@@ -92,11 +92,16 @@ jobs:
 
       # `compose config` resolves every interpolation, so a typo'd ${VAR} or a
       # malformed service block fails here instead of on someone's server.
+      # Every service declares `env_file: - .env`, and `compose config` fails if
+      # that file is absent — so a real .env has to exist here. `--env-file`
+      # only redirects variable *interpolation*; it does not satisfy the
+      # service-level directive. A fresh CI checkout has no .env, so writing one
+      # is safe (never do this on a developer machine — it would clobber theirs).
       - name: Validate dev and prod compose
-        env:
-          # .env.example ships SITE_DOMAIN empty, but prod compose marks it
-          # required (${SITE_DOMAIN:?}). Supply a placeholder just to interpolate.
-          SITE_DOMAIN: ci.example.com
         run: |
-          docker compose --env-file .env.example -f docker-compose.dev.yml config --quiet
-          docker compose --env-file .env.example -f docker-compose.prod.yml config --quiet
+          cp .env.example .env
+          # .env.example ships SITE_DOMAIN empty, but prod marks it required
+          # (${SITE_DOMAIN:?}). Give it a placeholder purely to interpolate.
+          sed -i 's|^SITE_DOMAIN=.*|SITE_DOMAIN=ci.example.com|' .env
+          docker compose -f docker-compose.dev.yml config --quiet
+          docker compose -f docker-compose.prod.yml config --quiet

@@ -208,8 +208,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Version comes from package.json "packageManager".
+      # Version comes from "packageManager" in frontend/package.json. The path
+      # is explicit because this is a `uses:` step — the job's
+      # defaults.run.working-directory applies only to `run:` steps, so the
+      # action would otherwise look for a package.json at the repo root, where
+      # there isn't one.
       - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
 
       - uses: actions/setup-node@v4
         with:
