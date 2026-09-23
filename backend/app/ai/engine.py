@@ -57,6 +57,35 @@ def parse_ai_json(content: str) -> dict:
             return {"raw": content, "_extraction_status": "parse_error"}
 
 
+async def demote_current_results(
+    db: AsyncSession,
+    *,
+    target_type: str | None,
+    target_id: uuid.UUID | None,
+    task_id: uuid.UUID,
+) -> None:
+    """Clear the incumbent is_current row(s) for a (target, task) before inserting a new one.
+
+    Readers treat "the current result" as a single row, so every is_current=True
+    insert has to retire the previous one. Missing this is how a (target, task)
+    ends up with several current rows, which used to make
+    `_current_analysis_result`'s scalar_one_or_none() raise MultipleResultsFound
+    and abort the whole hourly submit_analysis_batches run.
+    """
+    if target_type is None or target_id is None:
+        return
+    await db.execute(
+        update(AIResult)
+        .where(
+            AIResult.target_type == target_type,
+            AIResult.target_id == target_id,
+            AIResult.task_id == task_id,
+            AIResult.is_current == True,  # noqa: E712
+        )
+        .values(is_current=False)
+    )
+
+
 async def store_external_result(
     db,
     *,
@@ -87,16 +116,7 @@ async def store_external_result(
     cost = _estimate_cost(model_name, tokens_input, tokens_output, batch=batch)
     AI_COST_TOTAL.labels(provider=provider_model.provider_type).inc(float(cost))
 
-    await db.execute(
-        update(AIResult)
-        .where(
-            AIResult.target_type == "entry",
-            AIResult.target_id == entry_id,
-            AIResult.task_id == task.id,
-            AIResult.is_current == True,  # noqa: E712
-        )
-        .values(is_current=False)
-    )
+    await demote_current_results(db, target_type="entry", target_id=entry_id, task_id=task.id)
     ai_result = AIResult(
         entry_id=entry_id,
         target_type="entry",
@@ -421,6 +441,7 @@ async def run_task(
         }
     except Exception as e:
         logger.error(f"AI provider error for task {task_name}: {e}")
+        await demote_current_results(db, target_type=target_type, target_id=target_id, task_id=task.id)
         ai_result = AIResult(
             entry_id=entry_id,
             target_type=target_type,
@@ -467,6 +488,7 @@ async def run_task(
     AI_COST_TOTAL.labels(provider=provider_model.provider_type).inc(float(cost))
 
     # Store result
+    await demote_current_results(db, target_type=target_type, target_id=target_id, task_id=task.id)
     ai_result = AIResult(
         entry_id=entry_id,
         target_type=target_type,

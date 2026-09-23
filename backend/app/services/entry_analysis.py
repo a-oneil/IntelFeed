@@ -432,14 +432,21 @@ async def _current_analysis_result(db: AsyncSession, entry_id: uuid.UUID):
     task = (await db.execute(select(AITask).where(AITask.name == "entry_analysis"))).scalar_one_or_none()
     if task is None:
         return None, None
+    # Newest-first + limit(1) rather than scalar_one_or_none(): a (target, task)
+    # carrying more than one current row must not raise here. This is called
+    # per-entry from submit_analysis_batches' self-healing sweep, so one bad
+    # entry used to abort the whole hourly run and stall every pending analysis.
     result = (
         await db.execute(
-            select(AIResult).where(
+            select(AIResult)
+            .where(
                 AIResult.target_type == "entry",
                 AIResult.target_id == entry_id,
                 AIResult.task_id == task.id,
                 AIResult.is_current == True,  # noqa: E712
             )
+            .order_by(AIResult.created_at.desc())
+            .limit(1)
         )
     ).scalar_one_or_none()
     return result, task

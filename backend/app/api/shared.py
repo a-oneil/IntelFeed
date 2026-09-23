@@ -795,14 +795,18 @@ async def run_shared_ai_task(
     if task.category not in ("analysis", "generation") or task.name in EXCLUDED_SHARED_TASKS:
         raise AppError(code="forbidden", message="This task cannot be run on shared articles", status_code=403)
 
-    # One-time enforcement: check if already run
+    # One-time enforcement: check if already run. limit(1) keeps this an
+    # existence check — a target carrying duplicate current rows should still
+    # get a clean 409, not a MultipleResultsFound 500.
     existing = await db.execute(
-        select(AIResult).where(
+        select(AIResult)
+        .where(
             AIResult.target_type == "entry",
             AIResult.target_id == entry_id,
             AIResult.is_current.is_(True),
             AIResult.task_id == task.id,
         )
+        .limit(1)
     )
     existing_result = existing.scalar_one_or_none()
     if existing_result:

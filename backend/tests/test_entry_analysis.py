@@ -294,3 +294,50 @@ async def test_feed_extract_tools_false_suppresses_tools(db_session, test_entry)
     await db_session.flush()
     await store_entry_analysis(db_session, test_entry.id, {"tools": [_WIELDED_TOOL], "report_type": "incident_report"})
     assert await _tool_names(db_session, test_entry.id) == set()
+
+
+@pytest.mark.asyncio
+async def test_current_analysis_result_tolerates_duplicate_current_rows(db_session, feed, analysis_task):
+    """Duplicate is_current rows must not raise — they used to stall every pending analysis.
+
+    submit_analysis_batches calls this per-entry from its self-healing sweep, so
+    a MultipleResultsFound here aborted the whole hourly run and nothing was
+    dispatched for any entry.
+    """
+    from app.services.entry_analysis import _current_analysis_result
+
+    entry = await _make_entry(db_session, feed, title="Duplicate current rows")
+
+    older = AIResult(
+        entry_id=entry.id,
+        target_type="entry",
+        target_id=entry.id,
+        is_current=True,
+        task_id=analysis_task.id,
+        model_name="m",
+        prompt_used="p",
+        raw_response="r",
+        parsed_result={"summary": "older"},
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    newer = AIResult(
+        entry_id=entry.id,
+        target_type="entry",
+        target_id=entry.id,
+        is_current=True,
+        task_id=analysis_task.id,
+        model_name="m",
+        prompt_used="p",
+        raw_response="r",
+        parsed_result={"summary": "newer"},
+        created_at=datetime(2026, 6, 1, tzinfo=UTC),
+    )
+    db_session.add_all([older, newer])
+    await db_session.flush()
+
+    result, task = await _current_analysis_result(db_session, entry.id)
+
+    assert task is not None
+    assert result is not None
+    # Deterministically the newest, not an arbitrary row.
+    assert result.parsed_result["summary"] == "newer"
