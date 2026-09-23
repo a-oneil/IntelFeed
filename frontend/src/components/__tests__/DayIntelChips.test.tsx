@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, it, expect, vi } from "vitest";
 
-import { DayIntelChips } from "../DayIntelChips";
+import { DayIntelChips, type DayFocus } from "../DayIntelChips";
 import type { DayIntelResult } from "@/hooks/useDayIntel";
 
 // Keep the real dayWindowIso; only stub the query hook so we control the payload.
@@ -30,11 +30,16 @@ function makeData(over: Partial<DayIntelResult> = {}): DayIntelResult {
   };
 }
 
-function renderChips(data: DayIntelResult | undefined) {
+const DAY = "2026-07-08";
+
+function renderChips(
+  data: DayIntelResult | undefined,
+  extra: { focus?: DayFocus | null; onFocus?: (f: DayFocus | null) => void } = {},
+) {
   useDayIntelMock.mockReturnValue({ data });
   return render(
     <MemoryRouter>
-      <DayIntelChips dayKey="2026-07-08" filters={{}} />
+      <DayIntelChips dayKey={DAY} filters={{}} {...extra} />
     </MemoryRouter>,
   );
 }
@@ -139,6 +144,64 @@ describe("DayIntelChips", () => {
     expect(legend).toHaveTextContent("The threat actor named in the most");
     // No CVE chip on this day, so no CVE line in the legend.
     expect(legend).not.toHaveTextContent("headline vulnerability");
+  });
+
+  it("filters the list rather than navigating when a chip is clicked", async () => {
+    const onFocus = vi.fn();
+    renderChips(
+      makeData({
+        threat_actor: { id: "a1", name: "Lazarus", count: 2 },
+        sector: { slug: "healthcare", name: "Healthcare", count: 3 },
+        signals: { actively_exploited: 4, new: null },
+      }),
+      { onFocus },
+    );
+
+    await userEvent.click(screen.getByText(/4 actively exploited/));
+    expect(onFocus).toHaveBeenLastCalledWith(
+      expect.objectContaining({ dayKey: DAY, chip: "signal", filter: { exploited_cves: true } }),
+    );
+
+    await userEvent.click(screen.getByText("Healthcare"));
+    expect(onFocus).toHaveBeenLastCalledWith(
+      expect.objectContaining({ chip: "sector", filter: { sector: "healthcare" } }),
+    );
+
+    // The entity chips carry the canonical slug the /entries filter speaks.
+    await userEvent.click(screen.getByText("Lazarus"));
+    expect(onFocus).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        chip: "threat_actor",
+        filter: { entity_type: "threat_actor", entity_id: "a1" },
+      }),
+    );
+  });
+
+  it("clears the focus when the engaged chip is clicked again", async () => {
+    const onFocus = vi.fn();
+    renderChips(makeData({ signals: { actively_exploited: 4, new: null } }), {
+      onFocus,
+      focus: { dayKey: DAY, chip: "signal", label: "x", filter: { exploited_cves: true } },
+    });
+    const chip = screen.getByRole("button", { pressed: true });
+    await userEvent.click(chip);
+    expect(onFocus).toHaveBeenCalledWith(null);
+  });
+
+  it("lights only the chip on the day the focus was set from", () => {
+    renderChips(makeData({ signals: { actively_exploited: 4, new: null } }), {
+      onFocus: vi.fn(),
+      focus: { dayKey: "2026-07-07", chip: "signal", label: "x", filter: { exploited_cves: true } },
+    });
+    expect(screen.queryByRole("button", { pressed: true })).not.toBeInTheDocument();
+  });
+
+  it("renders chips as plain labels when the list can't be filtered", () => {
+    const { container } = renderChips(
+      makeData({ signals: { actively_exploited: 4, new: null } }),
+    );
+    // Only the "?" legend button remains interactive.
+    expect(container.querySelector("button[data-chip]")).toBeNull();
   });
 
   it("closes the legend on a second click", async () => {

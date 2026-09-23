@@ -111,6 +111,42 @@
   color: var(--text-primary);
 }
 
+/* Standing reminder that a day-divider chip is narrowing the list, and the one
+   control that always clears it — the chip itself can be filtered off screen. */
+.dayFocusBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: 6px var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-tertiary);
+  font-size: var(--fs-xs);
+}
+
+.dayFocusLabel {
+  color: var(--text-secondary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dayFocusClear {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.dayFocusClear:hover {
+  text-decoration: underline;
+}
+
 .batchResultBanner {
   border-bottom: 1px solid var(--border);
   background: var(--bg-tertiary);

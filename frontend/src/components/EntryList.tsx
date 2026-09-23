@@ -20,9 +20,10 @@ import { formatDate } from "@/utils/formatDate";
 import { groupConsecutiveEntries } from "@/utils/groupEntries";
 import { injectDayDividers, filterCollapsedDays } from "@/utils/dayDividers";
 import { DayDividerSummary } from "@/components/DayDividerSummary";
-import { DayIntelChips } from "@/components/DayIntelChips";
+import { DayIntelChips, type DayFocus } from "@/components/DayIntelChips";
 import { MarkDayReadButton } from "@/components/MarkDayReadButton";
 import type { DailySummaryFilters } from "@/hooks/useDailySummary";
+import { dayWindowIso } from "@/hooks/useDayIntel";
 import { useUIStore, type SortOrder, type ViewMode } from "@/stores/uiStore";
 import { useIsMobile } from "@/hooks/useMediaQuery";
 import { usePullToRefresh } from "@/hooks/usePullToRefresh";
@@ -596,6 +597,14 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
     return map;
   }, [feedsData]);
   const [changeTypeFilter, setChangeTypeFilter] = useState("");
+  // The day-divider chip currently narrowing the list to its own day's articles.
+  // Local rather than persisted: it is a "what is this?" drill-down on one
+  // divider, not a view preference to come back to tomorrow.
+  const [dayFocus, setDayFocus] = useState<DayFocus | null>(null);
+  // The Priority Queue is served by its own ranking endpoint, which doesn't take
+  // these filters — so its dividers show the chips as labels rather than
+  // offering a toggle that would do nothing.
+  const onDayFocus = priorityMode ? undefined : setDayFocus;
 
   const selectedFeed = feedsData?.items.find((s) => s.id === selectedFeedId);
   const isGitHubRepo = selectedFeed?.feed_type === "github_repo";
@@ -649,6 +658,21 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
     return undefined;
   }, [virtualFolder]);
 
+  // The engaged chip narrows to its own day, which is always inside whatever
+  // window the folder already asked for — so the later of the two `since`
+  // values wins rather than the day quietly widening a "last 24 hours" view.
+  const focusWindow = useMemo(
+    () => (dayFocus ? dayWindowIso(dayFocus.dayKey) : null),
+    [dayFocus],
+  );
+
+  // Changing scope changes which days exist, so a chip engaged on a day that is
+  // no longer in the list would leave an empty pane with nothing visible to
+  // clear it.
+  useEffect(() => {
+    setDayFocus(null);
+  }, [selectedFeedId, selectedCategoryId, virtualFolder]);
+
   const filters = {
     feed_id: selectedFeedId || undefined,
     category_id: selectedCategoryId || undefined,
@@ -657,7 +681,10 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
     is_bookmarked: virtualFolder === "bookmarked" ? true : undefined,
     watched: virtualFolder === "watched" ? true : undefined,
     change_type: changeTypeFilter || undefined,
-    since: sinceDate,
+    since:
+      focusWindow && (!sinceDate || focusWindow.since > sinceDate) ? focusWindow.since : sinceDate,
+    before: focusWindow?.before,
+    ...(dayFocus?.filter ?? {}),
     sort: sortOrder,
     dedup: true,
   };
@@ -1330,6 +1357,24 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
         </div>
       )}
 
+      {/* A chip can filter its day down to nothing, which would take the divider
+          — and the lit chip that clears it — off screen with it. This bar is the
+          one control that is always there while a focus is engaged. */}
+      {dayFocus && !priorityMode && (
+        <div className={styles.dayFocusBar}>
+          <span className={styles.dayFocusLabel}>
+            Showing only {dayFocus.label}
+          </span>
+          <button
+            type="button"
+            className={styles.dayFocusClear}
+            onClick={() => setDayFocus(null)}
+          >
+            Clear filter
+          </button>
+        </div>
+      )}
+
       {showChangeTypeFilter && (
         <div className={filterStyles.filterBar}>
           <div className={filterStyles.filterGroup}>
@@ -1431,7 +1476,12 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
                       filters={summaryFilters}
                       label={item.label}
                     />
-                    <DayIntelChips dayKey={item.dayKey} filters={summaryFilters} />
+                    <DayIntelChips
+                      dayKey={item.dayKey}
+                      filters={summaryFilters}
+                      focus={dayFocus}
+                      onFocus={onDayFocus}
+                    />
                   </div>
                 );
               }
@@ -1538,7 +1588,12 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
                             filters={summaryFilters}
                             label={item.label}
                           />
-                          <DayIntelChips dayKey={item.dayKey} filters={summaryFilters} />
+                          <DayIntelChips
+                            dayKey={item.dayKey}
+                            filters={summaryFilters}
+                            focus={dayFocus}
+                            onFocus={onDayFocus}
+                          />
                         </div>
                       );
                     })()

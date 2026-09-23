@@ -87,9 +87,35 @@
   --chip-color: var(--entity-country);
 }
 
-/* Display-only chips (no navigation target) shouldn't look clickable. */
+/* Display-only chips (rendered where the list can't be filtered — see
+   DayIntelChips) shouldn't look clickable. */
 .static {
   cursor: default;
+}
+
+/* Engaged: the list below is narrowed to this chip. Kept in the chip's own
+   colour rather than a shared accent, so which one is shaping the list is
+   obvious without the strip growing a second colour language. The ring is what
+   carries it — a heavier fill alone reads as hover on the denser chips. */
+.chipActive {
+  background: color-mix(in srgb, var(--chip-color, var(--text-muted)) 40%, transparent);
+  border-color: var(--chip-color, var(--text-muted));
+  box-shadow: inset 0 0 0 1px var(--chip-color, var(--text-muted));
+  font-weight: 600;
+  padding-right: 6px;
+}
+
+.chipActive:hover {
+  background: color-mix(in srgb, var(--chip-color, var(--text-muted)) 52%, transparent);
+  border-color: var(--chip-color, var(--text-muted));
+}
+
+/* The "click again to clear" affordance, so the toggle isn't tooltip-only. */
+.clear {
+  margin-left: 2px;
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0.75;
 }
 
 .mono {
@@ -102,7 +128,6 @@
    the frequency chips so a dangerous day reads at a glance. */
 .signal {
   --chip-color: var(--danger);
-  cursor: default;
   font-weight: 600;
   padding-left: 8px;
   color: color-mix(in srgb, var(--danger) 25%, var(--text-primary));

@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import and_, case, false, func, insert, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import entity_types
 from app.core.exceptions import AppError
 from app.core.pagination import CursorPaginatedResponse
 from app.core.security import get_current_user
@@ -61,6 +62,7 @@ from app.services.triage import get_triage_entries
 _STALE_ON_ARRIVAL_DAYS = 14
 
 _VALID_COUNTRY_ROLES = {"origin", "target", "infrastructure", "mentioned"}
+
 _CONFIDENCE_RANK = {"low": 0, "medium": 1, "high": 2}
 _ENTITY_TOP_QUERIES: list[tuple[str, type, str, type, object]] = [
     (
@@ -80,6 +82,71 @@ _ENTITY_TOP_QUERIES: list[tuple[str, type, str, type, object]] = [
 
 router = APIRouter()
 logger = structlog.get_logger("app.entries")
+
+
+def _actively_exploited_cve_ids():
+    """CVE ids that count as *actively exploited* — one definition, two readers.
+
+    The day-divider's "N actively exploited" signal and the entry filter behind
+    clicking it both read this, so the badge's number and the list it opens can
+    never drift apart. KEV membership and an explicit active-exploitation
+    reading are separate columns: NVD/CISA sets the first, analysts and the
+    extraction pipeline set the second, and either one alone is enough.
+    """
+    return select(CVE.id).where(or_(CVE.is_kev.is_(True), CVE.exploit_availability == "active_exploitation"))
+
+
+def _exploited_cve_entry_ids():
+    """Entry ids mentioning at least one actively-exploited CVE."""
+    return select(EntryCVE.entry_id).where(EntryCVE.cve_id.in_(_actively_exploited_cve_ids()))
+
+
+#: Entity type → (entry-id column, entity-id column) on its entry junction table.
+#: The reader's day-divider chips filter the list through this: every chip names
+#: an entity, and clicking one asks for that day's entries linked to it. Keyed by
+#: the canonical slugs so the query param speaks the same vocabulary as the rest
+#: of the app. CWE, ransomware victims and observables are absent because they
+#: have no direct entry junction.
+_ENTRY_ENTITY_LINKS: dict[str, tuple] = {
+    entity_types.THREAT_ACTOR: (EntryThreatActor.entry_id, EntryThreatActor.threat_actor_id),
+    entity_types.MALWARE: (EntryMalware.entry_id, EntryMalware.malware_family_id),
+    entity_types.CVE: (EntryCVE.entry_id, EntryCVE.cve_id),
+    entity_types.TTP: (EntryTTP.entry_id, EntryTTP.ttp_id),
+    entity_types.VENDOR: (EntryVendor.entry_id, EntryVendor.vendor_id),
+    entity_types.PRODUCT: (EntryProduct.entry_id, EntryProduct.product_id),
+    entity_types.COUNTRY: (EntryCountry.entry_id, EntryCountry.country_id),
+    entity_types.TOOL: (EntryTool.entry_id, EntryTool.tool_id),
+    entity_types.MITIGATION: (EntryMitigation.entry_id, EntryMitigation.mitigation_id),
+}
+
+
+def _validate_entity_filter(entity_type: str | None, entity_id: uuid.UUID | None) -> None:
+    """Both halves of the entity filter are required, and the type must be linkable."""
+    if entity_type is None and entity_id is None:
+        return
+    if entity_type is None or entity_id is None:
+        raise AppError(
+            code="bad_request",
+            message="entity_type and entity_id must be given together",
+            status_code=422,
+        )
+    if entity_type not in _ENTRY_ENTITY_LINKS:
+        raise AppError(
+            code="bad_request",
+            message=f"Unsupported entity_type: {entity_type}. "
+            f"Expected one of: {', '.join(sorted(_ENTRY_ENTITY_LINKS))}",
+            status_code=422,
+        )
+
+
+def _apply_entity_filters(query, entity_type: str | None, entity_id: uuid.UUID | None, sector: str | None):
+    """Narrow a list/count query to entries linked to one entity or sector."""
+    if entity_type is not None and entity_id is not None:
+        entry_col, id_col = _ENTRY_ENTITY_LINKS[entity_type]
+        query = query.where(Entry.id.in_(select(entry_col).where(id_col == entity_id)))
+    if sector:
+        query = query.where(Entry.id.in_(select(EntrySector.entry_id).where(EntrySector.sector == sector)))
+    return query
 
 
 def _exclude_stale_on_arrival(query):
@@ -394,6 +461,17 @@ async def list_entries(
         None, description="With country_id: link role (origin, target, infrastructure, mentioned)"
     ),
     campaign_id: uuid.UUID | None = Query(None, description="Only entries attached to this campaign"),
+    exploited_cves: bool | None = Query(
+        None,
+        description="true keeps only entries mentioning a CVE in CISA KEV or under active exploitation",
+    ),
+    entity_type: str | None = Query(
+        None,
+        description="With entity_id: keep only entries linked to that entity "
+        "(threat_actor, malware, cve, ttp, vendor, product, country, tool, mitigation)",
+    ),
+    entity_id: uuid.UUID | None = Query(None, description="With entity_type: the entity to filter by"),
+    sector: str | None = Query(None, description="Only entries whose targeted sector matches this slug"),
     watched: bool | None = Query(None, description="true keeps only entries matching the user's entity watchlist"),
     sort: str = Query(
         "newest", description="newest, oldest, title_asc, title_desc, shortest, longest, or radar (Priority Queue)"
@@ -426,6 +504,10 @@ async def list_entries(
         country_id=country_id,
         country_role=country_role,
         campaign_id=campaign_id,
+        exploited_cves=exploited_cves,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        sector=sector,
         watched=watched,
         sort=sort,
         dedup=dedup,
@@ -450,6 +532,10 @@ async def _entry_page(
     country_id: uuid.UUID | None = None,
     country_role: str | None = None,
     campaign_id: uuid.UUID | None = None,
+    exploited_cves: bool | None = None,
+    entity_type: str | None = None,
+    entity_id: uuid.UUID | None = None,
+    sector: str | None = None,
     watched: bool | None = None,
     sort: str = "newest",
     dedup: bool = True,
@@ -476,6 +562,7 @@ async def _entry_page(
             message=f"Invalid country_role: {country_role}",
             status_code=422,
         )
+    _validate_entity_filter(entity_type, entity_id)
     # Resolve feed IDs
     if feed_id:
         # When requesting a specific feed, allow muted feeds (they still index/show articles,
@@ -588,6 +675,12 @@ async def _entry_page(
         query = query.where(
             Entry.id.in_(select(CampaignEntry.entry_id).where(CampaignEntry.campaign_id == campaign_id))
         )
+
+    # The day divider's intel chips: clicking one narrows the list to the
+    # articles behind it, rather than leaving the reader for a profile page.
+    if exploited_cves is True:
+        query = query.where(Entry.id.in_(_exploited_cve_entry_ids()))
+    query = _apply_entity_filters(query, entity_type, entity_id, sector)
 
     # Dedup: for each content_hash, keep only one entry (the earliest ingested)
     if dedup:
@@ -1021,6 +1114,17 @@ async def count_entries(
         None, description="With country_id: link role (origin, target, infrastructure, mentioned)"
     ),
     campaign_id: uuid.UUID | None = Query(None, description="Only entries attached to this campaign"),
+    exploited_cves: bool | None = Query(
+        None,
+        description="true keeps only entries mentioning a CVE in CISA KEV or under active exploitation",
+    ),
+    entity_type: str | None = Query(
+        None,
+        description="With entity_id: keep only entries linked to that entity "
+        "(threat_actor, malware, cve, ttp, vendor, product, country, tool, mitigation)",
+    ),
+    entity_id: uuid.UUID | None = Query(None, description="With entity_type: the entity to filter by"),
+    sector: str | None = Query(None, description="Only entries whose targeted sector matches this slug"),
     dedup: bool = Query(True, description="Collapse same-content duplicates to the earliest-ingested copy"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -1035,6 +1139,7 @@ async def count_entries(
             message=f"Invalid country_role: {country_role}",
             status_code=422,
         )
+    _validate_entity_filter(entity_type, entity_id)
 
     if feed_id:
         feed_check = await db.get(Feed, feed_id)
@@ -1133,6 +1238,12 @@ async def count_entries(
         query = query.where(
             Entry.id.in_(select(CampaignEntry.entry_id).where(CampaignEntry.campaign_id == campaign_id))
         )
+
+    # The day divider's intel chips: clicking one narrows the list to the
+    # articles behind it, rather than leaving the reader for a profile page.
+    if exploited_cves is True:
+        query = query.where(Entry.id.in_(_exploited_cve_entry_ids()))
+    query = _apply_entity_filters(query, entity_type, entity_id, sector)
 
     if dedup:
         canonical_subq = (
@@ -1860,15 +1971,9 @@ async def day_intel(
     # --- signal: distinct actively-exploited CVEs in the window ---
     actively_exploited = (
         await db.execute(
-            select(func.count(func.distinct(CVE.id)))
-            .select_from(CVE)
-            .join(EntryCVE, EntryCVE.cve_id == CVE.id)
-            .where(
+            select(func.count(func.distinct(EntryCVE.cve_id))).where(
                 EntryCVE.entry_id.in_(entry_ids),
-                or_(
-                    CVE.is_kev.is_(True),
-                    CVE.exploit_availability == "active_exploitation",
-                ),
+                EntryCVE.cve_id.in_(_actively_exploited_cve_ids()),
             )
         )
     ).scalar() or 0

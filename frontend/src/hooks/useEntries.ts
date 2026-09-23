@@ -41,6 +41,13 @@ interface EntryFilters {
   country_role?: string;
   saved_search_id?: string;
   campaign_id?: string;
+  /** Only entries mentioning a CVE in CISA KEV or under active exploitation. */
+  exploited_cves?: boolean;
+  /** With entity_id: keep only entries linked to that entity. */
+  entity_type?: string;
+  entity_id?: string;
+  /** Only entries whose targeted sector matches this slug. */
+  sector?: string;
   sort?: string;
   dedup?: boolean;
 }

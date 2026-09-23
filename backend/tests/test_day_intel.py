@@ -154,3 +154,119 @@ async def test_day_intel_empty_window(client, auth_headers, db_session):
     assert data["cve"] is None
     assert data["signals"]["actively_exploited"] == 0
     assert data["signals"]["new"] is None
+
+
+async def test_entries_exploited_cves_filter(client, auth_headers, seeded):
+    """Clicking the badge filters the list to the articles behind its number.
+
+    Only Entry 1 mentions the KEV CVE; Entries 2 and 3 mention the loud
+    non-exploited one, so they must drop out.
+    """
+    resp = await client.get(
+        "/api/entries",
+        params={"since": SINCE, "before": BEFORE, "exploited_cves": "true"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    titles = [e["title"] for e in resp.json()["items"]]
+    assert titles == ["Entry 1"]
+
+    count = await client.get(
+        "/api/entries/count",
+        params={"since": SINCE, "before": BEFORE, "exploited_cves": "true"},
+        headers=auth_headers,
+    )
+    assert count.json()["total"] == 1
+
+
+async def test_entries_exploited_cves_filter_omitted_is_unfiltered(client, auth_headers, seeded):
+    resp = await client.get(
+        "/api/entries",
+        params={"since": SINCE, "before": BEFORE},
+        headers=auth_headers,
+    )
+    assert len(resp.json()["items"]) == 3
+
+
+async def test_entries_exploited_cves_counts_active_exploitation_without_kev(client, auth_headers, db_session, seeded):
+    """Active exploitation alone qualifies — KEV membership is not required.
+
+    The two columns are set by different writers (CISA's catalog vs. analysts
+    and the extraction pipeline), so the filter has to accept either.
+    """
+    e4 = await _entry(db_session, seeded.id, 4)
+    cve = CVE(cve_id="CVE-2026-3333", is_kev=False, exploit_availability="active_exploitation")
+    db_session.add(cve)
+    await db_session.flush()
+    db_session.add(EntryCVE(entry_id=e4.id, cve_id=cve.id))
+    await db_session.flush()
+
+    resp = await client.get(
+        "/api/entries",
+        params={"since": SINCE, "before": BEFORE, "exploited_cves": "true"},
+        headers=auth_headers,
+    )
+    assert sorted(e["title"] for e in resp.json()["items"]) == ["Entry 1", "Entry 4"]
+
+
+@pytest.mark.parametrize(
+    "entity_type,name_attr,expected",
+    [
+        ("threat_actor", "top_actor", ["Entry 1", "Entry 2"]),
+        ("malware", "malware", ["Entry 1"]),
+        ("ttp", "ttp", ["Entry 1", "Entry 2", "Entry 3"]),
+    ],
+)
+async def test_entries_entity_filter(client, auth_headers, db_session, seeded, entity_type, name_attr, expected):
+    """Each chip's entity filter returns exactly the entries behind its count."""
+    from sqlalchemy import select
+
+    lookup = {
+        "threat_actor": (ThreatActor, "APT-Test"),
+        "malware": (MalwareFamily, "LockBit"),
+        "ttp": (TTP, "T9999"),
+    }
+    model, ident = lookup[entity_type]
+    col = TTP.technique_id if entity_type == "ttp" else model.name
+    entity = (await db_session.execute(select(model).where(col == ident))).scalar_one()
+
+    resp = await client.get(
+        "/api/entries",
+        params={
+            "since": SINCE,
+            "before": BEFORE,
+            "entity_type": entity_type,
+            "entity_id": str(entity.id),
+        },
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    assert sorted(e["title"] for e in resp.json()["items"]) == expected
+
+
+async def test_entries_sector_filter(client, auth_headers, seeded):
+    resp = await client.get(
+        "/api/entries",
+        params={"since": SINCE, "before": BEFORE, "sector": "healthcare"},
+        headers=auth_headers,
+    )
+    assert sorted(e["title"] for e in resp.json()["items"]) == ["Entry 1", "Entry 2"]
+
+
+async def test_entries_entity_filter_rejects_unknown_type(client, auth_headers, seeded):
+    resp = await client.get(
+        "/api/entries",
+        params={"entity_type": "campaign", "entity_id": "00000000-0000-0000-0000-000000000001"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 422
+
+
+async def test_entries_entity_filter_rejects_half_a_filter(client, auth_headers, seeded):
+    """A type with no id would otherwise pass through as no filter at all."""
+    resp = await client.get(
+        "/api/entries",
+        params={"entity_type": "threat_actor"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 422
