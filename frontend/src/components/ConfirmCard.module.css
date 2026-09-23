@@ -1,0 +1,148 @@
+.card {
+  margin-top: var(--sp-3);
+  padding: 10px var(--sp-4);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-md);
+  background: var(--bg-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  font-size: var(--fs-base);
+  line-height: 1.5;
+}
+
+.cardExecuted {
+  border-color: var(--success);
+}
+
+.cardCancelled {
+  border-color: var(--border);
+}
+
+.cardError {
+  border-color: var(--danger);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.badge {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--accent);
+}
+
+/* Action verb: Chip supplies the box; only the muted, unfilled face is local.
+   Doubled so it beats Chip's own single-class rules whichever order the two
+   stylesheets land in. */
+.actionType.actionType {
+  color: var(--text-muted);
+  background: none;
+}
+
+.description {
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.actions {
+  display: flex;
+  gap: 6px;
+}
+
+.confirmBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  font-size: var(--fs-base);
+  font-weight: 700;
+  border: none;
+  border-radius: var(--r-md);
+  background: var(--accent);
+  color: var(--accent-text);
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.confirmBtn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.confirmBtn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.cancelBtn {
+  padding: 6px 14px;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.cancelBtn:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--text-primary);
+}
+
+.cancelBtn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.resolved {
+  font-size: var(--fs-base);
+  font-weight: 600;
+}
+
+.resolvedOk {
+  color: var(--success);
+}
+
+.resolvedLink {
+  color: var(--success);
+  text-decoration: underline;
+}
+
+.resolvedMuted {
+  color: var(--text-muted);
+}
+
+.resolvedError {
+  color: var(--danger);
+}
+
+.spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--accent-text);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: confirm-spin 0.7s linear infinite;
+}
+
+@keyframes confirm-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 767px) {
+  .confirmBtn,
+  .cancelBtn {
+    min-height: 40px;
+  }
+}

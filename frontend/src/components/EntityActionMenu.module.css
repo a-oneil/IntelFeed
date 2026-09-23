@@ -1,0 +1,122 @@
+.wrapper {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: none;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-md);
+  font-weight: 700;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.trigger:hover {
+  opacity: 1;
+  background: var(--bg-tertiary);
+}
+
+.menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 180px;
+  padding: var(--sp-2) 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--elevation-3);
+}
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: var(--sp-3) var(--sp-4);
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.menuItem:hover {
+  background: var(--bg-hover);
+}
+
+.menuIcon {
+  display: inline-flex;
+  width: 16px;
+  justify-content: center;
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+}
+
+.menuItemDanger {
+  color: var(--danger);
+  border-top: 1px solid var(--border);
+  margin-top: var(--sp-1);
+}
+
+.menuItemDanger:hover {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.menuItemDanger .menuIcon {
+  color: var(--danger);
+}
+
+.menuItemDanger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.campaignList {
+  border-top: 1px solid var(--border);
+  padding: var(--sp-2) 0;
+  max-height: 150px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.campaignItem {
+  display: block;
+  width: 100%;
+  padding: 6px var(--sp-4) 6px 36px;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font-size: var(--fs-base);
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.campaignItem:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.campaignItem:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.noCampaigns {
+  padding: 6px var(--sp-4) 6px 36px;
+  color: var(--text-muted);
+  font-size: var(--fs-base);
+}

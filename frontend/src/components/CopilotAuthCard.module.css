@@ -1,0 +1,180 @@
+.card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp-6) 1.75rem;
+  margin-bottom: var(--sp-6);
+}
+
+/* Flush variant: rendered inside another container (e.g. the AI settings box). */
+.embedded {
+  border: none;
+  background: none;
+  border-radius: 0;
+  box-shadow: none;
+  margin-bottom: 0;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-5);
+}
+
+.title {
+  margin: 0 0 0.35rem;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.subtitle {
+  margin: 0;
+  font-size: var(--fs-md);
+  line-height: 1.5;
+  color: var(--text-secondary);
+  max-width: 42rem;
+}
+
+.statusRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-top: var(--sp-5);
+}
+
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dot.authenticated {
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 20%, transparent);
+}
+
+.dot.expiring {
+  background: var(--warning);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 20%, transparent);
+}
+
+.dot.expired {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 20%, transparent);
+}
+
+.dot.unknown {
+  background: var(--text-secondary);
+}
+
+.statusLabel {
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+}
+
+/* Subscription pill: Chip's `toned` tone supplies the accent wash and border;
+   only the uppercase face is local. Doubled for font-size, which Chip's size
+   classes set. */
+.pill.pill {
+  font-size: var(--fs-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.primaryBtn {
+  flex-shrink: 0;
+  padding: var(--sp-3) var(--sp-5);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--accent-text);
+  background: var(--accent);
+  border: none;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.primaryBtn:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.primaryBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.flow {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.flowNote {
+  margin: 0;
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+}
+
+.flowError {
+  margin: 0 0 var(--sp-4);
+  font-size: var(--fs-md);
+  color: var(--danger);
+}
+
+.steps {
+  margin: 0 0 0.9rem;
+  padding-left: 1.2rem;
+  font-size: var(--fs-md);
+  line-height: 1.7;
+  color: var(--text-secondary);
+}
+
+.authLink {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.authLink:hover {
+  text-decoration: underline;
+}
+
+.codeRow {
+  display: flex;
+  gap: var(--sp-3);
+}
+
+.codeInput {
+  flex: 1;
+  padding: var(--sp-3) var(--sp-4);
+  font-size: var(--fs-md);
+  font-family: var(--font-display);
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.codeInput:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.cancelBtn {
+  margin-top: 0.85rem;
+  padding: 0.35rem var(--sp-4);
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+
+.cancelBtn:hover {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}

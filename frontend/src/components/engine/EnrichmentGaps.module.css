@@ -1,0 +1,121 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.title {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 700;
+}
+.hint {
+  margin: 3px 0 0;
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  max-width: 60ch;
+}
+.enrichAll {
+  flex: none;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+  cursor: pointer;
+}
+.enrichAll:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.list {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.row:last-child {
+  border-bottom: none;
+}
+
+.ent {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  min-width: 130px;
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.miss {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 13%, transparent);
+  padding: 2px 8px;
+  border-radius: var(--r-sm);
+  white-space: nowrap;
+}
+.samples {
+  flex: 1;
+  font-size: var(--fs-base);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.count {
+  color: var(--text-tertiary, var(--text-secondary));
+}
+.enrich {
+  flex: none;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  padding: 5px 14px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.enrich:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.enrich:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.noAuto {
+  flex: none;
+  font-size: var(--fs-sm);
+  color: var(--text-tertiary, var(--text-secondary));
+  font-style: italic;
+}
+.empty {
+  padding: 22px 14px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: var(--fs-md);
+}

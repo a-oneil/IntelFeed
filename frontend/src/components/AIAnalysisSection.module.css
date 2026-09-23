@@ -1,0 +1,179 @@
+.container {
+  padding: var(--sp-2) 0 var(--sp-3);
+}
+
+.groupLabel {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: var(--sp-3) var(--sp-4) var(--sp-2);
+}
+
+.taskRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin: 0 0.5rem 0.3rem;
+  padding: 0.35rem 0.6rem 0.35rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-secondary);
+}
+
+.taskRow:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--bg-hover);
+}
+
+.taskRowBtn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.taskRowBtn:disabled {
+  cursor: default;
+}
+
+.taskRowDone {
+  opacity: 0.65;
+}
+
+.taskIcon {
+  flex: none;
+  /* One step under the .taskRow container's --r-md so the inner tile never
+     out-rounds its row. */
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-sm);
+  background: var(--bg-tertiary);
+  display: grid;
+  place-items: center;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
+.taskName {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.hint {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+
+.hintMuted {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  font-style: italic;
+  flex: none;
+}
+
+.check {
+  color: var(--success);
+  font-size: var(--fs-base);
+}
+
+.spinner {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: aiRowSpin 0.7s linear infinite;
+}
+
+@keyframes aiRowSpin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation-duration: 2s; }
+}
+
+.focusToggle {
+  flex: none;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  padding: 0.1rem 0.35rem;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+
+.focusToggle:hover {
+  color: var(--text-secondary);
+  border-color: var(--border);
+}
+
+.focusToggleActive {
+  color: var(--accent);
+  border-color: var(--border);
+}
+
+.focusInput {
+  display: block;
+  width: calc(100% - 1rem);
+  margin: 0 0.5rem 0.35rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--bg-hover);
+  border-radius: var(--r-md);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: var(--fs-base);
+  box-sizing: border-box;
+}
+
+.focusInput::placeholder {
+  color: var(--text-muted);
+}
+
+.focusInput:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.error {
+  margin: 0 0.5rem 0.35rem;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  color: var(--danger);
+  font-size: var(--fs-base);
+}
+
+.hiddenNote {
+  padding: 0.4rem 0.75rem 0.15rem;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.hiddenLink {
+  color: var(--text-secondary);
+  text-decoration: underline;
+  text-decoration-color: var(--text-muted);
+}
+
+.hiddenLink:hover {
+  color: var(--text-primary);
+}

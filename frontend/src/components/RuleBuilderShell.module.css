@@ -1,0 +1,26 @@
+.shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.editorFill {
+  flex: 1;
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.editorFill > div {
+  flex: 1;
+  width: 100%;
+}
+
+@media (max-width: 767px) {
+  .editorFill {
+    min-height: 200px;
+  }
+}

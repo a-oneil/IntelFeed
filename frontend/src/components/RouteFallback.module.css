@@ -1,0 +1,46 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3);
+  /* Fills whatever pane hosts it, rather than the viewport. */
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  padding: var(--sp-6);
+  color: var(--text-muted);
+}
+
+.label {
+  font-size: 0.8125rem;
+  /* The spinner already reads as "working"; the text only has to say what. */
+  color: var(--text-secondary);
+  /* Held back a beat so a warm chunk resolves before any text appears —
+     a flash of "Loading X…" on an instant swap is noisier than nothing. */
+  animation: routeFallbackReveal 0.9s ease-out both;
+}
+
+/* Compact single-line variant for a section swapping inside a page. */
+.inline {
+  flex-direction: row;
+  height: auto;
+  flex: none;
+  padding: 40px;
+}
+
+@keyframes routeFallbackReveal {
+  0%,
+  40% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .label {
+    animation: none;
+  }
+}

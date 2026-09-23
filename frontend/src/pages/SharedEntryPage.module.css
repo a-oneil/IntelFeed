@@ -1,0 +1,346 @@
+.page {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Override global overflow:hidden for this standalone page */
+:global(html):has(.page),
+:global(body):has(.page),
+:global(#root):has(.page) {
+  overflow: visible;
+  height: auto;
+}
+
+/* Accent underline separating the nav bar, matching the logged-in AppHeader */
+.topBar {
+  border-bottom: 2px solid var(--accent);
+}
+
+/* Branding in top bar — matches the logged-in AppHeader brand */
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+/* Same hover as the logged-in AppHeader brand. */
+.brand:hover {
+  color: var(--accent);
+}
+
+.brandLogo {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.brandAccent {
+  color: var(--accent);
+}
+
+/* Rendered as a Chip — the default tone already is this box. Margin is the
+   one thing Chip never declares, so there is no specificity race. */
+.sharedBadge {
+  margin-left: var(--sp-3);
+}
+
+/* Quick export bar */
+.quickExportBar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: calc(6px * var(--ui-scale)) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-tertiary);
+  flex-shrink: 0;
+}
+
+.quickExportLabel {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-right: var(--sp-1);
+}
+
+.quickExportBtn {
+  padding: calc(3px * var(--ui-scale)) var(--sp-3);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+
+.quickExportBtn:hover {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.quickExportFlash {
+  font-size: var(--fs-xs);
+  color: var(--success);
+  font-weight: 600;
+  margin-left: var(--sp-2);
+}
+
+/* Intel sidebar content */
+.intelContent {
+  padding: var(--sp-4);
+}
+
+.overviewPills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(6px * var(--ui-scale));
+  margin-bottom: var(--sp-5);
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  padding: calc(3px * var(--ui-scale)) var(--sp-3);
+  border-radius: var(--r-sm);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+}
+
+.pillCount {
+  font-weight: 700;
+}
+
+.entitySection {
+  margin-bottom: var(--sp-4);
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: calc(6px * var(--ui-scale)) 0;
+  margin-bottom: calc(6px * var(--ui-scale));
+  cursor: pointer;
+  user-select: none;
+}
+
+.sectionLabel {
+  display: flex;
+  align-items: center;
+  gap: calc(6px * var(--ui-scale));
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.sectionCount {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border-radius: var(--r-sm);
+  padding: 0 calc(6px * var(--ui-scale));
+  min-width: calc(20px * var(--ui-scale));
+  text-align: center;
+}
+
+.chevron {
+  transition: transform 0.15s;
+  color: var(--text-muted);
+}
+
+.chevronOpen {
+  transform: rotate(90deg);
+}
+
+.entityCard {
+  padding: var(--sp-3) calc(10px * var(--ui-scale));
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  margin-bottom: calc(6px * var(--ui-scale));
+}
+
+.entityName {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.entityMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(6px * var(--ui-scale));
+  margin-top: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  padding: 1px calc(6px * var(--ui-scale));
+  border-radius: var(--r-sm);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+}
+
+.severityBadge {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  padding: 1px calc(6px * var(--ui-scale));
+  border-radius: var(--r-sm);
+  text-transform: uppercase;
+}
+
+.severityCritical {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.severityHigh {
+  background: rgba(249, 115, 22, 0.15);
+  color: #f97316;
+  border: 1px solid rgba(249, 115, 22, 0.3);
+}
+
+.severityMedium {
+  background: rgba(234, 179, 8, 0.15);
+  color: #eab308;
+  border: 1px solid rgba(234, 179, 8, 0.3);
+}
+
+.severityLow {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.ruleContent {
+  margin-top: var(--sp-3);
+  font-family: var(--font-display);
+  font-size: var(--fs-base);
+  line-height: 1.5;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: calc(10px * var(--ui-scale));
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: calc(200px * var(--ui-scale));
+  overflow-y: auto;
+  color: var(--text-primary);
+}
+
+.noteContent {
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  margin-top: var(--sp-2);
+  line-height: 1.5;
+}
+
+.noteContent p {
+  margin-bottom: 0.25em;
+}
+
+.noteContent blockquote {
+  border-left: 2px solid var(--border);
+  padding-left: var(--sp-3);
+  color: var(--text-muted);
+}
+
+.emptyIntel {
+  text-align: center;
+  padding: calc(32px * var(--ui-scale)) var(--sp-5);
+  color: var(--text-secondary);
+  font-size: var(--fs-md);
+}
+
+/* Error / loading states */
+.errorContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: var(--bg-primary);
+  gap: var(--sp-4);
+}
+
+.errorTitle {
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.errorMessage {
+  color: var(--text-secondary);
+  font-size: var(--fs-md);
+}
+
+/* ─── Read-only analyst notes (below intel sections) ─── */
+
+.sharedNotes {
+  padding: var(--sp-4);
+  border-top: 1px solid var(--border);
+}
+
+.sharedNotesTitle {
+  font-size: var(--fs-base);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: var(--sp-3);
+}
+
+.sharedNoteCard {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-secondary);
+  padding: var(--sp-3) calc(10px * var(--ui-scale));
+  margin-bottom: var(--sp-3);
+}
+
+.sharedNoteName {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sharedNoteBody {
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  margin-top: var(--sp-2);
+  overflow-wrap: break-word;
+}
+
+.sharedNoteTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: calc(6px * var(--ui-scale));
+}
+

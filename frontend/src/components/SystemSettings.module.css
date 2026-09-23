@@ -1,0 +1,349 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.loading {
+  padding: 2rem;
+  color: var(--text-secondary);
+  font-size: var(--fs-md);
+}
+
+/* ─── Group ──────────────────────────────────────────── */
+
+.group {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.groupTitle {
+  font-size: var(--fs-md);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  padding: 0.75rem 1.25rem;
+  margin: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-tertiary);
+}
+
+.groupBody {
+  padding: 0.25rem 1.5rem;
+}
+
+/* flat variant — host provides the container (Engine stage panels) */
+.groupFlat {
+  background: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+.groupTitleFlat {
+  font-size: var(--fs-base);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  padding: 0 0 0.4rem;
+  margin: 0;
+  border-bottom: 1px solid var(--border);
+}
+.groupBodyFlat {
+  padding: 0.25rem 0;
+}
+
+.topSlot {
+  border-bottom: 1px solid var(--border);
+}
+
+/* ─── Setting Row ────────────────────────────────────── */
+
+.settingRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 0.875rem 0;
+}
+
+.settingRow + .settingRow {
+  border-top: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+}
+
+.settingInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.settingLabel {
+  font-size: var(--fs-md);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.settingHint {
+  font-size: var(--fs-base);
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.settingControl {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.settingControlFull {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  flex-shrink: 0;
+  min-width: 320px;
+}
+
+/* ─── Inputs ─────────────────────────────────────────── */
+
+.input {
+  padding: 0.4375rem 0.75rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  outline: none;
+  min-width: 220px;
+  transition: border-color 0.15s;
+}
+
+.input:focus {
+  border-color: var(--accent);
+}
+
+.input[type="number"] {
+  min-width: 120px;
+  width: 120px;
+}
+
+.textarea {
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--text-primary);
+  font-size: var(--fs-base);
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  outline: none;
+  resize: vertical;
+  min-width: 320px;
+  line-height: 1.5;
+}
+
+.textarea:focus {
+  border-color: var(--accent);
+}
+
+/* ─── Toggle Switch ──────────────────────────────────── */
+
+.toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggleSlider {
+  width: 40px;
+  height: 22px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  position: relative;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.toggleSlider::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: var(--text-secondary);
+  border-radius: 50%;
+  transition: transform 0.2s, background 0.2s;
+}
+
+.toggle input:checked + .toggleSlider {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.toggle input:checked + .toggleSlider::after {
+  transform: translateX(18px);
+  background: #fff;
+}
+
+/* ─── Tags & Buttons ─────────────────────────────────── */
+
+.sourceTag {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.125rem 0.375rem;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.resetBtn {
+  padding: 0.25rem 0.5rem;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.resetBtn:hover {
+  border-color: var(--text-secondary);
+  color: var(--text-primary);
+}
+
+/* ─── Save Bar ───────────────────────────────────────── */
+
+.saveBar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 0;
+  /* Transparent so it matches whichever container hosts SystemSettings
+     (Settings page = bg-primary, Engine stage panel = bg-secondary). */
+  background: transparent;
+  border-top: 1px solid var(--border);
+}
+
+.saveBtn {
+  padding: 0.5rem 1.25rem;
+  background: var(--accent);
+  color: var(--accent-text);
+  border: none;
+  border-radius: var(--r-md);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.saveBtn:hover {
+  background: var(--accent-hover);
+}
+
+.saveBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.discardBtn {
+  padding: 0.5rem 1rem;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.discardBtn:hover {
+  border-color: var(--text-secondary);
+}
+
+.savedMsg {
+  font-size: var(--fs-md);
+  color: var(--success);
+  font-weight: 500;
+}
+
+/* ─── Mobile ─────────────────────────────────────────── */
+
+@media (max-width: 767px) {
+  .settingRow {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .settingControl {
+    width: 100%;
+  }
+
+  .settingControlFull {
+    min-width: unset;
+    width: 100%;
+  }
+
+  .input {
+    min-width: unset;
+    width: 100%;
+    min-height: 44px;
+    font-size: var(--fs-lg);
+  }
+
+  .input[type="number"] {
+    min-width: unset;
+    width: 100%;
+  }
+
+  .textarea {
+    min-width: unset;
+    width: 100%;
+  }
+
+  .saveBtn,
+  .discardBtn {
+    min-height: 44px;
+  }
+}
+
+/* Flash the row the Engine's setting search just jumped to — the panels it
+   opens can hold thirty knobs, so "it's on screen" isn't enough. */
+.settingRowHit {
+  scroll-margin: 96px;
+  animation: settingHit 2.4s ease-out;
+  border-radius: var(--r-sm);
+}
+
+@keyframes settingHit {
+  0%,
+  55% {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+  100% {
+    background: transparent;
+    box-shadow: none;
+  }
+}

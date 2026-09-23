@@ -1,0 +1,141 @@
+/* Rendered note content — shared by the read view and the editor preview pane.
+   Renders the sanitized markdown-derived HTML of a note. */
+.body {
+  font-size: var(--fs-md);
+  line-height: 1.6;
+  color: var(--text-primary);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.body > :first-child {
+  margin-top: 0;
+}
+.body > :last-child {
+  margin-bottom: 0;
+}
+
+.body p {
+  margin: 0 0 0.6em;
+}
+
+.body h1,
+.body h2,
+.body h3,
+.body h4,
+.body h5,
+.body h6 {
+  font-family: var(--font-display);
+  margin: 1em 0 0.4em;
+  line-height: 1.25;
+}
+.body h1 { font-size: var(--fs-lg); }
+.body h2 { font-size: var(--fs-lg); }
+.body h3 { font-size: var(--fs-md); }
+.body h4,
+.body h5,
+.body h6 { font-size: var(--fs-md); }
+
+.body strong { font-weight: 700; }
+
+.body ul,
+.body ol {
+  margin: 0 0 0.6em;
+  padding-left: 20px;
+}
+.body li { margin: var(--sp-1) 0; }
+.body li::marker { color: var(--accent); }
+
+/* :where() keeps this at zero-specificity for `.body` so the entity/article link
+   classes from EntityLinkedMarkdown (e.g. the 2px dotted .entityLink) win instead
+   of being overridden by this blanket anchor rule. Plain note links still match. */
+:where(.body) a {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+}
+:where(.body) a:hover {
+  color: var(--accent-hover);
+  border-bottom-color: currentColor;
+}
+
+.body code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-base);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 1px 5px;
+}
+
+.body pre {
+  background: var(--sidebar-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 12px 14px;
+  overflow-x: auto;
+  margin: 0 0 0.6em;
+  font-size: var(--fs-base);
+  line-height: 1.5;
+}
+.body pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: var(--fs-base);
+}
+
+.body blockquote {
+  margin: 0 0 0.6em;
+  padding: var(--sp-1) 0 var(--sp-1) var(--sp-4);
+  border-left: 3px solid var(--border);
+  color: var(--text-secondary);
+}
+
+.body hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1em 0;
+}
+
+.body table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0 0 0.6em;
+  font-size: var(--fs-base);
+}
+.body th,
+.body td {
+  border: 1px solid var(--border);
+  padding: 5px 10px;
+  text-align: left;
+}
+.body th {
+  background: var(--bg-tertiary);
+  font-weight: 600;
+}
+
+.body ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0;
+}
+.body ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+}
+
+.body img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--r-md);
+}
+
+/* Lowlight (highlight.js) syntax tokens — matches NoteEditor code blocks */
+.body :global(.hljs-keyword) { color: var(--syntax-keyword); }
+.body :global(.hljs-string) { color: var(--syntax-string); }
+.body :global(.hljs-number) { color: var(--syntax-number); }
+.body :global(.hljs-comment) { color: var(--syntax-comment); }
+.body :global(.hljs-attr) { color: var(--syntax-function); }
+.body :global(.hljs-title) { color: var(--syntax-operator); }
+.body :global(.hljs-built_in) { color: var(--syntax-attr); }

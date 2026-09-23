@@ -1,0 +1,68 @@
+# Environment & secrets
+.env
+.env*.local
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+backend/.venv/
+backend/.pytest_cache/
+backend/.ruff_cache/
+.ruff_cache/
+celerybeat-schedule
+
+# Node
+node_modules/
+frontend/.pnpm-store/
+frontend/dist/
+*.tsbuildinfo
+
+# Runtime data
+backend/data/
+# Image-proxy cache (IMAGE_PROXY_CACHE_DIR) and generated read-aloud audio.
+data/
+tts_media/
+backend/backups/
+logs/
+
+# IDE & tools
+.DS_Store
+.playwright-mcp/
+
+# Claude Code (local config)
+.claude/settings.local.json
+
+# Project-specific ignores
+planning/
+notes.md
+intelfeed-skill/intelfeed-workspace/
+intelfeed-skill/evals/
+.claude/
+
+# Backup Files
+backups/
+*.gz
+*.gz.gpg
+
+# Telegram
+telegram_data/
+telegram_media/
+
+# Local validator state
+.local_link_validator_seen.txt
+
+import/
+cleanup/
+# Docker bind-mount target for the skill CLIs (see docker-compose.dev.yml);
+# the host side is created empty by the daemon, never real content.
+backend/skill-clis/
+
+# Written by update.sh between pulling and a clean build+start (see update.sh).
+.update-pending
+
+# Review CSVs written by maintenance scripts (scripts/ is bind-mounted into the api container).
+scripts/out/

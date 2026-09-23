@@ -1,0 +1,42 @@
+.spinner {
+  display: inline-block;
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--text-muted) 35%, transparent);
+  border-top-color: var(--accent);
+  border-radius: var(--r-full);
+  animation: spinnerRotate 0.7s linear infinite;
+  /* Never squeezed by a flex row it shares with a label. */
+  flex-shrink: 0;
+}
+
+.sm {
+  width: 14px;
+  height: 14px;
+  border-width: 2px;
+}
+
+.md {
+  width: 16px;
+  height: 16px;
+  border-width: 2px;
+}
+
+.lg {
+  width: 24px;
+  height: 24px;
+  border-width: 2px;
+}
+
+@keyframes spinnerRotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+    /* Static ring reads as a placeholder rather than a stalled spinner. */
+    border-top-color: var(--text-muted);
+  }
+}

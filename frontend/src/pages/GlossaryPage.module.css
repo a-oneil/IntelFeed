@@ -1,0 +1,523 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Table + definition pane — the same split as Requirements, so a glossary
+   entry opens the way a requirement does instead of shoving the list apart. */
+.layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.tablePane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.detailPane {
+  width: var(--glossary-detail-w, 380px);
+  min-width: var(--glossary-detail-w, 380px);
+  padding: var(--sp-5);
+  border-left: 1px solid var(--border);
+  background: var(--bg-secondary);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.detailHead {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+}
+
+.detailTitle {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-body);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.detailClose {
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font-size: var(--fs-lg);
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 var(--sp-2);
+}
+
+.detailClose:hover {
+  color: var(--text-primary);
+}
+
+.detailMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.detailBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.detailActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: auto;
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--border);
+}
+
+@media (max-width: 900px) {
+  .detailPane {
+    /* A dragged width still applies here, but never past what the narrow
+       layout can spare. */
+    width: min(var(--glossary-detail-w, 380px), 300px);
+    min-width: min(var(--glossary-detail-w, 380px), 300px);
+  }
+}
+
+.addBtn {
+  padding: 6px 14px;
+  border: none;
+  border-radius: var(--r-md);
+  background: var(--accent);
+  color: var(--accent-text);
+  cursor: pointer;
+  font-size: var(--fs-md);
+  font-weight: 500;
+}
+
+.addBtn:hover {
+  opacity: 0.9;
+}
+
+/* Toolbar */
+
+.searchInput {
+  width: 240px;
+  max-width: 100%;
+  padding: var(--sp-3) var(--sp-4);
+  font-size: var(--fs-md);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.searchInput:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+
+
+/* Empty state */
+
+/* List */
+
+/* Rows */
+
+
+
+
+
+
+
+/* Badges are Chips now. These classes carry only what Chip never declares:
+   letter-casing and tracking. The category badge used to hardcode
+   `color: #fff` over an arbitrary NIST CSF fill — protect (#22c55e) landed at
+   2.28:1 and detect (#f59e0b) at 2.15:1. Chip's `solid` tone derives the
+   foreground from the fill, which is what fixes those. */
+
+
+
+
+
+
+
+
+
+/* Expanded detail */
+
+.description {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--fs-md);
+  line-height: 1.6;
+}
+
+
+.detailLabel {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: var(--sp-2);
+}
+
+.techList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.techChip a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.techChip a:hover {
+  text-decoration: underline;
+}
+
+.searchTermsList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+/* Chip never sets font-style, so there is no specificity race here. */
+.searchTermChip {
+  font-style: italic;
+}
+
+/* Modal */
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 300;
+}
+
+.modal {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  width: 90%;
+  max-width: 600px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+}
+
+.modalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-5) 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.modalHeader h2 {
+  margin: 0;
+  font-size: var(--fs-lg);
+  color: var(--text-primary);
+}
+
+.modalClose {
+  background: none;
+  border: none;
+  font-size: var(--fs-lg);
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.modalClose:hover {
+  color: var(--text-primary);
+}
+
+.modalBody {
+  padding: 1.25rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+
+.modalError {
+  padding: var(--sp-3) var(--sp-4);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border: 1px solid var(--danger);
+  border-radius: var(--r-md);
+  color: var(--danger);
+  font-size: var(--fs-md);
+}
+
+.formField {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.formField label {
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.formField input[type="text"],
+.formField textarea,
+.formField select {
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  font-family: inherit;
+}
+
+.formField input:focus,
+.formField textarea:focus,
+.formField select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.formField textarea {
+  resize: vertical;
+}
+
+.formRow {
+  display: flex;
+  gap: var(--sp-5);
+}
+
+.formRow .formField {
+  flex: 1;
+}
+
+.checkboxLabel {
+  font-size: var(--fs-base) !important;
+  font-weight: 400 !important;
+  text-transform: none !important;
+  letter-spacing: normal !important;
+  color: var(--text-muted) !important;
+  cursor: pointer;
+  margin-top: var(--sp-2);
+}
+
+.checkboxLabel input[type="checkbox"] {
+  margin-right: var(--sp-2);
+}
+
+.fieldHint {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.addTechBtn {
+  padding: var(--sp-1) var(--sp-3);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--accent);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.addTechBtn:hover {
+  background: var(--bg-hover);
+}
+
+.techRow {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: center;
+}
+
+.techNameInput {
+  flex: 1;
+}
+
+.techUrlInput {
+  flex: 2;
+}
+
+.removeTechBtn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: var(--fs-xl);
+  cursor: pointer;
+  padding: 0 var(--sp-2);
+  line-height: 1;
+}
+
+.removeTechBtn:hover {
+  color: var(--danger);
+}
+
+.modalFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-4);
+  padding: var(--sp-5) 1.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.cancelBtn {
+  padding: var(--sp-3) var(--sp-5);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--text-secondary);
+  font-size: var(--fs-md);
+  cursor: pointer;
+}
+
+.cancelBtn:hover {
+  background: var(--bg-hover);
+}
+
+.saveBtn {
+  padding: var(--sp-3) 1.25rem;
+  background: var(--accent);
+  color: var(--accent-text);
+  border: none;
+  border-radius: var(--r-md);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.saveBtn:hover {
+  opacity: 0.9;
+}
+
+.saveBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 900px) {
+  .container {
+    padding: var(--sp-5);
+  }
+
+  .toolbar {
+    flex-direction: column;
+  }
+
+  .formRow {
+    flex-direction: column;
+  }
+
+  /* These are Chips, which declare `display: inline-flex` from a single-class
+     selector. Scoping to .rowMain keeps this rule the more specific one no
+     matter how the two stylesheets end up ordered in the bundle. */
+  .rowMain .categoryBadge,
+  .rowMain .maturityBadge,
+  .rowMain .maturityNone {
+    display: none;
+  }
+}
+
+@media (max-width: 767px) {
+  .toolbar {
+    flex-direction: column;
+    gap: var(--sp-3);
+    margin: 0 -1rem 1rem;
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .searchInput,
+  .filterSelect {
+    min-height: 44px;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .addBtn {
+    min-height: 44px;
+    width: 100%;
+  }
+
+  .rowMain {
+    flex-wrap: wrap;
+    padding: var(--sp-4);
+  }
+
+  .actionBtn,
+  .deleteBtn {
+    min-height: 44px;
+    padding: 6px var(--sp-4);
+  }
+
+  .modalOverlay {
+    align-items: flex-end;
+  }
+
+  .modal {
+    max-width: 100%;
+    max-height: 90dvh;
+    border-radius: var(--r-md) var(--r-md) 0 0;
+    border-bottom: none;
+  }
+
+  .modalClose {
+    min-width: 44px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .formField input[type="text"],
+  .formField textarea,
+  .formField select {
+    min-height: 44px;
+  }
+
+  .cancelBtn,
+  .saveBtn {
+    min-height: 44px;
+  }
+
+  .removeTechBtn {
+    min-width: 44px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .addTechBtn {
+    min-height: 44px;
+  }
+}

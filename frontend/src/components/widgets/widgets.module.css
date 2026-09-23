@@ -1,0 +1,1452 @@
+.loading {
+  color: var(--text-muted);
+  font-size: var(--fs-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.noData {
+  color: var(--text-muted);
+  font-size: var(--fs-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+/* Stat Card */
+.statCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 4px;
+}
+
+.statValue {
+  font-size: var(--fs-3xl);
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1;
+}
+
+.statLabel {
+  font-size: var(--fs-md);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.statTrend {
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.trendUp {
+  color: var(--success);
+}
+
+.trendDown {
+  color: var(--danger);
+}
+
+/* Bar Chart */
+.barChart {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 100%;
+  padding-top: 8px;
+}
+
+.barGroup {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  min-width: 0;
+}
+
+.barContainer {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.bar {
+  width: 80%;
+  max-width: 24px;
+  border-radius: var(--r-sm) var(--r-sm) 0 0;
+  min-height: 2px;
+  transition: height 0.3s;
+}
+
+.barLabel {
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* Donut / Severity */
+.donutWidget {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+}
+
+.donutChart {
+  display: flex;
+  width: 100%;
+  height: 24px;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--bg-tertiary, var(--bg-secondary));
+}
+
+.donutBar {
+  height: 100%;
+  min-width: 2px;
+  transition: filter 0.15s;
+}
+
+.donutBar:hover {
+  filter: brightness(1.15);
+}
+
+.pieWidget {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  height: 100%;
+  min-height: 0;
+}
+
+.pieChart {
+  flex-shrink: 0;
+  max-width: 160px;
+  aspect-ratio: 1;
+  height: auto;
+}
+
+.pieChart path {
+  transition: filter 0.15s, transform 0.15s;
+  transform-origin: 50% 50%;
+}
+
+.pieChart path:hover {
+  filter: brightness(1.12);
+}
+
+.pieLegend {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.donutLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+/* Pie legend rows are Chip `quiet` with a dot marker; these are the deltas. */
+.legendItem.legendItem {
+  gap: 6px;
+  font-size: var(--fs-base);
+}
+
+.legendLabel {
+  color: var(--text-secondary);
+  text-transform: capitalize;
+}
+
+.legendValue {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* Horizontal Bars */
+.horizontalBars {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hBarRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hBarLabel {
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  width: 80px;
+  text-align: right;
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hBarTrack {
+  flex: 1;
+  height: 16px;
+  background: var(--bg-tertiary);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+.hBarFill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: var(--r-md);
+  min-width: 4px;
+  transition: width 0.3s;
+}
+
+.hBarValue {
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--text-primary);
+  width: 40px;
+  flex-shrink: 0;
+}
+
+/* List Widget */
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.listItem {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.listItem:last-child {
+  border-bottom: none;
+}
+
+.listItemMain {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.listItemMeta {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.cveId {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-primary);
+  font-family: monospace;
+}
+
+/* Chip overrides. Both are doubled so they beat Chip's own single-class
+   `.chip` / `.md` rules whichever order the two stylesheets land in. */
+
+/* Filled score / error badges: Chip's box, one step up in size and weight. */
+.countChip.countChip {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+}
+
+/* Unfilled count badges (mention counts, co-occurrence counts): same size bump
+   but borderless on the primary text colour, as they have always read. */
+.numBadge.numBadge {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--text-primary);
+  border-color: transparent;
+}
+
+.entryTitle {
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dotSuccess {
+  background: var(--success);
+}
+
+.dotError {
+  background: var(--danger);
+}
+
+.alertTrigger {
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+}
+
+.errorText {
+  color: var(--danger);
+}
+
+/* ATT&CK Heatmap */
+.heatmap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-x: auto;
+}
+
+.heatmapRow {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.heatmapTactic {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  width: 100px;
+  flex-shrink: 0;
+  text-transform: capitalize;
+  padding-top: 4px;
+  text-align: right;
+}
+
+.heatmapCells {
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+
+.heatmapCell {
+  width: 36px;
+  height: 28px;
+  border-radius: var(--r-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+}
+
+.heatmapCellId {
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  color: #333;
+  text-align: center;
+}
+
+/* Clickable list items */
+.listItemClickable {
+  all: unset;
+  display: block;
+  width: 100%;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.listItemClickable:last-child {
+  border-bottom: none;
+}
+
+.listItemClickable:hover {
+  background: var(--bg-secondary);
+}
+
+.actorName {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* Chip already supplies the tertiary fill and secondary text; these small type
+   tags have never carried a border. Doubled for the ordering reason above. */
+.tagSmall.tagSmall {
+  border-color: transparent;
+}
+
+/* Chart container */
+.chartContainer {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.barCol {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  min-width: 0;
+}
+
+/* Detection Coverage */
+.coverageWidget {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 8px;
+}
+
+.coveragePct {
+  font-size: calc(42px * var(--ui-scale));
+  font-weight: 700;
+  line-height: 1;
+}
+
+.coverageLabel {
+  font-size: var(--fs-md);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.coverageBar {
+  width: 80%;
+  height: 8px;
+  border-radius: var(--r-sm);
+  background: var(--bg-tertiary);
+  overflow: hidden;
+}
+
+.coverageFill {
+  height: 100%;
+  border-radius: var(--r-sm);
+  transition: width 0.3s;
+}
+
+.coverageMeta {
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+}
+
+/* Correlation events */
+.eventIcon {
+  font-size: var(--fs-lg);
+  flex-shrink: 0;
+}
+
+.eventContext {
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unreadEvent {
+  background: var(--bg-secondary);
+}
+
+.corrEventRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  padding: 2px 0;
+}
+
+.corrEventRow:last-child {
+  border-bottom: none;
+}
+
+.corrEventMain {
+  all: unset;
+  flex: 1;
+  min-width: 0;
+  padding: 6px 0;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.corrEventMain:hover .eventContext {
+  color: var(--accent);
+}
+
+.corrArticleBtn {
+  all: unset;
+  font-size: var(--fs-sm);
+  color: var(--accent);
+  cursor: pointer;
+  white-space: nowrap;
+  padding: 3px 8px;
+  border-radius: var(--r-sm);
+  flex-shrink: 0;
+}
+
+.corrArticleBtn:hover {
+  background: var(--bg-tertiary);
+  text-decoration: underline;
+}
+
+/* Overview Widget */
+.overviewGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  height: 100%;
+  align-content: center;
+}
+
+.overviewItem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.overviewValue {
+  font-size: var(--fs-2xl);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.overviewLabel {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Automation Logs Widget */
+.automationLogsWidget {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 8px;
+}
+
+.automationSummary {
+  display: flex;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.automationSummaryItem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  gap: 2px;
+}
+
+.automationSummaryValue {
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text-primary);
+}
+
+.automationSummaryLabel {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.automationRuleName {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.automationTrigger.automationTrigger {
+  font-size: var(--fs-sm);
+  border-color: transparent;
+  text-transform: capitalize;
+}
+
+/* Feed health */
+.feedHealthRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.feedHealthName {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.feedHealthStale {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.feedHealthStaleBad {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.lastErrorText {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* AI usage table */
+.opsTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-base);
+}
+
+.opsTable th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  font-size: var(--fs-xs);
+  letter-spacing: 0.5px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.opsTable td {
+  padding: 6px 6px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
+}
+
+.opsTable tr:last-child td {
+  border-bottom: none;
+}
+
+.opsTableNumeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.opsTableTotalsRow td {
+  font-weight: 700;
+  background: var(--bg-secondary);
+}
+
+/* Worker queue stat */
+.queueList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  width: 100%;
+}
+
+.queueRow {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 8px;
+}
+
+.queueName {
+  font-family: monospace;
+}
+
+.queueCount {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Triage stats grid */
+.triageGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+  gap: 8px;
+  height: 100%;
+}
+
+.triageTile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: var(--bg-secondary);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  padding: 8px;
+  transition: filter 0.15s;
+}
+
+.triageTile:hover {
+  filter: brightness(1.1);
+}
+
+.triageValue {
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text-primary);
+}
+
+.triageLabel {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Saved search hits */
+.savedSearchRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.savedSearchRow:last-child {
+  border-bottom: none;
+}
+
+.savedSearchRow:hover {
+  background: var(--bg-secondary);
+}
+
+.savedSearchName {
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.savedSearchCounts {
+  font-size: var(--fs-base);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.savedSearchUnread {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* Top tags */
+.tagPills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Tag pills are Chip `solid` at the tag's own colour; these are the deltas
+   (roomier, lighter, brightness hover). Doubled for the ordering reason above. */
+.tagPill.tagPill {
+  gap: 6px;
+  padding: 3px 8px;
+  font-size: var(--fs-base);
+  font-weight: 500;
+  transition: filter 0.15s;
+}
+
+.tagPill.tagPill:hover {
+  filter: brightness(1.15);
+  color: var(--chip-fg);
+  border-color: var(--chip-tint);
+}
+
+/* The scrim darkens the pill so the count reads as a sub-element. It only
+   works while the label is light: once Chip derives a BLACK foreground for a
+   light tag colour, a dark scrim pulls the ground toward the text (measured
+   3.14:1 on #8B5CF6). --tag-scrim is set per-pill alongside the derived
+   foreground so it always moves away from the text, not toward it. */
+.tagPillCount {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  background: var(--tag-scrim, rgba(0, 0, 0, 0.25));
+  padding: 1px var(--sp-3);
+  border-radius: var(--r-full);
+}
+
+/* Telegram mentions */
+.telegramRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.telegramRow:last-child {
+  border-bottom: none;
+}
+
+.telegramRow:hover {
+  background: var(--bg-secondary);
+}
+
+.telegramHandle {
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.telegramTime {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* Weekly Recap */
+.recapGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  height: 100%;
+  align-content: center;
+}
+
+.recapTile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 4px;
+  border-radius: var(--r-md);
+  background: var(--bg-secondary);
+}
+
+.recapValue {
+  font-size: var(--fs-2xl);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text-primary);
+}
+
+.recapLabel {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.recapTrend {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.recapNew {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--accent);
+}
+
+/* Actor Activity Sparkline */
+.sparkRow {
+  all: unset;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.sparkRow:last-child {
+  border-bottom: none;
+}
+
+.sparkRow:hover {
+  background: var(--bg-secondary);
+}
+
+.sparkLeft {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 30%;
+  min-width: 0;
+}
+
+.sparkActorName {
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sparkTotal {
+  font-size: var(--fs-base);
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  width: 36px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.sparkSvg {
+  flex: 1;
+  height: 24px;
+  min-width: 0;
+}
+
+/* Hot Correlations */
+.hotCorrRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.hotCorrRow:last-child {
+  border-bottom: none;
+}
+
+.hotCorrPair {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-base);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.hotCorrEntity {
+  all: unset;
+  font-weight: 600;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hotCorrEntity:hover {
+  text-decoration: underline;
+}
+
+.hotCorrSep {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+@media (max-width: 767px) {
+  .recapGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .heatmapTactic {
+    width: 70px;
+    font-size: var(--fs-2xs);
+  }
+
+  .hBarLabel {
+    width: 60px;
+    font-size: var(--fs-sm);
+  }
+
+  .hBarValue {
+    width: 30px;
+    font-size: var(--fs-sm);
+  }
+
+  .heatmap {
+    overflow-x: auto;
+  }
+
+  .chartContainer {
+    overflow-x: auto;
+  }
+
+  .barChart {
+    overflow-x: auto;
+  }
+
+  .heatmapCell {
+    width: 28px;
+    height: 22px;
+  }
+
+  .heatmapCellId {
+    font-size: calc(6px * var(--ui-scale));
+  }
+
+  .overviewGrid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
+  .statValue {
+    font-size: var(--fs-2xl);
+  }
+
+  .coveragePct {
+    font-size: var(--fs-3xl);
+  }
+}
+
+/* ══ Board widgets (round 2) ══════════════════════════════════════════════ */
+
+/* ── Overview row: headline KPI strip + all-entity strip ── */
+.kpiRow {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.kpiTile {
+  padding: 2px 12px 4px;
+  border-right: 1px solid var(--border);
+  min-width: 0;
+}
+
+.kpiTile:last-child {
+  border-right: none;
+}
+
+.kpiLabel {
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  margin: 0 0 2px;
+}
+
+.kpiValue {
+  font-size: var(--fs-2xl);
+  font-weight: 600;
+  line-height: 1.15;
+  color: var(--text-primary);
+}
+
+.kpiDelta {
+  font-size: var(--fs-sm);
+  font-family: var(--font-display);
+  margin-top: 1px;
+}
+
+.entityStrip {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  border-top: 1px solid var(--border);
+  margin-top: 10px;
+}
+
+.entityTile {
+  padding: 8px 10px 6px;
+  border-right: 1px solid var(--border);
+  min-width: 0;
+  background: none;
+  border-top: none;
+  border-bottom: none;
+  border-left: none;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.entityTile:last-child {
+  border-right: none;
+}
+
+.entityTile:hover {
+  background: var(--bg-tertiary);
+}
+
+.entityTileLabel {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
+.entityTileValue {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  margin: 2px 0 0;
+  color: var(--text-primary);
+}
+
+.entityTileDelta {
+  font-size: var(--fs-xs);
+  font-family: var(--font-display);
+}
+
+.entityDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+@media (max-width: 900px) {
+  .kpiRow {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .entityStrip {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+/* ── Shared board list scaffolding ── */
+.boardRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 4px;
+  min-width: 0;
+  width: 100%;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--border);
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.boardRow:first-child {
+  border-top: none;
+}
+
+.boardRow:hover {
+  background: var(--bg-tertiary);
+}
+
+.boardRowStatic {
+  cursor: default;
+}
+
+.boardRowStatic:hover {
+  background: none;
+}
+
+.boardGrow {
+  flex: 1;
+  min-width: 0;
+}
+
+.boardPrimary {
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
+
+.boardMeta {
+  font-size: var(--fs-xs);
+  font-family: var(--font-display);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
+
+.boardNum {
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-base);
+  flex-shrink: 0;
+}
+
+/* Board chips are Chip in its default tone (hot ones use `toned` at --accent);
+   the only delta is the display face. */
+.boardChip {
+  font-family: var(--font-display);
+}
+
+.deltaUp {
+  color: var(--success);
+}
+
+.deltaDown {
+  color: var(--danger);
+}
+
+.deltaFlat {
+  color: var(--text-muted);
+}
+
+.boardFootNote {
+  font-size: var(--fs-base);
+  color: var(--text-muted);
+  padding: 8px 4px 2px;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
+
+/* ── Ransomware pulse (stacked columns) ── */
+.stackChart {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.chartLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: center;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  margin-top: 8px;
+}
+
+.chartLegendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.chartLegendSwatch {
+  width: 9px;
+  height: 9px;
+  border-radius: var(--r-sm);
+  flex-shrink: 0;
+}
+
+/* ── Targeting grid (sector × region heat) ── */
+.heatGrid {
+  display: grid;
+  gap: 3px;
+  font-size: var(--fs-sm);
+}
+
+.heatCorner {
+  min-height: 16px;
+}
+
+.heatColHead {
+  font-family: var(--font-display);
+  font-size: var(--fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  text-align: center;
+  padding-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.heatRowLabel {
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.heatCellBtn {
+  border: none;
+  border-radius: var(--r-sm);
+  min-height: 24px;
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  color: var(--text-primary);
+  padding: 2px;
+}
+
+.heatCellBtn:hover {
+  filter: brightness(1.3);
+}
+
+/* ── Trust ladder (relationship inbox) ── */
+.ladderBar {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+
+.ladderSeg {
+  padding: 5px 9px;
+  border-radius: var(--r-sm);
+  font-family: var(--font-display);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  min-width: 0;
+}
+
+.ladderSegValue {
+  display: block;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.relActions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.relActionBtn {
+  border: 1px solid var(--border);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-sm);
+  line-height: 1;
+  padding: 3px 7px;
+  cursor: pointer;
+}
+
+.relActionBtn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.relActionBtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.relConfirm:hover:not(:disabled) {
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.relReject:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* ── Meters (telemetry gaps, KEV countdown) ── */
+.meterTrack {
+  /* Rendered as a <span>; without display:block the inner fill collapses to 0px. */
+  display: block;
+  height: 5px;
+  border-radius: var(--r-sm);
+  background: var(--bg-tertiary);
+  overflow: hidden;
+  flex: 1;
+  min-width: 30px;
+}
+
+.meterFill {
+  display: block;
+  height: 100%;
+  border-radius: var(--r-sm);
+  background: var(--accent);
+}
+
+.meterRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* ── Morning briefing ── */
+.briefingBody {
+  font-size: var(--fs-md);
+  line-height: 1.6;
+  color: var(--text-primary);
+  overflow-y: auto;
+  max-height: 100%;
+}
+
+.briefingBody h1,
+.briefingBody h2,
+.briefingBody h3 {
+  font-size: var(--fs-md);
+  margin: 10px 0 4px;
+  color: var(--text-primary);
+}
+
+.briefingBody p {
+  margin: 0 0 8px;
+}
+
+.briefingBody ul,
+.briefingBody ol {
+  margin: 0 0 8px;
+  padding-left: 18px;
+}
+
+.briefingBody li {
+  margin-bottom: 3px;
+}
+
+.briefingBody a {
+  color: var(--accent);
+}
+
+.briefingFooter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+/* ── Sparkline + mini charts ── */
+.miniSpark {
+  flex-shrink: 0;
+  display: block;
+}

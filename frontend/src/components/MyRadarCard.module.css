@@ -1,0 +1,222 @@
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md, 8px);
+  padding: 16px 18px;
+  margin-bottom: 16px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.lede {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  max-width: 68ch;
+}
+
+/* Toggle — mirrors the Settings page switch so the card reads as native. */
+.toggle {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+  flex: none;
+}
+.toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.toggleSlider {
+  position: absolute;
+  inset: 0;
+  cursor: pointer;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.toggleSlider::after {
+  content: "";
+  position: absolute;
+  height: 16px;
+  width: 16px;
+  left: 2px;
+  top: 2px;
+  background: var(--text-secondary);
+  border-radius: 50%;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+.toggle input:checked + .toggleSlider {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.toggle input:checked + .toggleSlider::after {
+  transform: translateX(18px);
+  background: var(--accent-text);
+}
+.toggle input:focus-visible + .toggleSlider {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.empty {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm, 6px);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.empty b {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 16px;
+  transition: opacity 0.15s ease;
+}
+/* Paused: the weights stay visible and auditable, just visibly not in force. */
+.inactive {
+  opacity: 0.45;
+}
+
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.rowHead,
+.rowFoot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.famName {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.famDelta {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+.famDelta.up {
+  color: var(--success);
+}
+.famDelta.down {
+  color: var(--warning);
+}
+.famDelta.flat {
+  color: var(--text-muted);
+}
+
+/* Divergence bar, centred on the shared weight. */
+.track {
+  position: relative;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-tertiary);
+  overflow: hidden;
+}
+.centre {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+}
+.fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 3px;
+}
+.fill.up {
+  background: var(--success);
+}
+.fill.down {
+  background: var(--warning);
+}
+.fill.flat {
+  background: transparent;
+}
+
+.famHint {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.famVotes {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.up {
+  color: var(--success);
+}
+.down {
+  color: var(--warning);
+}
+.dim {
+  color: var(--text-muted);
+}
+
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 11.5px;
+}
+
+.reset {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+.reset:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.reset:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

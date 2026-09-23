@@ -1,0 +1,477 @@
+:root {
+  /* Base colors */
+  --bg-primary: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-tertiary: #21262d;
+  --bg-hover: #30363d;
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted: #484f58;
+  --accent: #f78166;
+  --accent-hover: #ffa28b;
+  --accent-text: #ffffff;
+  --border: #30363d;
+  --danger: #f85149;
+  --success: #3fb950;
+  --warning: #d29922;
+  --sidebar-bg: #010409;
+  --sidebar-hover: #161b22;
+  --sidebar-active: #21262d;
+  --card-bg: #161b22;
+  --card-border: #30363d;
+  --sidebar-width: calc(280px * var(--ui-scale));
+  --reader-min-width: calc(400px * var(--ui-scale));
+
+  /* D1: Typography */
+  --font-display: 'JetBrains Mono', monospace;
+  /* Alias. 56 sites across the app ask for --font-mono, which was defined
+     NOWHERE — so every one of them silently fell back to the platform's
+     default monospace instead of the app's actual mono face, while headings
+     and --font-display sites got JetBrains Mono. Same intent, two different
+     fonts on screen. Aliased rather than find-and-replaced so the existing
+     call sites keep working. */
+  --font-mono: var(--font-display);
+
+  /* ===================================================================
+     Legacy token aliases.
+     An audit found 17 custom properties referenced across the app that
+     were defined NOWHERE — 105 uses in total. Two failure modes:
+
+       * 15 declarations had NO fallback, so they were
+         invalid-at-computed-value-time and rendered nothing. The Settings
+         and Workbench active nav items had no background tint at all
+         (--bg-active); .mediaGallery links drew no border
+         (--border-primary); several labels fell back to `inherit`
+         (--text-tertiary).
+       * The rest carried a hex fallback, so they rendered — but frozen,
+         invisible to all 48 themes.
+
+     Aliasing rather than find-and-replacing across 30+ files: one place to
+     read, one place to revert, and every existing call site keeps working.
+     =================================================================== */
+  --bg-active: var(--bg-hover);
+  --border-color: var(--border);
+  --border-subtle: var(--border);
+  --border-primary: var(--border);
+  --text-tertiary: var(--text-secondary);
+  --surface-2: var(--bg-secondary);
+  --surface-3: var(--bg-tertiary);
+  --error: var(--danger);
+  /* NOT aliased: --color-accent/-success/-info/-campaign/-status/-danger/-warning.
+     All seven are consumed only by EntityTimeline.tsx, which is dead code — no
+     component imports it (EntityProfilePage renders MentionsTimeline instead).
+     Aliasing two of the seven made that legend half-themed, which reads worse
+     than uniformly frozen. They are timeline EVENT CATEGORIES, not entities:
+     --color-info falls back to purple where --accent-intel is blue, and
+     --color-campaign to pink where --entity-campaign is teal, so aliasing onto
+     the entity family would also visibly shift them. If the timeline is ever
+     revived, give it a --timeline-* family seeded at these fallbacks. */
+  --accent-primary: var(--accent-intel);
+  --accent-blue: var(--accent-intel);
+  --font-sans: var(--font-body);
+
+  /* NOTE — the only alias here that CHANGES a rendered colour. These two
+     fell back to #6c63ff (indigo), so DataSourcePicker and
+     ReportBuilderPage have been rendering a purple accent while the rest
+     of the app renders coral. Aliasing makes them match, and follow the
+     theme. Revert these two lines if the purple was deliberate. */
+  --accent-color: var(--accent);
+  --accent-bg: color-mix(in srgb, var(--accent) 12%, transparent);
+
+  --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+
+  /* D2: Domain accent colors */
+  --accent-feeds: #f78166;
+  --accent-feeds-bg: rgba(247, 129, 102, 0.08);
+  --accent-intel: #58a6ff;
+  --accent-intel-bg: rgba(88, 166, 255, 0.08);
+  --accent-detect: #3fb950;
+  --accent-detect-bg: rgba(63, 185, 80, 0.08);
+  --accent-dash: #bc8cff;
+  --accent-dash-bg: rgba(188, 140, 255, 0.08);
+
+  /* D3: Entity type colors */
+  --entity-actor: #f97316;
+  --entity-malware: #a855f7;
+  --entity-ttp: #3b82f6;
+  --entity-cve: #ef4444;
+  --entity-cwe: #b45309;
+  --entity-country: #06b6d4;
+  --entity-rule: #22c55e;
+  --entity-campaign: #14b8a6;
+  --entity-vendor: #6366f1;
+  --entity-product: #ec4899;
+  --entity-tool: #eab308;
+  --entity-mitigation: #84cc16;
+  --entity-sector: #10b981;
+  --entity-victim: #e0555b;
+  /* Referenced as `var(--entity-pir, …)` by modules that predate this block;
+     defined at the value the fallback already rendered (duplicates country —
+     the names are semantic and free to diverge).
+     NOTE: --entity-ai is deliberately NOT defined: its call sites disagree
+     (4 want #22c55e, 2 want #c084fc), so defining it would pick a side. */
+  --entity-pir: #06b6d4;
+  /* Observables (the IOC ledger). Diverged from its historical tool-yellow
+     placeholder when observables became a real entity type: fuchsia is the
+     one hue gap left, between malware violet and product pink. */
+  --entity-ioc: #d946ef;
+  /* Analyst notes. Not an intelligence entity — it is the analyst's own
+     writing about one — so it sits beside the entity palette rather than in
+     it, on the same footing as --accent-intel for reports. */
+  --entity-note: #9aa4b2;
+
+  /* Severity ramp.
+     IMPORTANT: --severity-* are THEME-MANAGED — applyTheme() sets them at
+     runtime from the theme record (they sit in its variable list alongside
+     --accent and --danger), and an inline style on :root beats this
+     stylesheet. The values here are only the no-theme fallback, matching the
+     fallbacks already in utils/colorSchemes.ts.
+
+     The paired -fg values are DERIVED, not authored: applyTheme() computes
+     each with contrastText() against whatever fill the active theme supplies,
+     the same way --accent-text is derived. That is the only approach that
+     holds across 48 themes — three of the four default fills are light, so
+     assuming white fails AA badly (high 2.26:1, low 2.54:1). The values below
+     are the derived results for the fallback fills, so a filled chip is still
+     legible before any theme is applied. */
+  --severity-critical: #dc2626;
+  --severity-high: #fb923c;
+  --severity-medium: var(--warning);
+  --severity-low: var(--success);
+  --severity-info: var(--accent-intel);
+  --severity-critical-fg: #ffffff;
+  --severity-high-fg: #0d1117;
+  --severity-medium-fg: #0d1117;
+  --severity-low-fg: #0d1117;
+  --severity-info-fg: #ffffff;
+
+  /* Ransomware group palette (CVD-validated, from the tracker mockups). Always
+     paired with the group text label — colour is never the sole identity channel. */
+  --rgroup-lockbit: #e05c2f;
+  --rgroup-clop: #12996a;
+  --rgroup-akira: #2a78d6;
+  --rgroup-qilin: #c2537f;
+  --rgroup-play: #b5820f;
+  --rgroup-ransomhub: #2f8f2f;
+  --rgroup-other: #8b94a3;
+
+  /* Detection-rule format palette. Same precedent as --rgroup-* above: a
+     categorical set that is NOT an entity or a severity, so it gets its own
+     family rather than being aliased onto --entity-* (a rule format is not a
+     threat actor). These are GitHub's lightened syntax colours; seeded at the
+     exact values RuleLibrary already shipped, so this is themeable-only —
+     zero visual change. sigma/splunk are two distinct greens on purpose, and
+     kql/elastic deliberately share one blue. */
+  --fmt-sigma: #56d364;
+  --fmt-yara: #d2a8ff;
+  --fmt-kql: #79c0ff;
+  --fmt-elastic-ql: #79c0ff;
+  --fmt-nuclei: #ffa657;
+  --fmt-splunk-spl: #7ee787;
+
+  /* Code-block syntax palette (Catppuccin), used by NoteBody for highlighted
+     code in notes. Third categorical family, same rationale as --rgroup-* and
+     --fmt-*: a syntax token is not an entity or a severity, so it gets its own
+     namespace rather than being aliased onto one. Seeded at the exact shipped
+     values — themeable only, zero visual change. */
+  --syntax-keyword: #cba6f7;
+  --syntax-string: #a6e3a1;
+  --syntax-number: #fab387;
+  --syntax-comment: #6c7086;
+  --syntax-function: #89b4fa;
+  --syntax-operator: #89dceb;
+  --syntax-attr: #f9e2af;
+
+  /* PIR (Priority Intelligence Requirement) categories. A first-class domain
+     vocabulary in IntelFeed, and deliberately NOT --entity-*: several values
+     coincide with entity hexes, and aliasing would make recolouring threat
+     actors silently recolour the PIR bars. */
+  --pir-strategic: #8b5cf6;
+  --pir-operational: #f97316;
+  --pir-tactical: #ef4444;
+  --pir-technical: #06b6d4;
+
+  /* Automation flow node kinds. Same precedent as --rgroup-* and --fmt-*: a
+     node kind is NOT an entity, so these are their own family even though
+     condition/action/branch happen to equal --entity-ttp / --entity-rule /
+     --entity-malware today. Seeded at the exact values FlowBuilder and
+     NodeStyles already shipped — themeable-only, zero visual change. */
+  --node-trigger: #f59e0b;
+  --node-condition: #3b82f6;
+  --node-action: #22c55e;
+  --node-branch: #a855f7;
+
+  /* Foregrounds for fills that are NOT the accent (--accent-text is derived
+     from --accent and is only right on the accent — assuming otherwise is how
+     `#fff` on --danger shipped at 3.35:1).
+     --danger-fg is DERIVED at runtime by applyTheme(), because --danger is
+     theme-managed; the value below is contrastText(#f85149), the derived
+     result for the default fill.
+     --accent-intel-fg is authored, not derived, because --accent-intel is a
+     static token no theme overrides: contrastText(#58a6ff) is black, and
+     white on it measured 2.53:1. */
+  --danger-fg: #000000;
+  --accent-intel-fg: #0d1117;
+
+  /* D4: Elevation */
+  --elevation-0: none;
+  --elevation-1: 0 1px 3px rgba(0, 0, 0, 0.12);
+  --elevation-2: 0 4px 12px rgba(0, 0, 0, 0.15);
+  --elevation-3: 0 8px 24px rgba(0, 0, 0, 0.2);
+
+  /* ===================================================================
+     D6: Geometry scale. Colors were the only tokens for two years, so
+     every module invented its own spacing, type sizes and radii — the
+     audit found ~40 distinct font-sizes and 15 radii across 170 files.
+     These are the canonical steps. New CSS uses them; existing CSS
+     converts as files are touched.
+     =================================================================== */
+
+  /* Interface scale. The dense baseline below was authored at 1.0 and read
+     a hair too small — the app wanted a browser 105% zoom to feel right. A
+     `zoom` on #root would do that in one line, but ~30 components position
+     popovers and menus from getBoundingClientRect, and zoom double-applies
+     to a fixed-position child inside the zoomed subtree. Scaling the tokens
+     instead reaches the same pixels (font-size is 100% tokenized) without
+     touching the coordinate space. Change this one number to retune. */
+  --ui-scale: 1.05;
+
+  /* Type — 7 steps. The app's dense-UI baseline is --fs-base (12px);
+     body copy in the reader is set separately by ReaderTypography. */
+  --fs-2xs: calc(9px * var(--ui-scale));    /* dense table meta, timestamps */
+  --fs-xs: calc(10px * var(--ui-scale));    /* chips, counts, badge text */
+  --fs-sm: calc(11px * var(--ui-scale));    /* nav items, secondary labels */
+  --fs-base: calc(12px * var(--ui-scale));  /* UI default */
+  --fs-md: calc(13px * var(--ui-scale));    /* list titles, body text */
+  --fs-lg: calc(16px * var(--ui-scale));    /* section headings */
+  --fs-xl: calc(21px * var(--ui-scale));    /* page titles, hero numbers */
+  /* Hero steps. The scale stopped at 21px, so the two profile heroes (entity
+     and campaign) carried raw 34px/26px literals and sat in the stylelint
+     suppression list. 21 → 26 → 34 continues the ratio. */
+  --fs-2xl: calc(26px * var(--ui-scale));  /* hero, narrow viewports */
+  --fs-3xl: calc(34px * var(--ui-scale));  /* profile page hero */
+
+  /* Disclosure carets. Relative, not a step on the scale: a caret reads as
+     natural when it tracks the label it sits beside, and expanders live next
+     to everything from 9px table meta to 16px section headings.
+     --fs-caret is for the ▸/▾/▴ glyphs, which only ink about 40% of their em
+     box and so need a font-size well above their label to match its weight.
+     --sz-caret is for the stroke-drawn SVG chevrons, which ink their whole
+     box and so sit just under the cap-height of the label. */
+  --fs-caret: 1.5em;
+  --sz-caret: 0.85em;
+
+  /* Space — 4px grid. --sp-3 (8px) is the default gap. */
+  --sp-1: calc(2px * var(--ui-scale));
+  --sp-2: calc(4px * var(--ui-scale));
+  --sp-3: calc(8px * var(--ui-scale));
+  --sp-4: calc(12px * var(--ui-scale));
+  --sp-5: calc(16px * var(--ui-scale));
+  --sp-6: calc(24px * var(--ui-scale));
+
+  /* Radius — 3 steps. Anything else is a mistake. Deliberately NOT scaled by
+     --ui-scale, along with the elevation shadows above: 5% of a 4px radius is
+     0.2px, invisible, and fractional radii only soften the edge. */
+  --r-sm: 4px;    /* chips, inputs, table cells */
+  --r-md: 6px;    /* buttons, cards, panels */
+  --r-full: 999px;/* pills, avatars, status dots */
+
+  /* Control heights — keeps toolbars aligned across components. */
+  --h-sm: calc(22px * var(--ui-scale));
+  --h-md: calc(28px * var(--ui-scale));
+  --h-lg: calc(34px * var(--ui-scale));
+
+  /* D5: Heatmap palette (Atlas calendar + map). Theme-overridable. */
+  --heatmap-empty: rgba(255, 255, 255, 0.04);
+  --heatmap-1: #0e4429;
+  --heatmap-2: #006d32;
+  --heatmap-3: #26a641;
+  --heatmap-4: #39d353;
+  --heatmap-5: #56e373;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-body);
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* D1: Typographic hierarchy — display font for headings */
+h1, h2, h3 {
+  font-family: var(--font-display);
+}
+
+h1 {
+  font-size: calc(22px * var(--ui-scale));
+  font-weight: 700;
+}
+
+h2 {
+  font-size: calc(15px * var(--ui-scale));
+  font-weight: 600;
+}
+
+h3 {
+  font-size: calc(14px * var(--ui-scale));
+  font-weight: 600;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--accent-hover);
+}
+
+button {
+  cursor: pointer;
+  font-family: inherit;
+}
+
+/* Disclosure caret glyph. Expanders that inline a ▸/▾ inside a label ("read
+   more ▾", "Columns ▾") would otherwise inherit that label's small step and
+   render a near-invisible triangle. Global rather than per-module so every
+   expander in the app sizes from --fs-caret. */
+.caret-glyph {
+  display: inline-block;
+  font-size: var(--fs-caret);
+  line-height: 1;
+  vertical-align: -0.1em;
+}
+
+input, textarea, select {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+/* ─── Scrollbars ───────────────────────────────────────────
+   Every scroller in the app: the gutter is always reserved, but the thumb is
+   invisible until the pointer is somewhere inside that scroller (or something
+   in it has focus). Panels then read as their content rather than as boxes
+   with a bar down one edge, and because the gutter is never reclaimed on
+   hover, nothing reflows under the pointer on its way to a click.
+
+   `:hover` matches every ancestor of the pointer, which is exactly right here:
+   a scroller lights up whenever the pointer is over any part of it. Nested
+   scrollers light up together — the inner one and the panel holding it.
+
+   Firefox gets `scrollbar-color`; WebKit gets the pseudo-elements. The thumb
+   is inset with a transparent border rather than being narrowed, so the grab
+   target stays a full 8px while reading as a 4px hairline. Components that
+   want no scrollbar at all (the pannable toolbars, the tab strips) still win:
+   their `scrollbar-width: none` is a class selector and outranks these. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+*:hover,
+*:focus-within {
+  scrollbar-color: var(--border) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: transparent;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
+  /* Lives on the pseudo-element, not on `*` — a universal transition would
+     cost far more than it buys. */
+  transition: background 0.15s;
+}
+
+*:hover::-webkit-scrollbar-thumb,
+*:focus-within::-webkit-scrollbar-thumb {
+  background: var(--border);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+  background-clip: padding-box;
+}
+
+/* Reduced motion: disable animations and transitions */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Focus styles for keyboard navigation */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Tablet: allow scrolling, adjust reader min-width */
+@media (max-width: 1199px) {
+  :root {
+    --reader-min-width: calc(300px * var(--ui-scale));
+  }
+}
+
+/* Mobile: enable scrolling on root */
+@media (max-width: 767px) {
+  :root {
+    --sidebar-width: 100vw;
+    --reader-min-width: 0px;
+    --safe-area-top: env(safe-area-inset-top, 0px);
+    --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-area-left: env(safe-area-inset-left, 0px);
+    --safe-area-right: env(safe-area-inset-right, 0px);
+  }
+
+  html, body, #root {
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Hide custom scrollbars on mobile — use native. */
+  ::-webkit-scrollbar {
+    display: none;
+  }
+
+  * {
+    scrollbar-width: none;
+  }
+
+  /* Prevent iOS zoom on input focus */
+  input, textarea, select {
+    font-size: 16px !important;
+  }
+
+  /* Ensure touch targets are accessible */
+  button, [role="button"] {
+    min-height: calc(36px * var(--ui-scale));
+  }
+}

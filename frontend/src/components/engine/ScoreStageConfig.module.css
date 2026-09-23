@@ -1,0 +1,105 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 640px;
+}
+
+.loading {
+  padding: 12px;
+  color: var(--text-secondary);
+  font-size: var(--fs-md);
+}
+
+.heading {
+  margin: 12px 0 2px;
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.hint {
+  margin: 0 0 6px;
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+}
+
+.sliderRow {
+  display: grid;
+  grid-template-columns: 1fr 160px 44px;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--fs-base);
+}
+
+.sliderLabel {
+  color: var(--text-primary);
+}
+
+.sliderValue {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.thresholdRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.thresholdInput {
+  width: 100px;
+  padding: 5px 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+}
+
+.saveBtn {
+  padding: 5px 14px;
+  background: var(--accent);
+  color: var(--accent-text);
+  border: none;
+  border-radius: var(--r-md);
+  font-size: var(--fs-md);
+  cursor: pointer;
+}
+
+.saveBtn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.statsTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-base);
+}
+
+.statsTable th,
+.statsTable td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.statsTable th {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.removeBtn {
+  padding: 1px 7px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.removeBtn:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}

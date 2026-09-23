@@ -1,0 +1,126 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 720px;
+}
+
+.banner {
+  margin: 0;
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  border: 1px solid var(--warning);
+  border-radius: var(--r-md);
+  font-size: var(--fs-base);
+  color: var(--text-primary);
+}
+
+.hint {
+  margin: 0;
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+}
+
+.planCard {
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.planHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.planName {
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.deleteBtn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--danger);
+  font-size: var(--fs-sm);
+  padding: 1px 8px;
+  cursor: pointer;
+}
+
+.stageToggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--text-primary);
+  font-size: var(--fs-base);
+  cursor: pointer;
+  text-transform: capitalize;
+}
+
+.toggleState {
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+}
+
+.toggle_on {
+  border-color: var(--success);
+}
+
+.toggle_on .toggleState {
+  color: var(--success);
+}
+
+.toggle_off {
+  border-color: var(--danger);
+  opacity: 0.75;
+}
+
+.toggle_off .toggleState {
+  color: var(--danger);
+}
+
+.newPlanRow {
+  display: flex;
+  gap: 8px;
+}
+
+.feedSelect {
+  flex: 1;
+  max-width: 380px;
+  padding: 5px 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--text-primary);
+  font-size: var(--fs-base);
+}
+
+.addBtn {
+  padding: 5px 14px;
+  background: var(--accent);
+  color: var(--accent-text);
+  border: none;
+  border-radius: var(--r-md);
+  font-size: var(--fs-base);
+  cursor: pointer;
+}
+
+.addBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

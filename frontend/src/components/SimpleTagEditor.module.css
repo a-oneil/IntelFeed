@@ -1,0 +1,53 @@
+.container {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--bg-secondary);
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+/* Removable tag: Chip supplies the box, this keeps the editor's roomier face
+   and its accent wash. Doubled so it beats Chip's own single-class rules
+   whichever order the two stylesheets land in. */
+.tag.tag {
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-base);
+  background: var(--accent-bg);
+  border-color: transparent;
+}
+
+.remove {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 var(--sp-1);
+  font-size: var(--fs-md);
+  line-height: 1;
+}
+
+.remove:hover {
+  color: var(--text-primary);
+}
+
+.input {
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  min-width: 80px;
+  flex: 1;
+  padding: var(--sp-2) 0;
+}
+
+.input::placeholder {
+  color: var(--text-muted);
+}

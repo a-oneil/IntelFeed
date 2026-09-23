@@ -1,0 +1,98 @@
+/* The workbench's section nav. Lifted out of WorkbenchPage.module.css when the
+   workbench stopped carrying a rail of its own and moved into the app sidebar's
+   Workbench mode — the markup is unchanged, only its home. */
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  padding: var(--sp-2) 0 var(--sp-4);
+}
+
+.section {
+  margin-bottom: var(--sp-2);
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px var(--sp-5);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.sectionHeader:hover {
+  color: var(--text-secondary);
+}
+
+.sectionChevron {
+  /* All-caps label — see the caps note in Sidebar.module.css. */
+  width: 1em;
+  height: 1em;
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.sectionChevronOpen {
+  transform: rotate(90deg);
+}
+
+.navItem {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 6px var(--sp-5) 6px 28px;
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+  cursor: pointer;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  border-radius: 0;
+  transition: background 0.1s, color 0.1s;
+}
+
+.navItem:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.navItemActive {
+  background: var(--bg-active);
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.navItemActive:hover {
+  background: var(--bg-active);
+}
+
+/* Colour square standing in for the old 14px glyph — the entity palette is
+   the vocabulary, and at this size the glyphs read as noise. */
+.navSwatch {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--r-sm);
+  flex-shrink: 0;
+  background: var(--text-muted);
+  opacity: 0.85;
+}
+
+.navItemActive .navSwatch {
+  opacity: 1;
+  box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 22%, transparent);
+}
+
+.navLabel {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

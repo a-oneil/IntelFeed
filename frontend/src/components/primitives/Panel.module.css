@@ -1,0 +1,127 @@
+/* Canonical bordered container.
+   Surface defaults measured against the codebase, not assumed: --bg-secondary
+   backs 326 rules and --bg-tertiary 429, while --card-bg backs only 30. The
+   first two adoption passes both failed partly because this defaulted to
+   --card-bg, which is independently themeable and silently recolored cards. */
+.panel {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+/* Opt in to the card token pair where a consumer genuinely uses it. */
+.surface_card {
+  background: var(--card-bg);
+  border-color: var(--card-border);
+}
+
+.surface_sunken {
+  background: var(--bg-tertiary);
+}
+
+.flush {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+}
+
+/* The header inset tracks the body inset, so header text and body content sit
+   on the same left edge at every padding step. A fixed header inset only
+   aligned at padding="md". */
+.header_none { padding: 0; }
+.header_sm { padding: var(--sp-3); padding-bottom: var(--sp-2); }
+.header_md { padding: var(--sp-4); padding-bottom: var(--sp-3); }
+.header_lg { padding: var(--sp-5); padding-bottom: var(--sp-3); }
+
+/* Opt-out: cards that read as one block want no rule under the header. */
+.headerDivided {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: var(--sp-3);
+}
+
+.headerText {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  font-family: var(--font-display);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+  min-width: 0;
+}
+
+/* Dense workbench panels want the monospace display face; settings and
+   dashboard card headings want the body face at a larger size. */
+.title_heading {
+  font-family: var(--font-body);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+
+.subtitle {
+  margin: 0;
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.count {
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  flex: none;
+}
+
+.actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: none;
+}
+
+.body_none { padding: 0; }
+.body_sm { padding: var(--sp-3); }
+.body_md { padding: var(--sp-4); }
+.body_lg { padding: var(--sp-5); }
+
+/* A header already supplies the top inset, so the body must not double it. */
+.header_sm + .body_sm,
+.header_md + .body_md,
+.header_lg + .body_lg {
+  padding-top: 0;
+}
+
+.headerDivided + .body_sm { padding-top: var(--sp-3); }
+.headerDivided + .body_md { padding-top: var(--sp-4); }
+.headerDivided + .body_lg { padding-top: var(--sp-5); }
+
+/* Escape hatches that previously required a consumer className whose cascade
+   win depended on which chunk the bundler emitted it into. */
+.overflowVisible {
+  overflow: visible;
+}
+
+.elevation_1 {
+  box-shadow: var(--elevation-1);
+}
+
+.elevation_2 {
+  box-shadow: var(--elevation-2);
+}

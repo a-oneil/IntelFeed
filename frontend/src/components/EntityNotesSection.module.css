@@ -1,0 +1,256 @@
+.wrapper {
+  min-width: 0;
+}
+
+.header {
+  padding: 0 0 10px;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.count {
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  padding: 1px 6px;
+  border-radius: var(--r-md);
+}
+
+.addBtn {
+  background: none;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  padding: 2px 8px;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.addBtn:hover {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.body {
+  padding: 0;
+  max-height: 400px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.noteList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cardList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.note {
+  padding: 6px 8px;
+  border-radius: var(--r-sm);
+  background: transparent;
+}
+
+.note:hover {
+  background: var(--bg-tertiary);
+}
+
+.noteMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.noteType {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: var(--r-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+
+.noteTime {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.noteDeleteBtn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: var(--r-sm);
+  margin-left: auto;
+}
+
+.noteDeleteBtn:hover {
+  color: var(--danger);
+  background: rgba(220, 38, 38, 0.1);
+}
+
+.noteContent {
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.noteTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.noteTag {
+  font-size: var(--fs-xs);
+  padding: 1px 6px;
+  border-radius: var(--r-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+}
+
+.form {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.formRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.formSelect {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  outline: none;
+}
+
+.formSelect:focus {
+  border-color: var(--accent);
+}
+
+.textarea {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  outline: none;
+  resize: vertical;
+  min-height: 60px;
+  max-height: 200px;
+  font-family: inherit;
+}
+
+.textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.textarea:focus {
+  border-color: var(--accent);
+}
+
+.formActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.cancelBtn {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--fs-md);
+  cursor: pointer;
+}
+
+.cancelBtn:hover {
+  background: var(--bg-tertiary);
+}
+
+.saveBtn {
+  padding: 6px 12px;
+  background: var(--accent);
+  color: var(--accent-text);
+  border: none;
+  border-radius: var(--r-md);
+  font-size: var(--fs-md);
+  cursor: pointer;
+}
+
+.saveBtn:hover {
+  opacity: 0.9;
+}
+
+.saveBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.empty {
+  padding: 14px 0;
+  text-align: left;
+  color: var(--text-muted);
+  font-size: var(--fs-base);
+}
+
+@media (max-width: 767px) {
+  .addBtn {
+    min-height: 44px;
+  }
+
+  .noteDeleteBtn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .formSelect {
+    min-height: 44px;
+  }
+
+  .textarea {
+    min-height: 60px;
+  }
+
+  .cancelBtn,
+  .saveBtn {
+    min-height: 44px;
+  }
+
+  .formRow {
+    flex-wrap: wrap;
+  }
+}

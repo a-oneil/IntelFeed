@@ -1,0 +1,314 @@
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-5);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-secondary));
+  border-bottom: 2px solid var(--accent);
+  min-height: 3rem;
+  box-sizing: border-box;
+  max-width: 100%;
+  /* Narrow pane: the whole bar pans horizontally (scrollbar hidden so it
+     can't eat into the bar's height) instead of clipping buttons. Dropdowns
+     are portaled to <body> so this overflow doesn't clip them. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  animation: slideDown 0.15s ease-out;
+}
+
+.toolbar::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.left {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-shrink: 0;
+}
+
+.right {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
+
+.selectAllCheckbox {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.selectedCount {
+  font-size: var(--fs-md);
+  color: var(--accent);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Action buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0.3125rem 0.625rem;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-secondary);
+  font-size: var(--fs-base);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.12s ease;
+  line-height: 1.2;
+}
+
+.btn:hover {
+  color: var(--text-primary);
+  border-color: var(--accent);
+  background: var(--bg-tertiary);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btnAccent {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.btnAccent:hover {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+
+.btnDanger {
+  color: var(--danger);
+}
+
+.btnDanger:hover {
+  background: var(--danger);
+  /* No --danger-text token exists, and --accent-text is derived from the
+     accent, not from this fill. --bg-primary is the ground every theme
+     already guarantees --danger is legible against, so inverting to it is
+     the only theme-safe foreground here: white on the default --danger is
+     3.36:1 and fails AA at this size. */
+  color: var(--bg-primary);
+  border-color: var(--danger);
+}
+
+.divider {
+  width: 1px;
+  height: 1.25rem;
+  background: var(--border);
+  margin: 0 var(--sp-2);
+  flex-shrink: 0;
+}
+
+.cancelBtn {
+  padding: 0.3125rem 0.5rem;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: var(--fs-base);
+  cursor: pointer;
+}
+
+.cancelBtn:hover {
+  color: var(--text-primary);
+}
+
+/* Tag dropdown */
+.tagDropdownWrapper {
+  position: relative;
+}
+
+/* Portaled to <body>; position/top/right come from inline style so the
+   scrollable toolbar can't clip the panel. */
+.tagDropdown {
+  z-index: 100;
+  min-width: 200px;
+  max-height: 280px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--elevation-3);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.tagModeToggle {
+  display: flex;
+  gap: var(--sp-1);
+  padding: 6px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+.tagModeBtn,
+.tagModeActive {
+  flex: 1;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  padding: 5px 0;
+  border-radius: var(--r-sm);
+  border: 1px solid transparent;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.tagModeBtn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.tagModeActive {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.tagSearchInput {
+  padding: 0.5rem 0.625rem;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  outline: none;
+}
+
+.tagSearchInput::placeholder {
+  color: var(--text-muted);
+}
+
+.tagList {
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: 1;
+  max-height: 220px;
+}
+
+.tagItem {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 0.4375rem 0.625rem;
+  cursor: pointer;
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+}
+
+.tagItem:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.tagDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.tagEmpty {
+  padding: var(--sp-5);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--fs-md);
+}
+
+/* Extract dropdown */
+.extractDropdown {
+  z-index: 100;
+  min-width: 180px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--elevation-3);
+  overflow: hidden;
+  padding: var(--sp-2) 0;
+}
+
+.extractItem {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  cursor: pointer;
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+}
+
+.extractItem:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+/* Ask AI modal overlay */
+.askAIOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.askAIModal {
+  width: 600px;
+  max-width: calc(100vw - 32px);
+  max-height: 70vh;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--elevation-3);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.askAIModal > div {
+  max-height: 70vh;
+  min-height: 300px;
+}
+
+@media (max-width: 767px) {
+  .askAIOverlay {
+    align-items: flex-end;
+  }
+  .askAIModal {
+    max-width: 100%;
+    max-height: 85dvh;
+    border-radius: var(--r-md) var(--r-md) 0 0;
+    border-bottom: none;
+  }
+  .askAIModal > div {
+    max-height: 85dvh;
+  }
+}

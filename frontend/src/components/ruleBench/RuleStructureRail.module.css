@@ -1,0 +1,52 @@
+.outline {
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+}
+
+.node {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 3px var(--sp-3);
+  border: none;
+  border-left: 2px solid transparent;
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.node:hover {
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+}
+
+.node > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nodeActive {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border-left-color: var(--accent);
+}
+
+.indent {
+  padding-left: var(--sp-4);
+}
+
+.node em {
+  font-style: normal;
+  margin-left: auto;
+  flex: none;
+  color: var(--text-muted);
+  font-size: var(--fs-2xs);
+}

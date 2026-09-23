@@ -1,0 +1,20 @@
+/* Always-on 2px dotted underline; the entity color comes from an inline
+   border-bottom-color set per match. Matches the AI-summary entity style
+   (DayDividerSummary .entityLink) so highlights read the same everywhere. */
+.entityHighlight {
+  cursor: pointer;
+  border-bottom: 2px dotted var(--entity-cve);
+  padding-bottom: 1px;
+  transition: background-color 0.15s, border-bottom-style 0.15s;
+}
+
+.entityHighlight:hover {
+  background-color: var(--bg-hover, rgba(59, 130, 246, 0.1));
+  border-bottom-style: solid;
+}
+
+/* Observable values render mono — the string itself is the identity. */
+.entityMono {
+  font-family: var(--font-mono);
+  font-size: 0.94em;
+}

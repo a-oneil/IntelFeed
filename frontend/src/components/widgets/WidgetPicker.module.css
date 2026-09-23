@@ -1,0 +1,273 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 20px 24px 24px;
+  width: 92%;
+  max-width: 1040px;
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.modalHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  flex-shrink: 0;
+}
+
+.modalHeader h2 {
+  font-size: var(--fs-lg);
+  color: var(--text-primary);
+}
+
+.closeBtn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: var(--fs-lg);
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+/* ── Master–detail ── */
+
+.body {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 18px;
+  min-height: 0;
+  flex: 1;
+}
+
+.listPane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 10px;
+}
+
+.search {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 6px 10px;
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+  outline: none;
+  flex-shrink: 0;
+}
+
+.search:focus {
+  border-color: var(--accent);
+}
+
+.list {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  padding-right: 2px;
+}
+
+.listItem {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  padding: 7px 10px;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.listItem:hover {
+  background: var(--bg-tertiary);
+}
+
+.listItemActive {
+  background: var(--bg-tertiary);
+  border-color: var(--border);
+}
+
+.itemLabel {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.itemDesc {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.emptyList {
+  font-size: var(--fs-md);
+  color: var(--text-muted);
+  padding: 12px 4px;
+  margin: 0;
+}
+
+/* ── Preview ── */
+
+.previewPane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 12px;
+  overflow: hidden;
+}
+
+.previewHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.previewTitle {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.previewDesc {
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  margin: 3px 0 0;
+  max-width: 60ch;
+}
+
+.sizeChip {
+  font-family: var(--font-display);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+  padding: 2px 9px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Mirrors the dashboard's widget card so the preview reads as the real thing.
+   Height is set inline from the widget's grid rows; it shrinks to fit the
+   modal when the widget is taller than the available space. */
+.previewCard {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  min-height: 140px;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+.previewCardHead {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.previewCardTitle {
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.previewCardBody {
+  padding: 10px 12px 12px;
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.previewActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+  margin-top: auto;
+  padding-top: 4px;
+}
+
+.previewHint {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.addBtn {
+  padding: 7px 16px;
+  border: none;
+  border-radius: var(--r-md);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.addBtn:hover {
+  background: var(--accent-hover, var(--accent));
+}
+
+@media (max-width: 900px) {
+  .body {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(120px, 34%) 1fr;
+  }
+  .previewCard {
+    min-height: 220px;
+  }
+}
+
+@media (max-width: 767px) {
+  .overlay {
+    align-items: flex-end;
+  }
+  .modal {
+    max-width: 100%;
+    width: 100%;
+    max-height: 92dvh;
+    border-radius: var(--r-md) var(--r-md) 0 0;
+    border-bottom: none;
+    padding: 16px;
+  }
+  .closeBtn {
+    min-width: 44px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .addBtn {
+    min-height: 44px;
+  }
+}

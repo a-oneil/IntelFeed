@@ -1,0 +1,154 @@
+/* Two hosts, one body: `.panel` drops in over the results under the toolbar,
+   `.card` is the enclosed block the empty state shows. Everything below the
+   container is shared. */
+
+.panel {
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.card {
+  padding: var(--sp-5);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-secondary);
+}
+
+.title {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: var(--sp-4);
+}
+
+/* Multi-column rather than grid: the groups are different heights (Articles has
+   eleven fields, Ransomware three), and a grid puts every row on its tallest
+   member — leaving a stripe of dead space under each short group. Columns pack
+   them continuously instead, and `break-inside` keeps a group whole. */
+.groups {
+  columns: 4 210px;
+  column-gap: var(--sp-6);
+}
+
+.group {
+  break-inside: avoid;
+  /* Safari still needs the legacy property to honour the break. */
+  -webkit-column-break-inside: avoid;
+  margin-bottom: var(--sp-5);
+  min-width: 0;
+}
+
+.groupLabel {
+  display: flex;
+  margin-bottom: var(--sp-2);
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+/* Colour is the app's entity vocabulary, so a group reads as its domain. */
+.groupRule {
+  width: 3px;
+  height: 11px;
+  border-radius: var(--r-sm);
+  flex: none;
+}
+
+.fields {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+}
+
+.field {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+  padding: 1px 0;
+}
+
+.field dt {
+  flex: none;
+}
+
+.field dd {
+  margin: 0;
+  min-width: 0;
+}
+
+.token {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+
+/* Only the interactive form gets affordances — the static one is a reference. */
+button.token {
+  cursor: pointer;
+}
+
+button.token:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.hint {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.examples {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin-top: var(--sp-5);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--border);
+}
+
+.examplesLabel {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.example {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 3px 8px;
+}
+
+button.example {
+  cursor: pointer;
+}
+
+button.example:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}

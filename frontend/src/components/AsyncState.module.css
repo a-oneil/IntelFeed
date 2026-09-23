@@ -1,0 +1,61 @@
+.state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  text-align: center;
+  color: var(--text-muted);
+  gap: 6px;
+}
+
+.icon {
+  font-size: var(--fs-3xl);
+  margin-bottom: 6px;
+  opacity: 0.5;
+}
+
+.title {
+  font-size: var(--fs-lg);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.desc {
+  font-size: var(--fs-md);
+  max-width: 400px;
+  color: var(--text-muted);
+}
+
+.retryBtn {
+  margin-top: 10px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 6px 14px;
+  font-size: var(--fs-md);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.retryBtn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+
+/* Loading variant: the spinner carries the motion, the label the meaning. */
+.loadingState {
+  gap: var(--sp-3);
+  color: var(--text-secondary);
+}
+
+.loadingCompact {
+  flex-direction: row;
+  padding: 20px;
+}
+
+.loadingLabel {
+  font-size: var(--fs-md);
+}

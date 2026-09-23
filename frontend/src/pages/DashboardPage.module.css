@@ -1,0 +1,247 @@
+/* The page title sits flush inside the container's own inset. */
+.pageHead {
+  margin-bottom: var(--sp-5);
+}
+
+.container {
+  padding: 1.25rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+  height: 100%;
+}
+/* ── Summary Bar ── */
+/* ── Panels ── */
+/* ── Filters ── */
+/* ── Shared states ── */
+/* ── Priority Queue ── */
+/* Bands + colors mirror SignalChip (utils/signalBand) so a score reads the
+   same in the entry list, reader, and this priority queue. */
+/* Score value + breakdown tooltip */
+/* Score bar */
+/* Reason tag color variants */
+/* ── Unified queue: inline correlation events ── */
+/* ── Unified queue: cluster cards ── */
+/* ── Convergence cluster badges + entity tags ── */
+/* Cluster priority chip — mirrors the entry score cell (badge over number) so a
+   cluster reads on the same scale as the entries it's ranked against. */
+/* Shared entity tags */
+/* These three previously hardcoded the WRONG entity's colour: actor rendered
+   in malware's purple, malware in CVE's red, TTP in tool's yellow. Colour is
+   the entity vocabulary across the rest of the app, so a dashboard chip in a
+   sibling type's colour is a misread waiting to happen. Now on the tokens. */
+/* Compact cluster entry rows */
+/* ── Tune Button ── */
+/* ── Settings Panel ── */
+/* ── Widget Section ── */
+.widgetSection {
+  min-height: 0;
+}
+/* Tab bar */
+/* Widget grid */
+.widgetGrid {
+  position: relative;
+  width: 100%;
+}
+.widgetCell {
+  /* react-grid-layout sets position/size via inline styles */
+}
+.widgetCard {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: var(--r-md);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+.widgetHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px var(--sp-3) 6px var(--sp-2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  user-select: none;
+  /* Anchors the settings popover, which is absolutely positioned. */
+  position: relative;
+}
+.dragHandle {
+  cursor: grab;
+}
+.dragHandle:active {
+  cursor: grabbing;
+}
+/* Layout locked: no grab affordance, and text stays selectable. */
+.dragLocked,
+.dragLocked:active {
+  cursor: default;
+}
+.dragArea {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.dragGrip {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  line-height: 1;
+  flex-shrink: 0;
+  opacity: 0.5;
+  transition: opacity 0.15s;
+}
+.widgetHeader:hover .dragGrip {
+  opacity: 1;
+}
+.widgetTitle {
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--text-primary);
+  text-transform: capitalize;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.removeBtn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: var(--fs-md);
+  padding: 1px 5px;
+  border-radius: var(--r-sm);
+  line-height: 1;
+  cursor: pointer;
+}
+.removeBtn:hover {
+  background: var(--danger);
+  color: var(--bg-primary);
+}
+.widgetBody {
+  flex: 1;
+  padding: 10px;
+  overflow: auto;
+  min-height: 0;
+}
+/* Override react-grid-layout resize handle */
+.widgetGrid :global(.react-resizable-handle::after) {
+  border-color: var(--text-muted);
+}
+.widgetGrid :global(.react-grid-placeholder) {
+  background: var(--accent);
+  opacity: 0.15;
+  border-radius: var(--r-md);
+}
+.widgetEmpty {
+  text-align: center;
+  padding: 2.5rem var(--sp-5);
+  color: var(--text-muted);
+}
+.widgetEmpty p {
+  font-size: var(--fs-md);
+  font-weight: 500;
+  margin: 0 0 var(--sp-2);
+}
+.widgetEmpty span {
+  font-size: var(--fs-base);
+}
+/* ── Template Modal ── */
+.templateOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.templateModal {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp-6);
+  max-width: 560px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.templateTitle {
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  margin: 0 0 var(--sp-2);
+}
+.templateDesc {
+  font-size: var(--fs-md);
+  color: var(--text-muted);
+  margin: 0 0 var(--sp-5);
+}
+.templateGrid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.templateCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-4) var(--sp-5);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-secondary);
+  cursor: pointer;
+  text-align: left;
+}
+.templateCard:hover {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+.templateName {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.templateInfo {
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+}
+.templateWidgets {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+.templateClose {
+  margin-top: var(--sp-4);
+  padding: var(--sp-3) var(--sp-5);
+  font-size: var(--fs-md);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  width: 100%;
+}
+.templateClose:hover {
+  background: var(--bg-hover);
+}
+@media (max-width: 767px) {.container {
+    padding: var(--sp-4);
+  }
+.actionBtn,
+  .tuneBtn,
+  .addBtn,
+  .secondaryBtn,
+  .panelToggle,
+  .settingsClose,
+  .settingsResetBtn,
+  .settingsSaveBtn,
+  .templateClose {
+    min-height: 44px;
+  }
+.removeBtn {
+    min-width: 44px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}

@@ -1,0 +1,117 @@
+.shell {
+  position: relative;
+  margin: 1.25rem 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+.shell:fullscreen {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: var(--bg-primary);
+}
+
+.toolbar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  /* Never competes with the diagram for attention until pointed at. */
+  opacity: 0.55;
+  transition: opacity 0.12s;
+}
+
+.shell:hover .toolbar,
+.toolbar:focus-within {
+  opacity: 1;
+}
+
+.toolbar button {
+  min-width: 26px;
+  height: 24px;
+  padding: 0 6px;
+  font-size: var(--fs-md);
+  line-height: 1;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+.toolbar button:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.zoomLabel {
+  min-width: 44px !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.viewport {
+  position: relative;
+  height: min(70vh, 640px);
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+}
+
+.viewport:active {
+  cursor: grabbing;
+}
+
+.shell:fullscreen .viewport {
+  height: calc(100vh - 30px);
+}
+
+.canvas {
+  transform-origin: 0 0;
+  width: max-content;
+}
+
+/* Sizing is pinned inline from the viewBox (see normalize() in the component) —
+   mermaid's own width="100%" collapses to the 300x150 replaced-element default
+   inside a max-content box. Only the block display belongs here. */
+.canvas :global(svg) {
+  display: block;
+}
+
+.hint {
+  margin: 0;
+  padding: 4px 10px;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  background: var(--bg-primary);
+}
+
+.loading,
+.fallback {
+  margin: 1.25rem 0;
+  padding: 1rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--text-secondary);
+  font-size: var(--fs-md);
+}
+
+.error {
+  margin: 0 0 0.5rem;
+  color: var(--accent);
+}
+
+.fallback pre {
+  margin: 0;
+  overflow-x: auto;
+}

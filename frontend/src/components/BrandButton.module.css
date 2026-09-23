@@ -1,0 +1,29 @@
+.brand {
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+  flex-shrink: 0;
+  padding: 0 4px 0 0;
+  user-select: none;
+  background: none;
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.brand:hover {
+  color: var(--accent);
+}
+
+.brandLogo {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.brandAccent {
+  color: var(--accent);
+}

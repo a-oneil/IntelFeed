@@ -1,0 +1,168 @@
+{
+  "src/pages/CampaignProfilePage.module.css": {
+    "color-no-hex": {
+      "count": 6
+    }
+  },
+  "src/pages/DetectionWorkbenchPage.module.css": {
+    "color-no-hex": {
+      "count": 2
+    }
+  },
+  "src/pages/ExposurePage.module.css": {
+    "color-no-hex": {
+      "count": 1
+    }
+  },
+  "src/pages/RuleDetailPage.module.css": {
+    "color-no-hex": {
+      "count": 1
+    },
+    "declaration-property-value-disallowed-list": {
+      "count": 2
+    }
+  },
+  "src/pages/SettingsPage.module.css": {
+    "color-no-hex": {
+      "count": 13
+    }
+  },
+  "src/pages/SharedEntryPage.module.css": {
+    "color-no-hex": {
+      "count": 4
+    }
+  },
+  "src/pages/WorkbenchPage.module.css": {
+    "color-no-hex": {
+      "count": 7
+    }
+  },
+  "src/components/AISettings.module.css": {
+    "color-no-hex": {
+      "count": 1
+    }
+  },
+  "src/components/ActionableInsights.module.css": {
+    "color-no-hex": {
+      "count": 2
+    }
+  },
+  "src/components/AppHeader.module.css": {
+    "color-no-hex": {
+      "count": 5
+    }
+  },
+  "src/components/CommandPalette.module.css": {
+    "color-no-hex": {
+      "count": 2
+    }
+  },
+  "src/components/EnrichmentStatusIndicator.module.css": {
+    "color-no-hex": {
+      "count": 3
+    }
+  },
+  "src/components/EntryIntelBadges.module.css": {
+    "color-no-hex": {
+      "count": 6
+    }
+  },
+  "src/components/EntryReader.module.css": {
+    "color-no-hex": {
+      "count": 5
+    }
+  },
+  "src/components/EntryTableView.module.css": {
+    "color-no-hex": {
+      "count": 2
+    }
+  },
+  "src/components/KEVBadge.module.css": {
+    "color-no-hex": {
+      "count": 2
+    }
+  },
+  "src/components/PromptWorkspace.module.css": {
+    "color-no-hex": {
+      "count": 3
+    }
+  },
+  "src/components/RuleCoverageBoard.module.css": {
+    "color-no-hex": {
+      "count": 1
+    }
+  },
+  "src/components/RuleEntryCard.module.css": {
+    "color-no-hex": {
+      "count": 6
+    }
+  },
+  "src/components/SwipeableEntryRow.module.css": {
+    "color-no-hex": {
+      "count": 2
+    }
+  },
+  "src/components/SystemSettings.module.css": {
+    "color-no-hex": {
+      "count": 1
+    }
+  },
+  "src/components/UnifiedSearchBar.module.css": {
+    "color-no-hex": {
+      "count": 22
+    }
+  },
+  "src/components/WorkbenchPanel.module.css": {
+    "color-no-hex": {
+      "count": 9
+    }
+  },
+  "src/components/engine/AutolinkingSection.module.css": {
+    "declaration-property-value-disallowed-list": {
+      "count": 1
+    }
+  },
+  "src/components/engine/EngineMatrix.module.css": {
+    "color-no-hex": {
+      "count": 3
+    }
+  },
+  "src/components/entityProfile/entityProfile.module.css": {
+    "declaration-property-value-disallowed-list": {
+      "count": 1
+    }
+  },
+  "src/components/ransomware/LeakWatchFeed.module.css": {
+    "color-no-hex": {
+      "count": 1
+    }
+  },
+  "src/components/table/DataTable.module.css": {
+    "color-no-hex": {
+      "count": 10
+    }
+  },
+  "src/components/triage/corrEvents.module.css": {
+    "color-no-hex": {
+      "count": 2
+    }
+  },
+  "src/components/widgets/widgets.module.css": {
+    "color-no-hex": {
+      "count": 1
+    },
+    "declaration-property-value-disallowed-list": {
+      "count": 2
+    }
+  },
+  "src/components/entityProfile/tabs/VulnerabilitiesTab.module.css": {
+    "color-no-hex": {
+      "count": 6
+    }
+  },
+  "src/components/search/EntityResults.module.css": {
+    "color-no-hex": {
+      "count": 14
+    }
+  }
+}

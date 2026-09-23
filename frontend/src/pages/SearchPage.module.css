@@ -1,0 +1,121 @@
+.container {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* The search page's own rail. Same weight and background derivation as the
+   workbench rail so the two read as the same kind of surface — a second
+   sidebar inside the content area, distinct from the app sidebar. */
+.facetRail {
+  width: 232px;
+  min-width: 232px;
+  border-right: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-secondary) 60%, var(--bg-primary));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  z-index: 20;
+  transition: width 0.2s, min-width 0.2s, visibility 0.2s;
+}
+
+.facetRailCollapsed {
+  width: 0 !important;
+  min-width: 0 !important;
+  overflow: hidden;
+  border-right: none;
+  /* Zero-width controls must stop being hit-test targets, or clicks aimed at
+     the stream land on collapsed rows underneath it. */
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.stream {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.reader {
+  flex: 1;
+  min-width: var(--reader-min-width);
+  border-left: 1px solid var(--border);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Mobile: the rail becomes a sheet ──────────────────────
+   A 232px column beside the results leaves neither usable on a phone, and the
+   desktop rail toggle is a hover affordance that does not exist on touch — so
+   the rail is opened deliberately from the toolbar's Filters button and closed
+   by the backdrop or Done. */
+
+.sheetBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 40;
+}
+
+.facetSheet {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: min(86vw, 320px);
+  min-width: 0;
+  z-index: 50;
+  box-shadow: 4px 0 24px rgba(0, 0, 0, 0.45);
+  transition: transform 0.2s ease;
+}
+
+/* The sheet slides out rather than collapsing to zero width — a 0-width
+   transition on a fixed panel just snaps. */
+.facetSheet.facetRailCollapsed {
+  width: min(86vw, 320px) !important;
+  min-width: 0 !important;
+  transform: translateX(-100%);
+  visibility: hidden;
+  pointer-events: none;
+  border-right: 1px solid var(--border);
+}
+
+.sheetHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+
+.sheetTitle {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.sheetDone {
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  padding: 5px var(--sp-4);
+  cursor: pointer;
+}
+
+@media (max-width: 767px) {
+  .reader {
+    position: fixed;
+    inset: 0;
+    border-left: none;
+    z-index: 30;
+    background: var(--bg-primary);
+  }
+}

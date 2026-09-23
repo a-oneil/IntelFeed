@@ -1,0 +1,131 @@
+.wrapper {
+  position: relative;
+  display: inline;
+}
+
+.display {
+  cursor: pointer;
+  border-radius: var(--r-sm);
+  padding: 2px 4px;
+  margin: -2px -4px;
+  transition: background 0.15s;
+}
+
+.display:hover {
+  background: var(--bg-tertiary);
+}
+
+.pencil {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-left: 4px;
+  opacity: 0;
+  color: var(--text-muted);
+  transition: opacity 0.15s;
+  vertical-align: middle;
+}
+
+.display:hover .pencil {
+  opacity: 1;
+}
+
+.input {
+  padding: 4px 8px;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: inherit;
+  font-family: inherit;
+  outline: none;
+  width: 100%;
+  min-width: 120px;
+}
+
+.textarea {
+  padding: 6px 8px;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: inherit;
+  font-family: inherit;
+  outline: none;
+  width: 100%;
+  min-height: 60px;
+  resize: vertical;
+}
+
+.saving {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.markdownDisplay {
+  cursor: pointer;
+  border-radius: var(--r-sm);
+  padding: 2px 4px;
+  margin: -2px -4px;
+  transition: background 0.15s;
+  position: relative;
+}
+
+.markdownDisplay:hover {
+  background: var(--bg-tertiary);
+}
+
+.markdownDisplay:hover .pencil {
+  opacity: 1;
+}
+
+.markdownDisplay h2 {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 12px 0 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.markdownDisplay h3 {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 10px 0 4px;
+}
+
+.markdownDisplay p {
+  margin: 6px 0;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  font-size: var(--fs-base);
+}
+
+/* :where() keeps zero specificity for `.markdownDisplay` so EntityLinkedMarkdown's
+   entity-link styling (inherited text color + 2px dotted underline) wins, matching
+   how entities look in notes and the AI summary. Plain links still match. */
+:where(.markdownDisplay) a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+:where(.markdownDisplay) a:hover {
+  text-decoration: underline;
+}
+
+.markdownDisplay em {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.markdownDisplay ul, .markdownDisplay ol {
+  margin: 4px 0;
+  padding-left: 20px;
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+}
+
+.markdownDisplay li {
+  margin: 2px 0;
+}

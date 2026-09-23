@@ -1,0 +1,327 @@
+.card {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r-md);
+  background: var(--bg-secondary);
+  margin: var(--sp-4) 0 0;
+}
+
+/* The left rule carries the band, so the card reads while scrolling past it. */
+.edge_high {
+  border-left-color: var(--danger);
+}
+.edge_medium {
+  border-left-color: var(--warning);
+}
+.edge_low {
+  border-left-color: var(--text-muted);
+}
+
+.headerRow {
+  display: flex;
+  align-items: center;
+  padding-right: var(--sp-3);
+}
+
+.headerRow .header {
+  flex: 1;
+  min-width: 0;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: var(--sp-3) var(--sp-4);
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  text-align: left;
+}
+
+.score {
+  font-weight: 700;
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+.score.high {
+  color: var(--danger);
+}
+.score.medium {
+  color: var(--warning);
+}
+.score.low {
+  color: var(--text-secondary);
+}
+
+/* Collapsed state: the top reason, truncated rather than wrapped so the strip
+   stays one line at any reader width. */
+.leadText {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.more {
+  flex: none;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.bandLabel {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.arrow {
+  color: var(--text-muted);
+  font-size: var(--fs-caret);
+  line-height: 1;
+  flex: none;
+}
+
+.body {
+  padding: 0 0 0.6rem;
+}
+
+/* ── The ledger ──────────────────────────────────────────────────────
+   One row per signal, ordered by real contribution. Replaces the old family
+   bars *and* the reason list, which were the same data in two languages. */
+.ledger {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 3px 1fr auto;
+  align-items: stretch;
+  border-top: 1px solid var(--border);
+}
+
+.rowNeg {
+  opacity: 0.8;
+}
+
+.rule {
+  width: 3px;
+}
+
+.rowMain {
+  padding: 0.5rem var(--sp-4);
+  min-width: 0;
+}
+
+.rowFam {
+  display: block;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 2px;
+  color: var(--text-muted);
+}
+
+.driver {
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.rowText {
+  display: block;
+  font-size: var(--fs-md);
+  line-height: 1.45;
+  color: var(--text-primary);
+}
+
+.rowVal {
+  align-self: center;
+  padding: 0.5rem var(--sp-4) 0.5rem var(--sp-2);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.valNeg {
+  color: var(--danger);
+}
+
+/* ── Footer: one line for the personal lift, replacing the old boxed panel ── */
+.footer {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: 0.6rem var(--sp-4) 0;
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-base);
+  color: var(--text-muted);
+}
+
+.footItem {
+  flex: 1;
+  min-width: 15rem;
+}
+
+.footLift {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.footDetail {
+  color: var(--text-muted);
+}
+
+.footLinks {
+  display: flex;
+  gap: var(--sp-4);
+  flex: none;
+  margin-left: auto;
+}
+
+.footLink {
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.footLink:hover {
+  color: var(--accent);
+}
+
+/* ── "Show the math": the receipt, for auditing the number in place ── */
+.math {
+  margin: 0 var(--sp-4);
+  padding: 0.6rem 0 0.2rem;
+  border-top: 1px dashed var(--border);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+.mathHead {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  margin-bottom: 0.4rem;
+}
+
+.mathRow {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  padding: 3px 0;
+  font-size: var(--fs-sm);
+  border-bottom: 1px dotted var(--border);
+}
+
+.mathName {
+  color: var(--text-secondary);
+  min-width: 5.5rem;
+}
+
+.mathCalc {
+  flex: 1;
+  min-width: 8rem;
+  color: var(--text-muted);
+}
+
+.mathVal {
+  color: var(--text-primary);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.mathTotal {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding-top: 0.45rem;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.mathTotalSub {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding-top: 2px;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.mathNote {
+  margin: 0.5rem 0 0;
+  font-family: inherit;
+  font-size: var(--fs-base);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/* ── Family accents. Referenced dynamically via `bg_${family}` / `fam_${family}`,
+   so a static grep finds no call site for most of them. ── */
+.fam_severity {
+  color: var(--danger);
+}
+.fam_coverage {
+  color: var(--accent-intel);
+}
+.fam_interest {
+  color: var(--accent);
+}
+.fam_novelty {
+  color: var(--accent-dash);
+}
+.fam_content {
+  color: var(--accent-detect);
+}
+.fam_exposure {
+  color: var(--entity-product);
+}
+.fam_blindspot {
+  color: var(--danger);
+}
+
+.bg_severity {
+  background: var(--danger);
+}
+.bg_coverage {
+  background: var(--accent-intel);
+}
+.bg_interest {
+  background: var(--accent);
+}
+.bg_novelty {
+  background: var(--accent-dash);
+}
+.bg_content {
+  background: var(--accent-detect);
+}
+.bg_exposure {
+  background: var(--entity-product);
+}
+.bg_blindspot {
+  background: var(--danger);
+}
+.bg_other {
+  background: var(--text-muted);
+}
+

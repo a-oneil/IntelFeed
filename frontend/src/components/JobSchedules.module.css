@@ -1,0 +1,437 @@
+/* ─── Container ──────────────────────────────────────── */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+
+.restartBanner {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 10px 14px;
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
+  border-radius: var(--r-md);
+  font-size: var(--fs-md);
+  color: var(--warning);
+}
+
+.restartIcon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+/* ─── Category Groups ────────────────────────────────── */
+
+.group {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+.groupHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px var(--sp-5);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+}
+
+.groupHeader:hover {
+  background: var(--bg-hover);
+}
+
+.groupTitle {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.groupCount {
+  font-size: var(--fs-base);
+  color: var(--text-muted);
+  font-weight: 400;
+  margin-left: 6px;
+}
+
+.chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+  transition: transform 0.15s;
+}
+
+.chevronOpen {
+  transform: rotate(90deg);
+}
+
+.groupBody {
+  padding: 0;
+}
+
+/* ─── Job Rows ───────────────────────────────────────── */
+
+.jobRow {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5);
+  transition: background 0.1s;
+}
+
+.jobRow:hover {
+  background: var(--bg-hover);
+}
+
+.jobRow + .jobRow {
+  border-top: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+}
+
+.jobInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.jobName {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 var(--sp-1);
+}
+
+.jobDesc {
+  font-size: var(--fs-base);
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin: 0 0 6px;
+}
+
+.jobSchedule {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.scheduleIcon {
+  width: 12px;
+  height: 12px;
+  opacity: 0.6;
+}
+
+/* Job-name tags. Chip's `toned` tone supplies box, wash and border from the
+   tint; only the uppercase face and the gap from the name are local
+   (properties Chip never sets, so a single class is enough). */
+.nameTag {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-left: var(--sp-2);
+}
+
+.aiTag {
+  letter-spacing: 0.04em;
+  margin-left: 6px;
+}
+
+.jobDisabled .jobName,
+.jobDisabled .jobDesc,
+.jobDisabled .jobSchedule {
+  opacity: 0.45;
+}
+
+/* ─── Controls ───────────────────────────────────────── */
+
+.jobControls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding-top: var(--sp-1);
+}
+
+.toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggleSlider {
+  width: 36px;
+  height: 20px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  position: relative;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.toggleSlider::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  background: var(--text-secondary);
+  border-radius: 50%;
+  transition: transform 0.2s, background 0.2s;
+}
+
+.toggle input:checked + .toggleSlider {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.toggle input:checked + .toggleSlider::after {
+  transform: translateX(16px);
+  background: var(--accent-text);
+}
+
+.iconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s, color 0.1s;
+}
+
+.iconBtn:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+
+.iconBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.iconBtn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ─── Edit Panel ─────────────────────────────────────── */
+
+.editPanel {
+  margin-top: var(--sp-3);
+  padding: 10px var(--sp-4);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.editFields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.editField {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.editLabel {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.editInput {
+  width: 100px;
+  padding: 5px var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  font-variant-numeric: tabular-nums;
+}
+
+.editInput:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.editSelect {
+  padding: 5px var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  cursor: pointer;
+}
+
+.editSelect:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.editActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.editHint {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.btnSave {
+  padding: var(--sp-2) var(--sp-4);
+  background: var(--accent);
+  color: var(--accent-text);
+  border: none;
+  border-radius: var(--r-md);
+  font-size: var(--fs-base);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btnSave:hover {
+  background: var(--accent-hover);
+}
+
+.btnSave:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btnCancel {
+  padding: var(--sp-2) var(--sp-4);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  font-size: var(--fs-base);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.btnCancel:hover {
+  background: var(--bg-hover);
+}
+
+.btnReset {
+  padding: var(--sp-2) var(--sp-4);
+  background: none;
+  color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  border-radius: var(--r-md);
+  font-size: var(--fs-base);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.btnReset:hover {
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+
+/* ─── Status Message ─────────────────────────────────── */
+
+.statusMsg {
+  font-size: var(--fs-base);
+  color: var(--success);
+  margin-left: 6px;
+}
+
+/* ─── Loading ────────────────────────────────────────── */
+
+.loading {
+  font-size: var(--fs-md);
+  color: var(--text-muted);
+  padding: 2rem 0;
+}
+
+/* ─── Mobile ─────────────────────────────────────────── */
+
+@media (max-width: 767px) {
+  .jobRow {
+    flex-direction: column;
+    gap: var(--sp-3);
+  }
+
+  .jobControls {
+    align-self: flex-end;
+  }
+
+  .editFields {
+    flex-direction: column;
+  }
+
+  .editInput {
+    width: 100%;
+  }
+
+  .restartBanner {
+    font-size: var(--fs-base);
+  }
+}
+
+/* ─── Per-job settings ───────────────────────────────── */
+
+/* The knobs that tune a job, reachable from the job itself rather than only
+   from whichever Engine panel owns their settings group. */
+.settingsToggle {
+  /* Block, not inline — .jobSchedule above is an inline-flex row, so an inline
+     toggle lands on the same line as the schedule text. */
+  display: block;
+  margin-top: var(--sp-2);
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in srgb, var(--text-muted) 40%, transparent);
+}
+
+.settingsToggle:hover {
+  color: var(--text-primary);
+}
+
+.settingsPanel {
+  margin-top: var(--sp-2);
+  padding-left: var(--sp-3);
+  border-left: 2px solid var(--border);
+}
+
+.jobDisabled .settingsToggle {
+  opacity: 0.45;
+}

@@ -1,0 +1,72 @@
+.container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  align-items: center;
+}
+
+.saving {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.alias {
+  font-size: var(--fs-base);
+  padding: 2px 6px 2px 8px;
+  border-radius: var(--r-md);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.removeBtn {
+  all: unset;
+  cursor: pointer;
+  font-size: var(--fs-md);
+  line-height: 1;
+  color: var(--text-muted);
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+  padding: 0 2px;
+}
+
+.alias:hover .removeBtn {
+  opacity: 1;
+}
+
+.removeBtn:hover {
+  color: var(--danger);
+}
+
+.addBtn {
+  all: unset;
+  cursor: pointer;
+  font-size: var(--fs-base);
+  padding: 2px 8px;
+  border-radius: var(--r-md);
+  border: 1px dashed var(--border);
+  color: var(--text-muted);
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.addBtn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border-color: var(--text-muted);
+}
+
+.input {
+  font-size: var(--fs-base);
+  padding: 2px 8px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--accent);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  outline: none;
+  min-width: 100px;
+  max-width: 200px;
+  font-family: inherit;
+}

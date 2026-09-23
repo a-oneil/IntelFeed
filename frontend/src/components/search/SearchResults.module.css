@@ -1,0 +1,699 @@
+.results {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* ── Toolbar ──────────────────────────────────────────── */
+/* Sits above the toolbar, in the reading path between the input and the counts —
+   the correction has to be seen before the wrong number is believed. */
+.didYouMean {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: var(--sp-3) var(--sp-5);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+}
+
+.didYouMean code {
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  border-radius: var(--r-sm);
+  padding: 0 4px;
+}
+
+/* Matches .toolbarBtn directly below it — this is the same kind of control. */
+.didYouMeanApply {
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  padding: 4px var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.didYouMeanApply:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Same shelf as .didYouMean: both explain why the counts below are not what the
+   user expected, and both have to be read before those counts are believed. */
+.unknownFields {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  padding: var(--sp-3) var(--sp-5);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+}
+
+.unknownFields code {
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  border-radius: var(--r-sm);
+  padding: 0 4px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-5);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-primary);
+  flex-wrap: wrap;
+}
+
+.toolbarLeft {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.toolbarRight {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: none;
+}
+
+.summary {
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.summary b {
+  color: var(--text-primary);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.dot {
+  margin: 0 var(--sp-2);
+  color: var(--text-muted);
+}
+
+.toolbarBtn,
+.select {
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  padding: 4px var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.toolbarBtn:hover,
+.select:hover {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+.toolbarBtnActive {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.toolbarBtnActive:hover {
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+
+/* ── Scrolling body ───────────────────────────────────── */
+.scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: var(--sp-3);
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-5) var(--sp-5) var(--sp-2);
+}
+
+.sectionSwatch {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-sm);
+  flex: none;
+}
+
+.sectionTitle {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.sectionCount {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0 6px;
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+
+.sectionHint {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.sectionRule {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+  min-width: var(--sp-4);
+}
+
+/* ── Featured (top direct match) ──────────────────────── */
+.featured {
+  display: flex;
+  gap: var(--sp-5);
+  margin: var(--sp-2) var(--sp-5) var(--sp-3);
+  padding: var(--sp-4);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r-md);
+  flex-wrap: wrap;
+}
+
+.featuredBody {
+  flex: 1;
+  min-width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.featuredHead {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.featuredName {
+  font-family: var(--font-mono);
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.featuredSub {
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+}
+
+.featuredDesc {
+  margin: 0;
+  font-size: var(--fs-base);
+  line-height: 1.55;
+  color: var(--text-secondary);
+  max-width: 78ch;
+}
+
+.featuredActions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  width: 190px;
+  flex: none;
+}
+
+.action {
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  padding: 6px var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.action:hover {
+  border-color: var(--text-muted);
+}
+
+.actionPrimary {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.featuredStat {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  padding-top: var(--sp-1);
+}
+
+.featuredStat b {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Entity rows ──────────────────────────────────────── */
+.row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: 6px var(--sp-5);
+  border: none;
+  border-left: 2px solid transparent;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text-primary);
+  font-family: inherit;
+  min-width: 0;
+}
+
+.row:hover {
+  background: var(--bg-secondary);
+  border-left-color: var(--accent);
+}
+
+.badge {
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 3px;
+  padding: 2px 6px;
+  flex: none;
+  /* A floor, not a fixed width — short types still line up in a column, but a
+     long one (mitigation) grows instead of spilling out of its tinted box. */
+  min-width: 62px;
+  box-sizing: border-box;
+  white-space: nowrap;
+  text-align: center;
+  align-self: center;
+}
+
+.rowName {
+  font-family: var(--font-mono);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowSub {
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+
+.rowCount {
+  margin-left: var(--sp-3);
+  flex: none;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.matchTag {
+  flex: none;
+  margin-left: auto;
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
+  font-style: italic;
+  white-space: nowrap;
+}
+
+.matchTagDirect {
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin-left: 0;
+}
+
+.showAll {
+  align-self: flex-start;
+  margin: var(--sp-1) 0 0 calc(var(--sp-5) + 62px + var(--sp-3));
+  border: none;
+  background: none;
+  padding: 4px 0;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  color: var(--accent-intel);
+}
+
+.showAll:hover {
+  text-decoration: underline;
+}
+
+/* ── Entries ──────────────────────────────────────────── */
+.entryList {
+  display: flex;
+  flex-direction: column;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-4);
+  padding: var(--sp-5);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
+.pagination button {
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  padding: 4px var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.pagination button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ── Empty / placeholder ──────────────────────────────── */
+.empty {
+  padding: var(--sp-6) var(--sp-5);
+  color: var(--text-secondary);
+  font-size: var(--fs-md);
+}
+
+.empty b {
+  color: var(--text-primary);
+}
+
+.placeholder {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  padding: var(--sp-6) var(--sp-5);
+  color: var(--text-secondary);
+  font-size: var(--fs-md);
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.placeholder p {
+  margin: 0;
+  line-height: 1.6;
+}
+
+/* ── Landing surface ──────────────────────────────────────
+   Shown until there is a query. Three tiers: what this page is, what you
+   searched before, and the language itself. Full width — the pane is the
+   whole content area, and a 60ch column in the middle of it reads as broken. */
+
+.placeholderHead {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  max-width: 72ch;
+}
+
+.placeholderTitle {
+  font-family: var(--font-display);
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.historyGrid {
+  display: grid;
+  /* Recent (chips, wraps freely) gets the larger share; saved searches are
+     rows and read better narrow. Collapses to one column under ~840px. */
+  grid-template-columns: 1.4fr 1fr;
+  gap: var(--sp-6);
+  align-items: start;
+}
+
+@media (max-width: 840px) {
+  .historyGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.savedBlock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.savedHeader {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* Recents are short strings — chips pack them into the width instead of
+   stacking one per row down a tall, mostly-empty column. */
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.queryChip {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+  padding: 4px 11px;
+  cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queryChip:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.savedList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.savedItem {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  padding: 2px var(--sp-2);
+  min-width: 0;
+}
+
+.savedItem:hover {
+  background: var(--bg-secondary);
+  border-color: var(--border);
+}
+
+.savedName {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  text-align: left;
+  border: none;
+  background: none;
+  padding: 5px 4px;
+  cursor: pointer;
+}
+
+.savedTitle {
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.savedName:hover .savedTitle {
+  color: var(--accent);
+}
+
+.savedQuery {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.savedAction {
+  flex: none;
+  border: none;
+  background: none;
+  padding: 3px 5px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  opacity: 0;
+}
+
+.savedItem:hover .savedAction {
+  opacity: 1;
+}
+
+.savedAction:hover {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+}
+
+.toolbarBtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ── Narrow: results sharing the pane with an open reader ──
+   The same squeeze the entry list takes when the reader opens — the column is
+   down to ~300px, so the chrome gives back its horizontal padding and the
+   entity rows stop reserving width for subtext they can no longer show. */
+
+.narrow .toolbar,
+.narrow .didYouMean,
+.narrow .unknownFields,
+.narrow .pagination {
+  padding-left: var(--sp-3);
+  padding-right: var(--sp-3);
+  gap: var(--sp-2);
+}
+
+/* One scroll strip for the whole bar, the same move the reader's top bar
+   makes at this width: wrapping the controls onto three stacked rows costs
+   ~110px of the list before a single result, so they stay on one line and pan
+   instead. The scrollbar is hidden so it can't eat into the bar's height. */
+.narrow .toolbar {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.narrow .toolbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Both clusters are cargo on that strip — neither grows to claim the row nor
+   shrinks its controls to fit one. */
+.narrow .toolbarLeft,
+.narrow .toolbarRight {
+  flex: none;
+  flex-wrap: nowrap;
+}
+
+.narrow .toolbarBtn,
+.narrow .select,
+.narrow .summary {
+  flex: none;
+  white-space: nowrap;
+}
+
+.narrow .sectionHeader {
+  padding-left: var(--sp-3);
+  padding-right: var(--sp-3);
+  min-width: 0;
+}
+
+/* The header's trailing rule keeps a minimum width, which at this size pushes
+   the row wider than the column instead of shrinking. */
+.narrow .sectionHeader .sectionRule {
+  min-width: 0;
+}
+
+.narrow .row {
+  padding-left: var(--sp-3);
+  padding-right: var(--sp-3);
+  gap: var(--sp-2);
+}
+
+/* Name over subtext rather than beside it: at this width a single line fits
+   the badge and an ellipsis, and nothing else. */
+.narrow .rowName {
+  max-width: none;
+  flex: 1;
+}
+
+.narrow .rowSub,
+.narrow .matchTag {
+  display: none;
+}
+
+.narrow .featured {
+  padding: var(--sp-3);
+  gap: var(--sp-3);
+  margin: var(--sp-2) var(--sp-3) var(--sp-3);
+}
+
+/* The 190px action column and the body cannot both fit, so the card stacks. */
+.narrow .featuredActions {
+  width: 100%;
+}

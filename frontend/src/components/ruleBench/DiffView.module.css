@@ -1,0 +1,34 @@
+.diff {
+  margin: 0;
+  padding: var(--sp-3) 0;
+  max-height: 420px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-secondary);
+}
+
+.same,
+.add,
+.remove {
+  padding: 0 var(--sp-4);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.same {
+  color: var(--text-secondary);
+}
+
+.add {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+}
+
+.remove {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}

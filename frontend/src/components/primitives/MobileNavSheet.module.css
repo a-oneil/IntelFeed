@@ -1,0 +1,121 @@
+/* Mobile only. The hosting page renders this instead of its sidebar under
+   767px; above that the sidebar is a real column and none of this exists. */
+
+.trigger {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  min-height: 44px;
+  padding: var(--sp-3) var(--sp-4);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--fs-md);
+  text-align: left;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.trigger:active {
+  background: var(--bg-tertiary);
+}
+
+.triggerIcon {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  color: var(--text-secondary);
+}
+
+/* The section you are on is the label — the trigger answers "where am I?"
+   as well as "how do I move?". */
+.triggerLabel {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Only visible during the slide — the open panel covers the viewport. It still
+   earns its place as the tap target behind a half-open sheet. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 300;
+}
+
+/* Full-viewport, exactly like the app sidebar on this breakpoint: same 100vw /
+   100dvh panel, same slide, same safe-area insets. A narrow drawer beside a
+   sliver of the page read as a different mechanism from the main menu one tap
+   away — there is only one way a menu opens on a phone here. Nothing shows
+   behind it, so the drawer's edge border and shadow are gone with it. */
+.sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 310;
+  width: 100vw;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in srgb, var(--bg-secondary) 60%, var(--bg-primary));
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  box-sizing: border-box;
+  /* Slides rather than collapsing to zero width — a width transition on a
+     fixed panel just snaps. */
+  transform: translateX(-100%);
+  visibility: hidden;
+  transition: transform 0.25s ease, visibility 0.25s;
+}
+
+.sheetOpen {
+  transform: translateX(0);
+  visibility: visible;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+
+.headTitle {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.done {
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  min-height: 32px;
+  padding: 4px var(--sp-4);
+  cursor: pointer;
+}
+
+.body {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  /* Both navs open with a filter box, and neither carries a top margin of its
+     own — without this it sits flush against the header rule. */
+  padding-top: var(--sp-4);
+  padding-bottom: var(--sp-6);
+}

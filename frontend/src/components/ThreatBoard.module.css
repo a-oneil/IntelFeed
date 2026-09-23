@@ -1,0 +1,454 @@
+/* Threats board — quiet briefing rows.
+   A collapsed row is identity · story · one muted caption · actions.
+   No chip band: detail lives in the expansion drawer. */
+
+.board {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 12px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.headText {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.sub {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.controls {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.empty {
+  padding: 40px 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* Separated cards, not one fused list — the rows need air between them. */
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.row {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text-muted);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--bg-secondary);
+  display: flex;
+  flex-direction: column;
+}
+
+.rowOpen {
+  background: var(--bg-primary);
+}
+
+.generic {
+  opacity: 0.65;
+}
+
+.rowBody {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 12px 14px 11px 15px;
+  cursor: pointer;
+}
+
+.rowBody:hover {
+  background: color-mix(in srgb, var(--bg-hover) 35%, transparent);
+}
+
+/* identity line */
+.idl {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.name {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.name:hover {
+  text-decoration: underline;
+}
+
+/* unboxed coloured mono word — the entity vocabulary without the borders */
+.tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.03em;
+}
+
+.counts {
+  margin-left: auto;
+  display: flex;
+  gap: 14px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.counts b {
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.why {
+  color: var(--text-muted);
+}
+
+.rowBody:hover .why {
+  color: var(--text-primary);
+}
+
+/* story */
+.story {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  max-width: 80ch;
+}
+
+.story b {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.storyQuote {
+  color: var(--text-primary);
+}
+
+.storySrc {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* caption line — plain muted mono, not furniture */
+.cap {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.capText {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+.btn {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 4px 9px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.btnPrimary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg, #0d1117);
+  font-weight: 500;
+}
+
+.btnPrimary:hover {
+  background: var(--accent-hover);
+  color: var(--accent-fg, #0d1117);
+}
+
+/* drawer */
+.drawer {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1fr);
+  border-top: 1px dashed var(--border);
+  background: var(--bg-secondary);
+}
+
+.drawerLoading {
+  grid-column: 1 / -1;
+  padding: 14px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.dcol {
+  padding: 10px 14px 12px;
+  border-right: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dcol:last-child {
+  border-right: 0;
+}
+
+.dhead {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.drow {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drow b {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.drow i {
+  font-family: var(--font-mono);
+  font-style: normal;
+  font-size: 9.5px;
+  color: var(--text-muted);
+}
+
+.dlink {
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.dlink:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.dttp {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--entity-ttp);
+}
+
+.dmore {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--text-muted);
+}
+
+/* The other names one story's row carries — quieter than the name it leads
+   with, because one of them has to be the row's identity. */
+.coName {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* A sub-heading inside a drawer column (Precedent under the behaviours). */
+.dsubhead {
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* The outlet that broke the story, not merely the first row in a list. */
+.dfirst {
+  color: var(--accent-intel);
+}
+
+.dlinkQuiet {
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.dlinkQuiet:hover {
+  color: var(--accent);
+}
+
+@media (max-width: 860px) {
+  .drawer {
+    grid-template-columns: 1fr;
+  }
+
+  .dcol {
+    border-right: 0;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .dcol:last-child {
+    border-bottom: 0;
+  }
+
+  .counts {
+    margin-left: 0;
+    width: 100%;
+  }
+}
+
+/* The landscape divider: CVEs outside your surface are context, not queue. */
+.surfaceDivider {
+  padding: 4px 2px 10px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.offSurface {
+  opacity: 0.72;
+}
+
+/* Full-width rule inventory at the drawer's foot — the list behind the
+   caption's "N rules name it". */
+.dRules {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--border-subtle);
+  padding: 10px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.dheadNote {
+  margin-left: 10px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-muted);
+}
+
+.dRule {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+  font-size: 12px;
+}
+
+.dRuleType {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--entity-rule, #22c55e);
+}
+
+.dRuleTitle {
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dRuleTitle:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.dRuleMeta,
+.dRuleMatch {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dRuleWeak {
+  font-style: normal;
+  color: var(--warning, #d29922);
+}
+
+@media (max-width: 860px) {
+  .dRule {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+
+  .dRuleMeta,
+  .dRuleMatch {
+    grid-column: 2;
+  }
+}
+
+.dlink {
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.dext {
+  margin-left: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  text-decoration: none;
+}
+
+.dext:hover {
+  color: var(--accent);
+}

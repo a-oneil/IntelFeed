@@ -1,0 +1,607 @@
+.page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  width: 100%;
+}
+
+/* The page splits into the working column and the docked shelf, so the shelf
+   sits beside the editor and pushes it — the entry-reader dock pattern. */
+.shell {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+
+.shellMain {
+  flex: 1;
+  min-width: 0;
+  padding: 20px var(--sp-6);
+  display: flex;
+  flex-direction: column;
+}
+
+.loading {
+  padding: 40px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.topBar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--sp-5);
+}
+
+.topActions {
+  display: flex;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* Two more buttons appear as the rails fold in, so the bar has to wrap well
+   before the phone breakpoint or the status pill runs off the edge. */
+@media (max-width: 1023px) {
+  .topBar {
+    flex-wrap: wrap;
+    gap: var(--sp-3);
+  }
+}
+
+.statusBtn {
+  border: none;
+  border-radius: var(--r-sm);
+  padding: var(--sp-2) var(--sp-4);
+  font-size: var(--fs-base);
+  font-weight: 600;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.draft {
+  background: color-mix(in srgb, var(--warning) 15%, transparent);
+  color: var(--warning);
+}
+
+.published {
+  background: color-mix(in srgb, var(--success) 15%, transparent);
+  color: var(--success);
+}
+
+.metaToggle {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-secondary);
+  padding: var(--sp-2) var(--sp-4);
+  font-size: var(--fs-base);
+  cursor: pointer;
+}
+
+.metaToggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.deleteBtn {
+  background: none;
+  border: 1px solid var(--danger);
+  border-radius: var(--r-sm);
+  color: var(--danger);
+  padding: var(--sp-2) var(--sp-4);
+  font-size: var(--fs-base);
+  cursor: pointer;
+}
+
+.deleteBtn:hover {
+  background: var(--danger);
+  color: var(--accent-text);
+}
+
+.chatToggle {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-secondary);
+  padding: var(--sp-2) var(--sp-4);
+  font-size: var(--fs-base);
+  cursor: pointer;
+}
+
+.chatToggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.chatToggleActive {
+  background: color-mix(in srgb, var(--accent-intel) 10%, transparent);
+  border: 1px solid var(--accent-intel);
+  border-radius: var(--r-sm);
+  color: var(--accent-intel);
+  padding: var(--sp-2) var(--sp-4);
+  font-size: var(--fs-base);
+  cursor: pointer;
+}
+
+/* ─── The bench: structure / rule / context ─── */
+
+.bench {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr) 300px;
+  gap: var(--sp-5);
+  flex: 1;
+  min-height: 0;
+}
+
+/* Each rail folds into the slide-over below its breakpoint rather than
+   narrowing the editor — three columns on a laptop already leave the centre
+   at ~600px, and the point of the rearrangement is the rule body. */
+@media (max-width: 1199px) {
+  .bench {
+    grid-template-columns: 190px minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 899px) {
+  .bench {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  min-width: 0;
+  overflow-y: auto;
+  padding-bottom: var(--sp-5);
+}
+
+.railLeft {
+  border-right: 1px solid var(--border);
+  padding-right: var(--sp-4);
+}
+
+.railRight {
+  border-left: 1px solid var(--border);
+  padding-left: var(--sp-4);
+}
+
+.center {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.editorWrap {
+  flex: 1;
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Transient mark on the line the outline jumped to. */
+.lineFlash {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  transition: background 0.4s;
+}
+
+.aiNote {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
+}
+
+/* ─── Headline row ─── */
+
+.edHeadline {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: 0 var(--sp-1) var(--sp-4);
+  border-bottom: 1px solid var(--bg-tertiary);
+}
+
+.edFmt {
+  font-family: var(--font-mono);
+  font-size: var(--fs-base);
+  padding: 3px 9px;
+  border-radius: var(--r-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+/* Format colours come from the --fmt-* family, which was seeded at exactly
+   these values. The border tints are NOT alpha expansions of them (they are
+   --success / --entity-malware / --accent-intel / --accent at 30%, a
+   deliberately different set), so they stay literal rather than aliasing a
+   rule format onto an entity token. */
+.edFmt_sigma { color: var(--fmt-sigma); border-color: rgba(63,185,80,.3); }
+.edFmt_yara { color: var(--fmt-yara); border-color: rgba(168,85,247,.3); }
+.edFmt_kql { color: var(--fmt-kql); border-color: rgba(88,166,255,.3); }
+.edFmt_elastic_ql { color: var(--fmt-elastic-ql); border-color: rgba(88,166,255,.3); }
+.edFmt_nuclei { color: var(--fmt-nuclei); border-color: rgba(247,129,102,.3); }
+.edFmt_splunk_spl { color: var(--fmt-splunk-spl); border-color: rgba(63,185,80,.3); }
+.edFmt_crowdstrike_ql { color: var(--fmt-kql, #79c0ff); border-color: rgba(88,166,255,.3); }
+.edFmt_snort_suricata { color: var(--fmt-nuclei, #ffa657); border-color: rgba(247,129,102,.3); }
+.edFmt_panther { color: var(--fmt-sigma, #56d364); border-color: rgba(63,185,80,.3); }
+.edSev { font-family: var(--font-mono); font-size: var(--fs-md); text-transform: none; }
+.edSev[data-sev="critical"] { color: var(--danger); }
+.edSev[data-sev="high"] { color: var(--severity-high); }
+.edSev[data-sev="medium"] { color: var(--warning); }
+.edSev[data-sev="low"], .edSev[data-sev="informational"] { color: var(--text-secondary); }
+.edCve { font-family: var(--font-mono); font-size: var(--fs-md); color: var(--text-secondary); }
+.edHeadlineActions { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* Create-mode editable headline (type + title), consistent with the view headline */
+.createHeadline {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: 0 var(--sp-1) var(--sp-4);
+  border-bottom: 1px solid var(--bg-tertiary);
+}
+
+.createType {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--fs-base);
+  padding: 6px 10px;
+  border-radius: var(--r-md);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.createTitle {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: var(--sp-2) var(--sp-1);
+}
+
+.createTitle::placeholder { color: var(--text-muted); font-weight: 500; }
+.createTitle:focus { border-bottom: 1px solid var(--accent-detect); }
+
+/* ─── Validation detail (opened from the status line, never blocking) ─── */
+
+.errorList {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  max-height: 200px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.errorItem,
+.warningItem,
+.suggestionItem {
+  padding: 6px var(--sp-4);
+  font-size: var(--fs-base);
+  border-bottom: 1px solid var(--border);
+}
+
+.errorItem {
+  color: var(--danger);
+}
+
+.warningItem {
+  color: var(--warning);
+}
+
+.suggestionItem {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.lineNum {
+  font-family: var(--font-mono);
+  margin-right: var(--sp-3);
+  color: var(--text-muted);
+}
+
+.versionViewBar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+  border-radius: var(--r-md);
+  color: var(--warning);
+  font-size: var(--fs-md);
+}
+
+.versionViewBar button {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-secondary);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-base);
+  cursor: pointer;
+}
+
+.versionViewBar button:hover {
+  background: var(--bg-hover);
+}
+
+.saveBar {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: center;
+  padding-top: var(--sp-3);
+}
+
+.changeDesc {
+  flex: 1;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+}
+
+.changeDesc::placeholder {
+  color: var(--text-muted);
+}
+
+.saveBtn {
+  padding: var(--sp-3) 20px;
+  border: none;
+  border-radius: var(--r-md);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.saveBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.saveBtn:not(:disabled):hover {
+  opacity: 0.9;
+}
+
+@media (max-width: 767px) {
+  /* `.page` is the outer flex row, not the padded column — padding here stacked
+     on top of `.shellMain`'s own gutters and left the working column 306px wide
+     on a 390px screen. Tighten the real gutter instead. */
+  .shellMain {
+    padding: var(--sp-4);
+  }
+
+  /* The breadcrumb, the pane switches and the status/delete pair each get a
+     line of their own rather than a right-aligned staircase, and the switches
+     scroll sideways instead of stacking two rows deep. */
+  .topBar {
+    flex-direction: column;
+    /* Must clear the `wrap` the 1023px rule set — a wrapping column container
+       lays out in columns sized to their widest item, so the breadcrumb and the
+       action row kept their full content width and ran off the screen. */
+    flex-wrap: nowrap;
+    align-items: stretch;
+    margin-bottom: var(--sp-4);
+  }
+
+  .topActions {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .topActions::-webkit-scrollbar {
+    display: none;
+  }
+
+  .topActions > * {
+    flex: none;
+  }
+
+  /* Format + severity keep the first line; the rule actions drop to their own
+     scrolling line under them instead of wrapping into a ragged block. */
+  .edHeadline {
+    flex-wrap: wrap;
+    gap: var(--sp-3);
+  }
+
+  .edHeadlineActions {
+    margin-left: 0;
+    width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .edHeadlineActions::-webkit-scrollbar {
+    display: none;
+  }
+
+  .edHeadlineActions > * {
+    flex: none;
+  }
+
+  .statusBtn,
+  .metaToggle,
+  .deleteBtn,
+  .chatToggle,
+  .chatToggleActive,
+  .createType,
+  .saveBtn,
+  .versionViewBar button {
+    min-height: 44px;
+  }
+
+  .saveBar {
+    flex-wrap: wrap;
+  }
+
+  .changeDesc {
+    font-size: var(--fs-lg);
+    min-height: 44px;
+  }
+}
+
+/* ── Coverage-set handoff: seed banner, upstream pane, observable checklist ── */
+.seedBanner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r-md);
+  background: var(--bg-secondary);
+}
+
+.seedFact {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upstreamPane {
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+.upstreamHead {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  background: var(--bg-tertiary);
+  border: 0;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.upstreamHead:hover {
+  color: var(--text-primary);
+}
+
+.upstreamCode {
+  margin: 0;
+  padding: 10px 12px;
+  max-height: 240px;
+  overflow: auto;
+  background: var(--bg-secondary);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  white-space: pre;
+}
+
+.obsChecklist {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--bg-secondary);
+}
+
+.obsHead {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.obsRow {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border-subtle, var(--border));
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.obsRow:last-child {
+  border-bottom: 0;
+}
+
+.obsText {
+  color: var(--text-primary);
+}
+
+.obsDone {
+  color: var(--text-secondary);
+}
+
+.obsCite {
+  display: block;
+  font-family: var(--font-mono);
+  font-style: normal;
+  font-size: 9.5px;
+  color: var(--text-muted);
+}
+
+
+/* Reader-style flat tabs in the shelf toolbar (copies .labelBtn / .labelBtnActive). */
+.shelfTabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.shelfTab {
+  padding: var(--sp-2) var(--sp-3);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  color: var(--text-secondary);
+  font-size: var(--fs-base);
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  font-family: inherit;
+  line-height: 1.4;
+  transition: background 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+
+.shelfTab:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.shelfTabActive {
+  color: var(--accent);
+  background: var(--bg-tertiary);
+}

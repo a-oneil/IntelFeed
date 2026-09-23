@@ -1,0 +1,58 @@
+.suggested {
+  margin: 0.5rem 0.6rem 0.25rem;
+  border: 1px dashed var(--bg-hover);
+  border-radius: var(--r-md);
+  padding: 0.45rem 0.6rem 0.5rem;
+}
+
+.suggestedLabel {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 0.15rem;
+}
+
+.suggestedRow {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.22rem 0;
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  font-size: var(--fs-base);
+  text-align: left;
+  cursor: pointer;
+}
+
+.suggestedRow:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.suggestedRow svg {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+
+.suggestedText {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggestedGo {
+  flex: none;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.suggestedRow:hover .suggestedGo {
+  color: var(--accent-hover, var(--accent));
+}

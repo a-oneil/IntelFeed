@@ -1,0 +1,423 @@
+.container {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+/* Sidebar */
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  /* Width rides a custom property so the drag handle can move it while the
+     stacked mobile layout below still takes it back with `flex: 0 0 auto`. */
+  flex: 0 0 var(--docs-rail-w, 260px);
+  min-height: 0;
+  padding: var(--sp-4) 0;
+  border-right: 1px solid var(--border);
+  /* Same panel recipe as the settings nav — two theme-managed tokens mixed so
+     the rail sits a touch darker than a card without pinning a fixed colour.
+     These two rails sit in the same slot on adjacent routes; any divergence
+     reads as two different apps. */
+  background: color-mix(in srgb, var(--bg-secondary) 60%, var(--bg-primary));
+}
+
+/* Collapsed to nothing — the RailToggle strip beside it is the way back,
+   same affordance as the settings nav. */
+.sidebarCollapsed {
+  display: none;
+}
+
+
+.filter {
+  width: calc(100% - (var(--sp-5) * 2));
+  margin: 0 var(--sp-5) var(--sp-3);
+  padding: 0.4rem 0.6rem;
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.filter:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.nav {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+}
+
+.group + .group {
+  margin-top: var(--sp-4);
+}
+
+.groupTitle {
+  margin: 0;
+  padding: var(--sp-3) var(--sp-5) var(--sp-1);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.groupList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.navLink {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: 6px var(--sp-5);
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+  text-decoration: none;
+  border-radius: 0;
+  transition: background 0.1s, color 0.1s;
+}
+
+.navLink:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.navLinkActive {
+  color: var(--accent);
+  background: var(--bg-active);
+  font-weight: 500;
+}
+
+.navLinkActive:hover {
+  background: var(--bg-active);
+  color: var(--accent);
+}
+
+.sidebarFooter {
+  margin-top: auto;
+  padding: var(--sp-4) var(--sp-3) 0;
+  border-top: 1px solid var(--border);
+}
+
+.footerLink {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 6px var(--sp-3);
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+  text-decoration: none;
+  border-radius: var(--r-sm);
+  transition: background 0.1s, color 0.1s;
+}
+
+.footerLink:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.footerIcon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.externalIcon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  opacity: 0.5;
+  margin-left: auto;
+}
+
+.muted {
+  padding: var(--sp-3) var(--sp-5);
+  font-size: var(--fs-md);
+  color: var(--text-muted);
+}
+
+/* Content */
+.content {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 2rem 2.5rem 5rem;
+}
+
+/* Full-bleed: these docs are dense with wide reference tables, mermaid
+   diagrams and code blocks, and a 76ch column made every one of them scroll
+   inside its own little window while the rest of the pane sat empty. */
+.article {
+  width: 100%;
+  font-size: var(--fs-md);
+  line-height: 1.7;
+}
+
+.notFound {
+  max-width: 46ch;
+  color: var(--text-secondary);
+}
+
+.article :global(h1) {
+  margin: 0 0 1.25rem;
+  padding-bottom: 0.5rem;
+  font-size: var(--fs-2xl);
+  border-bottom: 1px solid var(--border);
+}
+
+.article :global(h2) {
+  margin: 2rem 0 0.75rem;
+  font-size: var(--fs-xl);
+  scroll-margin-top: 1rem;
+}
+
+.article :global(h3) {
+  margin: 1.5rem 0 0.5rem;
+  font-size: var(--fs-lg);
+  scroll-margin-top: 1rem;
+}
+
+.article :global(p),
+.article :global(li) {
+  color: var(--text-primary);
+}
+
+.article :global(a) {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.article :global(a:hover) {
+  text-decoration: underline;
+}
+
+.article :global(code) {
+  padding: 0.1rem 0.32rem;
+  font-size: 0.85em;
+  background: var(--bg-tertiary);
+  border-radius: var(--r-sm);
+}
+
+.article :global(pre) {
+  margin: 1rem 0;
+  padding: 0.85rem 1rem;
+  overflow-x: auto;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.article :global(pre code) {
+  padding: 0;
+  background: none;
+}
+
+.article :global(blockquote) {
+  margin: 1rem 0;
+  padding: 0.25rem 1rem;
+  color: var(--text-secondary);
+  border-left: 3px solid var(--border);
+}
+
+/* Wide reference tables are common in these docs; keep the page from scrolling. */
+.article :global(table) {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: var(--fs-md);
+}
+
+.article :global(th),
+.article :global(td) {
+  padding: 0.4rem 0.7rem;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.article :global(th) {
+  background: var(--bg-tertiary);
+  font-weight: 600;
+}
+
+.article :global(hr) {
+  margin: 2rem 0;
+  border: none;
+  border-top: 1px solid var(--border);
+}
+
+/* Mobile. The contents rail is not rendered at all below this width — it is a
+   MobileNavSheet slide-over instead, the same as the settings nav, so the only
+   thing above the prose is a one-row trigger. Matching Settings' 767px keeps
+   the two adjacent routes on the same breakpoint; between 768 and 900 the rail
+   is still a real column here, as it is there. */
+@media (max-width: 767px) {
+  .container {
+    flex-direction: column;
+    height: auto;
+  }
+
+  .content {
+    padding: 1.25rem 1rem 3rem;
+  }
+
+  /* Touch targets inside the sheet — same 44px floor the settings nav uses. */
+  .navLink,
+  .footerLink {
+    padding: var(--sp-3) var(--sp-5);
+    min-height: 44px;
+  }
+
+  .filter {
+    min-height: 44px;
+    font-size: var(--fs-lg);
+  }
+
+  /* margin-top: auto is inert in the sheet body (not a flex column); the rule
+     only does work in the desktop rail. */
+  .sidebarFooter {
+    margin-top: var(--sp-4);
+  }
+}
+
+/* Home link, above the page list — the landing page's own row in the rail. */
+.homeLink {
+  composes: navLink;
+  margin-bottom: var(--sp-2);
+}
+
+/* Landing page */
+.landing {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.landingHeader {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 1rem;
+}
+
+.landingTitle {
+  margin: 0;
+  font-size: var(--fs-2xl);
+}
+
+.landingLede {
+  margin: 0.5rem 0 0;
+  font-size: var(--fs-md);
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.apiRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.75rem;
+}
+
+.apiCard {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.75rem 0.9rem;
+  color: var(--text-primary);
+  text-decoration: none;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.apiCard:hover {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.apiIcon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.apiText {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.apiText strong {
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.apiText em {
+  font-size: var(--fs-sm);
+  font-style: normal;
+  color: var(--text-muted);
+}
+
+.guideTitle {
+  margin: 0 0 0.75rem;
+  font-size: var(--fs-lg);
+}
+
+.guideGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.6rem;
+}
+
+.guideCard {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.7rem 0.85rem;
+  color: var(--text-primary);
+  text-decoration: none;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.guideCard:hover {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.guideCard strong {
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.guideCard span {
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  color: var(--text-muted);
+  /* Summaries run to 280 chars; two lines keeps the grid rows even. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

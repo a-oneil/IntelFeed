@@ -1,0 +1,64 @@
+/* The hover card lifted out of Sidebar's `.modeHint`, which was the app's one
+   example of a control explaining itself. Same three-part shape — name, one
+   plain line, optional muted aside — now portalled so it can't be clipped by
+   the sidebar's `overflow-x: hidden` or a table's scroll container. */
+
+.card {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1300;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-secondary);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  font-family: var(--font-ui, inherit);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  line-height: 1.45;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--text-secondary);
+  text-align: left;
+  /* Never a hover target itself: a card that can be hovered can trap the
+     pointer between the control and its own edge. */
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.visible {
+  opacity: 1;
+}
+
+.title {
+  color: var(--text-primary);
+  font-size: var(--fs-base);
+  font-weight: 600;
+}
+
+.aside {
+  color: var(--text-muted);
+}
+
+.card kbd {
+  display: inline-block;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-tertiary);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card {
+    transition: none;
+  }
+}

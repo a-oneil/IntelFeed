@@ -1,0 +1,839 @@
+/* Engine console additions layered over ProcessingTab.module.css: healthline,
+   attention chips, live stage headers, peek popover, output lens, drawer
+   output-manager. Colors resolve through the runtime theme variables. */
+
+/* ---- healthline: unboxed one-breath funnel under the page title ---- */
+.healthline {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 0 var(--sp-1);
+  margin-top: -6px;
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+}
+.hdot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--success) 55%, transparent);
+  flex: none;
+}
+.hdotErr {
+  background: var(--danger);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--danger) 55%, transparent);
+}
+.hitem {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+  font-size: var(--fs-base);
+  color: var(--text-muted);
+}
+.hitem + .hitem {
+  border-left: 1px solid var(--border);
+  padding-left: var(--sp-5);
+  margin-left: 6px;
+}
+.hitem b {
+  font-family: var(--font-display);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.hok {
+  color: var(--success) !important;
+}
+.hproc {
+  color: var(--warning) !important;
+}
+.herr {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--danger);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.hspark {
+  width: 56px;
+  height: 18px;
+  opacity: 0.85;
+  margin: 0 6px;
+}
+.hwin {
+  margin-left: auto;
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  font-family: var(--font-display);
+  font-size: var(--fs-base);
+}
+.hwin button {
+  appearance: none;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  padding: 6px 13px;
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--fs-base);
+}
+.hwin button:hover {
+  color: var(--text-primary);
+}
+.hwinOn {
+  background: var(--accent) !important;
+  color: var(--accent-text) !important;
+}
+
+/* ---- table card + in-card toolbar ---- */
+.card {
+  border-radius: var(--r-full);
+}
+.card tbody td {
+  padding: 10px var(--sp-3);
+}
+.mhead {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.msearch {
+  flex: 1;
+  min-width: 180px;
+}
+/* view tabs: every engine dataset in the same card */
+/* Track/button radii stay concentric: 8px track - 1px border - 2px padding
+   leaves exactly --r-sm for the active tab's fill. */
+.viewSeg {
+  display: inline-flex;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp-1);
+  gap: var(--sp-1);
+}
+.viewSeg button {
+  appearance: none;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding: var(--sp-2) var(--sp-4);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.viewSeg button:hover {
+  color: var(--text-primary);
+}
+.viewOn {
+  background: var(--card-bg) !important;
+  color: var(--text-primary) !important;
+  box-shadow: 0 1px 3px color-mix(in srgb, #000 25%, transparent);
+}
+.viewCnt {
+  font-family: var(--font-display);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.viewOn .viewCnt {
+  color: var(--accent);
+}
+.subView {
+  padding: var(--sp-4) 14px 14px;
+}
+.subLens {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-4);
+  flex-wrap: wrap;
+}
+.subLensHint {
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+}
+
+.subCap {
+  font-family: var(--font-display);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 18px 0 var(--sp-3);
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+/* Same concentric pair as .viewSeg. */
+.lens {
+  display: inline-flex;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp-1);
+  gap: var(--sp-1);
+}
+.lens button {
+  appearance: none;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding: var(--sp-2) 13px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.lens button:hover {
+  color: var(--text-primary);
+}
+
+/* ---- attention chips ---- */
+/* Two fluid rows: queues on the first, console tools on the second. Each row
+ * spans the full width at every viewport — nothing hugs an edge or strands a
+ * half-empty line. */
+.attn {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+}
+.attnLeft {
+  /* always its own row — the queues line never mixes with the tools line */
+  flex: 1 1 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+}
+.attnCap {
+  flex: none;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-right: var(--sp-1);
+}
+.achip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 6px var(--sp-4);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--fs-base);
+  color: var(--text-primary);
+}
+/* chips split the row the same way the tools below them do — both lines run
+   edge to edge instead of ending wherever the labels happen to stop */
+.attnLeft .achip {
+  flex: 1 1 auto;
+  justify-content: center;
+}
+.achip:hover {
+  border-color: var(--text-muted);
+}
+.achipDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+.achipN {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: var(--fs-md);
+  font-variant-numeric: tabular-nums;
+}
+.aErr .achipDot { background: var(--danger); }
+.aErr .achipN { color: var(--danger); }
+.aWarn .achipDot { background: var(--warning); }
+.aWarn .achipN { color: var(--warning); }
+.aInfo .achipDot { background: var(--accent-intel); }
+.aInfo .achipN { color: var(--accent-intel); }
+.attnClear {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+.attnClear b {
+  color: var(--success);
+  font-weight: 600;
+}
+
+/* ---- lens active state ---- */
+.lensOn {
+  background: var(--card-bg) !important;
+  color: var(--accent) !important;
+  box-shadow: 0 1px 3px color-mix(in srgb, #000 25%, transparent);
+}
+
+/* ---- live stage headers: the pipeline's controls, mock-E style ---- */
+.sth {
+  appearance: none;
+  background: none;
+  border: none;
+  border-radius: var(--r-md) var(--r-md) 0 0;
+  padding: 6px 10px 8px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  font: inherit;
+  cursor: pointer;
+  width: 100%;
+  min-width: 78px;
+}
+.sth:hover {
+  background: var(--bg-tertiary);
+}
+.sthOn {
+  background: var(--bg-tertiary);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.sthName {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-display);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.sth:hover .sthName,
+.sthOn .sthName {
+  color: var(--text-primary);
+}
+/* Stage health dot, not a control. Filled = the stage ran in the window, tinted
+   by outcome; hollow = it never fired, so there is no health signal either way.
+   The plan toggle lives in the stage popover, which the surrounding header
+   button opens — this was previously drawn as a sliding pill switch, which read
+   as a toggle and invited clicks that could never do anything. */
+.sw {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--success);
+}
+.swWarn {
+  background: var(--warning);
+}
+.swErr {
+  background: var(--danger);
+}
+.swIdle {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--text-muted);
+}
+.sthCounts {
+  font-family: var(--font-display);
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.sthErr {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+/* ---- peek popover ---- */
+.popWrap {
+  position: relative;
+}
+.pop {
+  position: absolute;
+  z-index: 30;
+  top: 96px;
+  width: 350px;
+  background: var(--card-bg);
+  border: 1px solid var(--text-muted);
+  border-radius: var(--r-md);
+  box-shadow: 0 16px 40px color-mix(in srgb, #000 50%, transparent);
+}
+.pop::before {
+  content: "";
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  background: var(--bg-tertiary);
+  border-left: 1px solid var(--text-muted);
+  border-top: 1px solid var(--text-muted);
+  transform: translateX(-50%) rotate(45deg);
+}
+.popHead {
+  border-radius: var(--r-md) var(--r-md) 0 0;
+}
+.popFoot {
+  border-radius: 0 0 var(--r-md) var(--r-md);
+}
+.popHead {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 13px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-tertiary);
+}
+.popName {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.popKind {
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-intel);
+}
+.popClose {
+  margin-left: auto;
+  appearance: none;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: var(--fs-md);
+  cursor: pointer;
+  padding: 1px 6px;
+  border-radius: var(--r-sm);
+}
+.popClose:hover {
+  color: var(--text-primary);
+  background: var(--card-bg);
+}
+.popBody {
+  padding: 10px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+}
+.popDesc {
+  margin: 0;
+  line-height: 1.4;
+}
+.popRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.popStat {
+  font-family: var(--font-display);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.popStat b {
+  color: var(--text-primary);
+}
+.popErrStat {
+  color: var(--danger);
+}
+/* Rendered as an outlined Chip; the display face is the only thing Chip
+   never declares. */
+.scopePill {
+  font-family: var(--font-display);
+}
+.toggleBtn {
+  appearance: none;
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  border: 1px solid var(--border);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-radius: var(--r-md);
+  padding: var(--sp-2) 10px;
+  cursor: pointer;
+  margin-left: auto;
+}
+.toggleBtn:hover {
+  border-color: var(--text-muted);
+}
+.toggleBtn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.popWarn {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
+  border-radius: var(--r-md);
+  padding: 6px 9px;
+  line-height: 1.4;
+}
+.popFoot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: var(--sp-3) 13px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-tertiary);
+  font-size: var(--fs-sm);
+}
+.popLink {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+}
+.popLink:hover {
+  text-decoration: underline;
+}
+.popMuted {
+  color: var(--text-muted);
+}
+
+/* ---- output lens cells ---- */
+.outCell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 46px;
+  height: var(--h-sm);
+  padding: 0 var(--sp-3);
+  border-radius: var(--r-md);
+  font-family: var(--font-display);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+.outZero {
+  background: transparent;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.outLinks { color: var(--accent-intel); }
+.outEnts { color: var(--warning); }
+.outRels { color: var(--accent-dash); }
+.outSigs { color: var(--success); }
+
+/* ---- drawer: output manager zone ---- */
+.outputsZone {
+  min-width: 0;
+}
+.ozSub {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: var(--sp-4) 0 5px;
+}
+.ozSub:first-of-type {
+  margin-top: 0;
+}
+.orow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-base);
+  min-width: 0;
+}
+.orow:last-child {
+  border-bottom: none;
+}
+.entChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp-1) 9px;
+  font: inherit;
+  font-size: var(--fs-base);
+  color: var(--text-primary);
+  cursor: pointer;
+  max-width: 200px;
+}
+.entChip:hover {
+  border-color: var(--text-muted);
+}
+.entDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+.entName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.entType {
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  flex: none;
+}
+.surf {
+  font-family: var(--font-display);
+  font-size: var(--fs-xs);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 1px 6px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.srcPill {
+  font-family: var(--font-display);
+  font-size: var(--fs-2xs);
+  border-radius: var(--r-sm);
+  padding: 1.5px 7px;
+  white-space: nowrap;
+}
+.srcAuto {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+.srcAi {
+  background: color-mix(in srgb, var(--accent-dash) 14%, transparent);
+  color: var(--accent-dash);
+}
+.srcNeutral {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+.verb {
+  font-family: var(--font-display);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border-radius: var(--r-sm);
+  padding: 1px 7px;
+  white-space: nowrap;
+}
+.newTag {
+  font-family: var(--font-display);
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: var(--r-sm);
+  padding: 0 5px;
+}
+.oActs {
+  margin-left: auto;
+  display: flex;
+  gap: 3px;
+  flex: none;
+}
+.iact {
+  appearance: none;
+  background: none;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: var(--fs-base);
+  border-radius: var(--r-md);
+  padding: 1px 7px;
+}
+.iact:hover {
+  color: var(--text-primary);
+  border-color: var(--border);
+}
+.iactDanger:hover {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+.iactGood:hover {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 45%, transparent);
+}
+.ozEmpty {
+  font-size: var(--fs-base);
+  color: var(--text-muted);
+  padding: var(--sp-1) 0 var(--sp-2);
+}
+.ozMore {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  padding-top: var(--sp-2);
+}
+
+/* ---- console tools row (Jobs / Plans / Enrichment / Publishing / Maintenance) ---- */
+/* second row of the strip: a toolbar that spans the full width at any size —
+ * the finder takes a capped share, the browse buttons split what's left evenly
+ * so the line stays edge-to-edge instead of clustering at one end. */
+.attnTools {
+  flex: 1 1 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.attnSearch {
+  flex: 1 1 300px;
+  max-width: 440px;
+}
+.attnTools .browseBtn {
+  flex: 1 1 auto;
+  text-align: center;
+}
+.browseBtn {
+  appearance: none;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: var(--r-md);
+  padding: 4px 11px;
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.browseBtn:hover {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+.drawerGrid {
+  padding: var(--sp-5) 18px;
+  display: grid;
+  grid-template-columns: 250px 1fr 230px;
+  gap: 22px;
+}
+@media (max-width: 1100px) {
+  .drawerGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---- mobile ---- */
+@media (max-width: 720px) {
+  .healthline {
+    gap: 6px 14px;
+    margin-top: 0;
+  }
+  /* wrapped lines make the divider bars dangle — drop them on small screens */
+  .hitem + .hitem {
+    border-left: none;
+    padding-left: 0;
+    margin-left: 0;
+  }
+  .hitem {
+    font-size: var(--fs-sm);
+  }
+  .hitem b,
+  .herr {
+    font-size: var(--fs-md);
+  }
+  .hspark {
+    display: none;
+  }
+  .hwin {
+    margin-left: 0;
+    width: 100%;
+  }
+  .hwin button {
+    flex: 1;
+  }
+  .attn {
+    gap: 6px;
+  }
+  .attnCap {
+    width: 100%;
+    margin-right: 0;
+  }
+  .achip {
+    padding: 5px 10px;
+    font-size: var(--fs-base);
+  }
+  .achipN {
+    font-size: var(--fs-base);
+  }
+  .attnTools {
+    width: 100%;
+  }
+  .attnSearch {
+    /* full-width and back on top once the toolbar stacks */
+    order: -1;
+    flex-basis: 100%;
+    max-width: none;
+  }
+  .attnTools .browseBtn {
+    flex: 1;
+    text-align: center;
+  }
+  .mhead {
+    padding: 9px 10px;
+    gap: 6px;
+  }
+  .viewSeg {
+    width: 100%;
+    overflow-x: auto;
+  }
+  .viewSeg button {
+    flex: 1;
+    justify-content: center;
+    padding: var(--sp-2) var(--sp-3);
+  }
+  .msearch {
+    min-width: 0;
+    width: 100%;
+  }
+  .subView {
+    padding: var(--sp-3) var(--sp-3) 10px;
+  }
+  .pop {
+    width: min(350px, calc(100vw - 40px));
+  }
+}

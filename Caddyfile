@@ -1,0 +1,10 @@
+# The site domain comes from SITE_DOMAIN in .env (docker-compose.prod.yml passes
+# it into the caddy container). Caddy uses it to request the Let's Encrypt cert,
+# so DNS must already point at this host.
+{$SITE_DOMAIN} {
+	# Service worker must never be cached by CDN
+	@sw path /sw.js
+	header @sw Cache-Control "no-store"
+
+	reverse_proxy frontend:80
+}

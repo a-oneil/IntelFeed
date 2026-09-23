@@ -1,0 +1,129 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 240px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.count {
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+}
+
+.count strong {
+  color: var(--text-primary);
+}
+
+.mutedNote {
+  color: var(--text-muted);
+}
+
+.flagNote {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  color: var(--text-muted);
+  border-left: 2px solid var(--border);
+  padding-left: var(--sp-2);
+}
+
+.muted {
+  margin: 0;
+  font-size: var(--fs-base);
+  color: var(--text-muted);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 3px 0;
+  font-size: var(--fs-base);
+}
+
+.name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+
+.mutedChip {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 0 4px;
+  flex-shrink: 0;
+}
+
+.pushBtn,
+.addBtn,
+.addToggle {
+  padding: 2px var(--sp-2);
+  font-size: var(--fs-sm);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.pushBtn:hover:not(:disabled),
+.addBtn:hover:not(:disabled),
+.addToggle:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+.removeBtn {
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: var(--fs-md);
+  line-height: 1;
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+
+.removeBtn:hover:not(:disabled) {
+  color: var(--danger);
+}
+
+.pushBtn:disabled,
+.addBtn:disabled,
+.removeBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.addBlock {
+  border-top: 1px solid var(--border);
+  padding-top: var(--sp-2);
+}
+
+.addToggle {
+  width: 100%;
+  text-align: left;
+}

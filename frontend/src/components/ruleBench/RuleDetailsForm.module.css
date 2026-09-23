@@ -1,0 +1,382 @@
+/* Grouped, gridded layout — the flat section stack became labelled groups
+   that read like a document, not a form dump. */
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.groupHead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.groupBadge {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+/* Provenance is read-only reference — quieter than the editable groups. */
+.provenance .groupHead {
+  color: var(--text-muted);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.subLabel {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.sevRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sevRow .select {
+  flex: 1;
+  text-transform: capitalize;
+}
+
+.sevDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.sevDot[data-sev="critical"] { background: var(--danger); }
+.sevDot[data-sev="high"] { background: var(--severity-high); }
+.sevDot[data-sev="medium"] { background: var(--warning); }
+.sevDot[data-sev="low"] { background: var(--success); }
+.sevDot[data-sev="informational"] { background: var(--text-muted); }
+
+/* Read-only classification / timestamps as a tidy definition list. */
+.defList {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  margin: 0;
+}
+
+.defRow {
+  display: contents;
+}
+
+.defRow dt {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.defRow dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-base);
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.label {
+  font-size: var(--fs-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.select {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+}
+
+.textarea {
+  padding: var(--sp-3) 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  resize: vertical;
+  font-family: inherit;
+}
+
+.textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.tacticGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.tacticChip {
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  text-transform: capitalize;
+}
+
+.tacticChip:hover {
+  border-color: var(--accent);
+}
+
+.tacticActive {
+  background: var(--accent-detect-bg);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.badge {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.missing {
+  font-size: var(--fs-sm);
+  color: var(--danger);
+  padding: var(--sp-2) 0;
+}
+
+.metaLink {
+  background: none;
+  border: none;
+  color: var(--accent-intel);
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+}
+
+.metaLink:hover {
+  text-decoration-style: solid;
+}
+
+.metaTable {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+.metaRow {
+  display: flex;
+  gap: var(--sp-3);
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-base);
+}
+
+.metaRow:last-child {
+  border-bottom: none;
+}
+
+.metaKey {
+  color: var(--text-muted);
+  min-width: 90px;
+  flex-shrink: 0;
+  text-transform: capitalize;
+}
+
+.metaValue {
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.autoFill {
+  margin-top: 6px;
+  padding: var(--sp-2) 10px;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--accent);
+  font-size: var(--fs-base);
+  cursor: pointer;
+}
+
+.autoFill:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.extracting {
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.refList {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.refLink {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--accent-intel);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.refLink:hover {
+  text-decoration: underline;
+}
+
+.filePath {
+  font-weight: 400;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.commits {
+  display: flex;
+  flex-direction: column;
+  padding-left: var(--sp-2);
+}
+
+.commit {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding-left: 18px;
+  padding-bottom: var(--sp-4);
+  min-height: 32px;
+}
+
+.commit:last-child {
+  padding-bottom: 0;
+}
+
+.commitDot {
+  position: absolute;
+  left: 0;
+  top: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-intel);
+  z-index: 1;
+}
+
+.commit:first-child .commitDot {
+  background: var(--success);
+}
+
+.commitLine {
+  position: absolute;
+  left: 3px;
+  top: 14px;
+  bottom: 0;
+  width: 2px;
+  background: var(--border);
+}
+
+.commitHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-base);
+}
+
+.commitType {
+  font-size: var(--fs-xs);
+  padding: 1px 5px;
+  border-radius: var(--r-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.commitSha {
+  font-family: var(--font-mono);
+  font-size: var(--fs-base);
+  color: var(--accent-intel);
+  text-decoration: none;
+}
+
+.commitSha:hover {
+  text-decoration: underline;
+}
+
+.commitDate {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.commitMessage {
+  font-size: var(--fs-base);
+  color: var(--text-primary);
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.commitAuthor {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+/* Touch targets — the drawer is the phone's only route to these fields. */
+@media (max-width: 767px) {
+  .select,
+  .textarea,
+  .autoFill {
+    min-height: 44px;
+  }
+
+  .tacticChip {
+    min-height: 36px;
+    display: inline-flex;
+    align-items: center;
+  }
+}

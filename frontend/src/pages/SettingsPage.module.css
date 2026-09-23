@@ -1,0 +1,1418 @@
+/* ─── Layout ──────────────────────────────────────────── */
+
+.layout {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+
+/* ─── Sidebar Nav ─────────────────────────────────────── */
+
+.nav {
+  width: 220px;
+  min-width: 220px;
+  padding: var(--sp-4) 0;
+  border-right: 1px solid var(--border);
+  /* Nav panels sit a touch darker than the card surface but stay clear of
+     the page ground, so the sidebar still reads as a distinct panel.
+     Derived from two theme-managed tokens, so it moves with the theme
+     instead of clashing the way a fixed --sidebar-bg did. */
+  background: color-mix(in srgb, var(--bg-secondary) 60%, var(--bg-primary));
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.navTitle {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  padding: 6px var(--sp-5);
+  margin: 0 0 var(--sp-2);
+}
+
+.navList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Same pattern as the documentation sidebar's filter box. */
+.navSearch {
+  width: calc(100% - (var(--sp-5) * 2));
+  margin: 0 var(--sp-5) var(--sp-3);
+  padding: 0.4rem 0.6rem;
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.navSearch:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.navMatchHint {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 45%;
+}
+
+.navNoMatch {
+  padding: var(--sp-3) var(--sp-5);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.navNoMatch a {
+  color: var(--accent);
+}
+
+.navItem {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: 6px var(--sp-5) 6px var(--sp-5);
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  border-radius: 0;
+  transition: background 0.1s, color 0.1s;
+}
+
+.navItem:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.navItemActive {
+  composes: navItem;
+  background: var(--bg-active);
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.navItemActive:hover {
+  background: var(--bg-active);
+}
+
+.navIcon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.navItemActive .navIcon {
+  opacity: 1;
+}
+
+.navFooter {
+  margin-top: auto;
+  padding: var(--sp-4) var(--sp-3) 0;
+  border-top: 1px solid var(--border);
+}
+
+.navFooterLink {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 6px var(--sp-3);
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+  text-decoration: none;
+  border-radius: var(--r-sm);
+  transition: background 0.1s, color 0.1s;
+}
+
+.navFooterLink:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* ─── Content Panel ───────────────────────────────────── */
+
+.navCollapsed {
+  display: none;
+}
+
+/* Collapse strip between nav and content — same affordance as the
+   SidebarLayout / entry-list toggles. */
+
+
+/* Even 1.25rem inset and full-bleed content — the same geometry as the
+   Dashboard's .container. Settings used to run a 32px/40px well around a
+   1100px centred column, which made it the one route in the app whose
+   content neither started nor ended where every other page's does. */
+.content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-width: 0;
+  padding: 1.25rem;
+}
+
+.sectionContent {
+  width: 100%;
+}
+
+/* Matches the workbench's .contentTitle exactly (16px / 600 / body face).
+   Settings uses real <h2> elements for document structure, so it inherits the
+   global `h1, h2, h3 { font-family: var(--font-display) }` monospace rule from
+   index.css — that, plus 22px/700, was the whole reason the two surfaces read
+   as different apps side by side. The class (0,1,0) outranks the element
+   selector (0,0,1), so the body face wins here without !important, and the
+   heading level stays intact for screen readers. */
+.sectionTitle {
+  font-family: var(--font-body);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 var(--sp-2);
+}
+
+.sectionDesc {
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+  margin: 0 0 var(--sp-6);
+  line-height: 1.5;
+}
+
+/* ─── Cards ───────────────────────────────────────────── */
+
+.card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp-6) 1.75rem;
+  margin-bottom: var(--sp-5);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+/* Panel-title step, on the body face for the same reason as .sectionTitle
+   above — these are <h3> and would otherwise pick up the display monospace. */
+.cardTitle {
+  font-family: var(--font-body);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 var(--sp-4);
+  padding-bottom: 0.625rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.cardActions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding-top: var(--sp-4);
+}
+
+.cardDesc {
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+  margin: 0 0 var(--sp-4);
+  line-height: 1.5;
+}
+
+.codeBlock {
+  padding: var(--sp-4) var(--sp-5);
+  border-radius: var(--r-md);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  margin-bottom: var(--sp-4);
+  overflow-x: auto;
+  font-family: monospace;
+  font-size: var(--fs-md);
+  line-height: 1.6;
+  color: var(--text-primary);
+  white-space: pre;
+}
+
+.codeBlock code {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+.inlineCode {
+  padding: var(--sp-1) 0.375rem;
+  border-radius: var(--r-sm);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  font-family: monospace;
+  font-size: var(--fs-base);
+}
+
+.skillExamples {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.skillExamples li {
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
+  background: var(--bg-tertiary);
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+/* ─── Fields ──────────────────────────────────────────── */
+
+.fieldGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-5);
+  padding: var(--sp-3) 0;
+}
+
+.label {
+  font-weight: 500;
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+  min-width: 140px;
+  flex-shrink: 0;
+}
+
+.staticValue {
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+}
+
+.input {
+  flex: 1;
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.input:focus {
+  border-color: var(--accent);
+}
+
+.select {
+  padding: 0.4375rem var(--sp-4);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  outline: none;
+  min-width: 160px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.select:focus {
+  border-color: var(--accent);
+}
+
+/* ─── Setting Rows ────────────────────────────────────── */
+
+.settingRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-6);
+  padding: var(--sp-4) 0;
+}
+
+.settingRow + .settingRow {
+  border-top: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+}
+
+.settingInfo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.settingLabel {
+  font-size: var(--fs-md);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.settingHint {
+  font-size: var(--fs-base);
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+/* ─── Toggle Switch ───────────────────────────────────── */
+
+.toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggleSlider {
+  width: 40px;
+  height: 22px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+  position: relative;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.toggleSlider::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: var(--text-secondary);
+  border-radius: 50%;
+  transition: transform 0.2s, background 0.2s;
+}
+
+.toggle input:checked + .toggleSlider {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.toggle input:checked + .toggleSlider::after {
+  transform: translateX(18px);
+  /* The knob sits ON the accent fill, so its colour must be derived from the
+     accent — #fff measured 2.53:1 against the default accent, under the 3:1
+     that WCAG 1.4.11 requires of a UI component. */
+  background: var(--accent-text);
+}
+
+.toggle input:focus-visible + .toggleSlider {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+/* ─── Buttons ─────────────────────────────────────────── */
+
+.btnPrimary {
+  padding: var(--sp-3) 1.125rem;
+  background: var(--accent);
+  color: var(--accent-text);
+  border: none;
+  border-radius: var(--r-md);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btnPrimary:hover {
+  background: var(--accent-hover);
+}
+
+.btnPrimary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btnSecondary {
+  padding: var(--sp-3) 1.125rem;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.btnSecondary:hover {
+  background: var(--bg-primary);
+  border-color: var(--text-secondary);
+}
+
+.btnSecondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btnDanger {
+  padding: var(--sp-3) 1.125rem;
+  background: #dc2626;
+  color: var(--bg-primary);
+  border: none;
+  border-radius: var(--r-md);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btnDanger:hover {
+  background: #b91c1c;
+}
+
+.btnDanger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.confirmText {
+  font-size: var(--fs-base);
+  color: #dc2626;
+  font-weight: 500;
+  flex-basis: 100%;
+  margin-bottom: var(--sp-2);
+}
+
+/* ─── Misc ────────────────────────────────────────────── */
+
+/* Now a <Chip> — fill, border, radius, weight and padding come from the
+   primitive; only the capitalisation is local. */
+.badge {
+  text-transform: capitalize;
+}
+
+.hint {
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+  margin: 0 0 var(--sp-4);
+  line-height: 1.5;
+}
+
+.fileInput {
+  display: block;
+  margin-bottom: var(--sp-3);
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+}
+
+.successMsg {
+  font-size: var(--fs-md);
+  color: var(--success);
+}
+
+.autoSaveIndicator {
+  display: inline-block;
+  margin-left: var(--sp-3);
+  font-size: var(--fs-base);
+  color: var(--success);
+  font-weight: 500;
+}
+
+/* ─── Mobile ──────────────────────────────────────────── */
+
+@media (max-width: 767px) {
+  .layout {
+    flex-direction: column;
+    height: auto;
+  }
+
+  /* The nav no longer renders inline on mobile — it lives inside
+     MobileNavSheet, a vertical slide-over. The rules here used to lay it out as
+     a horizontal scrolling top bar, which inside a vertical sheet produced a
+     row you had to swipe sideways through. It is a plain list now; only the tap
+     targets change from desktop. */
+  .navItem {
+    padding: var(--sp-3) var(--sp-5);
+    min-height: 44px;
+  }
+
+  .content {
+    padding: var(--sp-4);
+  }
+
+  /* The desktop size is now 16px, so the old 18px mobile step would make the
+     title BIGGER on the small screen. Dropped — one size on both. */
+
+  .card {
+    padding: var(--sp-5);
+  }
+
+  .field {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.375rem;
+  }
+
+  .label {
+    min-width: unset;
+  }
+
+  .input {
+    min-height: 44px;
+    font-size: var(--fs-lg);
+  }
+
+  .select {
+    min-width: unset;
+    width: 100%;
+    min-height: 44px;
+    font-size: var(--fs-lg);
+  }
+
+  .settingRow {
+    flex-direction: row;
+    gap: var(--sp-5);
+  }
+
+  .btnPrimary,
+  .btnSecondary {
+    min-height: 44px;
+  }
+
+  .cardActions {
+    flex-direction: column;
+    gap: var(--sp-3);
+    align-items: stretch;
+  }
+
+  .proxGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ─── Proximity Tuning ────────────────────────────────── */
+
+.formula {
+  font-family: var(--font-mono, "SF Mono", "Fira Code", "Cascadia Code", monospace);
+  font-size: var(--fs-md);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 10px 14px;
+  margin: var(--sp-3) 0 var(--sp-4);
+  color: var(--text-primary);
+  white-space: pre;
+}
+
+.proxGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-5);
+  margin: var(--sp-5) 0;
+}
+
+.proxField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.proxLabel {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.proxHint {
+  font-weight: 400;
+  font-size: var(--fs-base);
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.proxInput {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  font-variant-numeric: tabular-nums;
+}
+
+.proxInput:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.proxPreview {
+  margin: var(--sp-5) 0 var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+.proxPreviewTitle {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  margin: 0;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.proxTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-md);
+}
+
+.proxTable th {
+  text-align: left;
+  padding: 6px var(--sp-4);
+  font-weight: 600;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.proxTable td {
+  padding: 6px var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle, var(--border));
+  color: var(--text-primary);
+}
+
+.proxTable tr:last-child td {
+  border-bottom: none;
+}
+
+.proxExample {
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: var(--fs-base);
+}
+
+.proxBadge {
+  display: inline-block;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: var(--r-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.prox_strong {
+  background: color-mix(in srgb, #22c55e 15%, transparent);
+  color: #16a34a;
+}
+
+.prox_moderate {
+  background: color-mix(in srgb, #f59e0b 15%, transparent);
+  color: #d97706;
+}
+
+.prox_weak {
+  background: color-mix(in srgb, #94a3b8 15%, transparent);
+  color: #64748b;
+}
+
+/* ─── Log Viewer ─────────────────────────────────────── */
+
+.logsLayout {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  /* Break out of .content's even inset to fill the entire panel */
+  margin: -1.25rem;
+  padding: 1.25rem 1.25rem 0;
+}
+
+.logsHeader {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  padding: 0 0 var(--sp-4);
+  flex-shrink: 0;
+}
+
+.logsHeader .sectionTitle {
+  margin: 0;
+  white-space: nowrap;
+}
+
+.logTabs {
+  display: flex;
+  gap: var(--sp-1);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 3px;
+  overflow-x: auto;
+}
+
+.logTab {
+  padding: 5px var(--sp-4);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.logTab:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.logTabActive {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.logPanel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--bg-secondary);
+}
+
+.logToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.logToolbarLeft {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.logToolbarRight {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.logFileName {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-primary);
+  font-family: var(--font-mono, "SF Mono", "Fira Code", monospace);
+}
+
+.logFileMeta {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.logSelect {
+  padding: 3px 6px;
+  font-size: var(--fs-base);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+  outline: none;
+}
+
+.logAutoRefresh {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.logAutoRefresh input {
+  margin: 0;
+  cursor: pointer;
+}
+
+.logToolbarBtn {
+  padding: 3px 10px;
+  font-size: var(--fs-base);
+  font-weight: 500;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.logToolbarBtn:hover {
+  background: var(--bg-hover);
+}
+
+.logToolbarBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Filter bar ── */
+
+.logFilterBar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: 6px var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  flex-shrink: 0;
+}
+
+.logSearch {
+  width: 220px;
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-base);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-primary);
+  outline: none;
+  font-family: var(--font-mono, monospace);
+}
+
+.logSearch:focus {
+  border-color: var(--accent);
+}
+
+.logSearch::placeholder {
+  color: var(--text-muted);
+}
+
+.logLevelFilters {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+/* Now a clickable <Chip tone="toned">: layout, size, weight, radius, cursor
+   and the level colour all come from the primitive + its tint. Only the
+   monospace face and tracking are local. */
+.logLevelPill {
+  font-family: var(--font-mono, monospace);
+  letter-spacing: 0.02em;
+}
+
+.logLevelPillOff {
+  opacity: 0.25;
+  text-decoration: line-through;
+}
+
+.logLevelCount {
+  font-weight: 400;
+  opacity: 0.7;
+}
+
+.logLineCount {
+  margin-left: auto;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* Level colours moved to LEVEL_TINT in SettingsPage.tsx and are applied as a
+   Chip `tint` — the old .logLvl_* classes are gone. */
+
+/* ── Rows ── */
+
+.logRows {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: var(--bg-primary);
+  font-family: var(--font-mono, "SF Mono", "Fira Code", monospace);
+  font-size: var(--fs-base);
+  line-height: 1.5;
+}
+
+.logRow {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  padding: 3px var(--sp-4);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+}
+
+.logRow:hover {
+  background: var(--bg-hover);
+}
+
+.logTs {
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-size: var(--fs-sm);
+}
+
+/* Now a <Chip tone="toned">. The doubled selector is deliberate: font-weight
+   and padding are properties Chip also sets, so a single class would win only
+   by bundle order. 700 (not Chip's 600) and the tight 4px padding are kept so
+   the log rows keep their exact column rhythm. */
+.logBadge {
+  min-width: 30px;
+  justify-content: center;
+  letter-spacing: 0.03em;
+}
+
+.logBadge.logBadge {
+  font-weight: 700;
+  padding: 1px var(--sp-2);
+}
+
+.logMsg {
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.logDetails {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  word-break: break-word;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.logHighlight {
+  background: rgba(250, 204, 21, 0.35);
+  color: inherit;
+  border-radius: var(--r-sm);
+  padding: 0 1px;
+}
+
+.logEmpty {
+  padding: 2rem;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--fs-md);
+}
+
+/* ─── Users Table ────────────────────────────────────── */
+
+.usersTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-md);
+}
+
+.usersTable th {
+  text-align: left;
+  padding: 6px 10px;
+  font-weight: 600;
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.usersTable td {
+  padding: var(--sp-3) 10px;
+  border-bottom: 1px solid var(--border-subtle, var(--border));
+  color: var(--text-primary);
+  vertical-align: middle;
+}
+
+.usersTable tr:last-child td {
+  border-bottom: none;
+}
+
+.editingRow {
+  background: var(--bg-tertiary);
+}
+
+.userCell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+}
+
+.actionButtons {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* The three users-table badges are <Chip>s now. Colour comes from `tint`
+   (accent for "you", #8b5cf6 for admin, green/red for active/inactive), so
+   .roleAdmin / .statusActive / .statusInactive are gone — only the shared
+   uppercase treatment stays here. */
+.youBadge,
+.roleBadge,
+.statusBadge {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.inputSmall {
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  outline: none;
+}
+
+.inputSmall:focus {
+  border-color: var(--accent);
+}
+
+.selectSmall {
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  cursor: pointer;
+  outline: none;
+}
+
+.selectSmall:focus {
+  border-color: var(--accent);
+}
+
+.selectSmall:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btnSmall {
+  padding: 3px 10px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-base);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btnSmall:hover {
+  background: var(--bg-hover);
+}
+
+.btnDangerSmall {
+  padding: 3px 10px;
+  background: none;
+  color: #dc2626;
+  border: 1px solid color-mix(in srgb, #dc2626 40%, transparent);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-base);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btnDangerSmall:hover {
+  background: color-mix(in srgb, #dc2626 10%, transparent);
+}
+
+.btnDangerSmall:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ─── Mobile (elements defined after the first mobile block) ── */
+
+@media (max-width: 767px) {
+  .formula {
+    white-space: pre-wrap;
+    word-break: break-all;
+    font-size: var(--fs-base);
+  }
+
+  .proxTable {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .proxTable th,
+  .proxTable td {
+    padding: 6px var(--sp-3);
+    font-size: var(--fs-base);
+  }
+
+  .usersTable {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .usersTable th,
+  .usersTable td {
+    padding: 6px var(--sp-3);
+    font-size: var(--fs-base);
+    white-space: nowrap;
+  }
+
+  .inputSmall,
+  .selectSmall {
+    min-height: 44px;
+    font-size: var(--fs-lg);
+  }
+
+  .btnSmall,
+  .btnDangerSmall {
+    min-height: 44px;
+    padding: 6px var(--sp-4);
+  }
+
+  .actionButtons {
+    gap: 6px;
+  }
+
+  .logsLayout {
+    margin: calc(var(--sp-4) * -1);
+    padding: var(--sp-5) var(--sp-4) 0;
+  }
+
+  .logsHeader {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--sp-3);
+  }
+
+  .logTabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    width: 100%;
+  }
+
+  .logTab {
+    min-height: 44px;
+    padding: var(--sp-3) var(--sp-4);
+  }
+
+  .logToolbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .logToolbarRight {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+
+  .logFilterBar {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .logSearch {
+    width: 100%;
+  }
+
+  .logLevelFilters {
+    flex-wrap: wrap;
+  }
+
+  .logRow {
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+    padding: var(--sp-2) var(--sp-3);
+  }
+
+  .logRows {
+    font-size: var(--fs-sm);
+  }
+}
+
+/* ─── Automation Execution Logs ─────────────────────────── */
+
+.alItem {
+  border-bottom: 1px solid var(--border);
+}
+
+.alItem:last-child {
+  border-bottom: none;
+}
+
+.alEntry {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: 6px var(--sp-4);
+  font-size: var(--fs-md);
+  width: 100%;
+  background: none;
+  border: none;
+  color: inherit;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.alEntry:hover {
+  background: var(--bg-hover);
+}
+
+.alExpandIcon {
+  display: inline-block;
+  font-size: var(--fs-base);
+  color: var(--text-muted);
+  transition: transform 0.15s;
+  flex-shrink: 0;
+  width: 12px;
+}
+
+.alExpandIcon[data-expanded="true"] {
+  transform: rotate(90deg);
+}
+
+/* .alStatus / .alStatus_* / .alActionStatus are <Chip>s now — see
+   AL_STATUS_TINT in SettingsPage.tsx. Nothing local was left to keep. */
+
+.alTime {
+  color: var(--text-muted);
+  min-width: 80px;
+  font-size: var(--fs-base);
+  flex-shrink: 0;
+}
+
+.alRuleName {
+  color: var(--text-primary);
+  font-weight: 500;
+  font-size: var(--fs-md);
+}
+
+.alTrigger {
+  color: var(--text-secondary);
+}
+
+.alSummary {
+  color: var(--text-muted);
+  font-size: var(--fs-base);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.alError {
+  color: #ef4444;
+  font-size: var(--fs-base);
+}
+
+.alDetails {
+  padding: var(--sp-2) var(--sp-4) 10px 34px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--bg-primary);
+  border-top: 1px solid var(--border);
+}
+
+.alAction {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+}
+
+.alActionHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.alActionType {
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.alActionDetail {
+  font-size: var(--fs-base);
+  color: var(--text-muted);
+}
+
+.alActionCount {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+
+/* --- Grouped nav (see NAV_GROUPS) --- */
+.navGroup {
+  display: flex;
+  flex-direction: column;
+}
+
+.navGroup + .navGroup {
+  margin-top: var(--sp-4);
+}
+
+/* Matches the workbench nav's .sectionHeader exactly — same face, size,
+   tracking and inset. They sit in the same slot on adjacent routes, so any
+   divergence reads as two different apps. */
+.navGroupLabel {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  padding: var(--sp-3) var(--sp-5) var(--sp-1);
+  margin: 0;
+}

@@ -1,0 +1,1324 @@
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 0 0 0.5rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+  container-type: inline-size;
+  container-name: sidebar;
+}
+
+/* ===== Brand + user actions ===== */
+
+.brandSection {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 12.5px 1rem;
+  color: var(--accent);
+  margin-bottom: 0.5rem;
+}
+
+/* Appearance belongs to BrandButton, which the header uses too — all this row
+   contributes is the share of the width. */
+.brandName {
+  flex: 1;
+}
+
+/* Desktop: the wordmark and Settings/Logout live in the app header instead */
+@media (min-width: 768px) {
+  .brandSection {
+    display: none;
+  }
+
+  .sidebar {
+    padding-top: 0.75rem;
+  }
+}
+
+.userActions {
+  display: flex;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.iconBtn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: var(--fs-base);
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+.iconBtn:hover {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+}
+
+/* ===== Workspace mode switch =====
+   The first control in the column, and the app's one statement that it is a
+   reader *and* a workbench. Sized like a real switch rather than a nav row:
+   users read the 14px shield in the old tool strip as a minor utility and
+   concluded the whole product was an RSS reader. */
+
+.modeSwitch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  margin: 0 0.8rem var(--sp-4);
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-secondary);
+}
+
+.modeBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  padding: var(--sp-3) var(--sp-2);
+  border: none;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.modeBtn:hover {
+  color: var(--text-primary);
+}
+
+.modeBtnActive,
+.modeBtnActive:hover {
+  background: var(--accent-feeds-bg);
+  color: var(--accent);
+  /* Inset rather than a border so the active half doesn't shift its siblings. */
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.modeIcon {
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+/* Each half of the switch anchors its own hover card. */
+.modeCell {
+  position: relative;
+  min-width: 0;
+}
+
+.modeCell .modeBtn {
+  width: 100%;
+}
+
+.modeHint {
+  position: absolute;
+  top: calc(100% + 9px);
+  left: 0;
+  width: 232px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-secondary);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  text-align: left;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s, visibility 0.15s;
+}
+
+.modeCell:last-child .modeHint {
+  left: auto;
+  right: 0;
+}
+
+.modeCell:hover .modeHint,
+.modeCell:focus-within .modeHint {
+  opacity: 1;
+  visibility: visible;
+  /* Deliberate delay: instant cards on a control this prominent feel nagging. */
+  transition-delay: 0.4s;
+}
+
+/* Same rule the JS hover cards follow (useHoverCards): touch leaves :hover and
+   :focus-within stuck on the button it activated, so the card would sit over
+   the sidebar until you tapped something harmless — and at mobile width it
+   covers a third of the screen even with a mouse attached. */
+@media (hover: none), (max-width: 767px) {
+  .modeHint {
+    display: none;
+  }
+}
+
+.modeHint strong {
+  color: var(--text-primary);
+  font-size: var(--fs-base);
+}
+
+.modeHint em {
+  font-style: normal;
+  color: var(--text-muted);
+}
+
+/* Until Workbench has been visited once: a quiet pulsing dot, not a tour. */
+.modeBtnNudge {
+  position: relative;
+}
+
+.modeBtnNudge::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: modeNudgePulse 2s ease-in-out infinite;
+}
+
+@keyframes modeNudgePulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modeBtnNudge::after { animation: none; }
+  .modeHint { transition: none; }
+}
+
+/* Below ~200px the two labels can't both fit; the icons still carry the pair,
+   and each button keeps its title attribute. */
+@container sidebar (max-width: 200px) {
+  .modeBtn {
+    font-size: var(--fs-sm);
+    gap: var(--sp-1);
+  }
+}
+
+.hidden {
+  display: none;
+}
+
+/* ===== Sections ===== */
+
+.section {
+  padding: 0.25rem 0;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 1rem;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+/* SAVED SEARCHES / FEEDS / MUTED are small all-caps: no x-height dip for a
+   chevron to sit against, so they take a fuller ratio than the sentence-case
+   category rows the same classes serve below. */
+.sectionLabel svg,
+.mutedFoldHeader svg {
+  width: 1em;
+  height: 1em;
+}
+
+.sectionLabel {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  cursor: pointer;
+}
+
+.savedSearchRow {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.savedSearchRow .navItem {
+  flex: 1;
+  min-width: 0;
+}
+
+.savedSearchReportBtn {
+  position: absolute;
+  right: 1.5rem;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 0.125rem;
+  line-height: 1;
+  opacity: 0;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.savedSearchRow:hover .savedSearchReportBtn {
+  opacity: 1;
+}
+
+.savedSearchReportBtn:hover {
+  color: var(--accent);
+}
+
+.savedSearchDeleteBtn {
+  position: absolute;
+  right: 0.5rem;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: var(--fs-md);
+  padding: 0 0.25rem;
+  line-height: 1;
+  opacity: 0;
+  flex-shrink: 0;
+}
+
+.savedSearchRow:hover .savedSearchDeleteBtn {
+  opacity: 1;
+}
+
+.savedSearchDeleteBtn:hover {
+  color: var(--error);
+}
+
+.savedSearchBadge {
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  padding: 0.0625rem 0.375rem;
+  border-radius: var(--r-md);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.sectionActions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.collapseToggleBtn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  padding: 0.125rem 0.25rem;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.collapseToggleBtn:hover {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+}
+
+.addBtn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: var(--fs-lg);
+  line-height: 1;
+  padding: 0 0.25rem;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+/* Add feed: the row's primary action wears the accent instead of disappearing
+   into the grey icon strip. */
+.newFeedBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 6px;
+  font-size: var(--fs-lg);
+  line-height: 1;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.newFeedBtn:hover {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.addBtn:hover {
+  color: var(--accent);
+  background: var(--bg-tertiary);
+}
+
+/* ===== Nav items (virtual folders, saved searches) ===== */
+
+.navItem,
+.categoryHeader,
+.feedItem {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 0.4375rem 1rem;
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+  gap: 0.5rem;
+}
+
+.navItem:hover,
+.categoryHeader:hover,
+.feedItem:hover {
+  background: var(--bg-tertiary);
+}
+
+.navItem.active,
+.categoryHeader.active,
+.feedItem.active {
+  background: var(--bg-tertiary);
+  color: var(--accent);
+}
+
+.navLabel {
+  flex: 1;
+}
+
+.allItemsHeader {
+  gap: 0.375rem;
+}
+
+.allItemsChildren {
+  margin-left: 1.375rem;
+  border-left: 1px solid var(--border);
+  padding-left: 0;
+}
+
+.subNavItem {
+  padding-left: 0.75rem;
+  font-weight: 400;
+}
+
+/* ===== Articles hero (C2) =====
+   The one dominant shape in the sidebar's top block: the unread total, with
+   the "since" delta sitting on the same baseline as the count rather than
+   claiming a third row. */
+
+.articlesHero {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-1);
+  box-sizing: border-box;
+  width: calc(100% - 1.6rem);
+  margin: 0.15rem 0.8rem var(--sp-2);
+  padding: 0.6rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  /* Transparent like .quickChip, so all three tile families read on the
+     sidebar's own surface. A fixed --bg-secondary fill is now LIGHTER
+     than the sidebar behind it, which made these buttons pop oddly. */
+  background: none;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.articlesHero:hover {
+  border-color: var(--text-muted);
+}
+
+.articlesHero.active {
+  background: var(--accent-feeds-bg);
+}
+
+.articlesHero.active .heroLabel {
+  color: var(--accent);
+}
+
+/* Count + delta on one row, sharing a baseline. */
+.heroTop {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  width: 100%;
+  min-width: 0;
+}
+
+.heroCount {
+  font-family: var(--font-display, monospace);
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+
+.heroLabel {
+  font-size: var(--fs-2xs);
+  font-weight: 500;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.heroDelta {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.heroDeltaPlus {
+  color: var(--success);
+  font-weight: 600;
+}
+
+/* ===== Quick-view filter grid =====
+   Six filters, one geometry: 3 across x 2 rows. Every chip is the same tile
+   (count over label), so nothing in the set claims priority over the rest.
+   Priority Queue rides in the grid as the sixth tile. */
+
+.quickGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--sp-2);
+  /* Bottom padding matches the grid gap so the tool strip below sits one
+     row-gap away, not a wider band. */
+  padding: 0 0.8rem var(--sp-2);
+}
+
+.quickChip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1);
+  min-width: 0;
+  min-height: 34px;
+  padding: var(--sp-2) var(--sp-1);
+  color: var(--text-secondary);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.quickChipCount {
+  font-family: var(--font-body);
+  font-size: var(--fs-md);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--accent);
+}
+
+.quickChipCountZero {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.quickChipLabel {
+  /* Sentence case, not uppercase: at a third of the sidebar the longest label
+     ("Priority Queue") only fits untracked. Ellipsis is the narrow-sidebar
+     safety net; the button also carries a title. */
+  max-width: 100%;
+  font-size: var(--fs-xs);
+  line-height: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quickChip:hover {
+  border-color: var(--text-muted);
+  color: var(--text-primary);
+}
+
+.quickChip.active {
+  background: var(--accent-feeds-bg);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ===== Tool strip (Automation / Notes / Workbench) =====
+   These are ROUTES, not filters. Deliberately a different shape from the
+   filter grid above: one low, borderless segmented bar of icon+label rows,
+   no counts, no tiles. */
+.toolStrip {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--sp-2);
+  margin: 0 0.8rem var(--sp-3);
+}
+
+/* Declared after .toolStrip: same specificity, so source order decides. */
+.toolStripPair {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.toolBtn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-3) var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  /* Transparent like .quickChip, so all three tile families read on the
+     sidebar's own surface. A fixed --bg-secondary fill is now LIGHTER
+     than the sidebar behind it, which made these buttons pop oddly. */
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.toolBtn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.toolBtn.active {
+  background: var(--accent-feeds-bg);
+  color: var(--accent);
+}
+
+.toolIcon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  opacity: 0.85;
+}
+
+.toolBtn:hover .toolIcon {
+  color: inherit;
+  opacity: 1;
+}
+
+.toolBtn.active .toolIcon {
+  color: var(--accent);
+  opacity: 1;
+}
+
+.toolLabel {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* ===== Saved-search ratio (right-aligned) ===== */
+
+.savedSearchRatio {
+  font-family: var(--font-body);
+  font-size: var(--fs-base);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  padding-right: 0.25rem;
+  white-space: nowrap;
+  transition: opacity 0.15s;
+}
+
+.savedSearchRatio b {
+  color: var(--accent);
+  font-weight: inherit;
+}
+
+/* Free the right edge for the report/delete actions that fade in on hover. */
+.savedSearchRow:hover .savedSearchRatio {
+  opacity: 0;
+}
+
+.shortcut {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  padding: 0.0625rem 0.375rem;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  font-family: monospace;
+  margin-left: auto;
+}
+
+/* ===== Categories ===== */
+
+.category {
+  cursor: grab;
+  transition: opacity 0.15s;
+}
+
+.category.dragging {
+  opacity: 0.4;
+}
+
+.category.dragOver {
+  border-top: 2px solid var(--accent);
+}
+
+.categoryHeader {
+  font-weight: 600;
+  font-size: var(--fs-md);
+  padding: 0.5rem 1rem;
+  gap: 0.375rem;
+  position: relative;
+}
+
+/* ===== Feeds "by unread" treatment (C2) ===== */
+
+/* Right-aligned quiet unread count for category headers + feed rows. */
+.categoryCount,
+.feedCount {
+  font-family: var(--font-display, monospace);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  padding-left: 0.4rem;
+}
+
+.categoryHeader.active .categoryCount,
+.feedItem.active .feedCount {
+  color: var(--accent);
+}
+
+/* Muted-feeds fold at the bottom of the section. */
+.mutedFoldHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  width: 100%;
+  padding: 0.45rem 1rem;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.mutedFoldHeader:hover {
+  color: var(--text-secondary);
+}
+
+.mutedFoldCount {
+  font-variant-numeric: tabular-nums;
+}
+
+.mutedFoldFeeds {
+  opacity: 0.55;
+}
+
+/* Intel-extraction level as a left-edge fill rail: taller than a glyph so the
+   quarter/half/full waterline reads, and out of the crowded name↔count zone. */
+.levelRail {
+  position: absolute;
+  left: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 16px;
+  border-radius: var(--r-sm);
+  background: var(--bg-tertiary);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.levelRailEmpty {
+  background: transparent;
+  border: 1px solid var(--text-muted);
+}
+
+.levelRailFill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--text-secondary);
+}
+
+.levelRailFull .levelRailFill {
+  background: var(--accent);
+}
+
+.categoryBadge {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: 3.25rem;
+  flex-shrink: 0;
+}
+
+.categoryBadgeItem {
+  width: 2.75rem;
+}
+
+.expandIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: var(--r-sm);
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.expandIcon:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.chevronExpanded {
+  width: var(--sz-caret);
+  height: var(--sz-caret);
+  flex-shrink: 0;
+  transform: rotate(90deg);
+  transition: transform 0.15s ease;
+}
+
+.chevronCollapsed {
+  width: var(--sz-caret);
+  height: var(--sz-caret);
+  flex-shrink: 0;
+  transform: rotate(0deg);
+  transition: transform 0.15s ease;
+}
+
+.categoryTooltip {
+  flex: 1;
+  min-width: 0;
+}
+
+.feedTitleTooltip {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.categoryTooltipContent {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.categoryName {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.categoryFeeds {
+  margin-left: 1.375rem;
+  border-left: 1px solid var(--border);
+  padding-left: 0;
+}
+
+/* ===== Uncategorized feeds ===== */
+
+.uncategorizedSection {
+  margin-top: 0.125rem;
+}
+
+.uncategorizedLabel {
+  padding: 0.375rem 1rem 0.25rem;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* ===== Feed items ===== */
+
+.feedItem {
+  padding-left: 0.9rem;
+  font-weight: 400;
+  position: relative;
+}
+
+.feedItem.muted {
+  opacity: 0.5;
+}
+
+.feedItem.paused {
+  opacity: 0.45;
+}
+
+.feedBadges {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.1875rem;
+  width: 2.75rem;
+  flex-shrink: 0;
+}
+
+.feedTypeIcon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+
+.feedTitle {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ===== Badges ===== */
+
+.badge {
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  padding: 0.0625rem 0.4rem;
+  border-radius: var(--r-md);
+  min-width: 1.75rem;
+  text-align: center;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.errorBadge {
+  background: var(--error);
+  color: var(--bg-primary);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.pausedBadge {
+  background: var(--warning);
+  color: var(--bg-primary);
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  letter-spacing: -1px;
+}
+
+/* ===== Context menu ===== */
+
+.contextMenu {
+  position: fixed;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 0.25rem 0;
+  min-width: 160px;
+  max-height: 320px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  z-index: 200;
+}
+
+.contextMenuItem {
+  display: block;
+  width: 100%;
+  padding: 0.4375rem 0.75rem;
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  text-align: left;
+  cursor: pointer;
+}
+
+.contextMenuItem:hover {
+  background: var(--bg-tertiary);
+}
+
+.contextMenuDanger {
+  color: var(--error);
+}
+
+.contextMenuDivider {
+  height: 1px;
+  background: var(--border);
+  margin: 0.25rem 0;
+}
+
+.contextMenuLabel {
+  padding: 0.25rem 0.75rem;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.contextMenuSubmenuWrapper {
+  position: relative;
+}
+
+.contextMenuSubmenu {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 0.25rem 0;
+  margin: 0.125rem 0.5rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* ===== New category ===== */
+
+.newCategoryRow {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.75rem;
+}
+
+.newCategoryCancelBtn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: var(--fs-base);
+  padding: 0.375rem 0.5rem;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.newCategoryCancelBtn:hover {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+}
+
+.newCategoryInput {
+  width: 100%;
+  padding: 0.375rem 0.5rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  outline: none;
+  box-sizing: border-box;
+}
+
+/* ===== Feed search ===== */
+
+.searchActiveBtn {
+  color: var(--accent) !important;
+  background: var(--bg-tertiary);
+}
+
+.feedSearchRow {
+  display: flex;
+  align-items: center;
+  padding: 0.25rem 0.75rem;
+  position: relative;
+}
+
+.feedSearchInput {
+  width: 100%;
+  padding: 0.375rem 0.5rem;
+  padding-right: 1.5rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  outline: none;
+  box-sizing: border-box;
+}
+
+.feedSearchClear {
+  position: absolute;
+  right: 0.875rem;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: var(--fs-lg);
+  line-height: 1;
+  padding: 0.125rem 0.25rem;
+}
+
+.feedSearchClear:hover {
+  color: var(--text-primary);
+}
+
+.feedSearchResults {
+  padding: 0.125rem 0;
+}
+
+.feedSearchCategory {
+  margin-left: auto;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  opacity: 0.7;
+  white-space: nowrap;
+  flex-shrink: 0;
+  padding-left: 0.375rem;
+}
+
+.feedSearchEmpty {
+  padding: 0.5rem 1rem;
+  font-size: var(--fs-base);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* ===== Rename inline input ===== */
+
+.renameInput {
+  flex: 1;
+  padding: 0.125rem 0.375rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  outline: none;
+  min-width: 0;
+}
+
+/* ===== Draggable sections ===== */
+
+.draggableSection {
+  transition: opacity 0.15s;
+}
+
+.draggableSection.dragging {
+  opacity: 0.4;
+}
+
+.draggableSection.dragOver {
+  border-top: 2px solid var(--accent);
+}
+
+.draggableSection .sectionHeader {
+  cursor: grab;
+}
+
+.draggableSection .sectionHeader:active {
+  cursor: grabbing;
+}
+
+/* ===== Narrow sidebar (container query) ===== */
+
+@container sidebar (max-width: 219px) {
+  .brandSection {
+    flex-direction: column;
+    align-items: center;
+    padding: 0.75rem 0.5rem;
+    gap: 0.375rem;
+  }
+
+  .brandName {
+    display: none;
+  }
+
+  .userActions {
+    gap: 0.25rem;
+  }
+
+  .navItem,
+  .categoryHeader,
+  .feedItem {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+
+  .sectionHeader {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+    font-size: 0;
+  }
+
+  .sectionActions {
+    margin: 0 auto;
+  }
+
+  .navLabel,
+  .categoryName,
+  .feedTitle {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .badge {
+    display: none;
+  }
+
+  .shortcut {
+    display: none;
+  }
+
+  .categoryFeeds {
+    margin-left: 0.5rem;
+  }
+
+  .feedBadges,
+  .categoryBadge {
+    display: none;
+  }
+
+  /* Narrow sidebar: reclaim the gutters. */
+  .quickGrid {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+
+  .articlesHero,
+  .modeSwitch,
+  .toolStrip {
+    margin-left: 0.5rem;
+    margin-right: 0.5rem;
+  }
+
+  .articlesHero {
+    width: calc(100% - 1rem);
+  }
+
+}
+
+/* ===== Mobile ===== */
+
+@media (max-width: 767px) {
+  .navItem,
+  .categoryHeader,
+  .feedItem {
+    min-height: 44px;
+    padding: 0.625rem 1rem;
+    font-size: var(--fs-md);
+  }
+
+  .feedItem {
+    padding-left: 0.75rem;
+  }
+
+  .categoryFeeds {
+    margin-left: 0.75rem;
+  }
+
+  .contextMenu {
+    min-width: 200px;
+  }
+
+  .contextMenuItem {
+    min-height: 44px;
+    padding: 0.75rem;
+    font-size: var(--fs-md);
+    display: flex;
+    align-items: center;
+  }
+
+  .expandIcon {
+    width: 2rem;
+    height: 2rem;
+  }
+
+  .iconBtn {
+    min-height: 36px;
+    padding: 0.375rem 0.625rem;
+    font-size: var(--fs-md);
+  }
+
+  .addBtn,
+  .collapseToggleBtn {
+    min-width: 36px;
+    min-height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .shortcut {
+    display: none;
+  }
+
+  .newCategoryInput {
+    min-height: 44px;
+    font-size: var(--fs-md);
+  }
+
+  .newCategoryRow {
+    padding: 0.375rem 0.75rem;
+  }
+
+  .newCategoryCancelBtn {
+    min-height: 36px;
+    font-size: var(--fs-md);
+  }
+
+  .renameInput {
+    min-height: 36px;
+    font-size: var(--fs-md);
+  }
+
+  /* Filter tiles and tool-bar rows need real touch targets. */
+  .quickChip {
+    min-height: 44px;
+  }
+
+  .toolBtn {
+    min-height: 40px;
+  }
+}

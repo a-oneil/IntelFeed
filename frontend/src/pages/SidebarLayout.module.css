@@ -1,0 +1,98 @@
+.outerLayout {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+
+.layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.sidebar {
+  /* Nav panels sit a touch darker than the card surface but stay clear of
+     the page ground, so the sidebar still reads as a distinct panel.
+     Derived from two theme-managed tokens, so it moves with the theme
+     instead of clashing the way a fixed --sidebar-bg did. */
+  background: color-mix(in srgb, var(--bg-secondary) 60%, var(--bg-primary));
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* visibility flips at the end of the collapse / start of the expand */
+  transition: width 0.2s, min-width 0.2s, visibility 0.2s;
+}
+
+.sidebar.collapsed {
+  width: 0 !important;
+  min-width: 0 !important;
+  overflow: hidden;
+  /* Zero-width nav buttons must not remain click/hit-test targets — clicks
+     aimed at them land on overlaying content (toggle rail, page content). */
+  visibility: hidden;
+  pointer-events: none;
+}
+
+
+
+.content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-width: 0;
+}
+
+.outerLayout.withPlayer {
+  height: calc(100vh - 64px);
+}
+
+.backdrop {
+  display: none;
+}
+
+/* Mobile: sidebar as overlay */
+@media (max-width: 767px) {
+  .outerLayout {
+    height: 100dvh;
+  }
+
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw !important;
+    min-width: 100vw !important;
+    height: 100dvh;
+    z-index: 100;
+    transition: transform 0.25s ease;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    box-sizing: border-box;
+  }
+
+  .sidebar.collapsed {
+    width: 100vw !important;
+    min-width: 100vw !important;
+    transform: translateX(-100%);
+    pointer-events: none;
+  }
+
+  .backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 99;
+  }
+
+  .content {
+    width: 100%;
+  }
+
+  .outerLayout.withPlayer {
+    height: calc(100dvh - 64px);
+  }
+}

@@ -1,0 +1,1 @@
+export { CoverageWorkspace } from "./CoverageWorkspace";

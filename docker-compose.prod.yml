@@ -1,0 +1,427 @@
+services:
+  db:
+    # postgres:16-alpine + pgvector, built from ./db/Dockerfile. Same base image
+    # as before, so the existing pgdata volume needs no migration.
+    build:
+      context: ./db
+    image: intelfeed-postgres:16
+    restart: unless-stopped
+    # OOM ordering: never sacrifice the database. If the host runs out of memory
+    # the kernel kills the highest-scored process first — push db to the bottom.
+    oom_score_adj: -900
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Stock postgres defaults were costing whole seconds on the reader's hot
+    # path. The dedup subquery behind /api/entries and /api/entries/count sorts
+    # ~143k rows, which at the default work_mem=4MB ran as "external merge
+    # Disk: 12648kB" on every request; and at shared_buffers=128MB the entries
+    # table was never cached, so the same query read ~25,900 blocks off disk
+    # each time. Sized against this service's 1500M limit: 320M resident plus
+    # work_mem only for connections that actually sort.
+    command: >
+      postgres
+      -c shared_buffers=320MB
+      -c work_mem=24MB
+      -c maintenance_work_mem=96MB
+      -c effective_cache_size=2GB
+      -c random_page_cost=1.1
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 1500M
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Protect redis: it's the fattest RSS on the box (correlation cache) and the
+    # broker/cache for the whole app, so a global OOM kept picking it — killing it
+    # took the app down. Deprioritize it as an OOM target.
+    oom_score_adj: -800
+    command: redis-server --appendonly yes --maxmemory 1gb --maxmemory-policy volatile-lru --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redisdata:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 1500M
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.6
+    restart: unless-stopped
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
+      MEILI_ENV: production
+    volumes:
+      - meilidata:/meili_data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
+
+  libretranslate:
+    image: libretranslate/libretranslate:v1.9.6
+    restart: unless-stopped
+    # On-demand only: preloading ~20 language models pins ~740MB resident 24/7,
+    # which is dead weight on an 8GB box between translations. The `translate`
+    # profile keeps it OUT of the default `up`, freeing that headroom. Start it
+    # when you need translation:
+    #   docker compose -f docker-compose.prod.yml --profile translate up -d libretranslate
+    # Auto-translate feeds degrade gracefully while it's down (the translate task
+    # swallows failures), and `retry_untranslated_entries` (beat, every 30m)
+    # backfills the gap once it's running again.
+    profiles: ["translate"]
+    environment:
+      LT_LOAD_ONLY: ${LIBRETRANSLATE_LANGUAGES:-en,ru,zh-Hans,zh-Hant,fa,uk,de,fr,es,ar,ja,ko,tr,pt,it,vi,he,pl,nl,cs}
+      LT_DISABLE_WEB_UI: "true"
+      LT_UPDATE_MODELS: "true"
+    volumes:
+      - libretranslate_models:/home/libretranslate/.local:rw
+    networks:
+      - backend
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request,sys; urllib.request.urlopen(''http://localhost:5000/languages'',timeout=5).read()" || exit 1',
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 180s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  piper:
+    build:
+      context: ./piper
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - PIPER_VOICE=${PIPER_VOICE:-en_US-lessac-medium}
+    # Restartable and spikes only ~once/day — safe to sacrifice before core services.
+    oom_score_adj: 300
+    volumes:
+      - piper_voices:/voices
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    deploy:
+      resources:
+        limits:
+          # Synthesizing a long (~13 min) daily summary peaks ~970MB under the
+          # server process (model + onnxruntime memory arena). 512M then 1G were
+          # OOM-tight; 1.5G gives margin. piper idles ~60MB, and the summary is
+          # pre-generated at ~6am (quiet hours) + cached, so this spikes ~once/day.
+          memory: 1536M
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: production
+    restart: unless-stopped
+    # Protect the API process — user-facing; kill workers before it.
+    oom_score_adj: -700
+    expose:
+      - "8000"
+    volumes:
+      - ./docs:/app/docs:ro # in-app documentation (app/api/documentation.py)
+      - ./scripts:/app/scripts:ro # maintenance/seed scripts (see scripts/README.md)
+      - ./logs:/app/logs
+      - image_cache:/app/data/image_cache
+      - ./backups:/app/backups
+      - ./telegram_data:/data
+      - ./telegram_media:/app/data/telegram_media
+      - ./tts_media:/app/data/tts_media
+      # Global copilot (/api/ai/copilot/stream): the api does NOT run the `claude`
+      # CLI. With copilot_worker_dispatch=true (default) it enqueues the CLI turn
+      # on the `ai` queue — celery-worker-ai owns the OAuth credentials
+      # volume + intelfeed skill mount and is the single credentials writer — and
+      # relays the streamed events back over Redis. So the api needs neither the
+      # CLI, the credentials volume, nor the skill mount here. (This resolves the
+      # earlier "who holds the credentials" question: only the CLI worker does.)
+    env_file:
+      - .env
+    environment:
+      - RUN_MIGRATIONS=true
+      - ENV=production
+    networks:
+      - backend
+      - frontend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Overrides the image CMD's `-w 4`. UvicornWorkers settle at 250-300MB RSS
+    # each, so four (~1.09G) never fit the old 1G cap: the cgroup sat at 99%
+    # with 390MB paged to swap and had hit its hard limit 76 times — every hit a
+    # direct-reclaim stall on a user-facing request, which is what tripped the
+    # frontend's 15s axios timeout on otherwise-idle endpoints. A swapped worker
+    # is worse than an absent one, so the fix is fitting inside the cap, not
+    # adding workers: 3 x ~300MB against the 1500M below leaves real headroom.
+    # Three also matches the CPU actually available — ~28% steal leaves ~2.9
+    # usable cores and celery-worker already holds 2. Concurrency does not track
+    # worker count here: every route handler is `async def`, so one worker
+    # multiplexes many in-flight requests across their awaits, and the one
+    # CPU-bound path (autolinker scan_text) runs in asyncio.to_thread.
+    # --max-requests recycles a worker before it can bloat back into the
+    # ceiling; the jitter keeps all three off the same recycle boundary.
+    command:
+      [
+        "gunicorn",
+        "app.main:app",
+        "-w",
+        "3",
+        "-k",
+        "uvicorn.workers.UvicornWorker",
+        "--bind",
+        "0.0.0.0:8000",
+        "--timeout",
+        "180",
+        "--max-requests",
+        "800",
+        "--max-requests-jitter",
+        "200",
+      ]
+    deploy:
+      resources:
+        limits:
+          # 1G was the binding constraint (see the command comment above). The
+          # box reports ~3.5G available, so 1500M is headroom it actually has;
+          # 3 workers peak around 900M, leaving margin for a recycle overlap.
+          memory: 1500M
+
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: production
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs
+      - image_cache:/app/data/image_cache
+      - ./backups:/app/backups
+      - ./telegram_data:/data
+      - ./telegram_media:/app/data/telegram_media
+      - ./tts_media:/app/data/tts_media
+    env_file:
+      - .env
+    environment:
+      - ENV=production
+    networks:
+      - backend
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Sacrifice workers first under memory pressure — they restart cleanly and
+    # their tasks re-run, unlike redis/db/api.
+    oom_score_adj: 600
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=2 --max-tasks-per-child=50 --max-memory-per-child=300000 --queues=celery
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  # Serialized AI worker: one task at a time on the "ai" queue, whatever the
+  # assigned provider (paces the Ollama GPU; also the only service mounting
+  # the claude_code CLI credentials volume for CLI-provider tasks).
+  # Un-gated (no profile) since the CLI-credential era: update.sh now rebuilds
+  # it with the rest of the stack, so it can't run stale worker code.
+  celery-worker-ai:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: production
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs
+      - claude_cli:/home/appuser/.claude
+      - ./intelfeed-skill:/home/appuser/.claude/skills/intelfeed:ro
+    env_file:
+      - .env
+    environment:
+      - ENV=production
+      - INTELFEED_API_URL=http://api:8000
+      - INTELFEED_USERNAME=${INTELFEED_USERNAME:-}
+      - INTELFEED_PASSWORD=${INTELFEED_PASSWORD:-}
+      # CLAUDE_CODE_OAUTH_TOKEN intentionally not forwarded — when present it
+      # overrides ~/.claude/.credentials.json and disables silent OAuth refresh.
+      # The CLI reads access_token + refresh_token from the credentials file
+      # in the claude_cli volume and rotates them on its own. Also strip the
+      # var from .env on the host to make sure it doesn't leak in via env_file.
+    networks:
+      - backend
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Same as celery-worker: first to be killed under memory pressure.
+    oom_score_adj: 600
+    # "claude_code" is the legacy queue name — kept in --queues only to drain
+    # messages enqueued before the rename to "ai"; safe to drop once empty.
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=${CLAUDE_CODE_CONCURRENCY:-1} --queues=ai,claude_code --prefetch-multiplier=1 --max-tasks-per-child=20
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: production
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs
+    env_file:
+      - .env
+    environment:
+      - ENV=production
+    networks:
+      - backend
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A app.workers.celery_app beat --loglevel=info -s /tmp/celerybeat-schedule
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  telegram-listener:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: production
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs
+      - ./telegram_data:/data
+      - ./telegram_media:/app/data/telegram_media
+    env_file:
+      - .env
+    environment:
+      - ENV=production
+    networks:
+      - backend
+    depends_on:
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: python -m app.workers.telegram_listener
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: "${VITE_API_URL:-/api}"
+    restart: unless-stopped
+    expose:
+      - "80"
+    networks:
+      - frontend
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      api:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    # Protect the TLS/reverse proxy — if it dies the whole site is unreachable.
+    oom_score_adj: -500
+    environment:
+      # Caddyfile reads {$SITE_DOMAIN}; without it Caddy has no site to serve.
+      - SITE_DOMAIN=${SITE_DOMAIN:?set SITE_DOMAIN in .env, e.g. SITE_DOMAIN=intelfeed.example.com}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - frontend
+    depends_on:
+      frontend:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+networks:
+  backend:
+    driver: bridge
+  frontend:
+    driver: bridge
+
+volumes:
+  pgdata:
+  redisdata:
+  meilidata:
+  image_cache:
+  caddy_data:
+  caddy_config:
+  libretranslate_models:
+  claude_cli:
+  piper_voices:

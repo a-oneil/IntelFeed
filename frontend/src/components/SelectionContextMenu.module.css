@@ -1,0 +1,241 @@
+.menu {
+  position: fixed;
+  z-index: 1000;
+  width: 224px;
+  padding: var(--sp-2) 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--elevation-3);
+  animation: fadeIn 0.1s ease;
+  pointer-events: auto;
+}
+
+.menuAbove {
+  transform-origin: bottom center;
+}
+
+.menuBelow {
+  transform-origin: top center;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.preview {
+  padding: 6px var(--sp-4);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-style: italic;
+  line-height: 1.4;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: var(--sp-3) var(--sp-4);
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.item:hover {
+  background: var(--bg-hover);
+}
+
+.itemActive {
+  background: var(--bg-hover);
+}
+
+.icon {
+  display: inline-flex;
+  width: 16px;
+  justify-content: center;
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.chevron {
+  margin-left: auto;
+  font-size: var(--fs-caret);
+  line-height: 1;
+  color: var(--text-muted);
+  transition: transform 0.15s;
+  display: inline-flex;
+}
+
+.chevronOpen {
+  transform: rotate(180deg);
+}
+
+/* Enrich submenu — inline expansion */
+.submenu {
+  background: var(--bg-tertiary);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: var(--sp-2) 0;
+}
+
+.submenuLabel {
+  padding: var(--sp-2) var(--sp-4) var(--sp-1) 36px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.submenuItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px var(--sp-4) 6px 28px;
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.submenuItem:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.submenuDot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.extIcon {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.submenuItem:hover .extIcon {
+  opacity: 1;
+}
+
+/* Inline result panel */
+.result {
+  position: relative;
+  margin: var(--sp-2) 0;
+  background: var(--bg-tertiary);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  max-height: 200px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.resultPre {
+  margin: 0;
+  padding: 10px var(--sp-4);
+  font-size: var(--fs-sm);
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}
+
+.resultClose {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-sm);
+}
+
+.resultClose:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* Empty / hint states */
+.submenuEmpty {
+  padding: 6px var(--sp-4) 6px 28px;
+  font-size: var(--fs-base);
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.hint {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  margin-left: var(--sp-1);
+}
+
+.submenuBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px var(--sp-4) 6px 28px;
+  border: none;
+  background: none;
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.submenuBtn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.submenuBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.submenuDivider {
+  margin: var(--sp-2) var(--sp-4) var(--sp-2) 28px;
+  border-top: 1px solid var(--border);
+}
+
+@media (max-width: 767px) {
+  .menu {
+    width: calc(100vw - 2rem);
+    max-width: 280px;
+  }
+
+  .item,
+  .submenuItem,
+  .submenuBtn {
+    min-height: 44px;
+  }
+}

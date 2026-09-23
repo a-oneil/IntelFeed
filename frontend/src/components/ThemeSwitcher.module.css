@@ -1,0 +1,219 @@
+.container {
+  margin-top: var(--sp-3);
+}
+
+.title {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: var(--sp-5);
+}
+
+/* Section headers for System / My Themes */
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--sp-4);
+  margin-top: 20px;
+}
+
+.sectionHeader:first-of-type {
+  margin-top: 0;
+}
+
+.sectionLabel {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.createBtn {
+  padding: 5px var(--sp-4);
+  font-size: var(--fs-base);
+  font-weight: 600;
+  background: var(--accent);
+  color: var(--accent-text);
+  border: none;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.createBtn:hover {
+  background: var(--accent-hover);
+}
+
+/* Theme card grid */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--sp-4);
+}
+
+.card {
+  position: relative;
+  background: none;
+  border: 2px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp-3);
+  cursor: pointer;
+  transition: border-color 0.15s;
+  text-align: center;
+}
+
+.card:hover {
+  border-color: var(--accent);
+}
+
+.card.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* Theme preview thumbnail */
+.preview {
+  display: flex;
+  height: 72px;
+  border-radius: var(--r-sm);
+  border: 1px solid;
+  overflow: hidden;
+  margin-bottom: var(--sp-3);
+}
+
+.previewSidebar {
+  width: 30%;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.previewDot {
+  width: 100%;
+  height: 6px;
+  border-radius: var(--r-sm);
+  opacity: 0.8;
+}
+
+.previewContent {
+  flex: 1;
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  justify-content: center;
+}
+
+.previewLine {
+  height: 4px;
+  border-radius: var(--r-sm);
+  opacity: 0.6;
+}
+
+.name {
+  font-size: var(--fs-base);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.loading {
+  color: var(--text-muted);
+  padding: var(--sp-5) 0;
+}
+
+/* Action buttons overlaid on card hover */
+.cardActions {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  left: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 2;
+}
+
+.card:hover .cardActions {
+  opacity: 1;
+}
+
+.actionBtn {
+  padding: 3px var(--sp-3);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.actionBtn:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.deleteBtn {
+  composes: actionBtn;
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.deleteBtn:hover {
+  background: var(--danger);
+  color: var(--danger-fg);
+}
+
+/* Instance-default badge, hidden while hover actions are shown */
+.defaultBadge {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  padding: var(--sp-1) 7px;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: var(--r-sm);
+  background: var(--accent);
+  color: var(--accent-text);
+  z-index: 1;
+}
+
+/* Empty state for custom themes */
+.emptyState {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--fs-md);
+  border: 1px dashed var(--border);
+  border-radius: var(--r-md);
+}
+
+@media (max-width: 767px) {
+  .card {
+    min-height: 44px;
+  }
+
+  .cardActions {
+    opacity: 1;
+  }
+
+  .actionBtn,
+  .deleteBtn {
+    min-height: 44px;
+    padding: 6px var(--sp-4);
+  }
+
+  .createBtn {
+    min-height: 44px;
+  }
+}

@@ -1,0 +1,56 @@
+.card {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r-md);
+  background: var(--bg-secondary);
+  margin: 0.75rem 0 0;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  text-align: left;
+}
+
+.label {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.meta {
+  margin-left: auto;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.arrow {
+  color: var(--text-muted);
+  font-size: var(--fs-caret);
+  line-height: 1;
+  flex: none;
+}
+
+.summary {
+  margin: 0;
+  padding: 0 0.75rem 0.65rem;
+  font-size: var(--fs-md);
+  line-height: 1.55;
+  color: var(--text-primary);
+}
+
+@media (max-width: 767px) {
+  .summary {
+    font-size: var(--fs-md);
+  }
+}

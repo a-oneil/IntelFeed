@@ -1,0 +1,235 @@
+
+
+
+
+
+.actionBtn {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: var(--fs-base);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.actionBtn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.actionBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.summaryBar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 8px 20px;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.summaryItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legendSwatch {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-sm);
+  display: inline-block;
+}
+
+.summaryMeta {
+  margin-left: auto;
+  color: var(--text-tertiary, var(--text-secondary));
+}
+
+.body {
+  flex: 1;
+  overflow: auto;
+  padding: 12px 20px 20px;
+}
+
+.status {
+  padding: 40px 0;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: var(--fs-md);
+}
+
+.matrix {
+  display: grid;
+  gap: 6px;
+  align-items: start;
+  min-width: max-content;
+}
+
+.tacticCol {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 158px;
+}
+
+.tacticHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.tacticName {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+
+.tacticCount {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.cell {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 4px 6px;
+  cursor: pointer;
+  background: var(--bg-primary);
+  margin-bottom: 4px;
+}
+
+.cell:hover {
+  border-color: var(--accent);
+}
+
+.subCell {
+  margin-left: 12px;
+}
+
+.cellHeader {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cellId {
+  font-size: var(--fs-xs);
+  font-family: var(--font-mono, monospace);
+  color: var(--text-secondary);
+}
+
+.cellCount {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--bg-primary) 65%, transparent);
+  border-radius: var(--r-sm);
+  padding: 0 4px;
+}
+
+.expandBtn {
+  border: none;
+  background: none;
+  padding: 0 2px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+}
+
+.expandBtn:hover {
+  color: var(--text-primary);
+}
+
+.chevron,
+.chevronOpen {
+  width: var(--sz-caret);
+  height: var(--sz-caret);
+  transition: transform 0.12s ease;
+}
+
+.chevronOpen {
+  transform: rotate(90deg);
+}
+
+.cellName {
+  display: block;
+  font-size: var(--fs-sm);
+  line-height: 1.3;
+  color: var(--text-primary);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.tooltip {
+  position: fixed;
+  z-index: 1000;
+  width: 290px;
+  padding: 10px 12px;
+  background: var(--bg-elevated, var(--bg-secondary));
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+}
+
+.tooltipTitle {
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+  line-height: 1.35;
+}
+
+.tooltipRow {
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+.tooltipHint {
+  margin-top: 6px;
+  font-size: var(--fs-sm);
+  color: var(--text-tertiary, var(--text-secondary));
+  font-style: italic;
+}
+
+@media (max-width: 768px) {
+  .header {
+    padding: 10px 12px;
+  }
+
+  .summaryBar,
+  .body {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .summaryMeta {
+    margin-left: 0;
+    width: 100%;
+  }
+}

@@ -1,0 +1,35 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.newBtn {
+  padding: 8px 14px;
+  border: 1px dashed var(--border);
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: var(--fs-md);
+  font-weight: 500;
+  text-align: center;
+}
+
+.newBtn:hover {
+  background: var(--bg-secondary);
+}
+
+.loading {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: var(--fs-md);
+}
+
+@media (max-width: 767px) {
+  .newBtn {
+    min-height: 44px;
+  }
+}

@@ -1,0 +1,341 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow-y: auto;
+}
+
+.body {
+  padding: 0 20px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  max-width: 980px;
+}
+
+.label {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  flex: none;
+}
+
+.scopeRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: var(--sp-4);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.scopeChips {
+  display: inline-flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.select,
+.input {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  padding: 6px 10px;
+}
+
+.input:focus-visible,
+.select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.ghostBtn,
+.primaryBtn,
+.keepBtn {
+  border-radius: var(--r-md);
+  font-size: var(--fs-md);
+  cursor: pointer;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+}
+
+.ghostBtn {
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.ghostBtn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.primaryBtn {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.primaryBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.empty {
+  color: var(--text-secondary);
+  font-size: var(--fs-md);
+  max-width: 62ch;
+}
+
+/* --- profile form --- */
+
+.formCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-5);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.formRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.picked {
+  display: inline-flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.pickedChip {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--entity-country);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.pickerWrap {
+  position: relative;
+}
+
+.pickerMenu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 20;
+  overflow: hidden;
+}
+
+.pickerItem {
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  text-align: left;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.pickerItem:hover {
+  background: var(--bg-hover);
+}
+
+.sectorGrid {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.sectorChip {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.sectorChipOn {
+  border-color: color-mix(in srgb, var(--entity-sector) 55%, transparent);
+  background: color-mix(in srgb, var(--entity-sector) 12%, transparent);
+  color: var(--entity-sector);
+  font-weight: 600;
+}
+
+.formActions {
+  display: flex;
+  gap: var(--sp-3);
+  justify-content: flex-end;
+}
+
+/* --- surface step --- */
+
+.surfaceHead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-4);
+}
+
+.surfaceTitle {
+  font-family: var(--font-body);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  margin: 0;
+}
+
+.surfaceCount {
+  color: var(--text-secondary);
+  font-size: var(--fs-md);
+  flex: 1;
+}
+
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.card {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-secondary);
+  overflow: hidden;
+}
+
+.cardDropped {
+  opacity: 0.45;
+}
+
+.cardRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-4);
+}
+
+.cardIdent {
+  min-width: 180px;
+}
+
+.cardName {
+  display: block;
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.cardAlias {
+  display: block;
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+}
+
+.why {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  flex: 1;
+  justify-content: flex-end;
+}
+
+.whyChip {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+
+.whyChip b {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.whyRegion {
+  color: var(--entity-country) !important;
+}
+
+.whySector {
+  color: var(--entity-sector) !important;
+}
+
+.whyVictim {
+  color: var(--entity-victim) !important;
+}
+
+.partialFlag {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--warning);
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
+  border-radius: var(--r-sm);
+  padding: 3px 7px;
+  align-self: center;
+}
+
+.keep {
+  display: flex;
+  gap: var(--sp-2);
+  flex: none;
+}
+
+.keepBtn {
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 4px 12px;
+}
+
+.keepOn {
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+  border-color: color-mix(in srgb, var(--success) 45%, transparent);
+  color: var(--success);
+  font-weight: 600;
+}
+
+.dropOn {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.evidence {
+  border-top: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  padding: var(--sp-3) var(--sp-4);
+}
+
+.footnote {
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  margin-top: var(--sp-4);
+  max-width: 70ch;
+}

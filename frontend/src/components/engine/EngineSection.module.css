@@ -1,0 +1,154 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.viewHead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.backBtn {
+  appearance: none;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: var(--r-md);
+  padding: 5px 12px;
+  font: inherit;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  cursor: pointer;
+}
+.backBtn:hover {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+.viewTitle {
+  /* Peer of WorkbenchPage's .contentTitle — same nav level, same role, so
+     same treatment. Was 15px / 650 / mono, which made adjacent
+     workbench routes read as different apps. */
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  font-family: var(--font-body);
+  margin: 0;
+  color: var(--text-primary);
+}
+.browseHint {
+  margin: 0 0 14px;
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  font-size: var(--fs-md);
+  padding: 6px 14px;
+  cursor: pointer;
+}
+
+.tabActive {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent);
+}
+
+.canvas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.stageCard {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 118px;
+  padding: 8px 10px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  text-align: left;
+}
+
+.stageCard:hover {
+  border-color: var(--accent);
+}
+
+.stageSelected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.stageError {
+  border-color: var(--danger);
+}
+
+.stageName {
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--text-primary);
+  text-transform: capitalize;
+}
+
+.stageKind {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+
+.stageCounts {
+  display: flex;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.countOk {
+  color: var(--success);
+}
+
+.countErr {
+  color: var(--danger);
+}
+
+.stagePanel {
+  padding: 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.stageNote {
+  margin: 0;
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+}
+
+.linkBtn {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+}
+.linkBtn:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}

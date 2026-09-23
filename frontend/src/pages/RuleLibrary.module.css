@@ -1,0 +1,446 @@
+/* Detection Rule Library — research redesign (phase 2).
+   Reuses global CSS variables from index.css; scoped to the library section. */
+
+/* The library is a two-column shell, not a header-over-body stack: the facet
+   rail runs the full height of the content area and the page header sits to its
+   right, matching how the search page seats its rail. */
+.shell {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.shellMain {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- faceted rail ----------
+   Same shape and background derivation as the search page's facet rail, so the
+   library's filters read as the same kind of surface — a second sidebar inside
+   the content area — and collapse away the same way. */
+.rail {
+  width: 210px;
+  min-width: 210px;
+  border-right: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-secondary) 60%, var(--bg-primary));
+  padding: 14px 0;
+  overflow-y: auto;
+  transition: width 0.2s, min-width 0.2s, visibility 0.2s;
+}
+
+.railCollapsed {
+  width: 0 !important;
+  min-width: 0 !important;
+  padding: 0;
+  overflow: hidden;
+  border-right: none;
+  /* Zero-width controls must stop being hit-test targets, or clicks aimed at
+     the table land on collapsed facet rows underneath it. */
+  visibility: hidden;
+  pointer-events: none;
+}
+.railGroup {
+  padding: 0 14px;
+  margin-bottom: 18px;
+}
+.railLabel {
+  font-family: var(--font-display);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: var(--sp-3);
+}
+.savedView {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: 5px var(--sp-3);
+  border: none;
+  background: none;
+  border-radius: var(--r-sm);
+  color: var(--text-secondary);
+  font-size: var(--fs-md);
+  cursor: pointer;
+  text-align: left;
+}
+.savedView:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+.savedViewActive {
+  background: var(--accent-detect-bg);
+  color: var(--text-primary);
+  box-shadow: inset 2px 0 0 var(--accent-detect);
+}
+
+.clearFacet {
+  font-size: var(--fs-sm);
+  color: var(--accent-intel);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--sp-2) var(--sp-3);
+}
+
+/* Bulk-select inside a facet group's title row. Lower-case and unbolded against
+   the upper-case group label, so it reads as an action rather than a second
+   heading; `margin-left: auto` pins it to the right edge of the rail. */
+.facetSelectMine {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--accent-intel);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.facetSelectMine:hover {
+  text-decoration: underline;
+}
+
+/* ---------- main column ---------- */
+.main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.groupHeader {
+  font-family: var(--font-display);
+  font-size: var(--fs-sm);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  padding: 7px var(--sp-4);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.groupHeader .gcount { color: var(--text-muted); margin-left: var(--sp-3); }
+
+/* ---------- rich row cells ---------- */
+.ruleCell { display: flex; flex-direction: column; gap: 3px; min-width: 200px; }
+.ruleTitle { color: var(--text-primary); font-weight: 550; }
+.ruleMeta {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: center;
+  font-family: var(--font-display);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  flex-wrap: wrap;
+}
+.fmt {
+  font-family: var(--font-display);
+  font-size: var(--fs-xs);
+  padding: 1px 6px;
+  border-radius: var(--r-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.source { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-base); }
+.sourceRepo { color: var(--text-primary); font-family: var(--font-display); font-size: var(--fs-sm); }
+.sourceAuthor { color: var(--text-muted); font-size: var(--fs-sm); }
+.authoredLocal { color: var(--accent-detect); font-family: var(--font-display); font-size: var(--fs-sm); }
+.license {
+  font-family: var(--font-display);
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 0 var(--sp-2);
+  margin-left: 6px;
+}
+
+.attck { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+.tech {
+  font-family: var(--font-display);
+  font-size: var(--fs-xs);
+  padding: 1px 5px;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--entity-ttp) 12%, transparent);
+  color: var(--entity-ttp);
+  border: 1px solid color-mix(in srgb, var(--entity-ttp) 25%, transparent);
+  white-space: nowrap;
+}
+.techMore { background: none; color: var(--text-muted); border-color: var(--border); }
+
+.telemetry {
+  font-family: var(--font-display);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.telemetryNone { color: var(--text-muted); }
+
+/* Named data sources on the row. Same chip shape as the ATT&CK column, keyed to
+   coverage instead of entity type: what you collect reads as confirmed, what
+   you don't reads as the gap it is. */
+.telSources {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.ds {
+  font-family: var(--font-display);
+  font-size: var(--fs-xs);
+  padding: 1px 5px;
+  border-radius: var(--r-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Index patterns and connector ids run long
+     (logs-windows.sysmon_operational-*). Wide enough that the common names read
+     whole, capped so one outlier can't take the row. */
+  max-width: 150px;
+}
+
+.dsHave {
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  color: var(--success);
+  border: 1px solid color-mix(in srgb, var(--success) 25%, transparent);
+}
+
+.dsMissing {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
+}
+
+.added { font-family: var(--font-display); font-size: var(--fs-sm); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.addedNew { color: var(--accent-detect); }
+
+@media (max-width: 860px) {
+  /* The rail folds into the table below this width, so its toggle goes with it
+     — RailToggle's own breakpoint is 767px, narrower than the rail's. */
+  .rail,
+  .railToggle,
+  .railResizer { display: none; }
+}
+
+/* Phase 5: telemetry coverage ring in the table */
+.telRing {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  flex: none;
+  background: conic-gradient(var(--c) calc(var(--p) * 1%), var(--bg-hover) 0);
+  display: inline-grid;
+  place-items: center;
+  position: relative;
+}
+.telRing::after {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--bg-secondary);
+}
+
+/* Build-to-mock refinements: severity stripe, github icon, format colors, telemetry label */
+.sevStripe { width: 3px; padding: 0 !important; }
+.rid { color: var(--text-muted); }
+.gh { width: 13px; height: 13px; opacity: 0.55; flex: none; vertical-align: -2px; margin-right: 5px; }
+.fmt_sigma { color: var(--fmt-sigma); border-color: rgba(63, 185, 80, 0.3); }
+.fmt_yara { color: var(--fmt-yara); border-color: rgba(168, 85, 247, 0.3); }
+.fmt_kql { color: var(--fmt-kql); border-color: rgba(88, 166, 255, 0.3); }
+.fmt_nuclei { color: var(--fmt-nuclei); border-color: rgba(247, 129, 102, 0.3); }
+.fmt_elastic_ql { color: var(--fmt-elastic-ql); border-color: rgba(88, 166, 255, 0.3); }
+.fmt_splunk_spl { color: var(--fmt-splunk-spl); border-color: rgba(63, 185, 80, 0.3); }
+.sourceRepo { display: inline-flex; align-items: center; }
+
+/* Build-to-mock: give the rich columns room + stop cramped wrapping */
+.source { min-width: 148px; }
+.sourceRepo { white-space: nowrap; max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+.license { white-space: nowrap; }
+.telemetry { min-width: 96px; align-items: center; }
+.ruleCell { min-width: 230px; }
+
+/* Build-to-mock: fixed table layout so long titles don't bleed into other columns */
+.rulesTable { table-layout: fixed; width: 100%; }
+.rulesTable td, .rulesTable th { overflow: hidden; }
+.repoName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sourceRepo { max-width: none; overflow: visible; gap: 0; }
+.ruleTitle { overflow-wrap: anywhere; }
+
+/* Polish pass: roomier rows, fewer columns, cleaner source/telemetry/added */
+.rulesTable td { padding: 13px 12px !important; vertical-align: middle; }
+.rulesTable thead th { padding-top: 10px; padding-bottom: 10px; }
+.rulesTable td:last-child, .rulesTable thead th:last-child { text-align: right; }
+.ruleCell { gap: 5px; }
+.ruleTitle { font-size: var(--fs-md); }
+.ruleMeta { gap: 9px; }
+.linkInline { color: var(--text-muted); white-space: nowrap; }
+.ruleMeta { flex-wrap: nowrap; overflow: hidden; }
+.ruleMeta > span { flex: none; }
+.source { gap: 3px; }
+.sourceRepo { font-size: var(--fs-base); }
+.repoName { max-width: 150px; }
+.sourceAuthor { display: inline-flex; align-items: center; gap: 0; }
+.license { margin-left: 6px; }
+.added { white-space: nowrap; font-size: var(--fs-sm); }
+
+/* ---------- mobile: the table becomes cards ----------
+   The desktop grid is table-layout:fixed with ~500px of hardcoded column
+   widths, which on a phone collapses into unreadable overlapping cells. Below
+   768px every cell stacks instead, and the two cells that carry no text of
+   their own — the severity stripe and the checkbox — are lifted out of the flow
+   onto the card's edges rather than becoming full-width blocks.
+
+   Done in CSS so one row renderer serves both layouts. */
+@media (max-width: 767px) {
+  .rulesTable,
+  .rulesTable tbody,
+  .rulesTable tr,
+  .rulesTable td {
+    display: block;
+    width: auto;
+  }
+
+  /* Column headers describe positions that no longer exist once stacked. */
+  .rulesTable thead {
+    display: none;
+  }
+
+  .rulesTable {
+    table-layout: auto;
+  }
+
+  .rulesTable tr {
+    position: relative;
+    padding: 11px 12px 11px 15px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* Severity reads as the card's left edge, not a 30px block. */
+  .rulesTable td.sevStripe {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    padding: 0 !important;
+  }
+
+  .rulesTable td.checkboxCol {
+    position: absolute;
+    top: 11px;
+    right: 10px;
+    width: auto;
+    padding: 0 !important;
+  }
+
+  .rulesTable td {
+    padding: 0 0 6px !important;
+    border: none;
+  }
+
+  /* Collapse cells with no content, except the severity stripe — it carries its
+     colour in a background and is empty by design. */
+  .rulesTable td:empty:not(.sevStripe) {
+    display: none;
+  }
+
+  /* Clear the absolutely-positioned checkbox. Qualified with .rulesTable to
+     match the specificity of the `.rulesTable td` reset above, which would
+     otherwise win and let the title run under the checkbox. */
+  .rulesTable td.cRule {
+    padding-right: 30px !important;
+  }
+
+  .cRule .ruleTitle {
+    white-space: normal;
+    font-weight: 600;
+  }
+
+  /* Wrapping is what the desktop row can't afford and the card can. */
+  .cRule .ruleMeta,
+  .cSource .source {
+    flex-wrap: wrap;
+  }
+
+  .cAttck .attck {
+    flex-wrap: wrap;
+  }
+
+  /* Coverage and age are both short — pair them on the card's last line
+     instead of spending two full rows on them. */
+  .cTel,
+  .cAdded {
+    display: inline-block !important;
+    padding-bottom: 0 !important;
+  }
+
+  .cAdded {
+    float: right;
+  }
+
+  /* No fixed column to fit inside on a card — let the names breathe. */
+  .cTel .ds {
+    max-width: 130px;
+  }
+
+  /* The group header is its row's only cell, so `td:last-child { text-align:
+     right }` was pushing the label to the far edge, and the card padding on the
+     row stacked with the cell's own to make a tall empty band. */
+  .rulesTable tr.groupRow {
+    padding: 0;
+    border-bottom: none;
+  }
+
+  .rulesTable td.groupHeader {
+    padding: 7px 12px !important;
+    text-align: left;
+  }
+}
+
+/* ---------- mobile: header controls ----------
+   Three controls on one flex line squeezed the search box down to "Sea" and
+   pushed the lens switch off-screen. On a phone the search takes its own full
+   line and the lens switch scrolls rather than overflowing. */
+.controlsRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  min-width: 0;
+  width: 100%;
+}
+
+@media (max-width: 767px) {
+  .ruleSearch {
+    flex: 1 1 100%;
+    width: auto;
+    min-width: 0;
+  }
+
+  .lensSegmented {
+    flex: 1 1 100%;
+    overflow-x: auto;
+    /* The track is inline-flex; without this it wraps instead of scrolling. */
+    justify-content: flex-start;
+    scrollbar-width: none;
+  }
+
+  .lensSegmented::-webkit-scrollbar {
+    display: none;
+  }
+}

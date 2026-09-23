@@ -1,0 +1,314 @@
+.intelLine {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  line-height: 1;
+}
+
+/* Thin divider between PIRs and evidence counts */
+.divider {
+  align-self: stretch;
+  width: 1px;
+  margin: 1px 1px;
+  background: var(--border);
+}
+
+/* --- Uniform chip --- */
+.chip {
+  --c: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 20px;
+  min-height: 20px;
+  box-sizing: border-box;
+  padding: 0 7px;
+  border-radius: var(--r-md);
+  border: 1px solid color-mix(in srgb, var(--c) 30%, transparent);
+  background: color-mix(in srgb, var(--c) 12%, transparent);
+  color: color-mix(in srgb, var(--c) 55%, var(--text-secondary));
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.chipNum {
+  font-weight: 700;
+  color: var(--c);
+  font-variant-numeric: tabular-nums;
+}
+
+.chipLabel {
+  color: color-mix(in srgb, var(--c) 55%, var(--text-secondary));
+}
+
+/* --- Personal state markers (starred / bookmarked / note) --- */
+.stateChip {
+  padding: 0 5px;
+  gap: 3px;
+  color: var(--c);
+}
+
+.stateChip svg {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+
+.starred { --c: #eab308; }
+.bookmarked { --c: #a78bfa; }
+.noted { --c: var(--text-secondary); }
+.echo { --c: #22d3ee; }
+
+/* --- Named subject chip (threat actor / malware) --- */
+.subject { max-width: 15ch; }
+.actor { --c: var(--entity-actor); }
+.malware { --c: var(--entity-malware); }
+
+.chipName {
+  font-weight: 600;
+  color: var(--c);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chipExtra {
+  color: color-mix(in srgb, var(--c) 50%, var(--text-secondary));
+  font-variant-numeric: tabular-nums;
+}
+
+/* Entity type accents (drive --c so bg/border/text all derive from one hue) */
+.ttp { --c: var(--entity-ttp); }
+.cve { --c: var(--entity-cve); }
+.rule { --c: var(--entity-rule); }
+.note { --c: var(--text-secondary); }
+
+/* Worst-severity emphasis on the CVE chip */
+.cveHigh {
+  background: color-mix(in srgb, var(--c) 18%, transparent);
+  border-color: color-mix(in srgb, var(--c) 45%, transparent);
+}
+.cveCritical {
+  --c: #dc2626;
+  background: color-mix(in srgb, var(--c) 24%, transparent);
+  border-color: color-mix(in srgb, var(--c) 60%, transparent);
+  font-weight: 600;
+}
+
+/* --- PIR chip: count + proportional category distribution bar --- */
+.pirSummaryWrap {
+  display: inline-flex;
+}
+
+.pirChip {
+  --c: var(--entity-pir);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+/* The PIR chip is a <span role="button">, so the global mobile
+   `button, [role="button"] { min-height: 36px }` touch-target rule in index.css
+   (equal specificity to .chip) would stretch it taller than the sibling badges.
+   This compound selector outranks it so the PIR chip stays badge-height. */
+.chip.pirChip {
+  min-height: 20px;
+}
+
+.pirChip:hover {
+  background: color-mix(in srgb, var(--c) 20%, transparent);
+  border-color: color-mix(in srgb, var(--c) 45%, transparent);
+}
+
+.pirChip:focus-visible {
+  outline: 2px solid var(--entity-pir);
+  outline-offset: 1px;
+}
+
+.pirBar {
+  display: inline-flex;
+  align-items: stretch;
+  height: 5px;
+  width: 40px;
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  gap: 1px;
+  margin-left: 1px;
+}
+
+.pirBarSeg {
+  display: block;
+  min-width: 3px;
+  flex-basis: 0;
+}
+
+.pirBarSeg[data-category="strategic"] { background: var(--pir-strategic); }
+.pirBarSeg[data-category="operational"] { background: var(--pir-operational); }
+.pirBarSeg[data-category="tactical"] { background: var(--pir-tactical); }
+.pirBarSeg[data-category="technical"] { background: var(--pir-technical); }
+
+.caret {
+  font-size: var(--fs-caret);
+  line-height: 1;
+  color: color-mix(in srgb, var(--c) 85%, transparent);
+  margin-left: 1px;
+}
+
+/* --- Detection opportunity pills (semantic, elevated) --- */
+.kev {
+  --c: #dc2626;
+  background: color-mix(in srgb, var(--c) 20%, transparent);
+  border-color: color-mix(in srgb, var(--c) 55%, transparent);
+  color: color-mix(in srgb, var(--c) 70%, var(--text-secondary));
+  font-weight: 600;
+  padding: 0 var(--sp-3);
+}
+
+.hot {
+  --c: var(--warning);
+  background: color-mix(in srgb, var(--c) 20%, transparent);
+  border-color: color-mix(in srgb, var(--c) 55%, transparent);
+  color: var(--c);
+  font-weight: 600;
+}
+
+.gap {
+  --c: var(--warning);
+  background: transparent;
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--c) 50%, transparent);
+  color: var(--c);
+}
+
+.tel {
+  --c: var(--text-secondary);
+  background: transparent;
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--c) 40%, transparent);
+  color: var(--c);
+  font-style: italic;
+}
+
+/* --- PIR popover dropdown --- */
+.pirPopoverIntro {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  padding-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.pirPopoverEdit {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.pirPopoverEdit:hover {
+  color: var(--accent);
+}
+
+.pirPopover {
+  position: fixed;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 280px;
+  max-width: 400px;
+  padding: var(--sp-3);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  white-space: normal;
+}
+
+.pirPopoverGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.pirPopoverCat {
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: var(--sp-1) 6px;
+  color: var(--text-muted);
+}
+
+.pirPopoverCat[data-category="strategic"] { color: var(--pir-strategic); }
+.pirPopoverCat[data-category="operational"] { color: var(--pir-operational); }
+.pirPopoverCat[data-category="tactical"] { color: var(--pir-tactical); }
+.pirPopoverCat[data-category="technical"] { color: var(--pir-technical); }
+
+.pirPopoverItem {
+  display: block;
+  cursor: pointer;
+  font-size: var(--fs-base);
+  font-weight: 500;
+  padding: var(--sp-2) 6px;
+  border-radius: var(--r-sm);
+  color: var(--text-primary);
+  transition: background 0.1s;
+}
+
+.pirPopoverItem:hover {
+  background: var(--bg-hover);
+}
+
+/* Priority-colored left accent on popover items */
+.pirPopoverItem[data-priority="critical"] {
+  border-left: 2px solid var(--pir-tactical);
+  padding-left: var(--sp-3);
+}
+
+.pirPopoverItem[data-priority="high"] {
+  border-left: 2px solid var(--pir-operational);
+  padding-left: var(--sp-3);
+}
+
+.pirPopoverItem[data-priority="medium"] {
+  border-left: 2px solid var(--entity-pir);
+  padding-left: var(--sp-3);
+}
+
+.pirPopoverItem[data-priority="low"] {
+  border-left: 2px solid var(--text-muted);
+  padding-left: var(--sp-3);
+}
+
+/* Why-matched line under each PIR popover item */
+.pirPopoverWhy {
+  display: block;
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  color: var(--text-secondary);
+  margin-top: 1px;
+}
+
+.pirPopoverRelevance {
+  margin-left: 6px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: var(--bg-hover);
+}
+
+.pirPopoverRelevance[data-relevance="high"] { color: var(--success); }
+.pirPopoverRelevance[data-relevance="medium"] { color: var(--warning); }
+.pirPopoverRelevance[data-relevance="low"] { color: var(--text-secondary); }
+
+@media (prefers-reduced-motion: reduce) {
+  .pirChip { transition: none; }
+}

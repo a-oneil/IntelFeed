@@ -1,0 +1,149 @@
+.container {
+  position: relative;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: center;
+  padding: var(--sp-2) 0;
+}
+
+/* Removable data-source tag: Chip supplies the box, this keeps the picker's
+   roomier, capitalised face and its accent wash. Doubled so it beats Chip's
+   own single-class rules whichever order the two stylesheets land in. */
+.chip.chip {
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-base);
+  text-transform: capitalize;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: transparent;
+}
+
+.chipRemove {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 var(--sp-1);
+  font-size: var(--fs-md);
+  line-height: 1;
+}
+
+.chipRemove:hover {
+  color: var(--text-primary);
+}
+
+.addBtn {
+  background: none;
+  border: 1px dashed var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: var(--fs-base);
+  padding: var(--sp-1) var(--sp-3);
+}
+
+.addBtn:hover {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+.dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  margin-top: var(--sp-2);
+  max-height: 300px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.search {
+  width: 100%;
+  padding: var(--sp-3) var(--sp-4);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  outline: none;
+}
+
+.groups {
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: 250px;
+}
+
+.group {
+  padding: var(--sp-2) 0;
+}
+
+.groupLabel {
+  padding: var(--sp-2) var(--sp-4);
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-4);
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: var(--fs-md);
+  text-align: left;
+  cursor: pointer;
+  text-transform: capitalize;
+}
+
+.option:hover {
+  background: var(--bg-hover);
+}
+
+.option.selected {
+  color: var(--accent);
+}
+
+.checkbox {
+  width: 16px;
+  font-size: var(--fs-base);
+  text-align: center;
+}
+
+@media (max-width: 767px) {
+  .option {
+    min-height: 44px;
+  }
+
+  .chipRemove {
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .addBtn {
+    min-height: 44px;
+  }
+
+  .search {
+    min-height: 44px;
+  }
+}

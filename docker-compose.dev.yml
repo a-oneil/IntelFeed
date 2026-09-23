@@ -1,0 +1,265 @@
+services:
+  db:
+    restart: unless-stopped
+    # postgres:16-alpine + pgvector, built from ./db/Dockerfile. Same base image
+    # as before, so the existing pgdata volume needs no migration.
+    build:
+      context: ./db
+    image: intelfeed-postgres:16
+    ports:
+      - "${DB_PORT:-5433}:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-intelfeed}
+      POSTGRES_USER: ${POSTGRES_USER:-intelfeed}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    command: postgres -c max_connections=300
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-intelfeed}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    # Same protection prod already has: redis is the broker for the whole stack,
+    # so when the Docker VM runs low the global OOM killer picks it and every
+    # service degrades silently — tests crawl on connection timeouts and the
+    # failures look like application bugs. Cap its memory, deprioritize it as an
+    # OOM target, and bring it back automatically if it does get killed.
+    restart: unless-stopped
+    oom_score_adj: -800
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru
+    ports:
+      - "${REDIS_PORT:-6380}:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.6
+    restart: unless-stopped
+    ports:
+      - "7700:7700"
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-changeme}
+      MEILI_ENV: development
+    volumes:
+      - meilidata:/meili_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  libretranslate:
+    restart: unless-stopped
+    image: libretranslate/libretranslate:v1.9.6
+    ports:
+      - "${LIBRETRANSLATE_PORT:-5050}:5000"
+    environment:
+      LT_LOAD_ONLY: ${LIBRETRANSLATE_LANGUAGES:-en,ru,zh-Hans,zh-Hant,fa,uk,de,fr,es,ar,ja,ko,tr,pt,it,vi,he,pl,nl,cs}
+      LT_DISABLE_WEB_UI: "true"
+      LT_UPDATE_MODELS: "true"
+    volumes:
+      - libretranslate_models:/home/libretranslate/.local:rw
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; urllib.request.urlopen('http://localhost:5000/languages',timeout=5).read()\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  piper:
+    restart: unless-stopped
+    build:
+      context: ./piper
+      dockerfile: Dockerfile
+    ports:
+      - "${PIPER_PORT:-5060}:5000"
+    environment:
+      - PIPER_VOICE=${PIPER_VOICE:-en_US-lessac-medium}
+    volumes:
+      - piper_voices:/voices
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+
+  api:
+    restart: unless-stopped
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - ./docs:/app/docs:ro  # in-app documentation (app/api/documentation.py)
+      # Maintenance/seed scripts run as `exec api python scripts/<folder>/<script>.py`.
+      # The image only carries ./backend, so they arrive by mount, same as docs/.
+      - ./scripts:/app/scripts
+      # Skill CLIs, mounted so test_tool_registry_sync.py can guard their
+      # generated TOOLS/WRITE_TOOLS blocks against the live registry.
+      - ./intelfeed-skill/scripts/intelfeed_cli.py:/app/skill-clis/full_cli.py:ro
+      - ./intelfeed-lite-skill/scripts/intelfeed_cli.py:/app/skill-clis/lite_cli.py:ro
+      - ./logs:/app/logs
+      - image_cache:/app/data/image_cache
+      - telegram_data:/data
+      - telegram_media:/app/data/telegram_media
+      - tts_media:/app/data/tts_media
+      # Interactive copilot runs the `claude` CLI + intelfeed skill in-process,
+      # so the api container needs the skill mounted where the CLI loads skills.
+      - ./intelfeed-skill:/home/appuser/.claude/skills/intelfeed:ro
+    env_file:
+      - .env
+    environment:
+      - RUN_MIGRATIONS=true
+      # The copilot's skill CLI calls back into this same container's API.
+      - INTELFEED_API_URL=http://api:8000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # --reload-exclude logs: log files live inside the watched /app mount —
+    # without the exclude every log write re-triggers the file watcher.
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-exclude 'logs/*' --reload-exclude 'backups/*'
+
+  celery-worker:
+    restart: unless-stopped
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    volumes:
+      - ./backend:/app
+      - ./logs:/app/logs
+      - image_cache:/app/data/image_cache
+      - ./backups:/app/backups
+      - telegram_data:/data
+      - telegram_media:/app/data/telegram_media
+      - tts_media:/app/data/tts_media
+    env_file:
+      - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      api:
+        condition: service_started
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=4 --queues=celery
+
+  # Serialized AI worker: one task at a time on the "ai" queue, whatever the
+  # assigned provider (paces a single Ollama GPU; also the only service
+  # mounting the claude_code CLI credentials volume for CLI-provider tasks).
+  celery-worker-ai:
+    restart: unless-stopped
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    volumes:
+      - ./backend:/app
+      - ./logs:/app/logs
+      - claude_cli:/home/appuser/.claude
+      - ./intelfeed-skill:/home/appuser/.claude/skills/intelfeed:ro
+    env_file:
+      - .env
+    environment:
+      - INTELFEED_API_URL=http://api:8000
+      - INTELFEED_USERNAME=${INTELFEED_USERNAME:-}
+      - INTELFEED_PASSWORD=${INTELFEED_PASSWORD:-}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      api:
+        condition: service_started
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # "claude_code" is the legacy queue name — kept in --queues only to drain
+    # messages enqueued before the rename to "ai"; safe to drop once empty.
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=${CLAUDE_CODE_CONCURRENCY:-1} --queues=ai,claude_code --prefetch-multiplier=1
+
+  celery-beat:
+    restart: unless-stopped
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    volumes:
+      - ./backend:/app
+      - ./logs:/app/logs
+    env_file:
+      - .env
+    depends_on:
+      api:
+        condition: service_started
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A app.workers.celery_app beat --loglevel=info
+
+  telegram-listener:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    volumes:
+      - ./backend:/app
+      - ./logs:/app/logs
+      - telegram_data:/data
+      - telegram_media:/app/data/telegram_media
+    env_file:
+      - .env
+    depends_on:
+      api:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    command: python -m app.workers.telegram_listener
+    restart: unless-stopped
+
+  frontend:
+    restart: unless-stopped
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "${FRONTEND_PORT:-3001}:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - VITE_API_URL=http://api:8000
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  redisdata:
+  meilidata:
+  image_cache:
+  claude_cli:
+  telegram_data:
+  telegram_media:
+  libretranslate_models:
+  tts_media:
+  piper_voices:

@@ -1,0 +1,93 @@
+/* Entry-specific cell styling. Table chrome and the shared cell primitives
+   (.ellipsis, .strong, .zero, .count, tones, .dateCell) live in
+   components/table/DataTable.module.css. */
+
+.statusCell {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.unreadDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+/* Personal markers: deliberately raw hues, not --entity-* aliases. */
+.star {
+  color: #eab308;
+  font-size: var(--fs-base);
+}
+
+.bookmark {
+  color: #a78bfa;
+  font-size: var(--fs-base);
+}
+
+.sourceCell {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.subjectCell {
+  color: var(--entity-actor);
+  font-weight: 500;
+}
+
+.summaryCell {
+  color: var(--text-secondary);
+}
+
+/* Detection opportunity mini-badges (compact cousins of the intel-badge pills) */
+.oppBadge {
+  padding: 1px 7px;
+  border-radius: var(--r-sm);
+  border: 1px solid;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.oppHot {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+}
+
+.oppGap {
+  color: var(--warning);
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--warning) 50%, transparent);
+  background: transparent;
+}
+
+.oppTel {
+  color: var(--text-secondary);
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--text-secondary) 40%, transparent);
+  background: transparent;
+  font-style: italic;
+}
+
+.tagInline {
+  white-space: nowrap;
+  margin-right: var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
+.tagDot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-right: 3px;
+  vertical-align: middle;
+}

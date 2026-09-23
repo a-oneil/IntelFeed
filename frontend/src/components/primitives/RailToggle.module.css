@@ -1,0 +1,51 @@
+/* The thin vertical rail that collapses/expands an adjacent pane.
+   Five layouts had byte-identical copies of this before it was extracted. */
+.rail {
+  flex-shrink: 0;
+  width: 16px;
+  background: var(--bg-secondary);
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-xs);
+  transition: color 0.15s, background 0.15s;
+  padding: 0;
+}
+
+/* Sized by the 16px rail rather than by --sz-caret: there is no label here
+   for a caret to track, only the strip itself. */
+.chevron {
+  width: 11px;
+  height: 11px;
+}
+
+.rail:hover {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+}
+
+/* Which edges get a hairline depends on what the rail sits between. */
+.left {
+  border-right: 1px solid var(--border);
+}
+
+.right {
+  border-left: 1px solid var(--border);
+}
+
+.both {
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+}
+
+/* The rail is a pointer affordance for resizable panes — mobile uses the
+   swipe gestures and the ☰ instead. All five hosts hid it at this
+   breakpoint independently before it was extracted. */
+@media (max-width: 767px) {
+  .rail {
+    display: none;
+  }
+}

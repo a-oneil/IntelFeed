@@ -1,0 +1,390 @@
+.container {
+  max-width: 100%;
+}
+
+.title {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  margin: 0 0 var(--sp-5);
+  padding-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
+}
+
+.statusBar {
+  display: flex;
+  gap: var(--sp-6);
+  padding: var(--sp-4) var(--sp-5);
+  background: var(--bg-tertiary);
+  border-radius: var(--r-md);
+  margin-bottom: var(--sp-5);
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+}
+
+.loading {
+  padding: 1.5rem;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--fs-md);
+}
+
+/* Budget overview */
+.budgetOverview {
+  margin-bottom: 1.25rem;
+  padding: var(--sp-4) var(--sp-5);
+  background: var(--bg-tertiary);
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+}
+
+.budgetGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--sp-4);
+}
+
+.budgetItem {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.budgetName {
+  font-size: var(--fs-base);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.budgetBar {
+  position: relative;
+  height: 18px;
+  background: var(--bg-primary);
+  border-radius: var(--r-full);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.budgetBarFill {
+  height: 100%;
+  border-radius: var(--r-full);
+  transition: width 0.3s ease;
+}
+
+.budgetBarLabel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+  mix-blend-mode: difference;
+}
+
+/* Source groups */
+.sourceGroup {
+  margin-bottom: 1.25rem;
+}
+
+.sectionSubtitle {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin: 0 0 var(--sp-3);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.groupCount {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.sourceList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+/* Source card */
+.sourceCard {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-tertiary);
+  overflow: hidden;
+}
+
+.sourceDisabled {
+  opacity: 0.6;
+}
+
+.sourceRow {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.625rem 0.75rem;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.1s;
+}
+
+.sourceRow:hover {
+  background: var(--bg-hover);
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.toggle input {
+  accent-color: var(--accent);
+}
+
+.healthDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.sourceName {
+  font-weight: 600;
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.rowMeta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* Row badges are Chips (pill, default tone). The one thing that must survive
+   is the ground: these sit on a --bg-tertiary card, which is exactly Chip's
+   own background, so the badge would dissolve into the row. The class is
+   doubled so it beats Chip's single-class `.chip` no matter how the two
+   stylesheets are ordered in the bundle. */
+.rowBadge.rowBadge {
+  background: var(--bg-primary);
+}
+
+.budgetBadge {
+  font-family: monospace;
+}
+
+.expandIcon {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* Expanded detail */
+.expandedDetail {
+  padding: var(--sp-4) var(--sp-5);
+  border-top: 1px solid var(--border);
+  background: var(--bg-primary);
+}
+
+.detailGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-5);
+  margin-bottom: var(--sp-4);
+}
+
+.detailField {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.detailLabel {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+}
+
+.detailHint {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  margin-top: var(--sp-1);
+}
+
+.budgetInputRow {
+  display: flex;
+  gap: 0.375rem;
+  align-items: center;
+}
+
+.keyRow {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: center;
+}
+
+.detailFooter {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding-top: 0.625rem;
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-base);
+  color: var(--text-muted);
+}
+
+/* A Chip: --bg-tertiary is Chip's own ground and this sits on the
+   --bg-primary detail panel, so the default tone is already right. */
+.sourceType {
+  font-family: monospace;
+}
+
+.lastSync {
+  color: var(--text-muted);
+}
+
+.entityTypes {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
+/* Shared form elements */
+.modeSelect {
+  padding: 0.3rem var(--sp-3);
+  font-size: var(--fs-md);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.modeSelect:focus {
+  border-color: var(--accent);
+}
+
+.keyStatus {
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+}
+
+.keyForm {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.keyInput {
+  padding: 0.3rem var(--sp-3);
+  font-size: var(--fs-md);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  width: 140px;
+  outline: none;
+}
+
+.keyInput:focus {
+  border-color: var(--accent);
+}
+
+.editKeyBtn,
+.testBtn,
+.saveBtn,
+.cancelBtn {
+  padding: 0.3rem 0.625rem;
+  font-size: var(--fs-base);
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.editKeyBtn {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+
+.editKeyBtn:hover {
+  color: var(--text-primary);
+}
+
+.testBtn {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  margin-left: auto;
+}
+
+.testBtn:hover {
+  color: var(--text-primary);
+}
+
+.testBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.saveBtn {
+  background: var(--accent);
+  color: var(--accent-text);
+  border: none;
+}
+
+.saveBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.cancelBtn {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+
+@media (max-width: 767px) {
+  .sourceRow {
+    flex-wrap: wrap;
+  }
+
+  .rowMeta {
+    margin-left: 0;
+    flex-basis: 100%;
+    order: 10;
+    margin-top: var(--sp-2);
+  }
+
+  .detailGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .modeSelect,
+  .keyInput {
+    min-height: 44px;
+    font-size: var(--fs-lg);
+  }
+
+  .editKeyBtn,
+  .testBtn,
+  .saveBtn,
+  .cancelBtn {
+    min-height: 44px;
+  }
+
+  .budgetGrid {
+    grid-template-columns: 1fr;
+  }
+}

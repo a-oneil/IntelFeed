@@ -1,0 +1,324 @@
+/* Mirrors EntryReader's shell: a fixed action bar over a scrolling pane, so
+   closing a thread is in the same place as closing an article. */
+.readerContainer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.topBar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 0.375rem var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  min-height: 2.625rem;
+  flex: none;
+}
+
+.closeBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-secondary);
+  font-size: var(--fs-base);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.closeBtn:hover {
+  color: var(--text-primary);
+}
+
+.barActions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.reader {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-lg, 1.25rem) var(--sp-xl, 1.75rem) 3rem;
+  max-width: 60rem;
+}
+
+.loading {
+  padding: 2rem;
+  color: var(--text-muted);
+}
+
+.header {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.kicker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  margin-bottom: 0.4rem;
+}
+.status {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent-intel);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--fs-2xl, 1.6rem);
+  line-height: 1.2;
+  color: var(--text-primary);
+}
+
+.summary {
+  margin: 0.5rem 0 0;
+  color: var(--text-secondary);
+  font-size: var(--fs-md);
+  line-height: 1.5;
+}
+
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-top: 0.85rem;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+.stats b {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The bar's one action: clear the story out of the queue. */
+.clearBtn {
+  padding: 0.25rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+.clearBtn:hover:not(:disabled) {
+  border-color: var(--success, var(--accent-intel));
+  color: var(--success, var(--accent-intel));
+}
+.clearBtn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.heuristicNote {
+  margin: 0.6rem 0 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.entities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.85rem;
+}
+.entityChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  text-decoration: none;
+}
+.entityChip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.entityCount {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.sectionTitle {
+  font-size: var(--fs-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text-muted);
+  margin: 0 0 0.75rem;
+  font-weight: 500;
+}
+
+.spine {
+  margin-bottom: 2rem;
+}
+
+.beat {
+  border-left: 2px solid var(--border);
+  padding: 0 0 1rem 1rem;
+  position: relative;
+}
+.beat::before {
+  content: "";
+  position: absolute;
+  left: -5px;
+  top: 0.35rem;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-intel);
+}
+
+.beatMeta {
+  display: flex;
+  gap: 0.6rem;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+.beatDate {
+  font-variant-numeric: tabular-nums;
+}
+.beatKind {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.beatKind.first_disclosure {
+  color: var(--accent-intel);
+}
+.beatKind.new_tradecraft {
+  color: var(--danger);
+}
+.beatKind.peak {
+  color: var(--warning);
+}
+
+.beatHeadline {
+  display: block;
+  margin-top: 0.15rem;
+  padding: 0;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  font-size: var(--fs-lg, 1.05rem);
+  line-height: 1.35;
+  color: var(--text-primary);
+}
+.beatHeadline:hover {
+  color: var(--accent);
+}
+
+.beatBody {
+  margin: 0.3rem 0 0;
+  font-size: var(--fs-md);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.collapsed {
+  margin: 0.35rem 0 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.members {
+  margin-bottom: 2rem;
+}
+
+.memberList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.member {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  background: none;
+  border: none;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+}
+.member:hover {
+  background: var(--bg-tertiary);
+}
+.read .memberTitle {
+  color: var(--text-muted);
+}
+
+.memberMeta {
+  display: flex;
+  gap: 0.4rem;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+.originTag {
+  color: var(--accent-intel);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.memberTitle {
+  font-size: var(--fs-md);
+  line-height: 1.35;
+  color: var(--text-primary);
+}
+
+.echoes {
+  margin-top: 0.75rem;
+}
+.echoes summary {
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.nearestList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.nearestLink {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  border: none;
+  background: none;
+  border-radius: var(--r-sm);
+  color: var(--text-secondary);
+  text-align: left;
+  cursor: pointer;
+  font-size: var(--fs-md);
+}
+.nearestLink:hover {
+  background: var(--bg-tertiary);
+  color: var(--accent);
+}
+.nearestScore {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}

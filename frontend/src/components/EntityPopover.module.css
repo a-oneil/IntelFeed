@@ -1,0 +1,285 @@
+.popover {
+  position: fixed;
+  z-index: 1000;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 10px var(--sp-4);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  min-width: 220px;
+  max-width: 340px;
+  transform: translateX(-50%);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+/* Entity-type badge. Chip's `solid` tone fills with the entity colour and
+   derives its own foreground — the old flat #fff failed contrast on the
+   lighter entity tints (tool #eab308 is 1.9:1 against white). */
+.badge {
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.valueRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+
+.thumb {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-sm);
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  background: var(--bg-tertiary);
+}
+
+.value {
+  font-size: var(--fs-md);
+  font-weight: 500;
+  color: var(--text-primary);
+  word-break: break-all;
+  font-family: var(--font-mono, monospace);
+}
+
+/* IOC metadata grid */
+.metaGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-1) var(--sp-4);
+  margin-bottom: var(--sp-3);
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.metaItem {
+  display: flex;
+  flex-direction: column;
+  padding: var(--sp-1) 0;
+}
+
+.metaLabel {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.metaValue {
+  font-size: var(--fs-base);
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.metaFull {
+  grid-column: 1 / -1;
+}
+
+.metaDesc {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.exploitValue {
+  color: var(--danger);
+}
+
+/* CVE severity badge. Colour comes from the chip's tint (the shared
+   --severity-* ramp via getSeverityColor); only the casing is local. */
+.severityBadge {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.pivotLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+
+.pivotLink {
+  font-size: var(--fs-sm);
+  color: var(--accent);
+  text-decoration: none;
+  padding: var(--sp-1) 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-tertiary);
+}
+
+.pivotLink:hover {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+
+/* Detection artifacts (offensive tools) */
+.artifacts {
+  margin-bottom: var(--sp-3);
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.artifactsLabel {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-bottom: var(--sp-2);
+}
+
+.artifactItem {
+  display: flex;
+  flex-direction: column;
+  padding: var(--sp-1) 0;
+}
+
+.artifactKey {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  text-transform: capitalize;
+}
+
+.artifactVal {
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+  font-family: var(--font-mono, monospace);
+  word-break: break-all;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.actionBtn {
+  flex: 1;
+  min-width: 60px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-base);
+  cursor: pointer;
+}
+
+.actionBtn:hover {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+
+.actionBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Positioning context for the Enrich / Wrong? dropdowns. */
+.actionsWrap {
+  position: relative;
+}
+
+/* Dropdowns overlay the card instead of growing it: a taller card gets
+   re-clamped, and near the bottom of the viewport that flips the whole popover
+   above the word — the card jumping up the page the moment you open a menu. */
+.enrichMenu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 2;
+  max-height: min(320px, 55vh);
+  overflow-y: auto;
+  padding: var(--sp-2) 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-tertiary);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
+}
+
+/* Too close to the bottom of the viewport for the menu to fit under the card —
+   open it upward instead. */
+.menuUp {
+  top: auto;
+  bottom: calc(100% + 4px);
+}
+
+.enrichMenuEmpty {
+  padding: 6px 10px;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.enrichMenuItem {
+  display: block;
+  width: 100%;
+  padding: 5px 10px;
+  font-size: var(--fs-base);
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.enrichMenuItem:hover {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.enrichFlash {
+  margin-top: var(--sp-2);
+  padding: 3px var(--sp-3);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--success);
+  text-align: center;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+}
+
+/* KEV: a filled red flag. Chip's `solid` tone derives the foreground from the
+   fill. The red stays a literal — KEV is a catalogue membership, not a
+   severity level, so it must not drift with the --severity-* ramp. */
+.kevBadge {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+/* Wrong-match menu: the convert type list nests one level under its row, and a
+   hairline separates the narrow fixes from the ones that reach past this
+   article. */
+.submenu {
+  border-left: 2px solid var(--border);
+  margin: 2px 0 2px var(--sp-3);
+}
+
+.submenu .enrichMenuItem {
+  padding-left: var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
+.menuDivider {
+  height: 1px;
+  margin: var(--sp-2) 0;
+  background: var(--border);
+}

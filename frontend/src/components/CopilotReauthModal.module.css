@@ -1,0 +1,118 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.modal {
+  width: 100%;
+  max-width: 30rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 1.5rem 1.75rem;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+
+.title {
+  margin: 0 0 1rem;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.note {
+  margin: 0;
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+}
+
+.error {
+  margin: 0 0 0.75rem;
+  font-size: var(--fs-md);
+  color: var(--danger);
+}
+
+.steps {
+  margin: 0 0 0.9rem;
+  padding-left: 1.2rem;
+  font-size: var(--fs-md);
+  line-height: 1.7;
+  color: var(--text-secondary);
+}
+
+.link {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+.codeRow {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.codeInput {
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  font-size: var(--fs-md);
+  font-family: var(--font-mono, monospace);
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.codeInput:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.primaryBtn {
+  padding: 0.5rem 1rem;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  /* Label sits on the accent fill: #fff measured 2.53:1 against the default
+     accent. --accent-text is derived from that same fill by applyTheme. */
+  color: var(--accent-text);
+  background: var(--accent);
+  border: none;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.primaryBtn:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.primaryBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.cancelBtn {
+  display: block;
+  margin-top: 1rem;
+  padding: 0.35rem 0.75rem;
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+
+.cancelBtn:hover {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}

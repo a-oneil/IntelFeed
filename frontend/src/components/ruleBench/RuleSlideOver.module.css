@@ -1,0 +1,83 @@
+/* Docked rail — width comes from the persisted useRailWidth style, the same
+   as the workbench entry reader. Not an overlay: it sits in the page flex row
+   and pushes the editor. */
+.panel {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  min-width: 0;
+  height: 100%;
+  background: var(--bg-primary);
+  border-left: 1px solid var(--border);
+}
+
+/* Copies the entry reader's .topBar exactly. */
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 0.375rem var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  overflow-x: auto;
+}
+
+.headTabs {
+  display: flex;
+  align-items: center;
+}
+
+.title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.close {
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-secondary);
+  font-size: var(--fs-base);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  /* The tab strip beside it scrolls, and selecting a tab from the far end
+     carries Close off the left edge with it. Pin it to the scroller so the way
+     out of the panel is always on screen. */
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  /* Paint the bar's own gutter to the left of the pinned button, so scrolled
+     tabs disappear behind it instead of showing through the padding. */
+  box-shadow: calc(-1 * var(--sp-4)) 0 0 var(--bg-secondary);
+}
+
+.close:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 18px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+
+/* On a phone the rail can't share the row — pin it as a full-height overlay. */
+@media (max-width: 767px) {
+  .panel {
+    position: fixed;
+    inset: 0 0 0 auto;
+    width: min(560px, 100vw);
+    z-index: 70;
+    box-shadow: -12px 0 32px rgb(0 0 0 / 45%);
+  }
+}

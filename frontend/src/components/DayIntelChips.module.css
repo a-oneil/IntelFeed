@@ -1,0 +1,304 @@
+.chips {
+  display: flex;
+  align-items: center;
+  /* Single horizontally-scrolling lane. Wrapping pushed the divider taller on
+     narrow widths and shoved the entry list down; scrolling keeps the strip a
+     fixed one-row height at every viewport. */
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  gap: 6px;
+  /* The intel strip claims its own full-width row inside the day divider and
+     sits (order: 2) below the meta + action-button row. This keeps the
+     "Mark day read" / "Summarize day" buttons aligned on the top line instead
+     of wrapping into an awkward, lower-right island beneath the chips. */
+  flex-basis: 100%;
+  order: 2;
+  margin-top: var(--sp-1);
+  min-width: 0;
+}
+
+.chips::-webkit-scrollbar {
+  display: none;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  /* Override the global mobile `button { min-height: 36px }` touch-target rule
+     in index.css — these dense info chips are not primary tap targets and must
+     stay uniform height whether they render as <button> or <span>. */
+  min-height: 22px;
+  line-height: 1;
+  box-sizing: border-box;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  padding: 0 var(--sp-3) 0 6px;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--chip-color, var(--text-muted)) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--chip-color, var(--text-muted)) 35%, transparent);
+  color: var(--text-primary);
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: 0;
+  white-space: nowrap;
+  /* Chips must keep their natural width inside the scroller instead of being
+     squeezed by the flex container. */
+  flex: 0 0 auto;
+  max-width: 220px;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.chip:hover {
+  background: color-mix(in srgb, var(--chip-color, var(--text-muted)) 18%, transparent);
+  border-color: color-mix(in srgb, var(--chip-color, var(--text-muted)) 60%, transparent);
+}
+
+.actor {
+  --chip-color: var(--entity-actor);
+}
+
+.malware {
+  --chip-color: var(--entity-malware);
+}
+
+.cve {
+  --chip-color: var(--entity-cve);
+}
+
+.ttp {
+  --chip-color: var(--entity-ttp);
+}
+
+.sector {
+  --chip-color: var(--entity-sector);
+}
+
+.product {
+  --chip-color: var(--entity-product);
+}
+
+.country {
+  --chip-color: var(--entity-country);
+}
+
+/* Display-only chips (no navigation target) shouldn't look clickable. */
+.static {
+  cursor: default;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: -0.2px;
+}
+
+/* Signal chip: actively-exploited CVEs. Solid alert treatment, distinct from
+   the frequency chips so a dangerous day reads at a glance. */
+.signal {
+  --chip-color: var(--danger);
+  cursor: default;
+  font-weight: 600;
+  padding-left: 8px;
+  color: color-mix(in srgb, var(--danger) 25%, var(--text-primary));
+  background: color-mix(in srgb, var(--danger) 20%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 65%, transparent);
+}
+
+.pip {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--danger);
+  box-shadow: 0 0 6px var(--danger);
+  flex-shrink: 0;
+}
+
+/* New-today chip: an entity first tracked within the day window. */
+.newflag {
+  --chip-color: var(--entity-actor);
+  border-style: dashed;
+}
+
+.star {
+  color: var(--warning);
+  font-size: var(--fs-sm);
+  line-height: 1;
+}
+
+.chipLabel {
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--chip-color, var(--text-muted));
+  padding: 1px 5px;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--chip-color, var(--text-muted)) 18%, transparent);
+}
+
+.chipName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.chipCount {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+/* "?" chip that opens the legend. Muted and iconic so it reads as an aside to
+   the strip rather than another piece of intel. */
+.explain {
+  --chip-color: var(--text-muted);
+  width: 22px;
+  min-width: 22px;
+  padding: 0;
+  justify-content: center;
+  font-weight: 700;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  background: transparent;
+}
+
+.explain:hover,
+.explain[aria-expanded="true"] {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-muted) 16%, transparent);
+  border-color: color-mix(in srgb, var(--text-muted) 55%, transparent);
+}
+
+/* Legend panel — portalled to <body>, so it is positioned in viewport space and
+   escapes the strip's overflow clipping. */
+.legend {
+  position: fixed;
+  z-index: 1000;
+  width: min(360px, calc(100vw - 16px));
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
+  padding: var(--sp-4);
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  box-shadow: var(--elevation-3);
+  color: var(--text-primary);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  line-height: 1.45;
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: default;
+}
+
+.legendTitle {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  margin-bottom: var(--sp-2);
+}
+
+.legendIntro {
+  margin: 0 0 var(--sp-3);
+  color: var(--text-secondary);
+}
+
+/* Two-column grid so every blurb starts at the same x — the term column
+   sizes to the widest chip, capped so a runaway name can't squeeze the text. */
+.legendList {
+  margin: 0;
+  display: grid;
+  grid-template-columns: fit-content(40%) 1fr;
+  align-items: baseline;
+  gap: var(--sp-3);
+}
+
+.legendRow {
+  display: contents;
+}
+
+/* Reuses .chipLabel, so it carries the same tint as the chip it explains. */
+.legendTerm {
+  justify-self: start;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.legendBlurb {
+  margin: 0;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+}
+
+.legendFoot {
+  margin: var(--sp-4) 0 0;
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+
+@media (max-width: 767px) {
+  /* Push chips to their own row so they don't share a cramped line with
+     the date label / count / buttons — but keep them compact so a few
+     stacked chips don't dominate the divider. The action buttons are compact
+     icon buttons on mobile too, so the desktop `order: 2` (chips below the
+     meta + action row) applies unchanged here. */
+  .chips {
+    flex-basis: 100%;
+    gap: var(--sp-2);
+    margin-top: var(--sp-1);
+  }
+
+  .chip {
+    height: 22px;
+    font-size: var(--fs-xs);
+    padding: 0 7px 0 5px;
+    gap: 4px;
+    max-width: 100%;
+  }
+
+  /* 8.5px is below the scale floor (--fs-2xs is 9px) and snapping it up would
+     erase the mobile shrink relative to the desktop label. Left raw. */
+  .chipLabel {
+    font-size: var(--fs-2xs);
+    padding: 1px var(--sp-2);
+  }
+
+  .mono {
+    font-size: var(--fs-2xs);
+  }
+
+  /* The mobile `.chip` padding above would otherwise re-pad the square "?". */
+  .explain {
+    padding: 0;
+  }
+
+  .legend {
+    padding: var(--sp-3);
+  }
+
+  /* Stack term over blurb — side-by-side leaves the blurb a ~2-word column. */
+  .legendList {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .legendRow {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-1);
+  }
+
+  .legendTerm {
+    max-width: 100%;
+    align-self: flex-start;
+  }
+}

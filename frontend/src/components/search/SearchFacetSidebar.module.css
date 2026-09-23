@@ -1,0 +1,214 @@
+/* The search page's own nav rail. Deliberately identical in weight to the
+   workbench and settings rails — it is the same kind of surface, a second
+   sidebar inside the content area, and must not read as the app sidebar. */
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  padding: var(--sp-4) 0 var(--sp-6);
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+}
+
+.groupTitle {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  padding: 0 var(--sp-5) 6px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.groupTotal {
+  margin-left: auto;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: 5px var(--sp-5);
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  font-family: inherit;
+  border-left: 2px solid transparent;
+  transition: background 0.1s, color 0.1s;
+  min-width: 0;
+}
+
+.row:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.rowOn {
+  color: var(--text-primary);
+  background: var(--bg-active);
+  border-left-color: var(--accent);
+}
+
+.rowOn:hover {
+  background: var(--bg-active);
+}
+
+.rowLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.rowHint {
+  margin-left: auto;
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex: none;
+}
+
+.count {
+  margin-left: auto;
+  flex: none;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  padding-left: var(--sp-3);
+}
+
+.rowOn .count {
+  color: var(--text-primary);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-sm);
+  flex: none;
+  opacity: 0.9;
+}
+
+.rowOn .dot {
+  opacity: 1;
+  box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 22%, transparent);
+}
+
+.check,
+.radio {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border: 1px solid var(--text-muted);
+  position: relative;
+}
+
+.check { border-radius: 3px; }
+.radio { border-radius: 50%; }
+
+.checkOn {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.checkOn::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0.5px;
+  width: 3px;
+  height: 6px;
+  border: solid var(--accent-text);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+
+.radioOn {
+  border-color: var(--accent);
+}
+
+.radioOn::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.facetSearch {
+  margin: 0 var(--sp-5) 6px;
+  padding: 4px 7px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-primary);
+  font-size: var(--fs-sm);
+  font-family: inherit;
+  min-width: 0;
+}
+
+.facetSearch:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.moreBtn {
+  align-self: flex-start;
+  margin-left: calc(var(--sp-5) + 20px);
+  padding: 4px 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--accent-intel);
+  font-size: var(--fs-sm);
+  font-family: inherit;
+}
+
+.moreBtn:hover {
+  text-decoration: underline;
+}
+
+.empty {
+  padding: 2px var(--sp-5) 6px;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.footer {
+  margin-top: auto;
+  padding: var(--sp-4) var(--sp-5) 0;
+  border-top: 1px solid var(--border);
+}
+
+.clearBtn {
+  width: 100%;
+  padding: 6px var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.clearBtn:hover {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}

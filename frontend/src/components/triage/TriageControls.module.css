@@ -1,0 +1,78 @@
+/* No box: these controls are the dashboard's page-header controls row, not a
+   card of their own. The bordered bar was the only framed header in the
+   workbench and read as a widget rather than as chrome. */
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  min-width: 0;
+  flex: 1;
+}
+
+/* Tabs zone — must be allowed to shrink so the tab strip's own horizontal
+   scroller takes over instead of the strip pushing past the bar. */
+.zone {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.zoneCenter {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+
+.label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.primaryAction,
+.secondaryAction {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  font-size: var(--fs-base);
+  font-weight: 500;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.primaryAction:hover,
+.secondaryAction:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+@media (max-width: 900px) {
+  .bar {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  /* Wrapped onto its own row — full width so the tab strip scrolls in place. */
+  .zone {
+    width: 100%;
+  }
+}
+
+/* Active state for toggle actions (layout lock). */
+.actionOn {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}

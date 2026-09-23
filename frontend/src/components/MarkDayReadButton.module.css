@@ -1,0 +1,62 @@
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  min-height: 22px;
+  padding: 0;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+  background: var(--bg-hover, color-mix(in srgb, var(--text-muted) 12%, var(--bg-tertiary)));
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.spinner {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, var(--text-secondary) 40%, transparent);
+  border-top-color: var(--text-secondary);
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 767px) {
+  .btn {
+    /* Slightly larger tap target on touch, still an inline icon button next
+       to the entry count rather than a full-width row. */
+    width: 28px;
+    height: 28px;
+    min-height: 28px;
+  }
+
+  .btn svg {
+    width: 14px;
+    height: 14px;
+  }
+}

@@ -1,0 +1,25 @@
+<svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Hexagon outline -->
+  <path d="M12 2L21.2 7.5V16.5L12 22L2.8 16.5V7.5Z" stroke="#f78166" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
+  <!-- Internal network lines — hexagram -->
+  <path d="M12 2L21.2 16.5L2.8 16.5Z" stroke="#f78166" stroke-width="0.7" stroke-linejoin="round" fill="none" opacity="0.6"/>
+  <path d="M21.2 7.5L12 22L2.8 7.5Z" stroke="#f78166" stroke-width="0.7" stroke-linejoin="round" fill="none" opacity="0.6"/>
+  <!-- Outer vertex nodes -->
+  <circle cx="12" cy="2" r="1.1" fill="#f78166"/>
+  <circle cx="21.2" cy="7.5" r="1.1" fill="#f78166"/>
+  <circle cx="21.2" cy="16.5" r="1.1" fill="#f78166"/>
+  <circle cx="12" cy="22" r="1.1" fill="#f78166"/>
+  <circle cx="2.8" cy="16.5" r="1.1" fill="#f78166"/>
+  <circle cx="2.8" cy="7.5" r="1.1" fill="#f78166"/>
+  <!-- Inner intersection nodes -->
+  <circle cx="15.5" cy="7.5" r="0.8" fill="#f78166"/>
+  <circle cx="18.3" cy="12" r="0.8" fill="#f78166"/>
+  <circle cx="15.5" cy="16.5" r="0.8" fill="#f78166"/>
+  <circle cx="8.5" cy="16.5" r="0.8" fill="#f78166"/>
+  <circle cx="5.7" cy="12" r="0.8" fill="#f78166"/>
+  <circle cx="8.5" cy="7.5" r="0.8" fill="#f78166"/>
+  <!-- RSS signal waves -->
+  <circle cx="8.5" cy="15.5" r="1.3" fill="#f78166"/>
+  <path d="M8.5 12.5C10.16 12.5 11.5 13.84 11.5 15.5" stroke="#f78166" stroke-width="1.4" stroke-linecap="round" fill="none"/>
+  <path d="M8.5 9.8C11.65 9.8 14.2 12.35 14.2 15.5" stroke="#f78166" stroke-width="1.4" stroke-linecap="round" fill="none"/>
+</svg>

@@ -1,0 +1,101 @@
+import logging
+from urllib.parse import quote, unquote, urlparse, urlunparse
+from urllib.robotparser import RobotFileParser
+
+import httpx
+
+from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+# In-memory cache of parsed robots.txt files: domain -> (parser, expiry_timestamp)
+_cache: dict[str, tuple[RobotFileParser, float]] = {}
+_CACHE_TTL = 3600  # 1 hour
+
+
+def _rule_allows(parser: RobotFileParser, useragent: str, url: str) -> bool:
+    """Evaluate robots.txt rules with most-specific-match precedence.
+
+    ``RobotFileParser.can_fetch`` returns the *first* matching rule, so a file
+    written as ``Allow: /`` followed by ``Disallow: /admin/`` — an extremely
+    common shape — reads as "everything is permitted" and we would happily
+    crawl the disallowed paths. RFC 9309 §2.2.2 says the longest matching path
+    wins, with ties going to Allow, which is what this implements.
+    """
+    if parser.disallow_all:
+        return False
+    if parser.allow_all:
+        return True
+
+    entry = next((e for e in parser.entries if e.applies_to(useragent)), None) or parser.default_entry
+    if entry is None:
+        return True
+
+    parsed = urlparse(unquote(url))
+    path = urlunparse(("", "", parsed.path, parsed.params, parsed.query, "")) or "/"
+    path = quote(path)
+
+    best_length = -1
+    best_allowance = True
+    for line in entry.rulelines:
+        if not line.applies_to(path):
+            continue
+        length = 0 if line.path == "*" else len(line.path)
+        # On a tie the permissive rule wins, per the RFC.
+        if length > best_length or (length == best_length and line.allowance):
+            best_length = length
+            best_allowance = line.allowance
+
+    return best_allowance
+
+
+async def can_fetch(url: str) -> bool:
+    """Check if robots.txt allows fetching the given URL.
+
+    Returns True if allowed or if robots.txt cannot be fetched.
+    """
+    parsed = urlparse(url)
+    domain = parsed.netloc.lower()
+    robots_url = f"{parsed.scheme}://{domain}/robots.txt"
+
+    # Check cache
+    import time
+
+    if domain in _cache:
+        parser, expiry = _cache[domain]
+        if time.time() < expiry:
+            return _rule_allows(parser, settings.user_agent, url)
+
+    # Fetch robots.txt
+    parser = RobotFileParser()
+    try:
+        async with httpx.AsyncClient(timeout=10.0, headers={"User-Agent": settings.user_agent}) as client:
+            response = await client.get(robots_url)
+            if response.status_code == 200:
+                parser.parse(response.text.splitlines())
+            else:
+                # If robots.txt doesn't exist or errors, allow all
+                parser.allow_all = True
+    except httpx.HTTPError:
+        # If we can't fetch robots.txt, default to allowing
+        parser.allow_all = True
+
+    _cache[domain] = (parser, time.time() + _CACHE_TTL)
+    return _rule_allows(parser, settings.user_agent, url)
+
+
+async def get_crawl_delay(url: str) -> float | None:
+    """Get the Crawl-delay directive for our user agent, if any."""
+    parsed = urlparse(url)
+    domain = parsed.netloc.lower()
+
+    # Ensure robots.txt is cached
+    await can_fetch(url)
+
+    if domain in _cache:
+        parser, _ = _cache[domain]
+        delay = parser.crawl_delay(settings.user_agent)
+        if delay is not None:
+            return float(delay)
+
+    return None

@@ -1,0 +1,117 @@
+/* Shared chrome for the rule bench rails: the section label and the small
+   bordered card both rails repeat. Kept in one module so the left and right
+   columns cannot drift apart. */
+
+.railLabel {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.railLabel b {
+  margin-left: auto;
+  letter-spacing: 0;
+  text-transform: none;
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.card {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-secondary);
+  overflow: hidden;
+}
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: 6px var(--sp-4);
+  border-bottom: 1px solid var(--bg-tertiary);
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+}
+
+.cardBody {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--sp-3) var(--sp-4);
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+}
+
+.cardBody + .cardBody {
+  border-top: 1px solid var(--bg-tertiary);
+}
+
+.cardFoot {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  padding: 6px var(--sp-4);
+  border-top: 1px solid var(--bg-tertiary);
+}
+
+.kv {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  min-width: 0;
+}
+
+.kv > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kvStatus {
+  margin-left: auto;
+  flex: none;
+  font-size: var(--fs-2xs);
+}
+
+.ok { color: var(--success); }
+.warn { color: var(--warning); }
+.bad { color: var(--danger); }
+.accent { color: var(--accent); }
+
+.btn {
+  padding: 3px var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.empty {
+  padding: var(--sp-3) 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}

@@ -1,0 +1,53 @@
+/* Defaults only — every surface may replace these via the `classes` prop. */
+
+.wrapper {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  position: relative;
+}
+
+.inputRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-4);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  cursor: text;
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  outline: none;
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  cursor: text;
+}
+
+.input::placeholder {
+  color: var(--text-muted);
+  font-size: var(--fs-md);
+}
+
+.dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  margin-top: var(--sp-2);
+  padding: var(--sp-2);
+  max-height: 240px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--elevation-2);
+}

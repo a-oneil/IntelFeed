@@ -1,0 +1,267 @@
+.thread {
+  border-bottom: 1px solid var(--border);
+  border-left: 3px solid var(--accent-intel);
+  background: color-mix(in srgb, var(--accent-intel) 5%, var(--bg-primary));
+  /* The entry list is resizable and docks to ~300px beside an open reader.
+     Sized against the row, not the viewport: a desktop-width media query left
+     the title crushed to "U." while the chips and counts kept their width. */
+  container-type: inline-size;
+}
+
+.headerRow {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.caretBtn {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 0 0.25rem 0 calc(1rem - 3px);
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+}
+.caret {
+  font-size: var(--fs-caret);
+  line-height: 1;
+  transition: transform 0.15s ease;
+  display: inline-block;
+}
+.caretOpen {
+  transform: rotate(90deg);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex: 1;
+  padding: 0.6rem 0.5rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  text-align: left;
+  min-width: 0;
+}
+.header:hover {
+  background: color-mix(in srgb, var(--accent-intel) 9%, transparent);
+}
+
+.score {
+  flex: none;
+  font-size: var(--fs-base);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.score.high {
+  color: var(--danger);
+}
+.score.medium {
+  color: var(--warning);
+}
+.score.low {
+  color: var(--text-secondary);
+}
+
+.thread_ {
+  flex: none;
+  color: var(--accent-intel);
+  font-size: var(--fs-base);
+}
+
+.title {
+  /* Grows before the chips do and shrinks last: the story's name is the row. */
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 46ch;
+}
+
+.chips {
+  display: flex;
+  gap: 0.3rem;
+  overflow: hidden;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.entityChip {
+  font-size: var(--fs-sm);
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.count {
+  flex: none;
+  margin-left: auto;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.clearBtn {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  padding: 0 0.75rem 0 0.25rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: color 0.12s ease;
+}
+.clearBtn:hover:not(:disabled) {
+  color: var(--success, var(--accent-intel));
+}
+.clearBtn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.clearBtn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent-intel);
+  border-radius: 50%;
+  animation: threadSpin 0.7s linear infinite;
+}
+@keyframes threadSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spine {
+  display: flex;
+  flex-direction: column;
+  padding: 0 0.75rem 0.5rem 2.1rem;
+}
+
+.loading {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  padding: 0.4rem 0;
+}
+
+.beat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  background: none;
+  border: none;
+  border-left: 2px solid var(--border);
+  cursor: pointer;
+  color: inherit;
+  text-align: left;
+}
+.beat:hover {
+  background: var(--bg-tertiary);
+  border-left-color: var(--accent-intel);
+}
+.beatActive {
+  background: var(--bg-tertiary);
+  border-left-color: var(--accent);
+}
+
+.beatMeta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+.beatDate {
+  font-variant-numeric: tabular-nums;
+}
+.beatKind {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: calc(var(--fs-sm) * 0.92);
+}
+.beatKind.first_disclosure {
+  color: var(--accent-intel);
+}
+.beatKind.new_tradecraft {
+  color: var(--danger);
+}
+.beatKind.peak {
+  color: var(--warning);
+}
+.folded {
+  font-style: italic;
+}
+
+.beatHeadline {
+  font-size: var(--fs-md);
+  line-height: 1.3;
+  color: var(--text-primary);
+}
+.beatBody {
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+  color: var(--text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.openThread {
+  align-self: flex-start;
+  margin: 0.35rem 0 0 0.6rem;
+  padding: 0.2rem 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  color: var(--accent-intel);
+}
+.openThread:hover {
+  text-decoration: underline;
+}
+
+/* Docked next to an open reader there is room for the name and the counts but
+   not the entity chips; narrower still, only the name and the mark-read control
+   survive. Both are in the spine one click away. */
+@container (max-width: 620px) {
+  .chips {
+    display: none;
+  }
+  .title {
+    max-width: none;
+  }
+}
+
+@container (max-width: 420px) {
+  .count {
+    display: none;
+  }
+}
+
+@media (max-width: 767px) {
+  .clearBtn {
+    width: 2.75rem;
+    padding: 0 0.5rem;
+  }
+}

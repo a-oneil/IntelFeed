@@ -1,0 +1,65 @@
+.btn {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.menu {
+  position: fixed;
+  min-width: 220px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--elevation-3);
+  padding: var(--sp-2) 0;
+  z-index: 1000;
+  animation: feedMenuFadeIn 0.1s ease-out;
+}
+
+@keyframes feedMenuFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.item {
+  all: unset;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: 0.4375rem var(--sp-4);
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+  cursor: pointer;
+  box-sizing: border-box;
+  transition: background 0.1s;
+}
+
+.item:hover {
+  background: var(--bg-tertiary);
+}
+
+.item svg {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+@media (max-width: 767px) {
+  /* 12px has no step on the D6 scale (4 / 6 / 999) and --r-md would halve it;
+     the mobile sheet is deliberately rounder than the desktop menu. Left raw. */
+  .menu {
+    min-width: 240px;
+    border-radius: var(--r-md);
+  }
+
+  /* 0.875rem (14px) is a deliberate +1px mobile bump over the desktop
+     --fs-md; snapping it to --fs-md would erase the bump. Left raw. */
+  .item {
+    padding: 0.625rem var(--sp-5);
+    min-height: 44px;
+    font-size: var(--fs-md);
+  }
+}

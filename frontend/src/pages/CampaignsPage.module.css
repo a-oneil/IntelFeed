@@ -1,0 +1,221 @@
+.page {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+}
+
+.listPanel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+
+
+.createBtn {
+  padding: 6px var(--sp-4);
+  font-size: var(--fs-base);
+  font-weight: 600;
+  border-radius: var(--r-md);
+  border: none;
+  background: var(--accent);
+  color: var(--accent-text);
+  cursor: pointer;
+}
+
+
+
+
+
+
+/* Chips — colour, size and shape come from the primitive. `.tlpBadge` had
+   nothing left of its own once `tone="outline"` supplied the tinted border
+   and text, so only the status tag's casing survives here. */
+.statusTag {
+  text-transform: uppercase;
+}
+
+
+
+/* Suggestions */
+
+.suggestionList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.suggestionTitle {
+  font-size: var(--fs-md);
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggestionMeta {
+  display: flex;
+  gap: var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  margin-top: var(--sp-1);
+}
+
+.overlapBadge {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* List header buttons */
+
+
+.discoverBtn {
+  padding: 6px var(--sp-4);
+  font-size: var(--fs-base);
+  font-weight: 600;
+  border-radius: var(--r-md);
+  border: 1px solid var(--accent);
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.discoverBtn:hover {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+/* Auto-detect modal */
+
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  width: 90%;
+  max-width: 600px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modalHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--sp-5) 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modalHeader h3 {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.modalClose {
+  background: none;
+  border: none;
+  font-size: var(--fs-xl);
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 var(--sp-2);
+}
+
+/* Still used by the Discover modal's empty state. */
+.placeholder {
+  padding: var(--sp-6);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--fs-md);
+}
+
+.modalBody {
+  padding: var(--sp-5) 20px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: 1;
+}
+
+.modalCenter {
+  text-align: center;
+  padding: 20px 0;
+}
+
+.modalDesc {
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+  margin: 0 0 var(--sp-5);
+}
+
+.autoDetectRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: var(--sp-4) 0;
+  border-bottom: 1px solid var(--bg-tertiary);
+  gap: var(--sp-4);
+}
+
+.autoDetectInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.sampleEntries {
+  margin-top: 6px;
+  padding-left: var(--sp-3);
+  border-left: 2px solid var(--bg-tertiary);
+}
+
+.statusCell { display: inline-flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+
+.quietTag {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.widerHint {
+  margin-top: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.sampleEntry {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  padding: 1px 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Stack the two-pane layout on phones and iPad-portrait sizes — 320px sidebar
+   + flex:1 detail just barely fits at 768px and is cramped from there down. */
+@media (max-width: 1024px) {
+  .page {
+    flex-direction: column;
+  }
+
+  .listPanel {
+    width: 100%;
+    max-height: 50dvh;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+}

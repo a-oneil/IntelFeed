@@ -1,0 +1,155 @@
+/* NoteCard — the single note card used across sidebar, entry panel and
+   entity profiles. Read state shows rendered content; hovering reveals the
+   actions; Edit flips the card into the inline editor. */
+.card {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-secondary);
+  padding: 12px 14px;
+  transition: border-color 0.15s;
+}
+.card:hover {
+  border-color: var(--text-muted);
+}
+.card:hover .actions {
+  opacity: 1;
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+
+.pinIcon {
+  font-size: var(--fs-sm);
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.title {
+  font-family: var(--font-display);
+  font-size: var(--fs-md);
+  font-weight: 700;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  overflow: hidden;
+}
+.metaSep {
+  color: var(--text-muted);
+}
+.author {
+  font-weight: 500;
+  white-space: nowrap;
+}
+.time {
+  font-family: var(--font-display);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.linked {
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.linked:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+.actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+/* Touch devices: actions can't be hovered, keep them visible */
+@media (hover: none) {
+  .actions {
+    opacity: 1;
+  }
+}
+.iconBtn {
+  font-family: var(--font-display);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 4px 9px;
+  cursor: pointer;
+  transition: 0.15s;
+  white-space: nowrap;
+}
+.iconBtn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+.iconBtn.danger:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+/* collapsible body */
+.bodyClamp {
+  position: relative;
+  overflow: hidden;
+}
+.bodyClamp.clamped {
+  max-height: 220px;
+}
+.bodyClamp.clamped::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 72px;
+  background: linear-gradient(to bottom, transparent, var(--bg-secondary));
+  pointer-events: none;
+}
+
+.expandBtn {
+  margin-top: var(--sp-3);
+  font-family: var(--font-display);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: var(--sp-1) 0;
+  cursor: pointer;
+}
+.expandBtn:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+@media (max-width: 767px) {
+  .iconBtn {
+    min-height: 36px;
+  }
+}

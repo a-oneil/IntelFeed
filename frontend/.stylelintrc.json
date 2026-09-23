@@ -1,0 +1,25 @@
+{
+  "rules": {},
+  "overrides": [
+    {
+      "files": ["src/**/*.module.css"],
+      "rules": {
+        "color-no-hex": [
+          true,
+          {
+            "message": "Raw hex color — use a var(--token) from index.css instead."
+          }
+        ],
+        "declaration-property-value-disallowed-list": [
+          {
+            "font-size": ["/[0-9](px|rem)/"],
+            "/^border(-(top|bottom)-(left|right))?-radius$/": ["/[0-9]px/"]
+          },
+          {
+            "message": "Raw geometry value — use the D6 scale: var(--fs-*) for font-size, var(--r-sm|--r-md|--r-full) for border-radius (50% is fine)."
+          }
+        ]
+      }
+    }
+  ]
+}

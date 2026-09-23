@@ -1,0 +1,6 @@
+.feedTypeIcon {
+  flex-shrink: 0;
+  margin-right: 4px;
+  color: var(--text-muted);
+  opacity: 0.6;
+}

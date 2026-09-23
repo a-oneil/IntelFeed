@@ -1,0 +1,161 @@
+.tagInput {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--elevation-2);
+  min-width: 240px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.label {
+  font-size: var(--fs-sm);
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.closeBtn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+}
+
+.tagList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+/* Toggle tag: Chip supplies the pill, the marker dot and the focus ring; this
+   keeps the picker's roomier 12px face and its unfilled ground. Doubled so it
+   beats Chip's own single-class rules whichever order the sheets land in. */
+.tag.tag {
+  padding: var(--sp-2) 10px;
+  font-size: var(--fs-base);
+  color: var(--text-primary);
+  background: none;
+  transition: background-color 0.15s;
+}
+
+.tag.tag:hover {
+  background: var(--bg-secondary);
+  border-color: var(--border);
+}
+
+.tag.active {
+  background: var(--bg-secondary);
+  border-color: var(--text-secondary);
+}
+
+.count {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
+.searchRow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.searchInput {
+  width: 100%;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 6px var(--sp-3);
+  font-size: var(--fs-md);
+  font-family: inherit;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+
+.searchInput::placeholder {
+  color: var(--text-secondary);
+}
+
+.searchInput:focus {
+  border-color: var(--accent);
+}
+
+.createRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.colorPicker {
+  width: 24px;
+  height: 24px;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  border-radius: var(--r-sm);
+  flex-shrink: 0;
+}
+
+.addBtn {
+  padding: var(--sp-2) 10px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: var(--accent);
+  color: var(--accent-text);
+  cursor: pointer;
+  font-size: var(--fs-base);
+  white-space: nowrap;
+}
+
+.addBtn:hover {
+  opacity: 0.9;
+}
+
+.empty {
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  padding: var(--sp-2) 0;
+}
+
+@media (max-width: 767px) {
+  .tagInput {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .tag.tag {
+    min-height: 36px;
+    padding: 6px var(--sp-4);
+  }
+
+  .searchInput {
+    min-height: 44px;
+    font-size: var(--fs-lg);
+  }
+
+  .addBtn {
+    min-height: 44px;
+    padding: 6px 14px;
+  }
+
+  .colorPicker {
+    width: 36px;
+    height: 36px;
+  }
+
+  .closeBtn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}

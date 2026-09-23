@@ -1,0 +1,121 @@
+.wrapper {
+  position: relative;
+}
+
+.trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px var(--sp-4);
+  font-size: var(--fs-md);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.trigger:hover {
+  background: var(--bg-hover);
+}
+
+.dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: var(--sp-2);
+  min-width: 220px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--elevation-2);
+  z-index: 50;
+  padding: var(--sp-2);
+}
+
+.dropdownLeft {
+  right: auto;
+  left: 0;
+}
+
+.option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--sp-3) var(--sp-4);
+  font-size: var(--fs-md);
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+.option:hover {
+  background: var(--bg-hover);
+}
+
+.optionActive {
+  background: var(--bg-active);
+  font-weight: 600;
+}
+
+.customRange {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: var(--sp-3);
+  border-top: 1px solid var(--border);
+  margin-top: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.dateInput {
+  padding: var(--sp-2) 6px;
+  font-size: var(--fs-base);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+}
+
+.dateSep {
+  font-size: var(--fs-base);
+  color: var(--text-muted);
+}
+
+.applyBtn {
+  padding: var(--sp-2) 10px;
+  font-size: var(--fs-base);
+  font-weight: 500;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  background: var(--accent);
+  color: var(--accent-text);
+  cursor: pointer;
+}
+
+.applyBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 767px) {
+  .trigger {
+    min-height: 44px;
+  }
+
+  .option {
+    min-height: 44px;
+  }
+
+  .dateInput {
+    min-height: 44px;
+  }
+
+  .applyBtn {
+    min-height: 44px;
+  }
+}

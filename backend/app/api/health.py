@@ -1,0 +1,77 @@
+import time
+
+import httpx
+from fastapi import APIRouter
+from sqlalchemy import text
+
+from app.config import settings
+from app.database import async_session
+from app.services.redis_client import get_redis
+
+router = APIRouter()
+
+
+async def _check_database() -> dict:
+    start = time.monotonic()
+    try:
+        async with async_session() as db:
+            await db.execute(text("SELECT 1"))
+        latency = round((time.monotonic() - start) * 1000, 1)
+        return {"status": "ok", "latency_ms": latency}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+async def _check_redis() -> dict:
+    start = time.monotonic()
+    try:
+        r = await get_redis()
+        await r.ping()
+        latency = round((time.monotonic() - start) * 1000, 1)
+        return {"status": "ok", "latency_ms": latency}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+async def _check_meilisearch() -> dict:
+    start = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{settings.meili_url}/health")
+            latency = round((time.monotonic() - start) * 1000, 1)
+            if resp.status_code == 200:
+                return {"status": "ok", "latency_ms": latency}
+            return {"status": "error", "error": f"HTTP {resp.status_code}"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@router.get("/api/health")
+async def health():
+    """Aggregate health check pinging PostgreSQL, Redis, and Meilisearch, with per-component latency.
+
+    Overall status is "healthy" when every component is ok, "degraded" when only the
+    database is ok, and "unhealthy" when the database check fails. Unauthenticated.
+    """
+    components = {
+        "database": await _check_database(),
+        "redis": await _check_redis(),
+        "meilisearch": await _check_meilisearch(),
+    }
+
+    # Database is critical; others are non-critical
+    db_ok = components["database"]["status"] == "ok"
+    all_ok = all(c["status"] == "ok" for c in components.values())
+
+    if all_ok:
+        status = "healthy"
+    elif db_ok:
+        status = "degraded"
+    else:
+        status = "unhealthy"
+
+    return {
+        "status": status,
+        "version": "0.1.0",
+        "components": components,
+    }

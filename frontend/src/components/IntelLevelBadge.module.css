@@ -1,0 +1,59 @@
+.rail {
+  display: inline-block;
+  vertical-align: middle;
+  position: relative;
+  width: 3px;
+  height: 13px;
+  border-radius: var(--r-sm);
+  background: var(--bg-tertiary);
+  overflow: hidden;
+  flex-shrink: 0;
+  cursor: default;
+}
+
+.md {
+  width: 3.5px;
+  height: 15px;
+}
+
+.empty {
+  background: transparent;
+  border: 1px solid var(--text-muted);
+}
+
+.fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--text-secondary);
+}
+
+.full .fill {
+  background: var(--accent);
+}
+
+.rail[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 4px 8px;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  z-index: 200;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  transition: opacity 0.15s ease;
+}
+
+.rail[data-tooltip]:hover::after {
+  opacity: 1;
+}

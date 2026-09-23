@@ -1,0 +1,109 @@
+/* The one page-header treatment for every workbench/tool route.
+
+   Deliberately borderless and unpainted: the pages below it (entity tables,
+   rule library, matrix) already stack a table bar and a sticky column-header
+   row, so a rule under the title was the third hairline in 60px. Separation
+   comes from space instead. */
+.head {
+  /* Positioning context for overflow menus a caller renders inside
+     `actions` (the entity tables' mobile ⋯ sheet anchors here). */
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-5) 20px var(--sp-4);
+  flex-shrink: 0;
+}
+
+/* Pages that manage their own page padding (Vendor Watch, Engine, Ransomware)
+   opt out of the inset so the title lines up with their body content. */
+.flush {
+  padding: 0;
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.title {
+  /* Body face at --fs-lg: `index.css` puts h1 on the mono display face, which
+     made adjacent workbench routes read as different apps. */
+  font-family: var(--font-body);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+  margin: 0;
+  white-space: nowrap;
+}
+
+.count {
+  font-size: var(--fs-base);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin-left: auto;
+  min-width: 0;
+}
+
+.subtitle {
+  margin: 0;
+  max-width: 70ch;
+  font-size: var(--fs-md);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* Second row: search, filters, lenses — anything that reshapes the content
+   below rather than acting on it. */
+.controls {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+@media (max-width: 767px) {
+  .head {
+    padding: var(--sp-4);
+    gap: var(--sp-3);
+  }
+
+  .flush {
+    padding: 0;
+  }
+
+  /* Title and its count must stay one line with the actions beside them —
+     wrapping a 3-button row under the title cost a third of a phone screen. */
+  .titleRow {
+    flex-wrap: nowrap;
+  }
+
+  .title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Keep the action buttons on the title's line too. Left wrapping, a pair of
+     wide labels stacks into two rows on a 320px screen and pushes the title
+     down to a three-character stub. */
+  .actions {
+    flex-wrap: nowrap;
+  }
+
+  .actions > * {
+    white-space: nowrap;
+  }
+}

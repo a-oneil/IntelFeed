@@ -1,0 +1,82 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.heading {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.statusGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: var(--fs-base);
+}
+
+.statLabel {
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.on {
+  color: var(--success);
+}
+
+.off {
+  color: var(--text-secondary);
+}
+
+.modelRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.modelLabel {
+  font-size: var(--fs-base);
+  font-weight: 600;
+}
+
+.modelRow select {
+  padding: 4px 8px;
+  font-size: var(--fs-base);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.tokenInput {
+  padding: 4px 8px;
+  font-size: var(--fs-base);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  width: 7rem;
+}
+
+.modelHint {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
+.batchesNote {
+  margin-top: 4px;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  font-style: italic;
+}

@@ -1,0 +1,125 @@
+/* Canonical small label. Replaces ad-hoc .badge / .chip / .pill classes,
+   of which the audit counted 301 across 170 modules. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  /* Chips are dense 9-10px labels; 600 keeps them legible against the
+     surrounding body text at that size. */
+  font-weight: 600;
+  line-height: 1.5;
+  padding: 0 var(--sp-2);
+  white-space: nowrap;
+  vertical-align: middle;
+  /* Never let a chip be squeezed by a flex row — it would ellipsise a label
+     that is already only a few characters long. */
+  flex: none;
+  /* Non-interactive by default; .clickable re-declares this as `pointer` and
+     wins on source order. */
+  cursor: default;
+}
+
+/* --- sizes --- */
+.sm {
+  font-size: var(--fs-2xs);
+  padding: 0 var(--sp-2);
+}
+
+.md {
+  font-size: var(--fs-xs);
+  padding: 1px var(--sp-3);
+}
+
+/* --- shapes --- */
+.pill {
+  border-radius: var(--r-full);
+}
+
+/* --- tones. `tint` is set inline from the entity/severity token. --- */
+.toned {
+  color: var(--chip-tint);
+  border-color: color-mix(in srgb, var(--chip-tint) 45%, transparent);
+  background: color-mix(in srgb, var(--chip-tint) 12%, transparent);
+}
+
+.solid {
+  /* --chip-fg defaults to --accent-text, which is only the right foreground
+     when --chip-tint is the accent. Callers tinting with a severity or entity
+     color should pass `fg` explicitly. */
+  color: var(--chip-fg, var(--accent-text));
+  border-color: var(--chip-tint);
+  background: var(--chip-tint);
+}
+
+.quiet {
+  border-color: transparent;
+  background: transparent;
+  /* Overridable: a quiet chip at --text-secondary is as common as one at
+     --text-muted, and hardcoding the latter blocked status legends. */
+  color: var(--chip-fg, var(--text-muted));
+  padding-left: 0;
+  padding-right: 0;
+}
+
+/* Full-strength tinted border over the normal ground — distinct from `toned`,
+   which also fills. Outlined severity pills need this. */
+.outline {
+  color: var(--chip-fg, var(--chip-tint));
+  border-color: var(--chip-tint);
+  background: transparent;
+}
+
+/* Interactive chips (filters, removable tags) get affordance + focus. */
+.clickable {
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.clickable:hover {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+.clickable.toned:hover {
+  color: var(--chip-tint);
+  border-color: var(--chip-tint);
+}
+
+.chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Leading colour marker — the square used in the workbench nav and legends. */
+.marker {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-sm);
+  background: var(--chip-tint, currentColor);
+  flex: none;
+}
+
+/* Status legends read as dots, not squares. */
+.markerDot {
+  border-radius: var(--r-full);
+}
+
+.chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Opt-in shrink + ellipsis. The default `flex: none; white-space: nowrap` is
+   right for short labels, but pushed long ones past their row in widget lists. */
+.truncate {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-block;
+}

@@ -1,0 +1,84 @@
+/* Two-column shell. The facet rail is a flush full-height column beside the
+   page header — the same surface treatment as the search page's facet rail and
+   the rule library's — so the page inset lives on the main column, not on a
+   wrapper that would push the rail inward. */
+.shell {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.rail {
+  width: 248px;
+  min-width: 248px;
+  border-right: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-secondary) 60%, var(--bg-primary));
+  overflow-y: auto;
+  transition: width 0.2s, min-width 0.2s, visibility 0.2s;
+}
+
+.railCollapsed {
+  width: 0 !important;
+  min-width: 0 !important;
+  overflow: hidden;
+  border-right: none;
+  /* Zero-width controls must stop being hit-test targets, or clicks aimed at
+     the feed land on collapsed facet rows underneath it. */
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.shellMain {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+/* The header carries PageHeader's own 20px inset now that the shell no longer
+   pads, and takes the body's width cap so the two stay aligned on wide screens. */
+.pageHeader {
+  max-width: 1360px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* The lifted Leak Watch filter — sized like every other header search box. */
+.search {
+  width: 260px;
+  max-width: 100%;
+  padding: 6px var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  outline: none;
+}
+
+.search:focus {
+  border-color: var(--accent);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  /* Match sibling WorkbenchPage sections' contentBody inset (16px 20px). */
+  padding: 16px 20px 48px;
+  max-width: 1360px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+@media (max-width: 860px) {
+  /* The rail folds away below this width, and its toggle goes with it —
+     RailToggle's own breakpoint is 767px, narrower than the rail's. */
+  .rail,
+  .railToggle,
+  .railResizer {
+    display: none;
+  }
+}

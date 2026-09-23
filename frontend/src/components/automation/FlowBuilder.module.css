@@ -1,0 +1,170 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.625rem 1rem;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.nameGroup {
+  display: flex;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.nameInput {
+  flex: 1;
+  min-width: 120px;
+  padding: 0.375rem 0.625rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.descInput {
+  flex: 2;
+  min-width: 120px;
+  padding: 0.375rem 0.625rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: var(--fs-md);
+}
+
+.backBtn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 0.375rem 0.75rem;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  font-size: var(--fs-md);
+}
+
+.backBtn:hover {
+  background: var(--bg-primary);
+}
+
+.saveBtn {
+  background: var(--accent);
+  color: var(--accent-text);
+  border: none;
+  padding: 0.375rem 1rem;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  font-weight: 500;
+  font-size: var(--fs-md);
+  white-space: nowrap;
+}
+
+.saveBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.error {
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
+  color: var(--danger);
+  padding: 0.375rem 1rem;
+  font-size: var(--fs-md);
+  flex-shrink: 0;
+}
+
+.flowWrapper {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Panel buttons */
+.addPanel {
+  display: flex;
+  gap: 0.375rem;
+}
+
+.addNodeBtn {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 0.375rem 0.75rem;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  font-size: var(--fs-base);
+  font-weight: 500;
+}
+
+.addNodeBtn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Legend */
+.legend {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.legendItem {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.legendDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.triggerDot {
+  background: var(--node-trigger);
+}
+
+.conditionDot {
+  background: var(--node-condition);
+}
+
+.actionDot {
+  background: var(--node-action);
+}
+
+.branchDot {
+  background: var(--node-branch);
+}
+
+@media (max-width: 767px) {
+  .header {
+    flex-wrap: wrap;
+  }
+
+  .nameGroup {
+    flex-direction: column;
+    order: 3;
+    width: 100%;
+  }
+
+  .backBtn,
+  .saveBtn {
+    min-height: 44px;
+  }
+}

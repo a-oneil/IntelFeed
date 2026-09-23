@@ -1,0 +1,350 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* toolbar */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.system {
+  font-size: var(--fs-base);
+  font-weight: 700;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+}
+.grow {
+  flex: 1;
+}
+
+.modeSeg,
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.modeSeg button,
+.seg button {
+  appearance: none;
+  background: none;
+  border: none;
+  border-right: 1px solid var(--border);
+  font: inherit;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding: 5px 11px;
+  cursor: pointer;
+}
+.modeSeg button:last-child,
+.seg button:last-child {
+  border-right: none;
+}
+.modeSeg button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.modeOn {
+  background: var(--accent) !important;
+  color: var(--accent-text) !important;
+}
+.segOn {
+  background: var(--bg-tertiary) !important;
+  color: var(--text-primary) !important;
+  font-weight: 700 !important;
+}
+
+.verdict {
+  font-size: var(--fs-base);
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.btn,
+.btnPrimary,
+.btnDanger {
+  font-size: var(--fs-base);
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.btn:disabled,
+.btnPrimary:disabled,
+.btnDanger:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.btnPrimary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+.btnDanger {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  color: var(--danger);
+  background: transparent;
+}
+
+/* table */
+.tableWrap {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-md);
+}
+.table thead th {
+  text-align: left;
+  font-size: var(--fs-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary, var(--text-secondary));
+  font-weight: 600;
+  padding: 9px 14px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.actCol {
+  width: 1%;
+}
+.table tbody td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+.table tbody tr:hover {
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+/* change tags */
+.tag {
+  display: inline-block;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--r-sm);
+  white-space: nowrap;
+}
+.tRemove {
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
+  color: var(--danger);
+}
+.tRecl {
+  background: color-mix(in srgb, var(--warning) 16%, transparent);
+  color: var(--warning);
+}
+.tMerge {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+}
+.tVlink {
+  background: color-mix(in srgb, var(--success) 15%, transparent);
+  color: var(--success);
+}
+.tName {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+.tStale {
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  color: var(--warning);
+}
+
+/* entity chip */
+.ent {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  appearance: none;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-primary);
+  cursor: pointer;
+  padding: 0;
+}
+.ent:disabled {
+  cursor: default;
+}
+.ent:not(:disabled):hover {
+  color: var(--accent);
+}
+.entDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
+/* A td must stay display:table-cell (flex here collapses the column and
+   strands the leftover width as a gap); width:100% makes this the greedy
+   column that absorbs the table's free space. */
+.detail {
+  width: 100%;
+}
+.subject {
+  display: block;
+  color: var(--text-primary);
+}
+.reason {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: var(--fs-base);
+}
+.muted {
+  color: var(--text-tertiary, var(--text-secondary));
+}
+.aiReason {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-tertiary, var(--text-secondary));
+  font-size: var(--fs-sm);
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60ch;
+}
+.linkChips {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+.linkChip {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.linkChip:hover {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+.when {
+  white-space: nowrap;
+  color: var(--text-tertiary, var(--text-secondary));
+  font-size: var(--fs-base);
+}
+
+/* verdict pills */
+.vpill {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: var(--r-full);
+  white-space: nowrap;
+}
+.vOk {
+  background: color-mix(in srgb, var(--success) 15%, transparent);
+  color: var(--success);
+}
+.vNo {
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
+  color: var(--danger);
+}
+.vMaybe {
+  background: color-mix(in srgb, var(--warning) 16%, transparent);
+  color: var(--warning);
+}
+
+/* row action buttons */
+.acts {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+.rowBtn {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.rowBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.bGood {
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+  color: var(--success);
+}
+.bWarn {
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
+  color: var(--warning);
+}
+.bGhost {
+  color: var(--text-secondary);
+}
+
+.empty {
+  text-align: center;
+  color: var(--text-secondary);
+  padding: 28px 14px;
+}
+
+/* generate-proposals row */
+.genRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.genLabel {
+  font-size: var(--fs-sm);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary, var(--text-secondary));
+  font-weight: 600;
+  margin-right: 2px;
+}
+.genBtn {
+  font-size: var(--fs-base);
+  font-weight: 600;
+  padding: 5px 11px;
+  border-radius: var(--r-md);
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.genBtn:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--text-tertiary, var(--text-secondary));
+}
+.genBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

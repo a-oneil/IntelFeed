@@ -1,0 +1,30 @@
+.articleLink {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px dotted color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.articleLink:hover {
+  border-bottom-style: solid;
+  text-decoration: none;
+}
+
+.entityLink {
+  /* border-bottom-color is set inline per-entity-type so one class supports
+     every color in ENTITY_COLOR_MAP. 2px dotted to match the AI-summary /
+     entry-body entity underline everywhere. */
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 2px dotted currentColor;
+  padding-bottom: 1px;
+  transition: background 0.12s, border-bottom-style 0.12s;
+}
+.entityLink:hover {
+  border-bottom-style: solid;
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  border-radius: var(--r-sm);
+}
+.entityLink:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}

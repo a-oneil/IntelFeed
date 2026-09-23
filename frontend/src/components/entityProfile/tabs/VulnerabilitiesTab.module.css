@@ -1,0 +1,249 @@
+.summary {
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  margin-bottom: var(--sp-4);
+}
+
+.summary b {
+  color: var(--text-primary);
+}
+
+/* The KEV count in the summary line is a `Chip`; this only carries the gap to
+   the preceding sentence, which Chip never sets. */
+.kevChipGap {
+  margin-left: var(--sp-3);
+}
+
+.filterStrip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+/* Active state for the `Chip`-based filter buttons. Doubled: `color`,
+   `border-color` and `background` are all properties Chip itself sets, so a
+   single class would only win by bundle order. */
+.fchipActive.fchipActive {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+/* --text-muted here measured 1.84:1 against Chip's --bg-tertiary ground (it was
+   already only 2.20:1 on the old transparent chip). --text-secondary is 4.95:1;
+   the count still reads as secondary because of its position and tabular figures. */
+.fchipCount {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.fchipActive .fchipCount {
+  color: inherit;
+}
+
+.fsep {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin: 0 var(--sp-2);
+}
+
+.sortSel {
+  margin-left: auto;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.prodStrip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: var(--sp-4);
+}
+
+.list {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--bg-secondary);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--sp-1) var(--sp-5);
+  padding: 9px 14px 9px var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  align-items: start;
+  border-left: 3px solid transparent;
+  background: color-mix(in srgb, var(--accent) 2%, var(--bg-primary));
+}
+
+.row:last-child {
+  border-bottom: 0;
+}
+
+.row:hover {
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-primary));
+}
+
+/* Deliberately NOT the --severity-* ramp: these are text/1px-stripe colours on
+   the dark row ground, and the ramp's fills (#dc2626 critical) drop to ~3.4:1
+   as text. The lighter tints below are the user-tuned values for this surface. */
+.sevCritical { border-left-color: #f87171; }
+.sevCritical .cvss { color: #f87171; }
+.sevHigh { border-left-color: var(--severity-high); }
+.sevHigh .cvss { color: var(--severity-high); }
+.sevMedium { border-left-color: #eab308; }
+.sevMedium .cvss { color: #eab308; }
+.sevLow { border-left-color: #4ade80; }
+.sevLow .cvss { color: #4ade80; }
+
+.rowMain {
+  min-width: 0;
+}
+
+.rowHead {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.cveId {
+  font-family: monospace;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.cveId:hover {
+  color: var(--accent);
+}
+
+/* Kept off `Chip` on purpose: `tone="outline"` paints a full-strength tinted
+   border, and this row is deliberately calm — the status marker is a hairline
+   at 35% alpha. */
+.statusChip {
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: rgba(248, 113, 113, 0.9);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: var(--r-sm);
+  padding: 0 5px;
+  text-transform: uppercase;
+}
+
+.desc {
+  color: var(--text-secondary);
+  font-size: var(--fs-base);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+}
+
+.prodTag {
+  color: var(--text-primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.prodTag:hover {
+  color: var(--entity-product);
+}
+
+.vendTag {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.verTag {
+  font-family: monospace;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.nums {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  align-items: flex-end;
+}
+
+.numsTop {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.cvss {
+  font-family: monospace;
+  font-size: var(--fs-md);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.epss {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
+.date {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+.empty {
+  padding: 22px 14px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--fs-base);
+}
+
+.loadMore {
+  display: block;
+  margin: var(--sp-4) auto 0;
+  padding: 5px 14px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.loadMore:hover {
+  color: var(--text-primary);
+  border-color: var(--bg-hover);
+}
+
+@media (max-width: 640px) {
+  .row {
+    grid-template-columns: 1fr;
+  }
+  .nums {
+    align-items: flex-start;
+    text-align: left;
+  }
+  .sortSel {
+    margin-left: 0;
+  }
+}

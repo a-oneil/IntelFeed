@@ -1,0 +1,18 @@
+/* Watchlist is a DataTable like every other workbench list; only the two
+   inputs the table itself doesn't own live here. */
+
+.boostInput {
+  composes: filterSelect from "@/pages/WorkbenchPage.module.css";
+  width: 64px;
+  text-align: right;
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.zero {
+  composes: zero from "@/components/table/DataTable.module.css";
+}
+
+.error {
+  composes: emptyState from "@/pages/WorkbenchPage.module.css";
+  color: var(--danger);
+}

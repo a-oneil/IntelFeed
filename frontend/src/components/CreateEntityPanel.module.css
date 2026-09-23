@@ -1,0 +1,186 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.typeTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  padding: var(--sp-1) 0 0;
+}
+
+.typeTab {
+  flex: 0 0 auto;
+  padding: 6px 8px;
+  border: none;
+  background: none;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 0.15s;
+  white-space: nowrap;
+}
+
+.typeTab:hover {
+  color: var(--text-primary);
+}
+
+.typeTabActive {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 500;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: var(--sp-5);
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: 1;
+}
+
+.label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  font-size: var(--fs-base);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.optional {
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.input,
+.select,
+.textarea {
+  padding: 7px 10px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  font-family: inherit;
+  transition: border-color 0.15s;
+}
+
+.input:focus,
+.select:focus,
+.textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.textarea {
+  resize: vertical;
+  min-height: 60px;
+  line-height: 1.5;
+}
+
+.error {
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  border-radius: var(--r-md);
+  color: var(--danger);
+  font-size: var(--fs-base);
+}
+
+.actions {
+  display: flex;
+  gap: var(--sp-3);
+  justify-content: flex-end;
+  padding-top: var(--sp-2);
+}
+
+.cancelBtn {
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  background: none;
+  border-radius: var(--r-md);
+  color: var(--text-secondary);
+  font-size: var(--fs-md);
+  cursor: pointer;
+}
+
+.cancelBtn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.submitBtn {
+  padding: 7px 16px;
+  border: none;
+  background: var(--accent);
+  border-radius: var(--r-md);
+  color: var(--accent-text);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.submitBtn:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+.submitBtn:disabled,
+.cancelBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 767px) {
+  .typeTab {
+    min-height: 44px;
+  }
+
+  .input,
+  .select,
+  .textarea {
+    min-height: 44px;
+  }
+
+  .cancelBtn,
+  .submitBtn {
+    min-height: 44px;
+  }
+}
+
+.gateWarning {
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+  border-radius: var(--r-md);
+  color: var(--warning);
+  font-size: var(--fs-base);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.forceBtn {
+  align-self: flex-end;
+  padding: 5px 12px;
+  border: 1px solid color-mix(in srgb, var(--warning) 50%, transparent);
+  background: none;
+  border-radius: var(--r-md);
+  color: var(--warning);
+  font-size: var(--fs-base);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.forceBtn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+}

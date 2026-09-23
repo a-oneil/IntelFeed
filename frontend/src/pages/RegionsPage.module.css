@@ -1,0 +1,78 @@
+.layout {
+  /* Same inset as the other tool pages, so the title does not shift
+     horizontally as you move through the nav. */
+  padding: var(--sp-5) 20px;
+  max-width: 1000px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+
+
+
+.regionGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0.75rem;
+}
+
+.regionCard {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 1rem 1.25rem;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.1s;
+}
+
+.regionCard:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.regionName {
+  font-size: var(--fs-lg);
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: 0.5rem;
+}
+
+.regionStats {
+  display: flex;
+  gap: 1.5rem;
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+}
+
+.statValue {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.activityBar {
+  margin-top: 0.75rem;
+  height: 4px;
+  background: var(--bg-tertiary);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+
+.activityFill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: var(--r-sm);
+  transition: width 0.3s;
+}
+
+
+
+@media (max-width: 767px) {
+  .layout {
+    padding: 1rem;
+  }
+
+  .regionGrid {
+    grid-template-columns: 1fr;
+  }
+}

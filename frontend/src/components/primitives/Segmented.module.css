@@ -1,0 +1,52 @@
+/* Segmented control. Track and button radii must stay concentric: the track's
+   inner corner is (radius - 1px border - 3px padding), so an 8px track leaves
+   exactly --r-sm (4px) for the active segment's fill. Bucketing the track down
+   to --r-md left only 2px of inner radius against a 6px button. */
+.track {
+  display: inline-flex;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--r-md) + var(--sp-1));
+  padding: 3px;
+  gap: 3px;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.track::-webkit-scrollbar {
+  display: none;
+}
+
+.segment {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 6px 14px;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background 0.1s, color 0.1s;
+}
+
+.sm .segment {
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-base);
+}
+
+.segment[aria-selected="true"],
+.segment[aria-pressed="true"] {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.segment:hover:not([aria-selected="true"]):not([aria-pressed="true"]) {
+  color: var(--text-primary);
+}
+
+.segment:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

@@ -1,0 +1,250 @@
+.player {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 64px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: 0 var(--sp-5);
+  z-index: 1000;
+}
+
+.trackInfo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 200px;
+  max-width: 280px;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.trackInfo:hover .trackTitle {
+  color: var(--accent);
+}
+
+.thumbnail {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--r-sm);
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.speechIcon {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--r-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-tertiary);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.trackText {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.trackTitle {
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trackFeed {
+  color: var(--text-muted);
+  font-size: var(--fs-base);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.controlBtn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: var(--fs-md);
+  padding: 6px var(--sp-3);
+  cursor: pointer;
+  border-radius: var(--r-sm);
+  font-weight: 600;
+}
+
+.controlBtn:hover {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+}
+
+/* 1.1rem (17.6px) sits 1.6px off --fs-lg (16px) — outside the 1px
+   conversion tolerance, and this is the player's primary glyph. Left raw. */
+.playBtn {
+  font-size: var(--fs-lg);
+  padding: 6px var(--sp-4);
+  color: var(--accent);
+}
+
+.progressSection {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.time {
+  color: var(--text-muted);
+  font-size: var(--fs-base);
+  font-variant-numeric: tabular-nums;
+  min-width: 40px;
+  text-align: center;
+}
+
+.progressBar {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  /* --r-full on a 4px-tall bar renders identically to the old 2px. */
+  border-radius: var(--r-full);
+  background: linear-gradient(
+    to right,
+    var(--accent) var(--progress, 0%),
+    var(--bg-tertiary) var(--progress, 0%)
+  );
+  cursor: pointer;
+}
+
+.progressBar::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+}
+
+.extras {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.rateSelect {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-base);
+  cursor: pointer;
+  max-width: 100%;
+}
+
+.voiceSelect {
+  max-width: 160px;
+  text-overflow: ellipsis;
+}
+
+.volumeSlider {
+  width: 60px;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 3px;
+  /* Pill radius; on a 3px-tall track this is what 2px already clamped to. */
+  border-radius: var(--r-full);
+  background: var(--bg-tertiary);
+  cursor: pointer;
+}
+
+.volumeSlider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  cursor: pointer;
+}
+
+@media (max-width: 767px) {
+  .player {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 56px;
+    padding: 0.375rem 0.75rem;
+    padding-bottom: calc(0.375rem + var(--safe-area-bottom, 0px));
+    gap: 6px;
+  }
+
+  .trackInfo {
+    min-width: 0;
+    max-width: none;
+    flex: 1;
+  }
+
+  .controls {
+    flex-shrink: 0;
+  }
+
+  .controlBtn {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 6px;
+  }
+
+  .progressSection {
+    width: 100%;
+    flex: none;
+    order: 3;
+  }
+
+  .progressBar {
+    height: 6px;
+  }
+
+  .progressBar::-webkit-slider-thumb {
+    width: 20px;
+    height: 20px;
+  }
+
+  .volumeSlider {
+    display: none;
+  }
+
+  .extras {
+    order: 2;
+    flex-wrap: wrap;
+    flex: 1 1 100%;
+    min-width: 0;
+    justify-content: flex-end;
+  }
+
+  .rateSelect {
+    min-height: 36px;
+  }
+
+  .voiceSelect {
+    max-width: 140px;
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+}

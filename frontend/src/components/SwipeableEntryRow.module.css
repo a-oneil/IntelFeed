@@ -1,0 +1,71 @@
+.wrapper {
+  position: relative;
+  overflow: hidden;
+}
+
+.actions {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+.actionBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  border: none;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.actionBtn svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* Each action paints its label ON its own fill, so the foreground has to be
+   computed per fill. A blanket `color: #fff` on .actionBtn measured 2.15:1
+   (star), 2.53:1 (bookmark) and 2.28:1 (read). The two literal fills keep a
+   literal foreground because the pair has to stay computed together; the
+   accent fill takes --accent-text, which applyTheme derives from the accent. */
+.starBtn {
+  background: #f59e0b;
+  color: var(--bg-primary);
+}
+
+.bookmarkBtn {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.readBtn {
+  background: #22c55e;
+  color: var(--bg-primary);
+}
+
+.content {
+  position: relative;
+  background: var(--bg-primary);
+  transition: transform 0.2s ease;
+  z-index: 1;
+}
+
+@media (max-width: 767px) {
+  .actionBtn {
+    width: 72px;
+    min-height: 44px;
+    font-size: var(--fs-base);
+  }
+
+  .actionBtn svg {
+    width: 20px;
+    height: 20px;
+  }
+}

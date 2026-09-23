@@ -1,0 +1,94 @@
+.tooltip {
+  position: fixed;
+  z-index: 200;
+  transform: translateX(-50%);
+  max-width: 380px;
+  min-width: 240px;
+  padding: 0.75rem 1rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  pointer-events: auto;
+}
+
+.tooltip.above {
+  transform: translateX(-50%) translateY(-100%);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.name {
+  font-weight: 600;
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+}
+
+/* Additive only — colour, size and shape come from the Chip primitive. */
+.categoryBadge {
+  letter-spacing: 0.05em;
+}
+
+.maturityBadge {
+  text-transform: capitalize;
+}
+
+.description {
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.techList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin-top: 0.5rem;
+}
+
+.techBadge a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.techBadge a:hover {
+  text-decoration: underline;
+}
+
+.actions {
+  display: flex;
+  gap: 0.375rem;
+  margin-top: 0.5rem;
+}
+
+.actionBtn {
+  flex: 1;
+  padding: 0.375rem 0;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--accent);
+  font-size: var(--fs-base);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.actionBtn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+
+@media (max-width: 767px) {
+  .tooltip {
+    max-width: calc(100vw - 2rem);
+    min-width: 0;
+  }
+}

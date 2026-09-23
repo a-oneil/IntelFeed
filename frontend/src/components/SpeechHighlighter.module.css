@@ -1,0 +1,10 @@
+.highlight {
+  pointer-events: none;
+  background: var(--accent);
+  opacity: 0.3;
+  border-radius: var(--r-sm);
+  z-index: 10;
+  mix-blend-mode: screen;
+  box-shadow: 0 0 0 2px var(--accent);
+  transition: top 0.05s ease, left 0.05s ease, width 0.05s ease;
+}

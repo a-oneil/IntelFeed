@@ -1,0 +1,30 @@
+.editor {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  font-size: var(--fs-md);
+  width: 100%;
+}
+
+.editor :global(.cm-editor) {
+  height: 100%;
+}
+
+.editor :global(.cm-scroller) {
+  overflow: auto !important;
+}
+
+.editor :global(.cm-focused) {
+  outline: none;
+}
+
+@media (max-width: 767px) {
+  .editor {
+    font-size: var(--fs-md);
+    border-radius: var(--r-sm);
+  }
+
+  .editor .cm-scroller {
+    -webkit-overflow-scrolling: touch;
+  }
+}
