@@ -55,13 +55,19 @@ dev = [
     "httpx>=0.27",
     "factory-boy>=3.3",
     "ruff>=0.3",
-    "flake8>=7.0",
-    "mypy>=1.8",
 ]
 
 [build-system]
 requires = ["setuptools>=69.0"]
 build-backend = "setuptools.build_meta"
+
+# Without this, setuptools' flat-layout auto-discovery sees `app`, `alembic` and
+# `tests` side by side and refuses to build:
+#   error: Multiple top-level packages discovered in a flat-layout
+# which breaks `pip install -e ".[dev]"` on any recent setuptools. Only `app`
+# is the importable package; alembic/ and tests/ are run in place.
+[tool.setuptools.packages.find]
+include = ["app*"]
 
 [tool.ruff]
 target-version = "py312"

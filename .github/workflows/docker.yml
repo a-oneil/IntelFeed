@@ -1,0 +1,102 @@
+name: Docker images
+
+# The Dockerfiles are the supported install path for a self-hosted deploy, so a
+# PR that breaks one breaks the product. They are slow to build (the backend
+# image compiles lxml and installs a PostgreSQL client), so this only runs when
+# something that feeds an image actually changes.
+#
+# The two `paths:` lists below are duplicated on purpose — GitHub Actions does
+# not expand YAML anchors. Keep them in sync.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/Dockerfile"
+      - "backend/.dockerignore"
+      - "backend/pyproject.toml"
+      - "backend/entrypoint.sh"
+      - "frontend/Dockerfile"
+      - "frontend/.dockerignore"
+      - "frontend/package.json"
+      - "frontend/pnpm-lock.yaml"
+      - "frontend/nginx.conf"
+      - "db/Dockerfile"
+      - "docker-compose*.yml"
+      - ".env.example"
+      - ".github/workflows/docker.yml"
+  pull_request:
+    paths:
+      - "backend/Dockerfile"
+      - "backend/.dockerignore"
+      - "backend/pyproject.toml"
+      - "backend/entrypoint.sh"
+      - "frontend/Dockerfile"
+      - "frontend/.dockerignore"
+      - "frontend/package.json"
+      - "frontend/pnpm-lock.yaml"
+      - "frontend/nginx.conf"
+      - "db/Dockerfile"
+      - "docker-compose*.yml"
+      - ".env.example"
+      - ".github/workflows/docker.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: docker-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: backend
+            context: ./backend
+            file: ./backend/Dockerfile
+            target: production
+          - name: frontend
+            context: ./frontend
+            file: ./frontend/Dockerfile
+            target: ""
+          - name: db
+            context: ./db
+            file: ./db/Dockerfile
+            target: ""
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          target: ${{ matrix.target }}
+          push: false
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,scope=${{ matrix.name }},mode=max
+
+  compose-config:
+    name: Compose files parse
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # `compose config` resolves every interpolation, so a typo'd ${VAR} or a
+      # malformed service block fails here instead of on someone's server.
+      - name: Validate dev and prod compose
+        env:
+          # .env.example ships SITE_DOMAIN empty, but prod compose marks it
+          # required (${SITE_DOMAIN:?}). Supply a placeholder just to interpolate.
+          SITE_DOMAIN: ci.example.com
+        run: |
+          docker compose --env-file .env.example -f docker-compose.dev.yml config --quiet
+          docker compose --env-file .env.example -f docker-compose.prod.yml config --quiet

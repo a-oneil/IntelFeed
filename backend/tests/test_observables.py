@@ -866,13 +866,9 @@ async def test_delete_observable_removes_row_sightings_and_claims(client, auth_h
     assert resp.status_code == 204, resp.text
 
     assert await db_session.get(Observable, obs_id) is None
-    sightings = (
-        await db_session.execute(select(EntryObservable).where(EntryObservable.observable_id == obs_id))
-    ).all()
+    sightings = (await db_session.execute(select(EntryObservable).where(EntryObservable.observable_id == obs_id))).all()
     assert sightings == []
-    claims = (
-        await db_session.execute(select(EntityRelationship).where(EntityRelationship.target_id == obs_id))
-    ).all()
+    claims = (await db_session.execute(select(EntityRelationship).where(EntityRelationship.target_id == obs_id))).all()
     assert claims == []
 
     # No tombstone: the value can be captured again (deny is the rung that stops that).

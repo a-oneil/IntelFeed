@@ -19,6 +19,30 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+# ``fnmatch.translate`` returns a fully anchored pattern — ``(?s:<body>)\Z`` up
+# to Python 3.13, ``(?s:<body>)\z`` from 3.14. ``_glob_match`` concatenates
+# several translated pieces, so that trailing anchor has to come off each one.
+#
+# This used to be ``.rstrip(r"\Z$")``, which strips *characters* in that set
+# rather than a suffix. When 3.14 changed the spelling to a lowercase ``\z`` it
+# silently stopped removing anything, leaving a stray anchor mid-pattern so
+# every ``**`` rule stopped matching and detection rules were mis-typed. Ask the
+# running interpreter for its own anchor instead of hard-coding a spelling.
+_FNMATCH_ANCHOR = fnmatch_translate("").partition(")")[2]
+
+if not _FNMATCH_ANCHOR.startswith("\\"):  # pragma: no cover - guards a stdlib change
+    raise RuntimeError(
+        f"fnmatch.translate('') returned {fnmatch_translate('')!r}; _glob_match cannot "
+        "find the end-of-string anchor to strip. See _glob_match in this module."
+    )
+
+
+def _translate_unanchored(part: str) -> str:
+    """``fnmatch.translate(part)`` with its end-of-string anchor removed."""
+    regex = fnmatch_translate(part)
+    return regex[: -len(_FNMATCH_ANCHOR)] if regex.endswith(_FNMATCH_ANCHOR) else regex
+
+
 def _glob_match(path: str, pattern: str) -> bool:
     """Match a file path against a glob pattern with ** support."""
     parts = pattern.split("**")
@@ -26,7 +50,7 @@ def _glob_match(path: str, pattern: str) -> bool:
     for i, part in enumerate(parts):
         if i > 0:
             regex += ".*"
-        regex += fnmatch_translate(part.lstrip("/")).rstrip(r"\Z$")
+        regex += _translate_unanchored(part.lstrip("/"))
     regex += r"\Z"
     return bool(re.match(regex, path))
 

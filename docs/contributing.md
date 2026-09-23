@@ -151,7 +151,11 @@ cd backend
 pip install -e ".[dev]"
 ```
 
-This installs all runtime + test dependencies (pytest, pytest-asyncio, pytest-cov, pytest-timeout, pytest-xdist, factory-boy, ruff, mypy).
+This installs all runtime + test dependencies (pytest, pytest-asyncio, pytest-cov, pytest-timeout, pytest-xdist, factory-boy, ruff).
+
+**Python 3.12, 3.13 and 3.14 all pass.** The Docker images ship 3.12; CI runs the test suite on all three.
+
+Two stdlib behaviour changes have bitten this codebase, both only visible off the pinned version — `urllib.robotparser` moved the catch-all `*` group in 3.13 (`app/services/robots.py`), and `fnmatch.translate` changed its end anchor from `\Z` to `\z` in 3.14 (`app/adapters/github_content_types.py`). Both now derive what they need at runtime instead of assuming a layout; if you touch either, keep the matrix green.
 
 ### Code Quality
 
@@ -164,12 +168,9 @@ ruff format .
 
 # Format check only
 ruff format --check .
-
-# Type checking
-mypy app
 ```
 
-There is no CI to catch lint regressions (see CI/CD below) — run `ruff check` + `ruff format --check` locally before every push.
+CI runs `ruff check` + `ruff format --check` on every PR (see CI/CD below), but running them locally first is faster than waiting on a red build.
 
 Line length: 120. Target: Python 3.12. See `pyproject.toml` for full ruff config.
 
@@ -373,7 +374,7 @@ pnpm test
 pnpm exec playwright test
 ```
 
-Run all four before pushing — there's no CI yet to catch regressions (see CI/CD below).
+CI runs the first three on every PR (see CI/CD below); Playwright is not yet wired into CI, so run it locally when you touch a user-facing flow.
 
 ### Adding a Page
 
@@ -677,12 +678,27 @@ pnpm exec playwright test tests/e2e/feeds.spec.ts
 
 ## CI/CD
 
-No CI workflow files yet — there is no `.gitea/workflows/` or `.github/workflows/` directory. Run the checks below by hand before pushing. When CI is set up, it should enforce:
+GitHub Actions runs on every pull request and every push to `main`.
 
-- **Backend:** `ruff check` + `ruff format --check` + `pytest --cov`
-- **Frontend:** `pnpm lint` + `pnpm build` + `pnpm test`
-- **E2E:** `pnpm exec playwright test` against Docker Compose stack
-- **Duration:** ~15–20 minutes total
+`.github/workflows/ci.yml` — four jobs, in parallel, ~3–5 minutes:
+
+| Job | What it runs | Services |
+| --- | --- | --- |
+| **Backend · ruff** | `ruff check` + `ruff format --check` | — |
+| **Backend · pytest** | full suite on Python 3.12, 3.13 and 3.14 (matrix) | PostgreSQL 16 + pgvector, Redis 7 |
+| **Backend · alembic** | one head, `upgrade head` on a fresh DB, then `downgrade -1` and re-apply | PostgreSQL 16 + pgvector |
+| **Frontend** | `pnpm install --frozen-lockfile`, `pnpm lint`, `pnpm test`, `pnpm build` (`tsc -b` is the type check) | — |
+
+`.github/workflows/docker.yml` — only when a file that feeds an image changes:
+builds the backend, frontend and db images (no push), and runs
+`docker compose config` over the dev and prod compose files.
+
+Notes:
+
+- Secrets are never needed: `SECRET_KEY` and a Fernet `ENCRYPTION_KEY` are generated per run, so CI passes on pull requests from forks.
+- Meilisearch has no service container — `conftest.py` patches the client off.
+- `pnpm lint:css` (stylelint) is **not** in CI; its suppression baseline is stale (228 errors). Fix the baseline before adding it as a gate.
+- Playwright E2E is **not** in CI — it needs the full Compose stack. Run it locally.
 
 **Run locally before pushing:**
 

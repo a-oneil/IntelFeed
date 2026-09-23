@@ -60,7 +60,11 @@ pnpm exec playwright test             # E2E tests (needs running stack)
 ```
 
 ### CI
-There is no CI pipeline configured (self-hosted Gitea, no workflow files) — run `ruff check` + `ruff format --check` + `pytest` (backend) and `pnpm lint` + `pnpm build` (frontend) before pushing.
+GitHub Actions (`.github/workflows/ci.yml`) runs on every PR and push to `main`: backend ruff, backend pytest (PostgreSQL 16 + pgvector and Redis service containers, Python 3.12), an alembic job (single head, fresh `upgrade head`, `downgrade -1` + re-apply), and a frontend job (`pnpm install --frozen-lockfile`, lint, vitest, build). `.github/workflows/docker.yml` builds the three images and validates both compose files, but only when a file feeding an image changes.
+
+Run the same checks locally first — `ruff check` + `ruff format --check` + `pytest` (backend), `pnpm lint` + `pnpm build` + `pnpm test` (frontend). Playwright E2E and `pnpm lint:css` are deliberately not in CI.
+
+**Backend passes on Python 3.12, 3.13 and 3.14.** The images ship 3.12; the pytest job runs all three, because both version bugs found so far were stdlib behaviour changes that only appeared off the pinned version (`urllib.robotparser` group layout in 3.13, `fnmatch.translate`'s anchor spelling in 3.14).
 
 ### Utility Scripts
 

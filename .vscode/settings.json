@@ -7,5 +7,13 @@
             "source.organizeImports.ruff": "explicit"
         }
     },
+    // The ESLint extension resolves config relative to the workspace root, where
+    // there is no eslint config — point it at the frontend package instead.
+    "eslint.workingDirectories": [
+        "frontend"
+    ],
+    // Pytest lives in backend/ (pyproject sets testpaths = ["tests"]).
+    "python.testing.pytestEnabled": true,
+    "python.testing.cwd": "${workspaceFolder}/backend",
     "jupyter.notebookFileRoot": "${workspaceFolder}"
 }

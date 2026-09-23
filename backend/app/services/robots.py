@@ -13,6 +13,41 @@ _cache: dict[str, tuple[RobotFileParser, float]] = {}
 _CACHE_TTL = 3600  # 1 hour
 
 
+def _select_entry(parser: RobotFileParser, useragent: str):
+    """Pick the robots.txt group that governs ``useragent``.
+
+    This does its own user-agent matching rather than calling
+    ``Entry.applies_to``, because where the catch-all ``*`` group lives, and
+    whether it matches at all, changed in Python 3.13:
+
+    ======================  ===================  =======================
+    .                       3.12                 3.13+
+    ======================  ===================  =======================
+    catch-all ``*`` group   ``default_entry``    inside ``entries``
+    ``applies_to(real UA)``  True                False (``*`` only
+    on a ``*`` group                              matches ``useragent=None``)
+    ======================  ===================  =======================
+
+    So on 3.13+ the old ``applies_to`` scan matched nothing, ``default_entry``
+    was ``None``, and every site's Disallow rules were silently ignored —
+    ``can_fetch`` failed open. Matching on ``entry.useragents`` directly
+    behaves identically on every version.
+
+    A group naming our agent wins over the catch-all (RFC 9309 §2.2.1).
+    """
+    # Same token rule the stdlib uses: compare against the product token only.
+    token = useragent.split("/")[0].lower()
+    catch_all = parser.default_entry  # 3.12 keeps the '*' group here
+    for entry in parser.entries:
+        for agent in entry.useragents:
+            if agent == "*":
+                if catch_all is None:  # 3.13+ keeps it here instead
+                    catch_all = entry
+            elif agent.lower() in token:
+                return entry
+    return catch_all
+
+
 def _rule_allows(parser: RobotFileParser, useragent: str, url: str) -> bool:
     """Evaluate robots.txt rules with most-specific-match precedence.
 
@@ -27,7 +62,7 @@ def _rule_allows(parser: RobotFileParser, useragent: str, url: str) -> bool:
     if parser.allow_all:
         return True
 
-    entry = next((e for e in parser.entries if e.applies_to(useragent)), None) or parser.default_entry
+    entry = _select_entry(parser, useragent)
     if entry is None:
         return True
 

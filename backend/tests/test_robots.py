@@ -179,3 +179,76 @@ class TestGetCrawlDelay:
             delay = await robots.get_crawl_delay("https://no-robots.example.com/feed.xml")
 
         assert delay is None
+
+
+class TestSelectEntry:
+    """Guards the catch-all lookup across Python versions.
+
+    Python 3.13 moved the ``*`` group out of ``RobotFileParser.default_entry``
+    into ``.entries`` and made ``Entry.applies_to`` reject a real user agent for
+    a ``*`` group. The previous implementation leaned on both, so on 3.13+ it
+    matched no group at all and ``can_fetch`` allowed everything. These assert
+    the selection itself, independent of which interpreter is running.
+    """
+
+    @staticmethod
+    def _parse(text):
+        from urllib.robotparser import RobotFileParser
+
+        parser = RobotFileParser()
+        parser.parse(text.splitlines())
+        return parser
+
+    def test_wildcard_group_is_found(self):
+        """A `User-agent: *` group must be selected for an agent it never names."""
+        parser = self._parse(ROBOTS_TXT_DISALLOW_ALL)
+
+        entry = robots._select_entry(parser, "Mozilla/5.0 (Windows NT 10.0) Chrome/126.0")
+
+        assert entry is not None, "catch-all group was not found — Disallow rules would be ignored"
+        assert "*" in entry.useragents
+
+    def test_named_group_wins_over_wildcard(self):
+        """RFC 9309 §2.2.1: the group naming our agent beats the catch-all.
+
+        The named group uses a bare product token, which is what agent matching
+        compares against — a robots.txt that spells out a full
+        ``Product/1.0 (+url)`` string as its ``User-agent`` matches nobody, in
+        the stdlib and here alike.
+        """
+        parser = self._parse("User-agent: IntelFeed\nDisallow: /private/\n\nUser-agent: *\nAllow: /\n")
+
+        entry = robots._select_entry(parser, "IntelFeed/1.0 (+https://github.com/intelfeed)")
+
+        assert entry is not None
+        assert "*" not in entry.useragents
+        assert [str(r) for r in entry.rulelines] == ["Disallow: /private/"]
+
+    def test_unnamed_agent_falls_back_to_wildcard(self):
+        parser = self._parse(ROBOTS_TXT_SPECIFIC_AGENT)
+
+        entry = robots._select_entry(parser, "SomeOtherBot/2.0")
+
+        assert entry is not None
+        assert "*" in entry.useragents
+
+    def test_no_groups_at_all(self):
+        parser = self._parse("# just a comment\n")
+
+        assert robots._select_entry(parser, "AnyBot/1.0") is None
+
+
+@pytest.mark.asyncio
+class TestWildcardDisallowIsEnforced:
+    async def test_wildcard_disallow_blocks_browser_user_agent(self):
+        """Regression: `Disallow: /` under `User-agent: *` must block us.
+
+        The fetcher sends a browser-like UA, which no robots.txt names, so this
+        is the path that silently failed open on Python 3.13+.
+        """
+        mock_client = _make_mock_client(ROBOTS_TXT_DISALLOW_ALL)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            result = await robots.can_fetch("https://blocked.example.com/anything")
+
+        assert result is False

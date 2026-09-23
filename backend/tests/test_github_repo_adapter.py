@@ -1,6 +1,7 @@
 """Tests for the GitHubRepoAdapter — monitors repos for new/changed files."""
 
 import base64
+import re
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
@@ -1320,3 +1321,40 @@ class TestBulkImportTemplates:
         elastic = next(t for t in DETECTION_REPO_TEMPLATES if t["owner"] == "elastic")
         assert elastic["repo"] == "detection-rules"
         assert "rules/**/*.toml" in elastic["paths"]
+
+
+class TestGlobMatchAnchorHandling:
+    """Guards `**` glob matching across Python versions.
+
+    ``fnmatch.translate`` ends its output with ``\\Z`` up to Python 3.13 and
+    ``\\z`` from 3.14. ``_glob_match`` strips that anchor off each translated
+    piece before concatenating them; when the strip silently stopped working on
+    3.14, every ``**`` rule fell through to plain extension detection and Sigma
+    rules were typed as generic YAML. These assert the matching itself, whatever
+    interpreter is running.
+    """
+
+    def test_anchor_was_derived(self):
+        from app.adapters.github_content_types import _FNMATCH_ANCHOR
+
+        assert _FNMATCH_ANCHOR in (r"\Z", r"\z"), f"unrecognised anchor {_FNMATCH_ANCHOR!r}"
+
+    def test_translate_unanchored_drops_the_anchor(self):
+        from app.adapters.github_content_types import _translate_unanchored
+
+        regex = _translate_unanchored("*.yml")
+
+        assert not regex.endswith(("\\Z", "\\z")), f"anchor survived in {regex!r}"
+        assert re.match(regex + r"\Z", "thing.yml")
+
+    def test_double_star_spans_directories(self):
+        from app.adapters.github_content_types import _glob_match
+
+        assert _glob_match("rules/windows/process_creation/test.yml", "rules/**/*.yml")
+        assert _glob_match("rules/test.yml", "rules/**/*.yml")
+
+    def test_double_star_respects_prefix_and_extension(self):
+        from app.adapters.github_content_types import _glob_match
+
+        assert not _glob_match("docs/windows/test.yml", "rules/**/*.yml")
+        assert not _glob_match("rules/windows/test.txt", "rules/**/*.yml")
