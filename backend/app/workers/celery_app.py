@@ -66,6 +66,11 @@ celery_app.conf.update(
         "app.workers.link_validation_tasks.validate_entity_links": {"queue": "ai"},
         "app.workers.link_validation_tasks.validate_single_entry_links": {"queue": "ai"},
         "app.workers.link_validation_tasks.validate_batch_entry_links": {"queue": "ai"},
+        # One-pass entry analysis is the heaviest generative task in the app
+        # (150-300s per entry on Ollama). Left on the default queue it fills
+        # both of that worker's slots and starves poll_due_feeds, which stops
+        # ingest outright.
+        "app.workers.ai_batch_tasks.run_entry_analysis_task": {"queue": "ai"},
         "app.workers.entity_maintenance_tasks.process_merge_candidate": {"queue": "ai"},
         "app.workers.entity_maintenance_tasks.refresh_actor_profile": {"queue": "ai"},
         "app.workers.entity_maintenance_tasks.process_name_normalization_batch": {"queue": "ai"},
