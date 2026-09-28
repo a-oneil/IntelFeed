@@ -62,6 +62,11 @@ fails when it drifts.
    }
    ```
    and enable `mcp/intelfeed` in the chat.
+
+   **Bionic** (LM Studio's agent app) doesn't read `mcp.json`: add the server under
+   Settings → MCP → Add custom MCP, connection type "On this computer", command `python3`,
+   argument `/path/to/IntelFeed/intelfeed-mcp/intelfeed_mcp.py`. Raise the request timeout
+   (advanced options, default 60 s) to ~150 s: some searches on a busy instance take a while.
 3. Use `system_prompt.md` as the chat's system prompt.
 4. Model settings: a tool-calling model (the Qwen 3 family works well), 32k–64k context, and
    a context-overflow policy that drops the middle of the conversation rather than the start.
