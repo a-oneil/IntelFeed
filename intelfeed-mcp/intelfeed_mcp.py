@@ -153,6 +153,7 @@ class IntelFeed:
         self._refresh: str | None = None
         self._lock = threading.Lock()
         self._registry: dict[str, dict] | None = None
+        self._registry_lock = threading.Lock()  # concurrent first calls share one fetch
         self.registry_source = "not loaded"
 
     def _http(self, method: str, path: str, body: dict | None = None, *, auth: bool = True, timeout: int = 120):
@@ -226,6 +227,12 @@ class IntelFeed:
         """Tool definitions keyed by name: live from GET /api/tools/tools, else the bundled snapshot."""
         if self._registry is not None:
             return self._registry
+        with self._registry_lock:
+            if self._registry is None:
+                self._registry = self._load_registry()
+        return self._registry
+
+    def _load_registry(self) -> dict[str, dict]:
         defs = None
         try:
             status, data = self._authed("GET", "/api/tools/tools", timeout=30)
@@ -238,9 +245,9 @@ class IntelFeed:
         if not defs:
             defs = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
             self.registry_source = "snapshot"
-        self._registry = {d["name"]: d for d in defs}
-        log(f"registry: {len(self._registry)} tools ({self.registry_source})")
-        return self._registry
+        registry = {d["name"]: d for d in defs}
+        log(f"registry: {len(registry)} tools ({self.registry_source})")
+        return registry
 
     def is_readable(self, tool: str) -> bool:
         d = self.registry().get(tool)
