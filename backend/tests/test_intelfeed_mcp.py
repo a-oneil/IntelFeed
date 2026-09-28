@@ -212,7 +212,7 @@ def test_long_lists_capped():
     rows = [{"id": f"3f2b8c1e-1111-4a2b-9c3d-{i:012d}", "name": f"T{i}"} for i in range(40)]
     server, _ = new_server({"get_trending_entities": {"trending": rows}})
     text, _ = server.call("get_trending_entities", {"entity_type": "malware"})
-    assert "(+15 more)" in text
+    assert "(+30 more)" in text  # cut to the default limit of 10
 
 
 def test_error_result_flagged():
@@ -266,6 +266,115 @@ def test_paginate_respects_size():
     pages = m.paginate(text, 1000)
     assert all(len(p) <= 1000 for p in pages)
     assert "\n".join(pages) == text
+
+
+# --- per-tool trimming (shapes taken from a live instance) -------------------------
+
+
+def _related(i: int, **extra) -> dict:
+    return {
+        "id": f"3f2b8c1e-2222-4a2b-9c3d-{i:012d}",
+        "type": "ttp",
+        "technique_id": f"T1{i:03d}",
+        "technique_name": f"Technique {i}",
+        "description": "Adversaries may " + "abuse things " * 40,
+        "detection": "detect " * 100,
+        "strength": {"score": 0.5, "tier": "moderate", "articles": 3, "last_seen": "2026-09-10T10:00:00+00:00"},
+        "proximity_entries": [{"entry_id": UUID_A, "title": "evidence " * 20}],
+        **extra,
+    }
+
+
+def test_pivot_is_one_row_per_related_entity():
+    pivot = {
+        "entity": {"id": UUID_A, "type": "threat_actor", "name": "APT29", "wikipedia_content": "x " * 900},
+        "related_counts": {"ttps": 94},
+        "related": {
+            "ttps": [_related(i, relationship_type="uses", relationship_confidence="confirmed") for i in range(94)]
+        },
+    }
+    server, _ = new_server({"pivot_entity": pivot})
+    text, _ = server.call("pivot_entity", {"entity_type": "threat_actor", "entity_id": UUID_A})
+    assert "entity: APT29 (threat_actor)" in text
+    assert "id | name | tier | articles | last_seen | relation" in text
+    assert "T1000 Technique 0 | moderate | 3 | 2026-09-10 10:00 | uses (confirmed)" in text
+    assert f"(+{94 - m.PIVOT_ROWS_PER_TYPE} more)" in text  # the server ignores limit_per_type here
+    assert "abuse things" not in text and "evidence" not in text and "wikipedia" not in text
+    assert len(text) < 1000
+
+
+def test_priority_queue_threads_and_entries_share_an_id_column():
+    queue = {
+        "items": [
+            {
+                "kind": "thread",
+                "score": 9.1,
+                "slug": "citrix-zero-day",
+                "title": "Citrix",
+                "summary": "s",
+                "outlets": 15,
+                "articles": 21,
+                "unread": 21,
+                "new_since_opened": 21,
+                "folded_articles": 21,
+                "url": "/pq?thread=x",
+            },
+            {
+                "kind": "entry",
+                "score": 5.3,
+                "entry_id": UUID_B,
+                "title": "Report",
+                "url": "https://x",
+                "feed": "CPR",
+                "published_at": "2026-09-28 13:55:26+00:00",
+                "summary": "<p>text</p>",
+                "signals": ["kev_added"],
+            },
+        ]
+        * 14,
+        "count": 28,
+        "next_cursor": "eyJ" * 30,
+        "radar_threshold": 2.1,
+    }
+    server, _ = new_server({"get_priority_queue": queue})
+    text, _ = server.call("call_tool", {"tool": "get_priority_queue", "args": {}})
+    header = next(line for line in text.splitlines() if line.strip().startswith("id |"))
+    assert header.split(" | ")[:2] == ["  id", "kind"]
+    assert "citrix-zero-day | thread" in text and "u1 | entry" in text
+    for noise in ("unread", "new_since_opened", "next_cursor", "radar_threshold", "outlets", "https://x"):
+        assert noise not in text
+    assert "(+18 more)" in text  # cut to the default limit of 10
+
+
+def test_disclosure_noise_dropped():
+    item = {
+        "id": UUID_A,
+        "victim_id": UUID_B,
+        "victim_name": "Knit",
+        "group_id": UUID_C,
+        "group_name": "Akira",
+        "group_color": "akira",
+        "sector": "technology",
+        "sector_label": "Technology",
+        "posted_at": "2026-09-28T14:25:10Z",
+        "claimed_data": "We believe " * 30,
+        "leak_site_url": "https://www.ransomware.live/id/x",
+        "source": "ransomware.live",
+        "is_new": True,
+    }
+    server, _ = new_server(
+        {"get_ransomware_disclosures": {"items": [item, dict(item, victim_name="Acme")], "total": 2}}
+    )
+    text, _ = server.call("call_tool", {"tool": "get_ransomware_disclosures", "args": {"since": 7}})
+    assert "victim_id | victim_name | group_id | group_name | sector | posted_at | is_new" in text
+    for noise in ("akira |", "Technology", "We believe", "ransomware.live"):
+        assert noise not in text
+
+
+def test_projection_falls_back_on_unexpected_shapes():
+    server, _ = new_server({"pivot_entity": {"related": "not a dict"}})
+    text, is_error = server.call("pivot_entity", {"entity_type": "threat_actor", "entity_id": UUID_A})
+    assert not is_error
 
 
 # --- arguments -------------------------------------------------------------------
@@ -385,7 +494,7 @@ def test_pivot_resolves_cve_to_uuid():
     tool, args = fake.calls[-1]
     assert tool == "pivot_entity"
     assert args["entity_id"] == UUID_C
-    assert args["limit_per_type"] == 8
+    assert args["limit_per_type"] == m.PIVOT_ROWS_PER_TYPE
 
 
 # --- protocol --------------------------------------------------------------------

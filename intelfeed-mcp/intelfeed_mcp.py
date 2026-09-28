@@ -324,10 +324,15 @@ DROP_KEYS = frozenset(
         "etag",
         "last_modified",
         "match_field",
+        "match_kind",
         "mitre_url",
         "malpedia_url",
+        "wikipedia_content",
+        "next_cursor",
     }
 )
+# Suffixes dropped everywhere: links, UI colours. (A plain "url" on a single object stays.)
+DROP_SUFFIXES = ("_html", "_url", "_color")
 # Dropped inside list items only (kept on a single fetched object).
 LIST_DROP_KEYS = frozenset(
     {
@@ -367,10 +372,11 @@ TAG_RE = re.compile(r"<[^>]+>")
 BLOCK_TAG_RE = re.compile(r"</?(?:p|div|br|li|ul|ol|h[1-6]|tr|table|blockquote|pre|section|article)\b[^>]*>", re.I)
 HAS_TAG_RE = re.compile(r"</?[a-zA-Z][a-zA-Z0-9]*(?:\s[^>]*)?>")
 
-LIST_STR_CAP = 200  # a string inside a list item
+LIST_STR_CAP = 140  # a string inside a list item
 STR_CAP = 800  # any other string
 LONG_TEXT_CAP = 3000  # article body / rule content on a single object
 NESTED_LIST_CAP = 12  # items shown from a list inside an object
+ITEM_LIST_CAP = 6  # items shown from a list inside a list item (aliases, sectors, ...)
 TOP_LIST_CAP = 25  # items shown from the main result list
 
 _DROP = object()
@@ -438,14 +444,19 @@ def shape(
     if isinstance(value, dict):
         out: dict[str, Any] = {}
         for k, v in value.items():
-            if k in DROP_KEYS or k.endswith("_html") or (in_list and k in LIST_DROP_KEYS):
+            if (
+                k in DROP_KEYS
+                or k.endswith(DROP_SUFFIXES)
+                or (in_list and k in LIST_DROP_KEYS)
+                or (k.endswith("_label") and k[: -len("_label")] in value)  # sector + sector_label
+            ):
                 continue
             sv = shape(v, handles, notes, key=k, in_list=in_list, depth=depth + 1, full=full)
             if sv is not _DROP:
                 out[k] = sv
         return out if out else _DROP
     if isinstance(value, (list, tuple)):
-        cap = TOP_LIST_CAP if depth <= 1 else NESTED_LIST_CAP
+        cap = TOP_LIST_CAP if depth <= 1 else (ITEM_LIST_CAP if in_list else NESTED_LIST_CAP)
         items = [shape(v, handles, notes, key=key, in_list=True, depth=depth + 1, full=full) for v in value]
         items = [i for i in items if i is not _DROP]
         if not items:
@@ -557,6 +568,124 @@ def render(value: Any, indent: int = 0) -> list[str]:
                     lines.extend(sub[1:])
         return lines
     return [pad + _fmt(value)]
+
+
+# Per-tool trims, applied before the generic shaping. Measured on a live instance: a pivot
+# returns ~1.6 MB of JSON (every related entity's full record, evidence and scoring detail),
+# and queue/thread/leak-site rows carry counters and blurbs a model has no use for.
+TOOL_DROP_KEYS = {
+    "get_priority_queue": frozenset({"unread", "new_since_opened", "folded_articles", "radar_threshold", "outlets"}),
+    "get_story_threads": frozenset({"echo_count", "unread_count", "new_since_opened", "top_score"}),
+    "get_ransomware_disclosures": frozenset({"id", "claimed_data", "source", "country_id", "country_code"}),
+}
+PIVOT_ROWS_PER_TYPE = 5
+
+
+def entity_label(item: dict) -> str:
+    """One-line name for an entity record of any type."""
+    if item.get("technique_id"):
+        return f"{item['technique_id']} {item.get('technique_name') or ''}".strip()
+    if item.get("cve_id"):
+        bits = [item["cve_id"]]
+        if item.get("cvss_score") is not None:
+            bits.append(f"CVSS {item['cvss_score']}")
+        if item.get("is_kev"):
+            bits.append("KEV")
+        return " ".join(bits)
+    if item.get("cwe_id"):
+        return f"{item['cwe_id']} {item.get('name') or ''}".strip()
+    return str(item.get("name") or item.get("label") or item.get("title") or item.get("value") or "?")
+
+
+def _without(value: Any, keys: frozenset) -> Any:
+    if isinstance(value, dict):
+        return {k: _without(v, keys) for k, v in value.items() if k not in keys}
+    if isinstance(value, list):
+        return [_without(v, keys) for v in value]
+    return value
+
+
+def _project_pivot(data: dict, args: dict) -> dict:
+    """The entity once (get_profile has the rest), then one row per related entity."""
+    entity = data.get("entity") or {}
+    per_type = int(args.get("limit_per_type") or PIVOT_ROWS_PER_TYPE)
+    related = {}
+    for kind, items in (data.get("related") or {}).items():
+        if not isinstance(items, list):
+            continue
+        rows = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            strength = item.get("strength") or {}
+            row = {
+                "id": item.get("id"),
+                "name": entity_label(item),
+                "tier": strength.get("tier"),
+                "articles": strength.get("articles", item.get("co_occurrence_count")),
+                "last_seen": strength.get("last_seen"),
+            }
+            if item.get("relationship_type"):
+                row["relation"] = f"{item['relationship_type']} ({item.get('relationship_confidence') or '?'})"
+            rows.append(row)
+        # the server does not apply limit_per_type to every relation type
+        related[kind] = rows[:per_type] + ([f"(+{len(rows) - per_type} more)"] if len(rows) > per_type else [])
+    out = {"entity": f"{entity_label(entity)} ({entity.get('type', '?')})"} if entity else {}
+    if data.get("related_counts"):
+        out["related_counts"] = data["related_counts"]
+    out["related"] = related
+    return out
+
+
+def _project_threads(data: dict) -> dict:
+    for thread in data.get("threads") or []:
+        if isinstance(thread, dict) and isinstance(thread.get("key_entities"), list):
+            thread["key_entities"] = [entity_label(e) for e in thread["key_entities"][:5] if isinstance(e, dict)]
+    return data
+
+
+def _project_queue(data: dict) -> dict:
+    """Threads and entries share one list: give both a single `id` (thread slug or entry id)."""
+    items = []
+    for item in data.get("items") or []:
+        if isinstance(item, dict):
+            ref = item.get("slug") or item.get("entry_id")
+            item = {"id": ref, **{k: v for k, v in item.items() if k not in ("slug", "entry_id")}}
+        items.append(item)
+    data["items"] = items
+    return data
+
+
+def _enforce_limit(data: dict, limit: Any) -> dict:
+    """Some tools return more rows than `limit` asked for; cut the main lists to it."""
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        return data
+    for key, value in data.items():
+        if isinstance(value, list) and len(value) > limit and all(isinstance(v, dict) for v in value):
+            data[key] = value[:limit] + [f"(+{len(value) - limit} more)"]
+    return data
+
+
+def project(tool: str | None, data: Any, args: dict | None) -> Any:
+    """Tool-specific trimming; any surprise in the payload falls back to the data as returned."""
+    if not tool or not isinstance(data, dict) or ("error" in data and len(data) <= 2):
+        return data
+    try:
+        if tool == "pivot_entity":
+            return _project_pivot(data, args or {})
+        if tool == "get_story_threads":
+            data = _project_threads(data)
+        if tool == "get_priority_queue":
+            data = _project_queue(data)
+        if tool in TOOL_DROP_KEYS:
+            data = _without(data, TOOL_DROP_KEYS[tool])
+        if (args or {}).get("limit"):
+            data = _enforce_limit(data, args["limit"])
+    except (TypeError, ValueError, AttributeError) as e:
+        log(f"projection for {tool} skipped: {e}")
+    return data
 
 
 class ResultStore:
@@ -701,7 +830,7 @@ def check_args(name: str, definition: dict, args: dict) -> tuple[dict, list[str]
     if "limit" in props and "limit" not in clean:
         clean["limit"] = DEFAULT_LIMIT
     if "limit_per_type" in props and "limit_per_type" not in clean:
-        clean["limit_per_type"] = 8
+        clean["limit_per_type"] = PIVOT_ROWS_PER_TYPE
     notes = [f"ignored unknown argument(s) {ignored}; usage: {sig}"] if ignored else []
     return clean, notes
 
@@ -936,9 +1065,12 @@ class Server:
 
     # -- result formatting -------------------------------------------------
 
-    def format_result(self, raw: str, extra_notes: list[str] | None = None) -> tuple[str, bool]:
+    def format_result(
+        self, raw: str, extra_notes: list[str] | None = None, *, tool: str | None = None, args: dict | None = None
+    ) -> tuple[str, bool]:
         data = parse_result(raw)
         is_error = isinstance(data, dict) and set(data) <= {"error", "detail"} and "error" in data
+        data = project(tool, data, args)
         notes = ShapeNotes()
         shaped = shape(data, self.handles, notes)
         if shaped is _DROP:
@@ -988,7 +1120,7 @@ class Server:
         clean, notes = check_args(tool, definition, args)
         started = time.monotonic()
         raw = self.intelfeed.execute(tool, clean)
-        text, is_error = self.format_result(raw, notes)
+        text, is_error = self.format_result(raw, notes, tool=tool, args=clean)
         log(
             f"{tool} {json.dumps(clean, ensure_ascii=False)[:160]} -> {len(raw)} chars raw, "
             f"{len(text)} shown, {time.monotonic() - started:.1f}s"

@@ -16,6 +16,12 @@ The server keeps the per-turn cost low instead:
 | Results | raw JSON | shaped to ~2k tokens: HTML stripped, empty and noisy fields dropped, UUIDs → `u12` handles, dates shortened, uniform lists as tables; the rest is paged with `read_more` |
 | Writes | whatever the model calls | read-only; opt-in `write_action` for a short allowlist |
 
+The heaviest tools also get per-tool trims (`project()` in the server). A pivot returns ~1.6 MB of
+JSON (every related entity's full record and evidence); it becomes one table row per related
+entity. Priority-queue, story-thread and leak-site rows lose counters, colours, URLs and blurbs, and
+lists the server returns beyond the requested `limit` are cut. On a live instance, eleven typical
+calls went from ~11.2k to ~7.4k tokens (disclosures −59%, queue −58%, threads −48%, pivot −39%).
+
 ## What the model sees
 
 Nine tools, fixed for the whole session (so the model server can reuse its cached prompt prefix):
