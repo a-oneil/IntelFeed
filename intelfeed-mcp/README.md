@@ -39,12 +39,21 @@ actor-research, vulnerability-triage, ransomware, detection-coverage, article-an
 daily-briefing, campaigns, iocs, requirements-reports, feeds-sources, platform-admin,
 intelfeed-help, and writes (only when writes are enabled). Adding one is adding a file.
 
-**Safety.** `call_tool` runs a tool only when the registry marks it non-mutating, minus the tools
-that persist results anyway (`extract_*`, `run_ai_task`, `generate_detection_rules`). With
-`INTELFEED_MCP_ALLOW_WRITES=1` a separate `write_action` tool appears, limited to notes, tags,
-stars, bookmarks, read state, watches, campaigns and saved searches (`INTELFEED_MCP_WRITE_TOOLS`
-changes the list). Merges, deletes, feed and automation changes are never exposed. Admin-only
-tools stay gated by `/api/tools/execute` as usual.
+**Safety.**
+- `call_tool` runs a tool only if it is on the server's hand-reviewed `READ_ONLY_TOOLS` list *and*
+  the registry says `mutating: false`; the tools that persist results anyway (`extract_*`,
+  `run_ai_task`, `generate_detection_rules`) are excluded. A new or mis-flagged backend tool stays
+  blocked until reviewed: `test_intelfeed_mcp.py` fails when the registry gains a read tool the
+  list doesn't have.
+- With `INTELFEED_MCP_ALLOW_WRITES=1` a separate `write_action` tool appears, limited to notes, tags,
+  stars, bookmarks, read state, watches, campaigns and saved searches. `INTELFEED_MCP_WRITE_TOOLS`
+  can narrow that list but never extend it. Merges, deletes, feed and automation changes are never
+  exposed. Admin-only tools stay gated by `/api/tools/execute` as usual.
+- Credentials only travel over `https://` (or `http://` to localhost; `INTELFEED_ALLOW_INSECURE_HTTP=1`
+  for a trusted LAN), and redirects are never followed: urllib would otherwise re-send the
+  `Authorization` header to whatever host a redirect names.
+- The system prompt tells the model to treat article and feed text as data, never as instructions.
+  The call log records tool and argument names, not values.
 
 **Registry.** The server reads the live registry from `GET /api/tools/tools` on first use, so
 `mutating` flags and schemas always match the deployment. `registry.json` is the fallback,
@@ -106,7 +115,8 @@ stayed small end to end:
 | `INTELFEED_API_URL` | `https://intelfeed.cc` | as for the skill CLIs |
 | `INTELFEED_USERNAME` / `INTELFEED_PASSWORD` | — | required |
 | `INTELFEED_MCP_ALLOW_WRITES` | off | exposes `write_action` |
-| `INTELFEED_MCP_WRITE_TOOLS` | the allowlist above | comma-separated |
+| `INTELFEED_MCP_WRITE_TOOLS` | the allowlist above | comma-separated; can only narrow it |
+| `INTELFEED_ALLOW_INSECURE_HTTP` | off | allow `http://` to a non-loopback host |
 | `INTELFEED_MCP_RESULT_CHARS` | 7000 (≈2k tokens) | per-result budget |
 | `INTELFEED_MCP_DEFAULT_LIMIT` | 10 | default `limit` for list/search tools |
 | `INTELFEED_MCP_LOG` | — | append a call log to this file (stderr always gets one) |
@@ -114,5 +124,6 @@ stayed small end to end:
 ## Tests
 
 `backend/tests/test_intelfeed_mcp.py` (protocol, shaping, argument checks, the read-only gate
-against every mutating registry tool, skills naming real read tools) and the snapshot check in
+against every mutating registry tool, the reviewed read list, redirect and URL handling, skills
+naming real read tools) and the snapshot check in
 `backend/tests/test_tool_registry_sync.py` run with the backend suite in CI.

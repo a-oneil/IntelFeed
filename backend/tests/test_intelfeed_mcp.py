@@ -448,6 +448,109 @@ def test_missing_credentials_message():
         m.IntelFeed(api_url="http://127.0.0.1:9", username="", password="").execute("get_dashboard_stats", {})
 
 
+def test_read_list_matches_registry():
+    """READ_ONLY_TOOLS is reviewed by hand; a new registry read tool fails here until someone adds it."""
+    registry_reads = {t["name"] for t in TOOL_DEFINITIONS if t.get("mutating") is False} - m.PERSISTING_READ_TOOLS
+    assert m.READ_ONLY_TOOLS == registry_reads, (
+        f"review, then add to READ_ONLY_TOOLS: {sorted(registry_reads - m.READ_ONLY_TOOLS)}; "
+        f"remove (gone or now a write): {sorted(m.READ_ONLY_TOOLS - registry_reads)}"
+    )
+
+
+def test_unreviewed_or_unflagged_tools_blocked():
+    server, fake = new_server()
+    fake._registry["get_brand_new_thing"] = {"name": "get_brand_new_thing", "mutating": False, "input_schema": {}}
+    with pytest.raises(m.ToolError, match="reviewed read-only list"):
+        server.call("call_tool", {"tool": "get_brand_new_thing", "args": {}})
+    # a reviewed tool still needs an explicit mutating: false from the registry
+    fake._registry["get_dashboard_stats"] = {
+        k: v for k, v in fake._registry["get_dashboard_stats"].items() if k != "mutating"
+    }
+    with pytest.raises(m.ToolError):
+        server.call("call_tool", {"tool": "get_dashboard_stats", "args": {}})
+    assert fake.calls == []
+
+
+def test_redirects_never_carry_the_token():
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    seen = {}
+
+    class Elsewhere(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            seen["authorization"] = self.headers.get("Authorization")
+            self.send_response(200)
+            self.end_headers()
+
+    class Api(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            self.send_response(302)
+            self.send_header("Location", f"http://localhost:{elsewhere.server_port}/collect")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+    elsewhere = ThreadingHTTPServer(("127.0.0.1", 0), Elsewhere)
+    api = ThreadingHTTPServer(("127.0.0.1", 0), Api)
+    for srv in (elsewhere, api):
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        client = m.IntelFeed(api_url=f"http://127.0.0.1:{api.server_port}", username="u", password="p")
+        client._access = "secret-token"
+        with pytest.raises(m.ToolError, match="redirect"):
+            client._http("GET", "/api/tools/tools")
+        assert "authorization" not in seen
+    finally:
+        elsewhere.shutdown()
+        api.shutdown()
+
+
+def test_plain_http_to_another_host_is_refused(monkeypatch):
+    monkeypatch.delenv("INTELFEED_ALLOW_INSECURE_HTTP", raising=False)
+    with pytest.raises(m.ToolError, match="https://"):
+        m.IntelFeed(api_url="http://intel.example.com", username="u", password="p").execute("get_dashboard_stats", {})
+    for ok in ("https://intel.example.com", "http://localhost:8000", "http://127.0.0.1:8000"):
+        assert m.IntelFeed(api_url=ok).config_error == ""
+    monkeypatch.setenv("INTELFEED_ALLOW_INSECURE_HTTP", "1")
+    assert m.IntelFeed(api_url="http://intel.example.com").config_error == ""
+
+
+def test_write_list_can_narrow_but_not_extend():
+    env = dict(os.environ, INTELFEED_MCP_WRITE_TOOLS="create_note,delete_feed,merge_threat_actors")
+    code = "import intelfeed_mcp as m; print(','.join(m.WRITE_TOOLS))"
+    proc = subprocess.run(
+        [sys.executable, "-c", code], cwd=_MCP_DIR, env=env, capture_output=True, text=True, timeout=30
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "create_note"
+    assert "delete_feed" in proc.stderr  # reported, not silently dropped
+
+
+def test_dotenv_quotes(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text("A_QUOTED=\"p#ss word # not a comment\"\nA_PLAIN=abc # a comment\nA_SINGLE='x y'\n")
+    for key in ("A_QUOTED", "A_PLAIN", "A_SINGLE"):
+        monkeypatch.delenv(key, raising=False)
+    m.load_dotenv(env_file)
+    assert os.environ["A_QUOTED"] == "p#ss word # not a comment"
+    assert os.environ["A_PLAIN"] == "abc"
+    assert os.environ["A_SINGLE"] == "x y"
+
+
+def test_call_log_names_arguments_but_not_values(capsys):
+    server, _ = new_server({"search_entries": search_result(1)})
+    server.call("search_entries", {"query": "private-investigation-term"})
+    err = capsys.readouterr().err
+    assert "search_entries(limit, query)" in err
+    assert "private-investigation-term" not in err
+
+
 # --- entity resolution -----------------------------------------------------------
 
 

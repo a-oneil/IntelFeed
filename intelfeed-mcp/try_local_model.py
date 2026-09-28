@@ -7,6 +7,7 @@ with the prompt size the model server reports — so you can see what a question
 
     python3 try_local_model.py "What is Qilin up to this month?"
     python3 try_local_model.py            # a few built-in questions
+    python3 try_local_model.py --yes ...  # don't ask before write_action (only exists with writes enabled)
 
 LLM_BASE_URL defaults to LM Studio (http://localhost:1234/v1); Ollama is http://localhost:11434/v1.
 LLM_MODEL defaults to the first model LM Studio reports as loaded. Both can go in .env.
@@ -131,7 +132,15 @@ def chat(model: str, messages: list[dict], tools: list[dict]) -> dict:
         return json.load(r)
 
 
-def ask(client: McpClient, model: str, question: str) -> dict:
+def confirm_write(args: dict) -> bool:
+    print(f"\n[confirm] the model wants write_action {args.get('tool', '?')} {json.dumps(args.get('args', {}))}")
+    try:
+        return input("Proceed? [y/N] ").strip().lower() in ("y", "yes")
+    except (EOFError, KeyboardInterrupt):
+        return False
+
+
+def ask(client: McpClient, model: str, question: str, auto_confirm: bool = False) -> dict:
     system = (HERE / "system_prompt.md").read_text(encoding="utf-8")
     tools = [
         {
@@ -160,7 +169,10 @@ def ask(client: McpClient, model: str, question: str) -> dict:
                 args = json.loads(tc["function"].get("arguments") or "{}")
             except json.JSONDecodeError:
                 args = {}
-            text, is_error = client.call(name, args)
+            if name == "write_action" and not auto_confirm and not confirm_write(args):
+                text, is_error = "Error: the user declined this write.", True
+            else:
+                text, is_error = client.call(name, args)
             stats["calls"].append(name if name != "call_tool" else f"call_tool:{args.get('tool')}")
             stats["errors"] += int(is_error)
             flag = "ERROR " if is_error else ""
@@ -182,12 +194,13 @@ def ask(client: McpClient, model: str, question: str) -> dict:
 
 
 def main() -> None:
-    questions = sys.argv[1:] or QUESTIONS
+    auto_confirm = any(a in ("--yes", "-y") for a in sys.argv[1:])
+    questions = [a for a in sys.argv[1:] if a not in ("--yes", "-y")] or QUESTIONS
     model = pick_model()
     client = McpClient()
     print(f"model {model}; {len(client.tools)} MCP tools")
     try:
-        results = [ask(client, model, q) for q in questions]
+        results = [ask(client, model, q, auto_confirm) for q in questions]
     finally:
         client.close()
     print("\n=== summary")
