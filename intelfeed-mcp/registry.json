@@ -1,0 +1,4758 @@
+[
+ {
+  "name": "add_requirement_match",
+  "description": "Manually match an entry to an intelligence requirement (match_type 'manual'). Increments the requirement's match count and stamps last_matched_at. Errors if the entry is already matched. Relevance: high, medium, or low.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "requirement_id": {
+     "type": "string",
+     "description": "Intelligence requirement UUID"
+    },
+    "entry_id": {
+     "type": "string",
+     "description": "Entry UUID to match"
+    },
+    "relevance": {
+     "type": "string",
+     "enum": [
+      "high",
+      "medium",
+      "low"
+     ],
+     "default": "medium"
+    }
+   },
+   "required": [
+    "requirement_id",
+    "entry_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "add_tag",
+  "description": "Tag an entry with an existing or new tag.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entry_id": {
+     "type": "string",
+     "description": "Entry UUID"
+    },
+    "tag_name": {
+     "type": "string",
+     "description": "Tag name (creates if doesn't exist)"
+    }
+   },
+   "required": [
+    "entry_id",
+    "tag_name"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "add_telegram_feed",
+  "description": "Subscribe to a Telegram channel feed. Requires server-side Telegram setup (scripts/telegram/telegram_login.py). The channel must be public OR the IntelFeed account must already be a member. Accepts @handle, t.me/https://t.me URLs (including /s/ preview URLs), or a numeric channel id; invite links (+hash / joinchat) are rejected — join first, then subscribe by handle or id. Queues an initial fetch on creation. Optionally auto-attribute every message to a threat actor or campaign — use this for ransomware leak channels, hacktivist channels, and broker channels that are themselves the actor.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "channel": {
+     "type": "string",
+     "description": "@channelname, https://t.me/channel, or numeric channel id"
+    },
+    "title": {
+     "type": "string",
+     "description": "Display title (defaults to 'Telegram: <channel>')"
+    },
+    "include_media": {
+     "type": "boolean",
+     "default": true,
+     "description": "Download photos/videos/voice notes/documents"
+    },
+    "extract_forwards": {
+     "type": "boolean",
+     "default": true,
+     "description": "Show 'Forwarded from' attribution"
+    },
+    "max_message_age_days": {
+     "type": "integer",
+     "default": 30,
+     "description": "Skip messages older than N days on first fetch (0 = no limit)"
+    },
+    "max_messages_per_fetch": {
+     "type": "integer",
+     "default": 200,
+     "description": "Safety cap per polling cycle"
+    },
+    "fetch_interval_minutes": {
+     "type": "integer",
+     "default": 30,
+     "description": "Polling cadence (lower = higher flood-wait risk)"
+    },
+    "threat_actor_id": {
+     "type": "string",
+     "description": "Optional UUID — auto-attribute every message to this actor"
+    },
+    "campaign_id": {
+     "type": "string",
+     "description": "Optional UUID — auto-link every message to this campaign"
+    },
+    "session_name": {
+     "type": "string",
+     "description": "Optional named session if running multiple Telegram identities"
+    },
+    "category": {
+     "type": "string",
+     "description": "Category name to organize the feed under"
+    }
+   },
+   "required": [
+    "channel"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "add_to_campaign",
+  "description": "Link an entry or entity to a campaign. Re-linking an already-linked entry/entity returns already_linked instead of an error. Note: the campaign UI and reports resolve names only for threat_actor, malware, cve, ttp and ransomware_victim links — other entity types are stored but render as bare IDs in campaign views.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "campaign_id": {
+     "type": "string",
+     "description": "Campaign UUID"
+    },
+    "entry_id": {
+     "type": "string",
+     "description": "Entry UUID to link (optional)"
+    },
+    "entity_type": {
+     "type": "string",
+     "enum": [
+      "country",
+      "cve",
+      "cwe",
+      "malware",
+      "mitigation",
+      "observable",
+      "product",
+      "ransomware_victim",
+      "threat_actor",
+      "tool",
+      "ttp",
+      "vendor"
+     ],
+     "description": "Entity type to link (optional)"
+    },
+    "entity_id": {
+     "type": "string",
+     "description": "Entity UUID to link (optional)"
+    },
+    "role": {
+     "type": "string",
+     "enum": [
+      "primary",
+      "secondary",
+      "related"
+     ],
+     "default": "related"
+    }
+   },
+   "required": [
+    "campaign_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "archive_intel_report",
+  "description": "Archive an intel report (status becomes 'archived'; the report is retained, not deleted).",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "report_id": {
+     "type": "string",
+     "description": "Intel report UUID"
+    }
+   },
+   "required": [
+    "report_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "bookmark_entry",
+  "description": "Set an entry's bookmarked flag for the current user (bookmarked=true by default; pass false to remove the bookmark). Syncs the flag to the search index. Returns the new value.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entry_id": {
+     "type": "string",
+     "description": "Entry UUID"
+    },
+    "bookmarked": {
+     "type": "boolean",
+     "description": "true = bookmark (default); false = remove"
+    }
+   },
+   "required": [
+    "entry_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "build_detection_summary",
+  "description": "Full detection engineering analysis: gathers all intelligence context for entries and produces comprehensive attack chain analysis and detection gaps. Optional focus steers the analysis angle; include_existing controls whether existing detection rules are folded into the context.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entry_ids": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Entry UUIDs to analyze"
+    },
+    "rule_formats": {
+     "type": "array",
+     "items": {
+      "type": "string",
+      "enum": [
+       "crowdstrike_ql",
+       "elastic_ql",
+       "kql",
+       "sigma",
+       "snort_suricata",
+       "splunk_spl",
+       "yara"
+      ]
+     },
+     "description": "Rule formats to include in the summary"
+    },
+    "focus": {
+     "type": "string",
+     "enum": [
+      "campaign",
+      "vulnerability",
+      "malware",
+      "actor"
+     ],
+     "default": "campaign",
+     "description": "Analysis angle for the summary"
+    },
+    "include_existing": {
+     "type": "boolean",
+     "default": true,
+     "description": "Include existing detection rules for the entries' TTPs in the analysis context"
+    }
+   },
+   "required": [
+    "entry_ids",
+    "rule_formats"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "bulk_entry_action",
+  "description": "Apply one state action to a list of entries for the current user: read, unread, star, unstar, bookmark, unbookmark, or hide (hide also marks the entries read). Syncs state to the search index. Returns the count of entries actually changed.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entry_ids": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Entry UUIDs to act on"
+    },
+    "action": {
+     "type": "string",
+     "enum": [
+      "bookmark",
+      "hide",
+      "read",
+      "star",
+      "unbookmark",
+      "unread",
+      "unstar"
+     ],
+     "description": "State action to apply to every entry"
+    }
+   },
+   "required": [
+    "entry_ids",
+    "action"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "bulk_unlink_entities",
+  "description": "Remove up to 500 entry→entity autolinks in one call. Each item is {entity_type, entity_id, entry_id}; items whose junction row no longer exists are skipped. Invalidates each affected entity's cached pivots/graphs. Returns the number actually deleted.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "items": {
+     "type": "array",
+     "description": "Links to remove (max 500)",
+     "items": {
+      "type": "object",
+      "properties": {
+       "entity_type": {
+        "type": "string",
+        "enum": [
+         "cve",
+         "cwe",
+         "malware",
+         "product",
+         "threat_actor",
+         "tool",
+         "ttp",
+         "vendor"
+        ]
+       },
+       "entity_id": {
+        "type": "string",
+        "description": "Entity UUID"
+       },
+       "entry_id": {
+        "type": "string",
+        "description": "Entry UUID"
+       }
+      },
+      "required": [
+       "entity_type",
+       "entity_id",
+       "entry_id"
+      ]
+     }
+    }
+   },
+   "required": [
+    "items"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "check_detection_gaps",
+  "description": "ATT&CK coverage analysis: observed TTPs vs non-draft detection rules, with per-tactic summary and the list of uncovered techniques. TTP-only — CVEs are not part of this analysis.",
+  "input_schema": {
+   "type": "object",
+   "properties": {}
+  },
+  "mutating": false
+ },
+ {
+  "name": "check_requirement_match",
+  "description": "Check an entry against all active intelligence requirements using the real matching engine (linked-entity hits, then title/body keyword hits, gated by each requirement's min_relevance and feed filter). Read-only: persists nothing; also returns matches the automated pipeline already persisted for this entry.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entry_id": {
+     "type": "string",
+     "description": "Entry UUID to check"
+    }
+   },
+   "required": [
+    "entry_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "check_telemetry_feasibility",
+  "description": "Check if detection rules are feasible given configured telemetry sources. Identifies what log sources are needed vs available.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "rule_id": {
+     "type": "string",
+     "description": "Optional: detection rule UUID to check"
+    }
+   }
+  },
+  "mutating": false
+ },
+ {
+  "name": "confirm_extraction_entities",
+  "description": "Analyst sign-off on AI-created entities: clears the needs_review flag on the given entities of one type so they no longer show in the extraction review queue. Returns how many rows were updated.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entity_type": {
+     "type": "string",
+     "enum": [
+      "cve",
+      "malware",
+      "observable",
+      "threat_actor",
+      "tool",
+      "ttp"
+     ],
+     "description": "Type of every id given"
+    },
+    "ids": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Entity UUIDs to confirm"
+    }
+   },
+   "required": [
+    "entity_type",
+    "ids"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "confirm_relationship",
+  "description": "Trust-ladder confirm: upgrade a relationship to source='analyst_confirmed' and confidence='confirmed', then invalidate cached pivots/graphs for both endpoints. Returns the updated relationship.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "relationship_id": {
+     "type": "string",
+     "description": "Relationship UUID"
+    }
+   },
+   "required": [
+    "relationship_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "convert_detection_rule",
+  "description": "Convert a detection rule to a different rule language using the AI provider assigned to the detection_rules task. Target formats: crowdstrike_ql, elastic_ql, kql, nuclei, panther, sigma, snort_suricata, splunk_spl, yara. Returns the converted content without changing the source rule. With save=true, the conversion is stored on the rule's metadata under rule_conversions (same place the UI keeps saved conversions).",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "rule_id": {
+     "type": "string",
+     "description": "Source detection rule UUID"
+    },
+    "target_format": {
+     "type": "string",
+     "enum": [
+      "crowdstrike_ql",
+      "elastic_ql",
+      "kql",
+      "nuclei",
+      "panther",
+      "sigma",
+      "snort_suricata",
+      "splunk_spl",
+      "yara"
+     ]
+    },
+    "save": {
+     "type": "boolean",
+     "default": false,
+     "description": "Persist the conversion on the rule's metadata (rule_conversions)."
+    }
+   },
+   "required": [
+    "rule_id",
+    "target_format"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "create_automation_rule",
+  "description": "Set up an automation rule with trigger, conditions, and actions. Trigger types: on_correlation_event, on_cve_detected, on_keyword_match, on_manual, on_new_entry, on_schedule. Each action is {type, config}; valid action types: add_tags, add_to_campaign, bookmark_entry, branch, chain_rule, create_intel_report, create_note, export_to, extract_cves, extract_malware, extract_threat_actors, extract_ttps, generate_detection_rules, hide_entry, mark_priority, mark_read, remove_tags, run_ai_task, run_webhook, send_notification, star_entry, use_daily_summary. The rule is created enabled.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string",
+     "description": "Rule name"
+    },
+    "description": {
+     "type": "string"
+    },
+    "trigger_type": {
+     "type": "string",
+     "enum": [
+      "on_correlation_event",
+      "on_cve_detected",
+      "on_keyword_match",
+      "on_manual",
+      "on_new_entry",
+      "on_schedule"
+     ],
+     "description": "What triggers the rule"
+    },
+    "trigger_config": {
+     "type": "object",
+     "description": "Trigger configuration (e.g. feed_ids, pattern, min_severity, execution_mode)"
+    },
+    "conditions": {
+     "type": "object",
+     "description": "Conditions to check before executing"
+    },
+    "actions": {
+     "type": "array",
+     "items": {
+      "type": "object"
+     },
+     "description": "Actions to execute, each {type: <action type>, config: {...}}"
+    }
+   },
+   "required": [
+    "name",
+    "trigger_type",
+    "actions"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "create_campaign",
+  "description": "Create a new campaign to track a threat operation and link entities/entries to it. TLP markings use TLP 2.0 (TLP:CLEAR/GREEN/AMBER/AMBER+STRICT/RED); the legacy TLP:WHITE is accepted and normalized to TLP:CLEAR.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string",
+     "description": "Campaign name"
+    },
+    "description": {
+     "type": "string"
+    },
+    "status": {
+     "type": "string",
+     "enum": [
+      "active",
+      "monitoring",
+      "closed",
+      "historical"
+     ],
+     "default": "active"
+    },
+    "tlp_marking": {
+     "type": "string",
+     "enum": [
+      "TLP:CLEAR",
+      "TLP:GREEN",
+      "TLP:AMBER",
+      "TLP:AMBER+STRICT",
+      "TLP:RED",
+      "TLP:WHITE"
+     ],
+     "default": "TLP:GREEN"
+    }
+   },
+   "required": [
+    "name"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "create_category",
+  "description": "Create a feed category. Returns the existing category instead if one with the same name exists.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string",
+     "description": "Category name"
+    }
+   },
+   "required": [
+    "name"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "create_detection_rule",
+  "description": "Save a detection rule to the library. The rule is stored as a DRAFT (is_draft=true) — an analyst promotes it from the Detection workbench. Optional provenance: tags, reference URLs, and source entry UUIDs the rule was derived from.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "title": {
+     "type": "string",
+     "description": "Rule title"
+    },
+    "rule_type": {
+     "type": "string",
+     "enum": [
+      "crowdstrike_ql",
+      "elastic_ql",
+      "kql",
+      "nuclei",
+      "panther",
+      "sigma",
+      "snort_suricata",
+      "splunk_spl",
+      "yara"
+     ]
+    },
+    "rule_content": {
+     "type": "string",
+     "description": "The rule content"
+    },
+    "description": {
+     "type": "string"
+    },
+    "severity": {
+     "type": "string",
+     "enum": [
+      "critical",
+      "high",
+      "medium",
+      "low",
+      "info"
+     ]
+    },
+    "entry_id": {
+     "type": "string",
+     "description": "Optional: source entry UUID"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Optional free-form tags"
+    },
+    "references": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Optional advisory/blog URLs the rule cites"
+    },
+    "source_entry_ids": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Optional entry UUIDs the rule was derived from"
+    }
+   },
+   "required": [
+    "title",
+    "rule_type",
+    "rule_content"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "create_entity_note",
+  "description": "Add an analytical note to an intelligence entity. Supported entity types: campaign, country, cve, malware, mitigation, product, threat_actor, tool, ttp, vendor (matches the entity_notes DB constraint; ransomware victims are not supported).",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entity_type": {
+     "type": "string",
+     "enum": [
+      "campaign",
+      "country",
+      "cve",
+      "cwe",
+      "malware",
+      "mitigation",
+      "observable",
+      "product",
+      "threat_actor",
+      "tool",
+      "ttp",
+      "vendor"
+     ]
+    },
+    "entity_id": {
+     "type": "string",
+     "description": "Entity UUID"
+    },
+    "content": {
+     "type": "string",
+     "description": "Note content (markdown)"
+    }
+   },
+   "required": [
+    "entity_type",
+    "entity_id",
+    "content"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "create_feed",
+  "description": "Subscribe to a new feed. feed_type covers every registered adapter (rss, atom, youtube, podcast, reddit, github_releases, github_advisories, github_repo, nvd, mastodon, web_scraper, telegram, bluesky — for telegram prefer add_telegram_feed). Rejects duplicate URLs with a structured error and queues an initial fetch via Celery. Extended adapter types usually need an adapter_config (see the adapter's expected keys). If a named category does not exist the feed is still created and a warning is returned.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "url": {
+     "type": "string",
+     "description": "Feed URL"
+    },
+    "title": {
+     "type": "string",
+     "description": "Display title (defaults to the URL if omitted)"
+    },
+    "feed_type": {
+     "type": "string",
+     "enum": [
+      "atom",
+      "bluesky",
+      "github_advisories",
+      "github_releases",
+      "github_repo",
+      "mastodon",
+      "nvd",
+      "podcast",
+      "reddit",
+      "rss",
+      "telegram",
+      "web_scraper",
+      "youtube"
+     ],
+     "default": "rss"
+    },
+    "category": {
+     "type": "string",
+     "description": "Category name to organize the feed under (must already exist)"
+    },
+    "adapter_config": {
+     "type": "object",
+     "description": "Adapter-specific configuration (extended adapter types)"
+    }
+   },
+   "required": [
+    "url"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "create_glossary_term",
+  "description": "Create a user glossary term. Requires name, category (free-form; NIST CSF functions govern/identify/protect/detect/respond/recover get special coloring), and description. Optional: maturity ('emerging', 'trending', or 'mature'), long_description, technologies (name + optional url), and search_terms aliases used for detection. Fails if a term with the same name already exists.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string",
+     "description": "Term name (unique)"
+    },
+    "category": {
+     "type": "string",
+     "description": "Category name, e.g. a NIST CSF function like 'detect'"
+    },
+    "description": {
+     "type": "string",
+     "description": "Short definition (max 2000 chars)"
+    },
+    "maturity": {
+     "type": "string",
+     "enum": [
+      "emerging",
+      "trending",
+      "mature"
+     ],
+     "description": "Optional maturity level"
+    },
+    "long_description": {
+     "type": "string",
+     "description": "Optional extended write-up (max 10000 chars)"
+    },
+    "technologies": {
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "name": {
+        "type": "string"
+       },
+       "url": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "name"
+      ]
+     },
+     "description": "Example technologies implementing the term"
+    },
+    "search_terms": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Alias phrases used when detecting the term in articles"
+    }
+   },
+   "required": [
+    "name",
+    "category",
+    "description"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "create_intel_report",
+  "description": "Create a draft intelligence report from a template with linked entities and entries. Templates: actor_profile, campaign_tracker, detection_report, exposure_report, flash_alert, landscape_report. TLP 2.0 markings; the legacy TLP:WHITE is accepted and normalized to TLP:CLEAR.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "title": {
+     "type": "string",
+     "description": "Report title"
+    },
+    "template_type": {
+     "type": "string",
+     "enum": [
+      "actor_profile",
+      "campaign_tracker",
+      "detection_report",
+      "exposure_report",
+      "flash_alert",
+      "landscape_report"
+     ]
+    },
+    "entry_ids": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Source entry UUIDs"
+    },
+    "entity_ids": {
+     "type": "object",
+     "description": "Entity UUIDs by type: {ttps: [...], actors: [...]}"
+    },
+    "tlp_marking": {
+     "type": "string",
+     "enum": [
+      "TLP:CLEAR",
+      "TLP:GREEN",
+      "TLP:AMBER",
+      "TLP:AMBER+STRICT",
+      "TLP:RED",
+      "TLP:WHITE"
+     ],
+     "default": "TLP:GREEN"
+    }
+   },
+   "required": [
+    "title",
+    "template_type"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "create_malware",
+  "description": "Create a new malware family entity. Runs the entity resolver first: if the name or an alias matches an existing family, that entity is returned (created: false) with new aliases folded in; if the creation gates reject the name the result is blocked: true with a reason. malware_type is coerced onto the controlled vocabulary (raw value kept in metadata).",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string",
+     "description": "Primary name"
+    },
+    "aliases": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "default": []
+    },
+    "description": {
+     "type": "string"
+    },
+    "malware_type": {
+     "type": "string",
+     "description": "e.g. ransomware, backdoor, loader, RAT, wiper"
+    }
+   },
+   "required": [
+    "name"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "create_note",
+  "description": "Add an analyst note to an entry. Markdown content is rendered and stored as HTML (same as the notes API). If no title is given, one is derived from the first line of the content, falling back to the entry title.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entry_id": {
+     "type": "string",
+     "description": "Entry UUID"
+    },
+    "content": {
+     "type": "string",
+     "description": "Note content (markdown)"
+    },
+    "title": {
+     "type": "string",
+     "description": "Note title (derived from content/entry title if omitted)"
+    }
+   },
+   "required": [
+    "entry_id",
+    "content"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "create_requirement",
+  "description": "Create a new Priority Intelligence Requirement (PIR).",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "title": {
+     "type": "string",
+     "description": "Requirement title"
+    },
+    "description": {
+     "type": "string",
+     "description": "What intelligence is needed and why"
+    },
+    "priority": {
+     "type": "string",
+     "enum": [
+      "critical",
+      "high",
+      "medium",
+      "low"
+     ],
+     "default": "medium"
+    },
+    "category": {
+     "type": "string",
+     "enum": [
+      "strategic",
+      "operational",
+      "tactical",
+      "technical"
+     ],
+     "default": "operational"
+    },
+    "keywords": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Keywords to match against articles"
+    },
+    "auto_match": {
+     "type": "boolean",
+     "default": true,
+     "description": "Automatically match new articles to this requirement"
+    }
+   },
+   "required": [
+    "title",
+    "keywords"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "create_saved_search",
+  "description": "Create a saved search from a query-language string (e.g. \"ransomware cve.severity:critical is:unread\"). Saved searches are per-user and appear in the reader sidebar. display_name optionally sets a friendlier label than the name.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string",
+     "description": "Short unique-ish name (1-255 chars)"
+    },
+    "query": {
+     "type": "string",
+     "description": "Search query-language string the saved search runs"
+    },
+    "display_name": {
+     "type": "string",
+     "description": "Optional display label (max 255 chars)"
+    }
+   },
+   "required": [
+    "name",
+    "query"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "create_share_link",
+  "description": "Create a public (unauthenticated) share link for an entry, or return this user's existing active one (share links are per-analyst, so another user's link for the same entry is not reused). ttl_days optionally sets an expiry on a newly created link (the API default is no expiry); it is ignored when an active link already exists. When server-side TTS is enabled, read-aloud audio is pre-generated best-effort with a 24h eviction TTL.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entry_id": {
+     "type": "string",
+     "description": "Entry UUID to share"
+    },
+    "ttl_days": {
+     "type": "number",
+     "description": "Optional days until the link expires (new links only)"
+    }
+   },
+   "required": [
+    "entry_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "create_threat_actor",
+  "description": "Create a new threat actor entity. Runs the entity resolver first: if the name or an alias matches an existing actor, that entity is returned (created: false) with new aliases folded in; if the creation gates reject the name (tombstone, dictionary word, etc.) the result is blocked: true with a reason instead of a new entity.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string",
+     "description": "Primary name"
+    },
+    "aliases": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "default": []
+    },
+    "description": {
+     "type": "string"
+    },
+    "country": {
+     "type": "string"
+    },
+    "motivation": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "name"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "create_webhook_preset",
+  "description": "Create a webhook preset — a reusable URL + payload + headers combination that automation rule actions can reference by preset id instead of repeating the URL.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string",
+     "description": "Preset name"
+    },
+    "url": {
+     "type": "string",
+     "description": "Webhook URL",
+     "default": ""
+    },
+    "payload": {
+     "type": "string",
+     "description": "Payload template as a JSON string (single-brace {var} placeholders)",
+     "default": "{}"
+    },
+    "headers": {
+     "type": "object",
+     "description": "HTTP headers to send",
+     "default": {}
+    },
+    "preset_type": {
+     "type": "string",
+     "default": "webhook"
+    },
+    "config": {
+     "type": "object",
+     "description": "Extra preset configuration",
+     "default": {}
+    }
+   },
+   "required": [
+    "name"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "delete_automation_rule",
+  "description": "Delete an automation rule permanently. REQUIRES user confirmation. First call returns a confirmation prompt with a token — present it to the user. Only call again with the confirmation_token after the user explicitly approves. To just stop a rule from running, use toggle_automation_rule instead.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "rule_id": {
+     "type": "string",
+     "description": "UUID of the automation rule to delete"
+    },
+    "confirmation_token": {
+     "type": "string",
+     "description": "Confirmation token from a previous call. Only provide after user confirms."
+    }
+   },
+   "required": [
+    "rule_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "delete_campaign",
+  "description": "Delete a campaign and its entry/entity/saved-search links. Linked entries and entities themselves are NOT deleted. REQUIRES user confirmation. First call returns a confirmation prompt with link counts — present it to the user. Only call again with the confirmation_token after the user explicitly approves.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "campaign_id": {
+     "type": "string",
+     "description": "Campaign UUID"
+    },
+    "confirmation_token": {
+     "type": "string",
+     "description": "Confirmation token from a previous call. Only provide after user confirms."
+    }
+   },
+   "required": [
+    "campaign_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "delete_detection_rule",
+  "description": "Delete a detection rule permanently; its version history is removed with it. REQUIRES user confirmation: the first call returns a confirmation prompt and token — present it to the user and only call again with confirmation_token after they explicitly approve.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "rule_id": {
+     "type": "string",
+     "description": "Detection rule UUID"
+    },
+    "confirmation_token": {
+     "type": "string",
+     "description": "Token from a previous call. Only provide after the user confirms."
+    }
+   },
+   "required": [
+    "rule_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "delete_entity",
+  "description": "Delete a record: feed, entry, note, detection rule, campaign, automation rule, intelligence requirement, intel report, tag, or any intelligence entity (threat actor, malware, CVE, TTP, country, tool, vendor, product, mitigation, observable). Intelligence entities get the same cleanup as the API delete endpoints: entry links and entity relationships are removed and the search-index document is dropped. No tombstone is written — the autolinker/extraction pipeline may re-create the entity from future articles; use the false-positive workflow if the name must stay gone (an observable's equivalent is the never-capture tombstone). REQUIRES user confirmation. First call returns a confirmation prompt — present it to the user. Only call again with the confirmation_token after the user explicitly approves.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entity_type": {
+     "type": "string",
+     "enum": [
+      "feed",
+      "entry",
+      "note",
+      "detection_rule",
+      "campaign",
+      "automation_rule",
+      "intelligence_requirement",
+      "intel_report",
+      "ttp",
+      "threat_actor",
+      "malware",
+      "tag",
+      "cve",
+      "country",
+      "tool",
+      "vendor",
+      "product",
+      "mitigation",
+      "observable"
+     ],
+     "description": "Type of entity to delete"
+    },
+    "entity_id": {
+     "type": "string",
+     "description": "UUID of the entity to delete"
+    },
+    "confirmation_token": {
+     "type": "string",
+     "description": "Confirmation token from a previous call. Only provide after user confirms."
+    }
+   },
+   "required": [
+    "entity_type",
+    "entity_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "delete_entity_note",
+  "description": "Permanently delete an entity note. The entity it was attached to is not affected.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "note_id": {
+     "type": "string",
+     "description": "UUID of the entity note to delete"
+    }
+   },
+   "required": [
+    "note_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "delete_feed",
+  "description": "Delete a feed and ALL of its entries (cascade), removing them from the search index first. REQUIRES user confirmation. First call returns a confirmation prompt with an entry count — present it to the user. Only call again with the confirmation_token after the user explicitly approves.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "feed_id": {
+     "type": "string",
+     "description": "UUID of the feed to delete"
+    },
+    "confirmation_token": {
+     "type": "string",
+     "description": "Confirmation token from a previous call. Only provide after user confirms."
+    }
+   },
+   "required": [
+    "feed_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "delete_glossary_term",
+  "description": "Delete a user-created glossary term by UUID. Built-in system terms cannot be deleted. Single-row removal; no confirmation required.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "term_id": {
+     "type": "string",
+     "description": "Glossary term UUID"
+    }
+   },
+   "required": [
+    "term_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "delete_intel_report",
+  "description": "Delete a draft intel report permanently (published or archived reports cannot be deleted — archive instead). REQUIRES user confirmation: the first call returns a confirmation prompt and token — present it to the user and only call again with confirmation_token after they explicitly approve.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "report_id": {
+     "type": "string",
+     "description": "Intel report UUID"
+    },
+    "confirmation_token": {
+     "type": "string",
+     "description": "Token from a previous call. Only provide after the user confirms."
+    }
+   },
+   "required": [
+    "report_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "delete_note",
+  "description": "Delete an analyst note. The entry it was attached to (if any) is not affected.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "note_id": {
+     "type": "string",
+     "description": "UUID of the note to delete"
+    }
+   },
+   "required": [
+    "note_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "delete_relationship",
+  "description": "Hard-delete an entity↔entity relationship and invalidate cached pivots/graphs for both endpoints. Reversible via re-create, so no confirmation is required — but prefer reject_relationship for auto-extracted edges: a deleted row can be recreated by re-ingestion, a rejected one cannot.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "relationship_id": {
+     "type": "string",
+     "description": "Relationship UUID"
+    }
+   },
+   "required": [
+    "relationship_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "delete_requirement",
+  "description": "Delete an intelligence requirement (PIR) permanently, along with its entry matches. REQUIRES user confirmation: the first call returns a confirmation prompt and token — present it to the user and only call again with confirmation_token after they explicitly approve.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "requirement_id": {
+     "type": "string",
+     "description": "Intelligence requirement UUID"
+    },
+    "confirmation_token": {
+     "type": "string",
+     "description": "Token from a previous call. Only provide after the user confirms."
+    }
+   },
+   "required": [
+    "requirement_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "delete_saved_search",
+  "description": "Delete one of this user's saved searches by id. The underlying entries are untouched and the search is trivially recreatable from its name and query.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "search_id": {
+     "type": "string",
+     "description": "Saved search UUID"
+    }
+   },
+   "required": [
+    "search_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "delete_webhook_preset",
+  "description": "Delete a webhook preset. Automation actions referencing it by id will stop resolving — check rules that use it first.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "preset_id": {
+     "type": "string",
+     "description": "UUID of the webhook preset to delete"
+    }
+   },
+   "required": [
+    "preset_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "detect_glossary_terms",
+  "description": "Detect which glossary terms appear in an entry's text (word-boundary matching over each term's name and search-term aliases). Returns matched terms with per-term match counts, highest first. Note: takes an entry UUID, not raw text — that is what the API supports.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entry_id": {
+     "type": "string",
+     "description": "Entry UUID whose text to scan"
+    }
+   },
+   "required": [
+    "entry_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "discover_telegram_channels",
+  "description": "List every Telegram channel the IntelFeed bootstrap account is joined to, with is_subscribed = whether IntelFeed already ingests it. Use this to see which channels you've joined in your Telegram client app but haven't yet wired up as IntelFeed feeds.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "session_name": {
+     "type": "string",
+     "description": "Optional named session"
+    },
+    "only_unsubscribed": {
+     "type": "boolean",
+     "default": false
+    }
+   }
+  },
+  "mutating": false
+ },
+ {
+  "name": "export_attack_layer",
+  "description": "Export MITRE ATT&CK Navigator layer JSON for visualization. With entry_id, uses the entry's linked techniques with real tactic and per-link confidence/source text; without it, covers observed techniques (linked to at least one entry, non-deprecated, top 500 by article count).",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entry_id": {
+     "type": "string",
+     "description": "Optional: scope to TTPs from a specific entry"
+    },
+    "title": {
+     "type": "string",
+     "default": "IntelFeed ATT&CK Layer"
+    }
+   }
+  },
+  "mutating": false
+ },
+ {
+  "name": "export_campaign",
+  "description": "Export a complete campaign intel package: linked entries, every entity type extracted from those entries (TTPs, CVEs, actors, malware, tools, vendors, products, countries, mitigations), explicitly linked entities, and detection rules sourced from the campaign.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "campaign_id": {
+     "type": "string",
+     "description": "Campaign UUID"
+    }
+   },
+   "required": [
+    "campaign_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "export_report",
+  "description": "Export an intelligence report in markdown or HTML format.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "report_id": {
+     "type": "string",
+     "description": "Report UUID"
+    },
+    "format": {
+     "type": "string",
+     "enum": [
+      "markdown",
+      "html"
+     ],
+     "description": "Export format"
+    }
+   },
+   "required": [
+    "report_id",
+    "format"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "extract_cves",
+  "description": "Extract CVE references from an entry and optionally enrich from NVD. Stores results.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entry_id": {
+     "type": "string",
+     "description": "Entry UUID"
+    }
+   },
+   "required": [
+    "entry_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "extract_malware",
+  "description": "Identify malware families in an entry via the consolidated entry_analysis AI task (may return the cached ingest-time analysis instead of a fresh AI call). Creates or links malware entities.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entry_id": {
+     "type": "string",
+     "description": "Entry UUID"
+    }
+   },
+   "required": [
+    "entry_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "extract_threat_actors",
+  "description": "Identify threat actors in an entry via the consolidated entry_analysis AI task (may return the cached ingest-time analysis instead of a fresh AI call). Creates or links threat actor entities.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entry_id": {
+     "type": "string",
+     "description": "Entry UUID"
+    }
+   },
+   "required": [
+    "entry_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "extract_ttps",
+  "description": "Extract MITRE ATT&CK techniques (TTPs) from an entry. Always runs regex matching; use_ai adds the ttp_mapping AI task (its result is cached per entry — reruns reuse the current AIResult). Stores links.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entry_id": {
+     "type": "string",
+     "description": "Entry UUID"
+    },
+    "use_ai": {
+     "type": "boolean",
+     "default": true
+    }
+   },
+   "required": [
+    "entry_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "fulfill_requirement",
+  "description": "Mark an intelligence requirement fulfilled, optionally linking the intel report that fulfilled it (report_id).",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "requirement_id": {
+     "type": "string",
+     "description": "Intelligence requirement UUID"
+    },
+    "report_id": {
+     "type": "string",
+     "description": "Optional UUID of the fulfilling intel report"
+    }
+   },
+   "required": [
+    "requirement_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "generate_campaign_report",
+  "description": "Generate an intelligence report from a campaign's linked entries and entities (draft + queued AI generation). Templates: actor_profile, campaign_tracker, detection_report, exposure_report, flash_alert, landscape_report (default campaign_tracker). TLP 2.0 markings; legacy TLP:WHITE is normalized to TLP:CLEAR.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "campaign_id": {
+     "type": "string",
+     "description": "Campaign UUID"
+    },
+    "template_type": {
+     "type": "string",
+     "enum": [
+      "actor_profile",
+      "campaign_tracker",
+      "detection_report",
+      "exposure_report",
+      "flash_alert",
+      "landscape_report"
+     ],
+     "default": "campaign_tracker"
+    },
+    "title": {
+     "type": "string",
+     "description": "Report title (defaults to campaign name)"
+    },
+    "tlp_marking": {
+     "type": "string",
+     "enum": [
+      "TLP:CLEAR",
+      "TLP:GREEN",
+      "TLP:AMBER",
+      "TLP:AMBER+STRICT",
+      "TLP:RED",
+      "TLP:WHITE"
+     ],
+     "default": "TLP:GREEN"
+    }
+   },
+   "required": [
+    "campaign_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "generate_detection_rules",
+  "description": "Generate detection rules from an entry's TTPs via the detection_rules AI task and store them as drafts. Supported formats: crowdstrike_ql, elastic_ql, kql, sigma, snort_suricata, splunk_spl, yara.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entry_id": {
+     "type": "string",
+     "description": "Entry UUID to generate rules from"
+    },
+    "rule_types": {
+     "type": "array",
+     "items": {
+      "type": "string",
+      "enum": [
+       "crowdstrike_ql",
+       "elastic_ql",
+       "kql",
+       "sigma",
+       "snort_suricata",
+       "splunk_spl",
+       "yara"
+      ]
+     },
+     "description": "Which rule formats to generate"
+    }
+   },
+   "required": [
+    "entry_id",
+    "rule_types"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "generate_full_report",
+  "description": "Generate an AI-powered intelligence report from source entries (created as a draft, then AI generation is queued via Celery). Templates: actor_profile, campaign_tracker, detection_report, exposure_report, flash_alert, landscape_report. TLP 2.0 markings; legacy TLP:WHITE is normalized to TLP:CLEAR.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "title": {
+     "type": "string",
+     "description": "Report title"
+    },
+    "template_type": {
+     "type": "string",
+     "enum": [
+      "actor_profile",
+      "campaign_tracker",
+      "detection_report",
+      "exposure_report",
+      "flash_alert",
+      "landscape_report"
+     ]
+    },
+    "entry_ids": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Source entry UUIDs"
+    },
+    "focus": {
+     "type": "string",
+     "description": "What the report should focus on"
+    },
+    "tlp_marking": {
+     "type": "string",
+     "enum": [
+      "TLP:CLEAR",
+      "TLP:GREEN",
+      "TLP:AMBER",
+      "TLP:AMBER+STRICT",
+      "TLP:RED",
+      "TLP:WHITE"
+     ],
+     "default": "TLP:GREEN"
+    }
+   },
+   "required": [
+    "title",
+    "template_type",
+    "entry_ids"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "get_analytics",
+  "description": "Get platform analytics: trending entities, intelligence velocity, detection coverage gaps, and overview stats.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "metric": {
+     "type": "string",
+     "enum": [
+      "overview",
+      "trending",
+      "detection_coverage",
+      "velocity"
+     ],
+     "description": "Which analytics metric to retrieve"
+    },
+    "entity_type": {
+     "type": "string",
+     "description": "For trending: threat_actor, malware, cve, ttp"
+    },
+    "days": {
+     "type": "integer",
+     "default": 30
+    }
+   },
+   "required": [
+    "metric"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_attack_layer",
+  "description": "Get MITRE ATT&CK Navigator layer JSON for a specific entry's TTPs, or (without entry_id) for all observed techniques — those linked to at least one entry, excluding deprecated catalog techniques.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entry_id": {
+     "type": "string",
+     "description": "Optional: scope to TTPs from a specific entry"
+    },
+    "title": {
+     "type": "string",
+     "default": "IntelFeed ATT&CK Coverage"
+    }
+   }
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_automation_logs",
+  "description": "Get recent automation execution logs.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "rule_id": {
+     "type": "string",
+     "description": "Optional: filter by specific rule"
+    },
+    "limit": {
+     "type": "integer",
+     "default": 30
+    }
+   }
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_automation_rules",
+  "description": "List automation rules with optional label filter.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "label": {
+     "type": "string",
+     "description": "Filter by label"
+    },
+    "limit": {
+     "type": "integer",
+     "default": 30
+    }
+   }
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_automation_templates",
+  "description": "List pre-built automation rule templates with categories.",
+  "input_schema": {
+   "type": "object",
+   "properties": {}
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_campaign",
+  "description": "Get campaign details with timeline, linked entries, linked entities, and detection gaps.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "campaign_id": {
+     "type": "string",
+     "description": "Campaign UUID"
+    }
+   },
+   "required": [
+    "campaign_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_campaign_attack_layer",
+  "description": "Get MITRE ATT&CK Navigator layer JSON for all TTPs linked to a campaign.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "campaign_id": {
+     "type": "string",
+     "description": "Campaign UUID"
+    }
+   },
+   "required": [
+    "campaign_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_campaign_detection_gaps",
+  "description": "Telemetry-aware detection coverage for a campaign's TTPs: covered, library_only (rules blocked by missing telemetry), and gaps (no rule).",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "campaign_id": {
+     "type": "string",
+     "description": "Campaign UUID"
+    }
+   },
+   "required": [
+    "campaign_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_campaign_timeline",
+  "description": "Get chronological entries in a campaign, sorted by publication date.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "campaign_id": {
+     "type": "string",
+     "description": "Campaign UUID"
+    }
+   },
+   "required": [
+    "campaign_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_campaigns",
+  "description": "List campaigns with optional status filter.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "status": {
+     "type": "string",
+     "enum": [
+      "active",
+      "monitoring",
+      "closed",
+      "historical"
+     ],
+     "description": "Filter by status"
+    },
+    "limit": {
+     "type": "integer",
+     "default": 30
+    }
+   }
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_correlation_events",
+  "description": "Get recent correlation events — coverage gaps, trending entities, campaign and requirement matches, new TTPs/malware for known actors or malware, actor-malware co-occurrence, feed staleness/errors, exploit and CVE score changes, and KEV additions.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "limit": {
+     "type": "integer",
+     "default": 30
+    },
+    "unread_only": {
+     "type": "boolean",
+     "default": false
+    }
+   }
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_cve",
+  "description": "Get CVE details including CVSS/EPSS scores, severity, CISA KEV status, GitHub PoC and Metasploit availability, structured NVD affected vendor/product links, NVD weakness (CWE) assignments, and linked article count.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "cve_id": {
+     "type": "string",
+     "description": "CVE UUID or CVE ID string (e.g. CVE-2024-1234)"
+    }
+   },
+   "required": [
+    "cve_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_cwe",
+  "description": "Get a MITRE CWE weakness by ID, including its position on the abstraction ladder (Pillar/Class/Base/Variant), parent and lineage, MITRE mapping guidance, catalog mitigations and detection methods, how many CVEs carry it directly and across its whole subtree, how many of those are in CISA KEV, and linked article count.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "cwe_id": {
+     "type": "string",
+     "description": "CWE UUID or catalog ID string (e.g. CWE-416)"
+    }
+   },
+   "required": [
+    "cwe_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_daily_summary",
+  "description": "Return the cached AI daily summary (briefing) for a day, or null if none has been generated. date is YYYY-MM-DD, defaulting to today (UTC). Read-only: this never generates a summary — generation runs via the daily_summary AI task/automation.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "date": {
+     "type": "string",
+     "description": "Day key YYYY-MM-DD (default: today, UTC)"
+    }
+   },
+   "required": []
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_dashboard_stats",
+  "description": "Get system-wide statistics: total entries, feeds, detection rules, counts for every entity type (ttp = observed techniques with linked articles; full catalog size in ttp_catalog_size), and recent activity (entries in the last 24h/7d).",
+  "input_schema": {
+   "type": "object",
+   "properties": {}
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_detection_rule",
+  "description": "Get a single detection rule with full rule content, provenance (source repo/author/license/references), draft/published status, telemetry feasibility against the enabled Telemetry Sources inventory, and a syntax-validation summary.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "rule_id": {
+     "type": "string",
+     "description": "Detection rule UUID"
+    }
+   },
+   "required": [
+    "rule_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_detection_rule_versions",
+  "description": "List a detection rule's saved versions, newest first. Versions are snapshots taken whenever rule_content changed or a rollback occurred.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "rule_id": {
+     "type": "string",
+     "description": "Detection rule UUID"
+    }
+   },
+   "required": [
+    "rule_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_detection_rules",
+  "description": "List detection rules. Optionally filter by rule type (crowdstrike_ql, elastic_ql, kql, nuclei, panther, sigma, snort_suricata, splunk_spl, yara).",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "rule_type": {
+     "type": "string",
+     "description": "Filter by rule type",
+     "enum": [
+      "crowdstrike_ql",
+      "elastic_ql",
+      "kql",
+      "nuclei",
+      "panther",
+      "sigma",
+      "snort_suricata",
+      "splunk_spl",
+      "yara"
+     ]
+    },
+    "limit": {
+     "type": "integer",
+     "default": 30
+    }
+   }
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_documentation_page",
+  "description": "Read one IntelFeed documentation page in full, as markdown. The slug is the path under docs/ without the .md suffix, e.g. 'architecture', 'user-guide' or 'diagrams/entry-pipeline'. Cite the page you used as a /documentation/<slug> link.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "slug": {
+     "type": "string",
+     "description": "Page slug, e.g. 'architecture' or 'diagrams/entry-pipeline'."
+    }
+   },
+   "required": [
+    "slug"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_enrichment_data",
+  "description": "Get enrichment results stored on an entity: CVE (EPSS, KEV, GitHub PoCs, Metasploit, NVD data), malware (Malpedia, Wikipedia), threat actor (Wikipedia), or TTP (Wikipedia).",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entity_type": {
+     "type": "string",
+     "enum": [
+      "cve",
+      "malware",
+      "threat_actor",
+      "ttp"
+     ],
+     "description": "Entity type"
+    },
+    "entity_id": {
+     "type": "string",
+     "description": "Entity UUID"
+    }
+   },
+   "required": [
+    "entity_type",
+    "entity_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_entity_graph",
+  "description": "Build a relationship graph centered on an entity. Claims-only: edges are typed relationship records (verb, direction, confidence, provenance) at confirmed/reported confidence — pure co-occurrence pairs are excluded; co-occurrence data only enriches edges with proximity and evidence articles.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entity_type": {
+     "type": "string",
+     "enum": [
+      "country",
+      "cve",
+      "cwe",
+      "malware",
+      "mitigation",
+      "observable",
+      "product",
+      "threat_actor",
+      "tool",
+      "ttp",
+      "vendor"
+     ]
+    },
+    "entity_id": {
+     "type": "string",
+     "description": "Entity UUID"
+    },
+    "depth": {
+     "type": "integer",
+     "default": 1,
+     "description": "Graph traversal depth (1-3)"
+    },
+    "window_days": {
+     "type": "integer",
+     "description": "Restrict the evidence window per node to N days"
+    }
+   },
+   "required": [
+    "entity_type",
+    "entity_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_entity_link_stats",
+  "description": "Autolinking health signals: total entry→entity links by entity type and provenance source, the held-match (pending autolink) queue depth and how many held matches are high-confidence ready, plus the count of non-rejected entity↔entity relationships.",
+  "input_schema": {
+   "type": "object",
+   "properties": {}
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_entity_timeline",
+  "description": "Get chronological timeline of when an entity appeared in articles.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entity_type": {
+     "type": "string",
+     "enum": [
+      "country",
+      "cve",
+      "cwe",
+      "malware",
+      "mitigation",
+      "observable",
+      "product",
+      "threat_actor",
+      "tool",
+      "ttp",
+      "vendor"
+     ]
+    },
+    "entity_id": {
+     "type": "string",
+     "description": "Entity UUID"
+    }
+   },
+   "required": [
+    "entity_type",
+    "entity_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_entry",
+  "description": "Fetch a single RSS entry by ID with full content and all extracted intelligence: TTPs, CVEs, CWEs, threat actors, malware, tools, vendors, products, countries, and mitigations.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entry_id": {
+     "type": "string",
+     "description": "Entry UUID"
+    }
+   },
+   "required": [
+    "entry_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_entry_graph",
+  "description": "Get relationship graph for all entities linked to a single entry.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entry_id": {
+     "type": "string",
+     "description": "Entry UUID"
+    }
+   },
+   "required": [
+    "entry_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_entry_insights",
+  "description": "Get actionable intelligence insights for a specific entry's entities.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entry_id": {
+     "type": "string",
+     "description": "Entry UUID"
+    }
+   },
+   "required": [
+    "entry_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_entry_story",
+  "description": "Chain follow-up/precursor articles to an entry via shared entities: within a ±30 day window, entries sharing at least one strong entity (CVE, threat actor, malware) or two entities of any type join the story. Ordered chronologically (a timeline, not a relevance ranking — use get_similar_entries for that).",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entry_id": {
+     "type": "string",
+     "description": "Entry UUID"
+    }
+   },
+   "required": [
+    "entry_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_extraction_stats",
+  "description": "Aggregate stats over AI-created entities (created_via='ai_extraction' across threat actors, malware, tools, CVEs, TTPs): totals by type, needs-review / orphaned / likely-duplicate / auto-confirmed counts, and how many were created in the requested window vs the preceding one.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "window": {
+     "type": "string",
+     "enum": [
+      "24h",
+      "30d",
+      "7d",
+      "all"
+     ],
+     "default": "7d",
+     "description": "Creation window for the created_window / created_prev_window counters"
+    }
+   }
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_feed_entries",
+  "description": "List recent entries from a specific feed.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "feed_id": {
+     "type": "string",
+     "description": "Feed UUID"
+    },
+    "limit": {
+     "type": "integer",
+     "default": 20
+    }
+   },
+   "required": [
+    "feed_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_feed_value",
+  "description": "Get feed value scores — composite 0-100 intelligence contribution metric per feed.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "days": {
+     "type": "integer",
+     "default": 30
+    }
+   }
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_feeds",
+  "description": "List configured feeds of any registered adapter type (atom, bluesky, github_advisories, github_releases, github_repo, mastodon, nvd, podcast, reddit, rss, telegram, web_scraper, youtube) with health status.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "limit": {
+     "type": "integer",
+     "default": 50
+    }
+   }
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_hygiene_feed",
+  "description": "Chronological hygiene feed: a merge of the link-validator and entity-maintenance logs, normalized (action, mode, applied, subject, reason, affected-entity links, AI review verdict). Filter by action code (comma-separate for several), log source, mode, AI review verdict, pending-only, or a since timestamp. Read-only — applying or dismissing proposals happens in the Hygiene admin UI.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "action": {
+     "type": "string",
+     "description": "Filter by action code(s), comma-separated — e.g. 'needs_reclassification' or 'ttp_malformed_id,cve_malformed_id'"
+    },
+    "source": {
+     "type": "string",
+     "enum": [
+      "link_validator",
+      "entity_maintenance"
+     ],
+     "description": "Restrict to one log source; omit for both"
+    },
+    "mode": {
+     "type": "string",
+     "enum": [
+      "shadow",
+      "apply"
+     ],
+     "description": "shadow = proposals only, apply = actions that actually ran"
+    },
+    "review": {
+     "type": "string",
+     "enum": [
+      "approve",
+      "reject",
+      "unsure",
+      "unreviewed"
+     ],
+     "description": "Filter pending proposals by AI reviewer verdict"
+    },
+    "pending": {
+     "type": "boolean",
+     "default": false,
+     "description": "Only unapplied proposals (skips applied history)"
+    },
+    "since": {
+     "type": "string",
+     "description": "ISO timestamp; only rows created at or after it"
+    },
+    "limit": {
+     "type": "integer",
+     "default": 50,
+     "description": "Rows per page (1-200)"
+    },
+    "offset": {
+     "type": "integer",
+     "default": 0,
+     "description": "Rows to skip"
+    }
+   }
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_hygiene_stats",
+  "description": "Combined entity-hygiene counters across the link validator and entity-maintenance systems: operating modes (shadow/apply), pending reclassify advisories and merge/name/alias/vendor/id proposals, AI review verdict counts, orphan entity count, validator scan progress, last run times, and how many actions were applied in the last 24h / 7d.",
+  "input_schema": {
+   "type": "object",
+   "properties": {}
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_intel_report",
+  "description": "Get a single intel report including its full content (all sections, metadata, references).",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "report_id": {
+     "type": "string",
+     "description": "Intel report UUID"
+    }
+   },
+   "required": [
+    "report_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_malware",
+  "description": "Get malware family profile with aliases, type, targeted sectors, associated actors, and the count of linked articles (article_count).",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "malware_id": {
+     "type": "string",
+     "description": "Malware family UUID"
+    }
+   },
+   "required": [
+    "malware_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_observable",
+  "description": "Look up an observable (IOC ledger row) by UUID or by its value (IP, domain, URL, hash, cmdline, registry key, ...). Returns kind, role, current/base confidence with decay state, sighting count, capture provenance (which judgment door created it) with the evidence sentence, first/last seen, and the most recent sighting articles. Defanged input (evil[.]com, hxxps://) is normalized.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "observable": {
+     "type": "string",
+     "description": "Observable UUID or the value itself (defanged ok)"
+    },
+    "kind": {
+     "type": "string",
+     "description": "Optional kind to disambiguate a value lookup (ipv4, domain, sha256, cmdline, ...)"
+    }
+   },
+   "required": [
+    "observable"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_priority_queue",
+  "description": "The analyst's reading queue, exactly as the Priority Queue page shows it: unread entries that clear the radar threshold, ranked by signal score, with story threads folded in as single rows so a story eleven outlets covered is one item and not eleven. Ask this for 'what should I read next' / 'what's important right now'. Prefer it over get_triage_queue, which is the older heuristic and does not fold stories.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "limit": {
+     "type": "integer",
+     "description": "Entries per page (1-200, default 25); thread rows are extra"
+    },
+    "unread_only": {
+     "type": "boolean",
+     "description": "false also returns entries already read (default true)"
+    },
+    "with_threads": {
+     "type": "boolean",
+     "description": "false skips story folding (default true)"
+    },
+    "cursor": {
+     "type": "string",
+     "description": "next_cursor from a previous call, for the next page"
+    }
+   }
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_ransomware_disclosures",
+  "description": "Reverse-chronological feed of ransomware leak-site victim disclosures (Leak Watch), with filters for group name, canonical sector slug, country (ISO code or name), posting recency, substring search, and the user's watched victims/groups. sort is 'recent', 'group', or 'sector' (newest-first tiebreak). Returns a paginated list; empty when the ransomware tracker has not synced yet.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "group": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Filter by ransomware group name(s)"
+    },
+    "sector": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Filter by canonical sector slug(s)"
+    },
+    "country": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Filter by country ISO code or name"
+    },
+    "watched_only": {
+     "type": "boolean",
+     "description": "Only disclosures hitting the user's watched victims/groups"
+    },
+    "since": {
+     "type": "integer",
+     "description": "Only postings newer than N days"
+    },
+    "q": {
+     "type": "string",
+     "description": "Substring search on victim name/domain or raw group name"
+    },
+    "sort": {
+     "type": "string",
+     "enum": [
+      "recent",
+      "group",
+      "sector"
+     ],
+     "description": "Sort order (default 'recent')"
+    },
+    "limit": {
+     "type": "integer",
+     "description": "Page size, 1-200 (default 50)"
+    },
+    "offset": {
+     "type": "integer",
+     "description": "Rows to skip for pagination"
+    }
+   },
+   "required": []
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_ransomware_group_victims",
+  "description": "Paginated list of victim organizations disclosed by a ransomware group (a ThreatActor), newest activity first. Returns an empty page if the actor has no tracked disclosures.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "actor_id": {
+     "type": "string",
+     "description": "ThreatActor UUID of the ransomware group"
+    },
+    "limit": {
+     "type": "integer",
+     "description": "Page size, 1-200 (default 50)"
+    },
+    "offset": {
+     "type": "integer",
+     "description": "Rows to skip for pagination"
+    }
+   },
+   "required": [
+    "actor_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_ransomware_stats",
+  "description": "Ransomware Landscape aggregates over a trailing window: victim totals with week-over-week change, weekly timeseries, top groups (with WoW trend), top sectors, top countries, and the user's watchlist exposure (watched groups/orgs/sectors vs new disclosures). All-zero when the ransomware tracker has not synced yet.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "days": {
+     "type": "integer",
+     "description": "Aggregation window in days, 1-1095 (default 90)"
+    }
+   },
+   "required": []
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_ransomware_victim",
+  "description": "Fetch one ransomware victim organization by UUID: name/domain/aliases, sector, country, first/last seen, whether the user watches it, the groups that listed it, and every leak-site disclosure.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "victim_id": {
+     "type": "string",
+     "description": "Ransomware victim UUID"
+    }
+   },
+   "required": [
+    "victim_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_requirement_coverage",
+  "description": "Get intelligence requirements coverage summary — counts by status, priority, category, and staleness.",
+  "input_schema": {
+   "type": "object",
+   "properties": {}
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_requirements",
+  "description": "Get intelligence requirements and their coverage status.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "status": {
+     "type": "string",
+     "enum": [
+      "active",
+      "fulfilled",
+      "expired",
+      "draft"
+     ],
+     "description": "Filter by status"
+    }
+   }
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_search_facets",
+  "description": "Get available search facets: feed types (feed count per type), categories (feed count per category), and top tags (by entry usage). Useful for understanding what's in the system before searching.",
+  "input_schema": {
+   "type": "object",
+   "properties": {}
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_share_link",
+  "description": "Return this user's active public share link for an entry ({token, url, created_at, expires_at}), or null if they have not shared it. Other analysts' share links for the same entry are not returned.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entry_id": {
+     "type": "string",
+     "description": "Entry UUID to look up"
+    }
+   },
+   "required": [
+    "entry_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_similar_entries",
+  "description": "Find entries similar to the given entry. Answers from the embedding index when the entry has been embedded — nearest neighbours find the article telling the same story in different words — and falls back to keyword search over the search index otherwise. Excludes the entry itself and its exact duplicates (same content hash).",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entry_id": {
+     "type": "string",
+     "description": "Entry UUID"
+    },
+    "limit": {
+     "type": "integer",
+     "description": "Maximum similar entries to return (1-30, default 10)"
+    }
+   },
+   "required": [
+    "entry_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_source_reliability",
+  "description": "Get feeds ranked by intelligence contribution: entity extractions across every entity junction type, plus detection rules generated from each feed's entries.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "limit": {
+     "type": "integer",
+     "default": 20
+    }
+   }
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_stack_exposure",
+  "description": "My Stack exposure board: every CVE affecting the vendors/products the user has declared as their stack (watchlist mode='stack'), ranked by exposure lift (KEV/EPSS/weaponization multipliers), each with a detection posture (defended / blind / no_rule) from the org's telemetry inventory, plus per-asset CVE tallies and the urgency x posture matrix counts. Empty if the user has no stack entities declared.",
+  "input_schema": {
+   "type": "object",
+   "properties": {},
+   "required": []
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_story_thread",
+  "description": "Read one story thread: its spine (one beat per wave of coverage — what broke, what each wave added), every member article with its role (origin, beat, or folded echo), what the story has yielded in techniques/CVEs/products/detection rules, and the threads it most resembles. Open it in the UI at /priority-queue?thread=<slug>.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "slug": {
+     "type": "string",
+     "description": "Thread slug, from get_story_threads"
+    },
+    "include_members": {
+     "type": "boolean",
+     "description": "Include the full member article list (default true)"
+    }
+   },
+   "required": [
+    "slug"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_story_threads",
+  "description": "List story threads — unfolding stories assembled from the articles that cover them, with the re-reports folded underneath. Each row carries its outlets, article and echo counts, key entities, how much is unread, and the priority score of its best unread beat. Use this instead of searching for a story twenty-three times.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "status": {
+     "type": "string",
+     "enum": [
+      "open",
+      "dormant",
+      "closed",
+      "any"
+     ],
+     "description": "open (still accepting articles), dormant, closed, or any. Default open"
+    },
+    "limit": {
+     "type": "integer",
+     "description": "Maximum threads returned (1-200, default 40)"
+    }
+   }
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_telemetry_sources",
+  "description": "List configured telemetry/log sources and their coverage. Useful for assessing detection feasibility.",
+  "input_schema": {
+   "type": "object",
+   "properties": {}
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_temporal_clusters",
+  "description": "Find entries sharing entities within time windows — useful for detecting emerging campaigns.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "days": {
+     "type": "integer",
+     "default": 14,
+     "description": "Lookback window in days"
+    },
+    "window_hours": {
+     "type": "integer",
+     "default": 72,
+     "description": "Clustering window in hours"
+    },
+    "min_shared": {
+     "type": "integer",
+     "default": 3,
+     "description": "Minimum shared entities to form a cluster"
+    },
+    "limit": {
+     "type": "integer",
+     "default": 10
+    }
+   }
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_threat_actor",
+  "description": "Get a threat actor profile including aliases, actor type, motivation, origin country, targeted sectors, associated TTPs, and the count of linked articles (article_count).",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "actor_id": {
+     "type": "string",
+     "description": "Threat actor UUID"
+    }
+   },
+   "required": [
+    "actor_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_trending_entities",
+  "description": "Get top entities by mention count over a time window.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entity_type": {
+     "type": "string",
+     "enum": [
+      "threat_actor",
+      "malware",
+      "cve",
+      "ttp"
+     ],
+     "description": "Entity type to trend"
+    },
+    "days": {
+     "type": "integer",
+     "default": 30
+    },
+    "limit": {
+     "type": "integer",
+     "default": 10
+    }
+   },
+   "required": [
+    "entity_type"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_triage_queue",
+  "description": "Get priority-scored entry queue for analyst review. Uses the signal-engine ranking when signal_engine_surface is enabled, otherwise the legacy composite heuristic — mirroring GET /api/entries/triage.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "days": {
+     "type": "integer",
+     "default": 7,
+     "description": "Lookback window in days"
+    },
+    "limit": {
+     "type": "integer",
+     "default": 20
+    }
+   }
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_ttp",
+  "description": "Get a MITRE ATT&CK technique (TTP) by ID, including tactic, platforms, data sources, and linked articles.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "ttp_id": {
+     "type": "string",
+     "description": "TTP UUID or technique ID string (e.g. T1059.001)"
+    }
+   },
+   "required": [
+    "ttp_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "ingest_url",
+  "description": "Ingest a web page/article URL as a manual entry: fetches and sanitizes the content, stores it under the Manual Uploads feed, dispatches the full intelligence pipeline (autolink + extraction), indexes it for search, and broadcasts an ingest event. Optionally overrides the extracted title. Errors if the URL was already ingested.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "url": {
+     "type": "string",
+     "description": "http(s) URL of the article to ingest"
+    },
+    "title": {
+     "type": "string",
+     "description": "Optional title override for the created entry"
+    }
+   },
+   "required": [
+    "url"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "link_entities",
+  "description": "Assert an analyst-grade relationship between two intelligence entities. The (source, verb, target) triple is validated against the semantic relationship matrix and auto-flipped into its canonical orientation (e.g. 'cve exploited-by actor' is stored as 'actor exploits cve'). Valid verbs (per-pair restrictions apply): attributed_to, communicates_with, controls, delivers, drops, exploits, overlaps_with, related_to, subgroup_of, successor_of, targets, uses, variant_of. Written with source=analyst_created; re-asserting an existing triple promotes it to analyst_created and merges confidence/description/evidence instead of erroring.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "source_type": {
+     "type": "string",
+     "enum": [
+      "campaign",
+      "country",
+      "cve",
+      "malware",
+      "observable",
+      "product",
+      "threat_actor",
+      "tool",
+      "ttp",
+      "vendor"
+     ]
+    },
+    "source_id": {
+     "type": "string"
+    },
+    "target_type": {
+     "type": "string",
+     "enum": [
+      "campaign",
+      "country",
+      "cve",
+      "malware",
+      "observable",
+      "product",
+      "threat_actor",
+      "tool",
+      "ttp",
+      "vendor"
+     ]
+    },
+    "target_id": {
+     "type": "string"
+    },
+    "relationship_type": {
+     "type": "string",
+     "enum": [
+      "attributed_to",
+      "communicates_with",
+      "controls",
+      "delivers",
+      "drops",
+      "exploits",
+      "overlaps_with",
+      "related_to",
+      "subgroup_of",
+      "successor_of",
+      "targets",
+      "uses",
+      "variant_of"
+     ]
+    },
+    "description": {
+     "type": "string"
+    },
+    "confidence": {
+     "type": "string",
+     "enum": [
+      "possible",
+      "probable",
+      "confirmed"
+     ],
+     "default": "possible"
+    },
+    "evidence_entry_ids": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Entry UUIDs that evidence this relationship"
+    }
+   },
+   "required": [
+    "source_type",
+    "source_id",
+    "target_type",
+    "target_id",
+    "relationship_type"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "list_categories",
+  "description": "List feed categories as a tree (top-level categories with nested children), each with its direct feed count.",
+  "input_schema": {
+   "type": "object",
+   "properties": {},
+   "required": []
+  },
+  "mutating": false
+ },
+ {
+  "name": "list_documentation_pages",
+  "description": "List every IntelFeed documentation page shipped with this deployment (slug, title, section, one-line summary). Start here when answering a question about how IntelFeed works, then fetch the relevant page with get_documentation_page.",
+  "input_schema": {
+   "type": "object",
+   "properties": {},
+   "required": []
+  },
+  "mutating": false
+ },
+ {
+  "name": "list_entity_links",
+  "description": "List entry→entity autolinks (junction rows) unioned across all seven junction tables, newest first. Filter by entity_type, entity_id, entry_id, source provenance (auto_link, ai, ai_reconcile, auto_extracted, manual — TTP/CVE junctions record no source and are excluded when set), confidence (high, medium, low — the CVE junction has none and is excluded when set), a substring search on entity name / entry title, or a recency window in days.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entity_type": {
+     "type": "string",
+     "enum": [
+      "cve",
+      "cwe",
+      "malware",
+      "product",
+      "threat_actor",
+      "tool",
+      "ttp",
+      "vendor"
+     ],
+     "description": "Restrict to one junction table"
+    },
+    "entity_id": {
+     "type": "string",
+     "description": "Only links pointing at this entity UUID"
+    },
+    "entry_id": {
+     "type": "string",
+     "description": "Only links on this entry UUID"
+    },
+    "source": {
+     "type": "string",
+     "description": "Provenance filter: auto_link, ai, ai_reconcile, auto_extracted, or manual"
+    },
+    "confidence": {
+     "type": "string",
+     "description": "Link confidence filter: high, medium, or low"
+    },
+    "search": {
+     "type": "string",
+     "description": "Case-insensitive substring on entity name or entry title"
+    },
+    "days": {
+     "type": "integer",
+     "description": "Only links extracted within the last N days (1-3650)"
+    },
+    "limit": {
+     "type": "integer",
+     "default": 50,
+     "description": "Max links per page (1-500)"
+    },
+    "offset": {
+     "type": "integer",
+     "default": 0,
+     "description": "Pagination offset"
+    }
+   }
+  },
+  "mutating": false
+ },
+ {
+  "name": "list_entity_notes",
+  "description": "List the analytical notes attached to one intelligence entity, newest first, with author usernames. Supported entity types match the entity_notes constraint (ransomware victims are not supported).",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entity_type": {
+     "type": "string",
+     "enum": [
+      "campaign",
+      "country",
+      "cve",
+      "cwe",
+      "malware",
+      "mitigation",
+      "observable",
+      "product",
+      "threat_actor",
+      "tool",
+      "ttp",
+      "vendor"
+     ]
+    },
+    "entity_id": {
+     "type": "string",
+     "description": "UUID of the entity whose notes to list"
+    },
+    "limit": {
+     "type": "integer",
+     "default": 50,
+     "description": "Maximum notes to return"
+    }
+   },
+   "required": [
+    "entity_type",
+    "entity_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "list_entity_relationships",
+  "description": "All entity↔entity relationships where the given entity is source or target, newest first, with endpoint display names resolved. Each row carries verb (relationship_type), confidence (possible/probable/confirmed), provenance source and evidence_entry_ids. Analyst-rejected edges and edges below the configured min-confidence display setting are hidden unless include_rejected is set.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entity_type": {
+     "type": "string",
+     "enum": [
+      "campaign",
+      "country",
+      "cve",
+      "malware",
+      "observable",
+      "product",
+      "threat_actor",
+      "tool",
+      "ttp",
+      "vendor"
+     ],
+     "description": "Pivot entity type"
+    },
+    "entity_id": {
+     "type": "string",
+     "description": "Pivot entity UUID"
+    },
+    "relationship_type": {
+     "type": "string",
+     "enum": [
+      "attributed_to",
+      "communicates_with",
+      "controls",
+      "delivers",
+      "drops",
+      "exploits",
+      "overlaps_with",
+      "related_to",
+      "subgroup_of",
+      "successor_of",
+      "targets",
+      "uses",
+      "variant_of"
+     ],
+     "description": "Only relationships with this verb"
+    },
+    "include_rejected": {
+     "type": "boolean",
+     "default": false,
+     "description": "Include analyst-rejected relationships"
+    }
+   },
+   "required": [
+    "entity_type",
+    "entity_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "list_extraction_entities",
+  "description": "List AI-created entities (created_via='ai_extraction') with a computed lifecycle status: linked (in use), review (needs analyst sign-off), orphan (zero articles), or dupe (near-duplicate sibling exists, with duplicate_of naming it). Filterable by type, status, creation window, text search and source entry; sorted and paginated. Includes provenance: created_confidence, needs_review, created_from_entry_id and the source entry title.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "types": {
+     "type": "string",
+     "description": "CSV of entity types to include (cve, malware, observable, threat_actor, tool, ttp); default all"
+    },
+    "status": {
+     "type": "string",
+     "enum": [
+      "all",
+      "linked",
+      "review",
+      "orphan",
+      "dupe"
+     ],
+     "default": "all",
+     "description": "Filter by computed lifecycle status"
+    },
+    "window": {
+     "type": "string",
+     "enum": [
+      "24h",
+      "30d",
+      "7d",
+      "all"
+     ],
+     "default": "7d",
+     "description": "Only entities first seen within this window"
+    },
+    "q": {
+     "type": "string",
+     "description": "Search name / aliases / technique id"
+    },
+    "source_entry_id": {
+     "type": "string",
+     "description": "Only entities created from this entry UUID"
+    },
+    "sort_by": {
+     "type": "string",
+     "enum": [
+      "created",
+      "entries",
+      "confidence",
+      "name"
+     ],
+     "default": "created",
+     "description": "Sort key: created (first seen), entries (article count), confidence, or name"
+    },
+    "sort_order": {
+     "type": "string",
+     "enum": [
+      "asc",
+      "desc"
+     ],
+     "default": "desc"
+    },
+    "limit": {
+     "type": "integer",
+     "default": 50,
+     "description": "Max entities per page (1-200)"
+    },
+    "offset": {
+     "type": "integer",
+     "default": 0,
+     "description": "Pagination offset"
+    }
+   }
+  },
+  "mutating": false
+ },
+ {
+  "name": "list_glossary_terms",
+  "description": "List security glossary terms alphabetically with optional filters: exact category (e.g. a NIST CSF function like 'detect'), case-insensitive name substring search, and built-in vs user-created (is_system). Each term carries maturity, descriptions, technologies, and search-term aliases.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "category": {
+     "type": "string",
+     "description": "Filter by exact category name"
+    },
+    "search": {
+     "type": "string",
+     "description": "Case-insensitive substring match on term names"
+    },
+    "is_system": {
+     "type": "boolean",
+     "description": "true = built-in terms only, false = user-created terms only"
+    },
+    "limit": {
+     "type": "integer",
+     "description": "Maximum terms to return, 1-500 (default 100)"
+    }
+   },
+   "required": []
+  },
+  "mutating": false
+ },
+ {
+  "name": "list_intel_reports",
+  "description": "List intel reports, newest-updated first, optionally filtered by status (draft, published, archived) or template_type slug. Rows are lightweight — section names only, no section content (use get_intel_report for the full report).",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "status": {
+     "type": "string",
+     "enum": [
+      "draft",
+      "published",
+      "archived"
+     ]
+    },
+    "template_type": {
+     "type": "string",
+     "description": "Filter by template slug (e.g. flash_alert)"
+    },
+    "limit": {
+     "type": "integer",
+     "default": 25
+    },
+    "offset": {
+     "type": "integer",
+     "default": 0
+    }
+   }
+  },
+  "mutating": false
+ },
+ {
+  "name": "list_notes",
+  "description": "List analyst notes (entry-attached and standalone), pinned first then most recently updated. Optionally filter to one entry or search title/content by substring. Each note includes its author and, when attached to an entry, the entry and feed titles.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entry_id": {
+     "type": "string",
+     "description": "Only notes attached to this entry UUID"
+    },
+    "search": {
+     "type": "string",
+     "description": "Case-insensitive substring search over note title and markdown content"
+    },
+    "limit": {
+     "type": "integer",
+     "default": 50,
+     "description": "Maximum notes to return"
+    }
+   },
+   "required": []
+  },
+  "mutating": false
+ },
+ {
+  "name": "list_saved_searches",
+  "description": "List this user's saved searches with unread/total entry counts. Counts come from a 10-minute cache and are computed inline (via search-index queries) on a cache miss.",
+  "input_schema": {
+   "type": "object",
+   "properties": {},
+   "required": []
+  },
+  "mutating": false
+ },
+ {
+  "name": "list_telegram_feeds",
+  "description": "List Telegram channel feeds with their adapter config — channel, last_seen_id, attribution, session, error state.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "limit": {
+     "type": "integer",
+     "default": 50
+    }
+   }
+  },
+  "mutating": false
+ },
+ {
+  "name": "list_watches",
+  "description": "List the current user's entity watchlist rows with resolved display names. Each row has mode 'watch' (priority boost), 'mute' (suppressed), or 'stack' ('I run this' — vendors/products feeding My Stack exposure scoring).",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "mode": {
+     "type": "string",
+     "enum": [
+      "watch",
+      "mute",
+      "stack"
+     ],
+     "description": "Optional filter by watch mode"
+    }
+   },
+   "required": []
+  },
+  "mutating": false
+ },
+ {
+  "name": "list_webhook_presets",
+  "description": "List saved webhook presets (reusable URL + payload + header combinations for automation actions), ordered by name. Webhook URLs and header values are redacted — inspect them in the web UI if needed.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "preset_type": {
+     "type": "string",
+     "description": "Filter by preset type (e.g. 'webhook')"
+    },
+    "limit": {
+     "type": "integer",
+     "default": 100,
+     "description": "Maximum presets to return"
+    }
+   },
+   "required": []
+  },
+  "mutating": false
+ },
+ {
+  "name": "mark_all_read",
+  "description": "Bulk-mark entries as read for the current user, optionally scoped to a single feed or a category. With no scope, marks EVERY entry in every feed as read — confirm intent before calling unscoped. The search-index sync runs on a background worker. Returns the number of entries marked.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "feed_id": {
+     "type": "string",
+     "description": "Optional feed UUID to scope to"
+    },
+    "category_id": {
+     "type": "string",
+     "description": "Optional category UUID to scope to"
+    }
+   },
+   "required": []
+  },
+  "mutating": true
+ },
+ {
+  "name": "mark_entry_read",
+  "description": "Mark an entry as read (read=true, the default) or unread (read=false) for the current user. Also syncs the flag to the search index and invalidates the feed unread-count cache.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entry_id": {
+     "type": "string",
+     "description": "Entry UUID"
+    },
+    "read": {
+     "type": "boolean",
+     "description": "true = mark read (default); false = mark unread"
+    }
+   },
+   "required": [
+    "entry_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "merge_malware",
+  "description": "Merge a duplicate malware family into another. Same semantics as merge_threat_actors but for malware. Use mode='shadow' for dry-run; always include 'reasoning'.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "target_id": {
+     "type": "string",
+     "description": "Surviving malware UUID."
+    },
+    "source_id": {
+     "type": "string",
+     "description": "Malware to merge away."
+    },
+    "mode": {
+     "type": "string",
+     "enum": [
+      "shadow",
+      "apply"
+     ],
+     "default": "apply"
+    },
+    "new_description": {
+     "type": "string"
+    },
+    "extra_aliases": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "default": []
+    },
+    "reasoning": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "target_id",
+    "source_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "merge_products",
+  "description": "Merge a duplicate product into another. Same semantics as merge_vendors.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "target_id": {
+     "type": "string"
+    },
+    "source_id": {
+     "type": "string"
+    },
+    "mode": {
+     "type": "string",
+     "enum": [
+      "shadow",
+      "apply"
+     ],
+     "default": "apply"
+    },
+    "new_description": {
+     "type": "string"
+    },
+    "extra_aliases": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "default": []
+    },
+    "reasoning": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "target_id",
+    "source_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "merge_threat_actors",
+  "description": "Merge a duplicate threat actor into another. Moves all entries and country links from source → target, unions aliases (source.name + source.aliases get added to target.aliases), optionally updates the description, then deletes the source actor. Set mode='shadow' to log what would happen without making changes. ALWAYS supply 'reasoning' so the maintenance log can be audited.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "target_id": {
+     "type": "string",
+     "description": "Surviving actor UUID."
+    },
+    "source_id": {
+     "type": "string",
+     "description": "Actor to merge away (deleted at the end)."
+    },
+    "mode": {
+     "type": "string",
+     "enum": [
+      "shadow",
+      "apply"
+     ],
+     "default": "apply"
+    },
+    "new_description": {
+     "type": "string",
+     "description": "Replace target description. Omit to leave existing."
+    },
+    "extra_aliases": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "default": []
+    },
+    "reasoning": {
+     "type": "string",
+     "description": "Why this merge — recorded in the maintenance log."
+    }
+   },
+   "required": [
+    "target_id",
+    "source_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "merge_tools",
+  "description": "Merge a duplicate tool into another. Same semantics as merge_vendors.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "target_id": {
+     "type": "string"
+    },
+    "source_id": {
+     "type": "string"
+    },
+    "mode": {
+     "type": "string",
+     "enum": [
+      "shadow",
+      "apply"
+     ],
+     "default": "apply"
+    },
+    "new_description": {
+     "type": "string"
+    },
+    "extra_aliases": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "default": []
+    },
+    "reasoning": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "target_id",
+    "source_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "merge_vendors",
+  "description": "Merge a duplicate vendor into another. Same semantics as merge_threat_actors. Moves all entries, unions aliases, optionally rewrites description, then deletes the source. Always include reasoning.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "target_id": {
+     "type": "string"
+    },
+    "source_id": {
+     "type": "string"
+    },
+    "mode": {
+     "type": "string",
+     "enum": [
+      "shadow",
+      "apply"
+     ],
+     "default": "apply"
+    },
+    "new_description": {
+     "type": "string"
+    },
+    "extra_aliases": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "default": []
+    },
+    "reasoning": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "target_id",
+    "source_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "pivot_entity",
+  "description": "Find all entities related to a given entity via co-occurrence in entries. One-hop pivot. Related lists carry strength tiers (weak/moderate/strong) and are ranked, tier-filterable, window-filterable and paginated; related_counts reports pre-slice totals.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entity_type": {
+     "type": "string",
+     "enum": [
+      "country",
+      "cve",
+      "cwe",
+      "malware",
+      "mitigation",
+      "observable",
+      "product",
+      "threat_actor",
+      "tool",
+      "ttp",
+      "vendor"
+     ]
+    },
+    "entity_id": {
+     "type": "string",
+     "description": "Entity UUID"
+    },
+    "limit_per_type": {
+     "type": "integer",
+     "default": 50,
+     "description": "Max related entities per type"
+    },
+    "window_days": {
+     "type": "integer",
+     "description": "Only count evidence from the last N days"
+    },
+    "offset": {
+     "type": "integer",
+     "default": 0,
+     "description": "Pagination offset within each type"
+    },
+    "sort": {
+     "type": "string",
+     "enum": [
+      "strength",
+      "recent",
+      "articles"
+     ],
+     "default": "strength"
+    },
+    "min_tier": {
+     "type": "string",
+     "enum": [
+      "weak",
+      "moderate",
+      "strong"
+     ],
+     "description": "Minimum strength tier; omitted uses the system default (confirmed rels always pass)"
+    }
+   },
+   "required": [
+    "entity_type",
+    "entity_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "publish_report",
+  "description": "Publish an intelligence report — saves current version and sets status to published.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "report_id": {
+     "type": "string",
+     "description": "Report UUID"
+    }
+   },
+   "required": [
+    "report_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "reclassify_entity",
+  "description": "Move an entity from one type to another (cross-type) when it was filed under the wrong type — e.g. a malware that's actually a tool, or a product mistakenly stored as a vendor. Supports malware / product / threat_actor / tool / vendor. If target_id is given, the source is merged into that existing entity in the target type; if omitted, a new entity is created in target_type by copying name/aliases/description. Type-specific fields (motivation, malware_type, vendor_id, tool_type, etc.) are NOT carried across — fix them after with update_entity_profile. Use mode='shadow' to log without acting; always include reasoning.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "source_type": {
+     "type": "string",
+     "enum": [
+      "malware",
+      "product",
+      "threat_actor",
+      "tool",
+      "vendor"
+     ]
+    },
+    "source_id": {
+     "type": "string"
+    },
+    "target_type": {
+     "type": "string",
+     "enum": [
+      "malware",
+      "product",
+      "threat_actor",
+      "tool",
+      "vendor"
+     ]
+    },
+    "target_id": {
+     "type": "string",
+     "description": "Optional: existing target entity to merge into. Omit to create a new one."
+    },
+    "mode": {
+     "type": "string",
+     "enum": [
+      "shadow",
+      "apply"
+     ],
+     "default": "apply"
+    },
+    "new_description": {
+     "type": "string"
+    },
+    "extra_aliases": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "default": []
+    },
+    "reasoning": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "source_type",
+    "source_id",
+    "target_type"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "refresh_feed",
+  "description": "Queue an immediate background fetch of a feed via Celery (same as the UI's refresh button). Returns as soon as the fetch task is queued; new entries appear once the worker completes.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "feed_id": {
+     "type": "string",
+     "description": "UUID of the feed to refresh"
+    }
+   },
+   "required": [
+    "feed_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "reject_relationship",
+  "description": "Trust-ladder reject: mark a relationship source='analyst_rejected'. The row is kept (not deleted) so re-ingestion and the co-occurrence engine cannot resurrect or accumulate evidence on it; it is hidden from pivot/graph/list surfaces. Invalidates cached pivots/graphs for both endpoints.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "relationship_id": {
+     "type": "string",
+     "description": "Relationship UUID"
+    }
+   },
+   "required": [
+    "relationship_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "remove_from_campaign",
+  "description": "Unlink an entry or entity from a campaign (the reverse of add_to_campaign). Provide either entry_id, or entity_type + entity_id. The entry/entity itself is not deleted, only the campaign link — no confirmation needed.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "campaign_id": {
+     "type": "string",
+     "description": "Campaign UUID"
+    },
+    "entry_id": {
+     "type": "string",
+     "description": "Entry UUID to unlink (optional)"
+    },
+    "entity_type": {
+     "type": "string",
+     "enum": [
+      "country",
+      "cve",
+      "cwe",
+      "malware",
+      "mitigation",
+      "observable",
+      "product",
+      "ransomware_victim",
+      "threat_actor",
+      "tool",
+      "ttp",
+      "vendor"
+     ],
+     "description": "Entity type to unlink (optional, requires entity_id)"
+    },
+    "entity_id": {
+     "type": "string",
+     "description": "Entity UUID to unlink (optional)"
+    }
+   },
+   "required": [
+    "campaign_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "remove_requirement_match",
+  "description": "Remove a matched entry from an intelligence requirement and decrement its match count. Reversible (the entry can be re-matched), so no confirmation is needed.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "requirement_id": {
+     "type": "string",
+     "description": "Intelligence requirement UUID"
+    },
+    "entry_id": {
+     "type": "string",
+     "description": "Entry UUID of the match to remove"
+    }
+   },
+   "required": [
+    "requirement_id",
+    "entry_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "report_false_positive",
+  "description": "Report a mislinked entity (autolinker noise). Always writes a FalsePositiveRecord audit row. With source_entry_id set, unlinks the entity from that entry. scope='entry' stops there. scope='alias' also drops entity_value from the entity's aliases and unlinks every entry that matched only via it (the entity survives and keeps matching under its other names). scope='global' instead blocks the surface form from matching any entity type and rebuilds the vocabulary (existing links on other entries are not retroactively removed).",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entity_type": {
+     "type": "string",
+     "enum": [
+      "country",
+      "cve",
+      "cwe",
+      "malware",
+      "mitigation",
+      "observable",
+      "product",
+      "threat_actor",
+      "tool",
+      "ttp",
+      "vendor"
+     ],
+     "description": "Type of the mislinked entity"
+    },
+    "entity_id": {
+     "type": "string",
+     "description": "UUID of the mislinked entity"
+    },
+    "entity_value": {
+     "type": "string",
+     "description": "The surface form that was wrongly matched (1-500 chars), e.g. 'Prometheus'"
+    },
+    "scope": {
+     "type": "string",
+     "enum": [
+      "entry",
+      "alias",
+      "global"
+     ],
+     "description": "'entry' = unlink from one article only; 'alias' = also drop the name from this entity and unlink articles matched only by it; 'global' = block the name platform-wide"
+    },
+    "source_entry_id": {
+     "type": "string",
+     "description": "Entry UUID to unlink the entity from (optional)"
+    },
+    "reason": {
+     "type": "string",
+     "description": "Why this is a false positive (optional, for the audit row)"
+    }
+   },
+   "required": [
+    "entity_type",
+    "entity_id",
+    "entity_value",
+    "scope"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "revoke_share_link",
+  "description": "Deactivate this user's active public share link for an entry so its public URL stops resolving. Share links other analysts created for the same entry are left alone. Reversible in effect (create_share_link issues a fresh link, with a new token).",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entry_id": {
+     "type": "string",
+     "description": "Entry UUID whose share link to revoke"
+    }
+   },
+   "required": [
+    "entry_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "rollback_detection_rule",
+  "description": "Restore a detection rule's content (and type) from a saved version, identified by its version number (see get_detection_rule_versions). The current content is snapshotted as a new version first, so a rollback is itself reversible.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "rule_id": {
+     "type": "string",
+     "description": "Detection rule UUID"
+    },
+    "version": {
+     "type": "integer",
+     "description": "Version number to restore"
+    }
+   },
+   "required": [
+    "rule_id",
+    "version"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "run_ai_task",
+  "description": "Run a registered AI task against an entry (e.g. article_summary, threat_assessment, detection_rules, entry_analysis). Returns the current cached AIResult when one exists for this entry+task; pass force=true to re-run and replace it. The 'cached' field reports which happened.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "task_name": {
+     "type": "string",
+     "description": "AI task name (e.g. article_summary, threat_assessment, detection_rules)"
+    },
+    "entry_id": {
+     "type": "string",
+     "description": "Entry UUID to run the task on"
+    },
+    "force": {
+     "type": "boolean",
+     "default": false,
+     "description": "Re-run even if a cached result exists (marks the old result not current)"
+    }
+   },
+   "required": [
+    "task_name",
+    "entry_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "run_automation_rule",
+  "description": "Execute an automation rule immediately, once per matching recent entry. Trigger-level filters (keyword pattern, CVE severity) and rule conditions are applied first; only entries whose actions actually ran count as matched. WARNING: this executes actions PER ENTRY — never use it to test batch/briefing rules (it will flood one briefing per entry); use test_automation_rule (dry-run) or the rule's schedule instead.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "rule_id": {
+     "type": "string",
+     "description": "Automation rule UUID"
+    },
+    "hours": {
+     "type": "integer",
+     "default": 24,
+     "description": "How many hours back to look for entries"
+    }
+   },
+   "required": [
+    "rule_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "search_documentation",
+  "description": "Full-text search across all IntelFeed documentation, returning the pages that mention a term along with excerpts around each hit. Use this to find which page covers a topic, then read it with get_documentation_page.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "query": {
+     "type": "string",
+     "description": "Text to search for across the docs."
+    },
+    "limit": {
+     "type": "integer",
+     "description": "Maximum pages to return (default 8).",
+     "default": 8
+    }
+   },
+   "required": [
+    "query"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "search_entities",
+  "description": "Search across all 13 intelligence entity types — TTPs, CVEs, CWEs (weaknesses), threat actors, malware, detection rules, tools, vendors, products, countries, mitigations, campaigns, intel reports — plus the analyst notes stored on the instance. Returns matching entities with type and key details. Note results use type 'note' and carry note_source ('note' for a note on an article or a standalone one, 'entity_note' for one attached to an entity), with a description snippet centred on the match rather than the note's opening line.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "query": {
+     "type": "string",
+     "description": "Search term"
+    },
+    "limit": {
+     "type": "integer",
+     "default": 30
+    }
+   },
+   "required": [
+    "query"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "search_entries",
+  "description": "Full-text search across RSS entries. Returns titles, summaries, dates, and feed names. Supports the full query language: AND/OR/NOT, quoted phrases, entry fields (feed:, tag:, type:, date:, is:, media:, lang:, title:, author:), entity filters (threat_actor:APT29, malware:, cve:, ttp:, tool:, vendor:, product:, country:, campaign:, rule:), and sort: — all filters are executed, not just the text terms. Supports pagination via offset for pulling large result sets.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "query": {
+     "type": "string",
+     "description": "Search query (text, boolean operators, field:value filters)"
+    },
+    "limit": {
+     "type": "integer",
+     "description": "Max results per call (default 20, max 1000)",
+     "default": 20
+    },
+    "offset": {
+     "type": "integer",
+     "description": "Pagination offset for paging through large result sets (default 0)",
+     "default": 0
+    },
+    "sort": {
+     "type": "string",
+     "enum": [
+      "longest",
+      "newest",
+      "oldest",
+      "radar",
+      "relevance",
+      "shortest",
+      "title_asc",
+      "title_desc"
+     ],
+     "default": "relevance"
+    }
+   },
+   "required": [
+    "query"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "search_observables",
+  "description": "Search the observables ledger (IOCs captured with judgment: AI-confirmed indicators, curated feed entries, TTP host artifacts, analyst promotions). Filter by substring, kind, role, lifecycle status, or capture door. Sorted by last sighting.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "query": {
+     "type": "string",
+     "description": "Substring of the value or label (optional)"
+    },
+    "kind": {
+     "type": "string",
+     "description": "ipv4, ipv6, domain, url, md5, sha256, cmdline, script, ..."
+    },
+    "role": {
+     "type": "string",
+     "description": "c2, delivery, payload, phishing, exfil, exploit, scanning"
+    },
+    "status": {
+     "type": "string",
+     "description": "active, aging, or expired"
+    },
+    "limit": {
+     "type": "integer",
+     "description": "Max rows (default 20, cap 100)"
+    }
+   },
+   "required": []
+  },
+  "mutating": false
+ },
+ {
+  "name": "search_unified",
+  "description": "Unified search across both entries and entities simultaneously, with the full query language (boolean operators, entry fields like feed:/tag:/date:, entity filters like threat_actor:APT29, sort:). Entity filters constrain entry results via linked entries. Returns combined results grouped by type.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "query": {
+     "type": "string",
+     "description": "Search query (text, boolean operators, field:value filters)"
+    },
+    "limit": {
+     "type": "integer",
+     "default": 20
+    }
+   },
+   "required": [
+    "query"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "set_detection_rule_status",
+  "description": "Set a detection rule's lifecycle status: 'draft' or 'published' (mirrors the API's is_draft toggle — detection rules have no other states).",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "rule_id": {
+     "type": "string",
+     "description": "Detection rule UUID"
+    },
+    "status": {
+     "type": "string",
+     "enum": [
+      "draft",
+      "published"
+     ]
+    }
+   },
+   "required": [
+    "rule_id",
+    "status"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "star_entry",
+  "description": "Set an entry's starred flag for the current user (starred=true by default; pass false to unstar). Syncs the flag to the search index. Returns the new value.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entry_id": {
+     "type": "string",
+     "description": "Entry UUID"
+    },
+    "starred": {
+     "type": "boolean",
+     "description": "true = star (default); false = unstar"
+    }
+   },
+   "required": [
+    "entry_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "suggest_campaign_entries",
+  "description": "Suggest entries that share entities with a campaign but aren't yet linked to it.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "campaign_id": {
+     "type": "string",
+     "description": "Campaign UUID"
+    },
+    "limit": {
+     "type": "integer",
+     "default": 10
+    }
+   },
+   "required": [
+    "campaign_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "test_automation_rule",
+  "description": "Dry-run an automation rule against an entry to see what would happen without executing actions.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "rule_id": {
+     "type": "string",
+     "description": "Automation rule UUID"
+    },
+    "entry_id": {
+     "type": "string",
+     "description": "Entry UUID to test against"
+    }
+   },
+   "required": [
+    "rule_id",
+    "entry_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "toggle_automation_rule",
+  "description": "Flip an automation rule's enabled state and return the new state.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "rule_id": {
+     "type": "string",
+     "description": "UUID of the automation rule to toggle"
+    }
+   },
+   "required": [
+    "rule_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "translate_entry",
+  "description": "Translate an entry's HTML content (and title) via the LibreTranslate sidecar and store the translation on the entry row. Re-requesting with the same target language returns the cached translation; a different target re-translates. target is an ISO-639-1 code and defaults to the configured target language (usually 'en').",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entry_id": {
+     "type": "string",
+     "description": "Entry UUID"
+    },
+    "target": {
+     "type": "string",
+     "description": "Target ISO-639-1 language code (default from settings)"
+    }
+   },
+   "required": [
+    "entry_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "unlink_entity_from_entry",
+  "description": "Remove a single entry→entity autolink (junction row) and invalidate the entity's cached pivots/graphs. Reversible (the autolinker or an analyst can re-create it), so no confirmation is required. Does not touch the entity or the entry themselves.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entity_type": {
+     "type": "string",
+     "enum": [
+      "cve",
+      "cwe",
+      "malware",
+      "product",
+      "threat_actor",
+      "tool",
+      "ttp",
+      "vendor"
+     ],
+     "description": "Entity type of the link"
+    },
+    "entity_id": {
+     "type": "string",
+     "description": "UUID of the linked entity"
+    },
+    "entry_id": {
+     "type": "string",
+     "description": "UUID of the entry to unlink"
+    }
+   },
+   "required": [
+    "entity_type",
+    "entity_id",
+    "entry_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "unwatch_entity",
+  "description": "Remove the current user's watch/mute/stack row on an entity. Reversible (re-add with watch_entity); no confirmation required.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entity_type": {
+     "type": "string",
+     "enum": [
+      "country",
+      "cve",
+      "cwe",
+      "malware",
+      "observable",
+      "product",
+      "ransomware_victim",
+      "threat_actor",
+      "tool",
+      "vendor"
+     ],
+     "description": "Type of the watched entity"
+    },
+    "entity_id": {
+     "type": "string",
+     "description": "UUID of the watched entity"
+    }
+   },
+   "required": [
+    "entity_type",
+    "entity_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "update_automation_rule",
+  "description": "Partially update an automation rule — only the provided fields change (mirrors PUT /api/automation/rules/{id}). Trigger types: on_correlation_event, on_cve_detected, on_keyword_match, on_manual, on_new_entry, on_schedule. Each action is {type, config}; valid action types: add_tags, add_to_campaign, bookmark_entry, branch, chain_rule, create_intel_report, create_note, export_to, extract_cves, extract_malware, extract_threat_actors, extract_ttps, generate_detection_rules, hide_entry, mark_priority, mark_read, remove_tags, run_ai_task, run_webhook, send_notification, star_entry, use_daily_summary (branch sub-actions are validated recursively). Note: actions replaces the whole list.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "rule_id": {
+     "type": "string",
+     "description": "UUID of the automation rule"
+    },
+    "name": {
+     "type": "string"
+    },
+    "description": {
+     "type": "string"
+    },
+    "trigger_type": {
+     "type": "string",
+     "enum": [
+      "on_correlation_event",
+      "on_cve_detected",
+      "on_keyword_match",
+      "on_manual",
+      "on_new_entry",
+      "on_schedule"
+     ]
+    },
+    "trigger_config": {
+     "type": "object",
+     "description": "Trigger configuration (e.g. feed_ids, pattern, min_severity, execution_mode)"
+    },
+    "conditions": {
+     "type": "object",
+     "description": "Conditions to check before executing"
+    },
+    "actions": {
+     "type": "array",
+     "items": {
+      "type": "object"
+     },
+     "description": "Full replacement action list, each {type: <action type>, config: {...}}"
+    },
+    "labels": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "is_enabled": {
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "rule_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "update_campaign",
+  "description": "Partially update a campaign — only the provided fields change (mirrors PUT /api/campaigns/{id}). Statuses: active, monitoring, closed, historical. TLP markings use TLP 2.0; the legacy TLP:WHITE is accepted and normalized to TLP:CLEAR. Note: tags replaces the whole tag list.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "campaign_id": {
+     "type": "string",
+     "description": "Campaign UUID"
+    },
+    "name": {
+     "type": "string"
+    },
+    "description": {
+     "type": "string"
+    },
+    "status": {
+     "type": "string",
+     "enum": [
+      "active",
+      "monitoring",
+      "closed",
+      "historical"
+     ]
+    },
+    "tlp_marking": {
+     "type": "string",
+     "enum": [
+      "TLP:CLEAR",
+      "TLP:GREEN",
+      "TLP:AMBER",
+      "TLP:AMBER+STRICT",
+      "TLP:RED",
+      "TLP:WHITE"
+     ]
+    },
+    "start_date": {
+     "type": "string",
+     "description": "Campaign start date (YYYY-MM-DD)"
+    },
+    "end_date": {
+     "type": "string",
+     "description": "Campaign end date (YYYY-MM-DD)"
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Full replacement tag list"
+    }
+   },
+   "required": [
+    "campaign_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "update_detection_rule",
+  "description": "Update fields of a detection rule. Updatable keys: title, description, rule_content, rule_type (crowdstrike_ql, elastic_ql, kql, nuclei, panther, sigma, snort_suricata, splunk_spl, yara), severity, tags, is_draft, log_sources, mitre_tactics, data_sources, notes, source_ttps, source_entries, source_actors, source_campaigns, metadata, change_description. Changing rule_content snapshots the previous content as a new version; content or type changes re-extract rule metadata into unset fields (same as the API PUT).",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "rule_id": {
+     "type": "string",
+     "description": "Detection rule UUID"
+    },
+    "updates": {
+     "type": "object",
+     "description": "Fields to change. Unknown keys are rejected. UUID-list fields take string UUIDs."
+    }
+   },
+   "required": [
+    "rule_id",
+    "updates"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "update_entity_note",
+  "description": "Update the content of an existing entity note. Other fields (title, type, tags) are unchanged.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "note_id": {
+     "type": "string",
+     "description": "UUID of the entity note to update"
+    },
+    "content": {
+     "type": "string",
+     "description": "New note content"
+    }
+   },
+   "required": [
+    "note_id",
+    "content"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "update_entity_profile",
+  "description": "Update an entity's profile. Supports every profile type with per-type editable fields: threat_actor (name/aliases/description/mitre_id/country/motivation), malware (name/aliases/description/malpedia_url/malware_type), cve (description/severity/exploit_status/affected_products/exploit_availability), ttp (technique_name/tactic/description), country (name/iso_code/aliases/region/description), tool (name/aliases/description/tool_type/malpedia_url/github_url), vendor (name/aliases/description/website/vendor_type), product (name/aliases/description/product_type/website/vendor_id), campaign (name/description/status/tags/tlp_marking). Renames are checked for name clashes; removing aliases unlinks entries matched only via those aliases; new aliases queue a retro-scan of existing entries; the search-index document is refreshed.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entity_type": {
+     "type": "string",
+     "enum": [
+      "campaign",
+      "country",
+      "cve",
+      "malware",
+      "product",
+      "threat_actor",
+      "tool",
+      "ttp",
+      "vendor"
+     ]
+    },
+    "entity_id": {
+     "type": "string",
+     "description": "Entity UUID"
+    },
+    "updates": {
+     "type": "object",
+     "description": "Fields to update (e.g. {description: '...', aliases: [...]})"
+    }
+   },
+   "required": [
+    "entity_type",
+    "entity_id",
+    "updates"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "update_feed",
+  "description": "Partially update a feed — only the provided fields change (mirrors PUT /api/feeds/{id}). Changing the URL resets fetch state (etag, error counters) and rejects duplicates. category is resolved by name and must already exist. exclude_shorts only applies to YouTube feeds. adapter_config is merged into the existing config (Telegram channel URLs are normalized, Bluesky app passwords encrypted at rest). Setting any reliability/timeliness/relevance rating or analyst notes stamps last_reviewed_at.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "feed_id": {
+     "type": "string",
+     "description": "UUID of the feed to update"
+    },
+    "url": {
+     "type": "string",
+     "description": "New feed URL (resets fetch state; duplicates rejected)"
+    },
+    "title": {
+     "type": "string",
+     "description": "Custom display title"
+    },
+    "category": {
+     "type": "string",
+     "description": "Category name to move the feed into (must exist)"
+    },
+    "is_muted": {
+     "type": "boolean",
+     "description": "Mute the feed (hidden from main timeline)"
+    },
+    "is_active": {
+     "type": "boolean",
+     "description": "Enable/disable fetching"
+    },
+    "fetch_interval_minutes": {
+     "type": "integer",
+     "description": "Polling cadence in minutes"
+    },
+    "exclude_shorts": {
+     "type": "boolean",
+     "description": "YouTube feeds only: skip Shorts"
+    },
+    "feed_type": {
+     "type": "string",
+     "enum": [
+      "atom",
+      "bluesky",
+      "podcast",
+      "reddit",
+      "rss",
+      "telegram",
+      "web_scraper",
+      "youtube"
+     ]
+    },
+    "retention_days": {
+     "type": "integer",
+     "description": "Entry retention window in days (0 or less clears the override)"
+    },
+    "reliability_rating": {
+     "type": "string",
+     "enum": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "F"
+     ]
+    },
+    "timeliness_rating": {
+     "type": "string",
+     "enum": [
+      "excellent",
+      "good",
+      "fair",
+      "poor"
+     ]
+    },
+    "relevance_rating": {
+     "type": "string",
+     "enum": [
+      "high",
+      "medium",
+      "low"
+     ]
+    },
+    "analyst_notes": {
+     "type": "string",
+     "description": "Source assessment notes"
+    },
+    "intel_extraction_mode": {
+     "type": "string",
+     "enum": [
+      "full",
+      "selective",
+      "manual",
+      "none"
+     ]
+    },
+    "auto_extract_on_ingest": {
+     "type": "boolean"
+    },
+    "extract_detection_rules": {
+     "type": "boolean"
+    },
+    "extract_tools": {
+     "type": "boolean"
+    },
+    "adapter_config": {
+     "type": "object",
+     "description": "Adapter-specific config keys to merge into the existing config"
+    }
+   },
+   "required": [
+    "feed_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "update_intel_report",
+  "description": "Update fields of an intel report. Updatable keys: title, tlp_marking (TLP 2.0; legacy TLP:WHITE is normalized to TLP:CLEAR), status (draft, published, archived), content (full content dict including sections), summary, entry_ids, entity_ids, tags, change_description. Changing content snapshots the previous content as a version and increments the version number; setting status to published stamps published_at.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "report_id": {
+     "type": "string",
+     "description": "Intel report UUID"
+    },
+    "updates": {
+     "type": "object",
+     "description": "Fields to change. Unknown keys are rejected. entry_ids take string UUIDs."
+    }
+   },
+   "required": [
+    "report_id",
+    "updates"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "update_note",
+  "description": "Update an analyst note's markdown content (and optionally its title). The stored HTML is re-rendered from the new markdown, same as the notes API.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "note_id": {
+     "type": "string",
+     "description": "UUID of the note to update"
+    },
+    "content": {
+     "type": "string",
+     "description": "New note content (markdown)"
+    },
+    "title": {
+     "type": "string",
+     "description": "New note title (unchanged if omitted)"
+    }
+   },
+   "required": [
+    "note_id",
+    "content"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "update_requirement",
+  "description": "Update an existing intelligence requirement (keywords, status, priority, etc.).",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "requirement_id": {
+     "type": "string",
+     "description": "Requirement UUID"
+    },
+    "updates": {
+     "type": "object",
+     "description": "Fields to update: title, description, keywords, priority, status, category, auto_match"
+    }
+   },
+   "required": [
+    "requirement_id",
+    "updates"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "validate_detection_rule",
+  "description": "Validate detection rule syntax. Returns validation errors, warnings, and suggestions. Supported formats: crowdstrike_ql, elastic_ql, kql, nuclei, panther, sigma, snort_suricata, splunk_spl, yara.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "rule_type": {
+     "type": "string",
+     "enum": [
+      "crowdstrike_ql",
+      "elastic_ql",
+      "kql",
+      "nuclei",
+      "panther",
+      "sigma",
+      "snort_suricata",
+      "splunk_spl",
+      "yara"
+     ]
+    },
+    "rule_content": {
+     "type": "string",
+     "description": "The rule content to validate"
+    }
+   },
+   "required": [
+    "rule_type",
+    "rule_content"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "watch_entity",
+  "description": "Create or update the current user's watch on an entity (upsert on entity type + id). mode 'watch' boosts the entity in priority scoring, 'mute' suppresses its entries, 'stack' declares 'I run this' and is only valid for vendors and products (feeds My Stack exposure scoring). boost weights priority scoring (0-5, default 1.0).",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entity_type": {
+     "type": "string",
+     "enum": [
+      "country",
+      "cve",
+      "cwe",
+      "malware",
+      "observable",
+      "product",
+      "ransomware_victim",
+      "threat_actor",
+      "tool",
+      "vendor"
+     ],
+     "description": "Type of the entity to watch"
+    },
+    "entity_id": {
+     "type": "string",
+     "description": "UUID of the entity to watch"
+    },
+    "mode": {
+     "type": "string",
+     "enum": [
+      "watch",
+      "mute",
+      "stack"
+     ],
+     "description": "watch | mute | stack (stack: vendor/product only)"
+    },
+    "boost": {
+     "type": "number",
+     "description": "Priority-scoring weight, 0.0-5.0 (default 1.0)"
+    }
+   },
+   "required": [
+    "entity_type",
+    "entity_id",
+    "mode"
+   ]
+  },
+  "mutating": true
+ }
+]

@@ -13,6 +13,7 @@ For a top-level project overview and quickstart, see [`../readme.md`](../readme.
 - **[guide/](guide/README.md)** — **The user guide.** How to actually work in IntelFeed: getting started, reading and triage, search, entity profiles, the Priority Queue, the workbench, detection rules, campaigns and reports, automation and the copilot. Start here if you want to *use* IntelFeed rather than build it.
 - **[query-language.md](query-language.md)** — Full reference for the search query syntax used across the unified search bar, command palette, query builder, and saved searches.
 - **[cli-reference.md](cli-reference.md)** — Reference for the `intelfeed_cli.py` tool — all 170 tools in the full CLI (81 in the read-only lite variant), with args, returns, and examples.
+- **[../intelfeed-mcp/README.md](../intelfeed-mcp/README.md)** — The MCP server for local models (LM Studio and other MCP clients): the same tool registry behind nine fixed tools, on-demand skills and size-capped results, so it fits a small context window.
 
 ## For operators
 
