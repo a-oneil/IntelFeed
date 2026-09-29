@@ -43,10 +43,23 @@ def _sha_from_git_dir(git_dir: Path) -> str:
 
 
 @lru_cache(maxsize=1)
-def build_stamp() -> dict:
-    """Version, commit and build time of this container. Cached — it cannot change."""
+def _env_stamp() -> tuple[str, str]:
+    """The baked-in version and SHA, blank where the build left them unstamped."""
     version = settings.app_version if settings.app_version not in _UNSTAMPED else ""
     sha = settings.git_sha if settings.git_sha not in _UNSTAMPED else ""
+    return version, sha
+
+
+def build_stamp() -> dict:
+    """Version, commit and build time of this container.
+
+    Only the env half is cached. The .git half deliberately is not: dev serves
+    volume-mounted code, so a stamp cached at process start would still name
+    the commit you were on when the container booted, several commits ago —
+    exactly the stale signal this is meant to kill. Production never reaches
+    that branch (no .git is mounted), so it pays nothing for the freshness.
+    """
+    version, sha = _env_stamp()
 
     if not version or not sha:
         mounted = _sha_from_git_dir(Path("/app/.git"))

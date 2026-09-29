@@ -47,3 +47,34 @@ def test_reads_detached_head(tmp_path: Path):
 def test_missing_git_dir_is_not_an_error(tmp_path: Path):
     """No mount (the production image) must fall through, never raise."""
     assert _sha_from_git_dir(tmp_path / "nope" / ".git") == ""
+
+
+def test_env_stamp_wins_over_a_mounted_checkout(monkeypatch):
+    """A stamped image reports its build, not whatever .git happens to say."""
+    from app.core import build_info
+
+    build_info._env_stamp.cache_clear()
+    monkeypatch.setattr(build_info.settings, "app_version", "v1.2.3")
+    monkeypatch.setattr(build_info.settings, "git_sha", "abcd1234")
+    monkeypatch.setattr(build_info, "_sha_from_git_dir", lambda _: "ffffffff", raising=True)
+    try:
+        assert build_info.build_stamp()["git_sha"] == "abcd1234"
+    finally:
+        build_info._env_stamp.cache_clear()
+
+
+def test_unstamped_build_rereads_the_checkout(monkeypatch):
+    """The .git half is not cached, so dev tracks commits without a restart."""
+    from app.core import build_info
+
+    build_info._env_stamp.cache_clear()
+    monkeypatch.setattr(build_info.settings, "app_version", "dev")
+    monkeypatch.setattr(build_info.settings, "git_sha", "")
+    seen = iter(["11111111", "22222222"])
+    monkeypatch.setattr(build_info, "_sha_from_git_dir", lambda _: next(seen), raising=True)
+    try:
+        assert build_info.build_stamp()["version"] == "11111111"
+        # Second call after a commit must reflect the new HEAD, not the first.
+        assert build_info.build_stamp()["version"] == "22222222"
+    finally:
+        build_info._env_stamp.cache_clear()
