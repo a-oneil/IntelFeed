@@ -221,6 +221,31 @@ def normalize_entity_name(name: str, entity_type: str | None = None) -> Normaliz
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 _HASH_RE = re.compile(r"^[0-9a-f]{32}$|^[0-9a-f]{40}$|^[0-9a-f]{64}$", re.IGNORECASE)
 
+# A CVE identifier names a vulnerability, and IntelFeed already has an entity
+# type and an ingest pipeline for those. Minting a *second* row for the same id
+# under another type is what breaks the autolinker: both rows enter the
+# Aho-Corasick vocabulary, so every mention of the id links to the CVE and to
+# the impostor, and the pair then correlates with itself forever. Malware may
+# of course be *related* to a CVE — that belongs in entity_relationships.
+#
+# Anchored form catches "CVE-2026-55193" and "CVE-2026-55193 ransomware"; the
+# unanchored form catches "Exploit for CVE-2026-55193". Both require digits
+# after the prefix, so the real tools cve-search, cvemap and cve-bin-tool are
+# unaffected.
+_CVE_ID_RE = re.compile(r"^CVE-\d", re.IGNORECASE)
+_CVE_IN_NAME_RE = re.compile(r"\bCVE[-_\s]?\d{4}-\d{3,}\b", re.IGNORECASE)
+
+
+def cve_shaped_name(name: str) -> bool:
+    """True when ``name`` is, or embeds, a CVE identifier.
+
+    Shared by the generic-name gate, the always-enforced resolver block and the
+    alias gate so the three can never drift apart.
+    """
+    stripped = (name or "").strip()
+    return bool(_CVE_ID_RE.match(stripped) or _CVE_IN_NAME_RE.search(stripped))
+
+
 _ACTOR_VAGUE_RE = re.compile(r"\b(unknown|unnamed|unidentified|unattributed|suspected|alleged)\b")
 # Head noun with only nationality/qualifier adjectives before it.
 _ACTOR_QUALIFIER = (
@@ -272,7 +297,6 @@ _SANDBOX_ID_RE = re.compile(r"\.sbx(\.|$)", re.IGNORECASE)
 _CLI_FLAG_RE = re.compile(r"^--?\S")
 _FUNC_CALL_RE = re.compile(r"[A-Za-z0-9_\]]\([^)]*\)")
 _ACRONYM_PARENS_RE = re.compile(r"\s\([A-Z0-9/]{1,6}\)")
-_CVE_ID_RE = re.compile(r"^CVE-\d", re.IGNORECASE)
 _SNAKE_CASE_RE = re.compile(r"^[a-z][a-z0-9]*(_[a-z0-9]+)+$")
 _TECHNIQUE_ID_RE = re.compile(r"^T\d{4}(\.\d{3})?$", re.IGNORECASE)
 _TECHNIQUE_PHRASES = frozenset(
@@ -385,6 +409,8 @@ def _shared_junk_reason(name: str, norm: NormalizedName) -> str | None:
         return "uuid_or_hash"
     if name.strip().startswith("{{") or name.strip().endswith(("...", "…")) or "[.]" in name:
         return "placeholder_artifact"
+    if cve_shaped_name(name):
+        return "cve_id"
     return None
 
 
@@ -425,8 +451,6 @@ def _tool_junk_reason(name: str) -> str | None:
         return "cli_flag"
     if _FUNC_CALL_RE.search(stripped) and not _ACRONYM_PARENS_RE.search(stripped):
         return "code_function_call"
-    if _CVE_ID_RE.match(stripped):
-        return "cve_id"
     if _SNAKE_CASE_RE.match(stripped) and len(stripped) > 4:
         return "code_symbol"
     if _TECHNIQUE_ID_RE.match(stripped) or " ".join(_tokens(name)) in _TECHNIQUE_PHRASES:
@@ -1070,6 +1094,36 @@ async def resolve_entity_creation(
             )
             return ResolutionDecision(action="blocked", reason="denylist_do_not_recreate")
 
+    # --- 3d. CVE identifier as a name --------------------------------------
+    # "CVE-2026-55193" is a vulnerability id. IntelFeed tracks those as CVE
+    # entities with their own ingest pipeline, so a second row for the same id
+    # under another type is never right — it duplicates the entity and puts the
+    # id in the autolinker vocabulary twice. The extraction prompt already
+    # forbids it ("DO NOT: extract CVE IDs as malware"), so a name in this shape
+    # is a model mistake with no legitimate reading. Like 3b and 3c it is
+    # therefore enforced even with the heuristic gates off or in shadow.
+    #
+    # Nothing is lost: the id still reaches the entry through the `cves`
+    # extraction array and the autolinker's CVE pass, and a genuine malware↔CVE
+    # connection belongs in entity_relationships. The manual UI still routes
+    # through the gates below, where an analyst sees the warning and can
+    # override.
+    if source != "manual" and cve_shaped_name(name):
+        _log(
+            db,
+            entity_type=entity_type,
+            action="resolution_blocked",
+            mode="apply",
+            applied=True,
+            before=ctx,
+            after={"reason": "generic_name:cve_id"},
+            reasoning=(
+                f"blocked creation of {entity_type} '{name}': the name is a CVE identifier, "
+                f"which belongs to the CVE entity type"
+            ),
+        )
+        return ResolutionDecision(action="blocked", reason="generic_name:cve_id")
+
     # --- 4. Creation gates (Phase 2) ---------------------------------------
     mode = gates_mode()
     gate_reason: str | None = None
@@ -1240,6 +1294,30 @@ async def gate_aliases(
         # length, FP name list, duplicate of own name) — dropping these does
         # not follow gate mode, or shadow would regress current behavior.
         if is_junk_alias(form, canonical_name):
+            continue
+
+        # A CVE id is never an alias either, and here shadow mode is actively
+        # harmful: a passed-through alias enters the autolinker vocabulary, so
+        # every mention of that id would link to this entity *as well as* to the
+        # CVE. "Spring4Shell" really is CVE-2022-22965, but recording that as an
+        # alias is what produces the duplicate link — the connection belongs in
+        # entity_relationships. Dropped regardless of gate mode, like the
+        # collision cases below.
+        if cve_shaped_name(form):
+            _log(
+                db,
+                entity_type=entity_type,
+                action="alias_rejected",
+                mode="apply",
+                applied=True,
+                entity_id=entity_id,
+                before={"entity": canonical_name, "alias": form, "source": source},
+                after={"reason": "cve_id"},
+                reasoning=(
+                    f"Alias '{form}' for {entity_type} '{canonical_name}' is a CVE identifier — "
+                    f"not written (belongs in entity_relationships, not the alias list)"
+                ),
+            )
             continue
 
         if len(_tokens(form)) > _MAX_ALIAS_TOKENS:
