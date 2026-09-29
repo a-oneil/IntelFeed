@@ -362,6 +362,53 @@ def test_f11_topical_guard_accepts_cyber_content():
 
 
 # ---------------------------------------------------------------------------
+# CVE identifiers are never entity names (issue #38)
+#
+# CVEs have their own entity type and ingest pipeline. A second row for the
+# same id under another type puts the id in the autolinker vocabulary twice,
+# so every mention links to both and the pair correlates with itself. The prod
+# malware catalog had collected a run of these (CVE-2026-11332 ... -81642).
+# ---------------------------------------------------------------------------
+
+CVE_SHAPED_NAMES = [
+    "CVE-2026-55193",
+    "CVE-2026-11332",
+    "cve-2026-81642",
+    "CVE-2022-22965",
+    "CVE-2026-55193 ransomware",
+    "Exploit for CVE-2026-55193",
+    "CVE 2026-55193",
+    "CVE_2026-55193",
+]
+
+
+@pytest.mark.parametrize("name", CVE_SHAPED_NAMES)
+@pytest.mark.parametrize("entity_type", ["threat_actor", "malware", "tool", "vendor", "product"])
+def test_cve_shaped_names_rejected_for_every_type(entity_type, name):
+    assert generic_name_reason(entity_type, name) == "cve_id"
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        # Real tools whose names start with "CVE" — the gate requires digits
+        # after the prefix, so none of these may be caught.
+        "cve-search",
+        "cvemap",
+        "cve-bin-tool",
+        "CVE Binary Tool",
+        "Vulners",
+        # A four-digit year alone is not an id, and a real family may carry one.
+        "Spring4Shell",
+        "Log4Shell",
+    ],
+)
+def test_cve_lookalike_names_still_pass(name):
+    assert generic_name_reason("tool", name) is None
+    assert generic_name_reason("malware", name) is None
+
+
+# ---------------------------------------------------------------------------
 # DB resolution — normalized matching, candidates, gates, denylist, cross-type
 # ---------------------------------------------------------------------------
 
@@ -477,6 +524,60 @@ async def test_f5_shadow_mode_logs_but_still_creates(db_session, gates_shadow, t
     assert len(log) == 1
     assert log[0].applied is False
     assert "generic_name" in (log[0].after or {}).get("reason", "")
+
+
+async def test_cve_named_malware_blocked_even_in_shadow(db_session, gates_shadow, test_entry):
+    """The regression this guard exists for: shadow mode must not let it through.
+
+    Every other generic-name gate downgrades to a log in shadow, which is how
+    the prod catalog filled with CVE-named malware families. A CVE id has no
+    legitimate reading as a malware name, so it is blocked like fp_name is.
+    """
+    stored = await store_malware(
+        db_session,
+        test_entry.id,
+        [{"name": "CVE-2026-55193"}, {"name": "CVE-2026-55193 ransomware"}, {"name": "Stealc"}],
+    )
+
+    assert [m.name for m, _ in stored] == ["Stealc"]
+    names = (await db_session.execute(select(MalwareFamily.name))).scalars().all()
+    assert names == ["Stealc"]
+
+    blocked = (
+        (
+            await db_session.execute(
+                select(EntityMaintenanceLog).where(EntityMaintenanceLog.action == "resolution_blocked")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(blocked) == 2
+    assert all(b.mode == "apply" and b.applied is True for b in blocked)
+    assert all((b.after or {}).get("reason") == "generic_name:cve_id" for b in blocked)
+
+
+async def test_cve_named_actor_and_tool_blocked_with_gates_off(db_session, monkeypatch, test_entry):
+    """Enforced independently of the gate flag, like the fp-name block."""
+    monkeypatch.setattr(settings, "entity_creation_gates", "off")
+
+    decision = await resolve_entity_creation(db_session, "threat_actor", "CVE-2026-73066", source="ai")
+    assert decision.action == "blocked" and decision.reason == "generic_name:cve_id"
+
+    decision = await resolve_entity_creation(db_session, "tool", "Exploit for CVE-2026-73066", source="ai")
+    assert decision.action == "blocked" and decision.reason == "generic_name:cve_id"
+
+    assert await _actor_count(db_session) == 0
+
+
+async def test_cve_named_manual_creation_is_overridable(db_session, gates_on):
+    """The hard block is for automated sources only — an analyst still gets the
+    warning-plus-override path rather than a wall."""
+    decision = await resolve_entity_creation(db_session, "malware", "CVE-2026-18297", source="manual")
+    assert decision.action == "blocked" and decision.reason == "generic_name:cve_id"
+
+    decision = await resolve_entity_creation(db_session, "malware", "CVE-2026-18297", source="manual", override=True)
+    assert decision.action == "create"
 
 
 async def test_denylist_blocks_resurrection(db_session, gates_on):
@@ -680,6 +781,33 @@ async def test_f6_generic_and_country_aliases_rejected(db_session, gates_on):
         entity_id=lazarus.id,
     )
     assert kept == ["Hidden Cobra"]
+
+
+async def test_cve_aliases_dropped_even_in_shadow(db_session, gates_shadow):
+    """Spring4Shell really is CVE-2022-22965 — but recording that as an alias
+    is what makes every mention of the id link to the malware *and* the CVE.
+    The connection belongs in entity_relationships."""
+    spring = MalwareFamily(name="Spring4Shell", aliases=[])
+    db_session.add(spring)
+    await db_session.flush()
+
+    kept = await gate_aliases(
+        db_session,
+        "malware",
+        "Spring4Shell",
+        ["CVE-2022-22965", "SpringShell"],
+        entity_id=spring.id,
+    )
+    assert kept == ["SpringShell"]
+
+    rejected = (
+        (await db_session.execute(select(EntityMaintenanceLog).where(EntityMaintenanceLog.action == "alias_rejected")))
+        .scalars()
+        .all()
+    )
+    assert len(rejected) == 1
+    assert rejected[0].applied is True
+    assert (rejected[0].after or {}).get("reason") == "cve_id"
 
 
 async def test_alias_gate_rejects_sentences(db_session, gates_on):
