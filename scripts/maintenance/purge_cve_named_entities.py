@@ -48,7 +48,11 @@ CSV columns: action is the only one meant to be edited.
     cve             the identifier found
     cve_row         the matching CVE entity's uuid, or "" if none exists
     entries         entry links on the entity
-    links_moved     name rows: links that will be re-pointed at the CVE entity
+    links_moved     name rows: links the CVE entity does NOT already have, which
+                    will be re-pointed at it. Usually 0 — see links_already.
+    links_already   name rows: links the CVE entity already carries, i.e. the
+                    duplicate pairs this whole exercise is about. Deleting the
+                    impostor loses nothing for these.
     links_orphaned  name rows: links with nowhere to go (no CVE row) — these
                     are lost on delete, so such rows default to skip
     links_purged    alias rows: links attributable to this alias alone
@@ -106,6 +110,7 @@ FIELDNAMES = [
     "cve_row",
     "entries",
     "links_moved",
+    "links_already",
     "links_orphaned",
     "links_purged",
     "links_protected",
@@ -160,6 +165,28 @@ async def _relationship_count(db, entity_type: str, entity_id) -> int:
     return len(rows)
 
 
+async def _uncovered(db, links, cve_row) -> int:
+    """How many of ``links`` the CVE entity does NOT already cover.
+
+    The common case is zero: the autolinker linked the entry to the CVE *and*
+    to the impostor, which is the whole bug. Reporting the raw link count as
+    "will move" would tell an operator 70 links are about to be rescued when in
+    fact all 70 are already on the CVE and the delete is a pure de-duplication.
+    A non-zero value here is the interesting one — it means the CVE genuinely
+    lacks entries the impostor was holding.
+    """
+    n = 0
+    for j in links:
+        exists = (
+            await db.execute(
+                select(EntryCVE.entry_id).where(EntryCVE.entry_id == j.entry_id, EntryCVE.cve_id == cve_row.id)
+            )
+        ).scalar_one_or_none()
+        if exists is None:
+            n += 1
+    return n
+
+
 async def _links(db, entity_type: str, entity_id):
     _model, junction, fk = TYPES[entity_type]
     return (await db.execute(select(junction).where(getattr(junction, fk) == entity_id))).scalars().all()
@@ -201,6 +228,7 @@ async def propose(out_path: str) -> None:
                     links = await _links(db, entity_type, entity.id)
                     protected = sum(1 for j in links if (getattr(j, "source", None) or "") in PROTECTED_SOURCES)
                     orphaned = 0 if cve_row else len(links)
+                    uncovered = await _uncovered(db, links, cve_row) if cve_row else 0
                     rows.append(
                         {
                             # No CVE row means the entry links have nowhere to
@@ -214,7 +242,8 @@ async def propose(out_path: str) -> None:
                             "cve": cve,
                             "cve_row": str(cve_row.id) if cve_row else "",
                             "entries": len(links),
-                            "links_moved": len(links) if cve_row else 0,
+                            "links_moved": uncovered,
+                            "links_already": len(links) - uncovered if cve_row else 0,
                             "links_orphaned": orphaned,
                             "links_purged": 0,
                             "links_protected": protected,
@@ -243,6 +272,7 @@ async def propose(out_path: str) -> None:
                             "cve_row": str(cves[cve].id) if cve in cves else "",
                             "entries": len(links),
                             "links_moved": 0,
+                            "links_already": 0,
                             "links_orphaned": 0,
                             "links_purged": len(purgeable),
                             "links_protected": protected,
@@ -265,7 +295,10 @@ async def propose(out_path: str) -> None:
     print(f"{len(names)} entities whose NAME is a CVE identifier")
     for t, n in sorted(by_type.items(), key=lambda kv: -kv[1]):
         print(f"  {t}: {n}")
-    print(f"  {sum(int(r['links_moved']) for r in names)} entry links will move to the real CVE entity")
+    print(
+        f"  {sum(int(r['links_moved']) for r in names)} entry links will move to the real CVE entity "
+        f"({sum(int(r['links_already']) for r in names)} already on it — pure duplicates)"
+    )
     orphans = [r for r in names if int(r["links_orphaned"])]
     if orphans:
         print(f"  {len(orphans)} have no CVE row to move their links to — defaulted to skip:")
