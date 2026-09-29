@@ -319,4 +319,25 @@ describe("Sidebar", () => {
     }
     useUIStore.setState({ sidebarMode: "reading" });
   });
+
+  it("stamps the footer with the build version, linked to its commit", () => {
+    renderSidebar();
+    // Inlined by vite.config.ts, so these are real strings here, not mocks.
+    const stamp = screen.getByText(__APP_VERSION__);
+    expect(stamp).toBeInTheDocument();
+    expect(stamp).toHaveAttribute("title", expect.stringContaining("Version"));
+
+    if (__GIT_SHA__) {
+      // The SHA usually sits on a branch, so main's history is the wrong place
+      // to go looking for it — point straight at the commit.
+      expect(stamp).toHaveAttribute(
+        "href",
+        `https://github.com/a-oneil/IntelFeed/commit/${__GIT_SHA__}`
+      );
+      expect(stamp).toHaveAttribute("rel", expect.stringContaining("noopener"));
+    } else {
+      // An unstamped build has no commit to point at: plain text, not a link.
+      expect(stamp.tagName).toBe("SPAN");
+    }
+  });
 });

@@ -13,6 +13,13 @@ class Settings(BaseSettings):
     # Environment
     env: str = "development"
 
+    # Build stamp, baked into the image by scripts/ops/version.sh via compose
+    # build args. Env-only on purpose: a value in system_settings would outlive
+    # the image it describes and misreport what is actually running.
+    app_version: str = "dev"
+    git_sha: str = ""
+    build_time: str = ""
+
     # Database
     postgres_host: str = "db"
     postgres_port: int = 5432

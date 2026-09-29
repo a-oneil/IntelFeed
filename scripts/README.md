@@ -127,6 +127,7 @@ Also needs `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` in `.env`.
 | `deploy.sh` | Push `main`, run `update.sh` on the production host over SSH, then verify the containers came back healthy. |
 | `sync_prod_to_dev.sh` | Dump the production database over SSH and restore it into the local dev stack, so you develop against real data. **Destroys the local dev database.** |
 | `cf-origin-lockdown.sh` | Restrict inbound 80/443 on the production host to Cloudflare's published edge ranges, closing the origin-bypass hole. Idempotent; never touches port 22. |
+| `version.sh` | **Sourced, not run.** Exports `APP_VERSION` / `GIT_SHA` / `BUILD_TIME` from the checkout so `docker compose build` can stamp the api and frontend images. `update.sh` sources it on every deploy; do the same for a hand-rolled build you want stamped. |
 
 `deploy.sh` and `sync_prod_to_dev.sh` need your production host:
 

@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from sqlalchemy import text
 
 from app.config import settings
+from app.core.build_info import build_stamp
 from app.database import async_session
 from app.services.redis_client import get_redis
 
@@ -46,6 +47,20 @@ async def _check_meilisearch() -> dict:
         return {"status": "error", "error": str(e)}
 
 
+@router.get("/api/version")
+async def version():
+    """Build stamp of the running API: version, commit SHA and build timestamp.
+
+    Touches nothing — no database, Redis or Meilisearch call — so unlike
+    /api/health it is cheap enough to poll. Unauthenticated.
+
+    `version` is `git describe --tags --always --dirty` at image build time, so
+    it reads as a bare short SHA until the repo carries tags and as a tag (or
+    `v1.2.3-4-gabc1234`) after. An unstamped build reports "dev".
+    """
+    return build_stamp()
+
+
 @router.get("/api/health")
 async def health():
     """Aggregate health check pinging PostgreSQL, Redis, and Meilisearch, with per-component latency.
@@ -72,6 +87,6 @@ async def health():
 
     return {
         "status": status,
-        "version": "0.1.0",
+        **build_stamp(),
         "components": components,
     }

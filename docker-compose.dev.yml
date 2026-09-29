@@ -103,11 +103,21 @@ services:
       context: ./backend
       dockerfile: Dockerfile
       target: development
+      args:
+        # Build stamp; `. scripts/ops/version.sh` exports these. Absent (a bare
+        # `docker compose build`) the image reports "dev".
+        APP_VERSION: "${APP_VERSION:-dev}"
+        GIT_SHA: "${GIT_SHA:-}"
+        BUILD_TIME: "${BUILD_TIME:-}"
     ports:
       - "8000:8000"
     volumes:
       - ./backend:/app
       - ./docs:/app/docs:ro  # in-app documentation (app/api/documentation.py)
+      # Same reason as the frontend mount: the image is stamped at build time,
+      # but dev serves volume-mounted code, so the stamp goes stale the moment
+      # you edit. Read the live SHA out of the checkout instead (read-only).
+      - ./.git:/app/.git:ro
       # Maintenance/seed scripts run as `exec api python scripts/<folder>/<script>.py`.
       # The image only carries ./backend, so they arrive by mount, same as docs/.
       - ./scripts:/app/scripts
@@ -251,8 +261,18 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
+      # The build stamp's last resort. The dev server runs in here with only
+      # ./frontend mounted, so without this it cannot tell which commit it is
+      # serving and the sidebar footer just says "dev". Read-only, and vite's
+      # watcher ignores it (see server.watch in vite.config.ts).
+      - ./.git:/app/.git:ro
     environment:
       - VITE_API_URL=http://api:8000
+      # The dev server re-reads VITE_* on start, so the stamp comes in as env
+      # rather than a build arg — a baked arg would survive every code change.
+      - VITE_APP_VERSION=${APP_VERSION:-dev}
+      - VITE_GIT_SHA=${GIT_SHA:-}
+      - VITE_BUILD_TIME=${BUILD_TIME:-}
     depends_on:
       - api
 

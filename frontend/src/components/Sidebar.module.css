@@ -1169,6 +1169,9 @@
    section list is long enough to scroll. */
 
 .sidebarFooter {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
   margin-top: auto;
   position: sticky;
   bottom: 0;
@@ -1200,6 +1203,37 @@
 
 .repoIcon {
   flex-shrink: 0;
+}
+
+/* The build stamp: the quietest thing in the column, and the fastest way to
+   tell whether what you are looking at is what you just deployed.
+
+   Inherits the sidebar's body font on purpose. --font-mono aliases
+   --font-display (JetBrains Mono), which this app reserves for headings — a
+   SHA set in it reads louder than the link it sits beside, however small and
+   muted the rest of the rule makes it. */
+.version {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  /* Even-width digits, so the stamp does not jitter between commits. */
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  /* A long `v1.2.3-4-gabc1234-dirty` must not push the link out of the row. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* It is a link to the commit, but it must not read as one at rest — the
+     underline and the brighter colour are held back for hover/focus. */
+  text-decoration: none;
+}
+
+.version:hover,
+.version:focus-visible {
+  color: var(--text-primary);
+  text-decoration: underline;
 }
 
 /* ===== Narrow sidebar (container query) ===== */
@@ -1292,6 +1326,10 @@
     margin-left: 0;
     justify-content: center;
     width: 100%;
+  }
+
+  .version {
+    display: none;
   }
 
 }

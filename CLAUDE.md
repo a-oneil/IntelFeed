@@ -90,6 +90,7 @@ scripts/ops/backup.sh | restore.sh        # pg_dump + gzip (7-day retention, Mei
 scripts/ops/deploy.sh                     # Push main, run update.sh on prod host, verify health
 scripts/ops/sync_prod_to_dev.sh           # Dump prod DB over SSH and restore into local dev stack
 scripts/ops/cf-origin-lockdown.sh         # Restrict prod 80/443 to Cloudflare edge ranges
+scripts/ops/version.sh                    # Source (don't run) before a build to stamp images with the commit
 scripts/dev/sync_skill_clis.py            # Regenerate skill CLIs from the live tool registry
 ```
 `deploy.sh` / `sync_prod_to_dev.sh` require `INTELFEED_PROD_HOST` — there is no default host.

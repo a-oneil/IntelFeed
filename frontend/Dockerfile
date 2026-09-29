@@ -12,6 +12,13 @@ COPY . .
 ARG VITE_API_URL
 ENV VITE_API_URL=${VITE_API_URL}
 
+# Build stamp, injected by compose from scripts/ops/version.sh. Vite inlines
+# VITE_* at build time, so this is baked into the bundle rather than fetched.
+ARG VITE_APP_VERSION=dev
+ARG VITE_GIT_SHA=""
+ARG VITE_BUILD_TIME=""
+ENV VITE_APP_VERSION=${VITE_APP_VERSION} VITE_GIT_SHA=${VITE_GIT_SHA} VITE_BUILD_TIME=${VITE_BUILD_TIME}
+
 RUN pnpm build
 
 # Serve with nginx

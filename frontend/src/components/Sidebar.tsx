@@ -26,6 +26,18 @@ import styles from "./Sidebar.module.css";
 /** Where the footer link points. Hard-coded upstream — a fork edits one line. */
 const REPO_URL = "https://github.com/a-oneil/IntelFeed";
 
+/** Hover text for the footer's version: the commit and when it was built. */
+function buildStampTitle(): string {
+  const parts = [`Version ${__APP_VERSION__}`];
+  if (__GIT_SHA__) parts.push(`commit ${__GIT_SHA__}`);
+  if (__BUILD_TIME__) {
+    const built = new Date(__BUILD_TIME__);
+    if (!Number.isNaN(built.getTime())) parts.push(`built ${built.toLocaleString()}`);
+  }
+  if (__GIT_SHA__) parts.push("open on GitHub");
+  return parts.join(" · ");
+}
+
 /** Format large counts to fit in a fixed-width badge (e.g. 13272 → "13.3k") */
 function useClampedContextMenu() {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -750,6 +762,26 @@ export function Sidebar() {
           </svg>
           <span className={styles.repoLabel}>GitHub</span>
         </a>
+        {/* What is actually running. A bare short SHA until the repo carries
+            tags, a tag after — see scripts/ops/version.sh. Links to the commit
+            itself, which beats searching main's history for a SHA that is
+            sitting on a branch. Falls back to plain text in an unstamped build,
+            where there is no commit to point at. */}
+        {__GIT_SHA__ ? (
+          <a
+            className={styles.version}
+            href={`${REPO_URL}/commit/${__GIT_SHA__}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={buildStampTitle()}
+          >
+            {__APP_VERSION__}
+          </a>
+        ) : (
+          <span className={styles.version} title={buildStampTitle()}>
+            {__APP_VERSION__}
+          </span>
+        )}
       </div>
 
       {showIngestModal && <IngestModal onClose={() => setShowIngestModal(false)} />}

@@ -1,6 +1,80 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
+import { execSync } from "child_process";
+import fs from "fs";
+
+/**
+ * HEAD's short SHA read straight out of a `.git` directory — no git binary.
+ *
+ * For the dev container: `docker-compose.dev.yml` bind-mounts the repo's `.git`
+ * read-only so this file has something to read, and node:alpine ships no git.
+ * Returns "" for anything it does not recognise; the caller falls back.
+ */
+function shaFromGitDir(dir: string): string {
+  try {
+    const head = fs.readFileSync(path.join(dir, "HEAD"), "utf8").trim();
+    // Detached HEAD stores the SHA itself rather than a ref.
+    if (!head.startsWith("ref: ")) return head.slice(0, 8);
+    const ref = head.slice(5).trim();
+    const loose = path.join(dir, ref);
+    if (fs.existsSync(loose)) {
+      return fs.readFileSync(loose, "utf8").trim().slice(0, 8);
+    }
+    // A fresh clone has no loose ref for its branch — it lives in packed-refs.
+    const packed = fs.readFileSync(path.join(dir, "packed-refs"), "utf8");
+    const line = packed.split("\n").find((l) => l.endsWith(` ${ref}`));
+    return line ? line.slice(0, 8) : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * The build stamp, from whichever source can actually see it.
+ *
+ * Three environments, three answers, in descending order of precision:
+ *
+ *  1. A production image build: compose passes VITE_* build args filled by
+ *     scripts/ops/version.sh, because `.git` sits above the build context and
+ *     is .dockerignore'd on top of that.
+ *  2. A host build or `pnpm dev`: no build arg, but the checkout is right
+ *     here, so ask git properly and get tags with it.
+ *  3. The dev container: no build arg, no git binary, but `.git` is mounted
+ *     read-only at /app/.git — read the SHA out of it by hand.
+ *
+ * Only if all three miss does it report "dev".
+ */
+function buildStamp() {
+  const git = (cmd: string) => {
+    try {
+      return execSync(`git ${cmd}`, { stdio: ["ignore", "pipe", "ignore"] })
+        .toString()
+        .trim();
+    } catch {
+      return "";
+    }
+  };
+  const mountedSha = () => shaFromGitDir(path.resolve(__dirname, ".git"));
+  // Compose and both Dockerfiles default the arg to the literal "dev", so an
+  // unstamped build arrives as a truthy placeholder. Treat it as "nobody knew"
+  // or it short-circuits the chain and the later sources never get a turn.
+  const arg = (v?: string) => (v && v !== "dev" ? v : "");
+  return {
+    version:
+      arg(process.env.VITE_APP_VERSION) ||
+      git("describe --tags --always --dirty") ||
+      mountedSha() ||
+      "dev",
+    sha:
+      arg(process.env.VITE_GIT_SHA) ||
+      git("rev-parse --short=8 HEAD") ||
+      mountedSha(),
+    builtAt: arg(process.env.VITE_BUILD_TIME) || new Date().toISOString(),
+  };
+}
+
+const stamp = buildStamp();
 
 export default defineConfig({
   plugins: [react()],
@@ -11,6 +85,9 @@ export default defineConfig({
   // widget move/resize. Define it (applies to dev and prod builds).
   define: {
     "process.env.DRAGGABLE_DEBUG": "false",
+    __APP_VERSION__: JSON.stringify(stamp.version),
+    __GIT_SHA__: JSON.stringify(stamp.sha),
+    __BUILD_TIME__: JSON.stringify(stamp.builtAt),
   },
   resolve: {
     alias: {
@@ -36,6 +113,9 @@ export default defineConfig({
   server: {
     port: 3000,
     host: true,
+    // The dev container bind-mounts the repo's .git here for the build stamp.
+    // Watching it would fire HMR on every fetch, commit and index write.
+    watch: { ignored: ["**/.git/**"] },
     allowedHosts: ["localhost", "127.0.0.1"],
     proxy: {
       "/api": {
