@@ -60,17 +60,25 @@ function buildStamp() {
   // unstamped build arrives as a truthy placeholder. Treat it as "nobody knew"
   // or it short-circuits the chain and the later sources never get a turn.
   const arg = (v?: string) => (v && v !== "dev" ? v : "");
+
+  const envVersion = arg(process.env.VITE_APP_VERSION);
+  const gitVersion = envVersion ? "" : git("describe --tags --always --dirty");
+  const version = envVersion || gitVersion || mountedSha() || "dev";
+
   return {
-    version:
-      arg(process.env.VITE_APP_VERSION) ||
-      git("describe --tags --always --dirty") ||
-      mountedSha() ||
-      "dev",
+    version,
     sha:
       arg(process.env.VITE_GIT_SHA) ||
       git("rev-parse --short=8 HEAD") ||
       mountedSha(),
     builtAt: arg(process.env.VITE_BUILD_TIME) || new Date().toISOString(),
+    // Which of the three sources won, so the running app can tell whether a
+    // disagreement with the server is meaningful. Only "env" is: there the
+    // bundle and its stamp were produced by the same image build, so a
+    // mismatch means the browser is holding an older bundle. Under "git" the
+    // stamp is frozen at dev-server start while HMR keeps the code current,
+    // so a mismatch is routine and says nothing.
+    source: envVersion ? "env" : version === "dev" ? "none" : "git",
   };
 }
 
@@ -88,6 +96,7 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify(stamp.version),
     __GIT_SHA__: JSON.stringify(stamp.sha),
     __BUILD_TIME__: JSON.stringify(stamp.builtAt),
+    __STAMP_SOURCE__: JSON.stringify(stamp.source),
   },
   resolve: {
     alias: {

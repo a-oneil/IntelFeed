@@ -1236,6 +1236,34 @@
   text-decoration: underline;
 }
 
+/* The one thing in this row allowed to be loud, and only when a reload would
+   actually change what you are looking at. Pushed against the link so the
+   version stays anchored to the right edge. */
+.stale {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-left: auto;
+  padding: 0.125rem 0.375rem;
+  border: none;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.stale:hover {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+/* With the reload button present it owns the auto margin, so the version
+   sits directly after it rather than being pushed off the row. */
+.stale ~ .version {
+  margin-left: 0;
+}
+
 /* ===== Narrow sidebar (container query) ===== */
 
 @container sidebar (max-width: 219px) {
@@ -1330,6 +1358,14 @@
 
   .version {
     display: none;
+  }
+
+  /* Too narrow for the word, but never hide the affordance itself. */
+  .stale {
+    margin-left: 0;
+    font-size: 0;
+    gap: 0;
+    padding: 0.25rem;
   }
 
 }

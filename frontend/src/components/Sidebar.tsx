@@ -11,6 +11,7 @@ import { useIsMobile } from "@/hooks/useMediaQuery";
 import { useLongPress } from "@/hooks/useLongPress";
 import { useUndoableDelete } from "@/hooks/useUndoableDelete";
 import { useSidebarCustomization } from "@/hooks/useSidebarCustomization";
+import { useStaleBundle } from "@/hooks/useBuildVersion";
 import { WorkbenchNav } from "./WorkbenchNav";
 import { IngestModal } from "./IngestModal";
 import { EditFeedModal } from "./EditFeedModal";
@@ -211,6 +212,8 @@ export function Sidebar() {
 
   // Sidebar customization
   const { sectionOrder, reorderSections } = useSidebarCustomization();
+  // Only ever true for a stamped image build; see useStaleBundle.
+  const { stale: bundleStale, serverVersion } = useStaleBundle();
   const [draggedSectionId, setDraggedSectionId] = useState<SidebarSectionId | null>(null);
 
   // Default all categories to collapsed on first load
@@ -762,6 +765,21 @@ export function Sidebar() {
           </svg>
           <span className={styles.repoLabel}>GitHub</span>
         </a>
+        {bundleStale && (
+          <button
+            type="button"
+            className={styles.stale}
+            onClick={() => window.location.reload()}
+            title={`This tab is running ${__APP_VERSION__}; the server is on ${serverVersion}. Reload to catch up.`}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+              <polyline points="21 3 21 9 15 9" />
+            </svg>
+            Reload
+          </button>
+        )}
+
         {/* What is actually running. A bare short SHA until the repo carries
             tags, a tag after — see scripts/ops/version.sh. Links to the commit
             itself, which beats searching main's history for a SHA that is

@@ -9,3 +9,5 @@ declare module '*.module.css' {
 declare const __APP_VERSION__: string;
 declare const __GIT_SHA__: string;
 declare const __BUILD_TIME__: string;
+/** Which source the stamp came from; only "env" makes a server mismatch meaningful. */
+declare const __STAMP_SOURCE__: "env" | "git" | "none";
