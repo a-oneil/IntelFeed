@@ -5,52 +5,85 @@ name: Docker images
 # image compiles lxml and installs a PostgreSQL client), so this only runs when
 # something that feeds an image actually changes.
 #
-# The two `paths:` lists below are duplicated on purpose — GitHub Actions does
-# not expand YAML anchors. Keep them in sync.
+# The filter used to be two duplicated `on.*.paths` lists — GitHub Actions does
+# not expand YAML anchors, so they had to be kept in sync by hand. It now lives
+# once, in the `changes` job below, which also gives this workflow a status on
+# every PR instead of silently not running.
 on:
   push:
     branches: [main]
-    paths:
-      - "backend/Dockerfile"
-      - "backend/.dockerignore"
-      - "backend/pyproject.toml"
-      - "backend/entrypoint.sh"
-      - "frontend/Dockerfile"
-      - "frontend/.dockerignore"
-      - "frontend/package.json"
-      - "frontend/pnpm-lock.yaml"
-      - "frontend/nginx.conf"
-      - "db/Dockerfile"
-      - "docker-compose*.yml"
-      - ".env.example"
-      - ".github/workflows/docker.yml"
   pull_request:
-    paths:
-      - "backend/Dockerfile"
-      - "backend/.dockerignore"
-      - "backend/pyproject.toml"
-      - "backend/entrypoint.sh"
-      - "frontend/Dockerfile"
-      - "frontend/.dockerignore"
-      - "frontend/package.json"
-      - "frontend/pnpm-lock.yaml"
-      - "frontend/nginx.conf"
-      - "db/Dockerfile"
-      - "docker-compose*.yml"
-      - ".env.example"
-      - ".github/workflows/docker.yml"
   workflow_dispatch:
 
 concurrency:
-  group: docker-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 jobs:
+  changes:
+    name: changed?
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.filter.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: filter
+        name: Did this PR touch anything that feeds an image?
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Event is '$EVENT' — building every image." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Anything baked into an image or read by `compose config`. Note this
+          # is deliberately narrower than `backend/**`: editing a Python module
+          # does not change how the image builds, only what it contains, and
+          # the backend workflow already tests that.
+          pattern='^(backend/(Dockerfile|\.dockerignore|pyproject\.toml|entrypoint\.sh)'
+          pattern="$pattern"'|frontend/(Dockerfile|\.dockerignore|package\.json|pnpm-lock\.yaml|nginx\.conf)'
+          pattern="$pattern"'|db/Dockerfile'
+          pattern="$pattern"'|docker-compose.*\.yml'
+          pattern="$pattern"'|\.env\.example'
+          pattern="$pattern"'|\.github/workflows/docker\.yml)$'
+
+          changed=$(git diff --name-only "$BASE" HEAD)
+
+          if printf '%s\n' "$changed" | grep -qE "$pattern"; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            verdict="Image inputs changed — building images."
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            verdict="No image inputs changed — skipping the image builds."
+          fi
+
+          {
+            echo "### $verdict"
+            echo
+            echo '<details><summary>Files changed in this PR</summary>'
+            echo
+            echo '```'
+            printf '%s\n' "$changed"
+            echo '```'
+            echo
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   build:
-    name: Build ${{ matrix.name }}
+    name: build ${{ matrix.name }}
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -84,8 +117,10 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,scope=${{ matrix.name }},mode=max
 
-  compose-config:
-    name: Compose files parse
+  compose:
+    name: compose config
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -105,3 +140,23 @@ jobs:
           sed -i 's|^SITE_DOMAIN=.*|SITE_DOMAIN=ci.example.com|' .env
           docker compose -f docker-compose.dev.yml config --quiet
           docker compose -f docker-compose.prod.yml config --quiet
+
+  # Stable check for branch protection — see the matching job in backend.yml.
+  docker:
+    name: Docker images
+    needs: [changes, build, compose]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: No image job failed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          set -euo pipefail
+          echo "job results: $RESULTS"
+          for result in $RESULTS; do
+            case "$result" in
+              success|skipped) ;;
+              *) echo "::error::a Docker job reported '$result'"; exit 1 ;;
+            esac
+          done
