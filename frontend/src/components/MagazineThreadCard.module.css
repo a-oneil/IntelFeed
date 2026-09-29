@@ -1,0 +1,152 @@
+/* A story card in the magazine grid. It shares the article card's frame (see
+   .magazineCard in EntryList.module.css) so the grid keeps one rhythm, and
+   departs from it exactly where the difference is the point: an intel-accent
+   rule down the side, no image well, and the count line set as the headline's
+   equal rather than as footnote meta. */
+
+.card {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  padding: var(--sp-4);
+  padding-left: calc(var(--sp-4) - 3px);
+  background: color-mix(in srgb, var(--accent-intel) 5%, var(--bg-secondary));
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent-intel);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.card:hover {
+  border-color: var(--text-muted);
+  border-left-color: var(--accent-intel);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-intel);
+  cursor: help;
+}
+
+.glyph {
+  font-size: var(--fs-base);
+  line-height: 1;
+}
+
+.score {
+  margin-left: auto;
+  flex: none;
+  font-size: var(--fs-base);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.score.high {
+  color: var(--danger);
+}
+.score.medium {
+  color: var(--warning);
+}
+.score.low {
+  color: var(--text-secondary);
+}
+
+.title {
+  overflow-wrap: anywhere;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text-primary);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* The card's argument for existing — sized and colored to be read, not skimmed
+   past the way the article card's meta line is. */
+.count {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--accent-intel);
+  overflow-wrap: anywhere;
+}
+
+.summary {
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.chip {
+  font-size: var(--fs-sm);
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-2) var(--sp-3);
+  margin-top: auto;
+  padding-top: 0.2rem;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.open {
+  margin-left: auto;
+  color: var(--accent-intel);
+}
+
+.card:hover .open {
+  text-decoration: underline;
+}
+
+@media (max-width: 767px) {
+  /* One card per row on a phone: the chips are the first thing to go, since
+     the title and the count line are what the card is for. */
+  .chips {
+    display: none;
+  }
+}
