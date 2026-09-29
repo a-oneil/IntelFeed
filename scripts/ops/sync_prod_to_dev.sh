@@ -3,8 +3,9 @@
 # dev stack (docker-compose.dev.yml). The dev database is dropped and
 # recreated; migrations re-run automatically when the api container restarts.
 #
-# Usage: ./scripts/ops/sync_prod_to_dev.sh [--yes] [existing_dump.sql.gz]
+# Usage: ./scripts/ops/sync_prod_to_dev.sh [--yes] [--skip-reindex] [existing_dump.sql.gz]
 #   --yes                 Skip the overwrite confirmation prompt
+#   --skip-reindex        Leave Meilisearch alone (search will be broken, see below)
 #   existing_dump.sql.gz  Restore this dump instead of pulling a fresh one
 #
 # Required: INTELFEED_PROD_HOST — SSH target for the prod host, e.g. user@prod.example.com
@@ -27,15 +28,17 @@ KEEP_SYNC_DUMPS=3
 DB_SERVICES=(api celery-worker celery-worker-ai celery-beat telegram-listener)
 
 ASSUME_YES=false
+SKIP_REINDEX=false
 DUMP_FILE=""
 for arg in "$@"; do
     case "$arg" in
         --yes) ASSUME_YES=true ;;
+        --skip-reindex) SKIP_REINDEX=true ;;
         *) DUMP_FILE="$arg" ;;
     esac
 done
 
-cd "$(cd "$(dirname "$0")/.." && pwd)"
+cd "$(cd "$(dirname "$0")/../.." && pwd)"
 
 if [ "$ASSUME_YES" = "false" ]; then
     echo "[sync] WARNING: this will DROP and overwrite your local dev database."
@@ -84,12 +87,35 @@ docker compose -f "$DEV_COMPOSE" exec -T db sh -c \
     'psql -U "$POSTGRES_USER" -d postgres -c "DROP DATABASE IF EXISTS $POSTGRES_DB WITH (FORCE);" -c "CREATE DATABASE $POSTGRES_DB OWNER $POSTGRES_USER;"'
 
 echo "[sync] Restoring dump (this can take a while)..."
+# ON_ERROR_STOP matters: without it psql exits 0 even though --single-transaction
+# rolled the whole restore back, so the script would report success over an
+# empty database.
 gunzip -c "$DUMP_FILE" | docker compose -f "$DEV_COMPOSE" exec -T db sh -c \
-    'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" --quiet --single-transaction'
+    'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" --quiet --single-transaction -v ON_ERROR_STOP=1'
 
 echo "[sync] Restarting dev services (api will re-run migrations on startup)..."
 docker compose -f "$DEV_COMPOSE" start "${DB_SERVICES[@]}"
 
+# --- 3. Rebuild the search indexes ------------------------------------------
+# Not optional housekeeping: Meilisearch document ids come from whichever
+# database wrote them, so after a restore the index points at rows that no
+# longer exist and search returns wrong and missing hits. Run inline (not via
+# the Celery task) so a failure here fails the sync instead of surfacing later
+# as "search is broken".
+if [ "$SKIP_REINDEX" = "true" ]; then
+    echo "[sync] Skipping reindex (--skip-reindex). Local search will be wrong until you run:"
+    echo "[sync]   docker compose -f $DEV_COMPOSE exec api python scripts/maintenance/rebuild_search_indexes.py"
+else
+    echo "[sync] Waiting for api and meilisearch to come up..."
+    for _ in $(seq 1 60); do
+        if docker compose -f "$DEV_COMPOSE" exec -T api python -c 'pass' >/dev/null 2>&1; then
+            break
+        fi
+        sleep 2
+    done
+    docker compose -f "$DEV_COMPOSE" up -d meilisearch
+    echo "[sync] Rebuilding Meilisearch indexes from the restored database..."
+    docker compose -f "$DEV_COMPOSE" exec -T api python scripts/maintenance/rebuild_search_indexes.py
+fi
+
 echo "[sync] Done. Dev database now mirrors prod (as of this dump)."
-echo "[sync] NOTE: the local Meilisearch index is now stale. Rebuild it via"
-echo "[sync]   POST /api/search/rebuild (admin) or the Settings UI reindex button."

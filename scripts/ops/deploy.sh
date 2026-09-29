@@ -21,7 +21,7 @@ fi
 SKIP_PUSH=false
 [ "${1:-}" = "--skip-push" ] && SKIP_PUSH=true
 
-cd "$(cd "$(dirname "$0")/.." && pwd)"
+cd "$(cd "$(dirname "$0")/../.." && pwd)"
 
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 if [ "$BRANCH" != "main" ]; then

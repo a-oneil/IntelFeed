@@ -13,6 +13,10 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-intelfeed}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
     command: postgres -c max_connections=300
+    # Docker's default 64MB /dev/shm is too small for parallel query and
+    # parallel index builds against a prod-sized database (a bulk restore of
+    # the ~4GB prod dump dies with "could not resize shared memory segment").
+    shm_size: 1gb
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
