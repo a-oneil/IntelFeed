@@ -2,7 +2,9 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: 0 0 0.5rem;
+  /* No bottom padding: .sidebarFooter is sticky to bottom: 0, and any padding
+     there would leave a strip below it for scrolled rows to show through. */
+  padding: 0;
   overflow-y: auto;
   overflow-x: hidden;
   container-type: inline-size;
@@ -1161,6 +1163,45 @@
   cursor: grabbing;
 }
 
+/* ===== Footer =====
+   A quiet link back to the repo, in both modes. `margin-top: auto` parks it at
+   the foot of a short column; `position: sticky` keeps it there once the
+   section list is long enough to scroll. */
+
+.sidebarFooter {
+  margin-top: auto;
+  position: sticky;
+  bottom: 0;
+  /* Mirrors the panel ground the two layouts paint, so rows scroll underneath
+     it rather than through it. */
+  background: color-mix(in srgb, var(--bg-secondary) 60%, var(--bg-primary));
+  border-top: 1px solid var(--border);
+  padding: 0.375rem 1rem 0.5rem;
+}
+
+.repoLink {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  /* Same muted-to-primary move as .iconBtn, whose contrast is already vetted
+     across the theme gallery. */
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  text-decoration: none;
+  padding: 0.25rem 0.375rem;
+  margin-left: -0.375rem;
+  border-radius: var(--r-sm);
+}
+
+.repoLink:hover {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+}
+
+.repoIcon {
+  flex-shrink: 0;
+}
+
 /* ===== Narrow sidebar (container query) ===== */
 
 @container sidebar (max-width: 219px) {
@@ -1235,6 +1276,22 @@
 
   .articlesHero {
     width: calc(100% - 1rem);
+  }
+
+  /* No room for the word; the mark plus the title attribute carry it. */
+  .sidebarFooter {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+
+  .repoLabel {
+    display: none;
+  }
+
+  .repoLink {
+    margin-left: 0;
+    justify-content: center;
+    width: 100%;
   }
 
 }
@@ -1320,5 +1377,10 @@
 
   .toolBtn {
     min-height: 40px;
+  }
+
+  .repoLink {
+    min-height: 44px;
+    font-size: var(--fs-md);
   }
 }

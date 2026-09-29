@@ -145,6 +145,7 @@ vi.mock("@/stores/uiStore", () => ({
 
 import { useFeeds, useCategories, useAddFeed } from "@/hooks/useFeeds";
 import { Sidebar } from "@/components/Sidebar";
+import { useUIStore } from "@/stores/uiStore";
 
 const mockUseFeeds = vi.mocked(useFeeds);
 const mockUseCategories = vi.mocked(useCategories);
@@ -301,5 +302,21 @@ describe("Sidebar", () => {
     // "5" appears only on the category badge (feeds collapsed)
     expect(screen.getAllByText("5")).toHaveLength(1);
     expect(screen.getByText("12")).toBeInTheDocument();
+  });
+
+  it("links to the repo from the footer, safely and in both modes", () => {
+    for (const mode of ["reading", "workbench"] as const) {
+      useUIStore.setState({ sidebarMode: mode });
+      const { unmount } = renderSidebar();
+      const link = screen.getByRole("link", { name: "IntelFeed on GitHub" });
+      expect(link).toHaveAttribute("href", "https://github.com/a-oneil/IntelFeed");
+      expect(link).toHaveAttribute("target", "_blank");
+      // Without both tokens the new tab keeps a handle on window.opener.
+      expect(link.getAttribute("rel")?.split(/\s+/)).toEqual(
+        expect.arrayContaining(["noopener", "noreferrer"])
+      );
+      unmount();
+    }
+    useUIStore.setState({ sidebarMode: "reading" });
   });
 });
