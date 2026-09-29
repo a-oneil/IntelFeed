@@ -63,7 +63,12 @@ fi
 # ./db (postgres + pgvector), so a build failure here has to mean "no update
 # yet" rather than "no database": `up --build` would have torn the old container
 # down first and left the host without one.
-log "Building images..."
+# Stamp the build with the commit it came from. Must run after the pull and
+# before the build: compose reads these from the environment to fill the api and
+# frontend build args, and nothing inside a build context can see .git.
+# shellcheck source=scripts/ops/version.sh
+. "$REPO_DIR/scripts/ops/version.sh"
+log "Building images (version $APP_VERSION, sha $GIT_SHA)..."
 if ! docker compose -f "$COMPOSE_FILE" build 2>&1 | while IFS= read -r line; do [ -n "$line" ] && log "$line"; done; then
     log "Image build FAILED — running stack left untouched, will retry next tick." "error"
     exit 1

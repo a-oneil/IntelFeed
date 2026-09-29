@@ -151,6 +151,12 @@ services:
       context: ./backend
       dockerfile: Dockerfile
       target: production
+      args:
+        # Build stamp; `. scripts/ops/version.sh` exports these. Absent (a bare
+        # `docker compose build`) the image reports "dev".
+        APP_VERSION: "${APP_VERSION:-dev}"
+        GIT_SHA: "${GIT_SHA:-}"
+        BUILD_TIME: "${BUILD_TIME:-}"
     restart: unless-stopped
     # Protect the API process — user-facing; kill workers before it.
     oom_score_adj: -700
@@ -365,6 +371,10 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_API_URL: "${VITE_API_URL:-/api}"
+        # Build stamp; see scripts/ops/version.sh.
+        VITE_APP_VERSION: "${APP_VERSION:-dev}"
+        VITE_GIT_SHA: "${GIT_SHA:-}"
+        VITE_BUILD_TIME: "${BUILD_TIME:-}"
     restart: unless-stopped
     expose:
       - "80"

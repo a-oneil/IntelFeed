@@ -145,6 +145,7 @@ vi.mock("@/stores/uiStore", () => ({
 
 import { useFeeds, useCategories, useAddFeed } from "@/hooks/useFeeds";
 import { Sidebar } from "@/components/Sidebar";
+import { useUIStore } from "@/stores/uiStore";
 
 const mockUseFeeds = vi.mocked(useFeeds);
 const mockUseCategories = vi.mocked(useCategories);
@@ -301,5 +302,42 @@ describe("Sidebar", () => {
     // "5" appears only on the category badge (feeds collapsed)
     expect(screen.getAllByText("5")).toHaveLength(1);
     expect(screen.getByText("12")).toBeInTheDocument();
+  });
+
+  it("links to the repo from the footer, safely and in both modes", () => {
+    for (const mode of ["reading", "workbench"] as const) {
+      useUIStore.setState({ sidebarMode: mode });
+      const { unmount } = renderSidebar();
+      const link = screen.getByRole("link", { name: "IntelFeed on GitHub" });
+      expect(link).toHaveAttribute("href", "https://github.com/a-oneil/IntelFeed");
+      expect(link).toHaveAttribute("target", "_blank");
+      // Without both tokens the new tab keeps a handle on window.opener.
+      expect(link.getAttribute("rel")?.split(/\s+/)).toEqual(
+        expect.arrayContaining(["noopener", "noreferrer"])
+      );
+      unmount();
+    }
+    useUIStore.setState({ sidebarMode: "reading" });
+  });
+
+  it("stamps the footer with the build version, linked to its commit", () => {
+    renderSidebar();
+    // Inlined by vite.config.ts, so these are real strings here, not mocks.
+    const stamp = screen.getByText(__APP_VERSION__);
+    expect(stamp).toBeInTheDocument();
+    expect(stamp).toHaveAttribute("title", expect.stringContaining("Version"));
+
+    if (__GIT_SHA__) {
+      // The SHA usually sits on a branch, so main's history is the wrong place
+      // to go looking for it — point straight at the commit.
+      expect(stamp).toHaveAttribute(
+        "href",
+        `https://github.com/a-oneil/IntelFeed/commit/${__GIT_SHA__}`
+      );
+      expect(stamp).toHaveAttribute("rel", expect.stringContaining("noopener"));
+    } else {
+      // An unstamped build has no commit to point at: plain text, not a link.
+      expect(stamp.tagName).toBe("SPAN");
+    }
   });
 });
