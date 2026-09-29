@@ -18,7 +18,7 @@ import { useEntryIntelBadges } from "@/hooks/useEntryIntelBadges";
 import { previewSnippet } from "@/utils/previewText";
 import { formatDate } from "@/utils/formatDate";
 import { groupConsecutiveEntries } from "@/utils/groupEntries";
-import { injectDayDividers, filterCollapsedDays } from "@/utils/dayDividers";
+import { injectDayDividers, filterCollapsedDays, type DayDividerItem } from "@/utils/dayDividers";
 import { DayDividerSummary } from "@/components/DayDividerSummary";
 import { DayIntelChips, type DayFocus } from "@/components/DayIntelChips";
 import { MarkDayReadButton } from "@/components/MarkDayReadButton";
@@ -30,7 +30,8 @@ import { usePullToRefresh } from "@/hooks/usePullToRefresh";
 import { SwipeableEntryRow } from "@/components/SwipeableEntryRow";
 import { CVEGroupRow } from "@/components/CVEGroupRow";
 import { ThreadRow } from "@/components/ThreadRow";
-import { queueItems, type QueueItem } from "@/utils/threads";
+import { queueItems, magazineQueueItems, type QueueItem, type MagazineItem } from "@/utils/threads";
+import { MagazineThreadCard } from "@/components/MagazineThreadCard";
 import { EntryIntelBadges } from "@/components/EntryIntelBadges";
 import { EntryTableView } from "@/components/EntryTableView";
 import { IntelLevelBadge } from "@/components/IntelLevelBadge";
@@ -852,18 +853,19 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
     const withDividers = injectDayDividers(displayItems, showDividers);
     return filterCollapsedDays(withDividers, collapsedDays);
   }, [priorityMode, queueRows, displayItems, showDividers, collapsedDays]);
-  const magazineItems = useMemo(() => {
+  const magazineItems = useMemo<(MagazineItem | DayDividerItem)[]>(() => {
     if (effectiveViewMode !== "magazine") return [];
-    const singles = entries.map((entry, i) => ({
-      type: "single" as const,
-      entry,
-      flatIndex: i,
-    }));
+    // Built from the queue rows, not from `entries`: the endpoint withholds
+    // every article a thread absorbed, so a grid mapped over the entry stream
+    // drops a whole story — the thread card and the coverage behind it both.
+    const items: MagazineItem[] = priorityMode
+      ? magazineQueueItems(queueRows)
+      : entries.map((entry, i) => ({ type: "single" as const, entry, flatIndex: i }));
     return filterCollapsedDays(
-      injectDayDividers(singles, showDividers),
+      injectDayDividers(items, showDividers),
       collapsedDays,
     );
-  }, [entries, effectiveViewMode, showDividers, collapsedDays]);
+  }, [priorityMode, queueRows, entries, effectiveViewMode, showDividers, collapsedDays]);
 
   // Every day key rendered by the *active* view — powers the collapse-all /
   // expand-all toolbar toggle. Derived from the same injected item list the
@@ -871,7 +873,10 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
   // exactly what's on screen. Magazine renders ungrouped singles while the list
   // renders CVE-grouped items, and a group can straddle midnight — so the two
   // views can surface different day dividers, and reading from the wrong one
-  // would leave some days uncollapsed.
+  // would leave some days uncollapsed. In the Priority Queue the list forgoes
+  // dividers entirely (it isn't date-ordered) while magazine would date a
+  // thread by its last beat — moot today, since the queue's forced "radar" sort
+  // turns dividers off in both.
   const activeDividerItems = effectiveViewMode === "magazine" ? magazineItems : virtualItems2D;
   const allDayKeys = useMemo(
     () =>
@@ -1405,6 +1410,10 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
         /* Table view — flat, sortable, filterable grid of all entries */
         <EntryTableView
           entries={entries}
+          // Priority mode: the table needs the queue rows, not the flattened
+          // entries — `entries` drops the thread rows, and the server already
+          // withheld the articles those threads absorbed.
+          queueRows={priorityMode ? queueRows : undefined}
           intelBadges={intelBadges}
           totalCount={totalCount ?? undefined}
           hasNextPage={!!hasNextPage}
@@ -1485,6 +1494,18 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
                   </div>
                 );
               }
+              if (item.type === "thread") {
+                // No expand-in-place here: the spine is a stack of beats, a
+                // row's shape rather than a card's. The card opens the story.
+                return (
+                  <MagazineThreadCard
+                    key={item.key}
+                    thread={item.thread}
+                    score={item.score}
+                    onOpen={() => setSelectedThread(item.thread.slug)}
+                  />
+                );
+              }
               if (item.type !== "single") return null;
               return (
                 <MagazineCard
@@ -1501,7 +1522,10 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
             })}
           </div>
           {isFetchingNextPage && <div className={styles.loading}>Loading more...</div>}
-          {!isLoading && entries.length === 0 && (
+          {/* Counted over the rendered cards, not over `entries` — a queue made
+              entirely of story threads has no standalone entries and would
+              otherwise claim it was empty underneath a full grid. */}
+          {!isLoading && magazineItems.length === 0 && (
             <div className={styles.empty}>No entries to display</div>
           )}
         </div>

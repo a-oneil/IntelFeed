@@ -1,6 +1,6 @@
 import type { Entry, PriorityQueueRow, StoryThread } from "@/api/types";
 import type { DisplayItemWithDividers } from "./dayDividers";
-import { groupConsecutiveEntries } from "./groupEntries";
+import { groupConsecutiveEntries, type SingleItem } from "./groupEntries";
 
 /** A story-thread row slotted into a list of entries. */
 export interface ThreadItem {
@@ -68,5 +68,45 @@ export function queueItems(rows: PriorityQueueRow[]): QueueItem[] {
     entriesSeen++;
   }
   flushRun();
+  return out;
+}
+
+/** A magazine-grid item: one card per entry, one card per story thread. */
+export type MagazineItem = SingleItem | ThreadItem;
+
+/**
+ * Render the server's Priority Queue rows as magazine cards, in the order they
+ * came.
+ *
+ * A thread has to earn a card of its own here rather than a badge on someone
+ * else's: the endpoint drops every article a thread absorbed, so a grid built
+ * from the entry stream alone loses the thread *and* the coverage it stands
+ * for — a 23-article story contributes no cards at all.
+ *
+ * Deliberately not `queueItems()` with its groups flattened. Magazine has never
+ * collapsed consecutive CVE entries (a card is a card), so borrowing that walk
+ * would mean undoing the work it had just done. `flatIndex` still counts the
+ * entry-only stream, which is what shift-range selection indexes into.
+ */
+export function magazineQueueItems(rows: PriorityQueueRow[]): MagazineItem[] {
+  const out: MagazineItem[] = [];
+  let entriesSeen = 0;
+
+  for (const row of rows) {
+    if (row.kind === "thread") {
+      if (!row.thread) continue;
+      out.push({
+        type: "thread",
+        thread: row.thread,
+        score: row.score,
+        memberIds: row.absorbed_entry_ids,
+        key: `thread-${row.thread.id}`,
+      });
+      continue;
+    }
+    if (!row.entry) continue;
+    out.push({ type: "single", entry: row.entry, flatIndex: entriesSeen });
+    entriesSeen++;
+  }
   return out;
 }

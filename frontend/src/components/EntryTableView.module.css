@@ -41,6 +41,29 @@
   font-weight: 500;
 }
 
+/* A story thread occupying an ordinary table row. The left accent is the one
+   ThreadRow wears in the compact list, so the same object reads the same way in
+   either view — no tint, because DataTable's .rowSelected / .rowChecked own the
+   row background and a second background here would fight them for it.
+   The class is doubled to out-specify .rowSelected's own inset shadow: a
+   selected thread keeps its accent colour and shows the selection through the
+   background instead. */
+.threadRow.threadRow {
+  box-shadow: inset 3px 0 0 var(--accent-intel);
+}
+
+.threadTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.threadGlyph {
+  flex: none;
+  color: var(--accent-intel);
+}
+
 .summaryCell {
   color: var(--text-secondary);
 }
