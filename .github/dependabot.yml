@@ -1,0 +1,73 @@
+# Dependency updates. Everything is grouped and weekly on purpose: an ungrouped
+# Dependabot on a repo this size opens ~20 PRs a week, each triggering a full
+# CI run, and the result is that nobody reads any of them.
+#
+# Note this only opens *version* PRs. The vulnerability side needs "Dependabot
+# alerts" switched on in the repo's Settings > Code security — on a private
+# repo it is off by default. The weekly pip-audit / pnpm audit in
+# .github/workflows/security.yml is the backstop either way.
+version: 2
+
+updates:
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+    open-pull-requests-limit: 5
+    groups:
+      # Patch and minor bumps land together; a major gets its own PR so the
+      # breaking-change notes are readable.
+      backend-minor:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    commit-message:
+      prefix: "deps(backend)"
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+    open-pull-requests-limit: 5
+    groups:
+      frontend-minor:
+        patterns: ["*"]
+        update-types: [minor, patch]
+      # These move as a set — bumping one @tiptap or @codemirror package
+      # without its siblings reliably breaks the editor build.
+      tiptap:
+        patterns: ["@tiptap/*"]
+      codemirror:
+        patterns: ["@codemirror/*", "@lezer/*", "codemirror"]
+    commit-message:
+      prefix: "deps(frontend)"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "deps(ci)"
+
+  - package-ecosystem: docker
+    directories:
+      - /backend
+      - /frontend
+      - /db
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+    groups:
+      base-images:
+        patterns: ["*"]
+    commit-message:
+      prefix: "deps(docker)"

@@ -1,29 +1,83 @@
-name: CI
+name: Backend
 
+# Runs only when backend code actually changes. See the `changes` job below for
+# why that gate is an `if:` on the jobs rather than `on.pull_request.paths` —
+# the short version is that a workflow filtered out at the `on:` level never
+# reports a status, so a branch-protection rule waits on it forever.
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
 
-# A second push to the same PR cancels the first run.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Supersede a PR's older run, but never kill a build of main — that run is
+  # the record of whether the default branch is green.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 env:
   # The version the Docker images ship (backend/Dockerfile). Used by the lint
-  # and migration jobs; the test job runs a matrix (see backend-test).
+  # and migration jobs; the test job runs a matrix (see `pytest`).
   PYTHON_VERSION: "3.12"
-  # frontend/Dockerfile builds on node:22 with pnpm 10.
-  NODE_VERSION: "22"
 
 jobs:
-  backend-lint:
-    name: Backend · ruff
+  changes:
+    name: changed?
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.filter.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need the PR base commit in the local object store to diff against.
+          fetch-depth: 0
+
+      - id: filter
+        name: Did this PR touch the backend?
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+
+          # A push to main (or a manual dispatch) always runs everything: main
+          # must be verified end to end, not just on the slice that moved.
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Event is '$EVENT' — running every backend check." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          changed=$(git diff --name-only "$BASE" HEAD)
+
+          if printf '%s\n' "$changed" | grep -qE '^(backend/|\.github/workflows/backend\.yml$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            verdict="Backend files changed — running backend checks."
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            verdict="No backend files changed — skipping backend checks."
+          fi
+
+          {
+            echo "### $verdict"
+            echo
+            echo '<details><summary>Files changed in this PR</summary>'
+            echo
+            echo '```'
+            printf '%s\n' "$changed"
+            echo '```'
+            echo
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  ruff:
+    name: ruff
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -47,8 +101,10 @@ jobs:
         working-directory: backend
         run: ruff format --check .
 
-  backend-test:
-    name: Backend · pytest (py${{ matrix.python }})
+  pytest:
+    name: pytest (py${{ matrix.python }})
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
 
     # Both bugs this matrix would have caught were stdlib behaviour changes
@@ -131,8 +187,10 @@ jobs:
         working-directory: backend
         run: pytest tests/ -q
 
-  backend-migrations:
-    name: Backend · alembic
+  alembic:
+    name: alembic
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
 
     services:
@@ -198,41 +256,24 @@ jobs:
           alembic downgrade -1
           alembic upgrade head
 
-  frontend:
-    name: Frontend · lint, test, build
+  # One stable check to put in branch protection. It reports on every PR —
+  # including ones that skip the backend entirely — so a required check never
+  # hangs pending. Mark this job required, not the individual ones above.
+  backend:
+    name: Backend
+    needs: [changes, ruff, pytest, alembic]
+    if: always()
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
-
     steps:
-      - uses: actions/checkout@v4
-
-      # Version comes from "packageManager" in frontend/package.json. The path
-      # is explicit because this is a `uses:` step — the job's
-      # defaults.run.working-directory applies only to `run:` steps, so the
-      # action would otherwise look for a package.json at the repo root, where
-      # there isn't one.
-      - uses: pnpm/action-setup@v4
-        with:
-          package_json_file: frontend/package.json
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
-
-      # Fails the PR if package.json changed without a lockfile update.
-      - name: Install
-        run: pnpm install --frozen-lockfile
-
-      - name: ESLint
-        run: pnpm lint
-
-      - name: Vitest
-        run: pnpm test
-
-      # `pnpm build` is `tsc -b && vite build` — this is the type check too.
-      - name: Type check and build
-        run: pnpm build
+      - name: No backend job failed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          set -euo pipefail
+          echo "job results: $RESULTS"
+          for result in $RESULTS; do
+            case "$result" in
+              success|skipped) ;;
+              *) echo "::error::a backend job reported '$result'"; exit 1 ;;
+            esac
+          done
