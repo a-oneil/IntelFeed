@@ -3888,6 +3888,18 @@ TOOLS: dict[str, dict] = {
 # ---------------------------------------------------------------------------
 
 
+class _RefuseRedirects(urllib.request.HTTPRedirectHandler):
+    """urllib re-sends every header, Authorization included, to wherever a redirect points,
+    even another host over plain http. The API never redirects, so a redirect comes back as
+    its 3xx status (an "API returned 30x" error) instead of being followed."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_OPENER = urllib.request.build_opener(_RefuseRedirects)
+
+
 class IntelFeedClient:
     """Synchronous HTTP client for IntelFeed API using urllib."""
 
@@ -3912,7 +3924,7 @@ class IntelFeedClient:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
+            with _OPENER.open(req, timeout=120) as resp:
                 raw = resp.read().decode("utf-8")
                 try:
                     return resp.status, json.loads(raw)

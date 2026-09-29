@@ -103,6 +103,7 @@ docker run -e INTELFEED_API_URL=http://api:8000 \
 2. **Tokens are returned** as `access_token` and `refresh_token` and stored in memory for the duration of the CLI process.
 3. **Token refresh** happens automatically if the access token expires (401 response). The CLI uses the refresh token to get a new access token without re-prompting for credentials.
 4. **No persistent cache** between invocations. Each CLI invocation logs in fresh. For high-frequency scripts, this is inefficient; consider a persistent client or API gateway (future enhancement).
+5. **Redirects are not followed.** urllib would re-send the `Authorization` header to whatever host a redirect names, so a 3xx comes back as an `API returned 30x` error instead. Point `INTELFEED_API_URL` at the final `https://` address (not an `http://` one that redirects).
 
 ---
 
