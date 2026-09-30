@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/intelfeed-logo.svg" alt="IntelFeed" width="300">
+  <img src="docs/assets/intelfeed-logo.svg" alt="IntelFeed" width="300">
 </p>
 
 <p align="center">
