@@ -245,4 +245,52 @@ describe("ExternalLinkGuard", () => {
     fireEvent.click(screen.getByText(/microsoft\.com/));
     expect(screen.queryByRole("checkbox")).toBeNull();
   });
+
+  it("keeps keystrokes from reaching the page's global shortcuts while open", () => {
+    // EntryList/EntryReader bind Enter, j/k, Escape... on window/document and only
+    // skip text inputs — a focused dialog button must not also drive the page.
+    const seen: string[] = [];
+    const onKey = (e: KeyboardEvent) => seen.push(e.key);
+    window.addEventListener("keydown", onKey);
+    try {
+      renderPage(EVIL);
+      fireEvent.click(screen.getByText("the report"));
+
+      fireEvent.keyDown(screen.getByRole("button", { name: "Cancel" }), { key: "Enter" });
+      fireEvent.keyDown(document.body, { key: "j" });
+      expect(seen).toEqual([]);
+
+      // Tab is left alone: the focus trap depends on it.
+      fireEvent.keyDown(screen.getByRole("button", { name: "Cancel" }), { key: "Tab" });
+      expect(seen).toEqual(["Tab"]);
+
+      // Escape closes the dialog and goes no further, so it can't also close the reader.
+      fireEvent.keyDown(document.body, { key: "Escape" });
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(seen).toEqual(["Tab"]);
+    } finally {
+      window.removeEventListener("keydown", onKey);
+    }
+  });
+
+  it("navigates before saving 'don't ask again', so the open keeps its user gesture", async () => {
+    const order: string[] = [];
+    vi.spyOn(window, "open").mockImplementation(() => {
+      order.push("open");
+      return null;
+    });
+    useAuthStore.setState({ user: user() });
+    mockPatch.mockImplementation(async () => {
+      order.push("save");
+      return { data: user({ external_link_trusted_hosts: ["evil.example"] }) };
+    });
+
+    renderPage("<p>body</p>", EVIL);
+    useAuthStore.setState({ user: user({ external_link_mode: "all" }) });
+    fireEvent.click(screen.getByText("the report"));
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "Open link" }));
+
+    await waitFor(() => expect(order).toEqual(["open", "save"]));
+  });
 });

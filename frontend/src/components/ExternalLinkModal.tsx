@@ -38,36 +38,45 @@ export function ExternalLinkModal({ info }: { info: ExternalLinkInfo }) {
     cancelRef.current?.focus();
   }, []);
 
+  // The entry list and reader bind j/k/o/Enter/Escape/... on window/document and
+  // only skip text inputs, so a focused dialog button would otherwise also open
+  // the selected article (Enter) or close the reader behind us (Escape). Keys
+  // are swallowed in the capture phase, except Tab, which the focus trap needs.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") release();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        release();
+      } else if (e.key !== "Tab") {
+        e.stopPropagation();
+      }
     };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
   }, [release]);
 
   // Trusting a host from a link that is lying about it would be a strange thing
   // to offer, and wouldn't skip the prompt next time anyway.
   const canRemember = info.mismatch === null && !info.notes.some((n) => n.id === "userinfo");
 
-  const open = async () => {
-    if (remember && canRemember) {
-      if (canSave) {
-        try {
-          await trustHost(info.host);
-        } catch {
-          toast.error("Couldn't save that preference — trusting it for this session only");
-          trustForSession(info.host);
-        }
-      } else {
-        trustForSession(info.host);
-      }
-    }
+  const open = () => {
+    // Navigate first, synchronously: awaiting a network save before window.open
+    // can cost the click its user-activation, and Safari then blocks the popup.
     release();
     if (info.newTab) {
       window.open(info.url, "_blank", "noopener,noreferrer");
     } else {
       window.location.assign(info.url);
+    }
+
+    if (!remember || !canRemember) return;
+    // Trust for this page load straight away so a second click can't race the save.
+    trustForSession(info.host);
+    if (canSave) {
+      trustHost(info.host).catch(() => {
+        toast.error("Couldn't save that preference — it will only last until you close this tab");
+      });
     }
   };
 

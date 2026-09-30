@@ -647,7 +647,7 @@ function ExternalLinksCard() {
           aria-label="Confirm before leaving IntelFeed"
           onChange={(e) => run(() => setMode(e.target.value as ExternalLinkMode))}
         >
-          <option value="article">Links in article content</option>
+          <option value="article">Article content</option>
           <option value="all">All external links</option>
           <option value="off">Off</option>
         </select>
