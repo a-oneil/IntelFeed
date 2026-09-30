@@ -32,21 +32,30 @@ default sort order, date format.
 - *Show entry previews* — the snippet under each title.
 - *Compact view* — more rows per screen, less of each.
 
-**External links** — a confirmation before you follow a link off IntelFeed. It
-shows the destination host in large type, the full URL in a block you can copy
-(or copy defanged), and a red banner when the link's text names one site but the
-link goes to another. (If the destination's URL itself mentions the site — an
-indicator domain linked to a VirusTotal or urlscan page about it — you get a
-quieter note instead of the red banner, but still confirm.) That mismatch, a shortener, a raw IP, an internationalised
-domain or a `user@host` URL are the things worth a second look in a phishing
-write-up. The scope is a choice: *links in articles and summaries* (the default —
-feed-supplied text and generated summaries are untrusted), *all external links*, or *off*.
-MITRE, NIST (NVD), CVE.org and CISA, plus the hosts of your subscribed feed URLs, normally
-skip the prompt, and ticking "Don't ask again" in the dialog adds a host to your trusted
-list here. Trust is per exact host, so trusting `example.com` does not trust
-`blog.example.com`. A link whose text names a different site is always
-confirmed, even for a trusted host. Middle-click and ⌘/Ctrl-click are held too;
-the browser's own right-click menu is not.
+**External links** — a confirmation before you follow a link that leaves
+IntelFeed. Links to other pages inside IntelFeed are never affected. The dialog
+shows the destination host in large type and the full URL in a block you can
+copy (or copy defanged). It gives a red banner when the link's text names one
+site but the link goes somewhere unrelated, and a quieter amber note when the
+destination is related to the named site (for example an indicator domain
+linked to a VirusTotal page about it, or a parent domain and its subdomain).
+A shortener, a raw IP, an internationalised domain, an HTTPS-to-HTTP downgrade
+or a `user@host` URL also get a note; they are worth a second look in a
+phishing write-up.
+
+The scope is a choice: *links in articles and summaries* (the default —
+feed-supplied text and generated summaries are untrusted), *all external
+links*, or *off*.
+
+Every outside link asks first, including links to the site of a feed you
+subscribe to. The only exceptions are MITRE, NIST (NVD), CVE.org and CISA
+(and their subdomains), plus hosts you add by ticking "Don't ask again" in the
+dialog; those hosts are listed here and can be removed. Trust is per exact
+host, so trusting `example.com` does not trust `blog.example.com`. Even a
+trusted host still asks when the link's text names an unrelated site (red),
+when the URL has a `user@host` section, or when it downgrades from HTTPS to
+HTTP. Middle-click and ⌘/Ctrl-click are held too; the browser's own
+right-click menu is not.
 
 **Reader typography** — font size, line height, column width for the article
 pane.

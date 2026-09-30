@@ -258,7 +258,7 @@ function collapseText(anchor: HTMLAnchorElement): string {
   return (anchor.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 300);
 }
 
-function opensNewTab(anchor: HTMLAnchorElement, event: MouseEvent): boolean {
+function opensNewTab(anchor: HTMLAnchorElement | HTMLAreaElement, event: MouseEvent): boolean {
   if (event.type === "auxclick" || event.metaKey || event.ctrlKey || event.shiftKey) return true;
   const target = anchor.target.toLowerCase();
   return target !== "" && target !== "_self" && target !== "_parent" && target !== "_top";
@@ -324,14 +324,14 @@ function evaluateUrl(
  * null to let the browser proceed untouched.
  */
 export function evaluateLinkClick(
-  anchor: HTMLAnchorElement,
+  anchor: HTMLAnchorElement | HTMLAreaElement,
   event: MouseEvent,
   ctx: InterceptContext,
 ): ExternalLinkInfo | null {
   const href = anchor.getAttribute("href");
   if (!href) return null;
   return evaluateUrl(href, ctx, {
-    text: collapseText(anchor),
+    text: anchor instanceof HTMLAreaElement ? anchor.alt.trim().slice(0, 300) : collapseText(anchor),
     newTab: opensNewTab(anchor, event),
     untrusted: anchor.closest(`[${UNTRUSTED_CONTENT_ATTR}]`) !== null,
   });

@@ -657,8 +657,8 @@ function ExternalLinksCard() {
         <div className={styles.settingInfo}>
           <span className={styles.settingLabel}>Trusted sites</span>
           <span className={styles.settingHint}>
-            Usually skipped: {BUILT_IN_TRUSTED_DOMAINS.join(", ")} (and their subdomains), the
-            hosts of your subscribed feed URLs, and anything you add with &ldquo;Don&apos;t ask again&rdquo;.
+            Skipped: {BUILT_IN_TRUSTED_DOMAINS.join(", ")} (and their subdomains) and anything you
+            add with &ldquo;Don&apos;t ask again&rdquo;. Every other outside link asks first.
             A link whose text names a different site is always confirmed.
           </span>
         </div>

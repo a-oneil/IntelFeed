@@ -51,20 +51,27 @@ describe("SafeHTML", () => {
     expect(screen.getByText("Click here")).toBeInTheDocument();
   });
 
-  it("strips image maps and areas that can navigate without an anchor", () => {
+  it("keeps image maps and areas (the click guard handles their links)", () => {
     const { container } = render(
-      <SafeHTML html='<img usemap="#links"><map name="links"><area href="https://evil.example/"></map>' />
+      <SafeHTML html='<img usemap="#links" alt="m"><map name="links"><area href="https://evil.example/" alt="go"></map>' />
     );
-    expect(container.querySelector("map")).toBeNull();
-    expect(container.querySelector("area")).toBeNull();
+    expect(container.querySelector("map")).not.toBeNull();
+    expect(container.querySelector("area")).not.toBeNull();
   });
 
-  it("strips forms and controls that can submit outside the link guard", () => {
+  it("keeps forms and controls, but drops a destination that leaves the site", () => {
     const { container } = render(
-      <SafeHTML html='<form action="https://evil.example/"><input name="q"><select><option>Go</option></select><textarea>text</textarea><button>Submit</button></form>' />
+      <SafeHTML html='<form action="https://evil.example/"><input name="q"><select><option>Go</option></select><textarea>text</textarea><button formaction="https://evil.example/x">Submit</button></form>' />
     );
     for (const tag of ["form", "input", "select", "option", "textarea", "button"]) {
-      expect(container.querySelector(tag), tag).toBeNull();
+      expect(container.querySelector(tag), tag).not.toBeNull();
     }
+    expect(container.querySelector("form")!.hasAttribute("action")).toBe(false);
+    expect(container.querySelector("button")!.hasAttribute("formaction")).toBe(false);
+  });
+
+  it("leaves a same-site form destination alone", () => {
+    const { container } = render(<SafeHTML html='<form action="/search"><input name="q"></form>' />);
+    expect(container.querySelector("form")!.getAttribute("action")).toBe("/search");
   });
 });

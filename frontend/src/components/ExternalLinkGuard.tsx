@@ -29,10 +29,11 @@ export function ExternalLinkGuard() {
       if (event.type === "auxclick" && event.button !== 1) return;
       if (!(event.target instanceof Element)) return;
 
-      const anchor = event.target.closest("a[href]");
-      if (!(anchor instanceof HTMLAnchorElement)) return;
+      // <area href> (image maps) navigates exactly like a link but is not an <a>.
+      const link = event.target.closest("a[href], area[href]");
+      if (!(link instanceof HTMLAnchorElement || link instanceof HTMLAreaElement)) return;
 
-      const info = evaluateLinkClick(anchor, event, currentInterceptContext());
+      const info = evaluateLinkClick(link, event, currentInterceptContext());
       if (!info) return;
 
       event.preventDefault();

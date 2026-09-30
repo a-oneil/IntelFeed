@@ -68,18 +68,21 @@ describe("ExternalLinkGuard", () => {
     );
   });
 
-  it("strips forms and controls from feed HTML", () => {
+  it("drops a form's OUTSIDE destination but leaves forms and controls alone", () => {
     renderPage(
       '<form action="https://evil.example/collect"><input name="q"><button formaction="https://evil.example/x">Go</button></form>',
     );
-    expect(document.querySelector("form")).toBeNull();
-    expect(document.querySelector("input")).toBeNull();
-    expect(document.querySelector("button")).toBeNull();
+    expect(document.querySelector("form")).not.toBeNull();
+    expect(document.querySelector("input")).not.toBeNull();
+    expect(document.querySelector("button")).not.toBeNull();
+    expect(document.querySelector("form")!.hasAttribute("action")).toBe(false);
+    expect(document.querySelector("button")!.hasAttribute("formaction")).toBe(false);
   });
 
-  it("also strips same-site forms from feed HTML", () => {
+  it("leaves a same-site form completely alone", () => {
     renderPage('<form action="/search" method="get"><input name="q"></form>');
-    expect(document.querySelector("form")).toBeNull();
+    expect(document.querySelector("form")!.getAttribute("action")).toBe("/search");
+    expect(document.querySelector("input")).not.toBeNull();
   });
 
   it("leaves same-site links completely alone, including handlers the app attached", () => {
@@ -95,6 +98,19 @@ describe("ExternalLinkGuard", () => {
     fireEvent.click(screen.getByText("internal"));
     fireEvent.click(screen.getByText("internal absolute"));
     expect(onClick).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("guards an image-map <area> link like any other outside link", () => {
+    renderPage('<img usemap="#m" alt="diagram"><map name="m"><area href="https://evil.example/map" alt="the diagram"></map>');
+    const area = document.querySelector("area")!;
+    expect(fireEvent.click(area)).toBe(false);
+    expect(screen.getByTestId("external-link-host")).toHaveTextContent("evil.example");
+  });
+
+  it("leaves a same-site <area> alone", () => {
+    renderPage('<img usemap="#m" alt="d"><map name="m"><area href="/settings" alt="s"></map>');
+    expect(fireEvent.click(document.querySelector("area")!)).toBe(true);
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 

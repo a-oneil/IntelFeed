@@ -218,7 +218,7 @@ describe("EntryList", () => {
     expect(screen.getByText("No entries to display")).toBeInTheDocument();
   });
 
-  it("lets Enter follow a focused internal link instead of using the article shortcut", () => {
+  it("lets Enter follow a focused OUTSIDE link, but leaves links within the app exactly as before", () => {
     mockUseEntries.mockReturnValue({
       data: makeInfiniteData([]),
       isLoading: false,
@@ -228,13 +228,20 @@ describe("EntryList", () => {
     } as unknown as ReturnType<typeof useEntries>);
 
     renderEntryList();
-    const link = document.createElement("a");
-    link.href = "/settings";
-    document.body.appendChild(link);
+    const outside = document.createElement("a");
+    outside.href = "https://evil.example/x";
+    const inside = document.createElement("a");
+    inside.href = "/settings";
+    document.body.append(outside, inside);
     try {
-      expect(fireEvent.keyDown(link, { key: "Enter" })).toBe(true);
+      // fireEvent returns false when the keypress was default-prevented (i.e. the
+      // list's Enter shortcut took it). The outside link is exempt; the inside
+      // link keeps its previous behaviour.
+      expect(fireEvent.keyDown(outside, { key: "Enter" })).toBe(true);
+      expect(fireEvent.keyDown(inside, { key: "Enter" })).toBe(false);
     } finally {
-      link.remove();
+      outside.remove();
+      inside.remove();
     }
   });
 
