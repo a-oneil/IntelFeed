@@ -13,6 +13,14 @@ export const DEFAULT_EXTERNAL_LINK_MODE: ExternalLinkMode = "article";
 export const EXTERNAL_LINK_MODE_KEY = "external_link_mode";
 export const EXTERNAL_LINK_TRUSTED_KEY = "external_link_trusted_hosts";
 
+/**
+ * sessionStorage key prefix for hosts trusted "for this tab" (one key per
+ * account, plus one for public pages). Lives here, not in the store, so the
+ * logout cleanup can clear them without importing the store (which imports
+ * authStore, which imports the cleanup).
+ */
+export const EXTERNAL_LINK_SESSION_TRUST_PREFIX = "intelfeed:external-link-trust:";
+
 /** Cap on the saved list so the settings blob can't grow without bound. */
 export const MAX_TRUSTED_HOSTS = 200;
 
@@ -68,7 +76,7 @@ const NOT_A_TLD = new Set([
 
 const WEB_PROTOCOLS = new Set(["http:", "https:", "ftp:", "ftps:"]);
 
-export type LinkNoteId = "userinfo" | "idn" | "ip" | "shortener";
+export type LinkNoteId = "userinfo" | "idn" | "ip" | "shortener" | "downgrade";
 
 export interface LinkNote {
   id: LinkNoteId;
@@ -107,7 +115,7 @@ export interface InterceptContext {
   mode: ExternalLinkMode;
   /** User-trusted hosts, matched exactly (ignoring a leading "www."). */
   trustedHosts: readonly string[];
-  /** Hosts of the user's own feeds, matched exactly like `trustedHosts`. */
+  /** Hosts of subscribed feed URLs, matched exactly like `trustedHosts`. */
   feedHosts: readonly string[];
   /** Base for resolving relative hrefs. Defaults to the document's base URI. */
   baseUri?: string;
@@ -207,7 +215,9 @@ export function findTextMismatch(
     }
     const a = normalizeHost(claimed);
     const b = normalizeHost(actualHost);
-    if (a === b || hostMatchesDomain(a, b) || hostMatchesDomain(b, a)) return null;
+    // Parent and child hosts are not interchangeable on shared hosting
+    // services (for example github.io and attacker.github.io).
+    if (a === b) return null;
     let tail = hrefTail;
     try {
       tail = decodeURIComponent(hrefTail);
@@ -224,7 +234,7 @@ export function isAlarming(mismatch: LinkMismatch | null): boolean {
   return mismatch !== null && !mismatch.related;
 }
 
-export function collectNotes(url: URL): LinkNote[] {
+export function collectNotes(url: URL, text = ""): LinkNote[] {
   const notes: LinkNote[] = [];
   const host = url.hostname.toLowerCase();
   if (url.username || url.password) {
@@ -232,6 +242,20 @@ export function collectNotes(url: URL): LinkNote[] {
       id: "userinfo",
       message:
         "This URL has a username/password section before the host — a common way to make a link look like it goes somewhere else.",
+    });
+  }
+  if (url.protocol === "http:" && text.split(/\s+/).some((token) => {
+    const candidate = stripPunctuation(token);
+    if (!candidate.toLowerCase().startsWith("https://")) return false;
+    try {
+      return normalizeHost(new URL(candidate).hostname) === normalizeHost(host);
+    } catch {
+      return false;
+    }
+  })) {
+    notes.push({
+      id: "downgrade",
+      message: "The link text promises HTTPS, but the destination uses unencrypted HTTP.",
     });
   }
   if (host.split(".").some((label) => label.startsWith("xn--"))) {
@@ -290,14 +314,12 @@ function evaluateUrl(
 
   const host = url.hostname.toLowerCase();
   const mismatch = findTextMismatch(opts.text, host, url.pathname + url.search + url.hash);
-  const notes = collectNotes(url);
+  const notes = collectNotes(url, opts.text);
 
-  // A trusted host skips the prompt — unless the link is lying about where it
-  // goes, which is exactly the case worth stopping for. The other notes (IP,
-  // shortener, IDN) describe the host itself, which the user already chose to
-  // trust, so they don't force a prompt; a user-info section does, because it
-  // is a disguise on this particular link rather than a property of the host.
-  const disguised = isAlarming(mismatch) || notes.some((n) => n.id === "userinfo");
+  // A trusted host skips the prompt only when the link text agrees with it.
+  // Notes about IPs, shorteners and IDNs describe the host itself; user-info
+  // and HTTPS downgrades describe this particular link and still force a prompt.
+  const disguised = mismatch !== null || notes.some((n) => n.id === "userinfo" || n.id === "downgrade");
   if (!disguised && isTrustedHost(host, ctx.trustedHosts, ctx.feedHosts)) return null;
 
   return { url: url.href, host, text: opts.text, newTab: opts.newTab, mismatch, notes };

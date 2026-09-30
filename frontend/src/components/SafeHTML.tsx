@@ -25,8 +25,13 @@ export function SafeHTML({ html, className, style, glossaryTerms }: SafeHTMLProp
     const sanitized = DOMPurify.sanitize(html, {
       USE_PROFILES: { html: true },
       ADD_ATTR: ["target", "loading"],
-      FORBID_TAGS: ["style", "script", "iframe", "object", "embed"],
-      FORBID_ATTR: ["onerror", "onload", "onclick", "onmouseover"],
+      // Feed markup must not create a second navigation path around the
+      // external-link guard. DOMPurify otherwise keeps <form action=...>.
+      FORBID_TAGS: [
+        "style", "script", "iframe", "object", "embed", "form",
+        "button", "input", "select", "option", "textarea",
+      ],
+      FORBID_ATTR: ["onerror", "onload", "onclick", "onmouseover", "action", "formaction"],
       ALLOWED_URI_REGEXP: /^(?:(?:f|ht)tps?|mailto|tel|callto|cid|blob):|^\//i,
     });
 

@@ -3,7 +3,7 @@ import type { Feed, PaginatedResponse } from "@/api/types";
 import { readExternalLinkSettings } from "@/hooks/useExternalLinkSettings";
 import { queryClient as appQueryClient } from "@/queryClient";
 import { useAuthStore } from "@/stores/authStore";
-import { useExternalLinkStore } from "@/stores/externalLinkStore";
+import { readSessionTrustedHosts, useExternalLinkStore } from "@/stores/externalLinkStore";
 import {
   evaluateProgrammaticOpen,
   hostsFromUrls,
@@ -21,8 +21,10 @@ export function currentInterceptContext(queryClient: QueryClient = appQueryClien
   return {
     origin: window.location.origin,
     mode,
-    trustedHosts: [...trustedHosts, ...useExternalLinkStore.getState().sessionTrustedHosts],
-    feedHosts: hostsFromUrls(feeds.flatMap((f) => [f.site_url, f.url])),
+    trustedHosts: [...trustedHosts, ...readSessionTrustedHosts()],
+    // site_url comes from the feed's own metadata and can name any host. Only
+    // the subscribed feed URL identifies a host the user actually selected.
+    feedHosts: hostsFromUrls(feeds.map((f) => f.url)),
   };
 }
 

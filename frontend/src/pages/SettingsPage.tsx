@@ -636,8 +636,8 @@ function ExternalLinksCard() {
           <span className={styles.settingLabel}>Confirm before leaving IntelFeed</span>
           <span className={styles.settingHint}>
             Shows where a link really goes before you follow it, and warns when the link text
-            names a different site. Article content comes straight from the feed, so it is the
-            default scope.
+            names a different site. Feed articles and generated summaries can contain
+            untrusted links, so they are the default scope.
           </span>
         </div>
         <select
@@ -647,7 +647,7 @@ function ExternalLinksCard() {
           aria-label="Confirm before leaving IntelFeed"
           onChange={(e) => run(() => setMode(e.target.value as ExternalLinkMode))}
         >
-          <option value="article">Article content</option>
+          <option value="article">Articles and summaries</option>
           <option value="all">All external links</option>
           <option value="off">Off</option>
         </select>
@@ -657,8 +657,8 @@ function ExternalLinksCard() {
         <div className={styles.settingInfo}>
           <span className={styles.settingLabel}>Trusted sites</span>
           <span className={styles.settingHint}>
-            Never asked about: {BUILT_IN_TRUSTED_DOMAINS.join(", ")} (and their subdomains), the
-            sites of your own feeds, and anything you add with &ldquo;Don&apos;t ask again&rdquo;.
+            Usually skipped: {BUILT_IN_TRUSTED_DOMAINS.join(", ")} (and their subdomains), the
+            hosts of your subscribed feed URLs, and anything you add with &ldquo;Don&apos;t ask again&rdquo;.
             A link whose text names a different site is always confirmed.
           </span>
         </div>
@@ -2113,4 +2113,3 @@ export INTELFEED_PASSWORD=your_password`}</code>
     </div>
   );
 }
-

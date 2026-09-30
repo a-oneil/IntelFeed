@@ -140,7 +140,7 @@ export function SharedCopilotPage() {
           >
             {m.role === "user" ? "You" : "IntelFeed"}
           </div>
-          <div style={{ lineHeight: 1.6 }}>
+          <div style={{ lineHeight: 1.6 }} data-untrusted-content={m.role === "assistant" ? "" : undefined}>
             {m.role === "user" ? (
               m.content
             ) : (

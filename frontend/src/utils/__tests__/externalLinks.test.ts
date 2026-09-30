@@ -128,10 +128,10 @@ describe("findTextMismatch", () => {
     expect(findTextMismatch("see example.com for details", "other.example")).toBeNull();
   });
 
-  it("accepts the same site with or without www or a subdomain", () => {
+  it("accepts the same host with or without www but flags different subdomains", () => {
     expect(findTextMismatch("microsoft.com", "www.microsoft.com")).toBeNull();
-    expect(findTextMismatch("learn.microsoft.com/docs", "microsoft.com")).toBeNull();
-    expect(findTextMismatch("microsoft.com", "learn.microsoft.com")).toBeNull();
+    expect(findTextMismatch("learn.microsoft.com/docs", "microsoft.com")).not.toBeNull();
+    expect(findTextMismatch("github.io", "attacker.github.io")).not.toBeNull();
   });
 
   it("catches a Cyrillic lookalike in the text", () => {
@@ -249,12 +249,16 @@ describe("evaluateLinkClick", () => {
     });
   });
 
-  it("lets a trusted host through for a lookup-style link, but not an unexplained one", () => {
+  it("holds a trusted lookup-style link even when the claimed host appears in its path", () => {
     const lookup = anchor('<a href="https://decryptads.com/publisher/armytimes.com">armytimes.com</a>', true);
-    expect(evaluateLinkClick(lookup, click(), ctx({ trustedHosts: ["decryptads.com"] }))).toBeNull();
-    // Untrusted, the same link still prompts — with the mismatch recorded as related.
-    const info = evaluateLinkClick(lookup, click(), ctx())!;
+    const info = evaluateLinkClick(lookup, click(), ctx({ trustedHosts: ["decryptads.com"] }))!;
     expect(info.mismatch?.related).toBe(true);
+  });
+
+  it("holds an HTTPS claim that actually points to HTTP on a trusted host", () => {
+    const a = anchor('<a href="http://blog.example.com/report">https://blog.example.com/report</a>', true);
+    const info = evaluateLinkClick(a, click(), ctx({ trustedHosts: ["blog.example.com"] }))!;
+    expect(info.notes.map((n) => n.id)).toContain("downgrade");
   });
 
   it("notes the common redirect hosts as shorteners", () => {
