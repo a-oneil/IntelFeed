@@ -167,8 +167,8 @@ db (PostgreSQL:5433, built from `db/Dockerfile` — postgres:16-alpine + pgvecto
 - **Server state via TanStack Query v5** — `useInfiniteQuery` for paginated lists, `useMutation` with cache invalidation. `staleTime: 30s`, `retry: 1`, `refetchOnWindowFocus: false`.
 - **Client state via Zustand** — Three stores with `persist` middleware to localStorage. `uiStore` tracks layout, selections, view mode. `intelStore` tracks intelligence workspace navigation and enrichment queue.
 - **CSS theming** — CSS variables in `:root` for colors, elevation, entity types. `applyTheme()` sets variables at runtime. Auto-contrast text via WCAG luminance. Entity-specific colors (`--entity-actor`, `--entity-malware`, `--entity-vendor`, `--entity-product`, etc.).
-- **Code splitting** — All pages lazy-loaded via `React.lazy()`. Manual Vite chunks for vendor-react, vendor-tanstack, vendor-tiptap, vendor-misc.
-- **Key libraries** — @tiptap (rich text), @codemirror (code editing), @xyflow/react (entity graphs), react-grid-layout (dashboards), @tanstack/react-virtual (virtualized lists), sonner (toasts), dompurify (HTML sanitization).
+- **Code splitting** — All pages lazy-loaded via `React.lazy()`. Manual Vite chunks for vendor-react, vendor-tanstack, vendor-misc.
+- **Key libraries** — @codemirror (code editing), @xyflow/react (entity graphs), react-grid-layout (dashboards), @tanstack/react-virtual (virtualized lists), sonner (toasts), dompurify (HTML sanitization).
 
 ### Testing
 - **Backend** (`backend/tests/`): Pytest with async fixtures. `conftest.py` provides `db_session` (fresh schema per test), `client` (ASGI test client with dependency override), `test_user`/`admin_user` with `auth_headers`/`admin_headers`. Test DB uses same URL + `_test` suffix.

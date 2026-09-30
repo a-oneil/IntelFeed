@@ -177,11 +177,13 @@ jobs:
         with:
           package_json_file: frontend/package.json
 
+      # No `cache: pnpm` here on purpose: this job never runs an install, so
+      # there is no pnpm store for setup-node's post-job cache save to write,
+      # and it fails the whole job with "Path Validation Error" when it finds
+      # nothing at the store path.
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
-          cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
 
       # `pnpm audit` resolves from the lockfile, so no install is needed.
       #

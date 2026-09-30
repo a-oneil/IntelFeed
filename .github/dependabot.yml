@@ -36,10 +36,8 @@ updates:
       frontend-minor:
         patterns: ["*"]
         update-types: [minor, patch]
-      # These move as a set — bumping one @tiptap or @codemirror package
-      # without its siblings reliably breaks the editor build.
-      tiptap:
-        patterns: ["@tiptap/*"]
+      # These move as a set — bumping one @codemirror package without its
+      # siblings reliably breaks the editor build.
       codemirror:
         patterns: ["@codemirror/*", "@lezer/*", "codemirror"]
     commit-message:
