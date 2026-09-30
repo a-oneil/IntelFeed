@@ -2,6 +2,7 @@ import { useRef, useEffect, useMemo } from "react";
 import DOMPurify from "dompurify";
 import api from "@/api/client";
 import { annotateGlossaryHTML, type GlossaryTermHighlight } from "@/utils/highlightText";
+import { UNTRUSTED_CONTENT_ATTR } from "@/utils/externalLinks";
 
 interface SafeHTMLProps {
   html: string;
@@ -116,6 +117,9 @@ export function SafeHTML({ html, className, style, glossaryTerms }: SafeHTMLProp
       ref={ref}
       className={className}
       style={style}
+      // Feed-supplied markup: ExternalLinkGuard treats links in here as untrusted
+      // even when it is set to "article content only".
+      {...{ [UNTRUSTED_CONTENT_ATTR]: "" }}
       dangerouslySetInnerHTML={{ __html: clean }}
     />
   );

@@ -434,6 +434,7 @@ affordance of its own — a "Sections" button for its section nav.
 
 ### Reader Experience Components
 - **SafeHTML** (SafeHTML.tsx) — DOMPurify renderer for entry content
+- **ExternalLinkGuard** (ExternalLinkGuard.tsx, ExternalLinkModal.tsx, `utils/externalLinks.ts`) — one capture-phase `click`/`auxclick` listener mounted in `GlobalModals` that holds off-site links for a confirmation dialog. `SafeHTML` marks its wrapper `data-untrusted-content`; that attribute is what the default "article content" scope keys on (add it to any other renderer of feed text). Preferences and the trusted-host list live in `user.settings` (`external_link_mode`, `external_link_trusted_hosts`), saved with `PATCH /auth/me/settings`
 - **ReaderTypography** (ReaderTypography.tsx) — Font size, line height, max-width controls
 - **FindInArticle** (FindInArticle.tsx) — Ctrl+F-like text search within entry
 - **AudioPlayer** (AudioPlayer.tsx, 200+ lines) — Playback controls, queue management, speed/volume

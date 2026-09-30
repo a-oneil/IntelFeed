@@ -5,6 +5,8 @@ import { useUIStore, type ReaderFontSize, type ReaderLineHeight, type ReaderMaxW
 import { useAppSidebarAutoCollapse } from "@/hooks/useAppSidebarAutoCollapse";
 import { useIsMobile } from "@/hooks/useMediaQuery";
 import { useUpdateProfile, useChangePassword } from "@/hooks/useAuth";
+import { useExternalLinkSettings } from "@/hooks/useExternalLinkSettings";
+import { BUILT_IN_TRUSTED_DOMAINS, type ExternalLinkMode } from "@/utils/externalLinks";
 import { useUsers, useUpdateUser, useDeleteUser } from "@/hooks/useUsers";
 import { useAutomationLogs, useClearAutomationLogs } from "@/hooks/useAutomation";
 import { formatDate } from "@/utils/formatDate";
@@ -607,7 +609,81 @@ function ReadingSection() {
 
       </div>
 
+      <ExternalLinksCard />
+
       <ReaderTypographySettings />
+    </div>
+  );
+}
+
+function ExternalLinksCard() {
+  const { mode, trustedHosts, saving, setMode, untrustHost } = useExternalLinkSettings();
+
+  const run = async (action: () => Promise<unknown>) => {
+    try {
+      await action();
+    } catch {
+      toast.error("Couldn't save that setting");
+    }
+  };
+
+  return (
+    <div className={styles.card}>
+      <h3 className={styles.cardTitle}>External links</h3>
+
+      <div className={styles.settingRow}>
+        <div className={styles.settingInfo}>
+          <span className={styles.settingLabel}>Confirm before leaving IntelFeed</span>
+          <span className={styles.settingHint}>
+            Shows where a link really goes before you follow it, and warns when the link text
+            names a different site. Article content comes straight from the feed, so it is the
+            default scope.
+          </span>
+        </div>
+        <select
+          className={styles.select}
+          value={mode}
+          disabled={saving}
+          aria-label="Confirm before leaving IntelFeed"
+          onChange={(e) => run(() => setMode(e.target.value as ExternalLinkMode))}
+        >
+          <option value="article">Links in article content</option>
+          <option value="all">All external links</option>
+          <option value="off">Off</option>
+        </select>
+      </div>
+
+      <div className={styles.settingRow}>
+        <div className={styles.settingInfo}>
+          <span className={styles.settingLabel}>Trusted sites</span>
+          <span className={styles.settingHint}>
+            Never asked about: {BUILT_IN_TRUSTED_DOMAINS.join(", ")} (and their subdomains), the
+            sites of your own feeds, and anything you add with &ldquo;Don&apos;t ask again&rdquo;.
+            A link whose text names a different site is always confirmed.
+          </span>
+        </div>
+      </div>
+
+      {trustedHosts.length > 0 ? (
+        <ul className={styles.trustedList}>
+          {trustedHosts.map((host) => (
+            <li key={host} className={styles.trustedItem}>
+              <code>{host}</code>
+              <button
+                type="button"
+                className={styles.trustedRemove}
+                disabled={saving}
+                aria-label={`Stop trusting ${host}`}
+                onClick={() => run(() => untrustHost(host))}
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <span className={styles.settingHint}>You haven&apos;t added any trusted sites yet.</span>
+      )}
     </div>
   );
 }

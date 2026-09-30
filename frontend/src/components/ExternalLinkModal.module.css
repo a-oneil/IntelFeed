@@ -1,0 +1,171 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  /* Above every other modal and the copilot dock: this can be raised from a
+     link inside any of them. */
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.modal {
+  width: 100%;
+  max-width: 34rem;
+  max-height: 100%;
+  overflow-y: auto;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 1.5rem 1.75rem;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+
+.title {
+  margin: 0 0 0.75rem;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* The host is the thing to read, so it is the biggest thing on screen. */
+.host {
+  margin: 0 0 0.9rem;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.danger,
+.warning {
+  margin: 0 0 0.75rem;
+  padding: 0.6rem 0.75rem;
+  font-size: var(--fs-md);
+  line-height: 1.45;
+  color: var(--text-primary);
+  border-radius: var(--r-md);
+  overflow-wrap: anywhere;
+}
+
+.danger {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  border: 1px solid var(--danger);
+}
+
+.warning {
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+  border: 1px solid var(--warning);
+}
+
+.danger code {
+  font-family: var(--font-mono, monospace);
+  font-weight: 600;
+}
+
+.linkText {
+  margin: 0 0 0.6rem;
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.linkText span {
+  color: var(--text-primary);
+}
+
+.url {
+  display: block;
+  margin: 0 0 0.9rem;
+  padding: 0.6rem 0.75rem;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--fs-base);
+  line-height: 1.45;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  /* Long URLs wrap instead of scrolling sideways, and one click selects the
+     whole thing for copying. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  user-select: all;
+  max-height: 10rem;
+  overflow-y: auto;
+}
+
+.remember {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 1rem;
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.remember code {
+  font-family: var(--font-mono, monospace);
+  color: var(--text-primary);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.primaryBtn {
+  padding: 0.5rem 1rem;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  /* --accent-text is derived from the accent fill by applyTheme (plain #fff
+     measured 2.53:1 against the default accent). */
+  color: var(--accent-text);
+  background: var(--accent);
+  border: none;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.primaryBtn:hover {
+  opacity: 0.9;
+}
+
+.secondaryBtn {
+  padding: 0.5rem 0.9rem;
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+
+.secondaryBtn:hover {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+.secondaryBtn:focus-visible,
+.primaryBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 480px) {
+  .modal {
+    padding: 1.25rem 1rem;
+  }
+
+  .actions > button {
+    flex: 1 1 auto;
+  }
+}
