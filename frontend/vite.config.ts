@@ -112,7 +112,6 @@ export default defineConfig({
           if (!id.includes("node_modules")) return undefined;
           if (/node_modules\/(react|react-dom|react-router-dom)\//.test(id)) return "vendor-react";
           if (id.includes("node_modules/@tanstack/react-query/")) return "vendor-tanstack";
-          if (id.includes("node_modules/@tiptap/") || id.includes("node_modules/lowlight/")) return "vendor-tiptap";
           if (/node_modules\/(zustand|axios|dompurify)\//.test(id)) return "vendor-misc";
           return undefined;
         },

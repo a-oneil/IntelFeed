@@ -697,7 +697,6 @@ Playwright configuration in `frontend/playwright.config.ts` (baseURL `localhost:
 Manual chunk configuration (function-form `manualChunks` — required by Vite 8 / rolldown) creates separate bundles:
 - `vendor-react` → React, React DOM, React Router
 - `vendor-tanstack` → TanStack Query (large, separate for caching)
-- `vendor-tiptap` → Rich text editor (TipTap extensions, lowlight syntax highlighter)
 - `vendor-misc` → Zustand, Axios, DOMPurify
 - **Page bundles** → Each lazy-loaded page in its own chunk
 

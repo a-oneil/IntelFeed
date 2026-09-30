@@ -130,12 +130,3 @@
   height: auto;
   border-radius: var(--r-md);
 }
-
-/* Lowlight (highlight.js) syntax tokens — matches NoteEditor code blocks */
-.body :global(.hljs-keyword) { color: var(--syntax-keyword); }
-.body :global(.hljs-string) { color: var(--syntax-string); }
-.body :global(.hljs-number) { color: var(--syntax-number); }
-.body :global(.hljs-comment) { color: var(--syntax-comment); }
-.body :global(.hljs-attr) { color: var(--syntax-function); }
-.body :global(.hljs-title) { color: var(--syntax-operator); }
-.body :global(.hljs-built_in) { color: var(--syntax-attr); }

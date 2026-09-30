@@ -1503,7 +1503,7 @@
   box-sizing: border-box;
 }
 
-/* Constrain tiptap editor toolbar and content inside the notes section */
+/* Keep notes-section content from forcing the panel wider than its column */
 .notesSectionContent > * {
   min-width: 0;
   max-width: 100%;
