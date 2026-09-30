@@ -71,6 +71,7 @@ const DockedEntryReader = lazy(() =>
   import("@/components/EntryReader").then((m) => ({ default: m.EntryReader }))
 );
 import { RouteFallback } from "@/components/RouteFallback";
+import { alertDialog, confirmDialog } from "@/utils/dialog";
 
 type SortOrder = "asc" | "desc";
 type SortState = { field: string; order: SortOrder };
@@ -1740,8 +1741,16 @@ function ObservableCandidatesQueue() {
             <button
               className={styles.candNever}
               disabled={bulkBusy || !selectedRows.length}
-              onClick={() => {
-                if (!confirm(`Tombstone ${selectedRows.length} value${selectedRows.length === 1 ? "" : "s"}? No door will capture them again.`)) return;
+              onClick={async () => {
+                if (
+                  !(await confirmDialog({
+                    title: "Tombstone values",
+                    message: `Tombstone ${selectedRows.length} value${selectedRows.length === 1 ? "" : "s"}? No door will capture them again.`,
+                    confirmLabel: "Tombstone",
+                    destructive: true,
+                  }))
+                )
+                  return;
                 void runBulk((c) => neverCapture.mutateAsync({ kind: c.kind, value: c.value }), "Tombstoned");
               }}
             >
@@ -2288,7 +2297,10 @@ function RulesSection() {
     importRules.mutate(file, {
       onSuccess: (result) => {
         setShowImport(false);
-        alert(`Imported: ${result.imported}, Skipped: ${result.skipped}${result.errors.length ? `\nErrors:\n${result.errors.map((e: { file: string; error: string }) => `${e.file}: ${e.error}`).join("\n")}` : ""}`);
+        void alertDialog({
+          title: "Import finished",
+          message: `Imported: ${result.imported}, Skipped: ${result.skipped}${result.errors.length ? `\n\nErrors:\n${result.errors.map((e: { file: string; error: string }) => `${e.file}: ${e.error}`).join("\n")}` : ""}`,
+        });
       },
     });
   };

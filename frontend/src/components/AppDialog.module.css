@@ -1,0 +1,132 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  /* Above the ordinary modals (1000), which is where most of these are raised
+     from, but below the external-link interstitial (2000) — a link inside a
+     dialog still has to clear the guard. */
+  z-index: 1500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.modal {
+  width: 100%;
+  max-width: 30rem;
+  max-height: 100%;
+  overflow-y: auto;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 1.5rem 1.75rem;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+
+.title {
+  margin: 0 0 0.6rem;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.message {
+  margin: 0 0 1rem;
+  font-size: var(--fs-md);
+  line-height: 1.5;
+  color: var(--text-secondary);
+  /* Messages inherited from the native dialogs are written with \n breaks. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.input {
+  display: block;
+  width: 100%;
+  margin: 0 0 1rem;
+  padding: 0.5rem 0.65rem;
+  font-family: inherit;
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.primaryBtn,
+.dangerBtn {
+  padding: 0.5rem 1rem;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  border: none;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.primaryBtn {
+  /* --accent-text is derived from the accent fill by applyTheme. */
+  color: var(--accent-text);
+  background: var(--accent);
+}
+
+.dangerBtn {
+  color: #fff;
+  background: var(--danger);
+}
+
+.primaryBtn:hover,
+.dangerBtn:hover {
+  opacity: 0.9;
+}
+
+.primaryBtn:disabled,
+.dangerBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.secondaryBtn {
+  padding: 0.5rem 0.9rem;
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+
+.secondaryBtn:hover {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+.secondaryBtn:focus-visible,
+.primaryBtn:focus-visible,
+.dangerBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 480px) {
+  .modal {
+    padding: 1.25rem 1rem;
+  }
+
+  .actions > button {
+    flex: 1 1 auto;
+  }
+}

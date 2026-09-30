@@ -35,6 +35,7 @@ import { StagePanel } from "./StagePanel";
 import type { EngineDest } from "./engineSettingsIndex";
 import m from "./EngineMatrix.module.css";
 import styles from "./ProcessingTab.module.css";
+import { confirmDialog } from "@/utils/dialog";
 
 export type BrowseView = "jobs" | "plans" | "maintenance" | "publishing";
 /** The card's data views — all engine data lives in the one table card. */
@@ -356,19 +357,23 @@ export function EngineMatrix({
 
   // Cycle inherit -> forced off -> forced on -> inherit, at GLOBAL scope, with
   // an impact confirm — identical plan semantics to the old Plans tab.
-  const cycleStage = (st: string) => {
+  const cycleStage = async (st: string) => {
     const current = planState(st);
     const next: boolean | undefined = current === undefined ? false : current === false ? true : undefined;
     const nextLabel = next === undefined ? "inherit (default on)" : next ? "forced ON" : "forced OFF";
     const runs = overviewByStage[st]?.runs_24h;
     const impact = runs ? `${st} ran on ${runs.success + runs.error} entries in the last 24h. ` : "";
     if (
-      !window.confirm(
-        `${impact}Set ${st} to ${nextLabel} at GLOBAL scope?\n\nThis is a live ingestion control` +
+      !(await confirmDialog({
+        title: `Set ${st} globally`,
+        message:
+          `${impact}Set ${st} to ${nextLabel} at GLOBAL scope?\n\nThis is a live ingestion control` +
           (overview?.pipeline_engine_enabled
             ? "."
             : " (currently staged: Pipeline Plans flag is off, so legacy per-feed toggles still drive behavior)."),
-      )
+        confirmLabel: `Set ${nextLabel}`,
+        destructive: true,
+      }))
     )
       return;
     const stagesNext = { ...(globalPlan?.stages ?? {}) };

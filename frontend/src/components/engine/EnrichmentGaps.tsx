@@ -11,6 +11,7 @@ import { useEnrichGap, useEnrichmentGaps } from "@/hooks/useHygiene";
 import { getEntityCssVar, getEntityLabel } from "@/utils/entityTheme";
 
 import styles from "./EnrichmentGaps.module.css";
+import { confirmDialog } from "@/utils/dialog";
 
 // (entity_type:field) pairs Claude Code can research + fill today.
 const SUPPORTED = new Set([
@@ -65,7 +66,14 @@ export function EnrichmentGaps() {
   const enrichAll = async () => {
     const targets = buckets.filter((b) => SUPPORTED.has(`${b.entity_type}:${b.field}`));
     if (!targets.length) return;
-    if (!confirm(`Dispatch AI enrichment for ${targets.length} field groups (10 entities each)?`)) return;
+    if (
+      !(await confirmDialog({
+        title: "Dispatch enrichment",
+        message: `Dispatch AI enrichment for ${targets.length} field groups (10 entities each)?`,
+        confirmLabel: "Dispatch",
+      }))
+    )
+      return;
     setBulkBusy(true);
     let n = 0;
     for (const b of targets) {

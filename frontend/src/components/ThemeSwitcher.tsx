@@ -16,6 +16,7 @@ import ThemeEditor from "./ThemeEditor";
 import { useUndoableDelete } from "@/hooks/useUndoableDelete";
 import styles from "./ThemeSwitcher.module.css";
 import { AsyncStateLoading } from "@/components/AsyncState";
+import { promptDialog } from "@/utils/dialog";
 
 export default function ThemeSwitcher() {
   const { data: themes, isLoading } = useThemes();
@@ -95,8 +96,13 @@ export default function ThemeSwitcher() {
     setEditorOpen(true);
   };
 
-  const handleDuplicate = (theme: Theme) => {
-    const newName = prompt("Enter a name for the duplicated theme:", `${theme.name} (copy)`);
+  const handleDuplicate = async (theme: Theme) => {
+    const newName = await promptDialog({
+      title: "Duplicate theme",
+      message: "Enter a name for the duplicated theme:",
+      defaultValue: `${theme.name} (copy)`,
+      confirmLabel: "Duplicate",
+    });
     if (!newName) return;
 
     duplicateTheme.mutate(

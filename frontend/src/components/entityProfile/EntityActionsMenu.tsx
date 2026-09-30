@@ -19,6 +19,7 @@ import api from "@/api/client";
 import { useAuthStore } from "@/stores/authStore";
 import { useDeleteWatch, useUpsertWatch, useWatchlist } from "@/hooks/useWatchlist";
 import { useDenyObservable } from "@/hooks/useIntelligence";
+import { confirmDialog } from "@/utils/dialog";
 
 const WATCHABLE_TYPES = ["threat_actor", "malware", "cve", "tool", "vendor", "product", "country"];
 
@@ -322,7 +323,7 @@ export function EntityActionsMenu({
   const handleConvert = (opt: ConvertTarget) => {
     setConvertOpen(false);
     setMenuOpen(false);
-    runEntityConvert({
+    void runEntityConvert({
       entityType,
       entityId,
       target: opt,
@@ -526,8 +527,16 @@ export function EntityActionsMenu({
             {has("clear_timeline") && (
               <button
                 className={`${styles.menuItem} ${styles.menuItemDanger}`}
-                onClick={() => {
-                  if (!confirm("Clear all timeline events for this entity?")) return;
+                onClick={async () => {
+                  if (
+                    !(await confirmDialog({
+                      title: "Clear timeline",
+                      message: "Clear all timeline events for this entity?",
+                      confirmLabel: "Clear timeline",
+                      destructive: true,
+                    }))
+                  )
+                    return;
                   clearTimeline.mutate({ entityType, entityId });
                   closeMenu();
                 }}
@@ -543,8 +552,16 @@ export function EntityActionsMenu({
             {isAdmin && has("unlink_all") && (
               <button
                 className={`${styles.menuItem} ${styles.menuItemDanger}`}
-                onClick={() => {
-                  if (!confirm("Unlink all entries from this entity?")) return;
+                onClick={async () => {
+                  if (
+                    !(await confirmDialog({
+                      title: "Unlink all entries",
+                      message: "Unlink all entries from this entity?",
+                      confirmLabel: "Unlink all",
+                      destructive: true,
+                    }))
+                  )
+                    return;
                   unlinkAll.mutate(
                     { entityType, entityId },
                     { onSuccess: (data) => toast.success(`Unlinked ${data.unlinked} entries`) },

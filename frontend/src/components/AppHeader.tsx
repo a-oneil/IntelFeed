@@ -7,6 +7,7 @@ import { HeaderSearch } from "./HeaderSearch";
 import { BrandButton } from "./BrandButton";
 import { Hint } from "./primitives";
 import styles from "./AppHeader.module.css";
+import { confirmDialog } from "@/utils/dialog";
 
 interface AppHeaderProps {
   onShowShortcuts: () => void;
@@ -152,11 +153,18 @@ export function AppHeader({ onShowShortcuts }: AppHeaderProps) {
         {!isMobile && (
           <button
             className={styles.iconBtn}
-            onClick={() => {
+            onClick={async () => {
               // Confirmed, not because logging out loses data, but because it
               // is one stray click from the shortcuts button and costs a
               // re-auth to undo.
-              if (!window.confirm("Log out of IntelFeed?")) return;
+              if (
+                !(await confirmDialog({
+                  title: "Log out?",
+                  message: "You'll need to sign in again to get back to your feeds.",
+                  confirmLabel: "Log out",
+                }))
+              )
+                return;
               logout();
               window.location.assign("/login");
             }}

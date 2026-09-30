@@ -24,6 +24,7 @@ import {
 } from "@/hooks/useExtraction";
 
 import styles from "./ExtractionTab.module.css";
+import { confirmDialog, promptDialog } from "@/utils/dialog";
 
 const ALL_TYPES: ExtractionType[] = ["threat_actor", "malware", "cve", "tool", "ttp", "observable"];
 const WINDOWS: ExtractionParams["window"][] = ["24h", "7d", "30d", "all"];
@@ -181,13 +182,27 @@ export function ExtractionTab({
       );
     }
     const label = one ? `"${one.name}"` : `${rows.length} selected`;
-    if (!window.confirm(`Remove ${label}?\n\n${parts.join("\n\n")}`)) return;
+    if (
+      !(await confirmDialog({
+        title: `Remove ${label}`,
+        message: parts.join("\n\n"),
+        confirmLabel: "Remove",
+        destructive: true,
+      }))
+    )
+      return;
     if (obsRows.length) {
-      denyObservables = !window.confirm(
-        "Hard-delete the observable rows instead of tombstoning?\n\n" +
-          "OK = hard-delete (rows and sightings gone, values free to be captured again).\n" +
-          "Cancel = tombstone (recommended).",
-      );
+      // Two outcomes rather than yes/no, which the native confirm could only
+      // express by explaining what OK and Cancel meant. Labelled buttons say it.
+      denyObservables = !(await confirmDialog({
+        title: "Tombstone or hard-delete?",
+        message:
+          "Tombstoning keeps the rows and their sightings as history, and every capture door refuses the values from now on. " +
+          "A hard delete removes the rows and sightings outright, leaving the values free to be captured again.",
+        confirmLabel: "Hard-delete",
+        cancelLabel: "Tombstone (recommended)",
+        destructive: true,
+      }));
     }
     // One call per type — the endpoint denies + deletes as a batch.
     const byType = new Map<ExtractionType, string[]>();
@@ -242,7 +257,14 @@ export function ExtractionTab({
     const sorted = [...selectedItems].sort((a, b) => b.article_count - a.article_count);
     const keeper = sorted[0];
     const mergeIds = sorted.slice(1).map((i) => i.id);
-    if (!window.confirm(`Merge ${mergeIds.length} into "${keeper.name}"? Aliases and entry links fold into the keeper.`))
+    if (
+      !(await confirmDialog({
+        title: "Merge entities",
+        message: `Merge ${mergeIds.length} into "${keeper.name}"? Aliases and entry links fold into the keeper.`,
+        confirmLabel: "Merge",
+        destructive: true,
+      }))
+    )
       return;
     await mergeMut.mutateAsync({ entityType, keeperId: keeper.id, mergeIds });
     toast.success(`Merged ${mergeIds.length} into "${keeper.name}"`);
@@ -250,7 +272,12 @@ export function ExtractionTab({
   }
 
   async function doRename(e: ExtractionEntity) {
-    const next = window.prompt(`Rename "${e.name}" to:`, e.name)?.trim();
+    const next = await promptDialog({
+      title: "Rename entity",
+      message: `Rename "${e.name}" to:`,
+      defaultValue: e.name,
+      confirmLabel: "Rename",
+    });
     if (!next || next === e.name) return;
     try {
       await updateMut.mutateAsync({ entityType: e.entity_type, id: e.id, name: next });
@@ -261,7 +288,11 @@ export function ExtractionTab({
   }
 
   async function doAddAlias(e: ExtractionEntity) {
-    const alias = window.prompt(`Add an alias to "${e.name}":`)?.trim();
+    const alias = await promptDialog({
+      title: "Add alias",
+      message: `Add an alias to "${e.name}":`,
+      confirmLabel: "Add alias",
+    });
     if (!alias) return;
     const existing = e.aliases ?? [];
     if (existing.some((a) => a.toLowerCase() === alias.toLowerCase())) {
@@ -279,17 +310,25 @@ export function ExtractionTab({
   async function doConvert(e: ExtractionEntity, target: (typeof CONVERT_TARGETS)[number]) {
     let targetIdentifier: string | undefined;
     if (target.needsIdentifier) {
-      const answer = window
-        .prompt(
+      const answer = await promptDialog({
+        title: target.needsIdentifier === "cve" ? "CVE ID" : "ATT&CK technique ID",
+        message:
           target.needsIdentifier === "cve"
             ? "Enter the CVE ID for the new record (e.g. CVE-2024-1234):"
             : "Enter the ATT&CK technique ID for the new record (e.g. T1059 or T1059.001):",
-        )
-        ?.trim();
+        placeholder: target.needsIdentifier === "cve" ? "CVE-2024-1234" : "T1059.001",
+      });
       if (!answer) return;
       targetIdentifier = answer;
     }
-    if (!window.confirm(`Convert "${e.name}" to ${target.label}? Entry links and relationships migrate to the new entity.`))
+    if (
+      !(await confirmDialog({
+        title: "Convert entity",
+        message: `Convert "${e.name}" to ${target.label}? Entry links and relationships migrate to the new entity.`,
+        confirmLabel: "Convert",
+        destructive: true,
+      }))
+    )
       return;
     try {
       await convertMut.mutateAsync({ id: e.id, targetType: target.key, targetIdentifier });

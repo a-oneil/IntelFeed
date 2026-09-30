@@ -24,6 +24,7 @@ import { useAuthStore } from "@/stores/authStore";
 import { useUIStore } from "@/stores/uiStore";
 import { Chip, PageHeader, Segmented } from "@/components/primitives";
 import styles from "./AutomationPage.module.css";
+import { promptDialog } from "@/utils/dialog";
 
 type EditorMode = "flow" | "form";
 
@@ -131,10 +132,14 @@ export function AutomationPage() {
     updateRule.mutate({ ruleId, data: { labels: nextLabels } });
   };
 
-  const handleAddLabel = (ruleId: string, currentLabels: string[]) => {
-    const label = prompt("Enter label name:");
-    if (!label?.trim()) return;
-    const normalized = label.trim().toLowerCase();
+  const handleAddLabel = async (ruleId: string, currentLabels: string[]) => {
+    const label = await promptDialog({
+      title: "Add label",
+      message: "Enter label name:",
+      confirmLabel: "Add label",
+    });
+    if (!label) return;
+    const normalized = label.toLowerCase();
     if (currentLabels.includes(normalized)) return;
     updateRule.mutate({ ruleId, data: { labels: [...currentLabels, normalized] } });
   };
