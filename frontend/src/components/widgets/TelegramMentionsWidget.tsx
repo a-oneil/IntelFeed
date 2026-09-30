@@ -1,3 +1,4 @@
+import { openExternalUrl } from "@/utils/openExternal";
 import { useTelegramMentionsWidget } from "@/hooks/useWidgetTriageData";
 import { WidgetListSkeleton } from "@/components/Skeleton";
 import { Chip } from "@/components/primitives";
@@ -38,7 +39,7 @@ export default function TelegramMentionsWidget({ config }: Props) {
         <div
           key={m.handle}
           className={styles.telegramRow}
-          onClick={() => window.open(m.canonical_url, "_blank", "noopener,noreferrer")}
+          onClick={() => openExternalUrl(m.canonical_url)}
           role="button"
           tabIndex={0}
           title={m.canonical_url}

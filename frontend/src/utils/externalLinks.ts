@@ -265,22 +265,19 @@ function opensNewTab(anchor: HTMLAnchorElement, event: MouseEvent): boolean {
 }
 
 /**
- * Decide whether a click on `anchor` should be held for confirmation. Returns
- * null to let the browser proceed untouched.
+ * The shared decision, given a URL rather than a DOM node. `untrusted` says the
+ * URL came from feed content: "article" scope only covers those.
  */
-export function evaluateLinkClick(
-  anchor: HTMLAnchorElement,
-  event: MouseEvent,
+function evaluateUrl(
+  rawUrl: string,
   ctx: InterceptContext,
+  opts: { text: string; newTab: boolean; untrusted: boolean },
 ): ExternalLinkInfo | null {
   if (ctx.mode === "off") return null;
 
-  const href = anchor.getAttribute("href");
-  if (!href) return null;
-
   let url: URL;
   try {
-    url = new URL(href, ctx.baseUri ?? document.baseURI);
+    url = new URL(rawUrl, ctx.baseUri ?? document.baseURI);
   } catch {
     return null;
   }
@@ -289,11 +286,10 @@ export function evaluateLinkClick(
   if (!WEB_PROTOCOLS.has(url.protocol)) return null;
   if (url.origin === ctx.origin) return null;
 
-  if (ctx.mode === "article" && !anchor.closest(`[${UNTRUSTED_CONTENT_ATTR}]`)) return null;
+  if (ctx.mode === "article" && !opts.untrusted) return null;
 
-  const text = collapseText(anchor);
   const host = url.hostname.toLowerCase();
-  const mismatch = findTextMismatch(text, host, url.pathname + url.search + url.hash);
+  const mismatch = findTextMismatch(opts.text, host, url.pathname + url.search + url.hash);
   const notes = collectNotes(url);
 
   // A trusted host skips the prompt — unless the link is lying about where it
@@ -304,5 +300,37 @@ export function evaluateLinkClick(
   const disguised = isAlarming(mismatch) || notes.some((n) => n.id === "userinfo");
   if (!disguised && isTrustedHost(host, ctx.trustedHosts, ctx.feedHosts)) return null;
 
-  return { url: url.href, host, text, newTab: opensNewTab(anchor, event), mismatch, notes };
+  return { url: url.href, host, text: opts.text, newTab: opts.newTab, mismatch, notes };
+}
+
+/**
+ * Decide whether a click on `anchor` should be held for confirmation. Returns
+ * null to let the browser proceed untouched.
+ */
+export function evaluateLinkClick(
+  anchor: HTMLAnchorElement,
+  event: MouseEvent,
+  ctx: InterceptContext,
+): ExternalLinkInfo | null {
+  const href = anchor.getAttribute("href");
+  if (!href) return null;
+  return evaluateUrl(href, ctx, {
+    text: collapseText(anchor),
+    newTab: opensNewTab(anchor, event),
+    untrusted: anchor.closest(`[${UNTRUSTED_CONTENT_ATTR}]`) !== null,
+  });
+}
+
+/**
+ * Same decision for a URL the app is about to open from code (the `o` shortcut,
+ * a widget row) rather than from a link click. These URLs come from feeds, so
+ * they count as untrusted in every scope except "off". For an entry that sits
+ * on its own feed's site the feed-host allowlist means this never prompts.
+ */
+export function evaluateProgrammaticOpen(
+  rawUrl: string,
+  ctx: InterceptContext,
+  text = "",
+): ExternalLinkInfo | null {
+  return evaluateUrl(rawUrl, ctx, { text, newTab: true, untrusted: true });
 }

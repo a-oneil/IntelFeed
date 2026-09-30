@@ -1,10 +1,8 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { Feed, PaginatedResponse } from "@/api/types";
-import { readExternalLinkSettings } from "@/hooks/useExternalLinkSettings";
-import { useAuthStore } from "@/stores/authStore";
 import { useExternalLinkStore } from "@/stores/externalLinkStore";
-import { evaluateLinkClick, hostsFromUrls } from "@/utils/externalLinks";
+import { evaluateLinkClick } from "@/utils/externalLinks";
+import { currentInterceptContext } from "@/utils/openExternal";
 import { ExternalLinkModal } from "@/components/ExternalLinkModal";
 
 /**
@@ -36,18 +34,7 @@ export function ExternalLinkGuard() {
       const anchor = event.target.closest("a[href]");
       if (!(anchor instanceof HTMLAnchorElement)) return;
 
-      const { mode, trustedHosts } = readExternalLinkSettings(useAuthStore.getState().user);
-      // Feeds are only ever read from the cache: fetching here would fire an
-      // authenticated request from public pages (shared entries) that have none.
-      const feeds = queryClient.getQueryData<PaginatedResponse<Feed>>(["feeds"])?.items ?? [];
-      const feedHosts = hostsFromUrls(feeds.flatMap((f) => [f.site_url, f.url]));
-
-      const info = evaluateLinkClick(anchor, event, {
-        origin: window.location.origin,
-        mode,
-        trustedHosts: [...trustedHosts, ...useExternalLinkStore.getState().sessionTrustedHosts],
-        feedHosts,
-      });
+      const info = evaluateLinkClick(anchor, event, currentInterceptContext(queryClient));
       if (!info) return;
 
       event.preventDefault();
