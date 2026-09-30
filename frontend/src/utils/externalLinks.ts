@@ -289,6 +289,24 @@ function opensNewTab(anchor: HTMLAnchorElement, event: MouseEvent): boolean {
 }
 
 /**
+ * True only for a web URL that leaves this site. Relative URLs, same-origin
+ * URLs, hash links and non-web schemes (mailto:, tel:, blob:...) are not
+ * external. Used wherever behaviour must apply to outside links only.
+ */
+export function isExternalWebUrl(
+  rawUrl: string,
+  origin: string = window.location.origin,
+  baseUri: string = document.baseURI,
+): boolean {
+  try {
+    const url = new URL(rawUrl, baseUri);
+    return WEB_PROTOCOLS.has(url.protocol) && url.origin !== origin;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * The shared decision, given a URL rather than a DOM node. `untrusted` says the
  * URL came from feed content: "article" scope only covers those.
  */

@@ -7,6 +7,7 @@ import {
   hostMatchesDomain,
   hostsFromUrls,
   isAlarming,
+  isExternalWebUrl,
   isTrustedHost,
   parseMode,
   parseTrustedHosts,
@@ -312,5 +313,21 @@ describe("evaluateLinkClick", () => {
       evaluateLinkClick(same, new MouseEvent("click", { button: 0, ctrlKey: true }), ctx())!.newTab,
     ).toBe(true);
     expect(evaluateLinkClick(same, new MouseEvent("auxclick", { button: 1 }), ctx())!.newTab).toBe(true);
+  });
+});
+
+describe("isExternalWebUrl", () => {
+  const o = "https://intelfeed.example";
+  const base = "https://intelfeed.example/";
+  it("is true only for web URLs that leave the site", () => {
+    expect(isExternalWebUrl("https://evil.example/x", o, base)).toBe(true);
+    expect(isExternalWebUrl("http://intelfeed.example/x", o, base)).toBe(true); // different origin (scheme)
+    expect(isExternalWebUrl("//evil.example/x", o, base)).toBe(true);
+    expect(isExternalWebUrl("ftp://files.example/x", o, base)).toBe(true);
+  });
+  it("is false for everything within the site or not a web link", () => {
+    for (const u of ["/settings", "settings", "#top", "?q=1", "https://intelfeed.example/entries/1", "mailto:a@b.example", "tel:+1555", "blob:https://intelfeed.example/1", "javascript:void(0)", "", "http://"]) {
+      expect(isExternalWebUrl(u, o, base), JSON.stringify(u)).toBe(false);
+    }
   });
 });

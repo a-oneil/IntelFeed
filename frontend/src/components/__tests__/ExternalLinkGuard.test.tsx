@@ -68,11 +68,36 @@ describe("ExternalLinkGuard", () => {
     );
   });
 
-  it("removes feed-supplied forms that could navigate around the click guard", () => {
-    renderPage('<form action="https://evil.example/collect"><input name="q" value="secret"><button>Open report</button></form>');
-    expect(document.querySelector("form")).toBeNull();
-    expect(document.querySelector("input")).toBeNull();
-    expect(document.querySelector("button")).toBeNull();
+  it("drops a form's OUTSIDE destination but leaves forms and controls alone", () => {
+    renderPage(
+      '<form action="https://evil.example/collect"><input name="q"><button formaction="https://evil.example/x">Go</button></form>',
+    );
+    expect(document.querySelector("form")).not.toBeNull();
+    expect(document.querySelector("input")).not.toBeNull();
+    expect(document.querySelector("button")).not.toBeNull();
+    expect(document.querySelector("form")!.hasAttribute("action")).toBe(false);
+    expect(document.querySelector("button")!.hasAttribute("formaction")).toBe(false);
+  });
+
+  it("leaves a form's same-site destination untouched", () => {
+    renderPage('<form action="/search" method="get"><input name="q"></form>');
+    expect(document.querySelector("form")!.getAttribute("action")).toBe("/search");
+  });
+
+  it("leaves same-site links completely alone, including handlers the app attached", () => {
+    const onClick = vi.fn((e: React.MouseEvent) => e.preventDefault());
+    const client = new QueryClient();
+    render(
+      <QueryClientProvider client={client}>
+        <a href="/settings" onClick={onClick}>internal</a>
+        <a href={`${window.location.origin}/entries/1`} onClick={onClick}>internal absolute</a>
+        <ExternalLinkGuard />
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByText("internal"));
+    fireEvent.click(screen.getByText("internal absolute"));
+    expect(onClick).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("does not stop same-origin links", () => {

@@ -7,6 +7,7 @@ import { readSessionTrustedHosts, useExternalLinkStore } from "@/stores/external
 import {
   evaluateProgrammaticOpen,
   hostsFromUrls,
+  isExternalWebUrl,
   type InterceptContext,
 } from "@/utils/externalLinks";
 
@@ -41,6 +42,13 @@ export function openExternalUrl(
   url: string,
   { features = "noopener,noreferrer", text = "" }: { features?: string; text?: string } = {},
 ): void {
+  // Not an outside link (same site, or not a web URL): exactly the plain
+  // window.open this replaced. The guard and the caller's features are for
+  // outside links only.
+  if (!isExternalWebUrl(url)) {
+    window.open(url, "_blank");
+    return;
+  }
   const info = evaluateProgrammaticOpen(url, currentInterceptContext(), text);
   if (info) {
     useExternalLinkStore.getState().hold(info);

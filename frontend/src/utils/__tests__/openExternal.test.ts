@@ -93,6 +93,13 @@ describe("openExternalUrl", () => {
     expect(useExternalLinkStore.getState().pending?.host).toBe("evil.example");
   });
 
+  it("opens a same-site URL exactly as the old plain window.open did", () => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    openExternalUrl(`${window.location.origin}/entries/1`, { features: "noopener" });
+    expect(open).toHaveBeenCalledWith(`${window.location.origin}/entries/1`, "_blank");
+    expect(useExternalLinkStore.getState().pending).toBeNull();
+  });
+
   it("opens straight away when the feature is off", () => {
     useAuthStore.setState({ user: user({ external_link_mode: "off" }) });
     const open = vi.spyOn(window, "open").mockReturnValue(null);
