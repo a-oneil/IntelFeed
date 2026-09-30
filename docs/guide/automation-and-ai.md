@@ -3,6 +3,10 @@
 Two ways of getting work done without doing it: rules that run on their own, and
 a copilot you can ask.
 
+![The Automation page listing rules with their triggers, run counts, and per-rule actions](../assets/screenshots/automation.png)
+
+*Automation rules, each with its trigger, label, and run history.*
+
 ## Automation rules
 
 **Sidebar → Automation → + New.** A rule is a trigger, optional conditions, and

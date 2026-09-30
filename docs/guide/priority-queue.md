@@ -9,6 +9,11 @@ inside any query.
 
 ## What it looks like
 
+![Priority Queue story cards, each showing a score, outlet and article counts, and entity chips](../assets/screenshots/priority-queue.png)
+
+*Each card is one story, not one article — duplicate coverage is folded in and counted.*
+
+
 It is a normal entry list and reader — same keys, same actions — pinned to the
 priority ranking instead of date order. Two things are different:
 

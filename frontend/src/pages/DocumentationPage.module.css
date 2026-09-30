@@ -169,6 +169,25 @@
   line-height: 1.7;
 }
 
+.article :global(img) {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 1rem 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 6px);
+}
+
+/* The line under a screenshot is its caption — markdown spells it as an
+   emphasised paragraph, so style the ones that stand alone. */
+.article :global(p > em:only-child) {
+  display: block;
+  margin-top: -0.5rem;
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  font-style: normal;
+}
+
 .notFound {
   max-width: 46ch;
   color: var(--text-secondary);

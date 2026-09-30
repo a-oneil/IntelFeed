@@ -4,6 +4,10 @@ Settings opens with its own nav rail; the app sidebar folds away beside it.
 What you see depends on your role — non-admins get Account, Appearance, Reading,
 Tags and Claude Code Skill; admins get everything.
 
+![The Appearance settings pane showing a grid of selectable light and dark themes](../assets/screenshots/settings.png)
+
+*Themes are switchable at runtime; the whole palette is CSS variables.*
+
 ## Account
 
 Profile and password. Little to say.

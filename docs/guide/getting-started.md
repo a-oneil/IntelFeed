@@ -2,6 +2,10 @@
 
 What to do in your first hour, in order.
 
+![The IntelFeed dashboard with overview stat tiles, a morning briefing, a triage flow chart, and an under-the-radar list](../assets/screenshots/dashboard.png)
+
+*The dashboard once feeds have been ingesting for a while.*
+
 ## Your account
 
 The first account created on an instance becomes the admin. After that,

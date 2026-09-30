@@ -56,6 +56,7 @@ pnpm build                            # TypeScript check + production build
 pnpm test                             # Vitest unit tests (one-shot)
 pnpm test:watch                       # Vitest in watch mode
 pnpm lint                             # ESLint
+pnpm exec playwright install chromium # One-time: fetch the browser binary
 pnpm exec playwright test             # E2E tests (needs running stack)
 ```
 
