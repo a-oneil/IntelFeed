@@ -41,7 +41,7 @@ dependencies = [
     "wikipedia-api>=0.7.1",
     "pymupdf>=1.24",
     "telethon>=1.34",
-    "googlenewsdecoder>=0.1.7",
+    "googlenewsdecoder>=0.2.1",
     "jsonschema>=4.21",
 ]
 
