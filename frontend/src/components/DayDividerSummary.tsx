@@ -493,7 +493,7 @@ export function DayDividerSummary({ dayKey, dayCount, filters, label }: Props) {
       <div ref={fullBodyRef} aria-hidden style={{ display: "none" }}>
         <Markdown remarkPlugins={remarkPlugins}>{summary}</Markdown>
       </div>
-      <div ref={bodyRef} className={`${styles.body} ${showFull ? styles.bodyExpanded : ""}`}>
+      <div ref={bodyRef} className={`${styles.body} ${showFull ? styles.bodyExpanded : ""}`} data-untrusted-content="">
         <Markdown
           remarkPlugins={remarkPlugins}
           components={{

@@ -2,6 +2,7 @@ import { useRef, useEffect, useMemo } from "react";
 import DOMPurify from "dompurify";
 import api from "@/api/client";
 import { annotateGlossaryHTML, type GlossaryTermHighlight } from "@/utils/highlightText";
+import { UNTRUSTED_CONTENT_ATTR, isExternalWebUrl } from "@/utils/externalLinks";
 
 interface SafeHTMLProps {
   html: string;
@@ -18,6 +19,15 @@ export function SafeHTML({ html, className, style, glossaryTerms }: SafeHTMLProp
     DOMPurify.addHook("afterSanitizeAttributes", (node) => {
       if (node.tagName === "A" && node.getAttribute("target") === "_blank") {
         node.setAttribute("rel", "noopener noreferrer");
+      }
+      // A <form action> / formaction sends the browser off-site without an
+      // <a>, so it would slip past the external-link confirmation. Drop only
+      // destinations that LEAVE the site; forms, controls and same-site
+      // destinations are left alone. (Image-map <area> links are handled by
+      // the click guard itself, so their content stays intact.)
+      for (const attr of ["action", "formaction"]) {
+        const value = node.getAttribute?.(attr);
+        if (value && isExternalWebUrl(value)) node.removeAttribute(attr);
       }
     });
 
@@ -116,6 +126,9 @@ export function SafeHTML({ html, className, style, glossaryTerms }: SafeHTMLProp
       ref={ref}
       className={className}
       style={style}
+      // Feed-supplied markup: ExternalLinkGuard treats links in here as untrusted
+      // even when it is set to "article content only".
+      {...{ [UNTRUSTED_CONTENT_ATTR]: "" }}
       dangerouslySetInnerHTML={{ __html: clean }}
     />
   );

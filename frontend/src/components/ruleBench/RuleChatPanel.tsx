@@ -70,7 +70,7 @@ export function RuleChatPanel({
           return (
             <div key={idx} className={msg.role === "user" ? styles.chatMsgUser : styles.chatMsgAssistant}>
               <div className={styles.chatMsgRole}>{msg.role === "user" ? "You" : "AI"}</div>
-              <div className={styles.chatMsgContent}>
+              <div className={styles.chatMsgContent} data-untrusted-content={msg.role === "assistant" ? "" : undefined}>
                 {msg.role === "assistant" && msg.content ? (
                   <Markdown remarkPlugins={[remarkGfm]}>{msg.content}</Markdown>
                 ) : (

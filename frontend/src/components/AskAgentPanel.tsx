@@ -93,7 +93,7 @@ export function AskAgentPanel({ onClose, askFn }: AskAgentPanelProps) {
               className={`${styles.message} ${msg.role === "user" ? styles.messageUser : styles.messageAssistant}`}
             >
               <div className={styles.messageRole}>{msg.role === "user" ? "You" : "Agent"}</div>
-              <div className={styles.messageContent}>
+              <div className={styles.messageContent} data-untrusted-content={msg.role === "assistant" ? "" : undefined}>
                 {isEmptyPending ? (
                   <span className={styles.thinking}>Thinking...</span>
                 ) : msg.role === "assistant" ? (

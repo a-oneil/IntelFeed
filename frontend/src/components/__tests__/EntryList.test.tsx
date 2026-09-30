@@ -218,6 +218,33 @@ describe("EntryList", () => {
     expect(screen.getByText("No entries to display")).toBeInTheDocument();
   });
 
+  it("lets Enter follow a focused OUTSIDE link, but leaves links within the app exactly as before", () => {
+    mockUseEntries.mockReturnValue({
+      data: makeInfiniteData([]),
+      isLoading: false,
+      fetchNextPage: vi.fn(),
+      hasNextPage: false,
+      isFetchingNextPage: false,
+    } as unknown as ReturnType<typeof useEntries>);
+
+    renderEntryList();
+    const outside = document.createElement("a");
+    outside.href = "https://evil.example/x";
+    const inside = document.createElement("a");
+    inside.href = "/settings";
+    document.body.append(outside, inside);
+    try {
+      // fireEvent returns false when the keypress was default-prevented (i.e. the
+      // list's Enter shortcut took it). The outside link is exempt; the inside
+      // link keeps its previous behaviour.
+      expect(fireEvent.keyDown(outside, { key: "Enter" })).toBe(true);
+      expect(fireEvent.keyDown(inside, { key: "Enter" })).toBe(false);
+    } finally {
+      outside.remove();
+      inside.remove();
+    }
+  });
+
   it("teaches how a zero-count folder earns a count instead of saying nothing", () => {
     mockUseEntries.mockReturnValue({
       data: makeInfiniteData([]),

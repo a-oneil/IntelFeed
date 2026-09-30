@@ -49,6 +49,8 @@ import { ExposureChip } from "./ExposureChip";
 import { ToolbarDropdown, DropdownItem } from "@/components/ToolbarDropdown";
 import { DEFAULT_TABLE_LAYOUTS } from "@/components/table/defaultLayouts";
 import { adjacentEntryId } from "@/utils/entryNavigation";
+import { openExternalUrl } from "@/utils/openExternal";
+import { isExternalWebUrl } from "@/utils/externalLinks";
 
 function stripHtml(html: string): string {
   const doc = new DOMParser().parseFromString(html, "text/html");
@@ -1072,6 +1074,16 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
         target?.isContentEditable
       ) return;
 
+      // Enter on a focused OUTSIDE link means "follow it". Without this the
+      // shortcut below preventDefault()s the keypress and opens the selected
+      // entry's own URL instead — the link never fires, and neither does the
+      // external-link confirmation that guards it. Links within the app are
+      // left exactly as they were.
+      if (e.key === "Enter") {
+        const link = target?.closest("a[href]");
+        if (link instanceof HTMLAnchorElement && isExternalWebUrl(link.getAttribute("href") ?? "")) return;
+      }
+
       // Escape clears bulk selection
       if (e.key === "Escape" && bulkMode) {
         e.preventDefault();
@@ -1114,7 +1126,8 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
       } else if (e.key === "o" || e.key === "Enter") {
         e.preventDefault();
         const current = navEntries[currentIndex];
-        if (current?.url) window.open(current.url, "_blank");
+        // "noopener" only (no noreferrer): keeps the referrer this shortcut has always sent.
+        if (current?.url) openExternalUrl(current.url, { features: "noopener" });
       } else if (e.key === "s") {
         e.preventDefault();
         if (selectedEntryId) toggleStar.mutate(selectedEntryId);
