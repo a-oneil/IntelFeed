@@ -58,6 +58,7 @@ import { entityDisplayName, entityProfilePath, type EntityProfileConfig, type Ov
 import { dedupeProducts, extractNvd, type RefLink } from "../cveRefs";
 import { defangObservable } from "@/utils/observables";
 import styles from "../entityProfile.module.css";
+import { confirmDialog } from "@/utils/dialog";
 
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
@@ -458,8 +459,16 @@ export function OverviewTab({
                 <button
                   className={styles.railBtn}
                   disabled={denyObservable.isPending}
-                  onClick={() => {
-                    if (confirm(`Never capture or export ${o.value} again?`)) denyObservable.mutate(o.id);
+                  onClick={async () => {
+                    if (
+                      await confirmDialog({
+                        title: "Never capture this value",
+                        message: `Never capture or export ${o.value} again?`,
+                        confirmLabel: "Never capture",
+                        destructive: true,
+                      })
+                    )
+                      denyObservable.mutate(o.id);
                   }}
                   title="Tombstone: never capture or export this value"
                 >

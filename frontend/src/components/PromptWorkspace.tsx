@@ -44,6 +44,7 @@ import styles from "./PromptWorkspace.module.css";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { useRailWidth } from "@/hooks/useRailWidth";
 import { AsyncStateLoading } from "@/components/AsyncState";
+import { confirmDialog } from "@/utils/dialog";
 
 /* ─── Jinja2 syntax highlighting (StreamLanguage, same pattern as
        CodeMirrorEditor's rule modes) ─────────────────────────────── */
@@ -803,8 +804,15 @@ function TaskDetail({
     );
   };
 
-  const handleReset = () => {
-    if (confirm("Reset this prompt to the system default? Your customizations will be deactivated.")) {
+  const handleReset = async () => {
+    if (
+      await confirmDialog({
+        title: "Reset prompt",
+        message: "Reset this prompt to the system default? Your customizations will be deactivated.",
+        confirmLabel: "Reset",
+        destructive: true,
+      })
+    ) {
       loadedVersionRef.current = null;
       resetPrompt.mutate(task.id, {
         onSuccess: () => {
@@ -846,11 +854,19 @@ function TaskDetail({
     );
   };
 
-  const handleSchemaReset = () => {
-    const prompt = isCustomTask
+  const handleSchemaReset = async () => {
+    const message = isCustomTask
       ? "Remove the output schema? The task will return free-form text."
       : "Remove the schema override and return to the shipped default?";
-    if (!confirm(prompt)) return;
+    if (
+      !(await confirmDialog({
+        title: isCustomTask ? "Remove schema" : "Reset schema override",
+        message,
+        confirmLabel: "Remove",
+        destructive: true,
+      }))
+    )
+      return;
     updateTask.mutate(
       {
         taskId: task.id,

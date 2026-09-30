@@ -23,6 +23,7 @@ import { deriveIntelLevel, INTEL_LEVEL_CONFIG } from "./IntelLevelBadge";
 import type { Category, Feed, SidebarSectionId } from "@/api/types";
 import { BrandButton } from "./BrandButton";
 import styles from "./Sidebar.module.css";
+import { promptDialog } from "@/utils/dialog";
 
 /** Where the footer link points. Hard-coded upstream — a fork edits one line. */
 const REPO_URL = "https://github.com/a-oneil/IntelFeed";
@@ -395,9 +396,17 @@ export function Sidebar() {
               <button
                 className={styles.navItem}
                 onClick={() => { openSavedSearch(s); closeSidebarIfMobile(); }}
-                onDoubleClick={(e) => {
+                onDoubleClick={async (e) => {
                   e.stopPropagation();
-                  const newName = prompt("Set display name:", s.display_name || s.name);
+                  // An empty answer is meaningful here — it clears the display
+                  // name back to the raw query — so it must stay submittable.
+                  const newName = await promptDialog({
+                    title: "Set display name",
+                    message: "Set display name:",
+                    defaultValue: s.display_name || s.name,
+                    required: false,
+                    confirmLabel: "Save",
+                  });
                   if (newName !== null) {
                     updateSavedSearch.mutate({ id: s.id, data: { display_name: newName || null } });
                   }

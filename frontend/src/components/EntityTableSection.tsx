@@ -18,6 +18,7 @@ import { DataTable, type DataTableColumn, type SortDir } from "@/components/tabl
 import { PageHeader } from "@/components/primitives";
 import table from "@/components/table/DataTable.module.css";
 import styles from "@/pages/WorkbenchPage.module.css";
+import { confirmDialog } from "@/utils/dialog";
 
 // Re-exported so entity column definitions can live next to the sections that
 // use them without importing the table module directly.
@@ -204,11 +205,11 @@ export function EntityTableSection<T>({
     const ids = [...selectedIds];
     if (ids.length === 0) return;
     const word = ids.length === 1 ? noun : (nounPlural ?? `${noun}s`);
-    const prompt =
+    const message =
       entityType === "observable"
         ? `Delete ${ids.length} ${word}? Their sightings and relationships go with them, and nothing stops a future article from capturing the values again — use "Never capture" for that. This can't be undone.`
         : `Delete ${ids.length} ${word}? Their entry links and relationships go with them. This can't be undone.`;
-    if (!confirm(prompt)) return;
+    if (!(await confirmDialog({ title: `Delete ${word}`, message, confirmLabel: "Delete", destructive: true }))) return;
     setDeletingSelected(true);
     const failed = await runOnSelection(ids, (id) => deleteEntity(entityType, id));
     setDeletingSelected(false);
@@ -222,9 +223,12 @@ export function EntityTableSection<T>({
     if (ids.length === 0) return;
     const word = ids.length === 1 ? noun : (nounPlural ?? `${noun}s`);
     if (
-      !confirm(
-        `Never capture ${ids.length} ${word}? Every door refuses the values from now on and they leave the outbound feeds; the rows and their sightings are kept as history.`,
-      )
+      !(await confirmDialog({
+        title: "Never capture these values",
+        message: `Never capture ${ids.length} ${word}? Every door refuses the values from now on and they leave the outbound feeds; the rows and their sightings are kept as history.`,
+        confirmLabel: "Never capture",
+        destructive: true,
+      }))
     )
       return;
     setTombstoningSelected(true);

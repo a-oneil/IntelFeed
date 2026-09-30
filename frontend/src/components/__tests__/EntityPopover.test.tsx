@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { EntityPopover } from "../EntityPopover";
 import type { HighlightEntity } from "../InlineEntityHighlighter";
@@ -51,6 +51,15 @@ vi.mock("@/stores/authStore", () => {
   return { useAuthStore };
 });
 
+// The app's own confirm replaced window.confirm here, so the stub moves with
+// it. It is async, which is why the assertions below have to wait.
+const confirmDialogMock = vi.fn<(opts: unknown) => Promise<boolean>>(() => Promise.resolve(true));
+vi.mock("@/utils/dialog", () => ({
+  confirmDialog: (opts: unknown) => confirmDialogMock(opts),
+  promptDialog: () => Promise.resolve(null),
+  alertDialog: () => Promise.resolve(),
+}));
+
 vi.mock("../EntityMergeIntoModal", () => ({
   EntityMergeIntoModal: ({ keeperName }: { keeperName: string }) => (
     <div data-testid="merge-modal">merge {keeperName}</div>
@@ -85,7 +94,7 @@ function openWrongMenu(entity: HighlightEntity = vendorEntity, props: Record<str
 describe("EntityPopover — wrong-match menu", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.spyOn(window, "confirm").mockReturnValue(true);
+    confirmDialogMock.mockResolvedValue(true);
     authState.user = { id: "u1", role: "admin" };
   });
 
@@ -112,19 +121,22 @@ describe("EntityPopover — wrong-match menu", () => {
     expect(screen.queryByText(/Not a name for/)).toBeNull();
   });
 
-  it("confirms before blocking a word everywhere", () => {
+  it("confirms before blocking a word everywhere", async () => {
     openWrongMenu();
     fireEvent.click(screen.getByText(/Never match/));
 
-    expect(window.confirm).toHaveBeenCalled();
-    expect(reportMutate).toHaveBeenCalledWith(expect.objectContaining({ scope: "global" }), expect.anything());
+    expect(confirmDialogMock).toHaveBeenCalled();
+    await waitFor(() =>
+      expect(reportMutate).toHaveBeenCalledWith(expect.objectContaining({ scope: "global" }), expect.anything()),
+    );
   });
 
-  it("does not report when the block confirmation is declined", () => {
-    vi.spyOn(window, "confirm").mockReturnValue(false);
+  it("does not report when the block confirmation is declined", async () => {
+    confirmDialogMock.mockResolvedValue(false);
     openWrongMenu();
     fireEvent.click(screen.getByText(/Never match/));
 
+    await waitFor(() => expect(confirmDialogMock).toHaveBeenCalled());
     expect(reportMutate).not.toHaveBeenCalled();
   });
 
@@ -138,14 +150,16 @@ describe("EntityPopover — wrong-match menu", () => {
     expect(screen.queryByRole("button", { name: "Vendor" })).toBeNull();
   });
 
-  it("converts through the shared convert action", () => {
+  it("converts through the shared convert action", async () => {
     openWrongMenu();
     fireEvent.click(screen.getByText(/Wrong type — convert/));
     fireEvent.click(screen.getByText("Product"));
 
-    expect(convertMutate).toHaveBeenCalledWith(
-      expect.objectContaining({ entityId: "vendor-1", targetType: "product" }),
-      expect.anything(),
+    await waitFor(() =>
+      expect(convertMutate).toHaveBeenCalledWith(
+        expect.objectContaining({ entityId: "vendor-1", targetType: "product" }),
+        expect.anything(),
+      ),
     );
   });
 
@@ -156,14 +170,16 @@ describe("EntityPopover — wrong-match menu", () => {
     expect(screen.getByTestId("merge-modal").textContent).toContain("Sprocket Security");
   });
 
-  it("unlinks from every article after confirmation", () => {
+  it("unlinks from every article after confirmation", async () => {
     openWrongMenu();
     fireEvent.click(screen.getByText("Unlink from every article"));
 
-    expect(window.confirm).toHaveBeenCalled();
-    expect(unlinkAllMutate).toHaveBeenCalledWith(
-      { entityType: "vendor", entityId: "vendor-1" },
-      expect.anything(),
+    expect(confirmDialogMock).toHaveBeenCalled();
+    await waitFor(() =>
+      expect(unlinkAllMutate).toHaveBeenCalledWith(
+        { entityType: "vendor", entityId: "vendor-1" },
+        expect.anything(),
+      ),
     );
   });
 
@@ -202,7 +218,7 @@ describe("EntityPopover — wrong-match menu", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it("tombstones an observable behind an admin confirm", () => {
+  it("tombstones an observable behind an admin confirm", async () => {
     const observable: HighlightEntity = {
       id: "obs-1",
       type: "observable",
@@ -213,8 +229,8 @@ describe("EntityPopover — wrong-match menu", () => {
     openWrongMenu(observable);
     fireEvent.click(screen.getByText(/Never capture/));
 
-    expect(window.confirm).toHaveBeenCalled();
-    expect(denyObservableMutate).toHaveBeenCalledWith("obs-1", expect.anything());
+    expect(confirmDialogMock).toHaveBeenCalled();
+    await waitFor(() => expect(denyObservableMutate).toHaveBeenCalledWith("obs-1", expect.anything()));
   });
 
   it("hides the tombstone rung from a regular analyst on observables", () => {

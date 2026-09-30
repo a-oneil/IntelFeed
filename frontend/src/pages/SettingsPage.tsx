@@ -24,6 +24,7 @@ import styles from "./SettingsPage.module.css";
 import { Chip, MobileNavSheet, RailToggle } from "@/components/primitives";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { useRailWidth } from "@/hooks/useRailWidth";
+import { confirmDialog } from "@/utils/dialog";
 
 /* Chip tints for automation-log statuses — status categories, not entity
    types, so they stay literals (see the --entity-* aliasing rule). */
@@ -1289,8 +1290,15 @@ function AutomationLogsPanel() {
           {logsTotal > 0 && (
             <button
               className={styles.logToolbarBtn}
-              onClick={() => {
-                if (confirm("Clear all execution logs? This cannot be undone.")) {
+              onClick={async () => {
+                if (
+                  await confirmDialog({
+                    title: "Clear execution logs",
+                    message: "Clear all execution logs? This cannot be undone.",
+                    confirmLabel: "Clear logs",
+                    destructive: true,
+                  })
+                ) {
                   clearLogs.mutate(undefined, {
                     onSuccess: () => {
                       setExpandedLogs(new Set());
