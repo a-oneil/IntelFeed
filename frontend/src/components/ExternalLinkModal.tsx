@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
 import { useExternalLinkSettings } from "@/hooks/useExternalLinkSettings";
 import { useExternalLinkStore } from "@/stores/externalLinkStore";
-import type { ExternalLinkInfo } from "@/utils/externalLinks";
+import { isAlarming, type ExternalLinkInfo } from "@/utils/externalLinks";
 import { defangObservable } from "@/utils/observables";
 
 import styles from "./ExternalLinkModal.module.css";
@@ -58,7 +58,7 @@ export function ExternalLinkModal({ info }: { info: ExternalLinkInfo }) {
 
   // Trusting a host from a link that is lying about it would be a strange thing
   // to offer, and wouldn't skip the prompt next time anyway.
-  const canRemember = info.mismatch === null && !info.notes.some((n) => n.id === "userinfo");
+  const canRemember = !isAlarming(info.mismatch) && !info.notes.some((n) => n.id === "userinfo");
 
   const open = () => {
     // Navigate first, synchronously: awaiting a network save before window.open
@@ -98,11 +98,19 @@ export function ExternalLinkModal({ info }: { info: ExternalLinkInfo }) {
           {info.host}
         </div>
 
-        {info.mismatch && (
+        {info.mismatch && isAlarming(info.mismatch) && (
           <div className={styles.danger} role="alert">
             <strong>The link text and destination don&apos;t match.</strong> The text names{" "}
             <code>{info.mismatch.claimedHost}</code>, but the link goes to{" "}
             <code>{info.mismatch.actualHost}</code>.
+          </div>
+        )}
+
+        {info.mismatch && !isAlarming(info.mismatch) && (
+          <div className={styles.warning}>
+            The link text names <code>{info.mismatch.claimedHost}</code>, but the link goes to{" "}
+            <code>{info.mismatch.actualHost}</code>. The URL mentions{" "}
+            <code>{info.mismatch.claimedHost}</code>, so this may be a lookup page for it.
           </div>
         )}
 

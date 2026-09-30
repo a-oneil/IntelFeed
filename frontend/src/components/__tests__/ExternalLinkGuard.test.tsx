@@ -144,6 +144,16 @@ describe("ExternalLinkGuard", () => {
     expect(alert).toHaveTextContent("evil.example");
   });
 
+  it("shows a lookup-style link as a note, not the red alarm", () => {
+    renderPage('<a href="https://decryptads.com/publisher/armytimes.com">armytimes.com</a>');
+    fireEvent.click(screen.getByText("armytimes.com"));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("dialog")).toHaveTextContent("may be a lookup page");
+    // Not an alarm, so trusting the host is still on offer.
+    expect(screen.getByRole("checkbox")).toBeInTheDocument();
+  });
+
   it("closes on Cancel and on Escape without navigating", () => {
     const open = vi.spyOn(window, "open").mockReturnValue(null);
     renderPage(EVIL);

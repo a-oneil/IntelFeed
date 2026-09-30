@@ -47,10 +47,24 @@ const URL_SHORTENERS = new Set([
   "lnkd.in",
   "tiny.cc",
   "rb.gy",
+  "hubs.li",
+  "feedproxy.google.com",
+  "l.facebook.com",
+  "safelinks.protection.outlook.com",
 ]);
 
-/** Trailing "extensions" that read like a host but are file names in prose. */
-const NOT_A_TLD = new Set(["js", "ts", "jsx", "tsx", "py", "rb", "md", "sh", "go", "cs", "ps1", "json"]);
+/**
+ * Trailing "extensions" that read like a host but are file names in prose
+ * (`ads.txt`, `msimg32.dll`) — common in incident write-ups. Real TLDs that
+ * double as extensions and get abused in phishing (.zip, .mov) are left out on
+ * purpose, as is anything else that could be a genuine host.
+ */
+const NOT_A_TLD = new Set([
+  "js", "ts", "jsx", "tsx", "py", "rb", "md", "sh", "go", "cs", "ps1", "json",
+  "txt", "dll", "exe", "sys", "bat", "vbs", "jar", "doc", "docx", "xls", "xlsx", "ppt",
+  "pptx", "pdf", "csv", "log", "ini", "cfg", "conf", "yml", "yaml", "xml", "html", "htm",
+  "php", "asp", "aspx", "jsp", "so", "lnk", "msi", "iso", "tmp", "bin", "dat", "sql",
+]);
 
 const WEB_PROTOCOLS = new Set(["http:", "https:", "ftp:", "ftps:"]);
 
@@ -66,6 +80,14 @@ export interface LinkMismatch {
   claimedHost: string;
   /** Host the link actually goes to. */
   actualHost: string;
+  /**
+   * The claimed host also appears in the link's own path/query — the shape of a
+   * lookup page *about* that host (`evil.com` linking to
+   * `virustotal.com/gui/domain/evil.com`), which is how analysts routinely link
+   * indicators. Still shown, but as a note rather than an alarm: an attacker can
+   * copy the host into a path too, so it must not silence the warning entirely.
+   */
+  related: boolean;
 }
 
 export interface ExternalLinkInfo {
@@ -161,7 +183,11 @@ function stripPunctuation(token: string): string {
  * host only counts when it is the whole text, to keep prose like "see
  * example.com for details" from tripping it.
  */
-export function findTextMismatch(text: string, actualHost: string): LinkMismatch | null {
+export function findTextMismatch(
+  text: string,
+  actualHost: string,
+  hrefTail = "",
+): LinkMismatch | null {
   const tokens = text.split(/\s+/).map(stripPunctuation).filter(Boolean);
   for (const token of tokens) {
     const match = HOST_TOKEN.exec(token);
@@ -182,9 +208,20 @@ export function findTextMismatch(text: string, actualHost: string): LinkMismatch
     const a = normalizeHost(claimed);
     const b = normalizeHost(actualHost);
     if (a === b || hostMatchesDomain(a, b) || hostMatchesDomain(b, a)) return null;
-    return { claimedHost: claimed, actualHost };
+    let tail = hrefTail;
+    try {
+      tail = decodeURIComponent(hrefTail);
+    } catch {
+      // malformed escapes: match against the raw text
+    }
+    return { claimedHost: claimed, actualHost, related: tail.toLowerCase().includes(a) };
   }
   return null;
+}
+
+/** A mismatch worth stopping a trusted host for: text names a host the URL never mentions. */
+export function isAlarming(mismatch: LinkMismatch | null): boolean {
+  return mismatch !== null && !mismatch.related;
 }
 
 export function collectNotes(url: URL): LinkNote[] {
@@ -256,7 +293,7 @@ export function evaluateLinkClick(
 
   const text = collapseText(anchor);
   const host = url.hostname.toLowerCase();
-  const mismatch = findTextMismatch(text, host);
+  const mismatch = findTextMismatch(text, host, url.pathname + url.search + url.hash);
   const notes = collectNotes(url);
 
   // A trusted host skips the prompt — unless the link is lying about where it
@@ -264,7 +301,7 @@ export function evaluateLinkClick(
   // shortener, IDN) describe the host itself, which the user already chose to
   // trust, so they don't force a prompt; a user-info section does, because it
   // is a disguise on this particular link rather than a property of the host.
-  const disguised = mismatch !== null || notes.some((n) => n.id === "userinfo");
+  const disguised = isAlarming(mismatch) || notes.some((n) => n.id === "userinfo");
   if (!disguised && isTrustedHost(host, ctx.trustedHosts, ctx.feedHosts)) return null;
 
   return { url: url.href, host, text, newTab: opensNewTab(anchor, event), mismatch, notes };

@@ -35,7 +35,9 @@ default sort order, date format.
 **External links** — a confirmation before you follow a link off IntelFeed. It
 shows the destination host in large type, the full URL in a block you can copy
 (or copy defanged), and a red banner when the link's text names one site but the
-link goes to another. That mismatch, a shortener, a raw IP, an internationalised
+link goes to another. (If the destination's URL itself mentions the site — an
+indicator domain linked to a VirusTotal or urlscan page about it — you get a
+quieter note instead of the red banner.) That mismatch, a shortener, a raw IP, an internationalised
 domain or a `user@host` URL are the things worth a second look in a phishing
 write-up. The scope is a choice: *links in article content* (the default —
 feed-supplied text is the untrusted part), *all external links*, or *off*.

@@ -6,6 +6,7 @@ import {
   findTextMismatch,
   hostMatchesDomain,
   hostsFromUrls,
+  isAlarming,
   isTrustedHost,
   parseMode,
   parseTrustedHosts,
@@ -109,6 +110,7 @@ describe("findTextMismatch", () => {
     expect(findTextMismatch("https://microsoft.com/security/report", "evil.example")).toEqual({
       claimedHost: "microsoft.com",
       actualHost: "evil.example",
+      related: false,
     });
     expect(findTextMismatch("microsoft.com", "evil.example")).not.toBeNull();
   });
@@ -139,6 +141,37 @@ describe("findTextMismatch", () => {
   it("does not mistake file-like names for hosts", () => {
     expect(findTextMismatch("Node.js", "nodejs.org")).toBeNull();
     expect(findTextMismatch("setup.py", "github.com")).toBeNull();
+  });
+
+  // Regression: every one of these fired the red banner on real feed content
+  // (Krebs, The DFIR Report) — file names in prose and indicator domains linked to
+  // a lookup page.
+  it("does not mistake common file names for hosts", () => {
+    for (const name of ["ads.txt", "app-ads.txt", "msimg32.dll", "setup.exe", "report.pdf", "notes.docx"]) {
+      expect(findTextMismatch(name, "example.com"), name).toBeNull();
+    }
+  });
+
+  it("still catches abusable real TLDs used as file-looking text", () => {
+    expect(findTextMismatch("invoice.zip", "evil.example")).not.toBeNull();
+  });
+
+  it("marks a domain linked to a lookup page about it as related, not alarming", () => {
+    const m = findTextMismatch("armytimes.com", "decryptads.com", "/publisher/armytimes.com");
+    expect(m).toEqual({ claimedHost: "armytimes.com", actualHost: "decryptads.com", related: true });
+    expect(isAlarming(m)).toBe(false);
+
+    const vt = findTextMismatch("evil.example", "www.virustotal.com", "/gui/domain/evil.example/detection");
+    expect(vt?.related).toBe(true);
+
+    const encoded = findTextMismatch("evil.example", "urlscan.io", "/search/", );
+    expect(encoded?.related).toBe(false);
+    expect(findTextMismatch("evil.example", "x.example", "/q%3Fd%3Devil.example")?.related).toBe(true);
+  });
+
+  it("treats a claimed host missing from the URL as alarming", () => {
+    const m = findTextMismatch("https://microsoft.com/security", "evil.example", "/login");
+    expect(isAlarming(m)).toBe(true);
   });
 
   it("tolerates trailing punctuation around the URL", () => {
@@ -209,7 +242,26 @@ describe("evaluateLinkClick", () => {
     const a = anchor('<a href="https://attack.mitre.org/x">https://paypal.com/login</a>', true);
     const info = evaluateLinkClick(a, click(), ctx())!;
     expect(info).not.toBeNull();
-    expect(info.mismatch).toEqual({ claimedHost: "paypal.com", actualHost: "attack.mitre.org" });
+    expect(info.mismatch).toEqual({
+      claimedHost: "paypal.com",
+      actualHost: "attack.mitre.org",
+      related: false,
+    });
+  });
+
+  it("lets a trusted host through for a lookup-style link, but not an unexplained one", () => {
+    const lookup = anchor('<a href="https://decryptads.com/publisher/armytimes.com">armytimes.com</a>', true);
+    expect(evaluateLinkClick(lookup, click(), ctx({ trustedHosts: ["decryptads.com"] }))).toBeNull();
+    // Untrusted, the same link still prompts — with the mismatch recorded as related.
+    const info = evaluateLinkClick(lookup, click(), ctx())!;
+    expect(info.mismatch?.related).toBe(true);
+  });
+
+  it("notes the common redirect hosts as shorteners", () => {
+    for (const host of ["hubs.li", "feedproxy.google.com", "safelinks.protection.outlook.com"]) {
+      const a = anchor(`<a href="https://${host}/abc">x</a>`, true);
+      expect(evaluateLinkClick(a, click(), ctx())!.notes.map((n) => n.id), host).toEqual(["shortener"]);
+    }
   });
 
   it("still stops a trusted host when the URL carries user-info", () => {
