@@ -73,7 +73,7 @@ Each workflow starts with a `changes` job that diffs against the PR base and gat
 
 Run the same checks locally first — `ruff check` + `ruff format --check` + `pytest` (backend), `pnpm lint` + `pnpm build` + `pnpm test` (frontend). Playwright E2E and `pnpm lint:css` are deliberately not in CI (`lint:css` has a stale suppressions baseline — re-run `pnpm lint:css:baseline` before wiring it up).
 
-**Backend passes on Python 3.12, 3.13 and 3.14.** The images ship 3.12; the pytest job runs all three, because both version bugs found so far were stdlib behaviour changes that only appeared off the pinned version (`urllib.robotparser` group layout in 3.13, `fnmatch.translate`'s anchor spelling in 3.14).
+**Backend passes on Python 3.12, 3.13 and 3.14.** The images ship 3.14; the pytest job runs all three, because both version bugs found so far were stdlib behaviour changes that only appeared off the pinned version (`urllib.robotparser` group layout in 3.13, `fnmatch.translate`'s anchor spelling in 3.14).
 
 **Security gates.** `gitleaks` scans every PR against `.gitleaks.toml`; that allowlist silences individual placeholders (example JWTs, `YOUR_TOKEN`, UUID entity ids), never whole files or rules — keep it that way or it stops catching anything. `pip-audit` resolves the backend tree fresh and blocks on any advisory except those in its documented `--ignore-vuln` list (today: `ecdsa`, unfixable upstream, reached only via JWT algorithms IntelFeed doesn't use). `pnpm audit --prod` blocks on high-severity advisories in shipped dependencies; dev-tree advisories are reported in the job summary but don't gate. Dependabot (`.github/dependabot.yml`) opens grouped weekly upgrade PRs.
 
