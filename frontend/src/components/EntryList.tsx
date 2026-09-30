@@ -1072,6 +1072,12 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
         target?.isContentEditable
       ) return;
 
+      // Enter on a focused link means "follow it". Without this the shortcut
+      // below preventDefault()s the keypress and opens the selected entry's own
+      // URL instead — the link never fires, and neither does the external-link
+      // confirmation that guards it.
+      if (e.key === "Enter" && target?.closest("a[href]")) return;
+
       // Escape clears bulk selection
       if (e.key === "Escape" && bulkMode) {
         e.preventDefault();
