@@ -8,6 +8,17 @@ analysts and detection engineers to consume threat feeds, extract TTPs/CVEs, cor
 generate detection rules.
 </p>
 
+<p align="center">
+  <a href="https://github.com/a-oneil/IntelFeed/actions/workflows/backend.yml"><img src="https://github.com/a-oneil/IntelFeed/actions/workflows/backend.yml/badge.svg?branch=main&event=push" alt="Backend"></a>
+  <a href="https://github.com/a-oneil/IntelFeed/actions/workflows/frontend.yml"><img src="https://github.com/a-oneil/IntelFeed/actions/workflows/frontend.yml/badge.svg?branch=main&event=push" alt="Frontend"></a>
+  <a href="https://github.com/a-oneil/IntelFeed/actions/workflows/docker.yml"><img src="https://github.com/a-oneil/IntelFeed/actions/workflows/docker.yml/badge.svg?branch=main&event=push" alt="Docker images"></a>
+  <a href="https://github.com/a-oneil/IntelFeed/actions/workflows/security.yml"><img src="https://github.com/a-oneil/IntelFeed/actions/workflows/security.yml/badge.svg?branch=main&event=push" alt="Security"></a>
+</p>
+
+<p align="center">
+  <img src="docs/assets/screenshots/reader.png" alt="The IntelFeed reader: today's articles in magazine view, with CVE and detection-opportunity chips inline" width="900">
+</p>
+
 ---
 
 ## What it is
@@ -70,6 +81,43 @@ your collection.
 - Configurable dashboards and widgets, a three-panel reader, runtime-switchable themes
 - Export to CSV and Markdown; outbound observable feeds (EDL blocklists, SIEM lookups, TAXII 2.1); token-gated public RSS re-publishing; shareable read-only links
 - REST API covering every feature, plus a zero-dependency CLI (170 tools) for scripting and agents
+
+## What it looks like
+
+**Read, and keep what you read.** Open an article and the entities it mentions are already linked —
+actors, malware, CVEs, techniques — with an extracted summary above the text.
+
+![An open article in the reader, with autolinked entities underlined in the body and an AI-written summary at the top](docs/assets/screenshots/reader-article.png)
+
+**A queue that ranks stories, not outlets.** The Priority Queue folds duplicate coverage of the same
+event into one story card, scored by how much it probably matters to you.
+
+![The Priority Queue showing story cards, each with a score, outlet and article counts, and entity chips](docs/assets/screenshots/priority-queue.png)
+
+**Entity profiles that accumulate.** Every article that mentions an actor feeds its profile: claims
+ranked by evidence, a coverage sparkline, detection gaps, and the reading that matters.
+
+![The Scattered Spider threat actor profile, showing aliases, best-evidenced claims, an AI assessment, and a detection-gap panel](docs/assets/screenshots/entity-profile.png)
+
+**A board of what's actually moving.** Threats ranks recent activity by attention and new tradecraft,
+with a one-click path from a threat to a drafted detection rule.
+
+![The Threats board listing ranked threats with story and outlet counts and draft-detection-rule actions](docs/assets/screenshots/threats-board.png)
+
+**One search box over everything.** Articles and entities in one result set, with a facet rail to
+narrow by type, malware family, actor, or detection rule.
+
+![Search results for "ransomware" showing direct entity matches, grouped threat actors and malware, and a faceted filter rail](docs/assets/screenshots/search.png)
+
+**Detection content as a first-class library.** Rules across nine formats, filterable by telemetry you
+actually have, with coverage gaps called out.
+
+![The Rules Library listing Sigma and SPL detection rules with severity, source CVE, and telemetry columns](docs/assets/screenshots/detection-rules.png)
+
+**A dashboard you arrange.** Widgets for triage flow, the morning briefing, under-the-radar items, and
+entity counts, on a grid you lay out yourself.
+
+![The IntelFeed dashboard with overview stat tiles, a morning briefing panel, a triage flow chart, and an under-the-radar list](docs/assets/screenshots/dashboard.png)
 
 ## Who it's for
 

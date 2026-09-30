@@ -3,6 +3,10 @@
 The reading side of the app: three panes, a keyboard, and a queue you need to
 get to the bottom of.
 
+![The reader with an article open: entity links underlined in the body, an extracted summary above it, and the entry list beside it](../assets/screenshots/reader-article.png)
+
+*An article open in the reader. Entities mentioned in the body are already linked, and the summary above the text is generated at ingest.*
+
 ## The layout
 
 ```

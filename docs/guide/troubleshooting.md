@@ -2,6 +2,10 @@
 
 Ordered by how often it comes up.
 
+![The Engine console showing per-entry pipeline stages across translate, autolink, observables, extraction, correlation and scoring](../assets/screenshots/engine.png)
+
+*The Engine console shows what each pipeline stage decided for every entry.*
+
 ## A feed stopped producing
 
 Feeds die quietly, and "no new articles" looks exactly like "a quiet week".

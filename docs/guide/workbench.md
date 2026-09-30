@@ -6,6 +6,10 @@ today.
 
 The nav opens with **Dashboard** and **Reports**, then groups into three blocks: Detection, Entities, Intelligence.
 
+![The Threats board listing ranked threats with story and outlet counts and draft-detection-rule actions](../assets/screenshots/threats-board.png)
+
+*The Threats board ranks recent activity by attention and new tradecraft.*
+
 ## Dashboard
 
 The workbench landing page, and a customisable widget board.
@@ -104,3 +108,7 @@ extraction producing junk, enrichment rate-limited — and where enrichment
 sources and their API keys are configured. Day to day, most users never open it.
 Every setting it exposes is catalogued in
 [engine-settings.md](../engine-settings.md).
+
+![The Glossary listing security terms with category and maturity columns](../assets/screenshots/glossary.png)
+
+*The Glossary maps terms to the articles that use them, so a term is a starting point for a search.*

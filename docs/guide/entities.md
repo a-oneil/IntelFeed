@@ -9,7 +9,16 @@ Every article that arrives is scanned against a dictionary of known entity names
 and aliases. Matches become links in the article body and rows in the database,
 which is what makes a profile page accumulate.
 
+![The Threat Actors table in the Workbench, with columns for aliases, country, motivation, sectors, activity and first seen](../assets/screenshots/entities-list.png)
+
+*Every entity type gets the same table: filterable per column, with the columns you pick.*
+
 ## Profile pages
+
+![The Scattered Spider profile page showing aliases, best-evidenced claims, an AI assessment, and a detection-gap panel](../assets/screenshots/entity-profile.png)
+
+*A profile page is assembled from every article that mentioned the entity.*
+
 
 Click any linked name in an article, or browse by type under **Workbench →
 Entities**. Every type shares the same page shape:

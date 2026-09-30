@@ -3,6 +3,10 @@
 Turning an article into something that actually fires in your SIEM, and keeping
 what you write.
 
+![The Rules Library listing Sigma and SPL rules with severity, source CVE, and telemetry columns](../assets/screenshots/detection-rules.png)
+
+*The rule library, filterable by the telemetry you actually collect.*
+
 ## Formats
 
 Nine, all validated for syntax when you save:

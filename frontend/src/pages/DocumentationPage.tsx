@@ -11,6 +11,7 @@ import { useIsMobile } from "@/hooks/useMediaQuery";
 import { useDocumentationIndex, useDocumentationPage } from "@/hooks/useDocumentation";
 import { DocsCopilot } from "@/components/DocsCopilot";
 import { useUIStore } from "@/stores/uiStore";
+import { useAuthStore } from "@/stores/authStore";
 import type { DocumentationPageSummary } from "@/hooks/useDocumentation";
 import styles from "./DocumentationPage.module.css";
 
@@ -80,6 +81,36 @@ function resolveHref(href: string | undefined, currentSlug: string): string | nu
   // `../readme.md`, `../setup.md` and friends escape docs/ — not ours to serve.
   if (!target || target.startsWith("..")) return null;
   return `/documentation/${target}${hash ? `#${hash}` : ""}`;
+}
+
+/**
+ * Map a relative image in the markdown to the API route that serves it.
+ *
+ * The docs render from raw markdown, so `../assets/screenshots/x.png` would
+ * otherwise resolve against the SPA route and 404. Normalise it against the
+ * current slug the way resolveHref does, keep it inside docs/assets/, and point
+ * it at /api/documentation/assets/. That route is auth-gated and an <img> tag
+ * cannot set a header, so the access token rides in the query string — the same
+ * bargain EntryReader makes for /api/telegram-media.
+ */
+function resolveAssetSrc(src: string | undefined, currentSlug: string): string | undefined {
+  if (!src) return undefined;
+  if (/^[a-z]+:/i.test(src) || src.startsWith("//") || src.startsWith("/")) return src;
+
+  const dir = currentSlug.includes("/") ? currentSlug.slice(0, currentSlug.lastIndexOf("/")) : "";
+  const stack: string[] = [];
+  for (const part of (dir ? `${dir}/${src}` : src).split("/")) {
+    if (part === "." || part === "") continue;
+    if (part === "..") stack.pop();
+    else stack.push(part);
+  }
+  const target = stack.join("/");
+  // Anything that climbs out of docs/assets/ is not ours to serve.
+  if (!target.startsWith("assets/")) return undefined;
+
+  const url = `/api/documentation/${target}`;
+  const accessToken = useAuthStore.getState().accessToken;
+  return accessToken ? `${url}?token=${encodeURIComponent(accessToken)}` : url;
 }
 
 function groupBySection(pages: DocumentationPageSummary[]) {
@@ -236,6 +267,11 @@ export default function DocumentationPage() {
             {children}
           </a>
         );
+      },
+      img({ src, alt, ...props }: React.ComponentPropsWithoutRef<"img">) {
+        const resolved = resolveAssetSrc(typeof src === "string" ? src : undefined, slug);
+        if (!resolved) return null;
+        return <img src={resolved} alt={alt ?? ""} loading="lazy" {...props} />;
       },
       h2: ({ children, ...props }: React.ComponentPropsWithoutRef<"h2">) => (
         <h2 id={headingId(children)} {...props}>
