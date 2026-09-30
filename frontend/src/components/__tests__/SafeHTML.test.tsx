@@ -50,4 +50,21 @@ describe("SafeHTML", () => {
     expect(link).toHaveAttribute("href", "https://example.com");
     expect(screen.getByText("Click here")).toBeInTheDocument();
   });
+
+  it("strips image maps and areas that can navigate without an anchor", () => {
+    const { container } = render(
+      <SafeHTML html='<img usemap="#links"><map name="links"><area href="https://evil.example/"></map>' />
+    );
+    expect(container.querySelector("map")).toBeNull();
+    expect(container.querySelector("area")).toBeNull();
+  });
+
+  it("strips forms and controls that can submit outside the link guard", () => {
+    const { container } = render(
+      <SafeHTML html='<form action="https://evil.example/"><input name="q"><select><option>Go</option></select><textarea>text</textarea><button>Submit</button></form>' />
+    );
+    for (const tag of ["form", "input", "select", "option", "textarea", "button"]) {
+      expect(container.querySelector(tag), tag).toBeNull();
+    }
+  });
 });

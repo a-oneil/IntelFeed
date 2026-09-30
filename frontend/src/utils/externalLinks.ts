@@ -89,11 +89,8 @@ export interface LinkMismatch {
   /** Host the link actually goes to. */
   actualHost: string;
   /**
-   * The claimed host also appears in the link's own path/query — the shape of a
-   * lookup page *about* that host (`evil.com` linking to
-   * `virustotal.com/gui/domain/evil.com`), which is how analysts routinely link
-   * indicators. Still shown, but as a note rather than an alarm: an attacker can
-   * copy the host into a path too, so it must not silence the warning entirely.
+   * The claimed host appears in the destination path/query, or the hosts have
+   * a parent/subdomain relationship. Still shown as a note when untrusted.
    */
   related: boolean;
 }
@@ -115,8 +112,6 @@ export interface InterceptContext {
   mode: ExternalLinkMode;
   /** User-trusted hosts, matched exactly (ignoring a leading "www."). */
   trustedHosts: readonly string[];
-  /** Hosts of subscribed feed URLs, matched exactly like `trustedHosts`. */
-  feedHosts: readonly string[];
   /** Base for resolving relative hrefs. Defaults to the document's base URI. */
   baseUri?: string;
 }
@@ -133,17 +128,13 @@ export function hostMatchesDomain(host: string, domain: string): boolean {
 export function isTrustedHost(
   host: string,
   trustedHosts: readonly string[],
-  feedHosts: readonly string[],
 ): boolean {
   const h = normalizeHost(host);
   if (BUILT_IN_TRUSTED_DOMAINS.some((d) => hostMatchesDomain(h, d))) return true;
-  // User and feed entries are exact on purpose: "trust example.com" must not
+  // User entries are exact on purpose: "trust example.com" must not
   // silently trust every subdomain, and without a public-suffix list there is
   // no safe way to widen it.
-  return (
-    trustedHosts.some((t) => normalizeHost(t) === h) ||
-    feedHosts.some((f) => normalizeHost(f) === h)
-  );
+  return trustedHosts.some((t) => normalizeHost(t) === h);
 }
 
 /** Clean a persisted value into a bounded, deduped, lowercase host list. */
@@ -161,20 +152,6 @@ export function parseTrustedHosts(raw: unknown): string[] {
 
 export function parseMode(raw: unknown): ExternalLinkMode {
   return raw === "off" || raw === "article" || raw === "all" ? raw : DEFAULT_EXTERNAL_LINK_MODE;
-}
-
-/** Host list of a feed's own URLs — the sites the user chose to follow. */
-export function hostsFromUrls(urls: readonly (string | null | undefined)[]): string[] {
-  const hosts = new Set<string>();
-  for (const u of urls) {
-    if (!u) continue;
-    try {
-      hosts.add(new URL(u).hostname.toLowerCase());
-    } catch {
-      // not a URL — skip
-    }
-  }
-  return [...hosts];
 }
 
 const HOST_TOKEN =
@@ -215,8 +192,6 @@ export function findTextMismatch(
     }
     const a = normalizeHost(claimed);
     const b = normalizeHost(actualHost);
-    // Parent and child hosts are not interchangeable on shared hosting
-    // services (for example github.io and attacker.github.io).
     if (a === b) return null;
     let tail = hrefTail;
     try {
@@ -224,7 +199,8 @@ export function findTextMismatch(
     } catch {
       // malformed escapes: match against the raw text
     }
-    return { claimedHost: claimed, actualHost, related: tail.toLowerCase().includes(a) };
+    const isSubdomainRel = hostMatchesDomain(b, a) || hostMatchesDomain(a, b);
+    return { claimedHost: claimed, actualHost, related: isSubdomainRel || tail.toLowerCase().includes(a) };
   }
   return null;
 }
@@ -334,11 +310,11 @@ function evaluateUrl(
   const mismatch = findTextMismatch(opts.text, host, url.pathname + url.search + url.hash);
   const notes = collectNotes(url, opts.text);
 
-  // A trusted host skips the prompt only when the link text agrees with it.
+  // A trusted host skips the prompt unless the link has an alarming mismatch.
   // Notes about IPs, shorteners and IDNs describe the host itself; user-info
   // and HTTPS downgrades describe this particular link and still force a prompt.
-  const disguised = mismatch !== null || notes.some((n) => n.id === "userinfo" || n.id === "downgrade");
-  if (!disguised && isTrustedHost(host, ctx.trustedHosts, ctx.feedHosts)) return null;
+  const disguised = isAlarming(mismatch) || notes.some((n) => n.id === "userinfo" || n.id === "downgrade");
+  if (!disguised && isTrustedHost(host, ctx.trustedHosts)) return null;
 
   return { url: url.href, host, text: opts.text, newTab: opts.newTab, mismatch, notes };
 }
@@ -364,8 +340,7 @@ export function evaluateLinkClick(
 /**
  * Same decision for a URL the app is about to open from code (the `o` shortcut,
  * a widget row) rather than from a link click. These URLs come from feeds, so
- * they count as untrusted in every scope except "off". For an entry that sits
- * on its own feed's site the feed-host allowlist means this never prompts.
+ * they count as untrusted in every scope except "off".
  */
 export function evaluateProgrammaticOpen(
   rawUrl: string,

@@ -50,7 +50,6 @@ import { ToolbarDropdown, DropdownItem } from "@/components/ToolbarDropdown";
 import { DEFAULT_TABLE_LAYOUTS } from "@/components/table/defaultLayouts";
 import { adjacentEntryId } from "@/utils/entryNavigation";
 import { openExternalUrl } from "@/utils/openExternal";
-import { isExternalWebUrl } from "@/utils/externalLinks";
 
 function stripHtml(html: string): string {
   const doc = new DOMParser().parseFromString(html, "text/html");
@@ -1074,14 +1073,10 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
         target?.isContentEditable
       ) return;
 
-      // Enter on a focused OUTSIDE link means "follow it". Without this the
-      // shortcut below preventDefault()s the keypress and opens the selected
-      // entry's own URL instead — the link never fires, and neither does the
-      // external-link confirmation that guards it. Links within the app are
-      // left exactly as they were.
+      // Enter on a focused link follows that link. Otherwise the shortcut
+      // below would open the selected entry's URL instead.
       if (e.key === "Enter") {
-        const link = target?.closest("a[href]");
-        if (link instanceof HTMLAnchorElement && isExternalWebUrl(link.getAttribute("href") ?? "")) return;
+        if (target?.closest("a[href]")) return;
       }
 
       // Escape clears bulk selection

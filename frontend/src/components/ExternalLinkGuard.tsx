@@ -1,5 +1,4 @@
 import { useEffect } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { useExternalLinkStore } from "@/stores/externalLinkStore";
 import { evaluateLinkClick } from "@/utils/externalLinks";
 import { currentInterceptContext } from "@/utils/openExternal";
@@ -22,7 +21,6 @@ import { ExternalLinkModal } from "@/components/ExternalLinkModal";
  * changing the setting takes effect without re-subscribing.
  */
 export function ExternalLinkGuard() {
-  const queryClient = useQueryClient();
   const pending = useExternalLinkStore((s) => s.pending);
 
   useEffect(() => {
@@ -34,7 +32,7 @@ export function ExternalLinkGuard() {
       const anchor = event.target.closest("a[href]");
       if (!(anchor instanceof HTMLAnchorElement)) return;
 
-      const info = evaluateLinkClick(anchor, event, currentInterceptContext(queryClient));
+      const info = evaluateLinkClick(anchor, event, currentInterceptContext());
       if (!info) return;
 
       event.preventDefault();
@@ -48,7 +46,7 @@ export function ExternalLinkGuard() {
       document.removeEventListener("click", handler, true);
       document.removeEventListener("auxclick", handler, true);
     };
-  }, [queryClient]);
+  }, []);
 
   return pending ? <ExternalLinkModal info={pending} /> : null;
 }

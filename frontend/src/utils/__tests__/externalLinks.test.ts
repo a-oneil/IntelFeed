@@ -5,7 +5,6 @@ import {
   evaluateLinkClick,
   findTextMismatch,
   hostMatchesDomain,
-  hostsFromUrls,
   isAlarming,
   isExternalWebUrl,
   isTrustedHost,
@@ -22,7 +21,6 @@ function ctx(overrides: Partial<InterceptContext> = {}): InterceptContext {
     baseUri: `${ORIGIN}/`,
     mode: "all",
     trustedHosts: [],
-    feedHosts: [],
     ...overrides,
   };
 }
@@ -55,28 +53,27 @@ describe("hostMatchesDomain", () => {
 describe("isTrustedHost", () => {
   it("trusts the built-in registries and their subdomains", () => {
     expect(BUILT_IN_TRUSTED_DOMAINS.length).toBeGreaterThan(0);
-    expect(isTrustedHost("attack.mitre.org", [], [])).toBe(true);
-    expect(isTrustedHost("nvd.nist.gov", [], [])).toBe(true);
-    expect(isTrustedHost("www.cisa.gov", [], [])).toBe(true);
-    expect(isTrustedHost("cve.org", [], [])).toBe(true);
+    expect(isTrustedHost("attack.mitre.org", [])).toBe(true);
+    expect(isTrustedHost("nvd.nist.gov", [])).toBe(true);
+    expect(isTrustedHost("www.cisa.gov", [])).toBe(true);
+    expect(isTrustedHost("cve.org", [])).toBe(true);
   });
 
   it("does not trust lookalikes of the built-ins", () => {
-    expect(isTrustedHost("mitre.org.evil.com", [], [])).toBe(false);
-    expect(isTrustedHost("notmitre.org", [], [])).toBe(false);
+    expect(isTrustedHost("mitre.org.evil.com", [])).toBe(false);
+    expect(isTrustedHost("notmitre.org", [])).toBe(false);
   });
 
-  it("matches user and feed hosts exactly, ignoring www", () => {
-    expect(isTrustedHost("example.com", ["example.com"], [])).toBe(true);
-    expect(isTrustedHost("www.example.com", ["example.com"], [])).toBe(true);
-    expect(isTrustedHost("example.com", [], ["www.example.com"])).toBe(true);
+  it("matches user-trusted hosts exactly, ignoring www", () => {
+    expect(isTrustedHost("example.com", ["example.com"])).toBe(true);
+    expect(isTrustedHost("www.example.com", ["example.com"])).toBe(true);
     // Trusting a host must not widen to its subdomains.
-    expect(isTrustedHost("blog.example.com", ["example.com"], [])).toBe(false);
-    expect(isTrustedHost("attacker.github.io", ["github.io"], [])).toBe(false);
+    expect(isTrustedHost("blog.example.com", ["example.com"])).toBe(false);
+    expect(isTrustedHost("attacker.github.io", ["github.io"])).toBe(false);
   });
 });
 
-describe("parseTrustedHosts / parseMode / hostsFromUrls", () => {
+describe("parseTrustedHosts / parseMode", () => {
   it("cleans a persisted list", () => {
     expect(parseTrustedHosts([" Example.COM ", "example.com", 5, null, "", "www.foo.org"])).toEqual([
       "example.com",
@@ -99,11 +96,6 @@ describe("parseTrustedHosts / parseMode / hostsFromUrls", () => {
     expect(parseMode(undefined)).toBe("article");
   });
 
-  it("extracts hosts and skips junk", () => {
-    expect(hostsFromUrls(["https://Blog.Example.com/feed.xml", null, "not a url", undefined])).toEqual([
-      "blog.example.com",
-    ]);
-  });
 });
 
 describe("findTextMismatch", () => {
@@ -129,10 +121,12 @@ describe("findTextMismatch", () => {
     expect(findTextMismatch("see example.com for details", "other.example")).toBeNull();
   });
 
-  it("accepts the same host with or without www but flags different subdomains", () => {
+  it("accepts the same host with or without www but notes different subdomains", () => {
     expect(findTextMismatch("microsoft.com", "www.microsoft.com")).toBeNull();
-    expect(findTextMismatch("learn.microsoft.com/docs", "microsoft.com")).not.toBeNull();
-    expect(findTextMismatch("github.io", "attacker.github.io")).not.toBeNull();
+    expect(findTextMismatch("learn.microsoft.com/docs", "microsoft.com")?.related).toBe(true);
+    expect(findTextMismatch("github.io", "attacker.github.io")?.related).toBe(true);
+    expect(findTextMismatch("any.run", "app.any.run")?.related).toBe(true);
+    expect(isAlarming(findTextMismatch("any.run", "app.any.run"))).toBe(false);
   });
 
   it("catches a Cyrillic lookalike in the text", () => {
@@ -229,13 +223,12 @@ describe("evaluateLinkClick", () => {
     expect(info.mismatch).toBeNull();
   });
 
-  it("lets built-in, user and feed hosts through", () => {
+  it("lets built-in and user-trusted hosts through", () => {
     const nvd = anchor('<a href="https://nvd.nist.gov/vuln/detail/CVE-2024-1">cve</a>', true);
     expect(evaluateLinkClick(nvd, click(), ctx())).toBeNull();
 
     const mine = anchor('<a href="https://blog.example.com/p">post</a>', true);
     expect(evaluateLinkClick(mine, click(), ctx({ trustedHosts: ["blog.example.com"] }))).toBeNull();
-    expect(evaluateLinkClick(mine, click(), ctx({ feedHosts: ["blog.example.com"] }))).toBeNull();
     expect(evaluateLinkClick(mine, click(), ctx())).not.toBeNull();
   });
 
@@ -250,10 +243,9 @@ describe("evaluateLinkClick", () => {
     });
   });
 
-  it("holds a trusted lookup-style link even when the claimed host appears in its path", () => {
+  it("lets a trusted lookup-style link through when the claimed host appears in its path", () => {
     const lookup = anchor('<a href="https://decryptads.com/publisher/armytimes.com">armytimes.com</a>', true);
-    const info = evaluateLinkClick(lookup, click(), ctx({ trustedHosts: ["decryptads.com"] }))!;
-    expect(info.mismatch?.related).toBe(true);
+    expect(evaluateLinkClick(lookup, click(), ctx({ trustedHosts: ["decryptads.com"] }))).toBeNull();
   });
 
   it("holds an HTTPS claim that actually points to HTTP on a trusted host", () => {

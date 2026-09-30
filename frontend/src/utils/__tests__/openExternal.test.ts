@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { QueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/stores/authStore";
 import { useExternalLinkStore } from "@/stores/externalLinkStore";
 import { clearAllSessionTrust } from "@/utils/sessionTrust";
@@ -20,7 +19,6 @@ const ctx = (over = {}) => ({
   baseUri: "https://intelfeed.example/",
   mode: "article" as const,
   trustedHosts: [] as string[],
-  feedHosts: [] as string[],
   ...over,
 });
 
@@ -33,14 +31,13 @@ describe("evaluateProgrammaticOpen", () => {
     expect(evaluateProgrammaticOpen("https://evil.example/x", ctx({ mode: "off" }))).toBeNull();
   });
 
-  it("lets an entry on its own feed's site straight through", () => {
-    const c = ctx({ feedHosts: ["krebsonsecurity.com"] });
-    expect(evaluateProgrammaticOpen("https://krebsonsecurity.com/2026/09/post/", c)).toBeNull();
+  it("holds an entry on its subscribed feed's site until the user trusts it", () => {
+    expect(evaluateProgrammaticOpen("https://krebsonsecurity.com/2026/09/post/", ctx())).not.toBeNull();
   });
 
-  it("still holds an entry whose URL points away from its feed's site", () => {
-    const c = ctx({ feedHosts: ["krebsonsecurity.com"] });
-    expect(evaluateProgrammaticOpen("https://evil.example/2026/09/post/", c)).not.toBeNull();
+  it("lets a user-trusted article host through", () => {
+    const c = ctx({ trustedHosts: ["krebsonsecurity.com"] });
+    expect(evaluateProgrammaticOpen("https://krebsonsecurity.com/2026/09/post/", c)).toBeNull();
   });
 
   it("ignores same-origin and non-web URLs", () => {
@@ -57,7 +54,7 @@ describe("evaluateProgrammaticOpen", () => {
 describe("openExternalUrl", () => {
   beforeEach(() => {
     clearAllSessionTrust();
-  sessionStorage.clear();
+    sessionStorage.clear();
     useAuthStore.setState({ accessToken: null, refreshToken: null, user: null });
     useExternalLinkStore.setState({ pending: null, sessionTrustedHosts: [] });
     queryClient.clear();
@@ -71,15 +68,15 @@ describe("openExternalUrl", () => {
     expect(useExternalLinkStore.getState().pending?.host).toBe("evil.example");
   });
 
-  it("opens straight away, with the caller's features, when the host is a feed host", () => {
+  it("holds a feed article even when its host is in the feed cache", () => {
     queryClient.setQueryData(["feeds"], {
       items: [{ url: "https://krebsonsecurity.com/feed/", site_url: "https://krebsonsecurity.com/" }],
       total: 1, limit: 1000, offset: 0, has_more: false,
     });
     const open = vi.spyOn(window, "open").mockReturnValue(null);
     openExternalUrl("https://krebsonsecurity.com/post", { features: "noopener" });
-    expect(open).toHaveBeenCalledWith("https://krebsonsecurity.com/post", "_blank", "noopener");
-    expect(useExternalLinkStore.getState().pending).toBeNull();
+    expect(open).not.toHaveBeenCalled();
+    expect(useExternalLinkStore.getState().pending?.host).toBe("krebsonsecurity.com");
   });
 
   it("does not trust a host supplied only in feed metadata", () => {
@@ -114,14 +111,12 @@ describe("openExternalUrl", () => {
     expect(open).toHaveBeenCalled();
   });
 
-  it("builds its context from whichever query client it is given", () => {
-    const other = new QueryClient();
-    other.setQueryData(["feeds"], {
+  it("does not include feed hosts in its trust context", () => {
+    queryClient.setQueryData(["feeds"], {
       items: [{ url: "https://a.example/feed", site_url: null }],
       total: 1, limit: 1, offset: 0, has_more: false,
     });
-    expect(currentInterceptContext(other).feedHosts).toEqual(["a.example"]);
-    expect(currentInterceptContext(queryClient).feedHosts).toEqual([]);
+    expect(currentInterceptContext().trustedHosts).not.toContain("a.example");
   });
 
   it("keeps session trust across reloads without sharing it with another account", () => {

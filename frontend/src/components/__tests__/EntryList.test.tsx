@@ -218,6 +218,26 @@ describe("EntryList", () => {
     expect(screen.getByText("No entries to display")).toBeInTheDocument();
   });
 
+  it("lets Enter follow a focused internal link instead of using the article shortcut", () => {
+    mockUseEntries.mockReturnValue({
+      data: makeInfiniteData([]),
+      isLoading: false,
+      fetchNextPage: vi.fn(),
+      hasNextPage: false,
+      isFetchingNextPage: false,
+    } as unknown as ReturnType<typeof useEntries>);
+
+    renderEntryList();
+    const link = document.createElement("a");
+    link.href = "/settings";
+    document.body.appendChild(link);
+    try {
+      expect(fireEvent.keyDown(link, { key: "Enter" })).toBe(true);
+    } finally {
+      link.remove();
+    }
+  });
+
   it("teaches how a zero-count folder earns a count instead of saying nothing", () => {
     mockUseEntries.mockReturnValue({
       data: makeInfiniteData([]),

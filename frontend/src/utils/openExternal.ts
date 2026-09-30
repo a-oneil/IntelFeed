@@ -1,31 +1,21 @@
-import type { QueryClient } from "@tanstack/react-query";
-import type { Feed, PaginatedResponse } from "@/api/types";
 import { readExternalLinkSettings } from "@/hooks/useExternalLinkSettings";
-import { queryClient as appQueryClient } from "@/queryClient";
 import { useAuthStore } from "@/stores/authStore";
 import { readSessionTrustedHosts, useExternalLinkStore } from "@/stores/externalLinkStore";
 import {
   evaluateProgrammaticOpen,
-  hostsFromUrls,
   isExternalWebUrl,
   type InterceptContext,
 } from "@/utils/externalLinks";
 
 /**
  * Everything the link decision needs, read from the stores at call time.
- * Feeds come from the query cache only: fetching here would fire an
- * authenticated request from public pages (shared entries) that have none.
  */
-export function currentInterceptContext(queryClient: QueryClient = appQueryClient): InterceptContext {
+export function currentInterceptContext(): InterceptContext {
   const { mode, trustedHosts } = readExternalLinkSettings(useAuthStore.getState().user);
-  const feeds = queryClient.getQueryData<PaginatedResponse<Feed>>(["feeds"])?.items ?? [];
   return {
     origin: window.location.origin,
     mode,
     trustedHosts: [...trustedHosts, ...readSessionTrustedHosts()],
-    // site_url comes from the feed's own metadata and can name any host. Only
-    // the subscribed feed URL identifies a host the user actually selected.
-    feedHosts: hostsFromUrls(feeds.map((f) => f.url)),
   };
 }
 

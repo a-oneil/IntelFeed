@@ -68,20 +68,18 @@ describe("ExternalLinkGuard", () => {
     );
   });
 
-  it("drops a form's OUTSIDE destination but leaves forms and controls alone", () => {
+  it("strips forms and controls from feed HTML", () => {
     renderPage(
       '<form action="https://evil.example/collect"><input name="q"><button formaction="https://evil.example/x">Go</button></form>',
     );
-    expect(document.querySelector("form")).not.toBeNull();
-    expect(document.querySelector("input")).not.toBeNull();
-    expect(document.querySelector("button")).not.toBeNull();
-    expect(document.querySelector("form")!.hasAttribute("action")).toBe(false);
-    expect(document.querySelector("button")!.hasAttribute("formaction")).toBe(false);
+    expect(document.querySelector("form")).toBeNull();
+    expect(document.querySelector("input")).toBeNull();
+    expect(document.querySelector("button")).toBeNull();
   });
 
-  it("leaves a form's same-site destination untouched", () => {
+  it("also strips same-site forms from feed HTML", () => {
     renderPage('<form action="/search" method="get"><input name="q"></form>');
-    expect(document.querySelector("form")!.getAttribute("action")).toBe("/search");
+    expect(document.querySelector("form")).toBeNull();
   });
 
   it("leaves same-site links completely alone, including handlers the app attached", () => {
@@ -152,7 +150,7 @@ describe("ExternalLinkGuard", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("skips hosts of the user's feeds, read from the query cache", () => {
+  it("prompts for subscribed feed hosts until the user trusts them", () => {
     const client = new QueryClient();
     client.setQueryData(["feeds"], {
       items: [{ url: "https://blog.vendor.example/feed.xml", site_url: "https://blog.vendor.example/" }],
@@ -167,8 +165,8 @@ describe("ExternalLinkGuard", () => {
         <ExternalLinkGuard />
       </QueryClientProvider>,
     );
-    expect(fireEvent.click(screen.getByText("post"))).toBe(true);
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(fireEvent.click(screen.getByText("post"))).toBe(false);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
   it("shouts when the link text names a different host", () => {
@@ -185,8 +183,22 @@ describe("ExternalLinkGuard", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.getByRole("dialog")).toHaveTextContent("may be a lookup page");
-    // Even a plausible lookup URL cannot silently become a trusted exception.
-    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(screen.getByRole("checkbox")).toBeInTheDocument();
+  });
+
+  it("lets a trusted lookup host through without a prompt", () => {
+    useAuthStore.setState({ user: user({ external_link_trusted_hosts: ["decryptads.com"] }) });
+    renderPage('<a href="https://decryptads.com/publisher/armytimes.com">armytimes.com</a>');
+    expect(fireEvent.click(screen.getByText("armytimes.com"))).toBe(true);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("shows related subdomains as an amber note and allows remembering the host", () => {
+    renderPage('<a href="https://app.any.run/report">any.run</a>');
+    fireEvent.click(screen.getByText("any.run"));
+    expect(screen.getByRole("dialog")).toHaveTextContent("parent/subdomain relationship");
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("checkbox")).toBeInTheDocument();
   });
 
   it("closes on Cancel and on Escape without navigating", () => {
