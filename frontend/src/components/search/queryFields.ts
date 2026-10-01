@@ -94,7 +94,6 @@ export const FIELD_GROUPS: QueryFieldGroup[] = [
           "weaponized_poc",
         ],
       },
-      { token: "sector:", hint: "Sector in the article" },
       { token: "feed.reliability:", hint: "Source grade (A–F)" },
       { token: "feed.timeliness:", hint: "Source grade (A–F)" },
       { token: "feed.relevance:", hint: "Source grade (A–F)" },
@@ -193,6 +192,14 @@ export const FIELD_GROUPS: QueryFieldGroup[] = [
       { token: "country:", hint: "Country name" },
       { token: "country.region:", hint: "Region name" },
       { token: "country.iso:", hint: "ISO code, e.g. RU" },
+    ],
+  },
+  {
+    label: "Sectors",
+    accent: "var(--entity-sector)",
+    fields: [
+      { token: "sector:", hint: "Targeted industry, by name or alias (banks, hospitals)" },
+      { token: "sector.slug:", hint: "Canonical slug, e.g. financial-services" },
     ],
   },
   {
@@ -351,6 +358,7 @@ const NAMESPACE_ENTITY: Record<string, string> = {
   vendor: "vendor",
   product: "product",
   country: "country",
+  sector: "sector",
   mitigation: "mitigation",
   cwe: "cwe",
   observable: "observable",
@@ -363,7 +371,7 @@ const NAMESPACE_ENTITY: Record<string, string> = {
 /** Entry-grammar fields — the feeds domain, not an entity. */
 const ENTRY_FIELDS = new Set([
   "title", "content", "author", "feed", "category", "tag", "type", "media",
-  "lang", "date", "is", "url", "words", "signal", "sector",
+  "lang", "date", "is", "url", "words", "signal",
 ]);
 
 /**

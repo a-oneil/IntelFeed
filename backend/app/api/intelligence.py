@@ -44,14 +44,18 @@ from app.models.cwe import CWE, CVEWeakness, EntryCWE
 from app.models.detection_rule import DetectionRule
 from app.models.detection_rule_version import DetectionRuleVersion
 from app.models.entry import Entry
+from app.models.entry_sector import EntrySector
 from app.models.feed import Feed
+from app.models.intel_profile import IntelProfile
 from app.models.intelligence_requirement import IntelligenceRequirement, RequirementMatch
 from app.models.malware_family import EntryMalware, MalwareFamily
 from app.models.mitigation import EntryMitigation, Mitigation, TTPMitigation
 from app.models.note import Note
 from app.models.observable import EntryObservable, Observable
 from app.models.product import EntryProduct, Product
+from app.models.ransomware import RansomwareVictim, VictimDisclosure
 from app.models.rule_coverage import RuleCoverage
+from app.models.sector import CampaignSector, MalwareTargetSector, Sector, ThreatActorTargetSector
 from app.models.threat_actor import EntryThreatActor, ThreatActor
 from app.models.tool import EntryTool, Tool
 from app.models.ttp import TTP, EntryTTP
@@ -98,6 +102,7 @@ from app.schemas.intelligence import (
     ProductResponse,
     RuleChatRequest,
     RuleConvertRequest,
+    SectorResponse,
     ThreatActorResponse,
     ToolResponse,
     TTPFamilyRef,
@@ -767,7 +772,7 @@ async def extract_entry_countries(
     return ExtractionResponse(items=items, status=status, error_message=error_msg)
 
 
-# --- Sector Routes (controlled vocabulary — no entity table) ---
+# --- Sector Routes ---
 
 
 @router.get("/entries/{entry_id}/sectors", response_model=list[EntrySectorResponse])
@@ -776,19 +781,24 @@ async def get_entry_sectors(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List the targeted victim sectors linked to an entry (controlled vocabulary, no entity table)."""
-    from app.intelligence.sectors import sector_label
-    from app.models.entry_sector import EntrySector
-
-    result = await db.execute(select(EntrySector).where(EntrySector.entry_id == entry_id).order_by(EntrySector.sector))
+    """List the victim sectors an entry describes as targeted, with the sector entity id for linking."""
+    result = await db.execute(
+        select(EntrySector, Sector.name)
+        .join(Sector, Sector.id == EntrySector.sector_id)
+        .where(EntrySector.entry_id == entry_id)
+        .order_by(Sector.name)
+    )
     return [
         EntrySectorResponse(
+            id=row.sector_id,
+            slug=row.sector,
+            name=name,
             sector=row.sector,
-            label=sector_label(row.sector),
+            label=name,
             confidence=row.confidence,
             source=row.source,
         )
-        for row in result.scalars().all()
+        for row, name in result.all()
     ]
 
 
@@ -1046,6 +1056,351 @@ async def list_regions(
     return {"regions": regions}
 
 
+# --- Sector entity routes ---
+
+
+async def _load_sector(db: AsyncSession, sector_ref: str) -> Sector:
+    """A sector is addressable by UUID, by its canonical slug (``healthcare``), by
+    its exact display name (``Financial Services`` — so a profile chip can link by
+    the label it shows) or by one of its aliases (``banks``)."""
+    try:
+        cond = Sector.id == uuid.UUID(sector_ref)
+    except ValueError:
+        ref = sector_ref.strip().lower()
+        cond = or_(Sector.slug == ref, func.lower(Sector.name) == ref, Sector.aliases.any(ref))
+    sector = (await db.execute(select(Sector).where(cond))).scalar_one_or_none()
+    if not sector:
+        raise AppError(code="not_found", message="Sector not found", status_code=404)
+    return sector
+
+
+_SECTOR_VICTIM_WINDOW_DAYS = 90
+
+
+async def _attach_sector_counts(db: AsyncSession, sectors: list[Sector]) -> None:
+    """Batch the per-sector counts the workbench columns show.
+
+    ``victim_count`` is leak-site disclosures in the last 90 days — the recent
+    ground truth, not the all-time pile the ransomware page already sums.
+    """
+    if not sectors:
+        return
+    ids = [s.id for s in sectors]
+    slugs = [s.slug for s in sectors]
+    actor_counts = dict(
+        (
+            await db.execute(
+                select(ThreatActorTargetSector.sector_id, func.count())
+                .where(ThreatActorTargetSector.sector_id.in_(ids))
+                .group_by(ThreatActorTargetSector.sector_id)
+            )
+        ).all()
+    )
+    malware_counts = dict(
+        (
+            await db.execute(
+                select(MalwareTargetSector.sector_id, func.count())
+                .where(MalwareTargetSector.sector_id.in_(ids))
+                .group_by(MalwareTargetSector.sector_id)
+            )
+        ).all()
+    )
+    since = datetime.now(UTC) - timedelta(days=_SECTOR_VICTIM_WINDOW_DAYS)
+    victim_counts = dict(
+        (
+            await db.execute(
+                select(VictimDisclosure.sector, func.count())
+                .where(VictimDisclosure.sector.in_(slugs), VictimDisclosure.posted_at >= since)
+                .group_by(VictimDisclosure.sector)
+            )
+        ).all()
+    )
+    for s in sectors:
+        s.targeting_actor_count = actor_counts.get(s.id, 0)
+        s.targeting_malware_count = malware_counts.get(s.id, 0)
+        s.victim_count = victim_counts.get(s.slug, 0)
+
+
+@router.get("/sectors", response_model=PaginatedResponse[SectorResponse])
+async def list_sectors(
+    search: str | None = Query(None, description="Case-insensitive match on sector name, slug or whole-word alias"),
+    sort_by: str = Query(
+        "article_count",
+        pattern="^(name|article_count|last_seen_at|linked_count|targeting_actor_count|victim_count)$",
+        description=(
+            "Sort column; linked_count sorts by non-rejected entity-relationship count, "
+            "targeting_actor_count by asserted actor claims, victim_count by leak-site victims in the last 90 days"
+        ),
+    ),
+    sort_order: str = Query("desc", pattern="^(asc|desc)$", description="Sort direction"),
+    limit: int = Query(50, ge=1, le=500, description="Page size"),
+    offset: int = Query(0, ge=0, description="Number of rows to skip"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Paginated list of the victim-sector vocabulary with per-sector targeting and victim counts."""
+    query = select(Sector)
+    count_q = select(func.count()).select_from(Sector)
+    if search:
+        pattern = f"%{search}%"
+        alias_pattern = rf"\y{re.escape(search)}\y"
+        search_filter = or_(
+            Sector.name.ilike(pattern),
+            Sector.slug.ilike(pattern),
+            func.array_to_string(Sector.aliases, " ").op("~*")(alias_pattern),
+        )
+        query = query.where(search_filter)
+        count_q = count_q.where(search_filter)
+
+    total = (await db.execute(count_q)).scalar() or 0
+    if sort_by == "linked_count":
+        sort_expr = _linked_count_subquery(Sector, "sector")
+    elif sort_by == "targeting_actor_count":
+        sort_expr = (
+            select(func.count())
+            .select_from(ThreatActorTargetSector)
+            .where(ThreatActorTargetSector.sector_id == Sector.id)
+            .correlate(Sector)
+            .scalar_subquery()
+        )
+    elif sort_by == "victim_count":
+        since = datetime.now(UTC) - timedelta(days=_SECTOR_VICTIM_WINDOW_DAYS)
+        sort_expr = (
+            select(func.count())
+            .select_from(VictimDisclosure)
+            .where(VictimDisclosure.sector == Sector.slug, VictimDisclosure.posted_at >= since)
+            .correlate(Sector)
+            .scalar_subquery()
+        )
+    else:
+        col = getattr(Sector, sort_by)
+        sort_expr = func.lower(col) if sort_by == "name" else col
+    order = sort_expr.asc() if sort_order == "asc" else sort_expr.desc()
+    result = await db.execute(query.order_by(order, Sector.slug.asc()).limit(limit).offset(offset))
+    items = list(result.scalars().all())
+    await _attach_sector_counts(db, items)
+    return PaginatedResponse(items=items, total=total, limit=limit, offset=offset, has_more=(offset + limit) < total)
+
+
+@router.get("/sectors/{sector_ref}", response_model=SectorResponse)
+async def get_sector(
+    sector_ref: str = Path(..., description="Sector UUID or canonical slug (e.g. healthcare)"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get a single sector by UUID or slug, with its targeting and 90-day victim counts."""
+    sector = await _load_sector(db, sector_ref)
+    await _attach_sector_counts(db, [sector])
+    return sector
+
+
+@router.get("/sectors/{sector_ref}/profile")
+async def get_sector_profile(
+    sector_ref: str = Path(..., description="Sector UUID or canonical slug (e.g. healthcare)"),
+    window_days: int = Query(90, ge=7, le=730, description="Window for victim and country activity"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The sector's victimology: who targets it (reported vs asserted), leak-site victims,
+    the country cross-tab, campaigns, the intel profiles that scope it, and recent articles.
+
+    *Reported* actors/malware co-occur with the sector on articles the AI judged
+    to describe it as targeted (counted by distinct article). *Asserted* ones
+    carry a targets-sector claim row, with the door that wrote it.
+    """
+    sector = await _load_sector(db, sector_ref)
+    now = datetime.now(UTC)
+    since = now - timedelta(days=window_days)
+    sector_entries = select(EntrySector.entry_id).where(EntrySector.sector_id == sector.id)
+
+    async def _reported(entity_cls, junction_cls, fk):
+        n = func.count(func.distinct(junction_cls.entry_id))
+        rows = await db.execute(
+            select(entity_cls.id, entity_cls.name, n.label("n"))
+            .join(entity_cls, entity_cls.id == fk)
+            .where(junction_cls.entry_id.in_(sector_entries))
+            .group_by(entity_cls.id, entity_cls.name)
+            .order_by(n.desc(), entity_cls.name.asc())
+            .limit(25)
+        )
+        return [{"id": str(eid), "name": name, "article_count": cnt} for eid, name, cnt in rows.all()]
+
+    async def _asserted(entity_cls, junction_cls, fk):
+        rows = await db.execute(
+            select(entity_cls.id, entity_cls.name, junction_cls.source, junction_cls.article_count)
+            .join(entity_cls, entity_cls.id == fk)
+            .where(junction_cls.sector_id == sector.id)
+            .order_by(junction_cls.article_count.desc(), entity_cls.name.asc())
+            .limit(50)
+        )
+        return [
+            {"id": str(eid), "name": name, "source": source, "article_count": cnt}
+            for eid, name, source, cnt in rows.all()
+        ]
+
+    reported_actors = await _reported(ThreatActor, EntryThreatActor, EntryThreatActor.threat_actor_id)
+    reported_malware = await _reported(MalwareFamily, EntryMalware, EntryMalware.malware_family_id)
+    asserted_actors = await _asserted(ThreatActor, ThreatActorTargetSector, ThreatActorTargetSector.threat_actor_id)
+    asserted_malware = await _asserted(MalwareFamily, MalwareTargetSector, MalwareTargetSector.malware_family_id)
+
+    campaigns_q = await db.execute(
+        select(Campaign)
+        .join(CampaignSector, CampaignSector.campaign_id == Campaign.id)
+        .where(CampaignSector.sector_id == sector.id)
+        .order_by(Campaign.updated_at.desc())
+        .limit(50)
+    )
+    campaigns = [
+        {
+            "id": str(c.id),
+            "name": c.name,
+            "status": c.status,
+            "start_date": c.start_date.isoformat() if c.start_date else None,
+        }
+        for c in campaigns_q.scalars().all()
+    ]
+
+    # --- leak-site victims: the richest victimology signal in the platform ---
+    victims_all = (
+        await db.execute(
+            select(func.count()).select_from(VictimDisclosure).where(VictimDisclosure.sector == sector.slug)
+        )
+    ).scalar() or 0
+    victims_window = (
+        await db.execute(
+            select(func.count())
+            .select_from(VictimDisclosure)
+            .where(VictimDisclosure.sector == sector.slug, VictimDisclosure.posted_at >= since)
+        )
+    ).scalar() or 0
+    month = func.date_trunc("month", VictimDisclosure.posted_at)
+    monthly_q = await db.execute(
+        select(month.label("m"), func.count())
+        .where(VictimDisclosure.sector == sector.slug, VictimDisclosure.posted_at >= now - timedelta(days=365))
+        .group_by(month)
+        .order_by(month)
+    )
+    victims_monthly = [{"month": m.date().isoformat(), "count": n} for m, n in monthly_q.all()]
+    groups_q = await db.execute(
+        select(VictimDisclosure.group_name_raw, func.count())
+        .where(
+            VictimDisclosure.sector == sector.slug,
+            VictimDisclosure.posted_at >= since,
+            VictimDisclosure.group_name_raw.is_not(None),
+        )
+        .group_by(VictimDisclosure.group_name_raw)
+        .order_by(func.count().desc())
+        .limit(10)
+    )
+    top_groups = [{"group": g, "victims": n} for g, n in groups_q.all()]
+    recent_q = await db.execute(
+        select(VictimDisclosure, RansomwareVictim.name, Country.name, Country.iso_code)
+        .join(RansomwareVictim, RansomwareVictim.id == VictimDisclosure.victim_id)
+        .outerjoin(Country, Country.id == VictimDisclosure.country_id)
+        .where(VictimDisclosure.sector == sector.slug)
+        .order_by(VictimDisclosure.posted_at.desc())
+        .limit(20)
+    )
+    recent_victims = [
+        {
+            "id": str(d.id),
+            "victim_id": str(d.victim_id),
+            "victim_name": vname,
+            "group": d.group_name_raw,
+            "country": cname,
+            "country_code": ciso,
+            "posted_at": d.posted_at.isoformat() if d.posted_at else None,
+        }
+        for d, vname, cname, ciso in recent_q.all()
+    ]
+
+    # --- sector × country: articles that name a victim country, plus leak-site victims ---
+    countries: dict[uuid.UUID, dict] = {}
+    article_countries_q = await db.execute(
+        select(Country.id, Country.name, Country.iso_code, func.count(func.distinct(EntryCountry.entry_id)))
+        .join(EntryCountry, EntryCountry.country_id == Country.id)
+        .join(Entry, Entry.id == EntryCountry.entry_id)
+        .where(
+            EntryCountry.entry_id.in_(sector_entries),
+            Entry.published_at >= since,
+            or_(EntryCountry.role.is_(None), EntryCountry.role.not_in(["origin", "infrastructure"])),
+        )
+        .group_by(Country.id, Country.name, Country.iso_code)
+    )
+    for cid, cname, ciso, n in article_countries_q.all():
+        countries[cid] = {"id": str(cid), "name": cname, "iso_code": ciso, "article_count": n, "victim_count": 0}
+    victim_countries_q = await db.execute(
+        select(Country.id, Country.name, Country.iso_code, func.count())
+        .join(VictimDisclosure, VictimDisclosure.country_id == Country.id)
+        .where(VictimDisclosure.sector == sector.slug, VictimDisclosure.posted_at >= since)
+        .group_by(Country.id, Country.name, Country.iso_code)
+    )
+    for cid, cname, ciso, n in victim_countries_q.all():
+        row = countries.setdefault(
+            cid, {"id": str(cid), "name": cname, "iso_code": ciso, "article_count": 0, "victim_count": 0}
+        )
+        row["victim_count"] = n
+    country_rows = sorted(countries.values(), key=lambda r: -(r["article_count"] + r["victim_count"]))[:15]
+
+    profiles_q = await db.execute(
+        select(IntelProfile.id, IntelProfile.name)
+        .where(IntelProfile.sectors.any(sector.slug))
+        .order_by(IntelProfile.name)
+    )
+    intel_profiles = [{"id": str(pid), "name": pname} for pid, pname in profiles_q.all()]
+
+    entries_q = await db.execute(
+        select(Entry.id, Entry.title, Entry.published_at, EntrySector.confidence)
+        .join(EntrySector, EntrySector.entry_id == Entry.id)
+        .where(EntrySector.sector_id == sector.id)
+        .order_by(Entry.published_at.desc())
+        .limit(25)
+    )
+    recent_entries = [
+        {"id": str(eid), "title": title, "published_at": pub.isoformat() if pub else None, "confidence": conf}
+        for eid, title, pub, conf in entries_q.all()
+    ]
+    entry_month = func.date_trunc("month", Entry.published_at)
+    entry_monthly_q = await db.execute(
+        select(entry_month.label("m"), func.count(func.distinct(Entry.id)))
+        .join(EntrySector, EntrySector.entry_id == Entry.id)
+        .where(EntrySector.sector_id == sector.id, Entry.published_at >= now - timedelta(days=365))
+        .group_by(entry_month)
+        .order_by(entry_month)
+    )
+    articles_monthly = [{"month": m.date().isoformat(), "count": n} for m, n in entry_monthly_q.all()]
+
+    return {
+        "sector": {
+            "id": str(sector.id),
+            "slug": sector.slug,
+            "name": sector.name,
+            "aliases": sector.aliases or [],
+            "description": sector.description,
+            "article_count": sector.article_count,
+            "first_seen_at": sector.first_seen_at.isoformat() if sector.first_seen_at else None,
+            "last_seen_at": sector.last_seen_at.isoformat() if sector.last_seen_at else None,
+        },
+        "window_days": window_days,
+        "reported_actors": reported_actors,
+        "reported_malware": reported_malware,
+        "asserted_actors": asserted_actors,
+        "asserted_malware": asserted_malware,
+        "campaigns": campaigns,
+        "victims": {
+            "total": victims_all,
+            "in_window": victims_window,
+            "monthly": victims_monthly,
+            "top_groups": top_groups,
+            "recent": recent_victims,
+        },
+        "countries": country_rows,
+        "intel_profiles": intel_profiles,
+        "recent_entries": recent_entries,
+        "articles_monthly": articles_monthly,
+    }
+
+
 # --- Unlink Entity from Entry ---
 
 
@@ -1061,7 +1416,7 @@ async def _invalidate_after_unlink(
 
 
 class LinkEntityRequest(BaseModel):
-    entity_type: str  # ttp, cve, threat_actor, malware, country, mitigation, tool, vendor, product
+    entity_type: str  # ttp, cve, threat_actor, malware, country, sector, mitigation, tool, vendor, product
     entity_id: uuid.UUID
     selected_text: str | None = None
 
@@ -1100,6 +1455,7 @@ async def link_entity_to_entry(
         "tool": (EntryTool, "tool_id", Tool),
         "vendor": (EntryVendor, "vendor_id", Vendor),
         "product": (EntryProduct, "product_id", Product),
+        "sector": (EntrySector, "sector_id", Sector),
     }
 
     if body.entity_type not in junction_map:
@@ -1130,6 +1486,10 @@ async def link_entity_to_entry(
     kwargs = {fk_col: body.entity_id}
     if hasattr(junction_model, "source"):
         kwargs["source"] = "manual"
+    if body.entity_type == "sector":
+        # The slug is the junction's natural key; an analyst link is a targeting judgment.
+        kwargs["sector"] = entity.slug
+        kwargs["role"] = "target"
     # Store the highlighted text as a matched name so the frontend underlines it.
     # Without this the highlighter falls back to entity name + aliases and misses
     # arbitrary surface forms the user selected.
@@ -1241,6 +1601,29 @@ async def unlink_entry_country(
         raise AppError(code="not_found", message="Association not found", status_code=404)
     await db.commit()
     await _invalidate_after_unlink("country", country_id, entry_id, db)
+    return Response(status_code=204)
+
+
+@router.delete("/entries/{entry_id}/sectors/{sector_id}", status_code=204)
+async def unlink_entry_sector(
+    entry_id: uuid.UUID = Path(..., description="UUID of the entry"),
+    sector_id: uuid.UUID = Path(..., description="UUID of the sector to unlink"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove the entry-sector association (the sector itself is kept) and invalidate correlation caches."""
+    result = await db.execute(
+        delete(EntrySector).where(EntrySector.entry_id == entry_id, EntrySector.sector_id == sector_id)
+    )
+    if result.rowcount == 0:
+        raise AppError(code="not_found", message="Association not found", status_code=404)
+    await db.execute(
+        sa_update(Sector)
+        .where(Sector.id == sector_id, Sector.article_count > 0)
+        .values(article_count=Sector.article_count - 1)
+    )
+    await db.commit()
+    await _invalidate_after_unlink("sector", sector_id, entry_id, db)
     return Response(status_code=204)
 
 

@@ -9,6 +9,7 @@ type EntityType =
   | "threat_actor"
   | "malware"
   | "country"
+  | "sector"
   | "mitigation"
   | "tool"
   | "vendor"

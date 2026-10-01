@@ -1288,85 +1288,92 @@ def rollup_targeted_sectors():
         CELERY_TASK_DURATION_SECONDS.labels(task_name="rollup_targeted_sectors").observe(time.monotonic() - start)
 
 
-# How many sectors a profile may show, and how many distinct articles must
-# mention a sector before it counts. min_articles=1 would let a single
-# mis-tagged article put a sector chip on a major actor's profile.
+# How many sectors the rollup may assert per entity, and how many distinct
+# articles must describe a sector as hit before it counts. min_articles=1 would
+# let a single mis-tagged article put a sector chip on a major actor's profile.
 _SECTOR_ROLLUP_LIMIT = 8
 _SECTOR_ROLLUP_MIN_ARTICLES = 2
 
 
 async def _rollup_targeted_sectors() -> dict:
-    """Aggregate entry_sectors through the entry junctions onto entity profiles.
+    async with worker_session() as db:
+        stats = await rollup_targeted_sectors_for_session(db)
+        await db.commit()
+    return stats
 
-    The one-pass entry analysis has been writing victim sectors to
-    `entry_sectors` all along, but nothing ever rolled them up, so
-    `targeted_sectors` on actors and malware stayed near-empty while the
-    underlying observations accumulated.
 
-    Derived sectors are unioned into whatever is already stored (curated values
-    from the seeders, Malpedia and MISP Galaxy) rather than replacing it —
-    observed-most-often first, then existing values, capped at
-    ``_SECTOR_ROLLUP_LIMIT``.
+async def rollup_targeted_sectors_for_session(db) -> dict:
+    """Aggregate entry_sectors through the entry junctions onto the target-sector junctions.
+
+    The one-pass entry analysis writes victim sectors to `entry_sectors`; this
+    turns "N of this actor's articles describe sector S as hit" into a
+    ``source="rollup"`` row on ``threat_actor_target_sectors`` /
+    ``malware_target_sectors`` carrying N as its evidence. The rollup owns only
+    its own rows: sectors asserted by enrichment, the seed backfill or an
+    analyst are kept (their evidence count is refreshed), and a rollup row whose
+    evidence dropped below the floor is removed again.
+
+    The legacy ``targeted_sectors`` label array is then rebuilt from the
+    junction (``refresh_targeted_sectors_cache`` is its only writer) and a
+    provenance claim records the resulting list, so the profile labels these
+    chips as derived from the entity's own articles rather than as a citation.
     """
-    from app.intelligence.sectors import fold_sector_labels, sector_label
     from app.models.entry_sector import EntrySector
     from app.models.malware_family import EntryMalware, MalwareFamily
     from app.models.threat_actor import EntryThreatActor, ThreatActor
     from app.services.claim_provenance import record_claim
+    from app.services.sector_links import junction_for, refresh_targeted_sectors_cache, set_rollup_sectors
 
     stats: dict = {}
 
-    async with worker_session() as db:
-        for label, model, junction, fk in (
-            ("threat_actor", ThreatActor, EntryThreatActor, EntryThreatActor.threat_actor_id),
-            ("malware", MalwareFamily, EntryMalware, EntryMalware.malware_family_id),
-        ):
-            article_count = func.count(func.distinct(EntrySector.entry_id)).label("c")
-            rows = (
-                await db.execute(
-                    select(fk, EntrySector.sector, article_count)
-                    .join(EntrySector, EntrySector.entry_id == junction.entry_id)
-                    .group_by(fk, EntrySector.sector)
-                    .having(article_count >= _SECTOR_ROLLUP_MIN_ARTICLES)
-                    .order_by(fk, article_count.desc())
-                )
-            ).all()
+    for label, model, junction, fk in (
+        ("threat_actor", ThreatActor, EntryThreatActor, EntryThreatActor.threat_actor_id),
+        ("malware", MalwareFamily, EntryMalware, EntryMalware.malware_family_id),
+    ):
+        article_count = func.count(func.distinct(EntrySector.entry_id)).label("c")
+        rows = (
+            await db.execute(
+                select(fk, EntrySector.sector_id, article_count)
+                .join(EntrySector, EntrySector.entry_id == junction.entry_id)
+                .group_by(fk, EntrySector.sector_id)
+                .having(article_count >= _SECTOR_ROLLUP_MIN_ARTICLES)
+                .order_by(fk, article_count.desc())
+            )
+        ).all()
 
-            observed: dict = {}
-            for entity_id, sector, _count in rows:
-                observed.setdefault(entity_id, []).append(sector_label(sector))
+        observed: dict = {}
+        for entity_id, sector_id, count in rows:
+            per_entity = observed.setdefault(entity_id, {})
+            if len(per_entity) < _SECTOR_ROLLUP_LIMIT:
+                per_entity[sector_id] = count
 
-            updated = 0
-            if observed:
-                entities = (await db.execute(select(model).where(model.id.in_(list(observed))))).scalars().all()
-                for entity in entities:
-                    derived = observed.get(entity.id) or []
-                    existing = list(entity.targeted_sectors or [])
-                    # Fold anything that maps onto its canonical label and keep
-                    # the rest as-is rather than discarding an analyst's
-                    # wording. Shared with the vocabulary backfill so the two
-                    # agree on the result.
-                    merged = fold_sector_labels(derived + existing)[:_SECTOR_ROLLUP_LIMIT]
-                    if merged != existing:
-                        entity.targeted_sectors = merged
-                        db.add(entity)
-                        # Derived from the entity's own linked articles, not
-                        # asserted by a source — the profile labels it that way
-                        # rather than letting a rollup read as a citation.
-                        await record_claim(
-                            db,
-                            entity_type=label,
-                            entity_id=entity.id,
-                            field="targeted_sectors",
-                            value=merged,
-                            source_kind="enrichment",
-                            source_ref="sector_rollup",
-                        )
-                        updated += 1
+        # Entities that only carry stale rollup rows still need a pass so those
+        # rows are pruned once the evidence behind them is gone.
+        _, target_junction, fk_attr = junction_for(label)
+        stale_q = await db.execute(
+            select(getattr(target_junction, fk_attr)).where(target_junction.source == "rollup").distinct()
+        )
+        touched = set(observed) | {row for row in stale_q.scalars().all()}
 
-            stats[label] = {"with_observed_sectors": len(observed), "updated": updated}
+        updated = 0
+        if touched:
+            entities = (await db.execute(select(model).where(model.id.in_(list(touched))))).scalars().all()
+            for entity in entities:
+                changed = await set_rollup_sectors(db, label, entity.id, observed.get(entity.id, {}))
+                labels = await refresh_targeted_sectors_cache(db, label, entity)
+                if changed:
+                    await record_claim(
+                        db,
+                        entity_type=label,
+                        entity_id=entity.id,
+                        field="targeted_sectors",
+                        value=labels,
+                        source_kind="enrichment",
+                        source_ref="sector_rollup",
+                    )
+                    updated += 1
 
-        await db.commit()
+        stats[label] = {"with_observed_sectors": len(observed), "updated": updated}
 
     return stats
 

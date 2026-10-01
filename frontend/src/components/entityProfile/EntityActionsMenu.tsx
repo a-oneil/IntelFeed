@@ -21,7 +21,7 @@ import { useDeleteWatch, useUpsertWatch, useWatchlist } from "@/hooks/useWatchli
 import { useDenyObservable } from "@/hooks/useIntelligence";
 import { confirmDialog } from "@/utils/dialog";
 
-const WATCHABLE_TYPES = ["threat_actor", "malware", "cve", "tool", "vendor", "product", "country"];
+const WATCHABLE_TYPES = ["threat_actor", "malware", "cve", "tool", "vendor", "product", "country", "sector"];
 
 /** Report entity_ids buckets by entity type — types without a bucket attach
  *  their linked articles only. */

@@ -20,6 +20,7 @@ export type TabKey =
   | "relationships"
   | "detection"
   | "geography"
+  | "victimology"
   // Not in any tabs array — reachable only via the rail's "Review gaps"
   // action; ProfileTabs appends it as an ephemeral tab while active.
   | "detection_gaps";
@@ -31,6 +32,7 @@ export const TAB_LABELS: Record<TabKey, string> = {
   relationships: "Relationships",
   detection: "Detection",
   geography: "Geography",
+  victimology: "Victimology",
   detection_gaps: "Detection Gaps",
 };
 
@@ -42,6 +44,11 @@ export const TAB_HINTS: Partial<Record<TabKey, { title: string; body: string; as
   relationships: {
     title: "Relationships",
     body: "Who this is tied to and how strongly, built only from articles that named both.",
+  },
+  victimology: {
+    title: "Victimology",
+    body: "Who targets this industry — reported in articles vs asserted as a claim — and the leak-site victims posted in it.",
+    aside: "Leak-site claims are the gang's claims, not confirmed breaches.",
   },
   detection_gaps: {
     title: "Detection Gaps",
@@ -70,7 +77,7 @@ export interface BadgeSpec {
    * placeholder. `editKind: "country"` links to the country profile when the
    * country id is resolvable, mirroring the old identity-field behavior. */
   editKey?: string;
-  editKind?: "text" | "country";
+  editKind?: "text" | "country" | "sector";
   placeholder?: string;
   /** Entity field this badge represents, for the "who says so" provenance
    * marker. Defaults to `editKey`; set it explicitly on badges that display a
@@ -197,6 +204,9 @@ function sectorBadges(sectors: string[] | undefined): BadgeSpec[] {
     label: s,
     tone: "neutral" as BadgeTone,
     title: sectors.length > 4 ? `Targeted sectors: ${all}` : "Targeted sector",
+    // Not editable — the kind only tells SignalBadges to link the chip to the
+    // sector profile (resolved by display name).
+    editKind: "sector" as const,
     // One marker for the whole group — the claim is about the list, not each chip.
     ...(i === 0 ? { provenanceKey: "targeted_sectors", provenanceLabel: "Targeted sectors" } : {}),
   }));
@@ -449,6 +459,22 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     externalLinks: (e) => getPivotLinks("country", e.name || ""),
     cascadeType: "country",
     actions: ["add_to_campaign", "generate_report", "ai_summary", "convert", "merge", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
+  },
+
+  // A sector is a closed vocabulary, not an extracted entity: no create, merge,
+  // convert, delete, or rescan (sectors are never autolinked). Its name and
+  // slug are the vocabulary itself; aliases and description are editable.
+  sector: {
+    tabs: ["overview", "victimology", "relationships"],
+    signalBadges: (e) =>
+      e.slug ? [{ label: e.slug, tone: "neutral", title: "Canonical slug — what sector.slug: searches" }] : [],
+    identityFields: [],
+    hasAliases: true,
+    hasDescription: true,
+    nameEditable: false,
+    overviewPanels: [],
+    externalLinks: (e) => getPivotLinks("sector", e.name || ""),
+    actions: ["add_to_campaign", "generate_report", "ai_summary"],
   },
 
   tool: {

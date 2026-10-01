@@ -49,7 +49,7 @@ type MetaLink = { label: string; url: string };
 /** Match the entity profile routes the remark plugin emits. The popover lookup
  *  and per-type styling both key off these. group 2 = entity slug. */
 const ENTITY_HREF_RE =
-  /^\/(intelligence|workbench)\/(actor|malware|cve|ttp|vendor|product|country|tool|mitigation)\//;
+  /^\/(intelligence|workbench)\/(actor|malware|cve|ttp|vendor|product|country|sector|tool|mitigation)\//;
 
 function entityTypeFromHref(href: string | undefined): string | null {
   if (!href) return null;

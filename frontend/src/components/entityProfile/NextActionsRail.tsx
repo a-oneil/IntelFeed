@@ -32,6 +32,7 @@ const ENTITY_RELATED_KEYS: Array<keyof RelatedEntities> = [
   "vendors",
   "products",
   "countrys",
+  "sectors",
   "mitigations",
 ];
 

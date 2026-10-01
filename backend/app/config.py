@@ -325,11 +325,6 @@ class Settings(BaseSettings):
     feed_value_weight_pir: float = 0.15
     # CVE risk tiering — EPSS score at/above which a CVE is considered high risk
     cve_epss_high_risk_threshold: float = 0.1
-    # Org context — comma-separated sectors your organization belongs to
-    # (normalized against app.intelligence.sectors vocabulary; aliases like
-    # "banks" or "hospitals" are accepted). Entries whose extracted victim
-    # sectors intersect this list get a Priority Queue boost.
-    my_sectors: str = ""
 
     # Detection-rule maintenance — CVEs/rules processed per backfill run.
     rule_attack_backfill_limit: int = 1500

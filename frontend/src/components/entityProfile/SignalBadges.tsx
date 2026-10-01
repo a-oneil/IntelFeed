@@ -95,6 +95,25 @@ export function SignalBadges({
           }
         }
 
+        // Targeted-sector chips open the sector profile. The route resolves the
+        // display label ("Financial Services") to the entity, so no id lookup is
+        // needed here; a legacy free-text value that is not a sector 404s on the
+        // profile rather than rendering as a dead chip.
+        if (b.editKind === "sector" && b.label && onOpenEntity) {
+          return (
+            <span key={key} className={styles.badgeWithSources}>
+              <button
+                className={`${cls} ${styles.signalBadgeLink}`}
+                title={`${b.title || "Targeted sector"} — open profile`}
+                onClick={() => onOpenEntity("sector", b.label, b.label)}
+              >
+                {b.label}
+              </button>
+              {sources(b)}
+            </span>
+          );
+        }
+
         if (b.editKey && onUpdateField) {
           return (
             <span key={key} className={styles.badgeWithSources}>

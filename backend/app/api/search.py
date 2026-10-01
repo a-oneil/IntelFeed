@@ -592,7 +592,7 @@ async def unified_search(
 
         await resolve_feed_filters(db, plan)
 
-    # Resolve the Postgres-backed entry filters (category, signal, sector, url,
+    # Resolve the Postgres-backed entry filters (category, signal, url,
     # feed ratings, is:muted/translated/image).
     if plan.pending_entry_filters:
         from app.search.query_planner import resolve_entry_filters
@@ -800,6 +800,8 @@ FIELD_SUGGESTIONS = [
     {"text": "malware.sector:", "description": "Sector the family targets", "category": "entity"},
     {"text": "country:", "description": "Search by country name", "category": "entity"},
     {"text": "country.region:", "description": "Filter by geographic region", "category": "entity"},
+    {"text": "sector:", "description": "Targeted industry sector, by name or alias", "category": "entity"},
+    {"text": "sector.slug:", "description": "Canonical sector slug (e.g. financial-services)", "category": "entity"},
     {"text": "tool:", "description": "Search tool names", "category": "entity"},
     {"text": "tool.type:", "description": "Filter by tool type", "category": "entity"},
     {"text": "tool.platform:", "description": "Filter by platform", "category": "entity"},
@@ -854,7 +856,6 @@ FIELD_SUGGESTIONS = [
     {"text": "media:", "description": "Filter by media type (audio, video)", "category": "entry"},
     {"text": "category:", "description": "Filter by feed folder", "category": "entry"},
     {"text": "signal:", "description": "Signal-engine reason (under_reported, kev_added, …)", "category": "entry"},
-    {"text": "sector:", "description": "Sector mentioned in the article", "category": "entry"},
     {"text": "url:", "description": "Article link contains", "category": "entry"},
     {"text": "words:", "description": "Article length (e.g. >1500)", "category": "entry"},
     {"text": "feed.reliability:", "description": "Source reliability grade (A-F)", "category": "entry"},
@@ -1222,8 +1223,11 @@ _DISTINCT_VALUE_FIELDS: dict[str, tuple[str, str]] = {
     "product.type": ("app.models.product:Product", "product_type"),
     "ransomware_victim.sector": ("app.models.ransomware:RansomwareVictim", "sector"),
     "ransomware_victim.domain": ("app.models.ransomware:RansomwareVictim", "domain"),
+    "sector": ("app.models.sector:Sector", "name"),
+    "sector.slug": ("app.models.sector:Sector", "slug"),
+    "threat_actor.sector": ("app.models.sector:Sector", "name"),
+    "malware.sector": ("app.models.sector:Sector", "name"),
     # Entry-scoped
-    "sector": ("app.models.entry_sector:EntrySector", "sector"),
     "category": ("app.models.category:Category", "name"),
     "lang": ("app.models.entry:Entry", "language"),
     "type": ("app.models.feed:Feed", "feed_type"),
@@ -1257,8 +1261,6 @@ _ARRAY_VALUE_FIELDS: dict[str, tuple[str, str, str]] = {
     "rule.data_source": ("app.models.detection_rule:DetectionRule", "data_sources", "array"),
     "rule.tactic": ("app.models.detection_rule:DetectionRule", "mitre_tactics", "array"),
     "rule.tag": ("app.models.detection_rule:DetectionRule", "tags", "array"),
-    "threat_actor.sector": ("app.models.threat_actor:ThreatActor", "targeted_sectors", "array"),
-    "malware.sector": ("app.models.malware_family:MalwareFamily", "targeted_sectors", "array"),
     "tool.platform": ("app.models.tool:Tool", "platforms", "array"),
     "note.tag": ("app.models.note:Note", "tags", "array"),
     "ttp.platform": ("app.models.ttp:TTP", "platforms", "jsonb"),

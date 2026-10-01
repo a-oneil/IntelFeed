@@ -70,7 +70,9 @@ The queue learns from you, in two ways you control directly.
 their articles and surface them even below the normal threshold; muted entities
 disappear from the queue entirely (but not from search or the feed list). Both
 are per-user. This is the biggest lever you have, and the most underused — watch
-your vendors, your products, and the actors that go after your sector.
+your vendors, your products, the actors that go after your sector, and the sector
+itself: watching **Healthcare** boosts every article the analysis judged to describe
+healthcare as the target.
 
 **Thumbs.** The queue asks whether a ranking was right. Everyone's votes
 together nudge the shared ranking by at most ±10%, which is deliberate — a

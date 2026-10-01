@@ -74,6 +74,7 @@ function entityRouteFromPivotType(type: string, id: string): string {
     case "cve": return `/workbench/cve/${id}`;
     case "ttp": return `/workbench/ttp/${id}`;
     case "country": return `/workbench/country/${id}`;
+    case "sector": return `/workbench/sector/${id}`;
     case "tool": return `/workbench/tool/${id}`;
     case "mitigation": return `/workbench/mitigation/${id}`;
     case "cwe": return `/workbench/cwe/${id}`;

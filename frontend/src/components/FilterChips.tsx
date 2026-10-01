@@ -11,6 +11,7 @@ const TYPE_VALUE_TO_ENTITY: Record<string, string> = {
   ttp: "ttp",
   malware: "malware",
   country: "country",
+  sector: "sector",
   tool: "tool",
   vendor: "vendor",
   product: "product",

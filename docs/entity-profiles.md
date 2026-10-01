@@ -46,7 +46,7 @@ asserter), written alongside the column by every path that fills one:
 | `analyst` | the per-type `PUT /entities/...` endpoints, via `_apply_fields` — only when a value actually changes, so a no-op save doesn't restamp the field |
 | `ai_extraction` | `intelligence/enrichment.py` while reading an article (carries `entry_id`) |
 | `ai_assessment` | the AI gap-fill in `workers/entity_maintenance_tasks.py` (carries the model's reason as the quote) |
-| `enrichment` | `enrichment/entity_updater.py` (wikipedia / mitre_attack / malpedia) and the sector rollup in `workers/maintenance.py` |
+| `enrichment` | `enrichment/entity_updater.py` (wikipedia / mitre_attack / malpedia) and the sector rollup in `workers/maintenance.py`, which writes `threat_actor_target_sectors` / `malware_target_sectors` rows from the entity's own articles and rebuilds the `targeted_sectors` cache (`services/sector_links.py`) |
 | `external_feed` | the Cybergeist attribute fill and the ransomware.live sync |
 
 Two invariants. Recording never fails the write — `record_claim` returns a bool

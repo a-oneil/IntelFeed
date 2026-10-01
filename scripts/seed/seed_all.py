@@ -13,7 +13,7 @@ Every step is idempotent, so re-running fills gaps rather than duplicating.
 Steps run as subprocesses: one failing seeder cannot poison another's database
 session, and a crash mid-run leaves the completed steps committed.
 
-All nine seeders support --dry-run, so `seed_all.py --dry-run` is a genuine
+All ten seeders support --dry-run, so `seed_all.py --dry-run` is a genuine
 preview of the whole set rather than just a plan. The two Wikipedia steps skip
 their network lookups when dry, so the preview is fast; the ATT&CK step still
 downloads its bundles, because that is the only way to know what would change.
@@ -58,6 +58,7 @@ DRY_OVERWRITE = ("--dry-run", "--overwrite")
 STEPS: tuple[Step, ...] = (
     Step("countries", "seed_countries.py", "UN-recognized countries with ISO codes and regions", accepts=DRY),
     Step("aliases", "seed_country_aliases.py", "Country demonyms, so 'Iranian' matches Iran", accepts=DRY),
+    Step("sectors", "seed_sectors.py", "The 21 victim-sector entities (closed vocabulary)", accepts=DRY),
     Step("attack", "seed_mitre_attack.py", "MITRE ATT&CK catalog (Enterprise + Mobile + ICS)", True, DRY),
     # Before vendors/cpe: the catalog has to exist before backfill_cve_weaknesses
     # can resolve the NVD refs already sitting in cves.nvd_data.

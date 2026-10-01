@@ -56,6 +56,8 @@ ADMIN_TOOLS: frozenset[str] = frozenset(
         "delete_intel_report",
         "bulk_unlink_entities",
         "confirm_extraction_entities",
+        # Target-sector claims are global profile edits, like the merges above.
+        "set_target_sector",
     }
 )
 
@@ -184,6 +186,7 @@ from app.tools import (  # noqa: E402
     read,  # noqa: F401
     reader_ops,  # noqa: F401
     search,  # noqa: F401
+    sector,  # noqa: F401
     threads,  # noqa: F401
     workspace,  # noqa: F401
     write,  # noqa: F401

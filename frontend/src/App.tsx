@@ -253,6 +253,7 @@ export default function App() {
               <Route path="cwe/:id" element={<EntityProfilePage slug="cwe" />} />
               <Route path="ttp/:id" element={<EntityProfilePage slug="ttp" />} />
               <Route path="country/:id" element={<EntityProfilePage slug="country" />} />
+              <Route path="sector/:id" element={<EntityProfilePage slug="sector" />} />
               <Route path="tool/:id" element={<EntityProfilePage slug="tool" />} />
               <Route path="mitigation/:id" element={<EntityProfilePage slug="mitigation" />} />
               <Route path="observable/:id" element={<EntityProfilePage slug="observable" />} />

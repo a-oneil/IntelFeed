@@ -282,13 +282,12 @@ All search tools (`search_entries`, `search_entities`, `search_unified`) support
 | Language | `lang:...` | `lang:en` |
 | Category | `category:...` | `category:Blogs` — the feed's folder |
 | Signal | `signal:...` | `signal:under_reported`, `signal:kev_added`, `signal:novel_entity` — the signal engine's reason for ranking an entry |
-| Sector | `sector:...` | `sector:healthcare` — sector mentioned in the article |
 | URL | `url:...` | `url:github.com` |
 | Length | `words:` | `words:>1500`, `words:500..2000` |
 | Source grade | `feed.reliability:` | `feed.reliability:B` — Admiralty-code grade (also `feed.timeliness:`, `feed.relevance:`) |
 | Sort | `sort:` | `relevance`, `newest`, `oldest`, `radar`, `title_asc`, `title_desc`, `shortest`, `longest` |
 
-`category`, `signal`, `sector`, `url`, `feed.*` and the `is:muted/translated/image`
+`category`, `signal`, `url`, `feed.*` and the `is:muted/translated/image`
 values are answered from PostgreSQL rather than the search index, so they need no
 re-index; the endpoint folds their entry IDs into the same constraint an entity
 join uses. `sort:radar` is likewise PostgreSQL-backed — it orders by the signal
@@ -299,7 +298,7 @@ Three things to know before trusting a filter's output:
 
 - **`OR` between two entry-scoped PostgreSQL filters silently means AND.** `signal:kev_added OR
   signal:scoop` intersects rather than unions and returns a plausible wrong number, not an error.
-  Affects `signal:`, `sector:`, `url:` and `is:translated`/`is:image`. `is:muted` is worse still —
+  Affects `signal:`, `url:` and `is:translated`/`is:image`. `is:muted` is worse still —
   it does not participate in OR at all, giving neither the union nor a reliable intersection.
   `feed:`, `category:` and the source grades OR correctly. Run the two queries separately.
 - **A negated PostgreSQL filter only subtracts from an entry-ID set.** `NOT signal:feed_echo`
@@ -321,6 +320,7 @@ Three things to know before trusting a filter's output:
 | TTP shape | `ttp.platform:` | `ttp.platform:Windows`, `ttp.data_source:process`, `ttp.domain:ics`, `ttp.subtechnique:true` |
 | Actor | `threat_actor:` | `threat_actor:APT29`, `threat_actor.country:Russia`, `threat_actor.motivation:espionage`, `threat_actor.sector:healthcare`, `threat_actor.type:ransomware` |
 | Malware | `malware:` | `malware:Emotet`, `malware.type:trojan`, `malware.sector:finance` |
+| Sector | `sector:` | `sector:healthcare`, `sector:banks` (name, slug or alias — articles the analysis judged to describe the industry as targeted), `sector.slug:financial-services` |
 | Tool | `tool:` | `tool:Mimikatz`, `tool.type:...`, `tool.platform:Windows` |
 | Country | `country:` | `country:"United States"`, `country.region:Europe`, `country.iso:RU` |
 | Vendor / product | `vendor:` | `vendor:Cisco`, `product:ASA`, `product.vendor:Cisco` |
@@ -558,6 +558,17 @@ python3 intelfeed-skill/scripts/intelfeed_cli.py get_malware '{"malware_id": "Em
 ```
 
 ---
+
+#### list_sectors / get_sector / who_targets_sector / sector_victims / set_target_sector
+
+The victim-industry vocabulary as an entity (21 closed, seeded sectors). `list_sectors` carries per-sector article, targeting-actor/malware and 90-day victim counts; `get_sector` is the victimology profile (reported vs asserted targeting, campaigns, leak-site victims, the country cross-tab, intel profiles, recent articles); `who_targets_sector` and `sector_victims` are its two halves trimmed for a model's context. A sector is addressable by UUID, slug (`healthcare`), display name or alias (`banks`). `set_target_sector` (admin) asserts or withdraws a targets-sector claim on an actor or malware family. Pivot, graph and timeline on a sector go through `pivot_entity` / `get_entity_graph` / `get_entity_timeline` with `entity_type: "sector"`.
+
+**Backed by:** `POST /api/tools/execute` → `app.tools.sector`
+
+```bash
+python3 intelfeed-skill/scripts/intelfeed_cli.py who_targets_sector '{"sector": "healthcare", "limit": 10}'
+python3 intelfeed-skill/scripts/intelfeed_cli.py sector_victims '{"sector": "financial-services", "window_days": 30}'
+```
 
 #### get_cve
 

@@ -2,7 +2,7 @@ import uuid
 from collections import Counter, defaultdict
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Body, Depends, Path, Query
+from fastapi import APIRouter, Body, Depends, Path, Query, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1872,6 +1872,129 @@ async def get_campaign_stats(
         "entries_over_time": entries_over_time,
         "entries_over_time_bucket": bucket,
     }
+
+
+# --- Campaign Sectors ---
+
+
+@router.get("/{campaign_id}/sectors")
+async def list_campaign_sectors(
+    campaign_id: uuid.UUID = Path(..., description="Campaign UUID."),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The victim verticals an analyst scoped this campaign to."""
+    from app.models.sector import CampaignSector, Sector
+
+    campaign = await db.get(Campaign, campaign_id)
+    if not campaign:
+        raise AppError(code="not_found", message="Campaign not found", status_code=404)
+    result = await db.execute(
+        select(CampaignSector, Sector.slug, Sector.name)
+        .join(Sector, Sector.id == CampaignSector.sector_id)
+        .where(CampaignSector.campaign_id == campaign_id)
+        .order_by(Sector.name)
+    )
+    return [
+        {
+            "sector_id": str(cs.sector_id),
+            "slug": slug,
+            "name": name,
+            "added_at": cs.added_at.isoformat() if cs.added_at else None,
+        }
+        for cs, slug, name in result.all()
+    ]
+
+
+@router.get("/{campaign_id}/sectors/suggested")
+async def suggest_campaign_sectors(
+    campaign_id: uuid.UUID = Path(..., description="Campaign UUID."),
+    limit: int = Query(8, ge=1, le=21, description="Maximum number of suggested sectors to return."),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Sectors the campaign's own articles describe as targeted, ranked by how many say so,
+    excluding the ones already linked."""
+    from app.models.entry_sector import EntrySector
+    from app.models.sector import CampaignSector, Sector
+
+    campaign = await db.get(Campaign, campaign_id)
+    if not campaign:
+        raise AppError(code="not_found", message="Campaign not found", status_code=404)
+    linked = {
+        row
+        for row in (
+            await db.execute(select(CampaignSector.sector_id).where(CampaignSector.campaign_id == campaign_id))
+        ).scalars()
+    }
+    n = func.count(func.distinct(EntrySector.entry_id)).label("n")
+    result = await db.execute(
+        select(Sector.id, Sector.slug, Sector.name, n)
+        .join(EntrySector, EntrySector.sector_id == Sector.id)
+        .where(EntrySector.entry_id.in_(select(CampaignEntry.entry_id).where(CampaignEntry.campaign_id == campaign_id)))
+        .group_by(Sector.id, Sector.slug, Sector.name)
+        .order_by(n.desc(), Sector.name)
+    )
+    return [
+        {"sector_id": str(sid), "slug": slug, "name": name, "entry_count": count}
+        for sid, slug, name, count in result.all()
+        if sid not in linked
+    ][:limit]
+
+
+@router.post("/{campaign_id}/sectors", status_code=201)
+async def add_campaign_sector(
+    campaign_id: uuid.UUID = Path(..., description="Campaign UUID."),
+    body: dict = Body(
+        ...,
+        description="JSON object with sector (UUID, canonical slug or display name).",
+        json_schema_extra={"example": {"sector": "healthcare"}},
+    ),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Scope a campaign to a victim vertical."""
+    from app.api.intelligence import _load_sector
+    from app.models.sector import CampaignSector
+
+    campaign = await db.get(Campaign, campaign_id)
+    if not campaign:
+        raise AppError(code="not_found", message="Campaign not found", status_code=404)
+    ref = body.get("sector") or body.get("sector_id")
+    if not ref:
+        raise AppError(code="bad_request", message="sector is required", status_code=400)
+    sector = await _load_sector(db, str(ref))
+    existing = await db.execute(
+        select(CampaignSector).where(CampaignSector.campaign_id == campaign_id, CampaignSector.sector_id == sector.id)
+    )
+    if existing.scalar_one_or_none():
+        raise AppError(code="conflict", message="Sector already linked to this campaign", status_code=409)
+    db.add(CampaignSector(campaign_id=campaign_id, sector_id=sector.id))
+    await db.flush()
+    return {"sector_id": str(sector.id), "slug": sector.slug, "name": sector.name}
+
+
+@router.delete("/{campaign_id}/sectors/{sector_ref}", status_code=204)
+async def remove_campaign_sector(
+    campaign_id: uuid.UUID = Path(..., description="Campaign UUID."),
+    sector_ref: str = Path(..., description="Sector UUID, slug or name."),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Unlink a sector from a campaign."""
+    from app.api.intelligence import _load_sector
+    from app.models.sector import CampaignSector
+
+    sector = await _load_sector(db, sector_ref)
+    result = await db.execute(
+        select(CampaignSector).where(CampaignSector.campaign_id == campaign_id, CampaignSector.sector_id == sector.id)
+    )
+    cs = result.scalar_one_or_none()
+    if not cs:
+        raise AppError(code="not_found", message="Campaign sector link not found", status_code=404)
+    await db.delete(cs)
+    await db.flush()
+    return Response(status_code=204)
 
 
 # --- Campaign Countries ---

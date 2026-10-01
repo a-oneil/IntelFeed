@@ -296,12 +296,38 @@ class EntryCountryResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-# --- Sector Schemas (controlled vocabulary — no entity table) ---
+# --- Sector Schemas ---
+
+
+class SectorResponse(BaseModel):
+    """A victim-sector entity (closed vocabulary; see app.intelligence.sectors)."""
+
+    id: uuid.UUID
+    slug: str
+    name: str
+    aliases: list[str] = []
+    description: str | None
+    first_seen_at: datetime
+    last_seen_at: datetime
+    article_count: int
+    # Batch-populated on the list endpoint from the target junctions / leak-site victims
+    targeting_actor_count: int = 0
+    targeting_malware_count: int = 0
+    victim_count: int = 0
+
+    model_config = {"from_attributes": True}
 
 
 class EntrySectorResponse(BaseModel):
-    """Targeted victim sector linked to an entry."""
+    """Targeted victim sector linked to an entry.
 
+    ``sector``/``label`` are the pre-entity names of ``slug``/``name`` and stay
+    for existing readers; ``id`` is what links to the sector profile.
+    """
+
+    id: uuid.UUID | None = None
+    slug: str | None = None
+    name: str | None = None
     sector: str  # canonical slug, e.g. "financial-services"
     label: str  # display label, e.g. "Financial Services"
     confidence: str | None = None

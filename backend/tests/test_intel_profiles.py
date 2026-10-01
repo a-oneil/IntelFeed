@@ -7,12 +7,14 @@ import pytest_asyncio
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.intelligence.sectors import sector_uuid
 from app.models.country import Country, EntryCountry
 from app.models.country_junction import ThreatActorTargetCountry
 from app.models.entry import Entry
 from app.models.entry_sector import EntrySector
 from app.models.feed import Feed
 from app.models.malware_family import EntryMalware, MalwareFamily
+from app.models.sector import MalwareTargetSector, ThreatActorTargetSector
 from app.models.threat_actor import EntryThreatActor, ThreatActor
 from app.models.user import User
 
@@ -58,6 +60,12 @@ async def scope_data(db_session: AsyncSession, test_user: User):
             EntrySector(entry_id=e4.id, sector="healthcare"),
             # Claim: APT28 targets Germany (rides alongside the co-occurrence).
             ThreatActorTargetCountry(threat_actor_id=apt28.id, country_id=de.id),
+            # Sector claims live on the target-sector junctions; the label arrays
+            # above are only the read cache those junctions rebuild.
+            ThreatActorTargetSector(
+                threat_actor_id=spider.id, sector_id=sector_uuid("financial-services"), source="seed"
+            ),
+            MalwareTargetSector(malware_family_id=inc.id, sector_id=sector_uuid("healthcare"), source="seed"),
         ]
     )
     await db_session.flush()

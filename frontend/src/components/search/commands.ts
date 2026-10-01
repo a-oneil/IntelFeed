@@ -102,6 +102,7 @@ export const QUICK_ACTIONS: QuickAction[] = [
   { label: "Vendors", icon: "🏢", path: explore("vendors"), category: "browse", workbenchSection: "vendors", keywords: ["vendor", "company", "manufacturer"] },
   { label: "Products", icon: "📦", path: explore("products"), category: "browse", workbenchSection: "products", keywords: ["product", "software", "application", "appliance"] },
   { label: "Countries", icon: "🏳", path: explore("countries"), category: "browse", workbenchSection: "countries", keywords: ["country", "nation", "geo", "attribution"] },
+  { label: "Sectors", icon: "🏭", path: explore("sectors"), category: "browse", workbenchSection: "sectors", keywords: ["sector", "industry", "vertical", "victimology", "targeting"] },
   { label: "Mitigations", icon: "🧯", path: explore("mitigations"), category: "browse", workbenchSection: "mitigations", keywords: ["mitigation", "control", "defense", "countermeasure"] },
   { label: "Watchlist", icon: "⭐", path: explore("watchlist"), category: "browse", workbenchSection: "watchlist", keywords: ["watchlist", "watched", "tracking", "alerts"] },
   { label: "Ransomware tracker", icon: "🔒", path: explore("ransomware"), category: "browse", workbenchSection: "ransomware", keywords: ["ransomware", "victims", "leak site", "extortion"] },

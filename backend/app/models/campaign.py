@@ -36,6 +36,7 @@ class Campaign(Base):
     entities = relationship("CampaignEntity", back_populates="campaign", cascade="all, delete-orphan")
     saved_searches = relationship("CampaignSavedSearch", back_populates="campaign", cascade="all, delete-orphan")
     country_links = relationship("CampaignCountry", back_populates="campaign", cascade="all, delete-orphan")
+    sector_links = relationship("CampaignSector", back_populates="campaign", cascade="all, delete-orphan")
     sources = relationship("CampaignSource", back_populates="campaign", cascade="all, delete-orphan")
 
 

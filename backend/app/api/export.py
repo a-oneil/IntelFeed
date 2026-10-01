@@ -39,6 +39,7 @@ _ENTITY_NAME_ATTR = {
     "cwe": "cwe_id",
     "ttp": "technique_id",
     "country": "name",
+    "sector": "name",
     "mitigation": "name",
     "tool": "name",
     "vendor": "name",

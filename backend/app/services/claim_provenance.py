@@ -44,7 +44,7 @@ PROVENANCE_FIELDS: dict[str, tuple[str, ...]] = {
         "mitre_id",
         "aliases",
     ),
-    entity_types.MALWARE: ("description", "malware_type", "mitre_id", "aliases"),
+    entity_types.MALWARE: ("description", "malware_type", "mitre_id", "aliases", "targeted_sectors"),
     entity_types.TOOL: ("description", "tool_type", "mitre_id", "aliases"),
     # Both exploit columns are real and both are analyst-editable: exploit_status
     # is the extraction's wording, exploit_availability is what the header badge
@@ -55,6 +55,7 @@ PROVENANCE_FIELDS: dict[str, tuple[str, ...]] = {
     entity_types.VENDOR: ("description",),
     entity_types.PRODUCT: ("description", "vendor_id"),
     entity_types.COUNTRY: ("description",),
+    entity_types.SECTOR: ("description",),
     entity_types.MITIGATION: ("description",),
 }
 

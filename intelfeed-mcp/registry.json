@@ -139,6 +139,7 @@
       "observable",
       "product",
       "ransomware_victim",
+      "sector",
       "threat_actor",
       "tool",
       "ttp",
@@ -651,7 +652,7 @@
  },
  {
   "name": "create_entity_note",
-  "description": "Add an analytical note to an intelligence entity. Supported entity types: campaign, country, cve, malware, mitigation, product, threat_actor, tool, ttp, vendor (matches the entity_notes DB constraint; ransomware victims are not supported).",
+  "description": "Add an analytical note to an intelligence entity. Supported entity types: campaign, country, cve, cwe, malware, mitigation, observable, product, sector, threat_actor, tool, ttp, vendor (matches the entity_notes DB constraint; ransomware victims are not supported).",
   "input_schema": {
    "type": "object",
    "properties": {
@@ -666,6 +667,7 @@
       "mitigation",
       "observable",
       "product",
+      "sector",
       "threat_actor",
       "tool",
       "ttp",
@@ -2068,6 +2070,7 @@
       "mitigation",
       "observable",
       "product",
+      "sector",
       "threat_actor",
       "tool",
       "ttp",
@@ -2120,6 +2123,7 @@
       "mitigation",
       "observable",
       "product",
+      "sector",
       "threat_actor",
       "tool",
       "ttp",
@@ -2582,6 +2586,28 @@
   "mutating": false
  },
  {
+  "name": "get_sector",
+  "description": "Get a sector's victimology profile: description and aliases, who targets it (reported from articles vs asserted claims), campaigns scoped to it, leak-site victim totals and top ransomware groups, the country cross-tab, the intel profiles that include it, and recent articles.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "sector": {
+     "type": "string",
+     "description": "Sector UUID or canonical slug, e.g. 'healthcare' or 'financial-services'"
+    },
+    "window_days": {
+     "type": "integer",
+     "default": 90,
+     "description": "Window for victim/country activity"
+    }
+   },
+   "required": [
+    "sector"
+   ]
+  },
+  "mutating": false
+ },
+ {
   "name": "get_share_link",
   "description": "Return this user's active public share link for an entry ({token, url, created_at, expires_at}), or null if they have not shared it. Other analysts' share links for the same entry are not returned.",
   "input_schema": {
@@ -2846,6 +2872,7 @@
       "malware",
       "observable",
       "product",
+      "sector",
       "threat_actor",
       "tool",
       "ttp",
@@ -2864,6 +2891,7 @@
       "malware",
       "observable",
       "product",
+      "sector",
       "threat_actor",
       "tool",
       "ttp",
@@ -3016,6 +3044,7 @@
       "mitigation",
       "observable",
       "product",
+      "sector",
       "threat_actor",
       "tool",
       "ttp",
@@ -3054,6 +3083,7 @@
       "malware",
       "observable",
       "product",
+      "sector",
       "threat_actor",
       "tool",
       "ttp",
@@ -3259,6 +3289,35 @@
    "type": "object",
    "properties": {},
    "required": []
+  },
+  "mutating": false
+ },
+ {
+  "name": "list_sectors",
+  "description": "List the victim-sector vocabulary (21 closed, seeded industries) with per-sector counts: linked articles, actors and malware asserted to target it, and leak-site victims in the last 90 days. Use the slug from here with get_sector / who_targets_sector / sector_victims / pivot_entity.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "search": {
+     "type": "string",
+     "description": "Match on name, slug or alias (e.g. 'banks')"
+    },
+    "sort_by": {
+     "type": "string",
+     "enum": [
+      "name",
+      "article_count",
+      "last_seen_at",
+      "targeting_actor_count",
+      "victim_count"
+     ],
+     "default": "article_count"
+    },
+    "limit": {
+     "type": "integer",
+     "default": 25
+    }
+   }
   },
   "mutating": false
  },
@@ -3583,6 +3642,7 @@
       "mitigation",
       "observable",
       "product",
+      "sector",
       "threat_actor",
       "tool",
       "ttp",
@@ -3772,6 +3832,7 @@
       "observable",
       "product",
       "ransomware_victim",
+      "sector",
       "threat_actor",
       "tool",
       "ttp",
@@ -3828,6 +3889,7 @@
       "mitigation",
       "observable",
       "product",
+      "sector",
       "threat_actor",
       "tool",
       "ttp",
@@ -4095,6 +4157,32 @@
   "mutating": false
  },
  {
+  "name": "sector_victims",
+  "description": "Leak-site ransomware victims in a sector: totals (all time and in the window), a 12-month monthly series, the top ransomware groups posting victims in that sector, the victim-country breakdown and the most recent disclosures.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "sector": {
+     "type": "string",
+     "description": "Sector UUID or canonical slug, e.g. 'healthcare' or 'financial-services'"
+    },
+    "window_days": {
+     "type": "integer",
+     "default": 90
+    },
+    "limit": {
+     "type": "integer",
+     "default": 20,
+     "description": "Recent disclosures to return"
+    }
+   },
+   "required": [
+    "sector"
+   ]
+  },
+  "mutating": false
+ },
+ {
   "name": "set_detection_rule_status",
   "description": "Set a detection rule's lifecycle status: 'draft' or 'published' (mirrors the API's is_draft toggle — detection rules have no other states).",
   "input_schema": {
@@ -4115,6 +4203,44 @@
    "required": [
     "rule_id",
     "status"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "set_target_sector",
+  "description": "Assert or withdraw that a threat actor or malware family targets a sector (an analyst claim on the target-sector junction; the profile's sector chips are rebuilt from it). action='add' upgrades an existing rolled-up or enriched claim to the analyst's; action='remove' withdraws the claim — the nightly rollup re-asserts it if the entity's own articles still carry the evidence.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entity_type": {
+     "type": "string",
+     "enum": [
+      "threat_actor",
+      "malware"
+     ]
+    },
+    "entity_id": {
+     "type": "string",
+     "description": "Actor or malware family UUID"
+    },
+    "sector": {
+     "type": "string",
+     "description": "Sector UUID or canonical slug, e.g. 'healthcare' or 'financial-services'"
+    },
+    "action": {
+     "type": "string",
+     "enum": [
+      "add",
+      "remove"
+     ],
+     "default": "add"
+    }
+   },
+   "required": [
+    "entity_type",
+    "entity_id",
+    "sector"
    ]
   },
   "mutating": true
@@ -4274,6 +4400,7 @@
       "observable",
       "product",
       "ransomware_victim",
+      "sector",
       "threat_actor",
       "tool",
       "vendor"
@@ -4454,7 +4581,7 @@
  },
  {
   "name": "update_entity_profile",
-  "description": "Update an entity's profile. Supports every profile type with per-type editable fields: threat_actor (name/aliases/description/mitre_id/country/motivation), malware (name/aliases/description/malpedia_url/malware_type), cve (description/severity/exploit_status/affected_products/exploit_availability), ttp (technique_name/tactic/description), country (name/iso_code/aliases/region/description), tool (name/aliases/description/tool_type/malpedia_url/github_url), vendor (name/aliases/description/website/vendor_type), product (name/aliases/description/product_type/website/vendor_id), campaign (name/description/status/tags/tlp_marking). Renames are checked for name clashes; removing aliases unlinks entries matched only via those aliases; new aliases queue a retro-scan of existing entries; the search-index document is refreshed.",
+  "description": "Update an entity's profile. Supports every profile type with per-type editable fields: threat_actor (name/aliases/description/mitre_id/country/motivation), malware (name/aliases/description/malpedia_url/malware_type), cve (description/severity/exploit_status/affected_products/exploit_availability), ttp (technique_name/tactic/description), country (name/iso_code/aliases/region/description), sector (aliases/description), tool (name/aliases/description/tool_type/malpedia_url/github_url), vendor (name/aliases/description/website/vendor_type), product (name/aliases/description/product_type/website/vendor_id), campaign (name/description/status/tags/tlp_marking). Renames are checked for name clashes; removing aliases unlinks entries matched only via those aliases; new aliases queue a retro-scan of existing entries; the search-index document is refreshed.",
   "input_schema": {
    "type": "object",
    "properties": {
@@ -4466,6 +4593,7 @@
       "cve",
       "malware",
       "product",
+      "sector",
       "threat_actor",
       "tool",
       "ttp",
@@ -4723,6 +4851,7 @@
       "observable",
       "product",
       "ransomware_victim",
+      "sector",
       "threat_actor",
       "tool",
       "vendor"
@@ -4754,5 +4883,27 @@
    ]
   },
   "mutating": true
+ },
+ {
+  "name": "who_targets_sector",
+  "description": "Rank the threat actors and malware families targeting a sector. 'reported' rows are ranked by how many articles describe both the actor/family and the sector being hit; 'asserted' rows carry an explicit targets-sector claim with its source (rollup, enrichment, seed, analyst) and evidence count.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "sector": {
+     "type": "string",
+     "description": "Sector UUID or canonical slug, e.g. 'healthcare' or 'financial-services'"
+    },
+    "limit": {
+     "type": "integer",
+     "default": 15,
+     "description": "Rows per list"
+    }
+   },
+   "required": [
+    "sector"
+   ]
+  },
+  "mutating": false
  }
 ]

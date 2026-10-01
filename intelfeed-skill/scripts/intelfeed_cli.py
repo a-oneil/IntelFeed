@@ -129,6 +129,7 @@ WRITE_TOOLS: frozenset[str] = frozenset(
         "run_ai_task",
         "run_automation_rule",
         "set_detection_rule_status",
+        "set_target_sector",
         "star_entry",
         "test_automation_rule",
         "toggle_automation_rule",
@@ -274,6 +275,7 @@ TOOLS: dict[str, dict] = {
                     'observable',
                     'product',
                     'ransomware_victim',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'ttp',
@@ -619,8 +621,9 @@ TOOLS: dict[str, dict] = {
     "create_entity_note": {
         "description": (
             "Add an analytical note to an intelligence entity. Supported entity types: campaign, "
-            "country, cve, malware, mitigation, product, threat_actor, tool, ttp, vendor (matches the "
-            "entity_notes DB constraint; ransomware victims are not supported)."
+            "country, cve, cwe, malware, mitigation, observable, product, sector, threat_actor, tool, "
+            "ttp, vendor (matches the entity_notes DB constraint; ransomware victims are not "
+            "supported)."
         ),
         "params": {
             "entity_type": {
@@ -635,6 +638,7 @@ TOOLS: dict[str, dict] = {
                     'mitigation',
                     'observable',
                     'product',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'ttp',
@@ -1704,6 +1708,7 @@ TOOLS: dict[str, dict] = {
                     'mitigation',
                     'observable',
                     'product',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'ttp',
@@ -1746,6 +1751,7 @@ TOOLS: dict[str, dict] = {
                     'mitigation',
                     'observable',
                     'product',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'ttp',
@@ -2096,6 +2102,24 @@ TOOLS: dict[str, dict] = {
         ),
         "params": {},
     },
+    "get_sector": {
+        "description": (
+            "Get a sector's victimology profile: description and aliases, who targets it (reported "
+            "from articles vs asserted claims), campaigns scoped to it, leak-site victim totals and "
+            "top ransomware groups, the country cross-tab, the intel profiles that include it, and "
+            "recent articles."
+        ),
+        "params": {
+            "sector": {
+                "type": 'str',
+                "required": True,
+            },
+            "window_days": {
+                "type": 'int',
+                "default": 90,
+            },
+        },
+    },
     "get_share_link": {
         "description": (
             "Return this user's active public share link for an entry ({token, url, created_at, "
@@ -2313,6 +2337,7 @@ TOOLS: dict[str, dict] = {
                     'malware',
                     'observable',
                     'product',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'ttp',
@@ -2333,6 +2358,7 @@ TOOLS: dict[str, dict] = {
                     'malware',
                     'observable',
                     'product',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'ttp',
@@ -2460,6 +2486,7 @@ TOOLS: dict[str, dict] = {
                     'mitigation',
                     'observable',
                     'product',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'ttp',
@@ -2495,6 +2522,7 @@ TOOLS: dict[str, dict] = {
                     'malware',
                     'observable',
                     'product',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'ttp',
@@ -2661,6 +2689,29 @@ TOOLS: dict[str, dict] = {
             "10-minute cache and are computed inline (via search-index queries) on a cache miss."
         ),
         "params": {},
+    },
+    "list_sectors": {
+        "description": (
+            "List the victim-sector vocabulary (21 closed, seeded industries) with per-sector counts: "
+            "linked articles, actors and malware asserted to target it, and leak-site victims in the "
+            "last 90 days. Use the slug from here with get_sector / who_targets_sector / "
+            "sector_victims / pivot_entity."
+        ),
+        "params": {
+            "search": {
+                "type": 'str',
+                "default": None,
+            },
+            "sort_by": {
+                "type": 'str',
+                "default": 'article_count',
+                "enum": ['name', 'article_count', 'last_seen_at', 'targeting_actor_count', 'victim_count'],
+            },
+            "limit": {
+                "type": 'int',
+                "default": 25,
+            },
+        },
     },
     "list_telegram_feeds": {
         "description": (
@@ -2922,6 +2973,7 @@ TOOLS: dict[str, dict] = {
                     'mitigation',
                     'observable',
                     'product',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'ttp',
@@ -3068,6 +3120,7 @@ TOOLS: dict[str, dict] = {
                     'observable',
                     'product',
                     'ransomware_victim',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'ttp',
@@ -3117,6 +3170,7 @@ TOOLS: dict[str, dict] = {
                     'mitigation',
                     'observable',
                     'product',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'ttp',
@@ -3340,6 +3394,27 @@ TOOLS: dict[str, dict] = {
             },
         },
     },
+    "sector_victims": {
+        "description": (
+            "Leak-site ransomware victims in a sector: totals (all time and in the window), a "
+            "12-month monthly series, the top ransomware groups posting victims in that sector, the "
+            "victim-country breakdown and the most recent disclosures."
+        ),
+        "params": {
+            "sector": {
+                "type": 'str',
+                "required": True,
+            },
+            "window_days": {
+                "type": 'int',
+                "default": 90,
+            },
+            "limit": {
+                "type": 'int',
+                "default": 20,
+            },
+        },
+    },
     "set_detection_rule_status": {
         "description": (
             "Set a detection rule's lifecycle status: 'draft' or 'published' (mirrors the API's "
@@ -3354,6 +3429,35 @@ TOOLS: dict[str, dict] = {
                 "type": 'str',
                 "required": True,
                 "enum": ['draft', 'published'],
+            },
+        },
+    },
+    "set_target_sector": {
+        "description": (
+            "Assert or withdraw that a threat actor or malware family targets a sector (an analyst "
+            "claim on the target-sector junction; the profile's sector chips are rebuilt from it). "
+            "action='add' upgrades an existing rolled-up or enriched claim to the analyst's; "
+            "action='remove' withdraws the claim \u2014 the nightly rollup re-asserts it if the entity's "
+            "own articles still carry the evidence."
+        ),
+        "params": {
+            "entity_type": {
+                "type": 'str',
+                "required": True,
+                "enum": ['threat_actor', 'malware'],
+            },
+            "entity_id": {
+                "type": 'str',
+                "required": True,
+            },
+            "sector": {
+                "type": 'str',
+                "required": True,
+            },
+            "action": {
+                "type": 'str',
+                "default": 'add',
+                "enum": ['add', 'remove'],
             },
         },
     },
@@ -3468,6 +3572,7 @@ TOOLS: dict[str, dict] = {
                     'observable',
                     'product',
                     'ransomware_victim',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'vendor',
@@ -3626,7 +3731,8 @@ TOOLS: dict[str, dict] = {
             "(name/aliases/description/malpedia_url/malware_type), cve "
             "(description/severity/exploit_status/affected_products/exploit_availability), ttp "
             "(technique_name/tactic/description), country (name/iso_code/aliases/region/description), "
-            "tool (name/aliases/description/tool_type/malpedia_url/github_url), vendor "
+            "sector (aliases/description), tool "
+            "(name/aliases/description/tool_type/malpedia_url/github_url), vendor "
             "(name/aliases/description/website/vendor_type), product "
             "(name/aliases/description/product_type/website/vendor_id), campaign "
             "(name/description/status/tags/tlp_marking). Renames are checked for name clashes; "
@@ -3643,6 +3749,7 @@ TOOLS: dict[str, dict] = {
                     'cve',
                     'malware',
                     'product',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'ttp',
@@ -3860,6 +3967,7 @@ TOOLS: dict[str, dict] = {
                     'observable',
                     'product',
                     'ransomware_victim',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'vendor',
@@ -3877,6 +3985,24 @@ TOOLS: dict[str, dict] = {
             "boost": {
                 "type": 'float',
                 "default": None,
+            },
+        },
+    },
+    "who_targets_sector": {
+        "description": (
+            "Rank the threat actors and malware families targeting a sector. 'reported' rows are "
+            "ranked by how many articles describe both the actor/family and the sector being hit; "
+            "'asserted' rows carry an explicit targets-sector claim with its source (rollup, "
+            "enrichment, seed, analyst) and evidence count."
+        ),
+        "params": {
+            "sector": {
+                "type": 'str',
+                "required": True,
+            },
+            "limit": {
+                "type": 'int',
+                "default": 15,
             },
         },
     },

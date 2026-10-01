@@ -50,9 +50,11 @@ from app.models.entity_maintenance import EntityMaintenanceLog
 from app.models.entity_note import EntityNote
 from app.models.entity_relationship import EntityRelationship
 from app.models.entry import Entry
+from app.models.entry_sector import EntrySector
 from app.models.malware_family import EntryMalware, MalwareFamily
 from app.models.observable import EntryObservable, Observable
 from app.models.product import EntryProduct, Product
+from app.models.sector import Sector
 from app.models.threat_actor import EntryThreatActor, ThreatActor
 from app.models.tool import EntryTool, Tool
 from app.models.ttp import TTP, EntryTTP
@@ -117,6 +119,12 @@ CASCADE_SPECS: dict[str, dict[str, Any]] = {
         "junction": EntryCountry,
         "junction_fk": "country_id",
         "rel_type": "country",
+    },
+    "sector": {
+        "model": Sector,
+        "junction": EntrySector,
+        "junction_fk": "sector_id",
+        "rel_type": "sector",
     },
     # The ledger row's identity is its value, not a name — the preview reads
     # `name_attr` so the header says which observable is about to go.

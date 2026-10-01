@@ -359,6 +359,8 @@ export interface EntitySearchResult {
   // Country
   iso_code?: string;
   region?: string;
+  // Sector
+  slug?: string;
   // Detection Rule
   title?: string;
   rule_type?: string;
@@ -825,6 +827,95 @@ export interface CountryProfile {
   recent_entries: CountryProfileEntry[];
   role_breakdown: Record<string, number>;
   related_countries: CountryProfileRelated[];
+}
+
+export interface Sector {
+  id: string;
+  slug: string;
+  name: string;
+  aliases: string[];
+  description: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+  article_count: number;
+  /** Actors / malware with an asserted targets-sector claim (list endpoint). */
+  targeting_actor_count?: number;
+  targeting_malware_count?: number;
+  /** Leak-site victim disclosures in the last 90 days (list endpoint). */
+  victim_count?: number;
+}
+
+/** A sector linked to an entry. `sector`/`label` are the pre-entity spellings of `slug`/`name`. */
+export interface EntrySector {
+  id: string;
+  slug: string;
+  name: string;
+  sector: string;
+  label: string;
+  confidence: string | null;
+  source: string | null;
+}
+
+export interface SectorProfileNamed {
+  id: string;
+  name: string;
+  article_count: number;
+}
+
+export interface SectorProfileClaim extends SectorProfileNamed {
+  /** rollup | enrichment | seed | analyst */
+  source: string;
+}
+
+export interface SectorProfileCampaign {
+  id: string;
+  name: string;
+  status: string;
+  start_date: string | null;
+}
+
+export interface SectorProfileVictim {
+  id: string;
+  victim_id: string;
+  victim_name: string;
+  group: string | null;
+  country: string | null;
+  country_code: string | null;
+  posted_at: string | null;
+}
+
+export interface SectorProfileCountry {
+  id: string;
+  name: string;
+  iso_code: string | null;
+  article_count: number;
+  victim_count: number;
+}
+
+export interface MonthCount {
+  month: string;
+  count: number;
+}
+
+export interface SectorProfile {
+  sector: Sector;
+  window_days: number;
+  reported_actors: SectorProfileNamed[];
+  reported_malware: SectorProfileNamed[];
+  asserted_actors: SectorProfileClaim[];
+  asserted_malware: SectorProfileClaim[];
+  campaigns: SectorProfileCampaign[];
+  victims: {
+    total: number;
+    in_window: number;
+    monthly: MonthCount[];
+    top_groups: Array<{ group: string; victims: number }>;
+    recent: SectorProfileVictim[];
+  };
+  countries: SectorProfileCountry[];
+  intel_profiles: Array<{ id: string; name: string }>;
+  recent_entries: Array<{ id: string; title: string; published_at: string | null; confidence: string | null }>;
+  articles_monthly: MonthCount[];
 }
 
 export interface RegionSummary {
@@ -1557,6 +1648,7 @@ export interface PivotResponse {
     threat_actors: EntitySearchResult[];
     malwares: EntitySearchResult[];
     countrys: EntitySearchResult[];
+    sectors?: EntitySearchResult[];
     mitigations?: EntitySearchResult[];
     cwes?: EntitySearchResult[];
     tools?: EntitySearchResult[];

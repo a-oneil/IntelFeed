@@ -32,7 +32,6 @@ ENTRY_FIELDS = frozenset(
         # resolving them here avoids re-indexing 94k documents to add them.
         "category",
         "signal",
-        "sector",
         "url",
         "words",
         "feed.reliability",
@@ -51,6 +50,7 @@ ENTITY_FIELD_ROOTS = frozenset(
         "threat_actor",
         "malware",
         "country",
+        "sector",
         "tool",
         "vendor",
         "product",
@@ -94,6 +94,8 @@ ENTITY_FIELDS = frozenset(
         "malware.type",
         "country",
         "country.region",
+        "sector",
+        "sector.slug",
         "tool",
         "tool.type",
         "vendor",
@@ -174,6 +176,7 @@ ENTITY_FIELDS = frozenset(
             "threat_actor",
             "malware",
             "country",
+            "sector",
             "tool",
             "vendor",
             "product",
@@ -312,7 +315,7 @@ class ExecutionPlan:
     meili_query_alternatives: list[str] = field(default_factory=list)
     # Pending feed name filters that need DB resolution to feed_ids
     pending_feed_filters: list[PendingFeedFilter] = field(default_factory=list)
-    # Filters answered from Postgres (categories, signals, sectors, feed ratings)
+    # Filters answered from Postgres (categories, signals, feed ratings)
     pending_entry_filters: list[PendingEntryFilter] = field(default_factory=list)
     # Entry IDs these resolved to; None means "no entry-scoped filter applied"
     db_entry_ids: set[str] | None = None
@@ -434,7 +437,7 @@ _FILTER_ENTRY_FIELDS = {"tag": "tags", "type": "feed_type", "media": "media_type
 # Entry fields answered from Postgres that still end up as a Meilisearch clause
 # (they all narrow to a set of feed IDs). Because the clause is a filter string
 # in the end, these can take part in an OR — they just need a placeholder until
-# the lookup has run. The entry-scoped kinds (`signal:`, `sector:`, `url:`,
+# the lookup has run. The entry-scoped kinds (`signal:`, `url:`,
 # `is:translated`, `is:image`) resolve to entry IDs instead and cannot.
 _DEFERRED_FILTER_FIELDS = frozenset({"feed", "category", "feed.reliability", "feed.timeliness", "feed.relevance"})
 
@@ -766,7 +769,7 @@ def _handle_entry_field(
     if f in _DEFERRED_FILTER_FIELDS:
         return  # registered by the branch expansion, which knows where it sits
 
-    if f in ("signal", "sector", "url"):
+    if f in ("signal", "url"):
         # Entry-scoped: resolves to a set of entry IDs, which cannot live in a
         # Meilisearch filter string. The OR group travels with it so the sets
         # can be unioned at resolution time instead of always intersecting.
@@ -1023,7 +1026,6 @@ async def resolve_entry_filters(db, plan: ExecutionPlan) -> None:
 
     from app.models.category import Category
     from app.models.entry import Entry
-    from app.models.entry_sector import EntrySector
     from app.models.entry_signal import EntrySignal
     from app.models.feed import Feed
 
@@ -1074,8 +1076,6 @@ async def resolve_entry_filters(db, plan: ExecutionPlan) -> None:
                 )
             else:
                 stmt = select(EntrySignal.entry_id).where(func.lower(EntrySignal.signal_type) == value.lower())
-        elif kind == "sector":
-            stmt = select(EntrySector.entry_id).where(EntrySector.sector.ilike(to_sql_pattern(value), escape="\\"))
         elif kind == "url":
             stmt = select(Entry.id).where(Entry.url.ilike(to_sql_pattern(value), escape="\\"))
         elif kind == "is.translated":
