@@ -49,7 +49,9 @@ regexes = [
 
 [[allowlists]]
 description = "Published lure URLs in the observables extraction fixture"
-regexTarget = "match"
+# The rule's match is the bare token after `filekey=`, so test the whole line
+# for the filemail download shape instead.
+regexTarget = "line"
 # backend/tests/fixtures/observables/cases/unit42-screening-serpens.json —
 # the attacker's filemail download link as Unit 42 printed it. Its
 # `filekey=` query string is the file-share token that *is* the indicator;
