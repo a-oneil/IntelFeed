@@ -44,8 +44,10 @@ const profile: SectorProfile = {
   articles_monthly: [],
 };
 
-const useSectorProfile = vi.fn(() => ({ data: profile, isLoading: false }));
-vi.mock("@/hooks/useSectorProfile", () => ({ useSectorProfile: (...args: unknown[]) => useSectorProfile(...args) }));
+const useSectorProfile = vi.fn((_id: string | undefined, _days?: number) => ({ data: profile, isLoading: false }));
+vi.mock("@/hooks/useSectorProfile", () => ({
+  useSectorProfile: (id: string | undefined, days?: number) => useSectorProfile(id, days),
+}));
 
 describe("VictimologyTab", () => {
   it("splits reported from asserted targeting and lists victims, groups and countries", () => {
