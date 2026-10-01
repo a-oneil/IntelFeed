@@ -48,6 +48,18 @@ regexes = [
 ]
 
 [[allowlists]]
+description = "Published lure URLs in the observables extraction fixture"
+regexTarget = "match"
+# backend/tests/fixtures/observables/cases/unit42-screening-serpens.json —
+# the attacker's filemail download link as Unit 42 printed it. Its
+# `filekey=` query string is the file-share token that *is* the indicator;
+# it names a dropper on someone else's service, not anything of ours. Tied
+# to the filemail download shape so it cannot silence a real key elsewhere.
+regexes = [
+  '''filemail\.com/api/file/get\?filekey=[A-Za-z0-9_-]+''',
+]
+
+[[allowlists]]
 description = "Bare UUIDs are entity identifiers, not credentials"
 regexTarget = "match"
 # generic-api-key fires on any long hex-ish string assigned to a *_key field.
