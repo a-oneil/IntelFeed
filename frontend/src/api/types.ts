@@ -1334,8 +1334,23 @@ export interface ObservableResponse {
   infra_tag?: string | null;
   needs_review: boolean;
   created_via?: string | null;
+  /** Raw junction count — every entry carrying the value, indicator-list files included. */
   sighting_count: number;
-  article_count: number;
+  /** Corroboration: distinct reporting entries (articles/advisories/rules) and distinct indicator feeds. */
+  report_count: number;
+  feed_source_count: number;
+  /** Compact enrichment summary (Shodan / GreyNoise / VT) written by the updater. */
+  reputation?: {
+    asn?: number | string | null;
+    country?: string | null;
+    ports?: string | null;
+    tags?: string | null;
+    hostnames?: string | null;
+    vt_ratio?: string | null;
+    gn_classification?: string | null;
+    gn_riot?: boolean | null;
+    enriched_at?: string | null;
+  } | null;
   first_seen_at: string;
   last_seen_at: string;
   // Decay projection.

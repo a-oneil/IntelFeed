@@ -116,13 +116,13 @@ click node_ai_task "https://github.com/a-oneil/intelfeed/blob/main/backend/app/m
 click node_user "https://github.com/a-oneil/intelfeed/blob/main/backend/app/models/user.py"
 click node_engine_settings "https://github.com/a-oneil/intelfeed/blob/main/frontend/src/components/engine/engineSettingsIndex.ts"
 
-classDef toneNeutral fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a
-classDef toneBlue fill:#dbeafe,stroke:#2563eb,stroke-width:1.5px,color:#172554
-classDef toneAmber fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#78350f
-classDef toneMint fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px,color:#14532d
-classDef toneRose fill:#ffe4e6,stroke:#e11d48,stroke-width:1.5px,color:#881337
-classDef toneIndigo fill:#e0e7ff,stroke:#4f46e5,stroke-width:1.5px,color:#312e81
-classDef toneTeal fill:#ccfbf1,stroke:#0f766e,stroke-width:1.5px,color:#134e4a
+classDef toneNeutral fill:#1e293b,stroke:#94a3b8,stroke-width:1.5px,color:#f8fafc
+classDef toneBlue fill:#1e3a8a,stroke:#60a5fa,stroke-width:1.5px,color:#f8fafc
+classDef toneAmber fill:#78350f,stroke:#fbbf24,stroke-width:1.5px,color:#f8fafc
+classDef toneMint fill:#14532d,stroke:#4ade80,stroke-width:1.5px,color:#f8fafc
+classDef toneRose fill:#881337,stroke:#fb7185,stroke-width:1.5px,color:#f8fafc
+classDef toneIndigo fill:#312e81,stroke:#818cf8,stroke-width:1.5px,color:#f8fafc
+classDef toneTeal fill:#134e4a,stroke:#2dd4bf,stroke-width:1.5px,color:#f8fafc
 class node_reader,node_feed_adapters,node_ingest,node_entry,node_feed toneBlue
 class node_autolink,node_enrichment,node_enrichment_sources,node_entities toneAmber
 class node_correlation,node_priority,node_search,node_meilisearch toneMint

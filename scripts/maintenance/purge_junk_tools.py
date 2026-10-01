@@ -177,13 +177,7 @@ FIELDNAMES = [
 
 
 async def build_plan(db) -> list[dict]:
-    link_counts = dict(
-        (
-            await db.execute(
-                select(EntryTool.tool_id, func.count()).group_by(EntryTool.tool_id)
-            )
-        ).all()
-    )
+    link_counts = dict((await db.execute(select(EntryTool.tool_id, func.count()).group_by(EntryTool.tool_id))).all())
 
     # Evidence = ATT&CK id, or a typed edge to an adversary/technique in either direction.
     evidenced: set = set()
@@ -206,12 +200,8 @@ async def build_plan(db) -> list[dict]:
     ).scalars():
         evidenced.add(row)
 
-    products = _index_by_name_and_alias(
-        (await db.execute(select(Product.id, Product.name, Product.aliases))).all()
-    )
-    vendors = _index_by_name_and_alias(
-        (await db.execute(select(Vendor.id, Vendor.name, Vendor.aliases))).all()
-    )
+    products = _index_by_name_and_alias((await db.execute(select(Product.id, Product.name, Product.aliases))).all())
+    vendors = _index_by_name_and_alias((await db.execute(select(Vendor.id, Vendor.name, Vendor.aliases))).all())
 
     tools = (await db.execute(select(Tool).order_by(Tool.name))).scalars().all()
     plan: list[dict] = []
@@ -298,22 +288,14 @@ async def do_dry_run(out_path: str) -> None:
     print(f"Wrote {len(plan)} proposed rows to {out_path}")
     for action in ("reclassify", "purge", "orphan"):
         if counts.get(action):
-            print(
-                f"  {action:11s} {counts[action]:5d} rows, {links[action]:6d} entry links"
-            )
+            print(f"  {action:11s} {counts[action]:5d} rows, {links[action]:6d} entry links")
     offensive = sum(1 for r in plan if r["action"] == "purge" and r["offensive"])
-    print(
-        f"\n  {offensive} purge rows carry an offensive tool_type — review those before applying."
-    )
+    print(f"\n  {offensive} purge rows carry an offensive tool_type — review those before applying.")
 
 
 async def do_apply(plan_path: str, batch: int) -> None:
     with open(plan_path, newline="") as fh:
-        rows = [
-            r
-            for r in csv.DictReader(fh)
-            if r.get("action") in ("reclassify", "purge", "orphan")
-        ]
+        rows = [r for r in csv.DictReader(fh) if r.get("action") in ("reclassify", "purge", "orphan")]
 
     print(f"Applying {len(rows)} rows from {plan_path}")
     done = {"reclassify": 0, "purge": 0, "orphan": 0, "failed": 0}
@@ -356,9 +338,7 @@ async def do_apply(plan_path: str, batch: int) -> None:
 
 async def _delete_tool(db, tool_id: str, *, deny: bool) -> None:
     """Delete one tool the way the Engine table does, optionally denylisting it."""
-    tool = (
-        await db.execute(select(Tool).where(Tool.id == tool_id))
-    ).scalar_one_or_none()
+    tool = (await db.execute(select(Tool).where(Tool.id == tool_id))).scalar_one_or_none()
     if tool is None:
         return
     if deny:
@@ -372,10 +352,8 @@ async def _delete_tool(db, tool_id: str, *, deny: bool) -> None:
     await db.execute(
         sql_delete(EntityRelationship).where(
             or_(
-                (EntityRelationship.source_type == "tool")
-                & (EntityRelationship.source_id == tool.id),
-                (EntityRelationship.target_type == "tool")
-                & (EntityRelationship.target_id == tool.id),
+                (EntityRelationship.source_type == "tool") & (EntityRelationship.source_id == tool.id),
+                (EntityRelationship.target_type == "tool") & (EntityRelationship.target_id == tool.id),
             )
         )
     )
@@ -386,18 +364,14 @@ async def _delete_tool(db, tool_id: str, *, deny: bool) -> None:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument(
         "--dry-run",
         action="store_true",
         help="Propose actions and write the review CSV.",
     )
-    mode.add_argument(
-        "--apply", action="store_true", help="Execute a reviewed plan CSV."
-    )
+    mode.add_argument("--apply", action="store_true", help="Execute a reviewed plan CSV.")
     ap.add_argument(
         "--out",
         default=DEFAULT_OUT,

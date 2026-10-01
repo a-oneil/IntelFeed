@@ -21,6 +21,7 @@ function tagArray(config: Record<string, unknown>): string[] {
 const TRIGGER_TYPES = [
   { value: "on_new_entry", label: "New entry arrives" },
   { value: "on_entry_scored", label: "Entry scored (signal engine)" },
+  { value: "on_observable_captured", label: "Observable captured (IOC ledger)" },
   { value: "on_schedule", label: "On schedule (cron)" },
   { value: "on_keyword_match", label: "Keyword match" },
   { value: "on_cve_detected", label: "CVE detected" },
@@ -68,6 +69,7 @@ const CONDITION_TYPES = [
   { value: "priority_score_above", label: "Priority score above (signals)" },
   { value: "has_signal", label: "Has signal type" },
   { value: "entity_watchlisted", label: "Watched entity mentioned" },
+  { value: "has_observable", label: "Has captured observable (IOC)" },
 ];
 
 interface ConditionItem {
@@ -146,6 +148,13 @@ function conditionConfigFields(type: string): Array<{
           placeholder: "7.0",
           type: "number",
         },
+      ];
+    case "has_observable":
+      return [
+        { key: "kinds", label: "Kinds (comma-separated, blank = any)", placeholder: "ipv4, domain, sha256, cmdline" },
+        { key: "roles", label: "Roles (comma-separated, blank = any)", placeholder: "c2, delivery, persistence" },
+        { key: "min_confidence", label: "Min confidence (0–1)", placeholder: "0.6", type: "number" },
+        { key: "exclude_infra_tagged", label: "Exclude dual-use infra? (true/false)", placeholder: "true" },
       ];
     case "priority_score_above":
       return [
@@ -315,6 +324,8 @@ function actionConfigFields(
       return [
         { key: "campaign_id", label: "Campaign ID", placeholder: "uuid" },
         { key: "notes", label: "Notes (optional)", placeholder: "Auto-linked by automation" },
+        { key: "link_observables", label: "Attach captured observables as campaign entities? (true/false)", placeholder: "false" },
+        { key: "observable_roles", label: "Observable roles to attach (comma-separated, blank = any)", placeholder: "c2, delivery, payload" },
       ];
     case "mark_priority":
       return [
@@ -1128,6 +1139,58 @@ export function AutomationRuleEditor({ rule, onClose }: Props) {
                       <option value="critical">Critical</option>
                     </select>
                   </div>
+                )}
+
+                {triggerType === "on_observable_captured" && (
+                  <>
+                    <div className={styles.hint}>
+                      Fires once per article when a reporting door (one-pass AI, publisher IOC file, analyst
+                      promote) captures an observable. Blocklist feeds never fire it.
+                    </div>
+                    <div className={styles.itemField}>
+                      <label>Kinds (comma-separated, blank = any)</label>
+                      <input
+                        type="text"
+                        value={(triggerConfig.kinds as string) ?? ""}
+                        onChange={(e) => updateTriggerField("kinds", e.target.value)}
+                        placeholder="ipv4, domain, url, sha256"
+                        className={styles.input}
+                      />
+                    </div>
+                    <div className={styles.itemField}>
+                      <label>Roles (comma-separated, blank = any)</label>
+                      <input
+                        type="text"
+                        value={(triggerConfig.roles as string) ?? ""}
+                        onChange={(e) => updateTriggerField("roles", e.target.value)}
+                        placeholder="c2, delivery, phishing"
+                        className={styles.input}
+                      />
+                    </div>
+                    <div className={styles.itemField}>
+                      <label>Minimum confidence (0–1, blank = any)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={(triggerConfig.min_confidence as string | number) ?? ""}
+                        onChange={(e) => updateTriggerField("min_confidence", e.target.value)}
+                        placeholder="0.6"
+                        className={styles.input}
+                      />
+                    </div>
+                    <div className={styles.itemField}>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={String(triggerConfig.exclude_infra_tagged ?? "true") !== "false"}
+                          onChange={(e) => updateTriggerField("exclude_infra_tagged", e.target.checked ? "true" : "false")}
+                        />
+                        Ignore dual-use infrastructure (VPN / proxy / Tor / shared hosting)
+                      </label>
+                    </div>
+                  </>
                 )}
 
                 {(triggerType === "on_new_entry" || triggerType === "on_manual") && (

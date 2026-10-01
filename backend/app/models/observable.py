@@ -26,7 +26,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, SmallInteger, String, Text, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import ARRAY, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -38,7 +38,19 @@ from app.database import Base
 # on the sighting). Host kinds map from EntryTTP.observable_type's vocabulary.
 NETWORK_KINDS = frozenset({"ipv4", "ipv6", "domain", "url", "uri_path", "ja3", "ja4", "cert_fingerprint", "email"})
 HASH_KINDS = frozenset({"md5", "sha1", "sha256"})
-HOST_KINDS = frozenset({"cmdline", "registry", "path", "mutex", "named_pipe", "service_name", "user_agent"})
+HOST_KINDS = frozenset(
+    {
+        "cmdline",
+        "registry",
+        "path",
+        "mutex",
+        "named_pipe",
+        "service_name",
+        "scheduled_task",
+        "user_agent",
+        "http_header",
+    }
+)
 SCRIPT_KIND = "script"
 ALL_KINDS = NETWORK_KINDS | HASH_KINDS | HOST_KINDS | {SCRIPT_KIND}
 
@@ -70,9 +82,16 @@ VIA_AI = "ai_extraction"  # entry_analysis iocs array (network kinds)
 VIA_TTP = "ttp_observable"  # EntryTTP.observable_value upsert (host kinds)
 VIA_FEED = "ioc_list"  # curated indicator-list feed body
 VIA_MANUAL = "manual"  # analyst promote / create
+VIA_PUBLISHER = "publisher_ioc"  # the indicator file a write-up links to (Talos/Bitdefender/Datadog repos)
 
-#: What the network indicator was doing, per the analysis AI.
-ROLES = frozenset({"c2", "delivery", "payload", "phishing", "exfil", "exploit", "scanning"})
+#: What the indicator was doing, per the analysis AI. Network roles name the
+#: infrastructure's job; host roles are tactic-shaped (what the artifact did on
+#: the box) so a cmdline or scheduled task carries context without a TTP link.
+NETWORK_ROLES = frozenset({"c2", "delivery", "payload", "phishing", "exfil", "exploit", "scanning"})
+HOST_ROLES = frozenset(
+    {"persistence", "execution", "defense_evasion", "credential_access", "discovery", "lateral_movement", "collection"}
+)
+ROLES = NETWORK_ROLES | HOST_ROLES
 
 
 class Observable(Base):
@@ -112,6 +131,12 @@ class Observable(Base):
     #: rows stay in the ledger — an attack from a VPN exit is context worth
     #: keeping — but never publish to blocklists/TAXII.
     infra_tag: Mapped[str | None] = mapped_column(String(20), index=True)
+    #: Compact reputation summary written by the enrichment updater
+    #: (``asn``, ``country``, ``ports``, ``tags``, ``vt_ratio``,
+    #: ``gn_classification``, ``gn_riot``, ``enriched_at``). Read-only context;
+    #: the updater also fills ``infra_tag`` from it (Shodan vpn/proxy/tor tags,
+    #: GreyNoise RIOT → ``benign_service``).
+    reputation: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     # --- AI-extraction provenance (shared extraction-management column quad) ---
     created_via: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
@@ -121,11 +146,17 @@ class Observable(Base):
     created_confidence: Mapped[str | None] = mapped_column(String(10), nullable=True)
     needs_review: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
-    # --- counters & dates (article_count is the shared convention; sightings
-    # count junction rows and the two stay equal today, but sightings may one
-    # day include non-entry sources) ---
+    # --- counters & dates. ``sighting_count`` is the raw junction count (and
+    # ``article_count`` mirrors it for the shared entity-table convention).
+    # The two corroboration counters are what the UI reads as "sources":
+    # ``report_count`` = distinct non-indicator-list entries (articles,
+    # advisories, rule files) carrying the value; ``feed_source_count`` =
+    # distinct feeds among the indicator-list entries carrying it, so a feed
+    # that publishes one list as eighteen CSV variants counts once. ---
     article_count: Mapped[int] = mapped_column(Integer, default=0)
     sighting_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    report_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0", index=True)
+    feed_source_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -145,7 +176,9 @@ class EntryObservable(Base):
         UUID(as_uuid=True), ForeignKey("observables.id", ondelete="CASCADE"), primary_key=True, index=True
     )
     confidence: Mapped[str | None] = mapped_column(String(10))
-    #: Which door recorded it: ai | ttp | feed | rule | manual | sighting.
+    #: Which door recorded it: ai | ttp | feed | publisher | manual | sighting.
+    #: (A rule-body door was removed on 2026-09-19: rules consume IOCs, they
+    #: are not a source of them.)
     #: "sighting" is the pipeline exact-matching a known value in a new entry —
     #: the one source that isn't a creation door.
     source: Mapped[str | None] = mapped_column(String(20))

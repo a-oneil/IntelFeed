@@ -23,6 +23,17 @@ interface Node {
   kind: "start" | "sight" | "due";
 }
 
+/** "Latest report · 3" when articles back the value; a list-feed-only row says
+ *  so instead of counting its export variants as reports. */
+function lifecycleSightingLabel(d: ObservableResponse): string {
+  const reports = d.report_count ?? 0;
+  const feeds = d.feed_source_count ?? 0;
+  if (reports > 1) return `Latest report · ${reports}`;
+  if (reports === 1) return feeds ? "Only report (+ feed)" : "Only report";
+  if (feeds) return `Listed on ${feeds} indicator feed${feeds === 1 ? "" : "s"}`;
+  return d.sighting_count > 1 ? `Latest sighting · ${d.sighting_count}` : "Only sighting";
+}
+
 export function ObservableLifecycleStrip({ detail }: { detail: ObservableResponse | undefined }) {
   if (!detail?.first_seen_at) return null;
 
@@ -31,7 +42,7 @@ export function ObservableLifecycleStrip({ detail }: { detail: ObservableRespons
     { key: "first", label: "First seen", date: detail.first_seen_at, sub: null, kind: "start" },
     {
       key: "last",
-      label: detail.sighting_count > 1 ? `Latest sighting · ${detail.sighting_count}` : "Only sighting",
+      label: lifecycleSightingLabel(detail),
       date: detail.last_seen_at,
       sub: detail.confidence_pinned ? "pinned" : decays ? "clock reset" : "no decay",
       kind: "sight",

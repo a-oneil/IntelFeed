@@ -1,0 +1,123 @@
+{
+  "slug": "bitdefender-android-huggingface",
+  "title_like": "Android Trojan Campaign Uses Hugging Face%",
+  "title": "Android Trojan Campaign Uses Hugging Face Hosting for RAT Payload Delivery",
+  "url": "https://www.bitdefender.com/en-us/blog/labs/android-trojan-campaign-hugging-face-hosting-rat-payload",
+  "publisher": "Bitdefender Labs",
+  "kind": "positive",
+  "attribution": [],
+  "expected": [
+    {
+      "kind": "md5",
+      "value": "d184d705189e42b54c6243a55d6c9502",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "md5",
+      "value": "d8b0fd515d860be2969cf441ea3b620d",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "md5",
+      "value": "b716a8a742fec3084b0f497abbfecfc0",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "md5",
+      "value": "15bdc66aca9fb7290165d460e6a993a9",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "trustbastion.com",
+      "role": "",
+      "note": "."
+    },
+    {
+      "kind": "ipv4",
+      "value": "154.198.48.57",
+      "role": "",
+      "note": "and the domain trustbastion[.]com."
+    },
+    {
+      "kind": "md5",
+      "value": "fc874c42ea76dd5f867649cbdf81e39b",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "au-club.top",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "ipv4",
+      "value": "108.187.7.133",
+      "role": "",
+      "note": ""
+    }
+  ],
+  "optional": [
+    {
+      "kind": "url",
+      "value": "https://www.trustbastion.com/xiazz.html",
+      "note": "ivity\";     public static final String B_PACKAGE = \"rgpp.lerlgl.vhrthg\";     // https://www.trustbastion[.]com/xiazz.html     private static final String DATA_SOURCE_1 = \"Eg4OCglAVVUNDQ1UDggPCQ4YGwkOE"
+    },
+    {
+      "kind": "domain",
+      "value": "www.trustbastion.com",
+      "note": "public static final String B_PACKAGE = \"rgpp.lerlgl.vhrthg\";     // https://www.trustbastion[.]com/xiazz.html     private static final String DATA_SOURCE_1 = \"Eg4OCglAVVUNDQ1UDgg"
+    },
+    {
+      "kind": "url",
+      "value": "https://huggingface.co/datasets/xcvqsccm/sfxyt851/resolve/main/b.apk?download=true",
+      "note": "\"request\": {     \"timestamp\": 1764085704406,     \"method\": \"GET\",     \"url\": \"https[:]//huggingface[.]co/datasets/xcvqsccm/sfxyt851/resolve/main/b.apk?download=true\",     \"host\": \"huggingface[.]co\",  "
+    },
+    {
+      "kind": "domain",
+      "value": "huggingface.co",
+      "note": "\"Accept-Ranges\": \"bytes\"     },     \"body_size\": 85,     \"body\": \"b'https://huggingface[.]co/datasets/xcvqsccm/sfxyt851/resolve/main/b.apk?download=true'\"   } }  Captured n"
+    },
+    {
+      "kind": "url",
+      "value": "https://cdn-lfs-us-1.hf.co/repos/a5/0c/a50cf45d8b119af0cc75679c8307b05e29f2bc85b6d0bd55999dd018639f1c72/19f1a6b9ad1a9654e7c78fa2d37a3ec10192b01b636c5fc1995b80bf6f7dcb36?response-content-disposition=attachment%3B+filename*%3DUTF-8%27%27b.apk%3B+filename%3D%22b.apk%22%3B&response-content-type=application%2Fvnd.android.package-archive&Expires=1764089304&Policy=eyJTdGF0ZW1lbnQiOlt7IkNvbmRpdGlvbiI6eyJEYXRlTGVzc1RoYW4iOnsiQVdTOkVwb2NoVGltZSI6MTc2NDA4OTMwNH19LCJSZXNvdXJjZSI6Imh0dHBzOi8vY2RuLWxmcy11cy0xLmhmLmNvL3JlcG9zL2E1LzBjL2E1MGNmNDVkOGIxMTlhZjBjYzc1Njc5YzgzMDdiMDVlMjlmMmJjODViNmQwYmQ1NTk5OWRkMDE4NjM5ZjFjNzIvMTlmMWE2YjlhZDFhOTY1NGU3Yzc4ZmEyZDM3YTNlYzEwMTkyYjAxYjYzNmM1ZmMxOTk1YjgwYmY2ZjdkY2IzNj9yZXNwb25zZS1jb250ZW50LWRpc3Bvc2l0aW9uPSomcmVzcG9uc2UtY29udGVudC10eXBlPSoifV19&Signature=Mqc2vLuG17L9PD9eOO96Tbl8S1P6Efgzc1c%7EvjGQqg7jE6NcLyKqkIn7Koq06ybpChfuNeUOUSIRvqUXUd%7EAUt1mvivbp8cZla5frbYSx6ce2-Enp7KmhKXafgpPH6Hr8sGEt8EO56g3oF867bsCO3qH4Q9HqcX6DZZfgyysDxK22VIzEOYCoGqzIa0pj1gFr57PGdcyQJxqFDvpQ9KiCoLxqGjf4O5EpO-4bLJ53D3nZUTrDZX3sCHo7hUOxwqBMUefhgL0BKhL4JPfaBsHyfM9Cj%7EO1yPsf6CqZd%7EVfQWh9CH6ZW834YlKppFxovUMdg3dUHxUNUBDZg2-Nf3plw__&Key-Pair-Id=K24J24Z295AEI9",
+      "note": "\"keep-alive\",       \"Date\": \"Tue, 25 Nov 2025 15:48:24 GMT\",       \"Location\": \"https://cdn-lfs-us-1.hf[.]co/repos/a5/0c/a50cf45d8b119af0cc75679c8307b05e29f2bc85b6d0bd55999dd018639f1c72/19f1a6b9ad1a96"
+    },
+    {
+      "kind": "url",
+      "value": "https://huggingface.co",
+      "note": "2\\\"\",       \"Accept-Ranges\": \"bytes\"     },     \"body_size\": 85,     \"body\": \"b'https://huggingface[.]co/datasets/xcvqsccm/sfxyt851/resolve/main/b.apk?download=true'\"   } }  Captured n"
+    },
+    {
+      "kind": "url",
+      "value": "https://cdn-lfs-us-1.hf.co/r",
+      "note": "XKl5zKU8Q==\"     },     \"body_size\": 1191,     \"body\": \"b'Found. Redirecting to https[:]//cdn-lfs-us-1.hf[.]co/r  ## Automated payload generation and server-side polymorphism  Analysis of the"
+    },
+    {
+      "kind": "sha256",
+      "value": "19f1a6b9ad1a9654e7c78fa2d37a3ec10192b01b636c5fc1995b80bf6f7dcb36",
+      "note": "co/repos/a5/0c/a50cf45d8b119af0cc75679c8307b05e29f2bc85b6d0bd55999dd018639f1c72/19f1a6b9ad1a9654e7c78fa2d37a3ec10192b01b636c5fc1995b80bf6f7dcb36?response-content-disposition=attachment%3B+filename*%3D"
+    },
+    {
+      "kind": "md5",
+      "value": "b62c906078644edd3439e2d986abd2e2",
+      "note": "995b80bf6f7dcb36\\\"\",       \"X-Cache\": \"Miss from cloudfront\",       \"Via\": \"1.1 b62c906078644edd3439e2d986abd2e2.cloudfront.net (CloudFront)\",       \"X-Amz-Cf-Pop\": \"OTP50-P3\",       \"X-Amz-Cf"
+    },
+    {
+      "kind": "ipv4",
+      "value": "148.135.44.146",
+      "note": "pt-Encoding\": \"gzip\"     },     \"body_size\": 0,     \"body\": \"\",     \"dest_ip\": \"148.135.44.146\",   },   \"response\": {     \"timestamp\": 1764085704313,     \"status_code\": 200,"
+    },
+    {
+      "kind": "ipv4",
+      "value": "143.204.11.112",
+      "note": "pt-Encoding\": \"gzip\"     },     \"body_size\": 0,     \"body\": \"\",     \"dest_ip\": \"143.204.11.112\",     \"obf_chain\": []   },   \"response\": {     \"timestamp\": 1764085704558,"
+    }
+  ],
+  "must_not": []
+}

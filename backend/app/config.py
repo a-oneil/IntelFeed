@@ -220,6 +220,13 @@ class Settings(BaseSettings):
     observables_decay_enabled: bool = True
     observables_candidate_max: int = 200
     observables_ai_capture_mode: str = "shadow"
+    observables_analysis_tail_reserve: float = 0.4
+    observables_publisher_ioc_enabled: bool = True
+    observables_publisher_ioc_max_values: int = 2000
+    observables_ai_capture_kinds: str = (
+        "ipv4,ipv6,domain,url,uri_path,email,ja3,ja4,cert_fingerprint,md5,sha1,sha256,script"
+    )
+    observables_codeblock_skip_categories: str = "Security Advisories,Government / CERT"
     observables_publish_enabled: bool = False
     observables_publish_token: str = ""
     observables_publish_min_confidence: float = 0.6

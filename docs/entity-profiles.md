@@ -33,6 +33,37 @@ All entity profiles (threat actor, malware family, CVE, TTP, country, tool, miti
 
 Relationships use the strength model (`backend/app/models/entity_relationship.py`): typed verb (uses, exploits, targets, attributed_to, variant_of, communicates_with, delivers, drops, related_to, successor_of, subgroup_of, overlaps_with), confidence (confirmed / probable / possible), source (co_occurrence, auto_extracted, analyst_confirmed/created/rejected, external_feed — the MITRE ATT&CK import writes external_feed + confirmed), and `evidence_entry_ids`. Every write path validates `(source_type, verb, target_type)` against the semantic allowlist in `backend/app/intelligence/relationship_matrix.py` (disallowed triples are flipped to their allowed orientation or dropped). A nightly AI adjudicator stamps `adjudication_verdict` on co-occurrence rows (corroborated → confidence confirmed; coincidental → demoted to possible, never re-promoted). Rows with `source=analyst_rejected` are kept as tombstones so a rejected pair is not resurrected by the co-occurrence engine; cross-type reclassifies write `EntityReclassifyTombstone` rows so folded names are not recreated by importers.
 
+## Observables and infrastructure
+
+The observable profile is the lightest in the app: its hero is the mono value,
+every badge is a lifecycle fact (kind, role, confidence, status, capture door)
+and nothing is editable inline. `entityProfileConfig.tsx` gives it two tabs
+(`overview`, `relationships`) and two Overview panels:
+
+- `observable_provenance` — captured by, dual-use tag, role, the evidence
+  sentence, base and current confidence, decay and projected expiry, the
+  **Sources** row (`N reports · M feeds`, with the raw sighting count), and an
+  honest "Reporting: none" row when a value is only on an indicator feed. The
+  buttons copy the value (plain or defanged), export sightings as CSV, pin the
+  confidence, and (admin) tombstone the value.
+- `observable_backlinks` — **Attribution**: who claims the value (edges with
+  their verb and trust tier) and which actors, families, campaigns and tools
+  its reporting articles name ("reported with").
+
+`ObservableLifecycleStrip` (mounted by `EntityProfilePage`, not the config)
+draws first seen → latest report → projected expiry; its middle node reads
+"Listed on 1 indicator feed" for feed-only rows.
+
+Threat actor, malware, campaign and tool profiles carry the mirror panel,
+`infrastructure` (`useEntityInfrastructure` → `GET /api/entities/{type}/{id}/infrastructure`):
+**Claimed** rows (attribution edges with evidence) and **Reported alongside**
+rows (observables sighted by a reporting door in articles that link the
+entity — co-occurrence computed at read time, never persisted, with indicator
+files and newsletters excluded), each linking to the observable's profile,
+plus "Copy all defanged" and "Export CSV". The Relationships tab shows
+claim-backed observables and keeps co-mention observables suppressed. See
+[observables.md](observables.md#attribution-claimed-vs-reported-alongside).
+
 ## Field provenance
 
 The trust ladder above covers relationships. Scalar profile fields — an actor's

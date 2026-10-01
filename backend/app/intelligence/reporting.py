@@ -294,6 +294,8 @@ async def collect_report_observables(
             "status": o.status,
             "infra_tag": o.infra_tag,
             "sightings": o.sighting_count or 0,
+            "reports": o.report_count or 0,
+            "feeds": o.feed_source_count or 0,
             "first_seen": o.first_seen_at.date().isoformat() if o.first_seen_at else None,
             "last_seen": o.last_seen_at.date().isoformat() if o.last_seen_at else None,
             "claimed_by": claims.get(o.id, []),

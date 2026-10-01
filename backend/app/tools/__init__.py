@@ -58,6 +58,8 @@ ADMIN_TOOLS: frozenset[str] = frozenset(
         "confirm_extraction_entities",
         # Target-sector claims are global profile edits, like the merges above.
         "set_target_sector",
+        # A never-capture tombstone silences a value for every door and every user.
+        "deny_observable",
     }
 )
 
@@ -183,6 +185,7 @@ from app.tools import (  # noqa: E402
     extraction,  # noqa: F401
     feeds_automation,  # noqa: F401
     landscape,  # noqa: F401
+    observables,  # noqa: F401
     read,  # noqa: F401
     reader_ops,  # noqa: F401
     search,  # noqa: F401

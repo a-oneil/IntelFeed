@@ -170,6 +170,8 @@ READ_ONLY_TOOLS = frozenset(
         "get_intel_report",
         "get_malware",
         "get_observable",
+        "get_entity_infrastructure",
+        "export_observables",
         "get_priority_queue",
         "get_ransomware_disclosures",
         "get_ransomware_group_victims",

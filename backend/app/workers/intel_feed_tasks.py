@@ -304,6 +304,27 @@ def observables_entry_task(entry_id: str):
         CELERY_TASK_DURATION_SECONDS.labels(task_name="observables_entry_task").observe(time.monotonic() - start)
 
 
+async def _codeblock_scan_skipped(db, entry) -> bool:
+    """Whether this entry's feed sits in a category that never nominates host
+    kinds from <pre> blocks (``observables_codeblock_skip_categories``)."""
+    from sqlalchemy import select
+
+    from app.models.category import Category
+    from app.models.feed import Feed
+    from app.services.system_settings import get_setting
+
+    raw = await get_setting("observables_codeblock_skip_categories", db) or ""
+    skip = {c.strip().lower() for c in str(raw).split(",") if c.strip()}
+    if not skip or not entry.feed_id:
+        return False
+    name = (
+        await db.execute(
+            select(Category.name).join(Feed, Feed.category_id == Category.id).where(Feed.id == entry.feed_id)
+        )
+    ).scalar_one_or_none()
+    return bool(name) and name.strip().lower() in skip
+
+
 async def _scan_entry_observables(entry_id: str):
     import uuid
 
@@ -340,13 +361,39 @@ async def _scan_entry_observables(entry_id: str):
 
             cap = int(await get_setting("observables_candidate_max", db) or 200)
             title, content_text = entry_text_with_translation(entry)
-            candidates = scan_candidates(f"{title}\n\n{content_text}", max_candidates=cap)
+            # Scan the HTML-rendered text when there is HTML: nh3's plain
+            # strip glues table cells together ("pobelstudio.comdomain"),
+            # the analysis renderer keeps rows as "cell | cell".
+            if entry.content_html:
+                from app.services.analysis_window import html_to_analysis_text
+
+                rendered = html_to_analysis_text(entry.content_html)
+                if rendered.strip():
+                    translated_tail = content_text[len(entry.content_text or "") :]
+                    content_text = rendered + translated_tail
+            # Advisory bulletins / NVD / rule and catalog repositories: a bare
+            # hex string is a checksum or commit, a dotted quad is a version.
+            # Only defanged tokens nominate there.
+            advisory = bool(metadata.get("content_type")) or await _codeblock_scan_skipped(db, entry)
+            if not advisory:
+                from app.models.feed import Feed as _Feed
+
+                feed_type = (
+                    await db.execute(select(_Feed.feed_type).where(_Feed.id == entry.feed_id))
+                ).scalar_one_or_none()
+                advisory = feed_type == "nvd"
+            candidates = scan_candidates(
+                f"{title}\n\n{content_text}", max_candidates=cap, plain_hashes=not advisory, plain_ips=not advisory
+            )
             # Host-kind nominations come from the article's code blocks — where
-            # authors put commands — never from prose regex.
-            existing = {(c.kind, c.value) for c in candidates}
-            for c in scan_code_block_candidates(entry.content_html):
-                if (c.kind, c.value) not in existing and len(candidates) < cap:
-                    candidates.append(c)
+            # authors put commands — never from prose regex. Rule-repository
+            # files (any GitHub content_type) and advisory-bulletin feeds are
+            # preformatted text, not commands, so they never nominate.
+            if not advisory:
+                existing = {(c.kind, c.value) for c in candidates}
+                for c in scan_code_block_candidates(entry.content_html):
+                    if (c.kind, c.value) not in existing and len(candidates) < cap:
+                        candidates.append(c)
             # Replace only scan-origin candidates: AI shadow stagings arrive
             # later and a stage re-run must not wipe them.
             scanned = candidates_as_json(candidates)
@@ -366,8 +413,22 @@ async def _scan_entry_observables(entry_id: str):
                 p for p in scan_sighting_probes(f"{title}\n\n{content_text}") if (p.kind, p.value) not in probe_keys
             ]
             stats["sighted"] = await sight_known_values(db, entry.id, candidates + probes)
+            # The publisher door: the indicator file the write-up links to
+            # (Talos / Bitdefender / Datadog GitHub repos), sighted on the article.
+            if await get_setting("observables_publisher_ioc_enabled", db):
+                from app.intelligence.publisher_iocs import store_publisher_observables
+
+                try:
+                    cap = int(await get_setting("observables_publisher_ioc_max_values", db) or 2000)
+                    stats["publisher_iocs"] = await store_publisher_observables(db, entry, max_values=cap)
+                except Exception:
+                    logger.warning("Publisher IOC door failed for entry %s", entry_id, exc_info=True)
 
         await db.commit()
+        if stats.get("publisher_iocs"):
+            from app.workers.automation_tasks import dispatch_observable_capture_automations
+
+            dispatch_observable_capture_automations(entry_id)
         return stats
 
 

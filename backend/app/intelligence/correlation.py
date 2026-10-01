@@ -614,7 +614,8 @@ def _serialize_entity(entity_type: str, entity) -> dict:
                 "description": getattr(entity, "description", None),
                 "created_via": getattr(entity, "created_via", None),
                 "sighting_count": getattr(entity, "sighting_count", 0),
-                "article_count": getattr(entity, "article_count", 0),
+                "report_count": getattr(entity, "report_count", 0),
+                "feed_source_count": getattr(entity, "feed_source_count", 0),
                 "first_seen_at": _dt(getattr(entity, "first_seen_at", None)),
                 "last_seen_at": _dt(getattr(entity, "last_seen_at", None)),
             }
@@ -793,6 +794,43 @@ def _dt(dt: datetime | None) -> str | None:
     return dt.isoformat() if dt else None
 
 
+async def _claimed_observables(db: AsyncSession, entity_type: str, entity_id: uuid.UUID) -> list[dict]:
+    """Observables an entity has attribution claims onto, as pivot rows.
+
+    Co-mention observables stay out of every non-observable pivot (one shared
+    ioc_list entry would flood the profile); claim-backed edges are the one
+    path in. Rows carry ``co_occurrence_count=0`` and no proximity score — the
+    typed-relationship join downstream attaches the verb, trust and evidence
+    count by id, which is what the Relationships tab renders.
+    """
+    from app.models.observable import Observable
+
+    query = (
+        select(Observable)
+        .join(
+            EntityRelationship,
+            (EntityRelationship.target_type == "observable") & (EntityRelationship.target_id == Observable.id),
+        )
+        .where(
+            EntityRelationship.source_type == entity_type,
+            EntityRelationship.source_id == entity_id,
+            EntityRelationship.source != "analyst_rejected",
+            Observable.is_denied.is_(False),
+        )
+    )
+    hidden = hidden_relationship_confidences()
+    if hidden:
+        query = query.where(EntityRelationship.confidence.notin_(hidden))
+    rows = (await db.execute(query.order_by(Observable.last_seen_at.desc()).limit(200))).scalars().all()
+    out = []
+    for obs in rows:
+        item = _serialize_entity("observable", obs)
+        item["co_occurrence_count"] = 0
+        item["proximity_score"] = 0.0
+        out.append(item)
+    return out
+
+
 async def _get_manual_relationships(db: AsyncSession, entity_type: str, entity_id: uuid.UUID) -> list[dict]:
     """Get manually created/confirmed EntityRelationship records for an entity."""
     query = select(EntityRelationship).where(
@@ -951,7 +989,7 @@ async def pivot_from_entity(
             # arrive via the typed relationships; the ledger's own profile
             # pivots normally.
             if related_type == "observable" and entity_type != "observable":
-                related["observables"] = []
+                related["observables"] = await _claimed_observables(db, entity_type, entity_id)
                 continue
             exclude = entity_id if related_type == entity_type else None
             related[related_type + "s"] = await _get_related_entities(

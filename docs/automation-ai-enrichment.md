@@ -50,11 +50,14 @@ Rules fire based on four trigger mechanisms (`backend/app/automation/engine.py:1
 | `on_keyword_match` | Title/content matches regex or substring | Checks entry text | "Alert when 'zero-day' appears" |
 | `on_cve_detected` | Entry contains CVEs above CVSS threshold | Requires CVE extraction | "Notify on critical CVEs (CVSS>9)" |
 | `on_correlation_event` | Correlation engine detects event | Event payload provided | "Block rules when new TTP detected for APT29" |
+| `on_entry_scored` | Signal engine finished scoring the entry | Priority score and signals populated | "Notify on KEV adds" |
+| `on_observable_captured` | A judgment door wrote observables for the entry (one-pass AI, publisher IOC file, analyst promote — never the indicator-feed door) | `trigger_config` = `{kinds, roles, min_confidence, exclude_infra_tagged, sources}`, same shape as `has_observable` | "Notify on new C2 infrastructure" |
 
 Implementation notes:
 - `on_new_entry` and `on_keyword_match` fire immediately during entry ingestion (synchronous)
 - `on_cve_detected` requires prior CVE extraction; uses threshold logic (`engine.py:192-211`)
 - `on_correlation_event` runs asynchronously when correlation events are published (`run_automations_for_correlation_event`, `engine.py:329`)
+- `on_observable_captured` runs asynchronously (`run_automations_for_observable_capture`) from a Celery task the capturing door queues after its commit (`dispatch_observable_capture_automations`). It fires **once per rule per entry**: the AI door and the publisher door can both land on one article, and a rule that already logged a run for that entry is skipped. The replay backfill script never fires it.
 
 ### Condition Language
 
@@ -1516,4 +1519,4 @@ The one-pass `entry_analysis` payload also adjudicates **pending autolinks** —
 
 ### Signal-engine automation (engine phase 7)
 
-Automation rules can react to what the pipeline learned: condition types `priority_score_above` (entry's signal-engine score), `has_signal` (specific signal types, e.g. kev_added / novel_entity / under_reported), and `entity_watchlisted` (entry links an entity the rule creator watches). The "Signal Engine" template category ships recipes for both. Radar items accept ▲/▼ feedback (`entry_signal_feedback`); the nightly rates job converts 30 days of feedback into bounded ±10% per-family weight nudges applied on top of the admin-set multipliers.
+Automation rules can react to what the pipeline learned: condition types `priority_score_above` (entry's signal-engine score), `has_signal` (specific signal types, e.g. kev_added / novel_entity / under_reported), and `entity_watchlisted` (entry links an entity the rule creator watches). The "Signal Engine" template category ships recipes for both. `has_observable` fires when the entry carries a captured observable (config: `kinds`, `roles`, `min_confidence`, `exclude_infra_tagged` — default true — and `sources`, which defaults to every door but the indicator-feed one, so "new C2 captured" means reporting, not a blocklist mirror). Notification and webhook templates can cite them with `{observables_count}` and `{observables}` (defanged, one per line as `kind value (role)`). The `on_observable_captured` trigger takes the same config as the condition, so a rule can be narrow at the trigger ("C2 only") and keep its conditions for everything else about the entry. `add_to_campaign` gains `link_observables` (with optional `observable_kinds` / `observable_roles`): besides linking the entry it attaches the entry's reporting-door observables as `campaign_entities` rows of type `observable`, dual-use infra excluded. Two templates ship for this: "Notify on New C2 Infrastructure" and "Add an Actor's New Infrastructure to Its Campaign". Radar items accept ▲/▼ feedback (`entry_signal_feedback`); the nightly rates job converts 30 days of feedback into bounded ±10% per-family weight nudges applied on top of the admin-set multipliers.

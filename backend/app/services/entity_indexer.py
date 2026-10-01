@@ -65,6 +65,8 @@ def _observable_to_doc(obs) -> dict:
         "infra_tag": obs.infra_tag or "",
         "current_confidence": float(obs.current_confidence or 0.0),
         "sighting_count": obs.sighting_count or 0,
+        "report_count": obs.report_count or 0,
+        "feed_source_count": obs.feed_source_count or 0,
         "article_count": obs.article_count or 0,
         "first_seen_at": obs.first_seen_at.isoformat() if obs.first_seen_at else "",
         "last_seen_at": obs.last_seen_at.isoformat() if obs.last_seen_at else "",

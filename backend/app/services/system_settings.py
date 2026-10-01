@@ -37,6 +37,11 @@ CONFIGURABLE_KEYS: dict[str, type] = {
     "observables_decay_enabled": bool,
     "observables_candidate_max": int,
     "observables_ai_capture_mode": str,
+    "observables_analysis_tail_reserve": float,
+    "observables_ai_capture_kinds": str,
+    "observables_publisher_ioc_enabled": bool,
+    "observables_publisher_ioc_max_values": int,
+    "observables_codeblock_skip_categories": str,
     "observables_publish_enabled": bool,
     "observables_publish_token": str,
     "observables_publish_min_confidence": float,
@@ -280,6 +285,48 @@ SETTING_METADATA: dict[str, dict] = {
         ),
         "group": "observables",
         "options": ["shadow", "capture"],
+    },
+    "observables_publisher_ioc_enabled": {
+        "label": "Publisher IOC Files",
+        "description": (
+            "When an article links an allow-listed publisher indicator file (Cisco Talos IOCs, Bitdefender "
+            "malware-ioc, Datadog indicators-of-compromise on GitHub), fetch it and capture its atoms — with the "
+            "publisher's roles — sighted on the article. Only those repositories are ever fetched"
+        ),
+        "group": "observables",
+    },
+    "observables_publisher_ioc_max_values": {
+        "label": "Publisher File Cap",
+        "description": "Maximum indicators taken from one linked publisher file",
+        "group": "observables",
+    },
+    "observables_ai_capture_kinds": {
+        "label": "AI Capture Kinds",
+        "description": (
+            "In capture mode, only these observable kinds become ledger rows from the one-pass AI; every other "
+            "kind the AI reports is still staged as a promotable candidate. Flip host kinds (cmdline, path, "
+            "registry, scheduled_task, service_name, mutex, named_pipe, user_agent, http_header) in once the "
+            "extraction fixture shows they are precise"
+        ),
+        "group": "observables",
+    },
+    "observables_analysis_tail_reserve": {
+        "label": "Analysis Tail Reserve",
+        "description": (
+            "Share of the one-pass analysis text budget reserved for an article's indicator appendix when "
+            "the body exceeds ai_analysis_content_max_chars. Research write-ups put their IOC tables and "
+            "command blocks at the end; 0 disables the appendix and the model only sees the head"
+        ),
+        "group": "observables",
+    },
+    "observables_codeblock_skip_categories": {
+        "label": "Code-Block Scan Skip Categories",
+        "description": (
+            "Comma list of feed categories whose entries never nominate host-kind candidates from <pre> "
+            "blocks (advisory bulletins are preformatted prose, not commands). Rule-repository entries "
+            "(any GitHub content_type) are always skipped"
+        ),
+        "group": "observables",
     },
     "observables_publish_enabled": {
         "label": "Publishing",
@@ -1157,6 +1204,11 @@ _ENGINE_SECTION_GROUPS: dict[str, str] = {
     "observables_decay_enabled": "observables",
     "observables_candidate_max": "observables",
     "observables_ai_capture_mode": "observables",
+    "observables_analysis_tail_reserve": "observables",
+    "observables_ai_capture_kinds": "observables",
+    "observables_publisher_ioc_enabled": "observables",
+    "observables_publisher_ioc_max_values": "observables",
+    "observables_codeblock_skip_categories": "observables",
     "observables_publish_enabled": "observables",
     "observables_publish_token": "observables",
     "observables_publish_min_confidence": "observables",

@@ -24,6 +24,7 @@ from app.intelligence.relationship_matrix import orient_relationship
 from app.models.country import Country, EntryCountry
 from app.models.entity_relationship import EntityRelationship
 from app.models.malware_family import EntryMalware, MalwareFamily
+from app.models.observable import ALL_KINDS as ALL_OBSERVABLE_KINDS
 from app.models.threat_actor import EntryThreatActor, ThreatActor
 from app.services.claim_provenance import record_claims
 
@@ -70,8 +71,11 @@ _ENTITY_TYPE_MODEL_MAP = {
 }
 
 
-async def _resolve_entity_id(db: AsyncSession, entity_type: str, name: str) -> uuid.UUID | None:
-    """Resolve an entity name to its UUID."""
+async def _resolve_entity_id(
+    db: AsyncSession, entity_type: str, name: str, *, kind: str | None = None
+) -> uuid.UUID | None:
+    """Resolve an entity name to its UUID. ``kind`` is the observable kind
+    when the AI disambiguated one (``target_kind``)."""
     if entity_type == "cve":
         from app.models.cve import CVE
 
@@ -88,14 +92,28 @@ async def _resolve_entity_id(db: AsyncSession, entity_type: str, name: str) -> u
         return await find_entity_id_by_name_or_alias(db, Tool, name)
     if entity_type == "observable":
         # The "name" is the indicator value as the article printed it (possibly
-        # defanged). Classify to the canonical (kind, value); fall back to a
-        # value-only lookup so host artifacts (which classify_value doesn't
-        # cover) still resolve. Only rows a judgment door already created can
-        # match — this path never creates one.
-        from app.intelligence.observables import classify_value, refang
-        from app.models.observable import Observable
+        # defanged). A stated kind resolves exactly through that kind's
+        # normalizer; otherwise classify to the canonical (kind, value); then
+        # fall back to a value lookup over every host kind's normal form so a
+        # command line the model printed with doubled spaces still matches the
+        # whitespace-collapsed row. Only rows a judgment door already created
+        # can match — this path never creates one.
+        from app.intelligence.observables import classify_value, normalize_value, refang
+        from app.models.observable import HOST_KINDS, Observable
 
-        classified = classify_value(name)
+        stripped = name.strip()
+        if kind and kind in ALL_OBSERVABLE_KINDS:
+            result = await db.execute(
+                select(Observable.id).where(
+                    Observable.kind == kind,
+                    Observable.value == normalize_value(kind, stripped),
+                    Observable.is_denied.is_(False),
+                )
+            )
+            found = result.scalar_one_or_none()
+            if found:
+                return found
+        classified = classify_value(stripped)
         if classified:
             result = await db.execute(
                 select(Observable.id).where(
@@ -105,9 +123,10 @@ async def _resolve_entity_id(db: AsyncSession, entity_type: str, name: str) -> u
                 )
             )
             return result.scalar_one_or_none()
+        forms = {refang(stripped)} | {normalize_value(k, stripped) for k in HOST_KINDS}
         result = await db.execute(
             select(Observable.id)
-            .where(Observable.value == refang(name.strip()), Observable.is_denied.is_(False))
+            .where(Observable.value.in_(forms), Observable.is_denied.is_(False))
             .order_by(Observable.sighting_count.desc())
             .limit(1)
         )
@@ -183,6 +202,7 @@ async def store_ai_relationships(
     # accumulated evidence, an authority import, or an analyst pin.
     conf_map = {"high": "probable", "medium": "probable", "low": "possible"}
     stored = 0
+    touched: set[tuple[str, uuid.UUID]] = set()
     for rel in relationships:
         if not isinstance(rel, dict):
             continue
@@ -190,6 +210,7 @@ async def store_ai_relationships(
         src_name = (rel.get("source_name") or "").strip()
         tgt_type = (rel.get("target_type") or "").strip()
         tgt_name = (rel.get("target_name") or "").strip()
+        tgt_kind = (rel.get("target_kind") or "").strip() or None
         rel_type = (rel.get("relationship_type") or "related_to").strip()
         evidence = (rel.get("evidence") or "").strip()
         confidence = (rel.get("confidence") or "medium").strip()
@@ -225,9 +246,11 @@ async def store_ai_relationships(
             continue
 
         src_id = await _resolve_entity_id(db, src_type, src_name)
-        tgt_id = await _resolve_entity_id(db, tgt_type, tgt_name)
+        tgt_id = await _resolve_entity_id(db, tgt_type, tgt_name, kind=tgt_kind if tgt_type == "observable" else None)
         if not src_id or not tgt_id or (src_type == tgt_type and src_id == tgt_id):
             continue
+        touched.add((src_type, src_id))
+        touched.add((tgt_type, tgt_id))
 
         # Merge with an existing edge in either orientation so an AI assertion
         # strengthens the co-occurrence row instead of minting a mirror edge.
@@ -288,6 +311,17 @@ async def store_ai_relationships(
 
     if stored:
         await db.flush()
+    if stored and touched:
+        # A fresh claim must show on both profiles now, not after the pivot
+        # cache's TTL — the observable's Infrastructure/Attribution panels
+        # read the same cached pivot.
+        try:
+            from app.intelligence.correlation_cache import invalidate_entity_cache
+
+            for etype, eid in touched:
+                await invalidate_entity_cache(etype, str(eid))
+        except Exception:
+            logger.debug("pivot cache invalidation skipped", exc_info=True)
     return stored
 
 

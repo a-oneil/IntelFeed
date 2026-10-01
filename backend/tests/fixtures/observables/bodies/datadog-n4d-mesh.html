@@ -1,0 +1,368 @@
+<div><div class="article-content relative">
+        <p>N4D Mesh Controller is an active Linux malware campaign that turns exposed Model Context Protocol (MCP) servers, and a wide range of other internet-facing services, into entry points for credential theft, lateral movement, persistence, and command and control (C2). <a href="https://blog.offensive-intel.com/n4d-mesh-controller/" rel="noopener noreferrer nofollow">Public reporting by researcher German Fernandez</a> first documented the campaign's exploitation framework in June 2026. New isolated-execution analysis by Datadog Security Research paints a clearer picture of the malware campaign's current tactics, including a newer loader-to-agent chain, rotated infrastructure, exact persistence artifacts, and direct runtime evidence that the current agent enumerates MCP tools, invokes a command-execution tool, and reports the result to its controller.</p>
+<h2 id="overview"></h2>
+<p>Researcher German Fernandez first documented N4D, reporting a generic MCP exploitation framework, eight polymorphic agent modules, more than 30 service-specific exploitation modules, automated attack-chain planning, and dedicated targeting of AI and LLM infrastructure. Datadog Security Research later obtained and executed a sample submitted after that initial reporting. The sample contacted a new IP address, <code>209.99.186.235</code>, and retrieved a second-stage agent identifying itself as <code>33.8-go-titan</code>, which installed several overlapping Linux persistence mechanisms.</p>
+<p>This new sample doesn't represent a new campaign. It confirms that N4D's operators are still active, still evolving their delivery infrastructure, and still worth hunting.</p>
+<h2 id="what-happened"></h2>
+<p>MCP servers can expose high-impact capabilities—including command execution, file access, database queries, and cloud administration—through a single, uniform protocol. N4D turns that uniformity into an attacker advantage: Instead of needing a distinct exploit for every MCP implementation, its scanner initializes a session, requests <code>tools/list</code>, classifies the returned tools, and invokes anything that looks dangerous (most notably <code>execute_command</code>) through <code>tools/call</code>.</p>
+<p>This automation changes the threat model for a publicly reachable MCP server. An unauthenticated server that intentionally exposes a command execution tool doesn't need a memory corruption bug or a CVE to be compromised; the dangerous capability is already there, and N4D supplies automated discovery and abuse.</p>
+<p>From that foothold, N4D broadens access through an unusually large, conventional exploitation library. The recovered Go binary contains paths for databases, caches, container platforms, application servers, and AI infrastructure, including Ray Dashboard and LightLLM. An operator can use one exposed MCP server as a beachhead and keep scanning or exploiting adjacent services from the compromised host.</p>
+<p>The observed attack flow proceeds as follows:</p>
+<ol>
+<li><strong>Discover exposed services.</strong> Scanner probes MCP endpoints and common infrastructure ports. Older scanner artifacts identify the MCP client as <code>n4d-vps</code>; the current Go agent uses the shorter name <code>n</code>. Both negotiate protocol version <code>2024-11-05</code> and request <code>tools/list</code>.</li>
+<li><strong>Classify dangerous capabilities.</strong> Tool names associated with command execution, file access, and database queries are selected for invocation.</li>
+<li><strong>Deliver the agent.</strong> Shell scripts and loaders use <code>curl</code> or <code>wget</code> to retrieve an architecture-specific agent from <code>cdnorigin.net</code>, <code>209.99.186.73</code>, or the newly observed <code>209.99.186.235</code>. The newer loader tries both <code>/api/agent/full?arch=</code> and the legacy <code>/api/agent/binary?arch=</code>.</li>
+<li><strong>Establish control.</strong> The agent communicates with controller API paths, including <code>/api/register</code>, <code>/api/beacon</code>, <code>/api/task/</code>, <code>/api/result/</code>, and <code>/api/pty</code>, authenticated with custom <code>X-Mesh-Auth</code> and <code>X-Operator-Key</code> headers.</li>
+<li><strong>Expand access.</strong> The agent contains service-specific abuse paths for PostgreSQL, MySQL, Redis, Docker, Kubernetes, Nacos, Jenkins, Ray, LightLLM, and other platforms, including recovered functions named <code>deployRayDashboard</code> and <code>deployLightLLM</code>.</li>
+<li><strong>Persist and conceal.</strong> Observed mechanisms include hidden cron entries, shell-profile modification, watchdog scripts, systemd units, SSH key installation, execution from memory-backed directories, and process names that mimic Linux kernel workers.</li>
+<li><strong>Add a secondary channel.</strong> The agent can launch Cloudflare Quick Tunnels and report the assigned <code>*.trycloudflare.com</code> hostname back to its controller.</li>
+</ol>
+<h2 id="what-we-found"></h2>
+<h3 id="sample-analysis"></h3>
+<p>At a publication-time refresh on July 29, 2026, the associated VirusTotal collection held 27 artifacts: 21 ELF binaries, five POSIX shell scripts, and one file of unknown type. Eighteen of the ELF files were UPX-packed. Antivirus detections across the set ranged from 0 to 29 engines, a wide enough spread that behavioral and campaign-specific artifacts are more useful for tracking than any detection-count threshold.</p>
+<p>The same refresh found an enabled four-rule VirusTotal Livehunt ruleset covering loaders, unobfuscated agents, delivery scripts, and MCP autodeployment behavior. Its newest notifications were repeated behavior matches on the known packed agent (<code>fc4109f5dd1d30b65dd60e57dc639ac1d313bfa5241e36e61fbc4aabc1cda482</code>) and static matches on two known unobfuscated collection files (<code>3435cc9d4a255bfb4cfb09f2390c29b888f70a43345cfaaecf46c55bc89b814d</code> and <code>ab435e3e24cfb3a37c1f564209869fe53c8fe95bc9161d0d373fbc1c551b2c29</code>). These were new analyses of previously submitted files, not newly submitted campaign samples. They validate the rules but do not, by themselves, establish new campaign activity.</p>
+<p>We inspected five representative files: an unpacked Go build, a packed ELF with the collection's highest detection count, and three downloader/watchdog scripts.</p>
+<p>The unpacked x86-64 Go sample (<code>3435cc9d4a255bfb4cfb09f2390c29b888f70a43345cfaaecf46c55bc89b814d</code>) exposes extensive implementation detail through static strings and symbols:</p>
+<ul>
+<li><strong>MCP operations:</strong> <code>initialize</code>, <code>tools/list</code>, <code>tools/call</code>, <code>execute_query</code>, and command-execution classification logic</li>
+<li><strong>Agent control:</strong> <code>X-Mesh-Auth</code>, <code>.trycloudflare.com</code>, <code>/api/pty</code>, and the registration/tasking/result API paths</li>
+<li><strong>AI infrastructure targeting:</strong> <code>main.deployLightLLM</code> and <code>main.deployRayDashboard</code></li>
+<li><strong>Persistence and execution:</strong> <code>/etc/cron.d/.syscheck</code>, <code>/etc/profile.d/sys_alias.sh</code>, <code>/root/.ssh/authorized_keys</code>, <code>/dev/shm/.n4d</code>, and kernel-worker-style process names</li>
+<li><strong>Service exploitation:</strong> PostgreSQL <code>COPY TO PROGRAM</code>, MySQL outfile/event execution, Redis configuration abuse, Docker socket access, Kubernetes APIs, Nacos, and Jenkins</li>
+</ul>
+<p>The shell samples show a compact, repeatable delivery pattern: Check a lock file or running process, map the host architecture, download to <code>/tmp/.agent</code> or <code>/tmp/.n4d</code>, <code>chmod +x</code>, and detach with <code>setsid</code>. One watchdog re-downloads the payload every 30 seconds if <code>/tmp/.agent</code> is missing. Another tries both the TLS-fronted domain and the raw IP. A third computes an architecture value but requests the <code>amd64</code> payload regardless, a sign of uneven quality across generated or operator-maintained variants.</p>
+<h3 id="isolated-execution-of-the-newer-loader"></h3>
+<p>We executed a newer x86-64 loader in disposable microVMs, using QEMU user-mode emulation with host-level syscall denial for runtime network connections. The password-protected archive was <code>77fe750d6b94b32e80e25aecb2ae7c435f0b45cfca25969dbee4dc22967b1302</code>; its ELF payload was <code>0d5f67b6d35e609e1d5eac0afd981147ea8df7da2f192ae59ac0bab7e48cc1de</code>. The statically linked Go loader used module path <code>n4d-agent/loader</code> and embedded both <code>cdnorigin.net</code> and <code>209.99.186.235</code>.</p>
+<p>The loader tried four endpoint combinations across ports 80 and 8443, using both the current <code>/api/agent/full?arch=amd64</code> path and the legacy <code>/api/agent/binary?arch=amd64</code>. It wrote <code>/etc/cron.d/.sys-health</code> on a three-minute schedule and staged <code>/tmp/.sys-health-monitor.tmp</code>.</p>
+<p>To capture the next stage without giving the loader unrestricted network access, we retrieved the exact observed URL from a separate disposable VM: <code>http://209.99.186.235:8443/api/agent/full?arch=amd64</code> returned a 7,321,596-byte UPX-packed ELF (<code>fc4109f5dd1d30b65dd60e57dc639ac1d313bfa5241e36e61fbc4aabc1cda482</code>). Unpacked with UPX 5.1.1, it grew to 19,202,174 bytes (<code>c422621ef824b627d74906f8d75ed8f990f4d6c708a0d263f219f9d9dd435174</code>), a Go binary that was also garble-obfuscated, with damaged or removed symbol metadata.</p>
+<p>The agent identified itself in its debug log as <code>33.8-go-titan</code>, using node authentication key <code>n4d-2ff16c75b1d2</code>. We denied every outbound connection before egress and let the agent run for 120 seconds. In that window, it made <strong>22,831 connection attempts across 742 destination IPs, 15,833 IP/port pairs, and 37 destination ports</strong>, targeting SSH, databases, container APIs, Kubernetes, caches, and application servers. This is direct runtime evidence that the delivered agent performs broad, multi-service scanning rather than only maintaining C2.</p>
+<p>The denied run also constrains how those targets were chosen: Scanning started without receiving controller tasking. Destinations clustered into contiguous address ranges, while the unobfuscated oracle exposes scanCIDR and scanLateral functions, as well as /24 construction artifacts. Together, that evidence supports autonomous, on-host expansion of CIDR seeds rather than 742 individually hardcoded targets. We have not recovered the seed selection algorithm from the garble-obfuscated 33.8 build, so whether those prefixes were built in or generated locally, and why the agent selected those particular public ranges, remain unresolved.</p>
+<p>The same run surfaced the current controller API surface: <code>POST /api/register</code>, <code>GET /api/task/{node}</code>, <code>POST /api/result/{node}</code>, <code>POST /api/intel</code>, <code>GET /api/endpoints</code>, and three <code>/api/update/</code> endpoints, all issued via an embedded Go HTTP client so they never appear as curl or wget command lines.</p>
+<p>Observed persistence included <code>/etc/cron.d/.s</code>, <code>/etc/cron.d/.sys-health</code>, <code>/etc/profile.d/.sys_alias.sh</code>, <code>/etc/systemd/system/sys-resource.service</code>, <code>/tmp/.wd</code>, <code>/var/tmp/.wd</code>, <code>/usr/local/bin/.sys-health-monitor</code>, and an appended shell startup command. It also installed the following SSH public key into <code>/root/.ssh/authorized_keys</code>:</p>
+<pre><code>ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJKH4g/SD6c00i5PzlWWkwXJwIHEac+nlAjg6WeOHUq3 root@ubuntu
+</code></pre>
+<p>The agent also attempted to download <code>cloudflared</code> from GitHub and retained logic to launch a Quick Tunnel to a local port. Generic Quick Tunnel activity is not an N4D indicator on its own, as legitimate use is common, but temporary-path execution combined with other campaign artifacts provides the needed context.</p>
+<h3 id="offline-replay-against-deterministic-services"></h3>
+<p>Connection denial established the agent's scanning breadth, but it could not show what happens after a service answers. We therefore built an offline replay lab. The sample runs in a network namespace connected only to a recorder namespace. The recorder has no default route or external interface, drops forwarding, captures original packets with <code>tcpdump</code>, transparently redirects TCP through <code>mitmproxy</code>, and sends HTTP, TLS, and WebSocket requests to deterministic <code>aiohttp</code> fixtures. The controller fixture registers a synthetic node but always returns an empty task queue. The MCP fixture advertises one inert <code>execute_command</code> tool and never executes the supplied argument. Samples and generated captures remain outside Git.</p>
+<p>An inert probe validated DNS, HTTP, TLS, WebSocket, PCAP, flow, syscall, and filesystem capture before malware execution. That validation also exposed an instrumentation failure: Wrapping QEMU in host <code>strace</code> set a nonzero <code>TracerPid</code>, which the debug agent read from <code>/proc/self/status</code> before exiting. Removing the host tracer while retaining QEMU's guest-side syscall trace allowed the same build to remain active until the containment timeout. Dynamic-analysis instrumentation can change the behavior it is intended to measure, so the lab records the execution mode with every run.</p>
+<p>We compared the unobfuscated <code>14.10-go-titan</code> oracle with the supplied packed <code>33.8-go-titan</code> sample. The supplied archive (<code>94ae566e27b176698958b4b9c216a0a2b0ac7ce11d7d81417c8add081fd3cc9c</code>) contained only the expected packed ELF (<code>fc4109f5dd1d30b65dd60e57dc639ac1d313bfa5241e36e61fbc4aabc1cda482</code>). VirusTotal independently relates that file to extracted payload <code>c422621ef824b627d74906f8d75ed8f990f4d6c708a0d263f219f9d9dd435174</code>.</p>
+<div class="table-wrapper "><table>
+<thead>
+<tr>
+<th>Capability</th>
+<th><code>14.10</code> debug oracle</th>
+<th><code>33.8</code> packed agent</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Controller</td>
+<td>Registered to a <code>trycloudflare.com</code> endpoint, sent health and host intelligence, and polled an empty task queue</td>
+<td>Tried <code>209.99.186.235</code> on ports 80 and 8443 plus <code>cdnorigin.net</code>; registered as <code>33.8-go-titan</code>, beaconed, sent intelligence, and polled an empty task queue</td>
+</tr>
+<tr>
+<td>MCP</td>
+<td>Sent 1,654 <code>initialize</code> and 1,473 <code>tools/list</code> requests; no tool invocation was reached in the 30-second replay</td>
+<td>Sent 3,409 <code>initialize</code>, 1,865 <code>tools/list</code>, and 1,534 <code>tools/call</code> requests in the fixture-amplified 30-second replay</td>
+</tr>
+<tr>
+<td>MCP action</td>
+<td>Enumerated the fixture's tool catalog</td>
+<td>Called execute_command with {"command":"id"}, then reported the tool schema, arguments, inert output, error:false, and exec_verified:false through /api/intel</td>
+</tr>
+<tr>
+<td>AI services</td>
+<td>Probed Ray Dashboard through <code>:8265/api/version</code>; static code also contains LightLLM, Ray, Marimo, Jupyter, and FastGPT deployment paths</td>
+<td>Probed Ollama <code>:11434/api/tags</code> and <code>/api/generate</code>, ComfyUI <code>:8188/system_stats</code> and <code>/prompt</code>, and Stable Diffusion WebUI <code>:7860/sdapi/v1/options</code></td>
+</tr>
+<tr>
+<td>Cloud and infrastructure</td>
+<td>Probed Nacos, WebLogic, XXL-Job, MinIO, rclone, Spring Gateway, cloud metadata, and many generic MCP locations</td>
+<td>Probed Kubernetes API and kubelet ports, unauthenticated Docker APIs, Elasticsearch, cloud metadata, SSH, databases, caches, and generic MCP locations</td>
+</tr>
+<tr>
+<td>Persistence</td>
+<td>Copied itself to <code>/var/tmp/.n4d</code> and <code>/dev/shm/.n4d</code>, installed a watchdog and profile startup file, and added an SSH key</td>
+<td>Copied itself to <code>/var/tmp/.a</code>, wrote <code>/var/tmp/.wd</code>, <code>/etc/profile.d/.sys_alias.sh</code>, <code>/root/.bashrc</code>, and <code>/usr/local/bin/.sys-health-monitor</code>, and added the same SSH key</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The request totals are not campaign scan rates. The fixture deliberately accepted every configured controller and synthetic MCP endpoint, amplifying concurrent loops and tool calls. They do establish code-path reachability. Most importantly, the packed current build did not merely contain generic MCP strings: It completed <code>initialize</code> → <code>tools/list</code> → <code>tools/call</code>, selected <code>execute_command</code>, attempted <code>id</code>, and exfiltrated the structured result. It also wrote <code>/tmp/.n4d_autodeploy_debug</code>, providing a second source of ground truth for each MCP initialization and tool-list operation.</p>
+<p>The two result flags describe different stages. <code>error:false</code> records that the JSON-RPC tool call itself succeeded. <code>exec_verified:false</code> is implant-side validation, not controller confirmation: The agent placed it in the outbound /api/intel request before receiving a response. In this run, the fixture returned the literal text <code>fixture: execution disabled</code>, which did not resemble a real id result. We did not recover the exact verification predicate from the obfuscated build.</p>
+<p>The AI service findings require a stricter confidence boundary. The replay dynamically confirmed current probes for Ollama, ComfyUI, and Stable Diffusion WebUI, but it did not observe exploitation of those products. The debug build reached Ray's version probe, while its <code>/run</code> deployment path remains a static capability. LightLLM /pd_register, Marimo /terminal/ws, Jupyter, FastGPT, and the two-stage Nginx UI chain were not reached in the bounded replay. Because the controller returned an empty task queue, the replay could not exercise modules that require operator tasking. Nor can it distinguish build-version changes from response gating, fixture fidelity, or timing. The functions and protocol artifacts remain high-confidence static findings from the debug build, supported by the original research and these advisories:</p>
+<ul>
+<li>LightLLM PD-mode unsafe deserialization, <a href="https://nvd.nist.gov/vuln/detail/CVE-2026-26220" rel="noopener noreferrer nofollow">CVE-2026-26220</a>, covers unauthenticated binary WebSocket data passed to <code>pickle.loads()</code> in versions through 1.1.0.</li>
+<li>Ray job submission, <a href="https://nvd.nist.gov/vuln/detail/cve-2023-48022" rel="noopener noreferrer nofollow">CVE-2023-48022</a>, covers remote code execution through the job API in Ray 2.6.3 and 2.8.0. Ray's documented position is that the service was intended for a controlled network, and token authentication became available in Ray 2.52.0.</li>
+<li>Marimo's unauthenticated terminal WebSocket, <a href="https://nvd.nist.gov/vuln/detail/CVE-2026-39987" rel="noopener noreferrer nofollow">CVE-2026-39987</a>, affects versions before 0.23.0 and is in CISA's Known Exploited Vulnerabilities catalog.</li>
+<li>Nginx UI's unauthenticated backup disclosure, <a href="https://nvd.nist.gov/vuln/detail/CVE-2026-27944" rel="noopener noreferrer nofollow">CVE-2026-27944</a>, and unauthenticated MCP endpoint, <a href="https://nvd.nist.gov/vuln/detail/CVE-2026-33032" rel="noopener noreferrer nofollow">CVE-2026-33032</a>, match the debug build's backup and MCP-chain artifacts. We did not dynamically reproduce that chain.</li>
+</ul>
+<p>The current build's runtime behavior is both broader and narrower than its static inventory suggests. It operationalises generic MCP tool abuse and adds probes for locally deployed generative-AI services, while several older CVE-specific modules did not execute during the bounded replay. We cannot yet attribute that difference to module removal or a deliberate behavioral shift; build changes, autonomous scanner prioritisation, response gating, timing, and operator tasking remain plausible explanations. The distinction is the main contribution beyond the original report: It separates code retained in an oracle build from behavior exercised by the packed agent delivered in July 2026.</p>
+<p>The current controller surface included <code>POST /api/register</code>, <code>GET /api/task/{node}</code>, <code>GET /api/beacon</code>, <code>POST /api/intel</code>, and <code>POST /api/deployed</code>. Authentication used <code>X-Mesh-Auth</code>, and the first intelligence report attempted to collect AWS, Google Cloud, and Azure metadata, environment values, sensitive files, and SSH keys.</p>
+<h3 id="detection-opportunities"></h3>
+<p>Defenders can correlate campaign-specific indicators with behaviors that stay useful even after infrastructure or file hashes rotate. Here's an overview of what to look for:</p>
+<p><strong>MCP server telemetry</strong></p>
+<ul>
+<li>An MCP <code>initialize</code> request followed by <code>tools/list</code> from client name <code>n4d-vps</code>, or from the current client name <code>n</code> when correlated with N4D request paths or persistence artifacts</li>
+<li><code>tools/call</code> activity invoking command-execution, file-write, or database-query tools</li>
+<li>Publicly reachable MCP endpoints without authentication, especially those exposing shell or code-execution tools</li>
+<li>Child processes spawned by an MCP server, particularly <code>curl</code>, <code>wget</code>, shell interpreters, or executables written to temporary directories</li>
+</ul>
+<p><strong>Host telemetry</strong></p>
+<ul>
+<li>Process execution from <code>/dev/shm</code>, <code>/tmp</code>, or <code>/var/tmp</code> named <code>kworker*</code> or using hidden dotfiles</li>
+<li>Writes to <code>/etc/cron.d/.s</code>, <code>/etc/cron.d/.sys-health</code>, <code>/etc/cron.d/.syscheck</code>, <code>/etc/profile.d/.sys_alias.sh</code>, or <code>/etc/systemd/system/sys-resource.service</code></li>
+<li>Creation of <code>/dev/shm/.agent.lock</code>, <code>/dev/shm/.agent.pid</code>, <code>/tmp/.n4d*</code>, <code>/tmp/.agent</code>, <code>/tmp/.sys-health-monitor</code>, <code>/var/tmp/.a</code>, or <code>/var/tmp/.wd</code></li>
+<li>Download activity referencing <code>/api/agent/full</code>, <code>/api/agent/binary</code>, <code>cdnorigin.net</code>, <code>209.99.186.73</code>, or <code>209.99.186.235</code></li>
+<li>HTTP telemetry containing <code>X-Mesh-Auth</code>, <code>X-Operator-Key</code>, <code>/api/task/</code>, <code>/api/beacon</code>, <code>/api/register</code>, <code>/api/result/</code>, <code>/api/deployed</code>, or <code>/api/pty</code></li>
+<li><code>cloudflared</code> launched from a world-writable temporary directory; treat generic <code>*.trycloudflare.com</code> DNS activity as a correlation lead, not attribution on its own</li>
+</ul>
+<p><strong>Network telemetry</strong></p>
+<ul>
+<li>Connections to <code>209.99.186.73</code> or <code>209.99.186.235</code>, and DNS/HTTP activity for <code>cdnorigin.net</code></li>
+<li>Requests to <code>/api/agent/full</code>, <code>/api/agent/binary</code>, and other controller API paths</li>
+<li>Cloudflare Quick Tunnel traffic correlated with temporary-path execution or other N4D host artifacts</li>
+</ul>
+<p>Here are some YARA rules for tracking the campaign: one for the newer loader, one for unobfuscated or debug agent builds, and one for delivery scripts. Packed or newly obfuscated agents may not expose enough plaintext for the second rule to match.</p>
+<pre><code>rule N4D_Linux_Loader_2026
+{
+    meta:
+        description = "Tracks N4D Go loaders delivering architecture-specific agents"
+        date = "2026-07-13"
+    strings:
+        $module = "n4d-agent/loader" ascii
+        $full = "/api/agent/full?arch=" ascii
+        $legacy = "/api/agent/binary?arch=" ascii
+        $beacon = "/api/beacon?k=n4d" ascii
+        $cron = "/etc/cron.d/.sys-health" ascii
+        $stage = "/tmp/.sys-health-monitor.tmp" ascii
+        $domain = "cdnorigin.net" ascii
+    condition:
+        uint32(0) == 0x464c457f and filesize &lt; 20MB and
+        $module and 3 of ($full, $legacy, $beacon, $cron, $stage, $domain)
+}
+
+rule N4D_Mesh_Agent_Unobfuscated
+{
+    meta:
+        description = "Tracks unobfuscated N4D mesh agent builds"
+        date = "2026-07-13"
+    strings:
+        $mcp1 = "tools/list" ascii
+        $mcp2 = "tools/call" ascii
+        $api1 = "/api/register" ascii
+        $api2 = "/api/result/" ascii
+        $tunnel = ".trycloudflare.com" ascii
+        $profile = "/etc/profile.d/sys_alias.sh" ascii
+    condition:
+        uint32(0) == 0x464c457f and filesize &lt; 40MB and
+        all of ($mcp*, $api*, $tunnel, $profile)
+}
+
+rule N4D_Linux_Delivery_Script
+{
+    meta:
+        description = "Tracks N4D shell downloaders and watchdogs"
+        date = "2026-07-13"
+    strings:
+        $shell = "#!/bin/" ascii
+        $full = "/api/agent/full?arch=" ascii
+        $legacy = "/api/agent/binary?arch=" ascii
+        $domain = "cdnorigin.net" ascii
+        $new_ip = "209.99.186.235" ascii
+        $watchdog = ".sys-health-monitor" ascii
+        $setsid = "setsid" ascii
+        $cron = "/etc/cron.d/.sys-health" ascii
+    condition:
+        filesize &lt; 200KB and $shell and
+        4 of ($full, $legacy, $domain, $new_ip, $watchdog, $setsid, $cron)
+}
+</code></pre>
+<p>VirusTotal Livehunt can also apply a behavior rule to normalised sandbox results from packed files. The enabled rule correlates N4D's MCP autodeployment markers with reporting to the controller:</p>
+<pre><code>import "vt"
+
+rule N4D_Dynamic_MCP_Autodeploy
+{
+    meta:
+        description = "N4D MCP exploitation followed by controller reporting"
+        date = "2026-07-14"
+    condition:
+        for any path in vt.behaviour.files_written : (
+            path endswith "/tmp/.n4d_autodeploy_debug" or
+            path endswith "/tmp/.n4d_nid"
+        ) and
+        for any http in vt.behaviour.http_conversations : (
+            http.request_method == vt.Http.Method.POST and
+            (http.url contains "/api/intel" or
+             http.url contains "/api/deployed")
+        )
+}
+</code></pre>
+<p>Keep file and behavior rules in separate Livehunt rulesets so high-volume behavioral pivots do not exhaust notification limits for high-confidence file matches. Monitor notifications through the API, then enrich each new SHA-256 with submissions, relationships, behavior, TLSH, telfhash, vhash, and dropped-file links before clustering it.</p>
+<p>Additional tracking opportunities include passive DNS for new resolutions of <code>cdnorigin.net</code>, certificate transparency pivots on newly observed TLS certificates, hosting/ASN changes around the controller IPs, and VirusTotal relationship pivots from new loaders to contacted URLs and downloaded files. Monitor the SSH public key above, the Go module path <code>n4d-agent/loader</code>, the version string <code>33.8-go-titan</code>, and the node key prefix <code>n4d-</code> in any newly recovered configuration. Track <code>*.trycloudflare.com</code> only when it correlates with <code>.cf_h</code>, temporary-path <code>cloudflared</code> execution, or another N4D indicator.</p>
+<h2 id="some-concise-threat-hunting-ideas"></h2>
+<p>Here are a few starting points for threat hunts to check for N4D related activity in your environment:</p>
+<div class="table-wrapper "><table>
+<thead>
+<tr>
+<th>Idea</th>
+<th>Detects</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>n4d-c2-network-activity</code></td>
+<td>Connections or DNS lookups to <code>209.99.186.73</code>, <code>209.99.186.235</code>, or <code>cdnorigin.net</code></td>
+</tr>
+<tr>
+<td><code>n4d-implant-binary-download</code></td>
+<td><code>curl</code>/<code>wget</code>/<code>lwp-download</code> fetching the implant via <code>/api/agent/binary</code> or <code>/api/agent/full</code></td>
+</tr>
+<tr>
+<td><code>n4d-local-c2-api-poll</code></td>
+<td>The implant's distinctive task-poll fingerprint (<code>X-Mesh-Auth</code>/<code>X-Operator-Key</code> headers against <code>/api/task/</code>, <code>/api/beacon</code>, <code>/api/register</code>, <code>/api/result/</code>, <code>/api/intel</code>, <code>/api/chains</code>, <code>/api/pty</code>)</td>
+</tr>
+<tr>
+<td><code>n4d-cloudflared-tunnel-abuse</code></td>
+<td><code>cloudflared ... tunnel --url</code> launched from <code>/tmp</code>, <code>/var/tmp</code>, or <code>/dev/shm</code></td>
+</tr>
+<tr>
+<td><code>n4d-devshm-process-masquerade</code></td>
+<td>A process named <code>kworker*</code> executing from <code>/dev/shm</code></td>
+</tr>
+<tr>
+<td><code>n4d-additional-persistence-file-activity</code></td>
+<td>Writes to <code>/etc/cron.d/.syscheck</code>, <code>/etc/cron.d/.sys-health</code>, <code>/etc/profile.d/sys_alias.sh</code>, or <code>/etc/ld.so.preload</code></td>
+</tr>
+<tr>
+<td><code>n4d-hardcoded-backdoor-credential-auth</code></td>
+<td>Authentication attempts using the implant's hardcoded backdoor accounts (<code>n4d_admin</code>, <code>n4d</code>) against Nacos/Postgres</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>If your rules use OCSF-normalised fields, they can apply across whichever log sources you have already onboarded, instead of depending on a single integration.</p>
+<h2 id="response-guidance"></h2>
+<p>Isolate affected hosts before removing persistence. Preserve the process tree, executable, shell scripts, open connections, and temporary files for analysis. Remove cron, profile, systemd, SSH-key, and watchdog persistence only after evidence collection is complete. Rotate cloud credentials, SSH keys, database credentials, API tokens, and any secrets available to the MCP process or stored on the host.</p>
+<p>For exposed MCP services, require authentication, bind local-only services to loopback, and put remote access behind an authenticated proxy. Inventory advertised tools and remove command execution, unrestricted file access, and broad database capabilities where they aren't required. Where command execution is a legitimate requirement, put it behind explicit per-tool authorisation and a strict allowlist, then run it in a short-lived, unprivileged sandbox with a read-only root filesystem, no host mounts or credentials, blocked cloud-metadata access, constrained egress, and resource and time limits. Log MCP tool invocation with the authenticated principal, client identity, tool name, arguments, resulting child process, and sandbox outcome.</p>
+<h2 id="indicators-of-compromise"></h2>
+<div class="table-wrapper "><table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Indicator</th>
+<th>Context</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>IPv4</td>
+<td><code>209.99.186.73</code></td>
+<td>Reported controller, payload delivery, and API infrastructure</td>
+</tr>
+<tr>
+<td>IPv4</td>
+<td><code>209.99.186.235</code></td>
+<td>Loader and live second-stage delivery infrastructure, observed July 13, 2026</td>
+</tr>
+<tr>
+<td>Domain</td>
+<td><code>cdnorigin.net</code></td>
+<td>TLS-fronted C2 and payload delivery</td>
+</tr>
+<tr>
+<td>Domain pattern</td>
+<td><code>*.trycloudflare.com</code></td>
+<td>Secondary tunnel channel; legitimate use exists</td>
+</tr>
+<tr>
+<td>MCP client</td>
+<td><code>n4d-vps</code>; <code>n</code></td>
+<td>Scanner client identities; treat <code>n</code> as an IOC only with other N4D behavior</td>
+</tr>
+<tr>
+<td>HTTP header</td>
+<td><code>X-Mesh-Auth</code></td>
+<td>Agent authentication header</td>
+</tr>
+<tr>
+<td>HTTP header</td>
+<td><code>X-Operator-Key</code></td>
+<td>Operator API authentication header</td>
+</tr>
+<tr>
+<td>Credential</td>
+<td><code>n4d_admin:n4d_admin123</code></td>
+<td>Nacos backdoor re-access credential</td>
+</tr>
+<tr>
+<td>Credential</td>
+<td><code>n4d:n4dmesh2024</code></td>
+<td>Controller PostgreSQL credential; indicates controller deployment, not a generic victim backdoor</td>
+</tr>
+<tr>
+<td>SSH key</td>
+<td><code>AAAAC3NzaC1lZDI1NTE5AAAAIJKH4g/SD6c00i5PzlWWkwXJwIHEac+nlAjg6WeOHUq3</code></td>
+<td>Public key installed by the go-titan agent</td>
+</tr>
+<tr>
+<td>SHA-256</td>
+<td><code>77fe750d6b94b32e80e25aecb2ae7c435f0b45cfca25969dbee4dc22967b1302</code></td>
+<td>Password-protected archive containing the newer loader</td>
+</tr>
+<tr>
+<td>SHA-256</td>
+<td><code>94ae566e27b176698958b4b9c216a0a2b0ac7ce11d7d81417c8add081fd3cc9c</code></td>
+<td>Password-protected archive containing the supplied packed <code>33.8-go-titan</code> agent</td>
+</tr>
+<tr>
+<td>SHA-256</td>
+<td><code>0d5f67b6d35e609e1d5eac0afd981147ea8df7da2f192ae59ac0bab7e48cc1de</code></td>
+<td>Newer statically linked Go loader</td>
+</tr>
+<tr>
+<td>SHA-256</td>
+<td><code>fc4109f5dd1d30b65dd60e57dc639ac1d313bfa5241e36e61fbc4aabc1cda482</code></td>
+<td>UPX-packed 33.8-go-titan agent retrieved from <code>209.99.186.235:8443</code></td>
+</tr>
+<tr>
+<td>SHA-256</td>
+<td><code>c422621ef824b627d74906f8d75ed8f990f4d6c708a0d263f219f9d9dd435174</code></td>
+<td>Unpacked form of the 33.8-go-titan agent</td>
+</tr>
+<tr>
+<td>SHA-256</td>
+<td><code>3435cc9d4a255bfb4cfb09f2390c29b888f70a43345cfaaecf46c55bc89b814d</code></td>
+<td>Unpacked Go debug build</td>
+</tr>
+<tr>
+<td>SHA-256</td>
+<td><code>d4483b7a943faeec2ce6690e508ee3a30c7fc1e546887658921c132f179b8e78</code></td>
+<td>UPX-packed Linux agent</td>
+</tr>
+<tr>
+<td>SHA-256</td>
+<td><code>749e8835bb407336742f3fff5f81ba5eb476a42dfc0246f1107d4f28f1bea708</code></td>
+<td>Agent watchdog shell script</td>
+</tr>
+<tr>
+<td>SHA-256</td>
+<td><code>79e44b8523ee1e371436ca36e91d4d6f932beb371e7d77de756ffdd8f825e763</code></td>
+<td>Architecture-aware downloader shell script</td>
+</tr>
+<tr>
+<td>SHA-256</td>
+<td><code>e09ac5e8c23a768a2370cff29aca64be0d6e210e1176ee526bb7e47f537509ae</code></td>
+<td>Agent downloader shell script</td>
+</tr>
+</tbody>
+</table>
+</div>
+<h2 id="references"></h2>
+
+
+
+        
+      </div>
+
+      </div>

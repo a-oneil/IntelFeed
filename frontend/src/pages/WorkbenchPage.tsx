@@ -48,6 +48,7 @@ import { TelegramMentionsPanel } from "@/components/TelegramMentionsPanel";
 import { WatchlistPanel } from "@/components/WatchlistPanel";
 import { EntityMergeModal } from "@/components/EntityMergeModal";
 import { formatDate } from "@/utils/formatDate";
+import { observableSourcesLabel, reputationLabel } from "@/utils/observables";
 import { exploitSourcesText } from "@/utils/exploitSources";
 import { TLP_COLORS, getTLPColor } from "@/utils/colorSchemes";
 import { CreateEntityPanel, isCreatableEntityType } from "@/components/CreateEntityPanel";
@@ -1432,6 +1433,8 @@ const OBSERVABLE_KIND_CHOICES = [
     "path",
     "mutex",
     "named_pipe",
+    "scheduled_task",
+    "http_header",
     "service_name",
     "user_agent",
     "script",
@@ -1448,6 +1451,7 @@ const OBSERVABLE_VIA_CHOICES = [
   { value: "ai_extraction", label: "analysis ai" },
   { value: "ttp_observable", label: "ttp observable" },
   { value: "ioc_list", label: "ioc_list feed" },
+  { value: "publisher_ioc", label: "publisher file" },
   { value: "manual", label: "analyst" },
 ];
 
@@ -1521,16 +1525,41 @@ const OBSERVABLE_COLUMNS: ColumnDef<ObservableResponse>[] = [
     // article_count stays off the column list: sightings count the same
     // junction today, and "Linked" (the shared claims column every entity
     // table gets) is the design mock's linked count.
-    key: "sighting_count", label: "Sightings", width: 90, minWidth: 70,
-    serverSort: true, numValue: (o) => o.sighting_count,
-    render: (o) => <NumCell value={o.sighting_count} />,
+    key: "report_count", label: "Sources", width: 120, minWidth: 90,
+    serverSort: true, numValue: (o) => o.report_count,
+    render: (o) => <span title={`${o.sighting_count} raw sightings`}>{observableSourcesLabel(o)}</span>,
+  },
+  {
+    key: "reputation", label: "Reputation", width: 180, minWidth: 120, hideable: true, defaultHidden: true,
+    sortValue: (o) => (o.reputation ? 1 : 0),
+    render: (o) =>
+      o.reputation ? (
+        <span title={`Enriched ${o.reputation.enriched_at ?? ""}`}>{reputationLabel(o.reputation)}</span>
+      ) : (
+        <span className={styles.muted}>—</span>
+      ),
   },
   {
     key: "role", label: "Role", width: 96, minWidth: 70, hideable: true,
     serverChoice: true, serverParam: "role",
     choices: [
       { value: "all", label: "Any" },
-      ...["c2", "delivery", "payload", "phishing", "exfil", "exploit", "scanning"].map((v) => ({ value: v, label: v })),
+      ...[
+        "c2",
+        "delivery",
+        "payload",
+        "phishing",
+        "exfil",
+        "exploit",
+        "scanning",
+        "persistence",
+        "execution",
+        "defense_evasion",
+        "credential_access",
+        "discovery",
+        "lateral_movement",
+        "collection",
+      ].map((v) => ({ value: v, label: v.replace(/_/g, " ") })),
     ],
     render: (o) => (o.role ? <Chip truncate>{o.role}</Chip> : <span className={table.zero}>·</span>),
   },
@@ -1749,8 +1778,9 @@ function ObservableCandidatesQueue() {
   return (
     <div className={styles.candQueue}>
       <div className={styles.candQueueHead}>
-        Candidates · {rows.length} — pattern nominations no judgment door has confirmed. Promote turns one into a
-        ledger row; dismiss drops it from its latest article; never-capture (admin) tombstones it everywhere.
+        Candidates · {rows.length}{rows.length >= 500 ? "+" : ""} — pattern nominations no judgment door has confirmed,
+        aggregated across the 400 most recent nominating articles. Promote turns one into a ledger row; dismiss drops
+        it from its latest article; never-capture (admin) tombstones it everywhere.
       </div>
       {rows.length > 0 && (
         <div className={styles.candBulkBar}>
@@ -1819,6 +1849,7 @@ function ObservableCandidatesQueue() {
       {!isLoading && rows.length === 0 && (
         <div className={styles.candQueueEmpty}>Queue is clear — nothing nominated and unjudged.</div>
       )}
+      <div className={styles.candRows}>
       {rows.map((c) => (
         <div key={keyOf(c)} className={styles.candRow}>
           <input
@@ -1889,6 +1920,7 @@ function ObservableCandidatesQueue() {
           )}
         </div>
       ))}
+      </div>
     </div>
   );
 }
@@ -1896,33 +1928,57 @@ function ObservableCandidatesQueue() {
 function ObservablesSection() {
   // ?queue=1 deep-links straight into the candidates queue (the Engine
   // console's attention chip lands here).
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [queueOpen, setQueueOpen] = useState(searchParams.get("queue") === "1");
   const { data: queueRows } = useObservableCandidates(true);
+  // ?linked_entity=<type>:<uuid> is the profile's "Open in observables
+  // browser" pivot: only the infrastructure behind that entity.
+  const linkedEntity = searchParams.get("linked_entity");
+  const linkedType = linkedEntity?.split(":")[0];
 
   return (
     <>
       {queueOpen && <ObservableCandidatesQueue />}
       <EntityTableSection<ObservableResponse>
-        title="Observables"
+        title={linkedEntity ? `Observables · ${linkedType?.replace(/_/g, " ")} infrastructure` : "Observables"}
         entityType="observable"
         columns={OBSERVABLE_COLUMNS}
-        queryKey="observables"
+        queryKey={linkedEntity ? `observables:${linkedEntity}` : "observables"}
         endpoint="/observables"
+        extraQueryParams={linkedEntity ? { linked_entity: linkedEntity } : undefined}
         defaultSort={{ key: "last_seen_at", dir: "desc" }}
-        emptyTitle="No observables yet"
-        emptyDesc="Ledger rows come from judgment: the one-pass analysis, curated ioc_list feeds, TTP observables, or promoting a candidate from an article's intel panel. Run scripts/maintenance/backfill_observables.py to fill from existing extractions."
+        emptyTitle={linkedEntity ? "No infrastructure behind this entity yet" : "No observables yet"}
+        emptyDesc={
+          linkedEntity
+            ? "Nothing is claimed for or reported alongside it. Indicators a judgment door captures in its articles will show here."
+            : "Ledger rows come from judgment: the one-pass analysis, curated ioc_list feeds, TTP observables, or promoting a candidate from an article's intel panel. Run scripts/maintenance/backfill_observables.py to fill from existing extractions."
+        }
         getId={(o) => o.id}
         getLabel={(o) => o.label || o.value}
         noun="observable"
         nounPlural="observables"
         filters={
-          <button
-            className={`${styles.candToggle} ${queueOpen ? styles.candToggleOn : ""}`}
-            onClick={() => setQueueOpen(!queueOpen)}
-          >
-            Candidates{queueRows?.length ? ` · ${queueRows.length}` : ""}
-          </button>
+          <>
+            {linkedEntity && (
+              <button
+                className={`${styles.candToggle} ${styles.candToggleOn}`}
+                title="Clear the entity filter"
+                onClick={() => {
+                  const next = new URLSearchParams(searchParams);
+                  next.delete("linked_entity");
+                  setSearchParams(next, { replace: true });
+                }}
+              >
+                Linked to one {linkedType?.replace(/_/g, " ")} · clear
+              </button>
+            )}
+            <button
+              className={`${styles.candToggle} ${queueOpen ? styles.candToggleOn : ""}`}
+              onClick={() => setQueueOpen(!queueOpen)}
+            >
+              Candidates{queueRows?.length ? ` · ${queueRows.length}` : ""}
+            </button>
+          </>
         }
       />
     </>

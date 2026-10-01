@@ -1,0 +1,378 @@
+{
+  "slug": "elastic-telepuz",
+  "title_like": "TELEPUZ: a modular MaaS malware%",
+  "title": "TELEPUZ: a modular MaaS malware spreading via CLICKFIX-VIDAR chains",
+  "url": "https://www.elastic.co/security-labs/telepuz-maas-malware-clickfix",
+  "publisher": "Elastic Security Labs",
+  "kind": "positive",
+  "attribution": [
+    {
+      "type": "malware",
+      "name": "TELEPUZ"
+    }
+  ],
+  "expected": [
+    {
+      "kind": "domain",
+      "value": "chubrik.sbs",
+      "role": "payload",
+      "note": "2026-05-09 | hxxps://chubrik\\[.\\]sbs/files/xK7mR9pL2nQw5tY8/ygvfuyze.dll"
+    },
+    {
+      "kind": "url",
+      "value": "https://chubrik.sbs/files/xK7mR9pL2nQw5tY8/ygvfuyze.dll",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "betalegenda.cfd",
+      "role": "payload",
+      "note": "2026-05-14 | hxxps://betalegenda\\[.\\]cfd/files/xK7mR9pL2nQw5tY8/kmwvogwx.dll"
+    },
+    {
+      "kind": "url",
+      "value": "https://betalegenda.cfd/files/xK7mR9pL2nQw5tY8/kmwvogwx.dll",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "mavpaprokla.lat",
+      "role": "payload",
+      "note": "2026-05-19 | hxxps://mavpaprokla\\[.\\]lat/files/telemetriawork/telepuz.dll"
+    },
+    {
+      "kind": "url",
+      "value": "https://mavpaprokla.lat/files/telemetriawork/telepuz.dll",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "comicstar.lat",
+      "role": "payload",
+      "note": "2026-05-26 | hxxps://comicstar\\[.\\]lat/files/telemetriawork/telepuz.dll"
+    },
+    {
+      "kind": "url",
+      "value": "https://comicstar.lat/files/telemetriawork/telepuz.dll",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "bigblower.click",
+      "role": "payload",
+      "note": "2026-05-28 | hxxps://bigblower\\[.\\]click/files/telemetriawork/telepuz.dll"
+    },
+    {
+      "kind": "url",
+      "value": "https://bigblower.click/files/telemetriawork/telepuz.dll",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "momasites.lol",
+      "role": "payload",
+      "note": "2026-06-05 | hxxps://momasites\\[.\\]lol/files/telemetriawork/telepuz.dll"
+    },
+    {
+      "kind": "url",
+      "value": "https://momasites.lol/files/telemetriawork/telepuz.dll",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "momasites.com",
+      "role": "",
+      "note": "2026-06-07 | hxxps://momasites\\[.\\]com/files/telemetrywork/telepuz"
+    },
+    {
+      "kind": "url",
+      "value": "https://momasites.com/files/telemetrywork/telepuz",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "mamsites.lol",
+      "role": "payload",
+      "note": "2026-06-07 | hxxps://mamsites\\[.\\]lol/files/telemetrywork/telepuz.dll"
+    },
+    {
+      "kind": "url",
+      "value": "https://mamsites.lol/files/telemetrywork/telepuz.dll",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "hardenedom.shop",
+      "role": "payload",
+      "note": "2026-06-07 | hxxps://hardenedom\\[.\\]shop/files/telemetriawork/telepuz.dll"
+    },
+    {
+      "kind": "url",
+      "value": "https://hardenedom.shop/files/telemetriawork/telepuz.dll",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "hardendedom.shop",
+      "role": "payload",
+      "note": "2026-06-07 | hxxps://hardendedom\\[.\\]shop/files/lemetriawork/epuz.dll"
+    },
+    {
+      "kind": "url",
+      "value": "https://hardendedom.shop/files/lemetriawork/epuz.dll",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "hardendom.shop",
+      "role": "payload",
+      "note": "2026-06-08 | hxxps://hardendom\\[.\\]shop/files/telemetry/telepuz.dll"
+    },
+    {
+      "kind": "url",
+      "value": "https://hardendom.shop/files/telemetry/telepuz.dll",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "hardeneddom.shop",
+      "role": "",
+      "note": "2026-06-10 | hxxps://hardeneddom\\[.\\]shop/files/telemetrywork/telepuz"
+    },
+    {
+      "kind": "url",
+      "value": "https://hardeneddom.shop/files/telemetrywork/telepuz",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "netblokirovka.asia",
+      "role": "payload",
+      "note": "2026-06-11 | hxxps://netblokirovka\\[.\\]asia/files/telemetriawork/telepuz.dll"
+    },
+    {
+      "kind": "url",
+      "value": "https://netblokirovka.asia/files/telemetriawork/telepuz.dll",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "netblokir.asia",
+      "role": "payload",
+      "note": "2026-06-12 | hxxps://netblokir\\[.\\]asia/files/telemetriawork/telepuz.dll"
+    },
+    {
+      "kind": "url",
+      "value": "https://netblokir.asia/files/telemetriawork/telepuz.dll",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "netlobikrovka.asia",
+      "role": "payload",
+      "note": "2026-06-14 | hxxps://netlobikrovka\\[.\\]asia/files/telemetriawork/telepuz.dll"
+    },
+    {
+      "kind": "url",
+      "value": "https://netlobikrovka.asia/files/telemetriawork/telepuz.dll",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "neblokirovka.as",
+      "role": "payload",
+      "note": "2026-06-15 | hxxps://neblokirovka\\[.\\]as/telemetry/network/telepuz.dll"
+    },
+    {
+      "kind": "url",
+      "value": "https://neblokirovka.as/telemetry/network/telepuz.dll",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "kidsko.shop",
+      "role": "payload",
+      "note": "2026-06-17 | hxxps://kidsko\\[.\\]shop/files/telemetriawork/telepuz.dll"
+    },
+    {
+      "kind": "url",
+      "value": "https://kidsko.shop/files/telemetriawork/telepuz.dll",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "mazaporka.shop",
+      "role": "payload",
+      "note": "2026-06-22 | hxxps://mazaporka\\[.\\]shop/files/telemetriawork/telepuz.dll"
+    },
+    {
+      "kind": "url",
+      "value": "https://mazaporka.shop/files/telemetriawork/telepuz.dll",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "ipv4",
+      "value": "172.67.215.214",
+      "role": "payload",
+      "note": "2026-06-24 | hxxps://172.67.215[.]214/files/telemetriawork/telepuz.dll"
+    },
+    {
+      "kind": "url",
+      "value": "https://172.67.215.214/files/telemetriawork/telepuz.dll",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "hurgadatour.shop",
+      "role": "payload",
+      "note": "2026-06-25 | hxxps://hurgadatour\\[.\\]shop/files/telemetriawork/telepuz.dll"
+    },
+    {
+      "kind": "url",
+      "value": "https://hurgadatour.shop/files/telemetriawork/telepuz.dll",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "krabsburger.xyz",
+      "role": "payload",
+      "note": "2026-06-29 | hxxp://krabsburger\\[.\\]xyz/files/telemetriawork/telepuz.dll"
+    },
+    {
+      "kind": "url",
+      "value": "http://krabsburger.xyz/files/telemetriawork/telepuz.dll",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "zewaplus.club",
+      "role": "payload",
+      "note": "2026-06-30 | hxxps://zewaplus\\[.\\]club/files/telemetriawork/telepuz.dll"
+    },
+    {
+      "kind": "url",
+      "value": "https://zewaplus.club/files/telemetriawork/telepuz.dll",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "ipv4",
+      "value": "172.67.165.144",
+      "role": "payload",
+      "note": "2026-07-06 | hxxps://172.67.165[.]144/files/telemetriawork/telepuz.dll"
+    },
+    {
+      "kind": "url",
+      "value": "https://172.67.165.144/files/telemetriawork/telepuz.dll",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "cal.joycedoula.com.br",
+      "role": "",
+      "note": "Present in configuration of earliest samples."
+    },
+    {
+      "kind": "domain",
+      "value": "cal.snehamumbai.org",
+      "role": "c2",
+      "note": "Latest C2"
+    },
+    {
+      "kind": "sha256",
+      "value": "58aec6e3835aaf20f7b4a7e308b36a19e7454673a6f71783871e9bcf6cae8eed",
+      "role": "payload",
+      "note": "Reference TELEPUZ main payload"
+    },
+    {
+      "kind": "sha256",
+      "value": "bf3b4e645a3c0c23f87c55971069014f7424ad14497371ee7567eff68ffaf343",
+      "role": "payload",
+      "note": "TELEPUZ main payload"
+    },
+    {
+      "kind": "sha256",
+      "value": "ff791fe1532a2dc3b3c188a71bfd0177f973ef228e4d1dda1db6d3c4b0d62b3e",
+      "role": "payload",
+      "note": "TELEPUZ main payload"
+    },
+    {
+      "kind": "sha256",
+      "value": "a955d7e2819d5fa8b5f879cb970e1a1a91327098a7383f2a03a5e1e7e19435e3",
+      "role": "payload",
+      "note": "TELEPUZ keylogger module"
+    },
+    {
+      "kind": "sha256",
+      "value": "9733a3f6409de81271f21993c7f8b9865ac9f5c68c3d4336e91afe6b312477eb",
+      "role": "payload",
+      "note": "TELEPUZ stealer module"
+    },
+    {
+      "kind": "sha256",
+      "value": "444f1c0c82b3f6cc31d685bac68b20edbde5722ce219af9cceab0c2a6537efc1",
+      "role": "payload",
+      "note": "TELEPUZ webinjector module"
+    }
+  ],
+  "optional": [
+    {
+      "kind": "url",
+      "value": "https://memshowblob.forum/api/index.php?a=grab",
+      "note": "one.Identifier')-EA 0;& $f  The command downloads the second stage from the URL hxxps://memshowblob[.]forum/api/index.php?a=grab and executes the binary in the user's %TEMP% folder.  The second stage "
+    },
+    {
+      "kind": "url",
+      "value": "https://steamcommunity.com//profiles/76561199705801219",
+      "note": "od is based on Steam profile usernames, the profile the malware is targeting is hxxps://steamcommunity[.]com//profiles/76561199705801219.  The profile name contains the same C2 address found in the Te"
+    },
+    {
+      "kind": "domain",
+      "value": "codebasecode.com",
+      "note": "y 111111111.  DNS record  The DNS record method does a DNS query for the domain codebasecode[.]com, it then extracts and decrypts the fallback C2 from the information returned. H"
+    },
+    {
+      "kind": "sha256",
+      "value": "580b441e2961739fd26e54e0a0ea08351cb10a51839519fc722cfa39ecd0c954",
+      "note": "he binary in the user's %TEMP% folder.  The second stage is a VIDAR Go variant (580b441e2961739fd26e54e0a0ea08351cb10a51839519fc722cfa39ecd0c954). VIDAR is a well-documented threat known for its abili"
+    },
+    {
+      "kind": "sha256",
+      "value": "03fa348b70819296c958c842e7646b3b7efe5fa217ed5098143003c47995a746",
+      "note": "e number of stagers and payloads associated with this family.  The third stage (03fa348b70819296c958c842e7646b3b7efe5fa217ed5098143003c47995a746) is a small PE, roughly 13–15 KB in size, designed to d"
+    },
+    {
+      "kind": "sha1",
+      "value": "f55bea1fdcf1c3abb39ab92567c09ac1bff6753e",
+      "note": "ockchain using pre-configured endpoints, targeting the smart contract address 0xf55Bea1FdCf1c3ABb39ab92567C09aC1BFf6753E with the method selector 0xc3f909d4.  {\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_cal"
+    },
+    {
+      "kind": "sha256",
+      "value": "cee96a38e2dfe31ccf8c3aa7d0d9323e1e3183b2478ba582285822e943d242e9",
+      "note": "TELEPUZ parses the encrypted data and decrypt it using AES256-CBC with the key ”cee96a38e2dfe31ccf8c3aa7d0d9323e1e3183b2478ba582285822e943d242e9.  h=cal.snehamumbai[.]org|p=443|ssl=1  The smart contra"
+    }
+  ],
+  "must_not": []
+}

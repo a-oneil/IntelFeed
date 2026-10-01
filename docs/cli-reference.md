@@ -1,6 +1,6 @@
 # CLI Reference
 
-This is the complete reference for the IntelFeed CLI — a zero-dependency Python tool that exposes 170 tools (organized into two flavors: full and lite) to query and manage a running IntelFeed deployment.
+This is the complete reference for the IntelFeed CLI — a zero-dependency Python tool that exposes 180 tools (organized into two flavors: full and lite) to query and manage a running IntelFeed deployment.
 
 **Table of Contents:**
 1. [Overview](#overview)
@@ -255,7 +255,7 @@ Use **`intelfeed-skill` (full)** when:
 
 Both CLIs are code-generated from the backend tool registry by `scripts/dev/sync_skill_clis.py`, so the split is rule-based rather than a hand-picked list:
 
-- **Full CLI (170 tools):** every tool in the backend registry (`backend/app/tools/`), read and write.
+- **Full CLI (180 tools):** every tool in the backend registry (`backend/app/tools/`), read and write.
 - **Lite CLI (81 tools):** every tool the registry does **not** flag as `mutating` (79 write tools are excluded), minus the compute-heavy read-only tools in the script's `LITE_EXCLUDE` set (AI invocation and document export: `extract_ttps`, `extract_cves`, `extract_threat_actors`, `extract_malware`, `run_ai_task`, `generate_detection_rules`, `validate_detection_rule`, `build_detection_summary`, `export_attack_layer`, `export_campaign`).
 
 In practice the lite CLI covers all search/lookup/pivot/analytics/landscape reads (including the newer curation-stats, ransomware-tracker, and reader read tools), while creation, updates, merges, deletes, extraction, automation execution, and report generation are full-CLI only. Run `--list-tools` against either script for the authoritative listing.
@@ -389,7 +389,7 @@ threat_actor:APT29 AND (malware:APT29_Malware* OR threat_actor.country:Russia)
 
 ## Tool Reference
 
-The registry contains 170 tools. The sections below document 83 core tools in full detail; the remaining 87 are summarized in [Extended Tool Surface](#extended-tool-surface) at the end of this section — use `--help-tool <name>` for their parameters. Each fully documented tool includes:
+The registry contains 180 tools. The sections below document 83 core tools in full detail; the remaining 97 are summarized in [Extended Tool Surface](#extended-tool-surface) at the end of this section — use `--help-tool <name>` for their parameters. Each fully documented tool includes:
 
 - **Name & Purpose** — what it does (1-line summary)
 - **Arguments** — required and optional parameters with types and defaults
@@ -2155,10 +2155,13 @@ python3 intelfeed-skill/scripts/intelfeed_cli.py discover_telegram_channels '{"o
 
 ### Extended Tool Surface
 
-The 2026-08 registry expansion added 78 tools in five backend modules; Story Threads, the observables ledger, CWE, the server-side Priority Queue and the in-app docs added nine more over September, bringing the registry to **170**. They follow the same invocation pattern as everything above; run `--help-tool <name>` for parameters and defaults. Grouped by module (`backend/app/tools/`):
+The 2026-08 registry expansion added 78 tools in five backend modules; Story Threads, the observables ledger, CWE, the server-side Priority Queue and the in-app docs added nine more over September, the sector entity four, and the observables-intelligence work five more (`observables.py`), bringing the registry to **180**. They follow the same invocation pattern as everything above; run `--help-tool <name>` for parameters and defaults. Grouped by module (`backend/app/tools/`):
 
 **Ledger, queue & catalog reads (`read.py`, 4 tools)** — the September additions to the largest module:
 `get_observable` (one IOC ledger row by UUID or value — kind, role, current/base confidence with decay state, sighting count, the judgment door that captured it with its evidence sentence, first/last seen, recent sighting articles; defanged input like `evil[.]com` or `hxxps://` is normalised), `search_observables` (filter the ledger by substring, kind, role, lifecycle status or capture door, sorted by last sighting), `get_cwe` (a MITRE CWE with its abstraction rung, parent and lineage, mapping guidance, catalog mitigations and detection methods, direct and subtree CVE counts, KEV count, linked articles), `get_priority_queue` (the reading queue exactly as the Priority Queue page shows it — radar-clearing unread entries with story threads folded in as single rows; prefer it over `get_triage_queue`, the older heuristic that does not fold stories)
+
+**Observables (`observables.py`, 5 tools)** — working the IOC ledger from a skill:
+`promote_observable` (the analyst door — a staged candidate or any value the article prints becomes a ledger row sighted in that entry, with role and evidence), `update_observable` (role, label, description, or pin confidence so decay stops), `deny_observable` (admin — tombstone a value so no door captures, sights or exports it again; works on a row or on any kind+value), `get_entity_infrastructure` (an actor's / family's / campaign's / tool's observables in two tiers — claimed attribution edges with trust tier, and values reported alongside it in the same articles, newsletters and list files excluded), `export_observables` (a filtered slice as EDL lines, CSV rows or JSON, refanged, dual-use infra excluded unless asked). `search_observables` also grew `captured_by`, `infra_tag`, `needs_review`, `min_confidence` and `min_reports` filters, and `get_observable` returns the corroboration counts (`report_count` / `feed_source_count`), reputation and `claimed_by`.
 
 **Documentation (`docs.py`, 3 tools)** — the copilot's route into these very docs:
 `list_documentation_pages` (slug, title, section and one-line summary for every page shipped with the deployment), `search_documentation` (full-text with excerpts, to find which page covers a topic), `get_documentation_page` (one page in full as markdown; the slug is the path under `docs/` without `.md`, e.g. `architecture` or `diagrams/entries-lifecycle` — cite it back as a `/documentation/<slug>` link)

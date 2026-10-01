@@ -80,7 +80,7 @@ your collection.
   command palette
 - Configurable dashboards and widgets, a three-panel reader, runtime-switchable themes
 - Export to CSV and Markdown; outbound observable feeds (EDL blocklists, SIEM lookups, TAXII 2.1); token-gated public RSS re-publishing; shareable read-only links
-- REST API covering every feature, plus a zero-dependency CLI (170 tools) for scripting and agents
+- REST API covering every feature, plus a zero-dependency CLI (180 tools) for scripting and agents
 
 ## What it looks like
 

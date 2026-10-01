@@ -24,6 +24,7 @@ def _get_model_map() -> dict:
         from app.models.cwe import CWE
         from app.models.malware_family import MalwareFamily
         from app.models.mitigation import Mitigation
+        from app.models.observable import Observable
         from app.models.product import Product
         from app.models.threat_actor import ThreatActor
         from app.models.tool import Tool
@@ -31,6 +32,7 @@ def _get_model_map() -> dict:
         from app.models.vendor import Vendor
 
         _MODEL_MAP = {
+            "observable": Observable,
             "threat_actor": ThreatActor,
             "malware": MalwareFamily,
             "cve": CVE,
@@ -100,6 +102,80 @@ _ALIAS_SOURCES = (("mitre_attack", "aliases"), ("malpedia", "alt_names"))
 _PLATFORM_SOURCES = ("mitre_attack",)
 
 
+#: Shodan tags that name dual-use infrastructure → the ledger's infra_tag.
+_SHODAN_TAG_TO_INFRA = {"vpn": "vpn", "proxy": "proxy", "tor": "tor"}
+
+
+def _apply_observable_reputation(obs, by_source: dict[str, dict]) -> bool:
+    """Fold VirusTotal / GreyNoise / Shodan results into ``Observable.reputation``
+    and fill ``infra_tag`` when the reputation says the host is dual-use:
+    Shodan ``vpn`` / ``proxy`` / ``tor`` tags, or GreyNoise RIOT (a known
+    benign business service → ``benign_service``). Tags are fill-only, like
+    every other door's."""
+    from datetime import UTC, datetime
+
+    summary: dict = dict(obs.reputation or {})
+    vt = by_source.get("virustotal") or {}
+    gn = by_source.get("greynoise") or {}
+    sh = by_source.get("shodan") or {}
+    if vt:
+        summary.update(
+            {
+                k: v
+                for k, v in {
+                    "vt_ratio": vt.get("detection_ratio"),
+                    "vt_malicious": vt.get("malicious_votes"),
+                    "vt_threat_label": vt.get("threat_label"),
+                    "vt_tags": vt.get("tags"),
+                    "asn": vt.get("asn") or summary.get("asn"),
+                    "as_owner": vt.get("as_owner") or summary.get("as_owner"),
+                    "country": vt.get("country") or summary.get("country"),
+                }.items()
+                if v not in (None, "", [])
+            }
+        )
+    if gn:
+        summary.update(
+            {
+                k: v
+                for k, v in {
+                    "gn_classification": gn.get("classification"),
+                    "gn_noise": gn.get("noise"),
+                    "gn_riot": gn.get("riot"),
+                    "gn_name": gn.get("name"),
+                }.items()
+                if v not in (None, "")
+            }
+        )
+    if sh:
+        summary.update(
+            {
+                k: v
+                for k, v in {
+                    "ports": sh.get("ports"),
+                    "hostnames": sh.get("hostnames"),
+                    "shodan_tags": sh.get("tags"),
+                    "vulns": sh.get("vulns"),
+                }.items()
+                if v not in (None, "", [])
+            }
+        )
+    if not (vt or gn or sh):
+        return False
+    summary["enriched_at"] = datetime.now(UTC).isoformat()
+    obs.reputation = summary
+
+    if not obs.infra_tag:
+        shodan_tags = str(sh.get("tags") or "").lower()
+        for tag, infra in _SHODAN_TAG_TO_INFRA.items():
+            if tag in [t.strip() for t in shodan_tags.split(",")]:
+                obs.infra_tag = infra
+                break
+        if not obs.infra_tag and gn.get("riot") is True:
+            obs.infra_tag = "benign_service"
+    return True
+
+
 async def apply_enrichment_results_to_entity(
     db: AsyncSession,
     entity_type: str,
@@ -152,6 +228,9 @@ async def apply_enrichment_results_to_entity(
     # the profile can name which adapter asserted each one. Collected as we go
     # and written once at the end — a failed audit write must not cost the fill.
     claimed: list[tuple[str, object, str]] = []
+
+    if entity_type == "observable":
+        return _apply_observable_reputation(entity, by_source)
 
     # Wikipedia has its own dedicated columns
     wiki = by_source.get("wikipedia")

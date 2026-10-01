@@ -49,11 +49,7 @@ from app.services.sector_links import add_target_sector, refresh_targeted_sector
 
 async def _country_index(db) -> tuple[set[str], dict[str, object]]:
     """Lowercased country names and aliases -> country id."""
-    rows = (
-        await db.execute(
-            select(Country.id, Country.name, Country.iso_code, Country.aliases)
-        )
-    ).all()
+    rows = (await db.execute(select(Country.id, Country.name, Country.iso_code, Country.aliases))).all()
     by_name: dict[str, object] = {}
     for cid, name, iso, aliases in rows:
         by_name[name.lower()] = cid
@@ -79,17 +75,7 @@ async def main(dry_run: bool, report: str | None, rehome_countries: bool) -> Non
             ("threat_actor", ThreatActor),
             ("malware", MalwareFamily),
         ):
-            rows = (
-                (
-                    await db.execute(
-                        select(model).where(
-                            func.cardinality(model.targeted_sectors) > 0
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
+            rows = (await db.execute(select(model).where(func.cardinality(model.targeted_sectors) > 0))).scalars().all()
             for entity in rows:
                 mapped_slugs: list[str] = []
                 rehome: list[object] = []
@@ -104,17 +90,12 @@ async def main(dry_run: bool, report: str | None, rehome_countries: bool) -> Non
                     if d.kind == "mapped" and d.slug:
                         mapped_slugs.append(d.slug)
                     elif (
-                        d.kind == "rehomed_country"
-                        and d.country
-                        and rehome_countries
-                        and entity_type == "threat_actor"
+                        d.kind == "rehomed_country" and d.country and rehome_countries and entity_type == "threat_actor"
                     ):
                         rehome.append(country_ids[d.country])
 
                 for slug in dict.fromkeys(mapped_slugs):
-                    if await add_target_sector(
-                        db, entity_type, entity.id, sector_uuid(slug), "seed"
-                    ):
+                    if await add_target_sector(db, entity_type, entity.id, sector_uuid(slug), "seed"):
                         junction_rows += 1
                 for cid in dict.fromkeys(rehome):
                     exists = await db.execute(
@@ -124,11 +105,7 @@ async def main(dry_run: bool, report: str | None, rehome_countries: bool) -> Non
                         )
                     )
                     if exists.scalar_one_or_none() is None:
-                        db.add(
-                            ThreatActorTargetCountry(
-                                threat_actor_id=entity.id, country_id=cid
-                            )
-                        )
+                        db.add(ThreatActorTargetCountry(threat_actor_id=entity.id, country_id=cid))
                         country_rows += 1
                 before = list(entity.targeted_sectors or [])
                 after = await refresh_targeted_sectors_cache(db, entity_type, entity)
@@ -147,9 +124,7 @@ async def main(dry_run: bool, report: str | None, rehome_countries: bool) -> Non
         print(f"Distinct values: {len(counts)}; cells: {sum(counts.values())}")
         for kind, n in sorted(outcome.items(), key=lambda kv: -kv[1]):
             print(f"  {kind:17} {n}")
-        print(
-            f"Junction rows added: {junction_rows}; country rows rehomed: {country_rows}"
-        )
+        print(f"Junction rows added: {junction_rows}; country rows rehomed: {country_rows}")
         print(f"Entities whose sector cache changed: {entities_touched}")
 
         if dry_run:
@@ -161,15 +136,9 @@ async def main(dry_run: bool, report: str | None, rehome_countries: bool) -> Non
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    parser.add_argument(
-        "--dry-run", action="store_true", help="Classify and report without writing."
-    )
-    parser.add_argument(
-        "--report", help="Write a CSV of every distinct value and its decision here."
-    )
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--dry-run", action="store_true", help="Classify and report without writing.")
+    parser.add_argument("--report", help="Write a CSV of every distinct value and its decision here.")
     parser.add_argument(
         "--rehome-countries",
         action="store_true",

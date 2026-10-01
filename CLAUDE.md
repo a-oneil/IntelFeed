@@ -181,7 +181,7 @@ Copy `.env.example` to `.env`. Key variables: `POSTGRES_*`, `REDIS_URL`, `MEILI_
 
 ## IntelFeed CLI
 
-`intelfeed-skill/scripts/intelfeed_cli.py` is a zero-dependency CLI tool (175 tools) that executes IntelFeed operations via the API. Used by Claude skills to interact with the platform.
+`intelfeed-skill/scripts/intelfeed_cli.py` is a zero-dependency CLI tool (180 tools) that executes IntelFeed operations via the API. Used by Claude skills to interact with the platform.
 
 ```bash
 # Single tool call

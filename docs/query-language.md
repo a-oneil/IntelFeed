@@ -502,10 +502,12 @@ heavily-used IDs are marked Discouraged.
 observable:evil.com          # By value — defanged input (evil[.]com) is normalised
 observable.kind:sha256       # ipv4 | ipv6 | domain | url | uri_path | email | md5 |
                              # sha1 | sha256 | ja3 | ja4 | cert_fingerprint | cmdline |
-                             # registry | path | mutex | named_pipe | service_name |
+                             # registry | path | mutex | named_pipe | service_name | scheduled_task | http_header |
                              # user_agent | script
 observable.role:c2           # c2 | delivery | payload | phishing | exfil | exploit | scanning
 observable.status:active     # active | aging | expired — derived from decayed confidence
+observable.reports:>0        # Distinct reporting articles (list files never count) — numeric
+observable.feeds:>=2         # Distinct indicator feeds listing it — numeric
 ```
 
 `observable.status:` is a lifecycle read, not a judgement: `aging` and `expired`

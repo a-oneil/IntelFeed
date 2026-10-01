@@ -114,6 +114,12 @@ FIELD_MAP = {
     "ioc.role": ("role", Observable),
     "ioc.status": ("status", Observable),
     "ioc.infra": ("infra_tag", Observable),
+    # Corroboration counts: reports = distinct non-list articles, feeds =
+    # distinct indicator feeds. Numeric (`ioc.reports:>0`).
+    "observable.reports": ("report_count", Observable),
+    "observable.feeds": ("feed_source_count", Observable),
+    "ioc.reports": ("report_count", Observable),
+    "ioc.feeds": ("feed_source_count", Observable),
     # Campaign
     "campaign": ("name", Campaign),
     "campaign.status": ("status", Campaign),

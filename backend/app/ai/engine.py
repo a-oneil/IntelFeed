@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 import time as _time
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -41,8 +42,23 @@ def _estimate_cost(model: str, tokens_in: int, tokens_out: int, batch: bool = Fa
     return Decimal(str(round(cost, 6)))
 
 
+#: A backslash that does not start a legal JSON escape. Small models write
+#: Windows paths and command lines into string values verbatim
+#: ("C:\ProgramData\x.exe"), which is an invalid escape and used to lose the
+#: whole analysis. Doubling only the illegal ones is lossless for valid JSON.
+_BAD_ESCAPE_RE = re.compile(r'\\(?![\\/"bfnrtu])')
+
+
+def _repair_json(text: str) -> str:
+    repaired = _BAD_ESCAPE_RE.sub(r"\\\\", text)
+    # A truncated response (output budget hit) is unrecoverable, but a trailing
+    # comma before a closing bracket is not.
+    return re.sub(r",\s*([}\]])", r"\1", repaired)
+
+
 def parse_ai_json(content: str) -> dict:
-    """Parse an AI JSON response, salvaging from markdown code fences (shared with the batch poller)."""
+    """Parse an AI JSON response, salvaging from markdown code fences and
+    repairing illegal backslash escapes (shared with the batch poller)."""
     try:
         return json.loads(content)
     except json.JSONDecodeError:
@@ -51,10 +67,12 @@ def parse_ai_json(content: str) -> dict:
             stripped = stripped.split("```json")[1].split("```")[0].strip()
         elif "```" in stripped:
             stripped = stripped.split("```")[1].split("```")[0].strip()
-        try:
-            return json.loads(stripped)
-        except json.JSONDecodeError:
-            return {"raw": content, "_extraction_status": "parse_error"}
+        for candidate in (stripped, _repair_json(stripped)):
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+        return {"raw": content, "_extraction_status": "parse_error"}
 
 
 async def demote_current_results(
@@ -328,7 +346,12 @@ async def run_task(
     # half-written JSON into _extraction_status="parse_error", which no caller
     # retries, so the whole extraction is silently lost. The cap only bounds
     # output, so raising it costs nothing on entries that finish early.
-    max_tokens = config.get("max_tokens", 8192)
+    # entry_analysis gets 16384: with the indicator appendix in the prompt and
+    # host-kind observables in the schema, a long research write-up's payload
+    # (TTPs with source sentences, countries, 30+ iocs with evidence) measured
+    # 30k+ characters — ~8k tokens — and was cut mid-field. A truncated
+    # response is a lost analysis; extra budget costs nothing when unused.
+    max_tokens = config.get("max_tokens", 16384 if task_name == "entry_analysis" else 8192)
 
     # Agentic tool wiring for tool-capable non-CLI providers (Ollama). The
     # Claude Code CLI reaches tools via its own subprocess (no injected executor

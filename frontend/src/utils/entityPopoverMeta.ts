@@ -3,6 +3,7 @@
 // fetched for highlighting (entry-entity endpoints or the public shared-entry
 // response), so no extra request is made.
 
+import { observableSourcesLabel } from "./observables";
 import type { ThreatActor, MalwareFamily, Vendor, Product, OffensiveTool, Country, Sector, Mitigation, CWEResponse } from "@/api/types";
 import type { HighlightEntityMeta } from "@/components/InlineEntityHighlighter";
 
@@ -172,7 +173,7 @@ export function observableMeta(o: {
       label: "Confidence",
       value: `${Math.round(o.current_confidence * 100)}%${o.status && o.status !== "active" ? ` · ${o.status}` : ""}`,
     });
-  if (o.sighting_count != null) facts.push({ label: "Sightings", value: String(o.sighting_count) });
+  if (o.sighting_count != null) facts.push({ label: "Sources", value: observableSourcesLabel(o) });
   if (o.created_via) facts.push({ label: "Captured by", value: o.created_via.replace(/_/g, " ") });
   if (o.last_seen_at)
     facts.push({ label: "Last seen", value: new Date(o.last_seen_at).toLocaleDateString(undefined, { month: "short", day: "numeric" }) });
