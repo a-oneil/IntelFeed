@@ -144,8 +144,16 @@ async def execute_automation(
                 await db.flush()
             return log
 
-        # 2. Execute actions sequentially (with branch support)
+        # 2. Execute actions sequentially (with branch support). The context
+        # starts with the entry's captured observables so message templates
+        # can cite them ({observables_count} / {observables}).
         action_context: dict = {}
+        try:
+            from app.automation.actions import observable_template_context
+
+            action_context.update(await observable_template_context(db, entry))
+        except Exception:
+            logger.debug("observable template context unavailable", exc_info=True)
         results = await _execute_action_chain(
             db,
             entry,
@@ -287,6 +295,60 @@ async def run_automations_for_scored_entry(db: AsyncSession, entry: Entry) -> li
             logs.append(await execute_automation(db, entry, rule))
         except Exception as e:
             logger.error(f"Error running automation rule {rule.id} for scored entry {entry.id}: {e}")
+    return logs
+
+
+async def _check_observable_capture_trigger(db: AsyncSession, entry: Entry, trigger_config: dict) -> bool:
+    """on_observable_captured fires when the entry carries a reporting-door
+    observable matching ``trigger_config`` — the same shape as the
+    ``has_observable`` condition (kinds, roles, min_confidence,
+    exclude_infra_tagged, sources), so the trigger can be narrow ("C2 only")
+    and the conditions stay for everything else about the entry."""
+    from app.automation.conditions import _eval_has_observable
+
+    return await _eval_has_observable(db, entry, trigger_config or {})
+
+
+async def run_automations_for_observable_capture(db: AsyncSession, entry: Entry) -> list[AutomationLog]:
+    """Run on_observable_captured rules for an entry a judgment door just
+    wrote observables for (the one-pass AI, the publisher IOC file, an
+    analyst promote). Fires once per rule per entry: the AI door and the
+    publisher door can both land on the same article, and the second capture
+    must not re-notify, so a rule that already logged a run for this entry is
+    skipped."""
+    await _enrich_entry_feed_type(db, entry)
+    result = await db.execute(
+        select(AutomationRule).where(
+            AutomationRule.is_enabled.is_(True),
+            AutomationRule.trigger_type == "on_observable_captured",
+        )
+    )
+    rules = result.scalars().all()
+    if not rules:
+        return []
+    already = set(
+        (
+            await db.execute(
+                select(AutomationLog.rule_id).where(
+                    AutomationLog.entry_id == entry.id,
+                    AutomationLog.rule_id.in_([r.id for r in rules]),
+                    AutomationLog.status != "skipped",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    logs = []
+    for rule in rules:
+        if rule.id in already:
+            continue
+        try:
+            if await _check_observable_capture_trigger(db, entry, rule.trigger_config):
+                logs.append(await execute_automation(db, entry, rule))
+        except Exception as e:
+            logger.error(f"Error running automation rule {rule.id} for observable capture on {entry.id}: {e}")
     return logs
 
 

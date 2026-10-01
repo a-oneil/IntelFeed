@@ -1765,7 +1765,7 @@
 }
 
 .candQueue {
-  margin: 0 20px var(--sp-4);
+  margin: var(--sp-4) 20px var(--sp-4);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--bg-secondary);
@@ -1799,6 +1799,11 @@
   color: var(--text-secondary);
   cursor: pointer;
   user-select: none;
+}
+.candRows {
+  max-height: 60vh;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 .candRow {
   display: flex;

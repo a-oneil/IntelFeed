@@ -1,0 +1,210 @@
+{
+  "slug": "datadog-n4d-mesh",
+  "title_like": "N4D Mesh Controller%",
+  "title": "N4D Mesh Controller: New infrastructure, a UPX-packed agent labeled \"go-titan,\" and how to hunt for it",
+  "url": "https://securitylabs.datadoghq.com/articles/n4d-mesh-controller-go-titan-new-infrastructure-hunting/",
+  "publisher": "Datadog Security Labs",
+  "kind": "positive",
+  "attribution": [
+    {
+      "type": "malware",
+      "name": "N4D Mesh Controller"
+    }
+  ],
+  "expected": [
+    {
+      "kind": "ipv4",
+      "value": "209.99.186.73",
+      "role": "c2",
+      "note": "Reported controller, payload delivery, and API infrastructure"
+    },
+    {
+      "kind": "ipv4",
+      "value": "209.99.186.235",
+      "role": "delivery",
+      "note": "Loader and live second-stage delivery infrastructure, observed July 13, 2026"
+    },
+    {
+      "kind": "domain",
+      "value": "cdnorigin.net",
+      "role": "c2",
+      "note": "Domain TLS-fronted C2 and payload delivery"
+    },
+    {
+      "kind": "sha256",
+      "value": "77fe750d6b94b32e80e25aecb2ae7c435f0b45cfca25969dbee4dc22967b1302",
+      "role": "delivery",
+      "note": "Password-protected archive containing the newer loader"
+    },
+    {
+      "kind": "sha256",
+      "value": "94ae566e27b176698958b4b9c216a0a2b0ac7ce11d7d81417c8add081fd3cc9c",
+      "role": "payload",
+      "note": "Password-protected archive containing the supplied packed 33.8-go-titan agent"
+    },
+    {
+      "kind": "sha256",
+      "value": "0d5f67b6d35e609e1d5eac0afd981147ea8df7da2f192ae59ac0bab7e48cc1de",
+      "role": "delivery",
+      "note": "Newer statically linked Go loader"
+    },
+    {
+      "kind": "sha256",
+      "value": "fc4109f5dd1d30b65dd60e57dc639ac1d313bfa5241e36e61fbc4aabc1cda482",
+      "role": "payload",
+      "note": "UPX-packed 33.8-go-titan agent retrieved from 209.99.186.235:8443"
+    },
+    {
+      "kind": "sha256",
+      "value": "c422621ef824b627d74906f8d75ed8f990f4d6c708a0d263f219f9d9dd435174",
+      "role": "payload",
+      "note": "Unpacked form of the 33.8-go-titan agent"
+    },
+    {
+      "kind": "sha256",
+      "value": "3435cc9d4a255bfb4cfb09f2390c29b888f70a43345cfaaecf46c55bc89b814d",
+      "role": "",
+      "note": "Unpacked Go debug build"
+    },
+    {
+      "kind": "sha256",
+      "value": "d4483b7a943faeec2ce6690e508ee3a30c7fc1e546887658921c132f179b8e78",
+      "role": "payload",
+      "note": "UPX-packed Linux agent"
+    },
+    {
+      "kind": "sha256",
+      "value": "749e8835bb407336742f3fff5f81ba5eb476a42dfc0246f1107d4f28f1bea708",
+      "role": "payload",
+      "note": "Agent watchdog shell script"
+    },
+    {
+      "kind": "sha256",
+      "value": "79e44b8523ee1e371436ca36e91d4d6f932beb371e7d77de756ffdd8f825e763",
+      "role": "payload",
+      "note": "Architecture-aware downloader shell script"
+    },
+    {
+      "kind": "sha256",
+      "value": "e09ac5e8c23a768a2370cff29aca64be0d6e210e1176ee526bb7e47f537509ae",
+      "role": "payload",
+      "note": "Agent downloader shell script"
+    },
+    {
+      "kind": "uri_path",
+      "value": "/api/agent/full?arch=",
+      "role": "c2",
+      "note": "controller API path the agent polls (table + prose)"
+    },
+    {
+      "kind": "uri_path",
+      "value": "/api/agent/binary?arch=",
+      "role": "c2",
+      "note": "controller API path the agent polls (table + prose)"
+    },
+    {
+      "kind": "uri_path",
+      "value": "/api/register",
+      "role": "c2",
+      "note": "controller API path the agent polls (table + prose)"
+    },
+    {
+      "kind": "uri_path",
+      "value": "/api/beacon",
+      "role": "c2",
+      "note": "controller API path the agent polls (table + prose)"
+    },
+    {
+      "kind": "uri_path",
+      "value": "/api/task/",
+      "role": "c2",
+      "note": "controller API path the agent polls (table + prose)"
+    },
+    {
+      "kind": "uri_path",
+      "value": "/api/result/",
+      "role": "c2",
+      "note": "controller API path the agent polls (table + prose)"
+    },
+    {
+      "kind": "uri_path",
+      "value": "/api/pty",
+      "role": "c2",
+      "note": "controller API path the agent polls (table + prose)"
+    },
+    {
+      "kind": "uri_path",
+      "value": "/api/intel",
+      "role": "c2",
+      "note": "controller API path the agent polls (table + prose)"
+    },
+    {
+      "kind": "uri_path",
+      "value": "/api/endpoints",
+      "role": "c2",
+      "note": "controller API path the agent polls (table + prose)"
+    },
+    {
+      "kind": "uri_path",
+      "value": "/api/update/",
+      "role": "c2",
+      "note": "controller API path the agent polls (table + prose)"
+    },
+    {
+      "kind": "uri_path",
+      "value": "/api/deployed",
+      "role": "c2",
+      "note": "controller API path the agent polls (table + prose)"
+    },
+    {
+      "kind": "uri_path",
+      "value": "/api/chains",
+      "role": "c2",
+      "note": "controller API path the agent polls (table + prose)"
+    },
+    {
+      "kind": "uri_path",
+      "value": "/api/pd_register",
+      "role": "c2",
+      "note": "controller API path the agent polls (table + prose)"
+    },
+    {
+      "kind": "http_header",
+      "value": "x-mesh-auth",
+      "role": "c2",
+      "note": "agent / operator authentication header (IOC table)"
+    },
+    {
+      "kind": "http_header",
+      "value": "x-operator-key",
+      "role": "c2",
+      "note": "agent / operator authentication header (IOC table)"
+    },
+    {
+      "kind": "path",
+      "value": "/etc/cron.d/.syscheck",
+      "role": "persistence",
+      "note": "cron persistence file (hunt table)"
+    },
+    {
+      "kind": "path",
+      "value": "/etc/profile.d/sys_alias.sh",
+      "role": "persistence",
+      "note": "profile persistence (hunt table)"
+    }
+  ],
+  "optional": [
+    {
+      "kind": "sha256",
+      "value": "ab435e3e24cfb3a37c1f564209869fe53c8fe95bc9161d0d373fbc1c551b2c29",
+      "note": "ion files (3435cc9d4a255bfb4cfb09f2390c29b888f70a43345cfaaecf46c55bc89b814d and ab435e3e24cfb3a37c1f564209869fe53c8fe95bc9161d0d373fbc1c551b2c29). These were new analyses of previously submitted files"
+    }
+  ],
+  "must_not": [
+    {
+      "kind": "domain",
+      "value": "trycloudflare.com",
+      "why": "apex of a legitimate tunnel service; the article itself says legitimate use exists"
+    }
+  ]
+}

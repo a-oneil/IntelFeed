@@ -85,6 +85,8 @@ async def _evaluate_single(db: AsyncSession, entry: Entry, condition: dict, user
                 return await _eval_has_signal(db, entry, config)
             case "entity_watchlisted":
                 return await _eval_entity_watchlisted(db, entry, user_id)
+            case "has_observable":
+                return await _eval_has_observable(db, entry, config)
             case _:
                 logger.warning(f"Unknown condition type: {cond_type}")
                 return False
@@ -270,6 +272,48 @@ async def _eval_has_signal(db: AsyncSession, entry: Entry, config: dict) -> bool
     query = select(EntrySignal.id).where(EntrySignal.entry_id == entry.id)
     if types:
         query = query.where(EntrySignal.signal_type.in_(types))
+    result = await db.execute(query.limit(1))
+    return result.scalar_one_or_none() is not None
+
+
+async def _eval_has_observable(db: AsyncSession, entry: Entry, config: dict) -> bool:
+    """Entry carries at least one captured observable matching the filters.
+
+    Config: ``kinds`` / ``roles`` (lists or comma strings, blank = any),
+    ``min_confidence`` (current, post-decay), ``exclude_infra_tagged``
+    (default true — a VPN exit is context, not an alert), ``sources``
+    (sighting doors; default excludes the indicator-feed door so a rule
+    on "C2 captured" fires on reporting, not on a blocklist mirror).
+    """
+    from app.models.observable import EntryObservable, Observable
+
+    def _as_list(v) -> list[str]:
+        if not v:
+            return []
+        if isinstance(v, str):
+            return [x.strip() for x in v.split(",") if x.strip()]
+        return [str(x).strip() for x in v if str(x).strip()]
+
+    kinds = _as_list(config.get("kinds"))
+    roles = _as_list(config.get("roles"))
+    sources = _as_list(config.get("sources")) or ["ai", "ttp", "manual", "publisher", "sighting"]
+    exclude_tagged = str(config.get("exclude_infra_tagged", "true")).lower() not in ("false", "0", "no")
+    query = (
+        select(Observable.id)
+        .join(EntryObservable, EntryObservable.observable_id == Observable.id)
+        .where(EntryObservable.entry_id == entry.id, Observable.is_denied.is_(False))
+    )
+    if sources:
+        query = query.where(EntryObservable.source.in_(sources))
+    if kinds:
+        query = query.where(Observable.kind.in_(kinds))
+    if roles:
+        query = query.where(Observable.role.in_(roles))
+    if exclude_tagged:
+        query = query.where(Observable.infra_tag.is_(None))
+    min_conf = config.get("min_confidence")
+    if min_conf not in (None, ""):
+        query = query.where(Observable.current_confidence >= float(min_conf))
     result = await db.execute(query.limit(1))
     return result.scalar_one_or_none() is not None
 

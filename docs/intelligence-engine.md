@@ -378,7 +378,7 @@ regex match.** There are two distinct things a scan can produce:
 |---|---|
 | Hashes, public IPs | Always — unambiguous, octet-validated, reserved/benign ranges gated out (`_valid_public_ip`, `observables.py:125`) |
 | Domains, URLs, emails | **Only when the author defanged them** (`evil[.]com`, `hxxps://`). An author who defangs is telling you it is an indicator, so `microsoft.com` in prose nominates nothing |
-| Host artifacts (cmdline, registry, path, mutex, …) | Never by regex. They arrive through the TTP observable door or an analyst |
+| Host artifacts (cmdline, registry, path, mutex, …) | Never from prose. `<pre>`/`<code>` blocks may nominate a *candidate* (`scan_code_block_candidates`) only when the block is mostly command-shaped and the line opens with a shell prompt or a known executor; bulletin feeds and rule-repository files never nominate. Rows arrive through the AI door, the TTP observable door or an analyst |
 
 Refanging (`refang()`, `observables.py:64`) normalises `hxxp`, `[.]`, `(dot)`,
 `[:]`, `[@]` and friends on the way in, and `is_defanged()` records that the
@@ -395,7 +395,8 @@ its own base confidence:
 | `manual` | 1.0 | An analyst promoted a candidate or created the row |
 | `ioc_list` | 0.85 | A curated indicator-list feed body, parsed by `parse_ioc_list_body()` (`observables.py:463`). Path-gated by `ioc_list_path_allowed()` (`observables.py:439`), which refuses `whitelist` / `allowlist` / `benign` / `unverified` files and C2-Tracker's aggregate `all.txt` — the per-tool files carry the real provenance, and an everything-list is not a judgment. `ioc_list_path_tag()` reads the infra tag a path implies |
 | `ttp_observable` | 0.85 | An `EntryTTP.observable_value` upsert — this is how host artifacts get in, carrying their technique via `entry_observables.ttp_id` |
-| `ai_extraction` | 0.8 | The one-pass `entry_analysis` `iocs` array, gated by `observables_ai_capture_mode` (`shadow` stages them as promotable candidates; `capture` writes rows) |
+| `publisher_ioc` | 0.9 | The indicator file a write-up links to — Cisco Talos `IOCs` (`.txt` + STIX `.json` with MISP-category roles), Bitdefender `malware-ioc` CSV, Datadog `indicators-of-compromise` CSV — fetched from an allow-list of repositories only, parsed with the publisher's own format, sighted on the **article** (`entry_observables.source = publisher`). `intelligence/publisher_iocs.py`; `observables_publisher_ioc_enabled` |
+| `ai_extraction` | 0.8 | The one-pass `entry_analysis` `iocs` array — network, hash **and host kinds** (cmdline, path, registry, scheduled_task, service_name, mutex, named_pipe, user_agent, http_header), each with a role (network: c2/delivery/payload/…; host: the tactic) and an optional `technique_id` that becomes the sighting's `ttp_id`. Gated by `observables_ai_capture_mode` (`shadow` stages them as promotable candidates carrying the judgment; `capture` writes rows) and, in capture, by the per-kind list `observables_ai_capture_kinds`. Every value passes `validate_kind_value`, which vetoes generic discovery commands, OS-binary paths, bare well-known registry keys, placeholders and key-shaped "hashes" |
 
 Author-defanged input adds `DEFANG_BONUS` (+0.1). There is intentionally no
 `created_via` value meaning "regex".

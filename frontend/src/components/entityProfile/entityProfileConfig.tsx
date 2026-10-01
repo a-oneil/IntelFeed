@@ -153,7 +153,9 @@ export type OverviewPanelKey =
   | "cwe_mitigations"
   | "cwe_affected_vendors"
   | "cwe_vendors"
-  | "observable_provenance";
+  | "observable_provenance"
+  | "observable_backlinks"
+  | "infrastructure";
 
 // ── Actions ───────────────────────────────────────────────────────────────
 export type ActionKey =
@@ -236,7 +238,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     hasAliases: false,
     hasDescription: true,
     nameEditable: true,
-    overviewPanels: [],
+    overviewPanels: ["infrastructure"],
     // Campaigns are internal objects; there is nothing to look them up in.
     externalLinks: () => [],
     // No cascadeType: the preview counts extraction links that would be severed,
@@ -263,7 +265,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     nameEditable: true,
     // Techniques/attribution now live in the hero (associates strip, badges) —
     // no overview panels repeat them.
-    overviewPanels: [],
+    overviewPanels: ["infrastructure"],
     externalLinks: (e) => getPivotLinks("threat_actor", e.name || ""),
     cascadeType: "threat_actor",
     actions: ["add_to_campaign", "generate_report", "ai_summary", "convert", "merge", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
@@ -280,7 +282,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     hasDescription: true,
     nameEditable: true,
     // Malpedia moved into the Sources rail card.
-    overviewPanels: [],
+    overviewPanels: ["infrastructure"],
     externalLinks: (e) => getPivotLinks("malware", e.name || ""),
     cascadeType: "malware",
     actions: ["add_to_campaign", "generate_report", "ai_summary", "convert", "merge", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
@@ -489,7 +491,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     hasDescription: true,
     nameEditable: true,
     // Malpedia/GitHub moved into the Sources rail card.
-    overviewPanels: [],
+    overviewPanels: ["infrastructure"],
     cascadeType: "tool",
     actions: ["add_to_campaign", "generate_report", "ai_summary", "convert", "merge", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
   },
@@ -520,7 +522,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     hasDescription: true,
     nameEditable: false,
     monoIdKey: "value",
-    overviewPanels: ["observable_provenance"],
+    overviewPanels: ["observable_provenance", "observable_backlinks"],
     externalLinks: (e) =>
       e.kind && e.value
         ? observablePivotLinks(e.kind, e.value).map((l) => ({ platform: l.label, url: l.url }))

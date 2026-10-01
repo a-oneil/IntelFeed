@@ -12,7 +12,7 @@ For a top-level project overview and quickstart, see [`../readme.md`](../readme.
 
 - **[guide/](guide/README.md)** — **The user guide.** How to actually work in IntelFeed: getting started, reading and triage, search, entity profiles, the Priority Queue, the workbench, detection rules, campaigns and reports, automation and the copilot. Start here if you want to *use* IntelFeed rather than build it.
 - **[query-language.md](query-language.md)** — Full reference for the search query syntax used across the unified search bar, command palette, query builder, and saved searches.
-- **[cli-reference.md](cli-reference.md)** — Reference for the `intelfeed_cli.py` tool — all 170 tools in the full CLI (81 in the read-only lite variant), with args, returns, and examples.
+- **[cli-reference.md](cli-reference.md)** — Reference for the `intelfeed_cli.py` tool — all 180 tools in the full CLI (81 in the read-only lite variant), with args, returns, and examples.
 - **[../intelfeed-mcp/README.md](../intelfeed-mcp/README.md)** — The MCP server for local models (LM Studio and other MCP clients): the same tool registry behind nine fixed tools, on-demand skills and size-capped results, so it fits a small context window.
 
 ## For operators
@@ -41,6 +41,7 @@ For a top-level project overview and quickstart, see [`../readme.md`](../readme.
 | **[workers-search-dashboards.md](workers-search-dashboards.md)** | Celery worker layer (every task + beat schedule), distributed coordination, Meilisearch indexing & query language, widgets system (the standalone dashboards feature is removed; widgets now live on the workbench Dashboard). |
 | **[frontend.md](frontend.md)** | React/TypeScript SPA: routing, layouts, Zustand stores, TanStack Query conventions, Axios JWT refresh, CSS-variable theming, component tour, testing. |
 | **[api-reference.md](api-reference.md)** | REST API reference: every router, endpoint, auth flow, error envelope, pagination conventions, rate limiting, middleware stack. |
+| **[observables.md](observables.md)** | The IOC ledger: kinds and validators, the judgment doors (AI, publisher file, feed, analyst) and why regex never creates a row, the indicator-aware analysis window, shadow vs capture and the per-kind list, the extraction fixture and eval, corroboration counts, attribution (claimed vs reported alongside), publishing, tools, automation hooks, enrichment. |
 | **[story-threads.md](story-threads.md)** | Entry embeddings (pgvector), story-thread clustering and merging, the spine (heuristic and written), where threads render, and the tuning knobs. |
 | **[data-model.md](data-model.md)** | Database schema reference: ER diagram, every table & junction, enums, indexes, JSONB columns, Alembic migration conventions. |
 

@@ -108,14 +108,19 @@ async def collect_link_candidates(db: AsyncSession, entry) -> list[dict]:
 def analysis_content_text(entry) -> str:
     """Prompt body for entry analysis — the translated text when one exists
     (the pipeline's translate prologue runs before scoring/enqueue), else the
-    original. Within the content cap, target-language text beats untranslated
-    source for extraction quality."""
-    if entry.translated_html:
-        from app.services.sanitizer import html_to_text
+    original. Rendered from HTML when available so tables keep their rows
+    (``hash | description``) and headings sit on their own line; nh3's plain
+    tag strip (``content_text``) is the fallback."""
+    from app.services.analysis_window import html_to_analysis_text
 
-        translated = html_to_text(entry.translated_html)
+    if entry.translated_html:
+        translated = html_to_analysis_text(entry.translated_html)
         if translated.strip():
             return translated
+    if getattr(entry, "content_html", None):
+        rendered = html_to_analysis_text(entry.content_html)
+        if rendered.strip():
+            return rendered
     return entry.content_text or ""
 
 
@@ -124,20 +129,25 @@ async def build_analysis_variables(db: AsyncSession, entry) -> dict:
     submit path, the sequential fallback, and manual runs so every path renders
     the identical prompt (content window + candidate entity tags)."""
     from app.models.feed import Feed
+    from app.services.analysis_window import analysis_content_window, rank_candidate_hints
     from app.services.system_settings import get_setting
 
     max_chars = int(await get_setting("ai_analysis_content_max_chars", db) or 12000)
+    tail_reserve = float(await get_setting("observables_analysis_tail_reserve", db) or 0.0)
     feed_title = (await db.execute(select(Feed.title).where(Feed.id == entry.feed_id))).scalar_one_or_none() or ""
     return {
         "entry": {
             "title": entry.translated_title or entry.title,
             "feed_title": feed_title,
-            "content_text": analysis_content_text(entry)[:max_chars],
+            # Head + indicator appendix: a long write-up's IOC section lives
+            # at the end, past a plain head slice.
+            "content_text": analysis_content_window(analysis_content_text(entry), max_chars, tail_reserve=tail_reserve),
         },
         "linked_entities": await collect_link_candidates(db, entry),
-        # Tier-0 regex nominations, rendered as hints for the iocs rules block.
-        # Cap keeps a C2-list entry from flooding the prompt.
-        "observable_candidates": (entry.observable_candidates or [])[:40],
+        # Tier-0 nominations rendered as hints for the iocs rules block, ranked
+        # (AI stagings, defanged, hashes, IPs) with scan-origin host kinds
+        # excluded. Cap keeps a C2-list entry from flooding the prompt.
+        "observable_candidates": rank_candidate_hints(entry.observable_candidates or [], limit=40),
     }
 
 
@@ -279,6 +289,84 @@ async def _tools_allowed_for_entry(db: AsyncSession, entry_id: uuid.UUID, parsed
     return bool(getattr(feed, "extract_tools", True)) if feed is not None else True
 
 
+async def apply_ai_observables(
+    db: AsyncSession,
+    entry_id: uuid.UUID,
+    parsed: dict,
+    *,
+    mode: str | None = None,
+    capture_kinds: set[str] | None = None,
+    fire_automations: bool = True,
+) -> dict[str, int]:
+    """The AI doors of the observables ledger, from a parsed entry_analysis payload.
+
+    ``observables_ai_capture_mode`` decides whether the AI's confirmations
+    become rows (``capture``) or stay on the entry as promotable candidates
+    (``shadow``, the default). In capture mode only the kinds listed in
+    ``observables_ai_capture_kinds`` are written; anything else the AI
+    reported is still staged, so host kinds can be switched on per kind once
+    the extraction fixture says they are precise. The TTP door
+    (``EntryTTP.observable_value`` upserts) follows the same switches.
+
+    Shared by ingest (``store_entry_analysis``) and the replay script, so a
+    backfill and a live run apply identical rules. Returns per-door counts.
+    When rows were captured and ``fire_automations`` is set (ingest, not the
+    replay backfill), the ``on_observable_captured`` runner is queued.
+    """
+    from app.intelligence.observables import (
+        kind_for_ttp_observable,
+        shadow_observables,
+        store_observables,
+        store_scripts,
+        sync_observables_from_entry_ttps,
+    )
+    from app.models.observable import SCRIPT_KIND
+    from app.services.system_settings import get_setting
+
+    counts: dict[str, int] = {}
+    ai_mode = (mode or str(await get_setting("observables_ai_capture_mode", db) or "shadow")).lower()
+    if capture_kinds is None:
+        raw = await get_setting("observables_ai_capture_kinds", db) or ""
+        capture_kinds = {k.strip() for k in str(raw).split(",") if k.strip()}
+
+    iocs = [i for i in (parsed.get("iocs") or []) if isinstance(i, dict)]
+    scripts = [i for i in (parsed.get("scripts") or []) if isinstance(i, dict)]
+    ttp_items = [
+        {"kind": kind, "value": t["observable_value"], "defanged": False, "technique_id": t.get("technique_id") or ""}
+        for t in (parsed.get("ttps") or [])
+        if isinstance(t, dict)
+        and (kind := kind_for_ttp_observable(t.get("observable_type"), t.get("observable_value")))
+    ]
+
+    if ai_mode == "capture":
+        captured = [i for i in iocs if (i.get("kind") or "").strip() in capture_kinds]
+        held = [i for i in iocs if (i.get("kind") or "").strip() not in capture_kinds]
+        if captured:
+            counts["observables"] = await store_observables(db, entry_id, captured)
+        held_scripts: list[dict] = []
+        if SCRIPT_KIND in capture_kinds:
+            if scripts:
+                counts["scripts"] = await store_scripts(db, entry_id, scripts)
+        else:
+            held_scripts = scripts
+        # The TTP door's host artifacts obey the per-kind list too.
+        if ttp_items and any(i["kind"] in capture_kinds for i in ttp_items):
+            host_obs = await sync_observables_from_entry_ttps(db, entry_id, kinds=capture_kinds)
+            if host_obs:
+                counts["host_observables"] = host_obs
+        held += [i for i in ttp_items if i["kind"] not in capture_kinds]
+        if held or held_scripts:
+            counts["observables_shadow"] = await shadow_observables(db, entry_id, held, held_scripts)
+    else:
+        if iocs or ttp_items or scripts:
+            counts["observables_shadow"] = await shadow_observables(db, entry_id, iocs + ttp_items, scripts)
+    if fire_automations and any(counts.get(k) for k in ("observables", "scripts", "host_observables")):
+        from app.workers.automation_tasks import dispatch_observable_capture_automations
+
+        dispatch_observable_capture_automations(entry_id)
+    return counts
+
+
 async def store_entry_analysis(db: AsyncSession, entry_id: uuid.UUID, parsed: dict) -> dict:
     """Fan a parsed entry_analysis payload out to the entity store functions.
 
@@ -310,44 +398,10 @@ async def store_entry_analysis(db: AsyncSession, entry_id: uuid.UUID, parsed: di
         counts["sectors"] = len(await store_sectors(db, entry_id, parsed["sectors"]))
     if parsed.get("mitigations"):
         counts["mitigations"] = len(await store_mitigations(db, entry_id, parsed["mitigations"]))
-    # The observables ledger's two AI-adjacent doors. Guarded: a ledger failure
-    # must never lose the analysis payload.
+    # The observables ledger's AI doors. Guarded: a ledger failure must never
+    # lose the analysis payload.
     try:
-        from app.intelligence.observables import (
-            shadow_observables,
-            store_observables,
-            store_scripts,
-            sync_observables_from_entry_ttps,
-        )
-        from app.services.system_settings import get_setting
-
-        # Shadow (the default) stages AI confirmations as promotable candidates
-        # instead of ledger rows — eyeball the model's judgment for a while,
-        # then flip observables_ai_capture_mode to "capture".
-        ai_mode = str(await get_setting("observables_ai_capture_mode", db) or "shadow").lower()
-        if ai_mode == "capture":
-            if parsed.get("iocs"):
-                counts["observables"] = await store_observables(db, entry_id, parsed["iocs"])
-            if parsed.get("scripts"):
-                counts["scripts"] = await store_scripts(db, entry_id, parsed["scripts"])
-            # The TTP observables came out of the SAME AI payload — they obey
-            # the same capture switch. In shadow they stage as candidates below.
-            if parsed.get("ttps"):
-                host_obs = await sync_observables_from_entry_ttps(db, entry_id)
-                if host_obs:
-                    counts["host_observables"] = host_obs
-        else:
-            shadow_items = list(parsed.get("iocs") or [])
-            for ttp_item in parsed.get("ttps") or []:
-                from app.intelligence.observables import kind_for_ttp_observable
-
-                kind = kind_for_ttp_observable(ttp_item.get("observable_type"), ttp_item.get("observable_value"))
-                if kind:
-                    shadow_items.append({"kind": kind, "value": ttp_item["observable_value"], "defanged": False})
-            if shadow_items or parsed.get("scripts"):
-                counts["observables_shadow"] = await shadow_observables(
-                    db, entry_id, shadow_items, parsed.get("scripts")
-                )
+        counts.update(await apply_ai_observables(db, entry_id, parsed))
     except Exception:
         logger.warning("Observable store failed for entry %s", entry_id, exc_info=True)
 

@@ -1,0 +1,113 @@
+{
+  "slug": "bitdefender-xeno-roblox",
+  "title_like": "Fake Xeno Roblox Cheats%",
+  "title": "Fake Xeno Roblox Cheats Deliver Powerful Java Stealer Through Discord and Forums",
+  "url": "https://www.bitdefender.com/en-us/blog/labs/fake-xeno-roblox-discord-executor",
+  "publisher": "Bitdefender Labs",
+  "kind": "positive",
+  "attribution": [],
+  "expected": [
+    {
+      "kind": "md5",
+      "value": "4bdaf7792e908f163ebef137854c571d",
+      "role": "payload",
+      "note": "archive containing fake Xeno installation"
+    },
+    {
+      "kind": "md5",
+      "value": "9930036e8f787674db39094e21413e77",
+      "role": "payload",
+      "note": "archive containing fake Xeno installation"
+    },
+    {
+      "kind": "md5",
+      "value": "9699bd6a448d0662a1e9e353223263b6",
+      "role": "payload",
+      "note": "archive containing fake Xeno installation"
+    },
+    {
+      "kind": "md5",
+      "value": "1a462c76efc4e73725b9e95c4a00fddb",
+      "role": "payload",
+      "note": "archive containing fake Xeno installation"
+    },
+    {
+      "kind": "md5",
+      "value": "7b96170259a376ea79411c5713beb396",
+      "role": "payload",
+      "note": "archive containing fake Xeno installation"
+    },
+    {
+      "kind": "md5",
+      "value": "2ead73ed62f1c2beb9043ce92e774e0b",
+      "role": "delivery",
+      "note": "malicious xeno.exe loader"
+    },
+    {
+      "kind": "md5",
+      "value": "0aadd62b535e683a5a2fe31fde546d07",
+      "role": "delivery",
+      "note": "malicious xeno.exe loader"
+    },
+    {
+      "kind": "md5",
+      "value": "26a94168fa25af0bcb46a18ede50af86",
+      "role": "delivery",
+      "note": "malicious xeno.exe loader"
+    },
+    {
+      "kind": "md5",
+      "value": "0d03faf1764297c908158da77c8ffcae",
+      "role": "delivery",
+      "note": "malicious xeno.exe loader"
+    },
+    {
+      "kind": "md5",
+      "value": "d123dbb5c5980bfeb22586197d2cc403",
+      "role": "",
+      "note": "decompiler.jar"
+    },
+    {
+      "kind": "md5",
+      "value": "163c8d117ef5a4e4e9c3e92a726af0eb",
+      "role": "",
+      "note": "JAR file from GameDVR, third stage"
+    },
+    {
+      "kind": "url",
+      "value": "https://solthere.net/justacoolkat10",
+      "role": "",
+      "note": "URL used for registering victim"
+    },
+    {
+      "kind": "url",
+      "value": "https://solthere.net/api/v1/redeem",
+      "role": "delivery",
+      "note": "URL used to download further payloads"
+    },
+    {
+      "kind": "domain",
+      "value": "ce953a0eb08246617b7f849486c4b26a7af37e9d2e8f0e13b3ae1bf0da8a70a.xyz",
+      "role": "c2",
+      "note": "dynamically generated C2 address"
+    }
+  ],
+  "optional": [
+    {
+      "kind": "domain",
+      "value": "ipapi.co",
+      "note": "The malware then contacts two online services that can identify IP addresses (ipapi[.]co and ipwho[.]is) to obtain geolocation information about the victim. This inform"
+    },
+    {
+      "kind": "domain",
+      "value": "ipwho.is",
+      "note": "hen contacts two online services that can identify IP addresses (ipapi[.]co and ipwho[.]is) to obtain geolocation information about the victim. This information is later"
+    },
+    {
+      "kind": "domain",
+      "value": "discord.com",
+      "note": "eps. First, the malware checks browser cookies for saved tokens associated with discord[.]com and extracts information stored in browser SQLite databases.  It then uses the"
+    }
+  ],
+  "must_not": []
+}

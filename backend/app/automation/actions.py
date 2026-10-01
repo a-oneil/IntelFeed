@@ -80,6 +80,35 @@ def _validate_webhook_url(url: str) -> str | None:
     return None
 
 
+async def observable_template_context(db: AsyncSession, entry: Entry) -> dict:
+    """``{observables_count}`` / ``{observables}`` for notification templates:
+    the entry's captured observables sighted by a reporting door (the
+    indicator-feed door is excluded — a blocklist mirror is not news),
+    defanged, one per line as ``kind value (role)``."""
+    from app.intelligence.observables import defang
+    from app.models.observable import EntryObservable, Observable
+
+    rows = (
+        (
+            await db.execute(
+                select(Observable)
+                .join(EntryObservable, EntryObservable.observable_id == Observable.id)
+                .where(
+                    EntryObservable.entry_id == entry.id,
+                    EntryObservable.source != "feed",
+                    Observable.is_denied.is_(False),
+                )
+                .order_by(Observable.kind, Observable.value)
+                .limit(50)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    lines = [f"{o.kind} {defang(o.kind, o.value)}" + (f" ({o.role})" if o.role else "") for o in rows]
+    return {"observables_count": len(rows), "observables": "\n".join(lines)}
+
+
 def _render_template(template: str, entry: Entry, context: dict | None = None) -> str:
     """Render a message template with entry and context variables.
 
@@ -100,6 +129,10 @@ def _render_template(template: str, entry: Entry, context: dict | None = None) -
         "published_at": str(entry.published_at) if entry.published_at else "",
         "ai_summary": ai_summary or "",
         "feed_name": getattr(entry, "_feed_title", "") or "",
+        # Seeded by execute_automation (observable_template_context) so a
+        # "new C2 captured" rule can name the indicators in its message.
+        "observables_count": str(ctx.get("observables_count", "")),
+        "observables": ctx.get("observables", "") or "",
     }
 
     result = template
@@ -1623,6 +1656,12 @@ async def _action_add_to_campaign(
     Config:
       - campaign_id: str (UUID, required)
       - notes: str (optional)
+      - link_observables: bool (optional) — also attach the entry's captured
+        observables (reporting doors only, dual-use infra excluded) as
+        campaign entities, so an on_observable_captured rule builds the
+        campaign's infrastructure list as articles land.
+      - observable_kinds / observable_roles: comma lists narrowing which
+        captured observables are attached (blank = any).
     """
     from app.models.campaign import Campaign, CampaignEntry
 
@@ -1646,18 +1685,84 @@ async def _action_add_to_campaign(
             CampaignEntry.entry_id == entry.id,
         )
     )
-    if existing.scalar_one_or_none():
-        return {"status": "skipped", "message": "Entry already in campaign"}
+    already_linked = existing.scalar_one_or_none() is not None
+    if not already_linked:
+        ce = CampaignEntry(
+            campaign_id=campaign.id,
+            entry_id=entry.id,
+            added_by=user_id,
+            notes=config.get("notes"),
+        )
+        db.add(ce)
+        await db.flush()
 
-    ce = CampaignEntry(
-        campaign_id=campaign.id,
-        entry_id=entry.id,
-        added_by=user_id,
-        notes=config.get("notes"),
+    linked_observables = 0
+    if str(config.get("link_observables", "")).lower() in ("true", "1", "yes"):
+        linked_observables = await _link_captured_observables_to_campaign(db, entry, campaign.id, config, user_id)
+
+    if already_linked and not linked_observables:
+        return {"status": "skipped", "message": "Entry already in campaign"}
+    return {"status": "success", "campaign": campaign.name, "observables_linked": linked_observables}
+
+
+async def _link_captured_observables_to_campaign(
+    db: AsyncSession, entry: Entry, campaign_id: uuid.UUID, config: dict, user_id: uuid.UUID
+) -> int:
+    """CampaignEntity(entity_type="observable") rows for the entry's
+    reporting-door observables; idempotent. Returns rows added."""
+    from app.models.campaign import CampaignEntity
+    from app.models.observable import EntryObservable, Observable
+
+    def _as_list(v) -> list[str]:
+        if not v:
+            return []
+        if isinstance(v, str):
+            return [x.strip() for x in v.split(",") if x.strip()]
+        return [str(x).strip() for x in v if str(x).strip()]
+
+    query = (
+        select(Observable.id)
+        .join(EntryObservable, EntryObservable.observable_id == Observable.id)
+        .where(
+            EntryObservable.entry_id == entry.id,
+            EntryObservable.source != "feed",
+            Observable.is_denied.is_(False),
+            Observable.infra_tag.is_(None),
+        )
     )
-    db.add(ce)
-    await db.flush()
-    return {"status": "success", "campaign": campaign.name}
+    kinds = _as_list(config.get("observable_kinds"))
+    roles = _as_list(config.get("observable_roles"))
+    if kinds:
+        query = query.where(Observable.kind.in_(kinds))
+    if roles:
+        query = query.where(Observable.role.in_(roles))
+    candidate_ids = set((await db.execute(query)).scalars().all())
+    if not candidate_ids:
+        return 0
+    present = set(
+        (
+            await db.execute(
+                select(CampaignEntity.entity_id).where(
+                    CampaignEntity.campaign_id == campaign_id,
+                    CampaignEntity.entity_type == "observable",
+                    CampaignEntity.entity_id.in_(candidate_ids),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    added = 0
+    for oid in candidate_ids - present:
+        db.add(
+            CampaignEntity(
+                campaign_id=campaign_id, entity_type="observable", entity_id=oid, role="related", added_by=user_id
+            )
+        )
+        added += 1
+    if added:
+        await db.flush()
+    return added
 
 
 async def _action_create_intel_report(

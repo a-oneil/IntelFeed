@@ -102,6 +102,22 @@ domain every 90, while hashes and host artifacts never decay, because behaviour
 and math persist while infrastructure rotates. A fresh sighting resets the
 clock.
 
+The **Sources** column says how many *independent* places back a value:
+"3 reports · 1 feed" means three articles or advisories mentioned it and one
+indicator feed lists it. A curated feed that republishes the same list as
+eighteen CSV files counts once, so a value with "1 feed" and no reports is
+exactly that — on a blocklist, never written up — and its profile says so
+instead of showing an empty page under a large number.
+
+Beyond IPs, domains, URLs and hashes, the ledger holds the behavioural
+observables research write-ups quote: full command lines, dropped file paths,
+registry values, scheduled-task and service names, mutexes, user-agents and
+custom HTTP headers. Each carries the role it played (persistence, execution,
+credential access, …) and, where the article makes it clear, the ATT&CK
+technique. Generic discovery commands (`whoami /priv`, `systeminfo`), system
+binaries named as the technique's target (`C:\Windows\System32\cmd.exe`) and
+redacted or templated values are kept out by design.
+
 Browse them under **Workbench → Entities → Observables**. Dual-use infrastructure (shared
 hosting, CDNs, URL shorteners) is kept but tagged, so it stays visible as intel
 without ever reaching a blocklist. If your administrator has turned on

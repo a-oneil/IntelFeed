@@ -957,7 +957,7 @@ export function useObservableCandidates(enabled: boolean, kind?: string) {
     queryKey: ["observable-candidates", kind ?? "all"],
     queryFn: async () => {
       const { data } = await api.get<ObservableCandidateRow[]>("/observables/candidates", {
-        params: kind && kind !== "all" ? { kind } : undefined,
+        params: { limit: 500, ...(kind && kind !== "all" ? { kind } : {}) },
       });
       return data;
     },

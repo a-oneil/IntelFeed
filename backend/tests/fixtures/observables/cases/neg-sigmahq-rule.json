@@ -1,0 +1,18 @@
+{
+  "slug": "neg-sigmahq-rule",
+  "title_like": "Credential Dumping Attempt Via WerFault",
+  "title": "Credential Dumping Attempt Via WerFault",
+  "url": "https://github.com/SigmaHQ/sigma/blob/b1512572c56dbcc4e083ac0cd7e19f266ba52644/rules/windows/process_access/proc_access_win_lsass_werfault.yml",
+  "publisher": "SigmaHQ",
+  "kind": "negative",
+  "attribution": [],
+  "expected": [],
+  "optional": [],
+  "must_not": [
+    {
+      "kind": "domain",
+      "value": "github.com",
+      "why": "publisher / reference link"
+    }
+  ]
+}

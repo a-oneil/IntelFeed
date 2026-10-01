@@ -512,7 +512,12 @@ async def run_rule_now(
 
     # Enrich entries with feed type for condition evaluation
     from app.automation.conditions import evaluate_conditions
-    from app.automation.engine import _check_cve_trigger, _check_keyword_trigger, _enrich_entry_feed_type
+    from app.automation.engine import (
+        _check_cve_trigger,
+        _check_keyword_trigger,
+        _check_observable_capture_trigger,
+        _enrich_entry_feed_type,
+    )
 
     # Filter entries by trigger logic and conditions
     matched_entries: list[Entry] = []
@@ -527,6 +532,8 @@ async def run_rule_now(
                     should_fire = _check_keyword_trigger(entry, rule.trigger_config)
                 case "on_cve_detected":
                     should_fire = await _check_cve_trigger(db, entry, rule.trigger_config)
+                case "on_observable_captured":
+                    should_fire = await _check_observable_capture_trigger(db, entry, rule.trigger_config)
                 case "on_new_entry" | "on_schedule" | "on_manual":
                     should_fire = True
 

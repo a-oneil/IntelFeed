@@ -79,7 +79,7 @@ Prefer a precise filter over free text. `cve.kev:true` is a fact; "known exploit
 
 - `cve:` — CVE identifier (`cve:CVE-2025-5777`), plus `cve.severity:`, `cve.cvss:>9.0`, `cve.kev:true`, `cve.epss:>0.5`, `cve.epss_percentile:>0.9`, `cve.poc:>0`, `cve.exploit:kev`, `cve.product:fortios`
 - `cwe:` — Weakness by ID or name (`cwe:CWE-416`, `cwe:"use after free"`), plus `cwe.abstraction:Base` (Pillar/Class/Base/Variant), `cwe.kind:weakness|category`, `cwe.usage:Allowed` (Allowed, Allowed-with-Review, Discouraged, Prohibited), `cwe.parent:CWE-664`, `cwe.deprecated:false`
-- `observable:` (alias `ioc:`) — IOC ledger value or label (`observable:185.174.100.5`), plus `observable.kind:` (`ipv4`, `ipv6`, `domain`, `url`, `uri_path`, `email`, `ja3`, `ja4`, `cert_fingerprint`, `md5`, `sha1`, `sha256`, `cmdline`, `registry`, `path`, `mutex`, `named_pipe`, `service_name`, `user_agent`, `script`), `observable.role:` (`c2`, `delivery`, `payload`, `phishing`, `exfil`, `exploit`, `scanning`), `observable.status:active|aging|expired`, `observable.infra:`
+- `observable:` (alias `ioc:`) — IOC ledger value or label (`observable:185.174.100.5`), plus `observable.kind:` (`ipv4`, `ipv6`, `domain`, `url`, `uri_path`, `email`, `ja3`, `ja4`, `cert_fingerprint`, `md5`, `sha1`, `sha256`, `cmdline`, `registry`, `path`, `mutex`, `named_pipe`, `service_name`, `user_agent`, `script`), `observable.role:` (`c2`, `delivery`, `payload`, `phishing`, `exfil`, `exploit`, `scanning`), `observable.status:active|aging|expired`, `observable.infra:`, `observable.reports:>0` / `observable.feeds:>0` (corroboration counts — distinct reporting articles / distinct indicator feeds)
 - `ttp:` — MITRE technique (`ttp:T1059*`), plus `ttp.tactic:`, `ttp.platform:Windows`, `ttp.data_source:process`, `ttp.domain:enterprise|mobile|ics`, `ttp.subtechnique:true`, `ttp.deprecated:false`
 - `threat_actor:` — Threat actor (`threat_actor:APT29`), plus `threat_actor.country:`, `threat_actor.motivation:espionage`, `threat_actor.sector:`, `threat_actor.type:`, `threat_actor.mitre:G0016`
 - `malware:` — Malware family, plus `malware.type:`, `malware.sector:`, `malware.mitre:S0367`
@@ -288,7 +288,7 @@ Answer platform questions from the docs, not from memory.
 
 ## Available Tools
 
-170 tools. Names in **bold** are the CLI tool names. `⚠` marks a tool that needs an **admin** account; `🔒` marks one that runs a **confirmation-token flow** — the first call returns a prompt and a token, which you must show the user and only re-send after they explicitly approve.
+180 tools. Names in **bold** are the CLI tool names. `⚠` marks a tool that needs an **admin** account; `🔒` marks one that runs a **confirmation-token flow** — the first call returns a prompt and a token, which you must show the user and only re-send after they explicitly approve.
 
 Everything that creates, changes or deletes data is refused outright when `INTELFEED_READ_ONLY` is set on the environment — that gate is in the CLI itself, not in your instructions.
 
@@ -340,7 +340,12 @@ Everything that creates, changes or deletes data is refused outright when `INTEL
 - **get_cwe** — A MITRE CWE weakness: abstraction level, parent and lineage, mapping guidance, catalog mitigations, linked CVEs (cwe_id)
 - **get_ttp** — ATT&CK technique with tactic, platforms, data sources, linked articles (ttp_id — UUID or T1059.001)
 - **get_observable** — One IOC ledger row by UUID or value: kind, role, confidence with decay state, sightings, provenance (observable, kind)
-- **search_observables** — Search the observables ledger by substring, kind, role and lifecycle status (query, kind, role, status, limit)
+- **search_observables** — Search the observables ledger by substring, kind, role, lifecycle status, capture door, dual-use tag, review flag, confidence floor and report-count floor (query, kind, role, status, captured_by, infra_tag, needs_review, min_confidence, min_reports, limit)
+- **get_entity_infrastructure** — An actor's / family's / campaign's / tool's observables in two tiers: claimed (attribution edges with evidence and trust tier) and reported alongside (co-reported in the same articles, newsletters and list files excluded) (entity_type, entity_id, limit)
+- **export_observables** — A filtered ledger slice as EDL lines, CSV rows or JSON, refanged, dual-use infra excluded unless asked (format, kind, role, status, min_confidence, min_reports, include_infra_tagged, query, limit)
+- **promote_observable** — The analyst door: turn a staged candidate (or any value the article prints) into a ledger row sighted in that entry, with role and evidence (entry_id, kind, value, role, evidence, label)
+- **update_observable** — Correct a ledger row: role, label, description, or pin its confidence so decay stops (observable_id, role, label, description, confidence_pinned)
+- **deny_observable** ⚠ — Tombstone a value so it is never captured, sighted or exported again; works on a row by UUID or on any (kind, value) (observable_id, kind, value, reason)
 - **get_enrichment_data** — Stored enrichment for a CVE, malware, actor or TTP (entity_type, entity_id)
 - **get_entry_insights** — Actionable insights across an entry's entities (entry_id)
 

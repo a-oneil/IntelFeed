@@ -1182,7 +1182,7 @@ async def _get_dynamic_values(
                 Observable.is_denied.is_(False),
                 Observable.status != "expired",
             )
-            .order_by(Observable.sighting_count.desc())
+            .order_by(Observable.report_count.desc(), Observable.sighting_count.desc())
             .limit(10)
         )
         for (value,) in result.all():

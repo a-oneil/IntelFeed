@@ -1,0 +1,291 @@
+{
+  "slug": "unit42-screening-serpens",
+  "title_like": "Tracking Iranian APT Screening Serpens%",
+  "title": "Tracking Iranian APT Screening Serpens’ 2026 Espionage Campaigns",
+  "url": "https://unit42.paloaltonetworks.com/tracking-iran-apt-screening-serpens/",
+  "publisher": "Unit 42",
+  "kind": "positive",
+  "attribution": [
+    {
+      "type": "threat_actor",
+      "name": "Screening Serpens"
+    },
+    {
+      "type": "malware",
+      "name": "MiniUpdate"
+    }
+  ],
+  "expected": [
+    {
+      "kind": "domain",
+      "value": "licencemanagers.azurewebsites.net",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "licencesupporting.azurewebsites.net",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "peerdistsvcmanagers.azurewebsites.net",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "themesmanagers.azurewebsites.net",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "themesprovidermanagers.azurewebsites.net",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "docspace-y4cumb.onlyoffice.com",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "nanomatrix.azurewebsites.net",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "quantumweave.azurewebsites.net",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "elementshift.azurewebsites.net",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "business-startup.org",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "business-startup.azurewebsites.net",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "businessstartup.azurewebsites.net",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "buisness-centeral.azurewebsites.net",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "buisness-centeral-transportation.azurewebsites.net",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "buisness-centeral-transportation.com",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "docspace-twpf0e.onlyoffice.com",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "premierhealthadvisory.com",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "premierhealthadvisory.azurewebsites.net",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "premier-healthadvisory.azurewebsites.net",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "ramiltonsfinance.com",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "ramiltonsfinance.azurewebsites.neti",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "ramiltons-finance.azurewebsites.net",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "url",
+      "value": "https://docspace-y4cumb.onlyoffice.com/storage/files/root/folder_3602000/file_3601577/v1/content.zip[...]",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "url",
+      "value": "https://app[redacted].live/meeting/edcdba624ddb43c2a1dcf334aa493068",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "url",
+      "value": "https://docspace-twpf0e.onlyoffice.com/storage/files/root/folder_3765000/file_3764519/v1/content.zip?filename=remote.[REDACTED].zip",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "url",
+      "value": "https://2117.filemail.com/api/file/get?filekey=T0EnWQ6NugHkW_kLfDxPBEw_um6NSkg9ZwNRQ_5lrKrLLUo35pV8m3TKv1LqF3zZzdUm",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "sha256",
+      "value": "44f4f7aca7f1d9bfdaf7b3736934cbe19f851a707662f8f0b0c49b383e054250",
+      "role": "payload",
+      "note": "Initial archive file"
+    },
+    {
+      "kind": "sha256",
+      "value": "332ba2f0297dfb1599adecc3e9067893e7cf243aa23aedce4906a4c480574c17",
+      "role": "",
+      "note": "Hiring Portal.zip"
+    },
+    {
+      "kind": "sha256",
+      "value": "0db36a04d304ad96f9e6f97b531934594cd95a5cea9ff2c9af249201089dc864",
+      "role": "payload",
+      "note": "UpdateChecker.dll"
+    },
+    {
+      "kind": "sha256",
+      "value": "38bd137c672bd58d08c4f0502f993a6561e2c3411773d1ae57ee0151a0a9d11d",
+      "role": "payload",
+      "note": "Initial archive file"
+    },
+    {
+      "kind": "sha256",
+      "value": "d4a7e9f107fe40c1a5d0139c6c6e25bf6bf57f61feff090bee28f476bb3cc3c2",
+      "role": "payload",
+      "note": "UpdateChecker.dll"
+    },
+    {
+      "kind": "sha256",
+      "value": "bc3b44154518c5794ce639108e7b9c5fecb0c189607a26de1aaed518d890c7ad",
+      "role": "payload",
+      "note": "UpdateChecker.dll"
+    },
+    {
+      "kind": "sha256",
+      "value": "74882085db2088356ed7f72f01e0404a0a98cda88ef56fb15ce74c1f36b26d27",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "sha256",
+      "value": "9cf029daca89523d917dafed0568d11d00e45ec96b5b90b4a1f7fd4018c7da84",
+      "role": "payload",
+      "note": "uevmonitor.dll"
+    },
+    {
+      "kind": "sha256",
+      "value": "b19e06da580cf91691eda066ac9ee4b09c6e5dc26c367af12660fe1f9306eec4",
+      "role": "payload",
+      "note": "unbcl.dll"
+    },
+    {
+      "kind": "sha256",
+      "value": "8808c794c24367438f183e4be941876f1d3ecd0c8d2eb43b10d2380841d2283b",
+      "role": "",
+      "note": "Portable Platform.zip"
+    },
+    {
+      "kind": "sha256",
+      "value": "43dc62cef52ebdd69e79f10015b3e13890f26c058325c0ff139c70f8d8eadcfa",
+      "role": "payload",
+      "note": "Connection.dll"
+    },
+    {
+      "kind": "sha256",
+      "value": "9e4a658e6d831c9e9bdfe11884a75b7c64812ed0a80e8495ddf6b316505acac1",
+      "role": "payload",
+      "note": "unbcl.dll"
+    }
+  ],
+  "optional": [
+    {
+      "kind": "url",
+      "value": "https://[redacted].live/meeting/edcdba624ddb43c2a1dcf334aa493068",
+      "note": "the attacker delivered a lookalike domain to attempt to compromise the target: hxxps[:]//[redacted][.]live/meeting/edcdba624ddb43c2a1dcf334aa493068  Looking into the response reveals a phishing landin"
+    },
+    {
+      "kind": "domain",
+      "value": "ramiltonsfinance.azurewebsites.net",
+      "note": "s to impersonate a financial sector entity, using:  - Ramiltonsfinance[.]com  - Ramiltonsfinance.azurewebsites[.]net  - Ramiltons-finance.azurewebsites[.]net  Furthermore, the April variants featu"
+    },
+    {
+      "kind": "url",
+      "value": "https://[redacted].com/career/recreuitment/[REDACTED]",
+      "note": "he threat actor initiated the attack by distributing a spoofed recruitment URL: hxxps[:]//[REDACTED][.]com/career/recreuitment/[REDACTED]. This endpoint currently returns an HTTP 404 Not Found status "
+    },
+    {
+      "kind": "url",
+      "value": "https://nanomatrix.azurewebsites.net",
+      "note": "ng within the technology, cybersecurity and artificial intelligence sectors:  - hxxps[:]//NanoMatrix.azurewebsites[.]net  - hxxps[:]//QuantumWeave.azurewebsites[.]net  - hxxps[:]//ElementShift.azurewe"
+    },
+    {
+      "kind": "url",
+      "value": "https://quantumweave.azurewebsites.net",
+      "note": "artificial intelligence sectors:  - hxxps[:]//NanoMatrix.azurewebsites[.]net  - hxxps[:]//QuantumWeave.azurewebsites[.]net  - hxxps[:]//ElementShift.azurewebsites[.]net  The malware beacons to the pri"
+    },
+    {
+      "kind": "url",
+      "value": "https://elementshift.azurewebsites.net",
+      "note": "NanoMatrix.azurewebsites[.]net  - hxxps[:]//QuantumWeave.azurewebsites[.]net  - hxxps[:]//ElementShift.azurewebsites[.]net  The malware beacons to the primary C2 base URL via an HTTP POST request. Dep"
+    },
+    {
+      "kind": "ipv4",
+      "value": "146.0.0.0",
+      "note": "5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36  - Digital signature misuse: This payload is digitally signed und"
+    },
+    {
+      "kind": "ipv4",
+      "value": "144.0.0.0",
+      "note": "5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0  Behavioral analysis confirms that the malware inte"
+    }
+  ],
+  "must_not": []
+}

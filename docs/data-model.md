@@ -422,7 +422,7 @@ match.
 - `kind` (String 20, indexed) — one of `ALL_KINDS` (`backend/app/models/observable.py:43`), in four families:
   - **network** — `ipv4`, `ipv6`, `domain`, `url`, `uri_path`, `ja3`, `ja4`, `cert_fingerprint`, `email` (stored refanged/canonical; the defanged surface form lives on the sighting)
   - **hash** — `md5`, `sha1`, `sha256`
-  - **host** — `cmdline`, `registry`, `path`, `mutex`, `named_pipe`, `service_name`, `user_agent` (mapped from `EntryTTP.observable_type`'s vocabulary)
+  - **host** — `cmdline`, `registry`, `path`, `mutex`, `named_pipe`, `service_name`, `scheduled_task`, `user_agent`, `http_header` (judged by the one-pass AI's `iocs` array, or mapped from `EntryTTP.observable_type`'s vocabulary)
   - **script** — `script`, for a body-carrying fragment rather than an atom
 - `value` (Text, indexed) — the canonical refanged form; `evil[.]com` and `hxxps://` normalise on the way in
 - `label`, `content`, `language` — for body-carrying kinds (a rule/script fragment rather than an atom)
@@ -432,9 +432,10 @@ match.
 - `confidence_pinned` (Boolean) — exempt this row from decay
 - `status` (String 12, indexed, default `active`) — derived from current confidence: `active` ≥ 0.5, `aging` < 0.5, `expired` < 0.15; `is_denied` (Boolean) — analyst denial is separate from lifecycle status
 - `infra_tag` (String 20, indexed) — dual-use infrastructure kept but marked (shared hosting, CDN, URL shortener) so publishing can exclude it without deleting the intel
-- `created_via` (String 20, indexed) — **which judgment door created the row**: `ai_extraction` (the one-pass `entry_analysis` `iocs` array, base confidence 0.8), `ttp_observable` (`EntryTTP.observable_value` upsert, 0.85), `ioc_list` (curated indicator-list feed body, 0.85), or `manual` (analyst promote/create, 1.0). There is intentionally **no value meaning "regex"**. Author-defanged input earns a +0.1 bonus — someone who defangs a string is telling you it is an indicator
+- `created_via` (String 20, indexed) — **which judgment door created the row**: `ai_extraction` (the one-pass `entry_analysis` `iocs` array, base confidence 0.8), `ttp_observable` (`EntryTTP.observable_value` upsert, 0.85), `ioc_list` / `publisher_ioc` (curated indicator-list feed body, 0.85), or `manual` (analyst promote/create, 1.0). There is intentionally **no value meaning "regex"**. Author-defanged input earns a +0.1 bonus — someone who defangs a string is telling you it is an indicator
 - `created_from_entry_id` (FK, SET NULL), `created_confidence`, `needs_review`
-- `article_count`, `sighting_count` (Integer) — maintained as O(1) counters, reconciled nightly by `reconcile-observable-counters`
+- `article_count`, `sighting_count` (Integer) — raw junction counts, maintained as O(1) counters, reconciled nightly by `reconcile-observable-counters`
+- `report_count`, `feed_source_count` (Integer) — the corroboration pair the UI shows as *Sources*: distinct reporting entries (articles, advisories, rule files) and distinct indicator feeds carrying the value. A feed that republishes one list as eighteen CSV variants is `feed_source_count = 1`, `report_count = 0`. `record_sighting` increments `report_count` for every door but the feed door; the nightly reconcile recomputes both from `entry_observables` (migration `s8j0l2n4p6r8`)
 - `first_seen_at`, `last_seen_at`
 
 **Unique Constraint:** `uq_observable_kind_value` on `(kind, value)` — the same

@@ -52,13 +52,15 @@ from app.models.observable import (
 _REFANG_RULES: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\bhxxp(s?)\b", re.IGNORECASE), r"http\1"),
     (re.compile(r"\bh..p(s?)://", re.IGNORECASE), r"http\1://"),
-    (re.compile(r"\[(\.|dot)\]|\((\.|dot)\)|\{(\.|dot)\}", re.IGNORECASE), "."),
+    # Markdown-escaped brackets ("evil\[.\]com") are how a CMS renders an
+    # author's [.] — same meaning.
+    (re.compile(r"\\?\[(\.|dot)\\?\]|\((\.|dot)\)|\{(\.|dot)\}", re.IGNORECASE), "."),
     (re.compile(r"\[:\]|\[://\]"), lambda m: ":" if m.group(0) == "[:]" else "://"),
     (re.compile(r"\[@\]|\(@\)| ?\bat\b ?(?=\S+\[\.\])", re.IGNORECASE), "@"),
 ]
 
 #: Anything that marks a token as author-defanged.
-_DEFANG_MARKER = re.compile(r"hxxp|\[\.\]|\(\.\)|\[dot\]|\(dot\)|\[:\]|\[@\]|\[://\]", re.IGNORECASE)
+_DEFANG_MARKER = re.compile(r"hxxp|\\?\[\.\\?\]|\(\.\)|\[dot\]|\(dot\)|\[:\]|\[@\]|\[://\]", re.IGNORECASE)
 
 
 def refang(text: str) -> str:
@@ -116,6 +118,129 @@ _BENIGN_IPS = frozenset(
 #: Documentation/testing domains, plus schema-ish suffixes that regex-match a
 #: domain but never name infrastructure.
 _BENIGN_DOMAIN_SUFFIXES = ("example.com", "example.net", "example.org", "example", "localhost", "w3.org", "schema.org")
+#: Placeholder names writers use for "some domain" — never infrastructure.
+_PLACEHOLDER_DOMAINS = frozenset(
+    {
+        "third-party.com",
+        "attacker.com",
+        "evil.com",
+        "malicious.com",
+        "victim.com",
+        "company.com",
+        "yourcompany.com",
+        "yourdomain.com",
+        "domain.com",
+        "test.com",
+        "contoso.com",
+        "fabrikam.com",
+        "acme.com",
+        "foo.com",
+        "bar.com",
+        "site.com",
+        "website.com",
+        "phishing.com",
+        "legit.com",
+        "badguy.com",
+        "c2.com",
+        "malware.com",
+        "target.com",
+        "internal.com",
+        "corp.com",
+        "mycompany.com",
+        "vendor.com",
+        "customer.com",
+    }
+)
+#: A real TLD never starts with a common TLD followed by more letters — that
+#: shape is two table cells glued together ("pobelstudio.comdomain",
+#: "info@nuf.co.jpsender") by an HTML renderer that dropped the cell boundary.
+_GLUED_TLD_RE = re.compile(
+    r"^(?:com|net|org|info|biz|io|co|us|uk|ru|cn|de|fr|xyz|top|live|app|dev|cloud|site|online|store|tech|club"
+    r"|shop|edu|gov|mil|int|me|tv|cc|ws|pw|su|in|br|jp|kr|au|ca|eu|nl|se|ch|it|es|pl|ir|tr|vn|id|mx|ar|za|ng)"
+    r"[a-z0-9]{2,}$"
+)
+#: Reference and shared-service hosts an article links *about* an indicator
+#: (sandbox reports, catalogs, vendor docs, social) or that malware merely
+#: uses (IP-echo, messaging APIs). Candidate-tier veto for bare domains and
+#: URLs; the AI door and the analyst can still promote a real abuse.
+_REFERENCE_HOSTS = frozenset(
+    {
+        "api.telegram.org",
+        "api.ipify.org",
+        "ipinfo.io",
+        "ifconfig.me",
+        "icanhazip.com",
+        "checkip.amazonaws.com",
+        "ip-api.com",
+        "api.ip.sb",
+        "whatismyipaddress.com",
+        "dns.google",
+        "virustotal.com",
+        "www.virustotal.com",
+        "urlscan.io",
+        "any.run",
+        "app.any.run",
+        "hybrid-analysis.com",
+        "www.hybrid-analysis.com",
+        "bazaar.abuse.ch",
+        "urlhaus.abuse.ch",
+        "threatfox.abuse.ch",
+        "otx.alienvault.com",
+        "exchange.xforce.ibmcloud.com",
+        "attack.mitre.org",
+        "nvd.nist.gov",
+        "cve.mitre.org",
+        "cve.org",
+        "www.cve.org",
+        "github.com",
+        "www.github.com",
+        "gist.github.com",
+        "raw.githubusercontent.com",
+        "twitter.com",
+        "x.com",
+        "t.me",
+        "linkedin.com",
+        "www.linkedin.com",
+        "reddit.com",
+        "www.reddit.com",
+        "medium.com",
+        "youtube.com",
+        "www.youtube.com",
+        "google.com",
+        "www.google.com",
+        "microsoft.com",
+        "www.microsoft.com",
+        "learn.microsoft.com",
+        "docs.microsoft.com",
+        "apple.com",
+        "support.apple.com",
+        "wikipedia.org",
+        "en.wikipedia.org",
+        "shodan.io",
+        "www.shodan.io",
+        "censys.io",
+        "greynoise.io",
+        "viz.greynoise.io",
+        "malpedia.caad.fkie.fraunhofer.de",
+        "bleepingcomputer.com",
+        "www.bleepingcomputer.com",
+        "thehackernews.com",
+        "therecord.media",
+        "krebsonsecurity.com",
+    }
+)
+
+
+def is_reference_host(value: str) -> bool:
+    """A domain, or a URL's host, that names a reference/shared service."""
+    v = value.lower()
+    host = v.split("/")[2] if "://" in v else v.split("/")[0]
+    host = host.split("@")[-1].split(":")[0]
+    if host in _REFERENCE_HOSTS:
+        return True
+    # The apex of a shared-infrastructure suffix (github.io, amazonaws.com) is
+    # the platform, never an indicator; a subdomain on it may be.
+    return host in SHARED_INFRA_SUFFIXES
 
 
 def _classify_hash(value: str) -> str:
@@ -134,7 +259,11 @@ def _plausible_domain(value: str) -> bool:
     v = value.lower().rstrip(".")
     if any(v == s or v.endswith("." + s) for s in _BENIGN_DOMAIN_SUFFIXES):
         return False
+    if v in _PLACEHOLDER_DOMAINS or v.startswith("www.") and v[4:] in _PLACEHOLDER_DOMAINS:
+        return False
     tld = v.rsplit(".", 1)[-1]
+    if _GLUED_TLD_RE.match(tld):
+        return False
     # Version-ish and filename-ish tails regex-match a domain; a real TLD is
     # never all digits and this list covers the common file-suffix collisions.
     if tld.isdigit() or tld in {
@@ -222,7 +351,7 @@ def classify_value(raw: str) -> tuple[str, str] | None:
         return "ipv6", token.lower()
     if URL_FULL_RE.fullmatch(token):
         return "url", token
-    if EMAIL_RE.fullmatch(token):
+    if EMAIL_RE.fullmatch(token) and _plausible_domain(token.rsplit("@", 1)[-1]):
         return "email", token.lower()
     if DOMAIN_RE.fullmatch(token) and _plausible_domain(token):
         return "domain", token.lower()
@@ -232,7 +361,19 @@ def classify_value(raw: str) -> tuple[str, str] | None:
 def normalize_value(kind: str, value: str) -> str:
     """Canonical storage form per kind. Identity depends on this being stable."""
     v = refang(value).strip()
-    lowered = {"domain", "email", "ja3", "ja4", "cert_fingerprint", "registry", "service_name", "mutex", "named_pipe"}
+    lowered = {
+        "domain",
+        "email",
+        "ja3",
+        "ja4",
+        "cert_fingerprint",
+        "registry",
+        "service_name",
+        "scheduled_task",
+        "mutex",
+        "named_pipe",
+        "http_header",
+    }
     if kind in lowered | HASH_KINDS:
         return v.lower()
     if kind == "cmdline":
@@ -268,16 +409,51 @@ def _paragraph_index(text: str, offset: int) -> int:
     return text.count("\n\n", 0, offset)
 
 
-def scan_candidates(text: str, *, max_candidates: int = 200) -> list[Candidate]:
+#: Words that say a dotted quad or a hex string is an *indicator* rather than
+#: a version or a commit — they lift the context vetoes below.
+_IOC_CONTEXT_RE = re.compile(
+    r"(?i)\b(?:ip|ips|c2|c&c|command[- ]and[- ]control|beacon\w*|server|host\w*|address\w*|infrastructure"
+    r"|callback|scann\w*|attacker\w*|malicious|connect\w*|download\w*|resolv\w*|listen\w*|port|payload"
+    r"|sample\w*|hash\w*|sha\d*|md5|dropper|loader|binar\w*|file\w*|ioc\w*|indicator\w*)\b"
+)
+_VERSION_CONTEXT_RE = re.compile(
+    r"(?i)\b(?:version[s]?|ver\.?|release[sd]?|build[s]?|firmware|fixed in|patched in|prior to|earlier than"
+    r"|later than|up to|through|affect\w*|vulnerable|upgrade\w*|update\w*|between|and (?:earlier|later)"
+    r"|v\d)\b[^\n]{0,40}$"
+)
+_RANGE_SUFFIX_RE = re.compile(
+    r"^\s*(?:to|through|and|or|-|–|—|,)\s*\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b", re.IGNORECASE
+)
+_RANGE_PREFIX_RE = re.compile(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\s*(?:to|through|and|or|-|–|—|,)\s*$", re.IGNORECASE)
+_COMMIT_CONTEXT_RE = re.compile(
+    r"(?i)(?:commit|merge|pull request|\bgit\b|revision|changeset|\btag\b|up to|prior to|before|fixed|patch\w*"
+    r"|version|affected|identified in)[^\n]{0,40}$"
+)
+
+
+def scan_candidates(
+    text: str, *, max_candidates: int = 200, plain_hashes: bool = True, plain_ips: bool = True
+) -> list[Candidate]:
     """Nominate observable candidates from entry text. Precision-first:
-    hashes + public IPs always; domains/URLs/emails only when defanged."""
+    hashes + public IPs always; domains/URLs/emails only when defanged.
+
+    ``plain_hashes`` / ``plain_ips`` switch off the un-defanged hash and IP
+    sweeps for sources where those tokens are almost never indicators
+    (advisory bulletins and NVD: package checksums, commit ids, version
+    quads; rule and catalog repositories: the rule's own metadata). Defanged
+    tokens always nominate — the author marked them."""
     seen: set[tuple[str, str]] = set()
     out: list[Candidate] = []
 
     def add(kind: str, value: str, surface: str, defanged: bool, offset: int) -> None:
+        if kind == "url":
+            # An HTML entity glued to the URL by a flattened renderer.
+            value = value.split("&nbsp;", 1)[0].split("&amp;nbsp;", 1)[0].rstrip(".,;:)")
+        if kind in ("url", "domain") and is_reference_host(value):
+            return
         canonical = normalize_value(kind, value)
         key = (kind, canonical)
-        if key in seen or len(out) >= max_candidates:
+        if not canonical or key in seen or len(out) >= max_candidates:
             return
         seen.add(key)
         out.append(Candidate(kind, canonical, surface, defanged, _paragraph_index(text, offset)))
@@ -294,12 +470,16 @@ def scan_candidates(text: str, *, max_candidates: int = 200) -> list[Candidate]:
     # Hashes: unambiguous at 32/40/64 hex — but hex strings also live in
     # package checksums (RHSA advisories), git commits, tracking/gravatar URLs.
     # Context vetoes keep those out of the nominations.
-    for m in HASH_RE.finditer(text):
+    for m in HASH_RE.finditer(text) if plain_hashes else ():
         prefix = text[max(0, m.start() - 90) : m.start()]
         suffix = text[m.end() : m.end() + 60]
         # Inside any URL-ish token (query strings, permalinks, gravatar).
         token_start = prefix.rsplit(None, 1)[-1] if prefix.split() else ""
         if "/" in token_start or "=" in token_start or "?" in token_start:
+            continue
+        # Part of a larger token — a bucket id inside a hostname
+        # ("pub-9ee1bf…a.r2.dev"), a path segment, an identifier — is not a hash.
+        if token_start.endswith(("-", "_", ".")) or re.match(r"[.\-_][A-Za-z0-9]", suffix):
             continue
         # Package/checksum context: advisory manifests, not indicators.
         if re.search(
@@ -308,22 +488,46 @@ def scan_candidates(text: str, *, max_candidates: int = 200) -> list[Candidate]:
             continue
         if re.search(r"(?i)^\s*\.(rpm|deb|tar|iso)\b", suffix):
             continue
+        # "fixed in commit 5dadec…", "up to 5dadec…" (NVD names versions by
+        # commit): a hex id in version/commit context, with nothing nearby
+        # calling it a sample or a hash, is not an indicator.
+        near = prefix[-60:] + suffix[:40]
+        if _COMMIT_CONTEXT_RE.search(prefix[-60:]) and not _IOC_CONTEXT_RE.search(near):
+            continue
         add(_classify_hash(m.group(0)), m.group(0).lower(), m.group(0), False, m.start())
 
     # Public IPv4s, octet-validated and reserved-range gated. A four-part
     # version number ("Version 2.4.1.100", "through 1.1.10.8") is a
     # syntactically valid global IP, so both context directions get a veto.
-    for m in IPV4_RE.finditer(text):
-        prefix = text[max(0, m.start() - 24) : m.start()]
-        suffix = text[m.end() : m.end() + 24]
+    for m in IPV4_RE.finditer(text) if plain_ips else ():
+        prefix = text[max(0, m.start() - 60) : m.start()]
+        suffix = text[m.end() : m.end() + 40]
         if re.search(
             r"(?i)(version[s]?|ver\.?|build|v|through|prior to|upgrade[d]? to|update[d]? to|release[sd]?)\s*$", prefix
         ):
             continue
         if re.search(r"(?i)^\s*(and|or)\s+(earlier|later|prior|below|above|newer|older)", suffix):
             continue
-        if _valid_public_ip(m.group(0)):
-            add("ipv4", m.group(0), m.group(0), False, m.start())
+        # Version ranges ("9.4.0.0 - 9.4.0.25", "from 20.15.6.1 to 20.18.4.1")
+        # and version talk earlier in the sentence with nothing calling the
+        # quad an address.
+        if _RANGE_SUFFIX_RE.match(suffix) or _RANGE_PREFIX_RE.search(prefix):
+            continue
+        if _VERSION_CONTEXT_RE.search(prefix) and not _IOC_CONTEXT_RE.search(prefix + suffix):
+            continue
+        # A fixed-release table row: "20.15 | 20.15.6.1" — a shorter dotted
+        # number on the same line that prefixes the quad names a release train.
+        line_start = text.rfind("\n", 0, m.start()) + 1
+        line_end = text.find("\n", m.end())
+        line = text[line_start : len(text) if line_end == -1 else line_end]
+        quad = m.group(0)
+        if any(
+            quad.startswith(t + ".") and t != quad
+            for t in re.findall(r"(?<![\d.])\d{1,3}(?:\.\d{1,3}){1,2}(?![\d.])", line)
+        ):
+            continue
+        if _valid_public_ip(quad):
+            add("ipv4", quad, quad, False, m.start())
 
     return out
 
@@ -423,6 +627,21 @@ SHARED_INFRA_SUFFIXES = (
     "fastly.net",
     "workers.dev",
     "pages.dev",
+    "r2.dev",
+    "trycloudflare.com",
+    "ngrok.io",
+    "ngrok-free.app",
+    "azurewebsites.net",
+    "blob.core.windows.net",
+    "web.app",
+    "firebaseapp.com",
+    "vercel.app",
+    "netlify.app",
+    "glitch.me",
+    "repl.co",
+    "onrender.com",
+    "fly.dev",
+    "icp0.io",
     "github.io",
     "amazonaws.com",
     "googleapis.com",
@@ -460,6 +679,33 @@ def ioc_list_path_tag(file_path: str | None) -> str | None:
     return None
 
 
+#: Path tokens that mark a curated list as command-and-control infrastructure
+#: (drb-ra's ``domainC2s`` / ``IPC2s`` / ``C2_configs``, C2-Tracker's per-tool
+#: ``<Tool> C2 IPs`` / ``<RAT> Trojan IPs`` / ``<Bot> Botnet IPs`` files).
+_C2_PATH_TOKENS = ("c2", "c2s", "botnet", "rat", "trojan", "implant", "beacon", "stealer", "loader")
+_INFRA_TAG_ROLES = {"scanner": "scanning", "phish_sim": "phishing"}
+
+
+def ioc_list_path_role(file_path: str | None, infra_tag: str | None = None) -> str | None:
+    """The network role a curated-feed file's path implies, or None.
+
+    Dual-use infrastructure files (VPN/proxy/TOR/RMM/KVM) carry no role —
+    the tag says what the host is, not what it did. Scanner and phish-sim
+    files map to their roles; everything else with a C2-ish token is ``c2``.
+    """
+    if infra_tag in _INFRA_TAG_ROLES:
+        return _INFRA_TAG_ROLES[infra_tag]
+    if infra_tag is not None:
+        return None
+    if not file_path:
+        return None
+    tokens = set(re.split(r"[/_\-. ]+", file_path.lower()))
+    # "domainC2swithURL" / "IPPortC2s-90day": the token holds C2 inside it.
+    if any(t in tokens for t in _C2_PATH_TOKENS) or any("c2" in t for t in tokens):
+        return "c2"
+    return None
+
+
 def parse_ioc_list_body(text: str, *, max_values: int = 5000) -> list[tuple[str, str]]:
     """(kind, value) pairs from a raw indicator-list body (one per line/cell)."""
     results: list[tuple[str, str]] = []
@@ -488,7 +734,7 @@ def parse_ioc_list_body(text: str, *, max_values: int = 5000) -> list[tuple[str,
 # ---------------------------------------------------------------------------
 
 #: Base confidence per creation door.
-BASE_CONFIDENCE = {"manual": 1.0, "ioc_list": 0.85, "ttp_observable": 0.85, "ai_extraction": 0.8}
+BASE_CONFIDENCE = {"manual": 1.0, "publisher_ioc": 0.9, "ioc_list": 0.85, "ttp_observable": 0.85, "ai_extraction": 0.8}
 DEFANG_BONUS = 0.1
 _AGING_BELOW = 0.5
 _EXPIRED_BELOW = 0.15
@@ -515,6 +761,32 @@ def status_for(confidence: float) -> str:
 # ---------------------------------------------------------------------------
 # Writes (the doors call these)
 # ---------------------------------------------------------------------------
+
+
+#: Kinds and doors that trigger a reputation lookup on creation (sources with
+#: trigger_mode=auto — Shodan InternetDB is keyless; VirusTotal / GreyNoise
+#: once their keys are configured).
+AUTO_ENRICH_KINDS = frozenset({"ipv4", "domain", "sha256", "md5", "sha1"})
+AUTO_ENRICH_DOORS = frozenset({"ai_extraction", "manual", "publisher_ioc"})
+#: A publisher's indicator file can carry hundreds of fresh rows for one
+#: article; only this many of them queue a reputation lookup (the rest stay
+#: available to the manual enrich button). Shodan InternetDB allows ~30/min.
+AUTO_ENRICH_PER_ENTRY_CAP = 25
+_auto_enrich_dispatched: dict[str, int] = {}
+
+
+def _dispatch_auto_enrich(obs: Observable) -> None:
+    try:
+        from app.workers.enrichment_tasks import auto_enrich_entity
+
+        auto_enrich_entity.delay(
+            entity_type="observable",
+            entity_id=str(obs.id),
+            entity_value=obs.value,
+            base_confidence=float(obs.base_confidence or 0.8),
+        )
+    except Exception:  # a broker hiccup must never fail the capture
+        pass
 
 
 async def get_or_create_observable(
@@ -549,7 +821,7 @@ async def get_or_create_observable(
     # Insert-or-ignore first: two doors creating the same (kind, value)
     # concurrently must not raise — an IntegrityError would abort the caller's
     # whole transaction (in the analysis fan-out that loses the entire payload).
-    await session.execute(
+    inserted = await session.execute(
         pg_insert(Observable)
         .values(
             id=uuid_mod.uuid4(),
@@ -578,6 +850,19 @@ async def get_or_create_observable(
     ).scalar_one_or_none()
     if obs is None or obs.is_denied:
         return None
+    if inserted.rowcount and kind in AUTO_ENRICH_KINDS and via in AUTO_ENRICH_DOORS:
+        # Reputation lookups for freshly judged infrastructure — never for the
+        # bulk feed door (16k rows of blocklist would burn every budget), and
+        # at most AUTO_ENRICH_PER_ENTRY_CAP per capturing entry so a publisher
+        # file's 400 hashes don't fan out into 400 tasks.
+        key = str(entry_id) if entry_id else ""
+        n = _auto_enrich_dispatched.get(key, 0)
+        if not key or n < AUTO_ENRICH_PER_ENTRY_CAP:
+            if key:
+                if len(_auto_enrich_dispatched) > 2048:
+                    _auto_enrich_dispatched.clear()
+                _auto_enrich_dispatched[key] = n + 1
+            _dispatch_auto_enrich(obs)
     # A later door can enrich what an earlier one left blank. infra_tag is
     # fill-only too: "this IP is a VPN exit" stays true even after an AI door
     # later confirms it as C2 — the dual signal is the point.
@@ -657,6 +942,9 @@ async def record_sighting(
             # does it ~100k times. Unlink recomputes when rows leave.
             "sighting_count": Observable.sighting_count + 1,
             "article_count": func.coalesce(Observable.article_count, 0) + 1,
+            # Reports are the corroboration count: every door but the
+            # indicator-feed one is an article/advisory/rule file saying so.
+            "report_count": Observable.report_count + (0 if source == "feed" else 1),
             # The row's FIRST sighting owns the clock outright — a freshly
             # created row carries now() column defaults, and greatest() would
             # keep them, stamping a backfilled 2023 article as seen today.
@@ -672,6 +960,42 @@ async def record_sighting(
             values["status"] = STATUS_ACTIVE
         await session.execute(update(Observable).where(Observable.id == observable.id).values(**values))
     return is_new
+
+
+def corroboration_counts_subquery():
+    """Per-observable ground truth for the four counters, from the junction.
+
+    ``report_count`` = distinct entries that are not indicator-list files;
+    ``feed_source_count`` = distinct feeds among indicator-list entries.
+    """
+    from app.models.entry import Entry
+
+    is_list = func.coalesce(Entry.metadata_["content_type"].astext, "") == "ioc_list"
+    return (
+        select(
+            EntryObservable.observable_id.label("observable_id"),
+            func.count().label("cnt"),
+            func.count(func.distinct(EntryObservable.entry_id)).filter(~is_list).label("reports"),
+            func.count(func.distinct(Entry.feed_id)).filter(is_list).label("feeds"),
+        )
+        .join(Entry, Entry.id == EntryObservable.entry_id)
+        .group_by(EntryObservable.observable_id)
+        .subquery()
+    )
+
+
+async def recount_observable(session: AsyncSession, observable_id) -> None:
+    """Recompute every counter for one row from the junction (after an unlink)."""
+    agg = corroboration_counts_subquery()
+    row = (
+        await session.execute(select(agg.c.cnt, agg.c.reports, agg.c.feeds).where(agg.c.observable_id == observable_id))
+    ).first()
+    cnt, reports, feeds = (row.cnt, row.reports, row.feeds) if row else (0, 0, 0)
+    await session.execute(
+        update(Observable)
+        .where(Observable.id == observable_id)
+        .values(sighting_count=cnt, article_count=cnt, report_count=reports, feed_source_count=feeds)
+    )
 
 
 async def sight_known_values(session: AsyncSession, entry_id, candidates: list[Candidate]) -> int:
@@ -708,23 +1032,164 @@ async def sight_known_values(session: AsyncSession, entry_id, candidates: list[C
     return sighted
 
 
+#: Redaction and template tokens: a value carrying one is a pattern, not an
+#: exact-match atom.
+_PLACEHOLDER_RE = re.compile(
+    r"(?i)redacted|anonymi[sz]ed|<[^>\s]{1,40}>|\{[a-z_][\w\s]{0,40}\}|\[(?:redacted|victim|target|user)[^\]]*\]"
+)
+
+#: Discovery / admin commands every incident report quotes and no ledger
+#: wants: they carry nothing attacker-chosen, so an exact match in telemetry
+#: means nothing. Matched against the whitespace-normalised, lowercased line.
+GENERIC_COMMANDS_RE = re.compile(
+    r"(?i)^(?:"
+    r"whoami(?:\s+/\w+)*|systeminfo|hostname|ipconfig(?:\s+/\w+)*|ifconfig(?:\s+-?\w+)*|uname(?:\s+-\w+)?|id|pwd|w|who|last|"
+    r"quser|qwinsta|query\s+user|set|env|printenv|history|netstat(?:\s+-\w+)*|arp\s+-a|route\s+print|nltest(?:\s+/\S+)*|"
+    r"net\s+(?:view|user|group|localgroup|accounts|share|session|start|config|time)(?:\s+(?:\"[^\"]*\"|[^/\s]+))*(?:\s+/domain)?|"
+    r"tasklist(?:\s+/\S+(?:\s+\"[^\"]*\")?)*|dir(?:\s+\S+)?|ls(?:\s+-\w+)*|ps(?:\s+-?\w+)*|sc\s+query(?:\s+\S+)?|"
+    r"wmic\s+\w+\s+get(?:\s+[\w,]+)?|"
+    r"get-(?:process|service|adcomputer|aduser|adgroup|netipconfiguration|hotfix|wmiobject\s+win32_\w+)(?:\s+-\w+(?:\s+\S+)?)*|"
+    r"invoke-sharefinder(?:\s+-\w+)*|export-dnsserverzone(?:\s+-\w+\s+\S+)*|nslookup(?:\s+\S+)?|ping(?:\s+-\w+\s*\d*)*\s*\S*|"
+    r"klist|whoami\.exe|cmd(?:\.exe)?|powershell(?:\.exe)?|sudo\s+su|su\s+-"
+    r")$"
+)
+#: Something only the attacker could have chosen: a path with two segments, a
+#: host/URL/IP, a quoted string, an encoded blob, a dropped file name, or a
+#: flag that changes state.
+_ATTACKER_LITERAL_RE = re.compile(
+    r"(?i)(?:[\\/][\w.$~%-]+[\\/]|https?://|\b\d{1,3}(?:\.\d{1,3}){3}\b|"
+    r"\b[a-z0-9-]{2,}\.(?:com|net|org|io|top|xyz|ru|cn|cc|info|biz|site|online|shop|club|dev|app|cloud|lat|sbs|cfd|click|lol|pro|ws|me|to|su|li|ee|sh|zip)\b|"
+    r"\"[^\"]{4,}\"|'[^']{4,}'|[A-Za-z0-9+/=]{24,}|"
+    r"\b[\w-]+\.(?:exe|dll|ps1|bat|cmd|vbs|vbe|js|jse|hta|sh|py|pl|msi|zip|rar|7z|jar|iso|img|lnk|scr|pif|dat|bin|txt|log|cfg|ini|xml|json|yml)\b|"
+    r"\s/(?:add|create|change|delete|tn|tr|ru|sc|mo|v|d|f|q|c|k|urlcache|split|decode|encode|transfer|download)\b|"
+    r"\s-(?:enc|e|ec|encodedcommand|nop|noprofile|w|windowstyle|ep|executionpolicy|c|command|u|p|H|M|R|L)\b)"
+)
+#: Windows binaries whose system path says nothing about an intrusion: the
+#: LOLBins and core processes a write-up names as the technique's *target*.
+#: Only these basenames are vetoed — a planted ``phoneinfo.dll`` under
+#: System32 is exactly the kind of artifact the ledger wants.
+_OS_BINARY_NAMES = (
+    "cmd|powershell|pwsh|cscript|wscript|mshta|rundll32|regsvr32|regsvcs|regasm|certutil|bitsadmin|msiexec|schtasks|"
+    "sc|reg|net|net1|wmic|msbuild|installutil|cmstp|forfiles|pcalua|odbcconf|control|svchost|explorer|lsass|winlogon|"
+    "services|csrss|conhost|dllhost|taskhostw|taskhost|spoolsv|msdtc|wmiprvse|consent|notepad|calc|taskmgr|wbadmin|"
+    "vssadmin|bcdedit|wevtutil|ntdsutil|comsvcs|ntdll|kernel32|kernelbase|user32|advapi32|msvcrt|amsi|sdiagnhost|"
+    "sdiageng|werfault|smss|wininit|runtimebroker|sihost|dwm|ctfmon|searchindexer|searchhost|msedge|iexplore|"
+    "appcmd|w3wp|inetinfo|mmc|tasklist|whoami|systeminfo|ipconfig|nslookup|netsh|ping|find|findstr|xcopy|robocopy|"
+    "attrib|icacls|takeown|cacls|at|schtasks|wscript|cmdkey|curl|tar|expand|extrac32|makecab|esentutl|print"
+)
+_SYSTEM_BINARY_PATH_RE = re.compile(
+    r"(?i)^(?:[a-z]:)?\\(?:windows|winnt)\\(?:system32|syswow64|winsxs|microsoft\.net|systemapps)\\"
+    r"(?:[\w.-]+\\)*(?:" + _OS_BINARY_NAMES + r")\.(?:exe|dll|sys|ocx|cpl|msc|mui)$"
+)
+_BARE_SYSTEM_DIR_RE = re.compile(
+    r"(?i)^(?:[a-z]:)?\\(?:windows(?:\\(?:system32|syswow64|temp))?|programdata|users(?:\\public)?"
+    r"|program files(?: \(x86\))?)\\?$"
+    r"|^%(?:temp|tmp|appdata|localappdata|programdata|userprofile|windir|systemroot|public)%\\?$"
+    r"|^/(?:usr(?:/local)?/s?bin|s?bin)/[a-z0-9_.-]+$"
+)
+#: Well-known registry keys an author names as the *location* of persistence;
+#: the IOC is the value name under them, never the bare key.
+_BARE_UNIX_LOCATION_RE = re.compile(
+    r"(?i)^/(?:dev/(?:shm|null|tcp|vd[a-z]|sd[a-z]|nvme\d\w*)|var/(?:tmp|log|lib|spool(?:/cron(?:/crontabs)?)?|run|www(?:/html)?)"
+    r"|etc/(?:hosts|passwd|shadow|group|sudoers|crontab|cron\.d|cron\.daily|cron\.hourly|rc\.local|profile|bashrc"
+    r"|ld\.so\.preload|ssh|ssh/sshd_config|resolv\.conf|fstab|hostname|motd|environment|init\.d|systemd(?:/system)?"
+    r"|network(?:/interfaces)?|nginx|apache2|httpd|pam\.d|security|selinux)"
+    r"|proc(?:/self)?|sys|boot|root(?:/\.ssh)?|home(?:/[a-z0-9_-]+(?:/\.ssh)?)?|usr/(?:lib|lib64|share|local|include|src)"
+    r"|opt|srv|mnt|media|run|lib|lib64|tmp|bin|sbin|usr/s?bin|usr/local/s?bin|private/tmp|private/var/tmp"
+    r"|library/launchagents|library/launchdaemons|applications|users(?:/[a-z0-9_-]+)?)$"
+)
+_BARE_WELLKNOWN_KEY_RE = re.compile(
+    r"(?i)^hk(?:lm|cu|u|cr|cc|ey_[a-z_]+)\\(?:(?:software|system)\\)?(?:wow6432node\\)?(?:"
+    r"microsoft\\windows(?: nt)?\\currentversion(?:\\(?:run|runonce|runservices|explorer|policies|policies\\explorer"
+    r"|policies\\explorer\\run|winlogon|image file execution options))?|"
+    r"currentcontrolset(?:\\services|\\control)?|microsoft\\cryptography"
+    r"|microsoft\\windows defender(?:\\exclusions(?:\\paths)?)?|"
+    r"classes|microsoft|software|system|environment"
+    r")\\?$"
+)
+_BENIGN_URI_PATHS = frozenset(
+    {
+        "/",
+        "/index.html",
+        "/index.php",
+        "/index.htm",
+        "/favicon.ico",
+        "/robots.txt",
+        "/sitemap.xml",
+        "/wp-login.php",
+        "/wp-admin",
+        "/wp-admin/",
+        "/login",
+        "/login/",
+        "/admin",
+        "/admin/",
+        "/api",
+        "/api/",
+        "/api/v1",
+        "/api/v1/",
+        "/health",
+        "/status",
+        "/.env",
+        "/.git/config",
+    }
+)
+_STANDARD_HEADERS = frozenset(
+    {
+        "accept", "accept-encoding", "accept-language", "authorization", "cache-control", "connection",
+        "content-length", "content-type", "cookie", "date", "etag", "host", "if-modified-since", "location",
+        "origin", "pragma", "range", "referer", "server", "set-cookie", "transfer-encoding", "upgrade",
+        "user-agent", "vary", "via", "www-authenticate", "x-forwarded-for", "x-forwarded-proto", "x-real-ip",
+        "x-requested-with", "x-frame-options", "x-xss-protection", "x-content-type-options",
+        "strict-transport-security", "content-security-policy", "access-control-allow-origin", "x-powered-by",
+        "x-api-key", "x-csrf-token", "x-auth-token", "accept-ranges", "content-disposition", "expires",
+        "last-modified", "keep-alive", "te", "trailer", "dnt", "sec-fetch-mode", "sec-fetch-site", "sec-fetch-dest",
+    }
+)  # fmt: skip
+#: Service / task names Windows ships with — a report naming one describes the
+#: target of the technique, not the attacker's artifact.
+_OS_DEFAULT_NAMES = frozenset(
+    {
+        "schedule", "spooler", "wuauserv", "bits", "winlogon", "lanmanserver", "lanmanworkstation", "eventlog",
+        "dnscache", "dhcp", "w32time", "termservice", "rpcss", "lsass", "samss", "netlogon", "winmgmt", "wscsvc",
+        "windefend", "mpssvc", "sense", "trustedinstaller", "cryptsvc", "appidsvc", "msiserver", "vss", "svchost",
+        "explorer", "cron", "sshd", "systemd", "init", "rsyslog", "networkmanager",
+    }
+)  # fmt: skip
+_DETECTION_QUERY_START_RE = re.compile(
+    r"(?i)^(?:process\.|event\.|file\.|registry\.|network\.|host\.|user\.|winlog\.|index\s*=|source\s*=|sourcetype\s*=|@|\||"
+    r"selection|condition|not\s|and\s|or\s|where\s|from\s|select\s|title:|detection:|logsource:)"
+)
+
 #: Known UA product prefixes for strings without a version token.
 _UA_PREFIXES = ("mozilla/", "curl/", "wget/", "python-requests/", "python-urllib", "okhttp", "go-http-client", "java/")
 
 
 def _plausible_cmdline(value: str) -> bool:
     """A command line, not a sentence about one and not detection logic.
+
     Prose ("disable Microsoft's Antimalware Scan Interface") is words all the
     way down; a real command's arguments carry flags, paths, separators or
-    digits. ``OR``/``AND`` chains are rule material, not commands."""
+    digits. ``OR``/``AND`` chains and field-prefixed expressions are rule
+    material. Generic discovery/admin commands (``whoami /priv``,
+    ``net group "Domain Admins" /domain``) are vetoed outright, and whatever
+    remains must carry something the attacker chose — a path, a host, a
+    quoted string, an encoded blob, a dropped file, a state-changing flag."""
     if re.search(r"\s(?:OR|AND)\s", value):
         return False
+    if _DETECTION_QUERY_START_RE.match(value.strip()):
+        return False
     tokens = value.split()
+    # A command has arguments; a lone "mimikatz.exe" is a filename, not a cmdline.
+    if len(tokens) < 2:
+        return False
     # Quotes excluded from the "command-ish" set: possessives ("Microsoft's")
     # would let prose through.
     if len(tokens) >= 4 and not any(re.search(r"[\\/=:.\-|&$%<>_@\d]", tok) for tok in tokens[1:]):
         return False
-    return True
+    normalized = re.sub(r"\s+", " ", value.strip()).lower().strip("\"'`")
+    if GENERIC_COMMANDS_RE.match(normalized):
+        return False
+    return bool(_ATTACKER_LITERAL_RE.search(value))
 
 
 def _plausible_path_atom(value: str) -> bool:
@@ -740,6 +1205,23 @@ def _plausible_path_atom(value: str) -> bool:
     if len(bare_words) >= 3:
         return False
     if re.fullmatch(r"/(?:tmp|etc|var|usr|opt|home|dev|bin|sbin|lib|root|ui|api)/?", value, re.IGNORECASE):
+        return False
+    # A single top-level segment ("/PSEMHUB/") is a URI path or a name, not a
+    # file-system location anyone chose; bare well-known locations
+    # ("/dev/shm", "/var/tmp", "/etc/hosts") would sight half the corpus.
+    if re.fullmatch(r"/[^/\\]+/?", value):
+        return False
+    if _BARE_UNIX_LOCATION_RE.match(value.rstrip("/") or value):
+        return False
+    if _PLACEHOLDER_RE.search(value):
+        return False
+    # The technique's *target* — a signed OS binary under System32, a bare
+    # well-known directory — is never the attacker's artifact.
+    if _SYSTEM_BINARY_PATH_RE.match(value) or _BARE_SYSTEM_DIR_RE.match(value.rstrip("\\/") or value):
+        return False
+    if re.search(r"(?i)\\users\\(?:lab|admin|user|test\w*|analyst|sandbox|anonymi[sz]ed\w*)\\", value):
+        return False
+    if re.search(r"(?i)\\device\\harddiskvolume\D", value):
         return False
     return "/" in value or "\\" in value
 
@@ -776,7 +1258,25 @@ def validate_kind_value(kind: str, raw: str) -> str | None:
     if kind == "email":
         return canonical if EMAIL_RE.fullmatch(canonical) else None
     if kind == "uri_path":
-        return canonical if canonical.startswith("/") and len(canonical) > 1 else None
+        if not canonical.startswith("/") or len(canonical) < 3 or canonical.lower() in _BENIGN_URI_PATHS:
+            return None
+        return None if _PLACEHOLDER_RE.search(canonical) or "*" in canonical else canonical
+    if kind == "registry":
+        bare = canonical.rstrip("\\")
+        if not re.match(r"hk(?:lm|cu|u|cr|cc|ey_)", bare) or _PLACEHOLDER_RE.search(bare) or "\\\\" in bare:
+            return None
+        return None if _BARE_WELLKNOWN_KEY_RE.match(bare) or "*" in bare else bare
+    if kind == "http_header":
+        name = canonical.split(":", 1)[0].strip()
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]{2,63}", name) or name in _STANDARD_HEADERS:
+            return None
+        return canonical if len(canonical) <= 320 else None
+    if kind in ("scheduled_task", "service_name", "mutex", "named_pipe"):
+        if not (3 <= len(canonical) <= 128) or len(canonical.split()) > 5 or _PLACEHOLDER_RE.search(canonical):
+            return None
+        if canonical.rsplit("\\", 1)[-1] in _OS_DEFAULT_NAMES:
+            return None
+        return canonical
     if kind == "ja3":
         return canonical if re.fullmatch(r"[a-f0-9]{32}", canonical) else None
     if kind == "ja4":
@@ -798,8 +1298,25 @@ def validate_kind_value(kind: str, raw: str) -> str | None:
     return canonical if 4 <= len(canonical) <= 4096 else None
 
 
+#: A 64-hex string the author calls a key, token or secret is not a file hash
+#: (AES keys and API tokens share SHA256's shape).
+_NOT_A_HASH_EVIDENCE_RE = re.compile(r"(?i)\b(?:aes|xor|rc4|chacha)?\s*(?:key|token|secret|nonce|iv|seed|salt)s?\b")
+
+
+async def _ttp_id_for(session: AsyncSession, technique_id: str | None):
+    if not technique_id:
+        return None
+    from app.models.ttp import TTP
+
+    tid = technique_id.strip().upper()
+    if not re.fullmatch(r"T\d{4}(?:\.\d{3})?", tid):
+        return None
+    return (await session.execute(select(TTP.id).where(TTP.technique_id == tid))).scalar_one_or_none()
+
+
 async def store_observables(session: AsyncSession, entry_id, iocs: list[dict]) -> int:
-    """The AI door: persist entry_analysis's confirmed network indicators."""
+    """The AI door: persist entry_analysis's confirmed indicators (network,
+    hash and host kinds alike — every one through ``validate_kind_value``)."""
     stored = 0
     for item in iocs or []:
         kind = (item.get("kind") or "").strip()
@@ -809,6 +1326,14 @@ async def store_observables(session: AsyncSession, entry_id, iocs: list[dict]) -
         canonical = validate_kind_value(kind, raw)
         if canonical is None:
             continue
+        evidence = (item.get("evidence") or "").strip() or None
+        if (
+            kind in HASH_KINDS
+            and evidence
+            and _NOT_A_HASH_EVIDENCE_RE.search(evidence)
+            and "hash" not in evidence.lower()
+        ):
+            continue
         defanged = bool(item.get("defanged")) or is_defanged(raw)
         obs = await get_or_create_observable(
             session,
@@ -817,7 +1342,7 @@ async def store_observables(session: AsyncSession, entry_id, iocs: list[dict]) -
             via="ai_extraction",
             entry_id=entry_id,
             role=(item.get("role") or "").strip() or None,
-            evidence=(item.get("evidence") or "").strip() or None,
+            evidence=evidence,
             was_defanged=defanged,
         )
         if obs is None:
@@ -830,6 +1355,7 @@ async def store_observables(session: AsyncSession, entry_id, iocs: list[dict]) -
             confidence=(item.get("confidence") or "").strip() or None,
             surface_form=raw,
             was_defanged=defanged,
+            ttp_id=await _ttp_id_for(session, item.get("technique_id")),
         )
         stored += 1
     return stored
@@ -862,6 +1388,7 @@ async def shadow_observables(
         if canonical is None or (kind, canonical) in seen:
             continue
         seen.add((kind, canonical))
+        role = (item.get("role") or "").strip()
         existing.append(
             {
                 "kind": kind,
@@ -870,6 +1397,13 @@ async def shadow_observables(
                 "was_defanged": bool(item.get("defanged")) or is_defanged(raw),
                 "paragraph_index": 0,
                 "origin": "ai",
+                # The judgment travels with the nomination so a later promote
+                # (or a capture-mode replay) creates the row the AI meant,
+                # not a bare manual row.
+                "role": role if role in ROLES else None,
+                "evidence": ((item.get("evidence") or "").strip() or None),
+                "confidence": ((item.get("confidence") or "").strip() or None),
+                "technique_id": ((item.get("technique_id") or "").strip() or None),
             }
         )
         staged += 1
@@ -935,11 +1469,14 @@ async def store_scripts(session: AsyncSession, entry_id, scripts: list[dict]) ->
     return stored
 
 
-async def sync_observables_from_entry_ttps(session: AsyncSession, entry_id=None) -> int:
+async def sync_observables_from_entry_ttps(
+    session: AsyncSession, entry_id=None, *, kinds: set[str] | None = None
+) -> int:
     """The TTP door: upsert host artifacts the technique extraction captured.
 
     With ``entry_id`` this runs per-entry at ingest; without it, it is the
     retroactive backfill over every populated EntryTTP.observable_value row.
+    ``kinds`` restricts the door to the per-kind capture list.
     """
     from app.models.entry import Entry
     from app.models.ttp import EntryTTP
@@ -962,7 +1499,7 @@ async def sync_observables_from_entry_ttps(session: AsyncSession, entry_id=None)
     stored = 0
     for row in rows:
         kind = kind_for_ttp_observable(row.observable_type, row.observable_value)
-        if kind is None:
+        if kind is None or (kinds is not None and kind not in kinds):
             continue
         canonical = validate_kind_value(kind, row.observable_value)
         if canonical is None:
@@ -1003,6 +1540,7 @@ async def store_ioc_list_observables(
     pairs = parse_ioc_list_body(body)
     if not pairs:
         return 0
+    role = ioc_list_path_role(file_path, infra_tag)
 
     # Bulk, not per-value record_sighting: a big C2 list is thousands of values
     # and the per-row path (4 statements each) blows the stage's time limit.
@@ -1030,6 +1568,8 @@ async def store_ioc_list_observables(
                         "created_via": "ioc_list",
                         "created_from_entry_id": entry_id,
                         "infra_tag": infra_tag,
+                        "role": role,
+                        "feed_source_count": 1,
                         # Explicit clocks: a backfilled historical list must not
                         # mint rows stamped "seen today" by the column defaults.
                         "first_seen_at": effective,
@@ -1054,6 +1594,11 @@ async def store_ioc_list_observables(
         # Fill-only, like get_or_create_observable: tag pre-existing untagged rows.
         await session.execute(
             update(Observable).where(Observable.id.in_(ids), Observable.infra_tag.is_(None)).values(infra_tag=infra_tag)
+        )
+    if role:
+        # Fill-only too: a C2 list naming a row the AI already judged keeps the AI's role.
+        await session.execute(
+            update(Observable).where(Observable.id.in_(ids), Observable.role.is_(None)).values(role=role)
         )
     new_ids = []
     for i in range(0, len(rows), _CHUNK):
@@ -1083,6 +1628,10 @@ async def store_ioc_list_observables(
         values: dict = {
             "sighting_count": Observable.sighting_count + 1,
             "article_count": func.coalesce(Observable.article_count, 0) + 1,
+            # A list file is one source however many variants it ships; the
+            # nightly reconcile counts distinct feeds exactly, this keeps a
+            # pre-existing row from reading "0 feeds" until then.
+            "feed_source_count": func.greatest(Observable.feed_source_count, 1),
             "first_seen_at": func.least(Observable.first_seen_at, effective),
             "last_seen_at": case(
                 (Observable.sighting_count == 0, effective),
@@ -1150,15 +1699,201 @@ def kind_for_ttp_observable(observable_type: str | None, observable_value: str |
 
 _CODE_BLOCK_RE = re.compile(r"<(?:pre|code)[^>]*>(.*?)</(?:pre|code)>", re.IGNORECASE | re.DOTALL)
 _TAG_RE = re.compile(r"<[^>]+>")
-_CMDLINE_START_RE = re.compile(r"^(?:[a-zA-Z_][\w.-]{1,40}(?:\.exe)?|\.\/[\w./-]+)\s")
 _WIN_PATH_RE = re.compile(r"^(?:[a-zA-Z]:\\|\\\\)[^<>\n]{3,}$")
 _NIX_PATH_RE = re.compile(r"^/(?:etc|tmp|var|usr|opt|home|dev|bin|sbin|lib)/[\w./-]{2,}$")
+
+#: A code-block line nominates as a command only when it starts the way a
+#: command does. The old rule ("a word followed by a space, with one digit or
+#: punctuation mark somewhere") let every preformatted bulletin line through —
+#: "Operating System: Red Hat", "Patch Instructions:" — and AusCERT alone
+#: staged 12k of them. Either the line opens with a shell prompt, or its
+#: first token is a known executor / script host / transfer tool, or it names
+#: an executable or script file.
+_PROMPT_RE = re.compile(r"^(?:PS [A-Z]:\\[^>]*>|[a-z0-9_.\-]+@[a-z0-9_.\-]+:[~/][^$#]*[$#]|[$#>])\s+")
+_EXECUTORS = (
+    "cmd",
+    "cmd.exe",
+    "powershell",
+    "powershell.exe",
+    "pwsh",
+    "cscript",
+    "wscript",
+    "mshta",
+    "rundll32",
+    "regsvr32",
+    "regsvcs",
+    "regasm",
+    "certutil",
+    "bitsadmin",
+    "msiexec",
+    "schtasks",
+    "sc",
+    "reg",
+    "net",
+    "net1",
+    "wmic",
+    "msbuild",
+    "installutil",
+    "cmstp",
+    "forfiles",
+    "pcalua",
+    "odbcconf",
+    "control",
+    "curl",
+    "wget",
+    "invoke-webrequest",
+    "iwr",
+    "irm",
+    "invoke-expression",
+    "iex",
+    "start-process",
+    "bash",
+    "sh",
+    "zsh",
+    "dash",
+    "python",
+    "python3",
+    "perl",
+    "ruby",
+    "node",
+    "php",
+    "java",
+    "nc",
+    "ncat",
+    "socat",
+    "chmod",
+    "chattr",
+    "chown",
+    "crontab",
+    "nohup",
+    "setsid",
+    "base64",
+    "echo",
+    "sudo",
+    "su",
+    "ssh",
+    "scp",
+    "sftp",
+    "rclone",
+    "nxc",
+    "crackmapexec",
+    "psexec",
+    "mimikatz",
+    "procdump",
+    "ntdsutil",
+    "vssadmin",
+    "wbadmin",
+    "bcdedit",
+    "wevtutil",
+    "taskkill",
+    "tasklist",
+    "whoami",
+    "nltest",
+    "dsquery",
+    "adfind",
+    "systeminfo",
+    "ipconfig",
+    "netsh",
+    "arp",
+    "route",
+    "attrib",
+    "icacls",
+    "takeown",
+    "cacls",
+    "xcopy",
+    "robocopy",
+    "copy",
+    "move",
+    "del",
+    "ren",
+    "mkdir",
+    "rmdir",
+    "type",
+    "findstr",
+    "find",
+    "ping",
+    "nslookup",
+    "dig",
+    "tar",
+    "unzip",
+    "7z",
+    "rar",
+    "zip",
+    "gzip",
+    "openssl",
+    "gpg",
+    "docker",
+    "kubectl",
+    "aws",
+    "az",
+    "gcloud",
+    "wmiexec.py",
+    "smbclient",
+    "impacket-",
+    "add-mppreference",
+    "set-mppreference",
+    "new-itemproperty",
+    "set-itemproperty",
+    "new-scheduledtask",
+    "register-scheduledtask",
+    "new-service",
+    "invoke-command",
+    "invoke-wmimethod",
+    "invoke-mimikatz",
+    "set-executionpolicy",
+)
+_EXEC_SUFFIXES = (
+    ".exe",
+    ".ps1",
+    ".bat",
+    ".cmd",
+    ".vbs",
+    ".vbe",
+    ".js",
+    ".jse",
+    ".hta",
+    ".sh",
+    ".py",
+    ".pl",
+    ".jar",
+    ".msi",
+    ".dll",
+    ".scr",
+    ".pif",
+)  # no ".com": a bare domain on its own line would read as a COM executable
+_PROSE_START_RE = re.compile(
+    r"(?i)^(the|this|that|these|those|it|we|you|note|output|example|figure|table|affected|operating|security|patch|cve|cvss|epss|announcement|an|a|in|on|for|if|when|several|multiple|please|see|refer|more|cvssv?\d|published|updated|product|vendor|summary|description|impact|resolution|references?|revision)\b"
+)
+#: Lines in a code block that look like a command — used to veto blocks that
+#: are mostly prose (bulletin text, log excerpts, config dumps).
+_COMMANDISH_RE = re.compile(r"[\\/=:.\-|&$%<>_@]|\d")
+
+
+def _looks_like_command(line: str) -> bool:
+    if _PROMPT_RE.match(line):
+        return True
+    first = line.split(None, 1)[0].lower().strip("\"'`") if line.split() else ""
+    if not first:
+        return False
+    if first.startswith("./") or first.startswith("\\") or first.startswith("~/"):
+        return True
+    base = first.rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
+    if base in _EXECUTORS or any(base.startswith(e) for e in _EXECUTORS if e.endswith("-")):
+        return True
+    return base.endswith(_EXEC_SUFFIXES)
 
 
 def scan_code_block_candidates(content_html: str | None, *, max_candidates: int = 20) -> list[Candidate]:
     """Host-kind candidates from the article's <pre>/<code> blocks — where
     authors put commands — instead of prose regex. Nominations only: same
-    entry-local candidate tier, same one-click promote, never entities."""
+    entry-local candidate tier, same one-click promote, never entities.
+
+    Precision rules: a block that is mostly prose (fewer than half its
+    non-trivial lines carry command syntax) nominates nothing; a cmdline
+    nomination needs a prompt marker or a known executor as its first token;
+    placeholder tokens (``REDACTED``, ``<GUID>``, ``{session_id}``) stay out of
+    path/registry nominations.
+    """
     if not content_html:
         return []
     out: list[Candidate] = []
@@ -1175,25 +1910,35 @@ def scan_code_block_candidates(content_html: str | None, *, max_candidates: int 
         out.append(Candidate(kind, canonical, value.strip()[:300], False, 0))
 
     for block_idx, m in enumerate(_CODE_BLOCK_RE.finditer(content_html)):
+        if block_idx > 30:
+            break
         block = html_mod.unescape(_TAG_RE.sub("", m.group(1)))
-        for raw_line in block.splitlines():
-            line = raw_line.strip().lstrip("$#> ").strip()
-            if not (6 <= len(line) <= 400):
+        lines = [ln.strip() for ln in block.splitlines() if 6 <= len(ln.strip()) <= 400]
+        if not lines:
+            continue
+        # Majority-prose veto: preformatted bulletins and log excerpts.
+        commandish = sum(1 for ln in lines if _COMMANDISH_RE.search(ln) and not _PROSE_START_RE.match(ln))
+        if commandish * 2 < len(lines):
+            continue
+        for line in lines:
+            had_prompt = bool(_PROMPT_RE.match(line))
+            body = _PROMPT_RE.sub("", line, count=1).strip() if had_prompt else line.lstrip("$#> ").strip()
+            if not (6 <= len(body) <= 400):
                 continue
             # Structural / comment lines never nominate; a bare "/" can open a
             # real unix path, so only comment markers skip.
-            if line[:1] in "{<[\"'-*=" or line.startswith(("//", "/*")):
+            if body[:1] in "{<[\"'-*=" or body.startswith(("//", "/*", "rem ", "REM ")):
                 continue
-            if re.match(r"(?i)^(the|this|that|these|those|it|we|you|note|output|example|figure|table)\b", line):
+            if _PROSE_START_RE.match(body):
                 continue
-            if re.match(r"(?i)^hk(?:lm|cu|cr|u|cc)\b", line):
-                add("registry", line)
-            elif _WIN_PATH_RE.match(line) or _NIX_PATH_RE.match(line):
-                add("path", line)
-            elif _CMDLINE_START_RE.match(line) and kind_for_ttp_observable("cmdline", line) == "cmdline":
-                add("cmdline", line)
-        if block_idx > 30:
-            break
+            if re.match(r"(?i)^hk(?:lm|cu|cr|u|cc)\b", body):
+                if not _PLACEHOLDER_RE.search(body) and "\\\\" not in body:
+                    add("registry", body)
+            elif _WIN_PATH_RE.match(body) or _NIX_PATH_RE.match(body):
+                if not _PLACEHOLDER_RE.search(body):
+                    add("path", body)
+            elif (had_prompt or _looks_like_command(body)) and kind_for_ttp_observable("cmdline", body) == "cmdline":
+                add("cmdline", body)
     return out
 
 

@@ -830,7 +830,7 @@ const OBSERVABLE_KIND_GROUPS: Array<[string, string[]]> = [
   ["Domains", ["domain"]],
   ["URLs & paths", ["url", "uri_path"]],
   ["Hashes & fingerprints", ["md5", "sha1", "sha256", "cert_fingerprint", "ja3", "ja4"]],
-  ["Commands & host artifacts", ["cmdline", "registry", "path", "mutex", "named_pipe", "service_name", "user_agent"]],
+  ["Commands & host artifacts", ["cmdline", "registry", "path", "mutex", "named_pipe", "service_name", "scheduled_task", "user_agent", "http_header"]],
   ["Scripts", ["script"]],
   ["Emails", ["email"]],
 ];

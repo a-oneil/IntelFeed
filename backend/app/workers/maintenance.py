@@ -1976,14 +1976,11 @@ def reconcile_observable_counters():
 async def _reconcile_observable_counters():
     from sqlalchemy import exists, or_, update
 
+    from app.intelligence.observables import corroboration_counts_subquery
     from app.models.observable import EntryObservable, Observable
 
     async with _get_worker_session() as db:
-        counts = (
-            select(EntryObservable.observable_id, func.count().label("cnt"))
-            .group_by(EntryObservable.observable_id)
-            .subquery()
-        )
+        counts = corroboration_counts_subquery()
         fixed = await db.execute(
             update(Observable)
             .where(
@@ -1992,17 +1989,29 @@ async def _reconcile_observable_counters():
                     Observable.sighting_count != counts.c.cnt,
                     Observable.article_count.is_(None),
                     Observable.article_count != counts.c.cnt,
+                    Observable.report_count != counts.c.reports,
+                    Observable.feed_source_count != counts.c.feeds,
                 ),
             )
-            .values(sighting_count=counts.c.cnt, article_count=counts.c.cnt)
+            .values(
+                sighting_count=counts.c.cnt,
+                article_count=counts.c.cnt,
+                report_count=counts.c.reports,
+                feed_source_count=counts.c.feeds,
+            )
         )
         zeroed = await db.execute(
             update(Observable)
             .where(
-                or_(Observable.sighting_count != 0, Observable.article_count != 0),
+                or_(
+                    Observable.sighting_count != 0,
+                    Observable.article_count != 0,
+                    Observable.report_count != 0,
+                    Observable.feed_source_count != 0,
+                ),
                 ~exists(select(EntryObservable.observable_id).where(EntryObservable.observable_id == Observable.id)),
             )
-            .values(sighting_count=0, article_count=0)
+            .values(sighting_count=0, article_count=0, report_count=0, feed_source_count=0)
         )
         await db.commit()
         return {"changed": (fixed.rowcount or 0) + (zeroed.rowcount or 0)}

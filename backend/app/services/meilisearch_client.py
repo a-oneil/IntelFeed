@@ -854,7 +854,14 @@ ENTITY_INDEXES = {
     "entities_observable": {
         "searchable": ["value", "label", "role"],
         "filterable": ["kind", "role", "status", "created_via", "infra_tag", "first_seen_at"],
-        "sortable": ["first_seen_at", "last_seen_at", "article_count", "sighting_count", "current_confidence"],
+        "sortable": [
+            "first_seen_at",
+            "last_seen_at",
+            "article_count",
+            "sighting_count",
+            "report_count",
+            "current_confidence",
+        ],
     },
     "entities_tool": {
         "searchable": ["name", "aliases", "tool_type", "description"],

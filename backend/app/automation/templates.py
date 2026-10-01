@@ -51,6 +51,55 @@ AUTOMATION_TEMPLATES: list[dict] = [
             }
         ],
     },
+    # --- Observables ---
+    {
+        "id": "new-c2-infrastructure-alert",
+        "name": "Notify on New C2 Infrastructure",
+        "description": (
+            "Notify when a reporting source (research write-up, publisher IOC file, analyst promote) captures "
+            "command-and-control infrastructure — never a blocklist mirror, never dual-use VPN/proxy exits"
+        ),
+        "category": "intelligence",
+        "tags": ["observables", "c2", "alerting"],
+        "trigger_type": "on_observable_captured",
+        "trigger_config": {"roles": ["c2"], "exclude_infra_tagged": True},
+        "conditions": {},
+        "actions": [
+            {
+                "type": "send_notification",
+                "config": {
+                    "platform": "custom",
+                    "webhook_url": "",
+                    "message_template": "New C2 ({observables_count}): {title}\n{observables}\n{app_url}",
+                },
+            }
+        ],
+    },
+    {
+        "id": "actor-infrastructure-to-campaign",
+        "name": "Add an Actor's New Infrastructure to Its Campaign",
+        "description": (
+            "When an article naming a tracked actor captures observables, link the article to the actor's "
+            "campaign and attach the captured infrastructure as campaign entities. Set campaign_id and the "
+            "name of the group you track before enabling."
+        ),
+        "category": "intelligence",
+        "tags": ["observables", "campaign", "attribution"],
+        "trigger_type": "on_observable_captured",
+        "trigger_config": {"exclude_infra_tagged": True},
+        "conditions": {"type": "content_contains", "config": {"pattern": "ACTOR NAME"}},
+        "actions": [
+            {
+                "type": "add_to_campaign",
+                "config": {
+                    "campaign_id": "",
+                    "notes": "Auto-linked on observable capture",
+                    "link_observables": True,
+                    "observable_roles": "c2, delivery, payload, phishing, exfil",
+                },
+            }
+        ],
+    },
     # --- Intelligence Extraction ---
     {
         "id": "full-intel-extraction",

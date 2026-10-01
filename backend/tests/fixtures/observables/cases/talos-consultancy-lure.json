@@ -1,0 +1,79 @@
+{
+  "slug": "talos-consultancy-lure",
+  "title_like": "Trust and the enticing consultancy offer",
+  "title": "Trust and the enticing consultancy offer",
+  "url": "https://blog.talosintelligence.com/trust-and-the-enticing-consultancy-offer/",
+  "publisher": "Cisco Talos",
+  "kind": "positive",
+  "attribution": [],
+  "expected": [
+    {
+      "kind": "sha256",
+      "value": "9f1f11a708d393e0a4109ae189bc64f1f3e312653dcf317a2bd406f18ffcc507",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "md5",
+      "value": "2915b3f8b703eb744fc54c81f4a9c67f",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "sha256",
+      "value": "9896a6fcb9bb5ac1ec5297b4a65be3f647589adf7c37b45f3f7466decd6a4a7f",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "md5",
+      "value": "38de5b216c33833af710e88f7f64fc98",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "sha256",
+      "value": "540080fea97d88ed902c5e4f9a026b4fcd32ab263706c520e00728f1a29578b8",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "md5",
+      "value": "d65c7b544a97b0c3f2773b5fcc57d30e",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "sha256",
+      "value": "cfa1997682e4ed41bc691ba848d845abbe0b75ec97e640c2b015b4d1624a108a",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "md5",
+      "value": "415898f14843d4a6537cf8f43d328eaf",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "sha256",
+      "value": "38d053135ddceaef0abb8296f3b0bf6114b25e10e6fa1bb8050aeecec4ba8f55",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "md5",
+      "value": "41444d7018601b599beac0c60ed1bf83",
+      "role": "",
+      "note": ""
+    }
+  ],
+  "optional": [],
+  "must_not": [
+    {
+      "kind": "domain",
+      "value": "talosintelligence.com",
+      "why": "publisher / reference link"
+    }
+  ]
+}

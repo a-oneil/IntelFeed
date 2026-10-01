@@ -10,6 +10,7 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Body, Depends, File, Path, Query, Response, UploadFile
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import case, cast, delete, func, or_, select, tuple_, type_coerce
+from sqlalchemy import false as sa_false
 from sqlalchemy import text as sa_text
 from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
@@ -51,7 +52,7 @@ from app.models.intelligence_requirement import IntelligenceRequirement, Require
 from app.models.malware_family import EntryMalware, MalwareFamily
 from app.models.mitigation import EntryMitigation, Mitigation, TTPMitigation
 from app.models.note import Note
-from app.models.observable import EntryObservable, Observable
+from app.models.observable import ALL_KINDS, EntryObservable, Observable
 from app.models.product import EntryProduct, Product
 from app.models.ransomware import RansomwareVictim, VictimDisclosure
 from app.models.rule_coverage import RuleCoverage
@@ -4842,7 +4843,9 @@ def _observable_to_response(obs: Observable, entry_link: EntryObservable | None 
         needs_review=obs.needs_review,
         created_via=obs.created_via,
         sighting_count=obs.sighting_count or 0,
-        article_count=obs.article_count or 0,
+        report_count=obs.report_count or 0,
+        feed_source_count=obs.feed_source_count or 0,
+        reputation=obs.reputation,
         first_seen_at=obs.first_seen_at,
         last_seen_at=obs.last_seen_at,
         link_source=entry_link.source if entry_link else None,
@@ -4850,6 +4853,70 @@ def _observable_to_response(obs: Observable, entry_link: EntryObservable | None 
         surface_form=entry_link.surface_form if entry_link else None,
         was_defanged=entry_link.was_defanged if entry_link else None,
     )
+
+
+@router.get("/entities/{entity_type}/{entity_id}/infrastructure")
+async def get_entity_infrastructure_view(
+    entity_type: str = Path(..., description="threat_actor, malware, campaign or tool"),
+    entity_id: uuid.UUID = Path(..., description="Entity UUID"),
+    format: str = Query("json", pattern="^(json|csv)$", description="json, or csv for a flat export"),
+    limit: int = Query(200, ge=1, le=1000),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The observables behind an actor, family, campaign or tool, in two tiers.
+
+    **Claimed** rows are attribution edges onto the ledger (uses /
+    communicates_with / controls), each born from an evidence sentence or an
+    analyst — the graph's edges, with their trust tier. **Reported alongside**
+    rows are observables a reporting door sighted in articles that link the
+    entity: read-time co-occurrence that never becomes a relationship, with
+    indicator-list files and newsletters excluded.
+    """
+    import csv
+    import io
+
+    from app.intelligence.infrastructure import (
+        INFRASTRUCTURE_ENTITY_TYPES,
+        get_entity_infrastructure,
+        infrastructure_csv_rows,
+    )
+
+    if entity_type not in INFRASTRUCTURE_ENTITY_TYPES:
+        raise AppError(
+            code="invalid_entity_type",
+            message=f"entity_type must be one of {sorted(INFRASTRUCTURE_ENTITY_TYPES)}",
+            status_code=422,
+        )
+    payload = await get_entity_infrastructure(db, entity_type, entity_id, limit=limit)
+    if format == "csv":
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        for row in infrastructure_csv_rows(payload):
+            # Spreadsheet formula-injection guard, same as sightings.csv.
+            writer.writerow([("'" + c) if c[:1] in "=+-@\t" else c for c in row])
+        return Response(
+            content=buf.getvalue(),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{entity_type}-{entity_id}-infrastructure.csv"'},
+        )
+    return payload
+
+
+@router.get("/observables/{observable_id}/backlinks")
+async def get_observable_backlinks_view(
+    observable_id: uuid.UUID = Path(..., description="Observable UUID"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Who claims this observable (attribution edges) and which actors,
+    families, campaigns and tools its reporting articles name."""
+    from app.intelligence.infrastructure import get_observable_backlinks
+
+    exists = (await db.execute(select(Observable.id).where(Observable.id == observable_id))).scalar_one_or_none()
+    if exists is None:
+        raise AppError(code="not_found", message="Observable not found", status_code=404)
+    return await get_observable_backlinks(db, observable_id)
 
 
 @router.get("/observables", response_model=PaginatedResponse[ObservableResponse])
@@ -4867,10 +4934,19 @@ async def list_observables(
         "'any' for all tagged rows, or 'none' for true indicators only",
     ),
     min_confidence: float | None = Query(None, ge=0, le=1, description="Minimum current confidence"),
+    linked_entity: str | None = Query(
+        None,
+        pattern=r"^(threat_actor|malware|campaign|tool):[0-9a-fA-F-]{36}$",
+        description=(
+            "`<type>:<uuid>` — only the observables behind that actor/family/campaign/tool "
+            "(claimed attribution edges plus values reported alongside it); the profile's "
+            "'Open in observables browser' pivot"
+        ),
+    ),
     include_denied: bool = Query(False, description="Include analyst-denied values (hidden by default)"),
     sort_by: str = Query(
         "last_seen_at",
-        pattern="^(value|kind|current_confidence|sighting_count|article_count|first_seen_at|last_seen_at|linked_count)$",
+        pattern="^(value|kind|current_confidence|sighting_count|first_seen_at|last_seen_at|linked_count|report_count|feed_source_count)$",
         description="Sort column; linked_count sorts by non-rejected entity-relationship count (attribution claims)",
     ),
     sort_order: str = Query("desc", pattern="^(asc|desc)$", description="Sort direction"),
@@ -4904,6 +4980,12 @@ async def list_observables(
             base_q = base_q.where(Observable.infra_tag == infra_tag)
     if min_confidence is not None:
         base_q = base_q.where(Observable.current_confidence >= min_confidence)
+    if linked_entity:
+        from app.intelligence.infrastructure import infrastructure_observable_ids
+
+        l_type, l_id = linked_entity.split(":", 1)
+        ids = await infrastructure_observable_ids(db, l_type, uuid.UUID(l_id))
+        base_q = base_q.where(Observable.id.in_(ids)) if ids else base_q.where(sa_false())
 
     total = (await db.execute(select(func.count()).select_from(base_q.subquery()))).scalar_one()
     # linked_count = the shared workbench "Linked" column (attribution claims).
@@ -4964,13 +5046,23 @@ async def list_observable_candidates(
         )
     ).all()
 
+    from app.intelligence.observables import validate_kind_value
+
     agg: dict[tuple[str, str], dict] = {}
+    rejected: dict[tuple[str, str], bool] = {}
     for entry_id, title, published_at, candidates in rows:
         for c in candidates or []:
             c_kind, c_value = c.get("kind"), c.get("value")
             if not c_kind or not c_value or (kind and c_kind != kind):
                 continue
             key = (c_kind, c_value)
+            # Nominations staged under older, looser rules: a value today's
+            # validators reject could never be promoted, so it never shows.
+            if key not in agg:
+                if key not in rejected:
+                    rejected[key] = c_kind not in ALL_KINDS or validate_kind_value(c_kind, c_value) is None
+                if rejected[key]:
+                    continue
             row = agg.get(key)
             if row is None:
                 agg[key] = {
@@ -5242,7 +5334,7 @@ async def promote_observable_candidate(
     from app.intelligence.observables import get_or_create_observable, record_sighting, validate_kind_value
     from app.models.observable import ALL_KINDS
 
-    await _get_entry(db, entry_id)
+    entry = await _get_entry(db, entry_id)
     if payload.kind not in ALL_KINDS:
         raise AppError(code="invalid_kind", message=f"kind must be one of {sorted(ALL_KINDS)}", status_code=422)
     canonical = validate_kind_value(payload.kind, payload.value)
@@ -5252,18 +5344,49 @@ async def promote_observable_candidate(
             message=f"'{payload.value}' is not a valid {payload.kind} value",
             status_code=422,
         )
-    obs = await get_or_create_observable(db, payload.kind, canonical, via="manual", entry_id=entry_id)
+    # A staged candidate (an AI shadow nomination) already carries a judgment;
+    # the analyst's click confirms it rather than discarding it.
+    staged = next(
+        (
+            c
+            for c in (entry.observable_candidates or [])
+            if isinstance(c, dict) and c.get("kind") == payload.kind and c.get("value") == canonical
+        ),
+        {},
+    )
+    obs = await get_or_create_observable(
+        db,
+        payload.kind,
+        canonical,
+        via="manual",
+        entry_id=entry_id,
+        role=payload.role or staged.get("role"),
+        evidence=payload.evidence or staged.get("evidence"),
+        label=payload.label,
+        was_defanged=bool(staged.get("was_defanged")),
+    )
     if obs is None:
         raise AppError(code="observable_denied", message="This value is on the never-capture list", status_code=409)
-    await record_sighting(db, entry_id, obs, source="manual", surface_form=payload.surface_form or payload.value)
+    await record_sighting(
+        db,
+        entry_id,
+        obs,
+        source="manual",
+        confidence=staged.get("confidence"),
+        surface_form=payload.surface_form or staged.get("surface_form") or payload.value,
+        was_defanged=bool(staged.get("was_defanged")),
+    )
     await db.commit()
     await db.refresh(obs)
     from app.services.entity_indexer import index_single_entity
+    from app.workers.automation_tasks import dispatch_observable_capture_automations
 
     try:
         await index_single_entity("observable", obs)
     except Exception:
         logger.warning("Observable search indexing failed for %s", obs.id, exc_info=True)
+    # The analyst door is a capture too: on_observable_captured rules see it.
+    dispatch_observable_capture_automations(entry_id, countdown=0)
     return _observable_to_response(obs)
 
 
@@ -5297,23 +5420,16 @@ async def unlink_entry_observable(
     db: AsyncSession = Depends(get_db),
 ):
     """Remove one sighting (the ledger row is kept) and refresh its counters."""
+    from app.intelligence.observables import recount_observable
+
     result = await db.execute(
         delete(EntryObservable).where(
             EntryObservable.entry_id == entry_id, EntryObservable.observable_id == observable_id
         )
     )
-    if result.rowcount == 0:
-        raise AppError(code="not_found", message="Association not found", status_code=404)
-    remaining = (
-        await db.execute(
-            select(func.count()).select_from(EntryObservable).where(EntryObservable.observable_id == observable_id)
-        )
-    ).scalar_one()
-    await db.execute(
-        sa_update(Observable)
-        .where(Observable.id == observable_id)
-        .values(sighting_count=remaining, article_count=remaining)
-    )
+    if not result.rowcount:
+        raise AppError(code="not_found", message="No such sighting", status_code=404)
+    await recount_observable(db, observable_id)
     await db.commit()
     await _invalidate_after_unlink("observable", observable_id, entry_id, db)
     return Response(status_code=204)

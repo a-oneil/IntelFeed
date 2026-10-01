@@ -112,6 +112,53 @@ TOOLS: dict[str, dict] = {
             },
         },
     },
+    "export_observables": {
+        "description": (
+            "Export a filtered slice of the ledger as lines (EDL), CSV rows, or JSON \u2014 the same "
+            "filters as search_observables plus a minimum report count and an 'exclude dual-use "
+            "infrastructure' switch. Values are returned refanged (operational form). Denied rows "
+            "and, by default, infra-tagged rows are excluded."
+        ),
+        "params": {
+            "format": {
+                "type": 'str',
+                "default": 'edl',
+                "enum": ['edl', 'csv', 'json'],
+            },
+            "kind": {
+                "type": 'str',
+                "default": None,
+            },
+            "role": {
+                "type": 'str',
+                "default": None,
+            },
+            "status": {
+                "type": 'str',
+                "default": None,
+            },
+            "min_confidence": {
+                "type": 'float',
+                "default": None,
+            },
+            "min_reports": {
+                "type": 'int',
+                "default": None,
+            },
+            "include_infra_tagged": {
+                "type": 'bool',
+                "default": False,
+            },
+            "query": {
+                "type": 'str',
+                "default": None,
+            },
+            "limit": {
+                "type": 'int',
+                "default": None,
+            },
+        },
+    },
     "get_analytics": {
         "description": (
             "Get platform analytics: trending entities, intelligence velocity, detection coverage "
@@ -415,6 +462,30 @@ TOOLS: dict[str, dict] = {
                 "default": 1,
             },
             "window_days": {
+                "type": 'int',
+                "default": None,
+            },
+        },
+    },
+    "get_entity_infrastructure": {
+        "description": (
+            "Pivot from a threat actor, malware family, campaign or tool to its observables, in two "
+            "tiers: 'claimed' (attribution edges with evidence \u2014 uses / communicates_with / controls, "
+            "with trust tier) and 'reported_alongside' (observables a reporting article that names "
+            "the entity also carried; indicator-list files and newsletters excluded). Answers 'what "
+            "infrastructure does X use?'."
+        ),
+        "params": {
+            "entity_type": {
+                "type": 'str',
+                "required": True,
+                "enum": ['threat_actor', 'malware', 'campaign', 'tool'],
+            },
+            "entity_id": {
+                "type": 'str',
+                "required": True,
+            },
+            "limit": {
                 "type": 'int',
                 "default": None,
             },
@@ -1491,6 +1562,34 @@ TOOLS: dict[str, dict] = {
                 "default": None,
             },
             "status": {
+                "type": 'str',
+                "default": None,
+            },
+            "captured_by": {
+                "type": 'str',
+                "default": None,
+            },
+            "infra_tag": {
+                "type": 'str',
+                "default": None,
+            },
+            "needs_review": {
+                "type": 'bool',
+                "default": None,
+            },
+            "min_confidence": {
+                "type": 'float',
+                "default": None,
+            },
+            "min_reports": {
+                "type": 'int',
+                "default": None,
+            },
+            "linked_entity_type": {
+                "type": 'str',
+                "default": None,
+            },
+            "linked_entity_id": {
                 "type": 'str',
                 "default": None,
             },

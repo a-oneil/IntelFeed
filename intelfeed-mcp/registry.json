@@ -469,7 +469,7 @@
  },
  {
   "name": "create_automation_rule",
-  "description": "Set up an automation rule with trigger, conditions, and actions. Trigger types: on_correlation_event, on_cve_detected, on_keyword_match, on_manual, on_new_entry, on_schedule. Each action is {type, config}; valid action types: add_tags, add_to_campaign, bookmark_entry, branch, chain_rule, create_intel_report, create_note, export_to, extract_cves, extract_malware, extract_threat_actors, extract_ttps, generate_detection_rules, hide_entry, mark_priority, mark_read, remove_tags, run_ai_task, run_webhook, send_notification, star_entry, use_daily_summary. The rule is created enabled.",
+  "description": "Set up an automation rule with trigger, conditions, and actions. Trigger types: on_correlation_event, on_cve_detected, on_entry_scored, on_keyword_match, on_manual, on_new_entry, on_observable_captured, on_schedule. Each action is {type, config}; valid action types: add_tags, add_to_campaign, bookmark_entry, branch, chain_rule, create_intel_report, create_note, export_to, extract_cves, extract_malware, extract_threat_actors, extract_ttps, generate_detection_rules, hide_entry, mark_priority, mark_read, remove_tags, run_ai_task, run_webhook, send_notification, star_entry, use_daily_summary. The rule is created enabled.",
   "input_schema": {
    "type": "object",
    "properties": {
@@ -485,9 +485,11 @@
      "enum": [
       "on_correlation_event",
       "on_cve_detected",
+      "on_entry_scored",
       "on_keyword_match",
       "on_manual",
       "on_new_entry",
+      "on_observable_captured",
       "on_schedule"
      ],
      "description": "What triggers the rule"
@@ -1364,6 +1366,31 @@
   "mutating": true
  },
  {
+  "name": "deny_observable",
+  "description": "Admin: tombstone a value so it is never captured, sighted or exported again (false positive, benign infrastructure, your own domain). Works on an existing row by UUID or on any (kind, value) — denying a value that is not in the ledger creates the tombstone so future doors refuse it. Reversible via the API.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "observable_id": {
+     "type": "string",
+     "description": "Observable UUID (or give kind + value)"
+    },
+    "kind": {
+     "type": "string"
+    },
+    "value": {
+     "type": "string"
+    },
+    "reason": {
+     "type": "string",
+     "description": "Why (stored as the row's description)"
+    }
+   },
+   "required": []
+  },
+  "mutating": true
+ },
+ {
   "name": "detect_glossary_terms",
   "description": "Detect which glossary terms appear in an entry's text (word-boundary matching over each term's name and search-term aliases). Returns matched terms with per-term match counts, highest first. Note: takes an entry UUID, not raw text — that is what the API supports.",
   "input_schema": {
@@ -1430,6 +1457,55 @@
    "required": [
     "campaign_id"
    ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "export_observables",
+  "description": "Export a filtered slice of the ledger as lines (EDL), CSV rows, or JSON — the same filters as search_observables plus a minimum report count and an 'exclude dual-use infrastructure' switch. Values are returned refanged (operational form). Denied rows and, by default, infra-tagged rows are excluded.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "format": {
+     "type": "string",
+     "enum": [
+      "edl",
+      "csv",
+      "json"
+     ],
+     "default": "edl"
+    },
+    "kind": {
+     "type": "string"
+    },
+    "role": {
+     "type": "string"
+    },
+    "status": {
+     "type": "string",
+     "description": "active, aging, expired (default active)"
+    },
+    "min_confidence": {
+     "type": "number"
+    },
+    "min_reports": {
+     "type": "integer",
+     "description": "Minimum report_count (articles that reported it)"
+    },
+    "include_infra_tagged": {
+     "type": "boolean",
+     "default": false
+    },
+    "query": {
+     "type": "string",
+     "description": "Substring of value or label"
+    },
+    "limit": {
+     "type": "integer",
+     "description": "Max rows (default 500, cap 5000)"
+    }
+   },
+   "required": []
   },
   "mutating": false
  },
@@ -2089,6 +2165,37 @@
     "window_days": {
      "type": "integer",
      "description": "Restrict the evidence window per node to N days"
+    }
+   },
+   "required": [
+    "entity_type",
+    "entity_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_entity_infrastructure",
+  "description": "Pivot from a threat actor, malware family, campaign or tool to its observables, in two tiers: 'claimed' (attribution edges with evidence — uses / communicates_with / controls, with trust tier) and 'reported_alongside' (observables a reporting article that names the entity also carried; indicator-list files and newsletters excluded). Answers 'what infrastructure does X use?'.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entity_type": {
+     "type": "string",
+     "enum": [
+      "threat_actor",
+      "malware",
+      "campaign",
+      "tool"
+     ]
+    },
+    "entity_id": {
+     "type": "string",
+     "description": "Entity UUID (use the lookup tools to resolve a name)"
+    },
+    "limit": {
+     "type": "integer",
+     "description": "Max rows per tier (default 50, cap 500)"
     }
    },
    "required": [
@@ -3694,6 +3801,45 @@
   "mutating": false
  },
  {
+  "name": "promote_observable",
+  "description": "The analyst door into the observables ledger: turn a staged candidate (or any value the article prints) into a ledger row sighted in that entry, with role and evidence. Use kind from: ipv4, ipv6, domain, url, uri_path, email, md5, sha1, sha256, ja3, ja4, cert_fingerprint, cmdline, path, registry, scheduled_task, service_name, mutex, named_pipe, user_agent, http_header. Defanged input is normalized; values that fail the kind's plausibility check are rejected with the reason.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entry_id": {
+     "type": "string",
+     "description": "UUID of the entry the value appears in"
+    },
+    "kind": {
+     "type": "string",
+     "description": "Observable kind"
+    },
+    "value": {
+     "type": "string",
+     "description": "The value as printed (defanged ok)"
+    },
+    "role": {
+     "type": "string",
+     "description": "c2, delivery, payload, phishing, exfil, exploit, scanning, persistence, execution, defense_evasion, credential_access, discovery, lateral_movement, collection"
+    },
+    "evidence": {
+     "type": "string",
+     "description": "The sentence that presents the value as malicious"
+    },
+    "label": {
+     "type": "string",
+     "description": "Short human label (optional)"
+    }
+   },
+   "required": [
+    "entry_id",
+    "kind",
+    "value"
+   ]
+  },
+  "mutating": true
+ },
+ {
   "name": "publish_report",
   "description": "Publish an intelligence report — saves current version and sets status to published.",
   "input_schema": {
@@ -4116,15 +4262,43 @@
     },
     "kind": {
      "type": "string",
-     "description": "ipv4, ipv6, domain, url, md5, sha256, cmdline, script, ..."
+     "description": "ipv4, ipv6, domain, url, uri_path, email, md5, sha1, sha256, cmdline, path, registry, scheduled_task, service_name, mutex, named_pipe, user_agent, http_header, script, ..."
     },
     "role": {
      "type": "string",
-     "description": "c2, delivery, payload, phishing, exfil, exploit, scanning"
+     "description": "c2, delivery, payload, phishing, exfil, exploit, scanning, persistence, execution, defense_evasion, credential_access, discovery, lateral_movement, collection"
     },
     "status": {
      "type": "string",
      "description": "active, aging, or expired"
+    },
+    "captured_by": {
+     "type": "string",
+     "description": "Capture door: ai_extraction, ttp_observable, ioc_list, publisher_ioc, manual"
+    },
+    "infra_tag": {
+     "type": "string",
+     "description": "Dual-use tag filter: a tag (vpn, proxy, tor, rmm, kvm, scanner, phish_sim, benign_service), 'any', or 'none' for untagged rows only"
+    },
+    "needs_review": {
+     "type": "boolean",
+     "description": "Only AI-created rows awaiting review"
+    },
+    "min_confidence": {
+     "type": "number",
+     "description": "Minimum current (decayed) confidence"
+    },
+    "min_reports": {
+     "type": "integer",
+     "description": "Minimum report_count — articles that reported it"
+    },
+    "linked_entity_type": {
+     "type": "string",
+     "description": "With linked_entity_id: only this entity's infrastructure (threat_actor, malware, campaign, tool)"
+    },
+    "linked_entity_id": {
+     "type": "string",
+     "description": "UUID of the entity to restrict to"
     },
     "limit": {
      "type": "integer",
@@ -4421,7 +4595,7 @@
  },
  {
   "name": "update_automation_rule",
-  "description": "Partially update an automation rule — only the provided fields change (mirrors PUT /api/automation/rules/{id}). Trigger types: on_correlation_event, on_cve_detected, on_keyword_match, on_manual, on_new_entry, on_schedule. Each action is {type, config}; valid action types: add_tags, add_to_campaign, bookmark_entry, branch, chain_rule, create_intel_report, create_note, export_to, extract_cves, extract_malware, extract_threat_actors, extract_ttps, generate_detection_rules, hide_entry, mark_priority, mark_read, remove_tags, run_ai_task, run_webhook, send_notification, star_entry, use_daily_summary (branch sub-actions are validated recursively). Note: actions replaces the whole list.",
+  "description": "Partially update an automation rule — only the provided fields change (mirrors PUT /api/automation/rules/{id}). Trigger types: on_correlation_event, on_cve_detected, on_entry_scored, on_keyword_match, on_manual, on_new_entry, on_observable_captured, on_schedule. Each action is {type, config}; valid action types: add_tags, add_to_campaign, bookmark_entry, branch, chain_rule, create_intel_report, create_note, export_to, extract_cves, extract_malware, extract_threat_actors, extract_ttps, generate_detection_rules, hide_entry, mark_priority, mark_read, remove_tags, run_ai_task, run_webhook, send_notification, star_entry, use_daily_summary (branch sub-actions are validated recursively). Note: actions replaces the whole list.",
   "input_schema": {
    "type": "object",
    "properties": {
@@ -4440,9 +4614,11 @@
      "enum": [
       "on_correlation_event",
       "on_cve_detected",
+      "on_entry_scored",
       "on_keyword_match",
       "on_manual",
       "on_new_entry",
+      "on_observable_captured",
       "on_schedule"
      ]
     },
@@ -4777,6 +4953,35 @@
    "required": [
     "note_id",
     "content"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "update_observable",
+  "description": "Correct a ledger row: set or change its role, label or description, or pin its confidence so decay stops. Fields left out are untouched.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "observable_id": {
+     "type": "string",
+     "description": "Observable UUID"
+    },
+    "role": {
+     "type": "string"
+    },
+    "label": {
+     "type": "string"
+    },
+    "description": {
+     "type": "string"
+    },
+    "confidence_pinned": {
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "observable_id"
    ]
   },
   "mutating": true

@@ -19,6 +19,7 @@ const CONDITION_TYPES = [
   { value: "priority_score_above", label: "Priority Score Above (Signals)" },
   { value: "has_signal", label: "Has Signal Type" },
   { value: "entity_watchlisted", label: "Watched Entity Mentioned" },
+  { value: "has_observable", label: "Has Captured Observable (IOC)" },
 ];
 
 const FEED_TYPES = [
@@ -344,6 +345,55 @@ export const ConditionNode = memo(function ConditionNode({
               placeholder="novel_entity, kev_added, under_reported"
               className={styles.input}
             />
+          </div>
+        )}
+
+        {conditionType === "has_observable" && (
+          <div className={styles.fieldGroup}>
+            <span className={styles.hint}>
+              Entry carries an observable a reporting door captured (blocklist feeds excluded)
+            </span>
+            <label className={styles.fieldLabel}>Kinds (comma-separated, blank = any)</label>
+            <input
+              type="text"
+              value={(config?.kinds as string) ?? ""}
+              onChange={(e) => onUpdate?.({ config: { ...config, kinds: e.target.value || undefined } })}
+              placeholder="ipv4, domain, sha256, cmdline"
+              className={styles.input}
+            />
+            <label className={styles.fieldLabel}>Roles (comma-separated, blank = any)</label>
+            <input
+              type="text"
+              value={(config?.roles as string) ?? ""}
+              onChange={(e) => onUpdate?.({ config: { ...config, roles: e.target.value || undefined } })}
+              placeholder="c2, delivery, persistence"
+              className={styles.input}
+            />
+            <label className={styles.fieldLabel}>Minimum confidence (0–1, blank = any)</label>
+            <input
+              type="number"
+              min={0}
+              max={1}
+              step={0.05}
+              value={(config?.min_confidence as string | number) ?? ""}
+              onChange={(e) =>
+                onUpdate?.({ config: { ...config, min_confidence: e.target.value || undefined } })
+              }
+              placeholder="0.6"
+              className={styles.input}
+            />
+            <label className={styles.checkLabel}>
+              <input
+                type="checkbox"
+                checked={String(config?.exclude_infra_tagged ?? "true") !== "false"}
+                onChange={(e) =>
+                  onUpdate?.({
+                    config: { ...config, exclude_infra_tagged: e.target.checked ? "true" : "false" },
+                  })
+                }
+              />
+              Ignore dual-use infrastructure (VPN / proxy / Tor / shared hosting)
+            </label>
           </div>
         )}
 

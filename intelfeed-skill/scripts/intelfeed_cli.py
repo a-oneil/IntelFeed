@@ -100,6 +100,7 @@ WRITE_TOOLS: frozenset[str] = frozenset(
         "delete_requirement",
         "delete_saved_search",
         "delete_webhook_preset",
+        "deny_observable",
         "export_report",
         "extract_cves",
         "extract_malware",
@@ -117,6 +118,7 @@ WRITE_TOOLS: frozenset[str] = frozenset(
         "merge_threat_actors",
         "merge_tools",
         "merge_vendors",
+        "promote_observable",
         "publish_report",
         "reclassify_entity",
         "refresh_feed",
@@ -144,6 +146,7 @@ WRITE_TOOLS: frozenset[str] = frozenset(
         "update_feed",
         "update_intel_report",
         "update_note",
+        "update_observable",
         "update_requirement",
         "watch_entity",
     }
@@ -479,13 +482,13 @@ TOOLS: dict[str, dict] = {
     "create_automation_rule": {
         "description": (
             "Set up an automation rule with trigger, conditions, and actions. Trigger types: "
-            "on_correlation_event, on_cve_detected, on_keyword_match, on_manual, on_new_entry, "
-            "on_schedule. Each action is {type, config}; valid action types: add_tags, "
-            "add_to_campaign, bookmark_entry, branch, chain_rule, create_intel_report, create_note, "
-            "export_to, extract_cves, extract_malware, extract_threat_actors, extract_ttps, "
-            "generate_detection_rules, hide_entry, mark_priority, mark_read, remove_tags, "
-            "run_ai_task, run_webhook, send_notification, star_entry, use_daily_summary. The rule is "
-            "created enabled."
+            "on_correlation_event, on_cve_detected, on_entry_scored, on_keyword_match, on_manual, "
+            "on_new_entry, on_observable_captured, on_schedule. Each action is {type, config}; valid "
+            "action types: add_tags, add_to_campaign, bookmark_entry, branch, chain_rule, "
+            "create_intel_report, create_note, export_to, extract_cves, extract_malware, "
+            "extract_threat_actors, extract_ttps, generate_detection_rules, hide_entry, "
+            "mark_priority, mark_read, remove_tags, run_ai_task, run_webhook, send_notification, "
+            "star_entry, use_daily_summary. The rule is created enabled."
         ),
         "params": {
             "name": {
@@ -502,9 +505,11 @@ TOOLS: dict[str, dict] = {
                 "enum": [
                     'on_correlation_event',
                     'on_cve_detected',
+                    'on_entry_scored',
                     'on_keyword_match',
                     'on_manual',
                     'on_new_entry',
+                    'on_observable_captured',
                     'on_schedule',
                 ],
             },
@@ -1187,6 +1192,32 @@ TOOLS: dict[str, dict] = {
             },
         },
     },
+    "deny_observable": {
+        "description": (
+            "Admin: tombstone a value so it is never captured, sighted or exported again (false "
+            "positive, benign infrastructure, your own domain). Works on an existing row by UUID or "
+            "on any (kind, value) \u2014 denying a value that is not in the ledger creates the tombstone "
+            "so future doors refuse it. Reversible via the API."
+        ),
+        "params": {
+            "observable_id": {
+                "type": 'str',
+                "default": None,
+            },
+            "kind": {
+                "type": 'str',
+                "default": None,
+            },
+            "value": {
+                "type": 'str',
+                "default": None,
+            },
+            "reason": {
+                "type": 'str',
+                "default": None,
+            },
+        },
+    },
     "detect_glossary_terms": {
         "description": (
             "Detect which glossary terms appear in an entry's text (word-boundary matching over each "
@@ -1245,6 +1276,53 @@ TOOLS: dict[str, dict] = {
             "campaign_id": {
                 "type": 'str',
                 "required": True,
+            },
+        },
+    },
+    "export_observables": {
+        "description": (
+            "Export a filtered slice of the ledger as lines (EDL), CSV rows, or JSON \u2014 the same "
+            "filters as search_observables plus a minimum report count and an 'exclude dual-use "
+            "infrastructure' switch. Values are returned refanged (operational form). Denied rows "
+            "and, by default, infra-tagged rows are excluded."
+        ),
+        "params": {
+            "format": {
+                "type": 'str',
+                "default": 'edl',
+                "enum": ['edl', 'csv', 'json'],
+            },
+            "kind": {
+                "type": 'str',
+                "default": None,
+            },
+            "role": {
+                "type": 'str',
+                "default": None,
+            },
+            "status": {
+                "type": 'str',
+                "default": None,
+            },
+            "min_confidence": {
+                "type": 'float',
+                "default": None,
+            },
+            "min_reports": {
+                "type": 'int',
+                "default": None,
+            },
+            "include_infra_tagged": {
+                "type": 'bool',
+                "default": False,
+            },
+            "query": {
+                "type": 'str',
+                "default": None,
+            },
+            "limit": {
+                "type": 'int',
+                "default": None,
             },
         },
     },
@@ -1724,6 +1802,30 @@ TOOLS: dict[str, dict] = {
                 "default": 1,
             },
             "window_days": {
+                "type": 'int',
+                "default": None,
+            },
+        },
+    },
+    "get_entity_infrastructure": {
+        "description": (
+            "Pivot from a threat actor, malware family, campaign or tool to its observables, in two "
+            "tiers: 'claimed' (attribution edges with evidence \u2014 uses / communicates_with / controls, "
+            "with trust tier) and 'reported_alongside' (observables a reporting article that names "
+            "the entity also carried; indicator-list files and newsletters excluded). Answers 'what "
+            "infrastructure does X use?'."
+        ),
+        "params": {
+            "entity_type": {
+                "type": 'str',
+                "required": True,
+                "enum": ['threat_actor', 'malware', 'campaign', 'tool'],
+            },
+            "entity_id": {
+                "type": 'str',
+                "required": True,
+            },
+            "limit": {
                 "type": 'int',
                 "default": None,
             },
@@ -3008,6 +3110,42 @@ TOOLS: dict[str, dict] = {
             },
         },
     },
+    "promote_observable": {
+        "description": (
+            "The analyst door into the observables ledger: turn a staged candidate (or any value the "
+            "article prints) into a ledger row sighted in that entry, with role and evidence. Use "
+            "kind from: ipv4, ipv6, domain, url, uri_path, email, md5, sha1, sha256, ja3, ja4, "
+            "cert_fingerprint, cmdline, path, registry, scheduled_task, service_name, mutex, "
+            "named_pipe, user_agent, http_header. Defanged input is normalized; values that fail the "
+            "kind's plausibility check are rejected with the reason."
+        ),
+        "params": {
+            "entry_id": {
+                "type": 'str',
+                "required": True,
+            },
+            "kind": {
+                "type": 'str',
+                "required": True,
+            },
+            "value": {
+                "type": 'str',
+                "required": True,
+            },
+            "role": {
+                "type": 'str',
+                "default": None,
+            },
+            "evidence": {
+                "type": 'str',
+                "default": None,
+            },
+            "label": {
+                "type": 'str',
+                "default": None,
+            },
+        },
+    },
     "publish_report": {
         "description": 'Publish an intelligence report — saves current version and sets status to published.',
         "params": {
@@ -3370,6 +3508,34 @@ TOOLS: dict[str, dict] = {
                 "type": 'str',
                 "default": None,
             },
+            "captured_by": {
+                "type": 'str',
+                "default": None,
+            },
+            "infra_tag": {
+                "type": 'str',
+                "default": None,
+            },
+            "needs_review": {
+                "type": 'bool',
+                "default": None,
+            },
+            "min_confidence": {
+                "type": 'float',
+                "default": None,
+            },
+            "min_reports": {
+                "type": 'int',
+                "default": None,
+            },
+            "linked_entity_type": {
+                "type": 'str',
+                "default": None,
+            },
+            "linked_entity_id": {
+                "type": 'str',
+                "default": None,
+            },
             "limit": {
                 "type": 'int',
                 "default": None,
@@ -3588,13 +3754,13 @@ TOOLS: dict[str, dict] = {
         "description": (
             "Partially update an automation rule \u2014 only the provided fields change (mirrors PUT "
             "/api/automation/rules/{id}). Trigger types: on_correlation_event, on_cve_detected, "
-            "on_keyword_match, on_manual, on_new_entry, on_schedule. Each action is {type, config}; "
-            "valid action types: add_tags, add_to_campaign, bookmark_entry, branch, chain_rule, "
-            "create_intel_report, create_note, export_to, extract_cves, extract_malware, "
-            "extract_threat_actors, extract_ttps, generate_detection_rules, hide_entry, "
-            "mark_priority, mark_read, remove_tags, run_ai_task, run_webhook, send_notification, "
-            "star_entry, use_daily_summary (branch sub-actions are validated recursively). Note: "
-            "actions replaces the whole list."
+            "on_entry_scored, on_keyword_match, on_manual, on_new_entry, on_observable_captured, "
+            "on_schedule. Each action is {type, config}; valid action types: add_tags, "
+            "add_to_campaign, bookmark_entry, branch, chain_rule, create_intel_report, create_note, "
+            "export_to, extract_cves, extract_malware, extract_threat_actors, extract_ttps, "
+            "generate_detection_rules, hide_entry, mark_priority, mark_read, remove_tags, "
+            "run_ai_task, run_webhook, send_notification, star_entry, use_daily_summary (branch "
+            "sub-actions are validated recursively). Note: actions replaces the whole list."
         ),
         "params": {
             "rule_id": {
@@ -3615,9 +3781,11 @@ TOOLS: dict[str, dict] = {
                 "enum": [
                     'on_correlation_event',
                     'on_cve_detected',
+                    'on_entry_scored',
                     'on_keyword_match',
                     'on_manual',
                     'on_new_entry',
+                    'on_observable_captured',
                     'on_schedule',
                 ],
             },
@@ -3903,6 +4071,34 @@ TOOLS: dict[str, dict] = {
             },
             "title": {
                 "type": 'str',
+                "default": None,
+            },
+        },
+    },
+    "update_observable": {
+        "description": (
+            "Correct a ledger row: set or change its role, label or description, or pin its "
+            "confidence so decay stops. Fields left out are untouched."
+        ),
+        "params": {
+            "observable_id": {
+                "type": 'str',
+                "required": True,
+            },
+            "role": {
+                "type": 'str',
+                "default": None,
+            },
+            "label": {
+                "type": 'str',
+                "default": None,
+            },
+            "description": {
+                "type": 'str',
+                "default": None,
+            },
+            "confidence_pinned": {
+                "type": 'bool',
                 "default": None,
             },
         },

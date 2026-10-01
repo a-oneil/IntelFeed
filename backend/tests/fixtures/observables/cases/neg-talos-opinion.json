@@ -1,0 +1,18 @@
+{
+  "slug": "neg-talos-opinion",
+  "title_like": "Should you care about an%",
+  "title": "Should you care about an “AI slowdown?”",
+  "url": "https://blog.talosintelligence.com/should-you-care-about-an-ai-slowdown/",
+  "publisher": "Cisco Talos",
+  "kind": "negative",
+  "attribution": [],
+  "expected": [],
+  "optional": [],
+  "must_not": [
+    {
+      "kind": "domain",
+      "value": "talosintelligence.com",
+      "why": "publisher / reference link"
+    }
+  ]
+}
