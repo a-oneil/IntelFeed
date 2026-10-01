@@ -180,7 +180,7 @@ Higher-level constructs — Campaign, DetectionRule, IntelligenceRequirement, St
 | --- | --- | --- |
 | `intelligence/tactics.py` | `DetectionRule.mitre_tactics`, `TTP.tactic` | ATT&CK's own `kill_chain_phases.phase_name` slug (`defense-evasion`) |
 | `intelligence/platforms.py` | `Tool.platforms` | ATT&CK enterprise platform labels (`Windows`, `IaaS`) |
-| `intelligence/sectors.py` | `EntrySector.sector`, `*.targeted_sectors` | slug + display label (`critical-infrastructure` / `Critical Infrastructure`) |
+| `intelligence/sectors.py` | the `sectors` entity table (seeded), `EntrySector.sector`, `*.targeted_sectors` (a cache of junction labels) | slug + display label (`critical-infrastructure` / `Critical Infrastructure`); the module is also the seed source for the entity rows |
 | `intelligence/actor_attributes.py` | `ThreatActor.motivation`, `.country` | five motivations; country names resolved against the countries table |
 
 Each is enforced by a SQLAlchemy `@validates` hook on the model rather than at the call sites, because these columns have five or six writers apiece (AI extraction, rule imports, the tool registry, the profile editor, maintenance jobs) and normalizing at any one of them only lasts until the next writer is added. The hooks **fold** rather than reject: an unrecognized value keeps its wording with the spelling settled, so a new ATT&CK release or an analyst's phrasing survives while case variants stop splitting the facet. Only placeholders (`Unknown`, `n/a`) are dropped.

@@ -206,8 +206,7 @@ export function DayIntelChips({ dayKey, filters, focus, onFocus }: Props) {
     });
   }
 
-  // 4. Top targeted sector. Sectors are a controlled vocabulary rather than an
-  // entity table, so this one filters by slug.
+  // 4. Top targeted sector — the industry the day's articles describe as hit.
   if (sector) {
     chips.push({
       key: "sector",
@@ -217,7 +216,7 @@ export function DayIntelChips({ dayKey, filters, focus, onFocus }: Props) {
         "sector",
         styles.sector,
         `articles targeting ${sector.name}`,
-        { sector: sector.slug },
+        { entity_type: "sector", entity_id: sector.id },
         `${sector.count} ${plural(sector.count)} target ${sector.name}`,
         <>
           <span className={styles.chipLabel}>sector</span>

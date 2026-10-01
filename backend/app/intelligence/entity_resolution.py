@@ -1258,6 +1258,21 @@ async def _is_country_name(db: AsyncSession, normalized: str) -> bool:
     return row.scalars().first() is not None
 
 
+async def _is_sector_name(db: AsyncSession, normalized: str) -> bool:
+    """A sector name or alias ("Healthcare", "banks") is never a new actor or malware."""
+    from app.models.sector import Sector
+
+    row = await db.execute(
+        select(Sector.id).where(
+            sa_text(
+                "entity_norm(name) = :n OR entity_norm(slug) = :n "
+                "OR EXISTS (SELECT 1 FROM unnest(aliases) a WHERE entity_norm(a) = :n)"
+            ).bindparams(n=normalized)
+        )
+    )
+    return row.scalars().first() is not None
+
+
 async def gate_aliases(
     db: AsyncSession,
     entity_type: str,
@@ -1328,6 +1343,8 @@ async def gate_aliases(
             reason = "dictionary_word"
         elif await _is_country_name(db, norm.norm_exact):
             reason = "country_name"
+        elif await _is_sector_name(db, norm.norm_exact):
+            reason = "sector_name"
 
         if reason is None:
             owners = await db.execute(

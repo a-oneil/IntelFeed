@@ -182,7 +182,7 @@ The `JOB_REGISTRY` is a declarative map of all **70** scheduled tasks, each with
 | `rebuild_rule_coverage` | Daily at 03:50 UTC | Re-resolve detection rules to the CVEs, techniques and actors they cover (`rule_coverage`) |
 | `backfill_rule_attack_mappings` | Weekly Sunday at 05:30 UTC | Re-fetch GitHub-sourced rules to recover ATT&CK mappings, and derive tactics from techniques |
 | `backfill_rule_data_sources` | Weekly Sunday at 04:50 UTC | Derive detection-rule `data_sources` from stored log sources, for telemetry coverage |
-| `rollup_targeted_sectors` | Daily at 04:20 UTC | Derive actor/malware targeted sectors from victim sectors on their articles |
+| `rollup_targeted_sectors` | Daily at 04:20 UTC | Derive actor/malware target-sector claims (`source=rollup`, with article evidence) from the victim sectors on their articles; rebuild the `targeted_sectors` cache |
 
 #### Automation & Saved Searches
 
@@ -397,7 +397,7 @@ def _ensure_index():
   - `is_read`, `is_starred`, `is_bookmarked`, `has_notes` (user state; indexed separately from PostgreSQL)
   - `word_count`, `language`, `media_type` for filtering and display
 
-**Not in this index:** feed categories, signal-engine reasons, article sectors, article URLs, feed rating grades, mute/translation/image state, and `priority_score`. The query planner resolves those against PostgreSQL instead of re-indexing ~95k documents to carry them — see [Query Execution](#query-execution-and-search-api).
+**Not in this index:** feed categories, signal-engine reasons, article URLs, feed rating grades, mute/translation/image state, and `priority_score`. The query planner resolves those against PostgreSQL instead of re-indexing ~95k documents to carry them — see [Query Execution](#query-execution-and-search-api).
 
 #### Entity and rule indexes
 
@@ -499,13 +499,13 @@ Three lanes, not two:
 | Lane | Fields | Resolved by |
 |------|--------|-------------|
 | Indexed entry | `title`, `content`, `author`, `feed`, `tag`, `type`, `media`, `lang`, `words`, `date`, `is:starred/read/unread/bookmarked/noted` | Meilisearch filter clauses |
-| PostgreSQL entry | `category`, `signal`, `sector`, `url`, `feed.reliability`, `feed.timeliness`, `feed.relevance`, `is:muted/translated/image` | `resolve_entry_filters()` |
+| PostgreSQL entry | `category`, `signal`, `url`, `feed.reliability`, `feed.timeliness`, `feed.relevance`, `is:muted/translated/image` | `resolve_entry_filters()` |
 | Entity | `cve`, `threat_actor`, `ttp`, `malware`, `country`, `tool`, `vendor`, `product`, `mitigation`, `campaign`, `ransomware_victim`, `rule`, `intel_report`, `pir`, `note` + sub-fields | `entity_builder.py` |
 
 **`PendingEntryFilter` resolution** has two shapes:
 
 - **Feed-scoped** (`category`, `is.muted`, `feed.*`) narrow to a set of feed IDs. There are only a few hundred feeds, so these become ordinary Meilisearch `feed_id` clauses.
-- **Entry-scoped** (`signal`, `sector`, `url`, `is.translated`, `is.image`) produce a set of *entry* IDs in `plan.db_entry_ids`, which the endpoint intersects with any entity join before running the query. A filter matching 17,000 entries costs one `IN` list rather than 17,000 OR clauses in a filter string.
+- **Entry-scoped** (`signal`, `url`, `is.translated`, `is.image`) produce a set of *entry* IDs in `plan.db_entry_ids`, which the endpoint intersects with any entity join before running the query. A filter matching 17,000 entries costs one `IN` list rather than 17,000 OR clauses in a filter string.
 
 Negation of an entry-scoped filter is subtractive only: the complement is every other entry and enumerating it is unbounded, so matches land in `plan.db_excluded_ids` and are removed from a positive set if one exists.
 

@@ -329,17 +329,12 @@ class TestAutocompleteCoverage:
         assert values == {name for name in SIGNAL_FAMILIES if "epss" in name}
 
     @pytest.mark.asyncio
-    async def test_sector_values_come_from_the_entries_that_have_them(
-        self, client: AsyncClient, auth_headers: dict, db_session, test_entry
-    ):
-        from app.models.entry_sector import EntrySector
-
-        db_session.add(EntrySector(entry_id=test_entry.id, sector="healthcare"))
-        await db_session.flush()
-
+    async def test_sector_values_come_from_the_vocabulary(self, client: AsyncClient, auth_headers: dict, db_session):
+        # `sector:` is an entity field: values are the seeded sector names, so
+        # the completion matches what `sector:Healthcare` will resolve against.
         resp = await client.get("/api/search/autocomplete?q=sector:health", headers=auth_headers)
         assert resp.status_code == 200
-        assert [s["text"] for s in resp.json() if s["type"] == "value"] == ["healthcare"]
+        assert [s["text"] for s in resp.json() if s["type"] == "value"] == ["Healthcare"]
 
     @pytest.mark.asyncio
     async def test_array_column_values_are_offered_one_element_at_a_time(

@@ -30,16 +30,17 @@ fills gaps.
 | --- | --- | --- |
 | 1 | `seed_countries.py` | Every UN-recognized country, with ISO codes and regions. |
 | 2 | `seed_country_aliases.py` | Demonyms and adjective forms ("Iranian" → Iran) so prose actually matches. |
-| 3 | `seed_mitre_attack.py` | The full MITRE ATT&CK catalog (Enterprise + Mobile + ICS) from the official STIX bundles: techniques, tactics, platforms, mitigations. |
-| 4 | `seed_cwe_catalog.py` | The full MITRE CWE catalog (969 weaknesses + 422 categories) from `cwec_latest.xml`: abstraction ladder, ChildOf parents, mapping guidance, consequences, mitigations. Must run before `backfill_cve_weaknesses.py` so NVD refs resolve. |
-| 5 | `seed_vendors_products.py` | 107 vendors and 862 products, with Wikipedia-sourced descriptions. |
-| 6 | `seed_vendor_descriptions.py` | Re-fetch and reformat those descriptions as markdown; fills in any the first pass missed. |
-| 7 | `seed_cpe_names.py` | CPE curation lists so NVD's CPE pairs resolve onto your vendors and products. |
-| 8 | `seed_actor_countries.py` | Origin-country attribution for ~530 threat actors with high-confidence public attribution. |
-| 9 | `seed_entity_attributes.py` | Motivation on threat actors, controlled-vocabulary type on malware families. |
-| — | **`seed_all.py`** | **Runs all nine above, in this order.** |
+| 3 | `seed_sectors.py` | The 21 victim-sector entities (closed vocabulary, deterministic ids). Also refreshes aliases/descriptions on re-run. |
+| 4 | `seed_mitre_attack.py` | The full MITRE ATT&CK catalog (Enterprise + Mobile + ICS) from the official STIX bundles: techniques, tactics, platforms, mitigations. |
+| 5 | `seed_cwe_catalog.py` | The full MITRE CWE catalog (969 weaknesses + 422 categories) from `cwec_latest.xml`: abstraction ladder, ChildOf parents, mapping guidance, consequences, mitigations. Must run before `backfill_cve_weaknesses.py` so NVD refs resolve. |
+| 6 | `seed_vendors_products.py` | 107 vendors and 862 products, with Wikipedia-sourced descriptions. |
+| 7 | `seed_vendor_descriptions.py` | Re-fetch and reformat those descriptions as markdown; fills in any the first pass missed. |
+| 8 | `seed_cpe_names.py` | CPE curation lists so NVD's CPE pairs resolve onto your vendors and products. |
+| 9 | `seed_actor_countries.py` | Origin-country attribution for ~530 threat actors with high-confidence public attribution. |
+| 10 | `seed_entity_attributes.py` | Motivation on threat actors, controlled-vocabulary type on malware families. |
+| — | **`seed_all.py`** | **Runs all ten above, in this order.** |
 
-`seed_all.py` runs all nine in order — that is the whole first-boot step:
+`seed_all.py` runs all ten in order — that is the whole first-boot step:
 
 ```bash
 D="docker compose -f docker-compose.dev.yml exec api python"
@@ -90,7 +91,8 @@ are for fixing something by hand.
 | `backfill_field_claims.py` | Seeds `entity_field_claims` from provenance already on record — description history, enrichment results, and the article AI-extracted entities were minted from. Fields whose origin isn't recoverable stay unsourced on purpose. `--dry-run` / `--only`. |
 | `backfill_narrative_themes.py` | Parses every cached daily briefing into the `### Theme` groupings it already made, so the co-occurrence promotion gate can tell repeat coverage from one reporting wave. Reads stored markdown only — no AI call. The nightly job covers 14 days; this covers the whole history. `--dry-run` / `--force` / `--days`. |
 | `enrich_cves.py` | Backfills EPSS scores, CISA KEV flags, and NVD metadata on CVEs. Batched and resumable, with `--phase epss` / `--phase nvd`. |
-| `normalize_vocabularies.py` | Folds `mitre_tactics`, `motivation`, `targeted_sectors`, `platforms` and `country` onto one spelling each, so a search facet stops listing `Persistence` and `persistence` as separate values. One-shot catch-up for rows written before the model validators landed; unrecognized values are kept and reported, not dropped, except the `platforms` entries that name an architecture or a language runtime, which are pruned and listed. `--dry-run`. |
+| `normalize_vocabularies.py` | Folds `mitre_tactics`, `motivation`, `platforms` and `country` onto one spelling each, so a search facet stops listing `Persistence` and `persistence` as separate values. One-shot catch-up for rows written before the model validators landed; unrecognized values are kept and reported, not dropped, except the `platforms` entries that name an architecture or a language runtime, which are pruned and listed. `--dry-run`. |
+| `backfill_targeted_sectors.py` | One-shot: folds the legacy free-text `targeted_sectors` arrays on actors and malware into the target-sector junctions (`source=seed`), optionally rehomes values that name a country onto `threat_actor_target_countries` (`--rehome-countries`), rebuilds the array cache, and writes a CSV of every distinct value and its decision (`--report`). Run in prod after reading the `--dry-run` report. |
 | `reconcile_search_index.py` | Deletes Meilisearch documents whose feed no longer exists, after a cascade cleanup missed them. |
 | `revalidate_wikipedia.py` | Clears Wikipedia enrichment on entities whose stored article title doesn't match the entity, so they re-enrich against the right article. |
 | `refetch_truncated_entries.py` | Re-fetches full text for entries that stored a "continue reading" stub. |

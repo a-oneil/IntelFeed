@@ -85,6 +85,7 @@ Prefer a precise filter over free text. `cve.kev:true` is a fact; "known exploit
 - `malware:` — Malware family, plus `malware.type:`, `malware.sector:`, `malware.mitre:S0367`
 - `tool:` — Tool name, plus `tool.type:`, `tool.platform:`, `tool.mitre:`
 - `country:` — Country name, plus `country.region:`, `country.iso:RU`
+- `sector:` — Targeted industry sector by name or alias (`sector:healthcare`, `sector:banks`), plus `sector.slug:financial-services`. Articles link to a sector only when the AI judged it *targeted* — a prose mention is not enough.
 - `vendor:` / `product:` — plus `vendor.type:`, `product.type:`, `product.vendor:Cisco`
 - `mitigation:` — Mitigation name or MITRE ID
 - `rule:` — Detection rule title, plus `rule.type:sigma`, `rule.severity:`, `rule.data_source:sysmon`, `rule.tactic:persistence`, `rule.tag:`, `rule.draft:`, `rule.license:`
@@ -95,7 +96,7 @@ Prefer a precise filter over free text. `cve.kev:true` is a fact; "known exploit
 
 **Catalogue suffixes** work across entity types — useful for curation and triage work:
 
-- `<entity>.articles:>100` — how much has been written about it (`ttp`, `threat_actor`, `malware`, `country`, `tool`, `vendor`, `product`, `mitigation`, `cwe`, `observable`/`ioc`)
+- `<entity>.articles:>100` — how much has been written about it (`ttp`, `threat_actor`, `malware`, `country`, `sector`, `tool`, `vendor`, `product`, `mitigation`, `cwe`, `observable`/`ioc`)
 - `<entity>.seen:>2026-01-01` / `<entity>.first_seen:>2026-06` — recency, same ten types (note: **not** `cve.*` — CVEs carry `.review` and `.via` only)
 - `<entity>.review:true` / `<entity>.via:ai_extraction` — extraction provenance (`threat_actor`, `malware`, `cve`, `ttp`, `tool`)
 
@@ -327,10 +328,14 @@ Everything that creates, changes or deletes data is refused outright when `INTEL
 - **get_share_link** — This analyst's active share link for an entry, or null (entry_id)
 - **revoke_share_link** — Deactivate this analyst's share link (entry_id)
 
-### Entity Lookups (9 tools)
+### Entity Lookups (13 tools)
 
 - **get_threat_actor** — Actor profile: aliases, type, motivation, origin country, targeted sectors, TTPs, article_count (actor_id)
 - **get_malware** — Malware family profile with aliases, type, sectors, associated actors (malware_id)
+- **list_sectors** — The 21-sector victim-industry vocabulary with article, targeting-actor/malware and 90-day victim counts (search, sort_by, limit)
+- **get_sector** — Sector victimology profile: who targets it (reported vs asserted), campaigns, leak-site victims, country cross-tab, intel profiles, recent articles (sector — UUID or slug, window_days)
+- **who_targets_sector** — Actors and malware ranked by articles describing them hitting the sector, plus asserted targets-sector claims with source (sector, limit)
+- **sector_victims** — Leak-site victims in a sector: totals, 12-month series, top groups, victim countries, recent disclosures (sector, window_days, limit)
 - **get_cve** — CVSS/EPSS, KEV status, PoC and Metasploit availability, NVD affected vendor/product links, CWE assignments (cve_id — UUID or CVE-YYYY-NNNNN)
 - **get_cwe** — A MITRE CWE weakness: abstraction level, parent and lineage, mapping guidance, catalog mitigations, linked CVEs (cwe_id)
 - **get_ttp** — ATT&CK technique with tactic, platforms, data sources, linked articles (ttp_id — UUID or T1059.001)
@@ -507,11 +512,12 @@ Entry→entity autolinks (edges) and entity→entity relationships (claims) are 
 - **get_hygiene_feed** — Chronological merge of link-validator and entity-maintenance logs (action, source, mode, review, pending, since, limit, offset)
 - **get_hygiene_stats** — Hygiene counters: operating modes (shadow/apply) and pending advisories
 
-### Entity Writes & Merges (11 tools)
+### Entity Writes & Merges (12 tools)
 
 - **create_threat_actor** — Create an actor; the entity resolver folds it into an existing one on a name/alias hit (name, aliases, description, country, motivation)
 - **create_malware** — Same for a malware family (name, aliases, description, malware_type)
 - **update_entity_profile** — Update an entity's profile fields, per type (entity_type, entity_id, updates)
+- **set_target_sector** 🔒 — Assert or withdraw that an actor or malware family targets a sector; an analyst claim on the target-sector junction that the nightly rollup never prunes (entity_type, entity_id, sector, action=add|remove)
 - **link_entities** — Assert an analyst-grade relationship, validated against the semantic relationship matrix and auto-flipped into canonical direction (source_type, source_id, target_type, target_id, relationship_type, description, confidence, evidence_entry_ids)
 - **merge_threat_actors** ⚠ — Merge a duplicate actor into another; `mode='shadow'` dry-runs it (target_id, source_id, mode, new_description, extra_aliases, reasoning)
 - **merge_malware** ⚠ — Same, for malware families
@@ -572,7 +578,7 @@ IntelFeed data is only as complete as what's been ingested and extracted. When y
 - **Be technical.** Use proper terminology — MITRE ATT&CK IDs (T1059.001, not "PowerShell execution"), full CVE identifiers, CVSS vectors, TLP markings.
 - **Structure for scannability.** Tables for entity comparisons. Headers to separate sections. Technique IDs inline with names.
 - **Show your sources.** Note whether data came from IntelFeed (which feed/article) or web research. This matters for confidence assessment.
-- **Link to IntelFeed.** When referencing entries or entities, include a clickable deep link using the `INTELFEED_WEB_URL` env var (default `https://intelfeed.cc`). Articles: `{WEB_URL}/?entry={entry_id}`. Entity profiles: `{WEB_URL}/workbench/{type}/{id}` — `threat_actor`, `malware`, `cve`, `cwe`, `ttp`, `tool`, `vendor`, `product`, `country`, `mitigation`, `observable`, `campaign`. Detection rules: `{WEB_URL}/workbench/rule/{id}`. Reports: `{WEB_URL}/workbench/report/{id}`.
+- **Link to IntelFeed.** When referencing entries or entities, include a clickable deep link using the `INTELFEED_WEB_URL` env var (default `https://intelfeed.cc`). Articles: `{WEB_URL}/?entry={entry_id}`. Entity profiles: `{WEB_URL}/workbench/{type}/{id}` — `threat_actor`, `malware`, `cve`, `cwe`, `ttp`, `tool`, `vendor`, `product`, `country`, `sector`, `mitigation`, `observable`, `campaign`. Detection rules: `{WEB_URL}/workbench/rule/{id}`. Reports: `{WEB_URL}/workbench/report/{id}`.
 - **Flag gaps and suggest next steps.** After answering, proactively note actionable gaps: entities with sparse data, TTPs without detection rules, actors missing aliases that should be merged, unprocessed articles. Offer to fix them.
 - **Detection rules must be deployable.** Include full rule content, log source requirements, expected false positive rate, and tuning notes.
 - **Study existing rules before writing new ones.** Before generating a detection rule, use `get_detection_rules '{"rule_type": "<type>", "limit": 10}'` to pull existing rules of the same type. Read them to understand the query language conventions, field names, log source patterns, and formatting style already in use.

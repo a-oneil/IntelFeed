@@ -38,6 +38,14 @@ evidence behind each link, not just the link. See below.
 
 **Articles** lists everything mentioning it, newest first.
 
+**Sectors** are the one entity nobody extracts by name. An article links to
+*Healthcare* only when the analysis judged healthcare to be the target, never
+because the word appeared, so a sector profile's **Victimology** tab is built
+from judgments: who targets it (split into *reported* — co-occurring on those
+articles — and *asserted* — an explicit claim with its source), the leak-site
+victims posted in it, and where in the world it is being hit. The chips on an
+actor's header link to these profiles.
+
 **Notes** are yours to write and everyone's to read.
 
 ## Where the facts come from

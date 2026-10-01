@@ -397,7 +397,7 @@ class TestPendingSubstitution:
 
 
 class TestEntryIdOrGroups:
-    """`signal:`, `sector:`, `url:` and `is:translated`/`is:image` resolve to
+    """`signal:`, `url:` and `is:translated`/`is:image` resolve to
     sets of entry IDs rather than filter clauses. Combining those sets with the
     operator the user typed — rather than always intersecting — is what stopped
     `signal:a OR signal:b` from meaning `signal:a AND signal:b`."""
@@ -417,11 +417,11 @@ class TestEntryIdOrGroups:
         assert p.db_entry_ids == {"1", "2", "3"}
 
     def test_implicit_and_still_intersects(self):
-        p = self._resolve("signal:a sector:b", [{"1", "2"}, {"2", "3"}])
+        p = self._resolve("signal:a url:b", [{"1", "2"}, {"2", "3"}])
         assert p.db_entry_ids == {"2"}
 
     def test_or_across_different_kinds_unions(self):
-        p = self._resolve("signal:a OR sector:b", [{"1"}, {"2"}])
+        p = self._resolve("signal:a OR url:b", [{"1"}, {"2"}])
         assert p.db_entry_ids == {"1", "2"}
 
     def test_three_way_or_unions(self):
@@ -430,7 +430,7 @@ class TestEntryIdOrGroups:
 
     def test_or_group_intersects_with_an_ungrouped_filter(self):
         # `(a OR b) AND c` — the group unions, then narrows by the loner.
-        p = self._resolve("(signal:a OR signal:b) sector:c", [{"1", "2"}, {"3"}, {"2", "3", "4"}])
+        p = self._resolve("(signal:a OR signal:b) url:c", [{"1", "2"}, {"3"}, {"2", "3", "4"}])
         assert p.db_entry_ids == {"2", "3"}
 
     def test_negated_member_becomes_an_exclusion(self):
@@ -445,7 +445,7 @@ class TestEntryIdOrGroups:
         assert p.db_excluded_ids == {"2"}
 
     def test_ungrouped_negation_is_unchanged(self):
-        p = self._resolve("signal:a NOT sector:b", [{"1", "2"}, {"2"}])
+        p = self._resolve("signal:a NOT url:b", [{"1", "2"}, {"2"}])
         assert p.db_entry_ids == {"1", "2"}
         assert p.db_excluded_ids == {"2"}
 

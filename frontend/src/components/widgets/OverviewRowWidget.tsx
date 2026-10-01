@@ -19,6 +19,7 @@ const ENTITY_SECTION: Record<string, string> = {
   vendor: "vendors",
   product: "products",
   country: "countries",
+  sector: "sectors",
 };
 
 export default function OverviewRowWidget({ config }: Props) {

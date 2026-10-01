@@ -192,7 +192,7 @@ export function EntityGraph({
   const [showNodeLabels, setShowNodeLabels] = useState(true);
   const [showEdgeLabels, setShowEdgeLabels] = useState(false);
   const [showRingGuides, setShowRingGuides] = useState(true);
-  const [showSectorLabels, setShowSectorLabels] = useState(true);
+  const [showArcLabels, setShowArcLabels] = useState(true);
   const [nodesPerType, setNodesPerType] = useState(5);
   const [ringSpacing, setRingSpacing] = useState(1.0);
 
@@ -1006,21 +1006,21 @@ export function EntityGraph({
             ) : null
           ))}
 
-          {/* Sector labels (radial layout only) */}
-          {!storyActive && showSectorLabels && layout.sectors.filter((s) => s.ring === 1).map((sector) => {
+          {/* Arc labels (radial layout only) */}
+          {!storyActive && showArcLabels && layout.arcs.filter((s) => s.ring === 1).map((arc) => {
             const labelR = (layout.ringRadii[1] ?? baseRadius) + 28;
-            const lx = layout.center.x + labelR * Math.cos(sector.midAngle);
-            const ly = layout.center.y + labelR * Math.sin(sector.midAngle);
+            const lx = layout.center.x + labelR * Math.cos(arc.midAngle);
+            const ly = layout.center.y + labelR * Math.sin(arc.midAngle);
             return (
               <text
-                key={`sector-${sector.type}`}
-                className={styles.sectorLabel}
+                key={`arc-${arc.type}`}
+                className={styles.arcLabel}
                 x={lx}
                 y={ly}
                 textAnchor="middle"
                 dominantBaseline="central"
               >
-                {getEntityLabel(sector.type) || sector.type} ({sector.total})
+                {getEntityLabel(arc.type) || arc.type} ({arc.total})
               </text>
             );
           })}
@@ -1544,7 +1544,7 @@ export function EntityGraph({
             {!storyActive && (
               <>
                 <label className={styles.settingsCheckbox}><input type="checkbox" checked={showRingGuides} onChange={() => setShowRingGuides(!showRingGuides)} /><span className={styles.settingsOptionLabel}>Ring guides</span></label>
-                <label className={styles.settingsCheckbox}><input type="checkbox" checked={showSectorLabels} onChange={() => setShowSectorLabels(!showSectorLabels)} /><span className={styles.settingsOptionLabel}>Sector labels</span></label>
+                <label className={styles.settingsCheckbox}><input type="checkbox" checked={showArcLabels} onChange={() => setShowArcLabels(!showArcLabels)} /><span className={styles.settingsOptionLabel}>Arc labels</span></label>
               </>
             )}
             <label className={styles.settingsCheckbox}><input type="checkbox" checked={showNodeLabels} onChange={() => setShowNodeLabels(!showNodeLabels)} /><span className={styles.settingsOptionLabel}>Node labels</span></label>

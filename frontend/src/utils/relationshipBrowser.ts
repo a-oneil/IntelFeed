@@ -19,6 +19,7 @@ const TYPE_KEYS: Array<[EntityType, string]> = [
   ["cve", "cves"],
   ["ttp", "ttps"],
   ["country", "countrys"],
+  ["sector", "sectors"],
   ["vendor", "vendors"],
   ["product", "products"],
   ["tool", "tools"],
@@ -44,6 +45,7 @@ const ALLOWED_MATRIX: Record<string, readonly string[]> = {
   "threat_actor>ttp": ["uses"],
   "threat_actor>cve": ["exploits"],
   "threat_actor>country": ["targets", "attributed_to"],
+  "threat_actor>sector": ["targets"],
   "threat_actor>vendor": ["targets"],
   "threat_actor>product": ["targets"],
   "threat_actor>threat_actor": ["related_to", "communicates_with", "successor_of", "subgroup_of", "overlaps_with"],
@@ -53,6 +55,7 @@ const ALLOWED_MATRIX: Record<string, readonly string[]> = {
   "malware>ttp": ["uses"],
   "malware>cve": ["exploits"],
   "malware>country": ["targets"],
+  "malware>sector": ["targets"],
   "malware>vendor": ["targets"],
   "malware>product": ["targets"],
   "tool>malware": ["delivers"],
@@ -65,6 +68,7 @@ const ALLOWED_MATRIX: Record<string, readonly string[]> = {
   "campaign>ttp": ["uses"],
   "campaign>cve": ["exploits"],
   "campaign>country": ["targets"],
+  "campaign>sector": ["targets"],
   "campaign>vendor": ["targets"],
   "campaign>product": ["targets"],
   "vendor>vendor": ["related_to"],
@@ -98,6 +102,7 @@ export function rowMeta(type: EntityType, item: EntitySearchResult): string | un
     case "malware": return item.malware_type ?? undefined;
     case "cve": return item.severity ?? undefined;
     case "country": return item.region ?? undefined;
+    case "sector": return item.slug ?? undefined;
     case "vendor": return item.vendor_type ?? undefined;
     case "product": return item.product_type ?? undefined;
     case "tool": return item.tool_type ?? undefined;

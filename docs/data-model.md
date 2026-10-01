@@ -125,7 +125,7 @@ Each analyst's visibility and personal mute over the shared feed pool; only cons
 
 ### 3. Intelligence Entities
 
-**Tables:** `ttps`, `cves`, `cve_affected`, `cve_weaknesses`, `cwes`, `observables`, `threat_actors`, `malware_families`, `countries`, `vendors`, `products`, `mitigations`, `tools`, `ransomware_victims`, `victim_disclosures`
+**Tables:** `ttps`, `cves`, `cve_affected`, `cve_weaknesses`, `cwes`, `observables`, `threat_actors`, `malware_families`, `countries`, `sectors`, `vendors`, `products`, `mitigations`, `tools`, `ransomware_victims`, `victim_disclosures`
 
 **Maintenance & audit tables:** `entity_maintenance_log`, `actor_description_history`, `entity_link_validation_log`, `entity_merge_suggestion_dismissals`, `entity_reclassify_tombstones`
 
@@ -209,7 +209,7 @@ Authoritative CVE → vendor/product affects-links parsed from NVD CPE data (tab
 - `country` (String 100) — attributed country (denormalized)
 - `origin_country_id` (FK, nullable, SET NULL) — link to `Country` record
 - `motivation` (String 100) — e.g., "financial", "espionage", "activism"
-- `targeted_sectors` (ARRAY(Text)) — e.g., ["finance", "healthcare"]
+- `targeted_sectors` (ARRAY(Text)) — read cache of the sector *labels* on `threat_actor_target_sectors`, rebuilt by `services/sector_links.refresh_targeted_sectors_cache` and written by nothing else
 - `associated_ttps` (JSONB) — list of TTPs used by this actor
 - `first_seen_at`, `last_seen_at`, `article_count` — temporal & frequency
 - `wikipedia_url`, `wikipedia_content`, `wikipedia_image_url` — enrichment
@@ -227,7 +227,7 @@ Authoritative CVE → vendor/product affects-links parsed from NVD CPE data (tab
 - `description`, `malpedia_url` — metadata
 - `malware_type` (String 50, indexed) — e.g., "trojan", "ransomware", "worm"
 - `associated_actors` (JSONB) — list of actors known to use this malware
-- `targeted_sectors` (ARRAY(Text)) — victimology chips, mirrors `threat_actors.targeted_sectors`
+- `targeted_sectors` (ARRAY(Text)) — read cache of `malware_target_sectors`, same rule as the actor column
 - `first_seen_at`, `last_seen_at`, `article_count` — temporal & frequency
 - `wikipedia_url`, `wikipedia_content`, `wikipedia_image_url` — enrichment
 - `metadata_` (JSONB)
@@ -241,6 +241,20 @@ Authoritative CVE → vendor/product affects-links parsed from NVD CPE data (tab
 - `name` (String 100, unique, indexed) — country name
 - `iso_code` (String 2, unique) — ISO 3166-1 alpha-2 code
 - `region` (String 50, indexed) — geographic region
+
+#### Sector
+
+The victim-industry vocabulary as an entity: 21 rows seeded from `app/intelligence/sectors.py` (one per canonical slug), ids minted as `uuid5(SECTOR_NAMESPACE, slug)` so every install agrees on them. Closed — no create, merge, convert or delete — and never autolinked, because sector names are everyday words.
+
+**Columns:**
+- `id` (UUID PK) — deterministic from the slug
+- `slug` (String 50, unique, indexed) — canonical slug, e.g. `financial-services`
+- `name` (String 100, unique) — display label, e.g. `Financial Services`
+- `aliases` (ARRAY(Text)) — the vocabulary's alias map (`banks`, `hospitals`), so `sector:banks` resolves; never fed to the autolinker
+- `description` (Text) — analyst-editable
+- `article_count`, `first_seen_at`, `last_seen_at`, `metadata_` (JSONB)
+
+Linked to entries through `entry_sectors` (written only by the one-pass AI analysis) and to actors / malware / campaigns through `threat_actor_target_sectors`, `malware_target_sectors` and `campaign_sectors` (see Junction Tables). The `targeted_sectors` arrays on actors and malware are a read cache of those junctions' labels.
 
 #### Vendor & Product
 
@@ -839,7 +853,7 @@ Provenance for scalar profile fields — the field-level counterpart to `EntityR
 
 ### 7. Dashboards & Reporting
 
-**Tables:** `dashboards`, `dashboard_widgets`, `saved_searches`, `intel_profiles`, `intel_reports`, `intel_report_versions`, `report_templates`, `campaigns`, `campaign_entries`, `campaign_entities`, `campaign_saved_searches`, `campaign_countries`, `campaign_sources`
+**Tables:** `dashboards`, `dashboard_widgets`, `saved_searches`, `intel_profiles`, `intel_reports`, `intel_report_versions`, `report_templates`, `campaigns`, `campaign_entries`, `campaign_entities`, `campaign_saved_searches`, `campaign_countries`, `campaign_sectors`, `campaign_sources`
 
 **Purpose:** User dashboards, intelligence reports, campaigns, and saved searches.
 
@@ -1385,9 +1399,11 @@ Data-defined pipeline stage composition per scope. A seeded "Global default" row
 - **`entry_vendors`** — links entries to vendors (with confidence, matched_names)
 - **`entry_products`** — links entries to products (with confidence, matched_names)
 - **`entry_tools`** — links entries to tools (with confidence, matched_names, paragraph_indices)
-- **`entry_sectors`** — links entries to targeted victim sectors (with confidence, source; sector is a controlled-vocabulary slug from `app/intelligence/sectors.py`, not an entity FK)
+- **`entry_sectors`** — links entries to the victim sectors the article describes as *targeted* (`sector_id` FK to `sectors` plus the canonical slug as a natural key; confidence, source, role, paragraph_indices). Written only by the one-pass AI analysis (`store_sectors`) — sectors are never autolinked, so a row is a judgment, not a word match
 - **`entry_tags`** — links entries to user-defined tags
 - **`threat_actor_target_countries`** — links threat actors to targeted countries
+- **`threat_actor_target_sectors`** / **`malware_target_sectors`** — "X targets sector S" claims, each with a `source` (`rollup` from the entity's own articles, `enrichment`, `seed`, `analyst`) and an `article_count` of evidence; the nightly rollup owns only its own rows
+- **`campaign_sectors`** — the victim verticals a campaign is scoped to
 - **`campaign_countries`** — links campaigns to countries (origin/target role)
 - **`ttp_mitigations`** — links TTPs to mitigations
 
@@ -1599,7 +1615,6 @@ All tables have UUID PKs with btree indexes (default).
 - `threat_actors.origin_country_id` — actor by country
 - `products.vendor_id` — product by vendor
 - `cves.severity` — by CVSS severity
-- `threat_actors.targeted_sectors` — sector filtering (GIN index on ARRAY)
 - `detection_rules.rule_type` — by rule type
 - `automation_rules.is_enabled` — active rules
 - `campaigns.status` — campaign lifecycle
@@ -1734,6 +1749,10 @@ Common migration prefixes:
 - `m2a2b3c4d5g9` — pruned ~1.9M duplicate bulk-sync enrichment_results rows
 - `n2b3c4d5e6f7`–`t6h8i9j0k1l2` — signal engine + pipeline observability (entry_signals, job_runs, user_entity_watches, ai_analysis queue, entry_pipeline_runs, pipeline_plans, signal feedback)
 - `u7i9j0k1l2m3` — cross-type reclassify tombstones
+
+**Notable migrations (September–October 2026):**
+- `q6h8j0l2n4p6` — sector as an entity: `sectors` table seeded from the vocabulary, `entry_sectors.sector_id` FK, the three target-sector junctions, enum CHECKs widened to `sector`
+- `r7i9k1m3o5q7` — `my_sectors` setting folded into per-user `sector` watches and removed
 
 **Previous major migrations:**
 - Phase 1: Core schema (users, feeds, entries, TTPs, CVEs, threat actors)

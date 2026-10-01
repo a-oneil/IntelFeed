@@ -141,7 +141,6 @@ CONFIGURABLE_KEYS: dict[str, type] = {
     "feed_value_weight_detection": float,
     "feed_value_weight_pir": float,
     "cve_epss_high_risk_threshold": float,
-    "my_sectors": str,
     # Signal engine
     "signal_engine_shadow": bool,
     "signal_engine_surface": bool,
@@ -806,16 +805,6 @@ SETTING_METADATA: dict[str, dict] = {
         ),
         "group": "intelligence",
     },
-    "my_sectors": {
-        "label": "My Sectors",
-        "description": (
-            "Comma-separated industry sectors your organization belongs to "
-            "(e.g. 'healthcare, financial services'). Aliases like 'banks' or "
-            "'hospitals' are accepted. Priority Queue boosts entries whose "
-            "extracted victim sectors match."
-        ),
-        "group": "intelligence",
-    },
     "registration_enabled": {
         "label": "Account Registration",
         "description": "Allow new users to register accounts. Disable to lock registration.",
@@ -1187,7 +1176,6 @@ _ENGINE_SECTION_GROUPS: dict[str, str] = {
     "radar_personalization_window_days": "scoring",
     "my_stack_exposure_enabled": "scoring",
     "exposure_attack_visibility_enabled": "scoring",
-    "my_sectors": "scoring",
     # Maintenance browse view (link validation, hygiene, merge engine)
     "entity_maintenance_mode": "maintenance",
     "link_validation_mode": "maintenance",

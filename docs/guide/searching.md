@@ -159,4 +159,4 @@ half, so any search built on an entity filter shows a number you can't trust —
 `country:"United States"` reads 0 next to a search that opens 5,896 articles.
 
 Counts are reliable for `tag:`, `feed:`, `category:`, `type:`, `date:`, `is:`
-and plain text. `signal:`, `sector:` and `url:` read low past about 500 matches.
+and plain text. `signal:` and `url:` read low past about 500 matches.

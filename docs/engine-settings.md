@@ -174,7 +174,6 @@ and story threads (`threads`). The scoring model itself is documented in
 | `radar_personalization_window_days` | int, `90` | Lookback for the nightly per-user fit. Longer than the global 30-day nudge window because one analyst votes far less often than all of them together. |
 | `my_stack_exposure_enabled` | bool, `false` | Vendor Watch: float CVEs affecting followed vendors/products in the Priority Queue and power the Vendor Watch board with detection-library coverage. Read-time and per-user, reusing the entity watchlist — no rescore. **Requires `signal_engine_surface`.** |
 | `exposure_attack_visibility_enabled` | bool, `false` | On the Vendor Watch board, for vulns with no detection rule, estimate detectability by mapping the CVE's co-occurring ATT&CK techniques to their data sources and on to configured telemetry. Explicitly lower confidence than rule-backed coverage — the CVE→technique link is article co-occurrence, not a curated mapping. |
-| `my_sectors` | csv, empty | Sectors your organisation belongs to, normalised against the `app.intelligence.sectors` vocabulary (aliases like "banks" or "hospitals" are accepted). Entries whose extracted victim sectors intersect this list get a Priority Queue boost. |
 
 Jobs: `signal-rate-recompute` (daily 04:20 UTC),
 `signal-personal-weight-fit` (daily 04:35 UTC), `signal-rescore-recent`

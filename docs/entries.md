@@ -34,7 +34,7 @@ See diagram: [Entry lifecycle](diagrams/entries-lifecycle.md)
 | CyberGeist sync | daily 02:30 |
 | mitre-attack-sync / malpedia-sync | weekly Sun 03:00 / 03:30 |
 | metasploit-sync | weekly Sun 03:45 (CVE → Metasploit module, escalates `weaponized`) |
-| rollup-targeted-sectors | daily 04:20 (entry_sectors → actor/malware `targeted_sectors`) |
+| rollup-targeted-sectors | daily 04:20 (entry_sectors → `threat_actor_target_sectors` / `malware_target_sectors` claim rows with article evidence; the `targeted_sectors` arrays are a cache rebuilt from them) |
 | backfill-rule-data-sources | weekly Sun 04:50 (rule log sources → `data_sources` for telemetry coverage) |
 | backfill-rule-attack-mappings | weekly Sun 05:30 (re-fetch GitHub-sourced rules for ATT&CK ids; derive tactics from techniques) |
 | wikipedia-bulk-sync | weekly Wed 04:00 |

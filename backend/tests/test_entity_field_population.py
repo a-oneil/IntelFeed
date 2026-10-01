@@ -5,7 +5,7 @@ either read a key the upstream source no longer publishes, or never looked at
 data the source was already handing us.
 """
 
-from app.intelligence.actor_attributes import coerce_motivation, coerce_sectors
+from app.intelligence.actor_attributes import coerce_motivation
 from app.intelligence.attack_catalog import parse_attack_bundle
 from app.intelligence.rule_metadata import derive_data_sources
 from app.workers.enrichment_tasks import parse_metasploit_modules, parse_misp_galaxy_attributes
@@ -223,13 +223,6 @@ def test_motivation_coerced_to_vocabulary():
     assert coerce_motivation("unknown") is None
     assert coerce_motivation("") is None
     assert coerce_motivation("Pro-Iran amplification actor") is None
-
-
-def test_sectors_coerced_to_canonical_labels():
-    assert coerce_sectors(["Government", "healthcare"]) == ["Government", "Healthcare"]
-    # Unmappable free text is dropped rather than stored as an unfilterable chip
-    assert coerce_sectors(["Political entities in Hong Kong"]) == []
-    assert coerce_sectors(None) == []
 
 
 # --- Splunk security_content schema drift -----------------------------------

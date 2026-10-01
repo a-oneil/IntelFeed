@@ -8,8 +8,8 @@ curate with evidence instead of trusting a silent query.
 Match sources, per entity:
 - co-occurrence: entries in the window that link the entity AND a scope
   country / a scope sector (entry_countries / entry_sectors junctions)
-- claims: threat_actor_target_countries rows and the targeted_sectors field
-  (normalized through the sector vocabulary before comparing)
+- claims: threat_actor_target_countries rows and the target-sector junctions
+  (threat_actor_target_sectors / malware_target_sectors, any source)
 - victims: ransomware victim disclosures by the group in scope countries /
   sectors inside the window
 
@@ -30,6 +30,7 @@ from app.models.entry import Entry
 from app.models.entry_sector import EntrySector
 from app.models.malware_family import EntryMalware, MalwareFamily
 from app.models.ransomware import VictimDisclosure
+from app.models.sector import MalwareTargetSector, Sector, ThreatActorTargetSector
 from app.models.threat_actor import EntryThreatActor, ThreatActor
 
 # Candidates with only one matched dimension still surface (ranked lower,
@@ -37,8 +38,17 @@ from app.models.threat_actor import EntryThreatActor, ThreatActor
 _MAX_CANDIDATES_PER_TYPE = 200
 
 
-def _norm_sectors(raw: list[str] | None) -> set[str]:
-    return {s for s in (normalize_sector(v) for v in (raw or [])) if s}
+async def _claimed_sectors(db: AsyncSession, junction, fk, sectors: list[str]) -> dict[uuid.UUID, set[str]]:
+    """entity_id -> scope slugs it is asserted to target (any claim source)."""
+    out: dict[uuid.UUID, set[str]] = {}
+    if not sectors:
+        return out
+    rows = await db.execute(
+        select(fk, Sector.slug).join(Sector, Sector.id == junction.sector_id).where(Sector.slug.in_(sectors))
+    )
+    for entity_id, slug in rows.all():
+        out.setdefault(entity_id, set()).add(slug)
+    return out
 
 
 async def _cooccurrence(
@@ -213,18 +223,9 @@ async def build_threat_surface(
         for actor_id, country_name in rows.all():
             actor_claim_regions.setdefault(actor_id, set()).add(country_name)
 
-    actor_claim_sectors: dict[uuid.UUID, set[str]] = {}
-    if sectors:
-        wanted = set(sectors)
-        rows = await db.execute(
-            select(ThreatActor.id, ThreatActor.targeted_sectors).where(
-                func.cardinality(ThreatActor.targeted_sectors) > 0
-            )
-        )
-        for actor_id, raw in rows.all():
-            overlap = _norm_sectors(raw) & wanted
-            if overlap:
-                actor_claim_sectors[actor_id] = overlap
+    actor_claim_sectors = await _claimed_sectors(
+        db, ThreatActorTargetSector, ThreatActorTargetSector.threat_actor_id, sectors
+    )
 
     actor_victims: dict[uuid.UUID, int] = {}
     victim_filters = []
@@ -281,18 +282,7 @@ async def build_threat_surface(
         db, EntryMalware, EntryMalware.malware_family_id, cutoff, country_ids, sectors
     )
 
-    mal_claim_sectors: dict[uuid.UUID, set[str]] = {}
-    if sectors:
-        wanted = set(sectors)
-        rows = await db.execute(
-            select(MalwareFamily.id, MalwareFamily.targeted_sectors).where(
-                func.cardinality(MalwareFamily.targeted_sectors) > 0
-            )
-        )
-        for mal_id, raw in rows.all():
-            overlap = _norm_sectors(raw) & wanted
-            if overlap:
-                mal_claim_sectors[mal_id] = overlap
+    mal_claim_sectors = await _claimed_sectors(db, MalwareTargetSector, MalwareTargetSector.malware_family_id, sectors)
 
     mal_ids = set(mal_cooc_regions) | set(mal_cooc_sectors) | set(mal_claim_sectors)
     mal_counts, mal_latest = await _entry_evidence(

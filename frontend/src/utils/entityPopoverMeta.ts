@@ -3,7 +3,7 @@
 // fetched for highlighting (entry-entity endpoints or the public shared-entry
 // response), so no extra request is made.
 
-import type { ThreatActor, MalwareFamily, Vendor, Product, OffensiveTool, Country, Mitigation, CWEResponse } from "@/api/types";
+import type { ThreatActor, MalwareFamily, Vendor, Product, OffensiveTool, Country, Sector, Mitigation, CWEResponse } from "@/api/types";
 import type { HighlightEntityMeta } from "@/components/InlineEntityHighlighter";
 
 type MetaLink = { label: string; url: string };
@@ -72,6 +72,13 @@ export function countryMeta(c: Country): HighlightEntityMeta {
   const facts: NonNullable<HighlightEntityMeta["facts"]> = [];
   if (c.region) facts.push({ label: "Region", value: c.region });
   return { description: c.description, facts, aliases: c.aliases, links: withWiki([], c.wikipedia_url), image_url: c.wikipedia_image_url, article_count: c.article_count, first_seen_at: c.first_seen_at };
+}
+
+export function sectorMeta(s: Sector): HighlightEntityMeta {
+  const facts: NonNullable<HighlightEntityMeta["facts"]> = [];
+  if (s.victim_count) facts.push({ label: "Leak-site victims (90d)", value: String(s.victim_count) });
+  if (s.targeting_actor_count) facts.push({ label: "Targeted by", value: `${s.targeting_actor_count} actors` });
+  return { description: s.description, facts, aliases: s.aliases, links: [], article_count: s.article_count, first_seen_at: s.first_seen_at };
 }
 
 export function mitigationMeta(m: Mitigation): HighlightEntityMeta {

@@ -38,6 +38,10 @@ const PIVOT_LINK_MAP: Record<string, PivotLinkTemplate[]> = {
     { platform: "Google", urlTemplate: "https://www.google.com/search?q={value}+cyber+threat" },
     { platform: "CISA", urlTemplate: "https://www.cisa.gov/search#gsc.tab=0&gsc.q={value}&gsc.sort=" },
   ],
+  sector: [
+    { platform: "Google", urlTemplate: "https://www.google.com/search?q={value}+sector+cyber+attack" },
+    { platform: "CISA", urlTemplate: "https://www.cisa.gov/search#gsc.tab=0&gsc.q={value}+sector&gsc.sort=" },
+  ],
   // The catalog page takes a bare number, so the profile passes the numeric
   // part; the other two want the full "CWE-416" form.
   cwe: [

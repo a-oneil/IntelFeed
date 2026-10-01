@@ -36,6 +36,7 @@ import { CveLifecycleStrip } from "@/components/entityProfile/CveLifecycleStrip"
 import { ObservableLifecycleStrip } from "@/components/entityProfile/ObservableLifecycleStrip";
 import { DetectionTab } from "@/components/entityProfile/tabs/DetectionTab";
 import { GeographyTab } from "@/components/entityProfile/tabs/GeographyTab";
+import { VictimologyTab } from "@/components/entityProfile/tabs/VictimologyTab";
 import { DetectionGapsTab } from "@/components/entityProfile/tabs/DetectionGapsTab";
 import styles from "@/components/entityProfile/entityProfile.module.css";
 
@@ -45,6 +46,8 @@ const RESOLVE_ENDPOINTS: Record<string, (id: string) => string> = {
   cve: (id) => `/cves/${id}`,
   // /cwes/{id} takes a UUID or a catalog id, so the same route resolves both.
   cwe: (id) => `/cwes/${id}`,
+  // /sectors/{ref} takes a UUID or the canonical slug (healthcare).
+  sector: (id) => `/sectors/${id}`,
 };
 
 export function EntityProfilePage({ slug }: { slug: string }) {
@@ -228,6 +231,7 @@ export function EntityProfilePage({ slug }: { slug: string }) {
       countOf("ttps", related.ttps) +
       countOf("cves", related.cves) +
       countOf("countrys", related.countrys) +
+      countOf("sectors", related.sectors) +
       countOf("vendors", related.vendors) +
       countOf("products", related.products) +
       countOf("tools", related.tools) +
@@ -317,6 +321,9 @@ export function EntityProfilePage({ slug }: { slug: string }) {
           <VulnerabilitiesTab mode={affectedKind} entityId={entityId} entityName={displayName} />
         )}
         {activeTab === "weaknesses" && entityType === "cve" && <WeaknessesTab entityId={entityId} />}
+        {activeTab === "victimology" && entityType === "sector" && (
+          <VictimologyTab entityId={entityId} entityLabel={displayName} onOpenEntity={openEntity} onOpenArticle={openArticle} />
+        )}
         {activeTab === "relationships" && (
           <RelationshipsTab
             entityType={entityType}

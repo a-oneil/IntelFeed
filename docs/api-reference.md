@@ -1400,11 +1400,25 @@ Related catalog endpoints: `GET /api/countries`, `GET /api/countries/{country_id
 
 ---
 
-#### Sectors, Mitigations & Offensive Tools
+#### Sectors
+
+A closed, seeded vocabulary of 21 victim industries, promoted to an entity. Every route accepts a sector by UUID, canonical slug (`healthcare`), display name or alias.
+
+- **`GET /api/sectors`** — paginated list; `search`, `sort_by` in `name|article_count|last_seen_at|linked_count|targeting_actor_count|victim_count`. Items carry `targeting_actor_count`, `targeting_malware_count` and `victim_count` (leak-site disclosures, last 90 days).
+- **`GET /api/sectors/{ref}`**, **`GET /api/sectors/{ref}/profile`** (`window_days`) — the victimology profile: `reported_actors`/`reported_malware` (ranked by articles describing both the entity and the sector being hit), `asserted_actors`/`asserted_malware` (target-sector claims with `source` and `article_count`), `campaigns`, `victims` (totals, 12-month series, top groups, recent disclosures), `countries` (article and victim counts), `intel_profiles`, `recent_entries`, `articles_monthly`.
+- **`GET /api/entries/{entry_id}/sectors`** / **`DELETE /api/entries/{entry_id}/sectors/{sector_id}`** — the sectors an article describes as targeted (written only by the one-pass AI analysis; `POST /api/entries/{entry_id}/extract-sectors` runs it). The response carries `id`/`slug`/`name` and the legacy `sector`/`label` spellings.
+- **`PUT /api/entities/sectors/{sector_id}`** — `aliases`, `description`. Name and slug are the vocabulary itself; there is no create, delete, merge or convert.
+- **`GET/POST /api/entities/{threat_actor|malware}/{id}/target-sectors`**, **`DELETE .../target-sectors/{ref}`** — the asserted targets-sector claims on an actor or family. `POST` records an analyst claim (upgrading a rolled-up or enriched row); the `targeted_sectors` label array on the entity is a cache rebuilt from these rows.
+- **`GET/POST /api/campaigns/{id}/sectors`**, **`DELETE .../sectors/{ref}`**, **`GET .../sectors/suggested`** — a campaign's victim verticals; suggestions come from its own articles' sectors.
+
+Sectors are also watchable (`entity_type: "sector"` on the watchlist) — a watch boosts the sector's articles in the Priority Queue — and pivot/graph/timeline through the generic correlation routes.
+
+---
+
+#### Mitigations & Offensive Tools
 
 Same extract/list pattern as the entity types above:
 
-- **`POST /api/entries/{entry_id}/extract-sectors`** / **`GET /api/entries/{entry_id}/sectors`**
 - **`POST /api/entries/{entry_id}/extract-mitigations`** / **`GET /api/entries/{entry_id}/mitigations`** — catalog at `GET /api/mitigations`, `GET /api/mitigations/{mitigation_id}`
 - **`POST /api/entries/{entry_id}/extract-tools`** / **`GET /api/entries/{entry_id}/tools`** — catalog at `GET /api/tools` (paginated), `GET /api/tools/{tool_id}`
 
@@ -1676,6 +1690,7 @@ Delete a campaign.
 - **`POST /api/campaigns/{id}/entries`** / **`DELETE /api/campaigns/{id}/entries/{entry_id}`** — Attach/detach entries
 - **`GET/POST /api/campaigns/{id}/entities`** / **`DELETE /api/campaigns/{id}/entities/{entity_id}`** — Campaign entity membership
 - **`GET/POST /api/campaigns/{id}/countries`** / **`DELETE .../countries/{country_id}`**, **`GET .../countries/suggested`** — Targeted/attributed countries
+- **`GET/POST /api/campaigns/{id}/sectors`** / **`DELETE .../sectors/{ref}`**, **`GET .../sectors/suggested`** — Victim verticals (sector by UUID, slug or name)
 - **`GET /api/campaigns/{id}/timeline`**, **`GET .../stats`**, **`GET .../attack-layer`**, **`GET .../detection-gaps`**, **`GET .../export`**, **`GET .../suggest`** — Analysis views
 - **`GET/POST /api/campaigns/{id}/saved-searches`**, **`PATCH/DELETE .../saved-searches/{css_id}`**, **`POST .../saved-searches/{css_id}/sync`** — Campaign-scoped saved searches that auto-collect matching entries
 - **`POST /api/campaigns/auto-detect`** — Suggest new campaigns from entry clustering
@@ -3093,7 +3108,7 @@ Full-text search across articles using Meilisearch.
 
 **`POST /api/search/unified`**
 
-The one search endpoint the `/search` page and the header input use. Runs the full query language: text terms and indexed filters against Meilisearch, `category:`/`signal:`/`sector:`/`url:`/`feed.*:`/`is:muted|translated|image` against PostgreSQL, entity filters against the entity tables — then intersects the three.
+The one search endpoint the `/search` page and the header input use. Runs the full query language: text terms and indexed filters against Meilisearch, `category:`/`signal:`/`url:`/`feed.*:`/`is:muted|translated|image` against PostgreSQL, entity filters against the entity tables — then intersects the three.
 
 **Auth:** Bearer token  
 **Body:**

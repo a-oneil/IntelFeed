@@ -19,12 +19,14 @@ from app.models.cwe import CWE, EntryCWE
 from app.models.detection_rule import DetectionRule
 from app.models.entity_relationship import EntityRelationship
 from app.models.entry import Entry
+from app.models.entry_sector import EntrySector
 from app.models.feed import Feed
 from app.models.intel_report import IntelReport
 from app.models.malware_family import EntryMalware, MalwareFamily
 from app.models.mitigation import EntryMitigation, Mitigation
 from app.models.observable import EntryObservable, Observable
 from app.models.product import EntryProduct, Product
+from app.models.sector import Sector
 from app.models.threat_actor import EntryThreatActor, ThreatActor
 from app.models.tool import EntryTool, Tool
 from app.models.ttp import TTP, EntryTTP
@@ -65,6 +67,7 @@ ENTITY_CONFIG = {
     "vendor": (Vendor, EntryVendor, EntryVendor.vendor_id),
     "product": (Product, EntryProduct, EntryProduct.product_id),
     "observable": (Observable, EntryObservable, EntryObservable.observable_id),
+    "sector": (Sector, EntrySector, EntrySector.sector_id),
 }
 
 VALID_ENTITY_TYPES = set(ENTITY_CONFIG.keys())
@@ -114,6 +117,8 @@ def _entity_label(entity_type: str, entity) -> str:
     if entity_type == "malware":
         return entity.name
     if entity_type == "country":
+        return entity.name
+    if entity_type == "sector":
         return entity.name
     if entity_type == "mitigation":
         return f"{entity.mitre_id} {entity.name}" if entity.mitre_id else entity.name
@@ -696,6 +701,18 @@ def _serialize_entity(entity_type: str, entity) -> dict:
                 "wikipedia_image_url": getattr(entity, "wikipedia_image_url", None),
             }
         )
+    elif entity_type == "sector":
+        base.update(
+            {
+                "name": getattr(entity, "name", None),
+                "slug": getattr(entity, "slug", None),
+                "aliases": getattr(entity, "aliases", None) or [],
+                "description": getattr(entity, "description", None),
+                "article_count": getattr(entity, "article_count", 0),
+                "first_seen_at": _dt(getattr(entity, "first_seen_at", None)),
+                "last_seen_at": _dt(getattr(entity, "last_seen_at", None)),
+            }
+        )
     elif entity_type == "tool":
         base.update(
             {
@@ -1187,6 +1204,29 @@ async def pivot_from_entity(
                 item["country_relationship"] = "operates_from"
             elif item.get("id") in infra:
                 item["country_relationship"] = "infrastructure"
+
+    # Sector pivots: mark which related actors/malware carry an asserted
+    # "targets" claim (a junction row) as opposed to merely co-reporting, and
+    # where that claim came from, so the UI can split the two.
+    if entity_type == "sector":
+        from app.models.sector import MalwareTargetSector, ThreatActorTargetSector
+
+        for key, junction, fk in (
+            ("threat_actors", ThreatActorTargetSector, ThreatActorTargetSector.threat_actor_id),
+            ("malwares", MalwareTargetSector, MalwareTargetSector.malware_family_id),
+        ):
+            if not related.get(key):
+                continue
+            rows = await db.execute(
+                select(fk, junction.source, junction.article_count).where(junction.sector_id == entity_id)
+            )
+            claims = {str(eid): (source, n) for eid, source, n in rows.all()}
+            for item in related[key]:
+                claim = claims.get(item.get("id"))
+                if claim:
+                    item["sector_relationship"] = "targets"
+                    item["sector_claim_source"] = claim[0]
+                    item["sector_claim_articles"] = claim[1]
 
     # Library-wide detection coverage: which of the related techniques/CVEs
     # does ANY rule in the library cover — not just rules extracted from this
@@ -1731,7 +1771,7 @@ def _get_label_from_serialized(entity_type: str, data: dict) -> str:
         return f"{data.get('technique_id', '')} {data.get('technique_name', '')}"
     if entity_type == "cve":
         return data.get("cve_id", "")
-    if entity_type in ("threat_actor", "malware", "country", "tool", "vendor", "product"):
+    if entity_type in ("threat_actor", "malware", "country", "sector", "tool", "vendor", "product"):
         return data.get("name", "")
     if entity_type == "mitigation":
         mid = data.get("mitre_id", "")
@@ -2041,6 +2081,22 @@ async def search_all_entities(
         item["match_field"] = _match_field(country, "country")
         results.append(item)
 
+    # Sectors — search name and aliases ("banks" finds Financial Services)
+    sector_result = await db.execute(
+        select(Sector)
+        .where(
+            or_(
+                Sector.name.ilike(q),
+                _aliases_match_bounded(Sector, query),
+            )
+        )
+        .limit(per_type_limit)
+    )
+    for sector in sector_result.scalars().all():
+        item = _serialize_entity("sector", sector)
+        item["match_field"] = _match_field(sector, "sector")
+        results.append(item)
+
     # Mitigations — search name and mitre_id
     mitigation_result = await db.execute(
         select(Mitigation)
@@ -2133,10 +2189,11 @@ async def search_all_entities(
         "vendor": 6,
         "product": 7,
         "country": 8,
-        "mitigation": 9,
-        "campaign": 10,
-        "intel_report": 11,
-        "note": 12,
+        "sector": 9,
+        "mitigation": 10,
+        "campaign": 11,
+        "intel_report": 12,
+        "note": 13,
     }
 
     def sort_key(item):
@@ -2403,6 +2460,7 @@ async def entity_timeline(db: AsyncSession, entity_type: str, entity_id: uuid.UU
         "ttp": "TTP",
         "cve": "CVE",
         "country": "country",
+        "sector": "sector",
         "mitigation": "mitigation",
         "tool": "tool",
     }
@@ -2498,7 +2556,7 @@ async def entity_timeline(db: AsyncSession, entity_type: str, entity_id: uuid.UU
 # ---------------------------------------------------------------------------
 
 # Entity types valid for EntityRelationship records (must match model constraints)
-_RELATABLE_TYPES = {"threat_actor", "malware", "ttp", "cve", "tool", "country"}
+_RELATABLE_TYPES = {"threat_actor", "malware", "ttp", "cve", "tool", "country", "sector"}
 
 # Maps (source_type, target_type) → relationship_type for co-occurrence.
 # Uses only values from EntityRelationship.relationship_type enum.
@@ -2507,10 +2565,12 @@ COOCCURRENCE_RELATIONSHIP_MAP: dict[tuple[str, str], str] = {
     ("threat_actor", "ttp"): "uses",
     ("threat_actor", "cve"): "exploits",
     ("threat_actor", "country"): "targets",
+    ("threat_actor", "sector"): "targets",
     ("threat_actor", "tool"): "uses",
     ("malware", "ttp"): "uses",
     ("malware", "cve"): "exploits",
     ("malware", "country"): "targets",
+    ("malware", "sector"): "targets",
     ("malware", "tool"): "related_to",
     ("cve", "ttp"): "related_to",
 }
@@ -2518,11 +2578,12 @@ COOCCURRENCE_RELATIONSHIP_MAP: dict[tuple[str, str], str] = {
 # Max entities per entry before we skip co-occurrence generation (avoid N^2 explosion)
 _MAX_ENTITIES_PER_ENTRY = 50
 
-# Speculative verbs that ride on the weakest evidence: a country "targets"
-# edge or a generic "related_to" is asserted from a bare co-mention, and
-# countries in particular show up as bystanders (victims, researcher locale,
-# an actor's disguise). Hold these to the same strong-proximity bar as
-# unmapped pairs so a loose cross-paragraph co-mention can't manufacture them.
+# Speculative verbs that ride on the weakest evidence: a country or sector
+# "targets" edge or a generic "related_to" is asserted from a bare co-mention,
+# and countries and sectors in particular show up as bystanders (victims,
+# researcher locale, an actor's disguise, the industry a vendor sells to).
+# Hold these to the same strong-proximity bar as unmapped pairs so a loose
+# cross-paragraph co-mention can't manufacture them.
 _SOFT_COOCCURRENCE_VERBS = {"targets", "related_to"}
 
 
@@ -2752,7 +2813,7 @@ async def create_cooccurrence_relationships(
 # Type preference when collapsing name-twins: an actor and a malware family that
 # share a display name (the Qilin RaaS *group* vs. the Qilin ransomware *payload*)
 # model one real-world subject. Keep the higher-signal type as the representative.
-_TWIN_TYPE_PRIORITY = {"threat_actor": 0, "malware": 1, "tool": 2, "ttp": 3, "cve": 4, "country": 5}
+_TWIN_TYPE_PRIORITY = {"threat_actor": 0, "malware": 1, "tool": 2, "ttp": 3, "cve": 4, "country": 5, "sector": 6}
 
 
 def _collapse_name_twins(

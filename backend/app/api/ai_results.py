@@ -37,6 +37,7 @@ VALID_TARGET_TYPES = {
     "tool",
     "mitigation",
     "country",
+    "sector",
     "vendor",
     "product",
     "observable",

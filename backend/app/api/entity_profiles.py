@@ -9,7 +9,7 @@ import re
 import uuid
 from datetime import UTC
 
-from fastapi import APIRouter, Body, Depends, Path, Query
+from fastapi import APIRouter, Body, Depends, Path, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -36,6 +36,7 @@ from app.models.entry import Entry
 from app.models.malware_family import EntryMalware, MalwareFamily
 from app.models.mitigation import EntryMitigation, Mitigation, TTPMitigation
 from app.models.product import EntryProduct, Product
+from app.models.sector import Sector
 from app.models.threat_actor import EntryThreatActor, ThreatActor
 from app.models.tool import EntryTool, Tool
 from app.models.ttp import TTP, EntryTTP
@@ -360,6 +361,22 @@ class CountryUpdate(BaseModel):
             "example": {
                 "aliases": ["DPRK"],
                 "region": "Asia",
+            }
+        }
+    )
+
+
+class SectorUpdate(BaseModel):
+    """A sector's name and slug are the vocabulary itself and never change here."""
+
+    aliases: list[str] | None = None
+    description: str | None = None
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "aliases": ["hospitals", "health systems", "pharma"],
+                "description": "Hospitals, health systems, clinics, insurers and medical-device makers.",
             }
         }
     )
@@ -1130,6 +1147,164 @@ async def update_country(
         "region": country.region,
         "description": country.description,
     }
+
+
+@router.put("/sectors/{sector_id}")
+async def update_sector(
+    sector_id: uuid.UUID = Path(..., description="UUID of the sector."),
+    body: SectorUpdate = Body(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update a sector's aliases or description.
+
+    Sectors are a closed vocabulary: the name and slug are fixed, there is no
+    create, delete, merge or convert, and because sectors are never autolinked
+    an alias change does not retro-scan or unlink anything — aliases only widen
+    what ``sector:`` search resolves.
+    """
+    result = await db.execute(select(Sector).where(Sector.id == sector_id))
+    sector = result.scalar_one_or_none()
+    if not sector:
+        raise AppError(code="not_found", message="Sector not found", status_code=404)
+
+    await _apply_fields(db, entity_types.SECTOR, sector, body, ["aliases", "description"], user)
+
+    db.add(sector)
+    await db.flush()
+    await db.refresh(sector)
+    await invalidate_entity_cache("sector", str(sector_id))
+
+    return {
+        "id": str(sector.id),
+        "slug": sector.slug,
+        "name": sector.name,
+        "aliases": sector.aliases,
+        "description": sector.description,
+    }
+
+
+# --- Target sectors (actors and malware) ---
+
+
+class TargetSectorBody(BaseModel):
+    """A sector by UUID, canonical slug or display name."""
+
+    sector: str = Field(min_length=1, max_length=100)
+
+    model_config = ConfigDict(json_schema_extra={"example": {"sector": "healthcare"}})
+
+
+def _require_target_sector_type(entity_type: str) -> None:
+    from app.services.sector_links import TARGET_SECTOR_ENTITY_TYPES
+
+    if entity_type not in TARGET_SECTOR_ENTITY_TYPES:
+        raise AppError(
+            code="bad_request",
+            message=f"{entity_type} cannot target sectors; expected one of {sorted(TARGET_SECTOR_ENTITY_TYPES)}",
+            status_code=400,
+        )
+
+
+async def _load_target_entity(db: AsyncSession, entity_type: str, entity_id: uuid.UUID):
+    from app.services.sector_links import junction_for
+
+    model, _, _ = junction_for(entity_type)
+    entity = (await db.execute(select(model).where(model.id == entity_id))).scalar_one_or_none()
+    if entity is None:
+        raise AppError(code="not_found", message=f"{entity_type} not found", status_code=404)
+    return entity
+
+
+@router.get("/{entity_type}/{entity_id}/target-sectors")
+async def list_entity_target_sectors(
+    entity_type: str = Path(..., description="threat_actor or malware."),
+    entity_id: uuid.UUID = Path(..., description="Entity UUID."),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The sectors this actor or family is asserted to target, with the source of each claim
+    (rollup from its own articles, reference-feed enrichment, the seed backfill, or an analyst)
+    and the article evidence behind it."""
+    from app.services.sector_links import list_target_sectors
+
+    _require_target_sector_type(entity_type)
+    await _load_target_entity(db, entity_type, entity_id)
+    return await list_target_sectors(db, entity_type, entity_id)
+
+
+@router.post("/{entity_type}/{entity_id}/target-sectors", status_code=201)
+async def add_entity_target_sector(
+    entity_type: str = Path(..., description="threat_actor or malware."),
+    entity_id: uuid.UUID = Path(..., description="Entity UUID."),
+    body: TargetSectorBody = Body(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Assert that the actor or family targets a sector. Recorded as an analyst claim; an existing
+    rolled-up or enriched row is upgraded to the analyst's, never duplicated."""
+    from app.api.intelligence import _load_sector
+    from app.services.claim_provenance import record_claim
+    from app.services.sector_links import add_target_sector, list_target_sectors, refresh_targeted_sectors_cache
+
+    _require_target_sector_type(entity_type)
+    entity = await _load_target_entity(db, entity_type, entity_id)
+    sector = await _load_sector(db, body.sector)
+    changed = await add_target_sector(db, entity_type, entity_id, sector.id, "analyst")
+    labels = await refresh_targeted_sectors_cache(db, entity_type, entity)
+    if changed:
+        await record_claim(
+            db,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            field="targeted_sectors",
+            value=labels,
+            source_kind="analyst",
+            created_by=user.id,
+        )
+        await invalidate_entity_cache(entity_type, str(entity_id))
+        await invalidate_entity_cache("sector", str(sector.id))
+    return {
+        "sector_id": str(sector.id),
+        "slug": sector.slug,
+        "name": sector.name,
+        "changed": changed,
+        "target_sectors": await list_target_sectors(db, entity_type, entity_id),
+    }
+
+
+@router.delete("/{entity_type}/{entity_id}/target-sectors/{sector_ref}", status_code=204)
+async def remove_entity_target_sector(
+    entity_type: str = Path(..., description="threat_actor or malware."),
+    entity_id: uuid.UUID = Path(..., description="Entity UUID."),
+    sector_ref: str = Path(..., description="Sector UUID, slug or name."),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Withdraw a targets-sector claim. The nightly rollup will re-assert it if the entity's own
+    articles still carry the evidence; remove the entry links to make that stick."""
+    from app.api.intelligence import _load_sector
+    from app.services.claim_provenance import record_claim
+    from app.services.sector_links import refresh_targeted_sectors_cache, remove_target_sector
+
+    _require_target_sector_type(entity_type)
+    entity = await _load_target_entity(db, entity_type, entity_id)
+    sector = await _load_sector(db, sector_ref)
+    if not await remove_target_sector(db, entity_type, entity_id, sector.id):
+        raise AppError(code="not_found", message="Target-sector claim not found", status_code=404)
+    labels = await refresh_targeted_sectors_cache(db, entity_type, entity)
+    await record_claim(
+        db,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        field="targeted_sectors",
+        value=labels,
+        source_kind="analyst",
+        created_by=user.id,
+    )
+    await invalidate_entity_cache(entity_type, str(entity_id))
+    await invalidate_entity_cache("sector", str(sector.id))
+    return Response(status_code=204)
 
 
 # --- Unlink all entries from entity ---
@@ -2136,7 +2311,13 @@ async def get_entity_field_provenance(
 # link_entity_to_existing_entries() also supports "mitigation" (name+alias
 # search) — ENTITY_MODEL_MAP above omits it because it's scoped to
 # Wikipedia-relevant types, not because rescan doesn't apply.
-RESCAN_MODEL_MAP = {**{k: v[0] for k, v in ENTITY_MODEL_MAP.items()}, "mitigation": Mitigation}
+# Sectors are summarizable (ENTITY_MODEL_MAP) but never autolinked, so there is
+# nothing to rescan for one — the gate below returns 400 rather than handing the
+# autolinker a type it has no match surface for.
+RESCAN_MODEL_MAP = {
+    **{k: v[0] for k, v in ENTITY_MODEL_MAP.items() if k != "sector"},
+    "mitigation": Mitigation,
+}
 
 
 @router.post("/{entity_type}/{entity_id}/rescan")

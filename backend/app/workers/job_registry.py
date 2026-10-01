@@ -527,7 +527,10 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
     },
     "rollup-targeted-sectors": {
         "task": "app.workers.maintenance.rollup_targeted_sectors",
-        "description": "Derive actor/malware targeted sectors from victim sectors on their articles",
+        "description": (
+            "Derive actor/malware target-sector claims (with article evidence) from the victim sectors on "
+            "their articles; rebuild the targeted_sectors cache"
+        ),
         "category": "maintenance",
         "default_schedule": {
             "type": "crontab",

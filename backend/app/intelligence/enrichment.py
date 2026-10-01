@@ -763,9 +763,17 @@ async def store_sectors(
     entry_id: uuid.UUID,
     sectors_data: list[dict],
 ) -> list[dict]:
-    """Persist AI-extracted victim sectors (shared with entry_analysis)."""
-    from app.intelligence.sectors import normalize_sector, sector_label
+    """Persist AI-extracted victim sectors (shared with entry_analysis).
+
+    The only writer of entry↔sector links: sectors are never autolinked, so a
+    row here always means the one-pass analysis judged the sector *targeted*.
+    Each new link bumps the sector entity's article count the way the
+    autolinker does for every other type.
+    """
+    from app.intelligence.autolinker import _bump_entity_stats
+    from app.intelligence.sectors import normalize_sector, sector_label, sector_uuid
     from app.models.entry_sector import EntrySector
+    from app.models.sector import Sector
 
     stored: list[dict] = []
     seen: set[str] = set()
@@ -775,19 +783,27 @@ async def store_sectors(
             continue
         seen.add(slug)
         confidence = (sector_data.get("confidence") or "").strip() or None
+        sector_id = sector_uuid(slug)
 
-        await db.execute(
+        result = await db.execute(
             pg_insert(EntrySector)
             .values(
                 entry_id=entry_id,
                 sector=slug,
+                sector_id=sector_id,
                 confidence=confidence,
                 source="ai",
+                role="target",
             )
             .on_conflict_do_nothing()
         )
+        if result.rowcount:
+            await _bump_entity_stats(db, Sector, sector_id)
         stored.append(
             {
+                "id": str(sector_id),
+                "slug": slug,
+                "name": sector_label(slug),
                 "sector": slug,
                 "label": sector_label(slug),
                 "confidence": confidence,

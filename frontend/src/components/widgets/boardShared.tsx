@@ -31,6 +31,7 @@ const ENTITY_LABELS: Record<string, string> = {
   vendor: "Vendors",
   product: "Products",
   country: "Countries",
+  sector: "Sectors",
 };
 
 export function entityLabel(entityType: string): string {

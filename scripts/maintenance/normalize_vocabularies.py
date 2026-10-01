@@ -1,19 +1,17 @@
 """Fold stored vocabulary columns onto their canonical spellings.
 
-Three columns that the search grammar treats as vocabularies were written by
+Two columns that the search grammar treats as vocabularies were written by
 several paths that each picked their own casing, so the facets listed the same
 value more than once and a filter for one spelling missed the others:
 
     detection_rules.mitre_tactics   Persistence / persistence / CommandAndControl
     threat_actors.motivation        Financial Extortion / financial extortion
-    threat_actors.targeted_sectors  Critical Infrastructure / critical-infrastructure
-    malware_families.targeted_sectors
 
 The write paths now normalize at the model, so this is a one-shot catch-up for
 rows written before that. It is idempotent — a second run reports zero changes.
 
-Unrecognized values are kept, not dropped: a motivation of "terrorism" or a
-sector of "Political entities in Hong Kong" is an analyst's wording, and the
+Unrecognized values are kept, not dropped: a motivation of "terrorism" is an
+analyst's wording, and the
 point of this sweep is to collapse duplicate spellings, not to prune the
 vocabulary. They are listed under "unmapped" so someone can fold them by hand.
 
@@ -24,7 +22,6 @@ Run inside the api container:
 
 import argparse
 import asyncio
-import re
 import sys
 from collections import Counter
 
@@ -36,25 +33,12 @@ import app.models  # noqa: E402,F401 — register all mappers (Entry relationshi
 from app.database import async_session  # noqa: E402
 from app.intelligence.actor_attributes import MOTIVATIONS, normalize_country, normalize_motivation  # noqa: E402
 from app.intelligence.platforms import CANONICAL_PLATFORMS, canonical_platforms, is_not_a_platform  # noqa: E402
-from app.intelligence.sectors import CANONICAL_SECTORS, fold_sector_labels  # noqa: E402
 from app.intelligence.tactics import CANONICAL_TACTICS, canonical_tactics  # noqa: E402
 from app.models.detection_rule import DetectionRule  # noqa: E402
-from app.models.malware_family import MalwareFamily  # noqa: E402
 from app.models.threat_actor import ThreatActor  # noqa: E402
 from app.models.tool import Tool  # noqa: E402
 
 BATCH = 500
-_SECTOR_LABELS = {label.casefold() for label in CANONICAL_SECTORS.values()}
-
-
-def _sector_key(value: str) -> str:
-    """Group spellings that differ only by case or separator.
-
-    "Individual users", "individual-users" and "individual_users" are one
-    sector written three ways; dropping the separators as well as the case is
-    what makes them meet.
-    """
-    return re.sub(r"[-_\s]+", "", value.casefold())
 
 
 async def _representatives(db, columns, fold, key, is_canonical) -> dict[str, str]:
@@ -138,29 +122,9 @@ async def main(dry_run: bool) -> None:
             "threat_actors.motivation",
             lambda v: v not in MOTIVATIONS,
         )
-        reps = await _representatives(
-            db,
-            (ThreatActor.targeted_sectors, MalwareFamily.targeted_sectors),
-            lambda stored: fold_sector_labels(stored),
-            _sector_key,
-            lambda v: v.casefold() in _SECTOR_LABELS,
-        )
-        print(f"\nsector spellings folded across rows: {len(reps)}")
-        for _key, winner in sorted(reps.items())[:10]:
-            print(f"    -> {winner}")
-
-        def fold_sectors(stored):
-            return [reps.get(_sector_key(v), v) for v in fold_sector_labels(stored or [])]
-
-        for model, label in ((ThreatActor, "threat_actors"), (MalwareFamily, "malware_families")):
-            total += await _fold_column(
-                db,
-                model,
-                "targeted_sectors",
-                fold_sectors,
-                f"{label}.targeted_sectors",
-                lambda v: v.casefold() not in _SECTOR_LABELS,
-            )
+        # targeted_sectors is no longer folded here: the column is a cache rebuilt
+        # from the target-sector junctions (app/services/sector_links.py), and the
+        # one-time free-text cleanup is scripts/maintenance/backfill_targeted_sectors.py.
 
         pruned: Counter = Counter()
 

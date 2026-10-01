@@ -11,7 +11,6 @@ import pytest
 from app.api.search import _array_element_values
 from app.intelligence.actor_attributes import normalize_country, normalize_motivation
 from app.intelligence.platforms import canonical_platform, is_not_a_platform
-from app.intelligence.sectors import fold_sector_labels
 from app.intelligence.tactics import CANONICAL_TACTICS, canonical_tactic, canonical_tactics
 from app.models.detection_rule import DetectionRule
 from app.models.threat_actor import ThreatActor
@@ -136,21 +135,6 @@ def test_actor_validator_folds_on_construction_and_assignment():
     assert actor.motivation == "espionage"
     actor.motivation = "Unknown"
     assert actor.motivation is None
-
-
-def test_fold_sector_labels_folds_case_and_separator_variants():
-    folded = fold_sector_labels(["Critical Infrastructure", "critical-infrastructure", "Healthcare", "healthcare"])
-    assert folded == ["Critical Infrastructure", "Healthcare"]
-
-
-def test_fold_sector_labels_keeps_wording_it_cannot_place():
-    folded = fold_sector_labels(["Political entities in Hong Kong", "hospitals"])
-    assert folded == ["Political entities in Hong Kong", "Healthcare"]
-
-
-def test_fold_sector_labels_ignores_blanks():
-    assert fold_sector_labels(["", "   ", None, "banks"]) == ["Financial Services"]
-    assert fold_sector_labels(None) == []
 
 
 # --- platforms --------------------------------------------------------------
@@ -285,10 +269,3 @@ async def test_autocomplete_groups_case_variants(db_session):
     for field in ("rule.tag", "rule.data_source"):
         suggestions = [s["text"] for s in await _array_element_values(db_session, field, "dns")]
         assert suggestions == ["dns"], f"{field} offered {suggestions}"
-
-
-def test_fold_sector_labels_treats_a_bare_string_as_one_sector():
-    """Iterating a string yields characters — the sector column already carries
-    stray single letters from a caller that made exactly this mistake."""
-    assert fold_sector_labels("Healthcare") == ["Healthcare"]
-    assert fold_sector_labels("banks") == ["Financial Services"]

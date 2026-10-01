@@ -37,6 +37,7 @@ PRODUCT: Final = "product"
 MITIGATION: Final = "mitigation"
 RANSOMWARE_VICTIM: Final = "ransomware_victim"
 OBSERVABLE: Final = "observable"
+SECTOR: Final = "sector"
 
 #: Every entity type in the platform. An "entity" is a first-class noun that can
 #: be linked to entries and related to other entities. Campaigns, detection rules,
@@ -55,6 +56,7 @@ ALL: Final = frozenset(
         MITIGATION,
         RANSOMWARE_VICTIM,
         OBSERVABLE,
+        SECTOR,
     }
 )
 
@@ -72,13 +74,17 @@ ALL: Final = frozenset(
 #: v1, so they never enter the dictionary or the prose scan. Their sightings
 #: accrue in the observables pipeline stage instead, which only exact-matches
 #: candidate values against rows the judgment doors already created.
+#: Sectors are absent for a different reason: their names are common English
+#: words ("energy", "retail", "media") and a prose mention is not a targeting
+#: claim. The one-pass AI analysis is the only writer of entry↔sector links.
 AUTOLINKABLE: Final = frozenset({THREAT_ACTOR, MALWARE, CVE, CWE, TTP, COUNTRY, TOOL, VENDOR, PRODUCT, MITIGATION})
 
 #: Types with a free-text name + aliases, so they can be deduped, merged,
 #: reclassified across types, and indexed in entity_alias_index. Excludes the
 #: id-keyed types (cve/cwe/ttp are identified by CVE-x / CWE-n / Tx, never by
-#: name), country (a closed UN-seeded set that must not be merged), and
-#: observable (identified by its (kind, value) pair — a hash has no aliases).
+#: name), country and sector (closed seeded vocabularies that must never be
+#: merged), and observable (identified by its (kind, value) pair — a hash has
+#: no aliases).
 NAME_RESOLVED: Final = frozenset({THREAT_ACTOR, MALWARE, TOOL, VENDOR, PRODUCT, RANSOMWARE_VICTIM})
 
 #: Types that can be reclassified into one another. Ransomware victims are
@@ -88,7 +94,7 @@ RECLASSIFIABLE: Final = frozenset({THREAT_ACTOR, MALWARE, TOOL, VENDOR, PRODUCT}
 #: Types with entry junction tables, so they can be pivoted, graphed and
 #: timelined. Mirrors intelligence.correlation.ENTITY_CONFIG.
 CORRELATABLE: Final = frozenset(
-    {THREAT_ACTOR, MALWARE, CVE, CWE, TTP, COUNTRY, TOOL, VENDOR, PRODUCT, MITIGATION, OBSERVABLE}
+    {THREAT_ACTOR, MALWARE, CVE, CWE, TTP, COUNTRY, TOOL, VENDOR, PRODUCT, MITIGATION, OBSERVABLE, SECTOR}
 )
 
 #: Types addressable as a field in the search bar (``threat_actor:APT29``).
@@ -97,7 +103,21 @@ CORRELATABLE: Final = frozenset(
 #: VictimDisclosure rows, never to entries, so searching one returns the victim
 #: itself and contributes no articles.
 SEARCHABLE: Final = frozenset(
-    {THREAT_ACTOR, MALWARE, CVE, CWE, TTP, COUNTRY, TOOL, VENDOR, PRODUCT, MITIGATION, RANSOMWARE_VICTIM, OBSERVABLE}
+    {
+        THREAT_ACTOR,
+        MALWARE,
+        CVE,
+        CWE,
+        TTP,
+        COUNTRY,
+        TOOL,
+        VENDOR,
+        PRODUCT,
+        MITIGATION,
+        RANSOMWARE_VICTIM,
+        OBSERVABLE,
+        SECTOR,
+    }
 )
 
 # ---------------------------------------------------------------------------
@@ -119,6 +139,7 @@ LABELS: Final = {
     MITIGATION: "mitigation",
     RANSOMWARE_VICTIM: "ransomware victim",
     OBSERVABLE: "observable",
+    SECTOR: "sector",
 }
 
 #: Slug → table, for raw SQL that can't go through the ORM (cluster discovery,
@@ -137,6 +158,7 @@ TABLES: Final = {
     MITIGATION: "mitigations",
     RANSOMWARE_VICTIM: "ransomware_victims",
     OBSERVABLE: "observables",
+    SECTOR: "sectors",
 }
 
 # ---------------------------------------------------------------------------

@@ -16,7 +16,7 @@ import type { CopilotContext } from "@/hooks/useAI";
  */
 function parseEntityFromPath(pathname: string): { slug: string; id: string } | null {
   const match = pathname.match(
-    /\/(actor|threat_actor|malware|cve|ttp|country|tool|mitigation|vendor|product)\/([^/?#]+)/,
+    /\/(actor|threat_actor|malware|cve|ttp|country|sector|tool|mitigation|vendor|product)\/([^/?#]+)/,
   );
   if (!match) return null;
   return { slug: match[1], id: decodeURIComponent(match[2]) };

@@ -79,6 +79,9 @@ class ThreatActor(Base):
     target_country_links = relationship(
         "ThreatActorTargetCountry", back_populates="threat_actor", cascade="all, delete-orphan"
     )
+    target_sector_links = relationship(
+        "ThreatActorTargetSector", back_populates="threat_actor", cascade="all, delete-orphan"
+    )
     entry_threat_actors = relationship("EntryThreatActor", back_populates="threat_actor", cascade="all, delete-orphan")
 
 

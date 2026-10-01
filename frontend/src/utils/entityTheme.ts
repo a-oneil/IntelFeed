@@ -11,6 +11,7 @@ export type EntityType =
   | "cve"
   | "cwe"
   | "country"
+  | "sector"
   | "detection_rule"
   | "campaign"
   | "vendor"
@@ -84,6 +85,15 @@ const ENTITY_THEMES: Record<EntityType, EntityTheme> = {
     label: "Country",
     pluralLabel: "Countries",
     icon: "globe",
+  },
+  // Emerald — the victim-industry vocabulary. The variable predates the entity
+  // (the day-divider chip and the exposure builder already wore it).
+  sector: {
+    color: "#10b981",
+    cssVar: "var(--entity-sector)",
+    label: "Sector",
+    pluralLabel: "Sectors",
+    icon: "factory",
   },
   // Fuchsia — the last real hue gap, between malware violet and product pink.
   // --entity-ioc predates this type (modules referenced it as a fallback var)
@@ -194,6 +204,7 @@ export const ENTITY_COLOR_MAP: Record<string, string> = {
   threat_actor: ENTITY_THEMES.threat_actor.cssVar,
   malware: ENTITY_THEMES.malware.cssVar,
   country: ENTITY_THEMES.country.cssVar,
+  sector: ENTITY_THEMES.sector.cssVar,
   detection_rule: ENTITY_THEMES.detection_rule.cssVar,
   campaign: ENTITY_THEMES.campaign.cssVar,
   vendor: ENTITY_THEMES.vendor.cssVar,

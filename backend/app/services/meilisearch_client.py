@@ -832,6 +832,11 @@ ENTITY_INDEXES = {
         "filterable": ["region", "iso_code", "first_seen_at"],
         "sortable": ["first_seen_at", "article_count"],
     },
+    "entities_sector": {
+        "searchable": ["name", "aliases", "slug"],
+        "filterable": ["slug", "first_seen_at"],
+        "sortable": ["first_seen_at", "article_count"],
+    },
     "entities_cwe": {
         # alternate_terms is searchable but never fed to the autolinker — a
         # human typing "use after free" should land on CWE-416; the dictionary

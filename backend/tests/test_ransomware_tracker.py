@@ -231,35 +231,30 @@ async def test_group_folds_into_tracked_actor_and_skips_junk(db_session, sweden)
 # --- watchlist alert emission (Phase 5) -----------------------------------
 
 
-class _StubSettings:
-    """Stand-in for the pydantic Settings singleton (its .get can't be monkeypatched)."""
-
-    def __init__(self, my_sectors: str):
-        self._my_sectors = my_sectors
-
-    def get(self, key: str):
-        return self._my_sectors if key == "my_sectors" else None
-
-
 @pytest.mark.asyncio
 async def test_watchlist_alert_emission(db_session, monkeypatch):
     from app.intelligence import ransomware_sync as rs
+    from app.intelligence.sectors import sector_uuid
 
     user = User(username="watcher", password_hash="x", role="user")
+    sector_watcher = User(username="hospital-ciso", password_hash="x", role="user")
     victim = RansomwareVictim(name="Acme Corp", first_seen_at=_EPOCH, last_seen_at=_EPOCH, disclosure_count=1)
     group = ThreatActor(name="Qilin", actor_type="ransomware")
-    db_session.add_all([user, victim, group])
+    db_session.add_all([user, sector_watcher, victim, group])
     await db_session.flush()
-    db_session.add(
-        UserEntityWatch(created_by=user.id, entity_type="ransomware_victim", entity_id=victim.id, mode="watch")
+    db_session.add_all(
+        [
+            UserEntityWatch(created_by=user.id, entity_type="ransomware_victim", entity_id=victim.id, mode="watch"),
+            # Sector interest is a per-user watch like any other (the global my_sectors setting is gone).
+            UserEntityWatch(
+                created_by=sector_watcher.id, entity_type="sector", entity_id=sector_uuid("healthcare"), mode="watch"
+            ),
+        ]
     )
     await db_session.flush()
 
     published: list = []
-    broadcasts: list = []
     monkeypatch.setattr(rs, "publish_event", lambda uid, ev, data: published.append((uid, ev, data)))
-    monkeypatch.setattr(rs, "broadcast_event", lambda ev, data: broadcasts.append((ev, data)))
-    monkeypatch.setattr(rs, "settings", _StubSettings("healthcare"))
 
     new_disclosures = [
         {
@@ -278,13 +273,13 @@ async def test_watchlist_alert_emission(db_session, monkeypatch):
     ]
     sent = await rs.emit_watchlist_alerts(db_session, new_disclosures)
 
-    # One per-user org hit + one broadcast sector hit.
+    # One per-user org hit + one per-user sector hit.
     assert sent == 2
     assert any(
         uid == str(user.id) and ev == "ransomware_disclosure" and data["reason"] == "watched org"
         for uid, ev, data in published
     )
-    assert any(data["reason"] == "watched sector" for _ev, data in broadcasts)
+    assert any(uid == str(sector_watcher.id) and data["reason"] == "watched sector" for uid, _ev, data in published)
 
 
 @pytest.mark.asyncio
@@ -297,8 +292,6 @@ async def test_watchlist_alert_no_watchers_is_silent(db_session, monkeypatch):
 
     calls: list = []
     monkeypatch.setattr(rs, "publish_event", lambda *a: calls.append(a))
-    monkeypatch.setattr(rs, "broadcast_event", lambda *a: calls.append(a))
-    monkeypatch.setattr(rs, "settings", _StubSettings(""))
 
     sent = await rs.emit_watchlist_alerts(
         db_session,

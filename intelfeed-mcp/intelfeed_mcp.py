@@ -178,6 +178,7 @@ READ_ONLY_TOOLS = frozenset(
         "get_requirement_coverage",
         "get_requirements",
         "get_search_facets",
+        "get_sector",
         "get_share_link",
         "get_similar_entries",
         "get_source_reliability",
@@ -200,6 +201,7 @@ READ_ONLY_TOOLS = frozenset(
         "list_intel_reports",
         "list_notes",
         "list_saved_searches",
+        "list_sectors",
         "list_telegram_feeds",
         "list_watches",
         "list_webhook_presets",
@@ -209,8 +211,10 @@ READ_ONLY_TOOLS = frozenset(
         "search_entries",
         "search_observables",
         "search_unified",
+        "sector_victims",
         "suggest_campaign_entries",
         "validate_detection_rule",
+        "who_targets_sector",
     }
 )
 # The only writes write_action can ever expose; INTELFEED_MCP_WRITE_TOOLS can narrow the list.

@@ -109,6 +109,21 @@ export function useUpdateCountry() {
   });
 }
 
+export function useUpdateSector() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...body }: { id: string; aliases?: string[]; description?: string }) => {
+      const { data } = await api.put(`/entities/sectors/${id}`, body);
+      return data;
+    },
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ["sector", vars.id] });
+      qc.invalidateQueries({ queryKey: ["sectors"] });
+      qc.invalidateQueries({ queryKey: ["pivot", "sector", vars.id] });
+    },
+  });
+}
+
 export function useUpdateOffensiveTool() {
   const qc = useQueryClient();
   return useMutation({
@@ -283,6 +298,7 @@ export const EDITABLE_ENTITY_TYPES = [
   "cve",
   "ttp",
   "country",
+  "sector",
   "tool",
   "vendor",
   "product",
@@ -303,6 +319,7 @@ export function useUpdateEntity() {
   const updateCVE = useUpdateCVE();
   const updateTTP = useUpdateTTP();
   const updateCountry = useUpdateCountry();
+  const updateSector = useUpdateSector();
   const updateTool = useUpdateOffensiveTool();
   const updateVendor = useUpdateVendor();
   const updateProduct = useUpdateProduct();
@@ -316,6 +333,7 @@ export function useUpdateEntity() {
         case "cve": return updateCVE.mutateAsync(payload as Parameters<typeof updateCVE.mutateAsync>[0]);
         case "ttp": return updateTTP.mutateAsync(payload as Parameters<typeof updateTTP.mutateAsync>[0]);
         case "country": return updateCountry.mutateAsync(payload as Parameters<typeof updateCountry.mutateAsync>[0]);
+        case "sector": return updateSector.mutateAsync(payload as Parameters<typeof updateSector.mutateAsync>[0]);
         case "tool": return updateTool.mutateAsync(payload as Parameters<typeof updateTool.mutateAsync>[0]);
         case "vendor": return updateVendor.mutateAsync(payload as Parameters<typeof updateVendor.mutateAsync>[0]);
         case "product": return updateProduct.mutateAsync(payload as Parameters<typeof updateProduct.mutateAsync>[0]);
@@ -334,7 +352,7 @@ export function useUpdateEntity() {
         default: return Promise.resolve();
       }
     },
-    [qc, updateActor, updateMalware, updateCVE, updateTTP, updateCountry, updateTool, updateVendor, updateProduct],
+    [qc, updateActor, updateMalware, updateCVE, updateTTP, updateCountry, updateSector, updateTool, updateVendor, updateProduct],
   );
 }
 

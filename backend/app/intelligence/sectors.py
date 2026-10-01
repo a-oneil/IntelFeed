@@ -1,13 +1,20 @@
 """Controlled vocabulary for victim sector / industry targeting.
 
-Sector targeting is intentionally NOT an entity table — it's a small, closed
-vocabulary (~20 canonical sectors) with an alias map that normalizes the
-free-form phrasing articles use ("banks", "hospitals", "power grid") to a
-canonical slug. Slugs are stored on `entry_sectors`; display labels are used
-for actor/malware `targeted_sectors` chips and triage explanations.
+Sectors are a small, closed vocabulary (21 canonical slugs) with an alias map
+that normalizes the free-form phrasing articles use ("banks", "hospitals",
+"power grid") onto a canonical slug. Since 2026-09 the vocabulary is also a
+first-class entity: the ``sectors`` table is seeded from ``CANONICAL_SECTORS``
+(one row per slug, ids minted deterministically by ``sector_uuid`` so every
+install shares them) and ``entry_sectors`` carries both the slug and the FK.
+
+This module stays the single source of truth for *what* a sector is — the
+seeder, the Alembic seed, the AI schema enum and the normalizer all read from
+here — so growing the vocabulary is one edit plus a seed run. Nothing here
+touches the database.
 """
 
 import re
+import uuid
 
 # Punctuation that is never part of a sector name but shows up wrapped around
 # one. The backslash matters: a few stored values arrived as `\"Energy\"` with
@@ -290,44 +297,6 @@ def normalize_sector(name: str | None) -> str | None:
     return None
 
 
-def fold_sector_labels(values) -> list[str]:
-    """Fold a stored `targeted_sectors` list onto canonical display labels.
-
-    Unlike `normalize_sectors`, which returns slugs and drops what it can't
-    place, this keeps an unrecognized value as written: stored sectors predate
-    the controlled vocabulary and include analyst phrasing like "Political
-    entities in Hong Kong" that no facet can group but nobody should delete.
-    Duplicates are folded case-insensitively, so "Healthcare" and "healthcare"
-    collapse to one chip while the first spelling's position is kept.
-
-    The nightly sector rollup and the vocabulary backfill both write this
-    column, so they share this function — if they folded differently the
-    rollup would churn the backfill's rows straight back.
-    """
-    if not values:
-        return []
-    # A bare string is one sector, not a sequence of single-character ones:
-    # iterating it would turn "Healthcare" into H, e, a, l, t, h... and the
-    # sector column already carries stray single letters from a caller that
-    # made exactly this mistake.
-    if isinstance(values, str):
-        values = [values]
-    merged: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        if not isinstance(value, str) or not value.strip():
-            continue
-        slug = normalize_sector(value)
-        canonical = sector_label(slug) if slug else value.strip(_EDGE_NOISE)
-        if not canonical:
-            continue
-        key = canonical.casefold()
-        if key not in seen:
-            seen.add(key)
-            merged.append(canonical)
-    return merged
-
-
 def normalize_sectors(names: list[str] | None) -> list[str]:
     """Normalize a list of free-form names to unique canonical slugs (order kept)."""
     slugs: list[str] = []
@@ -339,7 +308,84 @@ def normalize_sectors(names: list[str] | None) -> list[str]:
 
 
 def parse_sector_setting(raw: str | None) -> list[str]:
-    """Parse the comma-separated `my_sectors` setting into canonical slugs."""
+    """Parse a comma-separated list of sector names/aliases into canonical slugs.
+
+    Kept for the ``my_sectors`` → watches data migration and for callers that
+    accept free-form lists (the exposure builder); the setting itself is gone.
+    """
     if not raw:
         return []
     return normalize_sectors([part for part in raw.split(",") if part.strip()])
+
+
+# ---------------------------------------------------------------------------
+# Entity rows
+# ---------------------------------------------------------------------------
+
+#: Namespace for the deterministic sector ids. A closed vocabulary gains
+#: nothing from random ids and loses a lot: with uuid5 every install (dev,
+#: prod, the test schema, a fresh seed) agrees on which uuid "healthcare" is,
+#: so profile links survive a re-seed and fixtures never need a lookup.
+SECTOR_NAMESPACE = uuid.UUID("4e6a30ee-1eeb-5751-b76b-5c4de806fec1")
+
+
+def sector_uuid(slug: str) -> uuid.UUID:
+    """The id of the ``sectors`` row for a canonical slug."""
+    return uuid.uuid5(SECTOR_NAMESPACE, slug)
+
+
+#: One-line descriptions for the profile header and the AI assessment context.
+SECTOR_DESCRIPTIONS: dict[str, str] = {
+    "healthcare": "Hospitals, health systems, clinics, insurers, pharmaceutical and medical-device makers.",
+    "financial-services": "Banks, payment processors, insurers, asset managers and fintech.",
+    "government": "National, regional and municipal government bodies, agencies and public administration.",
+    "defense": "Armed forces, defense ministries and the defense industrial base.",
+    "energy": "Oil and gas, electric and gas utilities, renewables and power generation.",
+    "manufacturing": "Industrial, automotive, chemical and consumer-goods manufacturing.",
+    "education": "Schools, universities, academic research institutions and education technology.",
+    "technology": "Software, hardware, cloud, semiconductor and IT product companies.",
+    "telecommunications": "Carriers, ISPs, mobile operators and network service providers.",
+    "retail": "Retailers, e-commerce, consumer goods and wholesale distribution.",
+    "transportation": "Airlines, airports, shipping, rail, logistics and freight.",
+    "legal": "Law firms, legal services and the courts.",
+    "media": "News organizations, broadcasters, publishers and entertainment.",
+    "hospitality": "Hotels, restaurants, travel, tourism and gaming venues.",
+    "agriculture": "Farming, food production and the agribusiness supply chain.",
+    "aerospace": "Aircraft, spacecraft and satellite manufacturers and operators.",
+    "critical-infrastructure": (
+        "Operational technology and industrial control systems: water, power grids, pipelines "
+        "and other essential services."
+    ),
+    "ngo": "Non-profits, charities, think tanks, activists and other civil-society organizations.",
+    "cryptocurrency": "Cryptocurrency exchanges, wallets, DeFi protocols and Web3 projects.",
+    "msp": (
+        "Managed service providers, IT outsourcers and service desks with privileged access to customer environments."
+    ),
+    "professional-services": "Consulting, accounting, marketing, staffing and other business services.",
+}
+
+
+def sector_aliases(slug: str) -> list[str]:
+    """Alias surface forms for a slug, in alias-map order, excluding the label itself.
+
+    These populate ``sectors.aliases`` so ``sector:banks`` resolves the way
+    ``country:DPRK`` does. They are never fed to the autolinker — sector names
+    are common English words and a prose mention is not a targeting claim.
+    """
+    label = CANONICAL_SECTORS[slug].lower()
+    return [alias for alias, target in SECTOR_ALIASES.items() if target == slug and alias not in (slug, label)]
+
+
+def seed_rows() -> list[dict]:
+    """The 21 ``sectors`` rows, as the seeder, the migration and the test schema insert them."""
+    return [
+        {
+            "id": sector_uuid(slug),
+            "slug": slug,
+            "name": label,
+            "aliases": sector_aliases(slug),
+            "description": SECTOR_DESCRIPTIONS.get(slug),
+            "article_count": 0,
+        }
+        for slug, label in CANONICAL_SECTORS.items()
+    ]

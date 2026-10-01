@@ -6,7 +6,7 @@ import { useIsMobile } from "@/hooks/useMediaQuery";
 import { useIntelStore, type WorkspaceSection } from "@/stores/intelStore";
 import { useAuthStore } from "@/stores/authStore";
 import api from "@/api/client";
-import type { EntitySearchResult, ThreatActor, MalwareFamily, TTP, CVE, CWEResponse, ObservableResponse, ObservableCandidateRow, Country, Mitigation, OffensiveTool, Vendor, Product, DetectionRuleListItem, FacetBucket, RuleSearchResponse, IntelReport, IntelligenceRequirement, PaginatedResponse } from "@/api/types";
+import type { EntitySearchResult, ThreatActor, MalwareFamily, TTP, CVE, CWEResponse, ObservableResponse, ObservableCandidateRow, Country, Sector, Mitigation, OffensiveTool, Vendor, Product, DetectionRuleListItem, FacetBucket, RuleSearchResponse, IntelReport, IntelligenceRequirement, PaginatedResponse } from "@/api/types";
 import { EntityTableSection, type ColumnDef } from "@/components/EntityTableSection";
 import { DataTable, type SortDir } from "@/components/table/DataTable";
 import { NameCell } from "@/components/table/cells";
@@ -258,7 +258,7 @@ export function WorkbenchLayout() {
 // Entity types migrated to the unified full-width profile page — they open via
 // route instead of the legacy inline panel. (Country still uses the panel.)
 const ROUTED_PROFILE_TYPES = new Set<string>([
-  "threat_actor", "malware", "cve", "cwe", "ttp", "country", "tool", "mitigation", "vendor", "product", "observable",
+  "threat_actor", "malware", "cve", "cwe", "ttp", "country", "sector", "tool", "mitigation", "vendor", "product", "observable",
 ]);
 
 export function WorkbenchPage() {
@@ -316,6 +316,8 @@ function SectionContent({ section }: { section: WorkspaceSection }) {
       return <TTPsSection />;
     case "countries":
       return <CountriesSection />;
+    case "sectors":
+      return <SectorsSection />;
     case "mitigations":
       return <MitigationsSection />;
     case "observables":
@@ -1056,6 +1058,60 @@ const COUNTRY_COLUMNS: ColumnDef<Country>[] = [
     key: "description", label: "Description", width: 320, minWidth: 140, hideable: true, defaultHidden: true,
     textValue: (c) => c.description ?? "",
     render: (c) => <MetaCell value={c.description} />,
+  },
+];
+
+const SECTOR_COLUMNS: ColumnDef<Sector>[] = [
+  {
+    key: "name", label: "Name", width: 200, minWidth: 120, flex: true,
+    serverSort: true, serverText: true, serverParam: "search",
+    render: (s) => <span className={`${styles.entityName} ${table.ellipsis}`} title={s.name}>{s.name}</span>,
+  },
+  {
+    key: "targeting_actor_count", label: "Targeted By", width: 120, minWidth: 90, hideable: true,
+    serverSort: true, numValue: (s) => s.targeting_actor_count ?? 0,
+    render: (s) => s.targeting_actor_count
+      ? <span className={styles.entityMeta}>{s.targeting_actor_count} actor{s.targeting_actor_count === 1 ? "" : "s"}</span>
+      : <span className={table.zero}>·</span>,
+  },
+  {
+    key: "targeting_malware_count", label: "Malware", width: 110, minWidth: 80, hideable: true,
+    numValue: (s) => s.targeting_malware_count ?? 0,
+    render: (s) => s.targeting_malware_count
+      ? <span className={styles.entityMeta}>{s.targeting_malware_count} famil{s.targeting_malware_count === 1 ? "y" : "ies"}</span>
+      : <span className={table.zero}>·</span>,
+  },
+  {
+    key: "victim_count", label: "Victims (90d)", width: 120, minWidth: 90, hideable: true,
+    serverSort: true, numValue: (s) => s.victim_count ?? 0,
+    render: (s) => s.victim_count
+      ? <span className={styles.entityMeta}>{s.victim_count}</span>
+      : <span className={table.zero}>·</span>,
+  },
+  {
+    key: "article_count", label: "Articles", width: 80, minWidth: 64, hideable: true,
+    serverSort: true, numValue: (s) => s.article_count ?? 0,
+    render: (s) => <ArticleCount count={s.article_count} />,
+  },
+  {
+    key: "last_seen_at", label: "Last Seen", width: 120, minWidth: 90, hideable: true,
+    serverSort: true,
+    render: (s) => <DateCell value={s.last_seen_at} />,
+  },
+  {
+    key: "aliases", label: "Aliases", width: 220, minWidth: 100, hideable: true, defaultHidden: true,
+    textValue: (s) => listText(s.aliases),
+    render: (s) => <AliasesCell aliases={s.aliases} />,
+  },
+  {
+    key: "slug", label: "Slug", width: 160, minWidth: 100, hideable: true, defaultHidden: true,
+    textValue: (s) => s.slug,
+    render: (s) => <Chip>{s.slug}</Chip>,
+  },
+  {
+    key: "description", label: "Description", width: 320, minWidth: 140, hideable: true, defaultHidden: true,
+    textValue: (s) => s.description ?? "",
+    render: (s) => <MetaCell value={s.description} />,
   },
 ];
 
@@ -1926,6 +1982,25 @@ function CountriesSection() {
       noun="country"
       nounPlural="countries"
       filters={<FindDuplicatesButton entityType="country" />}
+    />
+  );
+}
+
+function SectorsSection() {
+  return (
+    <EntityTableSection<Sector>
+      title="Sectors"
+      entityType="sector"
+      columns={SECTOR_COLUMNS}
+      queryKey="sectors"
+      endpoint="/sectors"
+      defaultSort={{ key: "article_count", dir: "desc" }}
+      emptyTitle="No sectors yet"
+      emptyDesc="Sectors are a seeded vocabulary — run scripts/seed/seed_sectors.py to populate them."
+      getId={(s) => s.id}
+      getLabel={(s) => s.name}
+      noun="sector"
+      nounPlural="sectors"
     />
   );
 }

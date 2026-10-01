@@ -464,7 +464,7 @@ Entities are enriched from multiple sources:
 - Manual MITRE ATT&CK mapping (`mitre_id`)
 - Wikipedia profiles (`wikipedia_url`, `wikipedia_content`, `wikipedia_image_url`)
 - Origin country (`origin_country_id`)
-- Target sectors (`targeted_sectors`: financial, healthcare, etc.)
+- Target sectors (`threat_actor_target_sectors` claim rows; `targeted_sectors` is the label cache they rebuild)
 - Associated TTPs (`associated_ttps`: JSONB array)
 
 **MalwareFamily:**
@@ -1120,7 +1120,7 @@ matched**, from three independent sources:
 | Source | Evidence |
 |---|---|
 | Co-occurrence | Entries in the window linking the entity *and* a scope country or scope sector (`entry_countries` / `entry_sectors`) |
-| Claims | `threat_actor_target_countries` rows and the `targeted_sectors` field, normalised through the sector vocabulary before comparing |
+| Claims | `threat_actor_target_countries` rows and the target-sector junctions (`threat_actor_target_sectors` / `malware_target_sectors`, any source) |
 | Victims | Ransomware victim disclosures by that group in scope countries/sectors inside the window |
 
 Candidates matching on only one dimension still surface — ranked lower, with

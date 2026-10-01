@@ -333,6 +333,27 @@ export const DEFAULT_TABLE_LAYOUTS: Record<string, DefaultTableLayout> = {
       "top_link",
     ],
   },
+  "entity:sector": {
+    visibility: {
+      "aliases": false,
+      "slug": false,
+      "description": false,
+    },
+    widths: {
+      "name": 240,
+    },
+    order: [
+      "name",
+      "targeting_actor_count",
+      "targeting_malware_count",
+      "victim_count",
+      "article_count",
+      "last_seen_at",
+      "aliases",
+      "slug",
+      "description",
+    ],
+  },
 };
 
 export const EMPTY_DEFAULT_LAYOUT: DefaultTableLayout = {};

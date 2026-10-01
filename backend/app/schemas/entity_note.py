@@ -5,7 +5,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class EntityNoteCreate(BaseModel):
-    entity_type: str = Field(pattern=r"^(ttp|cve|threat_actor|malware|campaign|vendor|product)$")
+    # Mirrors the ck_entity_notes_entity_type CHECK constraint.
+    entity_type: str = Field(
+        pattern=r"^(ioc|ttp|cve|threat_actor|malware|campaign|country|mitigation|tool|vendor|product|sector)$"
+    )
     entity_id: uuid.UUID
     title: str | None = Field(default=None, max_length=500)
     content: str = Field(min_length=1, max_length=50000)

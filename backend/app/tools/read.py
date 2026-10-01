@@ -36,6 +36,7 @@ _ENTITY_RESULT_KEYS = {
     "threat_actor": "threat_actors",
     "malware": "malware",
     "country": "countries",
+    "sector": "sectors",
     "tool": "tools",
     "vendor": "vendors",
     "product": "products",

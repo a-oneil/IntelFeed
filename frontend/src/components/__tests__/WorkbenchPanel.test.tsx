@@ -20,6 +20,7 @@ vi.mock("@/hooks/useIntelligence", () => ({
   useEntryTTPs: (...args: unknown[]) => mockUseEntryTTPs(...(args as [])),
   useEntryCVEs: (...args: unknown[]) => mockUseEntryCVEs(...(args as [])),
   useEntryCountries: vi.fn(() => defaultQueryMock()),
+  useEntrySectors: vi.fn(() => defaultQueryMock()),
   useEntryThreatActors: vi.fn(() => defaultQueryMock()),
   useEntryMalware: vi.fn(() => defaultQueryMock()),
   useEntryMitigations: vi.fn(() => defaultQueryMock()),

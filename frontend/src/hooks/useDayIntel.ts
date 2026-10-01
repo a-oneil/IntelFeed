@@ -15,6 +15,7 @@ export interface DayIntelTtp {
 }
 
 export interface DayIntelSector {
+  id: string;
   slug: string;
   name: string;
   count: number;

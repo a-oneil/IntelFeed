@@ -693,8 +693,8 @@ async def _create_note(
     name="create_entity_note",
     description=(
         "Add an analytical note to an intelligence entity. Supported entity types: campaign, country, "
-        "cve, malware, mitigation, product, threat_actor, tool, ttp, vendor (matches the entity_notes "
-        "DB constraint; ransomware victims are not supported)."
+        "cve, cwe, malware, mitigation, observable, product, sector, threat_actor, tool, ttp, vendor "
+        "(matches the entity_notes DB constraint; ransomware victims are not supported)."
     ),
     input_schema={
         "properties": {
@@ -1438,6 +1438,8 @@ _PROFILE_SAFE_FIELDS: dict[str, set[str]] = {
     "cve": {"description", "severity", "exploit_status", "affected_products", "exploit_availability"},
     "ttp": {"technique_name", "tactic", "description"},
     "country": {"name", "iso_code", "aliases", "region", "description"},
+    # Closed vocabulary: the name and slug are the vocabulary itself.
+    "sector": {"aliases", "description"},
     "tool": {"name", "aliases", "description", "tool_type", "malpedia_url", "github_url"},
     "vendor": {"name", "aliases", "description", "website", "vendor_type"},
     "product": {"name", "aliases", "description", "product_type", "website", "vendor_id"},
@@ -1456,9 +1458,10 @@ _NAME_GUARDED_TYPES = frozenset({"threat_actor", "malware", "country", "tool", "
         "threat_actor (name/aliases/description/mitre_id/country/motivation), malware (name/aliases/"
         "description/malpedia_url/malware_type), cve (description/severity/exploit_status/"
         "affected_products/exploit_availability), ttp (technique_name/tactic/description), country "
-        "(name/iso_code/aliases/region/description), tool (name/aliases/description/tool_type/"
-        "malpedia_url/github_url), vendor (name/aliases/description/website/vendor_type), product "
-        "(name/aliases/description/product_type/website/vendor_id), campaign (name/description/status/"
+        "(name/iso_code/aliases/region/description), sector (aliases/description), tool (name/aliases/"
+        "description/tool_type/malpedia_url/github_url), vendor (name/aliases/description/website/"
+        "vendor_type), product (name/aliases/description/product_type/website/vendor_id), campaign "
+        "(name/description/status/"
         "tags/tlp_marking). Renames are checked for name clashes; removing aliases unlinks entries "
         "matched only via those aliases; new aliases queue a retro-scan of existing entries; the "
         "search-index document is refreshed."
@@ -1503,6 +1506,10 @@ async def _update_entity_profile(
         model, junction, fk_attr = Campaign, None, None
     else:
         model, junction, fk_attr = ENTITY_MODEL_MAP[entity_type]
+    if entity_type == "sector":
+        # Sectors are never autolinked, so no entry was ever matched *via* an
+        # alias — there is nothing to unlink when one is removed.
+        junction, fk_attr = None, None
 
     eid = uuid.UUID(entity_id)
     result = await db.execute(select(model).where(model.id == eid))

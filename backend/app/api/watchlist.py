@@ -18,6 +18,7 @@ from app.models.malware_family import MalwareFamily
 from app.models.observable import Observable
 from app.models.product import Product
 from app.models.ransomware import RansomwareVictim
+from app.models.sector import Sector
 from app.models.threat_actor import ThreatActor
 from app.models.tool import Tool
 from app.models.user import User
@@ -40,6 +41,7 @@ WATCHABLE_ENTITY_TYPES = {
     "vendor",
     "product",
     "country",
+    "sector",
     "ransomware_victim",
     "observable",
 }
@@ -54,6 +56,7 @@ _ENTITY_NAME_SOURCES = {
     "vendor": (Vendor, Vendor.name),
     "product": (Product, Product.name),
     "country": (Country, Country.name),
+    "sector": (Sector, Sector.name),
     "ransomware_victim": (RansomwareVictim, RansomwareVictim.name),
     "observable": (Observable, Observable.value),
 }

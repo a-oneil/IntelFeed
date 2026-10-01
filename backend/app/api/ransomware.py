@@ -16,13 +16,13 @@ from sqlalchemy import Select, and_, false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.config import settings
 from app.core.pagination import PaginatedResponse
 from app.core.security import get_current_user
 from app.database import get_db
-from app.intelligence.sectors import parse_sector_setting, sector_label
+from app.intelligence.sectors import sector_label
 from app.models.country import Country
 from app.models.ransomware import RansomwareVictim, VictimDisclosure
+from app.models.sector import Sector
 from app.models.threat_actor import ThreatActor
 from app.models.user import User
 from app.models.user_entity_watch import UserEntityWatch
@@ -295,7 +295,7 @@ async def _country_stats(db: AsyncSession, start: datetime) -> list[CountryStat]
 
 
 async def _watchlist_exposure(db: AsyncSession, user: User, start: datetime) -> list[ExposureItem]:
-    """Watched groups + orgs (UserEntityWatch) and watched sectors (my_sectors) vs
+    """The user's watched groups, orgs and sectors (all UserEntityWatch rows) vs
     disclosures in the window. Read-only exposure panel — no muting/boosting here."""
     items: list[ExposureItem] = []
     watched_victims, watched_groups = await _watched_sets(db, user)
@@ -350,8 +350,19 @@ async def _watchlist_exposure(db: AsyncSession, user: User, start: datetime) -> 
                 )
             )
 
-    my_sectors = parse_sector_setting(settings.get("my_sectors") or "")
-    for slug in my_sectors:
+    watched_sectors = (
+        await db.execute(
+            select(Sector.slug, Sector.name)
+            .join(UserEntityWatch, UserEntityWatch.entity_id == Sector.id)
+            .where(
+                UserEntityWatch.created_by == user.id,
+                UserEntityWatch.entity_type == "sector",
+                UserEntityWatch.mode == "watch",
+            )
+            .order_by(Sector.name)
+        )
+    ).all()
+    for slug, name in watched_sectors:
         c = (
             await db.execute(
                 select(func.count(VictimDisclosure.id)).where(
@@ -361,7 +372,7 @@ async def _watchlist_exposure(db: AsyncSession, user: User, start: datetime) -> 
         ).scalar() or 0
         items.append(
             ExposureItem(
-                name=sector_label(slug),
+                name=name,
                 kind="watched sector",
                 status="hit" if c else "clear",
                 detail=f"{c} new victims in window" if c else "no new victims",

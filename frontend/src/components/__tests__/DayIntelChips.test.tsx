@@ -82,7 +82,7 @@ describe("DayIntelChips", () => {
         product: { id: "p", name: "Ivanti", count: 3 },
         country: { id: "co", name: "Ukraine", count: 3 },
         ttp: { id: "t", technique_id: "T1566", name: "Phishing", count: 6 },
-        sector: { slug: "healthcare", name: "Healthcare", count: 7 },
+        sector: { id: "sec-1", slug: "healthcare", name: "Healthcare", count: 7 },
         cve: { id: "c", name: "CVE-2026-1", count: 8, cvss_score: null, severity: null, kev: false },
         signals: { actively_exploited: 1, new: { type: "threat_actor", id: "a", name: "APT-Test", total: 1 } },
       }),
@@ -105,7 +105,7 @@ describe("DayIntelChips", () => {
         threat_actor: { id: "a", name: "APT-Test", count: 5 },
         malware: { id: "m", name: "LockBit", count: 4 },
         ttp: { id: "t", technique_id: "T1566", name: "Phishing", count: 6 },
-        sector: { slug: "healthcare", name: "Healthcare", count: 7 },
+        sector: { id: "sec-1", slug: "healthcare", name: "Healthcare", count: 7 },
         cve: { id: "c", name: "CVE-2026-1", count: 8, cvss_score: null, severity: null, kev: false },
         signals: { actively_exploited: 1, new: { type: "threat_actor", id: "a", name: "APT-Test", total: 1 } },
       }),
@@ -151,7 +151,7 @@ describe("DayIntelChips", () => {
     renderChips(
       makeData({
         threat_actor: { id: "a1", name: "Lazarus", count: 2 },
-        sector: { slug: "healthcare", name: "Healthcare", count: 3 },
+        sector: { id: "sec-1", slug: "healthcare", name: "Healthcare", count: 3 },
         signals: { actively_exploited: 4, new: null },
       }),
       { onFocus },
@@ -164,7 +164,7 @@ describe("DayIntelChips", () => {
 
     await userEvent.click(screen.getByText("Healthcare"));
     expect(onFocus).toHaveBeenLastCalledWith(
-      expect.objectContaining({ chip: "sector", filter: { sector: "healthcare" } }),
+      expect.objectContaining({ chip: "sector", filter: { entity_type: "sector", entity_id: "sec-1" } }),
     );
 
     // The entity chips carry the canonical slug the /entries filter speaks.
