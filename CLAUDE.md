@@ -60,14 +60,22 @@ pnpm exec playwright install chromium # One-time: fetch the browser binary
 pnpm exec playwright test             # E2E tests (needs running stack)
 ```
 
+### Android (`android/`)
+Native client (Kotlin / Jetpack Compose) for the same REST API. It's developed in a separate working folder and synced here by pull request, so read [android/README.md](android/README.md) before editing it.
+```bash
+cd android
+./gradlew :app:testDebugUnitTest :app:assembleDebug   # JDK 17 + Android SDK
+```
+
 ### CI
 GitHub Actions is **one workflow** (`ci.yml`), because Actions bills by the *job*, rounded up to a whole minute. The previous split — one workflow per area — meant four `changed?` jobs and four aggregate jobs on every commit: eight billed minutes for ~40 seconds of work before a test ran. Measured over two days: 213 minutes of wall time billed as 416.
 
 | Job | Runs when | Does |
 | --- | --- | --- |
-| `changed?` | always | One checkout, one diff; outputs `backend` / `frontend` / `images` / `python` / `node` |
+| `changed?` | always | One checkout, one diff; outputs `backend` / `frontend` / `android` / `images` / `python` / `node` |
 | `backend` | `backend/**` changed | `ruff check`, `ruff format --check`, alembic (single head, fresh `upgrade head`, `downgrade -1` + re-apply), `pytest` — in that order, cheapest first, on PostgreSQL 16 + pgvector and Redis service containers |
 | `frontend` | `frontend/**` changed | One `pnpm install`, then `eslint`, `pnpm build` (type check), `vitest` |
+| `android` | `android/**` changed (not on the Monday sweep) | Gradle unit tests + debug APK, attached to the run as an artifact. On `main`, publishes the release `android-v<version>` with the APK when `android/version.properties` has a version that has no release yet. Signs with the `ANDROID_DEBUG_KEYSTORE` secret and doesn't publish without it |
 | `images` | A file feeding an image changed | Builds all three images (per-image `gha` cache scopes), `compose config` on dev + prod |
 | `security` | always (gitleaks); audit steps gated on manifests + Monday sweep | `gitleaks`, `pip-audit`, `pnpm audit` |
 | `CI` | always | Aggregate gate |
