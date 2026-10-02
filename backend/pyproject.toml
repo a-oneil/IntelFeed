@@ -1,7 +1,7 @@
 [project]
 name = "intelfeed"
 version = "0.1.0"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 
 dependencies = [
     "fastapi>=0.110",
@@ -70,6 +70,9 @@ build-backend = "setuptools.build_meta"
 include = ["app*"]
 
 [tool.ruff]
+# Deliberately lags requires-python. Bumping this to py314 is not a no-op: it
+# turns on UP043 (25 findings) and changes formatter output across 45 files.
+# That reformat is its own PR, not a rider on an unrelated change.
 target-version = "py312"
 line-length = 120
 

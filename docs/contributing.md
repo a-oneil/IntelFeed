@@ -90,7 +90,7 @@ Faster debugger attachment, pip-install iteration.
 # Start database, cache, search only
 docker compose -f docker-compose.dev.yml up db redis meilisearch
 
-# In backend terminal (Python 3.12+)
+# In backend terminal (Python 3.14)
 cd backend
 python3 -m venv venv
 source venv/bin/activate  # or venv\Scripts\activate on Windows
@@ -144,7 +144,7 @@ pnpm dev
 
 ### Setup
 
-Python 3.12+. Install dev dependencies:
+Python 3.14. Install dev dependencies:
 
 ```bash
 cd backend
@@ -153,9 +153,9 @@ pip install -e ".[dev]"
 
 This installs all runtime + test dependencies (pytest, pytest-asyncio, pytest-cov, pytest-timeout, pytest-xdist, factory-boy, ruff).
 
-**Python 3.12, 3.13 and 3.14 all pass.** The Docker images ship 3.12; CI runs the test suite on all three.
+**Python 3.14 only.** `backend/Dockerfile` is `python:3.14.7`, and every container that runs app code (api, celery-worker, celery-worker-ai, celery-beat, telegram-listener) is built from it. CI tests that one version; `requires-python` is `>=3.14`.
 
-Two stdlib behaviour changes have bitten this codebase, both only visible off the pinned version — `urllib.robotparser` moved the catch-all `*` group in 3.13 (`app/services/robots.py`), and `fnmatch.translate` changed its end anchor from `\Z` to `\z` in 3.14 (`app/adapters/github_content_types.py`). Both now derive what they need at runtime instead of assuming a layout; if you touch either, keep the matrix green.
+This used to be a 3.12/3.13/3.14 matrix, kept because two stdlib behaviour changes had bitten the codebase — `urllib.robotparser` moved the catch-all `*` group in 3.13 (`app/services/robots.py`), and `fnmatch.translate` changed its end anchor from `\Z` to `\z` in 3.14 (`app/adapters/github_content_types.py`). Both were found climbing *toward* 3.14, and both were fixed by deriving what they need at runtime instead of assuming a layout — so they stay correct on any version. Once 3.14 became the only runtime, the matrix was costing about a quarter of the repo's CI minutes to test interpreters nothing runs. Keep those two call sites version-agnostic; there is no matrix to keep green any more.
 
 ### Code Quality
 
@@ -172,7 +172,7 @@ ruff format --check .
 
 CI runs `ruff check` + `ruff format --check` on every PR (see CI/CD below), but running them locally first is faster than waiting on a red build.
 
-Line length: 120. Target: Python 3.12. See `pyproject.toml` for full ruff config.
+Line length: 120. Ruff's `target-version` is `py312`, deliberately behind the 3.14 runtime: bumping it turns on UP043 (25 findings) and changes formatter output across 45 files, so that reformat wants its own PR. See `pyproject.toml` for full ruff config.
 
 ### Tests
 
@@ -680,18 +680,26 @@ pnpm exec playwright test tests/e2e/feeds.spec.ts
 
 GitHub Actions runs on every pull request and every push to `main`.
 
-`.github/workflows/ci.yml` — four jobs, in parallel, ~3–5 minutes:
+`.github/workflows/ci.yml` is the only workflow. A `changed?` job diffs the
+branch and gates the rest, so a PR pays only for the areas it touched:
 
-| Job | What it runs | Services |
-| --- | --- | --- |
-| **Backend · ruff** | `ruff check` + `ruff format --check` | — |
-| **Backend · pytest** | full suite on Python 3.12, 3.13 and 3.14 (matrix) | PostgreSQL 16 + pgvector, Redis 7 |
-| **Backend · alembic** | one head, `upgrade head` on a fresh DB, then `downgrade -1` and re-apply | PostgreSQL 16 + pgvector |
-| **Frontend** | `pnpm install --frozen-lockfile`, `pnpm lint`, `pnpm test`, `pnpm build` (`tsc -b` is the type check) | — |
+| Job | Runs when | What it runs | Services |
+| --- | --- | --- | --- |
+| **backend** | `backend/**` changed | `ruff check`, `ruff format --check`, alembic (one head, `upgrade head` on a fresh DB, then `downgrade -1` and re-apply), then the full `pytest` suite on Python 3.14 | PostgreSQL 16 + pgvector, Redis 7 |
+| **frontend** | `frontend/**` changed | one `pnpm install --frozen-lockfile`, then `pnpm lint`, `pnpm build` (`tsc -b` is the type check), `pnpm test` | — |
+| **images** | a file that feeds an image changed | builds the backend, frontend and db images (no push), then `docker compose config` over the dev and prod compose files | — |
+| **security** | always; the audit steps are gated on the manifests | `gitleaks`, plus `pip-audit` / `pnpm audit` when a manifest moved | — |
+| **CI** | always | aggregate gate — this is the one required check | — |
 
-`.github/workflows/docker.yml` — only when a file that feeds an image changes:
-builds the backend, frontend and db images (no push), and runs
-`docker compose config` over the dev and prod compose files.
+Each area is a single job running its checks in sequence rather than several
+parallel ones. That is deliberate: Actions bills per job, rounded up to a whole
+minute, so splitting `ruff`/`alembic`/`pytest` cost three per-job minimums and
+three dependency installs to save about ninety seconds of wall clock. Expect
+feedback in roughly four to six minutes, and read the failing *step* rather than
+looking for a failing job.
+
+CI tests Python 3.14 only — that is what `backend/Dockerfile` ships and what
+every container running app code uses.
 
 Notes:
 
