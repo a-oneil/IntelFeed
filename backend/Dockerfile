@@ -1,4 +1,4 @@
-FROM python:3.14.7-slim-bookworm AS base
+FROM python:3.15.0rc2-slim-bookworm AS base
 
 WORKDIR /app
 ENV PYTHONPATH=/app
