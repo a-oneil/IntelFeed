@@ -56,9 +56,68 @@ def _repair_json(text: str) -> str:
     return re.sub(r",\s*([}\]])", r"\1", repaired)
 
 
+_CLOSER = {"{": "}", "[": "]"}
+
+
+def _salvage_truncated_json(text: str, *, max_attempts: int = 200) -> dict | None:
+    """Recover an object from JSON cut off mid-stream (output budget hit).
+
+    Walks the text once, tracking string/escape state and the open-bracket
+    stack, and records every point where an element closed at depth <= 2 —
+    the end of a top-level scalar, or of one element inside a top-level
+    array. Then, from the latest such point backwards, it cuts the text
+    there, drops a dangling comma, appends the closers the stack still owes,
+    and tries to parse. The first parse that succeeds is the longest prefix
+    made only of complete elements, so a response that died inside the 40th
+    TTP still yields every section emitted before it — which, with the
+    indicator sections front-loaded in the schema, is the ledger's part."""
+    cut_points: list[tuple[int, str]] = []
+    stack: list[str] = []
+    in_string = False
+    escape = False
+    for i, ch in enumerate(text):
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+                if len(stack) <= 2:
+                    cut_points.append((i, "".join(_CLOSER[o] for o in reversed(stack))))
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch in "{[":
+            stack.append(ch)
+        elif ch in "}]":
+            if stack:
+                stack.pop()
+            if len(stack) <= 2:
+                cut_points.append((i, "".join(_CLOSER[o] for o in reversed(stack))))
+        elif ch in "0123456789.eE-+" or ch in "truefalsn":
+            # scalars at depth 1-2 end at the next delimiter; the bracket/quote
+            # points are enough in practice, so no cut point is recorded here.
+            pass
+    if not stack and not cut_points:
+        return None
+    for pos, closers in reversed(cut_points[-max_attempts:]):
+        candidate = re.sub(r",\s*$", "", text[: pos + 1].rstrip()) + closers
+        for attempt in (candidate, _repair_json(candidate)):
+            try:
+                parsed = json.loads(attempt)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict) and parsed:
+                return parsed
+    return None
+
+
 def parse_ai_json(content: str) -> dict:
-    """Parse an AI JSON response, salvaging from markdown code fences and
-    repairing illegal backslash escapes (shared with the batch poller)."""
+    """Parse an AI JSON response, salvaging from markdown code fences,
+    repairing illegal backslash escapes, and recovering the complete prefix
+    of a response that was cut off by the output budget (shared with the
+    batch poller). A salvaged result carries ``_truncated: True``."""
     try:
         return json.loads(content)
     except json.JSONDecodeError:
@@ -72,6 +131,10 @@ def parse_ai_json(content: str) -> dict:
                 return json.loads(candidate)
             except json.JSONDecodeError:
                 continue
+        salvaged = _salvage_truncated_json(stripped)
+        if salvaged is not None:
+            salvaged["_truncated"] = True
+            return salvaged
         return {"raw": content, "_extraction_status": "parse_error"}
 
 

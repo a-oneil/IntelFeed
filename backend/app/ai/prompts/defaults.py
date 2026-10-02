@@ -2282,6 +2282,7 @@ CANDIDATE OBSERVABLES — unfiltered pattern hits, judge per the iocs rules
                 "summary": {"type": "string"},
                 "ttps": {
                     "type": "array",
+                    "maxItems": 20,
                     "items": {
                         "type": "object",
                         "properties": {
