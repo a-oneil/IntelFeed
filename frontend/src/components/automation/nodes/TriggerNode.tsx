@@ -377,7 +377,7 @@ export const TriggerNode = memo(function TriggerNode({ data }: NodeProps) {
         {triggerType === "on_observable_captured" && (
           <div className={styles.fieldGroup}>
             <span className={styles.hint}>
-              Fires once per article when a reporting door (one-pass AI, publisher IOC file, analyst promote)
+              Fires once per article when a reporting door (one-pass AI, the article's IOC table, analyst promote)
               captures an observable. Blocklist feeds never fire it.
             </span>
             <label className={styles.fieldLabel}>Kinds (comma-separated, blank = any)</label>

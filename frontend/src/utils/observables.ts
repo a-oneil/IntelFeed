@@ -133,3 +133,17 @@ interface ObservableResponseLike {
     enriched_at?: string | null;
   } | null;
 }
+
+/** Human labels for the ledger's capture doors (`Observable.created_via`). */
+export const CAPTURED_BY_LABELS: Record<string, string> = {
+  ai_extraction: "AI analysis",
+  ttp_observable: "TTP observable",
+  ioc_list: "indicator feed",
+  publisher_ioc: "article IOC table",
+  manual: "analyst",
+};
+
+export function capturedByLabel(createdVia: string | null | undefined): string {
+  if (!createdVia) return "";
+  return CAPTURED_BY_LABELS[createdVia] ?? createdVia.replace(/_/g, " ");
+}

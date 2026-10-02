@@ -1448,10 +1448,10 @@ const OBSERVABLE_STATUS_CHOICES = [
 
 const OBSERVABLE_VIA_CHOICES = [
   { value: "all", label: "Any" },
-  { value: "ai_extraction", label: "analysis ai" },
-  { value: "ttp_observable", label: "ttp observable" },
-  { value: "ioc_list", label: "ioc_list feed" },
-  { value: "publisher_ioc", label: "publisher file" },
+  { value: "ai_extraction", label: "AI analysis" },
+  { value: "ttp_observable", label: "TTP observable" },
+  { value: "ioc_list", label: "indicator feed" },
+  { value: "publisher_ioc", label: "article IOC table" },
   { value: "manual", label: "analyst" },
 ];
 

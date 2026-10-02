@@ -411,14 +411,23 @@ async def _ingest_batch_results(db, client, job, task, provider_model) -> dict:
     name="app.workers.ai_batch_tasks.run_entry_analysis_task",
     bind=True,
     max_retries=2,
-    soft_time_limit=300,
-    time_limit=360,
+    # Long research write-ups now reach the model with their indicator
+    # appendix and a 16k-token output budget; the provider timeout is 900 s,
+    # so the worker limit must not cut the run first.
+    soft_time_limit=900,
+    time_limit=960,
 )
-def run_entry_analysis_task(self, entry_id: str):
-    """Sequential fallback: one run_task call per entry (no Batches API)."""
+def run_entry_analysis_task(self, entry_id: str, force: bool = False):
+    """Sequential fallback: one run_task call per entry (no Batches API).
+
+    ``force`` re-runs an entry that already has a current analysis (the
+    engine's dedup guard otherwise returns the stored result untouched) —
+    the re-analysis of articles whose earlier run never saw their IOC
+    section goes through here.
+    """
     start = time.monotonic()
     try:
-        run_async(_run_entry_analysis(entry_id))
+        run_async(_run_entry_analysis(entry_id, force=force))
         CELERY_TASKS_TOTAL.labels(task_name="run_entry_analysis_task", status="success").inc()
     except Exception as exc:
         CELERY_TASKS_TOTAL.labels(task_name="run_entry_analysis_task", status="retry").inc()
@@ -427,7 +436,7 @@ def run_entry_analysis_task(self, entry_id: str):
         CELERY_TASK_DURATION_SECONDS.labels(task_name="run_entry_analysis_task").observe(time.monotonic() - start)
 
 
-async def _run_entry_analysis(entry_id_str: str):
+async def _run_entry_analysis(entry_id_str: str, force: bool = False):
     from app.ai.engine import run_task
     from app.models.ai_analysis import AIAnalysisRequest
     from app.models.entry import Entry
@@ -448,6 +457,7 @@ async def _run_entry_analysis(entry_id_str: str):
             entry_id=entry_id,
             target_type="entry",
             target_id=entry_id,
+            force=force,
         )
         request_row = (
             await db.execute(select(AIAnalysisRequest).where(AIAnalysisRequest.entry_id == entry_id))

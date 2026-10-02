@@ -24,7 +24,7 @@ only when something with judgment created it:
 |---|---|---|---|
 | One-pass analysis AI | `ai_extraction` | 0.8 (+0.1 if the author defanged) | The `iocs` array of `entry_analysis`: every kind, with a role, an evidence sentence and an optional ATT&CK `technique_id` |
 | TTP observable | `ttp_observable` | 0.85 | `EntryTTP.observable_value` upserts (host artifacts attached to a technique claim) — backfill path; at ingest the AI door covers these |
-| Publisher IOC file | `publisher_ioc` | 0.9 | The indicator file the article links to (Talos `.txt`/STIX `.json`, Bitdefender CSV, Datadog CSV) — allow-listed repositories only, roles from the publisher's labels, sighted on the article |
+| Article IOC table | `publisher_ioc` | 0.9 | The indicator file the article links to (Talos `.txt`/STIX `.json`, Bitdefender CSV, Datadog CSV) — allow-listed repositories only, roles from the publisher's labels, sighted on the article |
 | Curated indicator feed | `ioc_list` | 0.85 | A whole file from a curated list repo (C2IntelFeeds, C2-Tracker), path-gated and infra-tagged; role from the file path |
 | Analyst | `manual` | 1.0 | Promote from the reader, the candidates queue, or the `promote_observable` tool |
 
@@ -83,7 +83,7 @@ phish-sim → `phishing`; VPN/RMM/KVM rows carry a tag instead of a role).
   candidates) and appended after the head behind a marker line, within
   `observables_analysis_tail_reserve` of the budget. Lines that are only an
   indicator are quota'd (12 hashes, 20 of each network kind) so the model's
-  output stays bounded; the publisher's full list is a feed concern.
+  output stays bounded; the article's full IOC table is the table door's concern.
 - Candidate hints are ranked (AI stagings, then defanged tokens, hashes, IPs)
   and scan-origin host kinds never enter the hint block.
 
@@ -199,7 +199,7 @@ linked_entity_type + linked_entity_id for one entity's infrastructure),
 the skill CLIs after changing them (`scripts/dev/sync_skill_clis.py`).
 
 Automation: the `on_observable_captured` trigger fires once per rule per
-entry when a judgment door writes rows for it (AI, publisher file, analyst
+entry when a judgment door writes rows for it (AI, article IOC table, analyst
 promote — never the indicator-feed door, never the replay backfill); its
 `trigger_config` has the same shape as the `has_observable` condition (kinds,
 roles, min_confidence, exclude dual-use, sighting sources), which also works
@@ -213,7 +213,7 @@ observables browser" pivot is `GET /api/observables?linked_entity=<type>:<id>`
 `ioc.reports:>0` / `ioc.feeds:>0` for the corroboration counts.
 
 Enrichment: Shodan InternetDB (keyless) runs automatically for freshly judged
-IPs from the AI, analyst and publisher doors — never for bulk feed rows;
+IPs from the AI, analyst and article-IOC-table doors — never for bulk feed rows;
 VirusTotal and GreyNoise join once their keys are set (Settings → Engine →
 Enrichment). Results fold into `Observable.reputation` and fill `infra_tag`
 when the host is dual-use (Shodan `vpn`/`proxy`/`tor`, GreyNoise RIOT →

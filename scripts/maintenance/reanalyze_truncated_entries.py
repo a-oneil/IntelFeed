@@ -67,9 +67,11 @@ async def main(days: int, min_chars: int, limit: int, feed_like: str | None, dry
         return
     from app.workers.ai_batch_tasks import run_entry_analysis_task
 
+    # force=True: these entries already have a current analysis, and the
+    # engine's dedup guard would otherwise hand it back untouched.
     for eid, *_ in chosen:
-        run_entry_analysis_task.delay(str(eid))
-    print(f"queued {len(chosen)} analyses on the ai queue")
+        run_entry_analysis_task.delay(str(eid), force=True)
+    print(f"queued {len(chosen)} forced analyses on the ai queue")
 
 
 if __name__ == "__main__":

@@ -56,7 +56,7 @@ import { SinceLastVisitRibbon } from "../SinceLastVisitRibbon";
 import type { PivotResponse } from "@/api/types";
 import { entityDisplayName, entityProfilePath, type EntityProfileConfig, type OverviewPanelKey } from "../entityProfileConfig";
 import { dedupeProducts, extractNvd, type RefLink } from "../cveRefs";
-import { defangObservable, observableSourcesLabel, reputationLabel, stixBundle, STIX_PATTERNS } from "@/utils/observables";
+import { capturedByLabel, defangObservable, observableSourcesLabel, reputationLabel, stixBundle, STIX_PATTERNS } from "@/utils/observables";
 import { Chip } from "@/components/primitives";
 import {
   infrastructureCsvUrl,
@@ -560,7 +560,7 @@ export function OverviewTab({
         const pct = (v: number) => `${Math.round(v * 100)}%`;
         return (
           <Panel key={key} title="Provenance & confidence">
-            {o.created_via && <Row k="Captured by" v={o.created_via.replace(/_/g, " ")} />}
+            {o.created_via && <Row k="Captured by" v={capturedByLabel(o.created_via)} />}
             {o.reputation && (
               <Row
                 k="Reputation"
