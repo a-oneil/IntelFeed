@@ -1,3 +1,9 @@
+# Python 3.14, deliberately. 3.15 is held back in .github/dependabot.yml: the
+# backend tree cannot install on it — every selectolax release caps at <3.15,
+# so googlenewsdecoder fails to resolve. Patch bumps within 3.14 are fine.
+#
+# This is also the only Python that runs IntelFeed code, which is why CI tests
+# 3.14 alone (see .github/workflows/ci.yml).
 FROM python:3.14.7-slim-bookworm AS base
 
 WORKDIR /app

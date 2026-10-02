@@ -69,3 +69,26 @@ updates:
         patterns: ["*"]
     commit-message:
       prefix: "deps(docker)"
+    ignore:
+      # Both holds below are deliberate, and CI does not protect either one:
+      # the python bump fails the build loudly, the postgres bump goes green
+      # and breaks production. Dependabot re-proposed both in #63 (and the
+      # postgres half in #52), so they are pinned here rather than closed
+      # again every Monday.
+      #
+      # python: stay on 3.14. 3.15 is still pre-release (#63 offered
+      # 3.15.0rc2) and the backend tree cannot install on it at all — every
+      # selectolax release caps at <3.15, so googlenewsdecoder fails to
+      # resolve. Patch bumps (3.14.x) still come through.
+      - dependency-name: "python"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
+      # postgres: stay on 16. The `pgdata` named volume was initdb'd under 16
+      # and a newer major refuses to start against it, so the image builds
+      # clean and the stack then will not boot on real data. Moving majors
+      # needs pg_upgrade or dump/restore in a maintenance window. See the
+      # header comment in db/Dockerfile.
+      - dependency-name: "postgres"
+        update-types:
+          - "version-update:semver-major"
