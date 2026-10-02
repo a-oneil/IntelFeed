@@ -1,0 +1,18 @@
+# Code owners for IntelFeed — all three collaborators with push access.
+#
+# This file only has teeth once "Require review from Code Owners" is enabled
+# for `main` in Settings > Branches. Without that, GitHub still auto-requests
+# review from the owners below, it just does not block the merge.
+#
+# One rule listing three owners requests review from all three but is
+# satisfied by any ONE of their approvals — it is not a three-sign-off gate.
+# GitHub also never requests review from a PR's own author, so a PR from any
+# one of them can be approved by either of the other two.
+#
+# Rules are last-match-wins, not cumulative — a later line that matches a path
+# replaces the owners of an earlier one rather than adding to them. Any
+# narrower rule added below the catch-all must therefore re-list every owner
+# who should still own those paths.
+
+# Everything.
+*       @a-oneil @samir-elhelw76 @kwolfe22
