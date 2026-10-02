@@ -373,7 +373,7 @@ async def store_publisher_observables(
                 entry_id=entry.id,
                 role=ind.role,
                 label=(ind.label or None) and ind.label[:200],
-                evidence=f"Listed in the publisher's indicator file {url}",
+                evidence=f"Listed in the article's IOC table: {url}",
                 was_defanged=ind.was_defanged,
             )
             if obs is None:

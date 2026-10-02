@@ -287,17 +287,17 @@ SETTING_METADATA: dict[str, dict] = {
         "options": ["shadow", "capture"],
     },
     "observables_publisher_ioc_enabled": {
-        "label": "Publisher IOC Files",
+        "label": "Article IOC Tables",
         "description": (
-            "When an article links an allow-listed publisher indicator file (Cisco Talos IOCs, Bitdefender "
+            "When an article links its IOC table in an allow-listed repository (Cisco Talos IOCs, Bitdefender "
             "malware-ioc, Datadog indicators-of-compromise on GitHub), fetch it and capture its atoms — with the "
-            "publisher's roles — sighted on the article. Only those repositories are ever fetched"
+            "roles the table states — sighted on the article. Only those repositories are ever fetched"
         ),
         "group": "observables",
     },
     "observables_publisher_ioc_max_values": {
-        "label": "Publisher File Cap",
-        "description": "Maximum indicators taken from one linked publisher file",
+        "label": "Article IOC Table Cap",
+        "description": "Maximum indicators taken from one article's linked IOC table",
         "group": "observables",
     },
     "observables_ai_capture_kinds": {
