@@ -2204,7 +2204,8 @@ For each entity, decide `filled` (with cited value) or `unknown`. Return strict 
 		- path.resolve
 		- Info-ZIP Zip 3.0
 - `ttps`: 
-	- MITRE ATT&CK technique IDs only when the article describes the actual behavior; include the exact source_text sentence. 
+	- MITRE ATT&CK technique IDs only when the article describes the actual behavior; include the exact source_text sentence, cut to its first 160 characters.
+	- At most 20 techniques per article — the ones with a concrete artefact first — and never the same technique twice. The output has a hard size budget; a runaway `ttps` list is how an analysis gets cut off and lost.
 	- When that sentence documents a concrete artefact, also fill `observable_type` (domain_pattern, path, cmdline, registry, client_id, header, hash, or other) and observable_value with the artefact VERBATIM (the actual path, domain pattern, command line, registry key, client id, header value or hash — never a paraphrase). 
 	- The observable is the single most valuable output: it is what a detection rule is written from. Leave both empty when the article gives no concrete artefact for the technique.
 	- Also set `telemetry` to where a defender would SEE this activity: endpoint, dns, netflow, proxy, firewall, vpn, identity, cloudtrail, email_gw, or ot. Cloud/identity/network activity is not an endpoint story — "attackers created a malicious OAuth app" is identity, "beacons over TLS" is netflow. Empty string only when genuinely unclear.
@@ -2253,7 +2254,7 @@ For each entity, decide `filled` (with cited value) or `unknown`. Return strict 
 - Default to KEEP whenever uncertain — a wrongly removed link destroys real intelligence signal; a wrongly kept one is easily corrected. Judge the sentence where the name appears, not the article's overall topic. References to any member of the same family (parent, subsidiary, alias, variant, product line) are KEEP. `previously_restored=true` means an analyst explicitly confirmed this link — REMOVE only on an unambiguous name collision.
 - `reason`: one short evidence-based sentence citing the local phrase. Empty array when no candidates given.
 
-Output valid JSON matching the provided schema. Every key is present in the schema; use an empty array for lists with nothing of that type, and an empty string for any scalar field you cannot fill from the article. **Never** invent or extract an arbitrary value just to fill a field.
+Output valid JSON matching the provided schema, with the keys in the schema's order — `summary`, `iocs`, `scripts` and `relationships` come first, so the indicators survive even if the output is cut short. Every key is present in the schema; use an empty array for lists with nothing of that type, and an empty string for any scalar field you cannot fill from the article. **Never** invent or extract an arbitrary value just to fill a field.
 """,
         "default_prompt_template": """Analyze this article:
 
@@ -2927,3 +2928,22 @@ for _fam in _REPORT_FAMILY_TASKS:
         }
     )
     DEFAULT_MODEL_ASSIGNMENTS[_name] = DEFAULT_MODEL_ASSIGNMENTS["report_section"]
+
+
+def _front_load_schema_keys(schema: dict, first: tuple[str, ...]) -> None:
+    """Reorder a JSON schema's top-level properties so ``first`` lead.
+
+    Models emit object keys in schema order, and a response that hits the
+    output budget is cut from the end — so the sections the ledger depends on
+    (``iocs``, ``scripts``, ``relationships``) must come before the one that
+    runs long (``ttps``) to survive a truncated analysis."""
+    props = schema.get("properties") or {}
+    ordered = {k: props[k] for k in first if k in props}
+    ordered.update({k: v for k, v in props.items() if k not in ordered})
+    props.clear()
+    props.update(ordered)
+
+
+for _task in SYSTEM_TASKS:
+    if _task.get("name") == "entry_analysis":
+        _front_load_schema_keys(_task["output_schema"], ("summary", "iocs", "scripts", "relationships"))

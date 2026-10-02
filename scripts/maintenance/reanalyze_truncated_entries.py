@@ -29,9 +29,32 @@ from app.models.feed import Feed  # noqa: E402
 from app.services.analysis_window import find_indicator_section, html_to_analysis_text  # noqa: E402
 
 
-async def main(days: int, min_chars: int, limit: int, feed_like: str | None, dry_run: bool) -> None:
+async def main(
+    days: int, min_chars: int, limit: int, feed_like: str | None, dry_run: bool, failed_only: bool = False
+) -> None:
     since = datetime.now(UTC) - timedelta(days=days)
     async with async_session() as db:
+        failed_ids: set | None = None
+        if failed_only:
+            from app.models.ai_result import AIResult
+            from app.models.ai_task import AITask
+
+            failed_ids = set(
+                (
+                    await db.execute(
+                        select(AIResult.target_id)
+                        .join(AITask, AITask.id == AIResult.task_id)
+                        .where(
+                            AITask.name == "entry_analysis",
+                            AIResult.is_current.is_(True),
+                            AIResult.parsed_result["_extraction_status"].astext == "parse_error",
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            print(f"entries whose current analysis is a parse_error: {len(failed_ids)}")
         q = (
             select(Entry.id, Entry.title, Entry.content_html, Entry.content_text, Feed.title)
             .join(Feed, Feed.id == Entry.feed_id)
@@ -46,6 +69,8 @@ async def main(days: int, min_chars: int, limit: int, feed_like: str | None, dry
             q = q.where(Feed.title.ilike(f"%{feed_like}%"))
         chosen: list[tuple] = []
         for eid, title, html, text, feed_title in (await db.execute(q)).all():
+            if failed_ids is not None and eid not in failed_ids:
+                continue
             body = html_to_analysis_text(html) if html else (text or "")
             if len(body) <= min_chars:
                 continue
@@ -80,6 +105,11 @@ if __name__ == "__main__":
     ap.add_argument("--min-chars", type=int, default=15000, help="the old prompt cap")
     ap.add_argument("--limit", type=int, default=300)
     ap.add_argument("--feed-like", default=None, help="restrict to feeds whose title contains this")
+    ap.add_argument(
+        "--failed-only",
+        action="store_true",
+        help="only entries whose current analysis is a parse_error (an output cut off by the token budget)",
+    )
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
-    asyncio.run(main(a.days, a.min_chars, a.limit, a.feed_like, a.dry_run))
+    asyncio.run(main(a.days, a.min_chars, a.limit, a.feed_like, a.dry_run, a.failed_only))
