@@ -1,0 +1,154 @@
+--- a/app/src/main/AndroidManifest.xml
++++ b/app/src/main/AndroidManifest.xml
+@@ -36,6 +36,11 @@
+                 <data android:mimeType="text/plain" />
+             </intent-filter>
+         </activity>
++        <activity
++            android:name=".notifications.NotificationRouteActivity"
++            android:exported="false"
++            android:excludeFromRecents="true"
++            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+     </application>
+ 
+ </manifest>
+--- a/app/src/main/java/com/example/intelfeed/IntelFeedApplication.kt
++++ b/app/src/main/java/com/example/intelfeed/IntelFeedApplication.kt
+@@ -21,6 +21,10 @@
+  * configuration change.)
+  */
+ class IntelFeedApplication : Application(), ImageLoaderFactory {
++
++    // Set only by the non-exported notification target, then consumed by MainActivity on the
++    // main thread. Untrusted apps can launch MainActivity but cannot supply a notification route.
++    internal var pendingNotificationRoute: com.example.intelfeed.notifications.IntelNotificationHelper.Route? = null
+ 
+     val authPreferences: AuthPreferences by lazy { AuthPreferences(this) }
+     val userPreferences: UserPreferences by lazy { UserPreferences(this) }
+--- a/app/src/main/java/com/example/intelfeed/MainActivity.kt
++++ b/app/src/main/java/com/example/intelfeed/MainActivity.kt
+@@ -40,8 +40,8 @@
+         // Not after a configuration change or process restore: the same tap would be handled again.
+         if (savedInstanceState == null) {
+             handleShareIntent(intent)
+-            takeNotificationRoute(intent)
+         }
++        takeNotificationRoute()
+ 
+         val app = application as IntelFeedApplication
+         enableEdgeToEdge()
+@@ -101,12 +101,13 @@
+         super.onNewIntent(intent)
+         setIntent(intent)
+         handleShareIntent(intent)
+-        takeNotificationRoute(intent)
++        takeNotificationRoute()
+     }
+ 
+-    private fun takeNotificationRoute(intent: Intent?) {
+-        IntelNotificationHelper.routeFrom(intent)?.let { pendingRoute = it }
+-        IntelNotificationHelper.clearRoute(intent)
++    private fun takeNotificationRoute() {
++        val app = application as IntelFeedApplication
++        app.pendingNotificationRoute?.let { pendingRoute = it }
++        app.pendingNotificationRoute = null
+     }
+ 
+     /** Picks the first safe http(s) link out of text shared from another app (browsers often add a title). */
+--- a/app/src/main/java/com/example/intelfeed/notifications/IntelNotificationHelper.kt
++++ b/app/src/main/java/com/example/intelfeed/notifications/IntelNotificationHelper.kt
+@@ -18,7 +18,6 @@
+ import androidx.work.OneTimeWorkRequestBuilder
+ import androidx.work.PeriodicWorkRequestBuilder
+ import androidx.work.WorkManager
+-import com.example.intelfeed.MainActivity
+ import com.example.intelfeed.R
+ import java.util.concurrent.TimeUnit
+ 
+@@ -37,10 +36,7 @@
+     const val EXTRA_ROUTE_THREAD_TITLE = "route_thread_title"
+     const val EXTRA_ROUTE_KEYWORD = "route_keyword"
+ 
+-    /**
+-     * Where a notification tap should go. MainActivity is exported (it's the launcher), so any app
+-     * can start it with these extras: ids are checked against the server's id formats before use.
+-     */
++    /** Where a notification tap should go, after validation by the private notification target. */
+     sealed interface Route {
+         data class Entry(val id: String) : Route
+         data class Campaign(val id: String, val name: String?) : Route
+@@ -55,19 +51,18 @@
+     /** The validated destination in a notification's intent, or null. */
+     fun routeFrom(intent: Intent?): Route? {
+         intent ?: return null
+-        fun text(key: String) = intent.getStringExtra(key)?.trim()?.take(200)?.takeIf { it.isNotEmpty() }
++        fun text(key: String) = try {
++            intent.getStringExtra(key)?.take(200)?.trim()?.takeIf { it.isNotEmpty() }
++        } catch (_: RuntimeException) {
++            // Ignore malformed extras rather than crashing when a notification is tapped.
++            null
++        }
+         text(EXTRA_ROUTE_ENTRY_ID)?.takeIf { ID_PATTERN.matches(it) }?.let { return Route.Entry(it) }
+         text(EXTRA_ROUTE_THREAD_SLUG)?.takeIf { SLUG_PATTERN.matches(it) }?.let { return Route.Thread(it, text(EXTRA_ROUTE_THREAD_TITLE)) }
+         text(EXTRA_ROUTE_CAMPAIGN_ID)?.takeIf { ID_PATTERN.matches(it) }?.let { return Route.Campaign(it, text(EXTRA_ROUTE_CAMPAIGN_NAME)) }
+         // A keyword only ever becomes a phrase search in the app; no control characters, 100 chars max.
+         text(EXTRA_ROUTE_KEYWORD)?.takeIf { k -> k.length <= 100 && k.none { it.isISOControl() } }?.let { return Route.Keyword(it) }
+         return null
+-    }
+-
+-    /** Clears the route extras so the same tap isn't handled twice (e.g. after a configuration change). */
+-    fun clearRoute(intent: Intent?) {
+-        listOf(EXTRA_ROUTE_ENTRY_ID, EXTRA_ROUTE_CAMPAIGN_ID, EXTRA_ROUTE_CAMPAIGN_NAME, EXTRA_ROUTE_THREAD_SLUG, EXTRA_ROUTE_THREAD_TITLE, EXTRA_ROUTE_KEYWORD)
+-            .forEach { intent?.removeExtra(it) }
+     }
+ 
+     /** True when the app may post notifications: the Android 13+ permission and the system switch. */
+@@ -136,7 +131,7 @@
+     ) {
+         if (!canPostNotifications(context)) return
+ 
+-        val intent = Intent(context, MainActivity::class.java).apply {
++        val intent = Intent(context, NotificationRouteActivity::class.java).apply {
+             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+             entryId?.let { putExtra(EXTRA_ROUTE_ENTRY_ID, it) }
+             campaignId?.let { putExtra(EXTRA_ROUTE_CAMPAIGN_ID, it) }
+--- /dev/null
++++ b/app/src/main/java/com/example/intelfeed/notifications/NotificationRouteActivity.kt
+@@ -0,0 +1,21 @@
++package com.example.intelfeed.notifications
++
++import android.app.Activity
++import android.content.Intent
++import android.os.Bundle
++import com.example.intelfeed.IntelFeedApplication
++import com.example.intelfeed.MainActivity
++
++/** Receives only our notification PendingIntents and hands their validated route to MainActivity. */
++class NotificationRouteActivity : Activity() {
++    override fun onCreate(savedInstanceState: Bundle?) {
++        super.onCreate(savedInstanceState)
++        IntelNotificationHelper.routeFrom(intent)?.let { route ->
++            (application as IntelFeedApplication).pendingNotificationRoute = route
++            startActivity(Intent(this, MainActivity::class.java).apply {
++                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
++            })
++        }
++        finish()
++    }
++}
+--- a/app/src/main/java/com/example/intelfeed/util/ShareIntentSanitizer.kt
++++ b/app/src/main/java/com/example/intelfeed/util/ShareIntentSanitizer.kt
+@@ -34,7 +34,12 @@
+         }
+ 
+         // 2. Bound incoming text length to avoid regex DoS or memory spikes
+-        val rawText = intent.getStringExtra(Intent.EXTRA_TEXT)?.take(MAX_SHARE_TEXT_LENGTH) ?: return null
++        val rawText = try {
++            intent.getStringExtra(Intent.EXTRA_TEXT)?.take(MAX_SHARE_TEXT_LENGTH)
++        } catch (_: RuntimeException) {
++            // Malformed extras from another app must not crash the exported activity.
++            null
++        } ?: return null
+         return extractUrlFromText(rawText)
+     }
+ 
