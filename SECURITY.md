@@ -41,8 +41,8 @@ Out of scope:
 - Findings that require an attacker to already be an authenticated admin. Admins
   can edit AI prompts, automation rules and system settings by design.
 - Vulnerabilities in a dependency with no IntelFeed-specific exploit path —
-  report those upstream. `.github/workflows/security.yml` audits dependencies
-  weekly and Dependabot opens the upgrade PRs.
+  report those upstream. the `security` job in
+  `.github/workflows/ci.yml` audits dependencies weekly and Dependabot opens the upgrade PRs.
 - Anything about a deployment's own configuration: a missing reverse proxy, an
   exposed PostgreSQL port, a weak `SECRET_KEY`, a Meilisearch instance left
   open. See [setup.md](setup.md) for the intended production setup.

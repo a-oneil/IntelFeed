@@ -8,7 +8,7 @@ IntelFeed — a self-hosted, security-focused RSS aggregator and threat intellig
 
 ## Tech Stack
 
-- **Backend:** Python 3.12+ / FastAPI / SQLAlchemy (async) / Alembic / Celery + Redis
+- **Backend:** Python 3.14 / FastAPI / SQLAlchemy (async) / Alembic / Celery + Redis
 - **Frontend:** React 18 / TypeScript / Vite / TanStack Query + Zustand / CSS Modules
 - **Database:** PostgreSQL 16 (async via asyncpg)
 - **Search:** Meilisearch v1.6
@@ -61,22 +61,26 @@ pnpm exec playwright test             # E2E tests (needs running stack)
 ```
 
 ### CI
-GitHub Actions is split one workflow per area, so a PR only pays for what it touched:
+GitHub Actions is **one workflow** (`ci.yml`), because Actions bills by the *job*, rounded up to a whole minute. The previous split — one workflow per area — meant four `changed?` jobs and four aggregate jobs on every commit: eight billed minutes for ~40 seconds of work before a test ran. Measured over two days: 213 minutes of wall time billed as 416.
 
-| Workflow | Runs when | Jobs |
+| Job | Runs when | Does |
 | --- | --- | --- |
-| `backend.yml` | `backend/**` changed | `ruff`, `pytest` (py3.12/3.13/3.14, PostgreSQL 16 + pgvector and Redis service containers), `alembic` (single head, fresh `upgrade head`, `downgrade -1` + re-apply) |
-| `frontend.yml` | `frontend/**` changed | `eslint`, `vitest`, `type check & build` |
-| `docker.yml` | A file feeding an image changed | Builds all three images, `compose config` on dev + prod |
-| `security.yml` | Every PR (gitleaks); manifest changes + weekly (audits) | `gitleaks`, `pip-audit`, `pnpm audit` |
+| `changed?` | always | One checkout, one diff; outputs `backend` / `frontend` / `images` / `python` / `node` |
+| `backend` | `backend/**` changed | `ruff check`, `ruff format --check`, alembic (single head, fresh `upgrade head`, `downgrade -1` + re-apply), `pytest` — in that order, cheapest first, on PostgreSQL 16 + pgvector and Redis service containers |
+| `frontend` | `frontend/**` changed | One `pnpm install`, then `eslint`, `pnpm build` (type check), `vitest` |
+| `images` | A file feeding an image changed | Builds all three images (per-image `gha` cache scopes), `compose config` on dev + prod |
+| `security` | always (gitleaks); audit steps gated on manifests + Monday sweep | `gitleaks`, `pip-audit`, `pnpm audit` |
+| `CI` | always | Aggregate gate |
 
-Each workflow starts with a `changes` job that diffs against the PR base and gates the rest on an `if:`. This is deliberately **not** `on.pull_request.paths` — a workflow filtered out at the `on:` level never reports a status at all, so a required check would sit pending forever. Every workflow also ends with an aggregate job named after the workflow (`Backend`, `Frontend`, `Docker images`, `Security`) that always reports; **those four are the ones to mark required in branch protection**, never the individual jobs. A push to `main` skips the filter entirely and runs everything.
+**Each area is one job, not several.** Splitting `ruff`/`alembic`/`pytest` cost three per-job minimums and three editable installs to save ~90 seconds of wall clock. The tradeoff is accepted deliberately: feedback is a little slower and a failure names a *step* rather than a job. A full-fat commit costs ~13 billed minutes instead of 33; a docs-only commit costs 3 instead of 9.
+
+Filtering lives in the `changed?` job, **not** `on.pull_request.paths` — a workflow filtered out at the `on:` level never reports a status at all, so a required check would sit pending forever. **Mark the single `CI` job required in branch protection**, never the jobs above. Pushes to `main` are path-filtered the same way PRs are (they used to force-run everything, which re-tested the identical tree a squash-merge had just proven green).
 
 Run the same checks locally first — `ruff check` + `ruff format --check` + `pytest` (backend), `pnpm lint` + `pnpm build` + `pnpm test` (frontend). Playwright E2E and `pnpm lint:css` are deliberately not in CI (`lint:css` has a stale suppressions baseline — re-run `pnpm lint:css:baseline` before wiring it up).
 
-**Backend passes on Python 3.12, 3.13 and 3.14.** The images ship 3.14; the pytest job runs all three, because both version bugs found so far were stdlib behaviour changes that only appeared off the pinned version (`urllib.robotparser` group layout in 3.13, `fnmatch.translate`'s anchor spelling in 3.14).
+**CI tests Python 3.14 only, because that is the only Python that runs IntelFeed code**: `backend/Dockerfile` is `python:3.14.7`, and api / celery-worker / celery-worker-ai / celery-beat / telegram-listener all come from that image; the host venvs are 3.14 too. (`piper/Dockerfile` is 3.12, but that sidecar ships only `piper-tts` and its own `server.py` — no app code.) This was a 3.12/3.13/3.14 matrix, which cost 120 of those 416 minutes. The two bugs it caught (`urllib.robotparser` group layout in 3.13, `fnmatch.translate`'s anchor spelling in 3.14) were found climbing *toward* 3.14 — and we landed there, so the matrix stopped guarding a runtime. `requires-python` is now `>=3.14` to match. Ruff's `target-version` deliberately still says `py312`: bumping it turns on UP043 (25 findings) and changes formatter output across 45 files, which is its own PR.
 
-**Security gates.** `gitleaks` scans every PR against `.gitleaks.toml`; that allowlist silences individual placeholders (example JWTs, `YOUR_TOKEN`, UUID entity ids), never whole files or rules — keep it that way or it stops catching anything. `pip-audit` resolves the backend tree fresh and blocks on any advisory except those in its documented `--ignore-vuln` list (today: `ecdsa`, unfixable upstream, reached only via JWT algorithms IntelFeed doesn't use). `pnpm audit --prod` blocks on high-severity advisories in shipped dependencies; dev-tree advisories are reported in the job summary but don't gate. Dependabot (`.github/dependabot.yml`) opens grouped weekly upgrade PRs.
+**Security gates.** `gitleaks` scans every PR against `.gitleaks.toml` — it is the one check with no path gate, because a committed credential is diff-local: this PR's fault, this PR's job to fix. That allowlist silences individual placeholders (example JWTs, `YOUR_TOKEN`, UUID entity ids), never whole files or rules — keep it that way or it stops catching anything. `pip-audit` resolves the backend tree fresh and blocks on any advisory except those in its documented `--ignore-vuln` list (today: `ecdsa`, unfixable upstream, reached only via JWT algorithms IntelFeed doesn't use). `pnpm audit --prod` blocks on high-severity advisories in shipped dependencies; dev-tree advisories are reported in the job summary but don't gate. The two audits grade the repo's dependency state rather than the diff, so they are gated on the manifests plus a Monday sweep — otherwise a CSS change goes red the morning an advisory lands against lxml. Dependabot (`.github/dependabot.yml`) opens grouped weekly upgrade PRs.
 
 ### Utility Scripts
 

@@ -1,4 +1,4 @@
-# gitleaks configuration — see .github/workflows/security.yml.
+# gitleaks configuration — see the `security` job in .github/workflows/ci.yml.
 #
 # The scan runs on every PR and blocks on any finding. That only stays useful
 # if the allowlist below is small and every entry says why the thing it silences

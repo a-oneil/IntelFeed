@@ -9,10 +9,7 @@ generate detection rules.
 </p>
 
 <p align="center">
-  <a href="https://github.com/a-oneil/IntelFeed/actions/workflows/backend.yml"><img src="https://github.com/a-oneil/IntelFeed/actions/workflows/backend.yml/badge.svg?branch=main&event=push" alt="Backend"></a>
-  <a href="https://github.com/a-oneil/IntelFeed/actions/workflows/frontend.yml"><img src="https://github.com/a-oneil/IntelFeed/actions/workflows/frontend.yml/badge.svg?branch=main&event=push" alt="Frontend"></a>
-  <a href="https://github.com/a-oneil/IntelFeed/actions/workflows/docker.yml"><img src="https://github.com/a-oneil/IntelFeed/actions/workflows/docker.yml/badge.svg?branch=main&event=push" alt="Docker images"></a>
-  <a href="https://github.com/a-oneil/IntelFeed/actions/workflows/security.yml"><img src="https://github.com/a-oneil/IntelFeed/actions/workflows/security.yml/badge.svg?branch=main&event=push" alt="Security"></a>
+  <a href="https://github.com/a-oneil/IntelFeed/actions/workflows/ci.yml"><img src="https://github.com/a-oneil/IntelFeed/actions/workflows/ci.yml/badge.svg?branch=main&event=push" alt="CI"></a>
 </p>
 
 <p align="center">
@@ -202,7 +199,7 @@ in your own environment.
 
 ## Tech stack
 
-Python 3.12 · FastAPI · SQLAlchemy (async) · Alembic · Celery + Redis · PostgreSQL 16 · Meilisearch ·
+Python 3.14 · FastAPI · SQLAlchemy (async) · Alembic · Celery + Redis · PostgreSQL 16 · Meilisearch ·
 React 18 · TypeScript · Vite · TanStack Query + Zustand · Docker Compose · Caddy
 
 ## License
