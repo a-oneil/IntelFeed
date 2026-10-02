@@ -137,6 +137,7 @@ Also needs `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` in `.env`.
 | `sync_prod_to_dev.sh` | Dump the production database over SSH and restore it into the local dev stack, so you develop against real data. **Destroys the local dev database.** |
 | `cf-origin-lockdown.sh` | Restrict inbound 80/443 on the production host to Cloudflare's published edge ranges, closing the origin-bypass hole. Idempotent; never touches port 22. |
 | `version.sh` | **Sourced, not run.** Exports `APP_VERSION` / `GIT_SHA` / `BUILD_TIME` from the checkout so `docker compose build` can stamp the api and frontend images. `update.sh` sources it on every deploy; do the same for a hand-rolled build you want stamped. |
+| `pace_reanalyze.sh` | Runs on the prod host (`nohup scripts/ops/pace_reanalyze.sh &`): every 15 min, if the `ai` queue holds fewer than 10 messages, queues 8 forced `entry_analysis` re-runs for long research articles (>15k chars with an indicator section, last 90 days) that have no result newer than the 2026-10-02 prompt fixes; exits when none remain. Logs to `logs/reanalyze-pace.log`. Keeps a backfill from starving live analysis behind it on the concurrency-1 AI worker. |
 
 `deploy.sh` and `sync_prod_to_dev.sh` need your production host:
 
