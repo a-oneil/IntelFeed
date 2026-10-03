@@ -515,7 +515,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
       ...(e.status && e.status !== "active"
         ? [{ label: e.status, tone: "warning" as BadgeTone, title: "Lifecycle state" }]
         : []),
-      ...(e.created_via ? [{ label: `via ${String(e.created_via).replace(/_/g, " ")}`, tone: "neutral" as BadgeTone, title: "The judgment door that created this row" }] : []),
+      ...(e.created_via ? [{ label: `via ${String(e.created_via).replace(/_/g, " ")}`, tone: "neutral" as BadgeTone, title: "What created this row" }] : []),
     ],
     identityFields: [],
     hasAliases: false,
