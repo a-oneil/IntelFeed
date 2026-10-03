@@ -2857,13 +2857,21 @@ export interface ThreadListResponse {
   total: number;
 }
 
-/** Something a campaign follows: an entity it names, or a story it holds part of. */
+export type CampaignSourceKind = "entity" | "story" | "query";
+
+/**
+ * Standing intake owned by the campaign: an entity it names, a story it holds
+ * part of, or a query typed into it. A `query` source has no `ref_id` — unlike
+ * a linked saved search it belongs to the campaign, not to one analyst.
+ */
 export interface CampaignSource {
   id: string;
   campaign_id: string;
-  kind: "entity" | "story";
+  kind: CampaignSourceKind;
   entity_type: string | null;
-  ref_id: string;
+  ref_id: string | null;
+  /** The query-language string, when kind is "query". */
+  query: string | null;
   /** The target's name at link time — stays readable if it is later renamed. */
   label: string;
   auto_sync: boolean;
@@ -2883,6 +2891,37 @@ export interface CampaignSourceSuggestion {
   would_add: number;
   /** The newest few of those, by name — what makes the click informed. */
   preview: Array<{ entry_id: string; title: string; published_at: string | null }>;
+}
+
+/** A dry run of a source that does not exist yet. */
+export interface CampaignSourcePreview {
+  kind: CampaignSourceKind;
+  entity_type: string | null;
+  ref_id: string | null;
+  query: string | null;
+  /** What the source would be called once created. */
+  label: string;
+  would_add: number;
+  /** Articles it claims that the campaign already has — overlap, not waste. */
+  already_held: number;
+  preview: Array<{ entry_id: string; title: string | null; published_at: string | null }>;
+  /** Why the query could not be run, when it could not be parsed. */
+  error: string | null;
+  /**
+   * Field names the query language does not have. Not fatal — they become text
+   * terms — but a standing source built on a typo'd field answers plausibly
+   * forever, so the composer says so before the follow is created.
+   */
+  unknown_fields: string[];
+}
+
+/** What the intake pickers are allowed to offer, straight from the server. */
+export interface CampaignSourceOptions {
+  kinds: CampaignSourceKind[];
+  /** Types that own articles; a source on anything else would never add any. */
+  followable_entity_types: string[];
+  /** Followable *and* findable by name through /intelligence/search. */
+  pickable_entity_types: string[];
 }
 
 // --- Intel profiles (named report scopes: regions × verticals) ---

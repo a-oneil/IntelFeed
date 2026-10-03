@@ -10,6 +10,9 @@ import type {
   CampaignSavedSearch,
   CampaignSavedSearchSyncResult,
   CampaignSource,
+  CampaignSourceKind,
+  CampaignSourceOptions,
+  CampaignSourcePreview,
   CampaignSourceSuggestion,
   CampaignStats,
   CampaignSuggestion,
@@ -516,6 +519,47 @@ function invalidateCampaignIntake(qc: ReturnType<typeof useQueryClient>, campaig
   qc.invalidateQueries({ queryKey: ["campaign-suggestions", campaignId] });
 }
 
+/**
+ * Which source kinds exist and which entity types can be followed. Server-owned
+ * because only the backend knows which types own articles — a source on one
+ * that doesn't would be created and then never add anything.
+ */
+export function useCampaignSourceOptions() {
+  return useQuery({
+    queryKey: ["campaign-source-options"],
+    queryFn: async () => {
+      const { data } = await api.get<CampaignSourceOptions>("/campaigns/source-options");
+      return data;
+    },
+    staleTime: Infinity,
+  });
+}
+
+/**
+ * A dry run before the follow exists: how many articles it would add, how many
+ * the campaign already holds, and the newest few by name. Creates nothing, so
+ * it is safe to re-run as the analyst types (debounce the input, not this).
+ */
+export function useCampaignSourcePreview(
+  campaignId: string | undefined,
+  target: { kind: CampaignSourceKind; entityType?: string | null; refId?: string | null; query?: string | null } | null
+) {
+  return useQuery({
+    queryKey: ["campaign-source-preview", campaignId, target],
+    queryFn: async () => {
+      const { data } = await api.post<CampaignSourcePreview>(`/campaigns/${campaignId}/sources/preview`, {
+        kind: target!.kind,
+        entity_type: target!.entityType ?? null,
+        ref_id: target!.refId ?? null,
+        query: target!.query ?? null,
+      });
+      return data;
+    },
+    enabled: !!campaignId && !!target,
+    staleTime: 30_000,
+  });
+}
+
 export function useAddCampaignSource() {
   const qc = useQueryClient();
   return useMutation({
@@ -524,16 +568,19 @@ export function useAddCampaignSource() {
       kind,
       entityType,
       refId,
+      query,
     }: {
       campaignId: string;
-      kind: "entity" | "story";
+      kind: CampaignSourceKind;
       entityType?: string | null;
-      refId: string;
+      refId?: string | null;
+      query?: string | null;
     }) => {
       const { data } = await api.post<CampaignSource>(`/campaigns/${campaignId}/sources`, {
         kind,
         entity_type: entityType ?? null,
-        ref_id: refId,
+        ref_id: refId ?? null,
+        query: query ?? null,
       });
       return data;
     },
@@ -541,6 +588,7 @@ export function useAddCampaignSource() {
   });
 }
 
+/** Pause, resume, or rewrite a query source — the row and its history survive either. */
 export function useUpdateCampaignSource() {
   const qc = useQueryClient();
   return useMutation({
@@ -548,14 +596,19 @@ export function useUpdateCampaignSource() {
       campaignId,
       sourceId,
       autoSync,
+      query,
     }: {
       campaignId: string;
       sourceId: string;
-      autoSync: boolean;
+      autoSync?: boolean;
+      query?: string;
     }) => {
       const { data } = await api.patch<CampaignSource>(
         `/campaigns/${campaignId}/sources/${sourceId}`,
-        { auto_sync: autoSync }
+        {
+          ...(autoSync !== undefined ? { auto_sync: autoSync } : {}),
+          ...(query !== undefined ? { query } : {}),
+        }
       );
       return data;
     },

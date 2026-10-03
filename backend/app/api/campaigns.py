@@ -33,6 +33,9 @@ from app.schemas.campaign import (
     CampaignSavedSearchSyncResult,
     CampaignSavedSearchUpdate,
     CampaignSourceAdd,
+    CampaignSourceOptions,
+    CampaignSourcePreview,
+    CampaignSourcePreviewRequest,
     CampaignSourceResponse,
     CampaignSourceUpdate,
     CampaignSuggestion,
@@ -239,6 +242,26 @@ async def get_campaigns_for_entry(
     result = await db.execute(select(CampaignEntry.campaign_id).where(CampaignEntry.entry_id == entry_id))
     campaign_ids = [str(row[0]) for row in result.all()]
     return campaign_ids
+
+
+@router.get("/source-options", response_model=CampaignSourceOptions)
+async def get_campaign_source_options(
+    user: User = Depends(get_current_user),
+):
+    """What the intake pickers may offer — which source kinds exist, and which entity types can be followed.
+
+    Registered above ``/{campaign_id}`` so the literal path wins, and served
+    from the server's own vocabulary rather than a list copied into the client:
+    an entity type with no entry junction would make a source that is created
+    and then never adds anything, and only the backend knows which those are.
+    """
+    from app.services.campaign_sources import FOLLOWABLE_ENTITY_TYPES, PICKABLE_ENTITY_TYPES, SOURCE_KINDS
+
+    return CampaignSourceOptions(
+        kinds=list(SOURCE_KINDS),
+        followable_entity_types=list(FOLLOWABLE_ENTITY_TYPES),
+        pickable_entity_types=list(PICKABLE_ENTITY_TYPES),
+    )
 
 
 @router.get("/{campaign_id}", response_model=CampaignResponse)
@@ -1605,6 +1628,53 @@ async def suggest_campaign_sources(
     return await suggested_sources(db, campaign_id, limit=limit)
 
 
+@router.post("/{campaign_id}/sources/preview", response_model=CampaignSourcePreview)
+async def preview_campaign_source(
+    campaign_id: uuid.UUID = Path(..., description="Campaign UUID."),
+    body: CampaignSourcePreviewRequest = Body(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """A dry run of a source that does not exist yet: how many articles it would add, and the newest few by name.
+
+    The suggested sources have always carried their titles, because "adds 700"
+    tells you the size of a decision but not whether to make it. A query you
+    typed or an entity you picked yourself deserves the same look before the
+    follow is created. Creates nothing; safe to call on every keystroke.
+    """
+    from app.services.campaign_sources import preview_source, resolve_source_label, validate_source_target
+
+    campaign = await db.get(Campaign, campaign_id)
+    if not campaign:
+        raise AppError(code="not_found", message="Campaign not found", status_code=404)
+
+    query = body.query.strip() if body.query else None
+    if body.kind == "query":
+        # An unparseable or empty query is reported in the body (``error``, zero
+        # would_add) rather than raised: the UI previews as you type, and a
+        # half-typed query is not a failed request.
+        if not query:
+            return CampaignSourcePreview(kind="query", query=None, would_add=0, already_held=0)
+    else:
+        validate_source_target(body.kind, body.entity_type, body.ref_id, None)
+
+    result = await preview_source(
+        db,
+        campaign_id,
+        body.kind,
+        entity_type=body.entity_type,
+        ref_id=body.ref_id,
+        query=query,
+    )
+    label = ""
+    if not result.get("error"):
+        try:
+            label = await resolve_source_label(db, body.kind, body.entity_type, body.ref_id, query)
+        except AppError:
+            label = ""
+    return CampaignSourcePreview(label=label, **result)
+
+
 @router.post("/{campaign_id}/sources", response_model=CampaignSourceResponse, status_code=201)
 async def add_campaign_source(
     campaign_id: uuid.UUID = Path(..., description="Campaign UUID."),
@@ -1612,38 +1682,39 @@ async def add_campaign_source(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Follow an entity or a story. Syncs once immediately so the effect is visible."""
-    from app.services.campaign_sources import SOURCE_KINDS, resolve_source_label, sync_source
+    """Follow an entity, a story, or a typed query. Syncs once immediately so the effect is visible."""
+    from app.services.campaign_sources import resolve_source_label, sync_source, validate_source_target
 
     campaign = await db.get(Campaign, campaign_id)
     if not campaign:
         raise AppError(code="not_found", message="Campaign not found", status_code=404)
-    if body.kind not in SOURCE_KINDS:
-        raise AppError(
-            code="bad_request",
-            message=f"kind must be one of {', '.join(SOURCE_KINDS)}",
-            status_code=422,
-        )
 
-    existing = (
-        await db.execute(
-            select(CampaignSource).where(
-                CampaignSource.campaign_id == campaign_id,
-                CampaignSource.kind == body.kind,
-                CampaignSource.entity_type == body.entity_type,
-                CampaignSource.ref_id == body.ref_id,
-            )
+    query = body.query.strip() if body.query else None
+    validate_source_target(body.kind, body.entity_type, body.ref_id, query)
+
+    dup = select(CampaignSource).where(
+        CampaignSource.campaign_id == campaign_id,
+        CampaignSource.kind == body.kind,
+    )
+    # A query source is identified by its text; everything else by its target.
+    dup = (
+        dup.where(CampaignSource.query == query)
+        if body.kind == "query"
+        else dup.where(
+            CampaignSource.entity_type == body.entity_type,
+            CampaignSource.ref_id == body.ref_id,
         )
-    ).scalar_one_or_none()
-    if existing:
+    )
+    if (await db.execute(dup)).scalar_one_or_none():
         raise AppError(code="conflict", message="Already followed by this campaign", status_code=409)
 
-    label = await resolve_source_label(db, body.kind, body.entity_type, body.ref_id)
+    label = await resolve_source_label(db, body.kind, body.entity_type, body.ref_id, query)
     source = CampaignSource(
         campaign_id=campaign_id,
         kind=body.kind,
         entity_type=body.entity_type,
         ref_id=body.ref_id,
+        query=query,
         label=label,
         auto_sync=body.auto_sync,
         added_by=user.id,
@@ -1665,12 +1736,30 @@ async def update_campaign_source(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Pause or resume a source. Pausing keeps the row and its history."""
+    """Pause, resume, or rewrite a source. Either keeps the row, its history and what it already added."""
+    from app.services.campaign_sources import query_parse_error, resolve_source_label
+
     source = await db.get(CampaignSource, source_id)
     if not source or source.campaign_id != campaign_id:
         raise AppError(code="not_found", message="Source not found", status_code=404)
     if body.auto_sync is not None:
         source.auto_sync = body.auto_sync
+    if body.query is not None:
+        if source.kind != "query":
+            raise AppError(
+                code="bad_request",
+                message=f"A {source.kind} source has no query to rewrite",
+                status_code=422,
+            )
+        rewritten = body.query.strip()
+        if not rewritten:
+            raise AppError(code="bad_request", message="query cannot be empty", status_code=422)
+        problem = query_parse_error(rewritten)
+        if problem:
+            raise AppError(code="bad_request", message=f"Query does not parse: {problem}", status_code=422)
+        source.query = rewritten
+        # The label *is* the query for this kind, so it moves with it.
+        source.label = await resolve_source_label(db, "query", None, None, rewritten)
     await db.flush()
     return CampaignSourceResponse.model_validate(source, from_attributes=True)
 

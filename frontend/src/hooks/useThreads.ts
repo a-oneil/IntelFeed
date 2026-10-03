@@ -20,6 +20,27 @@ export function useOpenThreads(enabled = true, limit = 40) {
   });
 }
 
+/**
+ * Threads whose title matches — for a picker that needs one *named* story
+ * rather than the recent ones. Status "any" on purpose: a dormant story is
+ * exactly the kind you reach for by name, and following one onto a campaign
+ * still picks up its later waves if it wakes.
+ */
+export function useThreadSearch(q: string, limit = 20) {
+  const term = q.trim();
+  return useQuery({
+    queryKey: ["threads", "search", term, limit],
+    queryFn: async () => {
+      const res = await api.get<ThreadListResponse>("/threads", {
+        params: { status: "any", q: term, limit },
+      });
+      return res.data;
+    },
+    enabled: term.length > 0,
+    staleTime: 30_000,
+  });
+}
+
 export function useThread(slug: string | null) {
   return useQuery({
     queryKey: ["thread", slug],

@@ -38,16 +38,18 @@ router = APIRouter()
         "Open story threads, most recently active first. Each row carries the counts a reading "
         "surface needs to fold the pile: unread members, members added since this analyst last "
         "opened it, the score of the best unread beat, and every member id so a list view can "
-        "absorb them into the thread row."
+        "absorb them into the thread row. Pass `q` to search titles instead, for a picker that "
+        "needs one named story rather than the recent ones."
     ),
 )
 async def list_threads(
     status: str = Query("open", description="open, dormant, closed, or 'any'"),
     limit: int = Query(40, ge=1, le=200, description="Maximum threads returned"),
+    q: str | None = Query(None, max_length=200, description="Substring match on the thread title"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    rows = await story_threads.list_threads(db, user.id, status=status, limit=limit)
+    rows = await story_threads.list_threads(db, user.id, status=status, limit=limit, q=q)
     return ThreadListResponse(threads=[ThreadSummary.from_row(r) for r in rows], total=len(rows))
 
 
