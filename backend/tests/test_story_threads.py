@@ -521,6 +521,34 @@ class TestThreadsApi:
         assert body["thread_yield"]["echoes_folded"] == 0
         assert {m["role"] for m in body["members"]} == {"origin", "beat"}
 
+    async def test_titles_can_be_searched_for_a_picker(self, client, db_session, feeds, auth_headers):
+        """A picker needs one *named* story, not the recent ones — following one
+        onto a campaign starts from its title."""
+        for i in range(3):
+            await make_entry(
+                db_session,
+                feeds[i],
+                title=f"Qilin hits hospital chain {i}",
+                similarity_to_base=1.0 if i == 0 else 0.87,
+                axis=i + 1,
+                host=f"outlet{i}.example",
+            )
+        await assign_entries(db_session, limit=50)
+        await db_session.commit()
+
+        # No q is the unfiltered listing it has always been.
+        unfiltered = await client.get("/api/threads", headers=auth_headers)
+        assert unfiltered.json()["total"] == 1
+        title = unfiltered.json()["threads"][0]["title"]
+
+        word = title.split()[0]
+        hit = await client.get("/api/threads", params={"q": word.lower()}, headers=auth_headers)
+        assert hit.status_code == 200
+        assert hit.json()["total"] == 1
+
+        miss = await client.get("/api/threads", params={"q": "nothing like this"}, headers=auth_headers)
+        assert miss.json()["threads"] == []
+
     async def test_unknown_slug_is_a_404(self, client, auth_headers):
         resp = await client.get("/api/threads/no-such-story", headers=auth_headers)
         assert resp.status_code == 404

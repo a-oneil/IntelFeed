@@ -203,25 +203,104 @@ class CampaignEntityResponse(BaseModel):
 
 
 class CampaignSourceAdd(BaseModel):
-    kind: str = Field(description="entity — follow an actor/malware the campaign names; story — follow a thread")
+    kind: str = Field(
+        description=(
+            "entity — follow an actor/malware/CVE and take every article carrying it; "
+            "story — follow a thread and take its later waves; "
+            "query — take everything matching a query-language string, campaign-owned "
+            "rather than tucked inside one analyst's saved searches"
+        )
+    )
     entity_type: str | None = Field(None, description="Entity type slug; required when kind is entity")
-    ref_id: uuid.UUID = Field(description="The entity's UUID, or the story thread's UUID")
+    ref_id: uuid.UUID | None = Field(
+        None, description="The entity's UUID or the story thread's UUID. Omitted when kind is query."
+    )
+    query: str | None = Field(
+        None,
+        max_length=2000,
+        description="Query-language string; required when kind is query, forbidden otherwise.",
+    )
     auto_sync: bool = True
 
     model_config = ConfigDict(
         json_schema_extra={
-            "example": {
-                "kind": "entity",
-                "entity_type": "threat_actor",
-                "ref_id": "e5049c67-51bf-4dc9-9a78-fb23d6a7bbd7",
-                "auto_sync": True,
-            }
+            "examples": [
+                {
+                    "kind": "entity",
+                    "entity_type": "threat_actor",
+                    "ref_id": "e5049c67-51bf-4dc9-9a78-fb23d6a7bbd7",
+                    "auto_sync": True,
+                },
+                {"kind": "query", "query": 'threat_actor:"Scattered Spider" AND tag:ransomware', "auto_sync": True},
+            ]
         }
     )
 
 
 class CampaignSourceUpdate(BaseModel):
     auto_sync: bool | None = Field(None, description="Pause or resume without losing the link or its history")
+    query: str | None = Field(
+        None,
+        max_length=2000,
+        description=(
+            "Rewrite a query source's query, keeping the row and its history. "
+            "Only valid when the source's kind is query."
+        ),
+    )
+
+
+class CampaignSourcePreviewRequest(BaseModel):
+    """A source that does not exist yet, asked what it would add."""
+
+    kind: str = Field(description="entity, story, or query")
+    entity_type: str | None = Field(None, description="Entity type slug; required when kind is entity")
+    ref_id: uuid.UUID | None = Field(None, description="Target UUID; omitted when kind is query")
+    query: str | None = Field(None, max_length=2000, description="Query-language string; required when kind is query")
+
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"kind": "query", "query": 'malware:"Akira" AND date:>30d'}}
+    )
+
+
+class CampaignSourcePreviewEntry(BaseModel):
+    entry_id: uuid.UUID
+    title: str | None = None
+    published_at: datetime | None = None
+
+
+class CampaignSourcePreview(BaseModel):
+    """A dry run: what following this would pull in, before the row exists."""
+
+    kind: str
+    entity_type: str | None = None
+    ref_id: uuid.UUID | None = None
+    query: str | None = None
+    label: str = Field("", description="What the source would be called once created")
+    would_add: int = Field(description="Articles it claims that the campaign does not already hold")
+    already_held: int = Field(description="Articles it claims that the campaign already has — overlap, not waste")
+    preview: list[CampaignSourcePreviewEntry] = Field(
+        default_factory=list, description="The newest few it would add, by name"
+    )
+    error: str | None = Field(None, description="Why the query could not be run, when it could not be parsed")
+    unknown_fields: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Field names the query language does not have. Not fatal — they become text terms — "
+            "but on a standing source a typo'd field answers plausibly forever."
+        ),
+    )
+
+
+class CampaignSourceOptions(BaseModel):
+    """What the campaign page's intake pickers are allowed to offer."""
+
+    kinds: list[str] = Field(description="Every source kind the API accepts")
+    followable_entity_types: list[str] = Field(
+        description="Entity types that own articles — a source on anything else would never add any"
+    )
+    pickable_entity_types: list[str] = Field(
+        description="Followable types that are also findable by name through /api/intelligence/search"
+    )
 
 
 class CampaignSourceResponse(BaseModel):
@@ -229,7 +308,8 @@ class CampaignSourceResponse(BaseModel):
     campaign_id: uuid.UUID
     kind: str
     entity_type: str | None
-    ref_id: uuid.UUID
+    ref_id: uuid.UUID | None = Field(None, description="Null for a query source, which targets no single row")
+    query: str | None = Field(None, description="The query-language string, when kind is query")
     label: str = Field(description="The target's name at link time — stays readable if it is later renamed")
     auto_sync: bool
     last_synced_at: datetime | None

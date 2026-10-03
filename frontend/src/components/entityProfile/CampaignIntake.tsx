@@ -9,18 +9,23 @@
  *
  * Two halves, because they are two different commitments:
  *
- * * **Feeding it** — standing intake. A saved search catches things nobody has
- *   named yet; a followed entity or story reads the campaign's own curation and
- *   so doesn't drift the way a parallel query does.
+ * * **Feeding it** — standing intake. A followed entity or story reads the
+ *   campaign's own curation; a typed query catches what nobody has named yet.
+ *   Both are campaign-owned, so a teammate can read and pause either.
  * * **Could take** — offers. Each expands to the articles it would actually
  *   add, and carries both verbs: take these once, or follow it so later waves
  *   arrive on their own.
+ *
+ * The section always renders. It used to vanish when there was nothing held and
+ * nothing offered — which is exactly a new campaign, the one that most needs to
+ * be told what to collect. "Add intake" (CampaignIntakeComposer) is the way to
+ * point it at anything by hand; before that, intake could only be *accepted*
+ * from what the backend had already proposed.
  */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   useAddCampaignEntries,
-  useAddCampaignSavedSearch,
   useAddCampaignSource,
   useCampaignSavedSearches,
   useCampaignSources,
@@ -37,6 +42,7 @@ import { useSavedSearches } from "@/hooks/useSearch";
 import { useUndoableDelete } from "@/hooks/useUndoableDelete";
 import { groupSuggestions } from "@/utils/campaignSuggestions";
 import { formatDate } from "@/utils/formatDate";
+import { CampaignIntakeComposer } from "./CampaignIntakeComposer";
 import styles from "./entityProfile.module.css";
 
 /** One row in either half — the shape the list renders, whatever produced it. */
@@ -71,7 +77,6 @@ export function CampaignIntake({
   const updateSource = useUpdateCampaignSource();
   const removeSource = useRemoveCampaignSource();
   const syncSource = useSyncCampaignSource();
-  const addSearch = useAddCampaignSavedSearch();
   const updateSearch = useUpdateCampaignSavedSearch();
   const removeSearch = useRemoveCampaignSavedSearch();
   const syncSearch = useSyncCampaignSavedSearch();
@@ -79,7 +84,11 @@ export function CampaignIntake({
   const undoableDelete = useUndoableDelete();
 
   const [open, setOpen] = useState<string | null>(null);
-  const [picking, setPicking] = useState(false);
+  const [composing, setComposing] = useState(false);
+  /** Which query source is being rewritten in place, and to what. */
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  /** Set by Escape so the blur that follows discards rather than saves. */
+  const abandonEdit = useRef(false);
 
   const sourceRows = sources ?? [];
   const searchRows = searches ?? [];
@@ -133,28 +142,95 @@ export function CampaignIntake({
   }
 
   const nothingFeeding = sourceRows.length === 0 && searchRows.length === 0;
-  if (nothingFeeding && offers.length === 0 && availableSearches.length === 0) return null;
 
   return (
     <div className={`${styles.panel} ${styles.intakePanel}`}>
-      <div className={styles.panelTitle}>Feeding this campaign</div>
+      <div className={styles.intakeHead}>
+        <div className={styles.panelTitle}>Feeding this campaign</div>
+        {!composing && (
+          <button className={styles.intakeBtn} onClick={() => setComposing(true)}>
+            Add intake
+          </button>
+        )}
+      </div>
 
-      {nothingFeeding && (
+      {nothingFeeding && !composing && (
         <p className={styles.intakeEmpty}>
-          Nothing arrives on its own — every article here was added by hand.
+          Nothing arrives on its own — every article here was added by hand. Add intake to follow a query, an
+          entity or a story, and the next wave arrives without being asked for.
         </p>
+      )}
+
+      {composing && (
+        <CampaignIntakeComposer
+          campaignId={campaignId}
+          availableSearches={availableSearches}
+          onClose={() => setComposing(false)}
+          onOpenArticle={onOpenArticle}
+        />
       )}
 
       {sourceRows.map((source) => (
         <div key={source.id} className={styles.intakeRow}>
           <span className={styles.intakeKind}>{source.kind}</span>
-          <span className={styles.intakeLabel}>{source.label}</span>
+          {editing?.id === source.id ? (
+            <input
+              className={styles.intakeQueryInput}
+              value={editing.text}
+              autoFocus
+              spellCheck={false}
+              aria-label="Rewrite this query"
+              onChange={(e) => setEditing({ id: source.id, text: e.target.value })}
+              onKeyDown={(e) => {
+                // Both exits go through blur so there is one save path. Escape
+                // marks the intent first, because by the time blur runs the
+                // difference between "left it alone" and "changed my mind" is
+                // no longer visible in the value.
+                if (e.key === "Escape") abandonEdit.current = true;
+                if (e.key === "Escape" || e.key === "Enter") e.currentTarget.blur();
+              }}
+              onBlur={(e) => {
+                const text = e.target.value.trim();
+                const abandoned = abandonEdit.current;
+                abandonEdit.current = false;
+                setEditing(null);
+                if (abandoned || !text || text === source.query) return;
+                updateSource.mutate(
+                  { campaignId, sourceId: source.id, query: text },
+                  {
+                    onSuccess: () => toast.success("Query rewritten"),
+                    onError: (err) =>
+                      toast.error(
+                        (err as { response?: { data?: { error?: { message?: string } } } })?.response?.data
+                          ?.error?.message || "Failed to rewrite",
+                      ),
+                  },
+                );
+              }}
+            />
+          ) : (
+            <span
+              className={source.kind === "query" ? styles.intakeLabelQuery : styles.intakeLabel}
+              title={source.query ?? undefined}
+            >
+              {source.label}
+            </span>
+          )}
           <span className={styles.intakeMeta}>
             {source.entries_added} added
             {source.last_synced_at && ` · ran ${formatDate(source.last_synced_at)}`}
             {!source.auto_sync && " · paused"}
           </span>
           <span className={styles.intakeControls}>
+            {source.kind === "query" && editing?.id !== source.id && (
+              <button
+                className={styles.intakeBtn}
+                title="Rewrite the query, keeping what it has already added"
+                onClick={() => setEditing({ id: source.id, text: source.query ?? "" })}
+              >
+                Edit
+              </button>
+            )}
             <button
               className={styles.intakeBtn}
               onClick={() =>
@@ -252,41 +328,13 @@ export function CampaignIntake({
 
       {/* --- Offers --- */}
 
-      {(offers.length > 0 || availableSearches.length > 0) && (
+      {(offers.length > 0 || looseCount > 0) && (
         <div className={styles.intakeOffers}>
+          {/* Linking a saved search moved into the composer's own tab — it is
+              one of four ways to add intake, not a verb belonging to offers. */}
           <div className={styles.intakeOffersHead}>
             <span>Could take</span>
-            {availableSearches.length > 0 && (
-              <button className={styles.intakeBtn} onClick={() => setPicking((p) => !p)}>
-                {picking ? "Cancel" : "Link a saved search"}
-              </button>
-            )}
           </div>
-
-          {picking && (
-            <div className={styles.intakePicker}>
-              {availableSearches.map((s) => (
-                <button
-                  key={s.id}
-                  className={styles.intakePick}
-                  disabled={addSearch.isPending}
-                  onClick={() => {
-                    addSearch.mutate(
-                      { campaignId, savedSearchId: s.id },
-                      {
-                        onSuccess: () => toast.success(`Linked "${s.display_name || s.name}"`),
-                        onError: () => toast.error("Failed to link search"),
-                      },
-                    );
-                    setPicking(false);
-                  }}
-                >
-                  <span className={styles.intakeLabel}>{s.display_name || s.name}</span>
-                  {s.query && <span className={styles.intakeQuery}>{s.query}</span>}
-                </button>
-              ))}
-            </div>
-          )}
 
           {offers.map((offer) => {
             const isOpen = open === offer.key;

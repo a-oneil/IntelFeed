@@ -947,21 +947,39 @@ Provenance for scalar profile fields — the field-level counterpart to `EntityR
 
 #### CampaignSource
 
-Something a campaign feeds on beyond a linked saved search. A saved search is a
-query kept *in parallel* with the campaign and it drifts — the campaign's
-subject changes and the query doesn't. A source is the campaign feeding on what
-it has already declared.
+Standing intake the **campaign** owns. The alternative, a linked saved search,
+belongs to whoever saved it: teammates cannot see it in their own list, it can
+only be linked if it already exists, and it drifts — the campaign's subject
+changes and the query doesn't.
 
 **Columns:**
 - `id` (UUID PK)
 - `campaign_id` (FK, CASCADE, indexed)
-- `kind` (String 20) — `entity` (the actor or malware the campaign names as its subject; new articles mentioning it join, which is what makes curating the primary role worth doing) or `story` (a thread the campaign has already accepted part of; later waves of a story you are tracking are the clearest "obviously yes")
-- `entity_type` (String 32, nullable), `ref_id` (UUID) — the target
-- `label` (Text) — **frozen at link time**, so a source still reads after its target is renamed or merged away
+- `kind` (String 20) — one of:
+  - `entity` — the actor, malware, CVE or other entity named as the subject. Every article carrying it joins, which is what makes curating the primary role worth doing.
+  - `story` — a thread the campaign has already accepted part of; later waves of a story you are tracking are the clearest "obviously yes".
+  - `query` — a query-language string typed into the campaign. Same reach as a saved search; campaign-owned, so every analyst on it can read, pause and rewrite the query.
+- `entity_type` (String 32, nullable), `ref_id` (UUID, nullable) — the target. Both null for a `query` source.
+- `query` (Text, nullable) — the query-language string; set **only** when `kind = 'query'`
+- `label` (Text) — **frozen at link time**, so a source still reads after its target is renamed or merged away. For a `query` source it is the query text, truncated to 120 characters.
 - `auto_sync` (Boolean, default true), `last_synced_at`, `entries_added` (Integer)
 - `added_by` (FK → users, SET NULL), `created_at`
 
-**Unique Constraint:** `uq_campaign_sources_target` on `(campaign_id, kind, entity_type, ref_id)`.
+**Constraints:**
+- `uq_campaign_sources_target` on `(campaign_id, kind, entity_type, ref_id)` — identity for an entity/story source.
+- `uq_campaign_sources_query`, a partial unique index on `(campaign_id, query) WHERE kind = 'query'` — Postgres treats NULL `ref_id`s as distinct, so query rows need their own uniqueness on the text.
+- `ck_campaign_sources_shape` — `query` rows carry a query and no `ref_id`; every other kind carries a `ref_id` and no query.
+
+**Followable types.** An entity source is refused for a type with no entry
+junction (`entry_scope_junction` answers `None`): it would be created and then
+never add anything. `GET /api/campaigns/source-options` is the server's own list
+— the pickers read it rather than keeping a copy.
+
+**Sync semantics.** Every kind recomputes its *full* claimed set each run and
+inserts only what the campaign does not already hold, so an article that joins a
+story, gains an entity link or starts matching the query later still arrives.
+(The older `campaign_saved_searches` sweep diffs instead, which is why an
+article that gains a link later never reaches a campaign through one.)
 
 #### CampaignCountry
 

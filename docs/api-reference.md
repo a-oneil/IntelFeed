@@ -1692,11 +1692,64 @@ Delete a campaign.
 - **`GET/POST /api/campaigns/{id}/countries`** / **`DELETE .../countries/{country_id}`**, **`GET .../countries/suggested`** — Targeted/attributed countries
 - **`GET/POST /api/campaigns/{id}/sectors`** / **`DELETE .../sectors/{ref}`**, **`GET .../sectors/suggested`** — Victim verticals (sector by UUID, slug or name)
 - **`GET /api/campaigns/{id}/timeline`**, **`GET .../stats`**, **`GET .../attack-layer`**, **`GET .../detection-gaps`**, **`GET .../export`**, **`GET .../suggest`** — Analysis views
-- **`GET/POST /api/campaigns/{id}/saved-searches`**, **`PATCH/DELETE .../saved-searches/{css_id}`**, **`POST .../saved-searches/{css_id}/sync`** — Campaign-scoped saved searches that auto-collect matching entries
+- **`GET/POST /api/campaigns/{id}/saved-searches`**, **`PATCH/DELETE .../saved-searches/{css_id}`**, **`POST .../saved-searches/{css_id}/sync`** — Links to an analyst's own saved searches. Prefer a `query` source below: it belongs to the campaign instead of to one person.
+- **`GET/POST /api/campaigns/{id}/sources`**, **`PATCH/DELETE .../sources/{source_id}`**, **`POST .../sources/{source_id}/sync`** — Standing intake the campaign owns (see below)
+- **`GET /api/campaigns/{id}/sources/suggested`** — What it could follow, drawn from what it already holds
+- **`POST /api/campaigns/{id}/sources/preview`** — Dry run: what a source *would* add, before it exists
+- **`GET /api/campaigns/source-options`** — Which source kinds exist and which entity types can be followed
 - **`POST /api/campaigns/auto-detect`** — Suggest new campaigns from entry clustering
 - **`GET /api/campaigns/by-entry/{entry_id}`** — Campaigns containing an entry
 
 **Auth:** Bearer token
+
+---
+
+#### Campaign Sources
+
+Standing intake owned by the campaign rather than by one analyst. Three kinds:
+
+| `kind` | Body | Claims |
+| --- | --- | --- |
+| `entity` | `entity_type` + `ref_id` | Every article linked to that entity |
+| `story` | `ref_id` (thread UUID) | Every member of that story thread |
+| `query` | `query` (query-language string) | Everything the query matches — see [query-language.md](query-language.md) |
+
+Each recomputes its full claimed set on every run and inserts only what the
+campaign does not already hold, so an article that joins a story, gains an
+entity link or starts matching the query later still arrives. The
+`sync_campaign_sources` beat job runs every 15 minutes; `auto_sync: false`
+pauses a source without losing the row or what it has added.
+
+**`POST /api/campaigns/{id}/sources/preview`**
+
+A dry run. Creates nothing, so it is safe to call as an analyst types.
+
+**Request:** `{"kind": "query", "query": "malware:\"Akira\" AND date:>30d"}`
+
+**Response:**
+```json
+{
+  "kind": "query",
+  "entity_type": null,
+  "ref_id": null,
+  "query": "malware:\"Akira\" AND date:>30d",
+  "label": "malware:\"Akira\" AND date:>30d",
+  "would_add": 47,
+  "already_held": 3,
+  "preview": [{ "entry_id": "...", "title": "...", "published_at": "..." }],
+  "error": null,
+  "unknown_fields": []
+}
+```
+
+`error` is a parse failure (reported in the body, not as a 4xx, because the UI
+previews mid-typing). `unknown_fields` names fields the query language does not
+have — `actor:` instead of `threat_actor:`, say — which are not fatal (they
+become text terms) but on a standing source answer plausibly forever.
+
+**Refusals on `POST .../sources`:** an unparseable query, a `query` source with a
+`ref_id` (or any other kind without one), and an `entity_type` that owns no
+articles — `GET /api/campaigns/source-options` lists the ones that do.
 
 ---
 

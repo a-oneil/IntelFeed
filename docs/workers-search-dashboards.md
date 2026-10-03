@@ -191,7 +191,7 @@ The `JOB_REGISTRY` is a declarative map of all **70** scheduled tasks, each with
 | `run_scheduled_automations` | Every 60 seconds | Evaluate on_schedule automation rules |
 | `refresh_saved_search_counts` | Every 5 minutes | Refresh match counts and dispatch alerts |
 | `sync_campaign_saved_searches` | Every 5 minutes | Auto-sync campaign searches and add entries |
-| `sync_campaign_sources` | Every 15 minutes | Pull in articles for the entities and stories each campaign follows (`campaign_sources`) |
+| `sync_campaign_sources` | Every 15 minutes | Pull in articles for the entities, stories and queries each campaign follows (`campaign_sources`) |
 
 #### Content Generation
 

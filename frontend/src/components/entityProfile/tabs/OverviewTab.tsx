@@ -404,12 +404,13 @@ export function OverviewTab({
           return (
             <Panel key={key} title="Infrastructure">
               <div className={styles.metaLabel} style={{ textTransform: "none", letterSpacing: 0 }}>
-                No infrastructure captured yet. Indicators a judgment door captures in this entity&apos;s articles
-                will appear here — claimed attribution edges first, then values reported alongside it.
+                No infrastructure captured yet. IPs, domains and hashes found in{" "}
+                {entityType === "campaign" ? "this campaign's articles" : "articles about it"} will appear here —
+                ones attributed to it first, then ones merely reported alongside it.
                 {staged > 0 && (
                   <>
                     {" "}
-                    {staged} of its article{staged === 1 ? " has" : "s have"} staged candidates waiting for review —{" "}
+                    {staged === 1 ? "One article has" : `${staged} articles have`} indicators waiting for review —{" "}
                     <Link to="/workbench/observables?queue=1">open the candidates queue</Link>.
                   </>
                 )}
