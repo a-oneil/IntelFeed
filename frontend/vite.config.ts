@@ -62,7 +62,12 @@ function buildStamp() {
   const arg = (v?: string) => (v && v !== "dev" ? v : "");
 
   const envVersion = arg(process.env.VITE_APP_VERSION);
-  const gitVersion = envVersion ? "" : git("describe --tags --always --dirty");
+  // `--match='v*'` for the same reason scripts/ops/version.sh carries it: the
+  // repo also tags APK releases as `android-v<version>`, and an unfiltered
+  // describe reports whichever tag is nearest — which is how the footer came to
+  // show the Android app's version. The two must agree or a dev build and an
+  // image build disagree about what the same commit is called.
+  const gitVersion = envVersion ? "" : git("describe --tags --always --dirty --match='v*'");
   const version = envVersion || gitVersion || mountedSha() || "dev";
 
   return {

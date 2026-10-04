@@ -15,10 +15,17 @@
 # build` without sourcing this still works — it just reports an unknown version.
 
 # `--tags` counts lightweight tags too, `--always` degrades to a bare short SHA
-# while the repo has no tags at all, and `--dirty` marks a build made from an
+# while the repo has no matching tag, and `--dirty` marks a build made from an
 # edited working tree. Cutting the first `v0.2.0` tag upgrades every version
 # string from "c684f22" to "v0.2.0" with no further work here.
-APP_VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo unknown)
+#
+# `--match` rather than a bare `--tags`, because this repo tags more than one
+# artifact: CI publishes an `android-v<version>` tag for every APK release, and
+# without a filter `git describe` takes whichever tag is nearest — so the web
+# app's footer started reporting "android-v1.2-4-g7990e4d", the Android app's
+# version. An allowlist beats excluding `android-v*` by name: the next artifact
+# to get its own tag namespace will not quietly break this again.
+APP_VERSION=$(git describe --tags --always --dirty --match='v*' 2>/dev/null || echo unknown)
 GIT_SHA=$(git rev-parse --short=8 HEAD 2>/dev/null || echo unknown)
 BUILD_TIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 
