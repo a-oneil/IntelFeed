@@ -14,7 +14,7 @@ import { useSidebarCustomization } from "@/hooks/useSidebarCustomization";
 import { useStaleBundle } from "@/hooks/useBuildVersion";
 import { WorkbenchNav } from "./WorkbenchNav";
 import { IngestModal } from "./IngestModal";
-import { EditFeedModal } from "./EditFeedModal";
+import { EditFeedModal } from "./feedModal/EditFeedModal";
 import { EditCategoryModal } from "./EditCategoryModal";
 import { Tooltip } from "./Tooltip";
 import { Hint } from "./primitives";

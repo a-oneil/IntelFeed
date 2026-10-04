@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { useFeeds } from "@/hooks/useFeeds";
 import { useUIStore } from "@/stores/uiStore";
-import { EditFeedModal } from "@/components/EditFeedModal";
+import { EditFeedModal } from "@/components/feedModal/EditFeedModal";
 import styles from "./FeedNameMenuButton.module.css";
 
 interface FeedNameMenuButtonProps {

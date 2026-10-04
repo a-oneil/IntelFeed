@@ -45,7 +45,7 @@ vi.mock("@/components/IntelLevelBadge", () => ({
   IntelLevelBadge: () => null,
 }));
 
-vi.mock("@/components/EditFeedModal", () => ({
+vi.mock("@/components/feedModal/EditFeedModal", () => ({
   EditFeedModal: () => null,
 }));
 

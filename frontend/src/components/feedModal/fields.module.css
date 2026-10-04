@@ -1,0 +1,418 @@
+/* The form vocabulary every pane shares. */
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+}
+
+.row3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-4);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.label {
+  font-size: var(--fs-base);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.input,
+.select {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: var(--h-lg);
+  padding: 0 var(--sp-4);
+  font-family: inherit;
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  outline: none;
+}
+
+.select {
+  padding: 0 var(--sp-3);
+}
+
+.textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--sp-3) var(--sp-4);
+  font-family: inherit;
+  font-size: var(--fs-md);
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  outline: none;
+  resize: vertical;
+}
+
+.input:focus,
+.select:focus,
+.textarea:focus {
+  border-color: var(--accent);
+}
+
+.hint {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.checkRow {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  cursor: pointer;
+}
+
+.checkRow input[type="checkbox"] {
+  flex-shrink: 0;
+  margin: 2px 0 0;
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+}
+
+.checkText {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.checkLabel {
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+}
+
+.sectionLabel {
+  font-family: var(--font-display);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.note {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* ===== Overview ===== */
+
+.verdict {
+  margin: 0;
+  font-size: var(--fs-md);
+  line-height: 1.55;
+  color: var(--text-primary);
+  text-wrap: pretty;
+}
+
+.statGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-4);
+  background: var(--bg-secondary);
+}
+
+.statValue {
+  font-family: var(--font-display);
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.statLabel {
+  font-size: var(--fs-xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.actionRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.actionBtn {
+  min-height: var(--h-md);
+  padding: 0 var(--sp-4);
+  font-family: inherit;
+  font-size: var(--fs-base);
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+
+.actionBtn:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.actionBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.errorBox {
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 20%, transparent);
+  border-radius: var(--r-md);
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.errorLabel {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--error);
+}
+
+.errorText {
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+  word-break: break-word;
+}
+
+.live {
+  color: var(--success);
+}
+
+.down {
+  color: var(--warning);
+}
+
+.dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--r-full);
+  margin-right: var(--sp-2);
+}
+
+.dotOk {
+  background: var(--success);
+}
+
+.dotWarn {
+  background: var(--warning);
+}
+
+.dotErr {
+  background: var(--danger);
+}
+
+/* ===== Pipeline stages ===== */
+
+.stageList {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+.stageRow {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--bg-tertiary);
+  cursor: pointer;
+}
+
+.stageRow:last-child {
+  border-bottom: none;
+}
+
+.stageRowNested {
+  padding-left: var(--sp-6);
+  background: var(--bg-primary);
+}
+
+.stageRowDisabled {
+  cursor: default;
+}
+
+.stageRow input[type="checkbox"] {
+  flex-shrink: 0;
+  margin: 2px 0 0;
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+}
+
+.stageText {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.stageHead {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.stageLabel {
+  font-size: var(--fs-base);
+  color: var(--text-primary);
+}
+
+.stageLabelOff {
+  color: var(--text-secondary);
+}
+
+.stageDetail {
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.scopeChip {
+  flex-shrink: 0;
+  margin-top: 2px;
+  font-family: var(--font-display);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: var(--r-full);
+  padding: var(--sp-1) var(--sp-2);
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+}
+
+.writesChip {
+  font-family: var(--font-display);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: var(--r-full);
+  padding: var(--sp-1) var(--sp-2);
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+}
+
+.summaryBox {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-4);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.summaryLabel {
+  font-family: var(--font-display);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.summaryText {
+  font-size: var(--fs-md);
+  line-height: 1.5;
+  color: var(--text-primary);
+  text-wrap: pretty;
+}
+
+/* ===== Telegram health ===== */
+
+.healthGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2) var(--sp-5);
+  font-size: var(--fs-base);
+  color: var(--text-primary);
+}
+
+.healthKey {
+  color: var(--text-secondary);
+}
+
+.banner {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-base);
+}
+
+.bannerWarn {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
+}
+
+.bannerError {
+  color: var(--error);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
+}
+
+@media (max-width: 767px) {
+  .row,
+  .row3,
+  .healthGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Two up, not one: six stacked tiles turn Overview into a scroll. */
+  .statGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .input,
+  .select,
+  .actionBtn {
+    min-height: 44px;
+  }
+
+  .checkRow,
+  .stageRow {
+    min-height: 44px;
+  }
+}

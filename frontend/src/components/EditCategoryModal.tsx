@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useBulkUpdateCategoryFeeds } from "@/hooks/useFeeds";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
+import { deriveIntelLevel } from "./IntelLevelBadge";
 import type { Category, Feed } from "@/api/types";
-import styles from "./EditFeedModal.module.css";
+import styles from "./EditCategoryModal.module.css";
 
 interface Props {
   category: Category;
@@ -69,16 +70,14 @@ export function EditCategoryModal({ category, feeds, onClose }: Props) {
   const intervals = [...new Set(feeds.map((s) => s.fetch_interval_minutes))];
   const retentions = [...new Set(feeds.map((s) => s.retention_days))];
   const reliabilities = [...new Set(feeds.map((s) => s.reliability_rating))];
-  const deriveLevel = (s: Feed): string => {
-    const mode = s.intel_extraction_mode || "selective";
-    const extract = s.auto_extract_on_ingest ?? false;
-    if (mode === "none") return "none";
-    if (mode === "manual") return "manual";
-    if ((mode === "full" || mode === "selective") && !extract) return "known_only";
-    if (mode === "full" && extract) return "full";
-    return "selective";
-  };
-  const intelLevels = [...new Set(feeds.map(deriveLevel))];
+  // IntelLevelBadge owns this mapping; there were three hand-rolled copies.
+  const intelLevels = [
+    ...new Set(
+      feeds.map((s) =>
+        deriveIntelLevel(s.intel_extraction_mode || "selective", s.auto_extract_on_ingest ?? false)
+      )
+    ),
+  ];
 
   const mixedLabel = (values: unknown[]) =>
     values.length > 1 ? " (mixed)" : "";

@@ -1068,9 +1068,14 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
+      // A <select> counts as typing too. Without it, every dropdown in every
+      // modal above this list leaked its keystrokes through: with a feed's
+      // "Poll interval" focused, j/k and the arrows navigated the list behind
+      // the dialog, s starred, m marked read and Enter opened an article.
       if (
         target instanceof HTMLInputElement ||
         target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
         target?.isContentEditable
       ) return;
 

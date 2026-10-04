@@ -65,7 +65,7 @@ vi.mock("@/components/AddFeedModal", () => ({
   AddFeedModal: () => null,
 }));
 
-vi.mock("@/components/EditFeedModal", () => ({
+vi.mock("@/components/feedModal/EditFeedModal", () => ({
   EditFeedModal: () => null,
 }));
 

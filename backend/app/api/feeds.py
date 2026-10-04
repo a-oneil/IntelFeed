@@ -797,8 +797,12 @@ async def update_feed(
         "extract_detection_rules",
         "extract_tools",
     )
+    # `model_fields_set` rather than a None check: for the nullable fields below,
+    # None is a real value ("uncategorized", "keep forever") and must not be
+    # mistaken for "absent" — in either direction.
+    sent = request.model_fields_set
     if user.role != "admin":
-        touched = [f for f in _ADMIN_FEED_FIELDS if getattr(request, f) is not None]
+        touched = [f for f in _ADMIN_FEED_FIELDS if f in sent]
         if touched:
             raise AppError(
                 code="forbidden",
@@ -819,7 +823,9 @@ async def update_feed(
             feed.last_error = None
     if request.custom_title is not None:
         feed.custom_title = request.custom_title
-    if request.category_id is not None:
+    if "category_id" in sent:
+        # None = move to Uncategorized. The old `is not None` guard dropped it,
+        # so a feed could be filed but never unfiled from this endpoint.
         feed.category_id = request.category_id
     enabled = await subscriptions_enabled(db)
     per_user_mute: bool | None = None
@@ -870,7 +876,9 @@ async def update_feed(
             config.pop("last_commit_sha", None)
             feed.adapter_config = config
     if request.feed_type is not None:
-        allowed = {"rss", "atom", "youtube", "podcast", "reddit", "github", "web_scraper", "telegram", "bluesky"}
+        from app.adapters import known_feed_types
+
+        allowed = known_feed_types()
         if request.feed_type not in allowed:
             raise AppError(
                 code="invalid_feed_type",
@@ -878,8 +886,11 @@ async def update_feed(
                 status_code=400,
             )
         feed.feed_type = request.feed_type
-    if request.retention_days is not None:
-        feed.retention_days = request.retention_days if request.retention_days > 0 else None
+    if "retention_days" in sent:
+        # None or <= 0 = keep forever. Same bug as category_id: the previous
+        # guard meant a feed on a 90-day window could never be set back to
+        # unlimited, which is why the bulk-category path needed `clear_retention`.
+        feed.retention_days = request.retention_days if (request.retention_days or 0) > 0 else None
 
     # Source reliability fields
     reliability_changed = False
@@ -1196,6 +1207,42 @@ async def refresh_feed(
 
     fetch_feed.delay(str(feed_id))
     return {"message": "Feed refresh queued"}
+
+
+@router.get("/{feed_id}/value")
+async def get_one_feed_value(
+    feed_id: uuid.UUID = Path(..., description="UUID of the feed to score"),
+    days: int = Query(90, ge=7, le=365, description="Scoring window in days."),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """One feed's intelligence value score, plus its rank among the scored set.
+
+    Scoring runs over every active feed rather than this one alone, because
+    "entity introductions" means *first seen anywhere* — scoped to a single
+    feed the subquery would count every entity it ever mentioned as an
+    introduction and the number would be meaningless. The response is one row
+    either way, so the modal fetches kilobytes, not the whole table.
+    """
+    feed = await db.get(Feed, feed_id)
+    if not feed:
+        raise AppError(code="not_found", message="Feed not found", status_code=404)
+
+    from app.intelligence.source_analytics import compute_feed_value_scores
+
+    active_ids = [row[0] for row in (await db.execute(select(Feed.id).where(Feed.is_active.is_(True)))).all()]
+    # A paused feed is not in the active set but still has a history worth showing.
+    if feed_id not in active_ids:
+        active_ids.append(feed_id)
+
+    rows = await compute_feed_value_scores(db, feed_ids=active_ids, days=days)
+    mine = next((r for r in rows if r["feed_id"] == str(feed_id)), None)
+    if mine is None:
+        return {"feed_id": str(feed_id), "scored": False}
+
+    ranked = sorted(rows, key=lambda r: r["score"], reverse=True)
+    rank = next((i + 1 for i, r in enumerate(ranked) if r["feed_id"] == str(feed_id)), None)
+    return {**mine, "scored": True, "rank": rank, "of": len(rows), "days": days}
 
 
 @router.post("/{feed_id}/full-sync")

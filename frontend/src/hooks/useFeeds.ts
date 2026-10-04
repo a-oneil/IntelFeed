@@ -1,6 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "@/api/client";
-import type { Category, Feed, FeedSubscribersResponse, PaginatedResponse } from "@/api/types";
+import type {
+  Category,
+  Feed,
+  FeedSubscribersResponse,
+  FeedValueDetail,
+  PaginatedResponse,
+} from "@/api/types";
 
 export function useFeeds() {
   return useQuery({
@@ -84,6 +90,37 @@ export function useRefreshFeed() {
       const res = await api.post(`/feeds/${feedId}/refresh`);
       return res.data;
     },
+  });
+}
+
+/** Full tree re-import. GitHub repo feeds only — the API 400s on anything else. */
+export function useFullSyncFeed() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (feedId: string) => {
+      const res = await api.post(`/feeds/${feedId}/full-sync`);
+      return res.data;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["feeds"] }),
+  });
+}
+
+/**
+ * One feed's intelligence value score, for the edit modal's Overview pane.
+ *
+ * Scoring is corpus-wide on the server (entity introductions only mean
+ * anything against every feed), so this is deliberately not cheap — it is
+ * fetched lazily, when the pane that shows it mounts.
+ */
+export function useFeedValue(feedId: string | null) {
+  return useQuery({
+    queryKey: ["feed-value", feedId],
+    queryFn: async () => {
+      const res = await api.get<FeedValueDetail>(`/feeds/${feedId}/value`);
+      return res.data;
+    },
+    enabled: Boolean(feedId),
+    staleTime: 300_000,
   });
 }
 

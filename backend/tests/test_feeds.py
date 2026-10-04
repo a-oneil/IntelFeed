@@ -235,3 +235,177 @@ async def test_feed_health_includes_reliability(
     assert stale_row["reliability_rating"] == "B"
     disabled_row = next(f for f in data["disabled_feeds"] if f["id"] == str(unrated.id))
     assert disabled_row["reliability_rating"] is None
+
+
+@pytest.mark.asyncio
+async def test_update_feed_type_accepts_every_registered_adapter(
+    client: AsyncClient, admin_headers: dict, db_session: AsyncSession
+):
+    """Every type the adapter registry serves is a legal target for a type change.
+
+    The allowlist used to be a hand-written copy that had drifted: it rejected
+    github_repo / github_releases / github_advisories / nvd / mastodon, all of
+    which the edit modal offers, and accepted `github`, which has no adapter.
+    """
+    from app.adapters import known_feed_types
+
+    feed = Feed(title="Retype", url="https://retype.example.com/rss", feed_type="rss")
+    db_session.add(feed)
+    await db_session.flush()
+
+    for feed_type in sorted(known_feed_types()):
+        response = await client.put(
+            f"/api/feeds/{feed.id}",
+            json={"feed_type": feed_type},
+            headers=admin_headers,
+        )
+        assert response.status_code == 200, f"{feed_type}: {response.text}"
+        assert response.json()["feed_type"] == feed_type
+
+
+@pytest.mark.asyncio
+async def test_update_feed_type_rejects_an_adapterless_type(
+    client: AsyncClient, admin_headers: dict, db_session: AsyncSession
+):
+    """`github` has no adapter — get_adapter() would silently fall back to RSS."""
+    feed = Feed(title="Bad Retype", url="https://bad-retype.example.com/rss", feed_type="rss")
+    db_session.add(feed)
+    await db_session.flush()
+
+    response = await client.put(
+        f"/api/feeds/{feed.id}",
+        json={"feed_type": "github"},
+        headers=admin_headers,
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_feed_type"
+
+
+@pytest.mark.asyncio
+async def test_one_feed_value_returns_a_single_ranked_row(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession
+):
+    """The modal's Overview pane reads one row, ranked against the active set."""
+    scored = Feed(title="Scored", url="https://scored.example.com/rss", feed_type="rss")
+    other = Feed(title="Other", url="https://other.example.com/rss", feed_type="rss")
+    db_session.add_all([scored, other])
+    await db_session.flush()
+
+    response = await client.get(f"/api/feeds/{scored.id}/value", headers=auth_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["scored"] is True
+    assert data["feed_id"] == str(scored.id)
+    assert data["tier"] in {"S", "A", "B", "C", "D"}
+    assert data["of"] >= 2
+    assert 1 <= data["rank"] <= data["of"]
+    for key in ("articles", "unique_entities", "entity_introductions", "correlation_events", "detection_rules"):
+        assert isinstance(data[key], int)
+
+
+@pytest.mark.asyncio
+async def test_one_feed_value_scores_a_paused_feed(client: AsyncClient, auth_headers: dict, db_session: AsyncSession):
+    """A paused feed is outside the active set but still has a history to show."""
+    paused = Feed(title="Paused", url="https://paused.example.com/rss", feed_type="rss", is_active=False)
+    db_session.add(paused)
+    await db_session.flush()
+
+    response = await client.get(f"/api/feeds/{paused.id}/value", headers=auth_headers)
+    assert response.status_code == 200
+    assert response.json()["scored"] is True
+
+
+@pytest.mark.asyncio
+async def test_one_feed_value_not_found(client: AsyncClient, auth_headers: dict):
+    import uuid as _uuid
+
+    response = await client.get(f"/api/feeds/{_uuid.uuid4()}/value", headers=auth_headers)
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_update_feed_can_clear_category_and_retention(
+    client: AsyncClient, admin_headers: dict, db_session: AsyncSession
+):
+    """An explicit null means "uncategorized" / "keep forever", not "unchanged"."""
+    from app.models.category import Category
+
+    category = Category(name="News")
+    db_session.add(category)
+    await db_session.flush()
+
+    feed = Feed(
+        title="Clearable",
+        url="https://clearable.example.com/rss",
+        feed_type="rss",
+        category_id=category.id,
+        retention_days=90,
+    )
+    db_session.add(feed)
+    await db_session.flush()
+
+    response = await client.put(
+        f"/api/feeds/{feed.id}",
+        json={"category_id": None, "retention_days": None},
+        headers=admin_headers,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["category_id"] is None
+    assert data["retention_days"] is None
+
+
+@pytest.mark.asyncio
+async def test_update_feed_omitted_fields_stay_untouched(
+    client: AsyncClient, admin_headers: dict, db_session: AsyncSession
+):
+    """The flip side: a key the caller never sent must not be cleared."""
+    from app.models.category import Category
+
+    category = Category(name="Vendor research")
+    db_session.add(category)
+    await db_session.flush()
+
+    feed = Feed(
+        title="Untouched",
+        url="https://untouched.example.com/rss",
+        feed_type="rss",
+        category_id=category.id,
+        retention_days=90,
+    )
+    db_session.add(feed)
+    await db_session.flush()
+
+    response = await client.put(
+        f"/api/feeds/{feed.id}",
+        json={"custom_title": "Renamed"},
+        headers=admin_headers,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["custom_title"] == "Renamed"
+    assert data["category_id"] == str(category.id)
+    assert data["retention_days"] == 90
+
+
+@pytest.mark.asyncio
+async def test_non_admin_cannot_clear_retention_with_an_explicit_null(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession
+):
+    """Retention is infrastructure — an explicit null is still an admin write."""
+    feed = Feed(
+        title="Guarded",
+        url="https://guarded.example.com/rss",
+        feed_type="rss",
+        retention_days=90,
+    )
+    db_session.add(feed)
+    await db_session.flush()
+
+    response = await client.put(
+        f"/api/feeds/{feed.id}",
+        json={"retention_days": None},
+        headers=auth_headers,
+    )
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "forbidden"

@@ -2424,6 +2424,25 @@ export interface FeedHealthResponse {
 
 // Feed Value Scoring
 
+/** One feed's value score plus its rank, from GET /feeds/{id}/value. */
+export interface FeedValueDetail {
+  feed_id: string;
+  scored: boolean;
+  score?: number;
+  tier?: string;
+  articles?: number;
+  entity_yield?: number;
+  unique_entities?: number;
+  entity_introductions?: number;
+  correlation_events?: number;
+  detection_rules?: number;
+  pir_matches?: number;
+  dimensions?: FeedValueDimensions;
+  rank?: number | null;
+  of?: number;
+  days?: number;
+}
+
 export interface FeedValueDimensions {
   entity_introductions: number;
   correlation_events: number;
