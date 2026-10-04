@@ -48,6 +48,18 @@ def is_extended_feed_type(feed_type: str) -> bool:
     return feed_type in _EXTENDED_ADAPTERS
 
 
+def known_feed_types() -> frozenset[str]:
+    """Every feed type that has an adapter behind it.
+
+    The single source of truth for "is this a real feed type". Validators must
+    derive their allowlist from this rather than keeping a hand-written copy:
+    the update endpoint's own list had drifted to include `github` (no adapter —
+    `get_adapter` silently fell back to RSS) while rejecting five types the
+    registry serves, so the edit modal offered options the API refused.
+    """
+    return frozenset(_ADAPTERS) | frozenset(_EXTENDED_ADAPTERS)
+
+
 __all__ = [
     "BaseAdapter",
     "ExtendedAdapter",
@@ -66,4 +78,5 @@ __all__ = [
     "get_adapter",
     "get_extended_adapter",
     "is_extended_feed_type",
+    "known_feed_types",
 ]

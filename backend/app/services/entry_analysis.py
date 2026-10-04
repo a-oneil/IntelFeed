@@ -544,9 +544,18 @@ async def enqueue_entry_analysis(db: AsyncSession, entry_id: uuid.UUID) -> str |
     # Feed policy: feeds with intelligence extraction disabled skip AI analysis
     from app.models.feed import Feed
 
+    # Feed policy. Two separate switches, because they answer different
+    # questions: mode "none" means "extract nothing from this feed at all",
+    # while ai_analysis_enabled=False means "keep matching it against the
+    # catalog, just don't let the AI read it and invent entities". Before the
+    # second one existed, muting a noisy source's AI meant turning off its
+    # autolinking and scoring too.
     feed = await db.get(Feed, entry.feed_id)
-    if feed is not None and getattr(feed, "intel_extraction_mode", None) == "none":
-        return None
+    if feed is not None:
+        if getattr(feed, "intel_extraction_mode", None) == "none":
+            return None
+        if not getattr(feed, "ai_analysis_enabled", True):
+            return None
 
     async def _write_status(status: str, **extra) -> str:
         stmt = (

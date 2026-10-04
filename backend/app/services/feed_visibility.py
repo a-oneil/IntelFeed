@@ -1,9 +1,11 @@
 """Which feeds a user sees, and which they've muted.
 
 With `per_user_subscriptions_enabled` off (the default), behavior is the
-pre-multi-user one: a single shared feed list whose mute state is the global
-`Feed.is_muted` column. With it on, a user sees the feeds they hold a
-`user_feed_subscriptions` row for, and mute comes from that row.
+pre-multi-user one: a single shared feed list whose mute and active state are
+the global `Feed.is_muted` / `Feed.is_active` columns. With it on, a user sees
+the feeds they hold a `user_feed_subscriptions` row for, and both mute and
+pause come from that row — so one reader pausing a feed does not stop anyone
+else receiving it.
 
 Deliberately still on the global column regardless of the flag: search's
 `is:muted` operator, the atlas/strategic map, backup export, the public RSS
@@ -47,6 +49,12 @@ def visible_feed_ids_query(
         )
         if not include_muted:
             q = q.where(UserFeedSubscription.is_muted.is_(False))
+        if active_only:
+            # Both halves have to hold: the instance has not switched the feed
+            # off, and this reader has not paused their own copy. Hanging the
+            # per-user half off `active_only` means every caller that already
+            # asks for live feeds gets it without changing a line.
+            q = q.where(UserFeedSubscription.is_paused.is_(False))
     else:
         q = select(Feed.id)
         if not include_muted:
@@ -69,12 +77,12 @@ async def get_subscription(db: AsyncSession, user_id: uuid.UUID, feed_id: uuid.U
 
 
 async def ensure_subscription(
-    db: AsyncSession, user_id: uuid.UUID, feed_id: uuid.UUID, *, is_muted: bool = False
+    db: AsyncSession, user_id: uuid.UUID, feed_id: uuid.UUID, *, is_muted: bool = False, is_paused: bool = False
 ) -> None:
     """Idempotently subscribe a user to a feed."""
     await db.execute(
         pg_insert(UserFeedSubscription)
-        .values(id=uuid.uuid4(), user_id=user_id, feed_id=feed_id, is_muted=is_muted)
+        .values(id=uuid.uuid4(), user_id=user_id, feed_id=feed_id, is_muted=is_muted, is_paused=is_paused)
         .on_conflict_do_nothing(constraint="uq_user_feed_subscription")
     )
 
@@ -167,3 +175,18 @@ async def subscription_mute_map(
         )
     )
     return {row.feed_id: row.is_muted for row in result.all()}
+
+
+async def subscription_pause_map(
+    db: AsyncSession, user_id: uuid.UUID, feed_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, bool]:
+    """feed_id -> is_paused for the user's subscriptions among feed_ids."""
+    if not feed_ids:
+        return {}
+    result = await db.execute(
+        select(UserFeedSubscription.feed_id, UserFeedSubscription.is_paused).where(
+            UserFeedSubscription.user_id == user_id,
+            UserFeedSubscription.feed_id.in_(feed_ids),
+        )
+    )
+    return {row.feed_id: row.is_paused for row in result.all()}

@@ -1366,3 +1366,82 @@ async def test_candidates_queue_hides_rows_todays_validators_reject(client, auth
     assert resp.status_code == 200
     values = [r["value"] for r in resp.json() if r["latest_entry_id"] == str(entry.id)]
     assert values == ["c2.uat-example.net"]
+
+
+@pytest.mark.asyncio
+async def test_observables_skip_a_feed_switched_off(db_session, monkeypatch):
+    """ "Analyse this feed: off" has to include the ledger.
+
+    The curated ioc_list door creates rows straight from a body, so without this
+    a feed the operator had switched off could still mint observables.
+    """
+    import contextlib
+
+    from app.models.entry import Entry
+    from app.models.feed import Feed
+    from app.workers import intel_feed_tasks
+
+    @contextlib.asynccontextmanager
+    async def session_on(db):
+        yield db
+
+    feed = Feed(
+        title="Switched off",
+        url=f"https://off-{uuid.uuid4().hex}.example.com/rss",
+        feed_type="rss",
+        intel_extraction_mode="none",
+    )
+    db_session.add(feed)
+    await db_session.flush()
+
+    entry = Entry(
+        feed_id=feed.id,
+        title="Indicators",
+        url=f"https://off-{uuid.uuid4().hex}.example.com/a",
+        guid=uuid.uuid4().hex,
+        content_text="Contact 203.0.113.9 and evil.example.com for details.",
+        metadata_={"content_type": "ioc_list"},
+    )
+    db_session.add(entry)
+    await db_session.flush()
+
+    monkeypatch.setattr(intel_feed_tasks, "_get_worker_session", lambda: session_on(db_session))
+    stats = await intel_feed_tasks._scan_entry_observables(str(entry.id))
+    assert stats == {}
+
+
+@pytest.mark.asyncio
+async def test_observables_run_for_an_analysed_feed(db_session, monkeypatch):
+    """The companion guard, so the test above cannot pass vacuously."""
+    import contextlib
+
+    from app.models.entry import Entry
+    from app.models.feed import Feed
+    from app.workers import intel_feed_tasks
+
+    @contextlib.asynccontextmanager
+    async def session_on(db):
+        yield db
+
+    feed = Feed(
+        title="Analysed",
+        url=f"https://on-{uuid.uuid4().hex}.example.com/rss",
+        feed_type="rss",
+        intel_extraction_mode="selective",
+    )
+    db_session.add(feed)
+    await db_session.flush()
+
+    entry = Entry(
+        feed_id=feed.id,
+        title="Indicators",
+        url=f"https://on-{uuid.uuid4().hex}.example.com/a",
+        guid=uuid.uuid4().hex,
+        content_text="Contact 203.0.113.9 and evil.example.com for details.",
+    )
+    db_session.add(entry)
+    await db_session.flush()
+
+    monkeypatch.setattr(intel_feed_tasks, "_get_worker_session", lambda: session_on(db_session))
+    stats = await intel_feed_tasks._scan_entry_observables(str(entry.id))
+    assert stats != {}

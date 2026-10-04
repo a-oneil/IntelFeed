@@ -1536,24 +1536,27 @@ For architecture overview (non-engine-specific), see `/docs/architecture.md` sec
 
 ---
 
-## Intel Extraction Modes (per-feed)
+## Per-feed pipeline switches
 
-Every feed has a per-source **intel extraction mode** that controls how aggressively the platform extracts threat intelligence from incoming entries. The setting lives on the Feed model and is editable per-feed (Edit Feed modal) or per-category (Edit Category modal). There are five user-facing options, but they are a UI convenience that combines two backend fields:
+Each feed carries a set of switches that decide what the ingest pipeline does with its articles. They are edited per-feed in the Edit Feed modal's **Pipeline** pane and per-category in the Edit Category modal, and each one maps to a column on the Feed model:
 
-- `intel_extraction_mode`: `full` | `selective` | `manual` | `none`
-- `auto_extract_on_ingest`: bool
-
-The mapping is defined in `frontend/src/components/EditFeedModal.tsx` (~line 225):
-
-| UI label | `intel_extraction_mode` | `auto_extract_on_ingest` |
+| Switch | Field | Governs |
 |---|---|---|
-| Full | `full` | `true` |
-| Selective | `selective` | `true` |
-| Known entities only | `full` | `false` |
-| Manual | `manual` | `false` |
-| None | `none` | `false` |
+| Process this feed | `intel_extraction_mode` = `none` or not | Everything below. `none` opts out of all extraction. |
+| Autolink known entities | `intel_extraction_mode` = `manual` (off) vs `selective` / `full` (on) | The deterministic dictionary scan. |
+| ↳ Only security-relevant articles | `selective` (on) vs `full` (off) | Whether autolinking applies a keyword relevance pre-filter. |
+| AI analysis (one pass) | `ai_analysis_enabled` | The one-pass `entry_analysis` call. |
+| Regex enrichment | `auto_extract_on_ingest` | The standalone CVE/NVD, TTP and mitigation pass. |
+| Detection rule extraction | `extract_detection_rules` | Sigma/YARA/SPL/Elastic parsing from article bodies. |
+| ↳ Create tool entities | `extract_tools` | Whether that AI pass may mint Tool rows. Does nothing when the AI is off. |
 
-A separate `extract_detection_rules` flag is fully independent — it can be toggled on or off in any mode (except `none`, which short-circuits everything).
+The observables ledger scan has no switch of its own, but it is not unconditional either: `_scan_entry_observables` skips any feed whose `intel_extraction_mode` is `none`, so "do not analyse this feed" really does mean nothing is extracted — the curated `ioc_list` door would otherwise keep creating ledger rows from a feed the operator had switched off. That check sits in the task rather than at dispatch, exactly as `_autolink_entry`'s does, which also means a feed set to `none` outranks a pipeline plan that enables the stage. Everything else about it is tuned by the global `observables_*` settings.
+
+> **This section used to describe a five-way preset** — "Full", "Selective", "Known entities only", "Manual", "None" — mapped onto `intel_extraction_mode` + `auto_extract_on_ingest`. Three of those labels had stopped being true. The one-pass AI analysis, which does most of the extraction today, gates only on `intel_extraction_mode == "none"` and ignores `auto_extract_on_ingest` entirely, so a feed set to "Known entities only — match against existing database" or "Manual — only when triggered" still had the AI read every article and create entities. The preset is gone; the switches above are what actually exists. See `frontend/src/components/feedModal/pipelineStages.ts`.
+
+**The AI pass is the main extraction path, and it has its own switch.** `enqueue_entry_analysis` (`services/entry_analysis.py`) refuses to queue an entry when the global `ai_one_pass_enabled` is off, when the feed's `intel_extraction_mode` is `none`, or when the feed's `ai_analysis_enabled` is false. That last field exists because turning the AI off for one noisy source used to require `mode=none`, which also killed its autolinking and scoring — there was no setting for "keep matching this against my catalog, just don't let the AI invent entities from it".
+
+The sections below describe the **deterministic** layer in detail: what each `intel_extraction_mode` value does to the autolinker and the regex passes. They are accurate about that layer and say nothing about the AI pass, which runs independently of everything except the three gates above.
 
 ### The two pipelines
 
@@ -1572,7 +1575,7 @@ Gated by `auto_extract_on_ingest` (and for GitHub-typed entries, runs regardless
 
 A third optional layer — `extract_detection_rules` — runs `extract_rules_from_content` to pull SIGMA/YARA/SPL/Elastic/Snort rules from non-GitHub article bodies. Independent of mode/extract flags.
 
-### 1. Full — extract all intelligence automatically
+### `full` — autolink every article
 
 Backend: `mode=full, extract=true`. Every new entry gets the autolinker, regex CVE extraction with NVD enrichment, regex TTP extraction, regex mitigation extraction, and (if `extract_detection_rules=true`) detection rule extraction. The relevance pre-filter is skipped — everything is processed.
 
@@ -1582,7 +1585,7 @@ Cost considerations: NVD API calls are rate-limited (5 req / 30 sec without an A
 
 **Use for:** high-signal sources where every entry is virtually guaranteed to be threat intel (NVD, vendor PSIRT advisories, CISA alerts, Talos/Mandiant/CrowdStrike research, MITRE ATT&CK updates), reliability-A/B feeds, curated incident-tracking feeds. **Avoid for:** general news aggregators mixing commentary and marketing, Reddit/Bluesky/Mastodon feeds with a high noise floor, YouTube channels with noisy transcripts.
 
-### 2. Selective — security-relevant articles only (default)
+### `selective` — autolink security-relevant articles (default)
 
 Backend: `mode=selective, extract=true`. The relevance pre-filter (`backend/app/intelligence/relevance_filter.py`) runs first as the gate. If the score ≥ `DEFAULT_RELEVANCE_THRESHOLD` (0.15), the entry proceeds through the autolinker, regex CVE + NVD, regex TTP, and regex mitigations; below 0.15 all extraction is skipped (the entry itself is still ingested and visible in the reader). Detection rule extraction (if enabled) runs independent of the relevance gate.
 
@@ -1602,7 +1605,7 @@ Per-category contributions use diminishing returns (1 hit = 60% of the weight; e
 
 Subtle gotcha: if the relevance filter rejects an entry, the heavy enrichment pipeline is skipped too — a borderline article that contains `CVE-2024-12345` but uses none of the keyword vocabulary won't get those entities extracted. In practice the structured-pattern bonuses (+0.4 for CVE, +0.3 for TTP) make this rare.
 
-### 3. Known entities only — match against existing database
+### `full` with `auto_extract_on_ingest=false` — catalog matching without NVD cost
 
 Backend: `mode=full, extract=false`. The autolinker runs unconditionally (no relevance gate, since mode is `full`); the standalone CVE-with-NVD, TTP, and mitigation passes are skipped (gated by `auto_extract`); detection rule extraction (if enabled) still runs. Note: the autolinker's internal CVE/TTP regex still fires as part of `scan_text`, so CVE stubs get created and existing TTPs get linked — but without NVD hydration.
 
@@ -1612,7 +1615,7 @@ What you lose vs. selective/full: new CVE references don't trigger NVD lookups (
 
 **Use for:** high-volume feeds where you want catalog correlation without per-mention NVD cost (Telegram channels, Bluesky firehoses, r/netsec), "alarm sources" where you only care whether a known entity is mentioned, reliability-D/F sources you don't trust enough to enrich from, and feeds where the relevance filter drops content you care about. **Avoid for:** likely sources of new CVEs (NVD itself, vendor PSIRT) and feeds where you want to discover new TTPs/mitigations — use full or selective.
 
-### 4. Manual — only when triggered
+### `manual` — no autolinking
 
 Backend: `mode=manual, extract=false`. The autolinker and standalone CVE/TTP/mitigation extraction are skipped. Detection rule extraction still runs if `extract_detection_rules=true` (the rescan path at `intel_feed_tasks.py:1102` gates rule extraction only by the flag, not the mode).
 
@@ -1620,7 +1623,7 @@ Entries from this feed are ingested normally — sanitized HTML, title/summary/c
 
 **Use for:** noisy feeds you read for situational awareness but don't want polluting the entity graph, untrusted/unrated sources, feeds with persistent false-positive matches, personal feeds. If you genuinely never want anything from a feed, prefer `none`; if you actually want most entries processed, `selective` is the right call.
 
-### 5. None — disabled
+### `none` — process nothing
 
 Backend: `mode=none, extract=false`. The only mode that opts out of every extraction pipeline, including detection rule extraction (the bulk rescan loop at `intel_feed_tasks.py:1073` short-circuits on `mode=none` before checking the rule-extraction flag). Entries are still ingested, sanitized, indexed, and translated — they just have zero intel processing applied.
 
@@ -1634,10 +1637,11 @@ Independent of mode, every autolink junction record gets a confidence value (hig
 
 | Scenario | Suggested mode |
 |---|---|
-| NVD, CISA, vendor PSIRT, top-tier research feeds | Full |
-| General security news (Krebs, BleepingComputer, etc.) | Selective (default) |
-| Reddit/Mastodon/Bluesky firehose | Selective or Known entities only |
-| Telegram/foreign-language threat actor channel | Known entities only (relevance filter is English-only) |
+| NVD, CISA, vendor PSIRT, top-tier research feeds | `full` |
+| General security news (Krebs, BleepingComputer, etc.) | `selective` (default) |
+| Reddit/Mastodon/Bluesky firehose | `selective`, or `full` with regex enrichment off |
+| Telegram/foreign-language threat actor channel | `full` with regex enrichment off (the relevance filter is English-only) |
+| High-volume source you want matched but not AI-read | any mode, `ai_analysis_enabled=false` |
 | Conference announcements / industry news | Manual |
 | Untrusted source you read for awareness | Manual |
 | Personal/non-security feeds | None |
@@ -1654,7 +1658,9 @@ Independent of mode, every autolink junction record gets a confidence value (hig
 
 All five modes drive deterministic string matching only: the autolinker is a pure Aho-Corasick dictionary scan (`pyahocorasick` C extension); the relevance filter is frozenset keyword checks plus three regexes (its docstring at `relevance_filter.py:1-6` says "No AI, no DB calls — pure string matching"); CVE/TTP/mitigation extraction is regex; NVD enrichment is a REST lookup (external, but not AI); detection rule extraction is pattern-based parsing per format; confidence weighting is arithmetic on the reliability grade. This is deliberate — the autolinker comment calls it "Layer 0 — free, instant correlation that runs on every entry": cheap, fast, no provider dependency, no rate limits, no hallucinations.
 
-AI is a separate, opt-in layer on top (`backend/app/ai/` provider abstraction): summarization, one-pass `entry_analysis` extraction/adjudication, translation, detection rule drafts — run on demand, via automation rules, or at ingest when `ai_one_pass_enabled` is on. AI-created junction records carry a non-`auto_link` source so the rescan path leaves them alone when re-running the deterministic linker. The feed mode and the AI layer are orthogonal knobs — modes control deterministic extraction; AI is configured under Settings → AI Configuration and the engine flags.
+AI is a separate, opt-in layer on top (`backend/app/ai/` provider abstraction): summarization, one-pass `entry_analysis` extraction/adjudication, translation, detection rule drafts — run on demand, via automation rules, or at ingest when `ai_one_pass_enabled` is on. AI-created junction records carry a non-`auto_link` source so the rescan path leaves them alone when re-running the deterministic linker.
+
+The deterministic layer and the AI layer are *mostly* independent, with one coupling worth knowing: `intel_extraction_mode = "none"` disables both, because `enqueue_entry_analysis` treats it as "this feed is out of the intel system entirely". Every other mode value (`full`, `selective`, `manual`) has no effect on whether the AI runs — that is `ai_one_pass_enabled` globally and `ai_analysis_enabled` per feed. Provider configuration lives under Settings → AI Configuration and the engine flags.
 
 
 ## Signal Engine (engine phase 2)

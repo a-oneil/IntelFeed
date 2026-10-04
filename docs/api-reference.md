@@ -617,7 +617,7 @@ Get a single feed's detailed configuration.
 
 **`PUT /api/feeds/{feed_id}`**
 
-Update feed configuration (title, category, interval, adapter config). Infrastructure fields (`url`, `feed_type`, `is_active`, `fetch_interval_minutes`, `retention_days`, `adapter_config`, `exclude_shorts`, `intel_extraction_mode`, `auto_extract_on_ingest`, `extract_detection_rules`) are admin-only; curation fields (`custom_title`, `category_id`, `is_muted`, ratings, `analyst_notes`) are open to all users. `is_muted` is per-user when per-user subscriptions are enabled.
+Update feed configuration (title, category, interval, adapter config). Infrastructure fields (`url`, `feed_type`, `is_active`, `fetch_interval_minutes`, `retention_days`, `adapter_config`, `exclude_shorts`, `intel_extraction_mode`, `ai_analysis_enabled`, `auto_extract_on_ingest`, `extract_detection_rules`) are admin-only; curation fields (`custom_title`, `category_id`, `is_muted`, ratings, `analyst_notes`) are open to all users. `is_muted` is per-user when per-user subscriptions are enabled.
 
 **Auth:** Bearer token (admin for infrastructure fields)  
 **Status:** 200 OK  
@@ -639,6 +639,54 @@ Delete a feed (admin only) — removes the feed record and cascades its entries.
 
 **Auth:** Bearer token (admin for physical delete; any user to unsubscribe when per-user subscriptions are enabled)  
 **Status:** 204 No Content
+
+---
+
+**`GET /api/feeds/{feed_id}/value`**
+
+One feed's intelligence value score plus its rank among the scored set. Scoring runs over every active feed rather than this one alone — "entity introductions" means *first seen anywhere*, so a single-feed computation would count every entity the feed ever mentioned — but the response is a single row. Backs the Edit Feed modal's Overview pane.
+
+**Auth:** Bearer token
+**Query:** `days` (7-365, default 90)
+**Status:** 200 OK, 404 if the feed does not exist
+**Response:**
+```json
+{
+  "feed_id": "d5b2c8a1-4f3e-4b7a-9c6d-2e8f1a0b3c4d",
+  "scored": true,
+  "score": 48.2,
+  "tier": "B",
+  "articles": 142,
+  "unique_entities": 87,
+  "entity_introductions": 11,
+  "correlation_events": 3,
+  "detection_rules": 0,
+  "pir_matches": 2,
+  "rank": 4,
+  "of": 37,
+  "days": 90
+}
+```
+
+---
+
+**`GET /api/feeds/{feed_id}/pipeline`**
+
+Which pipeline stages run for this feed, and what decided each one. `decided_by` is `"legacy"` when the value still comes from the Feed columns (the case while `pipeline_engine_enabled` is off), otherwise the plan scope that overrode it — `global`, `category` or `feed`. The Edit Feed modal's Pipeline pane reads this so it can stop presenting its own checkbox as authoritative for a stage a plan controls.
+
+**Auth:** Bearer token
+**Status:** 200 OK, 404 if the feed does not exist
+**Response:**
+```json
+{
+  "engine_enabled": true,
+  "stages": {
+    "autolink": { "enabled": true, "config": {} },
+    "extract": { "enabled": false, "config": { "mode": "selective", "detection_rules": false } }
+  },
+  "decided_by": { "autolink": "feed", "extract": "legacy" }
+}
+```
 
 ---
 

@@ -260,3 +260,100 @@ async def test_register_seeds_subscriptions_from_earliest_admin(
         .all()
     }
     assert subs == {feed_a.id: True, feed_b.id: False}
+
+
+@pytest.mark.asyncio
+async def test_pause_is_personal_when_subscriptions_are_on(
+    client: AsyncClient, auth_headers: dict, test_user: User, db_session: AsyncSession, monkeypatch
+):
+    """One reader pausing must not stop anyone else receiving the feed."""
+    from app.config import settings as env_settings
+    from app.models.user_feed_subscription import UserFeedSubscription
+    from app.services.feed_visibility import ensure_subscription
+
+    monkeypatch.setattr(env_settings, "per_user_subscriptions_enabled", True)
+
+    feed = Feed(title="Shared", url="https://shared-pause.example.com/rss", feed_type="rss")
+    db_session.add(feed)
+    await db_session.flush()
+    await ensure_subscription(db_session, test_user.id, feed.id)
+
+    other = User(username="otherreader", password_hash="x", role="user")
+    db_session.add(other)
+    await db_session.flush()
+    await ensure_subscription(db_session, other.id, feed.id)
+
+    response = await client.put(f"/api/feeds/{feed.id}", json={"is_active": False}, headers=auth_headers)
+    assert response.status_code == 200
+    assert response.json()["is_active"] is False
+
+    await db_session.refresh(feed)
+    # The shared column is untouched — the feed keeps fetching for the other reader.
+    assert feed.is_active is True
+
+    rows = (
+        (await db_session.execute(select(UserFeedSubscription).where(UserFeedSubscription.feed_id == feed.id)))
+        .scalars()
+        .all()
+    )
+    by_user = {r.user_id: r.is_paused for r in rows}
+    assert by_user[test_user.id] is True
+    assert by_user[other.id] is False
+
+
+@pytest.mark.asyncio
+async def test_pause_stays_admin_only_while_the_feed_is_shared(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession, monkeypatch
+):
+    """With the flag off there is one switch, and it is the instance's."""
+    from app.config import settings as env_settings
+
+    monkeypatch.setattr(env_settings, "per_user_subscriptions_enabled", False)
+
+    feed = Feed(title="Pool", url="https://pool-pause.example.com/rss", feed_type="rss")
+    db_session.add(feed)
+    await db_session.flush()
+
+    response = await client.put(f"/api/feeds/{feed.id}", json={"is_active": False}, headers=auth_headers)
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_a_paused_subscription_hides_the_feed_from_live_queries(db_session: AsyncSession, test_user: User):
+    """`active_only` is where every entry query asks for live feeds."""
+    from app.models.user_feed_subscription import UserFeedSubscription
+    from app.services.feed_visibility import ensure_subscription, visible_feed_ids_query
+
+    feed = Feed(title="Paused", url="https://paused-vis.example.com/rss", feed_type="rss")
+    db_session.add(feed)
+    await db_session.flush()
+    await ensure_subscription(db_session, test_user.id, feed.id)
+
+    visible = (
+        (await db_session.execute(visible_feed_ids_query(test_user.id, enabled=True, active_only=True))).scalars().all()
+    )
+    assert feed.id in visible
+
+    sub = (
+        await db_session.execute(
+            select(UserFeedSubscription).where(
+                UserFeedSubscription.user_id == test_user.id,
+                UserFeedSubscription.feed_id == feed.id,
+            )
+        )
+    ).scalar_one()
+    sub.is_paused = True
+    await db_session.flush()
+
+    visible = (
+        (await db_session.execute(visible_feed_ids_query(test_user.id, enabled=True, active_only=True))).scalars().all()
+    )
+    assert feed.id not in visible
+
+    # Still listed, though — otherwise you could never un-pause it.
+    listed = (
+        (await db_session.execute(visible_feed_ids_query(test_user.id, enabled=True, include_muted=True)))
+        .scalars()
+        .all()
+    )
+    assert feed.id in listed

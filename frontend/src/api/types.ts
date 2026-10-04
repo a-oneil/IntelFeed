@@ -51,6 +51,7 @@ export interface Feed {
   is_active: boolean;
   adapter_config: Record<string, unknown>;
   intel_extraction_mode: "full" | "selective" | "manual" | "none";
+  ai_analysis_enabled: boolean;
   auto_extract_on_ingest: boolean;
   extract_detection_rules: boolean;
   extract_tools: boolean;
@@ -2423,6 +2424,33 @@ export interface FeedHealthResponse {
 }
 
 // Feed Value Scoring
+
+/** Resolved ingest pipeline for one feed, from GET /feeds/{id}/pipeline. */
+export interface FeedPipeline {
+  engine_enabled: boolean;
+  stages: Record<string, { enabled: boolean; config?: Record<string, unknown> }>;
+  /** Per stage: "legacy" (the Feed booleans) or the plan scope that overrode it. */
+  decided_by: Record<string, "legacy" | "global" | "category" | "feed">;
+}
+
+/** One feed's value score plus its rank, from GET /feeds/{id}/value. */
+export interface FeedValueDetail {
+  feed_id: string;
+  scored: boolean;
+  score?: number;
+  tier?: string;
+  articles?: number;
+  entity_yield?: number;
+  unique_entities?: number;
+  entity_introductions?: number;
+  correlation_events?: number;
+  detection_rules?: number;
+  pir_matches?: number;
+  dimensions?: FeedValueDimensions;
+  rank?: number | null;
+  of?: number;
+  days?: number;
+}
 
 export interface FeedValueDimensions {
   entity_introductions: number;

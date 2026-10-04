@@ -28,6 +28,12 @@ class UserFeedSubscription(Base):
         UUID(as_uuid=True), ForeignKey("feeds.id", ondelete="CASCADE"), nullable=False, index=True
     )
     is_muted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Paused is the per-user half of Feed.is_active. Muting keeps the articles
+    # coming and only drops them out of unread counts; pausing stops this
+    # reader receiving new ones at all, while the feed keeps fetching for
+    # everyone else. Only consulted when per_user_subscriptions_enabled is on —
+    # with it off, Feed.is_active is the single shared switch.
+    is_paused: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     feed = relationship("Feed")

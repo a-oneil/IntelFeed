@@ -65,7 +65,7 @@ vi.mock("@/components/AddFeedModal", () => ({
   AddFeedModal: () => null,
 }));
 
-vi.mock("@/components/EditFeedModal", () => ({
+vi.mock("@/components/feedModal/EditFeedModal", () => ({
   EditFeedModal: () => null,
 }));
 
@@ -186,6 +186,7 @@ const mockFeeds: Feed[] = [
     created_at: "2026-01-01T00:00:00Z",
     adapter_config: {},
     intel_extraction_mode: "selective" as const,
+    ai_analysis_enabled: true,
     auto_extract_on_ingest: false,
     extract_detection_rules: false,
     extract_tools: true,
@@ -217,6 +218,7 @@ const mockFeeds: Feed[] = [
     created_at: "2026-01-01T00:00:00Z",
     adapter_config: {},
     intel_extraction_mode: "selective" as const,
+    ai_analysis_enabled: true,
     auto_extract_on_ingest: false,
     extract_detection_rules: false,
     extract_tools: true,

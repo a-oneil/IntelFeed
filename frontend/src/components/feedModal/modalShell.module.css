@@ -1,0 +1,343 @@
+/* ===== Shell, shared by the feed and category modals ===== */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: var(--sp-5);
+}
+
+/*
+ * Two panes, fixed chrome. The old single-column sheet put the action row at
+ * the bottom of the scrolling body, so on a Telegram feed you scrolled past
+ * twenty controls to reach Save. Header, rail and footer are outside the
+ * scroller now; only the pane moves.
+ */
+.modal {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 760px;
+  height: 580px;
+  max-height: 100%;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+  /* Belt to the portal's braces: never inherit a caller's text layout. */
+  white-space: normal;
+  text-align: left;
+}
+
+.header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-4);
+  padding: var(--sp-5) var(--sp-6);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.headerIcon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--h-md);
+  height: var(--h-md);
+  border-radius: var(--r-md);
+  background: var(--accent-feeds-bg);
+  color: var(--accent-feeds);
+}
+
+.headerText {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.typeChip {
+  flex-shrink: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-feeds);
+  background: var(--accent-feeds-bg);
+  border: 1px solid color-mix(in srgb, var(--accent-feeds) 30%, transparent);
+  border-radius: var(--r-full);
+  padding: var(--sp-1) var(--sp-3);
+}
+
+.pausedChip {
+  flex-shrink: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
+  border-radius: var(--r-full);
+  padding: var(--sp-1) var(--sp-3);
+}
+
+.headerUrl {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.closeBtn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--h-md);
+  height: var(--h-md);
+  background: none;
+  border: none;
+  border-radius: var(--r-md);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.closeBtn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.body {
+  flex-grow: 1;
+  min-height: 0;
+  display: flex;
+}
+
+/* ===== Rail ===== */
+
+.rail {
+  flex-shrink: 0;
+  width: 184px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-4) var(--sp-3);
+  border-right: 1px solid var(--border);
+  background: var(--bg-secondary);
+  overflow-y: auto;
+}
+
+.railItem {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  box-sizing: border-box;
+  min-height: var(--h-md);
+  padding: 0 var(--sp-4);
+  font-family: inherit;
+  font-size: var(--fs-base);
+  text-align: left;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+
+.railItem:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.railItemActive {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.railLabel {
+  flex-grow: 1;
+}
+
+/* Marks a pane holding unsaved edits — the reason the rail exists at all is
+   that you can no longer see every field at once. */
+.railDot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+}
+
+.pane {
+  flex-grow: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: var(--sp-5) var(--sp-6);
+}
+
+/* ===== Footer ===== */
+
+.footer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-6);
+  border-top: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.footerSpacer {
+  flex-grow: 1;
+}
+
+.dirtyNote,
+.cleanNote {
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+
+.dirtyNote {
+  color: var(--accent);
+}
+
+.cleanNote {
+  color: var(--text-secondary);
+}
+
+.saveBtn {
+  min-height: var(--h-md);
+  padding: 0 var(--sp-6);
+  font-family: inherit;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--accent-text);
+  background: var(--accent);
+  border: none;
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+
+.saveBtn:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.saveBtn:disabled {
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  cursor: not-allowed;
+}
+
+.cancelBtn {
+  min-height: var(--h-md);
+  padding: 0 var(--sp-4);
+  font-family: inherit;
+  font-size: var(--fs-base);
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+
+.cancelBtn:hover {
+  background: var(--bg-hover);
+}
+
+.dangerBtn {
+  min-height: var(--h-md);
+  padding: 0 var(--sp-4);
+  font-family: inherit;
+  font-size: var(--fs-base);
+  color: var(--error);
+  background: none;
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+
+.dangerBtn:hover {
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+
+/* ===== Mobile: a drill-in list, not a squeezed two-pane ===== */
+
+@media (max-width: 767px) {
+  .overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .modal {
+    max-width: 100%;
+    height: 92dvh;
+    border-radius: var(--r-md) var(--r-md) 0 0;
+    border-bottom: none;
+  }
+
+  .body {
+    flex-direction: column;
+  }
+
+  /* The rail becomes a horizontal scroller above the pane: six 44px targets
+     in a row beats a 184px column eating half a phone's width. */
+  .rail {
+    width: 100%;
+    flex-direction: row;
+    gap: var(--sp-2);
+    padding: var(--sp-3);
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .railItem {
+    width: auto;
+    min-height: 44px;
+    white-space: nowrap;
+  }
+
+  .closeBtn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .saveBtn,
+  .cancelBtn,
+  .dangerBtn {
+    min-height: 44px;
+  }
+}

@@ -717,6 +717,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
                 return (
                   <IntelLevelBadge
                     mode={sub.intel_extraction_mode || "selective"}
+                    aiAnalysis={sub.ai_analysis_enabled ?? true}
                     autoExtract={sub.auto_extract_on_ingest ?? false}
                     size="md"
                   />

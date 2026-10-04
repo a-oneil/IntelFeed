@@ -67,7 +67,7 @@ vi.mock("@/components/ResizeHandle", () => ({
   ResizeHandle: () => null,
 }));
 
-vi.mock("@/components/EditFeedModal", () => ({
+vi.mock("@/components/feedModal/EditFeedModal", () => ({
   EditFeedModal: () => null,
 }));
 

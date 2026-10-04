@@ -182,15 +182,25 @@ async def _poll_due_feeds():
     async with _get_worker_session() as db:
         from sqlalchemy import text
 
+        from app.services.feed_visibility import subscriptions_enabled
+
+        per_user = await subscriptions_enabled(db)
         result = await db.execute(
             text("""
                 SELECT id FROM feeds
                 WHERE is_active = TRUE
+                -- With per-user subscriptions on, a feed every reader has paused
+                -- has nobody to deliver to, so stop paying to fetch it. One
+                -- un-paused reader is enough to keep it running for the pool.
+                AND (NOT :per_user OR EXISTS (
+                        SELECT 1 FROM user_feed_subscriptions s
+                        WHERE s.feed_id = feeds.id AND s.is_paused = FALSE))
                 AND (last_fetched_at IS NULL
                      OR NOW() > last_fetched_at + (fetch_interval_minutes || ' minutes')::interval)
                 ORDER BY last_fetched_at ASC NULLS FIRST
                 LIMIT 50
-            """)
+            """),
+            {"per_user": per_user},
         )
         feed_ids = [str(row[0]) for row in result.all()]
 
