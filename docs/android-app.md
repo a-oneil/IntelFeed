@@ -133,9 +133,19 @@ The `android` CI job:
    merge commit's subject as the notes. A merge that does not bump the version
    is built and tested but not released; the job summary says which happened.
 
-So the release flow is: bump `version.properties` (in the working folder,
-`tools/release_apk.sh "<what changed>"` does it and runs the tests), open the
-sync PR, merge. One release per app version, named after the version.
+So the release flow is:
+
+```bash
+scripts/release_apk.sh            # bumps android/version.properties, tests, builds,
+                                  # copies the APK to ./IntelFeed.apk, installs on plugged-in devices
+scripts/release_apk.sh --major    # 1.x -> 2.0 instead of 1.x -> 1.x+1
+scripts/release_apk.sh --install  # just install ./IntelFeed.apk on connected devices
+```
+
+Commit the bump, open a PR titled `android: <what changed>` (the release
+notes come from that title), merge. One release per app version, named after
+the version. A failed build puts the old version back so a number is never
+burned.
 
 ### The signing key
 
@@ -166,25 +176,12 @@ release build needs a real upload key, a one-time reinstall for everyone, and
 
 ## Where the code is edited
 
-Most development happens in a separate working folder (`IntelFeed_App`,
-outside this repo) where Kurt, Claude and Gemini work. Two scripts in
-[`android/tools/`](../android/tools/) bridge the two:
-
-- `sync_to_github.sh "<what changed>"` opens or updates a PR from the branch
-  `android-sync` that replaces `android/` with the working folder's last
-  commit.
-- `sync_to_github.sh --pull` brings changes merged here on GitHub back into
-  the working folder. The push refuses to run until this has happened, so
-  edits made directly in this repo are never silently overwritten.
-
-Squash-merging sync PRs is fine; the scripts compare tree hashes, not commit
-history.
-
-The working folder keeps its own markdown logs (`claude_changes.md`,
-`codex_changes.md`, `APK_VERSIONS.md`, implementation reviews). Those are
-deliberately **not** in this repo: documentation for the app lives here, in
-`docs/`, and the release history is the Releases page. The sync script must
-exclude them, otherwise the next sync re-adds them.
+`android/` is edited in this repo like everything else: branch, commit, PR
+against `main`. The app began life in a separate working folder that was
+synced in by script; that sync path is gone, so there is one copy of the
+source and it is this one. Agent change logs and handoff reviews do not live
+under `android/`: documentation for the app is this file, and the release
+history is the Releases page.
 
 ### `.gitignore` notes
 
