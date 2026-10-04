@@ -3,9 +3,15 @@ import { useQueryClient } from "@tanstack/react-query";
 import api from "@/api/client";
 import { useAuthStore } from "@/stores/authStore";
 import { useUpdateProfile } from "@/hooks/useAuth";
-import { useFeeds, useAddFeed } from "@/hooks/useFeeds";
+import {
+  useFeeds,
+  useAddFeed,
+  useStarterPacks,
+  useImportStarterPacks,
+} from "@/hooks/useFeeds";
 import { useCreateAIProvider } from "@/hooks/useAI";
 import { useThemes, useSetThemePreference } from "@/hooks/useThemes";
+import type { StarterPackImportResult } from "@/api/types";
 import { IntelFeedLogo } from "./IntelFeedLogo";
 import styles from "./OnboardingWizard.module.css";
 
@@ -14,9 +20,9 @@ interface AddedFeed {
   url: string;
 }
 
-const ALL_STEPS = ["welcome", "import", "feeds", "ai", "theme", "shortcuts", "docs", "skill"] as const;
+const ALL_STEPS = ["welcome", "packs", "import", "feeds", "ai", "theme", "shortcuts", "docs", "skill"] as const;
 type Step = (typeof ALL_STEPS)[number];
-const SETUP_STEPS: Step[] = ["import", "feeds", "ai"];
+const SETUP_STEPS: Step[] = ["packs", "import", "feeds", "ai"];
 
 export function OnboardingWizard() {
   const user = useAuthStore((s) => s.user);
@@ -32,7 +38,7 @@ export function OnboardingWizard() {
   const isAdmin = user?.role === "admin";
   const steps = ALL_STEPS.filter((s) => {
     if (hasExistingFeeds && SETUP_STEPS.includes(s)) return false;
-    if (!isAdmin && (s === "import" || s === "ai")) return false;
+    if (!isAdmin && (s === "packs" || s === "import" || s === "ai")) return false;
     return true;
   });
 
@@ -50,6 +56,19 @@ export function OnboardingWizard() {
   const [importError, setImportError] = useState("");
   const [importing, setImporting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Starter packs. `selectedPacks` starts undefined so the recommended pack can
+  // seed it once the list arrives, while still letting the user deselect it.
+  const { data: starterPacks } = useStarterPacks();
+  const importPacks = useImportStarterPacks();
+  const [pickedPacks, setPickedPacks] = useState<string[] | null>(null);
+  const [packResult, setPackResult] = useState<StarterPackImportResult | null>(null);
+  const [packError, setPackError] = useState("");
+  const selectedPacks =
+    pickedPacks ?? starterPacks?.filter((p) => p.recommended).map((p) => p.id) ?? [];
+  const selectedFeedCount = (starterPacks ?? [])
+    .filter((p) => selectedPacks.includes(p.id))
+    .reduce((n, p) => n + p.feed_count, 0);
 
   // AI config state
   const [aiApiKey, setAiApiKey] = useState("");
@@ -106,6 +125,24 @@ export function OnboardingWizard() {
     }
   };
 
+  const togglePack = (packId: string) =>
+    setPickedPacks(
+      selectedPacks.includes(packId)
+        ? selectedPacks.filter((id) => id !== packId)
+        : [...selectedPacks, packId],
+    );
+
+  const handleImportPacks = async () => {
+    if (!selectedPacks.length) return;
+    setPackError("");
+    setPackResult(null);
+    try {
+      setPackResult(await importPacks.mutateAsync(selectedPacks));
+    } catch {
+      setPackError("Could not add the recommended feeds. Try again, or add feeds manually below.");
+    }
+  };
+
   const handleAddFeed = async () => {
     if (!feedUrl.trim()) return;
     setFeedError("");
@@ -148,6 +185,82 @@ export function OnboardingWizard() {
             </div>
           </>
         );
+
+      case "packs": {
+        const done = importPacks.isSuccess;
+        return (
+          <div className={styles.body}>
+            <h3 className={styles.stepTitle}>Start With Recommended Feeds</h3>
+            <p className={styles.stepDesc}>
+              IntelFeed ships an audited list of security sources, so you don't have to go
+              and find them. Core is a good first run; add any of the others now or later
+              from Settings. Nothing is added until you choose.
+            </p>
+            <div className={styles.packList}>
+              {(starterPacks ?? []).map((pack) => {
+                const checked = selectedPacks.includes(pack.id);
+                return (
+                  <label
+                    key={pack.id}
+                    className={`${styles.packCard} ${checked ? styles.packCardSelected : ""}`}
+                  >
+                    <input
+                      type="checkbox"
+                      className={styles.packCheckbox}
+                      checked={checked}
+                      disabled={done || importPacks.isPending}
+                      onChange={() => togglePack(pack.id)}
+                    />
+                    <span className={styles.packText}>
+                      <span className={styles.packTitle}>
+                        {pack.title}
+                        <span className={styles.packCount}>{pack.feed_count} feeds</span>
+                        {pack.recommended && (
+                          <span className={styles.packBadge}>Recommended</span>
+                        )}
+                      </span>
+                      <span className={styles.packDesc}>{pack.description}</span>
+                      {pack.requires && checked && (
+                        <span className={styles.packRequires}>Needs: {pack.requires}</span>
+                      )}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+            {!done && (
+              <button
+                type="button"
+                className={styles.btnPrimary}
+                onClick={handleImportPacks}
+                disabled={!selectedPacks.length || importPacks.isPending}
+              >
+                {importPacks.isPending
+                  ? "Adding feeds…"
+                  : selectedPacks.length
+                    ? `Add ${selectedFeedCount} feed${selectedFeedCount !== 1 ? "s" : ""}`
+                    : "Select a pack to continue"}
+              </button>
+            )}
+            {packResult && (
+              <div className={`${styles.importResult} ${styles.success}`}>
+                Added {packResult.feeds_added} feed
+                {packResult.feeds_added !== 1 ? "s" : ""}
+                {packResult.categories_created > 0 &&
+                  ` in ${packResult.categories_created} categor${packResult.categories_created !== 1 ? "ies" : "y"}`}
+                {packResult.feeds_skipped > 0 &&
+                  ` (${packResult.feeds_skipped} already existed)`}
+                {packResult.feeds_added > 0
+                  ? ". They're fetching now — entries will start appearing in a few minutes."
+                  : "."}
+              </div>
+            )}
+            {packError && (
+              <div className={`${styles.importResult} ${styles.error}`}>{packError}</div>
+            )}
+          </div>
+        );
+      }
 
       case "import":
         return (

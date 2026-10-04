@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="1.0" xmlns:intelfeed="https://intelfeed.app/ns/opml/1">
+  <head>
+    <title>IntelFeed starter pack — Podcasts</title>
+  </head>
+  <body>
+    <outline text="Podcasts" title="Podcasts">
+      <outline text="CyberWire Daily" title="CyberWire Daily" type="podcast" xmlUrl="https://feeds.megaphone.fm/cyberwire-daily-podcast" htmlUrl="https://thecyberwire.com/podcasts/daily-podcast" intelfeed:interval="60" intelfeed:extractionMode="full" />
+      <outline text="Darknet Diaries" title="Darknet Diaries" type="podcast" xmlUrl="https://feeds.megaphone.fm/darknetdiaries" htmlUrl="https://darknetdiaries.com/" intelfeed:interval="60" intelfeed:extractionMode="none" />
+      <outline text="Risky Business" title="Risky Business" type="podcast" xmlUrl="https://risky.biz/feeds/risky-business/" htmlUrl="https://risky.biz/" intelfeed:interval="60" intelfeed:extractionMode="full" />
+      <outline text="SANS Internet Storm Center Daily" title="SANS Internet Storm Center Daily" type="podcast" xmlUrl="https://isc.sans.edu/dailypodcast.xml" htmlUrl="https://isc.sans.edu/podcast.html#stormcast" intelfeed:interval="60" intelfeed:autoExtract="true" />
+      <outline text="Smashing Security" title="Smashing Security" type="podcast" xmlUrl="https://www.smashingsecurity.com/rss" htmlUrl="https://www.smashingsecurity.com" intelfeed:interval="60" intelfeed:extractionMode="none" />
+    </outline>
+  </body>
+</opml>

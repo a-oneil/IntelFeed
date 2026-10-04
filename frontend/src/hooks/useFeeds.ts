@@ -7,6 +7,8 @@ import type {
   FeedSubscribersResponse,
   FeedValueDetail,
   PaginatedResponse,
+  StarterPack,
+  StarterPackImportResult,
 } from "@/api/types";
 
 export function useFeeds() {
@@ -51,6 +53,32 @@ export function useAddFeed() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["feeds"] });
+    },
+  });
+}
+
+export function useStarterPacks() {
+  return useQuery({
+    queryKey: ["starter-packs"],
+    queryFn: async () => {
+      const res = await api.get<{ packs: StarterPack[] }>("/opml/starter-packs");
+      return res.data.packs;
+    },
+    // Shipped with the build, so they only change on deploy.
+    staleTime: Infinity,
+  });
+}
+
+export function useImportStarterPacks() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (packIds: string[]) => {
+      const res = await api.post<StarterPackImportResult>("/opml/starter-packs/import", packIds);
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["feeds"] });
+      queryClient.invalidateQueries({ queryKey: ["categories"] });
     },
   });
 }

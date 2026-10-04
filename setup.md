@@ -91,12 +91,56 @@ docker compose -f docker-compose.prod.yml logs -f
 
 Open `https://intelfeed.example.com` and register the first account via the web UI — the first account registered becomes the admin. Registration can then be disabled or invite-gated under Settings > System.
 
-## 8. Verify
+## 8. Add feeds
+
+The onboarding wizard opens on the **Start With Recommended Feeds** step. IntelFeed ships an audited
+list of security sources as selectable packs, so a fresh install doesn't sit empty while you go
+hunting for URLs:
+
+| Pack | Feeds | What's in it |
+| --- | --- | --- |
+| **Core** (pre-selected) | 37 | Security news, government/CERT advisories, NVD and vendor CVE bulletins, marquee vendor research, detection engineering |
+| More news & government | 16 | Second-tier press, regional CERTs, breach and leak-site trackers |
+| Vendor advisories | 13 | Distro, network and OSS product bulletins — high volume, CVE-shaped |
+| Vendor research | 62 | The long tail of vendor and lab research: campaigns, malware analysis, attribution |
+| Detection engineering | 12 | Building, testing and tuning detections |
+| Detection rule repositories | 20 | Sigma, Elastic, Splunk, YARA, Nuclei, Atomic Red Team. **Needs a GitHub token** |
+| Practitioner blogs | 39 | Independent researchers and responders |
+| Reddit | 10 | Security subreddits |
+| YouTube | 26 | Conference talks and technical channels |
+| Podcasts | 5 | Playable in the reader |
+
+Nothing is created until you choose — it's your instance. Everything shipped polls hourly at most,
+because every install polls the same sources. Two things are deliberately **not** in any pack:
+
+- **Telegram channels**, which need `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` and the interactive login
+  in step 11 below. Imported without that, they'd be permanently failing feeds.
+- **The GitHub repo pack, unless you set a token.** Unauthenticated GitHub API calls are capped at
+  60/hour and those 20 repositories will exhaust it. Set `github_token` under Settings → System.
+
+Headless installs get the same thing from the CLI:
+
+```bash
+docker compose -f docker-compose.prod.yml exec api python scripts/seed/seed_feeds.py --list
+docker compose -f docker-compose.prod.yml exec api python scripts/seed/seed_feeds.py --packs core
+```
+
+A committed list rots, so before each release re-audit it and prune what has died:
+
+```bash
+GITHUB_TOKEN=$(gh auth token) python scripts/maintenance/audit_feed_packs.py
+```
+
+One caveat on that audit: it runs from wherever you run it. CISA's advisory feeds answer a
+datacenter IP with HTTP 403 while serving a residential one fine, so a source that passes on your
+laptop can still fail on the box.
+
+## 9. Verify
 
 - Visit `https://intelfeed.example.com` — should load with a valid TLS cert.
 - If Caddy can't obtain a cert, confirm DNS: `dig intelfeed.example.com` should return your EC2 IP.
 
-## 9. (Optional) Migrate local data
+## 10. (Optional) Migrate local data
 
 To bring your existing database over:
 
@@ -115,7 +159,7 @@ docker compose -f docker-compose.prod.yml up -d
 
 > **Important:** if migrating data, reuse the **same `ENCRYPTION_KEY`** you had locally — otherwise encrypted feed credentials won't decrypt.
 
-## 10. (Optional) Set up Telegram channel ingestion
+## 11. (Optional) Set up Telegram channel ingestion
 
 Telegram is a high-signal source for threat intel — ransomware leak sites publish victim listings there, hacktivist groups (Killnet, NoName057, Anonymous Sudan) coordinate operations there, and eCrime brokers run announcement channels there. IntelFeed can ingest public (and pre-joined private) Telegram channels alongside RSS, Reddit, etc.
 
@@ -156,7 +200,7 @@ Operational notes:
 - **Realtime ingest** (optional): the `telegram-listener` container holds a long-lived MTProto connection and pushes new messages as they arrive. Opt in per-feed by setting the "Realtime ingest" checkbox in Edit Feed (or `adapter_config.realtime: true`). Polling stays as a safety net — if the listener dies, entries still arrive on the normal cadence.
 - Ensure the host clock is in sync (`chronyd` / `systemd-timesyncd`); MTProto rejects requests that drift more than ~5 minutes.
 
-## 11. CLI access
+## 12. CLI access
 
 On whatever machine runs the CLI:
 
@@ -166,7 +210,7 @@ export INTELFEED_USERNAME=your-username
 export INTELFEED_PASSWORD=your-password
 ```
 
-## 12. (Optional) Claude Code CLI authentication
+## 13. (Optional) Claude Code CLI authentication
 
 The scheduled entity-link validator (`validate-entity-links` job, runs daily at 04:00 by default) uses the Claude Code CLI shipped inside the backend image. It runs in the dedicated `celery-worker-ai` service which mounts a named volume (`claude_cli`) at `/home/appuser/.claude` to persist OAuth tokens across container rebuilds.
 
