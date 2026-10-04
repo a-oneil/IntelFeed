@@ -121,8 +121,8 @@ Actions execute sequentially and share a mutable context dict. Earlier actions c
 |---|---|---|
 | `run_ai_task` | `task_id: str` | Execute AI task; store result in context |
 | `use_daily_summary` | `day: yesterday\|today = yesterday`, `on_missing: generate\|skip = generate` | Reuse the shared day-divider briefing as `{ai_summary}` instead of generating a second one (batch only) |
-| `add_tags` | `tags: list[str]` | Add tags to entry |
-| `remove_tags` | `tags: list[str]` | Remove tags |
+| `add_tags` | `tags: list[str \| {name, color, description, chip}]` | Add tags to entry. The object form sets a new tag's colour, tooltip and chip promotion — on create only; an existing tag keeps its own look. A chip tag is stamped for the rule's owner alone (only they see it); a plain tag is shared |
+| `remove_tags` | `tags: list[str]` | Remove the shared tag and the rule owner's own chip stamp; other users' stamps stay |
 | `send_notification` | `platform, webhook_url, channel, message_template, include_embeds` | POST to Slack/Discord/custom webhook |
 | `run_webhook` | `url: str, headers: dict, payload: str` | POST custom JSON to URL |
 | `mark_priority` | `level: str` | Add priority tag (priority-{level}) |

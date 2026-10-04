@@ -7,13 +7,27 @@ from pydantic import BaseModel, ConfigDict, Field
 class TagCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     color: str = Field(default="#6B7280", pattern=r"^#[0-9A-Fa-f]{6}$")
+    display_as_chip: bool = Field(default=False, description="Render in the entry's badge row as a chip")
+    description: str | None = Field(default=None, max_length=255, description="Chip tooltip")
 
-    model_config = ConfigDict(json_schema_extra={"example": {"name": "ransomware", "color": "#EF4444"}})
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "name": "customer-a",
+                "color": "#EF4444",
+                "display_as_chip": True,
+                "description": "Touches Customer A's estate",
+            }
+        }
+    )
 
 
 class TagUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
     color: str | None = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
+    display_as_chip: bool | None = None
+    # An empty string clears the description; omitted leaves it alone.
+    description: str | None = Field(default=None, max_length=255)
 
     model_config = ConfigDict(json_schema_extra={"example": {"name": "ransomware-ops", "color": "#F59E0B"}})
 
@@ -22,6 +36,8 @@ class TagResponse(BaseModel):
     id: uuid.UUID
     name: str
     color: str
+    display_as_chip: bool = False
+    description: str | None = None
     entry_count: int = 0
     created_at: datetime
 

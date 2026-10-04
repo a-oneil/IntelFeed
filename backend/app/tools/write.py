@@ -750,7 +750,9 @@ async def _add_tag(db: AsyncSession, user_id: uuid.UUID, entry_id: str, tag_name
         await db.flush()
 
     existing = await db.execute(
-        select(EntryTag).where(EntryTag.entry_id == uuid.UUID(entry_id), EntryTag.tag_id == tag.id)
+        select(EntryTag).where(
+            EntryTag.entry_id == uuid.UUID(entry_id), EntryTag.tag_id == tag.id, EntryTag.user_id.is_(None)
+        )
     )
     if existing.scalar_one_or_none():
         return {"tag_id": str(tag.id), "already_tagged": True}

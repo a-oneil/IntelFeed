@@ -27,7 +27,6 @@ from app.models.malware_family import EntryMalware, MalwareFamily
 from app.models.mitigation import EntryMitigation, Mitigation
 from app.models.product import EntryProduct, Product
 from app.models.sector import Sector
-from app.models.tag import EntryTag, Tag
 from app.models.threat_actor import EntryThreatActor, ThreatActor
 from app.models.tool import EntryTool, Tool
 from app.models.ttp import TTP, EntryTTP
@@ -49,6 +48,7 @@ from app.schemas.priority_queue import PriorityQueueResponse, PriorityQueueRow
 from app.schemas.thread import ThreadSummary
 from app.services import meilisearch_client, translation
 from app.services.atlas import build_atlas_entry_id_query
+from app.services.entry_tags import load_entry_tags
 from app.services.feed_visibility import subscriptions_enabled, visible_feed_ids_query
 from app.services.iso_codes import ALPHA2_TO_ALPHA3
 from app.services.read_state import has_no_state_for_user
@@ -952,15 +952,8 @@ async def _entry_page(
             )
 
     # Batch-load tags for all entries
-    tags_map: dict[uuid.UUID, list[dict]] = {}
-    if entry_ids:
-        tag_result = await db.execute(
-            select(EntryTag.entry_id, Tag.name, Tag.color)
-            .join(Tag, Tag.id == EntryTag.tag_id)
-            .where(EntryTag.entry_id.in_(entry_ids))
-        )
-        for entry_id, tag_name, tag_color in tag_result.all():
-            tags_map.setdefault(entry_id, []).append({"name": tag_name, "color": tag_color})
+    # Shared tags plus the viewer's own chip stamps — never another user's.
+    tags_map = await load_entry_tags(db, entry_ids, user.id)
 
     # Batch-load signal chips (signal engine, only when surfaced)
     signals_map: dict[uuid.UUID, list[dict]] = {}
@@ -2575,6 +2568,7 @@ async def get_entry(
         is_read=state.is_read if state else False,
         is_starred=state.is_starred if state else False,
         is_bookmarked=state.is_bookmarked if state else False,
+        tags=(await load_entry_tags(db, [entry.id], user.id)).get(entry.id, []),
         duplicates=duplicates,
         translated_html=entry.translated_html,
         translation_source_language=entry.translation_source_language,

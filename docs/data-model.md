@@ -1051,21 +1051,37 @@ threat-surface previews all take a profile as input.
 
 #### Tag
 
-Tags are global (shared across users), managed via the Tag Manager UI.
+Tags are global (shared across users), managed via the Tag Manager UI. A tag
+promoted to a chip (`display_as_chip`) renders in the entry's badge row
+(`EntryIntelBadges`) instead of the quiet meta line, with `description` as its
+tooltip.
 
 **Columns:**
 - `id` (UUID PK)
 - `created_by` (FK, nullable, SET NULL)
 - `name` (String 100, unique, indexed)
 - `color` (String 7, default "#6B7280")
+- `display_as_chip` (Boolean, default false)
+- `description` (String 255, nullable) — chip tooltip
 - `created_at`
 
 #### EntryTag
 
+One tag on one entry. `user_id` NULL is a shared assignment, visible to
+everyone (everything tagged by hand, and plain tags applied by rules). Set, it
+is a personal stamp: a chip an automation rule applied for its owner, visible
+only to that user — in entry responses, tag counts, `tag:` search and
+`tag_matches`. Read through `app.services.entry_tags.visible_to`. In
+Meilisearch, shared names live in `tags`; personal stamps live in the
+filter-only `user_tags` as `"<user_id>:<name>"`, which is stripped from every
+search hit.
+
 **Columns:**
-- `entry_id` (FK, CASCADE) — PK
-- `tag_id` (FK, CASCADE) — PK
-- `tagged_at` (DateTime)
+- `id` (UUID PK)
+- `entry_id` (FK, CASCADE)
+- `tag_id` (FK, CASCADE)
+- `user_id` (FK users, CASCADE, nullable, indexed)
+- Unique (`entry_id`, `tag_id`, `user_id`), NULLs not distinct
 
 #### Comment
 

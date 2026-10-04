@@ -39,11 +39,14 @@ export function TagManager() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameVal, setRenameVal] = useState("");
   const [recolorId, setRecolorId] = useState<string | null>(null);
+  const [describingId, setDescribingId] = useState<string | null>(null);
+  const [describeVal, setDescribeVal] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const [showNew, setShowNew] = useState(false);
   const [newName, setNewName] = useState("");
   const [newColor, setNewColor] = useState(PALETTE[0]);
+  const [newChip, setNewChip] = useState(false);
 
   const [merging, setMerging] = useState(false);
   const [mergeTarget, setMergeTarget] = useState<string>("");
@@ -95,6 +98,37 @@ export function TagManager() {
     );
   };
 
+  const toggleChip = (id: string, name: string, chip: boolean) => {
+    updateTag.mutate(
+      { tagId: id, data: { display_as_chip: chip } },
+      {
+        onSuccess: () =>
+          toast.success(chip ? `"${name}" now shows as a chip` : `"${name}" is a plain tag again`),
+        onError: (e) => toast.error(errMessage(e, "Couldn't update tag")),
+      },
+    );
+  };
+
+  const startDescribe = (id: string, current: string | null) => {
+    setRenamingId(null);
+    setRecolorId(null);
+    setConfirmDeleteId(null);
+    setDescribingId(id);
+    setDescribeVal(current ?? "");
+  };
+
+  const saveDescribe = (id: string) => {
+    const description = describeVal.trim();
+    setDescribingId(null);
+    const current = tags.find((t) => t.id === id);
+    if (!current || (current.description ?? "") === description) return;
+    // An empty string clears the tooltip server-side.
+    updateTag.mutate(
+      { tagId: id, data: { description } },
+      { onError: (e) => toast.error(errMessage(e, "Couldn't save tooltip")) },
+    );
+  };
+
   const recolor = (id: string, color: string) => {
     setRecolorId(null);
     updateTag.mutate({ tagId: id, data: { color } });
@@ -119,10 +153,11 @@ export function TagManager() {
     const name = newName.trim();
     if (!name) return;
     try {
-      await createTag.mutateAsync({ name, color: newColor });
+      await createTag.mutateAsync({ name, color: newColor, display_as_chip: newChip });
       toast.success(`Created "${name}"`);
       setNewName("");
       setNewColor(PALETTE[0]);
+      setNewChip(false);
       setShowNew(false);
     } catch (e) {
       toast.error(errMessage(e, "Couldn't create tag"));
@@ -226,6 +261,10 @@ export function TagManager() {
             autoFocus
             spellCheck={false}
           />
+          <label className={styles.chipToggle} title="Show in the entry's badge row instead of the meta line">
+            <input type="checkbox" checked={newChip} onChange={(e) => setNewChip(e.target.checked)} />
+            Chip
+          </label>
           <button className={`${styles.btn} ${styles.primary}`} onClick={doCreate} disabled={!newName.trim()}>
             Create
           </button>
@@ -351,6 +390,28 @@ export function TagManager() {
                       {t.name}
                     </button>
                   )}
+                  {t.display_as_chip && <span className={styles.chipMark}>chip</span>}
+                  {describingId === t.id ? (
+                    <input
+                      className={styles.renameInput}
+                      value={describeVal}
+                      maxLength={255}
+                      placeholder="Tooltip shown on the chip…"
+                      onChange={(e) => setDescribeVal(e.target.value)}
+                      onBlur={() => saveDescribe(t.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") saveDescribe(t.id);
+                        if (e.key === "Escape") setDescribingId(null);
+                      }}
+                      autoFocus
+                    />
+                  ) : (
+                    t.description && (
+                      <span className={styles.tagDescription} title={t.description}>
+                        {t.description}
+                      </span>
+                    )
+                  )}
                 </div>
 
                 <span className={styles.count}>
@@ -371,6 +432,15 @@ export function TagManager() {
                   ) : (
                     <>
                       <button className={styles.ract} onClick={() => viewTag(t.name)} disabled={t.entry_count === 0}>View</button>
+                      <button
+                        className={styles.ract}
+                        onClick={() => toggleChip(t.id, t.name, !t.display_as_chip)}
+                        aria-pressed={t.display_as_chip}
+                        title={t.display_as_chip ? "Show as a plain tag in the meta line" : "Show as a chip in the entry's badge row"}
+                      >
+                        {t.display_as_chip ? "Unchip" : "Chip"}
+                      </button>
+                      <button className={styles.ract} onClick={() => startDescribe(t.id, t.description)}>Tooltip</button>
                       <button className={styles.ract} onClick={() => startRename(t.id, t.name)}>Rename</button>
                       <button className={`${styles.ract} ${styles.del}`} onClick={() => setConfirmDeleteId(t.id)}>Delete</button>
                     </>

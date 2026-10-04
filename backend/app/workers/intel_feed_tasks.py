@@ -1486,8 +1486,8 @@ async def _rebuild_search_index(user_id: str) -> dict:
     from app.models.entry_state import UserEntryState
     from app.models.feed import Feed
     from app.models.note import Note
-    from app.models.tag import EntryTag, Tag
     from app.services import meilisearch_client
+    from app.services.entry_tags import search_tag_fields
 
     user_uuid = _uuid.UUID(user_id)
 
@@ -1518,14 +1518,7 @@ async def _rebuild_search_index(user_id: str) -> dict:
 
             entry_ids = [row[0].id for row in rows]
 
-            tags_map: dict = {}
-            tag_result = await db.execute(
-                select(EntryTag.entry_id, Tag.name)
-                .join(Tag, Tag.id == EntryTag.tag_id)
-                .where(EntryTag.entry_id.in_(entry_ids))
-            )
-            for eid, tname in tag_result.all():
-                tags_map.setdefault(eid, []).append(tname)
+            tag_fields = await search_tag_fields(db, entry_ids)
 
             states_map: dict = {}
             state_result = await db.execute(
@@ -1576,7 +1569,8 @@ async def _rebuild_search_index(user_id: str) -> dict:
                         "url": entry.url or "",
                         "media_type": media_map.get(entry.id),
                         "language": entry.language,
-                        "tags": tags_map.get(entry.id, []),
+                        "tags": tag_fields[str(entry.id)]["tags"],
+                        "user_tags": tag_fields[str(entry.id)]["user_tags"],
                         "is_read": state.get("is_read", False),
                         "is_starred": state.get("is_starred", False),
                         "is_bookmarked": state.get("is_bookmarked", False),

@@ -4097,10 +4097,10 @@ async def _resolve_bulk_entry_ids(db: AsyncSession, body: BulkExtractRequest | B
         feed_ids_q = select(Feed.id).where(Feed.category_id == body.category_id)
         q = q.where(Entry.feed_id.in_(feed_ids_q))
     elif body.tag:
-        q = (
-            q.join(EntryTag, EntryTag.entry_id == Entry.id)
-            .join(Tag, Tag.id == EntryTag.tag_id)
-            .where(Tag.name == body.tag)
+        # A subquery rather than a join: one entry can carry the tag more than
+        # once (shared plus personal chip stamps) and must be processed once.
+        q = q.where(
+            Entry.id.in_(select(EntryTag.entry_id).join(Tag, Tag.id == EntryTag.tag_id).where(Tag.name == body.tag))
         )
     result = await db.execute(q)
     return [row[0] for row in result.all()]

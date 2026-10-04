@@ -24,6 +24,7 @@ from app.schemas.search import (
 )
 from app.search.query_planner import IS_FILTER_VALUES, VALID_SORTS
 from app.services import meilisearch_client
+from app.services.entry_tags import load_entry_tags
 
 logger = logging.getLogger(__name__)
 
@@ -175,7 +176,9 @@ async def _enrich_hits_with_user_state(hits: list[dict], user_id: uuid.UUID, db:
     """Overlay actual is_read/is_starred/is_bookmarked from the DB onto search hits.
 
     Meilisearch state can be stale (bulk operations don't always sync), so we
-    always fetch the authoritative per-user state from UserEntryState.
+    always fetch the authoritative per-user state from UserEntryState. Tags get
+    the same treatment: `tag_details` carries the tags this user sees on each
+    hit — shared ones plus their own chip stamps — with chip presentation.
     """
     if not hits:
         return
@@ -200,8 +203,11 @@ async def _enrich_hits_with_user_state(hits: list[dict], user_id: uuid.UUID, db:
         )
     )
     state_map = {str(row.entry_id): row for row in result.all()}
+    tags_map = {str(eid): tags for eid, tags in (await load_entry_tags(db, entry_ids, user_id)).items()}
 
     for h in hits:
+        h.pop("user_tags", None)
+        h["tag_details"] = tags_map.get(h.get("id"), [])
         state = state_map.get(h.get("id"))
         if state:
             h["is_read"] = state.is_read
@@ -584,7 +590,7 @@ async def unified_search(
         ast = parse_query("")
 
     # Build execution plan
-    plan = build_execution_plan(ast)
+    plan = build_execution_plan(ast, viewer_id=user.id)
 
     # Resolve pending feed name filters to feed_id Meilisearch filters
     if plan.pending_feed_filters:

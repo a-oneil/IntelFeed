@@ -205,7 +205,7 @@ def execute_entry_search(
 
     # The common case: one search, and the index does the paging.
     if len(branches) == 1:
-        return run(branches[0], limit, offset)
+        return meilisearch_client.strip_private_fields(run(branches[0], limit, offset))
 
     # An OR across text terms cannot be one search, so the union is assembled
     # here. Each branch is fetched from the top — a branch's own offset means
@@ -222,9 +222,11 @@ def execute_entry_search(
     # drift every time the user pages, which reads as a bug in the UI.
     estimated = max(sum(r.get("estimatedTotalHits", 0) for r in results), len(merged_hits))
 
-    return {
-        "hits": page,
-        "estimatedTotalHits": estimated,
-        "processingTimeMs": sum(r.get("processingTimeMs", 0) for r in results),
-        "facetDistribution": _merge_facets(results),
-    }
+    return meilisearch_client.strip_private_fields(
+        {
+            "hits": page,
+            "estimatedTotalHits": estimated,
+            "processingTimeMs": sum(r.get("processingTimeMs", 0) for r in results),
+            "facetDistribution": _merge_facets(results),
+        }
+    )

@@ -329,6 +329,9 @@ class ExecutionPlan:
     # Fields that parsed as `name:value` but are not in the vocabulary. Their
     # values fall back to free text; the API returns these so the UI can say so.
     unknown_fields: list[str] = field(default_factory=list)
+    # Who is searching. `tag:` also matches their own personal chip stamps
+    # (`user_tags`); without a viewer it matches shared tags only.
+    viewer_id: str | None = None
     # Internal counter for allocating OR-group IDs during planning
     _or_counter: int = field(default=0, repr=False)
     # Set when anything asks for entries at all — including a bare/negated text
@@ -387,9 +390,13 @@ class EntityCondition:
 # ── Planner ──────────────────────────────────────────────
 
 
-def build_execution_plan(ast: ASTNode) -> ExecutionPlan:
-    """Walk the AST and build an execution plan."""
-    plan = ExecutionPlan()
+def build_execution_plan(ast: ASTNode, viewer_id: object = None) -> ExecutionPlan:
+    """Walk the AST and build an execution plan.
+
+    `viewer_id` is the searching user's id (UUID or str); it lets `tag:` see
+    their personal chips.
+    """
+    plan = ExecutionPlan(viewer_id=str(viewer_id) if viewer_id else None)
 
     # The walk owns everything Meilisearch cannot express on its own: entity
     # sub-plans, Postgres-backed filters, sort, and the chips the UI renders.
@@ -543,6 +550,11 @@ def _branch_dnf(node: ASTNode, plan: ExecutionPlan, *, negated: bool) -> list[tu
         attribute = _FILTER_ENTRY_FIELDS.get(node.field_name)
         if attribute and "*" not in node.value:
             clause = f'{attribute} = "{node.value}"'
+            if attribute == "tags" and plan.viewer_id:
+                # A tag is on an entry for this viewer if it's shared or one of
+                # their own chip stamps; nobody else's tokens can match.
+                # Token format: app.services.entry_tags.personal_tag_token.
+                clause = f'({clause} OR user_tags = "{plan.viewer_id}:{node.value}")'
             return [([], [f"NOT {clause}" if negated else clause])]
 
         if node.field_name == "is":

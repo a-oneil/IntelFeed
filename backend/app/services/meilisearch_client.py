@@ -47,10 +47,24 @@ FILTERABLE_ATTRIBUTES = [
     "has_notes",
     "media_type",
     "tags",
+    # Personal chip stamps as "<user_id>:<name>" — filter-only, never searched
+    # or faceted globally, so one analyst's stamps can't surface for another.
+    "user_tags",
     "language",
     # Already indexed and sortable; filterable is what `words:>1500` needs.
     "word_count",
 ]
+
+
+def strip_private_fields(result: dict) -> dict:
+    """Drop index-only fields from search hits before they leave the server.
+
+    `user_tags` carries every user's personal chip stamps; the query planner
+    filters on it, but no response may show one user's stamps to another.
+    """
+    for hit in result.get("hits") or []:
+        hit.pop("user_tags", None)
+    return result
 
 
 def _ensure_index():
@@ -173,18 +187,20 @@ def update_entry_tags(entry_id: uuid.UUID, tags: list[str]):
         logger.warning("Failed to update tags for entry %s in Meilisearch: %s", entry_id, e)
 
 
-def bulk_update_entry_tags(tag_map: dict[str, list[str]]):
-    """Partial-update the ``tags`` field for many entries in one batch.
+def bulk_update_entry_tags(tag_map: dict[str, dict[str, list[str]]]):
+    """Partial-update the tag fields for many entries in one batch.
 
-    ``tag_map`` maps entry id (str) -> full tag-name list. Only the tags field
-    is touched, so other document fields are preserved. Used by tag rename /
-    delete / merge, which can affect thousands of entries at once.
+    ``tag_map`` maps entry id (str) -> ``{"tags": [...], "user_tags": [...]}``
+    as built by ``app.services.entry_tags.search_tag_fields``. Only those
+    fields are touched, so other document fields are preserved. Used by every
+    tag write, including rename / delete / merge, which can affect thousands
+    of entries at once.
     """
     if not tag_map:
         return
     try:
         index = _get_client().index(INDEX_NAME)
-        docs = [{"id": eid, "tags": tags} for eid, tags in tag_map.items()]
+        docs = [{"id": eid, **fields} for eid, fields in tag_map.items()]
         for i in range(0, len(docs), 1000):
             index.update_documents(docs[i : i + 1000])
     except Exception as e:
@@ -371,7 +387,7 @@ def search_entries(
         else:
             params["facets"] = ["feed_type", "tags", "media_type"]
 
-        return index.search(query, params)
+        return strip_private_fields(index.search(query, params))
     except Exception as e:
         logger.warning(f"Meilisearch search failed: {e}")
         return {"hits": [], "estimatedTotalHits": 0, "processingTimeMs": 0, "searchUnavailable": True}

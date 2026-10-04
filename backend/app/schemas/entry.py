@@ -39,7 +39,7 @@ class EntryResponse(BaseModel):
     is_read: bool = False
     is_starred: bool = False
     is_bookmarked: bool = False
-    tags: list[dict] = []  # [{name, color}]
+    tags: list[dict] = []  # [{id, name, color, display_as_chip, description, personal}]
     # Signal engine (populated only when signal_engine_surface is enabled and
     # the entry's score clears the radar threshold; is_echo always set)
     priority_score: float | None = None

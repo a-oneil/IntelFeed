@@ -83,6 +83,16 @@ interface MetaColumn {
   render: (entry: Entry, counts?: EntryIntelCounts) => ReactNode;
 }
 
+/** Tags that stay a quiet label — the ones not promoted to a badge-row chip. */
+function plainTagsOf(entry: Entry) {
+  return (entry.tags ?? []).filter((t) => !t.display_as_chip);
+}
+
+function plainTagNames(entry: Entry): string | null {
+  const names = plainTagsOf(entry).map((t) => t.name);
+  return names.length ? names.join(", ") : null;
+}
+
 function domainOf(url: string | null | undefined): string | null {
   if (!url) return null;
   try {
@@ -157,7 +167,8 @@ const META_COLUMNS: Record<string, MetaColumn> = {
     defaultHidden: true,
     render: (_e, c) => (c?.notes ? `${c.notes} note${c.notes === 1 ? "" : "s"}` : null),
   },
-  tags: { render: (e) => (e.tags?.length ? e.tags.map((t) => t.name).join(", ") : null) },
+  // Chips already lead the badge row; this column carries the quiet tags.
+  tags: { render: (e) => plainTagNames(e) },
   type: { defaultHidden: true, render: (e) => (e.feed_type ? e.feed_type.replace(/_/g, " ") : null) },
   domain: { defaultHidden: true, render: (e) => domainOf(e.url) },
   author: { defaultHidden: true, render: (e) => e.author || null },
@@ -366,6 +377,7 @@ export const EntryRow = memo(function EntryRow({
     return out;
   }, [metaColumns, entry, intelCounts]);
   const useColumnMeta = metaFields.length > 0;
+  const plainTags = plainTagsOf(entry);
 
   return (
     <div
@@ -422,7 +434,7 @@ export const EntryRow = memo(function EntryRow({
             ))}
           </div>
         )}
-        <EntryIntelBadges counts={intelCounts} starred={entry.is_starred} bookmarked={entry.is_bookmarked} echo={entry.is_echo} />
+        <EntryIntelBadges counts={intelCounts} starred={entry.is_starred} bookmarked={entry.is_bookmarked} echo={entry.is_echo} tags={entry.tags} entryId={entry.id} />
         {searchSnippet ? (
           <p className={styles.summary} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(searchSnippet, { ALLOWED_TAGS: ["em", "mark", "strong", "b", "i", "span"], ALLOWED_ATTR: ["class"] }) }} />
         ) : (
@@ -442,13 +454,13 @@ export const EntryRow = memo(function EntryRow({
               {formatDuration(entry.media[0].duration_seconds)}
             </span>
           )}
-          {entry.tags?.length > 0 && (
+          {plainTags.length > 0 && (
             <span className={styles.tagList}>
-              {entry.tags.map((tag, i) => (
+              {plainTags.map((tag, i) => (
                 <span key={tag.name} className={styles.tagInline}>
                   <span className={styles.tagDot} style={{ backgroundColor: tag.color }} />
                   {tag.name}
-                  {i < entry.tags.length - 1 && <span className={styles.tagSep}>·</span>}
+                  {i < plainTags.length - 1 && <span className={styles.tagSep}>·</span>}
                 </span>
               ))}
             </span>
@@ -529,7 +541,7 @@ const MagazineCard = memo(function MagazineCard({
         </div>
         <h3 className={styles.magazineTitle}>{entry.translated_title || entry.title}</h3>
         {plainSummary && <p className={styles.magazineSummary}>{plainSummary}</p>}
-        <EntryIntelBadges counts={intelCounts} starred={entry.is_starred} bookmarked={entry.is_bookmarked} echo={entry.is_echo} />
+        <EntryIntelBadges counts={intelCounts} starred={entry.is_starred} bookmarked={entry.is_bookmarked} echo={entry.is_echo} tags={entry.tags} entryId={entry.id} />
         <div className={styles.magazineMeta}>
           {entry.author && <span>{entry.author}</span>}
           {readTime && <span>{readTime} read</span>}

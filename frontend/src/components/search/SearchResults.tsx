@@ -71,7 +71,7 @@ function searchHitToEntry(hit: SearchHit, markedReadIds: Set<string>): Entry {
     is_read: markedReadIds.has(hit.id) || (hit.is_read ?? false),
     is_starred: hit.is_starred ?? false,
     is_bookmarked: hit.is_bookmarked ?? false,
-    tags: (hit.tags ?? []).map((t: string) => ({ name: t, color: "" })),
+    tags: hit.tag_details ?? (hit.tags ?? []).map((t: string) => ({ name: t, color: "" })),
   };
 }
 

@@ -8,14 +8,12 @@ import { useAITasks } from "@/hooks/useAI";
 import { useWebhookPresets } from "@/hooks/useWebhookPresets";
 import type { AutomationRule } from "@/api/types";
 import { TagPicker } from "./TagPicker";
+import { toTagSpecs, type TagSpec } from "@/utils/tagSpecs";
 import styles from "./AutomationRuleEditor.module.css";
 
-/** Coerce a stored tags config value (array or comma string) to a name array. */
-function tagArray(config: Record<string, unknown>): string[] {
-  const v = config.tags;
-  if (Array.isArray(v)) return v as string[];
-  if (typeof v === "string" && v) return v.split(",").map((s) => s.trim()).filter(Boolean);
-  return [];
+/** Coerce a stored tags config value (array or comma string) to tag specs. */
+function tagArray(config: Record<string, unknown>): TagSpec[] {
+  return toTagSpecs(config.tags);
 }
 
 const TRIGGER_TYPES = [
@@ -460,6 +458,13 @@ function BranchActionEditor({
     onUpdate({ ...config, [branch]: list });
   };
 
+  // Tags are stored as specs (name, or name + presentation), not a comma string.
+  const setSubActionTags = (branch: "then_actions" | "else_actions", index: number, specs: TagSpec[]) => {
+    const list = branch === "then_actions" ? [...thenActions] : [...elseActions];
+    list[index] = { ...list[index], config: { ...list[index].config, tags: specs } };
+    onUpdate({ ...config, [branch]: list });
+  };
+
   const addSubAction = (branch: "then_actions" | "else_actions", type: string) => {
     const list = branch === "then_actions" ? [...thenActions] : [...elseActions];
     list.push({ type, config: {} });
@@ -531,7 +536,8 @@ function BranchActionEditor({
                   {f.key === "tags" ? (
                     <TagPicker
                       value={tagArray(action.config)}
-                      onChange={(names) => updateSubAction("then_actions", i, "tags", names.join(","), action.type)}
+                      onChange={(specs) => setSubActionTags("then_actions", i, specs)}
+                      presentation={action.type === "add_tags"}
                     />
                   ) : (
                     <input
@@ -580,7 +586,8 @@ function BranchActionEditor({
                   {f.key === "tags" ? (
                     <TagPicker
                       value={tagArray(action.config)}
-                      onChange={(names) => updateSubAction("else_actions", i, "tags", names.join(","), action.type)}
+                      onChange={(specs) => setSubActionTags("else_actions", i, specs)}
+                      presentation={action.type === "add_tags"}
                     />
                   ) : (
                     <input
@@ -793,6 +800,15 @@ export function AutomationRuleEditor({ rule, onClose }: Props) {
     },
     []
   );
+
+  // Tags are stored as specs (name, or name + presentation), not a comma string.
+  const setActionTags = useCallback((index: number, specs: TagSpec[]) => {
+    setActionItems((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], config: { ...next[index].config, tags: specs } };
+      return next;
+    });
+  }, []);
 
   const updateTriggerField = useCallback(
     (key: string, value: unknown) => {
@@ -1410,9 +1426,8 @@ export function AutomationRuleEditor({ rule, onClose }: Props) {
                               ) : f.key === "tags" ? (
                                 <TagPicker
                                   value={tagArray(action.config)}
-                                  onChange={(names) =>
-                                    updateActionConfig(i, "tags", names.join(","), action.type)
-                                  }
+                                  onChange={(specs) => setActionTags(i, specs)}
+                                  presentation={action.type === "add_tags"}
                                 />
                               ) : f.multiline ? (
                                 <textarea

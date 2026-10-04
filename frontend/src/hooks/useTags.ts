@@ -2,6 +2,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "@/api/client";
 import type { Tag } from "@/api/types";
 
+/** How a tag looks: its colour, whether it renders as a chip, and the chip tooltip. */
+export interface TagPresentation {
+  color?: string;
+  display_as_chip?: boolean;
+  description?: string;
+}
+
 export function useTags() {
   return useQuery({
     queryKey: ["tags"],
@@ -26,7 +33,7 @@ export function useEntryTags(entryId: string | null) {
 export function useCreateTag() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (data: { name: string; color?: string }) => {
+    mutationFn: async (data: TagPresentation & { name: string }) => {
       const res = await api.post<Tag>("/tags", data);
       return res.data;
     },
@@ -39,12 +46,15 @@ export function useCreateTag() {
 export function useUpdateTag() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ tagId, data }: { tagId: string; data: { name?: string; color?: string } }) => {
+    mutationFn: async ({ tagId, data }: { tagId: string; data: TagPresentation & { name?: string } }) => {
       const res = await api.put<Tag>(`/tags/${tagId}`, data);
       return res.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tags"] });
+      // Promoting/demoting or recolouring changes how every card draws the tag.
+      queryClient.invalidateQueries({ queryKey: ["entries"] });
+      queryClient.invalidateQueries({ queryKey: ["entry"] });
     },
   });
 }
@@ -86,6 +96,9 @@ export function useRemoveTagFromEntry() {
       queryClient.invalidateQueries({ queryKey: ["tags"] });
       queryClient.invalidateQueries({ queryKey: ["entry-tags", variables.entryId] });
       queryClient.invalidateQueries({ queryKey: ["entries"] });
+      // The chip × lives on the reader and search cards too.
+      queryClient.invalidateQueries({ queryKey: ["entry", variables.entryId] });
+      queryClient.invalidateQueries({ queryKey: ["unified-search"] });
     },
   });
 }

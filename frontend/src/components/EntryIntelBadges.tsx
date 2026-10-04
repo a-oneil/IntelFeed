@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
+import type { EntryTag } from "@/api/types";
 import type { EntryIntelCounts, PIRMatch } from "@/hooks/useEntryIntelBadges";
+import { TagChips, chipTags } from "@/components/TagChips";
 import { useUIStore } from "@/stores/uiStore";
 import styles from "./EntryIntelBadges.module.css";
 
@@ -13,6 +15,10 @@ interface EntryIntelBadgesProps {
   bookmarked?: boolean;
   /** Signal engine: this entry is a near-duplicate (echo) of earlier coverage */
   echo?: boolean;
+  /** The entry's tags; those promoted to chips lead the row. */
+  tags?: EntryTag[];
+  /** Lets a chip's × take its tag off this entry. */
+  entryId?: string;
 }
 
 const CATEGORY_ORDER = ["tactical", "operational", "technical", "strategic"] as const;
@@ -191,7 +197,7 @@ function PirSummary({ pirs }: { pirs: PIRMatch[] }) {
   );
 }
 
-export function EntryIntelBadges({ counts, starred, bookmarked, echo }: EntryIntelBadgesProps) {
+export function EntryIntelBadges({ counts, starred, bookmarked, echo, tags, entryId }: EntryIntelBadgesProps) {
   const pirMatches = counts?.pir_matches;
   const hasPirs = !!pirMatches && pirMatches.length > 0;
   const noteCount = counts?.notes ?? 0;
@@ -212,7 +218,11 @@ export function EntryIntelBadges({ counts, starred, bookmarked, echo }: EntryInt
 
   const hasIntel = hasPirs || hasSubject || (counts?.total ?? 0) > 0 || (counts?.rules ?? 0) > 0;
 
-  if (!hasIntel && !hasState) return null;
+  // Analyst-authored chips — "someone decided this about this entry" — lead the
+  // row, ahead of the personal markers.
+  const hasChips = chipTags(tags).length > 0;
+
+  if (!hasIntel && !hasState && !hasChips) return null;
 
   // Telemetry-aware opportunity tier; fall back to the legacy binary flag when
   // the API payload predates detection_opportunity.
@@ -240,7 +250,9 @@ export function EntryIntelBadges({ counts, starred, bookmarked, echo }: EntryInt
 
   return (
     <span className={styles.intelLine}>
-      {/* Personal state markers — leading icon chips */}
+      {hasChips && <TagChips tags={tags} entryId={entryId} />}
+      {hasChips && (hasState || hasIntel) && <span className={styles.divider} aria-hidden="true" />}
+      {/* Personal state markers — icon chips */}
       {echo && (
         <span
           className={`${styles.chip} ${styles.stateChip} ${styles.echo}`}

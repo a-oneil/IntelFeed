@@ -15,6 +15,7 @@ from app.models.entry_state import UserEntryState
 from app.models.feed import Feed
 from app.models.note import Note
 from app.models.tag import EntryTag, Tag
+from app.services.entry_tags import visible_to
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +69,7 @@ async def _evaluate_single(db: AsyncSession, entry: Entry, condition: dict, user
             case "author_matches":
                 return _eval_author_matches(entry, config)
             case "tag_matches":
-                return await _eval_tag_matches(db, entry, config)
+                return await _eval_tag_matches(db, entry, config, user_id)
             case "feed_type_matches":
                 return await _eval_feed_type_matches(db, entry, config)
             case "is_read":
@@ -155,14 +156,20 @@ def _eval_author_matches(entry: Entry, config: dict) -> bool:
     return any(a.lower() in entry.author.lower() for a in authors)
 
 
-async def _eval_tag_matches(db: AsyncSession, entry: Entry, config: dict) -> bool:
-    """Check if entry has any of the specified tags."""
+async def _eval_tag_matches(db: AsyncSession, entry: Entry, config: dict, user_id=None) -> bool:
+    """Check if entry has any of the specified tags.
+
+    Sees what the rule's owner sees: shared tags plus their own chip stamps, so
+    one of their rules' chips can trigger another of their rules.
+    """
     tag_names = config.get("tags", [])
     if not tag_names:
         return True
 
     result = await db.execute(
-        select(Tag.name).join(EntryTag, EntryTag.tag_id == Tag.id).where(EntryTag.entry_id == entry.id)
+        select(Tag.name)
+        .join(EntryTag, EntryTag.tag_id == Tag.id)
+        .where(EntryTag.entry_id == entry.id, visible_to(user_id))
     )
     entry_tags = {row[0].lower() for row in result.all()}
     return any(t.lower() in entry_tags for t in tag_names)
