@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { OnboardingStatus } from "@/api/types";
@@ -6,6 +6,7 @@ import type { OnboardingStatus } from "@/api/types";
 const saveProgress = vi.fn();
 let status: OnboardingStatus | undefined;
 let role = "admin";
+let settings: Record<string, unknown> = {};
 
 const READY: OnboardingStatus = {
   reference_data: { ok: true, checks: [], missing: [], remedy: "", consequence: "" },
@@ -37,7 +38,7 @@ vi.mock("react-router-dom", () => ({
 }));
 vi.mock("@/stores/authStore", () => ({
   useAuthStore: (selector: (s: unknown) => unknown) =>
-    selector({ user: { id: "u1", username: "aoneil", role, settings: {} } }),
+    selector({ user: { id: "u1", username: "aoneil", role, settings } }),
 }));
 
 const { OnboardingWizard } = await import("../OnboardingWizard");
@@ -47,6 +48,7 @@ describe("OnboardingWizard", () => {
     saveProgress.mockReset();
     status = READY;
     role = "admin";
+    settings = {};
   });
 
   it("closing defers instead of completing", async () => {
@@ -106,9 +108,9 @@ describe("OnboardingWizard", () => {
   });
 
   it("resumes at the saved step", async () => {
+    settings = { onboarding_step: "queue" };
     render(<OnboardingWizard />);
-    // Default start is the first step of the visible flow.
-    await waitFor(() => expect(screen.getByText(/Step 1 of/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("heading", { name: "The Priority Queue" })).toBeInTheDocument());
   });
 
   it("disables Back on the first step", () => {
@@ -139,4 +141,56 @@ describe("OnboardingWizard", () => {
 
     expect(screen.getByRole("heading", { name: /Priority Queue/ })).toBeInTheDocument();
   });
+
+  it.each([
+    ["Reference data", "readiness", "Optional services, and your team"],
+    ["Verify it works", "verify", "The reading loop"],
+  ])("advances when the current %s step becomes satisfied", async (label, id, nextHeading) => {
+    status = { ...READY, reference_data: { ...READY.reference_data, ok: false }, ready: false };
+    const user = userEvent.setup();
+    const { rerender } = render(<OnboardingWizard />);
+    await user.click(screen.getByRole("button", { name: label }));
+    settings = { onboarding_step: id };
+    status = READY;
+    rerender(<OnboardingWizard />);
+    expect(screen.getByRole("heading", { name: nextHeading })).toBeInTheDocument();
+    // A later readiness change must not take the user back to the old step.
+    status = { ...READY, reference_data: { ...READY.reference_data, ok: false }, ready: false };
+    rerender(<OnboardingWizard />);
+    expect(screen.getByRole("heading", { name: nextHeading })).toBeInTheDocument();
+  });
+
+  it("replays a deferred tour from the beginning, including repeated replays", async () => {
+    settings = { onboarding_step: "queue" };
+    const user = userEvent.setup();
+    const { rerender } = render(<OnboardingWizard />);
+    for (const runId of ["first-replay", "second-replay"]) {
+      await user.click(screen.getByRole("button", { name: /close/i }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      settings = { onboarding_completed: false, onboarding_step: null, onboarding_run_id: runId };
+      rerender(<OnboardingWizard />);
+      expect(screen.getByRole("heading", { name: "Welcome to IntelFeed" })).toBeInTheDocument();
+    }
+  });
+
+  it("restores focus and stops handling Escape after dismissal", async () => {
+    const trigger = document.createElement("button");
+    document.body.appendChild(trigger);
+    trigger.focus();
+    try {
+      const user = userEvent.setup();
+      render(<OnboardingWizard />);
+      expect(screen.getByRole("dialog")).toHaveFocus();
+      await user.click(screen.getByRole("button", { name: /close/i }));
+      expect(trigger).toHaveFocus();
+      saveProgress.mockReset();
+      const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+      fireEvent(document, event);
+      expect(event.defaultPrevented).toBe(false);
+      expect(saveProgress).not.toHaveBeenCalled();
+    } finally {
+      trigger.remove();
+    }
+  });
+
 });

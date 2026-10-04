@@ -9,6 +9,8 @@ export interface OnboardingProgress {
   onboarding_step?: string | null;
   /** Only ever set by finishing. Closing must never set it — that was the old bug. */
   onboarding_completed?: boolean;
+  /** A new run id remounts the wizard when a deferred tour is replayed. */
+  onboarding_run_id?: string;
 }
 
 /**

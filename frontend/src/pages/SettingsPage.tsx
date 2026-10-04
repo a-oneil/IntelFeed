@@ -379,7 +379,11 @@ function AccountSection() {
         <div className={styles.cardActions}>
           <button
             onClick={() =>
-              replayOnboarding.mutate({ onboarding_completed: false, onboarding_step: null })
+              replayOnboarding.mutate({
+                onboarding_completed: false,
+                onboarding_step: null,
+                onboarding_run_id: crypto.randomUUID(),
+              })
             }
             disabled={replayOnboarding.isPending}
             className={styles.btnPrimary}

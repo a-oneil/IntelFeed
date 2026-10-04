@@ -1,9 +1,12 @@
 """The readiness probe behind the onboarding wizard's first and last steps."""
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.ai_provider import AIProvider
 from app.models.country import Country
 from app.models.feed import Feed
 
@@ -74,3 +77,31 @@ async def test_status_requires_authentication(client: AsyncClient):
 async def test_status_is_open_to_non_admins(client: AsyncClient, auth_headers: dict):
     """A non-admin hitting an unusable instance deserves to be told why."""
     assert (await client.get("/api/onboarding/status", headers=auth_headers)).status_code == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider_type", "is_active", "expected"),
+    [("ollama", True, "ollama"), ("claude", True, "claude"), ("ollama", False, "claude_code")],
+)
+async def test_status_prefers_configured_provider_over_startup_cli(
+    client: AsyncClient,
+    auth_headers: dict,
+    db_session: AsyncSession,
+    provider_type: str,
+    is_active: bool,
+    expected: str,
+):
+    now = datetime.now(UTC)
+    db_session.add_all(
+        [
+            AIProvider(
+                name="Startup CLI", provider_type="claude_code", is_active=True, created_at=now - timedelta(days=1)
+            ),
+            AIProvider(name="Configured provider", provider_type=provider_type, is_active=is_active, created_at=now),
+        ]
+    )
+    await db_session.flush()
+    response = await client.get("/api/onboarding/status", headers=auth_headers)
+    assert response.status_code == 200
+    assert response.json()["ai"] == {"providers": 2, "active": expected}

@@ -178,7 +178,12 @@ async def onboarding_status(
     provider_rows = (
         await db.execute(select(AIProvider.provider_type, AIProvider.is_active).order_by(AIProvider.created_at))
     ).all()
-    active = next((p_type for p_type, is_active in provider_rows if is_active), None)
+    # Startup seeds an active CLI provider for link validation. Prefer a
+    # provider the admin chose, even if it was registered after that seed.
+    active_types = [p_type for p_type, is_active in provider_rows if is_active]
+    active = next((p_type for p_type in active_types if p_type != "claude_code"), None)
+    if active is None:
+        active = next(iter(active_types), None)
     ai = AIStatus(providers=len(provider_rows), active=active)
 
     return OnboardingStatus(

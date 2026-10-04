@@ -11,6 +11,12 @@ const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export function OnboardingWizard() {
+  const runId = useAuthStore((s) => s.user?.settings?.onboarding_run_id as string | undefined);
+  // Replay starts a new session even when the previous tour was only deferred.
+  return <OnboardingSession key={runId} />;
+}
+
+function OnboardingSession() {
   const user = useAuthStore((s) => s.user);
   const isAdmin = user?.role === "admin";
   const saveProgress = useSaveOnboardingProgress();
@@ -42,9 +48,15 @@ export function OnboardingWizard() {
   // If the step they were on disappears (they just satisfied it), fall to the
   // next one still standing rather than back to the beginning.
   const found = steps.findIndex((s) => s.id === currentId);
-  const index = found >= 0 ? found : 0;
+  const position = STEPS.findIndex((s) => s.id === currentId);
+  const nextRemaining = steps.findIndex((s) => STEPS.indexOf(s) > position);
+  const index = found >= 0 ? found : nextRemaining >= 0 ? nextRemaining : steps.length - 1;
   const step = steps[index];
   const isLast = index === steps.length - 1;
+
+  useEffect(() => {
+    if (currentId !== null && found < 0 && step) setCurrentId(step.id);
+  }, [currentId, found, step]);
 
   const close = useCallback(() => {
     setDismissed(true);
@@ -73,15 +85,17 @@ export function OnboardingWizard() {
   // Focus management: move focus into the dialog on open, keep Tab inside it,
   // and hand focus back to whatever had it when we close.
   useEffect(() => {
+    if (dismissed) return;
     restoreFocusTo.current = document.activeElement;
     dialogRef.current?.focus();
     const el = restoreFocusTo.current;
     return () => {
       if (el instanceof HTMLElement) el.focus();
     };
-  }, []);
+  }, [dismissed]);
 
   useEffect(() => {
+    if (dismissed) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -105,7 +119,7 @@ export function OnboardingWizard() {
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [close]);
+  }, [close, dismissed]);
 
   if (dismissed || !step) return null;
 
