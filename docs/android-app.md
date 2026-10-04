@@ -136,11 +136,16 @@ The `android` CI job:
 So the release flow is:
 
 ```bash
-scripts/release_apk.sh            # bumps android/version.properties, tests, builds,
-                                  # copies the APK to ./IntelFeed.apk, installs on plugged-in devices
-scripts/release_apk.sh --major    # 1.x -> 2.0 instead of 1.x -> 1.x+1
-scripts/release_apk.sh --install  # just install ./IntelFeed.apk on connected devices
+scripts/build_apk.sh            # bumps android/version.properties, tests, builds,
+                                # installs on plugged-in devices
+scripts/build_apk.sh --major    # 1.x -> 2.0 instead of 1.x -> 1.x+1
+scripts/build_apk.sh --install  # just install the last build on connected devices
 ```
+
+The APK stays where Gradle writes it,
+`android/app/build/outputs/apk/debug/app-debug.apk`. If no phone is connected
+the script says so and tells you to plug one in with USB debugging on, then
+run it again with `--install`.
 
 Commit the bump, open a PR titled `android: <what changed>` (the release
 notes come from that title), merge. One release per app version, named after

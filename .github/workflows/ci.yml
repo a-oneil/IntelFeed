@@ -339,7 +339,7 @@ jobs:
   # Unit tests + the debug APK in one job, sharing one Gradle daemon. On main it
   # also publishes the APK as a GitHub release — but only when
   # android/version.properties holds a version with no `android-v<version>`
-  # release yet, so a merge that bumps the version (scripts/release_apk.sh) is
+  # release yet, so a merge that bumps the version (scripts/build_apk.sh) is
   # what ships, and every other android/ change is built and tested only.
   # Skipped on the Monday sweep: nothing here is an advisory check, so it would
   # rebuild an unchanged tree.
@@ -418,7 +418,7 @@ jobs:
           apk="$RUNNER_TEMP/IntelFeed.apk"
 
           if gh release view "$tag" >/dev/null 2>&1; then
-            verdict="$tag is already released, so this build is not published. Bump android/version.properties (scripts/release_apk.sh) to ship it."
+            verdict="$tag is already released, so this build is not published. Bump android/version.properties (scripts/build_apk.sh) to ship it."
           elif [ "$GITHUB_REF" != "refs/heads/main" ]; then
             verdict="Version $NAME has no release yet: merging this publishes $tag."
           elif [ "$SHARED_KEY" != "true" ]; then

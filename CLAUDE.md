@@ -61,7 +61,7 @@ pnpm exec playwright test             # E2E tests (needs running stack)
 ```
 
 ### Android (`android/`)
-Native client (Kotlin / Jetpack Compose) for the same REST API; see [docs/android-app.md](docs/android-app.md). Documentation for the app lives in `docs/`, not in `android/`. `scripts/release_apk.sh` bumps `android/version.properties`, builds and installs on connected devices; merging the bump makes CI publish the release.
+Native client (Kotlin / Jetpack Compose) for the same REST API; see [docs/android-app.md](docs/android-app.md). Documentation for the app lives in `docs/`, not in `android/`. `scripts/build_apk.sh` bumps `android/version.properties`, builds and installs on connected devices; merging the bump makes CI publish the release.
 ```bash
 cd android
 ./gradlew :app:testDebugUnitTest :app:assembleDebug   # JDK 17 + Android SDK
@@ -116,7 +116,7 @@ scripts/ops/sync_prod_to_dev.sh           # Dump prod DB over SSH and restore in
 scripts/ops/cf-origin-lockdown.sh         # Restrict prod 80/443 to Cloudflare edge ranges
 scripts/ops/version.sh                    # Source (don't run) before a build to stamp images with the commit
 scripts/dev/sync_skill_clis.py            # Regenerate skill CLIs from the live tool registry
-scripts/release_apk.sh                    # Bump the Android app version, test, build, install on devices
+scripts/build_apk.sh                    # Bump the Android app version, test, build, install on devices
 ```
 `deploy.sh` / `sync_prod_to_dev.sh` require `INTELFEED_PROD_HOST` — there is no default host.
 

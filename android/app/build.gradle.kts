@@ -6,7 +6,7 @@ plugins {
   alias(libs.plugins.kotlin.serialization)
 }
 
-// One place for the version: version.properties (bumped by scripts/release_apk.sh at the repo root; history is the GitHub Releases page).
+// One place for the version: version.properties (bumped by scripts/build_apk.sh at the repo root; history is the GitHub Releases page).
 val appVersion = Properties().apply { rootProject.file("version.properties").inputStream().use { load(it) } }
 
 android {
