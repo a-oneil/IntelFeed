@@ -71,6 +71,8 @@ backend/skill-clis/
 
 # Written by update.sh between pulling and a clean build+start (see update.sh).
 .update-pending
+# The commit the running containers were last deployed from; gates the rebuild.
+.update-deployed
 
 # Review CSVs written by maintenance scripts (scripts/ is bind-mounted into the api container).
 scripts/out/

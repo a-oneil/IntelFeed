@@ -864,10 +864,38 @@ grep "entry_ingested" logs/app.log | grep "$(date +%Y-%m-%d)" | wc -l
 1. Fetches latest commits from `origin/main`
 2. Checks if commits exist (skip if up-to-date)
 3. Pulls latest code
-4. Ensures `./tts_media/` exists and is owned by uid 1000 (chowns if not — Piper audio is written by the in-container appuser)
-5. Rebuilds Docker images (`docker compose --build`)
-6. Restarts services (`up -d`)
-7. Logs all activity to `logs/update.log`
+4. Classifies what changed since the last deploy, and does the least that works (see below)
+5. For an image change: ensures `./tts_media/` exists and is owned by uid 1000 (chowns if not — Piper audio is written by the in-container appuser), then rebuilds images and `up -d`
+6. Logs all activity to `logs/update.log`
+
+**It only rebuilds when a rebuild would change something.** Most commits here touch
+`docs/`, `scripts/`, `planning/`, the Android client or CI, and none of those are
+baked into an image — `./docs`, `./scripts` and `./intelfeed-skill` are bind-mounted
+read-only, so new content is live the moment the pull lands. A cold build on the prod
+box is minutes of CPU on a box that OOMs under load, and `up -d` drops every request
+in flight, so paying that for a typo fix is pure downtime. The classification:
+
+| Changed path | Action |
+| --- | --- |
+| `backend/**`, `frontend/**`, `db/**`, `piper/**`, `docker-compose*.yml` | `build` then `up -d` |
+| `Caddyfile` | `caddy reload` in place (it is bind-mounted, so `up -d` would never re-read it) |
+| anything else | pull only; nothing is restarted |
+
+Note that `backend/**` and `frontend/**` count *in full* here, unlike the narrower
+`images` filter in CI: prod has no source volume mounts, so the api, worker and SPA
+images `COPY` the code at build time and a lone Python or TSX edit reaches the running
+stack only through a build.
+
+The decision diffs against `.update-deployed`, a gitignored file holding the commit
+the running containers were last built from — **not** against the previous `HEAD`. That
+distinction is the whole point: a docs-only commit landing on top of a backend change
+that failed to build must still rebuild, and diffing `HEAD~1..HEAD` would skip it.
+If that file is missing during a retry the script cannot know what is running, so it
+rebuilds.
+
+One consequence: on a pull-only tick the images keep the version stamp of the commit
+they were actually built from, so the About page can sit a few commits behind `HEAD`.
+That is accurate rather than wrong — the image really is that old.
 
 Note: profile-gated services (`libretranslate`) are **not** restarted by `update.sh` — re-enable them explicitly with `--profile translate` after an update if you use them. (`celery-worker-ai` was un-gated when the CLI-credential era ended; update.sh now manages it like any other service.)
 
