@@ -58,14 +58,24 @@ function OnboardingSession() {
     if (currentId !== null && found < 0 && step) setCurrentId(step.id);
   }, [currentId, found, step]);
 
+  // Closing saves the step *and* records the deferral. `dismissed` dies with the
+  // page, so without the second half every hard refresh reopened the tour and
+  // closing meant nothing until you walked all the way to Finish.
   const close = useCallback(() => {
     setDismissed(true);
-    if (step) saveProgress.mutate({ onboarding_step: step.id });
+    saveProgress.mutate({
+      onboarding_step: step?.id ?? null,
+      onboarding_deferred_at: new Date().toISOString(),
+    });
   }, [saveProgress, step]);
 
   const finish = useCallback(() => {
     setDismissed(true);
-    saveProgress.mutate({ onboarding_completed: true, onboarding_step: null });
+    saveProgress.mutate({
+      onboarding_completed: true,
+      onboarding_step: null,
+      onboarding_deferred_at: null,
+    });
   }, [saveProgress]);
 
   const goTo = useCallback(
@@ -230,6 +240,9 @@ function OnboardingSession() {
 function useThemesSafely() {
   const { data } = useThemes();
   const setThemePref = useSetThemePreference();
-  const current = useAuthStore((s) => s.user?.settings?.theme_id as string | undefined);
+  // The preference is a column on the user, not a key in the settings blob —
+  // nothing ever writes `settings.theme_id`, so reading it meant no theme
+  // showed as selected, not even the one just clicked.
+  const current = useAuthStore((s) => s.user?.theme_id ?? undefined);
   return { list: data ?? [], current, apply: (id: string) => setThemePref.mutate({ theme_id: id }) };
 }

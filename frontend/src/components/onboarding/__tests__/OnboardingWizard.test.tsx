@@ -62,6 +62,9 @@ describe("OnboardingWizard", () => {
     const arg = saveProgress.mock.calls[0][0];
     expect(arg.onboarding_step).toBeTruthy();
     expect(arg.onboarding_completed).toBeUndefined();
+    // ...and the deferral is persisted, or the next hard refresh reopens the
+    // tour over someone who already closed it — `dismissed` dies with the page.
+    expect(arg.onboarding_deferred_at).toBeTruthy();
   });
 
   it("Escape also defers rather than completing", async () => {
@@ -85,6 +88,7 @@ describe("OnboardingWizard", () => {
     const finish = saveProgress.mock.calls.at(-1)![0];
     expect(finish.onboarding_completed).toBe(true);
     expect(finish.onboarding_step).toBeNull();
+    expect(finish.onboarding_deferred_at).toBeNull();
   });
 
   it("is a labelled modal dialog", () => {

@@ -17,6 +17,7 @@ So this endpoint answers both, cheaply, as counts the wizard can show and
 re-poll. It is read-only and takes no arguments.
 """
 
+import os
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends
@@ -50,7 +51,21 @@ REFERENCE_CHECKS: tuple[tuple[str, str, type, int], ...] = (
     ("products", "Products", Product, 200),
 )
 
-SEED_COMMAND = "python scripts/seed/seed_all.py"
+SEED_SCRIPT = "python scripts/seed/seed_all.py"
+
+
+def _seed_command() -> str:
+    """The whole line to paste, compose file included.
+
+    The seeders run inside the api container, so the command depends on which
+    compose file this instance runs under — which the browser has no way to
+    know. The UI used to wrap the script in a hardcoded `-f
+    docker-compose.prod.yml`, wrong on every dev install, so resolve it here
+    off the same ENV var config.py reads.
+    """
+    env = os.getenv("ENV", "development").lower()
+    compose = "docker-compose.prod.yml" if env == "production" else "docker-compose.dev.yml"
+    return f"docker compose -f {compose} exec api {SEED_SCRIPT}"
 
 
 class ReferenceCheck(BaseModel):
@@ -132,7 +147,7 @@ async def onboarding_status(
         # idempotent and fills gaps, the steps have ordering dependencies
         # between them, and these check keys are not all seed_all step names
         # (products come from the `vendors` step).
-        remedy=SEED_COMMAND,
+        remedy=_seed_command(),
         consequence=(
             "Entries will ingest, but the autolinker has no vocabulary — no actor, "
             "technique, CVE, weakness or vendor will ever link to an article."

@@ -12,6 +12,11 @@ function extractErrorMessage(error: unknown): string {
   return "An unexpected error occurred";
 }
 
+/** Queries that report state on a timer opt out of the global toast via `meta`. */
+function silenced(meta: Record<string, unknown> | undefined): boolean {
+  return meta?.silenceToast === true;
+}
+
 function shouldShowToast(error: unknown): boolean {
   if (error && typeof error === "object" && "response" in error) {
     const axiosErr = error as { response?: { data?: { error?: { code?: string } }; status?: number } };
@@ -24,8 +29,8 @@ function shouldShowToast(error: unknown): boolean {
 
 export const queryClient = new QueryClient({
   queryCache: new QueryCache({
-    onError: (error) => {
-      if (shouldShowToast(error)) {
+    onError: (error, query) => {
+      if (!silenced(query.meta) && shouldShowToast(error)) {
         toast.error(extractErrorMessage(error));
       }
     },

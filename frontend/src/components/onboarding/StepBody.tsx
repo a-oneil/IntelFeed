@@ -151,9 +151,9 @@ function Readiness({
       {ref && !ref.ok && (
         <div className={`${styles.callout} ${styles.calloutWarn}`}>
           <b>Nothing is seeded.</b> {ref.consequence} Run this once, then re-check:
-          <pre className={styles.code}>
-            docker compose -f docker-compose.prod.yml exec api \{"\n"}  {ref.remedy}
-          </pre>
+          {/* The whole line comes from the server, compose file included — the UI
+              has no way to know which compose file this instance runs under. */}
+          <pre className={styles.code}>{ref.remedy}</pre>
         </div>
       )}
       {ref?.ok && (

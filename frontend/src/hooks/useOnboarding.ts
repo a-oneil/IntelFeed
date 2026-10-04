@@ -11,6 +11,16 @@ export interface OnboardingProgress {
   onboarding_completed?: boolean;
   /** A new run id remounts the wizard when a deferred tour is replayed. */
   onboarding_run_id?: string;
+  /**
+   * When they last closed the wizard without finishing.
+   *
+   * `dismissed` is component state and dies with the page, so without a
+   * persisted deferral every hard refresh reopened the tour over someone who
+   * had already closed it — closing meant nothing until they reached Finish.
+   * This is deliberately not `onboarding_completed`, which is the bug this
+   * whole flow exists to fix; Settings → Account clears it.
+   */
+  onboarding_deferred_at?: string | null;
 }
 
 /**
@@ -33,6 +43,10 @@ export function useOnboardingStatus(options?: { enabled?: boolean; pollMs?: numb
     // report the current state.
     staleTime: 0,
     gcTime: 0,
+    // The verify step polls this every few seconds. A failure must not become a
+    // toast per poll — the steps already degrade to "…" on their own.
+    retry: false,
+    meta: { silenceToast: true },
   });
 }
 

@@ -105,3 +105,13 @@ async def test_status_prefers_configured_provider_over_startup_cli(
     response = await client.get("/api/onboarding/status", headers=auth_headers)
     assert response.status_code == 200
     assert response.json()["ai"] == {"providers": 2, "active": expected}
+
+
+@pytest.mark.asyncio
+async def test_remedy_is_a_command_the_reader_can_paste(client: AsyncClient, auth_headers: dict):
+    """The UI used to wrap this in a hardcoded `-f docker-compose.prod.yml`, which was
+    wrong on every dev install. The whole line comes from the server now."""
+    data = (await client.get("/api/onboarding/status", headers=auth_headers)).json()
+    remedy = data["reference_data"]["remedy"]
+    assert remedy.startswith("docker compose -f docker-compose.")
+    assert remedy.endswith("exec api python scripts/seed/seed_all.py")

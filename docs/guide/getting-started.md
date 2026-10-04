@@ -20,9 +20,10 @@ settings. If a section in this guide says "admin only", that's why.
 ## The onboarding tour
 
 On first login a tour slides open, in three chapters. Every step is skippable,
-and **closing it saves your place rather than ending it** — you resume where you
-left off, and you can replay the whole thing any time from
-**Settings → Account → Replay the tour**.
+and **closing it saves your place rather than ending it** — it stays closed until
+you ask for it back, and **Settings → Account** then offers **Resume the tour**
+(picking up on the step you closed on) or **Replay from the start**. Only
+reaching the end marks it finished.
 
 **Set up** (admin only, and each step disappears once it's satisfied):
 

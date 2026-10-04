@@ -315,6 +315,10 @@ function TagsSection() {
 function AccountSection() {
   const user = useAuthStore((s) => s.user);
   const replayOnboarding = useSaveOnboardingProgress();
+  const tourState = user?.settings as
+    | { onboarding_completed?: boolean; onboarding_step?: string | null }
+    | undefined;
+  const canResumeTour = !tourState?.onboarding_completed && !!tourState?.onboarding_step;
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [passwordMsg, setPasswordMsg] = useState<string | null>(null);
@@ -372,23 +376,41 @@ function AccountSection() {
       <div className={styles.card}>
         <h3 className={styles.cardTitle}>Getting started</h3>
         <p className={styles.sectionDesc}>
-          Replay the setup and usage tour from the beginning. It covers the reading loop, the
-          priority queue, entities and search — and, if you're an admin, anything this instance
-          still needs.
+          {canResumeTour
+            ? "You closed the tour partway through. Pick it up where you left off, or start it again from the beginning."
+            : "Replay the setup and usage tour from the beginning. It covers the reading loop, the priority queue, entities and search — and, if you're an admin, anything this instance still needs."}
         </p>
         <div className={styles.cardActions}>
+          {canResumeTour && (
+            <button
+              // Clearing the deferral reopens the wizard on the saved step; the
+              // step itself is left alone. The run id remounts it, in case this
+              // page's wizard is still mounted-but-dismissed.
+              onClick={() =>
+                replayOnboarding.mutate({
+                  onboarding_deferred_at: null,
+                  onboarding_run_id: crypto.randomUUID(),
+                })
+              }
+              disabled={replayOnboarding.isPending}
+              className={styles.btnPrimary}
+            >
+              {replayOnboarding.isPending ? "Opening…" : "Resume the tour"}
+            </button>
+          )}
           <button
             onClick={() =>
               replayOnboarding.mutate({
                 onboarding_completed: false,
                 onboarding_step: null,
+                onboarding_deferred_at: null,
                 onboarding_run_id: crypto.randomUUID(),
               })
             }
             disabled={replayOnboarding.isPending}
-            className={styles.btnPrimary}
+            className={canResumeTour ? styles.btnSecondary : styles.btnPrimary}
           >
-            {replayOnboarding.isPending ? "Starting…" : "Replay the tour"}
+            {replayOnboarding.isPending ? "Starting…" : "Replay from the start"}
           </button>
         </div>
       </div>

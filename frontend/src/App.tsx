@@ -156,7 +156,14 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuth = useAuthStore((s) => s.isAuthenticated());
   const user = useAuthStore((s) => s.user);
   if (!isAuth) return <Navigate to="/login" replace />;
-  const showOnboarding = !!user && !user.settings?.onboarding_completed;
+  // Auto-open until they finish it — but a close counts too, otherwise every
+  // hard refresh reopens the tour over a user who already dismissed it. Both
+  // keys are cleared from Settings → Account.
+  const onboarding = user?.settings as
+    | { onboarding_completed?: boolean; onboarding_deferred_at?: string | null }
+    | undefined;
+  const showOnboarding =
+    !!user && !onboarding?.onboarding_completed && !onboarding?.onboarding_deferred_at;
   return (
     <>
       {children}
