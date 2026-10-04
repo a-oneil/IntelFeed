@@ -416,9 +416,9 @@ jobs:
           set -euo pipefail
           apksigner=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
           certs=$("$apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk)
-          # Older apksigner prints "Signer #1 certificate SHA-256 digest: ...";
-          # newer ones "Signer (minSdkVersion=24, maxSdkVersion=...) certificate SHA-256 digest: ...".
-          apk_sha=$(printf '%s\n' "$certs" | sed -n 's/^Signer .*certificate SHA-256 digest: //p' | head -1)
+          # The signer line's label varies by apksigner version: "Signer #1",
+          # "Signer (minSdkVersion=24, ...)", "V2 Signer:". Only the digest matters.
+          apk_sha=$(printf '%s\n' "$certs" | sed -n 's/^.*[Ss]igner.*certificate SHA-256 digest: //p' | head -1)
           echo "keystore: $SHARED_KEY_SHA256"
           echo "apk:      $apk_sha"
           if [ "$apk_sha" != "$SHARED_KEY_SHA256" ]; then
