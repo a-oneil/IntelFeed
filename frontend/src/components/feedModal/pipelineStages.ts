@@ -16,10 +16,10 @@ import type { FeedFormValues, IntelMode } from "./useFeedForm";
  * So the stages below are the real ones, each pointing at the field that
  * genuinely drives it.
  *
- * Only switches that are genuinely this feed's get a row. The observables
- * ledger scan used to have one and does not any more: `_scan_entry_observables`
- * never reads the Feed, so it runs on every article from every feed and the
- * checkbox was decoration. It lives in the summary sentence instead.
+ * Only switches you can actually move get a row. The observables ledger scan
+ * has none: it follows "Analyse this feed" and has no setting of its own, so a
+ * checkbox for it would be decoration. It is reported in the summary sentence
+ * instead.
  *
  * Two things can still take a listed stage out of this pane's hands, and both
  * say so rather than pretending:
@@ -244,7 +244,7 @@ export function summarizeStages(values: FeedFormValues, ctx: Context): string {
   const on = (id: StageId) => rows.find((r) => r.id === id)?.on ?? false;
 
   if (!on("master")) {
-    return "Articles still arrive, are cleaned up and stay searchable, and are still checked against your indicator ledger — that check is not a per-feed setting. Nothing else is pulled out of them, and no entity is created or linked.";
+    return "Articles still arrive, are cleaned up and stay searchable. Nothing is pulled out of them: no tagging, no AI, no indicator matching, and no entity created or linked.";
   }
 
   const parts: string[] = [];
@@ -258,8 +258,8 @@ export function summarizeStages(values: FeedFormValues, ctx: Context): string {
   if (on("ai")) parts.push("read by the AI");
   if (on("regex")) parts.push("filled in from NVD");
 
-  // The ledger scan runs on every article from every feed and has no per-feed
-  // switch, so it is stated rather than listed as something you chose.
+  // No row of its own — there is no individual switch for it — but it does
+  // follow "Analyse this feed", so the sentence only claims it when that is on.
   parts.push("checked against your indicator ledger");
 
   let summary = `Every article is ${joinWords(parts)}.`;

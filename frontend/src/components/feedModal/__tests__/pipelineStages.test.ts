@@ -160,11 +160,12 @@ describe("toggleStage", () => {
 });
 
 describe("summarizeStages", () => {
-  it("says plainly that nothing else is extracted, ledger aside", () => {
+  it("says plainly that nothing is extracted, ledger included", () => {
     const text = summarizeStages(values({ intel_extraction_mode: "none" }), ctx(true));
-    expect(text).toContain("Nothing else is pulled out of them");
-    // The ledger scan is ungated, so the sentence must not deny it.
-    expect(text).toContain("indicator ledger");
+    expect(text).toContain("Nothing is pulled out of them");
+    // The ledger scan follows the master switch now, so the sentence must not
+    // promise it is still happening.
+    expect(text).toContain("no indicator matching");
   });
 
   it("warns that the AI may create new entities", () => {
@@ -218,9 +219,12 @@ describe("pipeline plans", () => {
     expect(text).not.toContain("tagged with entities you already track");
   });
 
-  it("always reports the ledger scan, which no switch here controls", () => {
-    for (const vals of [values(), values({ intel_extraction_mode: "none" })]) {
-      expect(summarizeStages(vals, ctx(true))).toContain("indicator ledger");
-    }
+  it("reports the ledger scan only while the feed is analysed", () => {
+    expect(summarizeStages(values(), ctx(true))).toContain(
+      "checked against your indicator ledger"
+    );
+    expect(
+      summarizeStages(values({ intel_extraction_mode: "none" }), ctx(true))
+    ).not.toContain("checked against your indicator ledger");
   });
 });

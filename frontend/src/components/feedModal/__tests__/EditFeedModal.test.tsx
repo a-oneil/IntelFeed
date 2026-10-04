@@ -290,11 +290,11 @@ describe("EditFeedModal", () => {
     await user.click(screen.getByRole("checkbox", { name: /^Analyse this feed/i }));
 
     expect(screen.getByRole("checkbox", { name: /^Tag articles with entities/i })).toBeDisabled();
-    expect(screen.getByText(/Nothing else is pulled out of them/i)).toBeInTheDocument();
-    // The ledger scan is not the feed's to switch off, so it gets no checkbox
-    // — but the sentence still says it happens.
+    expect(screen.getByText(/Articles still arrive, are cleaned up/i)).toBeInTheDocument();
+    // No checkbox for the ledger scan — it has no switch of its own — and
+    // switching the feed off stops it too, so the sentence must say so.
     expect(screen.queryByRole("checkbox", { name: /ledger/i })).toBeNull();
-    expect(screen.getByText(/indicator ledger/i)).toBeInTheDocument();
+    expect(screen.getByText(/no indicator matching/i)).toBeInTheDocument();
   });
 
   it("turns the AI off for one feed without touching its autolinking", async () => {
