@@ -415,12 +415,15 @@ jobs:
         run: |
           set -euo pipefail
           apksigner=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
-          apk_sha=$("$apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk \
-                      | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+          certs=$("$apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk)
+          # Older apksigner prints "Signer #1 certificate SHA-256 digest: ...";
+          # newer ones "Signer (minSdkVersion=24, maxSdkVersion=...) certificate SHA-256 digest: ...".
+          apk_sha=$(printf '%s\n' "$certs" | sed -n 's/^Signer .*certificate SHA-256 digest: //p' | head -1)
           echo "keystore: $SHARED_KEY_SHA256"
           echo "apk:      $apk_sha"
           if [ "$apk_sha" != "$SHARED_KEY_SHA256" ]; then
             echo "::error::The APK is not signed with the shared debug key. Gradle looked for debug.keystore somewhere other than ANDROID_USER_HOME."
+            printf '%s\n' "$certs"
             echo "ANDROID_USER_HOME=$ANDROID_USER_HOME"; ls -la "$ANDROID_USER_HOME" || true
             env | grep -E '^(ANDROID_|XDG_|HOME=|TEST_TMPDIR)' || true
             find / -name debug.keystore -newer "$GITHUB_WORKSPACE/.git/HEAD" 2>/dev/null || true
