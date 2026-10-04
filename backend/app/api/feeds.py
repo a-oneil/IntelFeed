@@ -581,12 +581,18 @@ async def bulk_update_category_feeds(
         if request.extract_tools is not None and feed.extract_tools != request.extract_tools:
             feed.extract_tools = request.extract_tools
             changed = True
-        if request.reliability_rating is not None and feed.reliability_rating != request.reliability_rating:
-            feed.reliability_rating = request.reliability_rating
-            changed = True
-        if request.analyst_notes is not None and feed.analyst_notes != request.analyst_notes:
-            feed.analyst_notes = request.analyst_notes
-            changed = True
+        # Assessment fields stamp the review date, exactly as the single-feed
+        # PUT does. Without this, rating a whole category left every feed
+        # reading "never assessed" on its own Overview.
+        assessed = False
+        for field in ("reliability_rating", "timeliness_rating", "relevance_rating"):
+            value = getattr(request, field)
+            if value is not None and getattr(feed, field) != value:
+                setattr(feed, field, value)
+                assessed = True
+                changed = True
+        if assessed:
+            feed.last_reviewed_at = datetime.now(UTC)
 
         # Retention is now on Feed directly
         if request.clear_retention:

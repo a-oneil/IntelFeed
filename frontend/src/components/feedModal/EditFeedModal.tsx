@@ -14,7 +14,7 @@ import { IdentityPane } from "./panes/IdentityPane";
 import { OverviewPane } from "./panes/OverviewPane";
 import { PipelinePane } from "./panes/PipelinePane";
 import { SourcePane } from "./panes/SourcePane";
-import styles from "./EditFeedModal.module.css";
+import styles from "./modalShell.module.css";
 
 interface Props {
   subscription: Feed;

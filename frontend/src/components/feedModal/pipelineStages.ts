@@ -73,6 +73,52 @@ function planOverride(id: StageId, ctx: Context): "global" | "category" | "feed"
   return by && by !== "legacy" ? by : null;
 }
 
+/**
+ * What each stage is called and what it does, in one place.
+ *
+ * Both the feed modal and the category modal describe these settings, and
+ * before this they each carried their own wording — which is how the two ended
+ * up describing the same pipeline differently. The category modal reads these
+ * and renders them as bulk selects; the feed modal renders them as checkboxes.
+ */
+export const STAGE_COPY: Record<StageId, { label: string; detail: string }> = {
+  master: {
+    label: "Analyse this feed",
+    detail:
+      "Off, articles still arrive and stay searchable \u2014 nothing is pulled out of them. No entities, no scoring.",
+  },
+  autolink: {
+    label: "Tag articles with entities you already track",
+    detail:
+      "Matches names and aliases from your catalog \u2014 actors, malware, CVEs, TTPs, vendors, products, tools. Links what exists; never invents anything new.",
+  },
+  relevance: {
+    label: "Skip off-topic articles",
+    detail:
+      "Scores each article on security keywords first and leaves the obvious non-security ones untagged. Off, every article gets tagged.",
+  },
+  ai: {
+    label: "Let the AI read each article",
+    detail:
+      "Finds TTPs, actors, malware, sectors, indicators and relationships, and double-checks the tags above. This is what turns up things you have never seen before.",
+  },
+  tools: {
+    label: "Create records for new tools",
+    detail:
+      "Off, the AI can still mention a tool but will not add it to your catalog. Worth turning off for advisory and rule-repository feeds, which list affected software rather than attacker tooling.",
+  },
+  regex: {
+    label: "Fetch CVE details from NVD",
+    detail:
+      "Adds the CVSS score, severity, description and affected products for CVEs named here, and picks up MITRE mitigation IDs. Off, a CVE first seen on this feed stays a bare number until a background sweep fills it in. Uses NVD API quota.",
+  },
+  rules: {
+    label: "Save detection rules found in the text",
+    detail:
+      "Sigma, YARA, Splunk SPL, Elastic and KQL rules written out in an article become rules in your library.",
+  },
+};
+
 export function describeStages(values: FeedFormValues, ctx: Context): StageRow[] {
   const { aiEnabled, pipeline } = ctx;
   const mode = values.intel_extraction_mode;
@@ -83,27 +129,21 @@ export function describeStages(values: FeedFormValues, ctx: Context): StageRow[]
   const rows: StageRow[] = [
     {
       id: "master",
-      label: "Analyse this feed",
-      detail:
-        "Off, articles still arrive and stay searchable — nothing is pulled out of them. No entities, no scoring.",
+      ...STAGE_COPY.master,
       on: processing,
       scope: "feed",
       disabled: false,
     },
     {
       id: "autolink",
-      label: "Tag articles with entities you already track",
-      detail:
-        "Matches names and aliases from your catalog — actors, malware, CVEs, TTPs, vendors, products, tools. Links what exists; never invents anything new.",
+      ...STAGE_COPY.autolink,
       on: autolink,
       scope: "feed",
       disabled: !processing,
     },
     {
       id: "relevance",
-      label: "Skip off-topic articles",
-      detail:
-        "Scores each article on security keywords first and leaves the obvious non-security ones untagged. Off, every article gets tagged.",
+      ...STAGE_COPY.relevance,
       on: autolink && mode === "selective",
       scope: "feed",
       disabled: !autolink,
@@ -111,9 +151,9 @@ export function describeStages(values: FeedFormValues, ctx: Context): StageRow[]
     },
     {
       id: "ai",
-      label: "Let the AI read each article",
+      label: STAGE_COPY.ai.label,
       detail: aiEnabled
-        ? "Finds TTPs, actors, malware, sectors, indicators and relationships, and double-checks the tags above. This is what turns up things you have never seen before."
+        ? STAGE_COPY.ai.detail
         : "Switched off for the whole instance. Turn on “AI one pass” in Engine settings before this can do anything.",
       on: processing && aiEnabled && values.ai_analysis_enabled,
       scope: aiEnabled ? "feed" : "global",
@@ -125,9 +165,7 @@ export function describeStages(values: FeedFormValues, ctx: Context): StageRow[]
       // `apply_analysis_results`, so it is a sub-switch of the AI pass and does
       // nothing at all when that is off.
       id: "tools",
-      label: "Create records for new tools",
-      detail:
-        "Off, the AI can still mention a tool but will not add it to your catalog. Worth turning off for advisory and rule-repository feeds, which list affected software rather than attacker tooling. Articles the AI reads as an advisory are skipped regardless.",
+      ...STAGE_COPY.tools,
       on: aiRunning && values.extract_tools,
       scope: "feed",
       disabled: !aiRunning,
@@ -136,9 +174,7 @@ export function describeStages(values: FeedFormValues, ctx: Context): StageRow[]
     },
     {
       id: "regex",
-      label: "Fetch CVE details from NVD",
-      detail:
-        "Adds the CVSS score, severity, description and affected products for CVEs named here, and picks up MITRE mitigation IDs. Off, a CVE first seen on this feed stays a bare number until a background sweep fills it in. Uses NVD API quota.",
+      ...STAGE_COPY.regex,
       on: processing && values.auto_extract_on_ingest,
       scope: "feed",
       disabled: !processing,
@@ -146,9 +182,7 @@ export function describeStages(values: FeedFormValues, ctx: Context): StageRow[]
     },
     {
       id: "rules",
-      label: "Save detection rules found in the text",
-      detail:
-        "Sigma, YARA, Splunk SPL, Elastic and KQL rules written out in an article become rules in your library.",
+      ...STAGE_COPY.rules,
       on: processing && values.extract_detection_rules,
       scope: "feed",
       disabled: !processing,

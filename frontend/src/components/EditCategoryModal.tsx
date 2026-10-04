@@ -1,8 +1,12 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useBulkUpdateCategoryFeeds } from "@/hooks/useFeeds";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
+import { confirmDialog } from "@/utils/dialog";
+import { STAGE_COPY } from "./feedModal/pipelineStages";
 import type { Category, Feed } from "@/api/types";
-import styles from "./EditCategoryModal.module.css";
+import shell from "./feedModal/modalShell.module.css";
+import styles from "./feedModal/fields.module.css";
 
 interface Props {
   category: Category;
@@ -10,328 +14,402 @@ interface Props {
   onClose: () => void;
 }
 
+/** Every bulk control is a three-way: leave alone, or set it one way or the other. */
+const KEEP = "";
+
+const INTERVALS = [
+  { value: "15", label: "Every 15 min" },
+  { value: "30", label: "Every 30 min" },
+  { value: "60", label: "Every hour" },
+  { value: "360", label: "Every 6 hours" },
+  { value: "1440", label: "Once a day" },
+];
+
+const RETENTIONS = [
+  { value: "clear", label: "Keep forever" },
+  { value: "30", label: "30 days" },
+  { value: "90", label: "90 days" },
+  { value: "180", label: "180 days" },
+  { value: "365", label: "1 year" },
+];
+
+const PROCESSING = [
+  { value: "selective", label: "Tag articles, skipping off-topic ones" },
+  { value: "full", label: "Tag every article" },
+  { value: "manual", label: "Do not tag articles" },
+  { value: "none", label: "Do not analyse these feeds at all" },
+];
+
+const RELIABILITY = [
+  { value: "A", label: "A — Reliable" },
+  { value: "B", label: "B — Usually reliable" },
+  { value: "C", label: "C — Fairly reliable" },
+  { value: "D", label: "D — Not usually reliable" },
+  { value: "E", label: "E — Unreliable" },
+  { value: "F", label: "F — Cannot be judged" },
+];
+
+const TIMELINESS = [
+  { value: "excellent", label: "Excellent — often first to report" },
+  { value: "good", label: "Good — reports the same day" },
+  { value: "fair", label: "Fair — a few days behind" },
+  { value: "poor", label: "Poor — weeks behind" },
+];
+
+const RELEVANCE = [
+  { value: "high", label: "High — almost always worth reading" },
+  { value: "medium", label: "Medium — sometimes worth reading" },
+  { value: "low", label: "Low — rarely worth reading" },
+];
+
+const ON_OFF = [
+  { value: "on", label: "On" },
+  { value: "off", label: "Off" },
+];
+
+/**
+ * Apply one setting to every feed in a category at once.
+ *
+ * No analyst-notes field, deliberately: a single textarea here would replace
+ * whatever every feed in the category already had, with nothing to undo it.
+ * Notes are per-source judgement and belong in the feed modal.
+ *
+ * Deliberately not the feed modal's six-pane rail: there are nine controls, no
+ * per-feed facts to show, and seeing everything you are about to apply in one
+ * column is the point. What it does share is the shell, the field styles and —
+ * importantly — `STAGE_COPY`, so the two modals cannot describe the same
+ * setting differently again. That drift is what issue #60 was about.
+ *
+ * Every control is a select rather than a checkbox because across N feeds a
+ * checkbox has no honest unchecked state: "off" and "leave as they are" look
+ * identical and mean opposite things.
+ */
 export function EditCategoryModal({ category, feeds, onClose }: Props) {
-  const [interval, setInterval] = useState("");
-  const [retentionDays, setRetentionDays] = useState("");
-  const [reliability, setReliability] = useState("");
-  const [analystNotes, setAnalystNotes] = useState("");
-  // Bulk edits keep the "leave unchanged" idiom rather than tri-state
-  // checkboxes: across N feeds a checkbox has no honest unchecked state.
-  const [processing, setProcessing] = useState("");
-  const [aiAnalysis, setAiAnalysis] = useState("");
-  const [regexEnrich, setRegexEnrich] = useState("");
-  const [detectionRules, setDetectionRules] = useState("");
-  const [toolEntities, setToolEntities] = useState("");
+  const [interval, setInterval] = useState(KEEP);
+  const [retentionDays, setRetentionDays] = useState(KEEP);
+  const [reliability, setReliability] = useState(KEEP);
+  const [timeliness, setTimeliness] = useState(KEEP);
+  const [relevance, setRelevance] = useState(KEEP);
+  const [processing, setProcessing] = useState(KEEP);
+  const [aiAnalysis, setAiAnalysis] = useState(KEEP);
+  const [cveLookup, setCveLookup] = useState(KEEP);
+  const [detectionRules, setDetectionRules] = useState(KEEP);
+  const [toolEntities, setToolEntities] = useState(KEEP);
 
   const bulkUpdate = useBulkUpdateCategoryFeeds();
   const trapRef = useFocusTrap<HTMLDivElement>();
 
-  const hasChanges =
-    interval !== "" ||
-    retentionDays !== "" ||
-    reliability !== "" ||
-    analystNotes !== "" ||
-    processing !== "" ||
-    aiAnalysis !== "" ||
-    regexEnrich !== "" ||
-    detectionRules !== "" ||
-    toolEntities !== "";
+  const pending = [
+    interval,
+    retentionDays,
+    reliability,
+    timeliness,
+    relevance,
+    processing,
+    aiAnalysis,
+    cveLookup,
+    detectionRules,
+    toolEntities,
+  ].filter((v) => v !== "").length;
 
   const handleSave = async () => {
     const data: Record<string, unknown> = {};
 
-    if (interval !== "") {
-      data.fetch_interval_minutes = parseInt(interval, 10);
-    }
-    if (retentionDays === "clear") {
-      data.clear_retention = true;
-    } else if (retentionDays !== "") {
-      data.retention_days = parseInt(retentionDays, 10);
-    }
-    if (reliability !== "") {
-      data.reliability_rating = reliability;
-    }
-    if (analystNotes !== "") {
-      data.analyst_notes = analystNotes;
-    }
+    if (interval !== KEEP) data.fetch_interval_minutes = parseInt(interval, 10);
+    if (retentionDays === "clear") data.clear_retention = true;
+    else if (retentionDays !== KEEP) data.retention_days = parseInt(retentionDays, 10);
+    if (reliability !== KEEP) data.reliability_rating = reliability;
+    if (timeliness !== KEEP) data.timeliness_rating = timeliness;
+    if (relevance !== KEEP) data.relevance_rating = relevance;
     // One field per stage, not a preset: the old five-way control mapped onto
     // two columns and three of its labels described a pipeline that no longer
     // exists. See frontend/src/components/feedModal/pipelineStages.ts.
-    if (processing !== "") {
-      data.intel_extraction_mode = processing;
-    }
-    if (aiAnalysis !== "") {
-      data.ai_analysis_enabled = aiAnalysis === "on";
-    }
-    if (regexEnrich !== "") {
-      data.auto_extract_on_ingest = regexEnrich === "on";
-    }
-    if (detectionRules !== "") {
-      data.extract_detection_rules = detectionRules === "on";
-    }
-    if (toolEntities !== "") {
-      data.extract_tools = toolEntities === "on";
-    }
+    if (processing !== KEEP) data.intel_extraction_mode = processing;
+    if (aiAnalysis !== KEEP) data.ai_analysis_enabled = aiAnalysis === "on";
+    if (cveLookup !== KEEP) data.auto_extract_on_ingest = cveLookup === "on";
+    if (detectionRules !== KEEP) data.extract_detection_rules = detectionRules === "on";
+    if (toolEntities !== KEEP) data.extract_tools = toolEntities === "on";
+
+    // A bulk write over N feeds is not something to do on a stray click.
+    const ok = await confirmDialog({
+      message: `Apply ${pending} ${pending === 1 ? "change" : "changes"} to all ${feeds.length} ${
+        feeds.length === 1 ? "feed" : "feeds"
+      } in ${category.name}?`,
+      confirmLabel: "Apply",
+    });
+    if (!ok) return;
 
     try {
       await bulkUpdate.mutateAsync({ categoryId: category.id, data });
       onClose();
     } catch {
-      // error handled by mutation
+      // The mutation cache raises a toast; stay open so nothing is lost.
     }
   };
 
-  // Summarize current state across feeds
-  const intervals = [...new Set(feeds.map((s) => s.fetch_interval_minutes))];
-  const retentions = [...new Set(feeds.map((s) => s.retention_days))];
-  const reliabilities = [...new Set(feeds.map((s) => s.reliability_rating))];
-  const modes = [...new Set(feeds.map((s) => s.intel_extraction_mode || "selective"))];
-  const aiStates = [...new Set(feeds.map((s) => s.ai_analysis_enabled ?? true))];
-  const regexStates = [...new Set(feeds.map((s) => s.auto_extract_on_ingest ?? false))];
-  const ruleStates = [...new Set(feeds.map((s) => s.extract_detection_rules ?? false))];
-  const toolStates = [...new Set(feeds.map((s) => s.extract_tools ?? true))];
-  const onOff = (v: boolean) => (v ? "on" : "off");
-
-  const mixedLabel = (values: unknown[]) =>
-    values.length > 1 ? " (mixed)" : "";
-
-  const intervalLabel = (v: number) => {
-    if (v === 15) return "15 min";
-    if (v === 30) return "30 min";
-    if (v === 60) return "1 hour";
-    if (v === 360) return "6 hours";
-    if (v === 1440) return "1 day";
-    return `${v} min`;
+  const requestClose = async () => {
+    if (pending === 0) {
+      onClose();
+      return;
+    }
+    const ok = await confirmDialog({
+      message: "Discard these changes?",
+      confirmLabel: "Discard",
+      destructive: true,
+    });
+    if (ok) onClose();
   };
 
-  return (
-    <div className={styles.overlay} onClick={onClose}>
+  /**
+   * What the feeds hold today, appended to the "leave as they are" option.
+   *
+   * Without it a bulk editor is blind: you cannot tell whether you are about to
+   * change everything or nothing, and "mixed" is the case that matters most.
+   */
+  const current = useMemo(() => {
+    const summarize = <T,>(pick: (f: Feed) => T, render: (v: T) => string): string => {
+      const values = [...new Set(feeds.map(pick))];
+      if (values.length === 0) return "";
+      if (values.length > 1) return " — mixed today";
+      return ` — all ${render(values[0])}`;
+    };
+    const onOff = (v: boolean) => (v ? "on" : "off");
+
+    return {
+      interval: summarize(
+        (f) => f.fetch_interval_minutes,
+        (v) => (v === 1440 ? "once a day" : v >= 60 ? `every ${v / 60}h` : `every ${v}m`)
+      ),
+      retention: summarize(
+        (f) => f.retention_days,
+        (v) => (v == null ? "kept forever" : `${v} days`)
+      ),
+      reliability: summarize(
+        (f) => f.reliability_rating,
+        (v) => (v ? `rated ${v}` : "unrated")
+      ),
+      timeliness: summarize(
+        (f) => f.timeliness_rating,
+        (v) => v ?? "unrated"
+      ),
+      relevance: summarize(
+        (f) => f.relevance_rating,
+        (v) => v ?? "unrated"
+      ),
+      processing: summarize(
+        (f) => f.intel_extraction_mode || "selective",
+        (v) => v
+      ),
+      ai: summarize((f) => f.ai_analysis_enabled ?? true, onOff),
+      cve: summarize((f) => f.auto_extract_on_ingest ?? false, onOff),
+      rules: summarize((f) => f.extract_detection_rules ?? false, onOff),
+      tools: summarize((f) => f.extract_tools ?? true, onOff),
+    };
+  }, [feeds]);
+
+  const field = (
+    id: string,
+    label: string,
+    value: string,
+    onChange: (v: string) => void,
+    options: { value: string; label: string }[],
+    keepSuffix: string,
+    hint?: string
+  ) => (
+    <div className={styles.field}>
+      <label className={styles.label} htmlFor={id}>
+        {label}
+      </label>
+      <select
+        id={id}
+        className={styles.select}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        <option value={KEEP}>Leave as they are{keepSuffix}</option>
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      {hint && <span className={styles.hint}>{hint}</span>}
+    </div>
+  );
+
+  return createPortal(
+    <div className={shell.overlay} onClick={requestClose}>
       <div
-        className={styles.modal}
+        className={shell.modal}
         onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.key === "Escape" && onClose()}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.stopPropagation();
+            void requestClose();
+          }
+        }}
         ref={trapRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Edit category feeds"
+        aria-label={`Change every feed in ${category.name}`}
       >
-        <div className={styles.header}>
-          <h2>Edit Category: {category.name}</h2>
-          <button onClick={onClose} className={styles.closeBtn} aria-label="Close">
-            &times;
+        <div className={shell.header}>
+          <div className={shell.headerText}>
+            <div className={shell.titleRow}>
+              <h2 className={shell.title}>{category.name}</h2>
+            </div>
+            <span className={shell.headerUrl}>
+              Changes apply to all {feeds.length} {feeds.length === 1 ? "feed" : "feeds"} in
+              this category
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={requestClose}
+            className={shell.closeBtn}
+            aria-label="Close"
+          >
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              aria-hidden="true"
+            >
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
           </button>
         </div>
 
-        <div className={styles.body}>
-          <div className={styles.fieldHint} style={{ marginBottom: "1rem" }}>
-            Bulk update {feeds.length} feed{feeds.length !== 1 ? "s" : ""} in this
-            category. Only fields you change will be applied.
-          </div>
+        <div className={shell.body}>
+          <div className={shell.pane}>
+            <div className={styles.stack}>
+              <span className={styles.sectionLabel}>Fetching</span>
+              <div className={styles.row}>
+                {field(
+                  "cat-interval",
+                  "Check for new articles",
+                  interval,
+                  setInterval,
+                  INTERVALS,
+                  current.interval
+                )}
+                {field(
+                  "cat-retention",
+                  "Keep articles for",
+                  retentionDays,
+                  setRetentionDays,
+                  RETENTIONS,
+                  current.retention,
+                  "Older articles are deleted. Anything extracted from them stays."
+                )}
+              </div>
 
-          <div className={styles.field}>
-            <label>Poll Interval{mixedLabel(intervals)}</label>
-            <select
-              value={interval}
-              onChange={(e) => setInterval(e.target.value)}
-              className={styles.select}
-            >
-              <option value="">
-                — No change
-                {intervals.length === 1
-                  ? ` (all ${intervalLabel(intervals[0])})`
-                  : ""}
-              </option>
-              <option value="15">Every 15 min</option>
-              <option value="30">Every 30 min</option>
-              <option value="60">Every hour</option>
-              <option value="360">Every 6 hours</option>
-              <option value="1440">Once a day</option>
-            </select>
-          </div>
+              <span className={styles.sectionLabel}>What runs on each new article</span>
+              {field(
+                "cat-processing",
+                STAGE_COPY.master.label,
+                processing,
+                setProcessing,
+                PROCESSING,
+                current.processing,
+                "Not analysing a feed leaves its articles searchable but pulls nothing out of them."
+              )}
+              {field(
+                "cat-ai",
+                STAGE_COPY.ai.label,
+                aiAnalysis,
+                setAiAnalysis,
+                ON_OFF,
+                current.ai,
+                STAGE_COPY.ai.detail
+              )}
+              {field(
+                "cat-tools",
+                STAGE_COPY.tools.label,
+                toolEntities,
+                setToolEntities,
+                ON_OFF,
+                current.tools,
+                STAGE_COPY.tools.detail
+              )}
+              {field(
+                "cat-cve",
+                STAGE_COPY.regex.label,
+                cveLookup,
+                setCveLookup,
+                ON_OFF,
+                current.cve,
+                STAGE_COPY.regex.detail
+              )}
+              {field(
+                "cat-rules",
+                STAGE_COPY.rules.label,
+                detectionRules,
+                setDetectionRules,
+                ON_OFF,
+                current.rules,
+                STAGE_COPY.rules.detail
+              )}
 
-          <div className={styles.field}>
-            <label>Article Retention{mixedLabel(retentions)}</label>
-            <select
-              value={retentionDays}
-              onChange={(e) => setRetentionDays(e.target.value)}
-              className={styles.select}
-            >
-              <option value="">
-                — No change
-                {retentions.length === 1
-                  ? ` (all ${retentions[0] == null ? "keep forever" : `${retentions[0]} days`})`
-                  : ""}
-              </option>
-              <option value="clear">Keep forever</option>
-              <option value="30">30 days</option>
-              <option value="90">90 days</option>
-              <option value="180">180 days</option>
-              <option value="365">1 year</option>
-            </select>
-          </div>
+              <span className={styles.sectionLabel}>Assessment</span>
+              <div className={styles.row3}>
+                {field(
+                  "cat-reliability",
+                  "Reliability",
+                  reliability,
+                  setReliability,
+                  RELIABILITY,
+                  current.reliability
+                )}
+                {field(
+                  "cat-timeliness",
+                  "Timeliness",
+                  timeliness,
+                  setTimeliness,
+                  TIMELINESS,
+                  current.timeliness
+                )}
+                {field(
+                  "cat-relevance",
+                  "Relevance",
+                  relevance,
+                  setRelevance,
+                  RELEVANCE,
+                  current.relevance
+                )}
+              </div>
+              <p className={styles.note}>
+                Setting any of these three records today as the date each source was
+                last assessed.
+              </p>
 
-          <div className={styles.sectionDivider}>
-            <span>Intelligence</span>
-          </div>
-
-          <div className={styles.field}>
-            <label>Processing{mixedLabel(modes)}</label>
-            <select
-              value={processing}
-              onChange={(e) => setProcessing(e.target.value)}
-              className={styles.select}
-            >
-              <option value="">
-                — No change
-                {modes.length === 1 ? ` (all ${modes[0]})` : ""}
-              </option>
-              <option value="selective">Autolink security-relevant articles</option>
-              <option value="full">Autolink every article</option>
-              <option value="manual">No autolinking</option>
-              <option value="none">Process nothing</option>
-            </select>
-            {processing && (
-              <span className={styles.fieldHint}>
-                {processing === "selective" &&
-                  "A keyword filter runs first; articles below the threshold skip autolinking."}
-                {processing === "full" &&
-                  "Every article is matched against your catalog, no relevance gate."}
-                {processing === "manual" &&
-                  "Nothing is matched automatically. The AI still reads these feeds unless you turn it off below."}
-                {processing === "none" &&
-                  "Articles are ingested and searchable, but nothing is extracted, linked or scored."}
-              </span>
-            )}
-          </div>
-
-          <div className={styles.field}>
-            <label>AI analysis{mixedLabel(aiStates)}</label>
-            <select
-              value={aiAnalysis}
-              onChange={(e) => setAiAnalysis(e.target.value)}
-              className={styles.select}
-            >
-              <option value="">
-                — No change
-                {aiStates.length === 1 ? ` (all ${onOff(aiStates[0])})` : ""}
-              </option>
-              <option value="on">On — the AI reads every article</option>
-              <option value="off">Off — no AI pass on these feeds</option>
-            </select>
-            <span className={styles.fieldHint}>
-              The one-pass analysis that extracts TTPs, actors, malware, sectors and
-              indicators. It can create entities you do not have yet.
-            </span>
-          </div>
-
-          <div className={styles.field}>
-            <label>Regex enrichment{mixedLabel(regexStates)}</label>
-            <select
-              value={regexEnrich}
-              onChange={(e) => setRegexEnrich(e.target.value)}
-              className={styles.select}
-            >
-              <option value="">
-                — No change
-                {regexStates.length === 1 ? ` (all ${onOff(regexStates[0])})` : ""}
-              </option>
-              <option value="on">On</option>
-              <option value="off">Off</option>
-            </select>
-            <span className={styles.fieldHint}>
-              Standalone CVE pass with NVD hydration, plus TTP and mitigation IDs.
-            </span>
-          </div>
-
-          <div className={styles.field}>
-            <label>Detection rule extraction{mixedLabel(ruleStates)}</label>
-            <select
-              value={detectionRules}
-              onChange={(e) => setDetectionRules(e.target.value)}
-              className={styles.select}
-            >
-              <option value="">
-                — No change
-                {ruleStates.length === 1 ? ` (all ${onOff(ruleStates[0])})` : ""}
-              </option>
-              <option value="on">On</option>
-              <option value="off">Off</option>
-            </select>
-          </div>
-
-          <div className={styles.field}>
-            <label>Create tool entities{mixedLabel(toolStates)}</label>
-            <select
-              value={toolEntities}
-              onChange={(e) => setToolEntities(e.target.value)}
-              className={styles.select}
-            >
-              <option value="">
-                — No change
-                {toolStates.length === 1 ? ` (all ${onOff(toolStates[0])})` : ""}
-              </option>
-              <option value="on">On</option>
-              <option value="off">Off</option>
-            </select>
-            <span className={styles.fieldHint}>
-              Off for advisory and rule-repository feeds — they name affected software,
-              not tooling an adversary wielded.
-            </span>
-          </div>
-
-          <div className={styles.field}>
-            <label>Source Reliability{mixedLabel(reliabilities)}</label>
-            <select
-              value={reliability}
-              onChange={(e) => setReliability(e.target.value)}
-              className={styles.select}
-            >
-              <option value="">
-                — No change
-                {reliabilities.length === 1
-                  ? ` (all ${reliabilities[0] || "not rated"})`
-                  : ""}
-              </option>
-              <option value="A">A — Reliable</option>
-              <option value="B">B — Usually reliable</option>
-              <option value="C">C — Fairly reliable</option>
-              <option value="D">D — Not usually reliable</option>
-              <option value="E">E — Unreliable</option>
-              <option value="F">F — Cannot be judged</option>
-            </select>
-          </div>
-
-          <div className={styles.field}>
-            <label>Analyst Notes</label>
-            <textarea
-              value={analystNotes}
-              onChange={(e) => setAnalystNotes(e.target.value)}
-              placeholder="Set notes for all feeds in this category..."
-              className={styles.textarea}
-              rows={2}
-            />
-            <span className={styles.fieldHint}>
-              Will overwrite existing notes on all feeds in this category
-            </span>
-          </div>
-
-          <div className={styles.actions}>
-            <div className={styles.actionsSpacer} />
-            <button onClick={onClose} className={styles.cancelBtn}>
-              Cancel
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={bulkUpdate.isPending || !hasChanges}
-              className={styles.saveBtn}
-            >
-              {bulkUpdate.isPending
-                ? "Applying..."
-                : `Apply to ${feeds.length} Feed${feeds.length !== 1 ? "s" : ""}`}
-            </button>
+            </div>
           </div>
         </div>
+
+        <div className={shell.footer}>
+          <span className={shell.footerSpacer} />
+          <span className={pending ? shell.dirtyNote : shell.cleanNote}>
+            {pending ? `${pending} to apply` : "No changes"}
+          </span>
+          <button type="button" onClick={requestClose} className={shell.cancelBtn}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={bulkUpdate.isPending || pending === 0}
+            className={shell.saveBtn}
+          >
+            {bulkUpdate.isPending ? "Applying…" : `Apply to ${feeds.length}`}
+          </button>
+        </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

@@ -314,7 +314,6 @@ export function useBulkUpdateCategoryFeeds() {
         retention_days?: number | null;
         clear_retention?: boolean;
         reliability_rating?: string;
-        analyst_notes?: string;
         intel_extraction_mode?: "full" | "selective" | "manual" | "none";
         auto_extract_on_ingest?: boolean;
         extract_detection_rules?: boolean;

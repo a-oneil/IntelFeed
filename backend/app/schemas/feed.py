@@ -156,7 +156,11 @@ class BulkCategoryUpdateRequest(BaseModel):
     retention_days: int | None = Field(default=None)
     clear_retention: bool = False
     reliability_rating: str | None = Field(default=None, pattern=r"^[A-F]$")
-    analyst_notes: str | None = None
+    timeliness_rating: str | None = Field(default=None, pattern=r"^(excellent|good|fair|poor)$")
+    relevance_rating: str | None = Field(default=None, pattern=r"^(high|medium|low)$")
+    # Deliberately no analyst_notes. One value applied across a category would
+    # replace the per-source judgement on every feed in it, with nothing to undo
+    # — notes are written one feed at a time, in the feed modal.
     intel_extraction_mode: str | None = Field(default=None, pattern=r"^(full|selective|manual|none)$")
     ai_analysis_enabled: bool | None = None
     auto_extract_on_ingest: bool | None = None

@@ -609,3 +609,139 @@ async def test_extended_feed_types_track_the_adapter_registry():
     from app.api.feeds import _EXTENDED_FEED_TYPES
 
     assert set(_EXTENDED_FEED_TYPES) == set(_EXTENDED_ADAPTERS)
+
+
+@pytest.mark.asyncio
+async def test_bulk_category_update_stamps_the_review_date(
+    client: AsyncClient, admin_headers: dict, db_session: AsyncSession
+):
+    """Rating a whole category used to leave every feed reading "never assessed".
+
+    The single-feed PUT stamped `last_reviewed_at` on any assessment change and
+    the bulk path did not, so the Overview pane contradicted what you had just
+    done.
+    """
+    from app.models.category import Category
+
+    category = Category(name="Bulk assessed")
+    db_session.add(category)
+    await db_session.flush()
+
+    feeds = [
+        Feed(
+            title=f"Bulk {i}",
+            url=f"https://bulk-{i}.example.com/rss",
+            feed_type="rss",
+            category_id=category.id,
+        )
+        for i in range(2)
+    ]
+    db_session.add_all(feeds)
+    await db_session.flush()
+
+    response = await client.put(
+        f"/api/feeds/category/{category.id}/bulk-update",
+        json={"reliability_rating": "B", "timeliness_rating": "good", "relevance_rating": "high"},
+        headers=admin_headers,
+    )
+    assert response.status_code == 200
+
+    for feed in feeds:
+        await db_session.refresh(feed)
+        assert feed.reliability_rating == "B"
+        assert feed.timeliness_rating == "good"
+        assert feed.relevance_rating == "high"
+        assert feed.last_reviewed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_bulk_category_update_leaves_unsent_fields_alone(
+    client: AsyncClient, admin_headers: dict, db_session: AsyncSession
+):
+    """ "Leave as they are" is the default on every control — it must mean it."""
+    from app.models.category import Category
+
+    category = Category(name="Bulk untouched")
+    db_session.add(category)
+    await db_session.flush()
+
+    feed = Feed(
+        title="Untouched",
+        url="https://bulk-untouched.example.com/rss",
+        feed_type="rss",
+        category_id=category.id,
+        fetch_interval_minutes=360,
+        reliability_rating="A",
+        extract_tools=False,
+    )
+    db_session.add(feed)
+    await db_session.flush()
+
+    response = await client.put(
+        f"/api/feeds/category/{category.id}/bulk-update",
+        json={"ai_analysis_enabled": False},
+        headers=admin_headers,
+    )
+    assert response.status_code == 200
+
+    await db_session.refresh(feed)
+    assert feed.ai_analysis_enabled is False
+    assert feed.fetch_interval_minutes == 360
+    assert feed.reliability_rating == "A"
+    assert feed.extract_tools is False
+    # Nothing in the assessment block changed, so the review date stays unset.
+    assert feed.last_reviewed_at is None
+
+
+@pytest.mark.asyncio
+async def test_bulk_category_update_cannot_overwrite_analyst_notes(
+    client: AsyncClient, admin_headers: dict, db_session: AsyncSession
+):
+    """One textarea replacing the notes on every feed in a category, with no
+    undo, is not a thing this endpoint should be able to do. Per-feed notes are
+    edited per feed."""
+    from app.models.category import Category
+
+    category = Category(name="Notes guarded")
+    db_session.add(category)
+    await db_session.flush()
+
+    feed = Feed(
+        title="Has notes",
+        url="https://notes-guarded.example.com/rss",
+        feed_type="rss",
+        category_id=category.id,
+        analyst_notes="Hard-won context about this source.",
+    )
+    db_session.add(feed)
+    await db_session.flush()
+
+    response = await client.put(
+        f"/api/feeds/category/{category.id}/bulk-update",
+        json={"analyst_notes": "wiped", "reliability_rating": "C"},
+        headers=admin_headers,
+    )
+    assert response.status_code == 200
+
+    await db_session.refresh(feed)
+    assert feed.analyst_notes == "Hard-won context about this source."
+    # The rest of the request still applied.
+    assert feed.reliability_rating == "C"
+
+
+@pytest.mark.asyncio
+async def test_single_feed_update_still_writes_analyst_notes(
+    client: AsyncClient, admin_headers: dict, db_session: AsyncSession
+):
+    """The companion guard: dropping it from the bulk body must not drop it here."""
+    feed = Feed(title="Notes ok", url="https://notes-ok.example.com/rss", feed_type="rss")
+    db_session.add(feed)
+    await db_session.flush()
+
+    response = await client.put(
+        f"/api/feeds/{feed.id}",
+        json={"analyst_notes": "Fast on ransomware."},
+        headers=admin_headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["analyst_notes"] == "Fast on ransomware."
