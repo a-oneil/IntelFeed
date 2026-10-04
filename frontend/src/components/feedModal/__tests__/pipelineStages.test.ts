@@ -69,18 +69,17 @@ describe("describeStages", () => {
   it("turns off every stage the feed actually controls when it is not processed", () => {
     const stages = describeStages(values({ intel_extraction_mode: "none" }), ctx());
     for (const s of stages) {
-      // "master" is the switch itself; "observables" is genuinely ungated —
-      // the scan never looks at the feed, so claiming it stops would be a lie.
-      if (s.id === "master" || s.id === "observables") continue;
+      if (s.id === "master") continue;
       expect(s.on, `${s.id} should be off`).toBe(false);
       expect(s.disabled, `${s.id} should be disabled`).toBe(true);
     }
   });
 
-  it("keeps the observables row on for a feed that is switched off", () => {
-    const obs = stage(values({ intel_extraction_mode: "none" }), "observables");
-    expect(obs.on).toBe(true);
-    expect(obs.scope).toBe("global");
+  it("gives no row to the ledger scan, which is not this feed's to switch", () => {
+    // `_scan_entry_observables` never reads the Feed, so a checkbox for it was
+    // decoration. The sentence below still reports that it happens.
+    const ids = describeStages(values(), ctx()).map((s) => s.id);
+    expect(ids).not.toContain("observables");
   });
 
   it("nests tool creation under the AI pass, because that is all that reads it", () => {
@@ -152,10 +151,10 @@ describe("toggleStage", () => {
     expect(toggleStage(values(), "ai", false)).toEqual({ ai_analysis_enabled: false });
   });
 
-  it("a stage with no per-feed field is a no-op rather than a silent write", () => {
+  it("an unknown stage is a no-op rather than a silent write", () => {
     const vals = values();
-    expect(toggleStage(vals, "observables", false)).toEqual({
-      intel_extraction_mode: vals.intel_extraction_mode,
+    expect(toggleStage(vals, "master", true)).toEqual({
+      intel_extraction_mode: "selective",
     });
   });
 });
@@ -163,18 +162,18 @@ describe("toggleStage", () => {
 describe("summarizeStages", () => {
   it("says plainly that nothing else is extracted, ledger aside", () => {
     const text = summarizeStages(values({ intel_extraction_mode: "none" }), ctx(true));
-    expect(text).toContain("Nothing else is extracted");
+    expect(text).toContain("Nothing else is pulled out of them");
     // The ledger scan is ungated, so the sentence must not deny it.
     expect(text).toContain("indicator ledger");
   });
 
   it("warns that the AI may create new entities", () => {
-    expect(summarizeStages(values(), ctx(true))).toContain("may create entities you do not have yet");
+    expect(summarizeStages(values(), ctx(true))).toContain("can add entities you do not have yet");
   });
 
   it("promises nothing new when the AI is off engine-wide", () => {
     const text = summarizeStages(values(), ctx(false));
-    expect(text).toContain("Nothing new is created");
+    expect(text).toContain("Nothing new is added");
   });
 
   it("mentions detection rules only when they are being pulled out", () => {
@@ -216,6 +215,12 @@ describe("pipeline plans", () => {
   it("the summary follows the plan, not the feed's own setting", () => {
     const p = plan({ autolink: { enabled: false } }, { autolink: "global" });
     const text = summarizeStages(values(), ctx(true, p));
-    expect(text).not.toContain("matched against your catalog");
+    expect(text).not.toContain("tagged with entities you already track");
+  });
+
+  it("always reports the ledger scan, which no switch here controls", () => {
+    for (const vals of [values(), values({ intel_extraction_mode: "none" })]) {
+      expect(summarizeStages(vals, ctx(true))).toContain("indicator ledger");
+    }
   });
 });

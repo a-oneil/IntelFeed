@@ -16,8 +16,13 @@ import type { FeedFormValues, IntelMode } from "./useFeedForm";
  * So the stages below are the real ones, each pointing at the field that
  * genuinely drives it.
  *
- * Two things can take a stage out of this pane's hands, and both say so rather
- * than pretending:
+ * Only switches that are genuinely this feed's get a row. The observables
+ * ledger scan used to have one and does not any more: `_scan_entry_observables`
+ * never reads the Feed, so it runs on every article from every feed and the
+ * checkbox was decoration. It lives in the summary sentence instead.
+ *
+ * Two things can still take a listed stage out of this pane's hands, and both
+ * say so rather than pretending:
  *   - `ai_one_pass_enabled` off engine-wide — no per-feed setting revives it.
  *   - a PipelinePlan at global, category or feed scope overriding the stage
  *     once `pipeline_engine_enabled` is on. The plan wins over the Feed
@@ -30,8 +35,7 @@ export type StageId =
   | "ai"
   | "regex"
   | "rules"
-  | "tools"
-  | "observables";
+  | "tools";
 
 export type StageScope = "feed" | "global" | "plan";
 
@@ -55,7 +59,6 @@ const PLAN_STAGE: Partial<Record<StageId, string>> = {
   relevance: "autolink",
   regex: "extract",
   rules: "extract",
-  observables: "observables",
 };
 
 interface Context {
@@ -80,27 +83,27 @@ export function describeStages(values: FeedFormValues, ctx: Context): StageRow[]
   const rows: StageRow[] = [
     {
       id: "master",
-      label: "Process this feed",
+      label: "Analyse this feed",
       detail:
-        "Off ingests and indexes articles but extracts nothing — no entity is created, linked or scored.",
+        "Off, articles still arrive and stay searchable — nothing is pulled out of them. No entities, no scoring.",
       on: processing,
       scope: "feed",
       disabled: false,
     },
     {
       id: "autolink",
-      label: "Autolink known entities",
+      label: "Tag articles with entities you already track",
       detail:
-        "Dictionary scan for actors, malware, CVEs, TTPs, vendors, products and tools already in your catalog.",
+        "Matches names and aliases from your catalog — actors, malware, CVEs, TTPs, vendors, products, tools. Links what exists; never invents anything new.",
       on: autolink,
       scope: "feed",
       disabled: !processing,
     },
     {
       id: "relevance",
-      label: "Only security-relevant articles",
+      label: "Skip off-topic articles",
       detail:
-        "Scores each article against a keyword filter first and skips autolinking below the threshold.",
+        "Scores each article on security keywords first and leaves the obvious non-security ones untagged. Off, every article gets tagged.",
       on: autolink && mode === "selective",
       scope: "feed",
       disabled: !autolink,
@@ -108,10 +111,10 @@ export function describeStages(values: FeedFormValues, ctx: Context): StageRow[]
     },
     {
       id: "ai",
-      label: "AI analysis (one pass)",
+      label: "Let the AI read each article",
       detail: aiEnabled
-        ? "Reads the article, judges the autolinks, and extracts TTPs, actors, malware, sectors, indicators and relationships."
-        : "Off engine-wide. Turn on “AI one pass” in Engine settings before this does anything.",
+        ? "Finds TTPs, actors, malware, sectors, indicators and relationships, and double-checks the tags above. This is what turns up things you have never seen before."
+        : "Switched off for the whole instance. Turn on “AI one pass” in Engine settings before this can do anything.",
       on: processing && aiEnabled && values.ai_analysis_enabled,
       scope: aiEnabled ? "feed" : "global",
       disabled: !processing || !aiEnabled,
@@ -122,9 +125,9 @@ export function describeStages(values: FeedFormValues, ctx: Context): StageRow[]
       // `apply_analysis_results`, so it is a sub-switch of the AI pass and does
       // nothing at all when that is off.
       id: "tools",
-      label: "Create tool entities",
+      label: "Create records for new tools",
       detail:
-        "Let the AI mint Tool rows from what it read. Off for advisory and rule-repository feeds — they name affected software, not tooling an adversary wielded. Entries the AI classes as an advisory are skipped either way.",
+        "Off, the AI can still mention a tool but will not add it to your catalog. Worth turning off for advisory and rule-repository feeds, which list affected software rather than attacker tooling. Articles the AI reads as an advisory are skipped regardless.",
       on: aiRunning && values.extract_tools,
       scope: "feed",
       disabled: !aiRunning,
@@ -133,9 +136,9 @@ export function describeStages(values: FeedFormValues, ctx: Context): StageRow[]
     },
     {
       id: "regex",
-      label: "Look up CVEs in NVD",
+      label: "Fetch CVE details from NVD",
       detail:
-        "Fills in CVSS score, severity, description and affected products for CVEs named here. Without it a newly seen CVE stays a bare ID until a later enrichment sweep reaches it. Also pulls MITRE mitigation IDs. Costs NVD API quota.",
+        "Adds the CVSS score, severity, description and affected products for CVEs named here, and picks up MITRE mitigation IDs. Off, a CVE first seen on this feed stays a bare number until a background sweep fills it in. Uses NVD API quota.",
       on: processing && values.auto_extract_on_ingest,
       scope: "feed",
       disabled: !processing,
@@ -143,24 +146,12 @@ export function describeStages(values: FeedFormValues, ctx: Context): StageRow[]
     },
     {
       id: "rules",
-      label: "Detection rule extraction",
-      detail: "Pulls Sigma, YARA, SPL, Elastic and KQL rules out of the article body.",
+      label: "Save detection rules found in the text",
+      detail:
+        "Sigma, YARA, Splunk SPL, Elastic and KQL rules written out in an article become rules in your library.",
       on: processing && values.extract_detection_rules,
       scope: "feed",
       disabled: !processing,
-    },
-    {
-      // Genuinely ungated: `_scan_entry_observables` loads the entry and never
-      // looks at the feed, so this runs for every entry on every feed — even
-      // one switched off above. Showing it dim with the master switch would be
-      // the same kind of lie this pane exists to remove.
-      id: "observables",
-      label: "Observables ledger",
-      detail:
-        "Runs on every article from every feed. Stages indicator candidates and sights values already in the ledger by exact match; regex alone never creates a ledger row.",
-      on: true,
-      scope: "global",
-      disabled: true,
     },
   ];
 
@@ -209,7 +200,6 @@ export function toggleStage(
     case "tools":
       return { extract_tools: next };
     default:
-      // "observables" has no per-feed field to write.
       return { intel_extraction_mode: mode };
   }
 }
@@ -220,28 +210,29 @@ export function summarizeStages(values: FeedFormValues, ctx: Context): string {
   const on = (id: StageId) => rows.find((r) => r.id === id)?.on ?? false;
 
   if (!on("master")) {
-    return "Articles are ingested, sanitized and searchable, and still checked against the indicator ledger. Nothing else is extracted, and no entity is created or linked.";
+    return "Articles still arrive, are cleaned up and stay searchable, and are still checked against your indicator ledger — that check is not a per-feed setting. Nothing else is pulled out of them, and no entity is created or linked.";
   }
 
   const parts: string[] = [];
   if (on("autolink")) {
     parts.push(
       on("relevance")
-        ? "matched against your catalog when it looks security-relevant"
-        : "matched against your catalog"
+        ? "tagged with entities you already track, when it looks security-relevant"
+        : "tagged with entities you already track"
     );
   }
   if (on("ai")) parts.push("read by the AI");
-  if (on("regex")) parts.push("enriched from NVD");
-  if (on("observables")) parts.push("checked against the indicator ledger");
+  if (on("regex")) parts.push("filled in from NVD");
 
-  let summary = parts.length
-    ? `Every article is ${joinWords(parts)}.`
-    : "Articles are ingested and indexed only.";
+  // The ledger scan runs on every article from every feed and has no per-feed
+  // switch, so it is stated rather than listed as something you chose.
+  parts.push("checked against your indicator ledger");
+
+  let summary = `Every article is ${joinWords(parts)}.`;
   summary += on("ai")
-    ? " The AI may create entities you do not have yet."
-    : " Nothing new is created — only what is already in your catalog gets linked.";
-  if (on("rules")) summary += " Detection rules in the body are pulled out.";
+    ? " The AI can add entities you do not have yet."
+    : " Nothing new is added — only what is already in your catalog gets linked.";
+  if (on("rules")) summary += " Detection rules written out in the text are saved to your library.";
   return summary;
 }
 

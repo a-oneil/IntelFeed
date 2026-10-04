@@ -33,6 +33,7 @@ from app.services.feed_visibility import (
     get_subscription,
     subscribe_all_users,
     subscription_mute_map,
+    subscription_pause_map,
     subscriptions_enabled,
     visible_feed_ids_query,
 )
@@ -203,6 +204,7 @@ async def list_feeds(
                     pass
 
     mute_map = await subscription_mute_map(db, user.id, feed_ids) if enabled else {}
+    pause_map = await subscription_pause_map(db, user.id, feed_ids) if enabled else {}
 
     items = []
     for feed in feeds:
@@ -210,6 +212,8 @@ async def list_feeds(
         resp.unread_count = unread_map.get(feed.id, 0)
         if enabled:
             resp.is_muted = mute_map.get(feed.id, feed.is_muted)
+            # Reads as paused if the instance switched it off OR this reader did.
+            resp.is_active = feed.is_active and not pause_map.get(feed.id, False)
             resp.per_user = True
         items.append(resp)
 
@@ -783,7 +787,6 @@ async def update_feed(
     _ADMIN_FEED_FIELDS = (
         "url",
         "feed_type",
-        "is_active",
         "fetch_interval_minutes",
         "retention_days",
         "adapter_config",
@@ -798,8 +801,13 @@ async def update_feed(
     # None is a real value ("uncategorized", "keep forever") and must not be
     # mistaken for "absent" — in either direction.
     sent = request.model_fields_set
+    enabled = await subscriptions_enabled(db)
     if user.role != "admin":
         touched = [f for f in _ADMIN_FEED_FIELDS if f in sent]
+        # Pause is personal once subscriptions are on, so anyone may set it.
+        # With the flag off it writes the one shared column and stays admin-only.
+        if "is_active" in sent and not enabled:
+            touched.append("is_active")
         if touched:
             raise AppError(
                 code="forbidden",
@@ -824,8 +832,8 @@ async def update_feed(
         # None = move to Uncategorized. The old `is not None` guard dropped it,
         # so a feed could be filed but never unfiled from this endpoint.
         feed.category_id = request.category_id
-    enabled = await subscriptions_enabled(db)
     per_user_mute: bool | None = None
+    per_user_paused: bool | None = None
     if request.is_muted is not None:
         if enabled:
             # Mute is personal: write the caller's subscription row, not the pool
@@ -839,7 +847,17 @@ async def update_feed(
         else:
             feed.is_muted = request.is_muted
     if request.is_active is not None:
-        feed.is_active = request.is_active
+        if enabled:
+            # Pause is personal: write the caller's subscription row, not the pool
+            sub = await get_subscription(db, user.id, feed.id)
+            if sub:
+                sub.is_paused = not request.is_active
+                db.add(sub)
+            else:
+                await ensure_subscription(db, user.id, feed.id, is_paused=not request.is_active)
+            per_user_paused = not request.is_active
+        else:
+            feed.is_active = request.is_active
     if request.fetch_interval_minutes is not None:
         feed.fetch_interval_minutes = request.fetch_interval_minutes
     if request.exclude_shorts is not None and feed.feed_type == "youtube":
@@ -922,12 +940,12 @@ async def update_feed(
 
     resp = FeedResponse.model_validate(feed)
     if enabled:
-        if per_user_mute is not None:
-            resp.is_muted = per_user_mute
-        else:
-            sub = await get_subscription(db, user.id, feed.id)
-            if sub:
-                resp.is_muted = sub.is_muted
+        sub = await get_subscription(db, user.id, feed.id)
+        resp.is_muted = per_user_mute if per_user_mute is not None else (sub.is_muted if sub else resp.is_muted)
+        if per_user_paused is not None:
+            resp.is_active = not per_user_paused
+        elif sub:
+            resp.is_active = feed.is_active and not sub.is_paused
         resp.per_user = True
     return resp
 

@@ -86,7 +86,7 @@ export function EditFeedModal({ subscription, onClose }: Props) {
   };
 
   const handleSave = async () => {
-    const payload = form.buildPayload(isAdmin);
+    const payload = form.buildPayload(isAdmin, Boolean(subscription.per_user));
     if (Object.keys(payload).length === 0) {
       onClose();
       return;
@@ -198,7 +198,7 @@ export function EditFeedModal({ subscription, onClose }: Props) {
             {pane === "overview" && (
               <OverviewPane feed={subscription} isAdmin={isAdmin} />
             )}
-            {pane === "identity" && <IdentityPane feed={subscription} form={form} />}
+            {pane === "identity" && <IdentityPane feed={subscription} form={form} isAdmin={isAdmin} />}
             {pane === "source" && isAdmin && (
               <SourcePane feedId={subscription.id} form={form} />
             )}

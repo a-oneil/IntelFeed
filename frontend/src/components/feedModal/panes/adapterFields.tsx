@@ -47,8 +47,10 @@ function YouTubeFields({ form }: AdapterProps) {
         onChange={(e) => setAdapter("exclude_shorts", e.target.checked)}
       />
       <span className={styles.checkText}>
-        <span className={styles.checkLabel}>Exclude Shorts</span>
-        <span className={styles.hint}>Skip YouTube Shorts during sync.</span>
+        <span className={styles.checkLabel}>Skip Shorts</span>
+        <span className={styles.hint}>
+          Ignores vertical short-form videos and keeps full uploads.
+        </span>
       </span>
     </label>
   );
@@ -63,7 +65,7 @@ function GitHubRepoFields({ form }: AdapterProps) {
       <div className={styles.row}>
         <div className={styles.field}>
           <label className={styles.label} htmlFor="gh-branch">
-            Branch
+            Branch to watch
           </label>
           <input
             id="gh-branch"
@@ -76,7 +78,7 @@ function GitHubRepoFields({ form }: AdapterProps) {
         </div>
         <div className={styles.field}>
           <label className={styles.label} htmlFor="gh-backfill">
-            Backfill days
+            History to import
           </label>
           <input
             id="gh-backfill"
@@ -89,15 +91,15 @@ function GitHubRepoFields({ form }: AdapterProps) {
             }
           />
           <span className={styles.hint}>
-            History to import on first fetch. 0 = everything. Changing this resets
-            the fetch state and re-imports.
+            How far back to reach on the first fetch, in days. 0 takes the whole
+            history. Changing it starts the import again from scratch.
           </span>
         </div>
       </div>
 
       <div className={styles.field}>
         <label className={styles.label} htmlFor="gh-paths">
-          File patterns
+          Which files to import
         </label>
         <textarea
           id="gh-paths"
@@ -115,7 +117,9 @@ function GitHubRepoFields({ form }: AdapterProps) {
             )
           }
         />
-        <span className={styles.hint}>One glob pattern per line.</span>
+        <span className={styles.hint}>
+          One pattern per line. Only files matching one of them are imported.
+        </span>
       </div>
 
       <label className={styles.checkRow}>
@@ -125,8 +129,11 @@ function GitHubRepoFields({ form }: AdapterProps) {
           onChange={(e) => setAdapter("include_content", e.target.checked)}
         />
         <span className={styles.checkText}>
-          <span className={styles.checkLabel}>Include file content</span>
-          <span className={styles.hint}>Fetch full file bodies. Uses more API quota.</span>
+          <span className={styles.checkLabel}>Import the file contents</span>
+          <span className={styles.hint}>
+            Off, you get a record that a file changed without the file itself,
+            which uses less of the GitHub API allowance.
+          </span>
         </span>
       </label>
     </>
@@ -139,7 +146,7 @@ function WebScraperFields({ form }: AdapterProps) {
     <>
       <div className={styles.field}>
         <label className={styles.label} htmlFor="ws-selector">
-          Link selector
+          Where the article links are
         </label>
         <input
           id="ws-selector"
@@ -150,14 +157,15 @@ function WebScraperFields({ form }: AdapterProps) {
           onChange={(e) => setAdapter("link_selector", e.target.value || null)}
         />
         <span className={styles.hint}>
-          CSS selector for article links. Blank auto-detects.
+          A CSS selector matching the links to article pages. Leave blank to let
+          IntelFeed work it out.
         </span>
       </div>
 
       <div className={styles.row}>
         <div className={styles.field}>
           <label className={styles.label} htmlFor="ws-pattern">
-            URL pattern
+            Only follow links matching
           </label>
           <input
             id="ws-pattern"
@@ -167,11 +175,13 @@ function WebScraperFields({ form }: AdapterProps) {
             placeholder="/blog/.*"
             onChange={(e) => setAdapter("url_pattern", e.target.value || null)}
           />
-          <span className={styles.hint}>Regex filter for discovered links.</span>
+          <span className={styles.hint}>
+            A regular expression. Leave blank to follow every link found.
+          </span>
         </div>
         <div className={styles.field}>
           <label className={styles.label} htmlFor="ws-max">
-            Max articles per poll
+            Most articles per check
           </label>
           <input
             id="ws-max"
@@ -194,8 +204,10 @@ function WebScraperFields({ form }: AdapterProps) {
           onChange={(e) => setAdapter("follow_pagination", e.target.checked)}
         />
         <span className={styles.checkText}>
-          <span className={styles.checkLabel}>Follow pagination</span>
-          <span className={styles.hint}>Discover articles across index pages.</span>
+          <span className={styles.checkLabel}>Follow &ldquo;next page&rdquo; links</span>
+          <span className={styles.hint}>
+            Looks past the first index page when collecting articles.
+          </span>
         </span>
       </label>
     </>
@@ -234,7 +246,7 @@ function BlueskyFields({ form }: AdapterProps) {
       <div className={styles.row}>
         <div className={styles.field}>
           <label className={styles.label} htmlFor="bsky-mode">
-            Mode
+            What to follow
           </label>
           <select
             id="bsky-mode"
@@ -251,7 +263,7 @@ function BlueskyFields({ form }: AdapterProps) {
         {mode === "author" && (
           <div className={styles.field}>
             <label className={styles.label} htmlFor="bsky-handle">
-              Handle
+              Account handle
             </label>
             <input
               id="bsky-handle"
@@ -267,7 +279,7 @@ function BlueskyFields({ form }: AdapterProps) {
         {mode === "feed" && (
           <div className={styles.field}>
             <label className={styles.label} htmlFor="bsky-uri">
-              Feed URI
+              Custom feed address
             </label>
             <input
               id="bsky-uri"
@@ -283,7 +295,7 @@ function BlueskyFields({ form }: AdapterProps) {
         {mode === "search" && (
           <div className={styles.field}>
             <label className={styles.label} htmlFor="bsky-query">
-              Query
+              Search for
             </label>
             <input
               id="bsky-query"
@@ -299,7 +311,7 @@ function BlueskyFields({ form }: AdapterProps) {
       {mode === "search" && (
         <div className={styles.field}>
           <label className={styles.label} htmlFor="bsky-lang">
-            Language
+            Only this language
           </label>
           <input
             id="bsky-lang"
@@ -321,6 +333,9 @@ function BlueskyFields({ form }: AdapterProps) {
           />
           <span className={styles.checkText}>
             <span className={styles.checkLabel}>Include reposts</span>
+          <span className={styles.hint}>
+            Off, only the account&rsquo;s own posts are collected.
+          </span>
           </span>
         </label>
       )}
@@ -328,7 +343,7 @@ function BlueskyFields({ form }: AdapterProps) {
       <div className={styles.row}>
         <div className={styles.field}>
           <label className={styles.label} htmlFor="bsky-identifier">
-            Auth identifier
+            Sign in as
           </label>
           <input
             id="bsky-identifier"
@@ -338,7 +353,9 @@ function BlueskyFields({ form }: AdapterProps) {
             placeholder="your.handle.bsky.social"
             onChange={(e) => setAdapter("identifier", e.target.value)}
           />
-          <span className={styles.hint}>Optional.</span>
+          <span className={styles.hint}>
+            Optional. Only needed to reach posts that require an account.
+          </span>
         </div>
         <div className={styles.field}>
           <label className={styles.label} htmlFor="bsky-password">
@@ -353,7 +370,8 @@ function BlueskyFields({ form }: AdapterProps) {
             onChange={(e) => setNewAppPassword(e.target.value)}
           />
           <span className={styles.hint}>
-            Stored encrypted. Blank keeps the existing value.
+            Stored encrypted and never shown again. Leave blank to keep the one
+            already saved.
           </span>
         </div>
       </div>
@@ -361,7 +379,7 @@ function BlueskyFields({ form }: AdapterProps) {
       <div className={styles.row}>
         <div className={styles.field}>
           <label className={styles.label} htmlFor="bsky-author-type">
-            Attribute posts to
+            Credit posts to
           </label>
           <select
             id="bsky-author-type"
@@ -374,12 +392,14 @@ function BlueskyFields({ form }: AdapterProps) {
             <option value="vendor">Vendor</option>
             <option value="product">Product</option>
           </select>
-          <span className={styles.hint}>Optional.</span>
+          <span className={styles.hint}>
+            Optional. Links every post from this account to one entity.
+          </span>
         </div>
         {authorType && (
           <div className={styles.field}>
             <label className={styles.label} htmlFor="bsky-author-id">
-              Entity
+              Which one
             </label>
             <select
               id="bsky-author-id"
@@ -472,8 +492,11 @@ function TelegramFields({ feedId, form }: AdapterProps) {
           onChange={(e) => setAdapter("include_media", e.target.checked)}
         />
         <span className={styles.checkText}>
-          <span className={styles.checkLabel}>Download media</span>
-          <span className={styles.hint}>Photos, videos, voice notes and documents.</span>
+          <span className={styles.checkLabel}>Save attachments</span>
+          <span className={styles.hint}>
+            Photos, videos, voice notes and documents are stored locally. They can
+            take a lot of disk.
+          </span>
         </span>
       </label>
 
@@ -484,7 +507,10 @@ function TelegramFields({ feedId, form }: AdapterProps) {
           onChange={(e) => setAdapter("extract_forwards", e.target.checked)}
         />
         <span className={styles.checkText}>
-          <span className={styles.checkLabel}>Show forward attribution</span>
+          <span className={styles.checkLabel}>Show where forwards came from</span>
+          <span className={styles.hint}>
+            Records the original channel on a forwarded message.
+          </span>
         </span>
       </label>
 
@@ -495,11 +521,10 @@ function TelegramFields({ feedId, form }: AdapterProps) {
           onChange={(e) => setAdapter("realtime", e.target.checked)}
         />
         <span className={styles.checkText}>
-          <span className={styles.checkLabel}>Realtime ingest</span>
+          <span className={styles.checkLabel}>Receive messages as they arrive</span>
           <span className={styles.hint}>
-            Push updates from Telethon as they arrive. Needs the
-            telegram-listener container; falls back to 30-minute polling if it is
-            down.
+            Needs the telegram-listener service. If it stops, this falls back to
+            checking every 30 minutes on its own.
           </span>
         </span>
       </label>
@@ -507,7 +532,7 @@ function TelegramFields({ feedId, form }: AdapterProps) {
       <div className={styles.row}>
         <div className={styles.field}>
           <label className={styles.label} htmlFor="tg-actor">
-            Auto-attribute to threat actor
+            Credit every message to
           </label>
           <select
             id="tg-actor"
@@ -523,12 +548,12 @@ function TelegramFields({ feedId, form }: AdapterProps) {
             ))}
           </select>
           <span className={styles.hint}>
-            Applies to future entries only — existing ones are not backfilled.
+            Applies to messages from now on. Ones already here are left alone.
           </span>
         </div>
         <div className={styles.field}>
           <label className={styles.label} htmlFor="tg-campaign">
-            Auto-link to campaign
+            Add every message to campaign
           </label>
           <select
             id="tg-campaign"

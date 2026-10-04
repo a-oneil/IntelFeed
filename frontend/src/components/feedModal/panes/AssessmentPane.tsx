@@ -21,17 +21,17 @@ const RELIABILITY = [
 
 const TIMELINESS = [
   { value: "", label: "Not rated" },
-  { value: "excellent", label: "Excellent — first to report" },
-  { value: "good", label: "Good — same day" },
+  { value: "excellent", label: "Excellent — often first to report" },
+  { value: "good", label: "Good — reports the same day" },
   { value: "fair", label: "Fair — a few days behind" },
   { value: "poor", label: "Poor — weeks behind" },
 ];
 
 const RELEVANCE = [
   { value: "", label: "Not rated" },
-  { value: "high", label: "High — on our threat model" },
-  { value: "medium", label: "Medium — sometimes applies" },
-  { value: "low", label: "Low — rarely applies" },
+  { value: "high", label: "High — almost always worth reading" },
+  { value: "medium", label: "Medium — sometimes worth reading" },
+  { value: "low", label: "Low — rarely worth reading" },
 ];
 
 export function AssessmentPane({ form }: { form: FeedForm }) {
@@ -56,6 +56,10 @@ export function AssessmentPane({ form }: { form: FeedForm }) {
               </option>
             ))}
           </select>
+          <span className={styles.hint}>
+            How much you trust what it reports. Entity matches from a
+            low-rated source carry less weight.
+          </span>
         </div>
 
         <div className={styles.field}>
@@ -74,6 +78,9 @@ export function AssessmentPane({ form }: { form: FeedForm }) {
               </option>
             ))}
           </select>
+          <span className={styles.hint}>
+            How quickly it reports, not how accurate it is.
+          </span>
         </div>
 
         <div className={styles.field}>
@@ -92,12 +99,15 @@ export function AssessmentPane({ form }: { form: FeedForm }) {
               </option>
             ))}
           </select>
+          <span className={styles.hint}>
+            How often its coverage matters to the threats you track.
+          </span>
         </div>
       </div>
 
       <p className={styles.note}>
-        Reliability weights how much this source&rsquo;s entity matches count
-        toward autolink confidence. Saving any of these stamps the review date.
+        Saving any of these three records today as the date this source was last
+        assessed.
       </p>
 
       <div className={styles.field}>
@@ -109,7 +119,7 @@ export function AssessmentPane({ form }: { form: FeedForm }) {
           rows={6}
           className={styles.textarea}
           value={values.analyst_notes}
-          placeholder="What this source is good for, and what to corroborate elsewhere…"
+          placeholder="What this source is good for, and what to check elsewhere before trusting it…"
           onChange={(e) => set("analyst_notes", e.target.value)}
         />
       </div>

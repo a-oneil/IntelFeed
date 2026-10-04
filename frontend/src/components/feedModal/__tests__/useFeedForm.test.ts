@@ -45,7 +45,7 @@ describe("useFeedForm", () => {
     const { result } = renderHook(() => useFeedForm(makeFeed()));
     expect(result.current.isDirty).toBe(false);
     expect(result.current.dirtyFields).toEqual([]);
-    expect(result.current.buildPayload(true)).toEqual({});
+    expect(result.current.buildPayload(true, false)).toEqual({});
   });
 
   it("sends only the keys that changed", () => {
@@ -54,7 +54,7 @@ describe("useFeedForm", () => {
     act(() => result.current.set("custom_title", "Bleeping"));
 
     expect(result.current.isDirty).toBe(true);
-    expect(result.current.buildPayload(true)).toEqual({ custom_title: "Bleeping" });
+    expect(result.current.buildPayload(true, false)).toEqual({ custom_title: "Bleeping" });
   });
 
   it("attributes a changed field to its pane so the rail can mark it", () => {
@@ -84,7 +84,7 @@ describe("useFeedForm", () => {
 
     // Not `undefined` and not omitted: the API reads model_fields_set, so null
     // is how "Uncategorized" travels.
-    const payload = result.current.buildPayload(true);
+    const payload = result.current.buildPayload(true, false);
     expect(payload).toHaveProperty("category_id", null);
   });
 
@@ -93,7 +93,7 @@ describe("useFeedForm", () => {
 
     act(() => result.current.set("retention_days", ""));
 
-    const payload = result.current.buildPayload(true);
+    const payload = result.current.buildPayload(true, false);
     expect(payload).toHaveProperty("retention_days", null);
   });
 
@@ -111,10 +111,27 @@ describe("useFeedForm", () => {
 
     // The endpoint 403s on the mere presence of an admin key, so the payload
     // must carry none of them — not even unchanged ones.
-    expect(result.current.buildPayload(false)).toEqual({
+    expect(result.current.buildPayload(false, false)).toEqual({
       custom_title: "Mine",
       reliability_rating: "A",
     });
+  });
+
+  it("lets anyone pause their own copy once subscriptions are per-user", () => {
+    const { result } = renderHook(() => useFeedForm(makeFeed({ per_user: true })));
+
+    act(() => result.current.set("is_active", false));
+
+    expect(result.current.buildPayload(false, true)).toEqual({ is_active: false });
+  });
+
+  it("withholds the pause from a non-admin while the feed is shared", () => {
+    const { result } = renderHook(() => useFeedForm(makeFeed()));
+
+    act(() => result.current.set("is_active", false));
+
+    // One shared switch: throwing it would stop the fetch for the instance.
+    expect(result.current.buildPayload(false, false)).toEqual({});
   });
 
   it("keeps curation keys for an admin alongside the rest", () => {
@@ -125,7 +142,7 @@ describe("useFeedForm", () => {
       result.current.set("is_active", false);
     });
 
-    expect(result.current.buildPayload(true)).toEqual({
+    expect(result.current.buildPayload(true, false)).toEqual({
       custom_title: "Mine",
       is_active: false,
     });
@@ -141,7 +158,7 @@ describe("useFeedForm", () => {
     act(() => result.current.setAdapter("branch", "develop"));
 
     // last_commit_sha is fetch state — dropping it would re-import the repo.
-    expect(result.current.buildPayload(true).adapter_config).toEqual({
+    expect(result.current.buildPayload(true, false).adapter_config).toEqual({
       branch: "develop",
       last_commit_sha: "abc123",
     });
@@ -159,7 +176,7 @@ describe("useFeedForm", () => {
       result.current.setAdapter("query", "ransomware");
     });
 
-    const config = result.current.buildPayload(true).adapter_config as Record<string, unknown>;
+    const config = result.current.buildPayload(true, false).adapter_config as Record<string, unknown>;
     expect(config.mode).toBe("search");
     expect(config.query).toBe("ransomware");
     expect(config).not.toHaveProperty("handle");
@@ -174,7 +191,7 @@ describe("useFeedForm", () => {
 
     act(() => result.current.setAdapter("handle", "b.bsky.social"));
 
-    const config = result.current.buildPayload(true).adapter_config as Record<string, unknown>;
+    const config = result.current.buildPayload(true, false).adapter_config as Record<string, unknown>;
     expect(config).not.toHaveProperty("app_password");
   });
 
@@ -185,7 +202,7 @@ describe("useFeedForm", () => {
     act(() => result.current.setNewAppPassword("hunter2"));
 
     expect(result.current.isDirty).toBe(true);
-    const config = result.current.buildPayload(true).adapter_config as Record<string, unknown>;
+    const config = result.current.buildPayload(true, false).adapter_config as Record<string, unknown>;
     expect(config.app_password).toBe("hunter2");
   });
 
@@ -195,7 +212,7 @@ describe("useFeedForm", () => {
 
     act(() => result.current.setNewAppPassword("hunter2"));
 
-    expect(result.current.buildPayload(false)).toEqual({});
+    expect(result.current.buildPayload(false, false)).toEqual({});
   });
 
   it("trims the text fields it sends", () => {
@@ -206,7 +223,7 @@ describe("useFeedForm", () => {
       result.current.set("url", "  https://example.com/rss  ");
     });
 
-    const payload = result.current.buildPayload(true);
+    const payload = result.current.buildPayload(true, false);
     expect(payload.custom_title).toBe("Spaced");
     expect(payload.url).toBe("https://example.com/rss");
   });

@@ -52,10 +52,13 @@ vi.mock("@/hooks/useUndoableDelete", () => ({ useUndoableDelete: () => vi.fn() }
 vi.mock("@/hooks/useSystemSettings", () => ({
   useSystemSettings: () => ({ data: { settings: { ai_one_pass_enabled: { value: true } } } }),
 }));
+const mockBulkExtract = vi.fn();
 vi.mock("@/hooks/useIntelligence", () => ({
   useThreatActors: () => ({ data: { items: [] } }),
   useVendors: () => ({ data: { items: [] } }),
   useProducts: () => ({ data: { items: [] } }),
+  useBulkExtract: () => ({ mutate: mockBulkExtract, isPending: false }),
+  useBulkTranslate: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 vi.mock("@/hooks/useCampaigns", () => ({ useCampaigns: () => ({ data: { items: [] } }) }));
 vi.mock("@/hooks/useTelegram", () => ({
@@ -120,7 +123,7 @@ describe("EditFeedModal", () => {
 
     expect(screen.getByText("B")).toBeInTheDocument();
     expect(screen.getByText("142")).toBeInTheDocument();
-    expect(screen.getByText(/ranked 4 of 37/i)).toBeInTheDocument();
+    expect(screen.getByText(/4 of 37 feeds/i)).toBeInTheDocument();
   });
 
   it("gives an admin every pane", () => {
@@ -162,7 +165,7 @@ describe("EditFeedModal", () => {
     await user.click(screen.getByRole("button", { name: "Source" }));
 
     const options = Array.from(
-      screen.getByLabelText("Feed type").querySelectorAll("option")
+      screen.getByLabelText("Read as").querySelectorAll("option")
     ).map((o) => (o as HTMLOptionElement).value);
 
     // `github` has no adapter; these five used to be rejected by the PUT.
@@ -222,7 +225,7 @@ describe("EditFeedModal", () => {
     render(<EditFeedModal subscription={makeFeed()} onClose={vi.fn()} />);
 
     await user.click(screen.getByRole("button", { name: "Source" }));
-    await user.selectOptions(screen.getByLabelText("Article retention"), "");
+    await user.selectOptions(screen.getByLabelText("Keep articles for"), "");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(mockUpdateAsync).toHaveBeenCalled());
@@ -273,7 +276,7 @@ describe("EditFeedModal", () => {
 
     await user.click(screen.getByRole("button", { name: "Pipeline" }));
 
-    expect(screen.getByText(/may create entities you do not have yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/can add entities you do not have yet/i)).toBeInTheDocument();
     // Three stages can mint entities on this feed: the AI pass, the NVD
     // lookup, and tool creation under the AI.
     expect(screen.getAllByText("writes entities")).toHaveLength(3);
@@ -284,12 +287,14 @@ describe("EditFeedModal", () => {
     render(<EditFeedModal subscription={makeFeed()} onClose={vi.fn()} />);
     await user.click(screen.getByRole("button", { name: "Pipeline" }));
 
-    await user.click(screen.getByRole("checkbox", { name: /^Process this feed/i }));
+    await user.click(screen.getByRole("checkbox", { name: /^Analyse this feed/i }));
 
-    expect(screen.getByRole("checkbox", { name: /^Autolink known entities/i })).toBeDisabled();
-    expect(screen.getByText(/Nothing else is extracted/i)).toBeInTheDocument();
-    // The ledger scan is not the feed's to switch off.
-    expect(screen.getByRole("checkbox", { name: /^Observables ledger/i })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /^Tag articles with entities/i })).toBeDisabled();
+    expect(screen.getByText(/Nothing else is pulled out of them/i)).toBeInTheDocument();
+    // The ledger scan is not the feed's to switch off, so it gets no checkbox
+    // — but the sentence still says it happens.
+    expect(screen.queryByRole("checkbox", { name: /ledger/i })).toBeNull();
+    expect(screen.getByText(/indicator ledger/i)).toBeInTheDocument();
   });
 
   it("turns the AI off for one feed without touching its autolinking", async () => {
@@ -297,14 +302,25 @@ describe("EditFeedModal", () => {
     render(<EditFeedModal subscription={makeFeed()} onClose={vi.fn()} />);
     await user.click(screen.getByRole("button", { name: "Pipeline" }));
 
-    await user.click(screen.getByRole("checkbox", { name: /^AI analysis/i }));
+    await user.click(screen.getByRole("checkbox", { name: /^Let the AI read each article/i }));
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(mockUpdateAsync).toHaveBeenCalled());
     // Only the AI field — autolinking rides on intel_extraction_mode and must
     // not be dragged along.
     expect(mockUpdateAsync.mock.calls[0][0].data).toEqual({ ai_analysis_enabled: false });
-    expect(screen.queryByText(/may create entities you do not have yet/i)).toBeNull();
+    expect(screen.queryByText(/can add entities you do not have yet/i)).toBeNull();
+  });
+
+  it("can backfill the articles already here, next to the switches that changed", async () => {
+    const user = userEvent.setup();
+    render(<EditFeedModal subscription={makeFeed()} onClose={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Pipeline" }));
+
+    await user.click(screen.getByRole("button", { name: "Re-analyse past articles" }));
+
+    expect(mockBulkExtract).toHaveBeenCalled();
+    expect(mockBulkExtract.mock.calls[0][0]).toMatchObject({ feed_id: "feed-1", use_ai: true });
   });
 
   it("shows a paused feed as paused and offers to resume it", () => {

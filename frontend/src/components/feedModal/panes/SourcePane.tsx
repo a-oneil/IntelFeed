@@ -63,14 +63,15 @@ export function SourcePane({ feedId, form }: { feedId: string; form: FeedForm })
           onChange={(e) => set("url", e.target.value)}
         />
         <span className={styles.hint}>
-          Changing this clears the fetch state and error count.
+          Where articles are fetched from. Changing it forgets what has already
+          been fetched and clears the error count.
         </span>
       </div>
 
       <div className={styles.row3}>
         <div className={styles.field}>
           <label className={styles.label} htmlFor="feed-type">
-            Feed type
+            Read as
           </label>
           <select
             id="feed-type"
@@ -84,11 +85,14 @@ export function SourcePane({ feedId, form }: { feedId: string; form: FeedForm })
               </option>
             ))}
           </select>
+          <span className={styles.hint}>
+            Detected when the feed was added. Change it only if it was read wrong.
+          </span>
         </div>
 
         <div className={styles.field}>
           <label className={styles.label} htmlFor="feed-interval">
-            Poll interval
+            Check for new articles
           </label>
           <select
             id="feed-interval"
@@ -102,11 +106,14 @@ export function SourcePane({ feedId, form }: { feedId: string; form: FeedForm })
               </option>
             ))}
           </select>
+          <span className={styles.hint}>
+            Sources that publish rarely do not need a short interval.
+          </span>
         </div>
 
         <div className={styles.field}>
           <label className={styles.label} htmlFor="feed-retention">
-            Article retention
+            Keep articles for
           </label>
           <select
             id="feed-retention"
@@ -120,22 +127,11 @@ export function SourcePane({ feedId, form }: { feedId: string; form: FeedForm })
               </option>
             ))}
           </select>
+          <span className={styles.hint}>
+            Older articles are deleted. Anything extracted from them stays.
+          </span>
         </div>
       </div>
-
-      <label className={styles.checkRow}>
-        <input
-          type="checkbox"
-          checked={values.is_active}
-          onChange={(e) => set("is_active", e.target.checked)}
-        />
-        <span className={styles.checkText}>
-          <span className={styles.checkLabel}>Feed is active</span>
-          <span className={styles.hint}>
-            Pausing stops polling for everyone, not just you.
-          </span>
-        </span>
-      </label>
 
       <label className={styles.checkRow}>
         <input
@@ -144,10 +140,10 @@ export function SourcePane({ feedId, form }: { feedId: string; form: FeedForm })
           onChange={(e) => setAdapter("auto_translate", e.target.checked)}
         />
         <span className={styles.checkText}>
-          <span className={styles.checkLabel}>Auto-translate on ingest</span>
+          <span className={styles.checkLabel}>Translate articles into English</span>
           <span className={styles.hint}>
-            Detect the language and translate to English via the LibreTranslate
-            sidecar. The original is kept and shown alongside.
+            Detects the language on arrival and stores an English version next to
+            the original, which is kept. Needs the LibreTranslate service running.
           </span>
         </span>
       </label>
@@ -155,7 +151,7 @@ export function SourcePane({ feedId, form }: { feedId: string; form: FeedForm })
       {hasAdapterFields(values.feed_type) && (
         <>
           <span className={styles.sectionLabel}>
-            {FEED_TYPES.find((t) => t.value === values.feed_type)?.label} options
+            {FEED_TYPES.find((t) => t.value === values.feed_type)?.label} settings
           </span>
           <AdapterFields feedId={feedId} form={form} />
         </>

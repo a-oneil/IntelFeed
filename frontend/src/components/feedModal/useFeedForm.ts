@@ -52,11 +52,11 @@ const FIELD_PANE: Record<keyof FeedFormValues, PaneId> = {
   custom_title: "identity",
   category_id: "identity",
   is_muted: "identity",
+  is_active: "identity",
   url: "source",
   feed_type: "source",
   fetch_interval_minutes: "source",
   retention_days: "source",
-  is_active: "source",
   adapter: "source",
   intel_extraction_mode: "pipeline",
   ai_analysis_enabled: "pipeline",
@@ -73,6 +73,11 @@ const FIELD_PANE: Record<keyof FeedFormValues, PaneId> = {
  * Curation is anyone's to change; everything else is shared plumbing the API
  * only accepts from an admin. A non-admin must not send the other keys at all
  * — the endpoint 403s on their mere presence, explicit nulls included.
+ *
+ * `is_active` is in neither list because it moves between them: with per-user
+ * subscriptions on it writes the caller's own subscription row and is personal,
+ * and with the flag off it is the one shared switch and admin-only. The server
+ * gates it the same way.
  */
 const CURATION_FIELDS = [
   "custom_title",
@@ -135,7 +140,7 @@ export interface FeedForm {
   newAppPassword: string;
   setNewAppPassword: (v: string) => void;
   /** Only the keys that actually changed, gated by role. */
-  buildPayload: (isAdmin: boolean) => Record<string, unknown>;
+  buildPayload: (isAdmin: boolean, perUser: boolean) => Record<string, unknown>;
   reset: () => void;
 }
 
@@ -181,9 +186,11 @@ export function useFeedForm(feed: Feed): FeedForm {
   const isDirty = dirtyFields.length > 0 || newAppPassword !== "";
 
   const buildPayload = useCallback(
-    (isAdmin: boolean) => {
+    (isAdmin: boolean, perUser: boolean) => {
       const payload: Record<string, unknown> = {};
-      const fields = isAdmin ? dirtyFields : dirtyFields.filter((f) => CURATION.has(f));
+      const mine = (f: keyof FeedFormValues) =>
+        CURATION.has(f) || (f === "is_active" && perUser);
+      const fields = isAdmin ? dirtyFields : dirtyFields.filter(mine);
 
       for (const field of fields) {
         switch (field) {

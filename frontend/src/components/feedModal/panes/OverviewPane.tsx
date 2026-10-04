@@ -50,12 +50,12 @@ export function OverviewPane({ feed, isAdmin }: { feed: Feed; isAdmin: boolean }
 
   const stats: { value: string; label: string }[] = v?.scored
     ? [
-        { value: v.tier ?? "—", label: "Value tier" },
+        { value: v.tier ?? "—", label: "Value grade" },
         { value: String(v.articles ?? 0), label: `Articles ${v.days ?? 90}d` },
-        { value: String(v.entity_introductions ?? 0), label: "New entities" },
-        { value: String(v.correlation_events ?? 0), label: "Correlations" },
+        { value: String(v.entity_introductions ?? 0), label: "First to report" },
+        { value: String(v.correlation_events ?? 0), label: "Links made" },
         { value: String(v.detection_rules ?? 0), label: "Rules found" },
-        { value: String(v.pir_matches ?? 0), label: "PIR matches" },
+        { value: String(v.pir_matches ?? 0), label: "Requirement hits" },
       ]
     : [];
 
@@ -80,7 +80,7 @@ export function OverviewPane({ feed, isAdmin }: { feed: Feed; isAdmin: boolean }
         {verdict}
       </p>
 
-      {value.isLoading && <p className={styles.note}>Scoring this feed…</p>}
+      {value.isLoading && <p className={styles.note}>Working out what this feed has produced…</p>}
 
       {v?.scored && (
         <>
@@ -94,7 +94,9 @@ export function OverviewPane({ feed, isAdmin }: { feed: Feed; isAdmin: boolean }
           </div>
           {v.rank != null && (
             <p className={styles.note}>
-              Ranked {v.rank} of {v.of} scored feeds by intelligence value.
+              {v.rank} of {v.of} feeds by how much intelligence they produce.
+              &ldquo;First to report&rdquo; counts entities this feed brought in
+              before any other source had them.
             </p>
           )}
         </>
@@ -102,8 +104,8 @@ export function OverviewPane({ feed, isAdmin }: { feed: Feed; isAdmin: boolean }
 
       {value.data && !value.data.scored && (
         <p className={styles.note}>
-          No value score yet — this feed has produced nothing in the scoring
-          window.
+          Nothing to grade yet — this feed has not produced any intelligence in
+          the last 90 days.
         </p>
       )}
 
@@ -159,7 +161,7 @@ export function OverviewPane({ feed, isAdmin }: { feed: Feed; isAdmin: boolean }
         <span className={styles.hint}>
           {feed.last_reviewed_at
             ? formatDateTime(feed.last_reviewed_at)
-            : "Never — nobody has rated this source yet."}
+            : "Never rated. The Assessment tab is where you record what you make of it."}
         </span>
       </div>
     </div>
