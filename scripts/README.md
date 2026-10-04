@@ -11,8 +11,9 @@ is — the image itself only carries `./backend`.
 docker compose -f docker-compose.dev.yml exec api python scripts/<folder>/<script>.py
 ```
 
-`ops/` and `dev/` are the exception: they drive Docker, SSH, or the API from
-outside, so run those from the repo root on your own machine.
+`ops/`, `dev/` and `release_apk.sh` are the exception: they drive Docker, SSH,
+the API or the Android SDK from outside, so run those from the repo root on
+your own machine.
 
 Every script's docstring carries its exact invocation and flags. Anything that
 writes takes `--dry-run` (or `--apply`), so you can see the damage first.
@@ -148,6 +149,22 @@ export INTELFEED_PROD_DIR=intelfeed                # optional, checkout path on 
 ./scripts/ops/backup.sh
 ./scripts/ops/restore.sh backups/intelfeed_20260828_020000.sql.gz
 ./scripts/ops/deploy.sh
+```
+
+## `release_apk.sh` — Android app release  *(host-side)*
+
+Bumps `android/version.properties` (build number +1, `1.x` → `1.x+1`, or
+`2.0` with `--major`), runs the unit tests, builds the debug APK, copies it to
+`./IntelFeed.apk` (gitignored) and installs it on every connected device with
+data kept. A failed build restores the old version. `--install` only installs
+the existing APK. Merging the bump to `main` makes CI publish the release
+`android-v<version>`; see [docs/android-app.md](../docs/android-app.md).
+Needs JDK 17, the Android SDK and `adb`.
+
+```bash
+scripts/release_apk.sh            # new minor version
+scripts/release_apk.sh --major    # new major version
+scripts/release_apk.sh --install  # phone plugged in after the build
 ```
 
 ## `dev/` — developer tooling  *(host-side)*

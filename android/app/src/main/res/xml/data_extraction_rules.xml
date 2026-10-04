@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+   Backup and transfer rules for Android 12+ (see https://developer.android.com/about/versions/12/backup-restore#xml-changes).
+   The DataStore directory holds the access and refresh tokens, so it never leaves the device:
+   not to cloud backup and not to a new phone via device-to-device transfer.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="datastore/" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="datastore/" />
+    </device-transfer>
+</data-extraction-rules>

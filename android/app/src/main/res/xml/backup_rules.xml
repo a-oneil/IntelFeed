@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+   Backup rules for Android 11 and lower (see https://developer.android.com/guide/topics/data/autobackup).
+   allowBackup is currently false in the manifest; this exclusion keeps the auth tokens in the
+   DataStore file out of backups if backups are ever turned back on.
+-->
+<full-backup-content>
+    <exclude domain="file" path="datastore/" />
+</full-backup-content>

@@ -1,0 +1,31 @@
+*.iml
+.gradle
+/local.properties
+# Nothing from the IDE is tracked; ignore the whole folder rather than a list of files.
+/.idea/
+*.hprof
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# Build output (app/build was not covered by the root-only /build rule)
+build/
+.kotlin/
+
+# Release artifacts and signing material
+*.apk
+*.aab
+*.jks
+*.keystore
+*.p12
+
+# Copies of the backend repo's docs (a-oneil/IntelFeed docs/) for local reference only;
+# they already live in that repo, so they are not committed here.
+/docs/
+
+# In a-oneil/IntelFeed this folder is android/, and that repo's root .gitignore ignores data/ at
+# any depth (backend runtime data); here data/ is the app's data package, so keep it.
+!data/

@@ -14,6 +14,7 @@ For a top-level project overview and quickstart, see [`../readme.md`](../readme.
 - **[query-language.md](query-language.md)** — Full reference for the search query syntax used across the unified search bar, command palette, query builder, and saved searches.
 - **[cli-reference.md](cli-reference.md)** — Reference for the `intelfeed_cli.py` tool — all 180 tools in the full CLI (81 in the read-only lite variant), with args, returns, and examples.
 - **[../intelfeed-mcp/README.md](../intelfeed-mcp/README.md)** — The MCP server for local models (LM Studio and other MCP clients): the same tool registry behind nine fixed tools, on-demand skills and size-capped results, so it fits a small context window.
+- **[android-app.md](android-app.md)** — The native Android client: where to download the APK, what the app covers, how it is built, signed and released from CI, and how its source is synced into `android/`.
 
 ## For operators
 

@@ -3,6 +3,14 @@
 .env*.local
 *.pem
 *.key
+# Android signing material (the shared debug key lives in the ANDROID_DEBUG_KEYSTORE secret)
+*.keystore
+*.jks
+*.p12
+
+# Android build output
+*.apk
+*.aab
 
 # Python
 __pycache__/
