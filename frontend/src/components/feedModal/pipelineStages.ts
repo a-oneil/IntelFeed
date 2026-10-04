@@ -1,3 +1,4 @@
+import type { FeedPipeline } from "@/api/types";
 import type { FeedFormValues, IntelMode } from "./useFeedForm";
 
 /**
@@ -5,7 +6,7 @@ import type { FeedFormValues, IntelMode } from "./useFeedForm";
  *
  * The old control was a five-way preset ("Full", "Selective", "Known entities
  * only", "Manual", "None") mapped onto two columns. Three of those labels were
- * false: the one-pass AI analysis that does most of the extraction today gates
+ * false: the one-pass AI analysis that does most of the extraction today gated
  * only on `intel_extraction_mode === "none"`, so a feed set to "Known entities
  * only — match against existing database" or "Manual — only when triggered"
  * still had the AI read every article and create entities. `selective` and
@@ -13,9 +14,14 @@ import type { FeedFormValues, IntelMode } from "./useFeedForm";
  * the AI pass uses its own global junk threshold either way.
  *
  * So the stages below are the real ones, each pointing at the field that
- * genuinely drives it. Two have no per-feed switch at all and say so rather
- * than pretending — that is the `scope: "global"` marker, and it is honest
- * information, not decoration.
+ * genuinely drives it.
+ *
+ * Two things can take a stage out of this pane's hands, and both say so rather
+ * than pretending:
+ *   - `ai_one_pass_enabled` off engine-wide — no per-feed setting revives it.
+ *   - a PipelinePlan at global, category or feed scope overriding the stage
+ *     once `pipeline_engine_enabled` is on. The plan wins over the Feed
+ *     booleans, so the checkbox here would be writing a value nothing reads.
  */
 export type StageId =
   | "master"
@@ -27,27 +33,50 @@ export type StageId =
   | "tools"
   | "observables";
 
+export type StageScope = "feed" | "global" | "plan";
+
 export interface StageRow {
   id: StageId;
   label: string;
   detail: string;
   on: boolean;
-  /** "feed" = this feed's own switch; "global" = engine-wide, shown read-only. */
-  scope: "feed" | "global";
-  /** Off because the master switch is off, or because it is a global. */
+  scope: StageScope;
+  /** When scope is "plan", which scope's plan decided it. */
+  planScope?: "global" | "category" | "feed";
   disabled: boolean;
-  /** Indented under the stage above it. */
   nested?: boolean;
   /** This stage can create entities that did not exist before. */
   writes?: boolean;
 }
 
-export function describeStages(values: FeedFormValues, aiEnabled: boolean): StageRow[] {
+/** Which plan stage, if any, governs each row here. */
+const PLAN_STAGE: Partial<Record<StageId, string>> = {
+  autolink: "autolink",
+  relevance: "autolink",
+  regex: "extract",
+  rules: "extract",
+  observables: "observables",
+};
+
+interface Context {
+  aiEnabled: boolean;
+  pipeline?: FeedPipeline;
+}
+
+function planOverride(id: StageId, ctx: Context): "global" | "category" | "feed" | null {
+  const stage = PLAN_STAGE[id];
+  if (!stage || !ctx.pipeline?.engine_enabled) return null;
+  const by = ctx.pipeline.decided_by[stage];
+  return by && by !== "legacy" ? by : null;
+}
+
+export function describeStages(values: FeedFormValues, ctx: Context): StageRow[] {
+  const { aiEnabled, pipeline } = ctx;
   const mode = values.intel_extraction_mode;
   const processing = mode !== "none";
   const autolink = processing && mode !== "manual";
 
-  return [
+  const rows: StageRow[] = [
     {
       id: "master",
       label: "Process this feed",
@@ -80,11 +109,11 @@ export function describeStages(values: FeedFormValues, aiEnabled: boolean): Stag
       id: "ai",
       label: "AI analysis (one pass)",
       detail: aiEnabled
-        ? "Reads the article, judges the autolinks, and extracts TTPs, actors, malware, sectors, indicators and relationships. There is no per-feed switch — turn off “Process this feed” to stop it."
-        : "Off engine-wide. Turn on “AI one pass” in Engine settings to enable it.",
-      on: processing && aiEnabled,
-      scope: "global",
-      disabled: true,
+        ? "Reads the article, judges the autolinks, and extracts TTPs, actors, malware, sectors, indicators and relationships."
+        : "Off engine-wide. Turn on “AI one pass” in Engine settings before this does anything.",
+      on: processing && aiEnabled && values.ai_analysis_enabled,
+      scope: aiEnabled ? "feed" : "global",
+      disabled: !processing || !aiEnabled,
       writes: true,
     },
     {
@@ -124,6 +153,24 @@ export function describeStages(values: FeedFormValues, aiEnabled: boolean): Stag
       disabled: true,
     },
   ];
+
+  if (!pipeline?.engine_enabled) return rows;
+
+  // A plan outranks the Feed booleans, so show its value and stop offering a
+  // checkbox that would write somewhere nothing reads.
+  return rows.map((row) => {
+    const scope = planOverride(row.id, ctx);
+    if (!scope) return row;
+    const stage = PLAN_STAGE[row.id]!;
+    const planned = pipeline.stages[stage]?.enabled ?? row.on;
+    return {
+      ...row,
+      scope: "plan" as StageScope,
+      planScope: scope,
+      on: row.id === "relevance" ? row.on && planned : planned,
+      disabled: true,
+    };
+  });
 }
 
 /** The partial form update a stage toggle implies. */
@@ -143,6 +190,8 @@ export function toggleStage(
       return { intel_extraction_mode: (next ? "selective" : "manual") as IntelMode };
     case "relevance":
       return { intel_extraction_mode: (next ? "selective" : "full") as IntelMode };
+    case "ai":
+      return { ai_analysis_enabled: next };
     case "regex":
       return { auto_extract_on_ingest: next };
     case "rules":
@@ -150,37 +199,39 @@ export function toggleStage(
     case "tools":
       return { extract_tools: next };
     default:
-      // "ai" and "observables" have no per-feed field to write.
+      // "observables" has no per-feed field to write.
       return { intel_extraction_mode: mode };
   }
 }
 
 /** One sentence describing what a new article from this feed goes through. */
-export function summarizeStages(values: FeedFormValues, aiEnabled: boolean): string {
-  const mode = values.intel_extraction_mode;
-  if (mode === "none") {
+export function summarizeStages(values: FeedFormValues, ctx: Context): string {
+  const rows = describeStages(values, ctx);
+  const on = (id: StageId) => rows.find((r) => r.id === id)?.on ?? false;
+
+  if (!on("master")) {
     return "Articles are ingested, sanitized and searchable. Nothing is extracted from them, and no entity is created or linked.";
   }
 
   const parts: string[] = [];
-  if (mode !== "manual") {
+  if (on("autolink")) {
     parts.push(
-      mode === "selective"
+      on("relevance")
         ? "matched against your catalog when it looks security-relevant"
         : "matched against your catalog"
     );
   }
-  if (aiEnabled) parts.push("read by the AI");
-  if (values.auto_extract_on_ingest) parts.push("enriched from NVD");
-  parts.push("checked against the indicator ledger");
+  if (on("ai")) parts.push("read by the AI");
+  if (on("regex")) parts.push("enriched from NVD");
+  if (on("observables")) parts.push("checked against the indicator ledger");
 
-  let summary = `Every article is ${joinWords(parts)}.`;
-  summary += aiEnabled
+  let summary = parts.length
+    ? `Every article is ${joinWords(parts)}.`
+    : "Articles are ingested and indexed only.";
+  summary += on("ai")
     ? " The AI may create entities you do not have yet."
     : " Nothing new is created — only what is already in your catalog gets linked.";
-  if (values.extract_detection_rules) {
-    summary += " Detection rules in the body are pulled out.";
-  }
+  if (on("rules")) summary += " Detection rules in the body are pulled out.";
   return summary;
 }
 

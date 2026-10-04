@@ -202,7 +202,9 @@ export function EditFeedModal({ subscription, onClose }: Props) {
             {pane === "source" && isAdmin && (
               <SourcePane feedId={subscription.id} form={form} />
             )}
-            {pane === "pipeline" && isAdmin && <PipelinePane form={form} />}
+            {pane === "pipeline" && isAdmin && (
+              <PipelinePane feedId={subscription.id} form={form} />
+            )}
             {pane === "assessment" && <AssessmentPane form={form} />}
             {pane === "readers" && isAdmin && (
               <FeedSubscribersPanel

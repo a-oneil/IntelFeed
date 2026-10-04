@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { describeStages, summarizeStages, toggleStage } from "../pipelineStages";
+import type { FeedPipeline } from "@/api/types";
 import type { FeedFormValues } from "../useFeedForm";
 
 function values(overrides: Partial<FeedFormValues> = {}): FeedFormValues {
@@ -13,6 +14,7 @@ function values(overrides: Partial<FeedFormValues> = {}): FeedFormValues {
     retention_days: "",
     is_active: true,
     intel_extraction_mode: "selective",
+    ai_analysis_enabled: true,
     auto_extract_on_ingest: false,
     extract_detection_rules: false,
     extract_tools: true,
@@ -25,17 +27,33 @@ function values(overrides: Partial<FeedFormValues> = {}): FeedFormValues {
   };
 }
 
+const ctx = (aiEnabled = true, pipeline?: FeedPipeline) => ({ aiEnabled, pipeline });
+
 const stage = (vals: FeedFormValues, id: string, ai = true) =>
-  describeStages(vals, ai).find((s) => s.id === id)!;
+  describeStages(vals, ctx(ai)).find((s) => s.id === id)!;
+
+function plan(
+  stages: Record<string, { enabled: boolean }>,
+  decided: Record<string, "legacy" | "global" | "category" | "feed">
+): FeedPipeline {
+  return { engine_enabled: true, stages, decided_by: decided };
+}
 
 describe("describeStages", () => {
-  it("marks the AI pass as global, because there is no per-feed field for it", () => {
-    // The whole reason the old five-way preset lied: `auto_extract_on_ingest`
-    // does not gate the AI, so "Known entities only" could not mean what it said.
+  it("gives the AI pass its own per-feed switch", () => {
     const ai = stage(values(), "ai");
-    expect(ai.scope).toBe("global");
-    expect(ai.disabled).toBe(true);
+    expect(ai.scope).toBe("feed");
+    expect(ai.disabled).toBe(false);
+    expect(ai.on).toBe(true);
     expect(ai.writes).toBe(true);
+  });
+
+  it("turns the AI off for one feed without disturbing autolinking", () => {
+    // The gap this closes: mode="none" was the only lever, and it killed
+    // autolinking and scoring too.
+    const vals = values({ ai_analysis_enabled: false });
+    expect(stage(vals, "ai").on).toBe(false);
+    expect(stage(vals, "autolink").on).toBe(true);
   });
 
   it("shows the AI running on a feed the old UI called 'manual'", () => {
@@ -49,7 +67,7 @@ describe("describeStages", () => {
   });
 
   it("turns everything off when the feed is not processed at all", () => {
-    const stages = describeStages(values({ intel_extraction_mode: "none" }), true);
+    const stages = describeStages(values({ intel_extraction_mode: "none" }), ctx());
     for (const s of stages) {
       if (s.id === "master") continue;
       expect(s.on, `${s.id} should be off`).toBe(false);
@@ -57,8 +75,11 @@ describe("describeStages", () => {
     }
   });
 
-  it("reports the AI off when the engine-wide switch is off", () => {
-    expect(stage(values(), "ai", false).on).toBe(false);
+  it("reports the AI off, and not per-feed, when the engine-wide switch is off", () => {
+    const ai = stage(values(), "ai", false);
+    expect(ai.on).toBe(false);
+    expect(ai.scope).toBe("global");
+    expect(ai.disabled).toBe(true);
   });
 
   it("treats selective as autolink-plus-relevance-filter", () => {
@@ -108,11 +129,12 @@ describe("toggleStage", () => {
     expect(toggleStage(values(), "tools", false)).toEqual({ extract_tools: false });
   });
 
-  it("a global stage is a no-op rather than a silent write", () => {
+  it("the AI switch writes its own field now", () => {
+    expect(toggleStage(values(), "ai", false)).toEqual({ ai_analysis_enabled: false });
+  });
+
+  it("a stage with no per-feed field is a no-op rather than a silent write", () => {
     const vals = values();
-    expect(toggleStage(vals, "ai", false)).toEqual({
-      intel_extraction_mode: vals.intel_extraction_mode,
-    });
     expect(toggleStage(vals, "observables", false)).toEqual({
       intel_extraction_mode: vals.intel_extraction_mode,
     });
@@ -121,23 +143,58 @@ describe("toggleStage", () => {
 
 describe("summarizeStages", () => {
   it("says plainly that nothing is extracted", () => {
-    const text = summarizeStages(values({ intel_extraction_mode: "none" }), true);
+    const text = summarizeStages(values({ intel_extraction_mode: "none" }), ctx(true));
     expect(text).toContain("Nothing is extracted");
   });
 
   it("warns that the AI may create new entities", () => {
-    expect(summarizeStages(values(), true)).toContain("may create entities you do not have yet");
+    expect(summarizeStages(values(), ctx(true))).toContain("may create entities you do not have yet");
   });
 
   it("promises nothing new when the AI is off engine-wide", () => {
-    const text = summarizeStages(values(), false);
+    const text = summarizeStages(values(), ctx(false));
     expect(text).toContain("Nothing new is created");
   });
 
   it("mentions detection rules only when they are being pulled out", () => {
-    expect(summarizeStages(values(), true)).not.toContain("Detection rules");
+    expect(summarizeStages(values(), ctx(true))).not.toContain("Detection rules");
     expect(
-      summarizeStages(values({ extract_detection_rules: true }), true)
+      summarizeStages(values({ extract_detection_rules: true }), ctx(true))
     ).toContain("Detection rules");
+  });
+});
+
+describe("pipeline plans", () => {
+  it("leaves stages alone while the plan engine is off", () => {
+    const rows = describeStages(values(), ctx(true, undefined));
+    expect(rows.every((r) => r.scope !== "plan")).toBe(true);
+  });
+
+  it("hands a stage to the plan that overrides it", () => {
+    const p = plan({ autolink: { enabled: false } }, { autolink: "category", extract: "legacy" });
+    const autolink = describeStages(values(), ctx(true, p)).find((r) => r.id === "autolink")!;
+
+    // The plan wins over the Feed booleans, so a checkbox here would write a
+    // value nothing reads.
+    expect(autolink.scope).toBe("plan");
+    expect(autolink.planScope).toBe("category");
+    expect(autolink.disabled).toBe(true);
+    expect(autolink.on).toBe(false);
+  });
+
+  it("leaves a stage no plan touched under this pane's control", () => {
+    const p = plan({ autolink: { enabled: false } }, { autolink: "global", extract: "legacy" });
+    const rows = describeStages(values({ auto_extract_on_ingest: true }), ctx(true, p));
+
+    const regex = rows.find((r) => r.id === "regex")!;
+    expect(regex.scope).toBe("feed");
+    expect(regex.disabled).toBe(false);
+    expect(regex.on).toBe(true);
+  });
+
+  it("the summary follows the plan, not the feed's own setting", () => {
+    const p = plan({ autolink: { enabled: false } }, { autolink: "global" });
+    const text = summarizeStages(values(), ctx(true, p));
+    expect(text).not.toContain("matched against your catalog");
   });
 });

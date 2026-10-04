@@ -3,6 +3,7 @@ import api from "@/api/client";
 import type {
   Category,
   Feed,
+  FeedPipeline,
   FeedSubscribersResponse,
   FeedValueDetail,
   PaginatedResponse,
@@ -124,6 +125,25 @@ export function useFeedValue(feedId: string | null) {
   });
 }
 
+/**
+ * Which stages actually run for this feed, and what decided each one.
+ *
+ * Resolution (legacy booleans -> global -> category -> feed plan) happens on
+ * the server; re-implementing that merge in the client would drift the moment
+ * either side changed.
+ */
+export function useFeedPipeline(feedId: string | null) {
+  return useQuery({
+    queryKey: ["feed-pipeline", feedId],
+    queryFn: async () => {
+      const res = await api.get<FeedPipeline>(`/feeds/${feedId}/pipeline`);
+      return res.data;
+    },
+    enabled: Boolean(feedId),
+    staleTime: 60_000,
+  });
+}
+
 export function useDiscoverFeed() {
   return useMutation({
     mutationFn: async (url: string) => {
@@ -170,6 +190,7 @@ export function useUpdateFeed() {
         feed_type?: string;
         retention_days?: number | null;
         intel_extraction_mode?: "full" | "selective" | "manual" | "none";
+        ai_analysis_enabled?: boolean;
         auto_extract_on_ingest?: boolean;
         extract_detection_rules?: boolean;
         extract_tools?: boolean;

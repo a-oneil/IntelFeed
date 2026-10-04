@@ -409,3 +409,118 @@ async def test_non_admin_cannot_clear_retention_with_an_explicit_null(
     )
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "forbidden"
+
+
+@pytest.mark.asyncio
+async def test_ai_analysis_can_be_disabled_without_disabling_autolinking(
+    client: AsyncClient, admin_headers: dict, db_session: AsyncSession
+):
+    """The gap this field closes: quieting the AI used to mean mode="none"."""
+    feed = Feed(
+        title="Noisy",
+        url="https://noisy.example.com/rss",
+        feed_type="rss",
+        intel_extraction_mode="selective",
+    )
+    db_session.add(feed)
+    await db_session.flush()
+    assert feed.ai_analysis_enabled is True
+
+    response = await client.put(
+        f"/api/feeds/{feed.id}",
+        json={"ai_analysis_enabled": False},
+        headers=admin_headers,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ai_analysis_enabled"] is False
+    # Autolinking is untouched — that is the whole point.
+    assert data["intel_extraction_mode"] == "selective"
+
+
+@pytest.mark.asyncio
+async def test_ai_analysis_toggle_is_admin_only(client: AsyncClient, auth_headers: dict, db_session: AsyncSession):
+    feed = Feed(title="Guard", url="https://guard-ai.example.com/rss", feed_type="rss")
+    db_session.add(feed)
+    await db_session.flush()
+
+    response = await client.put(
+        f"/api/feeds/{feed.id}",
+        json={"ai_analysis_enabled": False},
+        headers=auth_headers,
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_analysis_is_not_queued_for_a_feed_with_ai_off(db_session: AsyncSession, monkeypatch):
+    """The switch has to actually stop the enqueue, not just store a bool."""
+    from app.config import settings as env_settings
+    from app.models.entry import Entry
+    from app.services.entry_analysis import enqueue_entry_analysis
+
+    monkeypatch.setattr(env_settings, "ai_one_pass_enabled", True)
+
+    feed = Feed(
+        title="AI off",
+        url="https://ai-off.example.com/rss",
+        feed_type="rss",
+        ai_analysis_enabled=False,
+    )
+    db_session.add(feed)
+    await db_session.flush()
+
+    entry = Entry(feed_id=feed.id, title="Something", url="https://ai-off.example.com/a", guid="ai-off-1")
+    db_session.add(entry)
+    await db_session.flush()
+
+    assert await enqueue_entry_analysis(db_session, entry.id) is None
+
+
+@pytest.mark.asyncio
+async def test_feed_pipeline_reports_legacy_while_the_engine_is_off(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession
+):
+    """With no plan engine, the Feed booleans are authoritative — say so."""
+    feed = Feed(title="Plain", url="https://plain.example.com/rss", feed_type="rss")
+    db_session.add(feed)
+    await db_session.flush()
+
+    response = await client.get(f"/api/feeds/{feed.id}/pipeline", headers=auth_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["engine_enabled"] is False
+    assert set(data["decided_by"].values()) == {"legacy"}
+    assert "autolink" in data["stages"]
+
+
+@pytest.mark.asyncio
+async def test_feed_pipeline_names_the_scope_that_overrode_a_stage(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession, monkeypatch
+):
+    """Feed scope beats global, and the pane needs to be told which won."""
+    from app.config import settings as env_settings
+    from app.models.pipeline_plan import PipelinePlan
+
+    monkeypatch.setattr(env_settings, "pipeline_engine_enabled", True)
+
+    feed = Feed(title="Planned", url="https://planned.example.com/rss", feed_type="rss")
+    db_session.add(feed)
+    await db_session.flush()
+
+    db_session.add_all(
+        [
+            PipelinePlan(name="global", scope_type="global", scope_id=None, stages={"autolink": {"enabled": False}}),
+            PipelinePlan(name="feed", scope_type="feed", scope_id=feed.id, stages={"autolink": {"enabled": True}}),
+        ]
+    )
+    await db_session.flush()
+
+    response = await client.get(f"/api/feeds/{feed.id}/pipeline", headers=auth_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["engine_enabled"] is True
+    assert data["decided_by"]["autolink"] == "feed"
+    assert data["stages"]["autolink"]["enabled"] is True
+    # A stage no plan touched still reads from the Feed booleans.
+    assert data["decided_by"]["score"] == "legacy"

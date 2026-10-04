@@ -66,7 +66,7 @@ Tables: `users`, `user_entry_states`, `playback_progress`
 - `is_active` (Boolean, indexed) — subscription status
 - `reliability_rating`, `timeliness_rating`, `relevance_rating` — analyst ratings (A-F or similar)
 - `intel_extraction_mode` ("full", "selective", "manual", "none") — TTP/CVE/Actor extraction strategy
-- `auto_extract_on_ingest`, `extract_detection_rules` — automation flags
+- `ai_analysis_enabled`, `auto_extract_on_ingest`, `extract_detection_rules` — per-feed pipeline switches. `ai_analysis_enabled` gates the one-pass AI analysis independently of `intel_extraction_mode`, so a noisy source can stay matched against the catalog without the AI reading it
 - `category_id` (FK, nullable, SET NULL on category delete)
 - `retention_days` — auto-delete entries older than N days
 - `adapter_config` (JSONB) — feed-type-specific config

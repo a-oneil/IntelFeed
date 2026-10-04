@@ -36,6 +36,7 @@ export interface FeedFormValues {
   retention_days: string;
   is_active: boolean;
   intel_extraction_mode: IntelMode;
+  ai_analysis_enabled: boolean;
   auto_extract_on_ingest: boolean;
   extract_detection_rules: boolean;
   extract_tools: boolean;
@@ -58,6 +59,7 @@ const FIELD_PANE: Record<keyof FeedFormValues, PaneId> = {
   is_active: "source",
   adapter: "source",
   intel_extraction_mode: "pipeline",
+  ai_analysis_enabled: "pipeline",
   auto_extract_on_ingest: "pipeline",
   extract_detection_rules: "pipeline",
   extract_tools: "pipeline",
@@ -102,6 +104,7 @@ function initialValues(feed: Feed): FeedFormValues {
     retention_days: feed.retention_days != null ? String(feed.retention_days) : "",
     is_active: feed.is_active,
     intel_extraction_mode: (feed.intel_extraction_mode || "selective") as IntelMode,
+    ai_analysis_enabled: feed.ai_analysis_enabled ?? true,
     auto_extract_on_ingest: feed.auto_extract_on_ingest ?? false,
     extract_detection_rules: feed.extract_detection_rules ?? false,
     extract_tools: feed.extract_tools ?? true,

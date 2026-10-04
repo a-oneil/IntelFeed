@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useBulkUpdateCategoryFeeds } from "@/hooks/useFeeds";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
-import { deriveIntelLevel } from "./IntelLevelBadge";
 import type { Category, Feed } from "@/api/types";
 import styles from "./EditCategoryModal.module.css";
 
@@ -16,7 +15,13 @@ export function EditCategoryModal({ category, feeds, onClose }: Props) {
   const [retentionDays, setRetentionDays] = useState("");
   const [reliability, setReliability] = useState("");
   const [analystNotes, setAnalystNotes] = useState("");
-  const [intelLevel, setIntelLevel] = useState("");
+  // Bulk edits keep the "leave unchanged" idiom rather than tri-state
+  // checkboxes: across N feeds a checkbox has no honest unchecked state.
+  const [processing, setProcessing] = useState("");
+  const [aiAnalysis, setAiAnalysis] = useState("");
+  const [regexEnrich, setRegexEnrich] = useState("");
+  const [detectionRules, setDetectionRules] = useState("");
+  const [toolEntities, setToolEntities] = useState("");
 
   const bulkUpdate = useBulkUpdateCategoryFeeds();
   const trapRef = useFocusTrap<HTMLDivElement>();
@@ -26,7 +31,11 @@ export function EditCategoryModal({ category, feeds, onClose }: Props) {
     retentionDays !== "" ||
     reliability !== "" ||
     analystNotes !== "" ||
-    intelLevel !== "";
+    processing !== "" ||
+    aiAnalysis !== "" ||
+    regexEnrich !== "" ||
+    detectionRules !== "" ||
+    toolEntities !== "";
 
   const handleSave = async () => {
     const data: Record<string, unknown> = {};
@@ -45,17 +54,23 @@ export function EditCategoryModal({ category, feeds, onClose }: Props) {
     if (analystNotes !== "") {
       data.analyst_notes = analystNotes;
     }
-    if (intelLevel !== "") {
-      const map: Record<string, { mode: string; extract: boolean }> = {
-        full: { mode: "full", extract: true },
-        selective: { mode: "selective", extract: true },
-        known_only: { mode: "full", extract: false },
-        manual: { mode: "manual", extract: false },
-        none: { mode: "none", extract: false },
-      };
-      const { mode, extract } = map[intelLevel];
-      data.intel_extraction_mode = mode;
-      data.auto_extract_on_ingest = extract;
+    // One field per stage, not a preset: the old five-way control mapped onto
+    // two columns and three of its labels described a pipeline that no longer
+    // exists. See frontend/src/components/feedModal/pipelineStages.ts.
+    if (processing !== "") {
+      data.intel_extraction_mode = processing;
+    }
+    if (aiAnalysis !== "") {
+      data.ai_analysis_enabled = aiAnalysis === "on";
+    }
+    if (regexEnrich !== "") {
+      data.auto_extract_on_ingest = regexEnrich === "on";
+    }
+    if (detectionRules !== "") {
+      data.extract_detection_rules = detectionRules === "on";
+    }
+    if (toolEntities !== "") {
+      data.extract_tools = toolEntities === "on";
     }
 
     try {
@@ -70,14 +85,12 @@ export function EditCategoryModal({ category, feeds, onClose }: Props) {
   const intervals = [...new Set(feeds.map((s) => s.fetch_interval_minutes))];
   const retentions = [...new Set(feeds.map((s) => s.retention_days))];
   const reliabilities = [...new Set(feeds.map((s) => s.reliability_rating))];
-  // IntelLevelBadge owns this mapping; there were three hand-rolled copies.
-  const intelLevels = [
-    ...new Set(
-      feeds.map((s) =>
-        deriveIntelLevel(s.intel_extraction_mode || "selective", s.auto_extract_on_ingest ?? false)
-      )
-    ),
-  ];
+  const modes = [...new Set(feeds.map((s) => s.intel_extraction_mode || "selective"))];
+  const aiStates = [...new Set(feeds.map((s) => s.ai_analysis_enabled ?? true))];
+  const regexStates = [...new Set(feeds.map((s) => s.auto_extract_on_ingest ?? false))];
+  const ruleStates = [...new Set(feeds.map((s) => s.extract_detection_rules ?? false))];
+  const toolStates = [...new Set(feeds.map((s) => s.extract_tools ?? true))];
+  const onOff = (v: boolean) => (v ? "on" : "off");
 
   const mixedLabel = (values: unknown[]) =>
     values.length > 1 ? " (mixed)" : "";
@@ -162,36 +175,108 @@ export function EditCategoryModal({ category, feeds, onClose }: Props) {
           </div>
 
           <div className={styles.field}>
-            <label>Intelligence Extraction{mixedLabel(intelLevels)}</label>
+            <label>Processing{mixedLabel(modes)}</label>
             <select
-              value={intelLevel}
-              onChange={(e) => setIntelLevel(e.target.value)}
+              value={processing}
+              onChange={(e) => setProcessing(e.target.value)}
               className={styles.select}
             >
               <option value="">
                 — No change
-                {intelLevels.length === 1 ? ` (all ${intelLevels[0]})` : ""}
+                {modes.length === 1 ? ` (all ${modes[0]})` : ""}
               </option>
-              <option value="full">Full — Extract all intelligence automatically</option>
-              <option value="selective">Selective — Security-relevant articles only</option>
-              <option value="known_only">Known entities only — Match against existing database</option>
-              <option value="manual">Manual — Only when triggered</option>
-              <option value="none">None — Disabled</option>
+              <option value="selective">Autolink security-relevant articles</option>
+              <option value="full">Autolink every article</option>
+              <option value="manual">No autolinking</option>
+              <option value="none">Process nothing</option>
             </select>
-            {intelLevel && (
+            {processing && (
               <span className={styles.fieldHint}>
-                {intelLevel === "full" &&
-                  "Best for dedicated threat intel feeds (CISA, Mandiant, CrowdStrike)"}
-                {intelLevel === "selective" &&
-                  "Runs a relevance check, then extracts TTPs, CVEs, and matches known entities"}
-                {intelLevel === "known_only" &&
-                  "Matches articles against threat actors, malware, and TTPs already in your database"}
-                {intelLevel === "manual" &&
-                  "No automatic processing — extract per-article from the context menu"}
-                {intelLevel === "none" &&
-                  "For non-security feeds (YouTube entertainment, general news)"}
+                {processing === "selective" &&
+                  "A keyword filter runs first; articles below the threshold skip autolinking."}
+                {processing === "full" &&
+                  "Every article is matched against your catalog, no relevance gate."}
+                {processing === "manual" &&
+                  "Nothing is matched automatically. The AI still reads these feeds unless you turn it off below."}
+                {processing === "none" &&
+                  "Articles are ingested and searchable, but nothing is extracted, linked or scored."}
               </span>
             )}
+          </div>
+
+          <div className={styles.field}>
+            <label>AI analysis{mixedLabel(aiStates)}</label>
+            <select
+              value={aiAnalysis}
+              onChange={(e) => setAiAnalysis(e.target.value)}
+              className={styles.select}
+            >
+              <option value="">
+                — No change
+                {aiStates.length === 1 ? ` (all ${onOff(aiStates[0])})` : ""}
+              </option>
+              <option value="on">On — the AI reads every article</option>
+              <option value="off">Off — no AI pass on these feeds</option>
+            </select>
+            <span className={styles.fieldHint}>
+              The one-pass analysis that extracts TTPs, actors, malware, sectors and
+              indicators. It can create entities you do not have yet.
+            </span>
+          </div>
+
+          <div className={styles.field}>
+            <label>Regex enrichment{mixedLabel(regexStates)}</label>
+            <select
+              value={regexEnrich}
+              onChange={(e) => setRegexEnrich(e.target.value)}
+              className={styles.select}
+            >
+              <option value="">
+                — No change
+                {regexStates.length === 1 ? ` (all ${onOff(regexStates[0])})` : ""}
+              </option>
+              <option value="on">On</option>
+              <option value="off">Off</option>
+            </select>
+            <span className={styles.fieldHint}>
+              Standalone CVE pass with NVD hydration, plus TTP and mitigation IDs.
+            </span>
+          </div>
+
+          <div className={styles.field}>
+            <label>Detection rule extraction{mixedLabel(ruleStates)}</label>
+            <select
+              value={detectionRules}
+              onChange={(e) => setDetectionRules(e.target.value)}
+              className={styles.select}
+            >
+              <option value="">
+                — No change
+                {ruleStates.length === 1 ? ` (all ${onOff(ruleStates[0])})` : ""}
+              </option>
+              <option value="on">On</option>
+              <option value="off">Off</option>
+            </select>
+          </div>
+
+          <div className={styles.field}>
+            <label>Create tool entities{mixedLabel(toolStates)}</label>
+            <select
+              value={toolEntities}
+              onChange={(e) => setToolEntities(e.target.value)}
+              className={styles.select}
+            >
+              <option value="">
+                — No change
+                {toolStates.length === 1 ? ` (all ${onOff(toolStates[0])})` : ""}
+              </option>
+              <option value="on">On</option>
+              <option value="off">Off</option>
+            </select>
+            <span className={styles.fieldHint}>
+              Off for advisory and rule-repository feeds — they name affected software,
+              not tooling an adversary wielded.
+            </span>
           </div>
 
           <div className={styles.field}>

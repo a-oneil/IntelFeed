@@ -21,6 +21,7 @@ function makeFeed(overrides: Partial<Feed> = {}): Feed {
     is_active: true,
     adapter_config: {},
     intel_extraction_mode: "selective",
+    ai_analysis_enabled: true,
     auto_extract_on_ingest: true,
     extract_detection_rules: false,
     extract_tools: true,

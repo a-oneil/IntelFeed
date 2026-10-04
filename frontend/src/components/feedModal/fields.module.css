@@ -324,6 +324,13 @@
   background: var(--bg-tertiary);
 }
 
+/* A plan-held stage reads differently from an engine-wide one: it is somebody's
+   deliberate override, and it is editable — just not from here. */
+.scopeChipPlan {
+  color: var(--accent-intel);
+  background: var(--accent-intel-bg);
+}
+
 .writesChip {
   font-family: var(--font-display);
   font-size: var(--fs-2xs);

@@ -570,6 +570,9 @@ async def bulk_update_category_feeds(
         if request.intel_extraction_mode is not None and feed.intel_extraction_mode != request.intel_extraction_mode:
             feed.intel_extraction_mode = request.intel_extraction_mode
             changed = True
+        if request.ai_analysis_enabled is not None and feed.ai_analysis_enabled != request.ai_analysis_enabled:
+            feed.ai_analysis_enabled = request.ai_analysis_enabled
+            changed = True
         if request.auto_extract_on_ingest is not None and feed.auto_extract_on_ingest != request.auto_extract_on_ingest:
             feed.auto_extract_on_ingest = request.auto_extract_on_ingest
             changed = True
@@ -793,6 +796,7 @@ async def update_feed(
         "adapter_config",
         "exclude_shorts",
         "intel_extraction_mode",
+        "ai_analysis_enabled",
         "auto_extract_on_ingest",
         "extract_detection_rules",
         "extract_tools",
@@ -911,6 +915,8 @@ async def update_feed(
 
     if request.intel_extraction_mode is not None:
         feed.intel_extraction_mode = request.intel_extraction_mode
+    if request.ai_analysis_enabled is not None:
+        feed.ai_analysis_enabled = request.ai_analysis_enabled
     if request.auto_extract_on_ingest is not None:
         feed.auto_extract_on_ingest = request.auto_extract_on_ingest
     if request.extract_detection_rules is not None:
@@ -1207,6 +1213,29 @@ async def refresh_feed(
 
     fetch_feed.delay(str(feed_id))
     return {"message": "Feed refresh queued"}
+
+
+@router.get("/{feed_id}/pipeline")
+async def get_feed_pipeline(
+    feed_id: uuid.UUID = Path(..., description="UUID of the feed"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Which stages run for this feed, and what decided each one.
+
+    The edit modal's Pipeline pane reads this so it can say where a value comes
+    from. While `pipeline_engine_enabled` is off every stage reads "legacy" and
+    the Feed booleans are authoritative; once it is on, a plan at global,
+    category or feed scope can override a stage, and the pane has to stop
+    presenting its own checkbox as the thing in charge.
+    """
+    feed = await db.get(Feed, feed_id)
+    if not feed:
+        raise AppError(code="not_found", message="Feed not found", status_code=404)
+
+    from app.pipeline.plans import explain_feed_plan
+
+    return await explain_feed_plan(db, feed)
 
 
 @router.get("/{feed_id}/value")

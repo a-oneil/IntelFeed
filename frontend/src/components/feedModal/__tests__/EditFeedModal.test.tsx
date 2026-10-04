@@ -1,4 +1,5 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render as rtlRender, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Feed } from "@/api/types";
@@ -18,6 +19,10 @@ vi.mock("@/hooks/useFeeds", () => ({
   useDeleteFeed: () => ({ mutate: vi.fn(), isPending: false }),
   useRefreshFeed: () => ({ mutate: vi.fn(), isPending: false }),
   useFullSyncFeed: () => ({ mutate: vi.fn(), isPending: false }),
+  useFeedPipeline: () => ({
+    data: { engine_enabled: false, stages: {}, decided_by: {} },
+    isLoading: false,
+  }),
   useFeedValue: () => ({
     data: {
       feed_id: "feed-1",
@@ -79,6 +84,7 @@ function makeFeed(overrides: Partial<Feed> = {}): Feed {
     is_active: true,
     adapter_config: {},
     intel_extraction_mode: "selective",
+    ai_analysis_enabled: true,
     auto_extract_on_ingest: true,
     extract_detection_rules: false,
     extract_tools: true,
@@ -96,6 +102,8 @@ function makeFeed(overrides: Partial<Feed> = {}): Feed {
     ...overrides,
   };
 }
+
+const render = (ui: React.ReactElement) => rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
 
 const rail = () => screen.getByRole("navigation", { name: /sections/i });
 
@@ -280,6 +288,21 @@ describe("EditFeedModal", () => {
 
     expect(screen.getByRole("checkbox", { name: /^Autolink known entities/i })).toBeDisabled();
     expect(screen.getByText(/Nothing is extracted from them/i)).toBeInTheDocument();
+  });
+
+  it("turns the AI off for one feed without touching its autolinking", async () => {
+    const user = userEvent.setup();
+    render(<EditFeedModal subscription={makeFeed()} onClose={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Pipeline" }));
+
+    await user.click(screen.getByRole("checkbox", { name: /^AI analysis/i }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(mockUpdateAsync).toHaveBeenCalled());
+    // Only the AI field — autolinking rides on intel_extraction_mode and must
+    // not be dragged along.
+    expect(mockUpdateAsync.mock.calls[0][0].data).toEqual({ ai_analysis_enabled: false });
+    expect(screen.queryByText(/may create entities you do not have yet/i)).toBeNull();
   });
 
   it("shows a paused feed as paused and offers to resume it", () => {
