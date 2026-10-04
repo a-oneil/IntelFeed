@@ -9,7 +9,7 @@ import { useSSE } from "@/hooks/useSSE";
 import { useTableLayoutSync } from "@/hooks/useTableLayoutSync";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AudioPlayer } from "@/components/AudioPlayer";
-import { OnboardingWizard } from "@/components/OnboardingWizard";
+import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard";
 import { ReportWizardModal } from "@/components/ReportWizardModal";
 import { SendToReportModal } from "@/components/SendToReportModal";
 import { GlobalModals } from "@/components/GlobalModals";

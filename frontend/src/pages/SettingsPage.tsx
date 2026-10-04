@@ -5,6 +5,7 @@ import { useUIStore, type ReaderFontSize, type ReaderLineHeight, type ReaderMaxW
 import { useAppSidebarAutoCollapse } from "@/hooks/useAppSidebarAutoCollapse";
 import { useIsMobile } from "@/hooks/useMediaQuery";
 import { useUpdateProfile, useChangePassword } from "@/hooks/useAuth";
+import { useSaveOnboardingProgress } from "@/hooks/useOnboarding";
 import { useExternalLinkSettings } from "@/hooks/useExternalLinkSettings";
 import { BUILT_IN_TRUSTED_DOMAINS, type ExternalLinkMode } from "@/utils/externalLinks";
 import { useUsers, useUpdateUser, useDeleteUser } from "@/hooks/useUsers";
@@ -313,6 +314,7 @@ function TagsSection() {
 
 function AccountSection() {
   const user = useAuthStore((s) => s.user);
+  const replayOnboarding = useSaveOnboardingProgress();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [passwordMsg, setPasswordMsg] = useState<string | null>(null);
@@ -364,6 +366,26 @@ function AccountSection() {
                 : "—"}
             </span>
           </div>
+        </div>
+      </div>
+
+      <div className={styles.card}>
+        <h3 className={styles.cardTitle}>Getting started</h3>
+        <p className={styles.sectionDesc}>
+          Replay the setup and usage tour from the beginning. It covers the reading loop, the
+          priority queue, entities and search — and, if you're an admin, anything this instance
+          still needs.
+        </p>
+        <div className={styles.cardActions}>
+          <button
+            onClick={() =>
+              replayOnboarding.mutate({ onboarding_completed: false, onboarding_step: null })
+            }
+            disabled={replayOnboarding.isPending}
+            className={styles.btnPrimary}
+          >
+            {replayOnboarding.isPending ? "Starting…" : "Replay the tour"}
+          </button>
         </div>
       </div>
 
