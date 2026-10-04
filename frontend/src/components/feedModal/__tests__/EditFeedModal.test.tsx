@@ -274,9 +274,9 @@ describe("EditFeedModal", () => {
     await user.click(screen.getByRole("button", { name: "Pipeline" }));
 
     expect(screen.getByText(/may create entities you do not have yet/i)).toBeInTheDocument();
-    // Both the AI pass and regex enrichment can mint entities, and this feed
-    // has both on.
-    expect(screen.getAllByText("writes entities")).toHaveLength(2);
+    // Three stages can mint entities on this feed: the AI pass, the NVD
+    // lookup, and tool creation under the AI.
+    expect(screen.getAllByText("writes entities")).toHaveLength(3);
   });
 
   it("switching the feed off disables the rest of the pipeline", async () => {
@@ -287,7 +287,9 @@ describe("EditFeedModal", () => {
     await user.click(screen.getByRole("checkbox", { name: /^Process this feed/i }));
 
     expect(screen.getByRole("checkbox", { name: /^Autolink known entities/i })).toBeDisabled();
-    expect(screen.getByText(/Nothing is extracted from them/i)).toBeInTheDocument();
+    expect(screen.getByText(/Nothing else is extracted/i)).toBeInTheDocument();
+    // The ledger scan is not the feed's to switch off.
+    expect(screen.getByRole("checkbox", { name: /^Observables ledger/i })).toBeChecked();
   });
 
   it("turns the AI off for one feed without touching its autolinking", async () => {

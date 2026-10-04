@@ -4889,6 +4889,9 @@
       "none"
      ]
     },
+    "ai_analysis_enabled": {
+     "type": "boolean"
+    },
     "auto_extract_on_ingest": {
      "type": "boolean"
     },

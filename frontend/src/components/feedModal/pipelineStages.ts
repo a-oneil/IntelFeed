@@ -75,6 +75,7 @@ export function describeStages(values: FeedFormValues, ctx: Context): StageRow[]
   const mode = values.intel_extraction_mode;
   const processing = mode !== "none";
   const autolink = processing && mode !== "manual";
+  const aiRunning = processing && aiEnabled && values.ai_analysis_enabled;
 
   const rows: StageRow[] = [
     {
@@ -117,10 +118,24 @@ export function describeStages(values: FeedFormValues, ctx: Context): StageRow[]
       writes: true,
     },
     {
-      id: "regex",
-      label: "Regex enrichment",
+      // Not a stage of its own: `extract_tools` is read only inside
+      // `apply_analysis_results`, so it is a sub-switch of the AI pass and does
+      // nothing at all when that is off.
+      id: "tools",
+      label: "Create tool entities",
       detail:
-        "Standalone CVE pass with NVD hydration, plus TTP and mitigation IDs. Costs NVD API quota.",
+        "Let the AI mint Tool rows from what it read. Off for advisory and rule-repository feeds — they name affected software, not tooling an adversary wielded. Entries the AI classes as an advisory are skipped either way.",
+      on: aiRunning && values.extract_tools,
+      scope: "feed",
+      disabled: !aiRunning,
+      nested: true,
+      writes: true,
+    },
+    {
+      id: "regex",
+      label: "Look up CVEs in NVD",
+      detail:
+        "Fills in CVSS score, severity, description and affected products for CVEs named here. Without it a newly seen CVE stays a bare ID until a later enrichment sweep reaches it. Also pulls MITRE mitigation IDs. Costs NVD API quota.",
       on: processing && values.auto_extract_on_ingest,
       scope: "feed",
       disabled: !processing,
@@ -135,20 +150,15 @@ export function describeStages(values: FeedFormValues, ctx: Context): StageRow[]
       disabled: !processing,
     },
     {
-      id: "tools",
-      label: "Create tool entities",
-      detail:
-        "Off for advisory and rule-repository feeds — they name affected software, not tooling an adversary wielded.",
-      on: processing && values.extract_tools,
-      scope: "feed",
-      disabled: !processing,
-    },
-    {
+      // Genuinely ungated: `_scan_entry_observables` loads the entry and never
+      // looks at the feed, so this runs for every entry on every feed — even
+      // one switched off above. Showing it dim with the master switch would be
+      // the same kind of lie this pane exists to remove.
       id: "observables",
       label: "Observables ledger",
       detail:
-        "Sights indicators already in the ledger by exact match. Regex alone never creates a ledger row.",
-      on: processing,
+        "Runs on every article from every feed. Stages indicator candidates and sights values already in the ledger by exact match; regex alone never creates a ledger row.",
+      on: true,
       scope: "global",
       disabled: true,
     },
@@ -210,7 +220,7 @@ export function summarizeStages(values: FeedFormValues, ctx: Context): string {
   const on = (id: StageId) => rows.find((r) => r.id === id)?.on ?? false;
 
   if (!on("master")) {
-    return "Articles are ingested, sanitized and searchable. Nothing is extracted from them, and no entity is created or linked.";
+    return "Articles are ingested, sanitized and searchable, and still checked against the indicator ledger. Nothing else is extracted, and no entity is created or linked.";
   }
 
   const parts: string[] = [];

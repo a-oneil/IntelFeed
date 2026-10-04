@@ -317,6 +317,7 @@ export const EntryRow = memo(function EntryRow({
   searchSnippet,
   intelCounts,
   intelMode,
+  aiAnalysis,
   autoExtract,
   metaColumns,
   undimRead,
@@ -343,6 +344,7 @@ export const EntryRow = memo(function EntryRow({
   intelCounts?: EntryIntelCounts;
   /** Feed-level intel extraction mode */
   intelMode?: string;
+  aiAnalysis?: boolean;
   /** Whether feed auto-extracts on ingest */
   autoExtract?: boolean;
   /**
@@ -392,7 +394,13 @@ export const EntryRow = memo(function EntryRow({
         {!useColumnMeta && (
           <div className={styles.entryHeader}>
             <FeedNameMenuButton feedId={entry.feed_id} className={styles.feedNameBtn}>
-              {intelMode && <IntelLevelBadge mode={intelMode} autoExtract={autoExtract ?? false} />}
+              {intelMode && (
+                <IntelLevelBadge
+                  mode={intelMode}
+                  aiAnalysis={aiAnalysis}
+                  autoExtract={autoExtract ?? false}
+                />
+              )}
               {entry.feed_type && <FeedTypeIcon type={entry.feed_type} size={11} />}
               {entry.feed_title}
             </FeedNameMenuButton>
@@ -590,10 +598,11 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
   const navTrailIndex = useUIStore((s) => s.entryNavTrailIndex);
   const { data: feedsData } = useFeeds();
   const feedIntelMap = useMemo(() => {
-    const map: Record<string, { mode: string; auto: boolean }> = {};
+    const map: Record<string, { mode: string; ai: boolean; auto: boolean }> = {};
     for (const sub of feedsData?.items ?? []) {
       map[sub.id] = {
         mode: sub.intel_extraction_mode || "selective",
+        ai: sub.ai_analysis_enabled ?? true,
         auto: sub.auto_extract_on_ingest ?? false,
       };
     }
@@ -1709,6 +1718,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
                         onCheck={(e) => handleCheckboxClick(item.flatIndex, item.entry.id, e)}
                           intelCounts={intelBadges?.[item.entry.id]}
                         intelMode={feedIntelMap[item.entry.feed_id]?.mode}
+                        aiAnalysis={feedIntelMap[item.entry.feed_id]?.ai}
                         autoExtract={feedIntelMap[item.entry.feed_id]?.auto}
                         metaColumns={metaColumnKeys}
                       />
@@ -1724,6 +1734,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
                       onCheck={(e) => handleCheckboxClick(item.flatIndex, item.entry.id, e)}
                       intelCounts={intelBadges?.[item.entry.id]}
                       intelMode={feedIntelMap[item.entry.feed_id]?.mode}
+                        aiAnalysis={feedIntelMap[item.entry.feed_id]?.ai}
                       autoExtract={feedIntelMap[item.entry.feed_id]?.auto}
                       metaColumns={metaColumnKeys}
                     />

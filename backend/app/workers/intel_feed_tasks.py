@@ -511,29 +511,41 @@ async def _extract_entry_intel(entry_id: str):
         if not text.strip() and not has_raw_content:
             return stats
 
-        # Regex-based TTP extraction (MITRE ATT&CK technique IDs)
-        ttp_results = extract_ttp_ids_regex(text)
-        if ttp_results:
-            stored = await store_ttps(db, entry.id, ttp_results)
-            stats["ttps"] = len(stored)
-            touched.setdefault("ttp", []).extend(t.id for t, _ in stored)
+        # This task is dispatched when EITHER flag is on
+        # (`auto_extract_on_ingest or extract_detection_rules`), so each half
+        # has to check its own. Without the first check below, turning off
+        # "look up CVEs in NVD" did nothing at all as long as detection-rule
+        # extraction was on — the regex passes ran regardless, and the setting
+        # was decorative.
+        feed_row = (
+            await db.execute(
+                select(Feed.auto_extract_on_ingest, Feed.extract_detection_rules).where(Feed.id == entry.feed_id)
+            )
+        ).one_or_none()
+        run_regex = bool(feed_row and feed_row.auto_extract_on_ingest)
+        extract_rules_flag = bool(feed_row and feed_row.extract_detection_rules)
 
-        # Regex-based CVE extraction + NVD enrichment
-        cves = await extract_and_store_cves(db, entry.id, text)
-        stats["cves"] = len(cves)
-        if cves:
-            touched.setdefault("cve", []).extend(c.id for c in cves)
+        if run_regex:
+            # Regex-based TTP extraction (MITRE ATT&CK technique IDs)
+            ttp_results = extract_ttp_ids_regex(text)
+            if ttp_results:
+                stored = await store_ttps(db, entry.id, ttp_results)
+                stats["ttps"] = len(stored)
+                touched.setdefault("ttp", []).extend(t.id for t, _ in stored)
 
-        # Regex-based mitigation extraction (MITRE M-IDs)
-        mit_results = extract_mitigation_ids_regex(text)
-        if mit_results:
-            stored = await store_mitigations(db, entry.id, mit_results)
-            stats["mitigations"] = len(stored)
-            touched.setdefault("mitigation", []).extend(m.id for m, _ in stored)
+            # Regex-based CVE extraction + NVD enrichment
+            cves = await extract_and_store_cves(db, entry.id, text)
+            stats["cves"] = len(cves)
+            if cves:
+                touched.setdefault("cve", []).extend(c.id for c in cves)
 
-        # Detection rule extraction (if feed has it enabled)
-        feed_result = await db.execute(select(Feed.extract_detection_rules).where(Feed.id == entry.feed_id))
-        extract_rules_flag = feed_result.scalar_one_or_none()
+            # Regex-based mitigation extraction (MITRE M-IDs)
+            mit_results = extract_mitigation_ids_regex(text)
+            if mit_results:
+                stored = await store_mitigations(db, entry.id, mit_results)
+                stats["mitigations"] = len(stored)
+                touched.setdefault("mitigation", []).extend(m.id for m, _ in stored)
+
         if extract_rules_flag:
             # Prefer raw_content from metadata (github_repo entries store file content there)
             rule_text = (entry.metadata_ or {}).get("raw_content") or text

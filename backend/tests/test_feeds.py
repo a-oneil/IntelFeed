@@ -1,3 +1,5 @@
+import contextlib
+import uuid
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -524,3 +526,86 @@ async def test_feed_pipeline_names_the_scope_that_overrode_a_stage(
     assert data["stages"]["autolink"]["enabled"] is True
     # A stage no plan touched still reads from the Feed booleans.
     assert data["decided_by"]["score"] == "legacy"
+
+
+@contextlib.asynccontextmanager
+async def _worker_session_on(db: AsyncSession):
+    """Hand the task the test's own session so it sees uncommitted fixtures.
+
+    `_extract_entry_intel` opens its own worker session, which cannot see the
+    test transaction — without this the task simply logs "Entry not found" and
+    returns zeroes, which would make a "nothing was extracted" assertion pass
+    for entirely the wrong reason.
+    """
+    yield db
+
+
+async def _run_extract(db_session: AsyncSession, monkeypatch, feed: Feed, text: str) -> dict:
+    from app.models.entry import Entry
+    from app.workers import intel_feed_tasks
+
+    db_session.add(feed)
+    await db_session.flush()
+    entry = Entry(
+        feed_id=feed.id,
+        title="Advisory",
+        url=f"https://{uuid.uuid4().hex}.example.com/a",
+        guid=uuid.uuid4().hex,
+        content_text=text,
+    )
+    db_session.add(entry)
+    await db_session.flush()
+
+    monkeypatch.setattr(intel_feed_tasks, "_get_worker_session", lambda: _worker_session_on(db_session))
+    # The real commit would end the test transaction.
+    monkeypatch.setattr(db_session, "commit", db_session.flush)
+    return await intel_feed_tasks._extract_entry_intel(str(entry.id))
+
+
+@pytest.mark.asyncio
+async def test_regex_pass_is_skipped_when_only_rule_extraction_is_on(db_session: AsyncSession, monkeypatch):
+    """The NVD/CVE pass has to honour its own flag.
+
+    Both halves of `extract_entry_intel_task` share one dispatch gate
+    (`auto_extract_on_ingest or extract_detection_rules`), and the regex half
+    used not to re-check its own flag — so turning "look up CVEs in NVD" off did
+    nothing at all as long as rule extraction was on.
+    """
+    feed = Feed(
+        title="Rules only",
+        url="https://rules-only.example.com/rss",
+        feed_type="rss",
+        auto_extract_on_ingest=False,
+        extract_detection_rules=True,
+    )
+    stats = await _run_extract(db_session, monkeypatch, feed, "Patch CVE-2026-10101 now. See also T1059.")
+    assert stats["ttps"] == 0
+    assert stats["cves"] == 0
+
+
+@pytest.mark.asyncio
+async def test_regex_pass_runs_when_its_own_flag_is_on(db_session: AsyncSession, monkeypatch):
+    """The companion to the test above — otherwise it could pass vacuously."""
+    from app.models.ttp import TTP
+
+    db_session.add(TTP(technique_id="T1059", technique_name="Command and Scripting Interpreter"))
+    await db_session.flush()
+
+    feed = Feed(
+        title="Regex on",
+        url="https://regex-on.example.com/rss",
+        feed_type="rss",
+        auto_extract_on_ingest=True,
+        extract_detection_rules=False,
+    )
+    stats = await _run_extract(db_session, monkeypatch, feed, "Patch CVE-2026-10102 now. See also T1059.")
+    assert stats["ttps"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_extended_feed_types_track_the_adapter_registry():
+    """A second hand-written feed-type set is a second thing that can drift."""
+    from app.adapters import _EXTENDED_ADAPTERS
+    from app.api.feeds import _EXTENDED_FEED_TYPES
+
+    assert set(_EXTENDED_FEED_TYPES) == set(_EXTENDED_ADAPTERS)

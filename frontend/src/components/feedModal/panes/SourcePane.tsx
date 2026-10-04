@@ -152,18 +152,13 @@ export function SourcePane({ feedId, form }: { feedId: string; form: FeedForm })
         </span>
       </label>
 
-      {hasAdapterFields(values.feed_type) ? (
+      {hasAdapterFields(values.feed_type) && (
         <>
           <span className={styles.sectionLabel}>
             {FEED_TYPES.find((t) => t.value === values.feed_type)?.label} options
           </span>
           <AdapterFields feedId={feedId} form={form} />
         </>
-      ) : (
-        <p className={styles.note}>
-          {FEED_TYPES.find((t) => t.value === values.feed_type)?.label ?? "This type"}{" "}
-          has no extra options.
-        </p>
       )}
     </div>
   );

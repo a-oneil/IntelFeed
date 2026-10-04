@@ -1548,7 +1548,9 @@ Each feed carries a set of switches that decide what the ingest pipeline does wi
 | AI analysis (one pass) | `ai_analysis_enabled` | The one-pass `entry_analysis` call. |
 | Regex enrichment | `auto_extract_on_ingest` | The standalone CVE/NVD, TTP and mitigation pass. |
 | Detection rule extraction | `extract_detection_rules` | Sigma/YARA/SPL/Elastic parsing from article bodies. |
-| Create tool entities | `extract_tools` | Whether AI extraction may mint Tool rows from this feed. |
+| ↳ Create tool entities | `extract_tools` | Whether that AI pass may mint Tool rows. Does nothing when the AI is off. |
+
+The observables ledger scan is **not** on this list, and not switchable per feed: `_scan_entry_observables` loads the entry and never reads the Feed row, so it runs on every article from every feed — including one with `intel_extraction_mode = "none"`. Its knobs are the global `observables_*` settings.
 
 > **This section used to describe a five-way preset** — "Full", "Selective", "Known entities only", "Manual", "None" — mapped onto `intel_extraction_mode` + `auto_extract_on_ingest`. Three of those labels had stopped being true. The one-pass AI analysis, which does most of the extraction today, gates only on `intel_extraction_mode == "none"` and ignores `auto_extract_on_ingest` entirely, so a feed set to "Known entities only — match against existing database" or "Manual — only when triggered" still had the AI read every article and create entities. The preset is gone; the switches above are what actually exists. See `frontend/src/components/feedModal/pipelineStages.ts`.
 

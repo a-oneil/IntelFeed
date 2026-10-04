@@ -4018,6 +4018,10 @@ TOOLS: dict[str, dict] = {
                 "default": None,
                 "enum": ['full', 'selective', 'manual', 'none'],
             },
+            "ai_analysis_enabled": {
+                "type": 'bool',
+                "default": None,
+            },
             "auto_extract_on_ingest": {
                 "type": 'bool',
                 "default": None,

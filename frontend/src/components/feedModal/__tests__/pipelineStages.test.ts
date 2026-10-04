@@ -66,13 +66,32 @@ describe("describeStages", () => {
     expect(stage(vals, "ai").on).toBe(true);
   });
 
-  it("turns everything off when the feed is not processed at all", () => {
+  it("turns off every stage the feed actually controls when it is not processed", () => {
     const stages = describeStages(values({ intel_extraction_mode: "none" }), ctx());
     for (const s of stages) {
-      if (s.id === "master") continue;
+      // "master" is the switch itself; "observables" is genuinely ungated —
+      // the scan never looks at the feed, so claiming it stops would be a lie.
+      if (s.id === "master" || s.id === "observables") continue;
       expect(s.on, `${s.id} should be off`).toBe(false);
       expect(s.disabled, `${s.id} should be disabled`).toBe(true);
     }
+  });
+
+  it("keeps the observables row on for a feed that is switched off", () => {
+    const obs = stage(values({ intel_extraction_mode: "none" }), "observables");
+    expect(obs.on).toBe(true);
+    expect(obs.scope).toBe("global");
+  });
+
+  it("nests tool creation under the AI pass, because that is all that reads it", () => {
+    const tools = stage(values(), "tools");
+    expect(tools.nested).toBe(true);
+    expect(tools.writes).toBe(true);
+
+    // AI off -> the switch is inert, so it must not look live.
+    const off = stage(values({ ai_analysis_enabled: false }), "tools");
+    expect(off.on).toBe(false);
+    expect(off.disabled).toBe(true);
   });
 
   it("reports the AI off, and not per-feed, when the engine-wide switch is off", () => {
@@ -142,9 +161,11 @@ describe("toggleStage", () => {
 });
 
 describe("summarizeStages", () => {
-  it("says plainly that nothing is extracted", () => {
+  it("says plainly that nothing else is extracted, ledger aside", () => {
     const text = summarizeStages(values({ intel_extraction_mode: "none" }), ctx(true));
-    expect(text).toContain("Nothing is extracted");
+    expect(text).toContain("Nothing else is extracted");
+    // The ledger scan is ungated, so the sentence must not deny it.
+    expect(text).toContain("indicator ledger");
   });
 
   it("warns that the AI may create new entities", () => {

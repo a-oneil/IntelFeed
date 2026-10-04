@@ -7,6 +7,7 @@ from fastapi import APIRouter, Body, Depends, Path, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.adapters import _EXTENDED_ADAPTERS
 from app.core.exceptions import AppError
 from app.core.pagination import CursorPaginatedResponse, PaginatedResponse
 from app.core.security import get_admin_user, get_current_user
@@ -36,18 +37,10 @@ from app.services.feed_visibility import (
     visible_feed_ids_query,
 )
 
-# Extended adapter feed types that skip URL discovery
-_EXTENDED_FEED_TYPES = {
-    "github_repo",
-    "github_releases",
-    "github_advisories",
-    "reddit",
-    "nvd",
-    "mastodon",
-    "web_scraper",
-    "telegram",
-    "bluesky",
-}
+# Extended adapter feed types that skip URL discovery. Derived from the adapter
+# registry rather than hand-listed: the update endpoint's own copy of a feed-type
+# set had silently drifted from it, and this one would have gone the same way.
+_EXTENDED_FEED_TYPES = frozenset(_EXTENDED_ADAPTERS)
 _EXTENDED_FEED_DEFAULTS: dict[str, dict] = {
     "github_repo": {"interval": 1440},
     "nvd": {"interval": 60},

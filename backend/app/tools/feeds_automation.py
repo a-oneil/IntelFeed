@@ -104,6 +104,7 @@ def _parse_date(value: str, label: str) -> tuple[date | None, dict | None]:
             "relevance_rating": {"type": "string", "enum": _RELEVANCE_RATINGS},
             "analyst_notes": {"type": "string", "description": "Source assessment notes"},
             "intel_extraction_mode": {"type": "string", "enum": _INTEL_MODES},
+            "ai_analysis_enabled": {"type": "boolean"},
             "auto_extract_on_ingest": {"type": "boolean"},
             "extract_detection_rules": {"type": "boolean"},
             "extract_tools": {"type": "boolean"},
@@ -134,6 +135,7 @@ async def _update_feed(
     relevance_rating: str | None = None,
     analyst_notes: str | None = None,
     intel_extraction_mode: str | None = None,
+    ai_analysis_enabled: bool | None = None,
     auto_extract_on_ingest: bool | None = None,
     extract_detection_rules: bool | None = None,
     extract_tools: bool | None = None,
@@ -258,6 +260,9 @@ async def _update_feed(
     if intel_extraction_mode is not None:
         feed.intel_extraction_mode = intel_extraction_mode
         updated.append("intel_extraction_mode")
+    if ai_analysis_enabled is not None:
+        feed.ai_analysis_enabled = ai_analysis_enabled
+        updated.append("ai_analysis_enabled")
     if auto_extract_on_ingest is not None:
         feed.auto_extract_on_ingest = auto_extract_on_ingest
         updated.append("auto_extract_on_ingest")

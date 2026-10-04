@@ -19,7 +19,7 @@ import { EditCategoryModal } from "./EditCategoryModal";
 import { Tooltip } from "./Tooltip";
 import { Hint } from "./primitives";
 import { FeedTypeIcon } from "./FeedTypeIcon";
-import { deriveIntelLevel, INTEL_LEVEL_CONFIG } from "./IntelLevelBadge";
+import { deriveIntelLevel } from "./IntelLevelBadge";
 import type { Category, Feed, SidebarSectionId } from "@/api/types";
 import { BrandButton } from "./BrandButton";
 import styles from "./Sidebar.module.css";
@@ -1217,15 +1217,15 @@ function FeedItem({
         {...feedLongPressHandlers}
       >
         {(() => {
-          const lvl = deriveIntelLevel(
-            subscription.intel_extraction_mode || "selective",
-            subscription.auto_extract_on_ingest ?? false,
-          );
-          if (lvl === "none") return null;
-          const { fill, label } = INTEL_LEVEL_CONFIG[lvl];
+          const { fill, label } = deriveIntelLevel({
+            mode: subscription.intel_extraction_mode || "selective",
+            aiAnalysis: subscription.ai_analysis_enabled ?? true,
+            autoExtract: subscription.auto_extract_on_ingest ?? false,
+          });
+          if (fill < 0) return null;
           return (
             <span
-              className={`${styles.levelRail} ${lvl === "full" ? styles.levelRailFull : ""} ${fill === 0 ? styles.levelRailEmpty : ""}`}
+              className={`${styles.levelRail} ${fill === 1 ? styles.levelRailFull : ""} ${fill === 0 ? styles.levelRailEmpty : ""}`}
               title={label}
               aria-label={label}
             >
