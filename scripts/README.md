@@ -11,7 +11,7 @@ is — the image itself only carries `./backend`.
 docker compose -f docker-compose.dev.yml exec api python scripts/<folder>/<script>.py
 ```
 
-`ops/`, `dev/` and `release_apk.sh` are the exception: they drive Docker, SSH,
+`ops/`, `dev/` and `build_apk.sh` are the exception: they drive Docker, SSH,
 the API or the Android SDK from outside, so run those from the repo root on
 your own machine.
 
@@ -151,20 +151,21 @@ export INTELFEED_PROD_DIR=intelfeed                # optional, checkout path on 
 ./scripts/ops/deploy.sh
 ```
 
-## `release_apk.sh` — Android app release  *(host-side)*
+## `build_apk.sh` — Android app build  *(host-side)*
 
 Bumps `android/version.properties` (build number +1, `1.x` → `1.x+1`, or
-`2.0` with `--major`), runs the unit tests, builds the debug APK, copies it to
-`./IntelFeed.apk` (gitignored) and installs it on every connected device with
-data kept. A failed build restores the old version. `--install` only installs
-the existing APK. Merging the bump to `main` makes CI publish the release
-`android-v<version>`; see [docs/android-app.md](../docs/android-app.md).
-Needs JDK 17, the Android SDK and `adb`.
+`2.0` with `--major`), runs the unit tests, builds the debug APK
+(`android/app/build/outputs/apk/debug/app-debug.apk`) and installs it on every
+connected device with data kept; with no device it tells you to plug a phone
+in and rerun with `--install`. A failed build restores the old version.
+Merging the bump to `main` makes CI publish the release `android-v<version>`;
+see [docs/android-app.md](../docs/android-app.md). Needs JDK 17, the Android
+SDK and `adb`.
 
 ```bash
-scripts/release_apk.sh            # new minor version
-scripts/release_apk.sh --major    # new major version
-scripts/release_apk.sh --install  # phone plugged in after the build
+scripts/build_apk.sh            # new minor version
+scripts/build_apk.sh --major    # new major version
+scripts/build_apk.sh --install  # phone plugged in after the build
 ```
 
 ## `dev/` — developer tooling  *(host-side)*
