@@ -156,9 +156,18 @@ burned.
 
 Android only installs an update over an app signed with the same key. Every
 APK so far was signed with one shared debug keystore, so CI must sign with it
-too, or the release would refuse to install over existing copies. CI writes
-the secret to `~/.android/debug.keystore`, which is where the Android Gradle
-plugin looks for the debug key.
+too, or the release refuses to install over existing copies ("App not
+installed"). CI decodes the secret into a folder of its own and points
+`ANDROID_USER_HOME` at that folder, which is the first place the Android
+Gradle plugin looks for `debug.keystore`. It then checks that the certificate
+in the built APK is the one in the keystore and fails the job if it is not, so
+a release can never be published with a key the phones do not have.
+
+(The first release, 1.2, was published before that check existed, and the
+plugin on the hosted runner never picked up the keystore from `~/.android`:
+the APK carried a throwaway key and would not install over the earlier
+builds. That release should not be used; 1.3 is the first one signed with the
+shared key.)
 
 Setting it (repo admin, once):
 
@@ -170,6 +179,12 @@ Then delete the local copy of the keystore. Without the secret the job still
 builds and tests but publishes nothing and logs a warning. If a version was
 merged before the secret existed, re-run the CI workflow on `main`
 (Actions → CI → Run workflow) and it will publish.
+
+A developer's local build (`scripts/build_apk.sh`) signs with that machine's
+own `~/.android/debug.keystore`. To install local builds over the released
+app, or the other way round, the same shared keystore has to be at that path
+on the machine (back up the existing one first, it is the debug key for every
+Android project built there).
 
 The released APK is a **debug build** signed with a debug key. That is the
 right choice while the install base is the developers' phones, but it means

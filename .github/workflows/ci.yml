@@ -367,12 +367,20 @@ jobs:
       # PRs) and validates the committed gradle-wrapper.jar checksum.
       - uses: gradle/actions/setup-gradle@v6
 
-      # AGP signs debug builds with ~/.android/debug.keystore and invents a
-      # random one when it is missing. Android only installs an update over an
-      # app signed with the same key, so restoring the shared key from the
-      # secret is what lets every release install over the last one (and over
-      # the developers' local builds). Without it the build still runs, but the
-      # APK is signed with a throwaway key and is never published.
+      # Android only installs an update over an app signed with the same key,
+      # so every release must be signed with the one shared debug keystore
+      # (the secret), or it refuses to install over the copy already on the
+      # phone ("App not installed"). The Android Gradle plugin signs debug
+      # builds with the debug.keystore in its preferences folder and invents a
+      # random key when that file is missing. It finds the folder by searching
+      # several variables, and on the hosted runner that search did not land
+      # on ~/.android: every build came out signed with a fresh throwaway key
+      # while the job summary claimed the shared one. So the keystore goes in a
+      # folder of our own and ANDROID_USER_HOME, the variable the plugin checks
+      # first, points straight at it; the step after the build then proves the
+      # APK really carries the key before anything can be published. Without
+      # the secret the build still runs, signed with a throwaway key, and is
+      # never published.
       - name: Restore the shared debug key
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_DEBUG_KEYSTORE }}
@@ -383,12 +391,44 @@ jobs:
             echo "::warning::ANDROID_DEBUG_KEYSTORE is not set: this APK is signed with a throwaway key and will not be published."
             exit 0
           fi
-          mkdir -p ~/.android
-          printf '%s' "$KEYSTORE_B64" | base64 -d > ~/.android/debug.keystore
-          echo "SHARED_KEY=true" >> "$GITHUB_ENV"
+          home="$RUNNER_TEMP/android-user-home"
+          mkdir -p "$home"
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$home/debug.keystore"
+          # The key's certificate fingerprint, for the check after the build.
+          sha=$(keytool -list -v -keystore "$home/debug.keystore" -storepass android -alias androiddebugkey \
+                  | sed -n 's/^[[:space:]]*SHA256: //p' | tr -d ':' | tr 'A-F' 'a-f')
+          [ -n "$sha" ] || { echo "::error::The ANDROID_DEBUG_KEYSTORE secret did not decode to a keystore with an androiddebugkey entry."; exit 1; }
+          {
+            echo "ANDROID_USER_HOME=$home"
+            echo "SHARED_KEY=true"
+            echo "SHARED_KEY_SHA256=$sha"
+          } >> "$GITHUB_ENV"
 
       - name: Unit tests and debug APK
         run: ./gradlew :app:testDebugUnitTest :app:assembleDebug
+
+      # The summary used to say "signed with the shared key" whenever the
+      # secret existed. Now it is checked: the certificate in the APK must be
+      # the one in the keystore, or the job fails before the release step.
+      - name: Check the APK is signed with the shared key
+        if: env.SHARED_KEY == 'true'
+        run: |
+          set -euo pipefail
+          apksigner=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          certs=$("$apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk)
+          # The signer line's label varies by apksigner version: "Signer #1",
+          # "Signer (minSdkVersion=24, ...)", "V2 Signer:". Only the digest matters.
+          apk_sha=$(printf '%s\n' "$certs" | sed -n 's/^.*[Ss]igner.*certificate SHA-256 digest: //p' | head -1)
+          echo "keystore: $SHARED_KEY_SHA256"
+          echo "apk:      $apk_sha"
+          if [ "$apk_sha" != "$SHARED_KEY_SHA256" ]; then
+            echo "::error::The APK is not signed with the shared debug key. Gradle looked for debug.keystore somewhere other than ANDROID_USER_HOME."
+            printf '%s\n' "$certs"
+            echo "ANDROID_USER_HOME=$ANDROID_USER_HOME"; ls -la "$ANDROID_USER_HOME" || true
+            env | grep -E '^(ANDROID_|XDG_|HOME=|TEST_TMPDIR)' || true
+            find / -name debug.keystore -newer "$GITHUB_WORKSPACE/.git/HEAD" 2>/dev/null || true
+            exit 1
+          fi
 
       - name: Read the app version
         id: version
@@ -446,7 +486,7 @@ jobs:
           {
             echo "### $verdict"
             echo
-            echo "APK: $(du -h "$apk" | cut -f1), version $NAME (build $CODE), signed with the shared key: $SHARED_KEY."
+            echo "APK: $(du -h "$apk" | cut -f1), version $NAME (build $CODE), signed with the shared key: $SHARED_KEY${SHARED_KEY_SHA256:+ (cert SHA-256 \`$SHARED_KEY_SHA256\`)}."
           } >> "$GITHUB_STEP_SUMMARY"
 
   # The Dockerfiles are the supported install path for a self-hosted deploy, so
