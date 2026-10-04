@@ -61,7 +61,7 @@ pnpm exec playwright test             # E2E tests (needs running stack)
 ```
 
 ### Android (`android/`)
-Native client (Kotlin / Jetpack Compose) for the same REST API. It's developed in a separate working folder and synced here by pull request, so read [android/README.md](android/README.md) before editing it.
+Native client (Kotlin / Jetpack Compose) for the same REST API. It's developed in a separate working folder and synced here by pull request, so read [docs/android-app.md](docs/android-app.md) before editing it. Documentation for the app lives in `docs/`, not in `android/`.
 ```bash
 cd android
 ./gradlew :app:testDebugUnitTest :app:assembleDebug   # JDK 17 + Android SDK
@@ -217,4 +217,5 @@ Requires env vars `INTELFEED_API_URL`, `INTELFEED_USERNAME`, `INTELFEED_PASSWORD
 - [docs/architecture.md](docs/architecture.md) — full architecture reference beyond the summary above
 - [docs/story-threads.md](docs/story-threads.md) — embeddings, thread clustering/merging, the spine, and its tuning knobs
 - [docs/entity-profiles.md](docs/entity-profiles.md), [docs/entries.md](docs/entries.md) — domain deep-dives
+- [docs/android-app.md](docs/android-app.md) — the Android client: download, features, build, signing key, CI releases, sync from the working folder
 - `planning/` (gitignored) — active phase plans (e.g. `vendor-product-entities.md`, `mobile-responsiveness.md`)

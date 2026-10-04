@@ -1,12 +1,9 @@
 *.iml
 .gradle
 /local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
+# Nothing from the IDE is tracked; ignore the whole folder rather than a list of files.
+/.idea/
+*.hprof
 .DS_Store
 /build
 /captures

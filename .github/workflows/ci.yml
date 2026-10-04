@@ -425,8 +425,9 @@ jobs:
             verdict="Not publishing $tag: the ANDROID_DEBUG_KEYSTORE secret is not set."
             echo "::warning::$verdict"
           else
-            # The "What changed" cell of this version's row in APK_VERSIONS.md.
-            what=$(grep -m1 "^| $NAME | " APK_VERSIONS.md | awk -F'|' '{print $7}' | sed 's/^ *//; s/ *$//' || true)
+            # The merge commit's subject. Sync PRs are titled "android: <what
+            # changed>", and a squash merge keeps that as the subject.
+            what=$(git log -1 --format=%s | sed -E 's/^android: *//; s/ *\(#[0-9]+\)$//')
             {
               echo "**IntelFeed for Android $NAME** (build $CODE)"
               echo
