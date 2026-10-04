@@ -165,6 +165,17 @@ anything:
 docker compose -f docker-compose.dev.yml exec api python scripts/seed/seed_all.py
 ```
 
+Then give it something to read. The onboarding wizard's first step offers curated **starter feed
+packs** that ship with the build — a 37-feed **Core** set (security news, government and CERT
+advisories, NVD and vendor bulletins, the best vendor research and detection-engineering sources),
+plus optional add-ons per category. Nothing is created until you pick. For a scripted install:
+
+```bash
+docker compose -f docker-compose.dev.yml exec api python scripts/seed/seed_feeds.py --list
+docker compose -f docker-compose.dev.yml exec api python scripts/seed/seed_feeds.py            # core only
+docker compose -f docker-compose.dev.yml exec api python scripts/seed/seed_feeds.py --all       # everything
+```
+
 From there, add feeds under **Settings → Feeds** or import an OPML file, and configure an AI provider
 under **Settings → AI Configuration** if you want summarization and extraction. Nearly everything
 else — thresholds, rate limits, image proxy, backups — is editable at runtime under

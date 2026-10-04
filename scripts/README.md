@@ -40,6 +40,7 @@ fills gaps.
 | 9 | `seed_actor_countries.py` | Origin-country attribution for ~530 threat actors with high-confidence public attribution. |
 | 10 | `seed_entity_attributes.py` | Motivation on threat actors, controlled-vocabulary type on malware families. |
 | — | **`seed_all.py`** | **Runs all ten above, in this order.** |
+| — | `seed_feeds.py` | Curated starter feeds, from the OPML packs in `backend/app/feed_packs/` — the same ones the onboarding wizard offers. Defaults to the 37-feed `core` pack; `--list` / `--packs` / `--all` / `--dry-run`. Deliberately **not** in `seed_all.py`: that is reference data, identical on every install, while which sources an instance polls is editorial. |
 
 `seed_all.py` runs all ten in order — that is the whole first-boot step:
 
@@ -94,6 +95,7 @@ are for fixing something by hand.
 | `enrich_cves.py` | Backfills EPSS scores, CISA KEV flags, and NVD metadata on CVEs. Batched and resumable, with `--phase epss` / `--phase nvd`. |
 | `normalize_vocabularies.py` | Folds `mitre_tactics`, `motivation`, `platforms` and `country` onto one spelling each, so a search facet stops listing `Persistence` and `persistence` as separate values. One-shot catch-up for rows written before the model validators landed; unrecognized values are kept and reported, not dropped, except the `platforms` entries that name an architecture or a language runtime, which are pruned and listed. `--dry-run`. |
 | `backfill_targeted_sectors.py` | One-shot: folds the legacy free-text `targeted_sectors` arrays on actors and malware into the target-sector junctions (`source=seed`), optionally rehomes values that name a country onto `threat_actor_target_countries` (`--rehome-countries`), rebuilds the array cache, and writes a CSV of every distinct value and its decision (`--report`). Run in prod after reading the `--dry-run` report. |
+| `audit_feed_packs.py` | Re-probes every source in the shipped starter feed packs: newest item date for RSS-ish feeds, `pushed_at` and archived for GitHub repos, liveness for the rest. Run it before a release and prune what it calls DEAD; WARN means bot protection or rate limiting, so look before cutting. Reads no database and writes nothing, so it runs on a laptop — set `GITHUB_TOKEN` to lift GitHub's 60/hour cap. Exits non-zero only on a confirmed dead source. |
 | `reconcile_search_index.py` | Deletes Meilisearch documents whose feed no longer exists, after a cascade cleanup missed them. |
 | `revalidate_wikipedia.py` | Clears Wikipedia enrichment on entities whose stored article title doesn't match the entity, so they re-enrich against the right article. |
 | `refetch_truncated_entries.py` | Re-fetches full text for entries that stored a "continue reading" stub. |

@@ -3018,3 +3018,22 @@ export interface ExposureGenerateRequest {
   dropped_malware_ids?: string[];
   tags?: string[];
 }
+
+/** A curated starter feed pack shipped with the build (GET /opml/starter-packs). */
+export interface StarterPack {
+  id: string;
+  title: string;
+  description: string;
+  feed_count: number;
+  recommended: boolean;
+  /** Human-readable prerequisite (an API token, say) this pack needs to work. */
+  requires: string | null;
+}
+
+export interface StarterPackImportResult {
+  feeds_added: number;
+  feeds_skipped: number;
+  categories_created: number;
+  errors: string[];
+  packs: { id: string; title: string; feeds_added: number }[];
+}

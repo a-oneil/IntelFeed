@@ -102,8 +102,9 @@ docker compose -f docker-compose.dev.yml exec api python scripts/<folder>/<scrip
 seed/         Reference data for a fresh install. `seed_all.py` runs all nine in
               dependency order (--dry-run to preview, --offline to skip downloads,
               --only/--skip to resume); each seeder also runs standalone.
+              `seed_feeds.py` is separate — curated starter feeds, not reference data.
 maintenance/  Repeatable repair: CVE enrichment, search reconcile, re-sanitize, requirement
-              re-match, relationship purge
+              re-match, relationship purge, starter-feed-pack audit
 telegram/     telegram_login.py / telegram_join.py (interactive — needs `exec -it`)
 archive/      Completed one-shot backfills, kept for reference
 ```
@@ -139,6 +140,7 @@ scripts/build_apk.sh                    # Bump the Android app version, test, bu
 - **`intelligence/story_threads.py`** — Story threads: embeddings (pgvector) cluster an unfolding story into one narrative object with a spine. See [docs/story-threads.md](docs/story-threads.md).
 - **`entity_types.py`** — Canonical entity-type vocabulary (one slug per type across API, DB columns, search, AI schemas). Import the constants; never type the strings.
 - **`core/`** — Cross-cutting: logging (structlog), metrics (Prometheus), rate limiting, security (JWT/bcrypt), exceptions (`AppError`)
+- **`feed_packs/`** (loader + the OPML files) — Curated starter feeds, so a fresh install isn't empty. OPML files (reviewable in git, readable by other readers) extended with an `intelfeed:` namespace that carries what plain OPML can't: the real `feed_type`, `adapter_config`, and the per-feed extraction tuning. `app/api/opml.py` parses it on import; plain `type` stays clamped to `PORTABLE_FEED_TYPES` so a third-party export can't mint an extended feed with no config. Served to onboarding via `/opml/starter-packs`, seeded headlessly by `scripts/seed/seed_feeds.py`, re-audited by `scripts/maintenance/audit_feed_packs.py`. Telegram and Bluesky never ship (out-of-band setup / credentials).
 - **`config.py`** — Pydantic settings (reads `.env`); `get()` method checks system_settings DB table before env defaults
 - **`database.py`** — Async SQLAlchemy session setup with `get_db()` dependency
 

@@ -1,0 +1,74 @@
+{
+  "_comment": [
+    "Curated starter feed packs. Each entry points at an OPML file in this",
+    "directory; feed counts are derived from the files at load time, never",
+    "stored here, so pruning a dead source does not leave a stale number.",
+    "Order is the order the onboarding wizard shows them in.",
+    "A committed feed list rots: run scripts/maintenance/audit_feed_packs.py",
+    "before a release and prune what it reports as dead."
+  ],
+  "packs": [
+    {
+      "id": "core",
+      "title": "Core",
+      "description": "The starting point: major security news, government and CERT advisories, NVD and vendor CVE bulletins, the best vendor threat research, and detection-engineering sources. Enough breadth for the engine to show what it does on day one without being a firehose.",
+      "file": "core.opml",
+      "recommended": true
+    },
+    {
+      "id": "news",
+      "title": "More news & government",
+      "description": "The second tier of security press and national CERTs — regional advisories, breach trackers and ransomware leak-site reporting.",
+      "file": "news.opml"
+    },
+    {
+      "id": "advisories",
+      "title": "Vendor advisories",
+      "description": "Product security bulletins beyond the core set: Linux distributions, industrial and network gear, and the widely deployed open-source projects. High volume, mostly CVE-shaped.",
+      "file": "advisories.opml"
+    },
+    {
+      "id": "vendor-research",
+      "title": "Vendor research",
+      "description": "The long tail of vendor and lab threat research blogs. This is where campaign write-ups, malware analysis and actor attribution come from, and it is the richest source of TTPs and IOCs.",
+      "file": "vendor-research.opml"
+    },
+    {
+      "id": "detection-engineering",
+      "title": "Detection engineering",
+      "description": "Blogs and newsletters focused on building, testing and tuning detections rather than reporting incidents.",
+      "file": "detection-engineering.opml"
+    },
+    {
+      "id": "github-rules",
+      "title": "Detection rule repositories",
+      "description": "GitHub repositories that publish detection content as code — Sigma, Elastic, Splunk, YARA, Nuclei, Atomic Red Team, LOLBAS and friends. Each commit becomes an entry, which feeds the detection-rule extractor directly.",
+      "file": "github-rules.opml",
+      "requires": "A GitHub token (Settings → System → github_token). Unauthenticated GitHub API calls are capped at 60/hour, which these repositories will exhaust."
+    },
+    {
+      "id": "blogs",
+      "title": "Practitioner blogs",
+      "description": "Independent researchers, incident responders and analysts writing under their own name. Lower volume, higher signal, and often the first public account of something.",
+      "file": "blogs.opml"
+    },
+    {
+      "id": "reddit",
+      "title": "Reddit",
+      "description": "Security subreddits via each one's hot feed. Useful for early chatter about an exploit or outage, noisier than everything else here.",
+      "file": "reddit.opml"
+    },
+    {
+      "id": "youtube",
+      "title": "YouTube",
+      "description": "Conference talks and technical channels. Entries carry the video description and transcript where available, so talks still correlate against your entities.",
+      "file": "youtube.opml"
+    },
+    {
+      "id": "podcasts",
+      "title": "Podcasts",
+      "description": "Security podcasts, with episode audio playable in the reader.",
+      "file": "podcasts.opml"
+    }
+  ]
+}
