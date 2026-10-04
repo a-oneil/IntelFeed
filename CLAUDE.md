@@ -28,7 +28,7 @@ docker compose -f docker-compose.dev.yml down       # Stop all services
 # (backed by POST /api/auth/register; can be invite-gated under Settings > System)
 ```
 
-Prod uses `docker-compose.prod.yml` with Caddy (`Caddyfile`) fronting for auto-TLS. `update.sh` at repo root is a one-shot `git fetch && pull && docker compose up --build -d` helper for production hosts. Full EC2 walkthrough lives in [setup.md](setup.md).
+Prod uses `docker-compose.prod.yml` with Caddy (`Caddyfile`) fronting for auto-TLS. `update.sh` at repo root is the production update helper (it runs on a ~2-minute cron, so a push is a deploy): it fetches, pulls, and then **rebuilds only when the pull actually changed an image** — `backend/**`, `frontend/**`, `db/**`, `piper/**` or a compose file. A `Caddyfile` change reloads caddy in place; a docs/scripts/android/CI commit pulls and stops, since `./docs` and `./scripts` are bind-mounted and nothing needs restarting. The gate diffs against `.update-deployed` (the commit the containers were built from), not the previous HEAD, so a failed build still retries after unrelated commits land on top. See [docs/operations.md](docs/operations.md). Full EC2 walkthrough lives in [setup.md](setup.md).
 
 ### Backend
 ```bash
