@@ -54,9 +54,11 @@ async def version():
     Touches nothing — no database, Redis or Meilisearch call — so unlike
     /api/health it is cheap enough to poll. Unauthenticated.
 
-    `version` is `git describe --tags --always --dirty` at image build time, so
-    it reads as a bare short SHA until the repo carries tags and as a tag (or
-    `v1.2.3-4-gabc1234`) after. An unstamped build reports "dev".
+    `version` is `git describe --tags --always --dirty --match='v*'` at image
+    build time, so it reads as a bare short SHA until the repo carries a `v*`
+    tag and as a tag (or `v1.2.3-4-gabc1234`) after. The `--match` matters: CI
+    also tags APK releases `android-v<version>`, and without it this reported
+    the Android app's version. An unstamped build reports "dev".
     """
     return build_stamp()
 
