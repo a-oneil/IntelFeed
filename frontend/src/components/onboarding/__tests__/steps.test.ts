@@ -7,7 +7,7 @@ const READY: OnboardingStatus = {
   feeds: { total: 37, polled_ok: 34, errored: 0, never_polled: 3 },
   entries: { total: 1284, last_24h: 1284 },
   autolink: { entity_links: 412 },
-  ai: { providers: 1, active: "ollama" },
+  ai: { providers: 1, active: "ollama", tasks_assigned: 28 },
   ready: true,
 };
 
@@ -22,7 +22,7 @@ const FRESH: OnboardingStatus = {
   feeds: { total: 0, polled_ok: 0, errored: 0, never_polled: 0 },
   entries: { total: 0, last_24h: 0 },
   autolink: { entity_links: 0 },
-  ai: { providers: 1, active: "claude_code" },
+  ai: { providers: 1, active: "claude_code", tasks_assigned: 0 },
   ready: false,
 };
 

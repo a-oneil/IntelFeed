@@ -7,6 +7,8 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.ai_provider import AIProvider
+from app.models.ai_task import AITask
+from app.models.ai_task_assignment import AITaskAssignment
 from app.models.country import Country
 from app.models.feed import Feed
 
@@ -104,7 +106,9 @@ async def test_status_prefers_configured_provider_over_startup_cli(
     await db_session.flush()
     response = await client.get("/api/onboarding/status", headers=auth_headers)
     assert response.status_code == 200
-    assert response.json()["ai"] == {"providers": 2, "active": expected}
+    # tasks_assigned is 0 throughout: these providers exist but nothing is routed
+    # at them, which is exactly the state that used to read as configured AI.
+    assert response.json()["ai"] == {"providers": 2, "active": expected, "tasks_assigned": 0}
 
 
 @pytest.mark.asyncio
@@ -115,3 +119,56 @@ async def test_remedy_is_a_command_the_reader_can_paste(client: AsyncClient, aut
     remedy = data["reference_data"]["remedy"]
     assert remedy.startswith("docker compose -f docker-compose.")
     assert remedy.endswith("exec api python scripts/seed/seed_all.py")
+
+
+@pytest.mark.asyncio
+async def test_a_provider_with_no_tasks_routed_at_it_is_not_configured_ai(
+    client: AsyncClient, admin_headers: dict, db_session: AsyncSession
+):
+    """The gap the wizard's AI step used to leave: a provider row exists, the step
+    reads as done, and the instance runs nothing because no task points at it."""
+    db_session.add(AIProvider(name="Ollama", provider_type="ollama", is_active=True))
+    await db_session.flush()
+
+    data = (await client.get("/api/onboarding/status", headers=admin_headers)).json()
+    assert data["ai"]["active"] == "ollama"
+    assert data["ai"]["tasks_assigned"] == 0
+
+
+@pytest.mark.asyncio
+async def test_tasks_assigned_counts_only_work_on_a_chosen_provider(
+    client: AsyncClient, admin_headers: dict, db_session: AsyncSession
+):
+    """The startup seeder routes agentic tasks at the auto-created CLI provider on
+    every install, so counting those would report a bare install as AI-ready."""
+    cli = AIProvider(name="CLI", provider_type="claude_code", is_active=True)
+    ollama = AIProvider(name="Ollama", provider_type="ollama", is_active=True)
+    task_a = AITask(name="t_cli", display_name="CLI task", default_prompt_template="x", is_system=True)
+    task_b = AITask(name="t_real", display_name="Real task", default_prompt_template="x", is_system=True)
+    db_session.add_all([cli, ollama, task_a, task_b])
+    await db_session.flush()
+    db_session.add_all(
+        [
+            AITaskAssignment(task_id=task_a.id, provider_id=cli.id, model_name="sonnet", is_enabled=True),
+            AITaskAssignment(task_id=task_b.id, provider_id=ollama.id, model_name="qwen3.5:9b", is_enabled=True),
+        ]
+    )
+    await db_session.flush()
+
+    data = (await client.get("/api/onboarding/status", headers=admin_headers)).json()
+    assert data["ai"]["tasks_assigned"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_disabled_assignment_does_not_count_as_wired(
+    client: AsyncClient, admin_headers: dict, db_session: AsyncSession
+):
+    ollama = AIProvider(name="Ollama", provider_type="ollama", is_active=True)
+    task = AITask(name="t_off", display_name="Off", default_prompt_template="x", is_system=True)
+    db_session.add_all([ollama, task])
+    await db_session.flush()
+    db_session.add(AITaskAssignment(task_id=task.id, provider_id=ollama.id, model_name="qwen3.5:9b", is_enabled=False))
+    await db_session.flush()
+
+    data = (await client.get("/api/onboarding/status", headers=admin_headers)).json()
+    assert data["ai"]["tasks_assigned"] == 0

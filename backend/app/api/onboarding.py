@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import get_current_user
 from app.database import get_db
 from app.models.ai_provider import AIProvider
+from app.models.ai_task_assignment import AITaskAssignment
 from app.models.country import Country
 from app.models.cve import EntryCVE
 from app.models.cwe import CWE, EntryCWE
@@ -104,6 +105,10 @@ class AutolinkStatus(BaseModel):
 class AIStatus(BaseModel):
     providers: int
     active: str | None
+    # Enabled task assignments pointing at an active provider the admin chose.
+    # A provider row on its own runs nothing: work only happens when a task is
+    # routed to it, which is the gap the wizard's AI step used to leave open.
+    tasks_assigned: int
 
 
 class OnboardingStatus(BaseModel):
@@ -199,7 +204,21 @@ async def onboarding_status(
     active = next((p_type for p_type in active_types if p_type != "claude_code"), None)
     if active is None:
         active = next(iter(active_types), None)
-    ai = AIStatus(providers=len(provider_rows), active=active)
+    # Count only assignments on an active, non-CLI provider: the startup seeder
+    # routes a handful of agentic tasks at the auto-created claude_code row, so
+    # counting those would report a bare install as having AI configured.
+    assigned = (
+        await db.execute(
+            select(func.count(AITaskAssignment.id))
+            .join(AIProvider, AIProvider.id == AITaskAssignment.provider_id)
+            .where(
+                AITaskAssignment.is_enabled.is_(True),
+                AIProvider.is_active.is_(True),
+                AIProvider.provider_type != "claude_code",
+            )
+        )
+    ).scalar() or 0
+    ai = AIStatus(providers=len(provider_rows), active=active, tasks_assigned=int(assigned))
 
     return OnboardingStatus(
         reference_data=reference,

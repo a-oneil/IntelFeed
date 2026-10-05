@@ -33,7 +33,10 @@ reaching the end marks it finished.
    is the single most common "IntelFeed looks broken" report.
 2. **Add feeds** — curated starter packs, an OPML import, or a single URL.
 3. **AI provider** — Ollama, Claude, or an explicit "run without AI" that says
-   what you lose.
+   what you lose. Connecting one tests it for real, then routes the AI tasks at
+   it, because a registered provider on its own runs nothing. The step reports
+   how many tasks are now running and on which model. Agentic tasks stay on the
+   Claude Code CLI if the provider can't call tools.
 4. **Services & team** — optional containers, invites and roles.
 5. **Verify it works** — waits for a real poll and shows feeds fetched, entries
    ingested and entities linked. Configuring something isn't the same as it

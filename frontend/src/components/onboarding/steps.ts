@@ -77,9 +77,12 @@ export const STEPS: StepDef[] = [
     chapter: "setup",
     label: "AI provider",
     adminOnly: true,
-    // claude_code is auto-created at startup for the link validator, so it
-    // alone doesn't mean anyone chose a provider.
-    satisfiedBy: (s) => s.ai.active !== null && s.ai.active !== "claude_code",
+    // Two separate things have to be true, and a provider row proves only the
+    // first: claude_code is auto-created at startup for the link validator, so
+    // its presence says nobody chose anything — and a chosen provider with no
+    // task routed at it still runs no AI, which is how this step used to "pass"
+    // while the instance did nothing.
+    satisfiedBy: (s) => s.ai.active !== null && s.ai.active !== "claude_code" && s.ai.tasks_assigned > 0,
   },
   { id: "extras", chapter: "setup", label: "Services & team", adminOnly: true },
   {

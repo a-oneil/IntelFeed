@@ -3,9 +3,19 @@ import { Link } from "react-router-dom";
 import api from "@/api/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAddFeed, useImportStarterPacks, useStarterPacks } from "@/hooks/useFeeds";
-import { useCreateAIProvider } from "@/hooks/useAI";
+import {
+  useAIProviders,
+  useCommissionAIProvider,
+  useCreateAIProvider,
+  useUpdateAIProvider,
+} from "@/hooks/useAI";
 import { useOnboardingStatus } from "@/hooks/useOnboarding";
-import type { OnboardingStatus, StarterPackImportResult, Theme } from "@/api/types";
+import type {
+  AIProviderCommissionResult,
+  OnboardingStatus,
+  StarterPackImportResult,
+  Theme,
+} from "@/api/types";
 import { KEY_GROUPS, type StepId } from "./steps";
 import { PivotSchematic, QueueSchematic, ReaderSchematic } from "./visuals";
 import styles from "./OnboardingWizard.module.css";
@@ -345,31 +355,52 @@ const AI_CHOICES = [
 
 function AIStep() {
   const createProvider = useCreateAIProvider();
+  const updateProvider = useUpdateAIProvider();
+  const commission = useCommissionAIProvider();
+  const { data: providers } = useAIProviders();
   const [choice, setChoice] = useState<string>("ollama");
   const [baseUrl, setBaseUrl] = useState("http://ollama:11434");
   const [apiKey, setApiKey] = useState("");
-  const [saved, setSaved] = useState(false);
+  const [result, setResult] = useState<AIProviderCommissionResult | null>(null);
   const [error, setError] = useState("");
 
   const current = AI_CHOICES.find((c) => c.id === choice)!;
+  const busy = createProvider.isPending || updateProvider.isPending || commission.isPending;
 
   const save = async () => {
     setError("");
+    setResult(null);
     try {
-      await createProvider.mutateAsync(
+      // Reuse a provider of this type if one is already registered, rather than
+      // minting a duplicate every time the step is revisited or the tour replayed.
+      const existing = providers?.find((p) => p.provider_type === choice);
+      const fields =
         choice === "ollama"
           ? { name: "Ollama", provider_type: "ollama", base_url: baseUrl.trim() }
-          : { name: "Anthropic Claude", provider_type: "claude", api_key: apiKey.trim() },
-      );
-      setSaved(true);
+          : { name: "Anthropic Claude", provider_type: "claude", api_key: apiKey.trim() };
+      const provider = existing
+        ? await updateProvider.mutateAsync({ id: existing.id, ...fields, is_active: true })
+        : await createProvider.mutateAsync(fields);
+
+      // Registering is not configuring: commission tests the provider for real and
+      // routes the AI tasks at it. take_over moves tasks the startup seeder parked
+      // on the CLI provider, which is the whole reason first-run AI never ran.
+      const outcome = await commission.mutateAsync({ id: provider.id, takeOver: true });
+      if (!outcome.success) {
+        setError(
+          choice === "ollama"
+            ? `Couldn't reach that Ollama host — ${outcome.message}. From inside Docker the URL is usually http://ollama:11434.`
+            : `That key was rejected — ${outcome.message}.`,
+        );
+        return;
+      }
+      setResult(outcome);
     } catch {
-      setError(
-        choice === "ollama"
-          ? "Couldn't reach that Ollama host. Check the URL — from inside Docker it's usually http://ollama:11434."
-          : "That key was rejected. Check it and try again.",
-      );
+      setError("Couldn't save that provider. Check the details and try again.");
     }
   };
+
+  const saved = !!result;
 
   return (
     <>
@@ -388,7 +419,7 @@ function AIStep() {
             aria-pressed={choice === c.id}
             onClick={() => {
               setChoice(c.id);
-              setSaved(false);
+              setResult(null);
               setError("");
             }}
           >
@@ -417,9 +448,9 @@ function AIStep() {
             type="button"
             className={`${styles.btn} ${styles.btnPrimary}`}
             onClick={save}
-            disabled={createProvider.isPending || !baseUrl.trim()}
+            disabled={busy || !baseUrl.trim()}
           >
-            {createProvider.isPending ? "Connecting…" : "Connect"}
+            {busy ? "Connecting…" : "Connect"}
           </button>
         </div>
       )}
@@ -441,9 +472,9 @@ function AIStep() {
             type="button"
             className={`${styles.btn} ${styles.btnPrimary}`}
             onClick={save}
-            disabled={createProvider.isPending || !apiKey.trim()}
+            disabled={busy || !apiKey.trim()}
           >
-            {createProvider.isPending ? "Saving…" : "Save key"}
+            {busy ? "Checking the key…" : "Save key"}
           </button>
         </div>
       )}
@@ -453,7 +484,23 @@ function AIStep() {
           Nothing to configure. Add a provider later under <b>Settings → AI Configuration</b>.
         </div>
       )}
-      {saved && <div className={`${styles.callout} ${styles.calloutOk}`}>Provider saved.</div>}
+      {result && (
+        <div className={`${styles.callout} ${styles.calloutOk}`}>
+          <b>Connected, and AI is wired up.</b> {result.tasks_assigned + result.tasks_reassigned} task
+          {result.tasks_assigned + result.tasks_reassigned !== 1 ? "s" : ""} now run on{" "}
+          <code>{result.model}</code>
+          {result.models.length > 1 && ` (${result.models.length} models available)`}. Change any of
+          them under <b>Settings → AI Configuration</b>.
+          {result.tasks_skipped_agentic.length > 0 && (
+            <>
+              {" "}
+              {result.tasks_skipped_agentic.length} agentic task
+              {result.tasks_skipped_agentic.length !== 1 ? "s" : ""} stayed on the Claude Code CLI —
+              they only work by calling tools, which this provider can't do.
+            </>
+          )}
+        </div>
+      )}
       {error && <div className={`${styles.callout} ${styles.calloutBad}`}>{error}</div>}
     </>
   );
@@ -534,6 +581,19 @@ function Verify() {
             </span>
             Feeds erroring
             <span className={styles.checkCount}>{feeds.errored}</span>
+          </li>
+        )}
+        {/* Only shown once a provider exists: an instance deliberately running
+            without AI shouldn't be told it's missing something. */}
+        {!!status?.ai.active && status.ai.active !== "claude_code" && (
+          <li
+            className={`${styles.check} ${status.ai.tasks_assigned > 0 ? styles.checkOk : styles.checkBad}`}
+          >
+            <span className={styles.checkMark} aria-hidden="true">
+              {status.ai.tasks_assigned > 0 ? "✓" : "✕"}
+            </span>
+            AI tasks running on {status.ai.active}
+            <span className={styles.checkCount}>{status.ai.tasks_assigned}</span>
           </li>
         )}
       </ul>

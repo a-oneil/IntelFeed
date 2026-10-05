@@ -13,7 +13,7 @@ const READY: OnboardingStatus = {
   feeds: { total: 37, polled_ok: 34, errored: 0, never_polled: 3 },
   entries: { total: 1284, last_24h: 1284 },
   autolink: { entity_links: 412 },
-  ai: { providers: 1, active: "ollama" },
+  ai: { providers: 1, active: "ollama", tasks_assigned: 28 },
   ready: true,
 };
 

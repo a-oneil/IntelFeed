@@ -111,6 +111,16 @@ You can run entirely locally on Ollama, on a hosted API, or mix — different
 tasks can go to different providers, which is how you put cheap bulk work on a
 local model and keep the expensive model for analysis.
 
+Worth knowing: **registering a provider is not the same as configuring AI.** Work
+runs off a per-task assignment naming a provider *and* a model, so a provider
+with no task pointing at it does nothing at all. The onboarding tour's AI step
+wires them for you — it tests the host, caches its model list, and routes every
+compatible task at it. Outside that, assignments are per task on this tab.
+
+Agentic tasks — the copilot and the entity maintenance jobs — only ever go to a
+provider that can execute tools. A plain chat provider would report merges it
+never applied, so the wizard leaves those on the Claude Code CLI and says so.
+
 The Cost tab shows tokens and spend per provider and task. One caveat: where the
 copilot runs on a flat-rate sign-in, its dollar figures are notional — what the
 tokens *would* cost at API rates, not a charge you'll see. The real limit there

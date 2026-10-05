@@ -41,6 +41,7 @@ async def _seed_ai_tasks() -> None:
         DEFAULT_PROVIDER_TYPE_ASSIGNMENTS,
         SYSTEM_TASKS,
     )
+    from app.ai.provisioning import pick_model
     from app.database import async_session
     from app.models.ai_provider import AIProvider as AIProviderModel
     from app.models.ai_task import AITask
@@ -182,22 +183,9 @@ async def _seed_ai_tasks() -> None:
                     chosen = default_provider
                 if not chosen:
                     continue
-                # The default model name assumes a Claude-family provider; when
-                # the chosen provider doesn't serve it (e.g. Ollama), fall back
-                # to the provider's first model so the assignment works out of
-                # the box instead of 404ing on an unknown model.
-                model_name = DEFAULT_MODEL_ASSIGNMENTS[task_name]
-                # Embedding models are listed alongside chat models on an Ollama
-                # host (Story Threads needs one there), and they cannot answer a
-                # prompt — never let the fallback below pick one.
-                provider_models = [m for m in (chosen.models or []) if "embed" not in m.lower()]
-                if provider_models and model_name not in provider_models:
-                    # Prefer a model whose id contains the alias ("sonnet" →
-                    # "claude-sonnet-4-6") before falling back to the first
-                    # listed model (Ollama lists are alphabetical, so [0] can
-                    # be an unfit pick — better than a guaranteed 404).
-                    match = next((m for m in provider_models if model_name in m), None)
-                    model_name = match or provider_models[0]
+                # The default names are Claude-family; pick_model resolves them
+                # against what the chosen provider actually serves.
+                model_name = pick_model(DEFAULT_MODEL_ASSIGNMENTS[task_name], chosen.models)
                 db.add(
                     AITaskAssignment(
                         created_by=first_user,
