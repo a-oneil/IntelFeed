@@ -658,7 +658,7 @@ A special mode for campaigns: saved searches can be linked to campaigns via the 
 
 ## Dashboards & Widgets
 
-IntelFeed features a fully customizable dashboard system with 51 pre-built widgets organized by category. Users create dashboards, add widgets, configure them, and arrange them using `react-grid-layout`. The board is the Workbench landing page (`/workbench/dashboard`); the old standalone `/dashboards` page was retired and now redirects there, while the dashboards REST API below is unchanged.
+IntelFeed features a fully customizable dashboard system with 51 pre-built widgets organized by category. Users create dashboards, add widgets, configure them, and arrange them using `react-grid-layout`. The board is the Workbench landing page (`/workbench/dashboard`); `/dashboards` redirects there. The dashboards REST API below is what it reads and writes.
 
 ### Dashboard Data Model
 

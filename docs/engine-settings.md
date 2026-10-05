@@ -321,7 +321,7 @@ Settings → Engine → **Feeds** table view (`feeds`, `rate_limiting`,
 | `default_feed_fetch_interval` | int, `30` min | Default interval between fetches for a feed that doesn't set its own. |
 | `user_agent` | str, browser-like | `User-Agent` sent when fetching feeds. The browser-like default exists because many sites (CISA/gov, Cloudflare-fronted blogs) return 403 to obvious bot agents. |
 | `rate_limit_default_interval` | float, `2.0` s | Default seconds between requests to the same domain. Per-domain overrides are env-only (`rate_limit_overrides`). |
-| `per_user_subscriptions_enabled` | bool, `false` | Each analyst manages their own feed list and mutes over the shared pool. Off is the legacy single shared list where a mute affects everyone. The migration backfilled every user as subscribed to every feed, copying each feed's mute at that moment. While the flag is off, mutes are written to the shared `Feed.is_muted` only and are not copied onto subscriptions, so turning it on re-shows any feed muted since. |
+| `per_user_subscriptions_enabled` | bool, `false` | Each analyst manages their own feed list and mutes over the shared pool. Off is a single shared list where a mute affects everyone. While the flag is off, a mute is written to the shared `Feed.is_muted` only, not to anyone's subscription, so a feed muted while the flag is off reappears for everyone when it is turned on. |
 | `image_proxy_enabled` | bool, `true` | Proxy external images through IntelFeed so reading an article doesn't beacon to the publisher. |
 | `image_proxy_cache_ttl_days` | int, `30` | Days a proxied image stays cached (`evict-image-cache`, daily 04:10 UTC). |
 | `image_proxy_max_size_bytes` | int, `10 MB` | Largest image the proxy will fetch. |

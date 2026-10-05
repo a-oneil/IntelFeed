@@ -941,7 +941,7 @@ This allows:
 - Team-wide key (e.g. VulnCheck, CVEDetails) + user's personal key for higher quota
 - Per-user overrides for any source
 
-Note: no current adapter sets `shared_key_group` — the mechanism exists (`base.py:26`, `SHARED_KEY_GROUPS` in `backend/app/enrichment/registry.py:151`) but the map is empty since the Abuse.ch-family IOC adapters were removed.
+Note: no current adapter sets `shared_key_group` — the mechanism exists (`base.py:26`, `SHARED_KEY_GROUPS` in `backend/app/enrichment/registry.py:151`) but the map is empty.
 
 ### Confidence Thresholds
 

@@ -262,7 +262,7 @@ The ranking and the folding are **server-side** (`build_priority_queue`, `backen
 
 The client only flattens the response into display rows (`queueItems`, `frontend/src/utils/threads.ts:38`) and adds day dividers; it does no ranking of its own. Pagination carries a composite cursor holding both the entry cursor and the thread sort key, so a page that emitted no thread row still resumes thread progress instead of re-emitting threads already shown.
 
-This replaced the **temporal convergence clusters** the queue used to slot in — per-request entity-overlap groups with no name, no spine and no persistence. `GET /api/intelligence/temporal-clusters` and its registry tool remain for the copilot and the triage widget; nothing in the reading UI calls them any more. See [story-threads.md](story-threads.md) for how a thread is built and tuned.
+**Temporal convergence clusters** — per-request entity-overlap groups with no name, no spine and no persistence — are not part of the queue. `GET /api/intelligence/temporal-clusters` and its registry tool serve the copilot and the triage widget; nothing in the reading UI calls them. See [story-threads.md](story-threads.md) for how a thread is built and tuned.
 
 ### Automation integration
 

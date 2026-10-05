@@ -8,7 +8,7 @@ Each code block says where it runs: **on the server** (over SSH), **in your brow
 
 | | |
 | --- | --- |
-| **OS** | Ubuntu 24.04 LTS or Amazon Linux 2023 are what this has been run on. Anything else current that runs Docker Engine with Compose v2 should behave the same, because everything runs in containers. |
+| **OS** | Ubuntu 24.04 LTS or Amazon Linux 2023. Anything else current that runs Docker Engine with Compose v2 should behave the same, because everything runs in containers. |
 | **Memory** | **8 GB** is the smallest we'd run it on, with swap — see [Memory](#memory-and-swap) below. 16 GB if you'll also run local translation. |
 | **Disk** | 30 GB or more. |
 | **Network** | `80/tcp` and `443/tcp` open to the internet (Caddy needs both to issue and renew the certificate); `22/tcp` for SSH from your own IP only. |
