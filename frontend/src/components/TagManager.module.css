@@ -251,7 +251,10 @@
 
 .row {
   display: grid;
-  grid-template-columns: 34px 1fr 130px 190px;
+  /* Actions size to their buttons (six of them since Share/Unshare) rather
+     than a fixed track they'd overflow across the count column; the name
+     column gives way instead. */
+  grid-template-columns: 34px minmax(0, 1fr) 130px max-content;
   align-items: center;
   gap: var(--sp-3);
   padding: var(--sp-3) 10px;
@@ -404,6 +407,7 @@
   gap: var(--sp-2);
   justify-content: flex-end;
   align-items: center;
+  white-space: nowrap;
 }
 
 /* Row-level buttons match SettingsPage's .btnSmall / .btnDangerSmall. */
