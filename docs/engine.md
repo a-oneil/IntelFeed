@@ -12,13 +12,13 @@ All three are behind runtime flags that live in the **`system_settings` DB table
 
 | Flag | Default | Effect |
 |---|---|---|
-| `signal_engine_shadow` | `false` | Compute + store signals and priority scores; no UI change (`backend/app/config.py:41`) |
-| `signal_engine_surface` | `false` | Surface scores: entry-list chips, Radar-ranked triage, SSE `entry_scored` events (`backend/app/config.py:42`) |
+| `signal_engine_shadow` | `false` | Compute + store signals and priority scores; no UI change (`backend/app/config.py:48`) |
+| `signal_engine_surface` | `false` | Surface scores: entry-list chips, Radar-ranked triage, SSE `entry_scored` events (`backend/app/config.py:49`) |
 | `radar_personalization_enabled` | `false` | Apply each analyst's learned family weights as a read-time lift on their own Radar ordering (`radar_personalization_min_samples` = 5, `radar_personalization_window_days` = 90) |
-| `pipeline_run_logging_enabled` | `true` | Kill switch for per-entry stage run logging (`backend/app/config.py:61`) |
-| `pipeline_engine_enabled` | `false` | Stage composition from pipeline plans instead of legacy feed booleans (`backend/app/config.py:64`) |
+| `pipeline_run_logging_enabled` | `true` | Kill switch for per-entry stage run logging (`backend/app/config.py:77`) |
+| `pipeline_engine_enabled` | `false` | Stage composition from pipeline plans instead of legacy feed booleans (`backend/app/config.py:80`) |
 
-Setting metadata (types, labels, help text, console groups) is registered in `backend/app/services/system_settings.py`: `CONFIGURABLE_KEYS` (`system_settings.py:19`) declares which keys are DB-overridable and their expected type, `SETTING_METADATA` (`system_settings.py:186`) carries the label/description/group shown in the UI, and `_ENGINE_SECTION_GROUPS` (`system_settings.py:1159`) re-groups the engine-owned keys onto Engine console sections. Every one of them is catalogued in [engine-settings.md](engine-settings.md). Because these are DB-backed, toggling them in a dev stack does **not** carry to production — they must be re-enabled per environment.
+Setting metadata (types, labels, help text, console groups) is registered in `backend/app/services/system_settings.py`: `CONFIGURABLE_KEYS` (`system_settings.py:19`) declares which keys are DB-overridable and their expected type, `SETTING_METADATA` (`system_settings.py:186`) carries the label/description/group shown in the UI, and `_ENGINE_SECTION_GROUPS` (`backend/app/services/system_settings.py:1195`) re-groups the engine-owned keys onto Engine console sections. Every one of them is catalogued in [engine-settings.md](engine-settings.md). Because these are DB-backed, toggling them in a dev stack does **not** carry to production — they must be re-enabled per environment.
 
 Related docs: [entries.md](entries.md) (full entry lifecycle), [intelligence-engine.md](intelligence-engine.md) (autolinker/correlation internals the pipeline stages call into), [data-model.md](data-model.md) (table schemas), [workers-search-dashboards.md](workers-search-dashboards.md) (Celery layer and beat schedules).
 
@@ -76,9 +76,9 @@ The full registry (`registry.py:35-144`):
 
 Resolution lives in `backend/app/pipeline/plans.py`:
 
-1. **Flag gate** — `resolve_feed_plan()` (`plans.py:68`) returns `None` when `pipeline_engine_enabled` is off; callers then use the legacy `run_extraction` boolean path. This is the instant-rollback lever.
+1. **Flag gate** — `resolve_feed_plan()` (`backend/app/pipeline/plans.py:116`) returns `None` when `pipeline_engine_enabled` is off; callers then use the legacy `run_extraction` boolean path. This is the instant-rollback lever.
 2. **Base layer** — `synthesize_from_feed()` (`plans.py:28`) produces a plan from the feed's own columns: every stage at its registry default, except `extract`, which is enabled iff `feed.auto_extract_on_ingest` or `feed.extract_detection_rules`, with `{mode, detection_rules}` config from the feed columns. The legacy booleans stay authoritative until a follow-up migration drops them; synthesizing at resolve time (not snapshotting) avoids drift.
-3. **Overlay** — active `PipelinePlan` rows for the feed's scopes are merged in order `global → category → feed` (`plans.py:107-109`); `_merge()` (`plans.py:47`) overrides `enabled` per stage and dict-merges `config`.
+3. **Overlay** — active `PipelinePlan` rows for the feed's scopes are merged in order `global → category → feed` (`plans.py:104-110`); `_merge()` (`plans.py:47`) overrides `enabled` per stage and dict-merges `config`.
 4. **Cache** — resolutions are cached in Redis per feed under `intelfeed:pipeline_plan:{feed_id}:{version}` with a 600s TTL (`plans.py:23-25`). Any plan write bumps `intelfeed:pipeline_plan:version` via `bump_plan_version()` (`plans.py:58`) — the same version-key invalidation pattern as the autolinker vocabulary. Resolution happens once per feed fetch, not per entry.
 
 `resolve_feed_plan` is called at each ingest path in `backend/app/workers/feed_tasks.py` (`:610`, `:1082`, `:1211`, `:1992`) before entries are dispatched.
@@ -206,7 +206,7 @@ Scheduled/dispatchable tasks in `backend/app/workers/signal_tasks.py`, registere
 |---|---|---|---|
 | `signal-rate-recompute` | `recompute_signal_rates` (`signal_tasks.py:167`) | daily 04:20 UTC (`job_registry.py:630`) | Recomputes 30-day firing rates (distinct entries with signal ÷ entries **scored** in window — not entries fetched, so backfills don't skew the denominator), the auto Radar threshold (p95 of `priority_score` over 7 days), and per-family feedback nudges; writes all three to Redis |
 | `signal-rescore-recent` | `rescore_recent_entries` (`signal_tasks.py:270`) | every 6h at :35 (`job_registry.py:648`) | Re-scores recent entries (default 72h/500) so late severity changes — KEV adds, EPSS jumps — propagate into stored scores. Also sweeps up never-scored entries in the window (unscored first when the limit truncates), so scoring failures self-heal instead of leaving entries permanently off Radar |
-| — | `rescore_entries_for_cve` (`signal_tasks.py:295`) | event-dispatched | Re-scores entries linked to one CVE (default 14d/200) when that CVE's severity facts change — dispatched via `dispatch_cve_rescore()` (`signal_tasks.py:343`) from CVE enrichment events, so KEV/EPSS/exploit changes propagate without waiting for the 6-hourly sweep |
+| — | `rescore_entries_for_cve` (`signal_tasks.py:295`) | event-dispatched | Re-scores entries linked to one CVE (default 14d/200) when that CVE's severity facts change — dispatched via `dispatch_cve_rescore()` (`backend/app/workers/signal_tasks.py:421`) from CVE enrichment events, so KEV/EPSS/exploit changes propagate without waiting for the 6-hourly sweep |
 | `signal-personal-weight-fit` | `fit_user_signal_weights` | daily 04:35 UTC | Fits per-analyst family weights from each user's own thumbs into `user_signal_weights`, and drops rows whose evidence aged out of the window or fell below the floor |
 | — | `backfill_entry_scores` (`signal_tasks.py:461`) | never scheduled | One-shot manual dispatch after enabling shadow mode, so there is historical data to evaluate |
 
@@ -234,7 +234,7 @@ All mutable tuning state is in Redis (constants at `signals.py:44-48`); Postgres
 
 ### Shadow vs surface rollout
 
-- **Shadow** (`signal_engine_shadow`): scoring runs and persists, nothing changes in the UI. Validate via `GET /entries/triage?mode=signals` against the legacy composite for a week (per the setting's own help text, `system_settings.py:255-270`).
+- **Shadow** (`signal_engine_shadow`): scoring runs and persists, nothing changes in the UI. Validate via `GET /entries/triage?mode=signals` against the legacy composite for a week (per the setting's own help text, `system_settings.py:458-466`).
 - **Surface** (`signal_engine_surface`): triage defaults to the signal ranking, entry lists gain priority chips and the `radar` sort, `entry_scored` SSE fires. Both flags live in the `system_settings` DB table — production must be flipped in its own Settings UI.
 
 ---
@@ -243,7 +243,7 @@ All mutable tuning state is in Redis (constants at `signals.py:44-48`); Postgres
 
 ### Signal-mode triage queue
 
-`GET /api/entries/triage` (`backend/app/api/entries.py:101`) picks its path per request: explicit `mode=legacy|signals` wins; otherwise `signal_engine_surface` decides. The legacy path is the live multi-subquery composite (`get_triage_entries`, `backend/app/services/triage.py:72` — PIR/correlation/automation/CVE-risk/reliability/engagement weights). The signal path (`get_triage_entries_signals`, `triage.py:356`) is one indexed scan over stored `Entry.priority_score ≥ threshold` plus one batched `entry_signals` fetch, returning the same response shape with signal explanations as `priority_reasons`.
+`GET /api/entries/triage` (`backend/app/api/entries.py:171`) picks its path per request: explicit `mode=legacy|signals` wins; otherwise `signal_engine_surface` decides. The legacy path is the live multi-subquery composite (`get_triage_entries`, `backend/app/services/triage.py:72` — PIR/correlation/automation/CVE-risk/reliability/engagement weights). The signal path (`get_triage_entries_signals`, `triage.py:356`) is one indexed scan over stored `Entry.priority_score ≥ threshold` plus one batched `entry_signals` fetch, returning the same response shape with signal explanations as `priority_reasons`.
 
 Per-user, read-time adjustments on top of the global score (inside `get_triage_entries_signals`):
 
@@ -252,13 +252,13 @@ Per-user, read-time adjustments on top of the global score (inside `get_triage_e
 
 ### Entry-list chips and radar sort
 
-When surfaced, the entry list endpoint (`list_entries`, `api/entries.py:373`) batch-loads signals for the page and each `EntryResponse` carries `priority_score`, up to 2 non-echo `top_signals`, and `is_echo` (`backend/app/schemas/entry.py:44-47`). Score and chips are only populated when the entry clears the Radar threshold; `is_echo` is always set so echoed re-reports can be visually de-emphasized. `sort=radar` orders by `priority_score` desc with a score-based cursor, and — when surfacing is on — restricts the list to entries clearing the Radar threshold, mirroring the Priority Queue badge count (`api/entries.py:675-695`; badge count itself from `GET /api/entries/priority-unread-count`, `:1028`). Rendering: `frontend/src/components/SignalChip.tsx`.
+When surfaced, the entry list endpoint (`list_entries`, `backend/app/api/entries.py:447`) batch-loads signals for the page and each `EntryResponse` carries `priority_score`, up to 2 non-echo `top_signals`, and `is_echo` (`backend/app/schemas/entry.py:44-47`). Score and chips are only populated when the entry clears the Radar threshold; `is_echo` is always set so echoed re-reports can be visually de-emphasized. `sort=radar` orders by `priority_score` desc with a score-based cursor, and — when surfacing is on — restricts the list to entries clearing the Radar threshold, mirroring the Priority Queue badge count (`api/entries.py:876-892`; badge count itself from `GET /api/entries/priority-unread-count`, `:1028`). Rendering: `frontend/src/components/SignalChip.tsx`.
 
 ### Story threads in the ranked queue
 
 The Priority Queue is a second, ranked entry list: `/priority-queue` renders `MainLayout` in `priorityMode`, which mounts `EntryList` with `sortOverride="radar"` and `withThreads`, a docked reader, and a Why-ranked card (`frontend/src/components/WhyRankedCard.tsx`) explaining the entry's signals. It folds **story threads** into the ranked list as inline rows (`GET /api/threads`).
 
-The ranking and the folding are **server-side** (`build_priority_queue`, `api/entries.py:1262`): the endpoint lists open threads with something unread, scores each one, and two-pointer-merges them into the radar-ordered entry page so a thread slots in ahead of the first entry it outranks. A thread takes the score of its best **unread, non-echo** member (`top_score`, `story_threads.py:1002`) plus a capped corroboration bump — +1 per independent outlet beyond the first, capped at +5 (`_thread_queue_score`, `api/entries.py:1215`; constants at `:1208-1209`). Every member of a live thread is withheld from the queue as a standalone entry, including members on pages not yet fetched — a thread always scores at or above its best unread member, so the row is reached before the articles it stands for. Corroboration across newsrooms is itself a signal, so a story eleven outlets carried outranks a lone entry with the same base score. A thread with nothing unread does not render at all: the queue answers "read this next", and a story you have finished has no answer to give.
+The ranking and the folding are **server-side** (`build_priority_queue`, `backend/app/api/entries.py:1377`): the endpoint lists open threads with something unread, scores each one, and two-pointer-merges them into the radar-ordered entry page so a thread slots in ahead of the first entry it outranks. A thread takes the score of its best **unread, non-echo** member (`top_score`, `story_threads.py:1003`) plus a capped corroboration bump — +1 per independent outlet beyond the first, capped at +5 (`_thread_queue_score`, `backend/app/api/entries.py:1330`; constants at `:1208-1209`). Every member of a live thread is withheld from the queue as a standalone entry, including members on pages not yet fetched — a thread always scores at or above its best unread member, so the row is reached before the articles it stands for. Corroboration across newsrooms is itself a signal, so a story eleven outlets carried outranks a lone entry with the same base score. A thread with nothing unread does not render at all: the queue answers "read this next", and a story you have finished has no answer to give.
 
 The client only flattens the response into display rows (`queueItems`, `frontend/src/utils/threads.ts:38`) and adds day dividers; it does no ranking of its own. Pagination carries a composite cursor holding both the entry cursor and the thread sort key, so a page that emitted no thread row still resumes thread progress instead of re-emitting threads already shown.
 
@@ -266,7 +266,7 @@ This replaced the **temporal convergence clusters** the queue used to slot in �
 
 ### Automation integration
 
-Automation rules can react to signal outputs via entry conditions in `backend/app/automation/conditions.py` (engine phase 7): `priority_score_above` (`conditions.py:249` — stored `Entry.priority_score` ≥ `config.min`), `has_signal` (`conditions.py:265` — entry carries any/specific `entry_signals` types), and `entity_watchlisted` (`conditions.py:277` — entry links an entity on the rule creator's watchlist). Because scoring is the *final* chord callback while `automate` is a *side* dispatch, `on_new_entry` rules see `priority_score` only if the entry was already scored. For score reactions use the **`on_entry_scored` trigger**: `score_entry_task` dispatches `run_scored_entry_automations` after signals + score are persisted (guarded by a cheap enabled-rule existence check), so `priority_score_above`/`has_signal` conditions evaluate against real values. It fires on initial pipeline scoring only — rescores and backfills don't re-fire rules. See [automation-ai-enrichment.md](automation-ai-enrichment.md) for the rule engine itself.
+Automation rules can react to signal outputs via entry conditions in `backend/app/automation/conditions.py` (engine phase 7): `priority_score_above` (`conditions.py:258` — stored `Entry.priority_score` ≥ `config.min`), `has_signal` (`conditions.py:274` — entry carries any/specific `entry_signals` types), and `entity_watchlisted` (`conditions.py:328` — entry links an entity on the rule creator's watchlist). Because scoring is the *final* chord callback while `automate` is a *side* dispatch, `on_new_entry` rules see `priority_score` only if the entry was already scored. For score reactions use the **`on_entry_scored` trigger**: `score_entry_task` dispatches `run_scored_entry_automations` after signals + score are persisted (guarded by a cheap enabled-rule existence check), so `priority_score_above`/`has_signal` conditions evaluate against real values. It fires on initial pipeline scoring only — rescores and backfills don't re-fire rules. See [automation-ai-enrichment.md](automation-ai-enrichment.md) for the rule engine itself.
 
 ### Entity "what's new" developments
 
@@ -305,13 +305,13 @@ Written by Celery signal handlers in `backend/app/workers/task_tracking.py` (`ta
 
 ### Retention: `prune_engine_tables`
 
-`backend/app/workers/maintenance.py:938` (job key `prune-engine-tables`, daily 02:40 UTC — `job_registry.py:696`) deletes engine bookkeeping older than **30 days**: `entry_pipeline_runs`, `job_runs`, non-pending `ai_analysis_requests`, `ai_batch_jobs`, and resolved `pending_autolink_matches` (unresolved pending matches expire at 14 days — no AI pass ever came, so the hold just lapses). `entry_signals` is not pruned — signals stay for the life of the entry and cascade-delete with it.
+`backend/app/workers/maintenance.py:938` (job key `prune-engine-tables`, daily 02:40 UTC — `job_registry.py:699`) deletes engine bookkeeping older than **30 days**: `entry_pipeline_runs`, `job_runs`, non-pending `ai_analysis_requests`, `ai_batch_jobs`, and resolved `pending_autolink_matches` (unresolved pending matches expire at 14 days — no AI pass ever came, so the hold just lapses). `entry_signals` is not pruned — signals stay for the life of the entry and cascade-delete with it.
 
 ---
 
 ## API endpoints
 
-The engine router mounts at `/api/engine` (`backend/app/main.py:810`). All endpoints require auth; mutating ones require admin (`_require_admin`, `api/engine.py:15`).
+The engine router mounts at `/api/engine` (`backend/app/main.py:801`). All endpoints require auth; mutating ones require admin (`_require_admin`, `api/engine.py:15`).
 
 | Method & path | Purpose | Ref |
 |---|---|---|
@@ -333,13 +333,13 @@ The engine router mounts at `/api/engine` (`backend/app/main.py:810`). All endpo
 | `GET/POST/DELETE /api/engine/autolink/fp-names` | The curated false-positive vocabulary (`autolinker_false_positive_names`) as rows — vendors/products/tools/mitigations bypass it | `api/engine.py:1427`, `:1444`, `:1465` |
 | `GET/POST/DELETE /api/engine/autolink/blocked-names` | Analyst hard blocks (`autolinker_blocked_surface_forms`) — enforced for **every** entity type | `api/engine.py:1497`, `:1514`, `:1535` |
 
-A sibling router mounts at `/api/engine/extraction` (`backend/app/api/extraction.py`, `main.py:840`) for the console's Entities view: `GET /stats` (provenance/source breakdowns), `GET /entities` (filterable list of AI-created entities), `POST /confirm` (bulk analyst confirmation).
+A sibling router mounts at `/api/engine/extraction` (`backend/app/api/extraction.py`, `main.py:831`) for the console's Entities view: `GET /stats` (provenance/source breakdowns), `GET /entities` (filterable list of AI-created entities), `POST /confirm` (bulk analyst confirmation).
 
 Related endpoints on other routers:
 
-- `GET /api/entries/triage?mode=legacy|signals` — triage queue, mode-switched (`api/entries.py:101`)
-- `GET /api/entries?sort=radar` — priority-ordered entry list with signal chips (`api/entries.py:376`)
-- `GET /api/entries/priority-queue` — the Priority Queue: the radar-ranked unread list with open story threads folded in as single rows, assembled server-side (`build_priority_queue`, `api/entries.py:1262`)
+- `GET /api/entries/triage?mode=legacy|signals` — triage queue, mode-switched (`api/entries.py:171`)
+- `GET /api/entries?sort=radar` — priority-ordered entry list with signal chips (`api/entries.py:447`)
+- `GET /api/entries/priority-queue` — the Priority Queue: the radar-ranked unread list with open story threads folded in as single rows, assembled server-side (`build_priority_queue`, `backend/app/api/entries.py:1377`)
 - `GET /api/entity-links` (+ `/stats`, unlink, bulk-unlink) — entry↔entity edge management for the console's Links view (`backend/app/api/entity_links.py`)
 - `GET /api/intelligence/temporal-clusters` — cross-feed temporal clusters, used by the convergence widgets (`api/correlation.py:388`)
 - Job schedule CRUD (Jobs browse-view editor) lives on the jobs router backed by `job_registry.py` — see [workers-search-dashboards.md](workers-search-dashboards.md)

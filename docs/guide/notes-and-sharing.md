@@ -1,6 +1,6 @@
 # Notes and sharing
 
-What you write down, and who can see it.
+How to keep notes and comments on your instance, hand a link to an article or conversation to someone outside it, and export to other tools — and what each of those does and does not protect. Read the [Share links](#share-links) section before you send anything outside your team.
 
 ## Notes
 
@@ -30,20 +30,33 @@ group does".
 
 ## Share links
 
-**Share** on an article, report, campaign or copilot conversation produces a
-public URL that works without a login.
+**Share** in the article reader, and **Share** on a copilot conversation in the copilot dock, each produce a public URL that works without a login. Reports and campaigns don't have share links; they leave as [exports](#exports).
 
-Understand what that means: **the link is the access control.** Anyone who has
-it can read the thing. There's no expiry gate, no viewer list, no audit of who
-opened it. It's the right tool for sending a write-up to a partner org, and the
-wrong tool for anything you wouldn't send in plain email.
+Understand what that means: **the link is the access control.** Anyone who has it can open the page, and there's no viewer list or audit of who did. It's the right tool for sending a write-up to a partner org, and the wrong tool for anything you wouldn't send in plain email.
 
-TLP is honoured — TLP:RED material doesn't generate a link — but TLP only helps
-if you set it honestly.
+### What a shared article exposes
 
-A shared article link carries the article and its linked entities. A shared
-copilot conversation carries the whole thread, including whatever context was
-pinned when you asked, so re-read it before sending.
+More than the article:
+
+- the article text, its media and linked entities, and any detection rules extracted from it;
+- **every note on that article**, whoever on your instance wrote it — notes have no private setting;
+- the article's current AI results.
+
+**Recipients can also run AI on it.** The shared page can run AI analysis and generation tasks and put questions to an AI agent about the article, with no login. Those calls run as *you*, the person who made the link, through your AI assignments and at your instance's AI cost. Each analysis task can run once per article, and its result is stored on the article, so it's then visible to everyone who can see that article's AI results, not only the person who triggered it. Questions put to the agent are answered and not stored.
+
+A shared copilot conversation is read-only and carries the whole thread, including whatever context was pinned when you asked. Re-read either one before sending.
+
+**TLP does not gate sharing.** Reports and campaigns carry a TLP marking, which shows on a report's banner in exports, but nothing checks it when an article or conversation is shared — TLP:RED material shares like anything else. Holding back what's marked red is up to you.
+
+### Expiry and revoking
+
+The **Share** button creates a link that stays live until it's revoked; the app has no expiry picker. Underneath:
+
+- **Reuse.** You have at most one active link per article. Share, and the CLI's `create_share_link`, hand back the one you already have if there is one, whatever its expiry, and only create a new link when you have none.
+- **`ttl_days`.** The CLI's `create_share_link` tool accepts it, but it applies only to a link that call creates. Pass it for an article you've already shared and the existing link comes back unchanged: the expiry is not added, shortened or extended. Once a link's expiry passes it answers "expired" (HTTP 410) instead of showing the article.
+- **An expired link still counts as active.** Share keeps handing it back, and recipients keep seeing "expired", until it's revoked. Revoke it, then share again for a fresh link.
+- **Revoking** is through the API only (`DELETE /api/entries/{entry_id}/share`); there is no button in the app. A revoked link answers 404. You revoke your own link; an admin revokes everyone's for that article.
+- **Links belong to the person who made them.** If two analysts share the same article each has their own link, and revoking one leaves the other working.
 
 ## Exports
 

@@ -15,7 +15,9 @@ you were sent an invite link, it will take you to the register page.
 Admin matters more than it sounds. Non-admins can read everything, write notes,
 build campaigns and reports, save searches, and write detection rules. Admins
 additionally manage feeds, AI configuration, users, the engine, and system
-settings. If a section in this guide says "admin only", that's why.
+settings. If a section in this guide says "admin only", that's why. Running an
+instance for a team — locking registration, invite links, managing accounts —
+is covered in [Users and access](users-and-access.md).
 
 ## The onboarding tour
 
@@ -29,7 +31,8 @@ reaching the end marks it finished.
 
 1. **Reference data** — checks whether the countries, ATT&CK, CWE and
    vendor/product catalogues are seeded, and gives you the command if they
-   aren't. Until they are, articles ingest but nothing links to anything, which
+   aren't. Until they are, articles ingest but most entity types never link
+   (migrations load only countries and a baseline of ATT&CK techniques), which
    is the single most common "IntelFeed looks broken" report.
 2. **Add feeds** — curated starter packs, an OPML import, or a single URL.
 3. **AI provider** — Ollama, Claude, or an explicit "run without AI" that says

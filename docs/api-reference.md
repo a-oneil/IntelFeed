@@ -1,12 +1,14 @@
 # REST API Reference
 
+For developers and integrators who want to script IntelFeed or build against its REST API: every router, its endpoints, request and response shapes, and the auth model. For ready-made recipes see [integrations.md](integrations.md); for the same operations as a command-line tool see [cli-reference.md](cli-reference.md).
+
 **Version:** 0.1.0  
 **Base URL:** `/api`  
 **Protocol:** HTTPS (self-hosted)  
 
 ## Overview
 
-IntelFeed's FastAPI backend provides a comprehensive REST API for threat intelligence ingestion, enrichment, analysis, and dissemination. The API is designed for self-hosted deployments with a single authenticated user or small teams. See [`backend/app/main.py:767-846`] for router mounting and prefix definitions — 77 routers in all. The interactive OpenAPI docs at `/docs` (and `/redoc`) are generated from the same source and are always current; this page is the narrative companion, not a replacement.
+IntelFeed's FastAPI backend provides a comprehensive REST API for threat intelligence ingestion, enrichment, analysis, and dissemination. The API is designed for self-hosted deployments with a single authenticated user or small teams. See [`backend/app/main.py:757-837`] for router mounting and prefix definitions — 78 routers in all. The interactive OpenAPI docs at `/docs` (and `/redoc`) are generated from the same source and are always current; this page is the narrative companion, not a replacement.
 
 This documentation covers:
 - **Authentication & Authorization:** JWT-based with access/refresh tokens
@@ -2959,7 +2961,7 @@ On-demand enrichment for a specific entity (cached + rate-limited pipeline).
 
 Base paths: `/api/entries/{id}/share`, `/api/shared`, `/api/public/rss`
 
-**`POST /api/entries/{entry_id}/share`** — Create (or return the existing) public share link for an entry: `{ "token": "...", "url": "/shared/<token>", ... }`.  
+**`POST /api/entries/{entry_id}/share`** — Create (or return the existing) public share link for an entry: `{ "token": "...", "url": "/shared/<token>", ... }`. The caller's existing active link is returned as it is, whatever its `expires_at`; this endpoint never sets an expiry.  
 **`GET /api/entries/{entry_id}/share`** — Current share link or `null`.  
 **`DELETE /api/entries/{entry_id}/share`** — Revoke the link.
 

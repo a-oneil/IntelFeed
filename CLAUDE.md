@@ -25,7 +25,7 @@ docker compose -f docker-compose.dev.yml down       # Stop all services
 # PostgreSQL: localhost:5433, Redis: localhost:6380
 
 # Create the first user via the register page at localhost:3001 (the first account becomes the admin)
-# (backed by POST /api/auth/register; can be invite-gated under Settings > System)
+# (backed by POST /api/auth/register; can be invite-gated under Settings > Users)
 ```
 
 Prod uses `docker-compose.prod.yml` with Caddy (`Caddyfile`) fronting for auto-TLS. `update.sh` at repo root is the production update helper (it runs on a ~2-minute cron, so a push is a deploy): it fetches, pulls, and then **rebuilds only when the pull actually changed an image** — `backend/**`, `frontend/**`, `db/**`, `piper/**` or a compose file. A `Caddyfile` change reloads caddy in place; a docs/scripts/android/CI commit pulls and stops, since `./docs` and `./scripts` are bind-mounted and nothing needs restarting. The gate diffs against `.update-deployed` (the commit the containers were built from), not the previous HEAD, so a failed build still retries after unrelated commits land on top. See [docs/operations.md](docs/operations.md). Full EC2 walkthrough lives in [setup.md](setup.md).
@@ -99,7 +99,7 @@ Most use the app's models and session, so they run in the api container. `./scri
 docker compose -f docker-compose.dev.yml exec api python scripts/<folder>/<script>.py
 ```
 ```
-seed/         Reference data for a fresh install. `seed_all.py` runs all nine in
+seed/         Reference data for a fresh install. `seed_all.py` runs all ten in
               dependency order (--dry-run to preview, --offline to skip downloads,
               --only/--skip to resume); each seeder also runs standalone.
               `seed_feeds.py` is separate — curated starter feeds, not reference data.
@@ -117,6 +117,7 @@ scripts/ops/sync_prod_to_dev.sh           # Dump prod DB over SSH and restore in
 scripts/ops/cf-origin-lockdown.sh         # Restrict prod 80/443 to Cloudflare edge ranges
 scripts/ops/version.sh                    # Source (don't run) before a build to stamp images with the commit
 scripts/dev/sync_skill_clis.py            # Regenerate skill CLIs from the live tool registry
+scripts/dev/check_doc_refs.py             # Check the file:line references in docs/ against the code (--fix repairs the unambiguous ones)
 scripts/build_apk.sh                    # Bump the Android app version, test, build, install on devices
 ```
 `deploy.sh` / `sync_prod_to_dev.sh` require `INTELFEED_PROD_HOST` — there is no default host.
@@ -160,7 +161,7 @@ This is the most complex subsystem:
 - **`autolinker.py`** — Aho-Corasick dictionary scans entry content for known entities (actors, malware, CVEs, TTPs, vendors, products, countries). Redis-versioned vocab for distributed workers. Configurable false positive filtering.
 - **`correlation.py`** — Pivot queries across entity types via shared entries. Proximity scoring with paragraph-distance decay. Entity graph building and timeline construction.
 - **`observables.py`** — The IOC ledger (observables entity type, `(kind, value)` identity). Hard rule: regex never creates a row — pattern scanning only stages entry-local candidates; rows come from judgment doors (one-pass AI `iocs` array, TTP observable upserts, curated `ioc_list` feeds, analyst promote) and known values are then sighted by exact match. Per-kind confidence decay (hashes/host artifacts never decay) runs nightly.
-- **`rule_extraction.py`** — Extracts detection rules in 6 formats (Sigma, SPL, CrowdStrike QL, Elastic QL, KQL, YARA) with syntax validation.
+- **`rule_extraction.py`** — Extracts detection rules in 6 formats (Sigma, Splunk SPL, Elastic QL, KQL, YARA, Snort/Suricata) with syntax validation. The validator (`rule_validation.py`) covers 9: those six plus CrowdStrike QL, Nuclei and Panther, which have no text extractor.
 - **`reporting.py`** — Report generation with customizable templates (Markdown/HTML render). Bundle export (CSV/ATT&CK layer) lives in `api/export.py`; outbound indicator feeds in `api/publish.py`.
 
 ### Database Migrations
@@ -175,7 +176,7 @@ db (PostgreSQL:5433, built from `db/Dockerfile` — postgres:16-alpine + pgvecto
 - **Async throughout** — All database operations use `AsyncSession`. Celery tasks wrap async code via `run_async()` helper with a persistent per-process event loop.
 - **Router pattern** — Dependency injection for `get_current_user` and `get_db`. All endpoints use Pydantic schemas. Eager loading via `selectinload()`. Pagination via offset/limit or cursor tokens. Admin-only operations use the `get_admin_user` dependency, and per-user rows enforce author-or-admin checks — new endpoints must follow this.
 - **Custom exceptions** — `AppError` class with structured `{code, message, details}` responses. Handlers in `main.py`.
-- **Config override chain** — `config.py` checks system_settings DB table first, then `.env` defaults. Many settings are editable via Settings > System UI.
+- **Config override chain** — `config.py` checks system_settings DB table first, then `.env` defaults. Many settings are editable in the Settings UI (Engine console, AI Configuration, Users, System).
 - **Worker tasks** — `@celery_app.task(bind=True, max_retries=3, soft_time_limit=600)` pattern. Each task creates/disposes its own async DB engine to prevent connection exhaustion. Tasks that invoke an AI provider (link validation, entity maintenance, assessment backfill) are routed via `task_routes` in `celery_app.py` to the `ai` queue (formerly `claude_code`), served only by the celery-worker-ai container at concurrency 1 — it serializes AI calls (paces a single Ollama GPU; owns the CLI credentials volume for the claude_code provider). New AI-calling tasks must be routed there too.
 - **Intelligence entities** use junction tables (`EntryTTP`, `EntryCVE`, `EntryVendor`, `EntryProduct`, etc.) for many-to-many with entries. Uniqueness constraints: TTP `technique_id`, CVE `cve_id`, ThreatActor `name`.
 
@@ -192,7 +193,7 @@ db (PostgreSQL:5433, built from `db/Dockerfile` — postgres:16-alpine + pgvecto
 
 ## Environment Setup
 
-Copy `.env.example` to `.env`. Key variables: `POSTGRES_*`, `REDIS_URL`, `MEILI_URL`, `MEILI_MASTER_KEY`, `SECRET_KEY`, `ENCRYPTION_KEY`. Most operational settings (AI providers, API keys, thresholds) are configurable in the web UI under Settings > System.
+Copy `.env.example` to `.env`. Key variables: `POSTGRES_*`, `REDIS_URL`, `MEILI_URL`, `MEILI_MASTER_KEY`, `SECRET_KEY`, `ENCRYPTION_KEY`. Most operational settings are configurable in the web UI: AI providers under Settings > AI Configuration; thresholds and API keys under Settings > Engine.
 
 ## IntelFeed CLI
 

@@ -162,7 +162,7 @@ python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().
 openssl rand -base64 24
 ```
 
-File: `setup.md` (lines 36–73)
+File: [`setup.md`](../setup.md), step 5
 
 ### System Settings (Database)
 

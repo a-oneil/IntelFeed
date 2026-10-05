@@ -550,12 +550,13 @@ The correlation engine (`backend/app/intelligence/correlation.py`) connects enti
 
 ### Entity Configuration
 
-The engine supports 9 entity types, each mapped to its model, junction table, and foreign key (`backend/app/intelligence/correlation.py`):
+The engine supports 12 entity types, each mapped to its model, junction table, and foreign key (`backend/app/intelligence/correlation.py`):
 
 ```python
 ENTITY_CONFIG = {
     "ttp":           (TTP, EntryTTP, EntryTTP.ttp_id),
     "cve":           (CVE, EntryCVE, EntryCVE.cve_id),
+    "cwe":           (CWE, EntryCWE, EntryCWE.cwe_id),
     "threat_actor":  (ThreatActor, EntryThreatActor, EntryThreatActor.threat_actor_id),
     "malware":       (MalwareFamily, EntryMalware, EntryMalware.malware_family_id),
     "country":       (Country, EntryCountry, EntryCountry.country_id),
@@ -563,8 +564,12 @@ ENTITY_CONFIG = {
     "tool":          (Tool, EntryTool, EntryTool.tool_id),
     "vendor":        (Vendor, EntryVendor, EntryVendor.vendor_id),
     "product":       (Product, EntryProduct, EntryProduct.product_id),
+    "observable":    (Observable, EntryObservable, EntryObservable.observable_id),
+    "sector":        (Sector, EntrySector, EntrySector.sector_id),
 }
 ```
+
+A **campaign** can be pivoted *from* but is not in `ENTITY_CONFIG`: it is a curated membership list, not something extracted from an article, so it never appears as a related type (`PIVOT_SOURCE_TYPES = VALID_ENTITY_TYPES | {"campaign"}`).
 
 ### Pivot Queries
 
@@ -842,7 +847,7 @@ All server state is managed via **TanStack Query v5**:
 
 The workbench landing page — the **Dashboard** (`/workbench/dashboard`, `frontend/src/pages/DashboardPage.tsx`) — is the operational "what is happening right now" view. It is the first item in the workbench nav and the page `/workbench` redirects to. The entity/section browser lives at `/workbench/explore`. `/triage`, `/dashboards`, and `/atlas` all redirect to `/workbench/dashboard`.
 
-The page is organized as a correlation-events browser plus a stack of widgets backed by `triageViewStore`. The **Priority Queue** — entries ranked by intelligence signals, with open story threads folded in as single rows — is a second, ranked entry list: `/priority-queue` renders `MainLayout` in `priorityMode` (`frontend/src/pages/MainLayout.tsx`), which mounts `EntryList` with `sortOverride="radar"` and `withThreads`, a docked reader, and a Why-ranked card (`WhyRankedCard.tsx`) explaining the entry's signals. The ranking and thread folding are assembled server-side by `GET /api/entries/priority-queue` (`build_priority_queue`, `backend/app/api/entries.py:1262`); the client only flattens the rows for display (`frontend/src/utils/threads.ts`). It is reachable from a chip under the Unread-articles hero in the feed sidebar.
+The page is organized as a correlation-events browser plus a stack of widgets backed by `triageViewStore`. The **Priority Queue** — entries ranked by intelligence signals, with open story threads folded in as single rows — is a second, ranked entry list: `/priority-queue` renders `MainLayout` in `priorityMode` (`frontend/src/pages/MainLayout.tsx`), which mounts `EntryList` with `sortOverride="radar"` and `withThreads`, a docked reader, and a Why-ranked card (`WhyRankedCard.tsx`) explaining the entry's signals. The ranking and thread folding are assembled server-side by `GET /api/entries/priority-queue` (`build_priority_queue`, `backend/app/api/entries.py:1377`); the client only flattens the rows for display (`frontend/src/utils/threads.ts`). It is reachable from a chip under the Unread-articles hero in the feed sidebar.
 
 The triage stream is broken up by **daily-divider summaries** — AI-generated per-day recaps that are shared across all users. A beat job (`generate-daily-summaries`, daily at 6 AM, `backend/app/workers/daily_summary_tasks.py`) pre-generates yesterday's summary so it renders instantly.
 
