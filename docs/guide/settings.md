@@ -10,7 +10,10 @@ Tags and Claude Code Skill; admins get everything.
 
 ## Account
 
-Profile and password. Little to say.
+Profile and password, plus **Getting started** — the onboarding tour. If you
+closed the tour partway through, **Resume the tour** reopens it on the step you
+left; **Replay from the start** runs the whole thing again. See
+[Getting started](getting-started.md).
 
 ## Appearance
 
