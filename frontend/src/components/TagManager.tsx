@@ -61,7 +61,6 @@ export function TagManager() {
     );
   }, [tags, query, sort]);
 
-  const maxCount = Math.max(1, ...tags.map((t) => t.entry_count));
   const selectedTags = tags.filter((t) => selected.has(t.id));
 
   const toggle = (id: string) =>
@@ -440,13 +439,7 @@ export function TagManager() {
                   )}
                 </div>
 
-                <span className={styles.count}>
-                  <span
-                    className={styles.bar}
-                    style={{ width: `${Math.round((t.entry_count / maxCount) * 60)}px` }}
-                  />
-                  {t.entry_count.toLocaleString()}
-                </span>
+                <span className={styles.count}>{t.entry_count.toLocaleString()}</span>
 
                 <div className={styles.rowActions}>
                   {confirmDeleteId === t.id ? (
