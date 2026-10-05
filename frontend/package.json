@@ -43,7 +43,7 @@
     "remark-gfm": "^4.0.1",
     "sonner": "^2.0.8",
     "unified": "^11.0.5",
-    "zustand": "^4.5.7"
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@eslint/js": "^8.57.1",
