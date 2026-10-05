@@ -393,15 +393,6 @@
   gap: var(--sp-3);
 }
 
-.bar {
-  display: inline-block;
-  height: 5px;
-  border-radius: var(--r-sm);
-  background: var(--accent-intel);
-  opacity: 0.5;
-  flex-shrink: 0;
-}
-
 .rowActions {
   display: flex;
   gap: var(--sp-2);
