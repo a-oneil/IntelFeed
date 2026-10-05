@@ -61,7 +61,9 @@ than just valid.
 **Threats** — the board covering what's active right now, ranked by story rather
 than by outlet, so ten articles about one campaign are one row. Four tabs: All,
 Actors, Malware and Vulnerabilities. The Vulnerabilities tab ranks CVEs by
-exploitation and is where vendor and product exposure lives.
+exploitation and is where vendor and product exposure lives. Each row's button
+names the job — draft a rule, extend one, adopt one — and the drawer shows its
+working; see [The Threats board](threats-board.md).
 
 ## Entities
 
@@ -83,6 +85,11 @@ the hover tooltips read from.
 
 **Ransomware** — leak-site victim tracking as structured data rather than as
 articles.
+
+**Regions** — a card per region with its country count and article volume, a
+quick read on where coverage is concentrated. It isn't in the Workbench nav: open
+it from the command palette (**Regions & countries**), and open a single country
+from the Countries browser under Entities.
 
 **Requirements** — your standing intelligence requirements. Worth doing
 properly: the *PIR match* signal in the [Priority Queue](priority-queue.md)

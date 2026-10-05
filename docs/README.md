@@ -12,7 +12,7 @@ For a top-level project overview and quickstart, see [`../readme.md`](../readme.
 
 - **[guide/](guide/README.md)** — **The user guide.** How to actually work in IntelFeed: getting started, reading and triage, search, entity profiles, the Priority Queue, the workbench, detection rules, campaigns and reports, automation and the copilot. Start here if you want to *use* IntelFeed rather than build it.
 - **[query-language.md](query-language.md)** — Full reference for the search query syntax used across the unified search bar, command palette, query builder, and saved searches.
-- **[cli-reference.md](cli-reference.md)** — Reference for the `intelfeed_cli.py` tool — all 180 tools in the full CLI (81 in the read-only lite variant), with args, returns, and examples.
+- **[cli-reference.md](cli-reference.md)** — Reference for the `intelfeed_cli.py` tool — all 180 tools in the full CLI (87 in the read-only lite variant), with args, returns, and examples.
 - **[../intelfeed-mcp/README.md](../intelfeed-mcp/README.md)** — The MCP server for local models (LM Studio and other MCP clients): the same tool registry behind nine fixed tools, on-demand skills and size-capped results, so it fits a small context window.
 - **[android-app.md](android-app.md)** — The native Android client: where to download the APK, what the app covers, how it is built, signed and released from CI, and how its source is synced into `android/`.
 
@@ -62,7 +62,7 @@ For a top-level project overview and quickstart, see [`../readme.md`](../readme.
 
 ## Conventions
 
-- File references use `path/to/file.py:line` format (e.g. `backend/app/intelligence/autolinker.py:101`) so links survive refactors.
+- File references use `path/to/file.py:line` format (e.g. `backend/app/intelligence/autolinker.py:101`) so links survive refactors. Line numbers drift whenever code above them moves, so after a refactor run `python3 scripts/dev/check_doc_refs.py` (add `--fix` to repair the unambiguous ones) and `python3 scripts/dev/check_doc_links.py` to catch broken links and anchors.
 - The deep-dive docs deliberately reference, rather than duplicate, content in `architecture.md`. If you find yourself paraphrasing the same content in two places, link instead.
 - Dates in docs are absolute (e.g. `2026-05-03`), not relative.
 - Mermaid diagrams are used for sequence flows, ER diagrams, and pipeline overviews. Each diagram lives as a standalone file under [`diagrams/`](diagrams/) — one diagram per file — and the doc links to it rather than embedding the chart inline.

@@ -22,9 +22,11 @@ writes takes `--dry-run` (or `--apply`), so you can see the damage first.
 
 ## `seed/` — reference data for a fresh install
 
-A new install starts empty: the autolinker has no vocabulary, so entries ingest
-and nothing links to anything. These populate the reference entities it matches
-against. Run them in this order; each is idempotent, so re-running later just
+A new install isn't quite empty — migrations load the countries and a baseline of
+ATT&CK techniques — but it has no CWE catalog, vendors, products, CPE curation or
+actor attribution, so most of what the autolinker matches against is missing and
+entries ingest without linking to it. These populate the reference entities it
+matches against. Run them in this order; each is idempotent, so re-running later just
 fills gaps.
 
 | Order | Script | Seeds |
@@ -41,6 +43,7 @@ fills gaps.
 | 10 | `seed_entity_attributes.py` | Motivation on threat actors, controlled-vocabulary type on malware families. |
 | — | **`seed_all.py`** | **Runs all ten above, in this order.** |
 | — | `seed_feeds.py` | Curated starter feeds, from the OPML packs in `backend/app/feed_packs/` — the same ones the onboarding wizard offers. Defaults to the 37-feed `core` pack; `--list` / `--packs` / `--all` / `--dry-run`. Deliberately **not** in `seed_all.py`: that is reference data, identical on every install, while which sources an instance polls is editorial. |
+| — | `seed_log_type_aliases.py` | Flattens the free-text `log_types` on telemetry sources onto the canonical behaviour axis in `app/services/detection_coverage.py`, writing `log_type_alias` and `telemetry_sources.log_types_canonical` so detection-coverage matching compares like with like. A deterministic table plus keyword rules, not a model call, so it is re-runnable: edit the table, run again. Not in `seed_all.py`. `--dry-run`. |
 
 `seed_all.py` runs all ten in order — that is the whole first-boot step:
 
@@ -50,7 +53,7 @@ $D scripts/seed/seed_all.py --dry-run    # preview every step, write nothing
 $D scripts/seed/seed_all.py              # seed everything
 ```
 
-All nine seeders support `--dry-run`, so the preview is real rather than just a
+All ten seeders support `--dry-run`, so the preview is real rather than just a
 plan, and takes about 15 seconds: the Wikipedia steps skip their network lookups
 when dry, while the ATT&CK and CWE steps still download their catalogs because
 that is the only way to know what would change.
@@ -68,16 +71,16 @@ $D scripts/seed/seed_all.py --list                          # step names
 | Flag | Effect |
 | --- | --- |
 | `--dry-run` | Run every step in its own dry-run mode. Nothing is written — verified by comparing database state before and after. |
-| `--offline` | Skip `attack`, `vendors`, `descriptions` — the three that download. |
+| `--offline` | Skip `attack`, `cwe`, `vendors`, `descriptions` — the four that download. |
 | `--only` / `--skip` | Comma-separated step names, for resuming or re-running a part. |
 | `--overwrite` | Let `attribution` and `attributes` replace existing values instead of only filling blanks. |
 | `--continue-on-error` | Keep going after a failure instead of stopping. |
 
 Or run any step on its own: `$D scripts/seed/seed_countries.py`.
 
-Steps 7 and 8 only enrich actors and malware that already exist, so they are
+Steps 9 and 10 only enrich actors and malware that already exist, so they are
 worth re-running once the feeds have been ingesting for a while.
-`seed_mitre_attack.py` and the vendor scripts reach out to the network (MITRE's
+`seed_mitre_attack.py`, `seed_cwe_catalog.py` and the vendor scripts reach out to the network (MITRE's
 STIX bundles, Wikipedia) and take a few minutes each.
 
 ## `maintenance/` — repeatable repair
@@ -114,6 +117,10 @@ are for fixing something by hand.
 | `fold_cross_type_twins.py` | Folds same-name entities living under two types ("Qilin" the actor vs "Qilin" the malware) into one survivor via reclassify, writing tombstones so extraction can't resurrect them. Dry-run writes a review CSV to `scripts/out/`; `--apply --plan <csv>` executes the reviewed decisions; `--replay-holds` recovers entry links that enforced cross-type holds dropped before the resolver learned to link them. Run `reconcile_search_index.py` afterwards. |
 | `strip_cross_type_aliases.py` | Removes aliases that duplicate another entity type's canonical name (malware DEADWOOD carrying the actor name "Agrius"), and purges the entry links that alias alone created. Analyst-sourced links are never touched. Dry-run writes a review CSV; `--report-ambiguous` lists alias-vs-alias collisions it refuses to guess at. |
 | `purge_cve_named_entities.py` | Removes CVE identifiers from the actor/malware/tool/vendor/product catalogs — both entities *named* after a CVE (a malware family called "CVE-2026-55193") and legitimate entities carrying one as an *alias* (Spring4Shell aliased CVE-2022-22965). Either way the id sits in the autolinker vocabulary twice, so every mention links to the CVE and to the impostor. Name rows re-link their entries to the real CVE entity before deletion (rows with no CVE row default to `skip`); alias rows purge only the links that alias alone produced. Dry-run writes a review CSV; `--apply --plan <csv>` executes it. Run `reconcile_search_index.py` afterwards. |
+| `backfill_observables.py` | Fills the observables ledger from the two pre-curated sources only — `EntryTTP.observable_value` rows and `ioc_list` feed bodies. There is deliberately no regex sweep over article prose. Idempotent on `(kind, value)`. `--dry-run` / `--only ttp\|ioc_list`. |
+| `purge_junk_tools.py` | Cleans the tool catalog in three stages — reclassify tool rows already claimed by a product or vendor, purge rows with no evidence anyone wielded them (denylisted so extraction can't re-mint them), delete unlinked orphans. Two-step: `--dry-run --out FILE` writes a review CSV, `--apply --plan FILE` executes it. Run the creation-side extraction fixes first or the catalog refills. |
+| `rebuild_search_indexes.py` | Rebuilds every Meilisearch index from the database — the `entries` index from scratch, plus the entity and rule indexes. Run it after restoring a dump from another environment (`ops/sync_prod_to_dev.sh` does). Runs inline, so the exit code says whether search works. `--user` (whose read/star state to bake in), `--entries-only`, `--entities-only`. |
+| `sync_denylist.py` | Moves the do-not-recreate list between environments: the `entity_name_denylist` rows plus the names in the `autolinker_false_positive_names` setting. `--export FILE` from the instance you curated in, `--import FILE` into the other. Import is additive and never deletes. `--dry-run`. |
 
 ## `telegram/` — channel ingestion setup
 
@@ -176,6 +183,8 @@ scripts/build_apk.sh --install  # phone plugged in after the build
 | Script | What it does |
 | --- | --- |
 | `sync_skill_clis.py` | Regenerate both skill CLIs' `TOOLS` and `WRITE_TOOLS` blocks from the live backend tool registry, which is the single source of truth. `--check` reports drift without writing (exit 1 if out of sync). |
+| `check_doc_refs.py` | Checks the `path/to/file.py:line` references in the docs against the code and reports the ones whose line number no longer lands on the symbol beside them. `--fix` repairs the unambiguous ones; the rest are left for a human. Exits 1 on drift, so it can gate a pre-release check. |
+| `check_doc_links.py` | Checks the relative links, `#anchors` and images between the Markdown docs: the target file exists, the heading the fragment names exists (GitHub's slug rules, which the in-app docs reader also uses), the image path resolves. External URLs and in-app routes such as `/documentation` are skipped. Exits 1 if anything is broken. |
 | `local_link_validator.py` | Bulk-run the entity-link validator against a production database over an SSH tunnel using your local `claude` CLI, for when the scheduled batches can't keep up with the backlog. Resumable. |
 | `webhook_proxy.py` | TCP proxy so containers on Docker Desktop for Mac can reach LAN hosts via `host.docker.internal`, for testing webhook deliveries. |
 | `build_observable_fixture.py` | *(runs in the api container)* Seeds one `backend/tests/fixtures/observables/cases/<slug>.json` case from a corpus article: `expected` from the article's own IOC section (with the publisher's role text as `note`), prose candidates to `optional`, reference-domain links to `must_not`. Hand-review before committing. |
@@ -184,6 +193,8 @@ scripts/build_apk.sh --install  # phone plugged in after the build
 ```bash
 INTELFEED_API_URL=http://localhost:8000 python3 scripts/dev/sync_skill_clis.py --check
 python3 scripts/dev/webhook_proxy.py 10138 192.0.2.10 80
+python3 scripts/dev/check_doc_refs.py          # add --fix to repair what it can
+python3 scripts/dev/check_doc_links.py         # broken doc links and anchors
 ```
 
 ## `archive/` — completed one-shots
@@ -197,3 +208,11 @@ of it.
 | Script | What it did |
 | --- | --- |
 | `fix_mistyped_entities_2026_09.py` | Undid the three cross-type folds that merged unrelated things (Medusa the Kali brute-forcer vs the ransomware, Sigma the rule format vs the malware, a Storm-1175 tombstone pointing at malware), and gave the NetSupport entities their real names — the legitimate product had been filed as malware and its abuse as a tool. Run against prod 2026-09-14. |
+| `backfill_og_images.py` | Fetched `og:image` for entries that had no `image_url`. |
+| `backfill_ransomware_victims.py` | Backfilled years of `victim_disclosures` from ransomware.live's per-year history so the Landscape dashboard had trend data on day one. Same resolver and dedup path as the live sync; idempotent on `(source, guid)`. `--start-year`. |
+| `backfill_rule_metadata.py` | Re-extracted metadata from each rule's content into `mitre_tactics` and `source_ttps`, normalizing tactic names to snake_case. |
+| `backfill_rule_provenance.py` | Filled `license`, `upstream_updated_at`, `references` and `source_products` on rules imported before those provenance fields existed. Idempotent. |
+| `backfill_type_vocab.py` | Coerced free-text `tool_type` / `malware_type` onto the controlled vocabulary — 1,544 of 1,705 prod tool rows had free text across 1,040 distinct values — keeping the originals in `metadata_`, and re-indexed the changed rows. The entity-creation guardrails coerce new writes; this fixed the stock. |
+| `fix_ttp_000_subtechniques.py` | Merged invalid `.000` TTP sub-techniques into their parent technique. TTP extraction rejects them at the source, so it only matters for a database that predates that check. Idempotent; `--dry-run`. |
+| `guardrails_prod_chores_2026_08.py` | One-shot prod data chores from the entity-guardrails follow-up (2026-08-16): merged a leetspeak duplicate malware (`n0_esc4pe` → `NoEscape`) and stripped a generic AV-detection alias that cross-linked unrelated entities. Read the docstring for the rest. |
+| `import_profiles.py` | Imported ~3,390 legacy markdown intelligence profiles (YAML frontmatter, Obsidian wikilinks) into actor, malware, tool and country entities as descriptions. Alias-aware matching; nothing is written without `--apply`. |

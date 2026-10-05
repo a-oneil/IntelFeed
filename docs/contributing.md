@@ -4,10 +4,66 @@ A guide for developers who just cloned the repo and want to contribute code.
 
 **Before you start:** Read [CLAUDE.md](../CLAUDE.md) for concise conventions and commands. Read [setup.md](../setup.md) for production deployment details. This document focuses on *local development*.
 
+**Contents**
+
+- [TL;DR Quickstart](#tldr-quickstart)
+- [Repo Tour](#repo-tour)
+- [Local Development Setups (Three Options)](#local-development-setups-three-options)
+  - [Full Docker (Recommended)](#full-docker-recommended)
+  - [Hybrid (Docker for infra, native for code)](#hybrid-docker-for-infra-native-for-code)
+  - [Fully Native (Uncommon)](#fully-native-uncommon)
+- [Backend Development](#backend-development)
+  - [Setup](#setup)
+  - [Code Quality](#code-quality)
+  - [Tests](#tests)
+  - [Async Patterns](#async-patterns)
+  - [Database Migrations](#database-migrations)
+  - [Adding an Endpoint](#adding-an-endpoint)
+  - [Celery Tasks](#celery-tasks)
+- [Frontend Development](#frontend-development)
+  - [Setup](#setup-1)
+  - [Development Server](#development-server)
+  - [Building & Checks](#building--checks)
+  - [Adding a Page](#adding-a-page)
+  - [TanStack Query Hooks](#tanstack-query-hooks)
+  - [Zustand Store](#zustand-store)
+  - [CSS Modules](#css-modules)
+  - [Component Location Heuristics](#component-location-heuristics)
+- [Tests](#tests-1)
+  - [Backend Unit Tests](#backend-unit-tests)
+  - [Frontend Unit Tests](#frontend-unit-tests)
+  - [Frontend E2E Tests (Playwright)](#frontend-e2e-tests-playwright)
+- [CI/CD](#cicd)
+- [Database Migration Recipe](#database-migration-recipe)
+  - [1. Edit the Model](#1-edit-the-model)
+  - [2. Generate Migration](#2-generate-migration)
+  - [3. Review & Edit](#3-review--edit)
+  - [4. Test Locally](#4-test-locally)
+  - [5. Commit](#5-commit)
+- [Code Style & Conventions](#code-style--conventions)
+  - [Backend](#backend)
+  - [Frontend](#frontend)
+- [Pre-commit Hooks](#pre-commit-hooks)
+- [Branch & PR Workflow](#branch--pr-workflow)
+  - [Branching](#branching)
+  - [Commits](#commits)
+  - [Pull Requests](#pull-requests)
+- [Adding Feed Adapters / Enrichment Sources / AI Tasks / Automation](#adding-feed-adapters--enrichment-sources--ai-tasks--automation)
+- [Debugging Tips](#debugging-tips)
+  - [Backend](#backend-1)
+  - [Frontend](#frontend-1)
+  - [Workers & Search](#workers--search)
+- [Local Data Seeding](#local-data-seeding)
+- [Skills & CLI](#skills--cli)
+  - [Claude Code Skills](#claude-code-skills)
+- [Releasing & Deploying](#releasing--deploying)
+- [Where to Ask for Help](#where-to-ask-for-help)
+- [Next Steps](#next-steps)
+
 ## TL;DR Quickstart
 
 ```bash
-git clone <your-repo-url> intelfeed
+git clone https://github.com/a-oneil/IntelFeed.git intelfeed
 cd intelfeed
 
 # Copy config and generate secrets
@@ -28,6 +84,8 @@ docker compose -f docker-compose.dev.yml up
 
 Services: Frontend 3001, API 8000, Meilisearch 7700, PostgreSQL 5433, Redis 6380, LibreTranslate 5050, Piper (TTS) 5060.
 
+> **Host ports vs service ports.** Those are the *host* ports `docker-compose.dev.yml` publishes; inside the Docker network each service keeps its own default (frontend 3000, PostgreSQL 5432, Redis 6379, LibreTranslate and Piper 5000). Run a service natively instead (the setups below) and you get the plain defaults — Vite on `localhost:3000`, Redis on `localhost:6379`. So `REDIS_URL=redis://localhost:6379/0` is right for a Redis you installed yourself, and wrong for the Docker one, which is on `localhost:6380`. Override a host port that's already taken with `FRONTEND_PORT`, `DB_PORT`, `REDIS_PORT`, `LIBRETRANSLATE_PORT` or `PIPER_PORT` in `.env`.
+
 ---
 
 ## Repo Tour
@@ -35,7 +93,7 @@ Services: Frontend 3001, API 8000, Meilisearch 7700, PostgreSQL 5433, Redis 6380
 ```
 backend/              FastAPI app, SQLAlchemy models, Alembic migrations, Celery workers
 frontend/             React + TypeScript, Vite, CSS Modules, TanStack Query + Zustand
-intelfeed-skill/      Claude Code skill (170 tools for API access)
+intelfeed-skill/      Claude Code skill (180 tools for API access)
 intelfeed-lite-skill/ Lightweight skill variant
 docs/                 Architecture, domain deep-dives, feed adapters, automation, detection
                       (mounted read-only into the api container — rendered as the in-app docs)
@@ -45,7 +103,7 @@ docker-compose.dev.yml / docker-compose.prod.yml
 Caddyfile             Reverse proxy + auto-TLS (production)
 update.sh             Helper script for in-place prod updates
 CLAUDE.md             Terse repo conventions (read first)
-setup.md              Production EC2 deployment walkthrough
+setup.md              Production deployment walkthrough (EC2 or any Linux host)
 ```
 
 ---
@@ -992,14 +1050,14 @@ SET log_min_duration_statement = 100;  -- log queries > 100ms
 
 All scripts live in [`scripts/`](../scripts/), grouped by purpose — [`scripts/README.md`](../scripts/README.md) indexes every one. Most use the app's models and session and run inside the api container: `./scripts` is bind-mounted to `/app/scripts` the same way `./docs` is, because the image only carries `./backend`. The `ops/` and `dev/` folders are the exception and run on the host.
 
-A fresh install starts with no autolinker vocabulary, so entries ingest but nothing links to anything. Seed the reference entities first, in this order:
+A fresh install has countries and a baseline of ATT&CK techniques (migrations load them) but not the CWE catalog, vendors, products or actor attribution, so most entity types never link. Seed the reference entities first, in this order:
 
 ```bash
 docker compose -f docker-compose.dev.yml exec api python scripts/seed/seed_all.py --dry-run
 docker compose -f docker-compose.dev.yml exec api python scripts/seed/seed_all.py
 ```
 
-`seed_all.py` runs all eight seeders in dependency order — countries, country aliases, MITRE ATT&CK, vendors/products, vendor descriptions, CPE names, actor attribution, entity attributes. Each runs as a subprocess, so one failure can't poison another's session; on failure it stops and prints a `--only <steps>` command to resume. All eight support `--dry-run`, so `seed_all.py --dry-run` previews the whole set (~15s) without writing. `--offline` skips the three that download from MITRE and Wikipedia, `--list` shows the step names, and any seeder can still be run on its own.
+`seed_all.py` runs all ten seeders in dependency order — countries, country aliases, sectors, MITRE ATT&CK, CWE catalog, vendors/products, vendor descriptions, CPE names, actor attribution, entity attributes. Each runs as a subprocess, so one failure can't poison another's session; on failure it stops and prints a `--only <steps>` command to resume. All ten support `--dry-run`, so `seed_all.py --dry-run` previews the whole set (~15s) without writing. `--offline` skips the four that download from MITRE and Wikipedia, `--list` shows the step names, and any seeder can still be run on its own.
 
 Every one is idempotent, so re-run them any time to fill gaps — the last two only enrich entities that already exist, and are worth repeating once feeds have been ingesting for a while.
 
@@ -1022,8 +1080,8 @@ docker compose -f docker-compose.dev.yml exec api python scripts/maintenance/pur
 
 Two zero-dependency Python skills let Claude interact with IntelFeed:
 
-- **`intelfeed-skill/`** — full feature set (170 tools)
-- **`intelfeed-lite-skill/`** — read-only variant (81 tools)
+- **`intelfeed-skill/`** — full feature set (180 tools)
+- **`intelfeed-lite-skill/`** — read-only variant (87 tools)
 
 Both execute via `intelfeed-skill/scripts/intelfeed_cli.py`.
 
@@ -1048,7 +1106,7 @@ Update skills when the API schema or auth changes.
 
 ## Releasing & Deploying
 
-**Local → Production:** See [setup.md](../setup.md) for one-time EC2 deployment walkthrough.
+**Local → Production:** See [setup.md](../setup.md) for one-time production deployment walkthrough.
 
 **In-place upgrades:** On the prod server:
 

@@ -419,7 +419,7 @@ match.
 
 **Columns:**
 - `id` (UUID PK)
-- `kind` (String 20, indexed) — one of `ALL_KINDS` (`backend/app/models/observable.py:43`), in four families:
+- `kind` (String 20, indexed) — one of `ALL_KINDS` (`backend/app/models/observable.py:55`), in four families:
   - **network** — `ipv4`, `ipv6`, `domain`, `url`, `uri_path`, `ja3`, `ja4`, `cert_fingerprint`, `email` (stored refanged/canonical; the defanged surface form lives on the sighting)
   - **hash** — `md5`, `sha1`, `sha256`
   - **host** — `cmdline`, `registry`, `path`, `mutex`, `named_pipe`, `service_name`, `scheduled_task`, `user_agent`, `http_header` (judged by the one-pass AI's `iocs` array, or mapped from `EntryTTP.observable_type`'s vocabulary)
@@ -443,7 +443,7 @@ string is a different observable as a domain than as a URL path component.
 
 **Confidence decay** (`decay-observable-confidence`, daily 02:20 UTC, gated by
 `observables_decay_enabled`) is per kind (`DECAY_HALF_LIFE_DAYS`,
-`observable.py:47`): `ipv4`/`ipv6` 30-day half-life, `url` 60, `domain`/`email`
+`observable.py:59`): `ipv4`/`ipv6` 30-day half-life, `url` 60, `domain`/`email`
 90, `uri_path` 120. Hashes, host artifacts, scripts, JA3/JA4 and certificate
 fingerprints never decay — behaviour and math persist, infrastructure rotates.
 A new sighting resets the clock, and `confidence_pinned` opts a row out.

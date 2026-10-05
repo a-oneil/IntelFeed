@@ -578,7 +578,7 @@ Fetch failures feed a breakage-alerting layer on top of the polling loop:
 
 - **`error_count` semantics**: incremented on every failed fetch (HTTP error, non-200, adapter exception, non-feed response), reset to 0 on any success — so it counts *consecutive* failures.
 - **`feed_error` correlation events**: `_maybe_create_feed_error_event()` creates a correlation event (via `app/intelligence/correlation_events.py`) once `error_count >= 3`, surfacing broken feeds in the events stream.
-- **`check_feed_health` beat task** (`feed_tasks.py:1632`, every 6 hours): creates `feed_stale` events for active, recently-polled feeds whose newest entry is older than 120 days, and `feed_error` events for feeds with 3+ consecutive errors.
+- **`check_feed_health` beat task** (`backend/app/workers/feed_tasks.py:1642`, every 6 hours): creates `feed_stale` events for active, recently-polled feeds whose newest entry is older than 120 days, and `feed_error` events for feeds with 3+ consecutive errors.
 - **`GET /api/feeds/health/failing`** (`api/feeds.py`): lists active feeds with `error_count >= threshold` (default 5). Feeds rated A/B for reliability are flagged `is_high_value` and sorted first so alerting UIs can highlight them.
 - **`GET /api/feeds/{feed_id}/analytics`**: per-feed source analytics (`app/intelligence/source_analytics.py`) — volume, intel yield, and the analyst-assigned reliability ratings.
 - **404 recovery**: persistent 404s trigger RSS autodiscovery and automatic URL repointing (see the polling loop above).
@@ -971,7 +971,7 @@ entry = ParsedEntry(
 
 **Full-Tree Sync**:
 
-The `full_sync_github_feed()` Celery task (`feed_tasks.py:1878`) enumerates **every** file in the repo (not just recent changes):
+The `full_sync_github_feed()` Celery task (`backend/app/workers/feed_tasks.py:1817`) enumerates **every** file in the repo (not just recent changes):
 
 ```python
 # Uses Git Trees API to get complete file list

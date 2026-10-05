@@ -78,10 +78,10 @@ const NAV_GROUPS: { group: string; items: NavItem[] }[] = [
     group: "Administration",
     items: [
       { key: "ai", keywords: ["provider", "ollama", "openai", "model", "prompts", "tasks", "copilot", "cost", "budget"],  label: "AI Configuration", icon: "M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1.07A7 7 0 0 1 14 23h-4a7 7 0 0 1-6.93-4H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2zM9 17a1 1 0 1 0 0-2 1 1 0 0 0 0 2zm6 0a1 1 0 1 0 0-2 1 1 0 0 0 0 2z", adminOnly: true },
-      { key: "engine", keywords: ["pipeline", "ingest", "stages", "autolinking", "extraction", "enrichment", "feed health", "jobs", "schedules", "plans", "maintenance", "console"],  label: "Engine", icon: "M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41", adminOnly: true },
+      { key: "engine", keywords: ["pipeline", "ingest", "stages", "autolinking", "extraction", "enrichment", "feed health", "jobs", "schedules", "plans", "maintenance", "console", "thresholds", "api keys", "rate limit", "signal engine", "embeddings", "ranking"],  label: "Engine", icon: "M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41", adminOnly: true },
       { key: "logs", keywords: ["audit", "errors", "activity", "history"],  label: "Logs", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M16 13H8M16 17H8M10 9H8", adminOnly: true },
-      { key: "system", keywords: ["invite", "registration", "rate limit", "retention", "autolinker", "extraction", "thresholds", "signal engine", "embeddings", "ranking", "api keys", "jobs"],  label: "System", icon: "M5 12h14M12 5l7 7-7 7", adminOnly: true },
-      { key: "users", keywords: ["accounts", "admin", "roles", "invite", "permissions"],  label: "Users", icon: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75", adminOnly: true },
+      { key: "system", keywords: ["monitoring", "sentry", "backup", "retention", "maintenance", "search index", "reindex"],  label: "System", icon: "M5 12h14M12 5l7 7-7 7", adminOnly: true },
+      { key: "users", keywords: ["accounts", "admin", "roles", "invite", "registration", "permissions"],  label: "Users", icon: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75", adminOnly: true },
     ],
   },
 ];

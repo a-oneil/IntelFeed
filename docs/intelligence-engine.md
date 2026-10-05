@@ -1,5 +1,83 @@
 # Intelligence Engine
 
+For contributors and operators who need to know how an article becomes linked, correlated intelligence — and why something did or didn't link. It walks an entry through the autolinker, the extraction layers, the observables ledger, correlation, detection-rule extraction and the TTP and CVE pipelines, with the settings that steer each.
+
+**Contents**
+
+- [Overview](#overview)
+- [Architecture Overview](#architecture-overview)
+- [Entry-to-Intelligence Pipeline](#entry-to-intelligence-pipeline)
+  - [Phase 1: Entry Arrival & Text Normalization](#phase-1-entry-arrival--text-normalization)
+  - [Phase 2: Autolinker Scan (Layer 0)](#phase-2-autolinker-scan-layer-0)
+  - [Phase 3: Junction Record Storage](#phase-3-junction-record-storage)
+  - [Phase 4 (Optional): Secondary Extraction Layers](#phase-4-optional-secondary-extraction-layers)
+- [Autolinker Deep Dive](#autolinker-deep-dive)
+  - [False Positive Filtering](#false-positive-filtering)
+  - [Pending Tier: Dictionary-Word Matches](#pending-tier-dictionary-word-matches)
+  - [Junk Alias Filtering at Import](#junk-alias-filtering-at-import)
+  - [Cross-Type Resurrection Guard](#cross-type-resurrection-guard)
+  - [Vocabulary Performance](#vocabulary-performance)
+  - [False Positive Feedback Loop](#false-positive-feedback-loop)
+- [Entity Hygiene Console](#entity-hygiene-console)
+  - [Unified Feed & Stats](#unified-feed--stats)
+  - [Reclassification Suggestions](#reclassification-suggestions)
+  - [Orphans, Cascade Preview & Scanners](#orphans-cascade-preview--scanners)
+  - [Tombstone Management](#tombstone-management)
+- [Observables — the IOC ledger](#observables--the-ioc-ledger)
+  - [The contract: regex never creates a row](#the-contract-regex-never-creates-a-row)
+  - [Candidate policy is precision-first by construction](#candidate-policy-is-precision-first-by-construction)
+  - [The judgment doors](#the-judgment-doors)
+  - [Validation gates](#validation-gates)
+  - [Lifecycle](#lifecycle)
+  - [Where it surfaces](#where-it-surfaces)
+- [Entity Types & Resolution](#entity-types--resolution)
+  - [Uniqueness Keys](#uniqueness-keys)
+  - [Enrichment Sources](#enrichment-sources)
+- [Correlation Engine](#correlation-engine)
+  - [Timeline Construction](#timeline-construction)
+- [Retention & Archival](#retention--archival)
+- [Detection Rule Extraction](#detection-rule-extraction)
+- [TTP & MITRE ATT&CK Integration](#ttp--mitre-attck-integration)
+  - [TTP Extraction Layers](#ttp-extraction-layers)
+  - [TTP Storage & Enrichment](#ttp-storage--enrichment)
+  - [MITRE ATT&CK Sync](#mitre-attck-sync)
+- [CVE Pipeline](#cve-pipeline)
+  - [CVE Extraction & NVD Enrichment](#cve-extraction--nvd-enrichment)
+  - [EPSS & Exploit Tracking](#epss--exploit-tracking)
+  - [CVE Scoring & Priority](#cve-scoring--priority)
+- [Glossary & Inline Highlighting](#glossary--inline-highlighting)
+- [Reporting & Export](#reporting--export)
+  - [Report Templates](#report-templates)
+  - [Intel profiles and exposure reports](#intel-profiles-and-exposure-reports)
+  - [Report Generation](#report-generation)
+  - [Export Formats](#export-formats)
+- [Real-Time Intelligence Events](#real-time-intelligence-events)
+  - [Event Publishing](#event-publishing)
+  - [Webhook Integration](#webhook-integration)
+- [Performance & Scaling](#performance--scaling)
+  - [Autolinker Performance](#autolinker-performance)
+  - [Correlation Engine Performance](#correlation-engine-performance)
+  - [Database Indexes](#database-indexes)
+  - [Scaling Strategies](#scaling-strategies)
+- [Configuration](#configuration)
+- [Sequence Diagrams](#sequence-diagrams)
+  - [Entry Ingest to Event Emission](#entry-ingest-to-event-emission)
+  - [Pivot Query (Find Actor for CVE)](#pivot-query-find-actor-for-cve)
+- [Troubleshooting & Debugging](#troubleshooting--debugging)
+  - [Vocabulary Build Issues](#vocabulary-build-issues)
+  - [Correlation Events Not Firing](#correlation-events-not-firing)
+  - [CVE Enrichment Delays](#cve-enrichment-delays)
+- [Future Enhancements](#future-enhancements)
+- [References](#references)
+- [Per-feed pipeline switches](#per-feed-pipeline-switches)
+  - [The two pipelines](#the-two-pipelines)
+  - [Confidence weighting and reliability rating](#confidence-weighting-and-reliability-rating)
+  - [Choosing a mode — quick decision guide](#choosing-a-mode--quick-decision-guide)
+  - [Operational notes](#operational-notes)
+  - [None of this uses AI](#none-of-this-uses-ai)
+- [Signal Engine (engine phase 2)](#signal-engine-engine-phase-2)
+  - [Surfacing (engine phase 3)](#surfacing-engine-phase-3)
+
 ## Overview
 
 The IntelFeed Intelligence Engine is a multi-stage extraction, linking, and correlation system that transforms raw threat intelligence feed entries into actionable, interconnected threat data. It operates as a high-throughput pipeline designed for distributed processing, zero-downtime updates, and real-time intelligence insights.
@@ -61,7 +139,7 @@ Real-time Event Publishing (SSE, webhooks, correlation_event table)
 When an entry enters IntelFeed, it is processed through:
 
 ```python
-# autolinker.py:206 — Paragraph Splitting
+# autolinker.py:227 — Paragraph Splitting
 paragraphs = split_into_paragraphs(title, summary, content_text)
 # → [(0, title), (1, summary), (2, para_1), (3, para_2), ...]
 ```
@@ -77,7 +155,7 @@ paragraphs = split_into_paragraphs(title, summary, content_text)
 
 The autolinker uses an **Aho-Corasick automaton** to scan entry text against a live vocabulary of known entities.
 
-#### Vocabulary Build (`autolinker.py:246-351`)
+#### Vocabulary Build (`autolinker.py:250-410`)
 
 On startup or after database mutations, the vocabulary is built from:
 ```python
@@ -103,7 +181,7 @@ ThreatActor(name="APT29", aliases=["Cozy Bear", "The Dukes"])
   → Add surface forms: "apt29", "cozy bear", "the dukes"
 ```
 
-#### Scan Process (`autolinker.py:362-488`)
+#### Scan Process (`autolinker.py:420-565`)
 
 For each paragraph:
 
@@ -123,7 +201,7 @@ For each paragraph:
    - CVE pattern: `CVE-\d{4}-\d{4,}`
    - TTP pattern: `T\d{4}(?:\.\d{3})?` (technique IDs + subtechniques)
 
-#### Redis Vocabulary Versioning (`autolinker.py:987-1043`)
+#### Redis Vocabulary Versioning (`autolinker.py:1091-1159`)
 
 For distributed workers (Celery nodes):
 
@@ -147,7 +225,7 @@ Workers check Redis before every scan; if versions mismatch, vocabulary is reloa
 Matches are persisted as **junction records** linking entries to entities:
 
 ```python
-# autolinker.py:543 — store_autolink_matches()
+# autolinker.py:638 — store_autolink_matches()
 
 # For threat actors:
 EntryThreatActor(
@@ -262,7 +340,7 @@ Callers:
 Same-type entity merges survive re-import because the loser's name lands in the survivor's `aliases` array (`intelligence/entity_dedup.py`). Cross-type folds (e.g. the "Akira" malware family folded into the "Akira" threat actor) would otherwise resurrect within hours, because each importer only searches its own table. Two mechanisms close that gap:
 
 1. **Reclassify tombstones** — `EntityReclassifyTombstone` (`models/entity_maintenance.py`) records one row per folded name/alias: `(source_type, normalized_name) → (target_type, target_id)`. A cross-type reclassify in `api/entity_merge.py` writes these. Automated creation paths — AI extraction (`intelligence/enrichment.py`) and the Cybergeist sync (`intelligence/external_feeds.py`) — now route through `resolve_entity_creation()` (`intelligence/entity_resolution.py`), which calls `find_reclassify_tombstone()` (`intelligence/entity_dedup.py`) before creating an entity; on a hit creation is skipped and the entry is instead linked to the surviving canonical entity via `link_entry_to_entity()` (idempotent junction insert that bumps `article_count`/`last_seen_at` only on new rows). Set `active=False` on a tombstone to intentionally re-allow a split. Legitimately-distinct same-name entities (Jupyter product vs Jupyter stealer) never get a tombstone.
-2. **FP entity-name filter** — `is_fp_entity_name()` (`autolinker.py:85`) guards the same automated creation paths against spawning junk profiles: it rejects the configurable FP name set plus bare system-binary/LOLBin filenames (`svchost.exe`, `*.dll`, `*.sys`, …). Manual creation is not gated — a human deliberately adding an entity is trusted.
+2. **FP entity-name filter** — `is_fp_entity_name()` (`backend/app/intelligence/autolinker.py:101`) guards the same automated creation paths against spawning junk profiles: it rejects the configurable FP name set plus bare system-binary/LOLBin filenames (`svchost.exe`, `*.dll`, `*.sys`, …). Manual creation is not gated — a human deliberately adding an entity is trusted.
 
 The resolver adds further gates on top (an `entity_name_denylist` table, normalized/alias-index exact matching, and held-for-review candidate matches), controlled by `entity_creation_gates` (`off` / `shadow` / `on`, default `shadow` — shadow logs the would-block decision to `EntityMaintenanceLog` and still creates). Every resolution decision is written to `EntityMaintenanceLog` (`resolution_*` actions) so it surfaces in the hygiene feed.
 
@@ -368,7 +446,7 @@ regex match.** There are two distinct things a scan can produce:
   (`observables.py:271`). They are attached to the entry and shown in the
   reader as promotable suggestions. They are not ledger rows and never become
   ones on their own. Capped by `observables_candidate_max` (default 200).
-- **Sightings** — `sight_known_values()` (`observables.py:677`) exact-matches
+- **Sightings** — `sight_known_values()` (`backend/app/intelligence/observables.py:1001`) exact-matches
   scanned tokens against values a **door** already created. Sighting a known-bad
   string is precise; discovering strings by regex is what killed v1.
 
@@ -376,7 +454,7 @@ regex match.** There are two distinct things a scan can produce:
 
 | Family | Becomes a candidate when |
 |---|---|
-| Hashes, public IPs | Always — unambiguous, octet-validated, reserved/benign ranges gated out (`_valid_public_ip`, `observables.py:125`) |
+| Hashes, public IPs | Always — unambiguous, octet-validated, reserved/benign ranges gated out (`_valid_public_ip`, `backend/app/intelligence/observables.py:250`) |
 | Domains, URLs, emails | **Only when the author defanged them** (`evil[.]com`, `hxxps://`). An author who defangs is telling you it is an indicator, so `microsoft.com` in prose nominates nothing |
 | Host artifacts (cmdline, registry, path, mutex, …) | Never from prose. `<pre>`/`<code>` blocks may nominate a *candidate* (`scan_code_block_candidates`) only when the block is mostly command-shaped and the line opens with a shell prompt or a known executor; bulletin feeds and rule-repository files never nominate. Rows arrive through the AI door, the TTP observable door or an analyst |
 
@@ -393,7 +471,7 @@ its own base confidence:
 | Door (`created_via`) | Base | What it is |
 |---|---|---|
 | `manual` | 1.0 | An analyst promoted a candidate or created the row |
-| `ioc_list` | 0.85 | A curated indicator-list feed body, parsed by `parse_ioc_list_body()` (`observables.py:463`). Path-gated by `ioc_list_path_allowed()` (`observables.py:439`), which refuses `whitelist` / `allowlist` / `benign` / `unverified` files and C2-Tracker's aggregate `all.txt` — the per-tool files carry the real provenance, and an everything-list is not a judgment. `ioc_list_path_tag()` reads the infra tag a path implies |
+| `ioc_list` | 0.85 | A curated indicator-list feed body, parsed by `parse_ioc_list_body()` (`backend/app/intelligence/observables.py:709`). Path-gated by `ioc_list_path_allowed()` (`backend/app/intelligence/observables.py:658`), which refuses `whitelist` / `allowlist` / `benign` / `unverified` files and C2-Tracker's aggregate `all.txt` — the per-tool files carry the real provenance, and an everything-list is not a judgment. `ioc_list_path_tag()` reads the infra tag a path implies |
 | `ttp_observable` | 0.85 | An `EntryTTP.observable_value` upsert — this is how host artifacts get in, carrying their technique via `entry_observables.ttp_id` |
 | `publisher_ioc` | 0.9 | The indicator file a write-up links to — Cisco Talos `IOCs` (`.txt` + STIX `.json` with MISP-category roles), Bitdefender `malware-ioc` CSV, Datadog `indicators-of-compromise` CSV — fetched from an allow-list of repositories only, parsed with the publisher's own format, sighted on the **article** (`entry_observables.source = publisher`). `intelligence/publisher_iocs.py`; `observables_publisher_ioc_enabled` |
 | `ai_extraction` | 0.8 | The one-pass `entry_analysis` `iocs` array — network, hash **and host kinds** (cmdline, path, registry, scheduled_task, service_name, mutex, named_pipe, user_agent, http_header), each with a role (network: c2/delivery/payload/…; host: the tactic) and an optional `technique_id` that becomes the sighting's `ttp_id`. Gated by `observables_ai_capture_mode` (`shadow` stages them as promotable candidates carrying the judgment; `capture` writes rows) and, in capture, by the per-kind list `observables_ai_capture_kinds`. Every value passes `validate_kind_value`, which vetoes generic discovery commands, OS-binary paths, bare well-known registry keys, placeholders and key-shaped "hashes" |
@@ -404,12 +482,12 @@ Author-defanged input adds `DEFANG_BONUS` (+0.1). There is intentionally no
 ### Validation gates
 
 Values still have to be plausible for their kind before a door can write them —
-`validate_kind_value()` (`observables.py:758`) and the per-kind plausibility
+`validate_kind_value()` (`backend/app/intelligence/observables.py:1240`) and the per-kind plausibility
 checks (`_plausible_cmdline`, `_plausible_path_atom`, `_plausible_user_agent`,
 `_plausible_domain`). These exist because an AI asked for IOCs will happily
 return a sentence as a command line.
 
-`is_shared_infra()` (`observables.py:433`) tags dual-use infrastructure —
+`is_shared_infra()` (`backend/app/intelligence/observables.py:652`) tags dual-use infrastructure —
 shared hosting, CDNs, URL shorteners — into `infra_tag` rather than dropping it.
 The intel is real; it just must not reach a blocklist. Publishing excludes
 tagged rows; the profile still shows them.
@@ -418,8 +496,8 @@ tagged rows; the profile still shows them.
 
 Confidence decays per kind (see
 [data-model.md](data-model.md#observable--the-ioc-ledger)) and `status_for()`
-(`observables.py:507`) derives `active` / `aging` / `expired` from the current
-value. `retro_sight_observable()` (`observables.py:1200`) back-fills sightings
+(`observables.py:753`) derives `active` / `aging` / `expired` from the current
+value. `retro_sight_observable()` (`backend/app/intelligence/observables.py:1945`) back-fills sightings
 for a newly created row against recent entries, so promoting a candidate does
 not lose the history it already had. Nightly jobs:
 `decay-observable-confidence` (02:20 UTC),
@@ -599,7 +677,7 @@ async def pivot_query(
 }
 ```
 
-### Proximity Scoring (`correlation.py:110-129`)
+### Proximity Scoring (`correlation.py:166-185`)
 
 When two entities appear in the same entry, their **proximity score** reflects how close they are:
 
@@ -657,7 +735,7 @@ Entity-level confidence is assigned at link time by the autolinker's `_weighted_
 Old entities and correlation events are archived based on retention policy:
 
 ```python
-# correlation_events.py:552
+# correlation_events.py:553
 async def archive_old_events(db, retention_days=90):
     """Delete read events older than 90 days."""
     cutoff = datetime.now(UTC) - timedelta(days=retention_days)
@@ -954,7 +1032,7 @@ async def sync_mitre_ttps(db):
 
 **Extraction step:**
 ```python
-# intelligence/cve.py:21-46
+# intelligence/cve.py:22-48
 CVE_PATTERN = re.compile(r"CVE-\d{4}-\d{4,}")
 
 def extract_cve_ids(text: str) -> list[str]:
@@ -963,7 +1041,7 @@ def extract_cve_ids(text: str) -> list[str]:
 
 **NVD Enrichment:**
 ```python
-# intelligence/cve.py:49
+# intelligence/cve.py:50
 async def enrich_from_nvd(cve_id: str) -> dict | None:
     """Fetch CVE details from NVD API 2.0."""
     headers = {}
@@ -1001,7 +1079,7 @@ async def enrich_from_nvd(cve_id: str) -> dict | None:
 The CVE model stores:
 
 ```python
-# models/cve.py:29-36
+# models/cve.py:31-38
 epss_score: float | None  # 0.0–1.0
 epss_percentile: float | None  # Percentile among all CVEs
 epss_updated_at: datetime  # When score last updated
@@ -1141,7 +1219,7 @@ entity profiles.
 ### Report Generation
 
 ```python
-# reporting.py:150-200 (outline)
+# reporting.py:310-492 (outline)
 async def generate_report_content(
     template_type: str,  # "flash_alert", "actor_profile", etc.
     entry_ids: list[uuid.UUID],
@@ -1325,7 +1403,7 @@ CREATE INDEX idx_correlation_event_created_at
 Key intelligence engine settings:
 
 ```python
-# Autolinker (config.py:173-207) — DB-overridable
+# Autolinker (config.py:180-214) — DB-overridable
 autolinker_min_name_length: int = 4        # Skip names shorter than this
 autolinker_false_positive_names: str = "..."  # Curated CSV denylist (common words,
                                               # Windows/LOLBin tools, junk aliases).
@@ -1336,7 +1414,7 @@ autolinker_ambiguous_name_max_length: int = 10  # Short alpha-only terms need ca
 autolinker_ambiguous_max_occurrences: int = 3   # Frequency threshold for ambiguous names
 autolink_pending_tier_enabled: bool = True      # Hold dictionary-word matches for AI confirmation
 
-# Proximity scoring (config.py:267-271) — DB-overridable
+# Proximity scoring (config.py:281-285) — DB-overridable
 proximity_default_score: float = 0.3       # No paragraph data
 proximity_decay_rate: float = 1.0          # Aggressiveness
 proximity_strong_threshold: float = 0.7    # "Strong" relationship cutoff
@@ -1346,9 +1424,9 @@ proximity_moderate_threshold: float = 0.3  # Filtering weak links
 nvd_api_key: str = ""  # NVD API key (higher rate limits when set)
 ```
 
-**Override behavior:** every one is read via `settings.get(...)` at runtime — proximity in `correlation.py:172-173,285-286`, the autolinker keys in `autolinker.py:44,48,61,202,413` — which checks the `system_settings` DB table before falling back to the `.env` default. All of them are editable at runtime from Settings → Engine.
+**Override behavior:** every one is read via `settings.get(...)` at runtime — proximity in `correlation.py:177-178,290-291`, the autolinker keys in `autolinker.py:46,50,63,204,448` — which checks the `system_settings` DB table before falling back to the `.env` default. All of them are editable at runtime from Settings → Engine.
 
-**Full catalogue:** [engine-settings.md](engine-settings.md) documents all 142 DB-overridable settings, including the relationship strength/specificity knobs and the entity-creation gates this doc's sections describe.
+**Full catalogue:** [engine-settings.md](engine-settings.md) documents all 146 DB-overridable settings, including the relationship strength/specificity knobs and the entity-creation gates this doc's sections describe.
 
 Correlation-event retention (90 days) and the dedupe window (24 h) are hardcoded function defaults in `correlation_events.py`, not config keys.
 
@@ -1564,7 +1642,7 @@ Two distinct extraction pipelines run on each new entry:
 
 **Pipeline A — the autolinker** (`backend/app/intelligence/autolinker.py`). Dictionary-based entity linking. Loads a vocabulary of every ThreatActor, MalwareFamily, Country, Vendor, Product, Tool, and Mitigation already in the database (canonical names + aliases) into an Aho-Corasick automaton, scans entry title/summary/content paragraph-by-paragraph, and creates `EntryThreatActor`, `EntryMalware`, `EntryCountry`, `EntryVendor`, `EntryProduct`, `EntryTool`, `EntryMitigation` junction rows. As a side effect of the same scan, regex matches for CVE IDs (`CVE-YYYY-NNNN`) and MITRE ATT&CK technique IDs (`T1234[.NNN]`) also create `EntryCVE` and `EntryTTP` links — CVEs auto-create a stub row if not seen before; TTPs only link if the technique is already in the MITRE catalog. Entry point: `_autolink_entry` (`workers/intel_feed_tasks.py:202`). Gated by `intel_extraction_mode`.
 
-**Pipeline B — heavy enrichment** (`_extract_entry_intel`, `workers/intel_feed_tasks.py:392`). Standalone regex pass + external lookups:
+**Pipeline B — heavy enrichment** (`_extract_entry_intel`, `backend/app/workers/intel_feed_tasks.py:469`). Standalone regex pass + external lookups:
 
 - CVE extraction with NVD enrichment — pulls CVSS scores, descriptions, affected products from the NVD API
 - TTP regex extraction — same `T1234` pattern, but a dedicated standalone pass
@@ -1611,7 +1689,7 @@ Backend: `mode=full, extract=false`. The autolinker runs unconditionally (no rel
 
 The autolinker matches against entities already in your database: threat actors and malware you've created or seeded, countries (seeded automatically), vendors/products, TTPs (the MITRE catalog must already be seeded), and CVEs (auto-created as skeletal stubs — just the ID, no description/CVSS/affected products — enriched later only if NVD enrichment runs as a separate pass).
 
-What you lose vs. selective/full: new CVE references don't trigger NVD lookups (bare CVE detail pages), M-IDs aren't linked, and the standalone TTP pass doesn't run (essentially redundant work being skipped, since the autolinker's own regex picks up TTP IDs). What you keep: full entity correlation against your curated catalog, retroactive backlinking when new entities are created later (`link_entity_to_existing_entries`, `autolinker.py:1195`), and optional detection rule extraction.
+What you lose vs. selective/full: new CVE references don't trigger NVD lookups (bare CVE detail pages), M-IDs aren't linked, and the standalone TTP pass doesn't run (essentially redundant work being skipped, since the autolinker's own regex picks up TTP IDs). What you keep: full entity correlation against your curated catalog, retroactive backlinking when new entities are created later (`link_entity_to_existing_entries`, `backend/app/intelligence/autolinker.py:1234`), and optional detection rule extraction.
 
 **Use for:** high-volume feeds where you want catalog correlation without per-mention NVD cost (Telegram channels, Bluesky firehoses, r/netsec), "alarm sources" where you only care whether a known entity is mentioned, reliability-D/F sources you don't trust enough to enrich from, and feeds where the relevance filter drops content you care about. **Avoid for:** likely sources of new CVEs (NVD itself, vendor PSIRT) and feeds where you want to discover new TTPs/mitigations — use full or selective.
 
@@ -1631,7 +1709,7 @@ Backend: `mode=none, extract=false`. The only mode that opts out of every extrac
 
 ### Confidence weighting and reliability rating
 
-Independent of mode, every autolink junction record gets a confidence value (high/medium/low) computed by `_weighted_confidence` (`autolinker.py:531`): a canonical name match starts at high (0.9), an alias match at medium (0.5), multiplied by `source_confidence_weight` derived from the feed's reliability rating (A–F), then bucketed (≥0.7 → high, ≥0.4 → medium, else low). An A-grade feed's canonical match for "APT29" stays high; an F-grade feed's alias match for "Cozy Bear" gets downgraded to low. This rolls into correlation scoring downstream — mode and reliability rating work together, so full mode on a graded-F feed still produces useful but appropriately-weighted links.
+Independent of mode, every autolink junction record gets a confidence value (high/medium/low) computed by `_weighted_confidence` (`backend/app/intelligence/autolinker.py:566`): a canonical name match starts at high (0.9), an alias match at medium (0.5), multiplied by `source_confidence_weight` derived from the feed's reliability rating (A–F), then bucketed (≥0.7 → high, ≥0.4 → medium, else low). An A-grade feed's canonical match for "APT29" stays high; an F-grade feed's alias match for "Cozy Bear" gets downgraded to low. This rolls into correlation scoring downstream — mode and reliability rating work together, so full mode on a graded-F feed still produces useful but appropriately-weighted links.
 
 ### Choosing a mode — quick decision guide
 
@@ -1649,10 +1727,10 @@ Independent of mode, every autolink junction record gets a confidence value (hig
 
 ### Operational notes
 
-- Changing mode does not re-process existing entries — switching a feed from manual to full only affects new entries. To backfill, use the bulk rescan path (`autolink_batch` in `autolinker.py:971` or the rescan endpoints).
-- Adding a new threat actor or malware family triggers `link_entity_to_existing_entries` (`autolinker.py:1195`), which retroactively scans existing entries — but only entries from feeds whose mode allows autolinking. Manual/none feeds stay untouched.
+- Changing mode does not re-process existing entries — switching a feed from manual to full only affects new entries. To backfill, use the bulk rescan path (`autolink_batch` in `backend/app/intelligence/autolinker.py:1010` or the rescan endpoints).
+- Adding a new threat actor or malware family triggers `link_entity_to_existing_entries` (`backend/app/intelligence/autolinker.py:1234`), which retroactively scans existing entries — but only entries from feeds whose mode allows autolinking. Manual/none feeds stay untouched.
 - The vocabulary is per-process and version-checked via Redis (`VOCAB_VERSION_KEY`). Creating a new entity bumps the version; all Celery workers rebuild on next scan, so there is no "stale vocab across workers" failure mode in normal operation.
-- Foreign-language entries with translations (e.g., Russian Telegram with auto-translation enabled) get the autolinker run against the original and translated text concatenated (`workers/intel_feed_tasks.py:193-195`, via `entry_text_with_translation`), in any mode that runs the autolinker.
+- Foreign-language entries with translations (e.g., Russian Telegram with auto-translation enabled) get the autolinker run against the original and translated text concatenated (`workers/intel_feed_tasks.py:239-241`, via `entry_text_with_translation`), in any mode that runs the autolinker.
 
 ### None of this uses AI
 
@@ -1679,4 +1757,4 @@ Scheduled-job observability: celery signal handlers in `app/workers/task_trackin
 
 When `signal_engine_surface` is on: entry list responses carry `priority_score` + `top_signals` (top-2 explanations, only above the radar threshold) and `is_echo`; the entry list renders score-banded chips and de-emphasizes echoes; a "Radar" sort is available; `/api/entries/triage` defaults to the signal ranking. The radar threshold is auto (p95 of trailing-7d scores) with a manual override, editable with family multipliers in the Engine console's score-stage panel (Settings → Engine, `ScoreStageConfig`; backend `/api/engine/signals/*`). Per-user entity watch/mute lives at `/api/intelligence/watchlist` (Watch button in the profile header + actions menu) — watch boosts at read time, mute suppresses. Entity profiles feed `/api/engine/entities/{type}/{id}/whats-new` into the Overview tab's assessment block ("recent developments").
 
-The Priority Queue is a `MainLayout` mode (`/priority-queue` renders `<MainLayout priorityMode />`). It interleaves open **story threads** with single ranked entries, assembled server-side by `GET /api/entries/priority-queue` (`build_priority_queue`, `backend/app/api/entries.py:1262`). A thread's rank is its best unread, non-echo member's `priority_score` plus +1 for each *independent outlet* beyond the first (capped at +5) — cross-newsroom corroboration is itself a signal — and its members are withheld from the queue as standalone rows. Threads with nothing unread never appear. The temporal-convergence clusters this replaced (`/intelligence/temporal-clusters`) still back the triage widget and the copilot tool, but nothing in the reading UI calls them. See [story-threads.md](story-threads.md).
+The Priority Queue is a `MainLayout` mode (`/priority-queue` renders `<MainLayout priorityMode />`). It interleaves open **story threads** with single ranked entries, assembled server-side by `GET /api/entries/priority-queue` (`build_priority_queue`, `backend/app/api/entries.py:1377`). A thread's rank is its best unread, non-echo member's `priority_score` plus +1 for each *independent outlet* beyond the first (capped at +5) — cross-newsroom corroboration is itself a signal — and its members are withheld from the queue as standalone rows. Threads with nothing unread never appear. The temporal-convergence clusters (`/intelligence/temporal-clusters`) still back the triage widget and the copilot tool, but nothing in the reading UI calls them. See [story-threads.md](story-threads.md).

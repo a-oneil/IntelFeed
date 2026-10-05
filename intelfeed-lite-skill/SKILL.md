@@ -285,7 +285,7 @@ Answer platform questions from the docs, not from memory.
 
 ## Available Tools
 
-81 tools, all read-only. The lite CLI does not carry a single tool that creates, changes or deletes anything — no writes, no AI extraction, no report or export generation. If the user asks for one of those, say the lite skill cannot do it rather than improvising a workaround.
+87 tools, all read-only. The lite CLI does not carry a single tool that creates, changes or deletes anything — no writes, no AI extraction, no report or document generation (`export_observables` only reads a ledger slice back as EDL/CSV/JSON; it saves nothing). If the user asks for one of those, say the lite skill cannot do it rather than improvising a workaround.
 
 ### Search & Discovery (4 tools)
 
@@ -311,15 +311,21 @@ Answer platform questions from the docs, not from memory.
 - **list_saved_searches** — This user's saved searches with unread/total counts
 - **get_share_link** — This analyst's active public share link for an entry, or null (entry_id)
 
-### Entity Lookups (9 tools)
+### Entity Lookups (15 tools)
 
 - **get_threat_actor** — Actor profile: aliases, type, motivation, origin country, targeted sectors, TTPs, article_count (actor_id)
 - **get_malware** — Malware family profile with aliases, type, sectors, associated actors (malware_id)
+- **list_sectors** — The 21-sector victim-industry vocabulary with article, targeting-actor/malware and 90-day victim counts (search, sort_by, limit)
+- **get_sector** — Sector victimology profile: who targets it (reported vs asserted), campaigns, leak-site victims, country cross-tab, intel profiles, recent articles (sector — UUID or slug, window_days)
+- **who_targets_sector** — Actors and malware ranked by articles describing them hitting the sector, plus asserted targets-sector claims with source (sector, limit)
+- **sector_victims** — Leak-site victims in a sector: totals, 12-month series, top groups, victim countries, recent disclosures (sector, window_days, limit)
 - **get_cve** — CVSS/EPSS, KEV status, PoC and Metasploit availability, NVD affected vendor/product links, CWE assignments (cve_id — UUID or CVE-YYYY-NNNNN)
 - **get_cwe** — A MITRE CWE weakness: abstraction level, parent and lineage, mapping guidance, catalog mitigations, linked CVEs (cwe_id)
 - **get_ttp** — ATT&CK technique with tactic, platforms, data sources, linked articles (ttp_id — UUID or T1059.001)
 - **get_observable** — One IOC ledger row by UUID or value: kind, role, confidence with decay state, sightings, provenance (observable, kind)
 - **search_observables** — Search the observables ledger by substring, kind, role and lifecycle status (query, kind, role, status, limit)
+- **get_entity_infrastructure** — An actor's / family's / campaign's / tool's observables in two tiers: claimed (attribution edges with evidence and trust tier) and reported alongside (co-reported in the same articles, newsletters and list files excluded) (entity_type, entity_id, limit)
+- **export_observables** — A filtered ledger slice as EDL lines, CSV rows or JSON, refanged, dual-use infra excluded unless asked (format, kind, role, status, min_confidence, min_reports, include_infra_tagged, query, limit)
 - **get_enrichment_data** — Stored enrichment for a CVE, malware, actor or TTP (entity_type, entity_id)
 - **get_entry_insights** — Actionable insights across an entry's entities (entry_id)
 

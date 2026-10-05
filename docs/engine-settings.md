@@ -4,10 +4,11 @@ Every runtime setting IntelFeed exposes, what it actually does, and where in the
 UI it lives. This is the companion to [engine.md](engine.md), which explains the
 subsystems these settings steer; here the unit of organisation is the **knob**.
 
-IntelFeed has **187 settings** in total:
+IntelFeed has **194 settings** in total:
 
-- **142** are DB-overridable and editable in the UI (`CONFIGURABLE_KEYS`, `backend/app/services/system_settings.py:19`).
-- **45** are env-only — infrastructure and secrets — see [Env-only settings](#env-only-settings) at the end.
+- **146** are DB-overridable and editable in the UI (`CONFIGURABLE_KEYS`, `backend/app/services/system_settings.py:19`).
+  Two of them exist only in the database, with no `Settings` field behind them — see [How a setting resolves](#how-a-setting-resolves).
+- **48** are env-only — infrastructure, secrets and build stamps — see [Env-only settings](#env-only-settings) at the end.
 - Five are **secrets** (encrypted at rest, masked in API responses): `github_token`,
   `nvd_api_key`, `observables_publish_token`, `registration_invite_code`, `sentry_dsn`
   (`SECRET_KEYS`, `system_settings.py:14`).
@@ -44,9 +45,10 @@ environment's own Settings UI.
 |---|---|---|
 | `CONFIGURABLE_KEYS` | `system_settings.py:19` | Which keys are DB-overridable, and the type each value is coerced to |
 | `SETTING_METADATA` | `system_settings.py:186` | Label, description and group shown in the UI |
-| `_ENGINE_SECTION_GROUPS` | `system_settings.py:1159` | Re-groups engine-owned keys onto Engine console sections, overwriting the `group` above |
+| `_ENGINE_SECTION_GROUPS` | `backend/app/services/system_settings.py:1195` | Re-groups engine-owned keys onto Engine console sections, overwriting the `group` above |
 | `SECRET_KEYS` | `system_settings.py:14` | Encrypted at rest, masked on read |
-| `GROUP_DEST` / `KEY_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:26`, `:52` | Group → which console surface renders it; powers the Engine settings search |
+| `GROUP_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:26` | Group → which console surface renders it; powers the Engine settings search |
+| `KEY_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:52` | Key-level exceptions to `GROUP_DEST` |
 
 Adding a setting means touching all of `config.py` (default), `CONFIGURABLE_KEYS`
 (type), `SETTING_METADATA` (label/description/group), and — if a scheduled job
@@ -319,7 +321,7 @@ Settings → Engine → **Feeds** table view (`feeds`, `rate_limiting`,
 | `default_feed_fetch_interval` | int, `30` min | Default interval between fetches for a feed that doesn't set its own. |
 | `user_agent` | str, browser-like | `User-Agent` sent when fetching feeds. The browser-like default exists because many sites (CISA/gov, Cloudflare-fronted blogs) return 403 to obvious bot agents. |
 | `rate_limit_default_interval` | float, `2.0` s | Default seconds between requests to the same domain. Per-domain overrides are env-only (`rate_limit_overrides`). |
-| `per_user_subscriptions_enabled` | bool, `false` | Each analyst manages their own feed list and mutes over the shared pool. Off is the legacy single shared list where a mute affects everyone. The migration backfills every user as subscribed to every feed, so flipping it on changes nothing until someone unsubscribes. |
+| `per_user_subscriptions_enabled` | bool, `false` | Each analyst manages their own feed list and mutes over the shared pool. Off is a single shared list where a mute affects everyone. While the flag is off, a mute is written to the shared `Feed.is_muted` only, not to anyone's subscription, so a feed muted while the flag is off reappears for everyone when it is turned on. |
 | `image_proxy_enabled` | bool, `true` | Proxy external images through IntelFeed so reading an article doesn't beacon to the publisher. |
 | `image_proxy_cache_ttl_days` | int, `30` | Days a proxied image stays cached (`evict-image-cache`, daily 04:10 UTC). |
 | `image_proxy_max_size_bytes` | int, `10 MB` | Largest image the proxy will fetch. |
@@ -537,13 +539,14 @@ The full 70-job registry, including the jobs with no settings, is documented in
 
 ## Env-only settings
 
-These 45 are **not** in `CONFIGURABLE_KEYS` — they come from the environment or
+These 48 are **not** in `CONFIGURABLE_KEYS` — they come from the environment or
 `.env` and take a process restart to change. Infrastructure and secrets that
 should not be editable from a web UI.
 
 | Area | Keys |
 |---|---|
 | Environment | `env` |
+| Build stamp | `app_version`, `git_sha`, `build_time` — baked into the image by `scripts/ops/version.sh` and compose build args, not set in `.env`; they feed the version string in the app footer |
 | Postgres | `postgres_host`, `postgres_port`, `postgres_db`, `postgres_user`, `postgres_password`, `postgres_ssl`, `db_pool_size`, `db_max_overflow`, `worker_db_pool_size`, `worker_db_max_overflow` |
 | Redis / Meilisearch | `redis_url`, `meili_url`, `meili_master_key`, `meili_timeout` |
 | Auth & crypto | `secret_key`, `access_token_expire_minutes`, `refresh_token_expire_days`, `encryption_key`, `encryption_key_previous` |
@@ -557,7 +560,7 @@ should not be editable from a web UI.
 
 `postgres_password`, `meili_master_key`, `secret_key` and `encryption_key` are
 validated at startup: the literal `changeme` warns in development and **raises**
-in production (`_reject_insecure_defaults`, `config.py:416`). `encryption_key`
+in production (`_reject_insecure_defaults`, `backend/app/config.py:425`). `encryption_key`
 must additionally be a valid 32-byte URL-safe base64 Fernet key.
 
 ---

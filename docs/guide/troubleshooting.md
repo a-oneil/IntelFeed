@@ -122,6 +122,7 @@ an admin can add an API key for that source under **Settings → Engine**.
 ## Still stuck
 
 Ask the copilot on the [documentation home](/documentation) — it can search
-these pages and the developer documentation. If the answer is genuinely about
+these pages and the developer documentation. (On GitHub, start from the
+[docs index](../README.md).) If the answer is genuinely about
 how something is *built* rather than how to use it, point it at the reference
 docs; it knows the difference.

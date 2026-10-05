@@ -12,6 +12,7 @@ import { useDocumentationIndex, useDocumentationPage } from "@/hooks/useDocument
 import { DocsCopilot } from "@/components/DocsCopilot";
 import { useUIStore } from "@/stores/uiStore";
 import { useAuthStore } from "@/stores/authStore";
+import { headingIdsByLine, nodeText, slugify } from "@/utils/headingAnchors";
 import type { DocumentationPageSummary } from "@/hooks/useDocumentation";
 import styles from "./DocumentationPage.module.css";
 
@@ -31,15 +32,10 @@ function ExternalIcon() {
   );
 }
 
-/** Anchor id matching GitHub's slugger, so in-doc `#heading` links resolve. */
-function headingId(children: React.ReactNode): string {
-  const text = String(children);
-  return text
-    .toLowerCase()
-    .replace(/[^\w\s-]/g, "")
-    .trim()
-    .replace(/\s+/g, "-");
-}
+/** What react-markdown hands a heading renderer: the DOM props plus its source position. */
+type HeadingProps = React.ComponentPropsWithoutRef<"h2"> & {
+  node?: { position?: { start: { line: number } } };
+};
 
 /**
  * Root-relative paths the API serves itself, not the SPA router: handing these
@@ -233,6 +229,11 @@ export default function DocumentationPage() {
     );
   }, [index, filter]);
 
+  // Heading anchors worked out from the markdown source, so a repeated heading gets
+  // its `-1` suffix and every id is the one GitHub would give it. The renderers
+  // below look theirs up by line; the slug of the rendered text is the fallback.
+  const headingIds = useMemo(() => headingIdsByLine(page?.markdown ?? ""), [page?.markdown]);
+
   const components = useMemo(
     () => ({
       code({ className, children, ...props }: React.ComponentPropsWithoutRef<"code">) {
@@ -273,18 +274,18 @@ export default function DocumentationPage() {
         if (!resolved) return null;
         return <img src={resolved} alt={alt ?? ""} loading="lazy" {...props} />;
       },
-      h2: ({ children, ...props }: React.ComponentPropsWithoutRef<"h2">) => (
-        <h2 id={headingId(children)} {...props}>
+      h2: ({ node, children, ...props }: HeadingProps) => (
+        <h2 id={headingIds.get(node?.position?.start.line ?? -1) ?? slugify(nodeText(children))} {...props}>
           {children}
         </h2>
       ),
-      h3: ({ children, ...props }: React.ComponentPropsWithoutRef<"h3">) => (
-        <h3 id={headingId(children)} {...props}>
+      h3: ({ node, children, ...props }: HeadingProps) => (
+        <h3 id={headingIds.get(node?.position?.start.line ?? -1) ?? slugify(nodeText(children))} {...props}>
           {children}
         </h3>
       ),
     }),
-    [slug, navigate],
+    [slug, navigate, headingIds],
   );
 
   // Where you are, named on the mobile trigger the way Settings names its

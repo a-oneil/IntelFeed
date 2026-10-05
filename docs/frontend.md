@@ -85,7 +85,7 @@ frontend/
 │   │   ├── entityProfile/               # Config-driven profile: header, tabs/, actions
 │   │   ├── ransomware/                  # Ransomware tracker: LeakWatchFeed, RansomwareLandscape
 │   │   ├── triage/                      # TriageControls, corrEventCards
-│   │   ├── widgets/                     # 30+ dashboard widgets + registry
+│   │   ├── widgets/                     # 50+ dashboard widgets + registry
 │   │   └── __tests__/                   # Vitest + RTL component tests
 │   │
 │   └── test/

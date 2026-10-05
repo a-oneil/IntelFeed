@@ -154,8 +154,9 @@ async def onboarding_status(
         # (products come from the `vendors` step).
         remedy=_seed_command(),
         consequence=(
-            "Entries will ingest, but the autolinker has no vocabulary — no actor, "
-            "technique, CVE, weakness or vendor will ever link to an article."
+            "Entries will ingest, but the autolinker only has what the migrations load "
+            "(countries and a baseline of ATT&CK techniques) — no weakness, vendor or "
+            "product will link to an article until the catalogs are seeded."
         ),
     )
 

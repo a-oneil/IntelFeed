@@ -116,12 +116,13 @@ subscriptions if your instance has them on. See [Feeds](feeds.md).
 
 **Telegram** — the one-time bootstrap walkthrough.
 
-**System** — grouped settings stored in the database rather than in config
-files, so they change without a redeploy: security, feeds, image proxy, API
-keys, AI, intelligence and autolinker behaviour, rate limiting, monitoring,
-backup, public RSS.
+**System** — monitoring (Sentry), database backups and how long they're kept,
+and maintenance buttons such as rebuilding the search index. Settings are stored
+in the database, so they change without a redeploy, and most of them live with
+the thing they control: pipeline thresholds, API keys, rate limits and the image
+proxy in the Engine console above, registration and invites under Users.
 
-**Users** — accounts and roles.
+**Users** — accounts and roles. See [Users and access](users-and-access.md).
 
 **Logs** — automation runs, AI task logs, per-task costs and errors. The first
 place to look when an automation seems to have stopped.

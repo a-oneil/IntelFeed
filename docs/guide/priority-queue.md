@@ -29,6 +29,10 @@ article plus a bump for each extra outlet carrying it, because corroboration
 across newsrooms is itself a signal. A story you have finished reading drops
 out of the queue entirely.
 
+What a story row opens into — the spine, the coverage list, what "N new" counts,
+and why threads may be missing on a fresh instance — is in
+[Story threads](story-threads.md).
+
 ## What the ranking looks at
 
 Signals fall into five families. None of them is "this article is important" —
