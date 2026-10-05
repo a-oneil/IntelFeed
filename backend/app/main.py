@@ -316,6 +316,7 @@ _OPENAPI_TAG_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
             ("notes", "Free-form notes attached to entries."),
             ("comments", "Per-entry comment threads."),
             ("ingest", "Manual URL ingestion into the entry pipeline."),
+            ("onboarding", "First-run readiness: is this instance seeded, polling and linking?"),
             ("opml", "OPML import/export of feed subscriptions."),
             ("podcasts", "Podcast episode listing and metadata."),
             ("playback", "Audio playback position sync."),
@@ -732,6 +733,7 @@ from app.api.link_validation import router as link_validation_router
 from app.api.logs import router as logs_router
 from app.api.metrics import router as metrics_router
 from app.api.notes import router as notes_router
+from app.api.onboarding import router as onboarding_router
 from app.api.opml import router as opml_router
 from app.api.playback import router as playback_router
 from app.api.podcasts import router as podcasts_router
@@ -771,6 +773,7 @@ app.include_router(users_router, prefix="/api/admin/users", tags=["admin"])
 app.include_router(feeds_router, prefix="/api/feeds", tags=["feeds"])
 app.include_router(entries_router, prefix="/api/entries", tags=["entries"])
 app.include_router(categories_router, prefix="/api/categories", tags=["categories"])
+app.include_router(onboarding_router, prefix="/api/onboarding", tags=["onboarding"])
 app.include_router(opml_router, prefix="/api/opml", tags=["opml"])
 app.include_router(events_router, prefix="/api/events", tags=["events"])
 app.include_router(proxy_router, prefix="/api/proxy", tags=["proxy"])
