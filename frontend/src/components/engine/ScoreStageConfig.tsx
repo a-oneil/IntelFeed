@@ -36,7 +36,7 @@ const SIGNAL_DESCRIPTIONS: Record<string, string> = {
 };
 
 /** Signal engine tuning: family multipliers, radar threshold, self-tuning readout.
- *  Interim home: Settings → System. Re-hosted under Engine → score stage in phase 6. */
+ *  Lives on the Engine console's score stage. */
 export function ScoreStageConfig() {
   const { data: stats, isLoading } = useSignalStats();
   const update = useUpdateSignalSettings();

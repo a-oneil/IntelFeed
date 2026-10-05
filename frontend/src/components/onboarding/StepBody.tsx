@@ -160,7 +160,7 @@ function Readiness({
       </ul>
       {ref && !ref.ok && (
         <div className={`${styles.callout} ${styles.calloutWarn}`}>
-          <b>Nothing is seeded.</b> {ref.consequence} Run this once, then re-check:
+          <b>Reference data isn't seeded.</b> {ref.consequence} Run this once, then re-check:
           {/* The whole line comes from the server, compose file included — the UI
               has no way to know which compose file this instance runs under. */}
           <pre className={styles.code}>{ref.remedy}</pre>
@@ -526,7 +526,7 @@ function Extras() {
       </Lead>
       <Facts
         rows={[
-          ["Invites", <>Registration is open by default. Gate it behind invites under <b>Settings → System</b>.</>],
+          ["Invites", <>Registration is open by default. Gate it behind invites under <b>Settings → Users</b>.</>],
           ["Roles", <>Promote or demote accounts under <b>Settings → Users</b>.</>],
         ]}
       />

@@ -77,8 +77,8 @@ export function PipelinePlans() {
     <div className={styles.wrap}>
       {!overview?.pipeline_engine_enabled && (
         <p className={styles.banner}>
-          Pipeline plans are configured but inactive — enable "Pipeline Plans" under Settings → System
-          (intelligence group) to apply them. Until then the legacy per-feed extraction toggles drive behavior.
+          Pipeline plans are configured but inactive — enable "Pipeline Plans" under Settings → Engine
+          (Plans) to apply them. Until then the legacy per-feed extraction toggles drive behavior.
         </p>
       )}
       <p className={styles.hint}>
