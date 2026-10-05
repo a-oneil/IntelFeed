@@ -1,6 +1,6 @@
 # Intelligence Engine
 
-For contributors and operators who need to know how an article becomes linked, correlated intelligence — and why something did or didn't link. It walks an entry through the autolinker, the extraction layers, the observables ledger, correlation, detection-rule extraction and the TTP and CVE pipelines, with the settings that steer each. After reading it you should be able to trace one entry through the engine and know which code path or setting to look at.
+For contributors and operators who need to know how an article becomes linked, correlated intelligence — and why something did or didn't link. It walks an entry through the autolinker, the extraction layers, the observables ledger, correlation, detection-rule extraction and the TTP and CVE pipelines, with the settings that steer each.
 
 **Contents**
 
@@ -1426,7 +1426,7 @@ nvd_api_key: str = ""  # NVD API key (higher rate limits when set)
 
 **Override behavior:** every one is read via `settings.get(...)` at runtime — proximity in `correlation.py:177-178,290-291`, the autolinker keys in `autolinker.py:46,50,63,204,448` — which checks the `system_settings` DB table before falling back to the `.env` default. All of them are editable at runtime from Settings → Engine.
 
-**Full catalogue:** [engine-settings.md](engine-settings.md) documents all 142 DB-overridable settings, including the relationship strength/specificity knobs and the entity-creation gates this doc's sections describe.
+**Full catalogue:** [engine-settings.md](engine-settings.md) documents all 146 DB-overridable settings, including the relationship strength/specificity knobs and the entity-creation gates this doc's sections describe.
 
 Correlation-event retention (90 days) and the dedupe window (24 h) are hardcoded function defaults in `correlation_events.py`, not config keys.
 

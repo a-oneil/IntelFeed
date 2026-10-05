@@ -35,13 +35,13 @@ The button opens the threat's profile — for a CVE, straight to its **Detection
 
 ## The drawer
 
-Click a row to expand it. Three columns:
+Click a row to expand it. Three columns (a story row swaps the middle one for **What's extractable**):
 
 - **Articles** (or **Coverage**, when stories were folded): the articles behind the row, with their outlet and date, how many techniques each carries, and a link to open each in the reader or at the source.
 - **New this window**: the techniques that weren't known for this threat before the window began. This is what *new tradecraft* means on this board.
 - **Why this rank**: the score and where it came from — stories, outlets, new tradecraft, rule-ready indicators, and the rule inventory split into rules that *name* the threat and weak matches, with the repositories they came from. Nothing is hidden behind the number.
 
-For a threat with a story behind it, the drawer can also show **Precedent**: the closest earlier story, as a percentage match, so you can ask "have we seen this shape before?"
+For a threat with a story behind it, the drawer can also show **Precedent**: the most similar other story, as a percentage match, so you can ask "have we seen this shape before?"
 
 There is deliberately **no coverage percentage**. Counting how many of a group's techniques some rule is tagged with comes out around 90% for nearly every actor, which says nothing. The inventory of rules is there to open, not to be read as a verdict.
 

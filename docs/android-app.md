@@ -1,7 +1,5 @@
 # IntelFeed for Android
 
-For anyone who wants IntelFeed on a phone, and for whoever builds and releases the app. After this page you can install the app, point it at your server, and tell what it does and doesn't cover.
-
 *Last verified: 2026-10-03 (app version 1.2, build 3)*
 
 A native Android client (Kotlin, Jetpack Compose) for an IntelFeed server. It

@@ -1,6 +1,6 @@
 # Notes and sharing
 
-How to keep notes and comments on your instance, hand a link to an article or conversation to someone outside it, and export to other tools — and what each of those does and does not protect. Read the [Share links](#share-links) section before you send anything outside your team.
+What you write down, who can see it, and what a share link gives away. Read [Share links](#share-links) before you send anything outside your team.
 
 ## Notes
 
@@ -42,7 +42,7 @@ More than the article:
 - **every note on that article**, whoever on your instance wrote it — notes have no private setting;
 - the article's current AI results.
 
-**Recipients can also run AI on it.** The shared page can run AI analysis and generation tasks and put questions to an AI agent about the article, with no login. Those calls run as *you*, the person who made the link, through your AI assignments and at your instance's AI cost. Each analysis task can run once per article, and its result is stored on the article, so it's then visible to everyone who can see that article's AI results, not only the person who triggered it. Questions put to the agent are answered and not stored.
+**Recipients can also run AI on it.** The shared page can run AI analysis and generation tasks and put questions to an AI agent about the article, with no login. Those calls run as *you*, the person who made the link, under your account and at your instance's AI cost. Each analysis task can run once per article, and its result is stored on the article, so it's then visible to everyone who can see that article's AI results, not only the person who triggered it. Questions put to the agent are answered and not stored, and there is no limit on how many a link holder can ask.
 
 A shared copilot conversation is read-only and carries the whole thread, including whatever context was pinned when you asked. Re-read either one before sending.
 

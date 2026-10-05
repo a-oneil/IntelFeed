@@ -1,6 +1,6 @@
 # When something isn't working
 
-A symptom-first checklist for what goes wrong in IntelFeed — a feed that stopped, links that look wrong, an automation that never fired, a ranking that doesn't make sense — ordered by how often each comes up, with where to look and what to change.
+Ordered by how often it comes up.
 
 ![The Engine console showing per-entry pipeline stages across translate, autolink, observables, extraction, correlation and scoring](../assets/screenshots/engine.png)
 

@@ -1,6 +1,6 @@
 # Automation, AI Providers, and Enrichment
 
-For contributors and operators working on the three subsystems that act on intelligence automatically: automation rules, AI providers and tasks, and entity enrichment. It explains how each works, how each is configured, and where to change it, so you can follow a rule from trigger to action, wire up or debug a provider, and tell why an enrichment source was or wasn't called.
+For contributors and operators working on the three subsystems that act on intelligence automatically: automation rules, AI providers and tasks, and entity enrichment.
 
 **Contents**
 
