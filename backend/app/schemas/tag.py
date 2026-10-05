@@ -9,6 +9,11 @@ class TagCreate(BaseModel):
     color: str = Field(default="#6B7280", pattern=r"^#[0-9A-Fa-f]{6}$")
     display_as_chip: bool = Field(default=False, description="Render in the entry's badge row as a chip")
     description: str | None = Field(default=None, max_length=255, description="Chip tooltip")
+    is_global: bool = Field(
+        default=False,
+        description="Global: one shared assignment per entry that everyone sees. "
+        "Personal (default): each user's assignments are their own.",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -17,6 +22,7 @@ class TagCreate(BaseModel):
                 "color": "#EF4444",
                 "display_as_chip": True,
                 "description": "Touches Customer A's estate",
+                "is_global": False,
             }
         }
     )
@@ -28,6 +34,10 @@ class TagUpdate(BaseModel):
     display_as_chip: bool | None = None
     # An empty string clears the description; omitted leaves it alone.
     description: str | None = Field(default=None, max_length=255)
+    # Changing scope re-homes every existing assignment: to global collapses
+    # everyone's rows into one shared row per entry; to personal hands the
+    # shared row to every human account as their own.
+    is_global: bool | None = None
 
     model_config = ConfigDict(json_schema_extra={"example": {"name": "ransomware-ops", "color": "#F59E0B"}})
 
@@ -38,6 +48,9 @@ class TagResponse(BaseModel):
     color: str
     display_as_chip: bool = False
     description: str | None = None
+    is_global: bool = False
+    # Entries carrying the tag as the caller sees them: their own assignments
+    # for a personal tag, everyone's for a global one.
     entry_count: int = 0
     created_at: datetime
 

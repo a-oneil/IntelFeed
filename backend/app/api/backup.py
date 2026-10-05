@@ -47,7 +47,7 @@ class ConfigImportRequest(BaseModel):
                         "actions": [{"type": "ai_task", "task": "briefing"}],
                     }
                 ],
-                "tags": [{"name": "ransomware", "color": "#DC2626"}],
+                "tags": [{"name": "ransomware", "color": "#DC2626", "display_as_chip": False, "is_global": True}],
                 "saved_searches": [{"name": "APT29 activity", "query": "APT29", "filters": {"unread_only": True}}],
                 "themes": [{"name": "Midnight Analyst", "css_variables": {"--bg-primary": "#0d1117"}}],
                 "detection_rules": [
@@ -107,8 +107,18 @@ async def export_config(
     ]
 
     # Tags
+    # Tag definitions only — assignments are per user and not part of a config backup.
     tag_result = await db.execute(select(Tag))
-    tags = [{"name": t.name, "color": t.color} for t in tag_result.scalars().all()]
+    tags = [
+        {
+            "name": t.name,
+            "color": t.color,
+            "display_as_chip": t.display_as_chip,
+            "description": t.description,
+            "is_global": t.is_global,
+        }
+        for t in tag_result.scalars().all()
+    ]
 
     # AI providers (redact API keys)
     provider_result = await db.execute(select(AIProvider))
@@ -266,7 +276,16 @@ async def import_config(
     existing_tag_names = {r[0] for r in existing_tags.all()}
     for tag_data in body.tags:
         if tag_data.get("name") and tag_data["name"] not in existing_tag_names:
-            db.add(Tag(created_by=user.id, name=tag_data["name"], color=tag_data.get("color", "#6B7280")))
+            db.add(
+                Tag(
+                    created_by=user.id,
+                    name=tag_data["name"],
+                    color=tag_data.get("color", "#6B7280"),
+                    display_as_chip=bool(tag_data.get("display_as_chip", False)),
+                    description=(tag_data.get("description") or None),
+                    is_global=bool(tag_data.get("is_global", False)),
+                )
+            )
             imported["tags"] += 1
 
     # Import automation rules (by name, skip duplicates).

@@ -17,7 +17,14 @@ from app.schemas.tag import (
     TagResponse,
     TagUpdate,
 )
-from app.services.entry_tags import sync_entry_tags_to_search, visible_to
+from app.services.entry_tags import (
+    ensure_assignment,
+    make_tag_global,
+    make_tag_personal,
+    merge_assignments,
+    sync_entry_tags_to_search,
+    visible_to,
+)
 
 router = APIRouter()
 
@@ -44,13 +51,15 @@ def _tag_response(tag: Tag, entry_count: int) -> TagResponse:
         color=tag.color,
         display_as_chip=tag.display_as_chip,
         description=tag.description,
+        is_global=tag.is_global,
         entry_count=entry_count,
         created_at=tag.created_at,
     )
 
 
 async def _visible_entry_count(db: AsyncSession, tag_id: uuid.UUID, user_id: uuid.UUID) -> int:
-    """Entries carrying the tag, as this user sees them (shared + their own stamps)."""
+    """Entries carrying the tag as this user sees them: their own assignments,
+    or everyone's if the tag is global."""
     result = await db.execute(
         select(func.count(func.distinct(EntryTag.entry_id))).where(EntryTag.tag_id == tag_id, visible_to(user_id))
     )
@@ -64,7 +73,8 @@ async def list_tags(
 ):
     """List all tags with their per-tag entry counts, ordered by name.
 
-    Counts include the caller's personal chip stamps, never anyone else's.
+    The tag list is shared; the counts are the caller's view (their own
+    assignments of a personal tag, everyone's of a global one).
     """
     result = await db.execute(
         select(
@@ -104,6 +114,7 @@ async def create_tag(
         color=body.color,
         display_as_chip=body.display_as_chip,
         description=body.description or None,
+        is_global=body.is_global,
     )
     db.add(tag)
     await db.flush()
@@ -118,8 +129,14 @@ async def update_tag(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Rename, recolor, promote/demote or describe a tag (409 if the new name is
-    taken). A rename reindexes every tagged entry so `tag:` search stays correct."""
+    """Rename, recolor, promote/demote, describe, or change the scope of a tag
+    (409 if the new name is taken).
+
+    A rename reindexes every tagged entry so `tag:` search stays correct. A
+    scope change re-homes the tag's assignments: to global, everyone's rows
+    collapse into one shared row per entry; to personal, the shared row is
+    handed to every human account as their own. Those entries are reindexed too.
+    """
     result = await db.execute(select(Tag).where(Tag.id == tag_id))
     tag = result.scalar_one_or_none()
     if not tag:
@@ -151,14 +168,22 @@ async def update_tag(
     if body.description is not None:
         tag.description = body.description or None
 
+    reindex: set[uuid.UUID] = set()
+    if body.is_global is not None and body.is_global != tag.is_global:
+        rehome = make_tag_global if body.is_global else make_tag_personal
+        reindex.update(await rehome(db, tag))
+
     db.add(tag)
     await db.flush()
 
     # A rename changes the tag name stored on every tagged entry in the search
-    # index — reindex them so `tag:` search keeps working.
+    # index, and a scope change moves the name between the `tags` and
+    # `user_tags` fields — reindex those entries so `tag:` search keeps working.
     if body.name is not None:
         rows = await db.execute(select(EntryTag.entry_id).where(EntryTag.tag_id == tag.id))
-        await _reindex_entries_tags(db, [r[0] for r in rows.all()])
+        reindex.update(r[0] for r in rows.all())
+    if reindex:
+        await _reindex_entries_tags(db, list(reindex))
 
     return _tag_response(tag, await _visible_entry_count(db, tag.id, user.id))
 
@@ -195,35 +220,20 @@ async def bulk_tag_entries(
     db: AsyncSession = Depends(get_db),
 ):
     """Attach one or more tags to many entries at once; existing assignments and
-    unknown tag IDs are skipped. Returns the number of links added."""
+    unknown tag IDs are skipped. Returns the number of links added.
+
+    Each assignment is the caller's own unless the tag is global.
+    """
+    tags = (await db.execute(select(Tag).where(Tag.id.in_(body.tag_ids)))).scalars().all()
     added = 0
     for entry_id in body.entry_ids:
-        for tag_id in body.tag_ids:
-            # Verify tag exists
-            tag_result = await db.execute(select(Tag).where(Tag.id == tag_id))
-            if not tag_result.scalar_one_or_none():
-                continue
-
-            existing = await db.execute(
-                select(EntryTag).where(
-                    EntryTag.entry_id == entry_id,
-                    EntryTag.tag_id == tag_id,
-                    EntryTag.user_id.is_(None),
-                )
-            )
-            if not existing.scalar_one_or_none():
-                db.add(
-                    EntryTag(
-                        entry_id=entry_id,
-                        tag_id=tag_id,
-                    )
-                )
+        for tag in tags:
+            if await ensure_assignment(db, entry_id, tag, user.id):
                 added += 1
 
     await db.flush()
     if added > 0:
-        for entry_id in body.entry_ids:
-            await _sync_entry_tags_to_search(db, entry_id)
+        await _reindex_entries_tags(db, body.entry_ids)
     return {"added": added}
 
 
@@ -233,8 +243,9 @@ async def bulk_untag_entries(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Remove one or more tags from many entries at once — the shared assignment
-    and the caller's own chip stamps; other users' stamps are left alone."""
+    """Remove one or more tags from many entries at once — the caller's own
+    assignments, or the shared one for a global tag. Other users' assignments
+    of a personal tag are left alone."""
     if not body.entry_ids or not body.tag_ids:
         return {"removed": 0}
     result = await db.execute(
@@ -274,29 +285,14 @@ async def add_tags_to_entry(
     db: AsyncSession = Depends(get_db),
 ):
     """Attach tags to a single entry, skipping ones it already has and unknown tag
-    IDs. Returns the number of links added."""
-    added = 0
-    for tag_id in body.tag_ids:
-        # Verify tag exists
-        tag_result = await db.execute(select(Tag).where(Tag.id == tag_id))
-        if not tag_result.scalar_one_or_none():
-            continue
+    IDs. Returns the number of links added.
 
-        # Check if already exists
-        existing = await db.execute(
-            select(EntryTag).where(
-                EntryTag.entry_id == entry_id,
-                EntryTag.tag_id == tag_id,
-                EntryTag.user_id.is_(None),
-            )
-        )
-        if not existing.scalar_one_or_none():
-            db.add(
-                EntryTag(
-                    entry_id=entry_id,
-                    tag_id=tag_id,
-                )
-            )
+    Each assignment is the caller's own unless the tag is global.
+    """
+    tags = (await db.execute(select(Tag).where(Tag.id.in_(body.tag_ids)))).scalars().all()
+    added = 0
+    for tag in tags:
+        if await ensure_assignment(db, entry_id, tag, user.id):
             added += 1
 
     await db.flush()
@@ -314,8 +310,8 @@ async def remove_tag_from_entry(
 ):
     """Detach one tag from one entry (404 if it isn't assigned).
 
-    Removes what the caller sees: the shared assignment and/or their own chip
-    stamp. Another user's personal stamp of the same tag stays on their card.
+    Removes what the caller sees: their own assignment, or the shared one for a
+    global tag. Another user's assignment of a personal tag stays on their card.
     """
     result = await db.execute(
         delete(EntryTag).where(
@@ -343,8 +339,10 @@ async def merge_tags(
     """Fold one or more source tags into a target tag.
 
     Every article carrying a source tag gains the target tag (if it doesn't
-    already), the source tags are deleted, and all affected articles are
-    reindexed so search stays correct.
+    already) under the target's scope — personal assignments keep their owner,
+    and everything collapses to shared rows if the target is global. The source
+    tags are deleted and all affected articles are reindexed so search stays
+    correct.
     """
     target = (await db.execute(select(Tag).where(Tag.id == body.target_id))).scalar_one_or_none()
     if not target:
@@ -354,20 +352,11 @@ async def merge_tags(
     if not sources:
         raise AppError(code="bad_request", message="No source tags to merge", status_code=400)
 
-    # Assignments currently on any source tag, and those already on the target,
-    # keyed by owner so a personal stamp stays personal after the merge.
-    src_rows = await db.execute(
-        select(EntryTag.entry_id, EntryTag.user_id).where(EntryTag.tag_id.in_(sources)).distinct()
-    )
-    on_source = set(src_rows.all())
-    tgt_rows = await db.execute(select(EntryTag.entry_id, EntryTag.user_id).where(EntryTag.tag_id == body.target_id))
-    on_target = set(tgt_rows.all())
-
-    db.add_all([EntryTag(entry_id=eid, tag_id=body.target_id, user_id=uid) for eid, uid in (on_source - on_target)])
+    affected = await merge_assignments(db, sources, target)
     # Deleting the source tags cascades their EntryTag links (FK ondelete=CASCADE).
     await db.execute(delete(Tag).where(Tag.id.in_(sources)))
     await db.flush()
 
-    await _reindex_entries_tags(db, list({eid for eid, _ in on_source}))
+    await _reindex_entries_tags(db, affected)
 
     return _tag_response(target, await _visible_entry_count(db, target.id, user.id))

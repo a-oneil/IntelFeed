@@ -21,6 +21,10 @@ class Tag(Base):
     # quiet label in the meta line.
     display_as_chip: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     description: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Scope of the tag's assignments. Personal (the default): each user's
+    # assignments are their own and nobody else sees them. Global: one shared
+    # assignment per entry, visible to everyone. Flipped in Tag Manager.
+    is_global: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (UniqueConstraint("name", name="uq_tags_name"),)
@@ -33,9 +37,11 @@ class Tag(Base):
 class EntryTag(Base):
     """One tag on one entry.
 
-    `user_id` NULL is a shared assignment, visible to everyone. Set, it is a
-    personal stamp — a chip an automation rule applied for its owner — visible
-    only to that user. Read through `app.services.entry_tags.visible_to`.
+    The tag's scope decides who the row belongs to. A global tag has one row
+    per entry with `user_id` NULL, visible to everyone. A personal tag has one
+    row per (entry, user): whoever applied it — by hand, in bulk, through a
+    tool, or via their automation rule — and only they see it. Read through
+    `app.services.entry_tags.visible_to`; write through `ensure_assignment`.
     """
 
     __tablename__ = "entry_tags"

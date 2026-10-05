@@ -6,6 +6,7 @@ from datetime import UTC
 import meilisearch
 
 from app.config import settings
+from app.search.query_planner import tag_filter_clause
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +48,10 @@ FILTERABLE_ATTRIBUTES = [
     "has_notes",
     "media_type",
     "tags",
-    # Personal chip stamps as "<user_id>:<name>" — filter-only, never searched
-    # or faceted globally, so one analyst's stamps can't surface for another.
+    # Personal tag assignments as "<user_id>:<name>" — filter-only and never
+    # searched. Faceted only to be folded into `tags` for the one viewer whose
+    # tokens they are (see fold_viewer_tags), so one analyst's tags can't
+    # surface for another.
     "user_tags",
     "language",
     # Already indexed and sortable; filterable is what `words:>1500` needs.
@@ -59,11 +62,42 @@ FILTERABLE_ATTRIBUTES = [
 def strip_private_fields(result: dict) -> dict:
     """Drop index-only fields from search hits before they leave the server.
 
-    `user_tags` carries every user's personal chip stamps; the query planner
-    filters on it, but no response may show one user's stamps to another.
+    `user_tags` carries every user's personal tag assignments; the query
+    planner filters on it, but no response may show one user's tags to another.
     """
     for hit in result.get("hits") or []:
         hit.pop("user_tags", None)
+    return result
+
+
+def viewer_facets(base: list[str], viewer_id: str | None) -> list[str]:
+    """The facets to request: `base`, plus `user_tags` when there is a viewer
+    whose tokens `fold_viewer_tags` can fold into `tags`."""
+    if viewer_id and "tags" in base and "user_tags" not in base:
+        return [*base, "user_tags"]
+    return base
+
+
+def fold_viewer_tags(result: dict, viewer_id: str | None) -> dict:
+    """Fold the viewer's own `user_tags` facet tokens into the `tags` facet.
+
+    The raw `user_tags` distribution carries every user's tokens, so it never
+    leaves the server: the viewer's `"<user_id>:<name>"` entries are added to
+    `tags` under their bare name and the rest are dropped. Counts add cleanly
+    because, once indexed, a tag's name is in `tags` (global) or in `user_tags`
+    (personal) on any one document, never both.
+    """
+    dist = result.get("facetDistribution")
+    if not dist or "user_tags" not in dist:
+        return result
+    tokens = dist.pop("user_tags") or {}
+    if viewer_id:
+        prefix = f"{viewer_id}:"
+        tags = dist.setdefault("tags", {})
+        for token, count in tokens.items():
+            if token.startswith(prefix):
+                name = token[len(prefix) :]
+                tags[name] = tags.get(name, 0) + count
     return result
 
 
@@ -313,8 +347,14 @@ def search_entries(
     offset: int = 0,
     show_matches: bool = True,
     facets: list[str] | None = None,
+    viewer_id: str | None = None,
 ) -> dict:
-    """Search entries with advanced filtering and facets."""
+    """Search entries with advanced filtering and facets.
+
+    `viewer_id` is the searching user's id. With it, `tags` filters also match
+    their own personal assignments and the `tags` facet includes them; without
+    it, only global tags take part.
+    """
     try:
         client = _get_client()
         index = client.index(INDEX_NAME)
@@ -338,7 +378,7 @@ def search_entries(
             filters.append(f"({type_filters})")
         if tags:
             for tag in tags:
-                filters.append(f'tags = "{tag}"')
+                filters.append(tag_filter_clause(tag, viewer_id))
         if date_from is not None:
             filters.append(f"published_at >= {date_from}")
         if date_to is not None:
@@ -382,12 +422,9 @@ def search_entries(
             params["sort"] = ["word_count:desc"]
         # "relevance" uses default ranking rules (no explicit sort)
 
-        if facets:
-            params["facets"] = facets
-        else:
-            params["facets"] = ["feed_type", "tags", "media_type"]
+        params["facets"] = viewer_facets(facets or ["feed_type", "tags", "media_type"], viewer_id)
 
-        return strip_private_fields(index.search(query, params))
+        return strip_private_fields(fold_viewer_tags(index.search(query, params), viewer_id))
     except Exception as e:
         logger.warning(f"Meilisearch search failed: {e}")
         return {"hits": [], "estimatedTotalHits": 0, "processingTimeMs": 0, "searchUnavailable": True}
@@ -583,18 +620,22 @@ def find_similar_entries(
 def get_facets(
     query: str = "",
     filters: str | None = None,
+    viewer_id: str | None = None,
 ) -> dict:
-    """Get facet distribution for search refinement."""
+    """Get facet distribution for search refinement.
+
+    With a `viewer_id`, the `tags` facet includes that user's personal tags.
+    """
     try:
         client = _get_client()
         index = client.index(INDEX_NAME)
         params: dict = {
             "limit": 0,
-            "facets": ["feed_type", "tags", "media_type", "language"],
+            "facets": viewer_facets(["feed_type", "tags", "media_type", "language"], viewer_id),
         }
         if filters:
             params["filter"] = filters
-        result = index.search(query, params)
+        result = fold_viewer_tags(index.search(query, params), viewer_id)
         return result.get("facetDistribution", {})
     except Exception as e:
         logger.warning(f"Meilisearch facet query failed: {e}")

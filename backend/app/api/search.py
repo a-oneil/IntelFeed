@@ -22,7 +22,7 @@ from app.schemas.search import (
     UnifiedSearchQuery,
     UnifiedSearchResponse,
 )
-from app.search.query_planner import IS_FILTER_VALUES, VALID_SORTS
+from app.search.query_planner import IS_FILTER_VALUES, VALID_SORTS, tag_filter_clause
 from app.services import meilisearch_client
 from app.services.entry_tags import load_entry_tags
 
@@ -108,7 +108,7 @@ async def _fetch_entries_by_ids(
     # Format as Meilisearch-compatible hit dicts
     hits = []
     for e in entries:
-        tag_names: list[str] = []  # tags populated by Meilisearch; PG fallback skips them
+        tag_names: list[str] = []  # filled in by _enrich_hits_with_user_state from the viewer's rows
         hits.append(
             {
                 "id": str(e.id),
@@ -178,7 +178,8 @@ async def _enrich_hits_with_user_state(hits: list[dict], user_id: uuid.UUID, db:
     Meilisearch state can be stale (bulk operations don't always sync), so we
     always fetch the authoritative per-user state from UserEntryState. Tags get
     the same treatment: `tag_details` carries the tags this user sees on each
-    hit — shared ones plus their own chip stamps — with chip presentation.
+    hit — global tags plus their own personal assignments — with chip
+    presentation, and `tags` is rewritten to those names.
     """
     if not hits:
         return
@@ -208,6 +209,10 @@ async def _enrich_hits_with_user_state(hits: list[dict], user_id: uuid.UUID, db:
     for h in hits:
         h.pop("user_tags", None)
         h["tag_details"] = tags_map.get(h.get("id"), [])
+        # The index's bare-name array only knows global tags; rewrite it to the
+        # names this viewer actually sees so string-only consumers (the Android
+        # client, the SearchResults fallback) agree with tag_details.
+        h["tags"] = [t["name"] for t in h["tag_details"]]
         state = state_map.get(h.get("id"))
         if state:
             h["is_read"] = state.is_read
@@ -362,6 +367,7 @@ async def search_entries(
         category_id=([str(cid) for cid in category_id] if category_id else None),
         feed_type=feed_type,
         tags=tags,
+        viewer_id=str(user.id),
         date_from=date_from.timestamp() if date_from else None,
         date_to=date_to.timestamp() if date_to else None,
         is_read=is_read,
@@ -404,6 +410,7 @@ async def advanced_search(
         category_id=cat_ids,
         feed_type=body.feed_type,
         tags=body.tags,
+        viewer_id=str(user.id),
         date_from=(body.date_from.timestamp() if body.date_from else None),
         date_to=(body.date_to.timestamp() if body.date_to else None),
         is_read=body.is_read,
@@ -459,7 +466,7 @@ async def get_search_facets(
         filter_parts.append(f"({ft_parts})")
     if tags:
         for tag in tags:
-            filter_parts.append(f'tags = "{tag}"')
+            filter_parts.append(tag_filter_clause(tag, str(user.id)))
     if date_from is not None:
         filter_parts.append(f"published_at >= {date_from.timestamp()}")
     if date_to is not None:
@@ -476,7 +483,7 @@ async def get_search_facets(
         filter_parts.append(f'media_type = "{media_type}"')
 
     filters_str = " AND ".join(filter_parts) if filter_parts else None
-    facets = meilisearch_client.get_facets(query=q, filters=filters_str)
+    facets = meilisearch_client.get_facets(query=q, filters=filters_str, viewer_id=str(user.id))
     return {"facets": facets}
 
 

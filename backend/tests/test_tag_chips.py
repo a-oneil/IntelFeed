@@ -94,7 +94,7 @@ async def test_add_tags_name_only_config_still_works(db_session: AsyncSession, c
     assert tag.color == "#6B7280"
     assert tag.display_as_chip is False
     row = (await db_session.execute(select(EntryTag).where(EntryTag.tag_id == tag.id))).scalar_one()
-    assert row.user_id is None  # plain tags stay shared
+    assert row.user_id == test_user.id  # a plain tag is personal too: the rule owner's own
 
 
 @pytest.mark.asyncio
@@ -104,11 +104,11 @@ async def test_add_tags_rejects_bad_color(db_session: AsyncSession, chip_entry: 
     assert tag.color == "#6B7280"
 
 
-# ---- Per-user stamps ----
+# ---- Per-user assignments ----
 
 
 @pytest.mark.asyncio
-async def test_chip_stamp_is_personal(
+async def test_tags_from_rules_are_personal(
     client: AsyncClient,
     db_session: AsyncSession,
     chip_entry: Entry,
@@ -116,15 +116,17 @@ async def test_chip_stamp_is_personal(
     auth_headers: dict,
     other_headers: dict,
 ):
-    await _add_tags(db_session, chip_entry, [{"name": "customer-a", "chip": True}, "shared-label"], test_user.id)
+    """Chip or plain, a tag a rule applies belongs to the rule's owner; another
+    analyst's card doesn't show it."""
+    await _add_tags(db_session, chip_entry, [{"name": "customer-a", "chip": True}, "plain-label"], test_user.id)
 
     mine = {t["name"]: t for t in await _entry_tags(client, auth_headers, chip_entry)}
     assert mine["customer-a"]["display_as_chip"] is True
     assert mine["customer-a"]["personal"] is True
-    assert mine["shared-label"]["personal"] is False
+    assert mine["plain-label"]["personal"] is True
 
     theirs = {t["name"] for t in await _entry_tags(client, other_headers, chip_entry)}
-    assert theirs == {"shared-label"}
+    assert theirs == set()
 
 
 @pytest.mark.asyncio
@@ -259,14 +261,19 @@ async def test_merge_keeps_stamps_personal(
 
 @pytest.mark.asyncio
 async def test_automation_tags_reach_search_index(db_session: AsyncSession, chip_entry: Entry, test_user: User):
-    """Regression: tags applied by a rule are pushed to Meilisearch, shared
-    names in `tags` and personal stamps in `user_tags`."""
+    """Regression: tags applied by a rule are pushed to Meilisearch — global
+    tag names in `tags`, the owner's personal assignments in `user_tags`."""
     with patch("app.services.meilisearch_client.bulk_update_entry_tags") as push:
-        await _add_tags(db_session, chip_entry, [{"name": "customer-a", "chip": True}, "shared-label"], test_user.id)
+        await _add_tags(
+            db_session,
+            chip_entry,
+            [{"name": "customer-a", "chip": True}, "plain-label", {"name": "team-wide", "global": True}],
+            test_user.id,
+        )
 
     pushed = push.call_args[0][0][str(chip_entry.id)]
-    assert pushed["tags"] == ["shared-label"]
-    assert pushed["user_tags"] == [f"{test_user.id}:customer-a"]
+    assert pushed["tags"] == ["team-wide"]
+    assert sorted(pushed["user_tags"]) == sorted([f"{test_user.id}:customer-a", f"{test_user.id}:plain-label"])
 
 
 def test_tag_filter_includes_the_viewers_stamps():

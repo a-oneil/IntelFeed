@@ -33,7 +33,7 @@ from app.models.entry import Entry
 from app.models.entry_state import UserEntryState
 from app.models.note import Note
 from app.models.tag import EntryTag, Tag
-from app.services.entry_tags import sync_entry_tags_to_search, visible_to
+from app.services.entry_tags import MissingOwner, ensure_assignment, sync_entry_tags_to_search, visible_to
 
 logger = logging.getLogger(__name__)
 
@@ -646,9 +646,9 @@ async def _sync_entry_tags_index(db: AsyncSession, entry_id: uuid.UUID) -> None:
     """Push the entry's current tags to the search index.
 
     Meilisearch stores tags as a full array per document, so we recompute the
-    entry's complete tag fields (shared names + personal stamps) and sync them
-    best-effort. Without this, automation-applied tags never reach the index
-    and `tag:` search returns nothing.
+    entry's complete tag fields (global tag names + personal assignment tokens)
+    and sync them best-effort. Without this, automation-applied tags never
+    reach the index and `tag:` search returns nothing.
     """
     await sync_entry_tags_to_search(db, [entry_id])
 
@@ -658,7 +658,7 @@ _HEX_COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 def _tag_spec(item) -> dict | None:
     """Normalise one `add_tags` entry: a bare name, or a dict that also carries
-    the presentation to use if the tag has to be created."""
+    the presentation and scope to use if the tag has to be created."""
     if isinstance(item, str):
         name = item.strip()
         return {"name": name} if name else None
@@ -671,19 +671,21 @@ def _tag_spec(item) -> dict | None:
 async def _action_add_tags(db: AsyncSession, entry: Entry, config: dict, user_id: uuid.UUID | None) -> dict:
     """Add tags to the entry.
 
-    `config["tags"]` holds bare names or `{name, color, description, chip}`
-    objects. The presentation fields apply only when the tag doesn't exist yet:
-    an existing tag's record is the source of truth and is never recoloured
-    from under the other entries carrying it.
+    `config["tags"]` holds bare names or `{name, color, description, chip,
+    global}` objects. The presentation and scope fields apply only when the tag
+    doesn't exist yet: an existing tag's record is the source of truth and is
+    never recoloured or re-scoped from under the other entries carrying it.
 
-    A tag promoted to a chip is stamped for the rule's owner alone, so it shows
-    on their cards and nobody else's; a plain tag is shared, as it always was.
+    Each assignment belongs to the rule's owner — it shows on their cards and
+    nobody else's — unless the tag is global, in which case it is shared. A
+    rule with no owner cannot apply a personal tag and skips it.
     """
     specs = [spec for spec in map(_tag_spec, config.get("tags") or []) if spec]
     if not specs:
         return {"status": "skipped", "message": "No tags specified"}
 
-    added = []
+    added: list[str] = []
+    unowned: list[str] = []
     for spec in specs:
         name = spec["name"][:100]
         # Find or create tag
@@ -698,25 +700,23 @@ async def _action_add_tags(db: AsyncSession, entry: Entry, config: dict, user_id
                 color=color if isinstance(color, str) and _HEX_COLOR.match(color) else "#6B7280",
                 display_as_chip=bool(spec.get("chip")),
                 description=str(description).strip()[:255] or None if description else None,
+                is_global=bool(spec.get("global")),
             )
             db.add(tag)
             await db.flush()
 
-        owner = user_id if tag.display_as_chip else None
-        # Check if already tagged (for this owner)
-        existing = await db.execute(
-            select(EntryTag).where(
-                EntryTag.entry_id == entry.id,
-                EntryTag.tag_id == tag.id,
-                (EntryTag.user_id == owner) if owner else EntryTag.user_id.is_(None),
-            )
-        )
-        if not existing.scalar_one_or_none():
-            entry_tag = EntryTag(entry_id=entry.id, tag_id=tag.id, user_id=owner)
-            db.add(entry_tag)
-            added.append(name)
+        try:
+            if await ensure_assignment(db, entry.id, tag, user_id):
+                added.append(name)
+        except MissingOwner:
+            unowned.append(name)
 
     await db.flush()
+    if unowned and not added:
+        return {
+            "status": "skipped",
+            "message": f"Rule has no owner; personal tags need one: {', '.join(unowned)}",
+        }
     if added:
         await _sync_entry_tags_index(db, entry.id)
     return {"status": "success", "tags_added": added}
@@ -1435,8 +1435,8 @@ async def _action_remove_tags(db: AsyncSession, entry: Entry, config: dict, user
         if not tag:
             continue
 
-        # The shared assignment and the rule owner's own chip stamp; another
-        # analyst's personal stamp is theirs to keep.
+        # The rule owner's own assignment, or the shared one for a global tag;
+        # another analyst's assignment of a personal tag is theirs to keep.
         et_result = await db.execute(
             delete(EntryTag).where(
                 EntryTag.entry_id == entry.id,

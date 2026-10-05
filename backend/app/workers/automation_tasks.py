@@ -321,6 +321,13 @@ async def _run_scheduled_automations():
             if not cron_expr:
                 continue
 
+            # Same guard the engine applies on the per-entry path: conditions
+            # and actions (read state, stars, tag assignments) resolve against
+            # the owner, so an ownerless rule has nothing to act as.
+            if rule.created_by is None:
+                logger.warning("Scheduled rule %s has no owner; skipping until one is assigned", rule.id)
+                continue
+
             if not _should_run_cron(cron_expr, now, rule.last_triggered_at):
                 continue
 
