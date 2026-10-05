@@ -1014,7 +1014,7 @@ Fetch a single article with full content and metadata.
   "malware": [ ... ],
   "ttps": [ ... ],
   "cves": [ ... ],
-  "tags": [ { "id": "...", "name": "vulnerability", "color": "#FF0000" } ],
+  "tags": [ { "id": "...", "name": "vulnerability", "color": "#FF0000", "display_as_chip": false, "description": null, "is_global": false, "personal": true } ],
   "comments_count": 5,
   "notes_count": 2
 }
@@ -3303,7 +3303,7 @@ Notes:
 
 **Categories** (`/api/categories`): `GET`, `POST` (201), `PUT /{category_id}`, `DELETE /{category_id}` (admin only — the folder tree is shared), `PUT /reorder`.
 
-**Tags** (`/api/tags`): `GET`, `POST` (201), `PUT /{tag_id}`, `DELETE /{tag_id}`, `GET/POST /entries/{entry_id}` (entry tags), `DELETE /entries/{entry_id}/{tag_id}`, `POST /entries/bulk-tag`, `POST /entries/bulk-untag`, `POST /merge`.
+**Tags** (`/api/tags`): `GET`, `POST` (201), `PUT /{tag_id}`, `DELETE /{tag_id}`, `GET/POST /entries/{entry_id}` (entry tags), `DELETE /entries/{entry_id}/{tag_id}`, `POST /entries/bulk-tag`, `POST /entries/bulk-untag`, `POST /merge`. The tag list is shared; assignments are per user — `POST /entries/{entry_id}` and `bulk-tag` create the caller's own assignment, and every read (entry `tags`, `GET /entries/{entry_id}`, `entry_count`, the search `tags` facet) is the caller's view — unless the tag has `is_global: true`, in which case one shared assignment serves everyone. Tag fields: `name`, `color`, `display_as_chip`, `description`, `is_global`. `PUT {is_global}` re-homes existing assignments: to global collapses everyone's rows into one shared row per entry; to personal hands the shared row to every human account. `DELETE /entries/{entry_id}/{tag_id}` and `bulk-untag` remove the caller's own assignment (or the shared one of a global tag) and leave other users' alone.
 
 **Auth:** Bearer token
 

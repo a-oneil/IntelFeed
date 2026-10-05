@@ -442,6 +442,12 @@ export interface Tag {
   display_as_chip: boolean;
   /** Chip tooltip. */
   description: string | null;
+  /**
+   * Global: one shared assignment per entry that everyone sees. Personal (the
+   * default): each user's assignments are their own and nobody else sees them.
+   */
+  is_global: boolean;
+  /** Entries carrying the tag as the viewer sees them: their own for a personal tag, everyone's for a global one. */
   entry_count: number;
   created_at: string;
 }
@@ -453,7 +459,8 @@ export interface EntryTag {
   color: string;
   display_as_chip?: boolean;
   description?: string | null;
-  /** On this entry only as the viewer's own chip stamp (from one of their rules). */
+  is_global?: boolean;
+  /** The viewer's own assignment of a personal tag; false for a global tag's shared row. */
   personal?: boolean;
 }
 

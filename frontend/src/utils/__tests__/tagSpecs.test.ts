@@ -21,6 +21,11 @@ describe("tagSpecs", () => {
     });
   });
 
+  it("keeps the global scope only when set", () => {
+    expect(normalizeTagSpec({ name: "x", global: false })).toBe("x");
+    expect(normalizeTagSpec({ name: "x", global: true })).toEqual({ name: "x", global: true });
+  });
+
   it("keeps spaces in a description while it is being typed", () => {
     expect(normalizeTagSpec({ name: "x", description: "Customer " })).toEqual({ name: "x", description: "Customer " });
   });

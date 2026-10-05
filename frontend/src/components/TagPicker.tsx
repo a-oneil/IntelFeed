@@ -4,9 +4,10 @@
  * add/remove-tags actions).
  *
  * With `presentation`, a tag that doesn't exist yet also gets a colour, a
- * "show as chip" switch and a tooltip, so a rule author sets the chip's look
- * the moment they invent it. Existing tags are never restyled from here — the
- * tag's own record is the source of truth.
+ * "show as chip" switch, a "visible to everyone" switch and a tooltip, so a
+ * rule author sets the tag's look and scope the moment they invent it. Existing
+ * tags are never restyled or re-scoped from here — the tag's own record is the
+ * source of truth.
  */
 import { useMemo, useRef, useState } from "react";
 import { useTags } from "@/hooks/useTags";
@@ -27,7 +28,7 @@ interface TagPickerProps {
   value: TagSpec[];
   onChange: (specs: TagSpec[]) => void;
   placeholder?: string;
-  /** Offer colour / chip / tooltip for tags that will be created. */
+  /** Offer colour / chip / scope / tooltip for tags that will be created. */
   presentation?: boolean;
 }
 
@@ -54,6 +55,14 @@ function NewTagEditor({ spec, onChange }: { spec: NewTagSpec; onChange: (spec: N
             onChange={(e) => onChange({ ...spec, chip: e.target.checked })}
           />
           Show as chip
+        </label>
+        <label className={styles.chipToggle} title="One shared assignment per entry that every analyst sees">
+          <input
+            type="checkbox"
+            checked={!!spec.global}
+            onChange={(e) => onChange({ ...spec, global: e.target.checked })}
+          />
+          Visible to everyone
         </label>
       </div>
       <div className={styles.swatches} role="radiogroup" aria-label={`Colour for ${spec.name}`}>
@@ -216,7 +225,8 @@ export function TagPicker({ value, onChange, placeholder = "Add or create tag…
             );
           })}
           <span className={styles.newTagsHint}>
-            Set when the rule first creates the tag. Chips show in the badge row, only to you.
+            Set when the rule first creates the tag. Tags are yours alone unless marked visible to everyone; chips
+            show in the badge row.
           </span>
         </div>
       )}

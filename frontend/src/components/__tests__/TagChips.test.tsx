@@ -66,11 +66,17 @@ describe("TagChips", () => {
     await waitFor(() => expect(del).toHaveBeenCalledWith("/tags/entries/e1/id-customer-a"));
   });
 
-  it("uses the description as tooltip and says when the chip is personal", () => {
+  it("uses the description as tooltip and says who sees the tag", () => {
     renderWithApp(<TagChips tags={[chip("customer-a", { description: "Customer A exposure", personal: true })]} />);
     const title = screen.getByText("customer-a").closest("button")!.getAttribute("title")!;
     expect(title).toMatch(/Customer A exposure/);
-    expect(title).toMatch(/Only you see this/);
+    expect(title).toMatch(/Only you see this tag/);
+  });
+
+  it("says when a tag is global", () => {
+    renderWithApp(<TagChips tags={[chip("team-wide", { is_global: true, personal: false })]} />);
+    const title = screen.getByText("team-wide").closest("button")!.getAttribute("title")!;
+    expect(title).toMatch(/Everyone sees this tag/);
   });
 
   it("derives a readable foreground from the tag colour", () => {

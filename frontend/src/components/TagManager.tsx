@@ -47,6 +47,7 @@ export function TagManager() {
   const [newName, setNewName] = useState("");
   const [newColor, setNewColor] = useState(PALETTE[0]);
   const [newChip, setNewChip] = useState(false);
+  const [newGlobal, setNewGlobal] = useState(false);
 
   const [merging, setMerging] = useState(false);
   const [mergeTarget, setMergeTarget] = useState<string>("");
@@ -109,6 +110,21 @@ export function TagManager() {
     );
   };
 
+  const toggleGlobal = (id: string, name: string, isGlobal: boolean) => {
+    updateTag.mutate(
+      { tagId: id, data: { is_global: isGlobal } },
+      {
+        onSuccess: () =>
+          toast.success(
+            isGlobal
+              ? `"${name}" is now visible to everyone`
+              : `"${name}" is personal again — everyone kept their own copy`,
+          ),
+        onError: (e) => toast.error(errMessage(e, "Couldn't change who sees the tag")),
+      },
+    );
+  };
+
   const startDescribe = (id: string, current: string | null) => {
     setRenamingId(null);
     setRecolorId(null);
@@ -153,11 +169,12 @@ export function TagManager() {
     const name = newName.trim();
     if (!name) return;
     try {
-      await createTag.mutateAsync({ name, color: newColor, display_as_chip: newChip });
+      await createTag.mutateAsync({ name, color: newColor, display_as_chip: newChip, is_global: newGlobal });
       toast.success(`Created "${name}"`);
       setNewName("");
       setNewColor(PALETTE[0]);
       setNewChip(false);
+      setNewGlobal(false);
       setShowNew(false);
     } catch (e) {
       toast.error(errMessage(e, "Couldn't create tag"));
@@ -265,6 +282,10 @@ export function TagManager() {
             <input type="checkbox" checked={newChip} onChange={(e) => setNewChip(e.target.checked)} />
             Chip
           </label>
+          <label className={styles.chipToggle} title="One shared assignment per entry that every analyst sees; otherwise each analyst's tagging is their own">
+            <input type="checkbox" checked={newGlobal} onChange={(e) => setNewGlobal(e.target.checked)} />
+            Everyone
+          </label>
           <button className={`${styles.btn} ${styles.primary}`} onClick={doCreate} disabled={!newName.trim()}>
             Create
           </button>
@@ -333,7 +354,7 @@ export function TagManager() {
           <div className={`${styles.row} ${styles.head}`}>
             <span />
             <span>Tag</span>
-            <span>Articles</span>
+            <span title="Articles carrying the tag as you see it: your own for a personal tag, everyone's for a global one">Articles</span>
             <span className={styles.actionsCol}>Actions</span>
           </div>
 
@@ -391,6 +412,11 @@ export function TagManager() {
                     </button>
                   )}
                   {t.display_as_chip && <span className={styles.chipMark}>chip</span>}
+                  {t.is_global && (
+                    <span className={`${styles.chipMark} ${styles.globalMark}`} title="Everyone sees this tag on an entry">
+                      global
+                    </span>
+                  )}
                   {describingId === t.id ? (
                     <input
                       className={styles.renameInput}
@@ -439,6 +465,18 @@ export function TagManager() {
                         title={t.display_as_chip ? "Show as a plain tag in the meta line" : "Show as a chip in the entry's badge row"}
                       >
                         {t.display_as_chip ? "Unchip" : "Chip"}
+                      </button>
+                      <button
+                        className={styles.ract}
+                        onClick={() => toggleGlobal(t.id, t.name, !t.is_global)}
+                        aria-pressed={t.is_global}
+                        title={
+                          t.is_global
+                            ? "Make personal: hand the shared assignments to every analyst as their own"
+                            : "Make global: merge everyone's assignments into one that every analyst sees"
+                        }
+                      >
+                        {t.is_global ? "Unshare" : "Share"}
                       </button>
                       <button className={styles.ract} onClick={() => startDescribe(t.id, t.description)}>Tooltip</button>
                       <button className={styles.ract} onClick={() => startRename(t.id, t.name)}>Rename</button>

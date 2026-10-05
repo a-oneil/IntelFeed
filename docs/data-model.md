@@ -1051,30 +1051,45 @@ threat-surface previews all take a profile as input.
 
 #### Tag
 
-Tags are global (shared across users), managed via the Tag Manager UI. A tag
-promoted to a chip (`display_as_chip`) renders in the entry's badge row
-(`EntryIntelBadges`) instead of the quiet meta line, with `description` as its
-tooltip.
+The tag *list* is shared: one row per name, with its colour, chip flag and
+tooltip, managed via the Tag Manager UI. Who sees a tag *on an entry* is per
+user (see EntryTag) unless the tag is global. A tag promoted to a chip
+(`display_as_chip`) renders in the entry's badge row (`EntryIntelBadges`)
+instead of the quiet meta line, with `description` as its tooltip.
 
 **Columns:**
 - `id` (UUID PK)
-- `created_by` (FK, nullable, SET NULL)
+- `created_by` (FK, nullable, SET NULL) — audit only
 - `name` (String 100, unique, indexed)
 - `color` (String 7, default "#6B7280")
 - `display_as_chip` (Boolean, default false)
 - `description` (String 255, nullable) — chip tooltip
+- `is_global` (Boolean, default false) — global: one shared assignment per
+  entry that everyone sees; personal: each user's assignments are their own.
+  Anyone can flip it in Tag Manager; flipping re-homes the tag's existing
+  assignments (to global collapses everyone's rows into one shared row per
+  entry; to personal hands the shared row to every human account) and
+  reindexes the affected entries
 - `created_at`
 
 #### EntryTag
 
-One tag on one entry. `user_id` NULL is a shared assignment, visible to
-everyone (everything tagged by hand, and plain tags applied by rules). Set, it
-is a personal stamp: a chip an automation rule applied for its owner, visible
-only to that user — in entry responses, tag counts, `tag:` search and
-`tag_matches`. Read through `app.services.entry_tags.visible_to`. In
-Meilisearch, shared names live in `tags`; personal stamps live in the
+One tag on one entry. For a personal tag (the default) `user_id` is the user
+who applied it — by hand, in bulk, through the copilot tool, or via their
+automation rule — and only they see it, in entry responses, tag counts, `tag:`
+search, the Tags facet and `tag_matches`. For a global tag there is one row per
+entry with `user_id` NULL that everyone sees. Read through
+`app.services.entry_tags.visible_to`; write through `ensure_assignment`, which
+derives the owner from the tag's scope and inserts with `ON CONFLICT`. In
+Meilisearch, global tag names live in `tags`; personal assignments live in the
 filter-only `user_tags` as `"<user_id>:<name>"`, which is stripped from every
-search hit.
+hit and folded into the viewer's own `tags` facet server-side.
+
+Migration `y6q8s0u2w4y6` introduced the per-user model by copying every
+existing shared assignment to every non-system user (the saved-searches
+precedent) and dropping the shared rows; every pre-existing tag started
+personal. `scripts/maintenance/reindex_entry_tags.py` re-pushes the index's
+tag fields afterwards.
 
 **Columns:**
 - `id` (UUID PK)
@@ -1435,7 +1450,7 @@ Data-defined pipeline stage composition per scope. A seeded "Global default" row
 - **`entry_products`** — links entries to products (with confidence, matched_names)
 - **`entry_tools`** — links entries to tools (with confidence, matched_names, paragraph_indices)
 - **`entry_sectors`** — links entries to the victim sectors the article describes as *targeted* (`sector_id` FK to `sectors` plus the canonical slug as a natural key; confidence, source, role, paragraph_indices). Written only by the one-pass AI analysis (`store_sectors`) — sectors are never autolinked, so a row is a judgment, not a word match
-- **`entry_tags`** — links entries to user-defined tags
+- **`entry_tags`** — links entries to user-defined tags; one row per (entry, tag, user) for a personal tag, one shared row (`user_id` NULL) for a global tag
 - **`threat_actor_target_countries`** — links threat actors to targeted countries
 - **`threat_actor_target_sectors`** / **`malware_target_sectors`** — "X targets sector S" claims, each with a `source` (`rollup` from the entity's own articles, `enrichment`, `seed`, `analyst`) and an `article_count` of evidence; the nightly rollup owns only its own rows
 - **`campaign_sectors`** — the victim verticals a campaign is scoped to
@@ -1612,7 +1627,7 @@ Enums are defined as string columns with CHECK constraints or documented in Pyth
 - **`countries(iso_code)`** — one country per ISO code
 - **`entity_relationships(source_type, source_id, target_type, target_id, relationship_type)`** — one relationship per directed pair and type
 - **`glossary_terms(name)`** — unique glossary entries
-- **`tags(name)`** — tags are global; unique by name
+- **`tags(name)`** — the tag list is shared; unique by name (assignments are per user unless the tag is global)
 - **`ai_tasks(name)`** — one task per name
 - **`campaign_saved_searches(campaign_id, saved_search_id)`** — one link per pair
 - **`entry_signals(entry_id, signal_type)`** — one signal per type per entry (upsert)

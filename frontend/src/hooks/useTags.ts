@@ -2,11 +2,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "@/api/client";
 import type { Tag } from "@/api/types";
 
-/** How a tag looks: its colour, whether it renders as a chip, and the chip tooltip. */
+/** How a tag looks and who sees it: colour, chip rendering, chip tooltip, and scope. */
 export interface TagPresentation {
   color?: string;
   display_as_chip?: boolean;
   description?: string;
+  /** Global tags have one shared assignment per entry; personal tags are each user's own. */
+  is_global?: boolean;
 }
 
 export function useTags() {
@@ -52,9 +54,12 @@ export function useUpdateTag() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tags"] });
-      // Promoting/demoting or recolouring changes how every card draws the tag.
+      // Promoting/demoting or recolouring changes how every card draws the tag;
+      // a scope flip changes which cards carry it and what the facet rail counts.
       queryClient.invalidateQueries({ queryKey: ["entries"] });
       queryClient.invalidateQueries({ queryKey: ["entry"] });
+      queryClient.invalidateQueries({ queryKey: ["entry-tags"] });
+      queryClient.invalidateQueries({ queryKey: ["unified-search"] });
     },
   });
 }

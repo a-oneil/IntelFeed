@@ -952,7 +952,7 @@ async def _entry_page(
             )
 
     # Batch-load tags for all entries
-    # Shared tags plus the viewer's own chip stamps — never another user's.
+    # The viewer's own tag assignments plus global tags — never another user's.
     tags_map = await load_entry_tags(db, entry_ids, user.id)
 
     # Batch-load signal chips (signal engine, only when surfaced)

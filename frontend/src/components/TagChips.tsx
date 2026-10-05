@@ -18,7 +18,7 @@ export function chipTags(tags: EntryTag[] | undefined): EntryTag[] {
 
 function chipTitle(tag: EntryTag): string {
   const lines = [tag.description || tag.name];
-  if (tag.personal) lines.push("Only you see this — one of your rules stamped it");
+  lines.push(tag.personal ? "Only you see this tag" : "Everyone sees this tag");
   lines.push(`Click to see everything tagged "${tag.name}"`);
   return lines.join("\n");
 }

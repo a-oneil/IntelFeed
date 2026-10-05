@@ -476,6 +476,12 @@
   padding: 0 4px;
 }
 
+/* Same mark, tinted so "global" reads apart from "chip" at a glance. */
+.globalMark {
+  color: var(--accent-detect);
+  border-color: color-mix(in srgb, var(--accent-detect) 45%, transparent);
+}
+
 .tagDescription {
   min-width: 0;
   overflow: hidden;

@@ -159,8 +159,8 @@ def _eval_author_matches(entry: Entry, config: dict) -> bool:
 async def _eval_tag_matches(db: AsyncSession, entry: Entry, config: dict, user_id=None) -> bool:
     """Check if entry has any of the specified tags.
 
-    Sees what the rule's owner sees: shared tags plus their own chip stamps, so
-    one of their rules' chips can trigger another of their rules.
+    Sees what the rule's owner sees: their own tag assignments plus global
+    tags, so a tag one of their rules applies can trigger another of their rules.
     """
     tag_names = config.get("tags", [])
     if not tag_names:
