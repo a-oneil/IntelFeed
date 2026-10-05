@@ -1,5 +1,11 @@
 """User-defined chips: promotable tags and per-user chip stamps.
 
+Superseded in part by y6q8s0u2w4y6, which makes *every* assignment per-user
+and adds `tags.is_global` as the shared exception; the shape this revision
+introduces (`entry_tags.id`, nullable `user_id`, the NULLS NOT DISTINCT unique
+constraint) is what that revision builds on. The paragraphs below describe the
+model as it stood at this revision.
+
 Revision ID: x5p7r9t1v3x5
 Revises: w4o6q8s0u2w4
 Create Date: 2026-10-04

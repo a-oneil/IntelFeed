@@ -656,14 +656,21 @@ async def _sync_entry_tags_index(db: AsyncSession, entry_id: uuid.UUID) -> None:
 _HEX_COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 
+def _clean_tag_name(raw: object) -> str:
+    """A tag name as the Tag model accepts it: trimmed, capped at the column's
+    100 chars, with the two characters a search filter can't take (`"` and `\\`)
+    dropped — see TAG_NAME_PATTERN in app.schemas.tag."""
+    return str(raw or "").replace('"', "").replace("\\", "").strip()[:100]
+
+
 def _tag_spec(item) -> dict | None:
     """Normalise one `add_tags` entry: a bare name, or a dict that also carries
     the presentation and scope to use if the tag has to be created."""
     if isinstance(item, str):
-        name = item.strip()
+        name = _clean_tag_name(item)
         return {"name": name} if name else None
     if isinstance(item, dict):
-        name = str(item.get("name") or "").strip()
+        name = _clean_tag_name(item.get("name"))
         return {**item, "name": name} if name else None
     return None
 
@@ -687,10 +694,14 @@ async def _action_add_tags(db: AsyncSession, entry: Entry, config: dict, user_id
     added: list[str] = []
     unowned: list[str] = []
     for spec in specs:
-        name = spec["name"][:100]
+        name = spec["name"]
         # Find or create tag
         result = await db.execute(select(Tag).where(Tag.name == name))
         tag = result.scalar_one_or_none()
+        if not tag and user_id is None and not spec.get("global"):
+            # Nobody to own the assignment, so don't mint an orphan definition.
+            unowned.append(name)
+            continue
         if not tag:
             color = spec.get("color")
             description = spec.get("description")
@@ -716,10 +727,14 @@ async def _action_add_tags(db: AsyncSession, entry: Entry, config: dict, user_id
         return {
             "status": "skipped",
             "message": f"Rule has no owner; personal tags need one: {', '.join(unowned)}",
+            "tags_skipped": unowned,
         }
     if added:
         await _sync_entry_tags_index(db, entry.id)
-    return {"status": "success", "tags_added": added}
+    result_payload: dict = {"status": "success", "tags_added": added}
+    if unowned:
+        result_payload["tags_skipped"] = unowned
+    return result_payload
 
 
 async def _action_send_notification(entry: Entry, config: dict, context: dict | None = None) -> dict:
@@ -1424,6 +1439,7 @@ async def _action_hide_entry(db: AsyncSession, entry: Entry, user_id: uuid.UUID)
 
 async def _action_remove_tags(db: AsyncSession, entry: Entry, config: dict, user_id: uuid.UUID) -> dict:
     """Remove tags from an entry."""
+    # Names normalised exactly as `add_tags` does, so a rule removes what it added.
     tag_names = [spec["name"] for spec in map(_tag_spec, config.get("tags") or []) if spec]
     if not tag_names:
         return {"status": "skipped", "message": "No tags specified"}

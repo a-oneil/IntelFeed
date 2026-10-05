@@ -249,7 +249,7 @@ export interface SearchHit {
   published_at: string | number | null;
   url: string | null;
   tags: string[];
-  /** Tags the viewer sees on this hit, with chip presentation (shared + their own stamps). */
+  /** Tags the viewer sees on this hit, with chip presentation: global tags plus their own personal assignments. */
   tag_details?: EntryTag[];
   word_count: number | null;
   is_read: boolean;

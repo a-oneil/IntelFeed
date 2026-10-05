@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import fnmatch
 
-from app.search.query_planner import ExecutionPlan, PendingFacetFilter, SearchBranch
+from app.search.query_planner import ExecutionPlan, PendingFacetFilter, SearchBranch, meili_quote
 from app.services import meilisearch_client
 
 # Maps plan.sort values to Meilisearch sort parameters.
@@ -53,10 +53,12 @@ def _resolve_facet_filters(index, pending: list[PendingFacetFilter], viewer_id: 
             values, tokens = [], []
 
         pattern = pf.pattern.lower()
-        matched = [f'{pf.attribute} = "{v}"' for v in values if fnmatch.fnmatchcase(str(v).lower(), pattern)]
+        matched = [
+            f"{pf.attribute} = {meili_quote(str(v))}" for v in values if fnmatch.fnmatchcase(str(v).lower(), pattern)
+        ]
         prefix = f"{viewer_id}:"
         matched += [
-            f'user_tags = "{t}"'
+            f"user_tags = {meili_quote(str(t))}"
             for t in tokens
             if str(t).startswith(prefix) and fnmatch.fnmatchcase(str(t)[len(prefix) :].lower(), pattern)
         ]

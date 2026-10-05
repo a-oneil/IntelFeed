@@ -52,8 +52,9 @@ class EntryTag(Base):
     entry_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("entries.id", ondelete="CASCADE"), nullable=False
     )
+    # Scope flips, merges, renames and deletes all walk a tag's rows.
     tag_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("tags.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True), ForeignKey("tags.id", ondelete="CASCADE"), nullable=False, index=True
     )
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True

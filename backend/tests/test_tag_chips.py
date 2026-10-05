@@ -1,5 +1,5 @@
-"""User-defined chips: promotable tags, rule-authored presentation, and
-per-user chip stamps (issue #23)."""
+"""User-defined chips: promotable tags and rule-authored presentation (issue
+#23), on the per-user assignment model (see test_tag_scope.py)."""
 
 from unittest.mock import patch
 
@@ -142,7 +142,7 @@ async def test_two_users_can_stamp_the_same_chip(
 
 
 @pytest.mark.asyncio
-async def test_remove_from_card_only_removes_my_stamp(
+async def test_remove_from_card_only_removes_my_assignment(
     client: AsyncClient,
     db_session: AsyncSession,
     chip_entry: Entry,
@@ -197,7 +197,7 @@ async def test_tag_matches_sees_the_rule_owners_chips(
 
 
 @pytest.mark.asyncio
-async def test_remove_tags_action_leaves_other_users_stamps(
+async def test_remove_tags_action_leaves_other_users_assignments(
     db_session: AsyncSession, chip_entry: Entry, test_user: User, other_user: User
 ):
     from app.automation.actions import execute_action
@@ -276,7 +276,7 @@ async def test_automation_tags_reach_search_index(db_session: AsyncSession, chip
     assert sorted(pushed["user_tags"]) == sorted([f"{test_user.id}:customer-a", f"{test_user.id}:plain-label"])
 
 
-def test_tag_filter_includes_the_viewers_stamps():
+def test_tag_filter_includes_the_viewers_assignments():
     plan = build_execution_plan(parse_query('tag:"customer-a"'), viewer_id="u-1")
     assert plan.meili_filters == ['(tags = "customer-a" OR user_tags = "u-1:customer-a")']
 
@@ -286,7 +286,7 @@ def test_tag_filter_without_viewer_is_shared_only():
     assert plan.meili_filters == ['tags = "customer-a"']
 
 
-def test_negated_tag_filter_covers_the_viewers_stamps():
+def test_negated_tag_filter_covers_the_viewers_assignments():
     plan = build_execution_plan(parse_query('NOT tag:"customer-a"'), viewer_id="u-1")
     assert plan.meili_filters == ['NOT (tags = "customer-a" OR user_tags = "u-1:customer-a")']
 

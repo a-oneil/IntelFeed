@@ -17,7 +17,7 @@ only ever matches against the searcher's own id.
 import uuid
 from collections.abc import Iterable
 
-from sqlalchemy import ColumnElement, cast, delete, distinct, literal, null, or_, select, true
+from sqlalchemy import ColumnElement, and_, cast, delete, distinct, literal, null, or_, select, true
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,12 +43,21 @@ def visible_to(user_id: uuid.UUID | str | None) -> ColumnElement[bool]:
     """Filter clause for the `EntryTag` rows a user can see: global tags'
     shared rows plus their own.
 
+    A shared row (`user_id` NULL) counts only while its tag is global. A stray
+    NULL row on a personal tag — a worker that read the tag just before someone
+    flipped it — is therefore invisible to everyone rather than published to
+    everyone, and the next flip to global and back sweeps it up.
+
     `None` (no user in context, e.g. an unauthenticated export) sees global
     rows only.
     """
+    shared = and_(
+        EntryTag.user_id.is_(None),
+        EntryTag.tag_id.in_(select(Tag.id).where(Tag.is_global.is_(True))),
+    )
     if user_id is None:
-        return EntryTag.user_id.is_(None)
-    return or_(EntryTag.user_id.is_(None), EntryTag.user_id == uuid.UUID(str(user_id)))
+        return shared
+    return or_(shared, EntryTag.user_id == uuid.UUID(str(user_id)))
 
 
 def assignment_owner(tag: Tag, user_id: uuid.UUID | str | None) -> uuid.UUID | None:
@@ -140,14 +149,16 @@ async def search_tag_fields(db: AsyncSession, entry_ids: Iterable[uuid.UUID]) ->
     if not ids:
         return fields
     result = await db.execute(
-        select(EntryTag.entry_id, EntryTag.user_id, Tag.name)
+        select(EntryTag.entry_id, EntryTag.user_id, Tag.name, Tag.is_global)
         .join(Tag, Tag.id == EntryTag.tag_id)
         .where(EntryTag.entry_id.in_(ids))
     )
-    for entry_id, user_id, name in result.all():
+    for entry_id, user_id, name, is_global in result.all():
         doc = fields[str(entry_id)]
         if user_id is None:
-            if name not in doc["tags"]:
+            # Same rule as visible_to: a shared row only counts while its tag is
+            # global, so a stray one on a personal tag is not published either.
+            if is_global and name not in doc["tags"]:
                 doc["tags"].append(name)
         else:
             doc["user_tags"].append(personal_tag_token(user_id, name))

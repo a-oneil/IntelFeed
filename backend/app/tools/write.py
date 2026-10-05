@@ -741,8 +741,12 @@ async def _create_entity_note(
 )
 async def _add_tag(db: AsyncSession, user_id: uuid.UUID, entry_id: str, tag_name: str) -> dict:
     """The assignment is the caller's own unless the tag is global."""
+    from app.automation.actions import _clean_tag_name
     from app.services.entry_tags import ensure_assignment, sync_entry_tags_to_search
 
+    tag_name = _clean_tag_name(tag_name)  # same normalisation as a rule's add_tags
+    if not tag_name:
+        return {"error": "tag_name is required"}
     tag_q = await db.execute(select(Tag).where(Tag.name == tag_name))
     tag = tag_q.scalar_one_or_none()
     if not tag:

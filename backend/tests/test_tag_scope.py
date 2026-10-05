@@ -461,6 +461,160 @@ def test_legacy_tags_filter_includes_the_viewers_assignments():
         assert "user_tags" in index.search.call_args[0][1]["facets"]
 
 
+# ---- filter strings are built, not interpolated ----
+
+
+def test_meili_quote_escapes_quotes_and_backslashes():
+    from app.search.query_planner import meili_quote, tag_filter_clause
+
+    assert meili_quote("plain") == '"plain"'
+    assert meili_quote('a"b') == '"a\\"b"'
+    assert meili_quote("a\\b") == '"a\\\\b"'
+    # A value trying to close the quote and add its own clause stays one literal.
+    hostile = 'x" OR user_tags = "victim:customer-a'
+    expected_global = 'tags = "x\\" OR user_tags = \\"victim:customer-a"'
+    expected_mine = 'user_tags = "me:x\\" OR user_tags = \\"victim:customer-a"'
+    assert tag_filter_clause(hostile, "me") == f"({expected_global} OR {expected_mine})"
+
+
+def test_wildcard_expansion_quotes_indexed_values():
+    from app.search.meili_builder import _resolve_facet_filters
+    from app.search.query_planner import PendingFacetFilter
+
+    class Index:
+        def search(self, query, params):
+            return {"facetDistribution": {"tags": {'odd"name': 1}, "user_tags": {'u-1:odd"mine': 1}}}
+
+    clauses = _resolve_facet_filters(Index(), [PendingFacetFilter("tags", "odd*")], viewer_id="u-1")
+    assert clauses == ['(tags = "odd\\"name" OR user_tags = "u-1:odd\\"mine")']
+
+
+def test_legacy_tags_param_cannot_escape_the_filter():
+    from unittest.mock import MagicMock
+
+    from app.services import meilisearch_client
+
+    index = MagicMock()
+    index.search.return_value = {"hits": [], "estimatedTotalHits": 0, "processingTimeMs": 0}
+    with patch("app.services.meilisearch_client._get_client") as get_client:
+        get_client.return_value = MagicMock(index=MagicMock(return_value=index))
+        meilisearch_client.search_entries(query="", tags=['x" OR user_tags = "victim:secret'], viewer_id="me")
+    flt = index.search.call_args[0][1]["filter"]
+    assert 'user_tags = "victim:secret"' not in flt
+    assert flt.count("OR") == 3 and flt.startswith('(tags = "x\\" OR')
+
+
+@pytest.mark.asyncio
+async def test_tag_names_cannot_carry_quotes(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession, scope_entries
+):
+    # Request validation errors come back as 400 from the app's handler.
+    resp = await client.post("/api/tags", json={"name": 'say "hi"'}, headers=auth_headers)
+    assert resp.status_code == 400
+    resp = await client.post("/api/tags", json={"name": "back\\slash"}, headers=auth_headers)
+    assert resp.status_code == 400
+
+    # Rules and the copilot tool normalise instead of failing.
+    from app.automation.actions import execute_action
+
+    result = await execute_action(
+        db_session, scope_entries[0], {"type": "add_tags", "config": {"tags": ['cust "a"']}}, None
+    )
+    assert result["status"] == "skipped"  # no owner — but the name was cleaned first
+    assert "cust a" in result["message"]
+
+
+# ---- the index mirrors visible_to ----
+
+
+@pytest.mark.asyncio
+async def test_index_fields_skip_a_stray_shared_row_on_a_personal_tag(
+    db_session: AsyncSession, scope_entries: list[Entry], test_user: User
+):
+    from app.services.entry_tags import search_tag_fields
+
+    personal = await _make_tag(db_session, "customer-a")
+    shared = await _make_tag(db_session, "team-wide", is_global=True)
+    entry = scope_entries[0]
+    db_session.add_all(
+        [
+            EntryTag(entry_id=entry.id, tag_id=personal.id, user_id=None),  # stray
+            EntryTag(entry_id=entry.id, tag_id=shared.id, user_id=None),
+        ]
+    )
+    await ensure_assignment(db_session, entry.id, personal, test_user.id)
+    await db_session.flush()
+
+    fields = await search_tag_fields(db_session, [entry.id])
+    assert fields[str(entry.id)] == {"tags": ["team-wide"], "user_tags": [f"{test_user.id}:customer-a"]}
+
+
+def test_reindexing_an_entry_keeps_its_tag_fields():
+    """index_entry is a partial update that leaves `tags`/`user_tags` alone
+    unless told otherwise; a transcript append or reconcile must not wipe them."""
+    from unittest.mock import MagicMock
+
+    from app.services import meilisearch_client
+
+    index = MagicMock()
+    with patch("app.services.meilisearch_client._get_client") as get_client:
+        get_client.return_value = MagicMock(index=MagicMock(return_value=index))
+        meilisearch_client.index_entry(
+            entry_id=uuid.uuid4(),
+            feed_id=uuid.uuid4(),
+            title="t",
+            content_text="body",
+            summary=None,
+            author=None,
+            published_at=None,
+            feed_title="f",
+            feed_type="rss",
+        )
+    index.add_documents.assert_not_called()
+    (doc,), _ = index.update_documents.call_args[0], index.update_documents.call_args[1]
+    assert "tags" not in doc and "user_tags" not in doc
+
+
+def test_multi_branch_search_folds_the_viewers_facets():
+    from unittest.mock import MagicMock
+
+    from app.search.meili_builder import execute_entry_search
+    from app.search.query_parser import parse_query
+    from app.search.query_planner import build_execution_plan
+
+    class Index:
+        def search(self, query, params):
+            return {
+                "hits": [{"id": query, "user_tags": ["u-1:x"]}],
+                "estimatedTotalHits": 1,
+                "processingTimeMs": 1,
+                "facetDistribution": {"tags": {"team-wide": 1}, "user_tags": {"u-1:customer-a": 1, "u-2:other": 1}},
+            }
+
+    plan = build_execution_plan(parse_query("qilin OR lockbit"), viewer_id="u-1")
+    assert len(plan.branches) == 2
+    with patch("app.services.meilisearch_client._get_client") as get_client:
+        get_client.return_value = MagicMock(index=MagicMock(return_value=Index()))
+        result = execute_entry_search(plan)
+    assert result["facetDistribution"] == {"tags": {"team-wide": 2, "customer-a": 2}}
+    assert all("user_tags" not in h for h in result["hits"])
+
+
+def test_get_facets_drops_other_users_tokens():
+    from unittest.mock import MagicMock
+
+    from app.services import meilisearch_client
+
+    index = MagicMock()
+    index.search.return_value = {
+        "facetDistribution": {"tags": {"team-wide": 3}, "user_tags": {"me:customer-a": 2, "them:secret": 9}}
+    }
+    with patch("app.services.meilisearch_client._get_client") as get_client:
+        get_client.return_value = MagicMock(index=MagicMock(return_value=index))
+        facets = meilisearch_client.get_facets(query="", viewer_id="me")
+    assert facets == {"tags": {"team-wide": 3, "customer-a": 2}}
+
+
 # ---- backup ----
 
 
@@ -497,6 +651,247 @@ async def test_backup_round_trips_tag_scope_and_presentation(
     assert resp.status_code == 200
     restored = (await db_session.execute(select(Tag).where(Tag.name == "team-wide"))).scalar_one()
     assert (restored.is_global, restored.display_as_chip, restored.description) == (True, True, "Shared")
+
+
+# ---- the harder interleavings ----
+
+
+@pytest.mark.asyncio
+async def test_rename_and_flip_in_one_put(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    scope_entries: list[Entry],
+    test_user: User,
+    other_user: User,
+    auth_headers: dict,
+):
+    tag = await _make_tag(db_session, "cust-a")
+    entry = scope_entries[0]
+    await ensure_assignment(db_session, entry.id, tag, test_user.id)
+    await ensure_assignment(db_session, entry.id, tag, other_user.id)
+
+    with patch("app.services.meilisearch_client.bulk_update_entry_tags") as push:
+        resp = await client.put(
+            f"/api/tags/{tag.id}", json={"name": "customer-a", "is_global": True}, headers=auth_headers
+        )
+    assert resp.status_code == 200
+    assert (resp.json()["name"], resp.json()["is_global"]) == ("customer-a", True)
+    assert await _rows(db_session, tag) == [(entry.id, None)]
+    # The index gets the new name, in the shared field.
+    assert push.call_args[0][0][str(entry.id)] == {"tags": ["customer-a"], "user_tags": []}
+
+
+@pytest.mark.asyncio
+async def test_two_users_flipping_back_and_forth(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    scope_entries: list[Entry],
+    test_user: User,
+    other_user: User,
+    system_user: User,
+    auth_headers: dict,
+    other_headers: dict,
+):
+    tag = await _make_tag(db_session, "customer-a")
+    e0, e1 = scope_entries
+    await ensure_assignment(db_session, e0.id, tag, test_user.id)
+    await ensure_assignment(db_session, e1.id, tag, other_user.id)
+
+    async def counts() -> tuple[int, int]:
+        a = next(t for t in (await client.get("/api/tags", headers=auth_headers)).json() if t["id"] == str(tag.id))
+        b = next(t for t in (await client.get("/api/tags", headers=other_headers)).json() if t["id"] == str(tag.id))
+        return a["entry_count"], b["entry_count"]
+
+    assert await counts() == (1, 1)
+    with patch("app.services.meilisearch_client.bulk_update_entry_tags"):
+        assert (
+            await client.put(f"/api/tags/{tag.id}", json={"is_global": True}, headers=auth_headers)
+        ).status_code == 200
+        assert await counts() == (2, 2)  # both entries, one shared row each
+        assert (
+            await client.put(f"/api/tags/{tag.id}", json={"is_global": False}, headers=other_headers)
+        ).status_code == 200
+        assert await counts() == (2, 2)  # fanned out: each user now owns both
+        assert (
+            await client.put(f"/api/tags/{tag.id}", json={"is_global": True}, headers=auth_headers)
+        ).status_code == 200
+    rows = await _rows(db_session, tag)
+    assert rows == sorted([(e0.id, None), (e1.id, None)], key=lambda r: (str(r[0]), str(r[1])))
+
+
+@pytest.mark.asyncio
+async def test_delete_tag_with_mixed_rows_clears_the_index(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    scope_entries: list[Entry],
+    test_user: User,
+    other_user: User,
+    auth_headers: dict,
+):
+    tag = await _make_tag(db_session, "customer-a")
+    entry = scope_entries[0]
+    await ensure_assignment(db_session, entry.id, tag, test_user.id)
+    await ensure_assignment(db_session, entry.id, tag, other_user.id)
+    db_session.add(EntryTag(entry_id=entry.id, tag_id=tag.id, user_id=None))
+    await db_session.flush()
+
+    with patch("app.services.meilisearch_client.bulk_update_entry_tags") as push:
+        resp = await client.delete(f"/api/tags/{tag.id}", headers=auth_headers)
+    assert resp.status_code == 204
+    assert await _rows(db_session, tag) == []
+    assert push.call_args[0][0] == {str(entry.id): {"tags": [], "user_tags": []}}
+
+
+@pytest.mark.asyncio
+async def test_copilot_delete_entity_tag_clears_the_index(
+    db_session: AsyncSession, scope_entries: list[Entry], test_user: User, other_user: User
+):
+    from app.tools.delete import _delete_entity
+
+    tag = await _make_tag(db_session, "customer-a")
+    entry = scope_entries[0]
+    await ensure_assignment(db_session, entry.id, tag, test_user.id)
+    await ensure_assignment(db_session, entry.id, tag, other_user.id)
+
+    first = await _delete_entity(db_session, test_user.id, "tag", str(tag.id))
+    assert first.get("confirmation_token"), first
+    with patch("app.services.meilisearch_client.bulk_update_entry_tags") as push:
+        done = await _delete_entity(db_session, test_user.id, "tag", str(tag.id), first["confirmation_token"])
+    assert done["status"] == "deleted"
+    assert await _rows(db_session, tag) == []
+    assert push.call_args[0][0] == {str(entry.id): {"tags": [], "user_tags": []}}
+
+
+@pytest.mark.asyncio
+async def test_global_tag_can_be_removed_by_anyone(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    scope_entries: list[Entry],
+    test_user: User,
+    other_user: User,
+    other_headers: dict,
+):
+    """A global tag's shared row is everyone's: another user, or another
+    user's rule, can take it off the entry."""
+    from app.automation.actions import execute_action
+
+    tag = await _make_tag(db_session, "team-wide", is_global=True)
+    e0, e1 = scope_entries
+    await ensure_assignment(db_session, e0.id, tag, test_user.id)
+    await ensure_assignment(db_session, e1.id, tag, test_user.id)
+
+    resp = await client.delete(f"/api/tags/entries/{e0.id}/{tag.id}", headers=other_headers)
+    assert resp.status_code == 204
+
+    result = await execute_action(
+        db_session, e1, {"type": "remove_tags", "config": {"tags": ["team-wide"]}}, other_user.id
+    )
+    assert result["tags_removed"] == ["team-wide"]
+    assert await _rows(db_session, tag) == []
+
+
+@pytest.mark.asyncio
+async def test_run_now_refuses_an_ownerless_rule(client: AsyncClient, db_session: AsyncSession, admin_headers: dict):
+    from app.models.automation_rule import AutomationRule
+
+    rule = AutomationRule(
+        created_by=None,
+        name="Orphan",
+        trigger_type="on_manual",
+        conditions={},
+        actions=[{"type": "add_tags", "config": {"tags": ["orphan-tag"]}}],
+    )
+    db_session.add(rule)
+    await db_session.flush()
+
+    resp = await client.post(f"/api/automation/rules/{rule.id}/run", headers=admin_headers)
+    assert resp.status_code == 400
+    assert "no owner" in resp.json()["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_personal_flag_when_shared_and_own_rows_coexist(
+    db_session: AsyncSession, scope_entries: list[Entry], test_user: User
+):
+    """Mid-flip a global tag can briefly have both a shared row and a user's
+    own row; the shared one decides the label."""
+    tag = await _make_tag(db_session, "team-wide", is_global=True)
+    entry = scope_entries[0]
+    db_session.add_all(
+        [
+            EntryTag(entry_id=entry.id, tag_id=tag.id, user_id=None),
+            EntryTag(entry_id=entry.id, tag_id=tag.id, user_id=test_user.id),
+        ]
+    )
+    await db_session.flush()
+    items = (await load_entry_tags(db_session, [entry.id], test_user.id))[entry.id]
+    assert [(t["name"], t["personal"]) for t in items] == [("team-wide", False)]
+
+
+@pytest.mark.asyncio
+async def test_stray_shared_row_on_a_personal_tag_is_invisible(
+    db_session: AsyncSession, scope_entries: list[Entry], test_user: User, other_user: User
+):
+    """A NULL-owner row that outlives a flip to personal must not publish the
+    tag to everyone; it is simply not shown."""
+    tag = await _make_tag(db_session, "customer-a")
+    entry = scope_entries[0]
+    db_session.add(EntryTag(entry_id=entry.id, tag_id=tag.id, user_id=None))
+    await db_session.flush()
+    assert await _names_for(db_session, entry, test_user.id) == set()
+    assert await _names_for(db_session, entry, other_user.id) == set()
+    assert await _names_for(db_session, entry, None) == set()
+
+
+@pytest.mark.asyncio
+async def test_export_and_top_tags_do_not_leak_across_users(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    scope_entries: list[Entry],
+    test_user: User,
+    other_user: User,
+    auth_headers: dict,
+    other_headers: dict,
+):
+    from datetime import UTC, datetime
+
+    tag = await _make_tag(db_session, "customer-a")
+    entry = scope_entries[0]
+    entry.published_at = datetime.now(UTC)
+    await ensure_assignment(db_session, entry.id, tag, test_user.id)
+    await db_session.flush()
+
+    mine = (await client.get(f"/api/export/entries/{entry.id}", headers=auth_headers)).text
+    theirs = (await client.get(f"/api/export/entries/{entry.id}", headers=other_headers)).text
+    assert "customer-a" in mine
+    assert "customer-a" not in theirs
+
+    mine = (await client.get("/api/widgets/top-tags", headers=auth_headers)).json()
+    theirs = (await client.get("/api/widgets/top-tags", headers=other_headers)).json()
+    names = lambda payload: {t["name"] for t in (payload["tags"] if isinstance(payload, dict) else payload)}  # noqa: E731
+    assert "customer-a" in names(mine)
+    assert "customer-a" not in names(theirs)
+
+
+# ---- the reindex script's queries ----
+
+
+@pytest.mark.asyncio
+async def test_reindex_script_queries_run(db_session: AsyncSession, scope_entries: list[Entry], test_user: User):
+    """Both branches of the maintenance script's id query must execute: the
+    tagged-only branch once rendered `ORDER BY DISTINCT …`."""
+    path = Path(__file__).resolve().parents[2] / "scripts" / "maintenance" / "reindex_entry_tags.py"
+    spec = importlib.util.spec_from_file_location("reindex_entry_tags", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    tag = await _make_tag(db_session, "customer-a")
+    await ensure_assignment(db_session, scope_entries[0].id, tag, test_user.id)
+
+    tagged = await module.entry_ids(db_session, include_untagged=False)
+    everything = await module.entry_ids(db_session, include_untagged=True)
+    assert tagged == [scope_entries[0].id]
+    assert set(everything) >= {e.id for e in scope_entries}
 
 
 # ---- migration SQL ----

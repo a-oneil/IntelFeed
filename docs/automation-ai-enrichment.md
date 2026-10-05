@@ -125,7 +125,7 @@ Actions execute sequentially and share a mutable context dict. Earlier actions c
 | `remove_tags` | `tags: list[str]` | Remove the rule owner's own assignment, or the shared one for a global tag; other users' assignments of a personal tag stay |
 | `send_notification` | `platform, webhook_url, channel, message_template, include_embeds` | POST to Slack/Discord/custom webhook |
 | `run_webhook` | `url: str, headers: dict, payload: str` | POST custom JSON to URL |
-| `mark_priority` | `level: str` | Add priority tag (priority-{level}) |
+| `mark_priority` | `level: str` | Add the `priority-{level}` tag via `add_tags`, so it follows that tag's scope: personal to the rule owner unless `priority-{level}` has been made global in Tag Manager |
 | `mark_read` | — | Mark as read for creator user |
 | `star_entry` | — | Star entry |
 | `bookmark_entry` | — | Bookmark entry |

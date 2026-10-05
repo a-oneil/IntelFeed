@@ -73,10 +73,11 @@ describe("TagChips", () => {
     expect(title).toMatch(/Only you see this tag/);
   });
 
-  it("says when a tag is global", () => {
-    renderWithApp(<TagChips tags={[chip("team-wide", { is_global: true, personal: false })]} />);
+  it("says when a tag is global and offers no one-click × for it", () => {
+    renderWithApp(<TagChips tags={[chip("team-wide", { is_global: true, personal: false })]} entryId="e1" />);
     const title = screen.getByText("team-wide").closest("button")!.getAttribute("title")!;
     expect(title).toMatch(/Everyone sees this tag/);
+    expect(screen.queryByRole("button", { name: 'Remove "team-wide" from this entry' })).toBeNull();
   });
 
   it("derives a readable foreground from the tag colour", () => {

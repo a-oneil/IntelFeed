@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from fastapi import APIRouter, Body, Depends, Path
@@ -26,20 +27,17 @@ from app.services.entry_tags import (
     visible_to,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 
-async def _sync_entry_tags_to_search(db: AsyncSession, entry_id: uuid.UUID):
-    """Recompute an entry's tags and update the search index."""
-    await sync_entry_tags_to_search(db, [entry_id])
-
-
 async def _reindex_entries_tags(db: AsyncSession, entry_ids: list[uuid.UUID]):
-    """Recompute + push the full tag fields for many entries to the search index.
+    """Recompute + push the tag fields for these entries to the search index.
 
-    Used by rename / delete / merge, which change the tag names stored on
-    potentially thousands of entries. Entries that end up with no tags are
-    cleared. Batched in one pass.
+    Every tag write ends here: a rename, scope flip, delete or merge can touch
+    thousands of entries, a single tag/untag just one. Entries that end up with
+    no tags are cleared. Batched in one pass.
     """
     await sync_entry_tags_to_search(db, entry_ids)
 
@@ -171,7 +169,17 @@ async def update_tag(
     reindex: set[uuid.UUID] = set()
     if body.is_global is not None and body.is_global != tag.is_global:
         rehome = make_tag_global if body.is_global else make_tag_personal
-        reindex.update(await rehome(db, tag))
+        affected = await rehome(db, tag)
+        reindex.update(affected)
+        # A flip to global publishes everyone's private tagging of this tag to
+        # the whole team; worth a line in the log with who did it.
+        logger.info(
+            "tag %r made %s by user %s (%d entries re-homed)",
+            tag.name,
+            "global" if body.is_global else "personal",
+            user.id,
+            len(affected),
+        )
 
     db.add(tag)
     await db.flush()
@@ -297,7 +305,7 @@ async def add_tags_to_entry(
 
     await db.flush()
     if added > 0:
-        await _sync_entry_tags_to_search(db, entry_id)
+        await _reindex_entries_tags(db, [entry_id])
     return {"added": added}
 
 
@@ -327,7 +335,7 @@ async def remove_tag_from_entry(
             status_code=404,
         )
     await db.flush()
-    await _sync_entry_tags_to_search(db, entry_id)
+    await _reindex_entries_tags(db, [entry_id])
 
 
 @router.post("/merge", response_model=TagResponse)

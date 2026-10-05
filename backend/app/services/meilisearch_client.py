@@ -84,8 +84,9 @@ def fold_viewer_tags(result: dict, viewer_id: str | None) -> dict:
     The raw `user_tags` distribution carries every user's tokens, so it never
     leaves the server: the viewer's `"<user_id>:<name>"` entries are added to
     `tags` under their bare name and the rest are dropped. Counts add cleanly
-    because, once indexed, a tag's name is in `tags` (global) or in `user_tags`
-    (personal) on any one document, never both.
+    because a tag's name is in `tags` (global) or in `user_tags` (personal) on
+    any one document, never both — once scripts/maintenance/reindex_entry_tags.py
+    has run after the migration.
     """
     dist = result.get("facetDistribution")
     if not dist or "user_tags" not in dist:
@@ -194,14 +195,17 @@ def index_entry(
             "url": url or "",
             "media_type": media_type,
             "language": language,
-            "tags": tags or [],
+            **({"tags": tags} if tags is not None else {}),
             "is_read": is_read,
             "is_starred": is_starred,
             "is_bookmarked": is_bookmarked,
             "has_notes": has_notes,
             "word_count": word_count or 0,
         }
-        index.add_documents([doc])
+        # update_documents, not add_documents: a re-index of an existing entry
+        # (transcript append, reconcile, retry) must not wipe the `tags` /
+        # `user_tags` fields that only the tag write paths know how to compute.
+        index.update_documents([doc])
     except Exception as e:
         logger.warning(
             "Failed to index entry %s in Meilisearch: %s",
@@ -209,16 +213,6 @@ def index_entry(
             e,
         )
         raise
-
-
-def update_entry_tags(entry_id: uuid.UUID, tags: list[str]):
-    """Update the tags array for an entry in the search index."""
-    try:
-        client = _get_client()
-        index = client.index(INDEX_NAME)
-        index.update_documents([{"id": str(entry_id), "tags": tags}])
-    except Exception as e:
-        logger.warning("Failed to update tags for entry %s in Meilisearch: %s", entry_id, e)
 
 
 def bulk_update_entry_tags(tag_map: dict[str, dict[str, list[str]]]):

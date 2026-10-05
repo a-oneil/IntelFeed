@@ -527,6 +527,17 @@ def _build_branches(node: ASTNode, plan: ExecutionPlan) -> list[SearchBranch]:
     return branches or [SearchBranch()]
 
 
+def meili_quote(value: str) -> str:
+    """`value` as a double-quoted Meilisearch filter string literal.
+
+    Backslash and the double quote are escaped (Meilisearch's filter grammar
+    accepts `\\"` inside a quoted string). Without this, a value from a request
+    parameter can close the quote and append its own clause — with `user_tags`
+    filterable, that would let one user query another's private assignments.
+    """
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 def tag_filter_clause(name: str, viewer_id: str | None) -> str:
     """The index filter for "this entry carries tag `name`" as `viewer_id` sees it.
 
@@ -535,9 +546,9 @@ def tag_filter_clause(name: str, viewer_id: str | None) -> str:
     `app.services.entry_tags.personal_tag_token`), so the viewer's own token is
     ORed in; nobody else's can match. Without a viewer, global tags only.
     """
-    clause = f'tags = "{name}"'
+    clause = f"tags = {meili_quote(name)}"
     if viewer_id:
-        clause = f'({clause} OR user_tags = "{viewer_id}:{name}")'
+        clause = f"({clause} OR user_tags = {meili_quote(f'{viewer_id}:{name}')})"
     return clause
 
 

@@ -69,6 +69,10 @@ DELETE_PERSONAL_ROWS = "DELETE FROM entry_tags WHERE user_id IS NOT NULL"
 
 def upgrade() -> None:
     op.add_column("tags", sa.Column("is_global", sa.Boolean(), nullable=False, server_default="false"))
+    # The old (entry_id, tag_id) primary key covered lookups by tag; the
+    # surrogate key from x5p7r9t1v3x5 doesn't, and scope flips, merges, renames
+    # and deletes all walk a tag's rows.
+    op.create_index("ix_entry_tags_tag_id", "entry_tags", ["tag_id"])
 
     conn = op.get_bind()
     conn.execute(sa.text(COPY_SHARED_TO_EACH_USER))
@@ -80,4 +84,5 @@ def downgrade() -> None:
     conn.execute(sa.text(COLLAPSE_TO_SHARED))
     conn.execute(sa.text(DELETE_PERSONAL_ROWS))
 
+    op.drop_index("ix_entry_tags_tag_id", table_name="entry_tags")
     op.drop_column("tags", "is_global")

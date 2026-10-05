@@ -3,9 +3,13 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+# Tag names travel into Meilisearch filter strings; a quote or backslash in one
+# is escaped there, but the simpler guarantee is that a name never contains one.
+TAG_NAME_PATTERN = r'^[^"\\]+$'
+
 
 class TagCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=100)
+    name: str = Field(min_length=1, max_length=100, pattern=TAG_NAME_PATTERN)
     color: str = Field(default="#6B7280", pattern=r"^#[0-9A-Fa-f]{6}$")
     display_as_chip: bool = Field(default=False, description="Render in the entry's badge row as a chip")
     description: str | None = Field(default=None, max_length=255, description="Chip tooltip")
@@ -29,7 +33,7 @@ class TagCreate(BaseModel):
 
 
 class TagUpdate(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=100)
+    name: str | None = Field(default=None, min_length=1, max_length=100, pattern=TAG_NAME_PATTERN)
     color: str | None = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
     display_as_chip: bool | None = None
     # An empty string clears the description; omitted leaves it alone.

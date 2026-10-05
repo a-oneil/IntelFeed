@@ -38,7 +38,10 @@ interface ChipItemProps {
  */
 function TagChipItem({ tag, entryId, onPivot }: ChipItemProps) {
   const remove = useRemoveTagFromEntry();
-  const canRemove = !!entryId && !!tag.id;
+  // A global tag's row is everyone's; taking it off the entry from a one-click
+  // × on a card is too easy a way to remove it for the whole team. That stays
+  // in the reader's Tags panel, which is a deliberate action.
+  const canRemove = !!entryId && !!tag.id && !tag.is_global;
 
   return (
     <span className={styles.item}>

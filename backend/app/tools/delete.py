@@ -187,8 +187,22 @@ async def _delete_entity(
     if entity_type in _INTEL_ENTITY_TYPES:
         await _cleanup_intel_entity(db, entity_type, eid)
 
+    tagged_entries: list = []
+    if entity_type == "tag":
+        # Deleting a tag definition cascades everyone's assignments of it; the
+        # search index must drop the name too, as the API's DELETE /tags does.
+        from app.models.tag import EntryTag
+
+        rows = await db.execute(select(EntryTag.entry_id).where(EntryTag.tag_id == eid))
+        tagged_entries = [r[0] for r in rows.all()]
+
     await db.delete(entity)
     await db.flush()
+
+    if tagged_entries:
+        from app.services.entry_tags import sync_entry_tags_to_search
+
+        await sync_entry_tags_to_search(db, tagged_entries)
 
     if entity_type in _INTEL_ENTITY_TYPES:
         from app.intelligence.correlation_cache import invalidate_entity_cache
