@@ -467,6 +467,14 @@ async def run_rule_now(
     """
     rule = await _get_rule(db, rule_id)
     _assert_rule_owner(rule, user)
+    # Same guard the engine applies on the per-entry path: conditions and
+    # actions (read state, stars, tag assignments) resolve against the owner.
+    if rule.created_by is None:
+        raise AppError(
+            code="bad_request",
+            message="Rule has no owner; assign one by re-saving it",
+            status_code=400,
+        )
 
     # Read limits from trigger_config, with query params as override
     entry_filter = rule.trigger_config.get("entry_filter", {})

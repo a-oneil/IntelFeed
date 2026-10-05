@@ -752,8 +752,8 @@ export function EntryReader({ entryId }: EntryReaderProps) {
             {isPodcast && audioMedia?.duration_seconds && (
               <span>{formatDuration(audioMedia.duration_seconds)}</span>
             )}
-            {(intelBadges?.[entryId] || entry.is_echo) && (
-              <EntryIntelBadges counts={intelBadges?.[entryId]} echo={entry.is_echo} />
+            {(intelBadges?.[entryId] || entry.is_echo || entry.tags?.some((t) => t.display_as_chip)) && (
+              <EntryIntelBadges counts={intelBadges?.[entryId]} echo={entry.is_echo} tags={entry.tags} entryId={entryId} />
             )}
           </div>
           {entry.echo_of && (

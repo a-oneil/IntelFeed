@@ -329,6 +329,9 @@ class ExecutionPlan:
     # Fields that parsed as `name:value` but are not in the vocabulary. Their
     # values fall back to free text; the API returns these so the UI can say so.
     unknown_fields: list[str] = field(default_factory=list)
+    # Who is searching. `tag:` also matches their own personal tag assignments
+    # (`user_tags`); without a viewer it matches global tags only.
+    viewer_id: str | None = None
     # Internal counter for allocating OR-group IDs during planning
     _or_counter: int = field(default=0, repr=False)
     # Set when anything asks for entries at all — including a bare/negated text
@@ -387,9 +390,13 @@ class EntityCondition:
 # ── Planner ──────────────────────────────────────────────
 
 
-def build_execution_plan(ast: ASTNode) -> ExecutionPlan:
-    """Walk the AST and build an execution plan."""
-    plan = ExecutionPlan()
+def build_execution_plan(ast: ASTNode, viewer_id: object = None) -> ExecutionPlan:
+    """Walk the AST and build an execution plan.
+
+    `viewer_id` is the searching user's id (UUID or str); it lets `tag:` see
+    their personal tag assignments.
+    """
+    plan = ExecutionPlan(viewer_id=str(viewer_id) if viewer_id else None)
 
     # The walk owns everything Meilisearch cannot express on its own: entity
     # sub-plans, Postgres-backed filters, sort, and the chips the UI renders.
@@ -520,6 +527,31 @@ def _build_branches(node: ASTNode, plan: ExecutionPlan) -> list[SearchBranch]:
     return branches or [SearchBranch()]
 
 
+def meili_quote(value: str) -> str:
+    """`value` as a double-quoted Meilisearch filter string literal.
+
+    Backslash and the double quote are escaped (Meilisearch's filter grammar
+    accepts `\\"` inside a quoted string). Without this, a value from a request
+    parameter can close the quote and append its own clause — with `user_tags`
+    filterable, that would let one user query another's private assignments.
+    """
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def tag_filter_clause(name: str, viewer_id: str | None) -> str:
+    """The index filter for "this entry carries tag `name`" as `viewer_id` sees it.
+
+    A global tag's name sits in the document's `tags` field. A personal
+    assignment is indexed as `"<user_id>:<name>"` in `user_tags` (format:
+    `app.services.entry_tags.personal_tag_token`), so the viewer's own token is
+    ORed in; nobody else's can match. Without a viewer, global tags only.
+    """
+    clause = f"tags = {meili_quote(name)}"
+    if viewer_id:
+        clause = f"({clause} OR user_tags = {meili_quote(f'{viewer_id}:{name}')})"
+    return clause
+
+
 def _branch_dnf(node: ASTNode, plan: ExecutionPlan, *, negated: bool) -> list[tuple[list[str], list[str]]]:
     """Disjunctive normal form of the index-facing expression.
 
@@ -542,7 +574,11 @@ def _branch_dnf(node: ASTNode, plan: ExecutionPlan, *, negated: bool) -> list[tu
             return [([], [])] if negated else [([term], [])]
         attribute = _FILTER_ENTRY_FIELDS.get(node.field_name)
         if attribute and "*" not in node.value:
-            clause = f'{attribute} = "{node.value}"'
+            clause = (
+                tag_filter_clause(node.value, plan.viewer_id)
+                if attribute == "tags"
+                else f'{attribute} = "{node.value}"'
+            )
             return [([], [f"NOT {clause}" if negated else clause])]
 
         if node.field_name == "is":

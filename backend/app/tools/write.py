@@ -740,8 +740,13 @@ async def _create_entity_note(
     },
 )
 async def _add_tag(db: AsyncSession, user_id: uuid.UUID, entry_id: str, tag_name: str) -> dict:
-    from app.models.tag import EntryTag
+    """The assignment is the caller's own unless the tag is global."""
+    from app.automation.actions import _clean_tag_name
+    from app.services.entry_tags import ensure_assignment, sync_entry_tags_to_search
 
+    tag_name = _clean_tag_name(tag_name)  # same normalisation as a rule's add_tags
+    if not tag_name:
+        return {"error": "tag_name is required"}
     tag_q = await db.execute(select(Tag).where(Tag.name == tag_name))
     tag = tag_q.scalar_one_or_none()
     if not tag:
@@ -749,14 +754,12 @@ async def _add_tag(db: AsyncSession, user_id: uuid.UUID, entry_id: str, tag_name
         db.add(tag)
         await db.flush()
 
-    existing = await db.execute(
-        select(EntryTag).where(EntryTag.entry_id == uuid.UUID(entry_id), EntryTag.tag_id == tag.id)
-    )
-    if existing.scalar_one_or_none():
+    entry_uuid = uuid.UUID(entry_id)
+    if not await ensure_assignment(db, entry_uuid, tag, user_id):
         return {"tag_id": str(tag.id), "already_tagged": True}
 
-    db.add(EntryTag(entry_id=uuid.UUID(entry_id), tag_id=tag.id))
     await db.flush()
+    await sync_entry_tags_to_search(db, [entry_uuid])
     return {"tag_id": str(tag.id), "created": True, "tag_name": tag_name}
 
 

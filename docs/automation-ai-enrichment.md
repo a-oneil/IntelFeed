@@ -121,11 +121,11 @@ Actions execute sequentially and share a mutable context dict. Earlier actions c
 |---|---|---|
 | `run_ai_task` | `task_id: str` | Execute AI task; store result in context |
 | `use_daily_summary` | `day: yesterday\|today = yesterday`, `on_missing: generate\|skip = generate` | Reuse the shared day-divider briefing as `{ai_summary}` instead of generating a second one (batch only) |
-| `add_tags` | `tags: list[str]` | Add tags to entry |
-| `remove_tags` | `tags: list[str]` | Remove tags |
+| `add_tags` | `tags: list[str \| {name, color, description, chip, global}]` | Add tags to entry. The object form sets a new tag's colour, tooltip, chip promotion and scope — on create only; an existing tag keeps its own look and scope. Each assignment belongs to the rule's owner (only they see it) unless the tag is global, in which case it is shared. A rule with no owner skips personal tags |
+| `remove_tags` | `tags: list[str]` | Remove the rule owner's own assignment, or the shared one for a global tag; other users' assignments of a personal tag stay |
 | `send_notification` | `platform, webhook_url, channel, message_template, include_embeds` | POST to Slack/Discord/custom webhook |
 | `run_webhook` | `url: str, headers: dict, payload: str` | POST custom JSON to URL |
-| `mark_priority` | `level: str` | Add priority tag (priority-{level}) |
+| `mark_priority` | `level: str` | Add the `priority-{level}` tag via `add_tags`, so it follows that tag's scope: personal to the rule owner unless `priority-{level}` has been made global in Tag Manager |
 | `mark_read` | — | Mark as read for creator user |
 | `star_entry` | — | Star entry |
 | `bookmark_entry` | — | Bookmark entry |

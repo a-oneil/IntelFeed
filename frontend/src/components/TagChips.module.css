@@ -1,0 +1,112 @@
+/* Analyst-authored chips leading the badge row. Sized to sit flush with the
+   row's 20px intel chips. */
+.group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  /* The row wraps between groups, never inside this one — overflow goes to +N. */
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.item {
+  position: relative;
+  display: inline-flex;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* In a narrow column the chips shrink and ellipsise rather than overlap.
+   Doubled class to outrank the primitive's `flex: none`. */
+.item .chip {
+  flex: 0 1 auto;
+  min-width: 3ch;
+  height: 20px;
+  max-width: 18ch;
+  border-radius: var(--r-md);
+}
+
+.label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The × floats over the chip's corner so revealing it never shifts the row. */
+.remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.item:hover .remove,
+.item:focus-within .remove {
+  display: inline-flex;
+}
+
+.remove:hover {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+.remove:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Touch screens have no hover — keep the × reachable there. */
+@media (hover: none) {
+  .remove {
+    display: inline-flex;
+  }
+}
+
+.more {
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.more:hover {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+.more:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.popover {
+  position: fixed;
+  z-index: 9999;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 320px;
+  padding: var(--sp-3);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}

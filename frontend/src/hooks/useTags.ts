@@ -2,6 +2,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "@/api/client";
 import type { Tag } from "@/api/types";
 
+/** How a tag looks and who sees it: colour, chip rendering, chip tooltip, and scope. */
+export interface TagPresentation {
+  color?: string;
+  display_as_chip?: boolean;
+  description?: string;
+  /** Global tags have one shared assignment per entry; personal tags are each user's own. */
+  is_global?: boolean;
+}
+
 export function useTags() {
   return useQuery({
     queryKey: ["tags"],
@@ -26,7 +35,7 @@ export function useEntryTags(entryId: string | null) {
 export function useCreateTag() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (data: { name: string; color?: string }) => {
+    mutationFn: async (data: TagPresentation & { name: string }) => {
       const res = await api.post<Tag>("/tags", data);
       return res.data;
     },
@@ -39,12 +48,18 @@ export function useCreateTag() {
 export function useUpdateTag() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ tagId, data }: { tagId: string; data: { name?: string; color?: string } }) => {
+    mutationFn: async ({ tagId, data }: { tagId: string; data: TagPresentation & { name?: string } }) => {
       const res = await api.put<Tag>(`/tags/${tagId}`, data);
       return res.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tags"] });
+      // Promoting/demoting or recolouring changes how every card draws the tag;
+      // a scope flip changes which cards carry it and what the facet rail counts.
+      queryClient.invalidateQueries({ queryKey: ["entries"] });
+      queryClient.invalidateQueries({ queryKey: ["entry"] });
+      queryClient.invalidateQueries({ queryKey: ["entry-tags"] });
+      queryClient.invalidateQueries({ queryKey: ["unified-search"] });
     },
   });
 }
@@ -86,6 +101,9 @@ export function useRemoveTagFromEntry() {
       queryClient.invalidateQueries({ queryKey: ["tags"] });
       queryClient.invalidateQueries({ queryKey: ["entry-tags", variables.entryId] });
       queryClient.invalidateQueries({ queryKey: ["entries"] });
+      // The chip × lives on the reader and search cards too.
+      queryClient.invalidateQueries({ queryKey: ["entry", variables.entryId] });
+      queryClient.invalidateQueries({ queryKey: ["unified-search"] });
     },
   });
 }

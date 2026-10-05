@@ -774,6 +774,13 @@ docker compose -f docker-compose.prod.yml exec redis redis-cli -a ${REDIS_PASSWO
 
 ### Useful Commands
 
+**One-shot after deploying the per-user tags migration (`y6q8s0u2w4y6`):**
+```bash
+# Re-push tag fields to Meilisearch so `tag:` search and the Tags facet stop showing
+# pre-migration shared tags to everyone. Safe to re-run; --dry-run just counts.
+docker compose -f docker-compose.prod.yml exec api python scripts/maintenance/reindex_entry_tags.py --all
+```
+
 **Docker Compose:**
 ```bash
 # View logs for service

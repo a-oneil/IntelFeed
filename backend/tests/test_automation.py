@@ -12,7 +12,7 @@ from app.models.automation_log import AutomationLog
 from app.models.automation_rule import AutomationRule
 from app.models.entry import Entry
 from app.models.feed import Feed
-from app.models.tag import EntryTag, Tag
+from app.models.tag import Tag
 from app.models.user import User
 
 # ---- Fixtures ----
@@ -162,11 +162,15 @@ async def test_evaluate_conditions_tag_matches(db_session: AsyncSession, auto_en
     tag = Tag(created_by=test_user.id, name="critical")
     db_session.add(tag)
     await db_session.flush()
-    db_session.add(EntryTag(entry_id=auto_entry.id, tag_id=tag.id))
-    await db_session.flush()
+    from app.services.entry_tags import ensure_assignment
+
+    await ensure_assignment(db_session, auto_entry.id, tag, test_user.id)
 
     cond = {"type": "tag_matches", "config": {"tags": ["critical"]}}
-    assert await evaluate_conditions(db_session, auto_entry, cond) is True
+    # The condition sees what the rule's owner sees: their own assignment.
+    assert await evaluate_conditions(db_session, auto_entry, cond, user_id=test_user.id) is True
+    # Another user's rule does not see it; a global tag it would.
+    assert await evaluate_conditions(db_session, auto_entry, cond) is False
 
     cond_miss = {"type": "tag_matches", "config": {"tags": ["nonexistent"]}}
     assert await evaluate_conditions(db_session, auto_entry, cond_miss) is False

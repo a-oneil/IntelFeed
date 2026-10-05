@@ -4049,7 +4049,7 @@ async def bulk_extract(
     """Dispatch bulk intelligence extraction as a background Celery task. Admin only."""
     entry_ids = body.entry_ids
     if not entry_ids:
-        entry_ids = await _resolve_bulk_entry_ids(db, body)
+        entry_ids = await _resolve_bulk_entry_ids(db, body, user)
 
     from app.workers.intel_feed_tasks import bulk_extract_intelligence
 
@@ -4074,7 +4074,7 @@ async def bulk_translate(
 
     entry_ids = body.entry_ids
     if not entry_ids:
-        entry_ids = await _resolve_bulk_entry_ids(db, body)
+        entry_ids = await _resolve_bulk_entry_ids(db, body, user)
     entry_ids = entry_ids[: body.limit]
 
     target_lang = (body.target_language or env_settings.get("translation_default_target") or "en").lower()
@@ -4085,9 +4085,12 @@ async def bulk_translate(
     return {"entry_count": len(entry_ids), "target_language": target_lang}
 
 
-async def _resolve_bulk_entry_ids(db: AsyncSession, body: BulkExtractRequest | BulkTranslateRequest) -> list[uuid.UUID]:
-    """Resolve entry IDs from feed_id, category_id, or tag."""
+async def _resolve_bulk_entry_ids(
+    db: AsyncSession, body: BulkExtractRequest | BulkTranslateRequest, user: User
+) -> list[uuid.UUID]:
+    """Resolve entry IDs from feed_id, category_id, or tag (as the caller sees it)."""
     from app.models.tag import EntryTag, Tag
+    from app.services.entry_tags import visible_to
 
     q = select(Entry.id).order_by(Entry.published_at.desc()).limit(body.limit)
     if body.feed_id:
@@ -4097,10 +4100,15 @@ async def _resolve_bulk_entry_ids(db: AsyncSession, body: BulkExtractRequest | B
         feed_ids_q = select(Feed.id).where(Feed.category_id == body.category_id)
         q = q.where(Entry.feed_id.in_(feed_ids_q))
     elif body.tag:
-        q = (
-            q.join(EntryTag, EntryTag.entry_id == Entry.id)
-            .join(Tag, Tag.id == EntryTag.tag_id)
-            .where(Tag.name == body.tag)
+        # The caller's view of the tag: their own assignments, or the shared
+        # ones of a global tag. A subquery rather than a join so an entry is
+        # processed once however many rows it has.
+        q = q.where(
+            Entry.id.in_(
+                select(EntryTag.entry_id)
+                .join(Tag, Tag.id == EntryTag.tag_id)
+                .where(Tag.name == body.tag, visible_to(user.id))
+            )
         )
     result = await db.execute(q)
     return [row[0] for row in result.all()]

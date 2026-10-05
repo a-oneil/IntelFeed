@@ -10,6 +10,7 @@ import {
   useCreateWebhookPreset,
 } from "@/hooks/useWebhookPresets";
 import { Chip } from "@/components/primitives";
+import { specsFromNames, tagSpecName, toTagSpecs } from "@/utils/tagSpecs";
 import styles from "./NodeStyles.module.css";
 
 const ACTION_TYPES = [
@@ -324,15 +325,19 @@ export const ActionNode = memo(function ActionNode({ data }: NodeProps) {
             <label className={styles.fieldLabel}>Tags (comma-separated)</label>
             <input
               type="text"
-              value={((config?.tags as string[]) ?? []).join(", ")}
+              value={toTagSpecs(config?.tags).map(tagSpecName).join(", ")}
               onChange={(e) =>
                 onUpdate?.({
                   config: {
                     ...config,
-                    tags: e.target.value
-                      .split(",")
-                      .map((s) => s.trim())
-                      .filter(Boolean),
+                    // Keep a new tag's colour / chip settings for names still listed.
+                    tags: specsFromNames(
+                      e.target.value
+                        .split(",")
+                        .map((s) => s.trim())
+                        .filter(Boolean),
+                      toTagSpecs(config?.tags),
+                    ),
                   },
                 })
               }

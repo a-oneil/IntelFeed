@@ -9,6 +9,7 @@ from app.models.category import Category
 from app.models.feed import Feed
 from app.models.tag import EntryTag, Tag
 from app.search.query_planner import VALID_SORTS
+from app.services.entry_tags import visible_to
 from app.tools import _tool
 
 _SORT_VALUES = sorted(VALID_SORTS)
@@ -44,7 +45,7 @@ async def _run_search_plan(
         ast = parse_query(query)
     except ParseError:
         ast = parse_query("")
-    plan = build_execution_plan(ast)
+    plan = build_execution_plan(ast, viewer_id=user_id)
     # An explicit sort argument wins; otherwise any sort: field in the query applies.
     if sort and sort != "relevance":
         plan.sort = sort
@@ -264,10 +265,11 @@ async def _get_search_facets(db: AsyncSession, user_id: uuid.UUID) -> dict:
     categories = {row[0]: row[1] for row in cat_q}
 
     tag_q = await db.execute(
-        select(Tag.name, func.count(EntryTag.entry_id))
+        select(Tag.name, func.count(func.distinct(EntryTag.entry_id)))
         .join(EntryTag, EntryTag.tag_id == Tag.id)
+        .where(visible_to(user_id))
         .group_by(Tag.name)
-        .order_by(func.count(EntryTag.entry_id).desc())
+        .order_by(func.count(func.distinct(EntryTag.entry_id)).desc())
         .limit(50)
     )
     tags = {row[0]: row[1] for row in tag_q}

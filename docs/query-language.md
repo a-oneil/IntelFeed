@@ -293,7 +293,7 @@ Valid values:
 - `type`: feed adapter type — `rss`, `atom`, `youtube`, `podcast`, `reddit`, `github_releases`, `github_advisories`, `github_repo`, `nvd`, `mastodon`, `bluesky`, `telegram`, `web_scraper`
 - `media`: `image`, `video`, `audio`, `document`
 - `lang`: ISO 639-1 codes (`en`, `es`, `fr`, `zh`, `ja`, etc.)
-- `tag`: any tag name (managed in the tag manager; tag names also autocomplete after `tag:`)
+- `tag`: any tag name (managed in the tag manager; tag names also autocomplete after `tag:`). Matches the tags *you* put on an entry plus any global tag — another analyst's personal tagging never matches, and the Tags facet counts the same view
 
 **`url:`, `words:`**
 

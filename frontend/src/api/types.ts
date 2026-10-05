@@ -113,7 +113,7 @@ export interface Entry {
   is_read: boolean;
   is_starred: boolean;
   is_bookmarked: boolean;
-  tags: { name: string; color: string }[];
+  tags: EntryTag[];
   // Signal engine (present only when surfaced and above the radar threshold)
   priority_score?: number | null;
   top_signals?: { type: string; explanation: string }[];
@@ -249,6 +249,8 @@ export interface SearchHit {
   published_at: string | number | null;
   url: string | null;
   tags: string[];
+  /** Tags the viewer sees on this hit, with chip presentation: global tags plus their own personal assignments. */
+  tag_details?: EntryTag[];
   word_count: number | null;
   is_read: boolean;
   is_starred: boolean;
@@ -436,8 +438,30 @@ export interface Tag {
   id: string;
   name: string;
   color: string;
+  /** Promoted tags render as chips in the entry's badge row. */
+  display_as_chip: boolean;
+  /** Chip tooltip. */
+  description: string | null;
+  /**
+   * Global: one shared assignment per entry that everyone sees. Personal (the
+   * default): each user's assignments are their own and nobody else sees them.
+   */
+  is_global: boolean;
+  /** Entries carrying the tag as the viewer sees them: their own for a personal tag, everyone's for a global one. */
   entry_count: number;
   created_at: string;
+}
+
+/** A tag as it sits on one entry, from the viewer's point of view. */
+export interface EntryTag {
+  id?: string;
+  name: string;
+  color: string;
+  display_as_chip?: boolean;
+  description?: string | null;
+  is_global?: boolean;
+  /** The viewer's own assignment of a personal tag; false for a global tag's shared row. */
+  personal?: boolean;
 }
 
 // Phase 4: AI & Threat Intelligence
