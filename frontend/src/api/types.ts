@@ -3037,3 +3037,35 @@ export interface StarterPackImportResult {
   errors: string[];
   packs: { id: string; title: string; feeds_added: number }[];
 }
+
+/** Instance readiness for the onboarding wizard (GET /onboarding/status). */
+export interface OnboardingStatus {
+  reference_data: {
+    ok: boolean;
+    checks: { key: string; label: string; count: number; ok: boolean }[];
+    missing: string[];
+    /** The exact seeder command to run; server-supplied so the UI can't drift from it. */
+    remedy: string;
+    consequence: string;
+  };
+  feeds: { total: number; polled_ok: number; errored: number; never_polled: number };
+  entries: { total: number; last_24h: number };
+  autolink: { entity_links: number };
+  ai: { providers: number; active: string | null; tasks_assigned: number };
+  /** Seeded, polling and ingesting — the instance can demonstrate itself. */
+  ready: boolean;
+}
+
+/** Outcome of POST /ai/providers/{id}/commission. */
+export interface AIProviderCommissionResult {
+  success: boolean;
+  /** Straight from the provider, so a failure can name the real cause. */
+  message: string;
+  models: string[];
+  /** The model the assignments were given, resolved against the live list. */
+  model: string | null;
+  tasks_assigned: number;
+  tasks_reassigned: number;
+  /** Agentic tasks left on the CLI because this provider can't run tools. */
+  tasks_skipped_agentic: string[];
+}
