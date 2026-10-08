@@ -50,6 +50,15 @@ CONFIGURABLE_KEYS: dict[str, type] = {
     "entity_resolution_normalized_match": bool,
     "entity_creation_gates": str,
     "attack_ics_context_keywords": str,
+    # Adjudicate stage
+    "adjudication_mode": str,
+    "adjudication_trigger": str,
+    "adjudication_max_per_hour": int,
+    "adjudication_min_priority_score": float,
+    "adjudication_apply_min_confidence": str,
+    "adjudication_circuit_breaker_pct": float,
+    "adjudication_content_max_chars": int,
+    "adjudication_scope": str,
     # Entity maintenance (merge engine / autonomous cleanup)
     "entity_maintenance_mode": str,
     # Entity link AI validator
@@ -381,6 +390,71 @@ SETTING_METADATA: dict[str, dict] = {
             "create), or 'on' (enforce). Manual creation keeps a logged override"
         ),
         "group": "intelligence",
+        "options": ["off", "shadow", "on"],
+    },
+    "adjudication_mode": {
+        "label": "Adjudication Mode",
+        "description": (
+            "off = never runs. shadow = every verdict is filed as a proposal in the Links / AI-entities "
+            "queues and nothing is touched. apply = high-confidence verdicts are applied at ingest; lower "
+            "ones still become proposals. This is the master switch; plans only subtract feeds."
+        ),
+        "group": "adjudication",
+        "options": ["off", "shadow", "apply"],
+    },
+    "adjudication_trigger": {
+        "label": "Trigger",
+        "description": (
+            "all = every analysed entry (what replacing the nightly validator needs; ~100-500/day). "
+            "created = only entries whose analysis minted an entity, asserted a link or edge, promoted a "
+            "pending match, or captured an observable (~20-50/day) — the fallback when the GPU is saturated"
+        ),
+        "group": "adjudication",
+        "options": ["all", "created"],
+    },
+    "adjudication_max_per_hour": {
+        "label": "Hourly Budget",
+        "description": (
+            "Reviews started per hour on the AI worker (~40 s each on a 9B model). Over-budget entries "
+            "wait for the next hour's sweep; they are never dropped. Live entries go before backfill"
+        ),
+        "group": "adjudication",
+    },
+    "adjudication_min_priority_score": {
+        "label": "Score Floor",
+        "description": (
+            "Skip entries below this priority score. 0 = no floor — keep it there while CVE/NVD entries "
+            "are the main source of junk tool entities; a floor would exempt exactly those"
+        ),
+        "group": "adjudication",
+    },
+    "adjudication_apply_min_confidence": {
+        "label": "Apply Only At Confidence",
+        "description": "In apply mode, verdicts below this confidence are filed as proposals instead of applied",
+        "group": "adjudication",
+        "options": ["high", "medium", "low"],
+    },
+    "adjudication_circuit_breaker_pct": {
+        "label": "Circuit Breaker",
+        "description": (
+            "If more than this share of an entry's items come back remove / veto / demote / drop, the "
+            "whole run is downgraded to proposals (0.5 = half). A rolling mean over the last 50 runs "
+            "above the same threshold pauses dispatch for the hour"
+        ),
+        "group": "adjudication",
+    },
+    "adjudication_content_max_chars": {
+        "label": "Article Text Cap",
+        "description": "Characters of article text in the review prompt (head + indicator tail, like extraction)",
+        "group": "adjudication",
+    },
+    "adjudication_scope": {
+        "label": "Review Scope",
+        "description": (
+            "Comma-separated manifest sections the reviewer sees: links, entities, relationships, "
+            "observables, assessment. assessment is opt-in and only ever logged"
+        ),
+        "group": "adjudication",
     },
     "attack_ics_context_keywords": {
         "label": "ICS Context Keywords",
@@ -1170,6 +1244,7 @@ GROUP_LABELS: dict[str, str] = {
     "extraction": "Extraction",
     "observables": "Observables",
     "scoring": "Scoring",
+    "adjudication": "Adjudication",
     "maintenance": "Maintenance",
     "enrichment": "Enrichment",
     "retention": "Retention & Eviction",
@@ -1219,6 +1294,15 @@ _ENGINE_SECTION_GROUPS: dict[str, str] = {
     "entity_creation_gates": "extraction",
     "attack_ics_context_keywords": "extraction",
     "cve_epss_high_risk_threshold": "extraction",
+    # Adjudicate stage (post-analysis AI review)
+    "adjudication_mode": "adjudication",
+    "adjudication_trigger": "adjudication",
+    "adjudication_max_per_hour": "adjudication",
+    "adjudication_min_priority_score": "adjudication",
+    "adjudication_apply_min_confidence": "adjudication",
+    "adjudication_circuit_breaker_pct": "adjudication",
+    "adjudication_content_max_chars": "adjudication",
+    "adjudication_scope": "adjudication",
     # Score stage
     "signal_engine_shadow": "scoring",
     "signal_engine_surface": "scoring",

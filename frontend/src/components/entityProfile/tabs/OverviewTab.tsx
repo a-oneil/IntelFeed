@@ -411,7 +411,7 @@ export function OverviewTab({
                   <>
                     {" "}
                     {staged === 1 ? "One article has" : `${staged} articles have`} indicators waiting for review —{" "}
-                    <Link to="/workbench/observables?queue=1">open the candidates queue</Link>.
+                    <Link to="/workbench/explore?section=observables&queue=1">open the candidates queue</Link>.
                   </>
                 )}
               </div>

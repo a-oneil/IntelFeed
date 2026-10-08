@@ -238,6 +238,17 @@ class Settings(BaseSettings):
     # Phase 2 creation/alias gates: 'off' | 'shadow' (log would-block decisions
     # to the maintenance log, still create) | 'on' (enforce).
     entity_creation_gates: str = "shadow"
+    # Adjudicate stage (post-analysis AI review; planning/ai-adjudication-stage.md).
+    # 'off' | 'shadow' (file verdicts as proposals) | 'apply' (high-confidence
+    # verdicts applied inline, the rest filed). Master switch — plans only subtract.
+    adjudication_mode: str = "off"
+    adjudication_trigger: str = "all"  # all | created
+    adjudication_max_per_hour: int = 30
+    adjudication_min_priority_score: float = 0.0  # 0 = no floor (keep it: junk comes from low-score CVE entries)
+    adjudication_apply_min_confidence: str = "high"  # high | medium | low
+    adjudication_circuit_breaker_pct: float = 0.5
+    adjudication_content_max_chars: int = 8000
+    adjudication_scope: str = "links,entities,relationships,observables"
     # ICS/OT context keywords — ICS-matrix (T0xxx) ATT&CK techniques are only
     # linked when the entry text matches one of these (comma-separated,
     # word-boundary matched). See app.intelligence.attack_catalog.

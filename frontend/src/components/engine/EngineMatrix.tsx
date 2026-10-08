@@ -53,6 +53,7 @@ const TOGGLEABLE_STAGES = new Set([
   "correlation",
   "requirements",
   "score",
+  "adjudicate",
 ]);
 
 // Stage → column group. Order matches the backend's PROCESSING_STAGE_ORDER, so
@@ -67,6 +68,7 @@ const STAGE_GROUP: Record<string, { key: string; label: string; cls: string }> =
   correlation: { key: "post", label: "post", cls: styles.gpost },
   requirements: { key: "post", label: "post", cls: styles.gpost },
   score: { key: "final", label: "final", cls: styles.gfinal },
+  adjudicate: { key: "review", label: "ai review", cls: styles.greview },
   automate: { key: "side", label: "post-score", cls: styles.gside },
 };
 
@@ -130,7 +132,66 @@ const STAGE_HINTS: Record<string, { title: string; body: string; aside?: string 
     body: "Where AI reads an article and proposes entities, techniques and CVEs.",
     aside: "Nothing it proposes goes live without clearing the creation gates.",
   },
+  adjudicate: {
+    title: "AI review",
+    body: "A second, smaller AI call re-reads the article next to everything the analysis wrote to it — links, new entities, edges, observables — and says keep, remove, merge, demote or drop per item.",
+    aside: "Off by default. Shadow files verdicts as proposals; apply fixes high-confidence ones at ingest.",
+  },
 };
+
+/** Verdict glyphs for the adjudicate stage's Output cell. Keys match the
+ *  `detail.verdicts` counters the task returns (see pipeline_logging). */
+const VERDICT_GLYPHS: { key: string; glyph: string; title: string }[] = [
+  { key: "remove", glyph: "✂", title: "links removed" },
+  { key: "reclassify", glyph: "↷", title: "links flagged for reclassification" },
+  { key: "veto", glyph: "⊘", title: "new entities vetoed" },
+  { key: "merge", glyph: "⇄", title: "new entities merged into existing ones" },
+  { key: "demote", glyph: "↓", title: "relationship edges demoted" },
+  { key: "drop", glyph: "✕", title: "observables dropped" },
+];
+
+/** Output-lens cell for the adjudicate stage: what the review decided. Reads
+ *  the run's detail (verdict counters, mode, skip reason). */
+function AdjudicateOutputCell({ cell }: { cell: ProcessingStageCell | undefined }) {
+  const detail = cell?.detail as
+    | { mode?: string; items?: number; verdicts?: Record<string, number>; skipped?: string; breaker?: boolean }
+    | null
+    | undefined;
+  if (!cell) return <span className={`${m.outCell} ${m.outZero}`}>·</span>;
+  if (cell.status !== "success" || !detail) return <span className={`${m.outCell} ${m.outZero}`}>·</span>;
+  if (detail.skipped) {
+    return (
+      <span className={`${m.outCell} ${m.outZero}`} title={`skipped: ${detail.skipped.replace(/_/g, " ")}`}>
+        —
+      </span>
+    );
+  }
+  const verdicts = detail.verdicts ?? {};
+  const shown = VERDICT_GLYPHS.filter((v) => (verdicts[v.key] ?? 0) > 0);
+  const shadow = detail.mode !== "apply";
+  const cls = `${m.outCell} ${shadow ? m.outShadow : ""}`;
+  if (!shown.length) {
+    return (
+      <span className={`${m.outCell} ${m.outKept}`} title={`all ${detail.items ?? 0} items kept`}>
+        ✓ {detail.items ?? 0}
+      </span>
+    );
+  }
+  const title =
+    shown.map((v) => `${verdicts[v.key]} ${v.title}`).join(" · ") +
+    (shadow ? " · shadow: proposals only" : " · applied") +
+    (detail.breaker ? " · breaker tripped, downgraded to proposals" : "");
+  return (
+    <span className={cls} title={title}>
+      {shown.map((v) => (
+        <span key={v.key} className={m.outRels}>
+          {verdicts[v.key]}
+          {v.glyph}
+        </span>
+      ))}
+    </span>
+  );
+}
 
 /** Output-lens cell: what the stage produced for this entry. Only the stages
  *  with per-entry output metrics render counts; the rest show a dot. */
@@ -485,7 +546,7 @@ export function EngineMatrix({
       n: stats?.observable_candidates,
       label: "observable candidates",
       cls: m.aInfo,
-      onClick: () => navigate("/workbench/observables?queue=1"),
+      onClick: () => navigate("/workbench/explore?section=observables&queue=1"),
       hint: {
         title: "Observable candidates",
         body: `Pattern nominations no judgment door has confirmed — ${stats?.observable_confirmed ?? 0} sightings were confirmed against them this window. If that ratio drifts, the scan is the first place to look.`,
@@ -613,7 +674,7 @@ export function EngineMatrix({
           <div className={m.pop} style={{ left: peek.left, top: peek.top }}>
             <div className={m.popHead}>
               <h4 className={m.popName}>{peek.stage.replace(/_/g, " ")}</h4>
-              <span className={m.popKind}>{peekInfo?.kind ?? ""}</span>
+              <span className={m.popKind}>{(peekInfo?.kind ?? "").replace(/_/g, " ")}</span>
               <button type="button" className={m.popClose} onClick={() => setPeek(null)} title="Close">
                 ✕
               </button>
@@ -1144,7 +1205,11 @@ function Row({
         {stages.map((s, i) => (
           <td key={s} className={groupStartStages.has(s) ? styles.gdiv : ""}>
             {lens === "output" ? (
-              <OutputCell stage={s} outputs={entry.outputs} />
+              s === "adjudicate" ? (
+                <AdjudicateOutputCell cell={entry.stages[s]} />
+              ) : (
+                <OutputCell stage={s} outputs={entry.outputs} />
+              )
             ) : (
               <StatusCell
                 cell={entry.stages[s]}

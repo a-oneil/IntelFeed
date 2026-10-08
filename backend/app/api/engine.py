@@ -397,6 +397,7 @@ PIPELINE_STAGE_LABELS: dict[str, str] = {
     "correlation": "Correlation events",
     "requirements": "Requirement matching",
     "score": "Signal scoring",
+    "adjudicate": "AI review",
     "automate": "Automation rules",
     "translate": "Translation",
 }
@@ -622,6 +623,7 @@ PROCESSING_STAGE_ORDER: list[str] = [
     "correlation",
     "requirements",
     "score",
+    "adjudicate",
     "automate",
 ]
 
@@ -901,6 +903,8 @@ async def processing_flow(
                 "error": r.error,
                 "retryable": st in RETRYABLE_STAGE_TASKS,
                 "created_at": r.created_at.isoformat() if r.created_at else None,
+                # Stage-specific run detail (the adjudicate stage's verdict counts).
+                "detail": r.detail or None,
             }
             if r.created_at and (last_run_at is None or r.created_at > last_run_at):
                 last_run_at = r.created_at

@@ -218,6 +218,9 @@
 .gside {
   color: var(--accent-intel) !important;
 }
+.greview {
+  color: var(--entity-ttp, var(--accent-dash)) !important;
+}
 .gdiv {
   border-left: 1px solid var(--border);
 }

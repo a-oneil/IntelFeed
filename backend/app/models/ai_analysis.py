@@ -14,6 +14,11 @@ class AIAnalysisRequest(Base):
     Lifecycle: pending → submitted (in a provider batch) → completed | failed.
     Terminal shortcut statuses: skipped_junk (relevance gate), reused_echo
     (analysis copied from a near-duplicate entry at zero cost).
+
+    ``adjudication_status`` tracks the post-analysis adjudicate stage for the
+    same entry: pending | completed | failed | skipped_<reason> (off, plan,
+    echo, nothing_new, score, budget). NULL = not yet decided (the hourly
+    sweep re-enqueues completed analyses left NULL).
     Pruned after 30 days by prune_engine_tables.
     """
 
@@ -33,6 +38,8 @@ class AIAnalysisRequest(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    adjudication_status: Mapped[str | None] = mapped_column(String(24), index=True)
+    adjudicated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (Index("ix_ai_analysis_status_created", "status", "created_at"),)
 

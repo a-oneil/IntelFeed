@@ -273,6 +273,8 @@ export interface ProcessingStageCell {
   error: string | null;
   retryable: boolean;
   created_at: string | null;
+  /** Stage-specific run detail (the adjudicate stage's verdict counters). */
+  detail?: Record<string, unknown> | null;
 }
 
 /** Output-lens counts: what each stage produced for one entry. */
