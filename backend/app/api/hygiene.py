@@ -1285,10 +1285,14 @@ def _row_actions_maint(row: EntityMaintenanceLog) -> list[str]:
         # Review-only flag: the entity chip deep-links to the profile where the
         # analyst can merge/delete; the row itself only supports dismissal.
         return ["dismiss"]
-    if row.action in ADJUDICATION_ACTIONS and not row.applied:
-        # The assessment flag is informational; the rest become applicable
-        # once apply mode lands (part 4 of the adjudication PR).
-        return ["dismiss"]
+    if row.action in ADJUDICATION_ACTIONS:
+        if row.action == ACTION_ASSESSMENT:
+            return ["dismiss"] if not row.applied else []
+        if not row.applied:
+            return ["apply", "dismiss"]
+        if row.action == ACTION_MERGE or (row.after or {}).get("restored"):
+            return []
+        return ["restore"]
     return []
 
 
@@ -3251,6 +3255,64 @@ async def apply_id_hygiene(
 # ---------------------------------------------------------------------------
 # Dismiss a single feed row (delete advisory / shadow proposal)
 # ---------------------------------------------------------------------------
+
+
+class AdjudicationRowResult(BaseModel):
+    log_id: uuid.UUID
+    applied: bool = False
+    restored: bool = False
+    reason: str | None = None
+    detail: dict = Field(default_factory=dict)
+
+
+async def _adjudication_row(db: AsyncSession, log_id: uuid.UUID) -> EntityMaintenanceLog:
+    row = (await db.execute(select(EntityMaintenanceLog).where(EntityMaintenanceLog.id == log_id))).scalar_one_or_none()
+    if row is None or row.action not in ADJUDICATION_ACTIONS:
+        raise AppError(code="not_found", message="adjudication proposal not found", status_code=404)
+    return row
+
+
+@router.post("/admin/hygiene/adjudication/{log_id}/apply", response_model=AdjudicationRowResult)
+async def apply_adjudication_proposal(
+    log_id: uuid.UUID = Path(..., description="entity_maintenance_log row id of an adjudication_* proposal"),
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> AdjudicationRowResult:
+    """Apply one proposal the adjudicate stage filed in shadow mode: unlink,
+    veto (delete when nothing else holds the entity), merge, demote, drop.
+    Same code path apply mode uses at ingest; the row becomes the undo record."""
+    from app.services.entry_adjudication import apply_adjudication_row
+
+    row = await _adjudication_row(db, log_id)
+    outcome = await apply_adjudication_row(db, row)
+    await db.flush()
+    return AdjudicationRowResult(
+        log_id=row.id,
+        applied=bool(outcome.get("applied")),
+        reason=outcome.get("reason"),
+        detail={k: v for k, v in outcome.items() if k not in ("applied", "reason")},
+    )
+
+
+@router.post("/admin/hygiene/adjudication/{log_id}/restore", response_model=AdjudicationRowResult)
+async def restore_adjudication_proposal(
+    log_id: uuid.UUID = Path(..., description="entity_maintenance_log row id of an applied adjudication_* change"),
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> AdjudicationRowResult:
+    """Undo an applied adjudication change from its snapshots: re-link, re-create
+    a vetoed entity, restore an edge's confidence, put an observable back."""
+    from app.services.entry_adjudication import restore_adjudication_row
+
+    row = await _adjudication_row(db, log_id)
+    outcome = await restore_adjudication_row(db, row)
+    await db.flush()
+    return AdjudicationRowResult(
+        log_id=row.id,
+        restored=bool(outcome.get("restored")),
+        reason=outcome.get("reason"),
+        detail={k: v for k, v in outcome.items() if k not in ("restored", "reason")},
+    )
 
 
 @router.delete("/admin/hygiene/feed/{source}/{row_id}", status_code=204)

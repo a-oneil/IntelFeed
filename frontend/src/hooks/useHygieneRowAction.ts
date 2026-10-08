@@ -36,6 +36,25 @@ export function useHygieneRowAction() {
   const invalidate = () => qc.invalidateQueries({ queryKey: ["hygiene"] });
 
   return async function handleRowAction(row: FeedRow, action: string) {
+    // Proposals the adjudicate stage filed: one apply / restore endpoint for
+    // every kind, the stage's own code path.
+    if (row.source === "entity_maintenance" && row.action.startsWith("adjudication_") && (action === "apply" || action === "restore")) {
+      try {
+        const res = await api.post<{ applied: boolean; restored: boolean; reason: string | null; detail: Record<string, unknown> }>(
+          `/admin/hygiene/adjudication/${extractLogId(row)}/${action}`,
+        );
+        if (action === "apply") {
+          if (res.data.applied) toast.success(res.data.detail?.deleted ? "Applied — entity deleted" : "Applied");
+          else toast.message(res.data.reason ?? "Nothing to apply");
+        } else if (res.data.restored) toast.success("Restored");
+        else toast.message(res.data.reason ?? "Nothing to restore");
+        invalidate();
+        qc.invalidateQueries({ queryKey: ["engine"] });
+      } catch (e) {
+        toast.error(`${action === "apply" ? "Apply" : "Restore"} failed: ${(e as Error).message}`);
+      }
+      return;
+    }
     if (action === "dismiss") {
       try {
         await dismissRow.mutateAsync({ source: row.source, id: extractLogId(row) });

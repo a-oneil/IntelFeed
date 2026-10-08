@@ -33,7 +33,9 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
+from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, or_, select
+from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -930,6 +932,314 @@ async def _rolling_breaker(ratio: float, breaker_pct: float) -> bool:
     return False
 
 
+async def _entity_snapshot(db: AsyncSession, entity_type: str, entity_id: uuid.UUID) -> dict:
+    """Enough of an entity to re-create it after a veto deleted it."""
+    model = _model_for(entity_type)
+    obj = await db.get(model, entity_id) if model else None
+    if obj is None:
+        return {}
+    snap = {"id": str(entity_id), "name": _display_name(obj)}
+    for attr in (
+        "aliases",
+        "description",
+        "article_count",
+        "created_via",
+        "created_from_entry_id",
+        "created_confidence",
+        "actor_type",
+        "malware_type",
+        "tool_type",
+        "country",
+        "motivation",
+        "platforms",
+    ):
+        if hasattr(obj, attr):
+            val = getattr(obj, attr)
+            snap[attr] = str(val) if isinstance(val, uuid.UUID) else val
+    return snap
+
+
+async def _junction_for(db: AsyncSession, entity_type: str, entry_id: uuid.UUID, entity_id: uuid.UUID):
+    """(junction row, junction model, entity model, fk attr) for one link, or None."""
+    for jmodel, emodel, fk_attr, etype in _link_specs():
+        if etype != entity_type:
+            continue
+        row = (
+            await db.execute(select(jmodel).where(jmodel.entry_id == entry_id, getattr(jmodel, fk_attr) == entity_id))
+        ).scalar_one_or_none()
+        return row, jmodel, emodel, fk_attr
+    if entity_type == "ttp":
+        from app.models.ttp import TTP, EntryTTP
+
+        row = (
+            await db.execute(select(EntryTTP).where(EntryTTP.entry_id == entry_id, EntryTTP.ttp_id == entity_id))
+        ).scalar_one_or_none()
+        return row, EntryTTP, TTP, "ttp_id"
+    return None, None, None, None
+
+
+def _junction_snapshot(junction) -> dict:
+    snap: dict = {}
+    for attr in ("confidence", "source", "matched_names", "paragraph_indices", "source_text", "role", "sector"):
+        if hasattr(junction, attr):
+            val = getattr(junction, attr)
+            snap[attr] = list(val) if isinstance(val, list | tuple) else val
+    if getattr(junction, "extracted_at", None):
+        snap["extracted_at"] = junction.extracted_at.isoformat()
+    return snap
+
+
+async def _unlink(db: AsyncSession, entity_type: str, entry_id: uuid.UUID, entity_id: uuid.UUID) -> dict | None:
+    """Delete one entry↔entity junction row and decrement article_count.
+    Returns the junction snapshot (for restore) or None when already gone."""
+    junction, _jmodel, emodel, _fk = await _junction_for(db, entity_type, entry_id, entity_id)
+    if junction is None:
+        return None
+    snap = _junction_snapshot(junction)
+    await db.delete(junction)
+    if emodel is not None and hasattr(emodel, "article_count"):
+        await db.execute(
+            sa_update(emodel)
+            .where(emodel.id == entity_id)
+            .values(article_count=func.greatest(emodel.article_count - 1, 0))
+        )
+    return snap
+
+
+async def _relink(db: AsyncSession, entity_type: str, entry_id: uuid.UUID, entity_id: uuid.UUID, snap: dict) -> bool:
+    existing, jmodel, emodel, fk_attr = await _junction_for(db, entity_type, entry_id, entity_id)
+    if jmodel is None or existing is not None:
+        return False
+    kwargs: dict = {"entry_id": entry_id, fk_attr: entity_id}
+    for attr in ("confidence", "source", "matched_names", "paragraph_indices", "source_text", "role", "sector"):
+        if attr in snap and hasattr(jmodel, attr):
+            kwargs[attr] = snap[attr]
+    if snap.get("extracted_at"):
+        kwargs["extracted_at"] = datetime.fromisoformat(snap["extracted_at"])
+    db.add(jmodel(**kwargs))
+    if emodel is not None and hasattr(emodel, "article_count"):
+        await db.execute(sa_update(emodel).where(emodel.id == entity_id).values(article_count=emodel.article_count + 1))
+    return True
+
+
+async def _entity_has_a_life(db: AsyncSession, entity_type: str, entity_id: uuid.UUID, entry_id: uuid.UUID) -> bool:
+    """True when deleting the entity would lose something beyond this entry:
+    other articles link it, an edge cites it, a claim was recorded, or it was
+    not created by this entry in the first place."""
+    from app.models.entity_relationship import EntityRelationship
+
+    model = _model_for(entity_type)
+    obj = await db.get(model, entity_id) if model else None
+    if obj is None:
+        return True
+    if getattr(obj, "created_from_entry_id", None) != entry_id:
+        return True
+    other_links = False
+    for jmodel, _emodel, fk_attr, etype in _link_specs():
+        if etype != entity_type:
+            continue
+        other_links = (
+            await db.execute(
+                select(jmodel.entry_id)
+                .where(getattr(jmodel, fk_attr) == entity_id, jmodel.entry_id != entry_id)
+                .limit(1)
+            )
+        ).scalar_one_or_none() is not None
+    if other_links:
+        return True
+    edge = (
+        await db.execute(
+            select(EntityRelationship.id)
+            .where(
+                or_(
+                    (EntityRelationship.source_type == entity_type) & (EntityRelationship.source_id == entity_id),
+                    (EntityRelationship.target_type == entity_type) & (EntityRelationship.target_id == entity_id),
+                )
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if edge is not None:
+        return True
+    try:
+        from app.models.entity_field_claim import EntityFieldClaim
+
+        claim = (
+            await db.execute(
+                select(EntityFieldClaim.id)
+                .where(EntityFieldClaim.entity_type == entity_type, EntityFieldClaim.entity_id == entity_id)
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if claim is not None:
+            return True
+    except Exception:
+        logger.debug("claim check skipped", exc_info=True)
+    return False
+
+
+async def _delete_entity(db: AsyncSession, entity_type: str, entity_id: uuid.UUID) -> bool:
+    """Hard-delete a vetoed entity: its edges, its remaining junction rows,
+    the row, and its search document."""
+    from app.models.entity_relationship import EntityRelationship
+    from app.services.entity_indexer import delete_entity_document
+
+    model = _model_for(entity_type)
+    obj = await db.get(model, entity_id) if model else None
+    if obj is None:
+        return False
+    await db.execute(
+        sa_delete(EntityRelationship).where(
+            or_(
+                (EntityRelationship.source_type == entity_type) & (EntityRelationship.source_id == entity_id),
+                (EntityRelationship.target_type == entity_type) & (EntityRelationship.target_id == entity_id),
+            )
+        )
+    )
+    for jmodel, _emodel, fk_attr, etype in _link_specs():
+        if etype == entity_type:
+            await db.execute(sa_delete(jmodel).where(getattr(jmodel, fk_attr) == entity_id))
+    await db.delete(obj)
+    await db.flush()
+    try:
+        delete_entity_document(entity_type, entity_id)
+    except Exception:
+        logger.debug("search document delete failed for %s %s", entity_type, entity_id, exc_info=True)
+    return True
+
+
+async def _recreate_entity(db: AsyncSession, entity_type: str, snap: dict):
+    """Re-create a vetoed-and-deleted entity from its snapshot (restore)."""
+    model = _model_for(entity_type)
+    if model is None or not snap.get("name"):
+        return None
+    kwargs: dict = {"name": snap["name"]}
+    if snap.get("id"):
+        kwargs["id"] = uuid.UUID(snap["id"])
+    for attr in (
+        "aliases",
+        "description",
+        "created_via",
+        "created_confidence",
+        "actor_type",
+        "malware_type",
+        "tool_type",
+        "country",
+        "motivation",
+        "platforms",
+    ):
+        if attr in snap and hasattr(model, attr) and snap[attr] is not None:
+            kwargs[attr] = snap[attr]
+    if snap.get("created_from_entry_id") and hasattr(model, "created_from_entry_id"):
+        kwargs["created_from_entry_id"] = uuid.UUID(snap["created_from_entry_id"])
+    obj = model(**kwargs)
+    db.add(obj)
+    await db.flush()
+    return obj
+
+
+async def _demote_edge(db: AsyncSession, edge_id: uuid.UUID, reason: str) -> dict | None:
+    """The nightly adjudicator's demotion, inline: confidence → possible,
+    verdict → coincidental (sticky: later evidence never re-promotes)."""
+    from app.intelligence.correlation_cache import invalidate_entity_cache
+    from app.models.entity_relationship import EntityRelationship
+
+    edge = await db.get(EntityRelationship, edge_id)
+    if edge is None or edge.source == "analyst_rejected":
+        return None
+    before = {"confidence": edge.confidence, "adjudication_verdict": edge.adjudication_verdict}
+    edge.confidence = "possible"
+    edge.adjudication_verdict = "coincidental"
+    edge.adjudicated_at = datetime.now(UTC)
+    if reason and not edge.description:
+        edge.description = reason
+    db.add(edge)
+    for etype, eid in ((edge.source_type, edge.source_id), (edge.target_type, edge.target_id)):
+        try:
+            await invalidate_entity_cache(etype, str(eid))
+        except Exception:
+            pass
+    return before
+
+
+async def _drop_ioc(db: AsyncSession, entry, kind: str, value: str, observable_id: uuid.UUID | None) -> dict | None:
+    """Staged → remove from the entry's candidate list (what the analyst
+    dismiss button does); captured → remove this entry's sighting and
+    recount the ledger row."""
+    from app.intelligence.observables import recount_observable
+    from app.models.observable import EntryObservable
+
+    before = list(entry.observable_candidates or [])
+    dropped = [c for c in before if isinstance(c, dict) and c.get("kind") == kind and c.get("value") == value]
+    remaining = [c for c in before if not (isinstance(c, dict) and c.get("kind") == kind and c.get("value") == value)]
+    snap: dict = {}
+    if dropped:
+        entry.observable_candidates = remaining
+        db.add(entry)
+        snap["candidate"] = dropped[0]
+    if observable_id is not None:
+        sighting = (
+            await db.execute(
+                select(EntryObservable).where(
+                    EntryObservable.entry_id == entry.id, EntryObservable.observable_id == observable_id
+                )
+            )
+        ).scalar_one_or_none()
+        if sighting is not None:
+            snap["sighting"] = {
+                "observable_id": str(observable_id),
+                "confidence": sighting.confidence,
+                "source": sighting.source,
+                "surface_form": sighting.surface_form,
+                "was_defanged": sighting.was_defanged,
+                "paragraph_indices": list(sighting.paragraph_indices or []),
+            }
+            await db.delete(sighting)
+            await db.flush()
+            await recount_observable(db, observable_id)
+    return snap or None
+
+
+async def _merge_entity(
+    db: AsyncSession, entity_type: str, entity_id: uuid.UUID, target: dict, reason: str
+) -> dict | None:
+    """Merge a minted duplicate into the catalogue entity the reviewer chose,
+    through the merge engine's own primitives so tombstones and undo apply."""
+    from app.api.entity_merge import (
+        MergeRequest,
+        ReclassifyRequest,
+        perform_actor_merge,
+        perform_malware_merge,
+        perform_reclassify,
+        perform_same_type_merge,
+    )
+
+    target_type = target["entity_type"]
+    target_id = uuid.UUID(str(target["entity_id"]))
+    if target_type != entity_type:
+        resp = await perform_reclassify(
+            db,
+            ReclassifyRequest(
+                source_type=entity_type,
+                source_id=entity_id,
+                target_type=target_type,
+                target_id=target_id,
+                mode="apply",
+                reasoning=reason or None,
+            ),
+        )
+        return {"via": "reclassify", "response": getattr(resp, "model_dump", lambda: str(resp))()}
+    if entity_type == "threat_actor":
+        resp = await perform_actor_merge(db, target_id, MergeRequest(source_id=entity_id, reasoning=reason or None))
+    elif entity_type == "malware":
+        resp = await perform_malware_merge(db, target_id, MergeRequest(source_id=entity_id, reasoning=reason or None))
+    else:
+        resp = await perform_same_type_merge(
+            db, entity_type, target_id, entity_id, mode="apply", reasoning=reason or None
+        )
+    return {"via": "merge", "response": getattr(resp, "model_dump", lambda: str(resp))()}
+
+
 async def apply_verdicts(
     db: AsyncSession,
     entry,
@@ -938,11 +1248,13 @@ async def apply_verdicts(
     cfg: dict,
 ) -> dict:
     """Act on the verdicts. Shadow writes proposals only; apply (gated on the
-    confidence floor and the breakers) writes the same audit rows the
-    existing tools do. Returns the run detail stored on the pipeline run."""
+    confidence floor and the breakers) acts through the same code the
+    existing tools use and writes the same audit rows, which double as the
+    undo record. Returns the run detail stored on the pipeline run."""
     from app.intelligence.link_validation_apply import (
         ENTITY_TYPES,
         LinkRow,
+        apply_removal,
         log_reclassification,
         log_shadow_removal,
     )
@@ -953,15 +1265,16 @@ async def apply_verdicts(
     counts: dict[str, int] = {}
     overridden = 0
     judged_links = 0
+    applied_n = 0
 
     # Positive-evidence override: the reviewer may not remove a link to an
     # entity the same analysis extracted by name.
     for v in verdicts:
-        if v.item.kind == "link" and v.verdict in {"remove", "veto", "merge"}:
+        if v.item.kind == "link" and v.verdict == "remove":
             pool = _payload_name_pool(parsed, v.item.entity_type)
             names = {v.item.name.strip().lower(), *(m.strip().lower() for m in v.item.matched_names)}
             names.discard("")
-            if names & pool and v.verdict == "remove":
+            if names & pool:
                 v.verdict = "keep"
                 overridden += 1
 
@@ -970,17 +1283,16 @@ async def apply_verdicts(
     ratio = (len(destructive) / items_n) if items_n else 0.0
     breaker = ratio > cfg["breaker_pct"]
     rolling = await _rolling_breaker(ratio, cfg["breaker_pct"])
-    effective_mode = "shadow" if (mode != "apply" or breaker or rolling) else "apply"
-    if mode == "apply" and effective_mode == "apply":
-        # Apply lands in a later commit; until then apply behaves as shadow.
-        logger.warning("adjudication apply mode requested for %s but not yet implemented; filing proposals", entry.id)
-        effective_mode = "shadow"
+    run_mode = "shadow" if (mode != "apply" or breaker or rolling) else "apply"
+    floor = _CONF_RANK[cfg["min_conf"]]
 
     def _log(
         action: str,
         item: ReviewItem,
         before: dict | None,
         after: dict,
+        *,
+        applied: bool,
         entity_type: str | None = None,
         entity_id: uuid.UUID | None = None,
     ) -> EntityMaintenanceLog:
@@ -988,12 +1300,12 @@ async def apply_verdicts(
             entity_type=entity_type or item.entity_type or "entry",
             entity_id=entity_id if entity_id is not None else item.entity_id,
             action=action,
-            mode=effective_mode,
+            mode="apply" if applied else "shadow",
             before={"entry_id": str(entry.id), **(before or {})},
             after=after,
             reasoning=after.get("reason"),
             ai_result_id=ai_result_id,
-            applied=False,
+            applied=applied,
         )
         db.add(row)
         return row
@@ -1006,6 +1318,9 @@ async def apply_verdicts(
         if v.verdict == "keep" or (item.kind == "assessment" and v.verdict == "ok"):
             continue
         reason = v.reason
+        do_apply = run_mode == "apply" and _CONF_RANK[v.confidence] >= floor
+        after_base = {"reason": reason, "confidence": v.confidence}
+
         if item.kind == "link":
             link_row = LinkRow(
                 entity_key=item.item_id.removeprefix("link:"),
@@ -1021,65 +1336,123 @@ async def apply_verdicts(
             )
             if v.verdict == "remove":
                 if item.entity_type in ENTITY_TYPES:
-                    await log_shadow_removal(db, entry.id, link_row, reason, ai_result_id)
+                    if do_apply:
+                        if await apply_removal(db, entry.id, link_row, reason, ai_result_id):
+                            applied_n += 1
+                    else:
+                        await log_shadow_removal(db, entry.id, link_row, reason, ai_result_id)
                 else:
-                    _log(
-                        ACTION_UNLINK,
-                        item,
-                        {"source": item.source, "confidence": item.confidence, "matched_names": item.matched_names},
-                        {"reason": reason, "confidence": v.confidence},
-                    )
+                    snap = _junction_snapshot_from_item(item)
+                    if do_apply:
+                        real = await _unlink(db, item.entity_type or "", entry.id, item.entity_id)  # type: ignore[arg-type]
+                        if real is not None:
+                            applied_n += 1
+                            snap = real
+                    _log(ACTION_UNLINK, item, {"junction": snap}, after_base, applied=do_apply)
             elif v.verdict == "reclassify":
+                # Advisory in both modes, like everywhere else.
                 if item.entity_type in ENTITY_TYPES:
                     await log_reclassification(db, entry.id, link_row, reason, v.suggested_type, ai_result_id)
                 else:
-                    _log(ACTION_UNLINK, item, None, {"reason": reason, "suggested_type": v.suggested_type})
+                    _log(ACTION_UNLINK, item, None, {**after_base, "suggested_type": v.suggested_type}, applied=False)
             elif v.verdict == "veto":
-                entity_model = _model_for(item.entity_type or "")
-                entity = await db.get(entity_model, item.entity_id) if entity_model else None
-                snapshot = {
-                    "name": item.name,
-                    "aliases": list(getattr(entity, "aliases", None) or []),
-                    "article_count": int(getattr(entity, "article_count", 0) or 0),
-                }
-                _log(ACTION_VETO, item, {"entity": snapshot}, {"reason": reason, "confidence": v.confidence})
+                snapshot = await _entity_snapshot(db, item.entity_type or "", item.entity_id)  # type: ignore[arg-type]
+                junction_snap = _junction_snapshot_from_item(item)
+                if do_apply:
+                    real = await _unlink(db, item.entity_type or "", entry.id, item.entity_id)  # type: ignore[arg-type]
+                    if real is not None:
+                        junction_snap = real
+                    deleted = False
+                    if not await _entity_has_a_life(db, item.entity_type or "", item.entity_id, entry.id):  # type: ignore[arg-type]
+                        deleted = await _delete_entity(db, item.entity_type or "", item.entity_id)  # type: ignore[arg-type]
+                    applied_n += 1
+                    _log(
+                        ACTION_VETO if deleted else ACTION_UNLINK,
+                        item,
+                        {"entity": snapshot, "junction": junction_snap},
+                        {**after_base, "deleted": deleted},
+                        applied=True,
+                    )
+                else:
+                    _log(ACTION_VETO, item, {"entity": snapshot, "junction": junction_snap}, after_base, applied=False)
             elif v.verdict == "merge" and v.merge_target:
-                _log(
-                    ACTION_MERGE,
-                    item,
-                    {"entity": {"name": item.name}},
-                    {
-                        "reason": reason,
-                        "confidence": v.confidence,
-                        "merge_into": v.merge_target["name"],
-                        "target_type": v.merge_target["entity_type"],
-                        "target_id": v.merge_target["entity_id"],
-                    },
-                )
+                after = {
+                    **after_base,
+                    "merge_into": v.merge_target["name"],
+                    "target_type": v.merge_target["entity_type"],
+                    "target_id": v.merge_target["entity_id"],
+                }
+                snapshot = {"name": item.name}
+                if do_apply:
+                    try:
+                        outcome = await _merge_entity(
+                            db, item.entity_type or "", item.entity_id, v.merge_target, reason
+                        )  # type: ignore[arg-type]
+                        applied_n += 1
+                        _log(ACTION_MERGE, item, {"entity": snapshot}, {**after, "outcome": outcome}, applied=True)
+                    except Exception as exc:
+                        logger.warning("adjudication merge failed for %s: %s", item.item_id, exc)
+                        _log(
+                            ACTION_MERGE, item, {"entity": snapshot}, {**after, "error": str(exc)[:300]}, applied=False
+                        )
+                else:
+                    _log(ACTION_MERGE, item, {"entity": snapshot}, after, applied=False)
         elif item.kind == "edge" and v.verdict == "demote":
-            _log(
-                ACTION_EDGE_DEMOTE,
-                item,
-                {"claim": item.name},
-                {"reason": reason, "confidence": v.confidence},
-                entity_type="relationship",
-                entity_id=item.edge_id,
-            )
+            if do_apply:
+                before = await _demote_edge(db, item.edge_id, reason)  # type: ignore[arg-type]
+                if before is not None:
+                    applied_n += 1
+                    _log(
+                        ACTION_EDGE_DEMOTE,
+                        item,
+                        {"claim": item.name, **before},
+                        after_base,
+                        applied=True,
+                        entity_type="relationship",
+                        entity_id=item.edge_id,
+                    )
+            else:
+                _log(
+                    ACTION_EDGE_DEMOTE,
+                    item,
+                    {"claim": item.name},
+                    after_base,
+                    applied=False,
+                    entity_type="relationship",
+                    entity_id=item.edge_id,
+                )
         elif item.kind == "ioc" and v.verdict == "drop":
-            _log(
-                ACTION_IOC_DROP,
-                item,
-                {"staged": item.staged},
-                {"reason": reason, "confidence": v.confidence, "kind": item.ioc_kind, "value": item.ioc_value},
-                entity_type="observable",
-                entity_id=item.observable_id,
-            )
+            after = {**after_base, "kind": item.ioc_kind, "value": item.ioc_value}
+            if do_apply:
+                snap = await _drop_ioc(db, entry, item.ioc_kind or "", item.ioc_value or "", item.observable_id)
+                if snap is not None:
+                    applied_n += 1
+                    _log(
+                        ACTION_IOC_DROP,
+                        item,
+                        {"staged": item.staged, **snap},
+                        after,
+                        applied=True,
+                        entity_type="observable",
+                        entity_id=item.observable_id,
+                    )
+            else:
+                _log(
+                    ACTION_IOC_DROP,
+                    item,
+                    {"staged": item.staged},
+                    after,
+                    applied=False,
+                    entity_type="observable",
+                    entity_id=item.observable_id,
+                )
         elif item.kind == "assessment":
             _log(
                 ACTION_ASSESSMENT,
                 item,
                 None,
                 {"verdict": v.verdict, "reason": reason},
+                applied=False,
                 entity_type="entry",
                 entity_id=entry.id,
             )
@@ -1088,15 +1461,185 @@ async def apply_verdicts(
         entry.last_link_validation_at = datetime.now(UTC)
         db.add(entry)
 
-    detail = {
-        "mode": effective_mode,
+    return {
+        "mode": run_mode,
         "requested_mode": mode,
         "items": items_n,
         "verdicts": counts,
-        "applied": 0,
-        "shadowed": len(destructive),
+        "applied": applied_n,
+        "shadowed": max(0, len(destructive) - applied_n),
         "breaker": breaker,
         "rolling_breaker": rolling,
         "keep_overridden": overridden,
     }
-    return detail
+
+
+def _junction_snapshot_from_item(item: ReviewItem) -> dict:
+    snap: dict = {
+        "confidence": item.confidence,
+        "source": item.source,
+        "matched_names": list(item.matched_names),
+        "paragraph_indices": list(item.paragraph_indices),
+    }
+    if item.extracted_at:
+        snap["extracted_at"] = item.extracted_at.isoformat()
+    return snap
+
+
+# --------------------------------------------------------------------------- queue apply / restore
+
+
+async def apply_adjudication_row(db: AsyncSession, row) -> dict:
+    """Apply one shadow proposal the stage filed (the queue's Apply button).
+    Same primitives as apply mode; marks the row applied."""
+    from app.models.entry import Entry
+
+    if row.applied:
+        return {"applied": False, "reason": "already applied"}
+    before = row.before or {}
+    after = row.after or {}
+    entry = await db.get(Entry, uuid.UUID(before["entry_id"])) if before.get("entry_id") else None
+    if entry is None:
+        return {"applied": False, "reason": "entry gone"}
+    reason = after.get("reason") or ""
+    outcome: dict = {"applied": True}
+
+    if row.action == ACTION_UNLINK and row.entity_id:
+        snap = await _unlink(db, row.entity_type, entry.id, row.entity_id)
+        if snap is not None:
+            before["junction"] = snap
+        else:
+            outcome = {"applied": True, "note": "link already gone"}
+    elif row.action == ACTION_VETO and row.entity_id:
+        snap = await _unlink(db, row.entity_type, entry.id, row.entity_id)
+        if snap is not None:
+            before["junction"] = snap
+        if not before.get("entity"):
+            before["entity"] = await _entity_snapshot(db, row.entity_type, row.entity_id)
+        deleted = False
+        if not await _entity_has_a_life(db, row.entity_type, row.entity_id, entry.id):
+            deleted = await _delete_entity(db, row.entity_type, row.entity_id)
+        after["deleted"] = deleted
+        if not deleted:
+            row.action = ACTION_UNLINK
+        outcome["deleted"] = deleted
+    elif row.action == ACTION_MERGE and row.entity_id and after.get("target_id"):
+        target = {
+            "entity_type": after.get("target_type") or row.entity_type,
+            "entity_id": after["target_id"],
+            "name": after.get("merge_into"),
+        }
+        after["outcome"] = await _merge_entity(db, row.entity_type, row.entity_id, target, reason)
+    elif row.action == ACTION_EDGE_DEMOTE and row.entity_id:
+        prev = await _demote_edge(db, row.entity_id, reason)
+        if prev is None:
+            return {"applied": False, "reason": "edge gone or analyst-rejected"}
+        before.update(prev)
+    elif row.action == ACTION_IOC_DROP:
+        observable_id = row.entity_id
+        snap = await _drop_ioc(db, entry, after.get("kind") or "", after.get("value") or "", observable_id)
+        if snap:
+            before.update(snap)
+    elif row.action == ACTION_ASSESSMENT:
+        return {"applied": False, "reason": "assessment flags are informational"}
+    else:
+        return {"applied": False, "reason": f"nothing to apply for {row.action}"}
+
+    row.before = dict(before)
+    row.after = dict(after)
+    row.mode = "apply"
+    row.applied = True
+    db.add(row)
+    await db.flush()
+    return outcome
+
+
+async def restore_adjudication_row(db: AsyncSession, row) -> dict:
+    """Undo an applied adjudication row from its snapshots."""
+    from app.intelligence.correlation_cache import invalidate_entity_cache
+    from app.intelligence.observables import record_sighting
+    from app.models.entity_relationship import EntityRelationship
+    from app.models.entry import Entry
+    from app.models.observable import Observable
+
+    if not row.applied:
+        return {"restored": False, "reason": "not applied"}
+    before = row.before or {}
+    after = row.after or {}
+    entry = await db.get(Entry, uuid.UUID(before["entry_id"])) if before.get("entry_id") else None
+    if entry is None:
+        return {"restored": False, "reason": "entry gone"}
+
+    if row.action in (ACTION_UNLINK, ACTION_VETO) and row.entity_id:
+        entity_type = row.entity_type
+        model = _model_for(entity_type)
+        obj = await db.get(model, row.entity_id) if model else None
+        if obj is None and row.action == ACTION_VETO and before.get("entity"):
+            obj = await _recreate_entity(db, entity_type, before["entity"])
+        if obj is None:
+            return {"restored": False, "reason": "entity gone and no snapshot"}
+        relinked = await _relink(db, entity_type, entry.id, row.entity_id, before.get("junction") or {})
+        outcome = {"restored": True, "relinked": relinked, "recreated": after.get("deleted", False)}
+    elif row.action == ACTION_EDGE_DEMOTE and row.entity_id:
+        edge = await db.get(EntityRelationship, row.entity_id)
+        if edge is None:
+            return {"restored": False, "reason": "edge gone"}
+        edge.confidence = before.get("confidence") or "probable"
+        edge.adjudication_verdict = before.get("adjudication_verdict")
+        edge.adjudicated_at = None
+        db.add(edge)
+        for etype, eid in ((edge.source_type, edge.source_id), (edge.target_type, edge.target_id)):
+            try:
+                await invalidate_entity_cache(etype, str(eid))
+            except Exception:
+                pass
+        outcome = {"restored": True}
+    elif row.action == ACTION_IOC_DROP:
+        outcome = {"restored": True}
+        if before.get("candidate"):
+            cands = list(entry.observable_candidates or [])
+            if not any(
+                c.get("kind") == before["candidate"].get("kind") and c.get("value") == before["candidate"].get("value")
+                for c in cands
+                if isinstance(c, dict)
+            ):
+                cands.append(before["candidate"])
+                entry.observable_candidates = cands
+                db.add(entry)
+        sighting = before.get("sighting")
+        if sighting and sighting.get("observable_id"):
+            obs = await db.get(Observable, uuid.UUID(sighting["observable_id"]))
+            if obs is not None:
+                await record_sighting(
+                    db,
+                    entry.id,
+                    obs,
+                    source=sighting.get("source") or "ai",
+                    confidence=sighting.get("confidence"),
+                    surface_form=sighting.get("surface_form"),
+                    was_defanged=bool(sighting.get("was_defanged")),
+                    paragraph_indices=sighting.get("paragraph_indices") or None,
+                )
+    elif row.action == ACTION_MERGE:
+        return {"restored": False, "reason": "merges are undone from the merge engine's tombstone"}
+    else:
+        return {"restored": False, "reason": f"nothing to restore for {row.action}"}
+
+    # The row stays as history; a restore is its own audit line.
+    db.add(
+        type(row)(
+            entity_type=row.entity_type,
+            entity_id=row.entity_id,
+            action=row.action,
+            mode="apply",
+            before={"restored_from": str(row.id), **before},
+            after={**after, "restored": True},
+            reasoning=f"restored from {row.id}",
+            ai_result_id=row.ai_result_id,
+            applied=False,
+        )
+    )
+    row.after = {**after, "restored": True}
+    db.add(row)
+    await db.flush()
+    return outcome

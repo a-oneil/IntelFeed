@@ -873,3 +873,17 @@
   color: var(--danger);
   background: color-mix(in srgb, var(--danger) 14%, transparent);
 }
+.verdictBtn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 3px;
+  padding: 0 6px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  cursor: pointer;
+}
+.verdictBtn:hover {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}

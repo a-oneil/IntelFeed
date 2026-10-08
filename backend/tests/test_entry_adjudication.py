@@ -542,23 +542,6 @@ async def test_positive_evidence_override_keeps_extracted_names(db_session: Asyn
     assert not (await db_session.execute(select(EntityLinkValidationLog))).scalars().all()
 
 
-@pytest.mark.asyncio
-async def test_apply_mode_degrades_to_shadow_until_implemented(db_session: AsyncSession, feed):
-    await _seed_settings(db_session, adjudication_mode="apply")
-    entry = await _make_entry(db_session, feed)
-    storm = await _link_actor(db_session, entry, "Storm")
-    items, _ = await build_manifest(db_session, entry, _payload())
-    verdicts, _ = _validate_verdicts(
-        {"verdicts": [{"item_id": f"link:threat_actor:{storm.id}", "verdict": "remove", "confidence": "high"}]}, items
-    )
-    cfg = await adj._settings(db_session)
-    detail = await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
-    assert detail["requested_mode"] == "apply" and detail["mode"] == "shadow"
-    assert (
-        await db_session.execute(select(EntryThreatActor).where(EntryThreatActor.entry_id == entry.id))
-    ).scalar_one() is not None
-
-
 # ------------------------------------------------------------------ worker task end to end
 
 
@@ -782,7 +765,7 @@ async def test_feed_tags_origin_and_filters_adjudicator_rows(client, admin_heade
     assert actions == [ACTION_VETO, "shadow_remove"]
     veto = next(r for r in rows if r["action"] == ACTION_VETO)
     assert veto["subject"].startswith("Veto: Water Utility Co")
-    assert veto["actions"] == ["dismiss"]
+    assert veto["actions"] == ["apply", "dismiss"]
     assert {link["kind"] for link in veto["links"]} == {"entity", "entry"}
 
     resp = await client.get(
@@ -802,3 +785,247 @@ async def test_feed_tags_origin_and_filters_adjudicator_rows(client, admin_heade
     assert by_id[f"link:threat_actor:{storm.id}"]["verdict"] == "remove"
     assert by_id[f"link:threat_actor:{victim.id}"]["verdict"] == "veto"
     assert all(v["applied"] is False for v in body["verdicts"])
+
+
+# ------------------------------------------------------------------ apply mode (commit 4)
+
+
+async def _verdicts_for(db_session, entry, raw):
+    items, _ = await build_manifest(db_session, entry, _payload())
+    verdicts, _ = _validate_verdicts({"verdicts": raw}, items)
+    return items, verdicts
+
+
+@pytest.mark.asyncio
+async def test_apply_removes_links_at_high_confidence_and_files_the_rest(db_session: AsyncSession, feed):
+    await _seed_settings(db_session, adjudication_mode="apply")
+    entry = await _make_entry(db_session, feed)
+    storm = await _link_actor(db_session, entry, "Storm")
+    warlock = await _link_actor(db_session, entry, "Warlock", article_count=14)
+    keep_me = await _link_actor(db_session, entry, "Nightspire", article_count=5)
+    _items, verdicts = await _verdicts_for(
+        db_session,
+        entry,
+        [
+            {
+                "item_id": f"link:threat_actor:{storm.id}",
+                "verdict": "remove",
+                "confidence": "high",
+                "reason": "weather",
+            },
+            {
+                "item_id": f"link:threat_actor:{warlock.id}",
+                "verdict": "remove",
+                "confidence": "medium",
+                "reason": "hmm",
+            },
+        ],
+    )
+    cfg = await adj._settings(db_session)
+    cfg["breaker_pct"] = 1.0  # 2 of 3 destructive would trip the default breaker; that case has its own test
+    detail = await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
+    await db_session.flush()
+
+    assert detail["mode"] == "apply" and detail["applied"] == 1 and detail["shadowed"] == 1
+    linked = {
+        r.threat_actor_id
+        for r in (await db_session.execute(select(EntryThreatActor).where(EntryThreatActor.entry_id == entry.id)))
+        .scalars()
+        .all()
+    }
+    assert linked == {warlock.id, keep_me.id}  # Storm gone, medium-confidence Warlock kept
+    await db_session.refresh(storm)
+    assert storm.article_count == 2
+    logs = {
+        (r.entity_id, r.action) for r in (await db_session.execute(select(EntityLinkValidationLog))).scalars().all()
+    }
+    assert logs == {(storm.id, "removed"), (warlock.id, "shadow_remove")}
+
+
+@pytest.mark.asyncio
+async def test_apply_veto_deletes_only_when_nothing_else_holds_the_entity(db_session: AsyncSession, feed):
+    await _seed_settings(db_session, adjudication_mode="apply")
+    entry = await _make_entry(db_session, feed)
+    victim = await _link_actor(db_session, entry, "Water Utility Co", source="ai", minted=True, article_count=1)
+    shared = await _link_actor(db_session, entry, "Warlock Group", source="ai", minted=True, article_count=2)
+    other = await _make_entry(db_session, feed)
+    db_session.add(
+        EntryThreatActor(
+            entry_id=other.id,
+            threat_actor_id=shared.id,
+            confidence="high",
+            source="auto_link",
+            matched_names=["Warlock Group"],
+            extracted_at=datetime.now(UTC),
+        )
+    )
+    await db_session.flush()
+    _items, verdicts = await _verdicts_for(
+        db_session,
+        entry,
+        [
+            {"item_id": f"link:threat_actor:{victim.id}", "verdict": "veto", "confidence": "high", "reason": "victim"},
+            {"item_id": f"link:threat_actor:{shared.id}", "verdict": "veto", "confidence": "high", "reason": "dupe"},
+        ],
+    )
+    cfg = await adj._settings(db_session)
+    cfg["breaker_pct"] = 1.0  # two of two are destructive; don't trip the breaker here
+    detail = await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
+    await db_session.flush()
+
+    assert detail["applied"] == 2
+    assert await db_session.get(ThreatActor, victim.id) is None  # one article, nothing else: deleted
+    assert await db_session.get(ThreatActor, shared.id) is not None  # another article links it: kept
+    await db_session.refresh(shared)
+    assert shared.article_count == 1
+    rows = {r.action: r for r in (await db_session.execute(select(EntityMaintenanceLog))).scalars().all()}
+    assert rows[ACTION_VETO].entity_id == victim.id and rows[ACTION_VETO].after["deleted"] is True
+    assert rows[ACTION_VETO].before["entity"]["name"] == "Water Utility Co"
+    assert rows[ACTION_UNLINK].entity_id == shared.id and rows[ACTION_UNLINK].after["deleted"] is False
+    assert all(r.applied and r.mode == "apply" for r in rows.values())
+
+
+@pytest.mark.asyncio
+async def test_apply_demotes_edge_like_the_nightly_job_and_drops_iocs(db_session: AsyncSession, feed):
+    from app.models.observable import EntryObservable, Observable
+
+    await _seed_settings(db_session, adjudication_mode="apply")
+    entry = await _make_entry(db_session, feed)
+    warlock = await _link_actor(db_session, entry, "Warlock", source="ai", article_count=14)
+    cobalt = Tool(name="Cobalt Strike", article_count=40)
+    db_session.add(cobalt)
+    await db_session.flush()
+    edge = EntityRelationship(
+        source_type="threat_actor",
+        source_id=warlock.id,
+        target_type="tool",
+        target_id=cobalt.id,
+        relationship_type="uses",
+        confidence="probable",
+        source="auto_extracted",
+        description="watch for Cobalt Strike beacons",
+        evidence_entry_ids=[entry.id],
+    )
+    rejected = EntityRelationship(
+        source_type="threat_actor",
+        source_id=warlock.id,
+        target_type="tool",
+        target_id=cobalt.id,
+        relationship_type="targets",
+        confidence="possible",
+        source="analyst_rejected",
+        evidence_entry_ids=[entry.id],
+    )
+    db_session.add_all([edge, rejected])
+    obs = Observable(kind="sha256", value="9f3a" * 16, sighting_count=1, article_count=1)
+    db_session.add(obs)
+    await db_session.flush()
+    db_session.add(EntryObservable(entry_id=entry.id, observable_id=obs.id, source="ai", confidence="high"))
+    entry.observable_candidates = [{"kind": "domain", "value": "blog.vendor-research.example", "origin": "ai"}]
+    await db_session.flush()
+
+    items, verdicts = await _verdicts_for(
+        db_session,
+        entry,
+        [
+            {"item_id": f"edge:{edge.id}", "verdict": "demote", "confidence": "high", "reason": "generic advice"},
+            {
+                "item_id": "ioc:domain:blog.vendor-research.example",
+                "verdict": "drop",
+                "confidence": "high",
+                "reason": "own blog",
+            },
+            {"item_id": f"ioc:sha256:{'9f3a' * 16}", "verdict": "drop", "confidence": "high", "reason": "sample"},
+        ],
+    )
+    assert not any(it.item_id == f"edge:{rejected.id}" for it in items)  # analyst-rejected edges never listed
+    cfg = await adj._settings(db_session)
+    cfg["breaker_pct"] = 1.0
+    detail = await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
+    await db_session.flush()
+
+    assert detail["applied"] == 3
+    edge = await db_session.get(EntityRelationship, edge.id)
+    assert edge.confidence == "possible" and edge.adjudication_verdict == "coincidental" and edge.adjudicated_at
+    assert (await db_session.get(Entry, entry.id)).observable_candidates == []
+    assert (
+        await db_session.execute(select(EntryObservable).where(EntryObservable.entry_id == entry.id))
+    ).scalar_one_or_none() is None
+    assert (await db_session.get(Observable, obs.id)).sighting_count == 0
+
+
+@pytest.mark.asyncio
+async def test_apply_breaker_downgrades_whole_run_to_proposals(db_session: AsyncSession, feed):
+    await _seed_settings(db_session, adjudication_mode="apply")
+    entry = await _make_entry(db_session, feed)
+    a = await _link_actor(db_session, entry, "Storm")
+    b = await _link_actor(db_session, entry, "Nightspire")
+    _items, verdicts = await _verdicts_for(
+        db_session,
+        entry,
+        [
+            {"item_id": f"link:threat_actor:{a.id}", "verdict": "remove", "confidence": "high"},
+            {"item_id": f"link:threat_actor:{b.id}", "verdict": "remove", "confidence": "high"},
+        ],
+    )
+    cfg = await adj._settings(db_session)  # breaker 0.5; 2/2 destructive trips it
+    detail = await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
+    assert detail["breaker"] and detail["mode"] == "shadow" and detail["applied"] == 0
+    assert (
+        len(
+            (await db_session.execute(select(EntryThreatActor).where(EntryThreatActor.entry_id == entry.id)))
+            .scalars()
+            .all()
+        )
+        == 2
+    )
+
+
+@pytest.mark.asyncio
+async def test_queue_apply_then_restore_recreates_a_vetoed_entity(
+    client, admin_headers, db_session: AsyncSession, feed
+):
+    await _seed_settings(db_session)
+    entry = await _make_entry(db_session, feed)
+    victim = await _link_actor(
+        db_session, entry, "Water Utility Co", source="ai", minted=True, article_count=1, aliases=["WUC"]
+    )
+    _items, verdicts = await _verdicts_for(
+        db_session,
+        entry,
+        [{"item_id": f"link:threat_actor:{victim.id}", "verdict": "veto", "confidence": "high", "reason": "victim"}],
+    )
+    cfg = await adj._settings(db_session)
+    await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)  # shadow proposal
+    await db_session.commit()
+    row = (
+        await db_session.execute(select(EntityMaintenanceLog).where(EntityMaintenanceLog.action == ACTION_VETO))
+    ).scalar_one()
+
+    resp = await client.post(f"/api/admin/hygiene/adjudication/{row.id}/apply", headers=admin_headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["applied"] is True and resp.json()["detail"]["deleted"] is True
+    gone = (
+        await db_session.execute(
+            select(ThreatActor).where(ThreatActor.id == victim.id).execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    assert gone is None
+
+    resp = await client.post(f"/api/admin/hygiene/adjudication/{row.id}/restore", headers=admin_headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["restored"] is True
+    back = (
+        await db_session.execute(
+            select(ThreatActor).where(ThreatActor.id == victim.id).execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    assert back is not None and back.name == "Water Utility Co" and back.aliases == ["WUC"]
+    assert (
+        await db_session.execute(select(EntryThreatActor).where(EntryThreatActor.entry_id == entry.id))
+    ).scalar_one().threat_actor_id == victim.id
+
+    feed_rows = (
+        await client.get("/api/admin/hygiene/feed", params={"origin": "adjudicator"}, headers=admin_headers)
+    ).json()["rows"]
+    assert any(r["action"] == ACTION_VETO and r["payload"]["after"].get("restored") for r in feed_rows)

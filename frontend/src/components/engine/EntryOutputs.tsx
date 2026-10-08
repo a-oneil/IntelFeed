@@ -1,5 +1,8 @@
 import { useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+
+import api from "@/api/client";
 
 import { entityProfilePath } from "@/components/entityProfile/entityProfileConfig";
 import { useAllRelationships, useEntityLinks, useUnlink } from "@/hooks/useAutolinking";
@@ -61,10 +64,38 @@ const VERDICT_LABEL: Record<string, string> = {
   drop: "drop",
 };
 
-/** The adjudicate stage's verdict for one drawer row, as a badge. Dashed =
- *  a shadow proposal (nothing applied yet); solid = applied. */
-function VerdictBadge({ verdict }: { verdict: EntryAdjudicationVerdict | undefined }) {
+/** The adjudicate stage's verdict for one drawer row, as a badge with the
+ *  matching action: Apply while it is a shadow proposal, Restore once it was
+ *  applied. Dashed = proposed; solid = applied. */
+function VerdictBadge({ verdict, entryId }: { verdict: EntryAdjudicationVerdict | undefined; entryId: string }) {
+  const qc = useQueryClient();
   if (!verdict || verdict.verdict === "keep") return null;
+  const [logSource, logId] = verdict.log.split(":");
+  const maint = logSource === "entity_maintenance";
+  const canApply = !verdict.applied && verdict.kind !== "assessment";
+  const canRestore = verdict.applied && verdict.verdict !== "merge";
+  const run = async (what: "apply" | "restore") => {
+    try {
+      if (maint) {
+        const res = await api.post<{ applied: boolean; restored: boolean; reason: string | null }>(
+          `/admin/hygiene/adjudication/${logId}/${what}`,
+        );
+        const ok = what === "apply" ? res.data.applied : res.data.restored;
+        if (ok) toast.success(what === "apply" ? "Applied" : "Restored");
+        else toast.message(res.data.reason ?? "Nothing to do");
+      } else {
+        await api.post(`/admin/link-validation/log/${logId}/${what === "apply" ? "apply-removal" : "restore"}`);
+        toast.success(what === "apply" ? "Link removed" : "Link restored");
+      }
+      qc.invalidateQueries({ queryKey: ["engine", "adjudication", entryId] });
+      qc.invalidateQueries({ queryKey: ["hygiene"] });
+      qc.invalidateQueries({ queryKey: ["entity-links"] });
+      qc.invalidateQueries({ queryKey: ["relationships"] });
+      qc.invalidateQueries({ queryKey: ["extraction"] });
+    } catch (e) {
+      toast.error(`${what === "apply" ? "Apply" : "Restore"} failed: ${(e as Error).message}`);
+    }
+  };
   const label = VERDICT_LABEL[verdict.verdict] ?? verdict.verdict;
   const detail =
     verdict.verdict === "merge" && verdict.merge_into
@@ -76,9 +107,21 @@ function VerdictBadge({ verdict }: { verdict: EntryAdjudicationVerdict | undefin
     verdict.reason ? ` — ${verdict.reason}` : ""
   }`;
   return (
-    <span className={`${styles.verdictPill} ${verdict.applied ? styles.verdictApplied : styles.verdictShadow}`} title={title}>
-      {detail}
-    </span>
+    <>
+      <span className={`${styles.verdictPill} ${verdict.applied ? styles.verdictApplied : styles.verdictShadow}`} title={title}>
+        {detail}
+      </span>
+      {canApply && (
+        <button type="button" className={styles.verdictBtn} title="Apply this verdict now" onClick={() => run("apply")}>
+          apply
+        </button>
+      )}
+      {canRestore && (
+        <button type="button" className={styles.verdictBtn} title="Undo this applied verdict" onClick={() => run("restore")}>
+          restore
+        </button>
+      )}
+    </>
   );
 }
 
@@ -126,7 +169,7 @@ export function EntryOutputs({ entryId }: { entryId: string }) {
       {links.map((l) => (
         <div key={`${l.entity_type}|${l.entity_id}`} className={styles.orow}>
           <EntityChip type={l.entity_type} id={l.entity_id} name={l.entity_name} />
-          <VerdictBadge verdict={verdictById.get(`link:${l.entity_type}:${l.entity_id}`)} />
+          <VerdictBadge verdict={verdictById.get(`link:${l.entity_type}:${l.entity_id}`)} entryId={entryId} />
           {l.matched_names?.length ? <span className={styles.surf}>{l.matched_names[0]}</span> : null}
           <span className={`${styles.srcPill} ${srcClass(l.source)}`}>
             {SOURCE_LABELS[l.source ?? ""] ?? l.source ?? "unattributed"}
@@ -162,7 +205,7 @@ export function EntryOutputs({ entryId }: { entryId: string }) {
           <EntityChip type={r.source_type} id={r.source_id} name={r.source_name} />
           <span className={styles.verb}>{r.relationship_type}</span>
           <EntityChip type={r.target_type} id={r.target_id} name={r.target_name} />
-          <VerdictBadge verdict={verdictById.get(`edge:${r.id}`)} />
+          <VerdictBadge verdict={verdictById.get(`edge:${r.id}`)} entryId={entryId} />
           <span className={`${styles.srcPill} ${srcClass(r.source)}`}>
             {SOURCE_LABELS[r.source ?? ""] ?? r.source ?? "—"}
           </span>
@@ -210,7 +253,7 @@ export function EntryOutputs({ entryId }: { entryId: string }) {
         <div key={e.id} className={styles.orow}>
           <EntityChip type={e.entity_type} id={e.id} name={e.name} />
           <span className={styles.newTag}>NEW</span>
-          <VerdictBadge verdict={verdictById.get(`link:${e.entity_type}:${e.id}`)} />
+          <VerdictBadge verdict={verdictById.get(`link:${e.entity_type}:${e.id}`)} entryId={entryId} />
           <span className={styles.popMuted}>
             {e.article_count} linked {e.article_count === 1 ? "entry" : "entries"}
             {e.created_confidence ? ` · ${e.created_confidence}` : ""}
