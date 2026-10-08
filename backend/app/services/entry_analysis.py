@@ -475,6 +475,11 @@ async def analyze_entry(
     if not isinstance(result, dict) or result.get("_extraction_status") not in (None, "success"):
         return result, {}
     counts = await store_entry_analysis(db, entry_id, result)
+    # Manual runs commit in the API handler right after this returns; the
+    # review task starts after its countdown, well past that commit.
+    from app.services.entry_adjudication import enqueue_and_dispatch
+
+    await enqueue_and_dispatch(db, entry_id, counts, result, countdown=15)
     return result, counts
 
 
@@ -610,10 +615,16 @@ async def enqueue_entry_analysis(db: AsyncSession, entry_id: uuid.UUID) -> str |
                     )
                 )
                 await store_entry_analysis(db, entry_id, parsed)
-                return await _write_status(
+                status = await _write_status(
                     "reused_echo",
                     reused_from_entry_id=uuid.UUID(dup_id),
                     completed_at=datetime.now(UTC),
                 )
+                # Echo payloads were judged against the duplicate's text; the
+                # adjudicate stage records the skip rather than reviewing them.
+                from app.services.entry_adjudication import enqueue_adjudication
+
+                await enqueue_adjudication(db, entry_id, None, parsed)
+                return status
 
     return await _write_status("pending")

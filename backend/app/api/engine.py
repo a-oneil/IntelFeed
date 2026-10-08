@@ -413,6 +413,8 @@ RETRYABLE_STAGE_TASKS: dict[str, str] = {
     "correlation": "app.workers.automation_tasks.detect_correlation_events",
     "requirements": "app.workers.intel_feed_tasks.match_requirements_task",
     "score": "app.workers.signal_tasks.score_entry_task",
+    # Re-checks every gate itself, so a manual retry is safe.
+    "adjudicate": "app.workers.adjudication_tasks.adjudicate_entry_task",
 }
 
 

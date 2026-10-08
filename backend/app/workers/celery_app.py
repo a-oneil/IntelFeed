@@ -35,6 +35,7 @@ celery_app = Celery(
         "app.workers.copilot_auth_tasks",
         "app.workers.signal_tasks",
         "app.workers.ai_batch_tasks",
+        "app.workers.adjudication_tasks",
         "app.workers.tts_tasks",
         "app.workers.embedding_tasks",
         "app.workers.thread_tasks",
@@ -71,6 +72,9 @@ celery_app.conf.update(
         # both of that worker's slots and starves poll_due_feeds, which stops
         # ingest outright.
         "app.workers.ai_batch_tasks.run_entry_analysis_task": {"queue": "ai"},
+        # The post-analysis review is one more generative call per entry;
+        # same worker, same serialization, never alongside the analysis.
+        "app.workers.adjudication_tasks.adjudicate_entry_task": {"queue": "ai"},
         "app.workers.entity_maintenance_tasks.process_merge_candidate": {"queue": "ai"},
         "app.workers.entity_maintenance_tasks.refresh_actor_profile": {"queue": "ai"},
         "app.workers.entity_maintenance_tasks.process_name_normalization_batch": {"queue": "ai"},

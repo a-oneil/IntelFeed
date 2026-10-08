@@ -137,6 +137,15 @@ async def _submit_analysis_batches() -> dict | None:
         )
         for eid in missed:
             await enqueue_entry_analysis(db, eid)
+        # Sibling sweep for the adjudicate stage: completed analyses whose
+        # review decision never landed, and over-budget rows waiting for a
+        # fresh hour.
+        try:
+            from app.services.entry_adjudication import resweep_adjudications
+
+            await resweep_adjudications(db)
+        except Exception:
+            logger.warning("adjudication resweep failed", exc_info=True)
 
         # Budget clamp (backstop, not a gate — pending rows simply wait)
         budget = float(await get_setting("ai_daily_budget_usd", db) or 2.0)
@@ -323,11 +332,14 @@ async def _poll_analysis_batches() -> dict | None:
 async def _ingest_batch_results(db, client, job, task, provider_model) -> dict:
     from app.ai.engine import store_external_result
     from app.models.ai_analysis import AIAnalysisRequest, AIBatchJob
+    from app.services.entry_adjudication import PENDING as ADJUDICATION_PENDING
+    from app.services.entry_adjudication import dispatch_adjudication, enqueue_adjudication
     from app.services.entry_analysis import store_entry_analysis
 
     counts = {"succeeded": 0, "errored": 0, "expired": 0}
     now = datetime.now(UTC)
     any_links = False
+    pending_adjudications: list[uuid.UUID] = []
 
     results = await client.messages.batches.results(job.provider_batch_id)
     async for item in results:
@@ -355,14 +367,18 @@ async def _ingest_batch_results(db, client, job, task, provider_model) -> dict:
                 model_name=message.model,
                 batch=True,
             )
+            adjudicate_status = None
             if isinstance(parsed, dict) and parsed.get("_extraction_status") == "success":
                 stored = await store_entry_analysis(db, entry_id, parsed)
                 any_links = any_links or bool(stored)
+                adjudicate_status = await enqueue_adjudication(db, entry_id, stored, parsed)
             if request_row:
                 request_row.status = "completed"
                 request_row.completed_at = now
                 db.add(request_row)
             counts["succeeded"] += 1
+            if adjudicate_status == ADJUDICATION_PENDING:
+                pending_adjudications.append(entry_id)
         elif kind == "errored":
             err = str(getattr(item.result, "error", ""))[:2000]
             if request_row:
@@ -396,6 +412,10 @@ async def _ingest_batch_results(db, client, job, task, provider_model) -> dict:
         )
     )
     await db.commit()
+
+    # Reviews are dispatched only now, after every row above is committed.
+    for eid in pending_adjudications:
+        dispatch_adjudication(eid)
 
     if any_links:
         try:
@@ -463,15 +483,23 @@ async def _run_entry_analysis(entry_id_str: str, force: bool = False):
             await db.execute(select(AIAnalysisRequest).where(AIAnalysisRequest.entry_id == entry_id))
         ).scalar_one_or_none()
         now = datetime.now(UTC)
+        adjudicate_status = None
         if isinstance(result, dict) and result.get("_extraction_status") == "success":
-            await store_entry_analysis(db, entry_id, result)
+            stored = await store_entry_analysis(db, entry_id, result)
             if request_row:
                 request_row.status = "completed"
                 request_row.completed_at = now
                 db.add(request_row)
+            from app.services.entry_adjudication import enqueue_adjudication
+
+            adjudicate_status = await enqueue_adjudication(db, entry_id, stored, result)
         elif request_row:
             request_row.attempts += 1
             request_row.status = "failed" if request_row.attempts >= 3 else "pending"
             request_row.error = (result or {}).get("_error") if isinstance(result, dict) else None
             db.add(request_row)
         await db.commit()
+        if adjudicate_status == "pending":
+            from app.services.entry_adjudication import dispatch_adjudication
+
+            dispatch_adjudication(entry_id)

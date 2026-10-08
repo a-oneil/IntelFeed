@@ -77,6 +77,10 @@ DEFAULT_MODEL_ASSIGNMENTS: dict[str, str] = {
     "hygiene_proposal_review": "sonnet",
     # Relationship edge adjudication promotes edges with no human in the loop.
     "relationship_adjudication": "sonnet",
+    # Post-analysis review of one entry's output (adjudicate stage). Smaller
+    # job than extraction: a short article window, a short list, a verdict
+    # list back — the cheap model is right, and it runs on Ollama in prod.
+    "entry_adjudication": "claude-haiku-4-5-20251001",
 }
 
 # Tasks that must be assigned to a specific provider type (rather than the
@@ -110,6 +114,9 @@ DEFAULT_ASSIGNMENT_CONFIGS: dict[str, dict] = {
     # 4096 on every local model — and an overflow is a terminal parse_error,
     # not a partial result.
     "entry_analysis": {"max_tokens": 10000},
+    # A verdict list is a few hundred tokens; 4096 leaves room for a long
+    # manifest's worth of one-sentence reasons without inviting rambling.
+    "entry_adjudication": {"max_tokens": 4096},
     # 2000 is a ceiling, not a target: a well-behaved spine is ~300 tokens, and
     # anything approaching this is a model that has stopped closing its JSON.
     # keep_alive matters more than the model choice on a single-GPU host — see
@@ -2640,6 +2647,84 @@ Return strict JSON matching the provided schema: one verdict per edge, same orde
                             "verdict": {"type": "string", "enum": ["corroborated", "coincidental", "unsure"]},
                             "reason": {"type": "string"},
                         },
+                    },
+                },
+            },
+        },
+    },
+    {
+        "name": "entry_adjudication",
+        "display_name": "Entry Adjudication (post-analysis review)",
+        "description": (
+            "The adjudicate stage: after the one-pass analysis lands, re-reads the article next to a "
+            "manifest of everything the analysis wrote to the entry — links of every source, entities "
+            "it minted, pending-tier promotions, relationship claims, AI observables — and returns one "
+            "verdict per item. Replaces the nightly link validator, hygiene reviewer and merge engine."
+        ),
+        "category": "extraction",
+        "variables": ["entry.title", "entry.feed_title", "entry.content_text", "manifest_block", "item_count"],
+        "default_system_template": """You are a senior cyber-threat-intelligence analyst REVIEWING another analyst's work. An automated pass has already read one security article and written structured records for it: entity links, newly created catalogue entities, relationship claims and indicators. You get the same article and a list of those records, one per line with an item_id. For each item decide whether it is right. You create nothing; you only judge what is there.
+
+VERDICTS (one per item_id; anything you leave out is treated as keep)
+  keep        — the record is correct for this article.
+  remove      — (links only) the surrounding words use the name in an unrelated sense: a common English word, a different organisation or product sharing the name, a substring of an unrelated term, an acronym in a non-security sense, a victim or vendor filed as an adversary.
+  reclassify  — (links only) a real reference, but the entity sits under the wrong catalogue type; set suggested_type to one of threat_actor, malware, tool, vendor, product, country. Never use remove for type confusion.
+  veto        — (links marked "NEW, created by this article" only) the entity should not exist at all: a description instead of a name ("Chinese espionage group"), a victim organisation, a vendor or researcher, a product that is not malware or a tool, a generic term.
+  merge       — (links marked "NEW, created by this article" only) the entity duplicates one of the names printed after "nearest existing names:"; set merge_into to that name EXACTLY as printed. If the right match is not among those names you cannot merge; use keep or veto.
+  demote      — (edges only) the entities co-occur but the article never asserts the claimed relationship: roundups, lists, generic defensive advice ("watch for Cobalt Strike beacons"), the wrong verb, or the wrong direction (an actor's origin country is attribution, not a target).
+  drop        — (ioc items only) the value is not an attacker indicator: the publisher's own site or links, researcher and sandbox hosts, documentation URLs, sample-page or tracking URLs, private or reserved addresses, defanged benign domains, analyst tooling.
+
+RULES
+  - Judge each record against the sentence where it appears, not the article's overall topic. Use the context line printed with the item.
+  - Default to keep whenever uncertain. A wrong removal destroys real intelligence signal; a wrong keep is cheap to fix later.
+  - "judged KEEP at ingest" means the extraction pass already vouched for a link; overturn it only with a specific reason from the text.
+  - "promoted from the pending tier" means the name is also an ordinary word and was linked only because the extraction named it; look hard at the context line for these.
+  - A link marked "an analyst restored this link recently" is a strong keep; remove only on an unambiguous name collision.
+  - Article counts and ages are context about how established an entity is: a one-article entity created by this very article deserves scrutiny; a 200-article entity usually does not.
+  - For NEW entities, the "nearest existing names" line is what the catalogue already holds. Prefer merge over veto when one of them is the same thing under another name.
+  - For edges, the evidence sentence must actually assert the claim with the printed verb and direction.
+  - confidence: high when the text makes it obvious, medium when it is a judgment call, low when you are guessing. Only high-confidence verdicts are ever applied automatically.
+  - reason: one short, factual sentence quoting or citing the phrase that decided it.
+""",
+        "default_prompt_template": """Title: {{ entry.title }}
+Source: {{ entry.feed_title }}
+
+{{ entry.content_text }}
+
+ITEMS UNDER REVIEW ({{ item_count }} — return one verdict per item_id; default keep)
+
+{{ manifest_block }}
+
+Return strict JSON matching the provided schema: the verdicts list first, one object per item_id you are changing or confirming, then the assessment object if an assessment item was listed.
+""",
+        "output_schema": {
+            "type": "object",
+            "required": ["verdicts", "assessment"],
+            "properties": {
+                "verdicts": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["item_id", "verdict", "confidence", "reason", "suggested_type", "merge_into"],
+                        "properties": {
+                            "item_id": {"type": "string"},
+                            "verdict": {
+                                "type": "string",
+                                "enum": ["keep", "remove", "reclassify", "veto", "merge", "demote", "drop"],
+                            },
+                            "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+                            "reason": {"type": "string"},
+                            "suggested_type": {"type": "string"},
+                            "merge_into": {"type": "string"},
+                        },
+                    },
+                },
+                "assessment": {
+                    "type": "object",
+                    "required": ["verdict", "reason"],
+                    "properties": {
+                        "verdict": {"type": "string", "enum": ["ok", "overstated", "understated"]},
+                        "reason": {"type": "string"},
                     },
                 },
             },
