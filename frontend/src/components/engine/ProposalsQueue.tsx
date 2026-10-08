@@ -48,6 +48,13 @@ const CHANGE_META: Record<string, { label: string; cls: string }> = {
   cve_malformed_id: { label: "ID fix", cls: styles.tName },
   cve_withdrawn: { label: "CVE withdrawn", cls: styles.tRemove },
   stale_entity_review: { label: "Stale entity", cls: styles.tStale },
+  // adjudicate stage (post-analysis review)
+  adjudication_veto: { label: "Veto entity", cls: styles.tRemove },
+  adjudication_merge: { label: "Merge", cls: styles.tMerge },
+  adjudication_unlink: { label: "Unlink", cls: styles.tRemove },
+  adjudication_edge_demote: { label: "Demote edge", cls: styles.tRecl },
+  adjudication_ioc_drop: { label: "Drop observable", cls: styles.tRecl },
+  adjudication_assessment: { label: "Assessment", cls: styles.tStale },
   // applied history
   removed: { label: "Link removed", cls: styles.tRemove },
   restored: { label: "Link restored", cls: styles.tVlink },
@@ -76,6 +83,15 @@ const ENTITY_FILTERS = [
   { value: "vendor_autolink", label: "Vendor link" },
   { value: "ttp_malformed_id,cve_malformed_id,cve_withdrawn", label: "ID fix" },
   { value: "stale_entity_review", label: "Stale" },
+  { value: "adjudication_veto", label: "Veto" },
+  { value: "adjudication_merge", label: "Merge (review)" },
+  { value: "adjudication_edge_demote", label: "Demote" },
+  { value: "adjudication_ioc_drop,adjudication_unlink", label: "Drop / unlink" },
+];
+const ORIGINS: { value: "" | "adjudicator" | "legacy"; label: string; title: string }[] = [
+  { value: "", label: "All", title: "Every proposal" },
+  { value: "adjudicator", label: "Adjudicator", title: "Filed by the post-analysis review, with the article in hand" },
+  { value: "legacy", label: "Legacy", title: "Filed by the retired nightly jobs and on-demand scans" },
 ];
 const LINK_HISTORY_FILTERS = [
   { value: "", label: "All" },
@@ -120,11 +136,20 @@ function feedLinkHref(link: FeedLink): string | null {
   return slug && link.entity_id ? `/workbench/${slug}/${link.entity_id}` : null;
 }
 
-export function ProposalsQueue({ domain, initialAction }: { domain: Domain; initialAction?: string }) {
+export function ProposalsQueue({
+  domain,
+  initialAction,
+  initialOrigin,
+}: {
+  domain: Domain;
+  initialAction?: string;
+  initialOrigin?: "adjudicator" | "legacy";
+}) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [hist, setHist] = useState(false);
   const [actionFilter, setActionFilter] = useState(initialAction ?? "");
+  const [originFilter, setOriginFilter] = useState<"" | "adjudicator" | "legacy">(initialOrigin ?? "");
   const [verdictFilter, setVerdictFilter] = useState("");
   const [modePending, setModePending] = useState(false);
   const [busyRow, setBusyRow] = useState<string | null>(null);
@@ -133,12 +158,13 @@ export function ProposalsQueue({ domain, initialAction }: { domain: Domain; init
   const stats = useHygieneStats();
   const feed = useHygieneFeed(
     hist
-      ? { source, mode: "apply", action: actionFilter || undefined, limit: 100 }
+      ? { source, mode: "apply", action: actionFilter || undefined, origin: originFilter || undefined, limit: 100 }
       : {
           source,
           pending: true,
           action: actionFilter || undefined,
           review: (verdictFilter || undefined) as FeedFilters["review"],
+          origin: originFilter || undefined,
           limit: 100,
         },
   );
@@ -341,6 +367,19 @@ export function ProposalsQueue({ domain, initialAction }: { domain: Domain; init
           ))}
         </div>
 
+        <div className={styles.seg} title="Who proposed it">
+          {ORIGINS.map((o) => (
+            <button
+              key={o.value || "all"}
+              className={originFilter === o.value ? styles.segOn : ""}
+              title={o.title}
+              onClick={() => setOriginFilter(o.value)}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+
         {!hist && (
           <select className={styles.verdict} value={verdictFilter} onChange={(e) => setVerdictFilter(e.target.value)}>
             <option value="">Any verdict</option>
@@ -477,6 +516,11 @@ export function ProposalsQueue({ domain, initialAction }: { domain: Domain; init
                 <tr key={row.id}>
                   <td>
                     <span className={`${styles.tag} ${meta.cls}`}>{meta.label}</span>
+                    {row.origin === "adjudicator" && (
+                      <span className={styles.originTag} title="Filed by the post-analysis review, with the article in hand">
+                        adjudicator
+                      </span>
+                    )}
                   </td>
                   <td>
                     {row.entity_name ? (

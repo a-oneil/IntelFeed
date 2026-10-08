@@ -3,6 +3,7 @@ import { toast } from "sonner";
 
 import { entityProfilePath } from "@/components/entityProfile/entityProfileConfig";
 import { useAllRelationships, useEntityLinks, useUnlink } from "@/hooks/useAutolinking";
+import { useEntryAdjudication, type EntryAdjudicationVerdict } from "@/hooks/useEngine";
 import { useConfirmExtraction, useDeleteExtractionEntity, useExtractionEntities } from "@/hooks/useExtraction";
 import {
   useConfirmRelationship,
@@ -50,6 +51,37 @@ function EntityChip({ type, id, name }: { type: string; id: string; name: string
 
 const LIST_LIMIT = 25;
 
+const VERDICT_LABEL: Record<string, string> = {
+  keep: "keep",
+  remove: "remove",
+  reclassify: "reclassify",
+  veto: "veto",
+  merge: "merge",
+  demote: "demote",
+  drop: "drop",
+};
+
+/** The adjudicate stage's verdict for one drawer row, as a badge. Dashed =
+ *  a shadow proposal (nothing applied yet); solid = applied. */
+function VerdictBadge({ verdict }: { verdict: EntryAdjudicationVerdict | undefined }) {
+  if (!verdict || verdict.verdict === "keep") return null;
+  const label = VERDICT_LABEL[verdict.verdict] ?? verdict.verdict;
+  const detail =
+    verdict.verdict === "merge" && verdict.merge_into
+      ? `${label} → ${verdict.merge_into}`
+      : verdict.verdict === "reclassify" && verdict.suggested_type
+        ? `${label} → ${verdict.suggested_type}`
+        : label;
+  const title = `AI review: ${detail}${verdict.applied ? " (applied)" : " (proposed, not applied)"}${
+    verdict.reason ? ` — ${verdict.reason}` : ""
+  }`;
+  return (
+    <span className={`${styles.verdictPill} ${verdict.applied ? styles.verdictApplied : styles.verdictShadow}`} title={title}>
+      {detail}
+    </span>
+  );
+}
+
 /** Drawer zone: everything the engine produced for one entry — links,
  *  relationships, created entities — each manageable in place. */
 export function EntryOutputs({ entryId }: { entryId: string }) {
@@ -70,12 +102,31 @@ export function EntryOutputs({ entryId }: { entryId: string }) {
   const created = createdQ.data?.items ?? [];
   const loading = linksQ.isLoading || relsQ.isLoading || createdQ.isLoading;
 
+  const adjQ = useEntryAdjudication(entryId);
+  const verdictById = new Map<string, EntryAdjudicationVerdict>();
+  for (const v of adjQ.data?.verdicts ?? []) verdictById.set(v.item_id, v);
+  const adjDetail = adjQ.data?.run?.detail as { mode?: string; items?: number; verdicts?: Record<string, number> } | null | undefined;
+  const adjStatus = adjQ.data?.status;
+  const adjSummary =
+    adjStatus === "completed" && adjDetail
+      ? `AI review: ${adjDetail.items ?? 0} items · ${Object.entries(adjDetail.verdicts ?? {})
+          .filter(([k]) => k !== "keep")
+          .map(([k, n]) => `${n} ${k}`)
+          .join(", ") || "all kept"}${adjDetail.mode === "apply" ? " · applied" : " · proposals only"}`
+      : adjStatus === "pending"
+        ? "AI review: queued"
+        : adjStatus?.startsWith("skipped_")
+          ? `AI review: skipped (${adjStatus.replace("skipped_", "").replace(/_/g, " ")})`
+          : null;
+
   return (
     <div className={styles.outputsZone}>
+      {adjSummary && <p className={styles.ozAdj}>{adjSummary}</p>}
       <p className={styles.ozSub}>Links — entry → entity ({linksQ.data?.total ?? "…"})</p>
       {links.map((l) => (
         <div key={`${l.entity_type}|${l.entity_id}`} className={styles.orow}>
           <EntityChip type={l.entity_type} id={l.entity_id} name={l.entity_name} />
+          <VerdictBadge verdict={verdictById.get(`link:${l.entity_type}:${l.entity_id}`)} />
           {l.matched_names?.length ? <span className={styles.surf}>{l.matched_names[0]}</span> : null}
           <span className={`${styles.srcPill} ${srcClass(l.source)}`}>
             {SOURCE_LABELS[l.source ?? ""] ?? l.source ?? "unattributed"}
@@ -111,6 +162,7 @@ export function EntryOutputs({ entryId }: { entryId: string }) {
           <EntityChip type={r.source_type} id={r.source_id} name={r.source_name} />
           <span className={styles.verb}>{r.relationship_type}</span>
           <EntityChip type={r.target_type} id={r.target_id} name={r.target_name} />
+          <VerdictBadge verdict={verdictById.get(`edge:${r.id}`)} />
           <span className={`${styles.srcPill} ${srcClass(r.source)}`}>
             {SOURCE_LABELS[r.source ?? ""] ?? r.source ?? "—"}
           </span>
@@ -158,6 +210,7 @@ export function EntryOutputs({ entryId }: { entryId: string }) {
         <div key={e.id} className={styles.orow}>
           <EntityChip type={e.entity_type} id={e.id} name={e.name} />
           <span className={styles.newTag}>NEW</span>
+          <VerdictBadge verdict={verdictById.get(`link:${e.entity_type}:${e.id}`)} />
           <span className={styles.popMuted}>
             {e.article_count} linked {e.article_count === 1 ? "entry" : "entries"}
             {e.created_confidence ? ` · ${e.created_confidence}` : ""}

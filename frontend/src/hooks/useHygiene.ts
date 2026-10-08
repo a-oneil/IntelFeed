@@ -21,6 +21,9 @@ export interface HygieneStats {
   ai_review_rejected: number;
   ai_review_unsure: number;
   ai_review_unreviewed: number;
+  /** Adjudicate stage: mode and the unapplied verdicts it has filed. */
+  adjudication_mode?: string;
+  adjudication_pending?: number;
 }
 
 export type ReviewDecision = "approve" | "reject" | "unsure";
@@ -141,6 +144,8 @@ export interface FeedRow {
   links: FeedLink[];
   review_decision: ReviewDecision | null;
   review_reason: string | null;
+  /** Who proposed it: the post-analysis adjudicate stage, or the legacy jobs/scans. */
+  origin: "adjudicator" | "legacy" | null;
 }
 
 export interface FeedResponse {
@@ -156,6 +161,7 @@ export interface FeedFilters {
   review?: ReviewDecision | "unreviewed";
   /** Only unapplied proposals (review-queue mode) — skips applied history. */
   pending?: boolean;
+  origin?: "adjudicator" | "legacy";
   limit?: number;
   offset?: number;
 }
@@ -238,6 +244,7 @@ export function useHygieneFeed(filters: FeedFilters) {
       if (filters.mode) params.mode = filters.mode;
       if (filters.review) params.review = filters.review;
       if (filters.pending) params.pending = "true";
+      if (filters.origin) params.origin = filters.origin;
       const { data } = await api.get<FeedResponse>("/admin/hygiene/feed", { params });
       return data;
     },

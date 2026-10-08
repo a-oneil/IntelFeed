@@ -196,6 +196,37 @@ export interface StageRunRow {
   retryable: boolean;
 }
 
+export interface EntryAdjudicationVerdict {
+  item_id: string;
+  kind: "link" | "edge" | "ioc" | "assessment";
+  entity_type: string | null;
+  entity_id: string | null;
+  verdict: string;
+  reason: string | null;
+  suggested_type?: string | null;
+  merge_into?: string | null;
+  applied: boolean;
+  log: string;
+  action: string;
+}
+
+export interface EntryAdjudication {
+  status: string | null;
+  adjudicated_at: string | null;
+  run: { status: string; created_at: string | null; detail: Record<string, unknown> | null } | null;
+  verdicts: EntryAdjudicationVerdict[];
+}
+
+/** What the adjudicate stage decided for one entry (drawer badges). */
+export function useEntryAdjudication(entryId: string, enabled = true) {
+  return useQuery({
+    queryKey: ["engine", "adjudication", entryId],
+    queryFn: async () => (await api.get<EntryAdjudication>(`/engine/entries/${entryId}/adjudication`)).data,
+    enabled: enabled && !!entryId,
+    staleTime: 15_000,
+  });
+}
+
 export function useStageRuns(stage: string, status?: string) {
   return useQuery({
     queryKey: ["engine", "stage-runs", stage, status ?? "all"],

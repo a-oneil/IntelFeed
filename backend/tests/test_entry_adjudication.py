@@ -694,3 +694,111 @@ async def test_task_records_off_without_calling_model(db_session: AsyncSession, 
         await db_session.execute(select(AIAnalysisRequest).where(AIAnalysisRequest.entry_id == entry.id))
     ).scalar_one()
     assert row.adjudication_status == adj.SKIPPED_OFF
+
+
+# ------------------------------------------------------------------ hygiene feed + drawer endpoint (commit 3)
+
+
+async def _adjudication_result(db_session, entry):
+    """An AIResult for the adjudication task, so link rows can carry its id."""
+    from app.models.ai_result import AIResult
+    from app.models.ai_task import AITask
+
+    task = AITask(
+        name=adj.TASK_NAME, display_name="r", description="", category="extraction", default_prompt_template="x"
+    )
+    db_session.add(task)
+    await db_session.flush()
+    result = AIResult(
+        entry_id=entry.id,
+        target_type=adj.TARGET_TYPE,
+        target_id=entry.id,
+        is_current=True,
+        task_id=task.id,
+        prompt_used="",
+        raw_response="",
+        parsed_result={},
+    )
+    db_session.add(result)
+    await db_session.flush()
+    return result
+
+
+@pytest.mark.asyncio
+async def test_feed_tags_origin_and_filters_adjudicator_rows(client, admin_headers, db_session: AsyncSession, feed):
+    await _seed_settings(db_session)
+    entry = await _make_entry(db_session, feed)
+    storm = await _link_actor(db_session, entry, "Storm")
+    victim = await _link_actor(db_session, entry, "Water Utility Co", source="ai", minted=True, article_count=1)
+    result = await _adjudication_result(db_session, entry)
+
+    # One adjudicator link verdict (carries the adjudication result id), one
+    # legacy validator row (no result), one adjudicator veto row.
+    db_session.add(
+        EntityLinkValidationLog(
+            entry_id=entry.id,
+            entity_type="threat_actor",
+            entity_id=storm.id,
+            entity_name_snapshot="Storm",
+            action="shadow_remove",
+            reason="weather",
+            ai_result_id=result.id,
+        )
+    )
+    db_session.add(
+        EntityLinkValidationLog(
+            entry_id=entry.id,
+            entity_type="threat_actor",
+            entity_id=storm.id,
+            entity_name_snapshot="Storm",
+            action="shadow_remove",
+            reason="nightly",
+        )
+    )
+    db_session.add(
+        EntityMaintenanceLog(
+            entity_type="threat_actor",
+            entity_id=victim.id,
+            action=ACTION_VETO,
+            mode="shadow",
+            before={
+                "entry_id": str(entry.id),
+                "entity": {"name": "Water Utility Co", "aliases": [], "article_count": 1},
+            },
+            after={"reason": "victim organisation", "confidence": "high"},
+            reasoning="victim organisation",
+            applied=False,
+        )
+    )
+    await db_session.commit()
+
+    resp = await client.get(
+        "/api/admin/hygiene/feed", params={"pending": "true", "origin": "adjudicator"}, headers=admin_headers
+    )
+    assert resp.status_code == 200, resp.text
+    rows = resp.json()["rows"]
+    assert {r["origin"] for r in rows} == {"adjudicator"}
+    actions = sorted(r["action"] for r in rows)
+    assert actions == [ACTION_VETO, "shadow_remove"]
+    veto = next(r for r in rows if r["action"] == ACTION_VETO)
+    assert veto["subject"].startswith("Veto: Water Utility Co")
+    assert veto["actions"] == ["dismiss"]
+    assert {link["kind"] for link in veto["links"]} == {"entity", "entry"}
+
+    resp = await client.get(
+        "/api/admin/hygiene/feed", params={"pending": "true", "origin": "legacy"}, headers=admin_headers
+    )
+    rows = resp.json()["rows"]
+    assert len(rows) == 1 and rows[0]["origin"] == "legacy" and rows[0]["reason"] == "nightly"
+
+    stats = (await client.get("/api/admin/hygiene/stats", headers=admin_headers)).json()
+    assert stats["adjudication_mode"] == "shadow" and stats["adjudication_pending"] == 2
+
+    # The drawer endpoint keys the same rows by manifest item id.
+    resp = await client.get(f"/api/engine/entries/{entry.id}/adjudication", headers=admin_headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    by_id = {v["item_id"]: v for v in body["verdicts"]}
+    assert by_id[f"link:threat_actor:{storm.id}"]["verdict"] == "remove"
+    assert by_id[f"link:threat_actor:{victim.id}"]["verdict"] == "veto"
+    assert all(v["applied"] is False for v in body["verdicts"])

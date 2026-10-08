@@ -18,6 +18,7 @@ import {
   useUpsertPlan,
 } from "@/hooks/useEngine";
 import { useExtractionStats } from "@/hooks/useExtraction";
+import { useHygieneStats } from "@/hooks/useHygiene";
 import { Chip } from "@/components/primitives/Chip";
 import { Hint } from "@/components/primitives";
 import { useFeeds } from "@/hooks/useFeeds";
@@ -268,6 +269,7 @@ export function EngineMatrix({
   const [proposalsMode, setProposalsMode] = useState(false);
   // Pre-applied action filter when a chip deep-links into a proposals queue.
   const [proposalsAction, setProposalsAction] = useState<string | undefined>(undefined);
+  const [proposalsOrigin, setProposalsOrigin] = useState<"adjudicator" | "legacy" | undefined>(undefined);
   const [status, setStatus] = useState<string | undefined>(initialStatus);
   const [stage, setStage] = useState<string | undefined>(initialStage);
   const [feedId, setFeedId] = useState<string | undefined>(undefined);
@@ -322,6 +324,7 @@ export function EngineMatrix({
   const { data: extractionStats } = useExtractionStats("7d");
   const { data: linkStats } = useEntityLinkStats();
   const { data: validationStats } = useLinkValidationStats();
+  const { data: hygieneStats } = useHygieneStats();
   const { data: feedHealth } = useFeedHealth();
   const { data: feeds } = useFeeds();
   const upsertPlan = useUpsertPlan();
@@ -527,6 +530,24 @@ export function EngineMatrix({
         setView("links");
         setProposalsMode(true);
         setProposalsAction("needs_reclassification");
+        setProposalsOrigin(undefined);
+      },
+    },
+    {
+      key: "adjudication",
+      n: hygieneStats?.adjudication_pending,
+      label: "adjudication verdicts",
+      cls: m.aWarn,
+      onClick: () => {
+        setView("links");
+        setProposalsMode(true);
+        setProposalsAction(undefined);
+        setProposalsOrigin("adjudicator");
+      },
+      hint: {
+        title: "Adjudication verdicts",
+        body: "What the post-analysis review wants changed: links to remove, new entities to veto or merge, edges to demote, observables to drop. In shadow mode these are suggestions until you apply them.",
+        aside: "Opens the Proposals lens filtered to the adjudicator.",
       },
     },
     {
@@ -921,14 +942,19 @@ export function EngineMatrix({
               )}
               {view === "links" &&
                 (proposalsMode ? (
-                  <ProposalsQueue domain="links" key={proposalsAction ?? "all"} initialAction={proposalsAction} />
+                  <ProposalsQueue
+                    domain="links"
+                    key={`${proposalsAction ?? "all"}:${proposalsOrigin ?? "all"}`}
+                    initialAction={proposalsAction}
+                    initialOrigin={proposalsOrigin}
+                  />
                 ) : (
                   <AutolinkingSection embedded view="links" />
                 ))}
               {view === "relationships" && <AutolinkingSection embedded view="relationships" />}
               {view === "entities" &&
                 (proposalsMode ? (
-                  <ProposalsQueue domain="entities" />
+                  <ProposalsQueue domain="entities" key={proposalsOrigin ?? "all"} initialOrigin={proposalsOrigin} />
                 ) : (
                   <ExtractionTab embedded key={entStatus} initialStatus={entStatus} />
                 ))}

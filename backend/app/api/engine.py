@@ -466,6 +466,155 @@ async def entry_pipeline_runs(
     }
 
 
+@router.get("/entries/{entry_id}/adjudication")
+async def entry_adjudication(
+    entry_id: str = Path(..., description="Entry UUID"),
+    user: User = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """What the adjudicate stage decided for this entry: the review status,
+    the latest run detail, and one row per verdict it filed, keyed by the
+    manifest item id so the entry drawer can badge its links, relationships
+    and observables in place."""
+    import uuid as _uuid
+
+    from sqlalchemy import select
+
+    from app.models.ai_analysis import AIAnalysisRequest
+    from app.models.ai_result import AIResult
+    from app.models.ai_task import AITask
+    from app.models.entity_link_validation_log import EntityLinkValidationLog
+    from app.models.entity_maintenance import EntityMaintenanceLog
+    from app.models.entry_pipeline_run import EntryPipelineRun
+    from app.services.entry_adjudication import (
+        ACTION_ASSESSMENT,
+        ACTION_EDGE_DEMOTE,
+        ACTION_IOC_DROP,
+        ACTION_MERGE,
+        ACTION_UNLINK,
+        ACTION_VETO,
+        ADJUDICATION_ACTIONS,
+        TASK_NAME,
+    )
+
+    try:
+        eid = _uuid.UUID(entry_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid entry id") from None
+
+    request = (
+        await db.execute(select(AIAnalysisRequest).where(AIAnalysisRequest.entry_id == eid))
+    ).scalar_one_or_none()
+    run = (
+        await db.execute(
+            select(EntryPipelineRun)
+            .where(EntryPipelineRun.entry_id == eid, EntryPipelineRun.stage == "adjudicate")
+            .order_by(EntryPipelineRun.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    adjudicator_results = select(AIResult.id).where(
+        AIResult.task_id == select(AITask.id).where(AITask.name == TASK_NAME).scalar_subquery()
+    )
+    verdicts: list[dict] = []
+    link_rows = (
+        (
+            await db.execute(
+                select(EntityLinkValidationLog).where(
+                    EntityLinkValidationLog.entry_id == eid,
+                    EntityLinkValidationLog.ai_result_id.in_(adjudicator_results),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for r in link_rows:
+        verdict = {
+            "shadow_remove": "remove",
+            "removed": "remove",
+            "needs_reclassification": "reclassify",
+            "restored": "keep",
+        }.get(r.action, r.action)
+        verdicts.append(
+            {
+                "item_id": f"link:{r.entity_type}:{r.entity_id}",
+                "kind": "link",
+                "entity_type": r.entity_type,
+                "entity_id": str(r.entity_id),
+                "verdict": verdict,
+                "reason": r.reason,
+                "suggested_type": r.suggested_entity_type,
+                "applied": r.action in ("removed", "restored"),
+                "log": f"link_validator:{r.id}",
+                "action": r.action,
+            }
+        )
+    maint_rows = (
+        (
+            await db.execute(
+                select(EntityMaintenanceLog).where(
+                    EntityMaintenanceLog.action.in_(sorted(ADJUDICATION_ACTIONS)),
+                    EntityMaintenanceLog.before["entry_id"].astext == str(eid),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    verdict_by_action = {
+        ACTION_UNLINK: "remove",
+        ACTION_VETO: "veto",
+        ACTION_MERGE: "merge",
+        ACTION_EDGE_DEMOTE: "demote",
+        ACTION_IOC_DROP: "drop",
+        ACTION_ASSESSMENT: "assessment",
+    }
+    for r in maint_rows:
+        after = r.after or {}
+        if r.action == ACTION_EDGE_DEMOTE:
+            item_id, kind = f"edge:{r.entity_id}", "edge"
+        elif r.action == ACTION_IOC_DROP:
+            item_id, kind = f"ioc:{after.get('kind')}:{after.get('value')}", "ioc"
+        elif r.action == ACTION_ASSESSMENT:
+            item_id, kind = "assessment", "assessment"
+        else:
+            item_id, kind = f"link:{r.entity_type}:{r.entity_id}", "link"
+        verdict = verdict_by_action.get(r.action, r.action)
+        if r.action == ACTION_UNLINK and after.get("suggested_type"):
+            verdict = "reclassify"
+        if r.action == ACTION_ASSESSMENT:
+            verdict = after.get("verdict") or "ok"
+        verdicts.append(
+            {
+                "item_id": item_id,
+                "kind": kind,
+                "entity_type": r.entity_type,
+                "entity_id": str(r.entity_id) if r.entity_id else None,
+                "verdict": verdict,
+                "reason": r.reasoning,
+                "suggested_type": after.get("suggested_type"),
+                "merge_into": after.get("merge_into"),
+                "applied": bool(r.applied),
+                "log": f"entity_maintenance:{r.id}",
+                "action": r.action,
+            }
+        )
+    return {
+        "status": request.adjudication_status if request else None,
+        "adjudicated_at": request.adjudicated_at.isoformat() if request and request.adjudicated_at else None,
+        "run": {
+            "status": run.status,
+            "created_at": run.created_at.isoformat() if run.created_at else None,
+            "detail": run.detail or None,
+        }
+        if run
+        else None,
+        "verdicts": verdicts,
+    }
+
+
 @router.get("/pipeline/stages/{stage}/runs")
 async def stage_runs(
     stage: str = Path(..., description="Pipeline stage name from the registry (e.g. autolink, extract, score)"),

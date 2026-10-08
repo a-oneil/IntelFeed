@@ -348,3 +348,18 @@
   opacity: 0.5;
   cursor: default;
 }
+
+/* Who proposed the row — the adjudicate stage, vs the legacy jobs/scans. */
+.originTag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid color-mix(in srgb, var(--entity-ttp, var(--accent-dash)) 50%, transparent);
+  border-radius: 3px;
+  color: var(--entity-ttp, var(--accent-dash));
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}

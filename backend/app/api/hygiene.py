@@ -41,6 +41,8 @@ from app.api.entity_merge import (
 from app.core.exceptions import AppError
 from app.core.security import get_admin_user, get_current_user
 from app.database import get_db
+from app.models.ai_result import AIResult
+from app.models.ai_task import AITask
 from app.models.campaign import CampaignEntity
 from app.models.country import Country, EntryCountry
 from app.models.cve import CVE, EntryCVE
@@ -60,6 +62,16 @@ from app.models.tool import EntryTool, Tool
 from app.models.ttp import TTP, EntryTTP
 from app.models.user import User
 from app.models.vendor import EntryVendor, Vendor
+from app.services.entry_adjudication import (
+    ACTION_ASSESSMENT,
+    ACTION_EDGE_DEMOTE,
+    ACTION_IOC_DROP,
+    ACTION_MERGE,
+    ACTION_UNLINK,
+    ACTION_VETO,
+    ADJUDICATION_ACTIONS,
+)
+from app.services.entry_adjudication import TASK_NAME as ADJUDICATION_TASK_NAME
 
 router = APIRouter()
 
@@ -1178,6 +1190,9 @@ class FeedRow(BaseModel):
     # AI reviewer verdict (pending proposals only; None = not reviewed)
     review_decision: str | None = None
     review_reason: str | None = None
+    # Who proposed it: "adjudicator" (the post-analysis adjudicate stage, with
+    # the article in hand) or "legacy" (the retired nightly jobs / scans).
+    origin: str | None = None
 
 
 class FeedResponse(BaseModel):
@@ -1204,6 +1219,7 @@ _MAINTENANCE_ACTIONS = {
     "cve_malformed_id",
     "cve_withdrawn",
     "stale_entity_review",
+    *ADJUDICATION_ACTIONS,
 }
 # Maintenance actions whose action code persists from proposal through apply
 # (only the `applied` boolean flips). Filtering by these in the UI means
@@ -1217,6 +1233,7 @@ _MAINTENANCE_PROPOSAL_ACTIONS = {
     "cve_malformed_id",
     "cve_withdrawn",
     "stale_entity_review",
+    *ADJUDICATION_ACTIONS,
 }
 # Maintenance actions whose code is used for BOTH a shadow preview and the
 # real apply. UI labels them in past tense ("Merged", "Reclassified",
@@ -1268,6 +1285,10 @@ def _row_actions_maint(row: EntityMaintenanceLog) -> list[str]:
         # Review-only flag: the entity chip deep-links to the profile where the
         # analyst can merge/delete; the row itself only supports dismissal.
         return ["dismiss"]
+    if row.action in ADJUDICATION_ACTIONS and not row.applied:
+        # The assessment flag is informational; the rest become applicable
+        # once apply mode lands (part 4 of the adjudication PR).
+        return ["dismiss"]
     return []
 
 
@@ -1298,6 +1319,8 @@ def _maint_subject(row: EntityMaintenanceLog) -> str:
     if row.action == "orphan_prune":
         nm = (before.get("entity") or {}).get("name") if isinstance(before.get("entity"), dict) else None
         return f"{nm or '(unknown)'} ({row.entity_type})"
+    if row.action in ADJUDICATION_ACTIONS:
+        return _adjudication_subject(row)
     if row.action == "merge_cluster_summary":
         merges = after.get("merges") or []
         reclassifies = after.get("reclassifies") or []
@@ -1370,6 +1393,30 @@ def _maint_subject(row: EntityMaintenanceLog) -> str:
     return f"{row.entity_type} {row.action}"
 
 
+def _adjudication_subject(row: EntityMaintenanceLog) -> str:
+    """Plain-English subject for the adjudicate stage's proposal rows."""
+    before = row.before or {}
+    after = row.after or {}
+    ent = before.get("entity") if isinstance(before.get("entity"), dict) else {}
+    name = ent.get("name") or after.get("value") or "(unknown)"
+    if row.action == ACTION_VETO:
+        return f"Veto: {name} ({row.entity_type}) should not exist"
+    if row.action == ACTION_MERGE:
+        return f"Merge: {name} → {after.get('merge_into') or '?'} ({after.get('target_type') or row.entity_type})"
+    if row.action == ACTION_UNLINK:
+        if after.get("suggested_type"):
+            return f"Reclassify: {name or row.entity_type} → {after['suggested_type']}"
+        return f"Unlink: {name or row.entity_type} from this article"
+    if row.action == ACTION_EDGE_DEMOTE:
+        return f"Demote: {before.get('claim') or 'relationship'}"
+    if row.action == ACTION_IOC_DROP:
+        where = "staged candidate" if before.get("staged") else "captured sighting"
+        return f"Drop: {after.get('value') or '?'} ({after.get('kind') or 'observable'}, {where})"
+    if row.action == ACTION_ASSESSMENT:
+        return f"Assessment {after.get('verdict') or '?'}"
+    return row.action
+
+
 def _maint_links(row: EntityMaintenanceLog) -> list[FeedLink]:
     """Surface every affected entity on a maintenance row as a deep-link chip.
 
@@ -1395,6 +1442,20 @@ def _maint_links(row: EntityMaintenanceLog) -> list[FeedLink]:
             )
         )
 
+    if row.action in ADJUDICATION_ACTIONS:
+        ent = before.get("entity") if isinstance(before.get("entity"), dict) else None
+        if ent and row.entity_id and row.action in (ACTION_VETO, ACTION_MERGE, ACTION_UNLINK):
+            _add(row.entity_type, row.entity_id, ent.get("name"), role="subject")
+        if row.action == ACTION_MERGE and after.get("target_id"):
+            _add(
+                after.get("target_type") or row.entity_type,
+                after.get("target_id"),
+                after.get("merge_into"),
+                role="target",
+            )
+        if before.get("entry_id"):
+            out.append(FeedLink(kind="entry", entity_id=str(before["entry_id"]), label="source entry"))
+        return out
     if row.action in ("merge", "reclassify"):
         src = before.get("source") if isinstance(before.get("source"), dict) else None
         tgt = before.get("target") if isinstance(before.get("target"), dict) else None
@@ -1522,6 +1583,11 @@ async def hygiene_feed(
         description="Only unapplied proposals (skips applied history). Required for the review queue, "
         "since applied resolution logs otherwise flood the newest page.",
     ),
+    origin: str | None = Query(
+        None,
+        description="'adjudicator' = rows the post-analysis adjudicate stage filed; "
+        "'legacy' = everything else (nightly jobs, scans, analysts).",
+    ),
     since: datetime | None = Query(None, description="Only rows created at or after this timestamp"),
     limit: int = Query(50, ge=1, le=200, description="Rows per page"),
     offset: int = Query(0, ge=0, description="Rows to skip for pagination"),
@@ -1547,9 +1613,22 @@ async def hygiene_feed(
     link_eligible = source in (None, "link_validator") and (not actions or bool(link_actions))
     maint_eligible = source in (None, "entity_maintenance") and (not actions or bool(maint_actions))
 
+    adjudicator_results = select(AIResult.id).where(
+        AIResult.task_id == select(AITask.id).where(AITask.name == ADJUDICATION_TASK_NAME).scalar_subquery()
+    )
+
     link_rows: list[EntityLinkValidationLog] = []
     if link_eligible:
         q = select(EntityLinkValidationLog)
+        if origin == "adjudicator":
+            q = q.where(EntityLinkValidationLog.ai_result_id.in_(adjudicator_results))
+        elif origin == "legacy":
+            q = q.where(
+                or_(
+                    EntityLinkValidationLog.ai_result_id.is_(None),
+                    ~EntityLinkValidationLog.ai_result_id.in_(adjudicator_results),
+                )
+            )
         if pending:
             q = q.where(EntityLinkValidationLog.action.in_(["shadow_remove", "needs_reclassification"]))
         if link_actions:
@@ -1576,6 +1655,10 @@ async def hygiene_feed(
     maint_rows: list[EntityMaintenanceLog] = []
     if maint_eligible:
         q = select(EntityMaintenanceLog)
+        if origin == "adjudicator":
+            q = q.where(EntityMaintenanceLog.action.in_(sorted(ADJUDICATION_ACTIONS)))
+        elif origin == "legacy":
+            q = q.where(EntityMaintenanceLog.action.notin_(sorted(ADJUDICATION_ACTIONS)))
         if pending:
             q = q.where(
                 EntityMaintenanceLog.applied.is_(False),
@@ -1615,6 +1698,23 @@ async def hygiene_feed(
             q = q.where(EntityMaintenanceLog.created_at >= since)
         q = q.order_by(EntityMaintenanceLog.created_at.desc()).limit(fetch_cap)
         maint_rows = list((await db.execute(q)).scalars().all())
+
+    # Which link rows came from the adjudicate stage (maintenance rows carry
+    # it in their action code).
+    adjudicator_ids: set[uuid.UUID] = set()
+    result_ids = {r.ai_result_id for r in link_rows if r.ai_result_id}
+    if result_ids:
+        adjudicator_ids = set(
+            (
+                await db.execute(
+                    select(AIResult.id)
+                    .join(AITask, AITask.id == AIResult.task_id)
+                    .where(AIResult.id.in_(result_ids), AITask.name == ADJUDICATION_TASK_NAME)
+                )
+            )
+            .scalars()
+            .all()
+        )
 
     # Normalize and merge.
     feed: list[FeedRow] = []
@@ -1662,6 +1762,7 @@ async def hygiene_feed(
                 links=links,
                 review_decision=r.review_decision,
                 review_reason=r.review_reason,
+                origin="adjudicator" if r.ai_result_id in adjudicator_ids else "legacy",
             )
         )
     for r in maint_rows:
@@ -1688,6 +1789,7 @@ async def hygiene_feed(
                 links=_maint_links(r),
                 review_decision=r.review_decision if not r.applied else None,
                 review_reason=r.review_reason if not r.applied else None,
+                origin="adjudicator" if r.action in ADJUDICATION_ACTIONS else "legacy",
             )
         )
 
@@ -1729,6 +1831,9 @@ class HygieneStats(BaseModel):
     ai_review_rejected: int
     ai_review_unsure: int
     ai_review_unreviewed: int
+    # Adjudicate stage (post-analysis review)
+    adjudication_mode: str  # off | shadow | apply
+    adjudication_pending: int  # unapplied verdicts it filed, across both logs
 
 
 @router.get("/admin/hygiene/stats", response_model=HygieneStats)
@@ -1745,6 +1850,29 @@ async def hygiene_stats(
     link_mode = (str(link_mode_val) if link_mode_val else "shadow").lower()
     maint_mode_val = await get_setting("entity_maintenance_mode", db)
     maint_mode = (str(maint_mode_val) if maint_mode_val else "shadow").lower()
+    adjudication_mode = str(await get_setting("adjudication_mode", db) or "off").lower()
+    adjudicator_results = select(AIResult.id).where(
+        AIResult.task_id == select(AITask.id).where(AITask.name == ADJUDICATION_TASK_NAME).scalar_subquery()
+    )
+    adjudication_pending = (
+        await db.execute(
+            select(func.count())
+            .select_from(EntityLinkValidationLog)
+            .where(
+                EntityLinkValidationLog.action.in_(["shadow_remove", "needs_reclassification"]),
+                EntityLinkValidationLog.ai_result_id.in_(adjudicator_results),
+            )
+        )
+    ).scalar_one() + (
+        await db.execute(
+            select(func.count())
+            .select_from(EntityMaintenanceLog)
+            .where(
+                EntityMaintenanceLog.action.in_(sorted(ADJUDICATION_ACTIONS)),
+                EntityMaintenanceLog.applied.is_(False),
+            )
+        )
+    ).scalar_one()
 
     # Link validator scan progress — matches the logic in
     # /admin/link-validation/stats so the Hygiene UI shows the same numbers as
@@ -1971,6 +2099,8 @@ async def hygiene_stats(
         ai_review_rejected=_review_count("reject"),
         ai_review_unsure=_review_count("unsure"),
         ai_review_unreviewed=_review_count(None),
+        adjudication_mode=adjudication_mode,
+        adjudication_pending=int(adjudication_pending),
     )
 
 
