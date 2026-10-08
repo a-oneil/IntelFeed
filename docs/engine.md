@@ -289,7 +289,7 @@ The Engine console lives at `/settings?section=engine` (Settings > Administratio
 - **Entities** — AI-created entity management (`ExtractionTab.tsx` over `/api/engine/extraction`: provenance stats, filter/merge/delete/confirm) plus its proposals queue.
 - **Feeds** — feed health plus feed/rate-limiting/image-proxy settings.
 
-Four things open as separate **browse views** with a back button (`BrowseView`, `EngineMatrix.tsx:39`): **Jobs** (schedule editor `frontend/src/components/JobSchedules.tsx`, backed by the `JOB_REGISTRY` + Redis schedule overrides, and run history from `GET /api/engine/job-runs`), **Plans** (`PipelinePlans.tsx` for global/category/feed plan CRUD plus the plan-engine switches), **Maintenance** (`MaintenancePanel.tsx` — global sweeps and destructive resets, plus link-validation/hygiene/merge-engine settings), and **Publishing** (`PublishingPanel.tsx` — the outbound observable feeds and their token/confidence/age gates).
+Four things open as separate **browse views** with a back button (`BrowseView`, `EngineMatrix.tsx:39`): **Jobs** (schedule editor `frontend/src/components/JobSchedules.tsx`, backed by the `JOB_REGISTRY` + Redis schedule overrides, and run history from `GET /api/engine/job-runs`), **Plans** (`PipelinePlans.tsx` for global/category/feed plan CRUD plus the plan-engine switches), **Maintenance** (`MaintenancePanel.tsx` — global sweeps, destructive resets and the on-demand hygiene scanners), and **Publishing** (`PublishingPanel.tsx` — the outbound observable feeds and their token/confidence/age gates).
 
 Enrichment, Job Schedules, Feed Health, and Workbench settings all live inside the console. Bookmarked `?tab=` and `?section=` deep links are remapped onto console states (`legacyState`, `EngineSection.tsx:30-53`). Every setting the console exposes is catalogued in [engine-settings.md](engine-settings.md).
 
@@ -381,7 +381,7 @@ All flags are DB-backed per environment — flipping them in dev does nothing fo
 ## Operational notes
 
 - **Plan edits outside the API don't propagate immediately.** Cached resolutions live up to 600s keyed on the version counter; the API bumps it on every write, but a direct DB edit to `pipeline_plans` without `bump_plan_version()` waits out the TTL.
-- **Global plans can't be deleted** via the API (`delete_plan`, `api/engine.py:1147`) — deactivate or empty them instead.
+- **Global plans can't be deleted** via the API (`delete_plan`, `api/engine.py:1382`) — deactivate or empty them instead.
 - **Run logging is write-path-only.** Disabling `pipeline_run_logging_enabled` stops new `entry_pipeline_runs` rows but the ops console keeps serving existing ones until retention prunes them.
 - **Retry re-runs the whole stage.** The retry endpoint just re-sends the task with the entry id; stages are idempotent (junction upserts, signal upserts), so this is safe, but it does not resume the chord — downstream stages are not re-triggered.
 - **Rate recompute denominator** is entries *scored* in the 30-day window, not entries fetched (`signal_tasks.py:192-196`) — so a large backfill shifts rates only in proportion to what it scored, not what it skimmed past.

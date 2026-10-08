@@ -368,29 +368,63 @@ links of every source, entities it minted (with their nearest catalogue names
 pre-fetched), pending-tier promotions, relationship claims, AI observables —
 and returns one verdict per item: keep, remove, reclassify, veto, merge,
 demote or drop. `backend/app/services/entry_adjudication.py`,
-`backend/app/workers/adjudication_tasks.py`; stage `adjudicate`, dispatched
-from the analysis landing path, not scheduled. It replaced the nightly link
-validator, hygiene proposal reviewer, weekly merge engine, nightly relationship
-adjudicator and weekly stale-entity sweep.
+`backend/app/workers/adjudication_tasks.py`; stage `adjudicate` (kind
+`post_analysis`), task `adjudicate_entry_task` on the `ai` Celery queue,
+dispatched from the analysis landing path (`enqueue_adjudication`), not
+scheduled. This is the day-to-day cleanup path: every link, minted entity,
+asserted edge and captured observable is judged once, at ingest. The AI task
+behind it is `entry_adjudication` (Settings → AI Configuration → Prompts).
 
 | Setting | Type / default | What it does |
 |---|---|---|
-| `adjudication_mode` | `off` \| `shadow` \| `apply`, default `off` | The master switch (pipeline plans only subtract feeds). `shadow` files every verdict as a proposal in the Links / AI-entities Proposals lens and touches nothing. `apply` acts on verdicts at or above the confidence floor at ingest, through the same code the queue's Apply buttons use; lower ones still become proposals. |
-| `adjudication_trigger` | `all` \| `created`, default `all` | `all` reviews every analysed entry (what replacing the validator needs; ~100–500/day). `created` reviews only entries whose analysis minted an entity, asserted a link or edge, promoted a pending match or captured an observable (~20–50/day) — the fallback when the GPU is saturated. |
-| `adjudication_max_per_hour` | int, `30` | Reviews started per hour on the AI worker (~40 s each on a 9B model). Over-budget entries wait for the hourly sweep; live entries go before backfill. |
-| `adjudication_min_priority_score` | float, `0` | Skip entries below this priority score. Keep it at 0: CVE/NVD entries are the main source of junk tool entities and score low, so a floor would exempt exactly those. |
+| `adjudication_mode` | `off` \| `shadow` \| `apply`, default `off` | The master switch (pipeline plans only subtract feeds). `shadow` files every verdict as a proposal in the Links / AI-entities Proposals lens and touches nothing. `apply` acts on verdicts at or above the confidence floor at ingest, through the same code the queue's Apply buttons use; lower ones still become proposals. The Proposed/Applied switch on the Proposals lens writes `shadow` / `apply`; `off` is set from the Adjudicate stage panel. |
+| `adjudication_trigger` | `all` \| `created`, default `all` | `all` reviews every analysed entry (~100–500/day). `created` reviews only entries whose analysis minted an entity, wrote an AI junction row (actor/malware/tool/country/sector), asserted a TTP or a relationship, promoted a pending match or captured an observable (~20–50/day) — the fallback when the GPU is saturated. |
+| `adjudication_max_per_hour` | int, `30` | Reviews started per hour on the AI worker (~40 s each on a 9B model). Over-budget entries wait for the hourly sweep. The backfill may use at most half of each hour's budget; live entries get the rest. |
+| `adjudication_min_priority_score` | float, `0` | Skip entries below this priority score (`0` = off). Keep it at 0: CVE/NVD entries are the main source of junk tool entities and score low, so a floor would exempt exactly those. |
 | `adjudication_apply_min_confidence` | `high` \| `medium` \| `low`, default `high` | In apply mode, verdicts below this confidence are filed as proposals instead of applied. |
-| `adjudication_circuit_breaker_pct` | float, `0.5` | If more than this share of an entry's items come back destructive, the whole run is downgraded to proposals. A rolling mean over the last 50 runs above the same threshold pauses dispatch for the hour. |
+| `adjudication_circuit_breaker_pct` | float, `0.5` | If more than this share of an entry's items come back destructive (remove + veto + demote + drop), the whole run is downgraded to proposals. A rolling mean over the last 50 runs above the same threshold (once 10 samples exist) pauses dispatch for an hour, logs a warning, and surfaces as `adjudication_breaker_until` in the hygiene stats and a chip in the Engine needs-you row. |
 | `adjudication_content_max_chars` | int, `8000` | Article text in the review prompt (head + indicator tail, the extraction window). |
 | `adjudication_scope` | csv, `links,entities,relationships,observables` | Manifest sections the reviewer sees. `assessment` is opt-in and only ever logged. |
 
+**Gates**, first hit wins, each recorded on `ai_analysis_requests.adjudication_status`:
+mode (`skipped_off`) → feed plan, only when pipeline plans are on
+(`skipped_plan`) → echo-reused analysis (`skipped_echo`) → trigger
+(`skipped_nothing_new`) → score floor (`skipped_score`) → hourly budget
+(`skipped_budget`). A provider quota pause parks the row as `skipped_paused`.
+Rows that pass go `pending` (stamping `adjudication_queued_at`) and end
+`completed`, or `failed` once the task's Celery retries are exhausted. The task
+itself re-checks only the master switch; a manual retry from the matrix
+bypasses the other gates and re-queues the row.
+
+**The hourly sweep** (`resweep_adjudications`, run from
+`submit_analysis_batches`) re-enqueues, newest first: completed analyses with
+no decision after two hours, `skipped_budget` / `skipped_paused` rows every
+hour, and `pending` rows queued more than six hours ago with no run (a lost
+task).
+
+**What never changes, in any mode:** edges an analyst rejected, and links an
+analyst restored within the last 90 days (flagged to the reviewer, never
+applied). Veto deletes an entity only when this entry created it and nothing
+else holds it (no other article, edge or claim); otherwise it only unlinks.
 Promotion of a relationship edge to *confirmed* is a counter on the edge
 (`reviewer_kept_entry_ids`): a keep in apply mode from a new entry appends it,
 and at `relationship_evidence_promote_count` distinct entries the edge is
 promoted. Stale entities (one article at most, no edge, 90 days idle) are a
-live `stale` filter on the AI-entities view. The one-off
-`backfill_entry_adjudications` task walks older entries through the same
-gates and supersedes the retired jobs' pending proposals as it goes.
+live `stale` filter on the AI-entities view.
+
+**Queue.** The Proposals lens has an origin facet (`adjudicator` | `legacy`),
+per-row Apply / Dismiss / Restore, bulk **Apply all**
+(`POST /api/admin/hygiene/adjudication/apply-all`) and **Dismiss all** scoped
+by origin. When a review completes it deletes the legacy pending rows it showed
+the model as earlier suggestions (merge-engine and stale-sweep proposals about
+entities this entry minted, validator rows on this entry). Legacy proposals no
+entry can carry are listed by `GET /api/admin/hygiene/feed?orphaned=true` for
+manual disposition; nothing automatic touches them.
+
+**Backfill.** `celery -A app.workers.celery_app call
+app.workers.adjudication_tasks.backfill_entry_adjudications` (kwargs `limit`,
+`since_days`) marks older analysed entries pending through the same gates; the
+sweep drains them within the backfill's half of the hourly budget.
 
 ### Entity assessments
 

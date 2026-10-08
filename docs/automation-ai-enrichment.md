@@ -428,7 +428,7 @@ class AIProvider(ABC):
 
 Three providers are implemented (`backend/app/ai/providers/`): `ClaudeProvider` (Anthropic API; also the fallback used for `openai`/`custom` provider types), `ClaudeCodeProvider` (the Claude Code CLI under an OAuth session — see [copilot.md](copilot.md)), and `OllamaProvider` (real Ollama support with a native `/api/chat` function-calling loop against the backend tool registry in `app/tools/`).
 
-Tool capability is gated centrally in `backend/app/ai/capabilities.py`: `TOOL_CAPABLE_PROVIDER_TYPES = {"claude_code", "ollama"}` and `TOOL_REQUIRED_TASKS` (copilot, entity_merge_maintenance, entity_enrichment_research) together prevent assigning an agentic task to a provider that can't execute tools.
+Tool capability is gated centrally in `backend/app/ai/capabilities.py`: `TOOL_CAPABLE_PROVIDER_TYPES = {"claude_code", "ollama"}` and `TOOL_REQUIRED_TASKS` (copilot, entity_enrichment_research) together prevent assigning an agentic task to a provider that can't execute tools.
 
 ### Model Configuration
 
@@ -491,12 +491,13 @@ class AITask(Base):
 | `ttp_mapping` | extraction | Entry text | MITRE ATT&CK technique extraction |
 | `detection_rules` | generation | Entry + TTPs | Detection rule generation |
 | `entry_analysis` | extraction | Entry content | One-pass consolidated extraction (see below) |
+| `entry_adjudication` | extraction | Article + manifest of what `entry_analysis` wrote | Post-analysis review: one verdict per link, minted entity, relationship claim and observable (the `adjudicate` pipeline stage; max_tokens 4096, no tools) |
 | `daily_summary` / `intelligence_briefing` / `threat_assessment` | analysis | Multiple entries | Batch briefings |
 | `detection_engineering_summary` | analysis | Multiple entries | Detection-focused briefing with coverage gaps |
 | `video_transcript_summary` / `reddit_digest` / `report_section` | analysis / generation | Source-specific | Adapter/report helpers |
 | `entry_qa` | analysis | User question + article | Per-entry "Ask Agent" chat |
 | `copilot` | analysis | Question + ambient context | Global streaming copilot ([copilot.md](copilot.md)) |
-| `entity_link_validation`, `entity_merge_maintenance`, `actor_profile_refresh`, `entity_name_normalization`, `hygiene_proposal_review`, `entity_enrichment_research`, `relationship_adjudication` | validation / maintenance | Entities/links | Agentic maintenance tasks (CLI or Ollama tool loop) |
+| `actor_profile_refresh`, `entity_name_normalization`, `entity_enrichment_research` | maintenance | Entities | Maintenance tasks (`workers/entity_maintenance_tasks.py`); `entity_enrichment_research` needs a tool-capable provider (CLI or Ollama tool loop) |
 
 The legacy per-entry extraction tasks (`threat_actor_id`, `malware_id`, `tool_extraction`, `country_id`, `sector_id`, `article_metadata`, `mitigation_extraction`, `cve_extraction`) still exist but are flagged `deprecated` — see "One-Pass Entry Analysis" below.
 

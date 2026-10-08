@@ -371,7 +371,7 @@ Audit trail for autonomous entity maintenance (merge/alias/description actions b
 
 #### EntityLinkValidationLog
 
-One row per AI decision on an entity↔entry link (the `entity_link_validation` task). Snapshots the junction row so removals can be restored.
+One row per decision on an entity↔entry link of a validator junction type: written by the adjudicate stage (`entry_adjudication` task — `shadow_remove` / `needs_reclassification` verdicts in shadow mode, `removed` in apply mode) and by analyst restores (`restored`, via `POST /api/admin/hygiene/link-log/{id}/restore` or the adjudication restore). Snapshots the junction row so removals can be restored; a restore within 90 days shields the link from the adjudicator.
 
 **Columns:**
 - `id` (UUID PK)
@@ -729,7 +729,7 @@ Server-side persistence for AI copilot chat threads (global dock panel + entry/e
 
 #### AIAnalysisRequest & AIBatchJob
 
-Bookkeeping for the one-pass `entry_analysis` batch extraction pipeline. Rows pruned after 30 days by `prune_engine_tables`.
+Bookkeeping for the one-pass `entry_analysis` batch extraction pipeline and the adjudicate stage that follows it. Rows pruned after 30 days by `prune_engine_tables`.
 
 **Columns (`ai_analysis_requests`):**
 - `id` (UUID PK)
@@ -737,6 +737,9 @@ Bookkeeping for the one-pass `entry_analysis` batch extraction pipeline. Rows pr
 - `status` (String 20) — "pending", "submitted", "completed", "failed", "skipped_junk", "reused_echo"
 - `batch_id` (String 80, indexed), `custom_id` (String 64)
 - `attempts` (Integer), `reused_from_entry_id` (UUID), `error` (Text)
+- `adjudication_status` (String 24, indexed) — the adjudicate stage's decision for this entry: "pending", "completed", "failed", or a gate skip ("skipped_off", "skipped_plan", "skipped_echo", "skipped_nothing_new", "skipped_score", "skipped_budget", "skipped_paused"); the hourly sweep re-enqueues budget/paused rows and lost pending rows
+- `adjudicated_at` — when the review completed
+- `adjudication_queued_at` — when the row went pending; a pending row older than 6 hours with no run is treated as a lost task and re-enqueued
 - `created_at`, `submitted_at`, `completed_at`
 
 **Columns (`ai_batch_jobs`):**
@@ -843,7 +846,8 @@ Provenance for scalar profile fields — the field-level counterpart to `EntityR
 - `confidence` (String 20) — "confirmed", "probable", "possible"
 - `source` (String 20) — "co_occurrence", "auto_extracted", "analyst_confirmed", "analyst_created", "analyst_rejected" (hidden + never resurrected by co-occurrence), "external_feed"
 - `description` (Text)
-- `adjudication_verdict` (String 20, nullable), `adjudicated_at` — AI adjudicator outcome: "corroborated" (promoted to confirmed) or "coincidental" (demoted to possible, never re-promoted by co-occurrence)
+- `adjudication_verdict` (String 20, nullable), `adjudicated_at` — the adjudicate stage's outcome: "corroborated" (promoted to confirmed) or "coincidental" (demoted to possible, sticky — never re-promoted by co-occurrence)
+- `reviewer_kept_entry_ids` (ARRAY(UUID)) — entries whose adjudicate-stage review kept this edge in apply mode; at `relationship_evidence_promote_count` distinct entries the edge becomes confirmed/corroborated
 - `evidence_entry_ids` (ARRAY(UUID)) — entries supporting this relationship
 - `created_by` (FK, nullable, CASCADE)
 - `created_at`, `updated_at`
@@ -1789,6 +1793,9 @@ Common migration prefixes:
 - `b3d5f7h9j1k3` — detection rule provenance (license, upstream_updated_at, references, source_products)
 - `f1a3c5e7g9i1` — AI-extraction provenance columns on the five extractable entity tables
 - `g2b4d6f8h0j2` — relationship adjudication columns (`adjudication_verdict`, `adjudicated_at`)
+- `z8w0y2a4c6e8`, `c2d3e4f5a6b7` — adjudicate stage bookkeeping on `ai_analysis_requests` (`adjudication_status`, `adjudicated_at`, `adjudication_queued_at`)
+- `a0b1c2d3e4f5` — `entity_relationships.reviewer_kept_entry_ids`
+- `b1c2d3e4f5a6` — drops the reviewer verdict columns from both proposal logs and the pending stale/cluster proposal rows
 
 **Notable migrations (July 2026):**
 - `d2a2b3c4d5g0` — CVE KEV flags + exploit-status provenance

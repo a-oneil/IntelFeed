@@ -46,7 +46,7 @@ celery_app.conf.update(
 - **Serializer:** JSON for broad language compatibility and debugging.
 - **Logging:** Celery's root logger is disabled (`worker_hijack_root_logger=False`) to allow structlog integration (via `setup_logging()`).
 - **Beat Schedule:** Built dynamically from the job registry (see [Beat Schedule](#beat-schedule-and-runtime-overrides)).
-- **Queue Routing:** `task_default_queue="celery"`, plus `task_routes` pinning every Claude Code CLI-invoking task to the dedicated `ai` queue (a worker with `--concurrency=1`, to avoid OAuth-session corruption and respect rate limits): the link-validation tasks, entity-maintenance tasks (`process_merge_candidate`, `refresh_actor_profile`, `process_name_normalization_batch`, `ai_enrich_gap_batch`), `review_hygiene_proposal_batch`, `adjudicate_relationship_batch`, `run_copilot_stream`, and the copilot auth tasks. Any new CLI-calling task must be routed here — the default worker has no CLI credentials.
+- **Queue Routing:** `task_default_queue="celery"`, plus `task_routes` pinning every task that calls an AI provider to the dedicated `ai` queue (served by `celery-worker-ai` at `--concurrency=1`: one AI call at a time regardless of provider, which paces a single Ollama GPU and, for the `claude_code` CLI provider, avoids OAuth-session corruption — that worker is the only one mounting the CLI credentials volume): `run_entry_analysis_task` (the one-pass analysis), `adjudicate_entry_task` and `backfill_entry_adjudications` (the adjudicate stage), `refresh_actor_profile`, `process_name_normalization_batch`, `ai_enrich_gap_batch`, `narrate_story_threads`, `run_copilot_stream`, and the copilot auth tasks (`run_claude_auth`, `refresh_claude_auth_status`). Any new AI-calling task must be routed here — left on the default queue it fills that worker's slots and starves `poll_due_feeds`.
 
 ### Per-Worker Async Pattern and Connection Management
 
@@ -168,10 +168,6 @@ The `JOB_REGISTRY` is a declarative map of all **70** scheduled tasks, each with
 | `reconcile_meilisearch` | Daily at 07:15 UTC | Detect and repair PostgreSQL ↔ Meilisearch drift |
 | `cleanup_orphaned_references` | Daily at 03:15 UTC | Remove references to deleted entities |
 | `decay_relationship_confidence` | Weekly Sunday at 03:45 UTC | Demote stale co-occurrence relationships from probable to possible |
-| `validate_entity_links` | Daily at 04:00 UTC | Re-validate autolinker entity links with Claude Code; flag/remove out-of-context links (AI) |
-| `kickoff_entity_merge_maintenance` | Weekly Sunday at 03:00 UTC | Find duplicates/misclassifications across entity types; merge or reclassify via Claude Code (AI, shadow by default) |
-| `review_hygiene_proposals` | Daily at 05:30 UTC | AI-review pending hygiene proposals (reclassify/merge/rename/alias trim/vendor link/id fix); verdicts gate bulk apply (AI) |
-| `adjudicate_relationships` | Daily at 06:30 UTC | AI-adjudicate probable relationship edges from evidence headlines; corroborated → confirmed, coincidental demoted (behind `relationship_adjudication_enabled`) (AI) |
 | `retry_untranslated_entries` | Every 30 minutes | Backfill translations missed while the LibreTranslate sidecar was off (auto-translate feeds) |
 | `refresh_claude_auth_status` | Every 30 minutes | Refresh copilot Claude Code OAuth credential health snapshot |
 | `prune_engine_tables` | Daily at 02:40 UTC | Delete engine bookkeeping rows older than 30 days (job_runs, …) |
@@ -201,7 +197,7 @@ The `JOB_REGISTRY` is a declarative map of all **70** scheduled tasks, each with
 
 ### Beat Schedule and Runtime Overrides
 
-**File:** `backend/app/workers/job_registry.py:789` (`build_beat_schedule`)
+**File:** `backend/app/workers/job_registry.py:709` (`build_beat_schedule`)
 
 The beat schedule is built at worker startup via `build_beat_schedule()`, which applies any overrides from Redis:
 
@@ -938,7 +934,7 @@ runtime from Engine → Jobs, which is stored in Redis and re-read at beat start
 02:30 ├─ sync_cybergeist_feeds
 02:40 ├─ prune_engine_tables
 02:50 ├─ reconcile_observable_counters
-03:00 ├─ kickoff_actor_profile_refresh (Monday) / kickoff_entity_merge_maintenance (Sunday)
+03:00 ├─ kickoff_actor_profile_refresh (Monday)
       ├─ rescore_all_entries (Sunday) / run_mitre_attack_sync (Sunday)
 03:05 ├─ reenrich_cve_nvd
 03:15 ├─ cleanup_orphaned_references
@@ -946,7 +942,7 @@ runtime from Engine → Jobs, which is stored in Redis and re-read at beat start
 03:35 ├─ resolve_cve_affected
 03:45 ├─ decay_relationship_confidence (Sunday) · refresh_cwe_catalog (Monday) · run_metasploit_sync (Sunday)
 03:50 ├─ rebuild_rule_coverage
-04:00 ├─ validate_entity_links · run_wikipedia_bulk_sync (Wednesday)
+04:00 ├─ run_wikipedia_bulk_sync (Wednesday)
 04:10 ├─ evict_image_cache
 04:15 ├─ evict_tts_cache
 04:20 ├─ recompute_signal_rates · rank_threat_board · rollup_targeted_sectors
@@ -962,7 +958,7 @@ runtime from Engine → Jobs, which is stored in Redis and re-read at beat start
 05:45 ├─ kickoff_assessment_backfill
 06:00 ├─ generate_daily_summaries
 06:10 ├─ narrate_story_threads
-06:30 ├─ run_epss_bulk_sync · adjudicate_relationships
+06:30 ├─ run_epss_bulk_sync
 07:00 ├─ generate_reddit_digest
 07:15 ├─ reconcile_meilisearch
 12:00 └─ run_cve_nvd_refresh
