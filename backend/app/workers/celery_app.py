@@ -26,10 +26,7 @@ celery_app = Celery(
         "app.workers.telegram_link_tasks",
         "app.workers.translation_tasks",
         "app.workers.telegram_backfill_tasks",
-        "app.workers.link_validation_tasks",
         "app.workers.entity_maintenance_tasks",
-        "app.workers.hygiene_review_tasks",
-        "app.workers.relationship_adjudication_tasks",
         "app.workers.daily_summary_tasks",
         "app.workers.copilot_tasks",
         "app.workers.copilot_auth_tasks",
@@ -62,11 +59,6 @@ celery_app.conf.update(
         # time regardless of provider (paces a single Ollama GPU; for the
         # claude_code CLI provider it also avoids OAuth-session corruption —
         # that worker is the only one mounting the CLI credentials volume).
-        # The link-validation kickoff runs its canary entries INLINE (CLI
-        # subprocess), so it must also live on this worker.
-        "app.workers.link_validation_tasks.validate_entity_links": {"queue": "ai"},
-        "app.workers.link_validation_tasks.validate_single_entry_links": {"queue": "ai"},
-        "app.workers.link_validation_tasks.validate_batch_entry_links": {"queue": "ai"},
         # One-pass entry analysis is the heaviest generative task in the app
         # (150-300s per entry on Ollama). Left on the default queue it fills
         # both of that worker's slots and starves poll_due_feeds, which stops
@@ -75,16 +67,9 @@ celery_app.conf.update(
         # The post-analysis review is one more generative call per entry;
         # same worker, same serialization, never alongside the analysis.
         "app.workers.adjudication_tasks.adjudicate_entry_task": {"queue": "ai"},
-        "app.workers.entity_maintenance_tasks.process_merge_candidate": {"queue": "ai"},
         "app.workers.entity_maintenance_tasks.refresh_actor_profile": {"queue": "ai"},
         "app.workers.entity_maintenance_tasks.process_name_normalization_batch": {"queue": "ai"},
         "app.workers.entity_maintenance_tasks.ai_enrich_gap_batch": {"queue": "ai"},
-        # Proposal-review batches invoke the CLI; the kickoff is DB-only fan-out
-        # and stays on the default queue.
-        "app.workers.hygiene_review_tasks.review_hygiene_proposal_batch": {"queue": "ai"},
-        # Adjudication batches may run on the CLI provider (or Ollama — no CLI);
-        # the CLI worker serializes AI batches either way.
-        "app.workers.relationship_adjudication_tasks.adjudicate_relationship_batch": {"queue": "ai"},
         # Thread spines are generative; the sweeper that builds the threads
         # themselves is pure SQL and stays on the default queue.
         "app.workers.thread_tasks.narrate_story_threads": {"queue": "ai"},

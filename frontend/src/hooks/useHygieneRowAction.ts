@@ -2,7 +2,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import api from "@/api/client";
-import { useApplyMaintenanceProposal } from "@/hooks/useEntityMaintenance";
 import {
   useApplyAdvisories,
   useApplyAliasCollision,
@@ -26,7 +25,6 @@ export function extractLogId(row: FeedRow): string {
 export function useHygieneRowAction() {
   const qc = useQueryClient();
   const dismissRow = useDismissFeedRow();
-  const applyMaintenance = useApplyMaintenanceProposal();
   const applyNormalizeName = useApplyNormalizeName();
   const applyAliasCollision = useApplyAliasCollision();
   const applyVendorAutolink = useApplyVendorAutolink();
@@ -66,7 +64,7 @@ export function useHygieneRowAction() {
     }
     if (action === "restore") {
       try {
-        await api.post(`/admin/link-validation/log/${extractLogId(row)}/restore`);
+        await api.post(`/admin/hygiene/link-log/${extractLogId(row)}/restore`);
         toast.success("Link restored");
         invalidate();
       } catch (e) {
@@ -119,13 +117,7 @@ export function useHygieneRowAction() {
         }
         return;
       }
-      // merge_cluster_summary + orphan_prune go through the legacy apply endpoint.
-      try {
-        const result = await applyMaintenance.mutateAsync(extractLogId(row));
-        toast.success(`Applied ${result.succeeded}/${result.attempted} (skipped ${result.skipped})`);
-      } catch (e) {
-        toast.error(`Apply failed: ${(e as Error).message}`);
-      }
+      toast.error(`No apply path for ${row.action}`);
       return;
     }
     if (action === "apply_reclassify" && row.source === "link_validator") {
@@ -144,7 +136,7 @@ export function useHygieneRowAction() {
     if (action === "promote_to_remove") {
       try {
         const res = await api.post<{ already_removed: boolean }>(
-          `/admin/link-validation/log/${extractLogId(row)}/apply-removal`,
+          `/admin/hygiene/link-log/${extractLogId(row)}/apply-removal`,
         );
         toast.success(res.data.already_removed ? "Link was already removed" : "Link removed");
         invalidate();

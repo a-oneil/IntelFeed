@@ -138,7 +138,7 @@ The api drains via BLPOP in `_iter_worker_events` (`copilot.py:430`), with a tim
 
 ### The `ai` queue
 
-All CLI-subprocess tasks are routed to this queue (`backend/app/workers/celery_app.py:58-94`): copilot turns, both auth tasks, link validation, the autonomous entity-maintenance tasks, and the hygiene-review and relationship-adjudication batches. `celery-worker-ai` consumes it with `--concurrency=${CLAUDE_CODE_CONCURRENCY:-1} --prefetch-multiplier=1` (`docker-compose.prod.yml:310`, dev `:212`) to avoid OAuth session-file corruption and respect Max-plan rate limits. Consequence: at the default concurrency of 1, a long copilot turn and a batch maintenance task queue behind each other.
+All CLI-subprocess tasks are routed to this queue (`backend/app/workers/celery_app.py:58-94`): copilot turns, both auth tasks, the one-pass entry analysis and its adjudicate-stage review, and the actor-refresh / assessment / name-normalization / enrichment-gap batches. `celery-worker-ai` consumes it with `--concurrency=${CLAUDE_CODE_CONCURRENCY:-1} --prefetch-multiplier=1` (`docker-compose.prod.yml:310`, dev `:212`) to avoid OAuth session-file corruption and respect Max-plan rate limits. Consequence: at the default concurrency of 1, a long copilot turn and a batch maintenance task queue behind each other.
 
 ### The CLI invocation
 

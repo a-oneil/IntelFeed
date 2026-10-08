@@ -29,7 +29,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Body, Depends, Path, Query
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import and_, delete, exists, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.entity_merge import (
@@ -51,7 +51,6 @@ from app.models.entity_link_validation_log import EntityLinkValidationLog
 from app.models.entity_maintenance import EntityMaintenanceLog
 from app.models.entity_note import EntityNote
 from app.models.entity_relationship import EntityRelationship
-from app.models.entry import Entry
 from app.models.entry_sector import EntrySector
 from app.models.malware_family import EntryMalware, MalwareFamily
 from app.models.observable import EntryObservable, Observable
@@ -503,19 +502,9 @@ class ApplyAdvisoriesRequest(BaseModel):
         description="Restrict to advisories whose source is this entity_type.",
     )
     mode: Literal["shadow", "apply"] = Field(default="apply")
-    exclude_rejected: bool = Field(
-        default=False,
-        description=(
-            "Skip advisories the AI reviewer marked 'reject'. The blind bulk "
-            "'Apply all' button sets this so it never applies a proposal the AI "
-            "vetoed; per-row apply leaves it off so an analyst can still override."
-        ),
-    )
 
     model_config = ConfigDict(
-        json_schema_extra={
-            "example": {"limit": 100, "entity_type": "threat_actor", "mode": "apply", "exclude_rejected": True}
-        }
+        json_schema_extra={"example": {"limit": 100, "entity_type": "threat_actor", "mode": "apply"}}
     )
 
 
@@ -553,13 +542,6 @@ async def apply_reclassify_advisories(
     )
     if body.entity_type:
         q = q.where(EntityLinkValidationLog.entity_type == body.entity_type)
-    if body.exclude_rejected:
-        q = q.where(
-            or_(
-                EntityLinkValidationLog.review_decision.is_(None),
-                EntityLinkValidationLog.review_decision != "reject",
-            )
-        )
     advisories = (await db.execute(q)).scalars().all()
     return await _apply_advisory_rows(db, list(advisories), body.mode)
 
@@ -662,222 +644,6 @@ async def _apply_advisory_rows(
 
 # ---------------------------------------------------------------------------
 # AI proposal review — judge pending proposals, bulk-apply the approved ones
-# ---------------------------------------------------------------------------
-
-
-class AiReviewKickoffResponse(BaseModel):
-    pending_unreviewed: int
-    dispatched: bool
-
-
-@router.post("/admin/hygiene/ai-review", response_model=AiReviewKickoffResponse)
-async def kickoff_ai_review(
-    user: User = Depends(get_admin_user),
-    db: AsyncSession = Depends(get_db),
-) -> AiReviewKickoffResponse:
-    """Queue an AI review pass over every pending, unreviewed proposal.
-
-    Fans out batches to the ai worker; verdicts land on the log rows
-    as they complete and surface in the feed + stats.
-    """
-    from app.workers.hygiene_review_tasks import review_hygiene_proposals
-
-    link_pending = (
-        await db.execute(
-            select(func.count())
-            .select_from(EntityLinkValidationLog)
-            .where(
-                EntityLinkValidationLog.action == "needs_reclassification",
-                EntityLinkValidationLog.review_decision.is_(None),
-            )
-        )
-    ).scalar_one()
-    maint_pending = (
-        await db.execute(
-            select(func.count())
-            .select_from(EntityMaintenanceLog)
-            .where(
-                EntityMaintenanceLog.action.in_(sorted(_MAINTENANCE_PROPOSAL_ACTIONS)),
-                EntityMaintenanceLog.applied.is_(False),
-                EntityMaintenanceLog.review_decision.is_(None),
-            )
-        )
-    ).scalar_one()
-    total = int(link_pending) + int(maint_pending)
-    if total:
-        review_hygiene_proposals.apply_async()
-    return AiReviewKickoffResponse(pending_unreviewed=total, dispatched=bool(total))
-
-
-class ApplyAiApprovedRequest(BaseModel):
-    dismiss_rejected: bool = Field(
-        default=False,
-        description="Also delete pending proposals the AI rejected.",
-    )
-
-    model_config = ConfigDict(json_schema_extra={"example": {"dismiss_rejected": True}})
-
-
-class ApplyAiApprovedResponse(BaseModel):
-    applied: int
-    skipped: int
-    failed: int
-    dismissed_rejected: int
-    errors: list[dict]
-
-
-async def apply_ai_reviewed_proposals(
-    db: AsyncSession,
-    user: User | None,
-    dismiss_rejected: bool = False,
-) -> dict:
-    """Apply every pending proposal the AI reviewer approved.
-
-    Routes each proposal kind through the same code path its per-row apply
-    endpoint uses, so behavior (idempotency, collision checks, audit rows) is
-    identical to a human clicking Apply. Also called from the review worker
-    when hygiene_review_auto_apply is enabled.
-    """
-    from app.api.entity_merge import _apply_one_proposal
-
-    applied = 0
-    skipped = 0
-    failed = 0
-    dismissed = 0
-    errors: list[dict] = []
-
-    # 1) Approved link-validator reclassify advisories — grouped + deduped.
-    advisories = (
-        (
-            await db.execute(
-                select(EntityLinkValidationLog)
-                .where(
-                    EntityLinkValidationLog.action == "needs_reclassification",
-                    EntityLinkValidationLog.review_decision == "approve",
-                )
-                .order_by(EntityLinkValidationLog.created_at.asc())
-            )
-        )
-        .scalars()
-        .all()
-    )
-    if advisories:
-        adv_result = await _apply_advisory_rows(db, list(advisories), "apply")
-        applied += adv_result.applied
-        skipped += adv_result.skipped
-        failed += adv_result.failed
-        errors.extend(adv_result.errors[:20])
-
-    # 2) Approved maintenance proposals, one row at a time.
-    rows = (
-        (
-            await db.execute(
-                select(EntityMaintenanceLog)
-                .where(
-                    EntityMaintenanceLog.action.in_(sorted(_MAINTENANCE_PROPOSAL_ACTIONS)),
-                    EntityMaintenanceLog.applied.is_(False),
-                    EntityMaintenanceLog.review_decision == "approve",
-                )
-                .order_by(EntityMaintenanceLog.created_at.asc())
-            )
-        )
-        .scalars()
-        .all()
-    )
-    for row in rows:
-        try:
-            if row.action == "merge_cluster_summary":
-                result = await _apply_one_proposal(db, row)
-                if result.succeeded:
-                    applied += 1
-                else:
-                    skipped += 1
-                for err in result.errors[:5]:
-                    errors.append({**err, "log_id": str(row.id)})
-            elif row.action == "normalize_name":
-                r = await apply_normalize_name(row.id, user, db)
-                applied += int(r.applied)
-                skipped += int(r.skipped)
-            elif row.action == "alias_collision":
-                r = await apply_alias_collision(row.id, user, db)
-                applied += int(r.applied)
-                skipped += int(r.skipped)
-            elif row.action == "vendor_autolink":
-                r = await apply_vendor_autolink(row.id, user, db)
-                applied += int(r.applied)
-                skipped += int(r.skipped)
-            elif row.action in ("ttp_malformed_id", "cve_malformed_id", "cve_withdrawn"):
-                r = await apply_id_hygiene(row.id, user, db)
-                applied += int(r.applied)
-                skipped += int(r.skipped)
-            else:
-                # stale_entity_review has no automated apply — the verdict is
-                # advisory; the analyst actions it from the entity profile.
-                skipped += 1
-        except AppError as e:
-            failed += 1
-            errors.append({"log_id": str(row.id), "action": row.action, "error": e.message})
-        except Exception as e:  # pragma: no cover  (defense-in-depth)
-            failed += 1
-            errors.append({"log_id": str(row.id), "action": row.action, "error": str(e)[:300]})
-
-    # 3) Optionally clear everything the AI rejected.
-    if dismiss_rejected:
-        rejected_advisories = (
-            (
-                await db.execute(
-                    select(EntityLinkValidationLog).where(
-                        EntityLinkValidationLog.action == "needs_reclassification",
-                        EntityLinkValidationLog.review_decision == "reject",
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        for r in rejected_advisories:
-            await db.delete(r)
-            dismissed += 1
-        rejected_rows = (
-            (
-                await db.execute(
-                    select(EntityMaintenanceLog).where(
-                        EntityMaintenanceLog.action.in_(sorted(_MAINTENANCE_PROPOSAL_ACTIONS)),
-                        EntityMaintenanceLog.applied.is_(False),
-                        EntityMaintenanceLog.review_decision == "reject",
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        for r in rejected_rows:
-            await db.delete(r)
-            dismissed += 1
-
-    await db.flush()
-    return {
-        "applied": applied,
-        "skipped": skipped,
-        "failed": failed,
-        "dismissed_rejected": dismissed,
-        "errors": errors[:50],
-    }
-
-
-@router.post("/admin/hygiene/apply-ai-approved", response_model=ApplyAiApprovedResponse)
-async def apply_ai_approved(
-    body: ApplyAiApprovedRequest = Body(default_factory=ApplyAiApprovedRequest),
-    user: User = Depends(get_admin_user),
-    db: AsyncSession = Depends(get_db),
-) -> ApplyAiApprovedResponse:
-    """Bulk-apply every proposal the AI reviewer approved (optionally dismissing rejects)."""
-    result = await apply_ai_reviewed_proposals(db, user, dismiss_rejected=body.dismiss_rejected)
-    return ApplyAiApprovedResponse(**result)
-
-
-# ---------------------------------------------------------------------------
-# Enrichment gaps
 # ---------------------------------------------------------------------------
 
 
@@ -1187,9 +953,6 @@ class FeedRow(BaseModel):
     payload: dict  # the underlying log row's structured fields, kept verbatim
     actions: list[str]  # frontend hints: e.g. ["restore"], ["apply"], ["dismiss"]
     links: list[FeedLink] = []  # affected entities/entries to deep-link from the row
-    # AI reviewer verdict (pending proposals only; None = not reviewed)
-    review_decision: str | None = None
-    review_reason: str | None = None
     # Who proposed it: "adjudicator" (the post-analysis adjudicate stage, with
     # the article in hand) or "legacy" (the retired nightly jobs / scans).
     origin: str | None = None
@@ -1204,7 +967,6 @@ class FeedResponse(BaseModel):
 _LINK_VALIDATOR_ACTIONS = {"shadow_remove", "removed", "restored", "needs_reclassification"}
 _MAINTENANCE_ACTIONS = {
     "merge",
-    "merge_cluster_summary",
     "reclassify",
     "no_op",
     "update_description",
@@ -1218,21 +980,18 @@ _MAINTENANCE_ACTIONS = {
     "ttp_malformed_id",
     "cve_malformed_id",
     "cve_withdrawn",
-    "stale_entity_review",
     *ADJUDICATION_ACTIONS,
 }
 # Maintenance actions whose action code persists from proposal through apply
 # (only the `applied` boolean flips). Filtering by these in the UI means
 # "show me the unapplied proposals" — applied rows must be excluded.
 _MAINTENANCE_PROPOSAL_ACTIONS = {
-    "merge_cluster_summary",
     "normalize_name",
     "alias_collision",
     "vendor_autolink",
     "ttp_malformed_id",
     "cve_malformed_id",
     "cve_withdrawn",
-    "stale_entity_review",
     *ADJUDICATION_ACTIONS,
 }
 # Maintenance actions whose code is used for BOTH a shadow preview and the
@@ -1264,8 +1023,6 @@ def _row_actions_link(row: EntityLinkValidationLog) -> list[str]:
 
 
 def _row_actions_maint(row: EntityMaintenanceLog) -> list[str]:
-    if row.action == "merge_cluster_summary" and not row.applied:
-        return ["apply", "dismiss"]
     if row.action == "orphan_prune" and row.mode == "shadow":
         return ["apply", "dismiss"]
     if row.action == "normalize_name" and not row.applied:
@@ -1281,10 +1038,6 @@ def _row_actions_maint(row: EntityMaintenanceLog) -> list[str]:
         return ["dismiss"]
     if row.action == "cve_withdrawn" and not row.applied:
         return ["apply", "dismiss"]
-    if row.action == "stale_entity_review" and not row.applied:
-        # Review-only flag: the entity chip deep-links to the profile where the
-        # analyst can merge/delete; the row itself only supports dismissal.
-        return ["dismiss"]
     if row.action in ADJUDICATION_ACTIONS:
         if row.action == ACTION_ASSESSMENT:
             return ["dismiss"] if not row.applied else []
@@ -1325,10 +1078,6 @@ def _maint_subject(row: EntityMaintenanceLog) -> str:
         return f"{nm or '(unknown)'} ({row.entity_type})"
     if row.action in ADJUDICATION_ACTIONS:
         return _adjudication_subject(row)
-    if row.action == "merge_cluster_summary":
-        merges = after.get("merges") or []
-        reclassifies = after.get("reclassifies") or []
-        return f"cluster: {len(merges)} merges, {len(reclassifies)} reclassifies"
     if row.action == "normalize_name":
         current = (before.get("entity") or {}).get("name") if isinstance(before.get("entity"), dict) else None
         proposed = after.get("proposed_name")
@@ -1373,13 +1122,6 @@ def _maint_subject(row: EntityMaintenanceLog) -> str:
         cve = ent.get("cve_id") or "?"
         status = after.get("vuln_status") or "withdrawn"
         return f"{cve} · {status} (NVD)"
-    if row.action == "stale_entity_review":
-        ent = before.get("entity") if isinstance(before.get("entity"), dict) else {}
-        nm = ent.get("name") if isinstance(ent, dict) else None
-        count = after.get("article_count", 0)
-        age = after.get("age_days")
-        age_part = f", first seen {age}d ago" if age is not None else ""
-        return f"{nm or '(unknown)'} ({row.entity_type}) · stale: {count} article(s), no relationships{age_part}"
     if row.action in ("ai_enrich_filled", "ai_enrich_unknown"):
         ent_name = (before.get("entity") or {}).get("name") if isinstance(before.get("entity"), dict) else None
         field = after.get("field") or "?"
@@ -1473,7 +1215,7 @@ def _maint_links(row: EntityMaintenanceLog) -> list[FeedLink]:
             # Reclassify with no pre-existing target — the new entity is row.entity_id
             # in target_type, name == source.name.
             _add(tgt_type, row.entity_id, src.get("name"), role="target")
-    elif row.action in ("orphan_prune", "stale_entity_review"):
+    elif row.action == "orphan_prune":
         ent = before.get("entity") if isinstance(before.get("entity"), dict) else None
         if ent:
             _add(row.entity_type, ent.get("id"), ent.get("name"))
@@ -1539,33 +1281,6 @@ def _maint_links(row: EntityMaintenanceLog) -> list[FeedLink]:
             # ttps / cves don't have entity profile routes in the workbench, so
             # the chip won't get a deep link — surfaced just for visibility.
             _add(row.entity_type, ent.get("id"), label, role="subject")
-    elif row.action == "merge_cluster_summary":
-        members = before.get("cluster_members") or []
-        if isinstance(members, list):
-            for m in members[:8]:  # cap so dense clusters don't blow up the row
-                if isinstance(m, dict):
-                    _add(m.get("entity_type"), m.get("entity_id"), m.get("name"), role="member")
-        # Surface targets of proposed merges/reclassifies too, deduped by id.
-        seen = {(li.entity_type, li.entity_id) for li in out}
-        for m in (after.get("merges") or [])[:6]:
-            if not isinstance(m, dict):
-                continue
-            tt = row.entity_type
-            tid = m.get("target_id")
-            tname = m.get("target_name")
-            if tid and tname and (tt, str(tid)) not in seen:
-                _add(tt, tid, tname, role="merge_target")
-                seen.add((tt, str(tid)))
-        for r2 in (after.get("reclassifies") or [])[:6]:
-            if not isinstance(r2, dict):
-                continue
-            tt = r2.get("target_type")
-            tid = r2.get("target_id")
-            tname = r2.get("target_name")
-            if tt and tid and tname and (tt, str(tid)) not in seen:
-                _add(tt, tid, tname, role="reclassify_target")
-                seen.add((tt, str(tid)))
-
     return out
 
 
@@ -1578,10 +1293,6 @@ async def hygiene_feed(
     ),
     source: str | None = Query(None, description="'link_validator' | 'entity_maintenance' | null (all)."),
     mode: str | None = Query(None, description="'shadow' | 'apply' — applies to entity_maintenance rows."),
-    review: str | None = Query(
-        None,
-        description="Filter pending proposals by AI verdict: 'approve' | 'reject' | 'unsure' | 'unreviewed'.",
-    ),
     pending: bool = Query(
         False,
         description="Only unapplied proposals (skips applied history). Required for the review queue, "
@@ -1637,13 +1348,6 @@ async def hygiene_feed(
             q = q.where(EntityLinkValidationLog.action.in_(["shadow_remove", "needs_reclassification"]))
         if link_actions:
             q = q.where(EntityLinkValidationLog.action.in_(sorted(link_actions)))
-        if review:
-            # Verdict filters only make sense on pending proposals.
-            q = q.where(EntityLinkValidationLog.action == "needs_reclassification")
-            if review == "unreviewed":
-                q = q.where(EntityLinkValidationLog.review_decision.is_(None))
-            else:
-                q = q.where(EntityLinkValidationLog.review_decision == review)
         # link_validator has no `mode` column — map mode filter to action subsets:
         # proposed → shadow_remove + needs_reclassification (no junction mutation)
         # applied  → removed + restored (junction actually mutated)
@@ -1668,15 +1372,6 @@ async def hygiene_feed(
                 EntityMaintenanceLog.applied.is_(False),
                 EntityMaintenanceLog.action.in_(sorted(_MAINTENANCE_PROPOSAL_ACTIONS | {"orphan_prune"})),
             )
-        if review:
-            q = q.where(
-                EntityMaintenanceLog.action.in_(sorted(_MAINTENANCE_PROPOSAL_ACTIONS)),
-                EntityMaintenanceLog.applied.is_(False),
-            )
-            if review == "unreviewed":
-                q = q.where(EntityMaintenanceLog.review_decision.is_(None))
-            else:
-                q = q.where(EntityMaintenanceLog.review_decision == review)
         if maint_actions:
             q = q.where(EntityMaintenanceLog.action.in_(sorted(maint_actions)))
             # Proposal-only actions reuse the same code post-apply (only the
@@ -1764,8 +1459,6 @@ async def hygiene_feed(
                 },
                 actions=_row_actions_link(r),
                 links=links,
-                review_decision=r.review_decision,
-                review_reason=r.review_reason,
                 origin="adjudicator" if r.ai_result_id in adjudicator_ids else "legacy",
             )
         )
@@ -1791,8 +1484,6 @@ async def hygiene_feed(
                 },
                 actions=_row_actions_maint(r),
                 links=_maint_links(r),
-                review_decision=r.review_decision if not r.applied else None,
-                review_reason=r.review_reason if not r.applied else None,
                 origin="adjudicator" if r.action in ADJUDICATION_ACTIONS else "legacy",
             )
         )
@@ -1813,31 +1504,19 @@ async def hygiene_feed(
 
 
 class HygieneStats(BaseModel):
-    link_validator_mode: str
-    entity_maintenance_mode: str
+    # Adjudicate stage (post-analysis review) — the cleanup path
+    adjudication_mode: str  # off | shadow | apply
+    adjudication_pending: int  # unapplied verdicts it filed, across both logs
     pending_advisories: int  # needs_reclassification rows
-    shadow_proposals: int  # entity_maintenance shadow rows not yet applied
     name_normalization_proposed: int  # unapplied normalize_name rows
-    applied_24h: int  # actions applied across both systems in last 24h
+    applied_24h: int  # actions applied across both logs in last 24h
     applied_7d: int
     orphan_count: int
-    last_validator_run_at: datetime | None
     last_maintenance_run_at: datetime | None
-    # Link validator scan progress
-    link_validator_pending: int  # entries with auto_link rows and stale/missing validation
-    link_validator_validated_24h: int  # entries the validator touched in last 24h
     # Deterministic hygiene scans — each tracks unapplied proposals
     alias_collisions_proposed: int
     vendor_autolinks_proposed: int
     ttp_cve_issues_proposed: int
-    # AI proposal review — verdict counts across all pending proposals
-    ai_review_approved: int
-    ai_review_rejected: int
-    ai_review_unsure: int
-    ai_review_unreviewed: int
-    # Adjudicate stage (post-analysis review)
-    adjudication_mode: str  # off | shadow | apply
-    adjudication_pending: int  # unapplied verdicts it filed, across both logs
 
 
 @router.get("/admin/hygiene/stats", response_model=HygieneStats)
@@ -1845,15 +1524,11 @@ async def hygiene_stats(
     user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ) -> HygieneStats:
-    """Combined hygiene counters across the link validator and entity-maintenance systems:
-    modes, pending proposals per scan type, AI review verdicts, orphans and recent apply activity.
-    """
+    """Combined hygiene counters across both proposal logs: the adjudicate
+    stage's mode and pending verdicts, pending proposals per scan type,
+    orphans and recent apply activity."""
     from app.services.system_settings import get_setting
 
-    link_mode_val = await get_setting("link_validation_mode", db)
-    link_mode = (str(link_mode_val) if link_mode_val else "shadow").lower()
-    maint_mode_val = await get_setting("entity_maintenance_mode", db)
-    maint_mode = (str(maint_mode_val) if maint_mode_val else "shadow").lower()
     adjudication_mode = str(await get_setting("adjudication_mode", db) or "off").lower()
     adjudicator_results = select(AIResult.id).where(
         AIResult.task_id == select(AITask.id).where(AITask.name == ADJUDICATION_TASK_NAME).scalar_subquery()
@@ -1878,71 +1553,12 @@ async def hygiene_stats(
         )
     ).scalar_one()
 
-    # Link validator scan progress — matches the logic in
-    # /admin/link-validation/stats so the Hygiene UI shows the same numbers as
-    # the legacy validator card without making a second API call.
-    recheck_days_val = await get_setting("link_validation_recheck_days", db)
-    # Clamp to [0, 36500] (≈100 years). Operators sometimes set absurd values
-    # like 999999 to effectively disable rechecks — that overflows
-    # `datetime - timedelta(days=N)` when the result lands before year 1.
-    try:
-        recheck_days = int(recheck_days_val if recheck_days_val is not None else 30)
-    except (TypeError, ValueError):
-        recheck_days = 30
-    recheck_days = max(0, min(recheck_days, 36500))
-    validator_cutoff = datetime.now(UTC) - timedelta(days=recheck_days)
-    from app.workers.link_validation_tasks import JUNCTION_SPECS
-
-    pending_exists_clauses = [
-        exists().where(and_(jmodel.entry_id == Entry.id, jmodel.source == "auto_link"))
-        for jmodel, _, _, _ in JUNCTION_SPECS
-    ]
-    link_validator_pending = (
-        await db.execute(
-            select(func.count())
-            .select_from(Entry)
-            .where(
-                or_(
-                    Entry.last_link_validation_at.is_(None),
-                    Entry.last_link_validation_at < validator_cutoff,
-                ),
-                or_(*pending_exists_clauses),
-            )
-        )
-    ).scalar_one()
-
-    # pending_advisories / shadow_proposals drive the "Apply all proposed
-    # reclassifies (N)" / "Apply all proposed merges (N)" bulk buttons, and
-    # those bulk applies now skip AI-rejected rows — so exclude rejected here
-    # too, or the count would overstate the work the button performs. Rejected
-    # rows stay visible in the feed (with a reject badge) and are surfaced by
-    # the separate ai_review_rejected counter.
+    # pending_advisories drives the "Apply all proposed reclassifies (N)" bulk button.
     pending_advisories = (
         await db.execute(
             select(func.count())
             .select_from(EntityLinkValidationLog)
-            .where(
-                EntityLinkValidationLog.action == "needs_reclassification",
-                or_(
-                    EntityLinkValidationLog.review_decision.is_(None),
-                    EntityLinkValidationLog.review_decision != "reject",
-                ),
-            )
-        )
-    ).scalar_one()
-
-    shadow_proposals = (
-        await db.execute(
-            select(func.count())
-            .select_from(EntityMaintenanceLog)
-            .where(
-                EntityMaintenanceLog.action == "merge_cluster_summary",
-                EntityMaintenanceLog.applied.is_(False),
-                or_(
-                    EntityMaintenanceLog.review_decision.is_(None),
-                    EntityMaintenanceLog.review_decision != "reject",
-                ),
-            )
+            .where(EntityLinkValidationLog.action == "needs_reclassification")
         )
     ).scalar_one()
 
@@ -1960,10 +1576,6 @@ async def hygiene_stats(
     now = datetime.now(UTC)
     cutoff_24h = now - timedelta(hours=24)
     cutoff_7d = now - timedelta(days=7)
-
-    link_validator_validated_24h = (
-        await db.execute(select(func.count()).select_from(Entry).where(Entry.last_link_validation_at >= cutoff_24h))
-    ).scalar_one()
 
     # "Applied" = link_validator removed/restored + entity_maintenance applied=true
     applied_24h_link = (
@@ -2008,7 +1620,6 @@ async def hygiene_stats(
         )
     ).scalar_one()
 
-    last_validator = (await db.execute(select(func.max(EntityLinkValidationLog.created_at)))).scalar_one()
     last_maintenance = (await db.execute(select(func.max(EntityMaintenanceLog.created_at)))).scalar_one()
 
     # Orphan count: sum across scannable types.
@@ -2057,54 +1668,18 @@ async def hygiene_stats(
         )
     ).scalar_one()
 
-    # AI review verdict counts across all still-pending proposals.
-    link_review_counts = dict(
-        (
-            await db.execute(
-                select(EntityLinkValidationLog.review_decision, func.count())
-                .where(EntityLinkValidationLog.action == "needs_reclassification")
-                .group_by(EntityLinkValidationLog.review_decision)
-            )
-        ).all()
-    )
-    maint_review_counts = dict(
-        (
-            await db.execute(
-                select(EntityMaintenanceLog.review_decision, func.count())
-                .where(
-                    EntityMaintenanceLog.action.in_(sorted(_MAINTENANCE_PROPOSAL_ACTIONS)),
-                    EntityMaintenanceLog.applied.is_(False),
-                )
-                .group_by(EntityMaintenanceLog.review_decision)
-            )
-        ).all()
-    )
-
-    def _review_count(key: str | None) -> int:
-        return int(link_review_counts.get(key, 0)) + int(maint_review_counts.get(key, 0))
-
     return HygieneStats(
-        link_validator_mode=link_mode,
-        entity_maintenance_mode=maint_mode,
+        adjudication_mode=adjudication_mode,
+        adjudication_pending=int(adjudication_pending),
         pending_advisories=int(pending_advisories),
-        shadow_proposals=int(shadow_proposals),
         name_normalization_proposed=int(name_normalization_proposed),
         applied_24h=int(applied_24h_link) + int(applied_24h_maint),
         applied_7d=int(applied_7d_link) + int(applied_7d_maint),
         orphan_count=orphan_count,
-        last_validator_run_at=last_validator,
         last_maintenance_run_at=last_maintenance,
-        link_validator_pending=int(link_validator_pending),
-        link_validator_validated_24h=int(link_validator_validated_24h),
         alias_collisions_proposed=int(alias_collisions_proposed),
         vendor_autolinks_proposed=int(vendor_autolinks_proposed),
         ttp_cve_issues_proposed=int(ttp_cve_issues_proposed),
-        ai_review_approved=_review_count("approve"),
-        ai_review_rejected=_review_count("reject"),
-        ai_review_unsure=_review_count("unsure"),
-        ai_review_unreviewed=_review_count(None),
-        adjudication_mode=adjudication_mode,
-        adjudication_pending=int(adjudication_pending),
     )
 
 
@@ -3315,6 +2890,100 @@ async def restore_adjudication_proposal(
     )
 
 
+class LinkLogResult(BaseModel):
+    log_id: uuid.UUID
+    restored: bool = False
+    applied: bool = False
+    already_removed: bool = False
+    message: str | None = None
+
+
+@router.post("/admin/hygiene/link-log/{log_id}/restore", response_model=LinkLogResult)
+async def restore_removed_link(
+    log_id: uuid.UUID = Path(..., description="entity_link_validation_log row id of a 'removed' action to undo"),
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> LinkLogResult:
+    """Re-create a junction row from a `removed` log row's snapshot (and the
+    entity's article_count). The undo for a link the adjudicate stage removed."""
+    from app.intelligence.link_validation_apply import restore_from_log
+
+    ok, message = await restore_from_log(db, log_id)
+    if not ok:
+        raise AppError(code="restore_failed", message=message, status_code=400)
+    await db.flush()
+    return LinkLogResult(log_id=log_id, restored=True, message=message)
+
+
+@router.post("/admin/hygiene/link-log/{log_id}/apply-removal", response_model=LinkLogResult)
+async def apply_proposed_link_removal(
+    log_id: uuid.UUID = Path(..., description="entity_link_validation_log row id of a 'shadow_remove' proposal"),
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> LinkLogResult:
+    """Promote a `shadow_remove` proposal into the actual junction deletion.
+    Writes a `removed` row (the proposal stays as history) and decrements the
+    entity's article_count. Idempotent when the junction is already gone."""
+    from sqlalchemy import update as sql_update
+
+    from app.intelligence.link_validation_apply import ENTITY_TYPES
+
+    row = (
+        await db.execute(select(EntityLinkValidationLog).where(EntityLinkValidationLog.id == log_id))
+    ).scalar_one_or_none()
+    if not row:
+        raise AppError(code="not_found", message="proposal not found", status_code=404)
+    if row.action != "shadow_remove":
+        raise AppError(code="invalid", message=f"can only apply shadow_remove rows (got {row.action})", status_code=400)
+    spec = ENTITY_TYPES.get(row.entity_type)
+    if not spec:
+        raise AppError(code="invalid", message=f"unsupported entity_type: {row.entity_type}", status_code=400)
+    jmodel, emodel, fk_attr = spec
+    junction = (
+        await db.execute(
+            select(jmodel).where(jmodel.entry_id == row.entry_id, getattr(jmodel, fk_attr) == row.entity_id)
+        )
+    ).scalar_one_or_none()
+    if junction is None:
+        db.add(
+            EntityLinkValidationLog(
+                entry_id=row.entry_id,
+                entity_type=row.entity_type,
+                entity_id=row.entity_id,
+                entity_name_snapshot=row.entity_name_snapshot,
+                action="removed",
+                reason="Promoted from proposal; junction was already absent.",
+                ai_result_id=row.ai_result_id,
+            )
+        )
+        await db.flush()
+        return LinkLogResult(log_id=log_id, applied=True, already_removed=True)
+    db.add(
+        EntityLinkValidationLog(
+            entry_id=row.entry_id,
+            entity_type=row.entity_type,
+            entity_id=row.entity_id,
+            entity_name_snapshot=row.entity_name_snapshot,
+            action="removed",
+            reason=f"Promoted from proposal {log_id}: " + (row.reason or "")[:400],
+            original_source=junction.source,
+            original_confidence=junction.confidence,
+            original_matched_names=list(junction.matched_names or []),
+            original_paragraph_indices=list(junction.paragraph_indices or []),
+            original_extracted_at=junction.extracted_at,
+            ai_result_id=row.ai_result_id,
+        )
+    )
+    await db.delete(junction)
+    await db.execute(
+        sql_update(emodel)
+        .where(emodel.id == row.entity_id)
+        .values(article_count=func.greatest(emodel.article_count - 1, 0))
+    )
+    await db.flush()
+    return LinkLogResult(log_id=log_id, applied=True)
+
+
 @router.delete("/admin/hygiene/feed/{source}/{row_id}", status_code=204)
 async def dismiss_feed_row(
     source: str = Path(..., description="Log table the row lives in: link_validator or entity_maintenance"),
@@ -3351,15 +3020,9 @@ class DismissProposalsRequest(BaseModel):
         "null clears every pending type.",
     )
     source: str | None = Field(default=None, description="'link_validator' | 'entity_maintenance' | null (both).")
-    review: str | None = Field(
-        default=None,
-        description="Dismiss only proposals with this AI verdict: 'approve' | 'reject' | 'unsure' | 'unreviewed'.",
-    )
 
     model_config = ConfigDict(
-        json_schema_extra={
-            "example": {"action": "needs_reclassification", "source": "link_validator", "review": "reject"}
-        }
+        json_schema_extra={"example": {"action": "needs_reclassification", "source": "link_validator"}}
     )
 
 
@@ -3400,13 +3063,6 @@ async def dismiss_proposals(
         )
         if link_actions:
             q = q.where(EntityLinkValidationLog.action.in_(sorted(link_actions)))
-        if body.review:
-            # AI verdicts only exist on reclassify advisories.
-            q = q.where(EntityLinkValidationLog.action == "needs_reclassification")
-            if body.review == "unreviewed":
-                q = q.where(EntityLinkValidationLog.review_decision.is_(None))
-            else:
-                q = q.where(EntityLinkValidationLog.review_decision == body.review)
         dismissed += (await db.execute(q)).rowcount or 0
 
     if maint_eligible:
@@ -3417,11 +3073,6 @@ async def dismiss_proposals(
         )
         if maint_actions:
             q = q.where(EntityMaintenanceLog.action.in_(sorted(maint_actions)))
-        if body.review:
-            if body.review == "unreviewed":
-                q = q.where(EntityMaintenanceLog.review_decision.is_(None))
-            else:
-                q = q.where(EntityMaintenanceLog.review_decision == body.review)
         dismissed += (await db.execute(q)).rowcount or 0
 
     await db.flush()

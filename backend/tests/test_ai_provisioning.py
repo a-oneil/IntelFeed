@@ -93,14 +93,14 @@ async def test_routing_assigns_every_compatible_task(db_session: AsyncSession, a
 @pytest.mark.asyncio
 async def test_routing_leaves_agentic_tasks_on_a_tool_less_provider(db_session: AsyncSession, admin_user, system_tasks):
     """A chat-only provider running an agentic task returns tool-less output that
-    reads like success — the merge task reporting merges it never applied."""
+    reads like success — the research task reporting lookups it never made."""
     provider = AIProvider(name="Claude", provider_type="claude", is_active=True, models=["claude-sonnet-4-6"])
     db_session.add(provider)
     await db_session.flush()
 
     routing = await route_tasks_to_provider(db_session, provider, created_by=admin_user.id, take_over=False)
 
-    assert "entity_merge_maintenance" in routing.skipped_agentic
+    assert "entity_enrichment_research" in routing.skipped_agentic
     assert "copilot" in routing.skipped_agentic
     assert "article_summary" in routing.assigned
     names = {
@@ -108,7 +108,7 @@ async def test_routing_leaves_agentic_tasks_on_a_tool_less_provider(db_session: 
         for t in (await db_session.execute(select(AITask))).scalars().all()
         if t.id in {r.task_id for r in (await db_session.execute(select(AITaskAssignment))).scalars().all()}
     }
-    assert "entity_merge_maintenance" not in names
+    assert "entity_enrichment_research" not in names
 
 
 @pytest.mark.asyncio

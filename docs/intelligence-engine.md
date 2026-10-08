@@ -398,21 +398,19 @@ The dedup/tombstone/FP machinery above is operated day-to-day from a single admi
 - `GET /api/admin/hygiene/feed` — chronological merge of `entity_link_validation_log` + `entity_maintenance_log`, normalized into one row shape with per-row actions and filter chips (proposed vs applied). `DELETE /api/admin/hygiene/feed/{source}/{row_id}` dismisses a row.
 - `GET /api/admin/hygiene/stats` — combined counters (applied 24h/7d, pending proposals, orphan count) across both logs.
 
-### Link Validation (`workers/link_validation_tasks.py`)
+### The adjudicate stage (`services/entry_adjudication.py`)
 
-`validate_entity_links` is a beat job (daily 04:00 UTC) that re-judges autolinker junction rows (`source = 'auto_link'`) with the Claude Code CLI provider: it picks the next batch of entries, runs a canary, then fans out `validate_single_entry_links` per entry to the `ai` queue (dedicated `celery-worker-ai` service, `--concurrency=1`). Each per-entry task slices article text by the stored `paragraph_indices`, asks the model to judge every dictionary link in context, and applies decisions — or shadow-logs them — into `entity_link_validation_log`.
+Day-to-day cleanup is no longer a set of nightly jobs working a queue. After an entry's one-pass analysis lands, the `adjudicate` pipeline stage runs one more AI call on that entry: the article text plus a manifest of everything the analysis wrote — entity links of every source (with article counts, ages, the pending-tier flag and the analyst-restored flag), entities the entry minted (with their nearest catalogue names pre-fetched through the resolver's own matchers, so a merge can only target a name the model was shown), relationship claims with their evidence sentence, and AI observables. One verdict per item: keep, remove, reclassify, veto, merge, demote or drop. In `shadow` the verdicts become rows in the two proposal logs the Proposals lens reads (`shadow_remove` / `needs_reclassification` for links, `adjudication_*` actions in `entity_maintenance_log` for the rest); in `apply` the high-confidence ones are acted on through the same primitives the queue's Apply buttons use, and every applied change writes the audit row that is also its undo. Per-entry and rolling circuit breakers downgrade a destructive run to proposals. See [engine.md](engine.md) and [engine-settings.md](engine-settings.md#adjudicate-stage-post-analysis-ai-review).
+
+What it replaced: the nightly link validator (every link is now judged at ingest; `backfill_entry_adjudications` walks older entries), the hygiene proposal reviewer (nothing files proposals for it any more), the weekly merge engine (duplicates are caught at creation), the nightly relationship adjudicator (demotion at birth; promotion is a keep-counter on the edge, `reviewer_kept_entry_ids`, promoted at `relationship_evidence_promote_count` distinct entries) and the weekly stale-entity sweep (`stale` is a live filter on the AI-entities view).
 
 ### Reclassification Suggestions
 
-The link validator can also emit `needs_reclassification` advisories (with a `suggested_entity_type`) instead of remove/keep verdicts. `POST /api/admin/hygiene/apply-reclassify-advisories` promotes them: advisories are deduped by `(entity_type, entity_id, suggested_type)`, matched to an existing same-name target (or a new one is created), and pushed through `perform_reclassify()` (`api/entity_merge.py`) in shadow or apply mode. Apply mode clears the consumed advisory rows; stale advisories for already-deleted entities are cleared too.
+The reviewer can file `needs_reclassification` advisories (with a `suggested_entity_type`) instead of remove/keep verdicts. `POST /api/admin/hygiene/apply-reclassify-advisories` promotes them: advisories are deduped by `(entity_type, entity_id, suggested_type)`, matched to an existing same-name target (or a new one is created), and pushed through `perform_reclassify()` (`api/entity_merge.py`) in shadow or apply mode. Apply mode clears the consumed advisory rows; stale advisories for already-deleted entities are cleared too.
 
 ### Merge Suggestions (`intelligence/merge_suggestions.py`)
 
 Ranked duplicate-pair suggestions per entity type, scoring normalized-name similarity (generic-suffix stripping, token containment), alias overlap, shared entity relationships, and co-mention frequency. Served at `GET /api/entities/{entity_type}/merge-suggestions`; pairs the analyst dismisses are persisted in **`entity_merge_suggestion_dismissals`** (unique per pair) and never re-suggested. Cross-type tool-vs-malware name collisions ("Pegasus" tool vs "Pegasus" malware) are flagged as possible cross-type duplicates but never offered auto-merge — those need reclassify, not merge.
-
-### Stale-Entity Flagging (`workers/maintenance.py`)
-
-`flag_stale_entities` runs weekly (Sun 05:30 UTC): entities with ≤1 linked article, no entity relationships, and 90+ days of inactivity are **flagged, never deleted** — written as `entity_maintenance_log` rows (`action='stale_entity_review'`, `mode='shadow'`, capped at 500 per type per run) so they surface in the hygiene feed. Dismissing a flag deletes the row, so the entity is reconsidered on the next run.
 
 ### Orphans, Cascade Preview & Scanners
 

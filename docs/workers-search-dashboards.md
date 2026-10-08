@@ -174,7 +174,6 @@ The `JOB_REGISTRY` is a declarative map of all **70** scheduled tasks, each with
 | `adjudicate_relationships` | Daily at 06:30 UTC | AI-adjudicate probable relationship edges from evidence headlines; corroborated → confirmed, coincidental demoted (behind `relationship_adjudication_enabled`) (AI) |
 | `retry_untranslated_entries` | Every 30 minutes | Backfill translations missed while the LibreTranslate sidecar was off (auto-translate feeds) |
 | `refresh_claude_auth_status` | Every 30 minutes | Refresh copilot Claude Code OAuth credential health snapshot |
-| `flag_stale_entities` | Weekly Sunday at 05:30 UTC | Flag entities with ≤1 article, no relationships, 90+ days idle (never deletes) |
 | `prune_engine_tables` | Daily at 02:40 UTC | Delete engine bookkeeping rows older than 30 days (job_runs, …) |
 | `decay_observable_confidence` | Daily at 02:20 UTC | Nightly confidence decay and lifecycle transitions for the observables ledger |
 | `reconcile_observable_counters` | Daily at 02:50 UTC | Recount observable sighting/article counters from the junction — deletion cascades drift them |
@@ -959,7 +958,6 @@ runtime from Engine → Jobs, which is stored in Redis and re-read at beat start
 04:45 ├─ archive_correlation_events
 04:50 ├─ backfill_rule_data_sources (Sunday)
 05:00 ├─ run_github_poc_scan
-05:30 ├─ review_hygiene_proposals · flag_stale_entities (Sunday)
       ├─ backfill_rule_attack_mappings (Sunday)
 05:45 ├─ kickoff_assessment_backfill
 06:00 ├─ generate_daily_summaries
@@ -984,7 +982,7 @@ Recurring:
 
 The 03:00–06:00 UTC band is deliberately dense and deliberately ordered: the
 enrichment and catalog syncs land first, the resolvers and rebuilds that read
-them come next, and the AI jobs (assessments, hygiene review, adjudication,
+them come next, and the AI jobs (assessments,
 briefs) run last on the single-concurrency `ai` worker, where they queue behind
 one another anyway.
 

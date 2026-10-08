@@ -103,7 +103,7 @@ Each analyst's visibility and personal mute over the shared feed pool; only cons
 - `extracted_urls` (JSONB array) — URLs found in content
 - `metadata_` (JSONB) — feed-specific metadata (e.g., feed author's categories, tags)
 - `translated_html`, `translated_title`, `translation_source_language`, `translation_target_language`, `translated_at` — machine translation cache
-- `last_link_validation_at` (DateTime, indexed) — last AI entity-link validation pass
+- `last_link_validation_at` (DateTime, indexed) — when the adjudicate stage last judged this entry's links
 - `priority_score` (Float, indexed), `scored_at` — signal engine composite score (see Signal Engine cluster)
 
 **Relationships:**
@@ -1541,7 +1541,7 @@ reader, and thrown away. Parsing it back costs nothing: it reads markdown that
 was already generated and cached. See
 `backend/app/intelligence/narrative_themes.py`; gated by
 `narrative_themes_enabled` and `narrative_theme_gating`
-([engine-settings.md](engine-settings.md#relationship-adjudication-and-narrative-themes)).
+([engine-settings.md](engine-settings.md#narrative-themes-and-actor-refresh-mode)).
 
 #### NarrativeBriefing
 

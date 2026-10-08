@@ -41,21 +41,6 @@ export function useEntityMaintenanceLog(filters: MaintenanceLogFilters) {
   });
 }
 
-export function useApplyMaintenanceProposal() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (logId: string) => {
-      const { data } = await api.post<ApplyProposalResult>(
-        `/entity-maintenance/log/${logId}/apply`
-      );
-      return data;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["entity-maintenance-log"] });
-    },
-  });
-}
-
 export interface ApplyAllProposalsResult {
   rows_processed: number;
   rows_skipped: number;
@@ -64,23 +49,6 @@ export interface ApplyAllProposalsResult {
   total_failed: number;
   total_skipped: number;
   errors: Array<{ target_id: string; source_id: string; error: string; log_id?: string }>;
-}
-
-export function useApplyAllMaintenanceProposals() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (entityType?: string) => {
-      const { data } = await api.post<ApplyAllProposalsResult>(
-        "/entity-maintenance/log/apply-all",
-        null,
-        { params: entityType ? { entity_type: entityType } : undefined }
-      );
-      return data;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["entity-maintenance-log"] });
-    },
-  });
 }
 
 export function useDeleteMaintenanceLog() {

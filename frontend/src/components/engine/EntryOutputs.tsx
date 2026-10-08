@@ -84,7 +84,7 @@ function VerdictBadge({ verdict, entryId }: { verdict: EntryAdjudicationVerdict 
         if (ok) toast.success(what === "apply" ? "Applied" : "Restored");
         else toast.message(res.data.reason ?? "Nothing to do");
       } else {
-        await api.post(`/admin/link-validation/log/${logId}/${what === "apply" ? "apply-removal" : "restore"}`);
+        await api.post(`/admin/hygiene/link-log/${logId}/${what === "apply" ? "apply-removal" : "restore"}`);
         toast.success(what === "apply" ? "Link removed" : "Link restored");
       }
       qc.invalidateQueries({ queryKey: ["engine", "adjudication", entryId] });

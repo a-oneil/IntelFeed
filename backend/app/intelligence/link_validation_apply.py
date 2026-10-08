@@ -1,16 +1,12 @@
-"""Shared apply/audit helpers for AI entity-link validation.
+"""Shared apply/audit helpers for entity-link verdicts.
 
-Two callers judge autolinker links and act on the verdicts:
-
-- the scheduled recheck job (``workers/link_validation_tasks.py``) via the
-  standalone ``entity_link_validation`` AI task, and
-- the ingest-time one-pass path (``services/entry_analysis.py``), which folds
-  the same KEEP/REMOVE/RECLASSIFY judgment into the ``entry_analysis`` call.
-
-Both share the junction specs, the ``LinkRow`` snapshot shape, the fetch that
-annotates analyst-restore feedback, and the mutation/audit primitives so a
-removal looks identical in ``entity_link_validation_log`` regardless of which
-path produced it.
+The adjudicate stage (``services/entry_adjudication.py``) judges every link
+on an entry after the one-pass analysis has landed and acts on the verdicts
+through these primitives: the junction specs, the ``LinkRow`` snapshot
+shape, the fetch that annotates analyst-restore feedback, and the
+mutation/audit writes into ``entity_link_validation_log``. ``restore_from_log``
+is the undo for a ``removed`` row, used by the Proposals queue and the entry
+drawer.
 """
 
 import logging
@@ -248,3 +244,67 @@ async def log_reclassification(
             ai_result_id=ai_result_id,
         )
     )
+
+
+async def restore_from_log(db: AsyncSession, log_id: uuid.UUID) -> tuple[bool, str]:
+    """Re-create a junction row from a previously-removed log entry.
+
+    Returns (success, message). Only `removed` rows can be restored.
+    """
+    result = await db.execute(select(EntityLinkValidationLog).where(EntityLinkValidationLog.id == log_id))
+    log_row = result.scalar_one_or_none()
+    if log_row is None:
+        return False, "log entry not found"
+    if log_row.action != "removed":
+        return False, f"cannot restore action={log_row.action}"
+    spec = ENTITY_TYPES.get(log_row.entity_type)
+    if spec is None:
+        return False, f"unknown entity_type {log_row.entity_type}"
+    jmodel, emodel, fk_attr = spec
+
+    # Re-check entity still exists
+    ent_result = await db.execute(select(emodel.id).where(emodel.id == log_row.entity_id))
+    if ent_result.scalar_one_or_none() is None:
+        return False, "entity no longer exists"
+
+    # Check we don't re-insert a duplicate (composite PK)
+    fk_col = getattr(jmodel, fk_attr)
+    dup_result = await db.execute(
+        select(jmodel).where(jmodel.entry_id == log_row.entry_id, fk_col == log_row.entity_id)
+    )
+    if dup_result.scalar_one_or_none() is not None:
+        return False, "link already exists"
+
+    junction_kwargs = {
+        "entry_id": log_row.entry_id,
+        fk_attr: log_row.entity_id,
+        "confidence": log_row.original_confidence,
+        "source": log_row.original_source or "auto_link",
+        "matched_names": list(log_row.original_matched_names or []),
+        "paragraph_indices": list(log_row.original_paragraph_indices or []),
+    }
+    if log_row.original_extracted_at is not None:
+        junction_kwargs["extracted_at"] = log_row.original_extracted_at
+    db.add(jmodel(**junction_kwargs))
+    # Reverse the article_count decrement
+    await db.execute(
+        update(emodel).where(emodel.id == log_row.entity_id).values(article_count=emodel.article_count + 1)
+    )
+    # Record the restore as its own audit row
+    db.add(
+        EntityLinkValidationLog(
+            entry_id=log_row.entry_id,
+            entity_type=log_row.entity_type,
+            entity_id=log_row.entity_id,
+            entity_name_snapshot=log_row.entity_name_snapshot,
+            action="restored",
+            reason=f"restored from {log_row.id}",
+            original_source=log_row.original_source,
+            original_confidence=log_row.original_confidence,
+            original_matched_names=log_row.original_matched_names,
+            original_paragraph_indices=log_row.original_paragraph_indices,
+            original_extracted_at=log_row.original_extracted_at,
+            ai_result_id=log_row.ai_result_id,
+        )
+    )
+    return True, "restored"

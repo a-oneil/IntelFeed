@@ -12,7 +12,6 @@ import {
   type ProcessingStageCell,
   useEngineProcessing,
   useExtractionStatus,
-  useLinkValidationStats,
   usePipelineOverview,
   usePipelinePlans,
   useUpsertPlan,
@@ -323,7 +322,6 @@ export function EngineMatrix({
   const { data: plans } = usePipelinePlans();
   const { data: extractionStats } = useExtractionStats("7d");
   const { data: linkStats } = useEntityLinkStats();
-  const { data: validationStats } = useLinkValidationStats();
   const { data: hygieneStats } = useHygieneStats();
   const { data: feedHealth } = useFeedHealth();
   const { data: feeds } = useFeeds();
@@ -523,7 +521,7 @@ export function EngineMatrix({
     },
     {
       key: "reclass",
-      n: validationStats?.reclassify_pending,
+      n: hygieneStats?.pending_advisories,
       label: "reclassify proposals",
       cls: m.aWarn,
       onClick: () => {
@@ -934,8 +932,8 @@ export function EngineMatrix({
                   {proposalsMode && (
                     <span className={m.subLensHint}>
                       {view === "links"
-                        ? "Link-validator suggestions — apply or dismiss without leaving the table"
-                        : "Merge / rename / reclassify suggestions over AI-created entities"}
+                        ? "The review's link verdicts — apply or dismiss without leaving the table"
+                        : "Veto / merge / demote / drop verdicts and scan proposals over AI-created entities"}
                     </span>
                   )}
                 </div>

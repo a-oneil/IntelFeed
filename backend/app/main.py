@@ -717,7 +717,6 @@ from app.api.intel_profiles import router as intel_profiles_router
 from app.api.intel_reports import router as intel_reports_router
 from app.api.intelligence import router as intelligence_router
 from app.api.job_schedules import router as job_schedules_router
-from app.api.link_validation import router as link_validation_router
 from app.api.logs import router as logs_router
 from app.api.metrics import router as metrics_router
 from app.api.notes import router as notes_router
@@ -826,7 +825,6 @@ app.include_router(ai_results_router, prefix="/api", tags=["ai-results"])
 app.include_router(system_settings_router, prefix="/api/system-settings", tags=["system-settings"])
 app.include_router(shared_router, prefix="/api", tags=["sharing"])
 app.include_router(job_schedules_router, prefix="/api/job-schedules", tags=["job-schedules"])
-app.include_router(link_validation_router, prefix="/api/admin/link-validation", tags=["link-validation"])
 app.include_router(hygiene_router, prefix="/api", tags=["hygiene"])
 app.include_router(extraction_router, prefix="/api/engine/extraction", tags=["extraction"])
 app.include_router(ingest_router, prefix="/api/entries", tags=["ingest"])

@@ -38,7 +38,8 @@ Documented in the module docstring (`registry.py:1-19`):
 | `pre` | Chained ahead of the chord | Output (e.g. translated text) visible to every later stage; must never raise or the whole chain dies |
 | `parallel` | First chord header, after entry creation | `autolink` ∥ `observables` ∥ `telegram_links` ∥ `extract` |
 | `post` | Second chord header | Runs after all parallel stages complete |
-| `final` | Second chord callback | Signal scoring — the terminal stage |
+| `final` | Second chord callback | Signal scoring — the terminal chord stage |
+| `post_analysis` | Dispatched from wherever the one-pass AI analysis lands, minutes to hours after `score` | `adjudicate` — never part of the chord; the registry row gives it a matrix column, a plan chip, run logging |
 | `side` | Dispatched independently of the chord | Automation, enrichment |
 
 ### Stage catalog
@@ -60,6 +61,7 @@ The full registry (`registry.py:35-144`):
 | `correlation` | post | `automation_tasks.detect_correlation_events` | on |
 | `requirements` | post | `intel_feed_tasks.match_requirements_task` | on |
 | `score` | final | `signal_tasks.score_entry_task` — signal scoring **and** the one-pass AI analysis enqueue | on |
+| `adjudicate` | post_analysis | `adjudication_tasks.adjudicate_entry_task` — AI review of everything the analysis wrote to the entry (links of every source, minted entities with nearest catalogue names, asserted edges, AI observables); verdicts filed as proposals or applied per `adjudication_mode`. See [engine-settings.md](engine-settings.md#adjudicate-stage-post-analysis-ai-review) | on (mode `off` by default — the mode is the master switch because plans are off in prod) |
 | `enrich` | side | `enrichment_tasks.auto_enrich_entity` | on |
 | `automate` | side | `automation_tasks.run_entry_automations` | on |
 
@@ -120,6 +122,7 @@ Diagram: [diagrams/engine-pipeline-execution.md](diagrams/engine-pipeline-execut
 3. **First callback** — `entry_post_processing` (`feed_tasks.py:75`) runs when the header completes. It builds a **second chord**: all `post` stages (`cooccurrence`, `correlation`, `requirements`) as the header, with the single `final` stage (`score`) as callback. Note: plan gating applies to the parallel header only — post/final stages always run (scoring no-ops on its own flag).
 4. **Final callback** — `score_entry_task` runs once co-occurrence edges, correlation events, and requirement matches all exist, because those are the signal engine's inputs. It accepts positional args since Celery passes the chord header results as the first argument (`backend/app/workers/signal_tasks.py:39-44`).
 5. **Side dispatches** — `automate` and `enrich` are sent independently of the chord (automation per entry from the fetch loop; enrichment triggered by entity creation).
+6. **After the analysis lands** — `services/entry_adjudication.enqueue_adjudication` runs at each of the one-pass analysis landing sites (batch ingest, sequential task, echo reuse, manual run) right after their commit, walks the gates (mode → feed plan → echo → trigger → score floor → hourly budget), records the decision on `ai_analysis_requests.adjudication_status`, and dispatches `adjudicate_entry_task` on the `ai` queue. The task's return dict becomes the run's `detail` (verdict counts) via `@pipeline_stage`, which the matrix's Output lens renders.
 
 ### Per-stage run logging
 

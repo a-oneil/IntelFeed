@@ -241,28 +241,6 @@ export function useStageRuns(stage: string, status?: string) {
   });
 }
 
-export interface LinkValidationStats {
-  mode: string;
-  pending_count: number;
-  validated_24h: number;
-  removed_24h: number;
-  removed_7d: number;
-  shadow_removed_7d: number;
-  restored_7d: number;
-  reclassify_pending: number;
-  last_run_at: string | null;
-  recheck_days: number;
-}
-
-/** Link-validator overview counts — feeds the "reclassifies" attention chip. */
-export function useLinkValidationStats() {
-  return useQuery({
-    queryKey: ["link-validation", "stats"],
-    queryFn: async () => (await api.get<LinkValidationStats>("/admin/link-validation/stats")).data,
-    staleTime: 60_000,
-  });
-}
-
 export function useExtractionStatus() {
   return useQuery({
     queryKey: ["engine", "extraction-status"],

@@ -1,13 +1,12 @@
 """Audit log + history for autonomous entity-maintenance actions.
 
-Two tables, both populated by the celery-worker-ai worker when running the
-entity_merge_maintenance and actor_profile_refresh tasks:
+Two tables:
 
   entity_maintenance_log   — one row per proposed (shadow) or applied action
-                              the AI took on an entity (merge, alias edit,
-                              description rewrite, no-op). Generic enough to
-                              cover threat_actor + malware + future
-                              entity types.
+                              taken on an entity: the adjudicate stage's
+                              verdicts (adjudication_* actions), the on-demand
+                              hygiene scans' proposals, actor profile refreshes,
+                              resolver decisions. Generic across entity types.
 
   actor_description_history — versioned snapshots of every change to a
                               threat actor's description field. Same row
@@ -48,11 +47,6 @@ class EntityMaintenanceLog(Base):
         index=True,
     )
     applied: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    # Hygiene-reviewer verdict on pending proposals: 'approve' | 'reject' |
-    # 'unsure'. NULL = not yet reviewed. See workers/hygiene_review_tasks.py.
-    review_decision: Mapped[str | None] = mapped_column(String(10), nullable=True)
-    review_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (Index("ix_entity_maintenance_log_entity_type_action", "entity_type", "action", "created_at"),)
 

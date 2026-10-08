@@ -65,18 +65,9 @@ DEFAULT_MODEL_ASSIGNMENTS: dict[str, str] = {
     # read-only intelfeed skill to search/look up data. Sonnet balances latency
     # with reasoning for interactive chat.
     "copilot": "sonnet",
-    # Validation → Sonnet (judgment-heavy; cost is irrelevant under Claude Max)
-    "entity_link_validation": "sonnet",
-    # Autonomous entity maintenance → Sonnet on the CLI; uses the intelfeed skill
-    # to actually call merge/update tools when in apply mode.
-    "entity_merge_maintenance": "sonnet",
     "actor_profile_refresh": "sonnet",
     "entity_name_normalization": "sonnet",
     "entity_enrichment_research": "sonnet",
-    # Proposal review is the gate before auto-apply — judgment-heavy, use Sonnet.
-    "hygiene_proposal_review": "sonnet",
-    # Relationship edge adjudication promotes edges with no human in the loop.
-    "relationship_adjudication": "sonnet",
     # Post-analysis review of one entry's output (adjudicate stage). Smaller
     # job than extraction: a short article window, a short list, a verdict
     # list back — the cheap model is right, and it runs on Ollama in prod.
@@ -89,17 +80,12 @@ DEFAULT_MODEL_ASSIGNMENTS: dict[str, str] = {
 # Code CLI subprocess under the Max subscription, not the Anthropic API.
 DEFAULT_PROVIDER_TYPE_ASSIGNMENTS: dict[str, str] = {
     "copilot": "claude_code",
-    # entity_link_validation is deliberately NOT pinned: it is pure
-    # prompt→JSON (no tool calling), so it runs on whatever provider the
-    # operator assigns (Anthropic API, Ollama, or the CLI).
-    "entity_merge_maintenance": "claude_code",
     "actor_profile_refresh": "claude_code",
     "entity_name_normalization": "claude_code",
     "entity_enrichment_research": "claude_code",
-    "hygiene_proposal_review": "claude_code",
-    # relationship_adjudication is deliberately NOT pinned: pure prompt→JSON
-    # (no tool calling), so it runs on whatever provider the operator assigns
-    # (Ollama in prod, Anthropic API, or the CLI).
+    # entry_adjudication is deliberately NOT pinned: pure prompt→JSON (no tool
+    # calling), so it runs on whatever provider the operator assigns (Ollama in
+    # prod, Anthropic API, or the CLI).
 }
 
 # Per-task config keys layered into AITaskAssignment.config at seeding time.
@@ -131,10 +117,6 @@ DEFAULT_ASSIGNMENT_CONFIGS: dict[str, dict] = {
         "allowed_tools": ["Bash", "Read", "Skill"],
         "timeout_seconds": 240,
     },
-    "entity_merge_maintenance": {
-        "allowed_tools": ["Bash", "Read", "Skill"],
-        "timeout_seconds": 300,
-    },
     "actor_profile_refresh": {
         "allowed_tools": ["Bash", "Read", "Skill"],
         "timeout_seconds": 240,
@@ -149,19 +131,6 @@ DEFAULT_ASSIGNMENT_CONFIGS: dict[str, dict] = {
         # lookups. Needs WebFetch + WebSearch; no shell or skill access.
         "allowed_tools": ["WebFetch", "WebSearch"],
         "timeout_seconds": 600,
-    },
-    "hygiene_proposal_review": {
-        # Batch judgment from threat-landscape knowledge; no tools needed.
-        "allowed_tools": [],
-        "timeout_seconds": 300,
-    },
-    "relationship_adjudication": {
-        # Batch judgment from evidence headlines + landscape knowledge; no tools.
-        # 4096: local models truncate long verdict arrays at the 2048 default.
-        "allowed_tools": [],
-        "timeout_seconds": 300,
-        # Verdict arrays scale with the batch size; 4096 truncated real batches.
-        "max_tokens": 20000,
     },
     "daily_summary": {
         # Detailed multi-section briefing — default 4096 truncates on busy days.
@@ -1602,253 +1571,6 @@ Answer per your instructions. Use the intelfeed skill to look up live data whene
         "output_schema": None,
     },
     {
-        "name": "entity_link_validation",
-        "display_name": "Entity Link Validation",
-        "description": "Validate that autolinker entity tags applied to an article are correct in context; flag obvious false-positives for removal.",
-        "category": "validation",
-        "variables": [
-            "entry_title",
-            "entry_feed_name",
-            "entry_published_at",
-            "entry_summary",
-            "entry_language",
-            "entry_paragraphs",
-            "linked_entities",
-        ],
-        "default_prompt_template": """You are a senior threat-intelligence editor reviewing entity tags that an automated linker has applied to a security article. Your sole responsibility is to judge whether each tag is a correct reference, evaluated at the level of the surrounding text where the name actually appears — the sentence, the paragraph, the immediate context of the match. You do not summarize, rewrite, or analyze the article — you only render verdicts on whether each individual occurrence of an entity name is a real reference to that entity.
-
-WHAT YOU ARE EVALUATING
-
-The autolinker has matched a known entity name (or one of its aliases) somewhere in the article text. Your job is to decide whether that occurrence, in the immediate context where it appears, genuinely refers to the catalogued entity — or whether the surrounding text reveals it to be something else (a homonym, an unrelated word that happens to share spelling, a substring match inside a longer unrelated term, an acronym used in a non-security sense, etc.).
-
-You are not deciding whether the article is "about" the entity. You are not measuring how central the entity is to the article's thesis. A single passing mention of a threat actor in an article about something else is still a real reference and the link is still valid — provided the words around the match actually refer to the threat actor and not something with a coincidentally similar name. The unit of judgment is the local context of the match, not the article as a whole.
-
-DECISIONS
-
-For every candidate entity in the input list, return exactly one of:
-
-  KEEP — the occurrence of this entity name in the article's text genuinely refers to this catalogued entity. The surrounding words (sentence and paragraph) treat it as the entity, even if only in passing. The link is a real reference and belongs.
-
-  REMOVE — the occurrence of this entity name in the article's text does NOT refer to the catalogued entity. The match is wrong because the surrounding words use the name in an unrelated sense: a common English word, a different organization or product sharing the name, a substring lodged inside an unrelated term, an acronym used outside its security meaning, a screenshot caption mentioning the name as incidental UI text rather than as a substantive reference. The link is false-positive noise produced by name collision.
-
-  RECLASSIFY — the occurrence does refer to the catalogued entity (so the link itself is valid), but the entity is filed in the wrong entity_type catalog (for example, a threat actor stored as a malware, a vendor stored as a product, or a product stored as a vendor). When returning RECLASSIFY, you must include a `suggested_type` field naming the correct entity_type. The link is preserved — only the entity's classification is wrong.
-
-GUIDING PRINCIPLES (apply in this order)
-
-1. Default to KEEP. A wrongly-removed link destroys real intelligence signal and erodes analyst trust. A wrongly-kept link is annoying but easily corrected. The cost is asymmetric — whenever you are uncertain, KEEP.
-
-2. Evaluate at the level of the local context — the sentence containing the match, with the paragraph as supporting context. Ask: "in the sentence where this name appears, do the surrounding words treat it as the catalogued entity, or as something else?" The article's overall topic is irrelevant if the local context is clear. A throwaway mention of LockBit in an article about phishing is still a real LockBit reference and KEEP. A mention of "storm" in a weather paragraph of a security article is not a real Storm-0501 reference and REMOVE.
-
-3. The discriminator is whether the surrounding text uses the name in its entity sense versus a non-entity sense. Look at the words immediately around the match: do they describe activity, attribution, infrastructure, capabilities, naming conventions, victims, or otherwise treat the name as a proper noun referring to the catalogued entity? Or do they treat the name as a common word, a different organization, a product label, a place name, an acronym in a non-security domain, or noise inside a longer unrelated string?
-
-4. Treat each catalogued entity as a member of a domain family — actor lineages and aliases, malware families and their variants, vendor product portfolios, country geopolitical scopes. If the local context refers to any member of the same family (parent, child, sibling, alias, rename, predecessor, successor) by name, KEEP. The link does not need to point at the exact named variant the text mentions — adjacency within the same family is sufficient. Pedantic distinctions between sub-products, sibling forks, naming conventions, parent/subsidiary organizations, and "another catalog entity would have been a better choice" are not grounds to REMOVE. If a different catalogued entity might have been a more precise match, that is a catalog disambiguation issue handled elsewhere — it is not a false-positive link. Keep the link.
-
-5. Name collisions across genuinely different domains are the core REMOVE case. The defining test: replace the matched name in your head with an obvious synonym from the non-entity sense — if the sentence still makes sense, the occurrence is in the non-entity sense and the link is false-positive noise. A common English word that happens to share a name with a threat entity, an acronym used in its everyday non-security sense, a substring that lands inside an unrelated longer word, an entity name appearing inside an unrelated quoted product label — these are REMOVE.
-
-6. Mention quality matters less than mention validity. Even a single sentence of passing reference is KEEP if the local context treats it as a real reference. REMOVE only when the local context makes clear the match is a different sense of the same string — not when the mention is brief, parenthetical, or off the article's main topic. Structurally incidental mentions (image alt text, irrelevant UI captions, automated signatures, boilerplate footers) are REMOVE only when the surrounding context confirms the mention is mechanical rather than substantive.
-
-7. Use RECLASSIFY when the occurrence is a valid reference but the catalog placement is wrong. Common patterns include threat actors stored as malware entries, malware stored as product or vendor entries, and vendor names stored as products. The article-to-entity reference is correct; the entity's catalog type is not. Preserve the link with RECLASSIFY and name the correct entity_type in `suggested_type`. Do not use REMOVE for type-confusion cases — that destroys a valid link.
-
-8. If a candidate entity is marked `previously_restored: true`, an analyst has previously reviewed this exact (article, entity) pair and explicitly restored it after the system flagged it for removal. Treat this as strong, human-validated evidence that the link is real. REMOVE only when the local context makes the name collision unambiguous — never on the basis of relevance pedantry.
-
-DISCRIMINATION FRAMEWORK FOR AMBIGUOUS OCCURRENCES
-
-When an occurrence feels genuinely ambiguous:
-  - Find the sentence or paragraph containing the match. Read only the words around the match, ignoring the article's broader thesis.
-  - Determine whether the surrounding words treat the matched string as the catalogued entity (proper noun, activity verb, attribution language, infrastructure or victim reference) or as something else (common word, acronym in non-security sense, substring of an unrelated longer term, different organization with the same name).
-  - If the local context uses the name in its entity sense, KEEP — even if the article overall is about a different topic.
-  - If the local context uses the name in a non-entity sense, REMOVE.
-  - If the local context uses the name in the entity sense but the entity is filed under the wrong type, RECLASSIFY.
-
-OUTPUT CONTRACT
-
-Return strict JSON conforming to the provided schema. No prose outside the JSON object, no markdown code fences, no preamble or postscript.
-
-  - Provide a decision for every entity_key in the input list. No additions, no omissions, no duplicates.
-  - The `reason` field must be ≤120 characters, evidence-based, and where possible cite the local phrase or sentence from the article that justifies the decision.
-  - The `suggested_type` field is required when and only when decision is RECLASSIFY. Permitted values: threat_actor, malware, vendor, product, country.
-
-ARTICLE METADATA
-Title:    {{ entry_title }}
-Source:   {{ entry_feed_name | default("(unknown)") }}
-Date:     {{ entry_published_at | default("(unknown)") }}
-Language: {{ entry_language | default("unknown") }}
-
-ARTICLE SUMMARY
-{{ entry_summary | default("(no summary)") }}
-
-ARTICLE BODY (paragraph-sliced; [...] indicates gaps)
-{{ entry_paragraphs }}
-
-CANDIDATE ENTITY TAGS — judge each one
-{% for e in linked_entities %}
-[{{ e.entity_key }}] type={{ e.entity_type }} name="{{ e.name }}" matched_as={{ e.matched_names | tojson }} confidence={{ e.confidence | default("n/a") }} previously_restored={{ e.previously_restored | default(false) | tojson }}
-{% endfor %}""",
-        "output_schema": {
-            "type": "object",
-            "required": ["validations"],
-            "additionalProperties": False,
-            "properties": {
-                "validations": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "required": ["entity_key", "decision", "reason"],
-                        "additionalProperties": False,
-                        "properties": {
-                            "entity_key": {
-                                "type": "string",
-                                "pattern": "^(threat_actor|malware|vendor|product|country):[0-9a-f-]{36}$",
-                            },
-                            "decision": {"type": "string", "enum": ["KEEP", "REMOVE", "RECLASSIFY"]},
-                            "reason": {"type": "string", "maxLength": 200},
-                            "suggested_type": {
-                                "type": "string",
-                                "enum": ["threat_actor", "malware", "vendor", "product", "country"],
-                            },
-                        },
-                    },
-                }
-            },
-        },
-    },
-    {
-        "name": "entity_merge_maintenance",
-        "display_name": "Entity Merge Maintenance",
-        "description": "Autonomous weekly sweep — judge whether a cluster of similarly-named entities (across threat actors, malware, vendors, products, offensive tools) are duplicates or misclassified, and reconcile them via the IntelFeed skill.",
-        "category": "maintenance",
-        "variables": [
-            "cluster",
-            "cluster_types",
-            "is_cross_type",
-            "mode",
-        ],
-        "default_prompt_template": """You are a senior threat-intelligence editor responsible for keeping the IntelFeed entity catalog clean. The autolinker has accumulated duplicates — same real-world entity under different names, renames the catalog never picked up (e.g. Storm-0501 → Octo Tempest per Microsoft 2024), and **misclassifications** where an entity was filed under the wrong type (e.g. Cobalt Strike filed as malware when it's a tool; "Microsoft Exchange" filed as a vendor when it's a product).
-
-A candidate cluster has been pre-computed by a name-similarity heuristic spanning **five entity types**: threat_actor, malware, vendor, product, tool. Members of the cluster may all share one type (a normal merge candidate) OR mix types (a possible reclassification case).
-
-  Cluster types present:  {{ cluster_types }}
-  Mixed types in cluster: {{ is_cross_type }}
-  Current mode:           {{ mode }}
-
-YOU HAVE ACCESS TO THE INTELFEED SKILL
-The skill (.claude/skills/intelfeed) gives you a CLI for the running IntelFeed instance. Tools available to you for this task:
-  - `get_threat_actor` / `get_malware` — pull richer entity profiles when needed
-  - `search_entries` — look up recent articles mentioning a candidate name to verify it really refers to the named entity
-  - `merge_threat_actors` / `merge_malware` / `merge_vendors` / `merge_products` / `merge_tools` — same-type merges (only call when MODE == "apply")
-  - `reclassify_entity` — move an entity from one type to another, optionally merging into an existing target. Use this when a member is in the wrong type.
-  - `update_entity_profile` — fix description / aliases on the surviving entity after merge
-
-MODE BEHAVIOR
-
-  - shadow: Decide as if you were going to act, but DO NOT call any mutating tools. Return your decisions in the JSON output only — both `merges` and `reclassifies`.
-  - apply: Call the appropriate tool with mode='apply' for every action you decide to perform. Still also list the actions in the JSON output for the audit log.
-
-DECISION RUBRIC (apply in order)
-
-1. SAME ENTITY EVIDENCE — strongest first:
-   - Vendor / agency rename announcement (Microsoft Storm-XXXX → Tempest, Mandiant UNCXXXX → APTXX, CrowdStrike → Bear/Spider naming)
-   - Same MITRE G-XXXX id (actors) / shared malpedia entry (malware)
-   - Overlap on TTPs + targeted sectors + geography + timeframe (actors), or identical capability + delivery + family (malware/tools)
-   - One entry's "aliases" array already contains the other's primary name
-   - Multiple credible articles (verify via search_entries) explicitly equate the names
-
-2. WRONG-TYPE EVIDENCE (use reclassify, not merge):
-   - **malware that's really a tool**: legitimate commercial / open-source tooling used offensively. Cobalt Strike, Mimikatz, Sliver, BloodHound, PsExec, Impacket-suite, Brute Ratel, Havoc, Empire — these are tools, not malware. Discriminator: is it a product/framework someone publishes vs. an attacker-developed implant.
-   - **tool that's really a malware**: bespoke backdoors, droppers, ransomware. Discriminator: does it have authors / threat-actor attribution rather than vendor publication?
-   - **vendor stored as product** (or vice versa): "Microsoft" is a vendor; "Microsoft Exchange" is a product. "Fortinet" vendor; "FortiGate" product. Discriminator: is it an organization or a piece of software?
-   - **product stored as malware**: occasionally a CVE-affected product gets autolinked as malware. Move it to product.
-
-3. DIFFERENT ENTITY indicators:
-   - Distinct primary-source attribution (different intel vendors, different victims, different TTPs)
-   - Active concurrent operations under both names with no rename
-   - Coincidental name similarity in unrelated linguistic / cultural contexts
-
-4. If you cannot reach high confidence either way, return action='no_op' for the cluster with reasoning.
-
-CANONICAL TARGET — when merging same-type
-  - Prefer the entity with higher article_count (more established).
-  - Tiebreak: longer / richer description.
-  - Tiebreak: earliest first_seen_at.
-  - Add ALL source names + their existing aliases to the surviving entity's aliases.
-
-CANONICAL TARGET — when reclassifying
-  - If a member of the cluster is already in the correct type, target THAT entity (set target_id in `reclassify_entity`).
-  - If no entity in the correct type exists yet, omit target_id — the tool will create a new one in the target type by copying name/aliases/description.
-  - Type-specific fields (motivation, malware_type, vendor_id, tool_type) are NOT carried across. After reclassify, call update_entity_profile to set the correct type-specific fields on the new home.
-
-ANTI-CRITERIA — do NOT merge:
-  - Different malware in the same family / loader-vs-payload distinctions where they're operationally separate
-  - Threat actor "supergroups" that contain sub-actors — keep them distinct
-  - Two genuinely-distinct entities (vendor + their product) — they have a relationship but are not the same thing
-
-CLUSTER UNDER REVIEW
-
-Each member self-describes its entity_type plus type-specific signal fields (mitre_id / malware_type / vendor_type / product_type / tool_type as applicable).
-
-{{ cluster }}
-
-OUTPUT CONTRACT
-
-Return strict JSON conforming to the provided schema:
-  - action='merge' with EITHER `merges` (same-type pairs only; all members must share the row's dominant type), OR `reclassifies` (cross-type moves), OR both. Each list may be empty.
-  - action='no_op' with `reasoning` explaining why nothing should be done.
-
-If MODE == 'apply', also call the corresponding skill tools to execute the actions. The JSON output is the audit summary that gets logged. If MODE == 'shadow', no skill calls; the JSON IS the proposal that will be promotable from the UI.
-""",
-        "output_schema": {
-            "type": "object",
-            "required": ["action", "reasoning"],
-            "additionalProperties": False,
-            "properties": {
-                "action": {"type": "string", "enum": ["merge", "no_op"]},
-                "reasoning": {"type": "string", "maxLength": 2000},
-                "merges": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "required": ["target_id", "source_id", "reasoning"],
-                        "additionalProperties": False,
-                        "properties": {
-                            "target_id": {"type": "string", "minLength": 36, "maxLength": 36},
-                            "source_id": {"type": "string", "minLength": 36, "maxLength": 36},
-                            "reasoning": {"type": "string", "maxLength": 500},
-                            "new_description": {"type": "string"},
-                            "extra_aliases": {"type": "array", "items": {"type": "string"}},
-                        },
-                    },
-                },
-                "reclassifies": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "required": ["source_type", "source_id", "target_type", "reasoning"],
-                        "additionalProperties": False,
-                        "properties": {
-                            "source_type": {
-                                "type": "string",
-                                "enum": ["threat_actor", "malware", "vendor", "product", "tool"],
-                            },
-                            "source_id": {"type": "string", "minLength": 36, "maxLength": 36},
-                            "target_type": {
-                                "type": "string",
-                                "enum": ["threat_actor", "malware", "vendor", "product", "tool"],
-                            },
-                            "target_id": {
-                                "type": "string",
-                                "minLength": 36,
-                                "maxLength": 36,
-                                "description": "Existing target entity to merge into. Omit to create new in target_type.",
-                            },
-                            "reasoning": {"type": "string", "maxLength": 500},
-                            "new_description": {"type": "string"},
-                        },
-                    },
-                },
-            },
-        },
-    },
-    {
         "name": "actor_profile_refresh",
         "display_name": "Threat Actor Profile Refresh",
         "description": "Autonomous weekly refresh of threat actor descriptions based on recent article activity. Updates the description field with a versioned diff history.",
@@ -1969,100 +1691,6 @@ Return one decision per entity in the input order. Strict JSON matching the prov
                             "action": {"type": "string", "enum": ["keep", "rename"]},
                             "proposed_name": {"type": "string", "maxLength": 200},
                             "reason": {"type": "string", "maxLength": 300},
-                        },
-                    },
-                },
-            },
-        },
-    },
-    {
-        "name": "hygiene_proposal_review",
-        "display_name": "Hygiene Proposal Review",
-        "description": (
-            "AI reviewer for pending entity-hygiene proposals (reclassifies, merges, renames, alias trims, "
-            "vendor autolinks, TTP/CVE id fixes). Judges each proposal approve/reject/unsure with reasoning "
-            "so approved ones can be bulk-applied — the stepping stone to fully automatic hygiene."
-        ),
-        "category": "maintenance",
-        "variables": ["proposal_count", "proposals_block"],
-        "default_system_template": """You are a senior cyber-threat-intelligence analyst reviewing AUTOMATED
-HYGIENE PROPOSALS for IntelFeed's entity catalog before they are applied. Upstream jobs (link validator,
-merge engine, name normalizer, alias scanner, vendor autolinker, id scanners) have proposed changes; your
-job is to catch the wrong ones.
-
-For each proposal decide exactly one of:
-  - `approve` — the proposal is correct and safe to apply automatically.
-  - `reject`  — the proposal is wrong or risky; it should be dismissed.
-  - `unsure`  — you cannot judge confidently from the given context and your threat-landscape knowledge;
-    a human should look.
-
-PER-KIND GUIDANCE
-
-needs_reclassification (move an entity to a different entity type)
-  - Approve when the name is well-established as the suggested type in the threat landscape (e.g. a
-    ransomware *gang* filed as malware → threat_actor is right for LockBit-the-group coverage;
-    "Cobalt Strike" filed as threat_actor → offensive tool/malware is right).
-  - Names legitimately used for BOTH an actor and their malware (e.g. many ransomware brands) are `unsure`
-    unless the evidence (reason, matched names) clearly favors one filing.
-  - Reject when the current type is the conventional filing.
-
-merge_cluster_summary (merge/reclassify a cluster of similar-named entities)
-  - Approve only when the members are the SAME real-world thing (known alias pairs, spelling variants of
-    one entity).
-  - Reject when look-alike names are DISTINCT things (a product and a malware family sharing a name —
-    e.g. "Jupyter" the notebook vs Jupyter the stealer; a vendor and an unrelated tool). Never approve
-    merging distinct entities, even if their names are identical.
-
-normalize_name (cosmetic rename)
-  - Approve when the proposed form matches vendor/industry convention (APT29, LockBit 3.0, Palo Alto
-    Networks). Reject renames that change meaning or drop distinguishing qualifiers.
-
-alias_collision (trim an alias from an entity)
-  - Approve trims of aliases that genuinely belong to a different entity or duplicate the canonical name.
-    Reject trims of legitimate, well-known aliases of THIS entity.
-
-vendor_autolink (set a product's vendor)
-  - Approve when the vendor really publishes/owns the product. Reject wrong ownership (e.g. a community
-    fork attributed to the original vendor is usually still approve; a different company entirely is
-    reject).
-
-ttp_malformed_id / cve_malformed_id (canonicalize an id)
-  - Approve mechanical fixes to the canonical form (T1059.001, CVE-2024-12345). Reject if the "fix"
-    changes which technique/CVE is referenced.
-
-cve_withdrawn — approve unless you have reason to believe the NVD status is wrong.
-
-stale_entity_review / orphan candidates — approve means "yes, this looks stale/junk and can be cleaned
-up"; use reject for entities that are real and just under-covered.
-
-HARD CONSTRAINTS
-  - Judge each proposal independently on its own line. Do not invent proposals or skip any.
-  - `approve` is a commitment: approved proposals may be applied with no human in the loop. When in
-    doubt, say `unsure` — never round uncertainty up to `approve`.
-  - Keep `reason` to one or two factual sentences naming the evidence ("LockBit is the group's name;
-    articles cover the operation, not a binary").
-""",
-        "default_prompt_template": """PENDING PROPOSALS ({{ proposal_count }} total — return one review per proposal_id)
-
-{{ proposals_block }}
-
-Return strict JSON matching the provided schema: one review per proposal, same order as input.
-""",
-        "output_schema": {
-            "type": "object",
-            "required": ["reviews"],
-            "additionalProperties": False,
-            "properties": {
-                "reviews": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "required": ["proposal_id", "decision"],
-                        "additionalProperties": False,
-                        "properties": {
-                            "proposal_id": {"type": "string"},
-                            "decision": {"type": "string", "enum": ["approve", "reject", "unsure"]},
-                            "reason": {"type": "string", "maxLength": 400},
                         },
                     },
                 },
@@ -2555,73 +2183,6 @@ CANDIDATE OBSERVABLES — unfiltered pattern hits, judge per the iocs rules
                 "scripts",
                 "relationships",
             ],
-        },
-    },
-    {
-        "name": "relationship_adjudication",
-        "display_name": "Relationship Adjudication",
-        "description": (
-            "Nightly judge for probable relationship edges: reads each edge's claim and evidence "
-            "headlines and rules it corroborated (promoted to confirmed) or coincidental (demoted "
-            "and never re-promoted). The machine layer of the relationship trust ladder."
-        ),
-        "category": "maintenance",
-        "variables": ["edge_count", "edges_block"],
-        "default_system_template": """You are a senior cyber-threat-intelligence analyst adjudicating RELATIONSHIP
-CLAIMS that IntelFeed's correlation engine has inferred from reporting. Each edge asserts a typed claim
-("APT29 uses WINELOADER", "LockBit exploits CVE-2023-4966") backed by the headlines of the articles the
-two entities were co-mentioned in. Your job: decide whether the reporting actually SUPPORTS the claim, or
-the pair merely appears together (roundups, vendor coverage, coincidence).
-
-For each edge decide exactly one of:
-  - `corroborated` — the evidence headlines plausibly report this specific claim, or the claim matches
-    well-established threat-landscape knowledge (a known actor-tool pairing, a documented exploit).
-  - `coincidental` — the entities co-occur without the claimed relationship: news roundups, a vendor
-    reporting on many things, list articles, or the verb is wrong for what the coverage describes.
-  - `unsure` — the headlines don't say enough either way and you have no landscape knowledge of the pair.
-
-RULES
-  - Judge the CLAIM, not the entities: both can be real while the relationship is noise.
-  - THE VERB'S DIRECTION MATTERS. "X targets <country>" is corroborated only when reporting shows
-    victims IN that country. Coverage tying an actor or malware to its ORIGIN or sponsor state is
-    attribution, NOT targeting — "DPRK-linked Lazarus" does NOT corroborate "Lazarus targets North
-    Korea"; that claim is coincidental. The same applies to any reversed reading of the verb.
-  - Roundup/newsletter-looking headlines ("Weekly threat recap", "Top 10 CVEs") support nothing.
-  - Some edges carry `profile of <entity>` lines — the platform's own assessment of that entity,
-    written from its reporting. Treat a profile as context about WHO the entity is (its access
-    vector, its tooling, who it goes after), not as evidence that this specific pair is linked. A
-    profile that describes the claimed behaviour as characteristic supports the claim; one that
-    describes the entity doing the opposite argues against it.
-  - Your threat-landscape knowledge counts as evidence: a famous pairing (Sandworm–Industroyer) can be
-    corroborated even from thin headlines; an implausible one (a ransomware gang "using" a defensive
-    product) leans coincidental.
-  - `corroborated` is a commitment — the edge is promoted with no human in the loop. When in doubt,
-    say `unsure`; never round uncertainty up.
-  - Keep `reason` to one factual sentence.
-""",
-        "default_prompt_template": """RELATIONSHIP EDGES TO ADJUDICATE ({{ edge_count }} total — return one verdict per edge_id)
-
-{{ edges_block }}
-
-Return strict JSON matching the provided schema: one verdict per edge, same order as input.
-""",
-        "output_schema": {
-            "type": "object",
-            "required": ["verdicts"],
-            "properties": {
-                "verdicts": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "required": ["edge_id", "verdict", "reason"],
-                        "properties": {
-                            "edge_id": {"type": "string"},
-                            "verdict": {"type": "string", "enum": ["corroborated", "coincidental", "unsure"]},
-                            "reason": {"type": "string"},
-                        },
-                    },
-                },
-            },
         },
     },
     {

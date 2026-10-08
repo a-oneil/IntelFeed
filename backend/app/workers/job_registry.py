@@ -329,79 +329,6 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
         "category": "maintenance",
         "default_schedule": {"type": "crontab", "minute": "45", "hour": "3", "day_of_week": "0"},
     },
-    "validate-entity-links": {
-        "settings_keys": [
-            "link_validation_mode",
-            "link_validation_entries_per_run",
-            "link_validation_batch_size",
-            "link_validation_recheck_days",
-            "link_validation_content_max_chars",
-            "link_validation_circuit_breaker_pct",
-            "link_validation_kickoff_canary_count",
-            "link_validation_skip_confidence",
-        ],
-        "task": "app.workers.link_validation_tasks.validate_entity_links",
-        "description": (
-            "Re-validate autolinker entity links with the configured AI provider; flag/remove out-of-context links"
-        ),
-        "category": "maintenance",
-        "uses_ai": True,
-        "default_schedule": {"type": "crontab", "minute": "0", "hour": "4"},
-    },
-    "hygiene-proposal-review": {
-        "settings_keys": [
-            "hygiene_review_batch_size",
-            "hygiene_review_auto_apply",
-        ],
-        "task": "app.workers.hygiene_review_tasks.review_hygiene_proposals",
-        "description": (
-            "AI-review every pending hygiene proposal (reclassify / merge / rename / alias trim / "
-            "vendor link / id fix); verdicts gate bulk apply, or auto-apply when hygiene_review_auto_apply is on"
-        ),
-        "category": "maintenance",
-        "uses_ai": True,
-        # After the 04:00 link validator so fresh advisories get judged same-day.
-        "default_schedule": {"type": "crontab", "minute": "30", "hour": "5"},
-    },
-    "relationship-adjudication": {
-        "settings_keys": [
-            "relationship_adjudication_enabled",
-            "relationship_adjudication_batch_size",
-            "relationship_adjudication_min_articles",
-            "relationship_adjudication_dossier",
-        ],
-        "task": "app.workers.relationship_adjudication_tasks.adjudicate_relationships",
-        "description": (
-            "AI-adjudicate probable relationship edges from their evidence headlines — plus each "
-            "entity's own assessment paragraph as context: corroborated edges are promoted to "
-            "confirmed, coincidental ones demoted and never re-promoted "
-            "(behind relationship_adjudication_enabled)"
-        ),
-        "category": "maintenance",
-        "uses_ai": True,
-        # After the 05:30 hygiene review; batches queue serially on the AI worker.
-        "default_schedule": {"type": "crontab", "minute": "30", "hour": "6"},
-    },
-    "entity-merge-maintenance": {
-        "settings_keys": [
-            "entity_maintenance_mode",
-            "entity_merge_max_clusters_per_run",
-        ],
-        "task": "app.workers.entity_maintenance_tasks.kickoff_entity_merge_maintenance",
-        "description": (
-            "Find duplicates and misclassifications across threat actors / malware / vendors / "
-            "products / tools; merge or reclassify via the configured AI provider "
-            "(autonomous, shadow by default)"
-        ),
-        "category": "maintenance",
-        "uses_ai": True,
-        "default_schedule": {
-            "type": "crontab",
-            "minute": "0",
-            "hour": "3",
-            "day_of_week": "0",
-        },
-    },
     "retry-untranslated-entries": {
         "settings_keys": ["translation_default_target"],
         "task": "app.workers.translation_tasks.retry_untranslated_entries",
@@ -414,16 +341,6 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
         "description": "Refresh the copilot Claude Code OAuth credential health snapshot (expiry monitor)",
         "category": "maintenance",
         "default_schedule": {"type": "crontab", "minute": "*/30"},
-    },
-    "stale-entity-review": {
-        "settings_keys": [
-            "stale_entity_min_age_days",
-            "stale_entity_max_articles",
-        ],
-        "task": "app.workers.maintenance.flag_stale_entities",
-        "description": "Flag entities with <=1 article, no relationships, 90+ days idle for review (never deletes)",
-        "category": "maintenance",
-        "default_schedule": {"type": "crontab", "minute": "30", "hour": "5", "day_of_week": "0"},
     },
     # --- Enrichment ---
     "scheduled-enrichment-check": {
