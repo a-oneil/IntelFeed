@@ -254,13 +254,17 @@ export function ProposalsQueue({
     return hist ? all : all.filter(isPending);
   }, [feed.data, hist]);
 
-  const mode: "shadow" | "apply" =
-    (domain === "links" ? stats.data?.link_validator_mode : stats.data?.entity_maintenance_mode) === "apply"
-      ? "apply"
-      : "shadow";
-  const modeKey = domain === "links" ? "link_validation_mode" : "entity_maintenance_mode";
-
-  const statsField = domain === "links" ? "link_validator_mode" : "entity_maintenance_mode";
+  // The Proposed / Applied switch drives the adjudicate stage whenever it is
+  // on; only with adjudication off does it fall back to the legacy job's mode.
+  const adjudicationOn = (stats.data?.adjudication_mode ?? "off") !== "off";
+  const legacyField = domain === "links" ? "link_validator_mode" : "entity_maintenance_mode";
+  const statsField = adjudicationOn ? "adjudication_mode" : legacyField;
+  const mode: "shadow" | "apply" = (stats.data?.[statsField] ?? "shadow") === "apply" ? "apply" : "shadow";
+  const modeKey = adjudicationOn
+    ? "adjudication_mode"
+    : domain === "links"
+      ? "link_validation_mode"
+      : "entity_maintenance_mode";
   const setMode = async (next: "shadow" | "apply") => {
     if (next === mode || modePending) return;
     setModePending(true);
@@ -273,7 +277,11 @@ export function ProposalsQueue({
     try {
       await api.patch("/system-settings", { settings: { [modeKey]: next } });
       toast.success(
-        next === "apply" ? "Applied mode — scans now auto-run proposals" : "Proposed mode — suggestions held for review",
+        next === "apply"
+          ? adjudicationOn
+            ? "Applied mode — the review now applies high-confidence verdicts at ingest"
+            : "Applied mode — scans now auto-run proposals"
+          : "Proposed mode — suggestions held for review",
       );
     } catch (e) {
       qc.setQueryData(["hygiene", "stats"], (prev: unknown) =>
@@ -340,8 +348,17 @@ export function ProposalsQueue({
     <div className={styles.wrap}>
       {/* toolbar */}
       <div className={styles.toolbar}>
-        <span className={styles.system}>{domain === "links" ? "Link validator" : "Merge engine"}</span>
-        <div className={styles.modeSeg} title="Proposed: suggestions held for review · Applied: auto-run on scan">
+        <span className={styles.system}>
+          {adjudicationOn ? "Adjudicator" : domain === "links" ? "Link validator" : "Merge engine"}
+        </span>
+        <div
+          className={styles.modeSeg}
+          title={
+            adjudicationOn
+              ? "Proposed: the review files suggestions · Applied: high-confidence verdicts applied at ingest"
+              : "Proposed: suggestions held for review · Applied: auto-run on scan"
+          }
+        >
           <button className={mode === "shadow" ? styles.modeOn : ""} disabled={modePending} onClick={() => setMode("shadow")}>
             Proposed
           </button>

@@ -86,6 +86,8 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
         _validate_verdicts,
         apply_verdicts,
         build_variables,
+        collect_legacy_rows,
+        supersede_legacy_proposals,
     )
     from app.services.system_settings import _ensure_cache, invalidate_cache
     from app.services.system_user import get_system_user_id
@@ -129,6 +131,7 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
             user_id = await get_system_user_id(db)
             if user_id is None:
                 return await _finish(FAILED, {"skipped": "no_system_user"})
+            legacy_rows = await collect_legacy_rows(db, entry, items)
 
             try:
                 result = await run_task(
@@ -157,6 +160,7 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
 
             verdicts, stats = _validate_verdicts(result, items)
             detail = await apply_verdicts(db, entry, verdicts, parsed, cfg)
+            detail["superseded"] = await supersede_legacy_proposals(db, legacy_rows)
             detail["unknown_ids"] = stats["unknown"]
             if stats["duplicate"]:
                 detail["skipped"] = "ai_bad_shape"
@@ -166,3 +170,59 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
             redis_client.delete(lock_key)
         except Exception:
             pass
+
+
+@celery_app.task(
+    name="app.workers.adjudication_tasks.backfill_entry_adjudications",
+    soft_time_limit=600,
+    time_limit=660,
+)
+def backfill_entry_adjudications(limit: int = 500, since_days: int | None = None) -> dict:
+    """One-off walk: queue every analysed entry the stage has not decided on,
+    newest first, through the normal gates and hourly budget. Live entries go
+    first; these fill what each hour has left, and the hourly sweep keeps
+    draining them. Not scheduled — run it once per rollout, like
+    backfill_entry_scores."""
+    start = time.monotonic()
+    try:
+        stats = run_async(_backfill(limit, since_days))
+        logger.info("adjudication backfill: %s", stats)
+        CELERY_TASKS_TOTAL.labels(task_name="backfill_entry_adjudications", status="success").inc()
+        return stats
+    except Exception:
+        CELERY_TASKS_TOTAL.labels(task_name="backfill_entry_adjudications", status="error").inc()
+        logger.exception("adjudication backfill failed")
+        raise
+    finally:
+        CELERY_TASK_DURATION_SECONDS.labels(task_name="backfill_entry_adjudications").observe(time.monotonic() - start)
+
+
+async def _backfill(limit: int, since_days: int | None) -> dict:
+    from app.services.entry_adjudication import (
+        PENDING,
+        SKIPPED_BUDGET,
+        _current_analysis,
+        dispatch_adjudication,
+        enqueue_adjudication,
+        select_backfill_entries,
+    )
+    from app.services.system_settings import _ensure_cache, invalidate_cache
+
+    async with worker_session() as db:
+        invalidate_cache()
+        await _ensure_cache(db)
+        entry_ids = await select_backfill_entries(db, limit=limit, since_days=since_days)
+        stats = {"candidates": len(entry_ids), "queued": 0, "waiting": 0, "skipped": 0}
+        for i, entry_id in enumerate(entry_ids):
+            _result, parsed = await _current_analysis(db, entry_id)
+            status = await enqueue_adjudication(db, entry_id, None, parsed)
+            if status == PENDING:
+                stats["queued"] += 1
+                # Spread the queue so live reviews interleave with backfill.
+                dispatch_adjudication(entry_id, countdown=30 + i * 2)
+            elif status == SKIPPED_BUDGET:
+                stats["waiting"] += 1
+            else:
+                stats["skipped"] += 1
+        await db.commit()
+        return stats

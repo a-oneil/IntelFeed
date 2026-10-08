@@ -255,7 +255,7 @@ export function EngineMatrix({
   initialStage?: string;
   initialStatus?: string;
   initialView?: MatrixView;
-  initialEntityStatus?: "all" | "review" | "orphan" | "dupe";
+  initialEntityStatus?: "all" | "review" | "orphan" | "dupe" | "stale";
   initialOpenStage?: string | null;
   onBrowse: (view: BrowseView) => void;
   /** Flash a setting once its host surface is open. */
@@ -263,7 +263,7 @@ export function EngineMatrix({
 }) {
   const [window_, setWindow] = useState("24h");
   const [view, setView] = useState<MatrixView>(initialView ?? "entries");
-  const [entStatus, setEntStatus] = useState<"all" | "review" | "orphan" | "dupe">(initialEntityStatus ?? "all");
+  const [entStatus, setEntStatus] = useState<"all" | "review" | "orphan" | "dupe" | "stale">(initialEntityStatus ?? "all");
   const [openStage, setOpenStage] = useState<string | null>(initialOpenStage ?? null);
   const [lens, setLens] = useState<"timing" | "output">("timing");
   const [proposalsMode, setProposalsMode] = useState(false);

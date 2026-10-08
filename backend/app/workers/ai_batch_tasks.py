@@ -216,7 +216,7 @@ async def _submit_via_batches_api(db, task, assignment, provider_model, user_id,
     output_config = provider._build_output_config(task.effective_output_schema)
     merged_config = {**(provider_model.config or {}), **(assignment.config or {})}
     # Fallback matches run_task's default (engine.py) — at 2048 the payload's
-    # trailing link_validations/relationships keys get truncated off.
+    # trailing relationships key gets truncated off.
     max_tokens = int(merged_config.get("max_tokens", 4096))
 
     requests = []

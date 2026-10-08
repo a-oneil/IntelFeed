@@ -128,7 +128,7 @@ async def _link_actor(db_session, entry, name, *, source="auto_link", minted=Fal
 
 
 def _payload(**overrides) -> dict:
-    base = {"summary": "s", "threat_actors": [], "malware": [], "tools": [], "link_validations": []}
+    base = {"summary": "s", "threat_actors": [], "malware": [], "tools": []}
     base.update(overrides)
     return base
 
@@ -259,14 +259,12 @@ async def test_manifest_lists_links_with_provenance_and_candidates(db_session: A
         )
     )
     await db_session.flush()
-    parsed = _payload(link_validations=[{"entity_key": f"malware:{warlock.id}", "decision": "KEEP", "reason": ""}])
-
-    items, block = await build_manifest(db_session, entry, parsed)
+    items, block = await build_manifest(db_session, entry, _payload())
     by_id = {it.item_id: it for it in items}
 
     w = by_id[f"link:malware:{warlock.id}"]
-    assert w.source == "auto_link" and w.ingest_verdict == "KEEP" and not w.minted_here
-    assert "judged KEEP at ingest" in w.line and "14 articles" in w.line and "Warlock ransomware crew" in w.line
+    assert w.source == "auto_link" and not w.minted_here
+    assert "autolinker" in w.line and "14 articles" in w.line and "Warlock ransomware crew" in w.line
 
     g = by_id[f"link:threat_actor:{group.id}"]
     assert g.minted_here
@@ -1029,3 +1027,201 @@ async def test_queue_apply_then_restore_recreates_a_vetoed_entity(
         await client.get("/api/admin/hygiene/feed", params={"origin": "adjudicator"}, headers=admin_headers)
     ).json()["rows"]
     assert any(r["action"] == ACTION_VETO and r["payload"]["after"].get("restored") for r in feed_rows)
+
+
+# ------------------------------------------------------------------ takeover (commit 5)
+
+
+def test_extraction_prompt_no_longer_judges_links():
+    """The one-pass call only extracts; link judgment lives in the adjudicate stage."""
+    from app.ai.prompts.defaults import SYSTEM_TASKS
+
+    task = next(t for t in SYSTEM_TASKS if t["name"] == "entry_analysis")
+    assert "link_validations" not in task["output_schema"]["properties"]
+    assert "link_validations" not in task["output_schema"]["required"]
+    assert "linked_entities" not in task["variables"]
+    assert "CANDIDATE ENTITY TAGS" not in task["default_prompt_template"]
+    assert "link_validations" not in task["default_system_template"]
+
+
+@pytest.mark.asyncio
+async def test_keep_counter_promotes_edge_after_three_distinct_entries(db_session: AsyncSession, feed):
+    await _seed_settings(db_session, adjudication_mode="apply")
+    warlock = ThreatActor(name="Warlock", article_count=14)
+    cobalt = Tool(name="Cobalt Strike", article_count=40)
+    db_session.add_all([warlock, cobalt])
+    await db_session.flush()
+    edge = EntityRelationship(
+        source_type="threat_actor",
+        source_id=warlock.id,
+        target_type="tool",
+        target_id=cobalt.id,
+        relationship_type="uses",
+        confidence="probable",
+        source="auto_extracted",
+        description="Warlock deploys Cobalt Strike",
+        evidence_entry_ids=[],
+    )
+    db_session.add(edge)
+    await db_session.flush()
+
+    async def keep_from(entry):
+        edge.evidence_entry_ids = [*(edge.evidence_entry_ids or []), entry.id]
+        db_session.add(edge)
+        await db_session.flush()
+        items, _ = await build_manifest(db_session, entry, _payload())
+        verdicts, _ = _validate_verdicts({"verdicts": [{"item_id": f"edge:{edge.id}", "verdict": "keep"}]}, items)
+        cfg = await adj._settings(db_session)
+        await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
+        await db_session.flush()
+        await db_session.refresh(edge)
+
+    e1, e2, e3 = [await _make_entry(db_session, feed) for _ in range(3)]
+    await keep_from(e1)
+    await keep_from(e1)  # same entry again does not count twice
+    assert len(edge.reviewer_kept_entry_ids) == 1 and edge.confidence == "probable"
+    await keep_from(e2)
+    assert len(edge.reviewer_kept_entry_ids) == 2 and edge.confidence == "probable"
+    await keep_from(e3)
+    assert len(edge.reviewer_kept_entry_ids) == 3
+    assert edge.confidence == "confirmed" and edge.adjudication_verdict == "corroborated"
+
+
+@pytest.mark.asyncio
+async def test_keep_counter_never_touches_shadow_or_demoted_edges(db_session: AsyncSession, feed):
+    await _seed_settings(db_session, adjudication_mode="shadow")
+    entry = await _make_entry(db_session, feed)
+    warlock = await _link_actor(db_session, entry, "Warlock", source="ai")
+    cobalt = Tool(name="Cobalt Strike", article_count=40)
+    db_session.add(cobalt)
+    await db_session.flush()
+    edge = EntityRelationship(
+        source_type="threat_actor",
+        source_id=warlock.id,
+        target_type="tool",
+        target_id=cobalt.id,
+        relationship_type="uses",
+        confidence="probable",
+        source="auto_extracted",
+        evidence_entry_ids=[entry.id],
+    )
+    db_session.add(edge)
+    await db_session.flush()
+    items, _ = await build_manifest(db_session, entry, _payload())
+    verdicts, _ = _validate_verdicts({"verdicts": [{"item_id": f"edge:{edge.id}", "verdict": "keep"}]}, items)
+    cfg = await adj._settings(db_session)
+    await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
+    await db_session.refresh(edge)
+    assert edge.reviewer_kept_entry_ids == []
+
+
+@pytest.mark.asyncio
+async def test_stale_status_is_a_live_filter(client, admin_headers, db_session: AsyncSession, feed):
+    from datetime import timedelta
+
+    entry = await _make_entry(db_session, feed)
+    old = ThreatActor(
+        name="tortilla crew",
+        article_count=1,
+        created_via="ai_extraction",
+        created_from_entry_id=entry.id,
+        first_seen_at=datetime.now(UTC) - timedelta(days=205),
+        last_seen_at=datetime.now(UTC) - timedelta(days=205),
+    )
+    fresh = ThreatActor(
+        name="Warlock Group", article_count=1, created_via="ai_extraction", created_from_entry_id=entry.id
+    )
+    db_session.add_all([old, fresh])
+    await db_session.commit()
+    resp = await client.get(
+        "/api/engine/extraction/entities", params={"status": "stale", "window": "all"}, headers=admin_headers
+    )
+    assert resp.status_code == 200, resp.text
+    names = {i["name"] for i in resp.json()["items"]}
+    assert names == {"tortilla crew"}
+
+
+@pytest.mark.asyncio
+async def test_backfill_selects_only_undecided_analysed_entries(db_session: AsyncSession, feed):
+    from app.models.ai_result import AIResult
+    from app.models.ai_task import AITask
+
+    task = AITask(
+        name="entry_analysis", display_name="t", description="", category="extraction", default_prompt_template="x"
+    )
+    db_session.add(task)
+    await db_session.flush()
+
+    async def analysed(entry):
+        db_session.add(
+            AIResult(
+                entry_id=entry.id,
+                target_type="entry",
+                target_id=entry.id,
+                is_current=True,
+                task_id=task.id,
+                prompt_used="",
+                raw_response="",
+                parsed_result=_payload(),
+            )
+        )
+
+    undecided = await _make_entry(db_session, feed)
+    await analysed(undecided)
+    waiting = await _make_entry(db_session, feed)
+    await analysed(waiting)
+    row = await _request(db_session, waiting)
+    row.adjudication_status = adj.SKIPPED_BUDGET
+    done = await _make_entry(db_session, feed)
+    await analysed(done)
+    row = await _request(db_session, done)
+    row.adjudication_status = adj.COMPLETED
+    row.adjudicated_at = datetime.now(UTC)
+    never_analysed = await _make_entry(db_session, feed)
+    await db_session.flush()
+
+    picked = set(await adj.select_backfill_entries(db_session))
+    assert picked == {undecided.id, waiting.id}
+    assert done.id not in picked and never_analysed.id not in picked
+
+
+@pytest.mark.asyncio
+async def test_legacy_proposals_are_shown_to_the_reviewer_then_superseded(db_session: AsyncSession, feed):
+    await _seed_settings(db_session)
+    entry = await _make_entry(db_session, feed)
+    storm = await _link_actor(db_session, entry, "Storm")
+    minted = await _link_actor(db_session, entry, "Water Utility Co", source="ai", minted=True, article_count=1)
+    db_session.add(
+        EntityLinkValidationLog(
+            entry_id=entry.id,
+            entity_type="threat_actor",
+            entity_id=storm.id,
+            entity_name_snapshot="Storm",
+            action="shadow_remove",
+            reason="nightly validator thought it was weather",
+        )
+    )
+    db_session.add(
+        EntityMaintenanceLog(
+            entity_type="threat_actor",
+            entity_id=minted.id,
+            action="stale_entity_review",
+            mode="shadow",
+            before={"entity": {"name": "Water Utility Co"}},
+            after={},
+            reasoning="1 article, no relationships",
+            applied=False,
+        )
+    )
+    await db_session.flush()
+
+    items, block = await build_manifest(db_session, entry, _payload())
+    assert "earlier suggestion (retired nightly job): remove — nightly validator thought it was weather" in block
+    assert "earlier suggestion (retired nightly job): stale entity review" in block
+
+    legacy = await adj.collect_legacy_rows(db_session, entry, items)
+    superseded = await adj.supersede_legacy_proposals(db_session, legacy)
+    await db_session.flush()
+    assert superseded == 2
+    assert (await db_session.execute(select(EntityLinkValidationLog))).scalars().all() == []
+    assert (await db_session.execute(select(EntityMaintenanceLog))).scalars().all() == []

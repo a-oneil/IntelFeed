@@ -107,8 +107,8 @@ DEFAULT_PROVIDER_TYPE_ASSIGNMENTS: dict[str, str] = {
 # via the intelfeed skill need explicit tool allowlists (the provider's
 # default is to disable ALL tools).
 DEFAULT_ASSIGNMENT_CONFIGS: dict[str, dict] = {
-    # 10000: the payload ends with link_validations + relationships, so any
-    # truncation drops those trailing keys entirely. Measured output on real
+    # 10000: the payload ends with relationships, so any truncation drops
+    # that trailing key entirely. Measured output on real
     # articles is 1900-3251 tokens, but TTP-dense advisories (CISA
     # #StopRansomware bulletins enumerate a dozen technique IDs) blow past
     # 4096 on every local model — and an overflow is a terminal parse_error,
@@ -2148,7 +2148,7 @@ For each entity, decide `filled` (with cited value) or `unknown`. Return strict 
             "extraction calls."
         ),
         "category": "extraction",
-        "variables": ["entry.title", "entry.content_text", "entry.feed_title", "linked_entities"],
+        "variables": ["entry.title", "entry.content_text", "entry.feed_title"],
         "default_system_template": """You are a senior cyber threat intelligence analyst. You read one security article and produce a single structured analysis covering everything a threat intelligence platform needs to index it.
 
 **Rules:**
@@ -2253,14 +2253,6 @@ For each entity, decide `filled` (with cited value) or `unknown`. Return strict 
 - `source_type`/`target_type`: threat_actor, malware, tool, country, or observable. relationship_type: uses, targets, exploits, attributed_to, variant_of, successor_of, subgroup_of, overlaps_with, communicates_with, controls, or related_to.
 - observable endpoints are target-only and allowed ONLY for values you also reported in the iocs list, with `target_name` the value EXACTLY as the article prints it (keep defanging) and `target_kind` the same `kind` you gave it there. communicates_with for C2 traffic ("X beacons to Y"), uses for delivery/payload material and for host artifacts (the family's mutex, scheduled task, dropped path, command line), controls when the article attributes the infrastructure to an actor.
 
-**Link validation (the "link_validations" list):**
-- The article may come with CANDIDATE ENTITY TAGS applied by an automated name matcher, each with the local context where the name matched. Judge every candidate and return one decision per entity_key:
-	- KEEP — in its local context the name genuinely refers to the catalogued entity, even in passing.
-	- REMOVE — the surrounding words use the name in an unrelated sense: a common English word, a different organization or product sharing the name, a substring inside an unrelated term, an acronym in a non-security sense.
-	- RECLASSIFY — a real reference, but the entity is filed under the wrong catalog type; set `suggested_type` to one of threat_actor, malware, vendor, product, country. Do not use REMOVE for type confusion.
-- Default to KEEP whenever uncertain — a wrongly removed link destroys real intelligence signal; a wrongly kept one is easily corrected. Judge the sentence where the name appears, not the article's overall topic. References to any member of the same family (parent, subsidiary, alias, variant, product line) are KEEP. `previously_restored=true` means an analyst explicitly confirmed this link — REMOVE only on an unambiguous name collision.
-- `reason`: one short evidence-based sentence citing the local phrase. Empty array when no candidates given.
-
 Output valid JSON matching the provided schema, with the keys in the schema's order — `summary`, `iocs`, `scripts` and `relationships` come first, so the indicators survive even if the output is cut short. Every key is present in the schema; use an empty array for lists with nothing of that type, and an empty string for any scalar field you cannot fill from the article. **Never** invent or extract an arbitrary value just to fill a field.
 """,
         "default_prompt_template": """Analyze this article:
@@ -2269,13 +2261,7 @@ Title: {{ entry.title }}
 Source: {{ entry.feed_title }}
 
 {{ entry.content_text }}
-{% if linked_entities %}
-CANDIDATE ENTITY TAGS — judge each one (see link validation rules)
-{% for e in linked_entities %}
-[{{ e.entity_key }}] type={{ e.entity_type }} name="{{ e.name }}" matched_as={{ e.matched_names | tojson }}
-  confidence={{ e.confidence | default("n/a") }} previously_restored={{ e.previously_restored | tojson }}
-  context: {{ e.context }}
-{% endfor %}{% endif %}{% if observable_candidates %}
+{% if observable_candidates %}
 CANDIDATE OBSERVABLES — unfiltered pattern hits, judge per the iocs rules
 {% for c in observable_candidates %}
 - {{ c.kind }}: {{ c.surface_form }}
@@ -2549,19 +2535,6 @@ CANDIDATE OBSERVABLES — unfiltered pattern hits, judge per the iocs rules
                         ],
                     },
                 },
-                "link_validations": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "entity_key": {"type": "string"},
-                            "decision": {"type": "string"},
-                            "reason": {"type": "string"},
-                            "suggested_type": {"type": "string"},
-                        },
-                        "required": ["entity_key", "decision", "reason", "suggested_type"],
-                    },
-                },
             },
             "required": [
                 "summary",
@@ -2581,7 +2554,6 @@ CANDIDATE OBSERVABLES — unfiltered pattern hits, judge per the iocs rules
                 "iocs",
                 "scripts",
                 "relationships",
-                "link_validations",
             ],
         },
     },
@@ -2677,7 +2649,6 @@ VERDICTS (one per item_id; anything you leave out is treated as keep)
 RULES
   - Judge each record against the sentence where it appears, not the article's overall topic. Use the context line printed with the item.
   - Default to keep whenever uncertain. A wrong removal destroys real intelligence signal; a wrong keep is cheap to fix later.
-  - "judged KEEP at ingest" means the extraction pass already vouched for a link; overturn it only with a specific reason from the text.
   - "promoted from the pending tier" means the name is also an ordinary word and was linked only because the extraction named it; look hard at the context line for these.
   - A link marked "an analyst restored this link recently" is a strong keep; remove only on an unambiguous name collision.
   - Article counts and ages are context about how established an entity is: a one-article entity created by this very article deserves scrutiny; a 200-article entity usually does not.

@@ -3251,7 +3251,8 @@
       "linked",
       "review",
       "orphan",
-      "dupe"
+      "dupe",
+      "stale"
      ],
      "default": "all",
      "description": "Filter by computed lifecycle status"

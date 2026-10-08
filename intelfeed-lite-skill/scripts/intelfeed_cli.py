@@ -1231,7 +1231,7 @@ TOOLS: dict[str, dict] = {
             "status": {
                 "type": 'str',
                 "default": 'all',
-                "enum": ['all', 'linked', 'review', 'orphan', 'dupe'],
+                "enum": ['all', 'linked', 'review', 'orphan', 'dupe', 'stale'],
             },
             "window": {
                 "type": 'str',

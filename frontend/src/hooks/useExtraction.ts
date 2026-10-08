@@ -2,7 +2,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 
 import api from "@/api/client";
 
-export type ExtractionStatus = "linked" | "review" | "orphan" | "dupe";
+export type ExtractionStatus = "linked" | "review" | "orphan" | "dupe" | "stale";
 export type ExtractionType = "threat_actor" | "malware" | "tool" | "cve" | "ttp" | "observable";
 
 export interface ExtractionEntity {

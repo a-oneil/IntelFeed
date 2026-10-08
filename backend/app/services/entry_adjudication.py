@@ -61,6 +61,16 @@ VALID_FOR_KIND: dict[str, set[str]] = {
 DESTRUCTIVE = {"remove", "veto", "merge", "demote", "drop"}
 RECLASSIFY_TYPES = {"threat_actor", "malware", "vendor", "product", "country", "tool"}
 
+# Positive-evidence override: payload lists that count as the analysis naming
+# an entity by type. Actor/malware share one pool (the model routinely files
+# ransomware brands under the other slot); vendor/product have no list.
+_OVERRIDE_PAYLOAD_KEYS: dict[str, tuple[str, ...]] = {
+    "threat_actor": ("threat_actors", "malware", "tools"),
+    "malware": ("threat_actors", "malware", "tools"),
+    "tool": ("threat_actors", "malware", "tools"),
+    "country": ("countries",),
+}
+
 # Maintenance-log actions this stage writes (shadow proposals and applied
 # changes share the action code; `applied` tells them apart, like the merge
 # engine's rows). api/hygiene.py registers them as proposal kinds.
@@ -325,6 +335,40 @@ async def resweep_adjudications(db: AsyncSession, limit: int = 200) -> dict:
     return {"swept": swept, "candidates": len(rows)}
 
 
+async def select_backfill_entries(db: AsyncSession, limit: int = 500, since_days: int | None = None) -> list:
+    """Entries with a current analysis that the stage has never decided on,
+    newest first — the one-off walk through history and the old backlogs."""
+    from datetime import timedelta
+
+    from app.models.ai_analysis import AIAnalysisRequest
+    from app.models.ai_result import AIResult
+    from app.models.ai_task import AITask
+    from app.models.entry import Entry
+
+    analysed = select(AIResult.target_id).where(
+        AIResult.target_type == "entry",
+        AIResult.is_current.is_(True),
+        AIResult.task_id == select(AITask.id).where(AITask.name == "entry_analysis").scalar_subquery(),
+    )
+    q = (
+        select(Entry.id)
+        .outerjoin(AIAnalysisRequest, AIAnalysisRequest.entry_id == Entry.id)
+        .where(
+            Entry.id.in_(analysed),
+            or_(AIAnalysisRequest.id.is_(None), AIAnalysisRequest.adjudicated_at.is_(None)),
+            or_(
+                AIAnalysisRequest.adjudication_status.is_(None),
+                AIAnalysisRequest.adjudication_status.notin_([PENDING, COMPLETED, FAILED, SKIPPED_ECHO]),
+            ),
+        )
+        .order_by(Entry.created_at.desc())
+        .limit(limit)
+    )
+    if since_days:
+        q = q.where(Entry.created_at >= datetime.now(UTC) - timedelta(days=since_days))
+    return list((await db.execute(q)).scalars().all())
+
+
 async def _current_analysis(db: AsyncSession, entry_id: uuid.UUID):
     from app.services.entry_analysis import _current_analysis_result
 
@@ -348,7 +392,6 @@ class ReviewItem:
     source: str | None = None
     minted_here: bool = False
     promoted: bool = False
-    ingest_verdict: str | None = None
     previously_restored: bool = False
     # Candidate merge targets: [{entity_type, entity_id, name, article_count}]
     candidates: list[dict] = field(default_factory=list)
@@ -511,16 +554,6 @@ async def _nearest_candidates(db: AsyncSession, entity_type: str, entity, limit:
     return out
 
 
-def _ingest_verdicts(parsed: dict | None) -> dict[str, str]:
-    """entity_key → KEEP/REMOVE/RECLASSIFY from the one-pass payload (until
-    the fold-out removes that block from the extraction prompt)."""
-    out: dict[str, str] = {}
-    for item in (parsed or {}).get("link_validations") or []:
-        if isinstance(item, dict) and item.get("entity_key") and item.get("decision"):
-            out[str(item["entity_key"])] = str(item["decision"]).upper()
-    return out
-
-
 def _age_days(ts: datetime | None) -> int | None:
     if not ts:
         return None
@@ -541,7 +574,6 @@ async def _link_items(db: AsyncSession, entry, parsed: dict | None, scope: set[s
 
     title, content_text = entry_text_with_translation(entry)
     paragraph_map = dict(split_into_paragraphs(title, entry.summary or "", content_text))
-    verdicts = _ingest_verdicts(parsed)
 
     promoted = {
         (r.entity_type, r.entity_id)
@@ -593,7 +625,6 @@ async def _link_items(db: AsyncSession, entry, parsed: dict | None, scope: set[s
                 minted_here=getattr(entity, "created_from_entry_id", None) == entry.id,
                 promoted=(entity_type, entity.id) in promoted,
                 previously_restored=(entity_type, entity.id) in restored,
-                ingest_verdict=verdicts.get(f"{entity_type}:{entity.id}"),
             )
             if item.minted_here and "entities" in scope:
                 item.candidates = await _nearest_candidates(db, entity_type, entity)
@@ -630,6 +661,7 @@ async def _link_items(db: AsyncSession, entry, parsed: dict | None, scope: set[s
         )
 
     items = items[:_MAX_LINKS]
+    earlier = await _legacy_suggestions(db, entry, items)
     for item in items:
         entity_model = _model_for(item.entity_type or "")
         entity = await db.get(entity_model, item.entity_id) if entity_model else None
@@ -646,8 +678,6 @@ async def _link_items(db: AsyncSession, entry, parsed: dict | None, scope: set[s
                 bits.append("a creation gate flagged it")
         if item.promoted:
             bits.append("promoted from the pending tier (name is also a dictionary word)")
-        if item.ingest_verdict:
-            bits.append(f"judged {item.ingest_verdict} at ingest")
         if item.previously_restored:
             bits.append("an analyst restored this link recently — remove only on an unambiguous collision")
         line = f"{item.item_id}  " + " · ".join(bits)
@@ -665,8 +695,91 @@ async def _link_items(db: AsyncSession, entry, parsed: dict | None, scope: set[s
         snippet = _snippet(paragraph_map, item.matched_names or [item.name], item.paragraph_indices, text)
         if snippet:
             line += f'\n    context: "{snippet}"'
+        for note in earlier.get(item.item_id, []):
+            line += f"\n    earlier suggestion (retired nightly job): {note}"
         item.line = line
     return items
+
+
+async def _legacy_rows(db: AsyncSession, entry, items: list[ReviewItem]):
+    """Pending proposals the retired jobs left for this entry: validator rows
+    keyed by entry, and maintenance proposals about entities this entry
+    created. Returns (link_log_rows, maintenance_rows)."""
+    from app.models.ai_result import AIResult
+    from app.models.ai_task import AITask
+    from app.models.entity_link_validation_log import EntityLinkValidationLog
+    from app.models.entity_maintenance import EntityMaintenanceLog
+
+    adjudicator_results = select(AIResult.id).where(
+        AIResult.task_id == select(AITask.id).where(AITask.name == TASK_NAME).scalar_subquery()
+    )
+    link_rows = (
+        (
+            await db.execute(
+                select(EntityLinkValidationLog).where(
+                    EntityLinkValidationLog.entry_id == entry.id,
+                    EntityLinkValidationLog.action.in_(["shadow_remove", "needs_reclassification"]),
+                    or_(
+                        EntityLinkValidationLog.ai_result_id.is_(None),
+                        ~EntityLinkValidationLog.ai_result_id.in_(adjudicator_results),
+                    ),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    minted = [it.entity_id for it in items if it.kind == "link" and it.minted_here and it.entity_id]
+    maint_rows = []
+    if minted:
+        maint_rows = (
+            (
+                await db.execute(
+                    select(EntityMaintenanceLog).where(
+                        EntityMaintenanceLog.entity_id.in_(minted),
+                        EntityMaintenanceLog.applied.is_(False),
+                        EntityMaintenanceLog.action.in_(
+                            ["merge_cluster_summary", "normalize_name", "alias_collision", "stale_entity_review"]
+                        ),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return link_rows, maint_rows
+
+
+async def _legacy_suggestions(db: AsyncSession, entry, items: list[ReviewItem]) -> dict[str, list[str]]:
+    link_rows, maint_rows = await _legacy_rows(db, entry, items)
+    out: dict[str, list[str]] = {}
+    for r in link_rows:
+        key = f"link:{r.entity_type}:{r.entity_id}"
+        what = "remove" if r.action == "shadow_remove" else f"reclassify as {r.suggested_entity_type or '?'}"
+        out.setdefault(key, []).append(f"{what} — {(r.reason or '').strip()[:160]}")
+    by_entity = {it.entity_id: it.item_id for it in items if it.kind == "link" and it.entity_id}
+    for r in maint_rows:
+        key = by_entity.get(r.entity_id)
+        if key:
+            out.setdefault(key, []).append(f"{r.action.replace('_', ' ')} — {(r.reasoning or '').strip()[:160]}")
+    return out
+
+
+async def collect_legacy_rows(db: AsyncSession, entry, items: list[ReviewItem]) -> list:
+    """The retired jobs' pending rows this review is about to replace. Taken
+    BEFORE the model runs so the reviewer's own freshly written rows can never
+    be mistaken for legacy ones."""
+    link_rows, maint_rows = await _legacy_rows(db, entry, items)
+    return [*link_rows, *maint_rows]
+
+
+async def supersede_legacy_proposals(db: AsyncSession, legacy_rows: list) -> int:
+    """After the review has judged the entry, the retired jobs' pending rows
+    for the same links and entities are superseded: deleted, not archived,
+    because the reviewer's own rows now say what should happen."""
+    for row in legacy_rows:
+        await db.delete(row)
+    return len(legacy_rows)
 
 
 async def _edge_items(db: AsyncSession, entry) -> list[ReviewItem]:
@@ -891,7 +1004,6 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
 
 def _payload_name_pool(parsed: dict | None, entity_type: str | None) -> set[str]:
     from app.intelligence.autolink_reconcile import _payload_names
-    from app.services.entry_analysis import _OVERRIDE_PAYLOAD_KEYS
 
     keys = _OVERRIDE_PAYLOAD_KEYS.get(entity_type or "", ())
     return _payload_names(parsed or {}, keys) if keys else set()
@@ -1138,6 +1250,41 @@ async def _recreate_entity(db: AsyncSession, entity_type: str, snap: dict):
     return obj
 
 
+async def _count_edge_keep(db: AsyncSession, edge_id: uuid.UUID, entry_id: uuid.UUID) -> bool:
+    """A keep on an edge from a new entry is corroboration. At
+    relationship_evidence_promote_count distinct entries the edge is promoted
+    to confirmed — the nightly adjudicator's promotion, as a counter. Returns
+    True when this call promoted the edge."""
+    from app.intelligence.correlation_cache import invalidate_entity_cache
+    from app.models.entity_relationship import EntityRelationship
+    from app.services.system_settings import get_setting
+
+    edge = await db.get(EntityRelationship, edge_id)
+    if edge is None or edge.source in ("analyst_rejected", "analyst_confirmed", "analyst_created"):
+        return False
+    if edge.adjudication_verdict == "coincidental":
+        return False  # sticky, like the nightly job's demotion
+    kept = list(edge.reviewer_kept_entry_ids or [])
+    if entry_id in kept:
+        return False
+    kept.append(entry_id)
+    edge.reviewer_kept_entry_ids = kept
+    threshold = max(1, int(await get_setting("relationship_evidence_promote_count", db) or 3))
+    promoted = False
+    if len(kept) >= threshold and edge.confidence != "confirmed":
+        edge.confidence = "confirmed"
+        edge.adjudication_verdict = "corroborated"
+        edge.adjudicated_at = datetime.now(UTC)
+        promoted = True
+        for etype, eid in ((edge.source_type, edge.source_id), (edge.target_type, edge.target_id)):
+            try:
+                await invalidate_entity_cache(etype, str(eid))
+            except Exception:
+                pass
+    db.add(edge)
+    return promoted
+
+
 async def _demote_edge(db: AsyncSession, edge_id: uuid.UUID, reason: str) -> dict | None:
     """The nightly adjudicator's demotion, inline: confidence → possible,
     verdict → coincidental (sticky: later evidence never re-promotes)."""
@@ -1315,7 +1462,12 @@ async def apply_verdicts(
         counts[v.verdict] = counts.get(v.verdict, 0) + 1
         if item.kind == "link":
             judged_links += 1
-        if v.verdict == "keep" or (item.kind == "assessment" and v.verdict == "ok"):
+        if v.verdict == "keep":
+            if item.kind == "edge" and run_mode == "apply" and item.edge_id is not None:
+                if await _count_edge_keep(db, item.edge_id, entry.id):
+                    applied_n += 1
+            continue
+        if item.kind == "assessment" and v.verdict == "ok":
             continue
         reason = v.reason
         do_apply = run_mode == "apply" and _CONF_RANK[v.confidence] >= floor
