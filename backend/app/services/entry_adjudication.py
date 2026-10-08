@@ -99,7 +99,13 @@ ACTION_MERGE = "adjudication_merge"
 ACTION_EDGE_DEMOTE = "adjudication_edge_demote"
 ACTION_IOC_DROP = "adjudication_ioc_drop"
 ACTION_ASSESSMENT = "adjudication_assessment"
-ADJUDICATION_ACTIONS = {
+# History, never a proposal: the audit line an analyst's Restore writes. It
+# carries its own code so it cannot be mistaken for a fresh verdict — the
+# action codes above persist from proposal through apply (only `applied`
+# flips), so reusing one here would re-file the change that was just undone.
+ACTION_RESTORED = "adjudication_restored"
+# The stage's verdict codes: unapplied means "an analyst still has to decide".
+ADJUDICATION_PROPOSAL_ACTIONS = {
     ACTION_UNLINK,
     ACTION_RECLASSIFY,
     ACTION_VETO,
@@ -108,6 +114,9 @@ ADJUDICATION_ACTIONS = {
     ACTION_IOC_DROP,
     ACTION_ASSESSMENT,
 }
+# Everything the stage writes, proposals and history alike — what `origin`
+# filters on.
+ADJUDICATION_ACTIONS = ADJUDICATION_PROPOSAL_ACTIONS | {ACTION_RESTORED}
 
 # Redis keys
 _HOUR_KEY = "intelfeed:adjudication:hour:{hour}"
@@ -482,7 +491,7 @@ async def _current_analysis(db: AsyncSession, entry_id: uuid.UUID):
 @dataclass
 class ReviewItem:
     item_id: str
-    kind: str  # link | edge | ioc | assessment
+    kind: str  # link | edge | ioc | assessment | note (rendered, never judged)
     line: str
     entity_type: str | None = None
     entity_id: uuid.UUID | None = None
@@ -702,8 +711,24 @@ async def _recently_restored(db: AsyncSession, entry_id: uuid.UUID) -> set[tuple
     return out
 
 
+def _review_priority(item: ReviewItem) -> int:
+    """Sort key for the link cap: lowest is most worth a verdict."""
+    if item.minted_here:
+        return 0
+    if item.promoted:
+        return 1
+    if item.source != "auto_link":
+        return 2
+    return 3
+
+
 async def _link_items(
-    db: AsyncSession, entry, scope: set[str], text: str, legacy_out: list | None = None
+    db: AsyncSession,
+    entry,
+    scope: set[str],
+    text: str,
+    legacy_out: list | None = None,
+    dropped: list | None = None,
 ) -> list[ReviewItem]:
     from app.intelligence.autolinker import split_into_paragraphs
     from app.models.entity_maintenance import EntityMaintenanceLog
@@ -714,6 +739,7 @@ async def _link_items(
 
     title, content_text = entry_text_with_translation(entry)
     paragraph_map = dict(split_into_paragraphs(title, entry.summary or "", content_text))
+    dropped = dropped if dropped is not None else []
 
     promoted: dict[tuple[str, uuid.UUID], PendingAutolinkMatch] = {
         (r.entity_type, r.entity_id): r
@@ -728,6 +754,11 @@ async def _link_items(
         .all()
     }
     restored = await _recently_restored(db, entry.id)
+    # `entities` is what buys the catalogue lookup, and the lookup is what
+    # makes veto and merge answerable — without it nothing is reviewed as new.
+    # Without `links`, only the rows this article minted are reviewed at all.
+    review_new = "entities" in scope
+    established_too = "links" in scope
 
     items: list[ReviewItem] = []
     for jmodel, emodel, fk_attr, entity_type in _link_specs():
@@ -738,6 +769,9 @@ async def _link_items(
             )
         ).all()
         for junction, entity in rows:
+            minted = getattr(entity, "created_from_entry_id", None) == entry.id
+            if not established_too and not minted:
+                continue
             item = ReviewItem(
                 item_id=f"link:{entity_type}:{entity.id}",
                 kind="link",
@@ -750,27 +784,32 @@ async def _link_items(
                 matched_names=list(getattr(junction, "matched_names", None) or []),
                 paragraph_indices=list(getattr(junction, "paragraph_indices", None) or []),
                 extracted_at=getattr(junction, "extracted_at", None),
-                minted_here=getattr(entity, "created_from_entry_id", None) == entry.id,
+                minted_here=minted and review_new,
                 promoted=(entity_type, entity.id) in promoted,
                 previously_restored=(entity_type, entity.id) in restored,
             )
-            if item.minted_here and "entities" in scope:
+            if item.minted_here:
                 item.candidates = await _nearest_candidates(db, entity_type, entity)
             items.append(item)
 
     # AI-asserted TTPs: the junction has no source column; the autolinker
     # stamps source_text with an "auto_link:" prefix, the AI writes a quote.
+    # No entity mints a TTP, so they ride on the `links` scope alone.
     ttp_rows = (
-        await db.execute(
-            select(EntryTTP, TTPModel)
-            .join(TTPModel, TTPModel.id == EntryTTP.ttp_id)
-            .where(
-                EntryTTP.entry_id == entry.id,
-                EntryTTP.source_text.isnot(None),
-                ~EntryTTP.source_text.like("auto\\_link:%"),
+        (
+            await db.execute(
+                select(EntryTTP, TTPModel)
+                .join(TTPModel, TTPModel.id == EntryTTP.ttp_id)
+                .where(
+                    EntryTTP.entry_id == entry.id,
+                    EntryTTP.source_text.isnot(None),
+                    ~EntryTTP.source_text.like("auto\\_link:%"),
+                )
             )
-        )
-    ).all()
+        ).all()
+        if established_too
+        else []
+    )
     for junction, ttp in ttp_rows:
         items.append(
             ReviewItem(
@@ -788,7 +827,14 @@ async def _link_items(
             )
         )
 
-    items = items[:_MAX_LINKS]
+    # The cap used to trim whatever the list happened to end with, which was
+    # always the AI TTPs. Judge the rows that only this review can judge:
+    # entities it minted (the sole veto/merge candidates), then pending-tier
+    # promotions, then anything the AI asserted, then the autolinker's bulk.
+    if len(items) > _MAX_LINKS:
+        items.sort(key=_review_priority)
+        dropped.extend(items[_MAX_LINKS:])
+        items = items[:_MAX_LINKS]
     link_rows, maint_rows = await _legacy_rows(db, entry, items)
     if legacy_out is not None:
         legacy_out.extend([*link_rows, *maint_rows])
@@ -825,7 +871,7 @@ async def _link_items(
         if item.previously_restored:
             bits.append("an analyst restored this link recently — it will not be changed, flag it only")
         line = f"{item.item_id}  " + " · ".join(bits)
-        if item.minted_here and "entities" in scope:
+        if item.minted_here:
             if item.candidates:
                 near = "; ".join(
                     f"{c['name']} ({c['entity_type']}, {c['article_count']} articles)" for c in item.candidates
@@ -1065,19 +1111,28 @@ def _assessment_item(parsed: dict | None) -> ReviewItem | None:
 
 
 async def build_manifest(
-    db: AsyncSession, entry, parsed: dict | None, scope: set[str] | None = None, legacy_out: list | None = None
+    db: AsyncSession,
+    entry,
+    parsed: dict | None,
+    scope: set[str] | None = None,
+    legacy_out: list | None = None,
+    dropped_out: list | None = None,
 ) -> tuple[list[ReviewItem], str]:
     """Review items for the entry + the rendered prompt block. ``legacy_out``
     collects the retired jobs' pending rows the manifest rendered as earlier
     suggestions, so the caller can supersede exactly those after the review
-    (taken before the model runs: the reviewer's own rows are never among them)."""
+    (taken before the model runs: the reviewer's own rows are never among them).
+    ``dropped_out`` collects link items the per-entry cap left out."""
     from app.services.entry_analysis import analysis_content_text
 
     scope = scope or {"links", "entities", "relationships", "observables"}
     text = analysis_content_text(entry)
     items: list[ReviewItem] = []
     if "links" in scope or "entities" in scope:
-        items += await _link_items(db, entry, scope, text, legacy_out)
+        # `_link_items` reads the scope itself: `entities` decides whether a
+        # minted row is reviewed as new, `links` whether established rows are
+        # in the manifest at all.
+        items += await _link_items(db, entry, scope, text, legacy_out, dropped_out)
     if "relationships" in scope:
         items += await _edge_items(db, entry)
     if "observables" in scope:
@@ -1086,21 +1141,33 @@ async def build_manifest(
         item = _assessment_item(parsed)
         if item:
             items.append(item)
+    if dropped_out:
+        items.append(
+            ReviewItem(
+                item_id="_note",
+                kind="note",
+                line=(
+                    f"(note: this article has {len(dropped_out)} further autolinked entity links that are not "
+                    "in this list — judge only the items above)"
+                ),
+            )
+        )
     block = "\n".join(it.line for it in items)
-    return items, block
+    return [it for it in items if it.kind != "note"], block
 
 
 async def build_variables(
-    db: AsyncSession, entry, parsed: dict | None, cfg: dict
+    db: AsyncSession, entry, parsed: dict | None, cfg: dict, dropped_out: list | None = None
 ) -> tuple[list[ReviewItem], dict, list]:
-    """(items, prompt variables, legacy rows to supersede after the review)."""
+    """(items, prompt variables, legacy rows to supersede after the review).
+    ``dropped_out`` collects the link items the per-entry cap left out."""
     from app.models.feed import Feed
     from app.services.analysis_window import analysis_content_window
     from app.services.entry_analysis import analysis_content_text
     from app.services.system_settings import get_setting
 
     legacy: list = []
-    items, block = await build_manifest(db, entry, parsed, cfg["scope"], legacy_out=legacy)
+    items, block = await build_manifest(db, entry, parsed, cfg["scope"], legacy_out=legacy, dropped_out=dropped_out)
     tail_reserve = float(await get_setting("observables_analysis_tail_reserve", db) or 0.0)
     feed_title = (await db.execute(select(Feed.title).where(Feed.id == entry.feed_id))).scalar_one_or_none() or ""
     variables = {
@@ -1158,7 +1225,9 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
             if confidence not in CONFIDENCES:
                 confidence = "low"
             reason = str(entry.get("reason") or "")[:500]
-            suggested = (entry.get("suggested_type") or None) if verdict == "reclassify" else None
+            suggested = str(entry.get("suggested_type") or "").strip().lower().replace(" ", "_") or None
+            if verdict != "reclassify":
+                suggested = None
             merge_target = None
             asked = verdict
             if verdict not in VALID_FOR_KIND.get(item.kind, set()):
@@ -1356,19 +1425,17 @@ async def _entity_has_a_life(db: AsyncSession, entity_type: str, entity_id: uuid
         return True
     if getattr(obj, "created_from_entry_id", None) != entry_id:
         return True
-    other_links = False
     for jmodel, _emodel, fk_attr, etype in _link_specs():
         if etype != entity_type:
             continue
-        other_links = (
+        if (
             await db.execute(
                 select(jmodel.entry_id)
                 .where(getattr(jmodel, fk_attr) == entity_id, jmodel.entry_id != entry_id)
                 .limit(1)
             )
-        ).scalar_one_or_none() is not None
-    if other_links:
-        return True
+        ).scalar_one_or_none() is not None:
+            return True
     edge = (
         await db.execute(
             select(EntityRelationship.id)
@@ -1622,7 +1689,11 @@ async def apply_verdicts(
     counts: dict[str, int] = {}
     overridden = 0
     judged_links = 0
+    # Changes that actually ran, vs edges a keep promoted. Promotions are not
+    # changes the analyst can undo from the queue, so they are counted apart —
+    # folding them into `applied` made `shadowed` under-report.
     applied_n = 0
+    promoted_n = 0
 
     # Positive-evidence override: the reviewer may not remove a link to an
     # entity the same analysis extracted by name.
@@ -1676,7 +1747,7 @@ async def apply_verdicts(
         if v.verdict == "keep":
             if item.kind == "edge" and run_mode == "apply" and item.edge_id is not None:
                 if await _count_edge_keep(db, item.edge_id, entry.id):
-                    applied_n += 1
+                    promoted_n += 1
             continue
         if item.kind == "assessment" and v.verdict == "ok":
             continue
@@ -1845,6 +1916,7 @@ async def apply_verdicts(
         "items": items_n,
         "verdicts": counts,
         "applied": applied_n,
+        "promoted": promoted_n,
         "shadowed": max(0, len(changes) - applied_n),
         "breaker": breaker,
         "rolling_breaker": rolling,
@@ -2052,18 +2124,20 @@ async def restore_adjudication_row(db: AsyncSession, row) -> dict:
     else:
         return {"restored": False, "reason": f"nothing to restore for {row.action}"}
 
-    # The row stays as history; a restore is its own audit line.
+    # The row stays as history; a restore is its own audit line. `applied` is
+    # True and the action is ACTION_RESTORED: the restore ran, and nothing
+    # should ever offer to apply it.
     db.add(
         type(row)(
             entity_type=row.entity_type,
             entity_id=row.entity_id,
-            action=row.action,
+            action=ACTION_RESTORED,
             mode="apply",
-            before={"restored_from": str(row.id), **before},
+            before={"restored_from": str(row.id), "undid": row.action, **before},
             after={**after, "restored": True},
             reasoning=f"restored from {row.id}",
             ai_result_id=row.ai_result_id,
-            applied=False,
+            applied=True,
         )
     )
     row.after = {**after, "restored": True}

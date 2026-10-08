@@ -413,7 +413,8 @@ RETRYABLE_STAGE_TASKS: dict[str, str] = {
     "correlation": "app.workers.automation_tasks.detect_correlation_events",
     "requirements": "app.workers.intel_feed_tasks.match_requirements_task",
     "score": "app.workers.signal_tasks.score_entry_task",
-    # Re-checks every gate itself, so a manual retry is safe.
+    # A manual retry is a deliberate bypass of the enqueue gates — the task
+    # re-checks only the master switch. See retry_pipeline_stage.
     "adjudicate": "app.workers.adjudication_tasks.adjudicate_entry_task",
 }
 
@@ -494,7 +495,7 @@ async def entry_adjudication(
         ACTION_RECLASSIFY,
         ACTION_UNLINK,
         ACTION_VETO,
-        ADJUDICATION_ACTIONS,
+        ADJUDICATION_PROPOSAL_ACTIONS,
         TASK_NAME,
     )
 
@@ -548,6 +549,7 @@ async def entry_adjudication(
                 "reason": r.reason,
                 "suggested_type": r.suggested_entity_type,
                 "applied": r.action in ("removed", "restored"),
+                "restored": r.action == "restored",
                 "log": f"link_validator:{r.id}",
                 "action": r.action,
             }
@@ -555,8 +557,10 @@ async def entry_adjudication(
     maint_rows = (
         (
             await db.execute(
+                # Proposal actions only: an ACTION_RESTORED row is the audit
+                # line for an undo, and its verdict is already on the row it undid.
                 select(EntityMaintenanceLog).where(
-                    EntityMaintenanceLog.action.in_(sorted(ADJUDICATION_ACTIONS)),
+                    EntityMaintenanceLog.action.in_(sorted(ADJUDICATION_PROPOSAL_ACTIONS)),
                     EntityMaintenanceLog.before["entry_id"].astext == str(eid),
                 )
             )
@@ -597,6 +601,9 @@ async def entry_adjudication(
                 "suggested_type": after.get("suggested_type"),
                 "merge_into": after.get("merge_into"),
                 "applied": bool(r.applied),
+                # An analyst already put this one back: neither Apply nor
+                # Restore is on offer any more.
+                "restored": bool(after.get("restored")),
                 "log": f"entity_maintenance:{r.id}",
                 "action": r.action,
             }

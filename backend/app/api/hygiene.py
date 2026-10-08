@@ -68,9 +68,11 @@ from app.services.entry_adjudication import (
     ACTION_IOC_DROP,
     ACTION_MERGE,
     ACTION_RECLASSIFY,
+    ACTION_RESTORED,
     ACTION_UNLINK,
     ACTION_VETO,
     ADJUDICATION_ACTIONS,
+    ADJUDICATION_PROPOSAL_ACTIONS,
     LEGACY_MAINT_ACTIONS,
     legacy_row_is_orphaned,
 )
@@ -996,7 +998,8 @@ _MAINTENANCE_PROPOSAL_ACTIONS = {
     "ttp_malformed_id",
     "cve_malformed_id",
     "cve_withdrawn",
-    *ADJUDICATION_ACTIONS,
+    # Not ACTION_RESTORED: an analyst's undo is history, not a fresh verdict.
+    *ADJUDICATION_PROPOSAL_ACTIONS,
 }
 # Maintenance actions whose code is used for BOTH a shadow preview and the
 # real apply. UI labels them in past tense ("Merged", "Reclassified",
@@ -1043,6 +1046,8 @@ def _row_actions_maint(row: EntityMaintenanceLog) -> list[str]:
     if row.action == "cve_withdrawn" and not row.applied:
         return ["apply", "dismiss"]
     if row.action in ADJUDICATION_ACTIONS:
+        if row.action == ACTION_RESTORED:
+            return []  # the undo already ran; this row is the audit line
         if row.action == ACTION_ASSESSMENT:
             return ["dismiss"] if not row.applied else []
         if not row.applied:
@@ -1166,6 +1171,9 @@ def _adjudication_subject(row: EntityMaintenanceLog) -> str:
         return f"Drop: {after.get('value') or '?'} ({after.get('kind') or 'observable'}, {where})"
     if row.action == ACTION_ASSESSMENT:
         return f"Assessment {after.get('verdict') or '?'}"
+    if row.action == ACTION_RESTORED:
+        undid = (before.get("undid") or "").removeprefix("adjudication_") or "change"
+        return f"Restored: {name or row.entity_type} ({undid} undone by an analyst)"
     return row.action
 
 
@@ -1590,7 +1598,7 @@ async def hygiene_stats(
             select(func.count())
             .select_from(EntityMaintenanceLog)
             .where(
-                EntityMaintenanceLog.action.in_(sorted(ADJUDICATION_ACTIONS)),
+                EntityMaintenanceLog.action.in_(sorted(ADJUDICATION_PROPOSAL_ACTIONS)),
                 EntityMaintenanceLog.applied.is_(False),
             )
         )
@@ -2886,7 +2894,7 @@ class AdjudicationRowResult(BaseModel):
 
 async def _adjudication_row(db: AsyncSession, log_id: uuid.UUID) -> EntityMaintenanceLog:
     row = (await db.execute(select(EntityMaintenanceLog).where(EntityMaintenanceLog.id == log_id))).scalar_one_or_none()
-    if row is None or row.action not in ADJUDICATION_ACTIONS:
+    if row is None or row.action not in ADJUDICATION_PROPOSAL_ACTIONS:
         raise AppError(code="not_found", message="adjudication proposal not found", status_code=404)
     return row
 
@@ -3190,9 +3198,9 @@ async def apply_adjudication_all(
     errors: list[dict] = []
     budget = body.limit
 
-    maint_actions = sorted(ADJUDICATION_ACTIONS - {ACTION_ASSESSMENT})
+    maint_actions = sorted(ADJUDICATION_PROPOSAL_ACTIONS - {ACTION_ASSESSMENT})
     if body.action and body.action != "shadow_remove":
-        if body.action not in ADJUDICATION_ACTIONS or body.action == ACTION_ASSESSMENT:
+        if body.action not in ADJUDICATION_PROPOSAL_ACTIONS or body.action == ACTION_ASSESSMENT:
             raise AppError(
                 code="invalid", message=f"not an applyable adjudication action: {body.action}", status_code=400
             )

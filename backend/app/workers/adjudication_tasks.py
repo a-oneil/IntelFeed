@@ -147,7 +147,8 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
 
             # Legacy rows are taken here, before the model runs, so the
             # reviewer's own freshly written rows are never superseded.
-            items, variables, legacy_rows = await build_variables(db, entry, parsed, cfg)
+            dropped: list = []
+            items, variables, legacy_rows = await build_variables(db, entry, parsed, cfg, dropped_out=dropped)
             if not items:
                 return await _finish(COMPLETED, {"skipped": "nothing_to_review", "mode": cfg["mode"], "items": 0})
 
@@ -190,6 +191,8 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
             detail["superseded"] = await supersede_legacy_proposals(db, legacy_rows)
             detail["unknown_ids"] = stats["unknown"]
             detail["coerced_verdicts"] = stats["coerced"]
+            if dropped:
+                detail["uncapped_links"] = len(dropped)
             if stats["duplicate"]:
                 detail["skipped"] = "ai_bad_shape"
             return await _finish(COMPLETED, detail)

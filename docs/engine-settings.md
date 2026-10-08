@@ -367,7 +367,12 @@ article next to a manifest of everything the analysis wrote to it — entity
 links of every source, entities it minted (with their nearest catalogue names
 pre-fetched), pending-tier promotions, relationship claims, AI observables —
 and returns one verdict per item: keep, remove, reclassify, veto, merge,
-demote or drop. `backend/app/services/entry_adjudication.py`,
+demote or drop. A manifest holds at most 60 entity links, 10 relationship
+claims and 25 observables; when an article has more links than that, the ones
+only this review can judge come first — entities it minted, then pending-tier
+promotions, then AI assertions, then the autolinker's bulk — the prompt says
+the list is partial, and the run's `detail.uncapped_links` records the
+remainder. `backend/app/services/entry_adjudication.py`,
 `backend/app/workers/adjudication_tasks.py`; stage `adjudicate` (kind
 `post_analysis`), task `adjudicate_entry_task` on the `ai` Celery queue,
 dispatched from the analysis landing path (`enqueue_adjudication`), not
@@ -384,7 +389,7 @@ behind it is `entry_adjudication` (Settings → AI Configuration → Prompts).
 | `adjudication_apply_min_confidence` | `high` \| `medium` \| `low`, default `high` | In apply mode, verdicts below this confidence are filed as proposals instead of applied. |
 | `adjudication_circuit_breaker_pct` | float, `0.5` | If more than this share of an entry's items come back destructive (remove + veto + demote + drop), the whole run is downgraded to proposals. A rolling mean over the last 50 runs above the same threshold (once 10 samples exist) pauses dispatch for an hour, logs a warning, and surfaces as `adjudication_breaker_until` in the hygiene stats and a chip in the Engine needs-you row. |
 | `adjudication_content_max_chars` | int, `8000` | Article text in the review prompt (head + indicator tail, the extraction window). |
-| `adjudication_scope` | csv, `links,entities,relationships,observables` | Manifest sections the reviewer sees. `assessment` is opt-in and only ever logged. |
+| `adjudication_scope` | csv, `links,entities,relationships,observables` | Manifest sections the reviewer sees. `links` puts every entity link on the article under review; `entities` adds the catalogue lookup that makes `veto` and `merge` answerable, and on its own narrows the review to what this article minted. `assessment` is opt-in and only ever logged. |
 
 **Gates**, first hit wins, each recorded on `ai_analysis_requests.adjudication_status`:
 mode (`skipped_off`) → feed plan, only when pipeline plans are on
@@ -415,7 +420,9 @@ live `stale` filter on the AI-entities view.
 **Queue.** The Proposals lens has an origin facet (`adjudicator` | `legacy`),
 per-row Apply / Dismiss / Restore, bulk **Apply all**
 (`POST /api/admin/hygiene/adjudication/apply-all`) and **Dismiss all** scoped
-by origin. When a review completes it deletes the legacy pending rows it showed
+by origin. A restore writes its own `adjudication_restored` audit line rather
+than reusing the verdict's code, so an undo reads as history: it stays out of
+the pending count, out of Apply all, and offers no buttons of its own. When a review completes it deletes the legacy pending rows it showed
 the model as earlier suggestions (merge-engine and stale-sweep proposals about
 entities this entry minted, validator rows on this entry). Legacy proposals no
 entry can carry are listed by `GET /api/admin/hygiene/feed?orphaned=true` for

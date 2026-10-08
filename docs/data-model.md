@@ -357,7 +357,10 @@ Audit trail for autonomous entity maintenance (merge/alias/description actions b
 - `id` (UUID PK)
 - `entity_type` (String 30, indexed) — canonical slugs from `app/entity_types.py`, e.g. "threat_actor", "malware"
 - `entity_id` (UUID, nullable, indexed) — surviving/updated entity; NULL for cluster no-ops
-- `action` (String 40, indexed) — "merge", "update_description", "update_aliases", "no_op"
+- `action` (String 40, indexed) — "merge", "update_description", "update_aliases", "no_op", the on-demand
+  scanners' proposal codes, and the adjudicate stage's `adjudication_*` verdicts. An `adjudication_restored`
+  row is the audit line an analyst's undo writes: it is always `applied`, carries the code it undid in
+  `before.undid`, and is deliberately not a proposal, so nothing offers to apply it again
 - `mode` (String 10) — "shadow" or "apply"
 - `before`, `after` (JSONB) — snapshots
 - `reasoning` (Text), `ai_result_id` (FK, SET NULL), `applied` (Boolean)

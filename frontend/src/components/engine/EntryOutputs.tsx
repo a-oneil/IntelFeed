@@ -86,8 +86,9 @@ function VerdictBadge({ verdict, entryId }: { verdict: EntryAdjudicationVerdict 
   if (!verdict || verdict.verdict === "keep") return null;
   const [logSource, logId] = verdict.log.split(":");
   const maint = logSource === "entity_maintenance";
-  const canApply = !verdict.applied && verdict.kind !== "assessment";
-  const canRestore = verdict.applied && verdict.verdict !== "merge";
+  const canApply = !verdict.applied && !verdict.restored && verdict.kind !== "assessment";
+  // Merges are undone from the merge engine's tombstone, not from here.
+  const canRestore = verdict.applied && !verdict.restored && verdict.verdict !== "merge";
   const run = async (what: "apply" | "restore") => {
     try {
       if (maint) {
@@ -117,9 +118,12 @@ function VerdictBadge({ verdict, entryId }: { verdict: EntryAdjudicationVerdict 
       : verdict.verdict === "reclassify" && verdict.suggested_type
         ? `${label} → ${verdict.suggested_type}`
         : label;
-  const title = `AI review: ${detail}${verdict.applied ? " (applied)" : " (proposed, not applied)"}${
-    verdict.reason ? ` — ${verdict.reason}` : ""
-  }`;
+  const state = verdict.restored
+    ? " (applied, then restored by an analyst)"
+    : verdict.applied
+      ? " (applied)"
+      : " (proposed, not applied)";
+  const title = `AI review: ${detail}${state}${verdict.reason ? ` — ${verdict.reason}` : ""}`;
   return (
     <>
       <span className={`${styles.verdictPill} ${verdict.applied ? styles.verdictApplied : styles.verdictShadow}`} title={title}>

@@ -19,6 +19,7 @@ from app.models.pending_autolink import PendingAutolinkMatch
 from app.models.system_setting import SystemSettings
 from app.models.threat_actor import EntryThreatActor, ThreatActor
 from app.models.tool import EntryTool, Tool
+from app.models.ttp import TTP, EntryTTP
 from app.services import entry_adjudication as adj
 from app.services.entry_adjudication import (
     ACTION_EDGE_DEMOTE,
@@ -1896,3 +1897,249 @@ async def test_matrix_retry_requeues_the_request_row(
     db_session.expire_all()
     await db_session.refresh(row)
     assert row.adjudication_status == adj.PENDING and row.adjudication_queued_at is not None
+
+
+# ------------------------------------------------------------------ review round (part 10)
+
+
+@pytest.mark.asyncio
+async def test_a_restore_is_history_not_a_fresh_verdict(client, admin_headers, db_session: AsyncSession, feed):
+    """A restore used to re-file its own action with applied=False, so the
+    needs-you chip counted it and "Apply all" re-ran the change just undone."""
+    await _seed_settings(db_session)
+    entry = await _make_entry(db_session, feed)
+    victim = await _link_actor(
+        db_session, entry, "Water Utility Co", source="ai", minted=True, article_count=1, aliases=["WUC"]
+    )
+    _items, verdicts = await _verdicts_for(
+        db_session,
+        entry,
+        [{"item_id": f"link:threat_actor:{victim.id}", "verdict": "veto", "confidence": "high", "reason": "victim"}],
+    )
+    cfg = await adj._settings(db_session)
+    await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
+    await db_session.commit()
+    row = (
+        await db_session.execute(select(EntityMaintenanceLog).where(EntityMaintenanceLog.action == ACTION_VETO))
+    ).scalar_one()
+
+    assert (
+        await client.post(f"/api/admin/hygiene/adjudication/{row.id}/apply", headers=admin_headers)
+    ).status_code == 200
+    assert (
+        await client.post(f"/api/admin/hygiene/adjudication/{row.id}/restore", headers=admin_headers)
+    ).status_code == 200
+
+    # The audit line carries its own action, is already applied, and offers nothing.
+    audit = (
+        await db_session.execute(select(EntityMaintenanceLog).where(EntityMaintenanceLog.action == adj.ACTION_RESTORED))
+    ).scalar_one()
+    assert audit.applied is True and audit.before["undid"] == ACTION_VETO
+
+    stats = (await client.get("/api/admin/hygiene/stats", headers=admin_headers)).json()
+    assert stats["adjudication_pending"] == 0
+    pending = (
+        await client.get(
+            "/api/admin/hygiene/feed", params={"origin": "adjudicator", "pending": True}, headers=admin_headers
+        )
+    ).json()["rows"]
+    assert pending == []
+
+    # It still reads as adjudicator-origin history, with no buttons.
+    rows = (
+        await client.get(
+            "/api/admin/hygiene/feed", params={"origin": "adjudicator", "mode": "apply"}, headers=admin_headers
+        )
+    ).json()["rows"]
+    audit_row = next(r for r in rows if r["action"] == adj.ACTION_RESTORED)
+    assert audit_row["actions"] == [] and audit_row["origin"] == "adjudicator"
+
+    # And apply-all leaves the restored entity alone.
+    resp = await client.post("/api/admin/hygiene/adjudication/apply-all", json={}, headers=admin_headers)
+    assert resp.status_code == 200 and resp.json()["applied"] == 0
+    db_session.expire_all()
+    assert (
+        await db_session.execute(select(ThreatActor).where(ThreatActor.id == victim.id))
+    ).scalar_one_or_none() is not None
+
+
+@pytest.mark.asyncio
+async def test_restore_endpoints_reject_an_audit_row(client, admin_headers, db_session: AsyncSession, feed):
+    await _seed_settings(db_session)
+    entry = await _make_entry(db_session, feed)
+    db_session.add(
+        EntityMaintenanceLog(
+            entity_type="threat_actor",
+            entity_id=uuid.uuid4(),
+            action=adj.ACTION_RESTORED,
+            mode="apply",
+            before={"entry_id": str(entry.id)},
+            after={"restored": True},
+            applied=True,
+        )
+    )
+    await db_session.commit()
+    row = (
+        await db_session.execute(select(EntityMaintenanceLog).where(EntityMaintenanceLog.action == adj.ACTION_RESTORED))
+    ).scalar_one()
+    for verb in ("apply", "restore"):
+        resp = await client.post(f"/api/admin/hygiene/adjudication/{row.id}/{verb}", headers=admin_headers)
+        assert resp.status_code == 404, f"{verb}: {resp.text}"
+
+
+@pytest.mark.asyncio
+async def test_drawer_shows_a_restored_verdict_once_with_no_actions_left(
+    client, admin_headers, db_session: AsyncSession, feed
+):
+    await _seed_settings(db_session)
+    entry = await _make_entry(db_session, feed)
+    victim = await _link_actor(db_session, entry, "Water Utility Co", source="ai", minted=True, article_count=1)
+    _items, verdicts = await _verdicts_for(
+        db_session,
+        entry,
+        [{"item_id": f"link:threat_actor:{victim.id}", "verdict": "veto", "confidence": "high", "reason": "victim"}],
+    )
+    cfg = await adj._settings(db_session)
+    await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
+    await db_session.commit()
+    row = (
+        await db_session.execute(select(EntityMaintenanceLog).where(EntityMaintenanceLog.action == ACTION_VETO))
+    ).scalar_one()
+    await client.post(f"/api/admin/hygiene/adjudication/{row.id}/apply", headers=admin_headers)
+    await client.post(f"/api/admin/hygiene/adjudication/{row.id}/restore", headers=admin_headers)
+
+    body = (await client.get(f"/api/engine/entries/{entry.id}/adjudication", headers=admin_headers)).json()
+    vetoes = [v for v in body["verdicts"] if v["verdict"] == "veto"]
+    assert len(vetoes) == 1, body["verdicts"]
+    assert vetoes[0]["applied"] is True and vetoes[0]["restored"] is True
+
+
+@pytest.mark.asyncio
+async def test_edge_promotion_is_not_counted_as_an_applied_change(db_session: AsyncSession, feed):
+    """`applied` means "a change ran"; a keep that bumps the promote counter
+    is its own tally, or `shadowed` under-reports the queued proposals."""
+    await _seed_settings(db_session, adjudication_mode="apply", adjudication_apply_min_confidence="high")
+    entry = await _make_entry(db_session, feed)
+    actor = await _link_actor(db_session, entry, "Warlock", article_count=9)
+    malware = MalwareFamily(name="Warlock Locker", article_count=4)
+    db_session.add(malware)
+    await db_session.flush()
+    edge = EntityRelationship(
+        source_type="threat_actor",
+        source_id=actor.id,
+        target_type="malware",
+        target_id=malware.id,
+        relationship_type="uses",
+        confidence="probable",
+        source="auto_extracted",
+        evidence_entry_ids=[entry.id],
+        reviewer_kept_entry_ids=[uuid.uuid4(), uuid.uuid4()],
+    )
+    db_session.add(edge)
+    await db_session.flush()
+
+    _items, verdicts = await _verdicts_for(
+        db_session,
+        entry,
+        [
+            {"item_id": f"edge:{edge.id}", "verdict": "keep", "confidence": "high", "reason": "asserted"},
+            # Below the floor, so it files as a proposal rather than running.
+            {
+                "item_id": f"link:threat_actor:{actor.id}",
+                "verdict": "remove",
+                "confidence": "low",
+                "reason": "unsure",
+            },
+        ],
+    )
+    cfg = await adj._settings(db_session)
+    detail = await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
+    await db_session.flush()
+    await db_session.refresh(edge)
+    assert edge.confidence == "confirmed"
+    assert detail["promoted"] == 1
+    assert detail["applied"] == 0
+    assert detail["shadowed"] == 1  # the low-confidence remove is still waiting
+
+
+@pytest.mark.asyncio
+async def test_the_link_cap_keeps_the_rows_only_this_review_can_judge(db_session: AsyncSession, feed, monkeypatch):
+    monkeypatch.setattr(adj, "_MAX_LINKS", 3)
+    entry = await _make_entry(db_session, feed)
+    bulk = [await _link_actor(db_session, entry, f"Bulk Actor {i}", article_count=50) for i in range(6)]
+    minted = await _link_actor(db_session, entry, "Brand New Crew", source="ai", minted=True, article_count=1)
+    asserted = await _link_actor(db_session, entry, "Named By The AI", source="ai", article_count=7)
+
+    dropped: list = []
+    items, block = await build_manifest(db_session, entry, _payload(), dropped_out=dropped)
+    ids = {it.item_id for it in items}
+    assert len(items) == 3
+    assert f"link:threat_actor:{minted.id}" in ids
+    assert f"link:threat_actor:{asserted.id}" in ids
+    assert len(dropped) == 5 and all(it.source == "auto_link" for it in dropped)
+    # One slot is left over after the two that matter, and it goes to the bulk.
+    assert len([b for b in bulk if f"link:threat_actor:{b.id}" in ids]) == 1
+    # The model is told the list is partial, and the note is never an item.
+    assert "not in this list" in block and "_note" not in ids
+
+
+@pytest.mark.asyncio
+async def test_scope_entities_only_reviews_what_this_article_minted(db_session: AsyncSession, feed):
+    entry = await _make_entry(db_session, feed)
+    established = await _link_actor(db_session, entry, "Warlock", article_count=30)
+    minted = await _link_actor(db_session, entry, "Brand New Crew", source="ai", minted=True, article_count=1)
+    ttp = TTP(technique_id="T1486", technique_name="Data Encrypted for Impact")
+    db_session.add(ttp)
+    await db_session.flush()
+    db_session.add(
+        EntryTTP(entry_id=entry.id, ttp_id=ttp.id, confidence="high", source_text="they encrypted the shares")
+    )
+    await db_session.flush()
+
+    # No entity mints a TTP, so a TTP row is an established link, not a new one.
+    items, block = await build_manifest(db_session, entry, _payload(), scope={"entities"})
+    assert {it.item_id for it in items} == {f"link:threat_actor:{minted.id}"}
+    assert "T1486" not in block
+
+    # `links` alone keeps every link but answers no catalogue question, so
+    # nothing is veto- or merge-eligible.
+    items, _ = await build_manifest(db_session, entry, _payload(), scope={"links"})
+    assert {it.item_id for it in items} == {
+        f"link:threat_actor:{established.id}",
+        f"link:threat_actor:{minted.id}",
+        f"link:ttp:{ttp.id}",
+    }
+    assert all(not it.minted_here and not it.candidates for it in items)
+    # The rendered line must agree with the matrix: no row claims to be new.
+    _items, block = await build_manifest(db_session, entry, _payload(), scope={"links"})
+    assert "NEW, created by this article" not in block
+    out, _ = _validate_verdicts(
+        {"verdicts": [{"item_id": f"link:threat_actor:{minted.id}", "verdict": "veto", "confidence": "high"}]}, items
+    )
+    assert all(v.verdict == "keep" for v in out)
+
+
+def test_a_title_cased_suggested_type_still_reclassifies():
+    item = ReviewItem(
+        item_id="link:threat_actor:x",
+        kind="link",
+        line="",
+        entity_type="threat_actor",
+        entity_id=uuid.uuid4(),
+        name="Scattered Spider",
+    )
+    out, _ = _validate_verdicts(
+        {
+            "verdicts": [
+                {
+                    "item_id": item.item_id,
+                    "verdict": "reclassify",
+                    "confidence": "high",
+                    "suggested_type": "Malware",
+                    "reason": "it is a family",
+                }
+            ]
+        },
+        [item],
+    )
+    assert out[0].verdict == "reclassify" and out[0].suggested_type == "malware"

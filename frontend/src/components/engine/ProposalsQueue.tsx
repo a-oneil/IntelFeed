@@ -51,6 +51,7 @@ const CHANGE_META: Record<string, { label: string; cls: string }> = {
   adjudication_edge_demote: { label: "Demote edge", cls: styles.tRecl },
   adjudication_ioc_drop: { label: "Drop observable", cls: styles.tRecl },
   adjudication_assessment: { label: "Assessment", cls: styles.tStale },
+  adjudication_restored: { label: "Verdict restored", cls: styles.tVlink },
   // applied history
   removed: { label: "Link removed", cls: styles.tRemove },
   restored: { label: "Link restored", cls: styles.tVlink },
@@ -109,6 +110,7 @@ const ENTITY_HISTORY_FILTERS = [
   { value: "orphan_prune", label: "Orphans" },
   { value: "update_description,update_aliases", label: "Profile" },
   { value: "ai_enrich_filled,ai_enrich_unknown", label: "AI enrich" },
+  { value: "adjudication_restored", label: "Restored" },
 ];
 
 

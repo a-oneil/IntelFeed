@@ -381,7 +381,7 @@ All flags are DB-backed per environment — flipping them in dev does nothing fo
 ## Operational notes
 
 - **Plan edits outside the API don't propagate immediately.** Cached resolutions live up to 600s keyed on the version counter; the API bumps it on every write, but a direct DB edit to `pipeline_plans` without `bump_plan_version()` waits out the TTL.
-- **Global plans can't be deleted** via the API (`delete_plan`, `api/engine.py:1382`) — deactivate or empty them instead.
+- **Global plans can't be deleted** via the API (`delete_plan`, `backend/app/api/engine.py:1389`) — deactivate or empty them instead.
 - **Run logging is write-path-only.** Disabling `pipeline_run_logging_enabled` stops new `entry_pipeline_runs` rows but the ops console keeps serving existing ones until retention prunes them.
 - **Retry re-runs the whole stage.** The retry endpoint just re-sends the task with the entry id; stages are idempotent (junction upserts, signal upserts), so this is safe, but it does not resume the chord — downstream stages are not re-triggered.
 - **Rate recompute denominator** is entries *scored* in the 30-day window, not entries fetched (`signal_tasks.py:192-196`) — so a large backfill shifts rates only in proportion to what it scored, not what it skimmed past.

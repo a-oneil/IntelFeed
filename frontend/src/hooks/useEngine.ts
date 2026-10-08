@@ -206,6 +206,8 @@ export interface EntryAdjudicationVerdict {
   suggested_type?: string | null;
   merge_into?: string | null;
   applied: boolean;
+  /** An analyst already put this one back: neither Apply nor Restore applies. */
+  restored: boolean;
   log: string;
   action: string;
 }
