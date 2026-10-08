@@ -34,8 +34,9 @@ export function useHygieneRowAction() {
   const invalidate = () => qc.invalidateQueries({ queryKey: ["hygiene"] });
 
   return async function handleRowAction(row: FeedRow, action: string) {
-    // Proposals the adjudicate stage filed: one apply / restore endpoint for
-    // every kind, the stage's own code path.
+    // Proposals the adjudicate stage filed (veto / merge / unlink / reclassify /
+    // edge demote / ioc drop): one apply / restore endpoint for every kind, the
+    // stage's own code path.
     if (row.source === "entity_maintenance" && row.action.startsWith("adjudication_") && (action === "apply" || action === "restore")) {
       try {
         const res = await api.post<{ applied: boolean; restored: boolean; reason: string | null; detail: Record<string, unknown> }>(
@@ -117,6 +118,9 @@ export function useHygieneRowAction() {
         }
         return;
       }
+      // Reachable: a shadow `orphan_prune` row still advertises apply (see
+      // _row_actions_maint) and the flagger that minted them is retired, so
+      // those legacy rows only have Dismiss here.
       toast.error(`No apply path for ${row.action}`);
       return;
     }

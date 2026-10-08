@@ -32,6 +32,7 @@ import { EntryOutputs } from "./EntryOutputs";
 import { ExtractionTab } from "./ExtractionTab";
 import { ProposalsQueue } from "./ProposalsQueue";
 import { StagePanel } from "./StagePanel";
+import { skipReason } from "./adjudicationCopy";
 import type { EngineDest } from "./engineSettingsIndex";
 import m from "./EngineMatrix.module.css";
 import styles from "./ProcessingTab.module.css";
@@ -139,6 +140,15 @@ const STAGE_HINTS: Record<string, { title: string; body: string; aside?: string 
   },
 };
 
+/** A synthetic or real cell's skip code, if any: `status: "skipped"` carries
+ *  it in `detail.skipped`; a success run that bailed carries the same key. */
+function cellSkipCode(cell: ProcessingStageCell | undefined): string | null {
+  if (!cell || cell.status === "error" || cell.status === "retry" || cell.status === "queued") return null;
+  const code = (cell.detail as { skipped?: unknown } | null | undefined)?.skipped;
+  if (typeof code === "string" && code) return code;
+  return cell.status === "skipped" ? "skipped" : null;
+}
+
 /** Verdict glyphs for the adjudicate stage's Output cell. Keys match the
  *  `detail.verdicts` counters the task returns (see pipeline_logging). */
 const VERDICT_GLYPHS: { key: string; glyph: string; title: string }[] = [
@@ -158,14 +168,22 @@ function AdjudicateOutputCell({ cell }: { cell: ProcessingStageCell | undefined 
     | null
     | undefined;
   if (!cell) return <span className={`${m.outCell} ${m.outZero}`}>·</span>;
-  if (cell.status !== "success" || !detail) return <span className={`${m.outCell} ${m.outZero}`}>·</span>;
-  if (detail.skipped) {
+  if (cell.status === "queued") {
     return (
-      <span className={`${m.outCell} ${m.outZero}`} title={`skipped: ${detail.skipped.replace(/_/g, " ")}`}>
+      <span className={`${m.outCell} ${m.outQueued}`} title="queued — waiting on the AI worker">
+        …
+      </span>
+    );
+  }
+  const skip = cellSkipCode(cell);
+  if (skip) {
+    return (
+      <span className={`${m.outCell} ${m.outZero}`} title={`skipped: ${skipReason(skip)}`}>
         —
       </span>
     );
   }
+  if (cell.status !== "success" || !detail) return <span className={`${m.outCell} ${m.outZero}`}>·</span>;
   const verdicts = detail.verdicts ?? {};
   const shown = VERDICT_GLYPHS.filter((v) => (verdicts[v.key] ?? 0) > 0);
   const shadow = detail.mode !== "apply";
@@ -581,6 +599,12 @@ export function EngineMatrix({
     },
   ];
   const activeAttention = attention.filter((a) => (a.n ?? 0) > 0);
+  // The adjudicate stage's rolling circuit breaker: not a count, a state —
+  // dispatch is paused until the timestamp lifts.
+  const breakerUntil = hygieneStats?.adjudication_breaker_until
+    ? new Date(hygieneStats.adjudication_breaker_until)
+    : null;
+  const breakerActive = !!breakerUntil && !Number.isNaN(breakerUntil.getTime()) && breakerUntil.getTime() > Date.now();
 
   const peekInfo = peek ? overviewByStage[peek.stage] : undefined;
 
@@ -665,7 +689,23 @@ export function EngineMatrix({
               </button>
             </Hint>
           ))}
-          {activeAttention.length === 0 && <span className={m.attnClear}>All clear — no queues need review.</span>}
+          {breakerActive && breakerUntil && (
+            <button
+              type="button"
+              className={`${m.achip} ${m.aWarn}`}
+              title={`rolling circuit breaker tripped; dispatch resumes at ${breakerUntil.toLocaleTimeString()}`}
+              onClick={() => {
+                switchView("entries");
+                setOpenStage("adjudicate");
+              }}
+            >
+              <span className={m.achipDot} />
+              adjudication paused (breaker)
+            </button>
+          )}
+          {activeAttention.length === 0 && !breakerActive && (
+            <span className={m.attnClear}>All clear — no queues need review.</span>
+          )}
         </div>
         <div className={m.attnTools}>
           <button type="button" className={m.browseBtn} onClick={() => onBrowse("jobs")}>
@@ -1183,6 +1223,21 @@ function StatusCell({
         retry
       </span>
     );
+  if (cell.status === "queued")
+    return (
+      <span className={`${styles.pip} ${styles.pend}`} title={`${title} · queued — waiting on the AI worker`}>
+        queued
+      </span>
+    );
+  // A gate skipped the stage, or the run bailed before reviewing anything —
+  // never a green "ok", the reason lives in the tooltip.
+  const skip = cellSkipCode(cell);
+  if (skip)
+    return (
+      <span className={`${styles.pip} ${styles.skip}`} title={`${title} · skipped — ${skipReason(skip)}`}>
+        —
+      </span>
+    );
   return (
     <span className={`${styles.pip} ${styles.ok}`} title={`${title} · success`}>
       {fmtMs(cell.duration_ms) || "ok"}
@@ -1272,13 +1327,28 @@ function Row({
                     .map((s) => {
                       const c = entry.stages[s];
                       const isErr = c.status === "error";
-                      const dotCls = isErr ? styles.sdotErr : c.status === "retry" ? styles.sdotRetry : styles.sdotOk;
+                      const skip = cellSkipCode(c);
+                      const dotCls = isErr
+                        ? styles.sdotErr
+                        : c.status === "retry" || c.status === "queued"
+                          ? styles.sdotRetry
+                          : skip
+                            ? styles.sdotSkip
+                            : styles.sdotOk;
                       return (
                         <div key={s} className={`${styles.srow} ${isErr ? styles.srowErr : ""}`}>
                           <span className={`${styles.sdot} ${dotCls}`} />
                           <span className={styles.sname}>{labelByStage[s] ?? s}</span>
                           <span className={styles.sdetail}>
-                            {isErr ? c.error : c.status === "retry" ? "retrying" : ""}
+                            {isErr
+                              ? c.error
+                              : c.status === "retry"
+                                ? "retrying"
+                                : c.status === "queued"
+                                  ? "queued — waiting on the AI worker"
+                                  : skip
+                                    ? `skipped — ${skipReason(skip)}`
+                                    : ""}
                           </span>
                           {isErr && c.retryable ? (
                             <button className={styles.retrybtn} onClick={() => onRetry(entry.id, s)}>

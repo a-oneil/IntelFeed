@@ -17,6 +17,7 @@ import type { EntityType } from "@/stores/intelStore";
 import { getEntityCssVar, getEntityLabel } from "@/utils/entityTheme";
 
 import styles from "./EngineMatrix.module.css";
+import { skipReason } from "./adjudicationCopy";
 import { confirmDialog } from "@/utils/dialog";
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -53,6 +54,19 @@ function EntityChip({ type, id, name }: { type: string; id: string; name: string
 }
 
 const LIST_LIMIT = 25;
+
+function fmtDuration(ms: number | null | undefined): string {
+  if (ms == null) return "";
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+  return `${(ms / 60_000).toFixed(1)}m`;
+}
+
+/** `ioc:<kind>:<value>` — the value may itself contain colons (URLs, IPv6). */
+function parseIocItemId(itemId: string): { kind: string; value: string } {
+  const m = /^ioc:([^:]*):(.*)$/.exec(itemId);
+  return m ? { kind: m[1], value: m[2] } : { kind: "", value: itemId };
+}
 
 const VERDICT_LABEL: Record<string, string> = {
   keep: "keep",
@@ -148,19 +162,33 @@ export function EntryOutputs({ entryId }: { entryId: string }) {
   const adjQ = useEntryAdjudication(entryId);
   const verdictById = new Map<string, EntryAdjudicationVerdict>();
   for (const v of adjQ.data?.verdicts ?? []) verdictById.set(v.item_id, v);
-  const adjDetail = adjQ.data?.run?.detail as { mode?: string; items?: number; verdicts?: Record<string, number> } | null | undefined;
+  const adjRun = adjQ.data?.run;
+  const adjDetail = adjRun?.detail as
+    | { mode?: string; items?: number; verdicts?: Record<string, number>; skipped?: string }
+    | null
+    | undefined;
   const adjStatus = adjQ.data?.status;
+  const adjMode = adjRun?.mode ?? adjDetail?.mode;
+  const adjDur = fmtDuration(adjRun?.duration_ms);
   const adjSummary =
     adjStatus === "completed" && adjDetail
-      ? `AI review: ${adjDetail.items ?? 0} items · ${Object.entries(adjDetail.verdicts ?? {})
-          .filter(([k]) => k !== "keep")
-          .map(([k, n]) => `${n} ${k}`)
-          .join(", ") || "all kept"}${adjDetail.mode === "apply" ? " · applied" : " · proposals only"}`
+      ? adjDetail.skipped
+        ? `AI review: skipped — ${skipReason(adjDetail.skipped)}`
+        : `AI review: ${[adjDur ? `reviewed in ${adjDur}` : "reviewed", adjMode ?? "shadow"].join(" · ")} · ${
+            adjDetail.items ?? 0
+          } items · ${
+            Object.entries(adjDetail.verdicts ?? {})
+              .filter(([k]) => k !== "keep")
+              .map(([k, n]) => `${n} ${k}`)
+              .join(", ") || "all kept"
+          }${adjMode === "apply" ? " · applied" : " · proposals only"}`
       : adjStatus === "pending"
         ? "AI review: queued"
         : adjStatus?.startsWith("skipped_")
-          ? `AI review: skipped (${adjStatus.replace("skipped_", "").replace(/_/g, " ")})`
+          ? `AI review: skipped — ${skipReason(adjStatus.replace("skipped_", ""))}`
           : null;
+  const iocVerdicts = (adjQ.data?.verdicts ?? []).filter((v) => v.kind === "ioc");
+  const assessment = (adjQ.data?.verdicts ?? []).find((v) => v.kind === "assessment");
 
   return (
     <div className={styles.outputsZone}>
@@ -318,6 +346,52 @@ export function EntryOutputs({ entryId }: { entryId: string }) {
         </div>
       ))}
       {!loading && created.length === 0 && <div className={styles.ozEmpty}>No entities were created from this entry.</div>}
+
+      {/* The review's observable verdicts. The drawer has no sightings list of
+          its own, so each ioc verdict is its own row: kind · value, the badge
+          (Apply while proposed, Restore once applied), and the reason. */}
+      {iocVerdicts.length > 0 && (
+        <>
+          <p className={styles.ozSub}>Observables — review verdicts ({iocVerdicts.length})</p>
+          {iocVerdicts.map((v) => {
+            const { kind, value } = parseIocItemId(v.item_id);
+            return (
+              <div key={v.item_id} className={styles.orow} data-testid="ioc-verdict">
+                {kind && <span className={styles.surf}>{kind}</span>}
+                {v.entity_id ? (
+                  <EntityChip type="observable" id={v.entity_id} name={value} />
+                ) : (
+                  <span className={styles.entName} title={value}>
+                    {value}
+                  </span>
+                )}
+                <VerdictBadge verdict={v} entryId={entryId} />
+                {v.reason && <span className={styles.popMuted}>{v.reason}</span>}
+              </div>
+            );
+          })}
+        </>
+      )}
+
+      {/* The review's read on the analysis itself — logged, never applied. */}
+      {assessment && (
+        <>
+          <p className={styles.ozSub}>Assessment</p>
+          <div className={styles.orow} data-testid="assessment-verdict">
+            <span className={styles.entName}>severity/summary</span>
+            <span
+              className={`${styles.verdictPill} ${assessment.verdict === "ok" ? styles.verdictOk : styles.verdictShadow}`}
+              title={`AI review: the analysis's severity/summary reads as ${assessment.verdict}`}
+            >
+              {assessment.verdict}
+            </span>
+            {assessment.reason && <span className={styles.popMuted}>{assessment.reason}</span>}
+            <span className={styles.loggedOnly} title="Assessment verdicts are recorded for the record; nothing is changed">
+              logged only
+            </span>
+          </div>
+        </>
+      )}
     </div>
   );
 }

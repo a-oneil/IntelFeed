@@ -213,7 +213,13 @@ export interface EntryAdjudicationVerdict {
 export interface EntryAdjudication {
   status: string | null;
   adjudicated_at: string | null;
-  run: { status: string; created_at: string | null; detail: Record<string, unknown> | null } | null;
+  run: {
+    status: string;
+    created_at: string | null;
+    duration_ms: number | null;
+    mode: string | null;
+    detail: Record<string, unknown> | null;
+  } | null;
   verdicts: EntryAdjudicationVerdict[];
 }
 
@@ -277,12 +283,16 @@ export interface ProcessingEntity {
 }
 
 export interface ProcessingStageCell {
-  status: string; // success | error | retry
+  /** success / error / retry are real runs. queued and skipped are synthetic
+   *  cells for a stage task that never ran (the adjudicate stage waiting on
+   *  the AI worker, or gated off before dispatch). */
+  status: "success" | "error" | "retry" | "queued" | "skipped";
   duration_ms: number | null;
   error: string | null;
   retryable: boolean;
   created_at: string | null;
-  /** Stage-specific run detail (the adjudicate stage's verdict counters). */
+  /** Stage-specific run detail: the adjudicate stage's verdict counters and
+   *  mode on a run, `{queued_at}` on a queued cell, `{skipped}` on a skip. */
   detail?: Record<string, unknown> | null;
 }
 

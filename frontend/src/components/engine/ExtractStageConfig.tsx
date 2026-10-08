@@ -114,7 +114,8 @@ export function ExtractStageConfig() {
           />
           <span className={styles.modelHint}>
             Response budget per analysis call. Too low truncates the payload mid-JSON — the
-            trailing link_validations/relationships keys are lost first.
+            schema front-loads summary, observables and relationships, so the trailing
+            timeline/patch keys are lost first.
           </span>
         </div>
       )}

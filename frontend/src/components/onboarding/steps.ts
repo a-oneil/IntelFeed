@@ -78,7 +78,7 @@ export const STEPS: StepDef[] = [
     label: "AI provider",
     adminOnly: true,
     // Two separate things have to be true, and a provider row proves only the
-    // first: claude_code is auto-created at startup for the link validator, so
+    // first: claude_code is auto-created at startup for the copilot's default assignment, so
     // its presence says nobody chose anything — and a chosen provider with no
     // task routed at it still runs no AI, which is how this step used to "pass"
     // while the instance did nothing.

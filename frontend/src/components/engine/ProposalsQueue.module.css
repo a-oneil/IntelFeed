@@ -59,18 +59,7 @@
   font-weight: 700 !important;
 }
 
-.verdict {
-  font-size: var(--fs-base);
-  padding: 5px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  cursor: pointer;
-}
-
 .btn,
-.btnPrimary,
 .btnDanger {
   font-size: var(--fs-base);
   font-weight: 600;
@@ -82,15 +71,9 @@
   cursor: pointer;
 }
 .btn:disabled,
-.btnPrimary:disabled,
 .btnDanger:disabled {
   opacity: 0.5;
   cursor: default;
-}
-.btnPrimary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-text);
 }
 .btnDanger {
   border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
@@ -217,17 +200,6 @@
 .muted {
   color: var(--text-tertiary, var(--text-secondary));
 }
-.aiReason {
-  display: block;
-  margin-top: 2px;
-  color: var(--text-tertiary, var(--text-secondary));
-  font-size: var(--fs-sm);
-  font-style: italic;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 60ch;
-}
 .linkChips {
   display: flex;
   gap: 6px;
@@ -252,27 +224,6 @@
   white-space: nowrap;
   color: var(--text-tertiary, var(--text-secondary));
   font-size: var(--fs-base);
-}
-
-/* verdict pills */
-.vpill {
-  font-size: var(--fs-sm);
-  font-weight: 600;
-  padding: 2px 9px;
-  border-radius: var(--r-full);
-  white-space: nowrap;
-}
-.vOk {
-  background: color-mix(in srgb, var(--success) 15%, transparent);
-  color: var(--success);
-}
-.vNo {
-  background: color-mix(in srgb, var(--danger) 15%, transparent);
-  color: var(--danger);
-}
-.vMaybe {
-  background: color-mix(in srgb, var(--warning) 16%, transparent);
-  color: var(--warning);
 }
 
 /* row action buttons */
@@ -306,6 +257,13 @@
   color: var(--warning);
 }
 .bGhost {
+  color: var(--text-secondary);
+}
+
+/* Orphaned facet: why these rows are here and what (doesn't) happen to them. */
+.note {
+  margin: 0;
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
 }
 

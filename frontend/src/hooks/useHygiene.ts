@@ -5,6 +5,8 @@ export interface HygieneStats {
   /** Adjudicate stage: mode and the unapplied verdicts it has filed. */
   adjudication_mode: string;
   adjudication_pending: number;
+  /** Set while the rolling circuit breaker has paused dispatch (ISO time it lifts). */
+  adjudication_breaker_until: string | null;
   pending_advisories: number;
   name_normalization_proposed: number;
   applied_24h: number;
@@ -134,8 +136,17 @@ export interface FeedFilters {
   /** Only unapplied proposals (review-queue mode) — skips applied history. */
   pending?: boolean;
   origin?: "adjudicator" | "legacy";
+  /** Pending legacy proposals no entry can carry to the adjudicate stage —
+   *  listed for manual disposition; nothing automatic touches them. */
+  orphaned?: boolean;
   limit?: number;
   offset?: number;
+}
+
+export interface ApplyAdjudicationAllResult {
+  applied: number;
+  skipped: number;
+  errors: Array<{ log_id: string; action: string; error: string }>;
 }
 
 export interface OrphanRow {
@@ -216,6 +227,7 @@ export function useHygieneFeed(filters: FeedFilters) {
       if (filters.mode) params.mode = filters.mode;
       if (filters.pending) params.pending = "true";
       if (filters.origin) params.origin = filters.origin;
+      if (filters.orphaned) params.orphaned = "true";
       const { data } = await api.get<FeedResponse>("/admin/hygiene/feed", { params });
       return data;
     },
@@ -286,7 +298,6 @@ export function useApplyAdvisories() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: HYGIENE_KEYS });
-      qc.invalidateQueries({ queryKey: ["entity-maintenance-log"] });
     },
   });
 }
@@ -304,16 +315,39 @@ export function useDismissFeedRow() {
 }
 
 /** Bulk-discard pending proposals without applying them. Scope with
- *  action / source / review, or pass {} to clear the whole pending queue. */
+ *  action / source / origin, or pass {} to clear the whole pending queue. */
 export function useDismissProposals() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (body: { action?: string; source?: string; review?: string }) => {
+    mutationFn: async (body: {
+      action?: string;
+      source?: string;
+      origin?: "adjudicator" | "legacy";
+    }) => {
       const { data } = await api.post<{ dismissed: number }>("/admin/hygiene/dismiss-proposals", body);
       return data;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: HYGIENE_KEYS });
+    },
+  });
+}
+
+/** Apply every pending adjudicator proposal (both logs) through the stage's
+ *  own apply path. `action` narrows to one `adjudication_*` code or `shadow_remove`. */
+export function useApplyAdjudicationAll() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: { action?: string; limit?: number }) => {
+      const { data } = await api.post<ApplyAdjudicationAllResult>("/admin/hygiene/adjudication/apply-all", body);
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: HYGIENE_KEYS });
+      qc.invalidateQueries({ queryKey: ["engine"] });
+      qc.invalidateQueries({ queryKey: ["entity-links"] });
+      qc.invalidateQueries({ queryKey: ["relationships"] });
+      qc.invalidateQueries({ queryKey: ["extraction"] });
     },
   });
 }
@@ -334,7 +368,6 @@ export function useRunNameNormalization() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: HYGIENE_KEYS });
-      qc.invalidateQueries({ queryKey: ["entity-maintenance-log"] });
     },
   });
 }
@@ -366,7 +399,6 @@ export function useApplyNormalizeName() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: HYGIENE_KEYS });
-      qc.invalidateQueries({ queryKey: ["entity-maintenance-log"] });
     },
   });
 }

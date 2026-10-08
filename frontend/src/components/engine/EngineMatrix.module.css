@@ -569,6 +569,11 @@
   color: var(--success);
   background: color-mix(in srgb, var(--success) 12%, transparent);
 }
+/* Adjudicate stage: the review is queued on the AI worker, nothing decided yet. */
+.outQueued {
+  color: var(--accent-intel);
+  background: color-mix(in srgb, var(--accent-intel) 14%, transparent);
+}
 
 /* ---- drawer: output manager zone ---- */
 .outputsZone {
@@ -872,6 +877,18 @@
 .verdictApplied {
   color: var(--danger);
   background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+.verdictOk {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+/* Assessment verdicts are recorded, never applied. */
+.loggedOnly {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 .verdictBtn {
   border: 1px solid var(--border);

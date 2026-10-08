@@ -490,6 +490,10 @@
 .sdotRetry {
   background: var(--warning);
 }
+.sdotSkip {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--text-muted);
+}
 .retrybtn {
   appearance: none;
   border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border));
