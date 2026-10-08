@@ -341,3 +341,80 @@ async def test_current_analysis_result_tolerates_duplicate_current_rows(db_sessi
     assert result is not None
     # Deterministically the newest, not an arbitrary row.
     assert result.parsed_result["summary"] == "newer"
+
+
+def _stub_provider(monkeypatch, analysis_task, content='{"summary": "fresh"}'):
+    from unittest.mock import AsyncMock, MagicMock
+
+    import app.ai.engine as engine
+
+    response = MagicMock(content=content, model="m", tokens_input=10, tokens_output=5, cost_usd=None)
+    provider = MagicMock()
+    provider.complete = AsyncMock(return_value=response)
+    assignment = MagicMock(config={}, model_name="m")
+    provider_model = MagicMock(id=None, config={}, provider_type="test")
+    monkeypatch.setattr(
+        engine, "get_task_assignment", AsyncMock(return_value=(assignment, analysis_task, provider_model))
+    )
+    monkeypatch.setattr(engine, "_get_provider_instance", lambda pm, **kw: provider)
+    return provider
+
+
+def _current_row(entry, analysis_task, parsed):
+    return AIResult(
+        entry_id=entry.id,
+        target_type="entry",
+        target_id=entry.id,
+        is_current=True,
+        task_id=analysis_task.id,
+        model_name="m",
+        prompt_used="p",
+        raw_response="r",
+        parsed_result=parsed,
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_task_retries_past_a_current_provider_error(db_session, feed, analysis_task, test_user, monkeypatch):
+    """A stored provider error must not answer the retry.
+
+    During an outage every first attempt stored {"_error": ...} as current, and
+    every retry got that row back without calling the provider, so the whole
+    backlog failed again in milliseconds once the provider was back.
+    """
+    from app.ai.engine import run_task
+
+    entry = await _make_entry(db_session, feed, title="Outage casualty")
+    db_session.add(_current_row(entry, analysis_task, {"_error": "[SSL: TLSV1_UNRECOGNIZED_NAME]"}))
+    await db_session.flush()
+    provider = _stub_provider(monkeypatch, analysis_task)
+
+    result = await run_task(db_session, test_user.id, "entry_analysis", {"entry": {"title": "t"}}, entry_id=entry.id)
+
+    provider.complete.assert_awaited_once()
+    assert result["_extraction_status"] == "success"
+    current = (
+        (
+            await db_session.execute(
+                select(AIResult).where(AIResult.target_id == entry.id, AIResult.is_current == True)  # noqa: E712
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert [r.parsed_result["summary"] for r in current] == ["fresh"]
+
+
+@pytest.mark.asyncio
+async def test_run_task_still_dedups_a_current_answer(db_session, feed, analysis_task, test_user, monkeypatch):
+    from app.ai.engine import run_task
+
+    entry = await _make_entry(db_session, feed, title="Already analysed")
+    db_session.add(_current_row(entry, analysis_task, SAMPLE_PARSED))
+    await db_session.flush()
+    provider = _stub_provider(monkeypatch, analysis_task)
+
+    result = await run_task(db_session, test_user.id, "entry_analysis", {"entry": {"title": "t"}}, entry_id=entry.id)
+
+    provider.complete.assert_not_awaited()
+    assert result["summary"] == SAMPLE_PARSED["summary"]

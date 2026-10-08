@@ -358,7 +358,10 @@ async def run_task(
 
     assignment, task, provider_model = assignment_data
 
-    # Dedup guard: skip if target already has a current result for this task
+    # Dedup guard: skip if target already has a current result for this task.
+    # A provider error ({"_error": ...}, no _extraction_status) is current so
+    # the workbench shows the last run failed, but it is not an answer: replaying
+    # it would turn every retry of an outage casualty into an instant failure.
     if target_type and target_id and not force:
         existing = await db.execute(
             select(AIResult.parsed_result)
@@ -371,7 +374,8 @@ async def run_task(
             .limit(1)
         )
         cached = existing.scalar_one_or_none()
-        if cached is not None:
+        provider_error = isinstance(cached, dict) and "_error" in cached and "_extraction_status" not in cached
+        if cached is not None and not provider_error:
             logger.debug("Skipping duplicate AI task %s for %s/%s", task_name, target_type, target_id)
             return cached
 
