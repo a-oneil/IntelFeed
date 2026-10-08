@@ -67,6 +67,7 @@ celery_app.conf.update(
         # The post-analysis review is one more generative call per entry;
         # same worker, same serialization, never alongside the analysis.
         "app.workers.adjudication_tasks.adjudicate_entry_task": {"queue": "ai"},
+        "app.workers.adjudication_tasks.backfill_entry_adjudications": {"queue": "ai"},
         "app.workers.entity_maintenance_tasks.refresh_actor_profile": {"queue": "ai"},
         "app.workers.entity_maintenance_tasks.process_name_normalization_batch": {"queue": "ai"},
         "app.workers.entity_maintenance_tasks.ai_enrich_gap_batch": {"queue": "ai"},

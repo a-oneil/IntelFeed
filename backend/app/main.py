@@ -117,10 +117,11 @@ async def _seed_ai_tasks() -> None:
 
         await db.flush()
 
-        # Auto-create a 'claude_code' provider on first startup so the entity
-        # link validator has an assignment target. The provider only works
-        # once OAuth credentials are bootstrapped (see setup.md section 14),
-        # but seeding it now means the task assignment exists from day one.
+        # Auto-create a 'claude_code' provider on first startup so the tasks
+        # pinned to that provider type (DEFAULT_PROVIDER_TYPE_ASSIGNMENTS: the
+        # copilot) have an assignment target. The provider only works once
+        # OAuth credentials are bootstrapped (see setup.md section 14), but
+        # seeding it now means the task assignment exists from day one.
         cc_provider_result = await db.execute(
             select(AIProviderModel).where(AIProviderModel.provider_type == "claude_code").limit(1)
         )

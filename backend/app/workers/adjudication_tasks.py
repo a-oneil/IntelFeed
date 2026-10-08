@@ -6,9 +6,12 @@ one-pass analysis has been stored and committed. Runs on the `ai` queue
 itself for the GPU. Wrapped with @pipeline_stage so the Engine matrix gets a
 column and the verdict counts land in the run's `detail`.
 
-The task is idempotent and re-checks every gate: a retry, a manual re-run
-from the matrix, or an entry whose mode was switched off meanwhile all end
-in a recorded status rather than a duplicate review.
+The task re-checks the master switch only: the plan, trigger, score and
+budget gates were decided at enqueue time (``enqueue_adjudication``), and a
+manual re-run from the matrix deliberately bypasses them. An entry whose
+mode was switched off meanwhile, a lost lock, or a missing analysis all end
+in a recorded status rather than a review. A review that exhausts its
+retries records ``failed`` so the hourly sweep can tell it from a queued one.
 """
 
 from __future__ import annotations
@@ -19,7 +22,7 @@ import uuid
 from datetime import UTC, datetime
 
 import redis
-from celery.exceptions import MaxRetriesExceededError, Retry
+from celery.exceptions import Retry
 
 from app.config import settings
 from app.core.metrics import CELERY_TASK_DURATION_SECONDS, CELERY_TASKS_TOTAL
@@ -30,6 +33,15 @@ from app.workers.pipeline_logging import pipeline_stage
 logger = logging.getLogger(__name__)
 
 _LOCK_TTL = 900
+_redis_client: redis.Redis | None = None
+
+
+def _redis() -> redis.Redis:
+    """One sync client per worker process (the lock is a two-call affair)."""
+    global _redis_client
+    if _redis_client is None:
+        _redis_client = redis.from_url(settings.redis_url, decode_responses=True)
+    return _redis_client
 
 
 @celery_app.task(
@@ -45,29 +57,38 @@ def adjudicate_entry_task(self, entry_id: str) -> dict:
     start = time.monotonic()
     try:
         detail = run_async(_adjudicate_entry(uuid.UUID(entry_id)))
-        if detail.get("status") == "provider_paused":
-            countdown = 3600
-            pause_until = detail.get("pause_until")
-            if pause_until:
-                try:
-                    until = datetime.fromisoformat(pause_until)
-                    countdown = max(60, min(3600, int((until - datetime.now(UTC)).total_seconds()) + 30))
-                except ValueError:
-                    pass
+        if detail.get("skipped") == "provider_paused":
             CELERY_TASKS_TOTAL.labels(task_name="adjudicate_entry_task", status="provider_paused").inc()
-            raise self.retry(countdown=countdown, max_retries=24)
-        CELERY_TASKS_TOTAL.labels(task_name="adjudicate_entry_task", status="success").inc()
+        else:
+            CELERY_TASKS_TOTAL.labels(task_name="adjudicate_entry_task", status="success").inc()
         return detail
     except Retry:
         raise
-    except MaxRetriesExceededError:
-        CELERY_TASKS_TOTAL.labels(task_name="adjudicate_entry_task", status="error").inc()
-        raise
     except Exception as exc:
+        if self.request.retries >= self.max_retries:
+            CELERY_TASKS_TOTAL.labels(task_name="adjudicate_entry_task", status="error").inc()
+            run_async(_record_failure(uuid.UUID(entry_id), exc))
+            raise
         CELERY_TASKS_TOTAL.labels(task_name="adjudicate_entry_task", status="retry").inc()
         raise self.retry(exc=exc, countdown=min(300, 60 * (self.request.retries + 1)))
     finally:
         CELERY_TASK_DURATION_SECONDS.labels(task_name="adjudicate_entry_task").observe(time.monotonic() - start)
+
+
+async def _record_failure(entry_id: uuid.UUID, exc: BaseException) -> None:
+    """Retries exhausted: leave `failed` on the row, not a `pending` the sweep
+    would wait STALE_PENDING_HOURS to notice."""
+    from app.services.entry_adjudication import FAILED, _request_row
+
+    try:
+        async with worker_session() as db:
+            row = await _request_row(db, entry_id)
+            row.adjudication_status = FAILED
+            row.adjudicated_at = datetime.now(UTC)
+            db.add(row)
+            await db.commit()
+    except Exception:
+        logger.warning("adjudicate %s: could not record the failure (%s)", entry_id, exc, exc_info=True)
 
 
 async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
@@ -78,6 +99,7 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
         COMPLETED,
         FAILED,
         SKIPPED_OFF,
+        SKIPPED_PAUSED,
         TARGET_TYPE,
         TASK_NAME,
         _current_analysis,
@@ -86,13 +108,12 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
         _validate_verdicts,
         apply_verdicts,
         build_variables,
-        collect_legacy_rows,
         supersede_legacy_proposals,
     )
     from app.services.system_settings import _ensure_cache, invalidate_cache
     from app.services.system_user import get_system_user_id
 
-    redis_client = redis.from_url(settings.redis_url, decode_responses=True)
+    redis_client = _redis()
     lock_key = f"adjudication:entry:{entry_id}"
     if not redis_client.set(lock_key, "1", nx=True, ex=_LOCK_TTL):
         return {"skipped": "locked"}
@@ -124,14 +145,15 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
             if parsed is None:
                 return await _finish(FAILED, {"skipped": "no_analysis"})
 
-            items, variables = await build_variables(db, entry, parsed, cfg)
+            # Legacy rows are taken here, before the model runs, so the
+            # reviewer's own freshly written rows are never superseded.
+            items, variables, legacy_rows = await build_variables(db, entry, parsed, cfg)
             if not items:
                 return await _finish(COMPLETED, {"skipped": "nothing_to_review", "mode": cfg["mode"], "items": 0})
 
             user_id = await get_system_user_id(db)
             if user_id is None:
                 return await _finish(FAILED, {"skipped": "no_system_user"})
-            legacy_rows = await collect_legacy_rows(db, entry, items)
 
             try:
                 result = await run_task(
@@ -144,16 +166,21 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
                     force=True,
                 )
             except QuotaExhaustedError as e:
+                # The provider is paused: park the row like an over-budget
+                # one; the hourly sweep re-enqueues it when a new hour starts.
                 pause_until = getattr(e, "reset_at", None) or getattr(e, "pause_until", None)
-                await db.commit()
-                return {"status": "provider_paused", "pause_until": pause_until.isoformat() if pause_until else None}
+                return await _finish(
+                    SKIPPED_PAUSED,
+                    {"skipped": "provider_paused", "pause_until": pause_until.isoformat() if pause_until else None},
+                )
 
             if not result:
                 return await _finish(FAILED, {"skipped": "no_assignment", "items": len(items)})
             status = result.get("_extraction_status")
             if status == "provider_paused":
-                await db.commit()
-                return {"status": "provider_paused", "pause_until": result.get("_pause_until")}
+                return await _finish(
+                    SKIPPED_PAUSED, {"skipped": "provider_paused", "pause_until": result.get("_pause_until")}
+                )
             if status not in (None, "success"):
                 logger.warning("adjudicate %s: AI returned %r; nothing written", entry_id, status)
                 return await _finish(FAILED, {"skipped": f"ai_{status}", "items": len(items)})
@@ -162,6 +189,7 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
             detail = await apply_verdicts(db, entry, verdicts, parsed, cfg)
             detail["superseded"] = await supersede_legacy_proposals(db, legacy_rows)
             detail["unknown_ids"] = stats["unknown"]
+            detail["coerced_verdicts"] = stats["coerced"]
             if stats["duplicate"]:
                 detail["skipped"] = "ai_bad_shape"
             return await _finish(COMPLETED, detail)
@@ -179,10 +207,15 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
 )
 def backfill_entry_adjudications(limit: int = 500, since_days: int | None = None) -> dict:
     """One-off walk: queue every analysed entry the stage has not decided on,
-    newest first, through the normal gates and hourly budget. Live entries go
-    first; these fill what each hour has left, and the hourly sweep keeps
-    draining them. Not scheduled — run it once per rollout, like
-    backfill_entry_scores."""
+    newest first, through the normal gates. Backfill draws on its share of
+    each hour's budget only (live entries keep the rest); the ones that do
+    not fit wait as `skipped_budget` and the hourly sweep drains them, newest
+    first. Not scheduled — dispatch it once per rollout, like
+    backfill_entry_scores:
+
+        celery -A app.workers.celery_app call \\
+            app.workers.adjudication_tasks.backfill_entry_adjudications
+    """
     start = time.monotonic()
     try:
         stats = run_async(_backfill(limit, since_days))
@@ -215,7 +248,7 @@ async def _backfill(limit: int, since_days: int | None) -> dict:
         stats = {"candidates": len(entry_ids), "queued": 0, "waiting": 0, "skipped": 0}
         for i, entry_id in enumerate(entry_ids):
             _result, parsed = await _current_analysis(db, entry_id)
-            status = await enqueue_adjudication(db, entry_id, None, parsed)
+            status = await enqueue_adjudication(db, entry_id, None, parsed, backfill=True)
             if status == PENDING:
                 stats["queued"] += 1
                 # Spread the queue so live reviews interleave with backfill.

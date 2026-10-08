@@ -397,7 +397,8 @@ SETTING_METADATA: dict[str, dict] = {
         "label": "Hourly Budget",
         "description": (
             "Reviews started per hour on the AI worker (~40 s each on a 9B model). Over-budget entries "
-            "wait for the next hour's sweep; they are never dropped. Live entries go before backfill"
+            "wait for the next hour's sweep; they are never dropped. The backfill may use at most half of "
+            "each hour; live entries get the rest"
         ),
         "group": "adjudication",
     },

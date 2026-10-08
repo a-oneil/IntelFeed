@@ -491,6 +491,7 @@ async def entry_adjudication(
         ACTION_EDGE_DEMOTE,
         ACTION_IOC_DROP,
         ACTION_MERGE,
+        ACTION_RECLASSIFY,
         ACTION_UNLINK,
         ACTION_VETO,
         ADJUDICATION_ACTIONS,
@@ -565,6 +566,7 @@ async def entry_adjudication(
     )
     verdict_by_action = {
         ACTION_UNLINK: "remove",
+        ACTION_RECLASSIFY: "reclassify",
         ACTION_VETO: "veto",
         ACTION_MERGE: "merge",
         ACTION_EDGE_DEMOTE: "demote",
@@ -582,8 +584,6 @@ async def entry_adjudication(
         else:
             item_id, kind = f"link:{r.entity_type}:{r.entity_id}", "link"
         verdict = verdict_by_action.get(r.action, r.action)
-        if r.action == ACTION_UNLINK and after.get("suggested_type"):
-            verdict = "reclassify"
         if r.action == ACTION_ASSESSMENT:
             verdict = after.get("verdict") or "ok"
         verdicts.append(
@@ -607,6 +607,8 @@ async def entry_adjudication(
         "run": {
             "status": run.status,
             "created_at": run.created_at.isoformat() if run.created_at else None,
+            "duration_ms": run.duration_ms,
+            "mode": (run.detail or {}).get("mode"),
             "detail": run.detail or None,
         }
         if run
@@ -666,8 +668,13 @@ async def retry_pipeline_stage(
     entry_id: str = Path(..., description="Entry UUID"),
     stage: str = Path(..., description="Stage to re-dispatch; must be retryable (automate/translate are not)"),
     user: User = Depends(get_current_user),
+    db=Depends(get_db),
 ):
-    """Re-dispatch one pipeline stage task for an entry. Admin only."""
+    """Re-dispatch one pipeline stage task for an entry. Admin only.
+
+    For the adjudicate stage this is a deliberate bypass of the enqueue gates
+    (plan, trigger, score, hourly budget): the request row is marked queued
+    so the matrix shows it, and the task re-checks only the master switch."""
     _require_admin(user)
     import uuid as _uuid
 
@@ -676,9 +683,19 @@ async def retry_pipeline_stage(
     if stage not in RETRYABLE_STAGE_TASKS:
         raise HTTPException(status_code=422, detail=f"Stage not retryable: {stage}")
     try:
-        _uuid.UUID(entry_id)
+        eid = _uuid.UUID(entry_id)
     except ValueError:
         raise HTTPException(status_code=422, detail="Invalid entry id") from None
+    if stage == "adjudicate":
+        from datetime import UTC, datetime
+
+        from app.services.entry_adjudication import PENDING, _request_row
+
+        row = await _request_row(db, eid)
+        row.adjudication_status = PENDING
+        row.adjudication_queued_at = datetime.now(UTC)
+        db.add(row)
+        await db.commit()
     result = celery_app.send_task(RETRYABLE_STAGE_TASKS[stage], kwargs={"entry_id": entry_id})
     return {"dispatched": True, "task_id": result.id}
 
@@ -1041,14 +1058,65 @@ async def processing_flow(
         for r in runs:
             latest.setdefault((r.entry_id, r.stage), r)
 
+    # The adjudicate stage's gate decisions (skipped_*, pending) live on the
+    # entry's AI request row, not in a pipeline run: an entry the gates
+    # skipped never ran the task. Read them so the column can say why.
+    from app.models.ai_analysis import AIAnalysisRequest
+
+    adjudication_by_entry: dict = {}
+    if entry_ids:
+        for req in (
+            (
+                await db.execute(
+                    select(AIAnalysisRequest).where(
+                        AIAnalysisRequest.entry_id.in_(entry_ids), AIAnalysisRequest.adjudication_status.isnot(None)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        ):
+            adjudication_by_entry[req.entry_id] = req
+
+    def _adjudication_cell(e: Entry) -> dict | None:
+        """A synthetic cell for the adjudicate column when the task never ran
+        (gate skip, or queued and waiting on the AI worker)."""
+        req = adjudication_by_entry.get(e.id)
+        if req is None:
+            return None
+        status = req.adjudication_status or ""
+        if status == "pending":
+            return {
+                "status": "queued",
+                "duration_ms": None,
+                "error": None,
+                "retryable": True,
+                "created_at": req.adjudication_queued_at.isoformat() if req.adjudication_queued_at else None,
+                "detail": {"queued_at": req.adjudication_queued_at.isoformat() if req.adjudication_queued_at else None},
+            }
+        if status.startswith("skipped_"):
+            return {
+                "status": "skipped",
+                "duration_ms": None,
+                "error": None,
+                "retryable": True,
+                "created_at": req.adjudicated_at.isoformat() if req.adjudicated_at else None,
+                "detail": {"skipped": status.removeprefix("skipped_")},
+            }
+        return None
+
     def _row(e: Entry) -> dict:
         stages: dict[str, dict] = {}
         last_run_at = None
         for st in PROCESSING_STAGE_ORDER:
             r = latest.get((e.id, st))
             if r is None:
+                if st == "adjudicate":
+                    cell = _adjudication_cell(e)
+                    if cell is not None:
+                        stages[st] = cell
                 continue
-            stages[st] = {
+            cell = {
                 "status": r.status,
                 "duration_ms": r.duration_ms,
                 "error": r.error,
@@ -1057,6 +1125,18 @@ async def processing_flow(
                 # Stage-specific run detail (the adjudicate stage's verdict counts).
                 "detail": r.detail or None,
             }
+            if st == "adjudicate":
+                req = adjudication_by_entry.get(e.id)
+                queued_at = getattr(req, "adjudication_queued_at", None) if req else None
+                if (
+                    req is not None
+                    and req.adjudication_status == "pending"
+                    and queued_at is not None
+                    and r.created_at is not None
+                    and queued_at > r.created_at
+                ):
+                    cell = _adjudication_cell(e) or cell
+            stages[st] = cell
             if r.created_at and (last_run_at is None or r.created_at > last_run_at):
                 last_run_at = r.created_at
         has_err = any(s["status"] == "error" for s in stages.values())

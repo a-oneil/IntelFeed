@@ -76,8 +76,8 @@ DEFAULT_MODEL_ASSIGNMENTS: dict[str, str] = {
 
 # Tasks that must be assigned to a specific provider type (rather than the
 # first active provider the seeder finds). Used for tasks tied to a
-# particular invocation model — e.g. entity_link_validation runs the Claude
-# Code CLI subprocess under the Max subscription, not the Anthropic API.
+# particular invocation model — the copilot streams through the Claude Code
+# CLI subprocess under the Max subscription, not the Anthropic API.
 DEFAULT_PROVIDER_TYPE_ASSIGNMENTS: dict[str, str] = {
     "copilot": "claude_code",
     "actor_profile_refresh": "claude_code",

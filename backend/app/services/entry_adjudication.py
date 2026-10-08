@@ -38,6 +38,19 @@ from sqlalchemy import func, or_, select
 from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.entity_types import (
+    COUNTRY,
+    CVE,
+    MALWARE,
+    OBSERVABLE,
+    PRODUCT,
+    SECTOR,
+    THREAT_ACTOR,
+    TOOL,
+    TTP,
+    VENDOR,
+)
+
 logger = logging.getLogger(__name__)
 
 TASK_NAME = "entry_adjudication"
@@ -57,24 +70,30 @@ VALID_FOR_KIND: dict[str, set[str]] = {
     "edge": {"keep", "demote"},
     "ioc": {"keep", "drop"},
 }
-# Verdicts that count toward the circuit breaker (anything destructive).
-DESTRUCTIVE = {"remove", "veto", "merge", "demote", "drop"}
-RECLASSIFY_TYPES = {"threat_actor", "malware", "vendor", "product", "country", "tool"}
+# Verdicts that count toward the circuit breaker: the ones that take
+# something away. A merge keeps the data under the catalogue name the model
+# was shown, so it is not counted (planning/ai-adjudication-stage.md §4.3).
+DESTRUCTIVE = {"remove", "veto", "demote", "drop"}
+# Types a link can be reclassified between (the merge engine's convertible set).
+RECLASSIFY_TYPES = {THREAT_ACTOR, MALWARE, VENDOR, PRODUCT, COUNTRY, TOOL}
 
 # Positive-evidence override: payload lists that count as the analysis naming
 # an entity by type. Actor/malware share one pool (the model routinely files
 # ransomware brands under the other slot); vendor/product have no list.
 _OVERRIDE_PAYLOAD_KEYS: dict[str, tuple[str, ...]] = {
-    "threat_actor": ("threat_actors", "malware", "tools"),
-    "malware": ("threat_actors", "malware", "tools"),
-    "tool": ("threat_actors", "malware", "tools"),
-    "country": ("countries",),
+    THREAT_ACTOR: ("threat_actors", "malware", "tools"),
+    MALWARE: ("threat_actors", "malware", "tools"),
+    TOOL: ("threat_actors", "malware", "tools"),
+    COUNTRY: ("countries",),
 }
 
 # Maintenance-log actions this stage writes (shadow proposals and applied
 # changes share the action code; `applied` tells them apart, like the merge
 # engine's rows). api/hygiene.py registers them as proposal kinds.
 ACTION_UNLINK = "adjudication_unlink"
+# Advisory: a link whose entity is filed under the wrong type. Applying it
+# converts the entity (the merge engine's reclassify), never unlinks it.
+ACTION_RECLASSIFY = "adjudication_reclassify"
 ACTION_VETO = "adjudication_veto"
 ACTION_MERGE = "adjudication_merge"
 ACTION_EDGE_DEMOTE = "adjudication_edge_demote"
@@ -82,6 +101,7 @@ ACTION_IOC_DROP = "adjudication_ioc_drop"
 ACTION_ASSESSMENT = "adjudication_assessment"
 ADJUDICATION_ACTIONS = {
     ACTION_UNLINK,
+    ACTION_RECLASSIFY,
     ACTION_VETO,
     ACTION_MERGE,
     ACTION_EDGE_DEMOTE,
@@ -94,6 +114,16 @@ _HOUR_KEY = "intelfeed:adjudication:hour:{hour}"
 _RATIOS_KEY = "intelfeed:adjudication:ratios"
 _BREAKER_KEY = "intelfeed:adjudication:breaker_until"
 _ROLLING_WINDOW = 50
+# The rolling breaker needs a sample before a mean says anything.
+_ROLLING_MIN_SAMPLES = 10
+# Share of each hour's budget the backfill may use; live entries get the rest
+# (and the whole budget when nothing is backfilling).
+_BACKFILL_SHARE = 0.5
+# A `pending` row older than this with no run is a lost task, not a queue.
+STALE_PENDING_HOURS = 6
+# Links an analyst restored this recently are never changed again by the
+# stage (planning §4.3 "never touched"); the reviewer only sees the flag.
+RESTORED_GUARD_DAYS = 90
 
 # Manifest caps — a C2-list entry must not flood the prompt.
 _MAX_LINKS = 60
@@ -110,12 +140,24 @@ SKIPPED_ECHO = "skipped_echo"
 SKIPPED_NOTHING_NEW = "skipped_nothing_new"
 SKIPPED_SCORE = "skipped_score"
 SKIPPED_BUDGET = "skipped_budget"
+# The provider is paused (quota); re-enqueued by the hourly sweep like budget.
+SKIPPED_PAUSED = "skipped_paused"
 PENDING = "pending"
 COMPLETED = "completed"
 FAILED = "failed"
 
 
 # --------------------------------------------------------------------------- settings
+
+
+def _num(value, default: float, cast=float):
+    """A stored 0 is a value, not an absence — only None/"" fall back."""
+    if value is None or value == "":
+        return cast(default)
+    try:
+        return cast(value)
+    except (TypeError, ValueError):
+        return cast(default)
 
 
 async def _settings(db: AsyncSession) -> dict:
@@ -128,11 +170,11 @@ async def _settings(db: AsyncSession) -> dict:
     return {
         "mode": mode if mode in MODES else "off",
         "trigger": trigger if trigger in TRIGGERS else "all",
-        "max_per_hour": int(await get_setting("adjudication_max_per_hour", db) or 30),
-        "min_score": float(await get_setting("adjudication_min_priority_score", db) or 0.0),
+        "max_per_hour": _num(await get_setting("adjudication_max_per_hour", db), 30, int),
+        "min_score": _num(await get_setting("adjudication_min_priority_score", db), 0.0),
         "min_conf": min_conf if min_conf in CONFIDENCES else "high",
-        "breaker_pct": float(await get_setting("adjudication_circuit_breaker_pct", db) or 0.5),
-        "max_chars": int(await get_setting("adjudication_content_max_chars", db) or 8000),
+        "breaker_pct": _num(await get_setting("adjudication_circuit_breaker_pct", db), 0.5),
+        "max_chars": _num(await get_setting("adjudication_content_max_chars", db), 8000, int),
         "scope": {s.strip() for s in scope_raw.split(",") if s.strip()}
         or {"links", "entities", "relationships", "observables"},
     }
@@ -172,42 +214,79 @@ async def _created_something(db: AsyncSession, entry_id: uuid.UUID, counts: dict
     ):
         return True
 
+    from app.models.country import EntryCountry
+    from app.models.entry_sector import EntrySector
     from app.models.malware_family import EntryMalware, MalwareFamily
     from app.models.threat_actor import EntryThreatActor, ThreatActor
     from app.models.tool import EntryTool, Tool
+    from app.models.ttp import EntryTTP
 
     for model in (ThreatActor, MalwareFamily, Tool):
         if (
             await db.execute(select(model.id).where(model.created_from_entry_id == entry_id).limit(1))
         ).scalar_one_or_none():
             return True
-    for jmodel in (EntryThreatActor, EntryMalware, EntryTool):
+    for jmodel in (EntryThreatActor, EntryMalware, EntryTool, EntryCountry, EntrySector):
         if (
             await db.execute(select(jmodel.entry_id).where(jmodel.entry_id == entry_id, jmodel.source == "ai").limit(1))
         ).scalar_one_or_none():
             return True
+    # AI-asserted TTPs: no source column; the autolinker prefixes source_text.
+    if (
+        await db.execute(
+            select(EntryTTP.entry_id)
+            .where(
+                EntryTTP.entry_id == entry_id,
+                EntryTTP.source_text.isnot(None),
+                ~EntryTTP.source_text.like("auto\\_link:%"),
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none():
+        return True
     return False
 
 
-async def _consume_hour_budget(max_per_hour: int) -> bool:
-    """INCR the current hour's counter; True when this entry fits. A breaker
-    pause (see _rolling_breaker) counts as no budget."""
+async def breaker_paused_until() -> datetime | None:
+    """When the rolling breaker has paused dispatch, the instant it lifts."""
     from app.services.redis_client import get_redis
 
     try:
         r = await get_redis()
         until = await r.get(_BREAKER_KEY)
         if until and float(until) > datetime.now(UTC).timestamp():
-            return False
+            return datetime.fromtimestamp(float(until), tz=UTC)
+    except Exception:
+        logger.debug("breaker lookup failed", exc_info=True)
+    return None
+
+
+async def _consume_hour_budget(max_per_hour: int, *, backfill: bool = False) -> str | None:
+    """INCR the current hour's counter. Returns None when this entry fits,
+    else why not: ``"budget"`` (hour is full) or ``"breaker"`` (the rolling
+    breaker paused dispatch). Live entries may use the whole budget; the
+    backfill only its share, so a backfill run can never starve the hour."""
+    from app.services.redis_client import get_redis
+
+    try:
+        r = await get_redis()
+        until = await r.get(_BREAKER_KEY)
+        if until and float(until) > datetime.now(UTC).timestamp():
+            return "breaker"
         key = _HOUR_KEY.format(hour=datetime.now(UTC).strftime("%Y%m%d%H"))
+        cap = max(1, max_per_hour)
+        if backfill:
+            cap = max(1, int(cap * _BACKFILL_SHARE))
+            if int(await r.get(key) or 0) >= cap:
+                return "budget"
         n = await r.incr(key)
         if n == 1:
             await r.expire(key, 7200)
-        return int(n) <= max(1, max_per_hour)
+        return None if int(n) <= cap else "budget"
     except Exception:
         # Redis down: the AI worker is single-file anyway, so let it through.
         logger.debug("adjudication budget check failed; allowing", exc_info=True)
-        return True
+        return None
 
 
 async def enqueue_adjudication(
@@ -215,10 +294,13 @@ async def enqueue_adjudication(
     entry_id: uuid.UUID,
     stored_counts: dict | None,
     parsed: dict | None,
+    *,
+    backfill: bool = False,
 ) -> str:
     """Decide whether the entry gets a review and record it. Returns the
     status written (``pending`` or a ``skipped_*``). The caller commits and,
-    on ``pending``, calls ``dispatch_adjudication``."""
+    on ``pending``, calls ``dispatch_adjudication``. ``backfill`` entries only
+    draw on their share of the hourly budget (live entries come first)."""
     from app.models.entry import Entry
     from app.models.feed import Feed
     from app.pipeline.plans import resolve_feed_plan
@@ -228,6 +310,8 @@ async def enqueue_adjudication(
 
     async def _write(status: str) -> str:
         row.adjudication_status = status
+        if status == PENDING:
+            row.adjudication_queued_at = datetime.now(UTC)
         db.add(row)
         return status
 
@@ -253,7 +337,10 @@ async def enqueue_adjudication(
     if cfg["min_score"] > 0 and float(entry.priority_score or 0.0) < cfg["min_score"]:
         return await _write(SKIPPED_SCORE)
 
-    if not await _consume_hour_budget(cfg["max_per_hour"]):
+    why = await _consume_hour_budget(cfg["max_per_hour"], backfill=backfill)
+    if why is not None:
+        if why == "breaker":
+            logger.info("adjudication dispatch paused by the rolling breaker; %s waits", entry_id)
         return await _write(SKIPPED_BUDGET)
 
     return await _write(PENDING)
@@ -290,9 +377,16 @@ async def enqueue_and_dispatch(
 
 
 async def resweep_adjudications(db: AsyncSession, limit: int = 200) -> dict:
-    """Hourly self-heal (called from submit_analysis_batches): completed
-    analyses whose review decision never landed (worker crash between commit
-    and dispatch), plus over-budget rows waiting for a new hour."""
+    """Hourly self-heal (called from submit_analysis_batches). Re-enqueues,
+    newest analysis first:
+
+    - completed analyses whose review decision never landed (crash between
+      the analysis commit and the enqueue);
+    - rows waiting on budget or a paused provider (a new hour, a new try);
+    - ``pending`` rows queued longer than STALE_PENDING_HOURS with no run —
+      a lost task (dispatch failure, worker crash, retries exhausted).
+
+    Newest first means live entries drain before backfilled history."""
     from datetime import timedelta
 
     from app.models.ai_analysis import AIAnalysisRequest
@@ -300,7 +394,9 @@ async def resweep_adjudications(db: AsyncSession, limit: int = 200) -> dict:
     cfg = await _settings(db)
     if cfg["mode"] == "off":
         return {"swept": 0}
-    stale = datetime.now(UTC) - timedelta(hours=2)
+    now = datetime.now(UTC)
+    stale = now - timedelta(hours=2)
+    lost = now - timedelta(hours=STALE_PENDING_HOURS)
     rows = (
         (
             await db.execute(
@@ -309,7 +405,9 @@ async def resweep_adjudications(db: AsyncSession, limit: int = 200) -> dict:
                     AIAnalysisRequest.status.in_(["completed", "reused_echo"]),
                     or_(
                         (AIAnalysisRequest.adjudication_status.is_(None)) & (AIAnalysisRequest.completed_at < stale),
-                        AIAnalysisRequest.adjudication_status == SKIPPED_BUDGET,
+                        AIAnalysisRequest.adjudication_status.in_([SKIPPED_BUDGET, SKIPPED_PAUSED]),
+                        (AIAnalysisRequest.adjudication_status == PENDING)
+                        & (AIAnalysisRequest.adjudication_queued_at < lost),
                     ),
                 )
                 .order_by(AIAnalysisRequest.completed_at.desc().nullslast())
@@ -323,7 +421,8 @@ async def resweep_adjudications(db: AsyncSession, limit: int = 200) -> dict:
     for row in rows:
         _result, parsed = await _current_analysis(db, row.entry_id)
         if parsed is None:
-            row.adjudication_status = SKIPPED_NOTHING_NEW
+            # Nothing to review against: the analysis was superseded or removed.
+            row.adjudication_status = FAILED
             db.add(row)
             continue
         status = await enqueue_adjudication(db, row.entry_id, None, parsed)
@@ -361,11 +460,10 @@ async def select_backfill_entries(db: AsyncSession, limit: int = 500, since_days
                 AIAnalysisRequest.adjudication_status.notin_([PENDING, COMPLETED, FAILED, SKIPPED_ECHO]),
             ),
         )
-        .order_by(Entry.created_at.desc())
-        .limit(limit)
     )
     if since_days:
         q = q.where(Entry.created_at >= datetime.now(UTC) - timedelta(days=since_days))
+    q = q.order_by(Entry.created_at.desc()).limit(limit)
     return list((await db.execute(q)).scalars().all())
 
 
@@ -416,22 +514,25 @@ def _link_specs():
     from app.models.sector import Sector
     from app.models.tool import EntryTool, Tool
 
-    return [*JUNCTION_SPECS, (EntryTool, Tool, "tool_id", "tool"), (EntrySector, Sector, "sector_id", "sector")]
+    return [*JUNCTION_SPECS, (EntryTool, Tool, "tool_id", TOOL), (EntrySector, Sector, "sector_id", SECTOR)]
 
 
 _ENDPOINT_MODELS: dict[str, tuple[str, str]] = {
     # entity_type → (module path, class name) — resolved lazily
-    "threat_actor": ("app.models.threat_actor", "ThreatActor"),
-    "malware": ("app.models.malware_family", "MalwareFamily"),
-    "tool": ("app.models.tool", "Tool"),
-    "country": ("app.models.country", "Country"),
-    "vendor": ("app.models.vendor", "Vendor"),
-    "product": ("app.models.product", "Product"),
-    "sector": ("app.models.sector", "Sector"),
-    "cve": ("app.models.cve", "CVE"),
-    "ttp": ("app.models.ttp", "TTP"),
-    "observable": ("app.models.observable", "Observable"),
+    THREAT_ACTOR: ("app.models.threat_actor", "ThreatActor"),
+    MALWARE: ("app.models.malware_family", "MalwareFamily"),
+    TOOL: ("app.models.tool", "Tool"),
+    COUNTRY: ("app.models.country", "Country"),
+    VENDOR: ("app.models.vendor", "Vendor"),
+    PRODUCT: ("app.models.product", "Product"),
+    SECTOR: ("app.models.sector", "Sector"),
+    CVE: ("app.models.cve", "CVE"),
+    TTP: ("app.models.ttp", "TTP"),
+    OBSERVABLE: ("app.models.observable", "Observable"),
 }
+# Pseudo entity types the stage's own log rows use for non-entity subjects.
+LOG_TYPE_RELATIONSHIP = "relationship"
+LOG_TYPE_ENTRY = "entry"
 
 
 def _model_for(entity_type: str):
@@ -562,21 +663,60 @@ def _age_days(ts: datetime | None) -> int | None:
     return max(0, (datetime.now(UTC) - ts).days)
 
 
-async def _link_items(db: AsyncSession, entry, parsed: dict | None, scope: set[str], text: str) -> list[ReviewItem]:
+async def _recently_restored(db: AsyncSession, entry_id: uuid.UUID) -> set[tuple[str, uuid.UUID]]:
+    """Links on this entry an analyst restored within RESTORED_GUARD_DAYS —
+    from the link log (validator-type links) and from the stage's own restore
+    audit rows (tool / sector / ttp links and vetoes)."""
     from datetime import timedelta
 
-    from app.intelligence.autolinker import split_into_paragraphs
-    from app.intelligence.link_validation_apply import PREVIOUSLY_RESTORED_LOOKBACK_DAYS
     from app.models.entity_link_validation_log import EntityLinkValidationLog
+    from app.models.entity_maintenance import EntityMaintenanceLog
+
+    cutoff = datetime.now(UTC) - timedelta(days=RESTORED_GUARD_DAYS)
+    out = {
+        (t, eid)
+        for t, eid in (
+            await db.execute(
+                select(EntityLinkValidationLog.entity_type, EntityLinkValidationLog.entity_id).where(
+                    EntityLinkValidationLog.entry_id == entry_id,
+                    EntityLinkValidationLog.action == "restored",
+                    EntityLinkValidationLog.created_at >= cutoff,
+                )
+            )
+        ).all()
+    }
+    out |= {
+        (t, eid)
+        for t, eid in (
+            await db.execute(
+                select(EntityMaintenanceLog.entity_type, EntityMaintenanceLog.entity_id).where(
+                    EntityMaintenanceLog.action.in_([ACTION_UNLINK, ACTION_VETO]),
+                    EntityMaintenanceLog.before["entry_id"].astext == str(entry_id),
+                    EntityMaintenanceLog.before["restored_from"].astext.isnot(None),
+                    EntityMaintenanceLog.created_at >= cutoff,
+                )
+            )
+        ).all()
+        if eid is not None
+    }
+    return out
+
+
+async def _link_items(
+    db: AsyncSession, entry, scope: set[str], text: str, legacy_out: list | None = None
+) -> list[ReviewItem]:
+    from app.intelligence.autolinker import split_into_paragraphs
+    from app.models.entity_maintenance import EntityMaintenanceLog
     from app.models.pending_autolink import PendingAutolinkMatch
-    from app.models.ttp import TTP, EntryTTP
+    from app.models.ttp import TTP as TTPModel
+    from app.models.ttp import EntryTTP
     from app.services.sanitizer import entry_text_with_translation
 
     title, content_text = entry_text_with_translation(entry)
     paragraph_map = dict(split_into_paragraphs(title, entry.summary or "", content_text))
 
-    promoted = {
-        (r.entity_type, r.entity_id)
+    promoted: dict[tuple[str, uuid.UUID], PendingAutolinkMatch] = {
+        (r.entity_type, r.entity_id): r
         for r in (
             await db.execute(
                 select(PendingAutolinkMatch).where(
@@ -587,19 +727,7 @@ async def _link_items(db: AsyncSession, entry, parsed: dict | None, scope: set[s
         .scalars()
         .all()
     }
-    cutoff = datetime.now(UTC) - timedelta(days=PREVIOUSLY_RESTORED_LOOKBACK_DAYS)
-    restored = {
-        (t, eid)
-        for t, eid in (
-            await db.execute(
-                select(EntityLinkValidationLog.entity_type, EntityLinkValidationLog.entity_id).where(
-                    EntityLinkValidationLog.entry_id == entry.id,
-                    EntityLinkValidationLog.action == "restored",
-                    EntityLinkValidationLog.created_at >= cutoff,
-                )
-            )
-        ).all()
-    }
+    restored = await _recently_restored(db, entry.id)
 
     items: list[ReviewItem] = []
     for jmodel, emodel, fk_attr, entity_type in _link_specs():
@@ -634,8 +762,8 @@ async def _link_items(db: AsyncSession, entry, parsed: dict | None, scope: set[s
     # stamps source_text with an "auto_link:" prefix, the AI writes a quote.
     ttp_rows = (
         await db.execute(
-            select(EntryTTP, TTP)
-            .join(TTP, TTP.id == EntryTTP.ttp_id)
+            select(EntryTTP, TTPModel)
+            .join(TTPModel, TTPModel.id == EntryTTP.ttp_id)
             .where(
                 EntryTTP.entry_id == entry.id,
                 EntryTTP.source_text.isnot(None),
@@ -646,10 +774,10 @@ async def _link_items(db: AsyncSession, entry, parsed: dict | None, scope: set[s
     for junction, ttp in ttp_rows:
         items.append(
             ReviewItem(
-                item_id=f"link:ttp:{ttp.id}",
+                item_id=f"link:{TTP}:{ttp.id}",
                 kind="link",
                 line="",
-                entity_type="ttp",
+                entity_type=TTP,
                 entity_id=ttp.id,
                 name=f"{ttp.technique_id} {ttp.technique_name}",
                 source="ai",
@@ -661,7 +789,23 @@ async def _link_items(db: AsyncSession, entry, parsed: dict | None, scope: set[s
         )
 
     items = items[:_MAX_LINKS]
-    earlier = await _legacy_suggestions(db, entry, items)
+    link_rows, maint_rows = await _legacy_rows(db, entry, items)
+    if legacy_out is not None:
+        legacy_out.extend([*link_rows, *maint_rows])
+    earlier = _legacy_suggestions(link_rows, maint_rows, items)
+    minted_ids = [it.entity_id for it in items if it.minted_here and it.entity_id]
+    resolver_rows: dict[uuid.UUID, dict] = {}
+    if minted_ids:
+        for eid, after in (
+            await db.execute(
+                select(EntityMaintenanceLog.entity_id, EntityMaintenanceLog.after).where(
+                    EntityMaintenanceLog.action == "resolution_created",
+                    EntityMaintenanceLog.entity_id.in_(minted_ids),
+                )
+            )
+        ).all():
+            if isinstance(after, dict):
+                resolver_rows.setdefault(eid, after)
     for item in items:
         entity_model = _model_for(item.entity_type or "")
         entity = await db.get(entity_model, item.entity_id) if entity_model else None
@@ -679,7 +823,7 @@ async def _link_items(db: AsyncSession, entry, parsed: dict | None, scope: set[s
         if item.promoted:
             bits.append("promoted from the pending tier (name is also a dictionary word)")
         if item.previously_restored:
-            bits.append("an analyst restored this link recently — remove only on an unambiguous collision")
+            bits.append("an analyst restored this link recently — it will not be changed, flag it only")
         line = f"{item.item_id}  " + " · ".join(bits)
         if item.minted_here and "entities" in scope:
             if item.candidates:
@@ -689,6 +833,13 @@ async def _link_items(db: AsyncSession, entry, parsed: dict | None, scope: set[s
                 line += f"\n    nearest existing names: {near}"
             else:
                 line += "\n    nearest existing names: none"
+            resolver = resolver_rows.get(item.entity_id)  # type: ignore[arg-type]
+            if resolver and resolver.get("norm_exact"):
+                line += f"\n    resolver: created as '{resolver['norm_exact']}' — no catalogue name matched at creation"
+        pend = promoted.get((item.entity_type or "", item.entity_id))  # type: ignore[arg-type]
+        if pend is not None:
+            forms = ", ".join(dict.fromkeys(pend.matched_names or [])) or item.name
+            line += f"\n    pending match: surface form(s) {forms} · autolinker confidence {pend.confidence or '?'}"
         aliases = list(getattr(entity, "aliases", None) or [])[:3]
         if aliases:
             line += f"\n    aliases: {', '.join(aliases)}"
@@ -699,6 +850,29 @@ async def _link_items(db: AsyncSession, entry, parsed: dict | None, scope: set[s
             line += f"\n    earlier suggestion (retired nightly job): {note}"
         item.line = line
     return items
+
+
+# Proposal actions of the retired merge engine and stale sweep (migration
+# b1c2d3e4f5a6 deletes their pending rows; this covers anything older).
+LEGACY_MAINT_ACTIONS = ("merge_cluster_summary", "stale_entity_review")
+
+
+async def legacy_row_is_orphaned(db: AsyncSession, row) -> bool:
+    """True when no entry can carry this retired-job proposal to a review: its
+    entity is gone, or nothing records which entry created it, so the backfill
+    will never reach it. Those rows are listed for manual disposition."""
+    from app.models.entry import Entry
+
+    if row.entity_id is None:
+        return True
+    model = _model_for(row.entity_type or "")
+    obj = await db.get(model, row.entity_id) if model else None
+    if obj is None:
+        return True
+    creator = getattr(obj, "created_from_entry_id", None)
+    if creator is None:
+        return True
+    return await db.get(Entry, creator) is None
 
 
 async def _legacy_rows(db: AsyncSession, entry, items: list[ReviewItem]):
@@ -738,9 +912,10 @@ async def _legacy_rows(db: AsyncSession, entry, items: list[ReviewItem]):
                     select(EntityMaintenanceLog).where(
                         EntityMaintenanceLog.entity_id.in_(minted),
                         EntityMaintenanceLog.applied.is_(False),
-                        EntityMaintenanceLog.action.in_(
-                            ["merge_cluster_summary", "normalize_name", "alias_collision", "stale_entity_review"]
-                        ),
+                        # Only the retired jobs' own proposals. normalize_name /
+                        # alias_collision come from scanners that still run and
+                        # get no verdict here, so they are never superseded.
+                        EntityMaintenanceLog.action.in_(LEGACY_MAINT_ACTIONS),
                     )
                 )
             )
@@ -750,8 +925,7 @@ async def _legacy_rows(db: AsyncSession, entry, items: list[ReviewItem]):
     return link_rows, maint_rows
 
 
-async def _legacy_suggestions(db: AsyncSession, entry, items: list[ReviewItem]) -> dict[str, list[str]]:
-    link_rows, maint_rows = await _legacy_rows(db, entry, items)
+def _legacy_suggestions(link_rows: list, maint_rows: list, items: list[ReviewItem]) -> dict[str, list[str]]:
     out: dict[str, list[str]] = {}
     for r in link_rows:
         key = f"link:{r.entity_type}:{r.entity_id}"
@@ -829,6 +1003,8 @@ async def _ioc_items(db: AsyncSession, entry) -> list[ReviewItem]:
             continue
         seen.add((kind, value))
         line = f"ioc:{kind}:{value}  {kind} · staged by the AI, not yet a ledger row"
+        if cand.get("was_defanged"):
+            line += " · printed defanged"
         if cand.get("evidence"):
             line += f'\n    evidence: "{str(cand["evidence"])[:200]}"'
         items.append(
@@ -856,6 +1032,8 @@ async def _ioc_items(db: AsyncSession, entry) -> list[ReviewItem]:
         line = f"ioc:{obs.kind}:{obs.value}  {obs.kind} · captured as a ledger row · {obs.sighting_count} sightings"
         if sighting.surface_form and sighting.surface_form != obs.value:
             line += f" · printed as {sighting.surface_form}"
+        if getattr(sighting, "was_defanged", False):
+            line += " · printed defanged"
         items.append(
             ReviewItem(
                 item_id=f"ioc:{obs.kind}:{obs.value}",
@@ -887,16 +1065,19 @@ def _assessment_item(parsed: dict | None) -> ReviewItem | None:
 
 
 async def build_manifest(
-    db: AsyncSession, entry, parsed: dict | None, scope: set[str] | None = None
+    db: AsyncSession, entry, parsed: dict | None, scope: set[str] | None = None, legacy_out: list | None = None
 ) -> tuple[list[ReviewItem], str]:
-    """Review items for the entry + the rendered prompt block."""
+    """Review items for the entry + the rendered prompt block. ``legacy_out``
+    collects the retired jobs' pending rows the manifest rendered as earlier
+    suggestions, so the caller can supersede exactly those after the review
+    (taken before the model runs: the reviewer's own rows are never among them)."""
     from app.services.entry_analysis import analysis_content_text
 
     scope = scope or {"links", "entities", "relationships", "observables"}
     text = analysis_content_text(entry)
     items: list[ReviewItem] = []
     if "links" in scope or "entities" in scope:
-        items += await _link_items(db, entry, parsed, scope, text)
+        items += await _link_items(db, entry, scope, text, legacy_out)
     if "relationships" in scope:
         items += await _edge_items(db, entry)
     if "observables" in scope:
@@ -909,13 +1090,17 @@ async def build_manifest(
     return items, block
 
 
-async def build_variables(db: AsyncSession, entry, parsed: dict | None, cfg: dict) -> tuple[list[ReviewItem], dict]:
+async def build_variables(
+    db: AsyncSession, entry, parsed: dict | None, cfg: dict
+) -> tuple[list[ReviewItem], dict, list]:
+    """(items, prompt variables, legacy rows to supersede after the review)."""
     from app.models.feed import Feed
     from app.services.analysis_window import analysis_content_window
     from app.services.entry_analysis import analysis_content_text
     from app.services.system_settings import get_setting
 
-    items, block = await build_manifest(db, entry, parsed, cfg["scope"])
+    legacy: list = []
+    items, block = await build_manifest(db, entry, parsed, cfg["scope"], legacy_out=legacy)
     tail_reserve = float(await get_setting("observables_analysis_tail_reserve", db) or 0.0)
     feed_title = (await db.execute(select(Feed.title).where(Feed.id == entry.feed_id))).scalar_one_or_none() or ""
     variables = {
@@ -929,7 +1114,7 @@ async def build_variables(db: AsyncSession, entry, parsed: dict | None, cfg: dic
         "manifest_block": block,
         "item_count": len(items),
     }
-    return items, variables
+    return items, variables, legacy
 
 
 # --------------------------------------------------------------------------- verdicts
@@ -951,7 +1136,9 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
     response (all keep), the same rule the one-pass path uses."""
     by_id = {it.item_id: it for it in items}
     raw = result.get("verdicts")
-    stats = {"unknown": 0, "duplicate": False}
+    # unknown: item ids not in the manifest; coerced: verdicts the item's kind
+    # or state does not accept (treated as keep).
+    stats = {"unknown": 0, "coerced": 0, "duplicate": False}
     verdicts: dict[str, Verdict] = {}
     if isinstance(raw, list):
         for entry in raw:
@@ -973,11 +1160,16 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
             reason = str(entry.get("reason") or "")[:500]
             suggested = (entry.get("suggested_type") or None) if verdict == "reclassify" else None
             merge_target = None
+            asked = verdict
             if verdict not in VALID_FOR_KIND.get(item.kind, set()):
                 verdict = "keep"
             if verdict in {"veto", "merge"} and not item.minted_here:
                 verdict = "keep"
-            if verdict == "reclassify" and suggested not in RECLASSIFY_TYPES:
+            if verdict == "reclassify" and (
+                suggested not in RECLASSIFY_TYPES
+                or item.entity_type not in RECLASSIFY_TYPES
+                or suggested == item.entity_type
+            ):
                 verdict = "keep"
             if verdict == "merge":
                 wanted = str(entry.get("merge_into") or "").strip().lower()
@@ -988,6 +1180,8 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
                         break
                 if merge_target is None:
                     verdict = "keep"  # never merge into a name it was not shown
+            if verdict != asked and asked in VERDICTS:
+                stats["coerced"] += 1
             verdicts[item_id] = Verdict(item, verdict, confidence, reason, suggested, merge_target)
     if stats["duplicate"]:
         verdicts = {}
@@ -1036,8 +1230,17 @@ async def _rolling_breaker(ratio: float, breaker_pct: float) -> bool:
         await r.lpush(_RATIOS_KEY, f"{ratio:.3f}")
         await r.ltrim(_RATIOS_KEY, 0, _ROLLING_WINDOW - 1)
         vals = [float(v) for v in await r.lrange(_RATIOS_KEY, 0, _ROLLING_WINDOW - 1)]
-        if len(vals) >= 10 and sum(vals) / len(vals) > breaker_pct:
+        if len(vals) >= _ROLLING_MIN_SAMPLES and sum(vals) / len(vals) > breaker_pct:
+            already = await r.get(_BREAKER_KEY)
             await r.set(_BREAKER_KEY, str(datetime.now(UTC).timestamp() + 3600), ex=3600)
+            if not already:
+                logger.warning(
+                    "adjudication rolling breaker tripped: mean destructive ratio %.2f over %d runs > %.2f; "
+                    "dispatch paused for an hour and this run filed as proposals",
+                    sum(vals) / len(vals),
+                    len(vals),
+                    breaker_pct,
+                )
             return True
     except Exception:
         logger.debug("rolling breaker update failed", exc_info=True)
@@ -1046,10 +1249,16 @@ async def _rolling_breaker(ratio: float, breaker_pct: float) -> bool:
 
 async def _entity_snapshot(db: AsyncSession, entity_type: str, entity_id: uuid.UUID) -> dict:
     """Enough of an entity to re-create it after a veto deleted it."""
+    from sqlalchemy import inspect as sa_inspect
+
     model = _model_for(entity_type)
     obj = await db.get(model, entity_id) if model else None
     if obj is None:
         return {}
+    # A bulk UPDATE on the entity's table (article_count) expires the loaded
+    # instance; reading an expired attribute would lazy-load synchronously.
+    if sa_inspect(obj).expired:
+        await db.refresh(obj)
     snap = {"id": str(entity_id), "name": _display_name(obj)}
     for attr in (
         "aliases",
@@ -1080,13 +1289,14 @@ async def _junction_for(db: AsyncSession, entity_type: str, entry_id: uuid.UUID,
             await db.execute(select(jmodel).where(jmodel.entry_id == entry_id, getattr(jmodel, fk_attr) == entity_id))
         ).scalar_one_or_none()
         return row, jmodel, emodel, fk_attr
-    if entity_type == "ttp":
-        from app.models.ttp import TTP, EntryTTP
+    if entity_type == TTP:
+        from app.models.ttp import TTP as TTPModel
+        from app.models.ttp import EntryTTP
 
         row = (
             await db.execute(select(EntryTTP).where(EntryTTP.entry_id == entry_id, EntryTTP.ttp_id == entity_id))
         ).scalar_one_or_none()
-        return row, EntryTTP, TTP, "ttp_id"
+        return row, EntryTTP, TTPModel, "ttp_id"
     return None, None, None, None
 
 
@@ -1376,9 +1586,9 @@ async def _merge_entity(
             ),
         )
         return {"via": "reclassify", "response": getattr(resp, "model_dump", lambda: str(resp))()}
-    if entity_type == "threat_actor":
+    if entity_type == THREAT_ACTOR:
         resp = await perform_actor_merge(db, target_id, MergeRequest(source_id=entity_id, reasoning=reason or None))
-    elif entity_type == "malware":
+    elif entity_type == MALWARE:
         resp = await perform_malware_merge(db, target_id, MergeRequest(source_id=entity_id, reasoning=reason or None))
     else:
         resp = await perform_same_type_merge(
@@ -1426,6 +1636,7 @@ async def apply_verdicts(
                 overridden += 1
 
     destructive = [v for v in verdicts if v.verdict in DESTRUCTIVE]
+    changes = [v for v in verdicts if v.verdict in DESTRUCTIVE | {"merge"}]
     items_n = len([v for v in verdicts if v.item.kind != "assessment"])
     ratio = (len(destructive) / items_n) if items_n else 0.0
     breaker = ratio > cfg["breaker_pct"]
@@ -1444,7 +1655,7 @@ async def apply_verdicts(
         entity_id: uuid.UUID | None = None,
     ) -> EntityMaintenanceLog:
         row = EntityMaintenanceLog(
-            entity_type=entity_type or item.entity_type or "entry",
+            entity_type=entity_type or item.entity_type or LOG_TYPE_ENTRY,
             entity_id=entity_id if entity_id is not None else item.entity_id,
             action=action,
             mode="apply" if applied else "shadow",
@@ -1471,6 +1682,10 @@ async def apply_verdicts(
             continue
         reason = v.reason
         do_apply = run_mode == "apply" and _CONF_RANK[v.confidence] >= floor
+        # Never touched: a link an analyst restored recently is only ever
+        # flagged again, whatever the mode and confidence.
+        if item.kind == "link" and item.previously_restored:
+            do_apply = False
         after_base = {"reason": reason, "confidence": v.confidence}
 
         if item.kind == "link":
@@ -1502,11 +1717,18 @@ async def apply_verdicts(
                             snap = real
                     _log(ACTION_UNLINK, item, {"junction": snap}, after_base, applied=do_apply)
             elif v.verdict == "reclassify":
-                # Advisory in both modes, like everywhere else.
+                # Advisory in both modes, like everywhere else. Applying it
+                # (from the queue) converts the entity, never unlinks it.
                 if item.entity_type in ENTITY_TYPES:
                     await log_reclassification(db, entry.id, link_row, reason, v.suggested_type, ai_result_id)
                 else:
-                    _log(ACTION_UNLINK, item, None, {**after_base, "suggested_type": v.suggested_type}, applied=False)
+                    _log(
+                        ACTION_RECLASSIFY,
+                        item,
+                        {"entity": {"name": item.name}},
+                        {**after_base, "suggested_type": v.suggested_type},
+                        applied=False,
+                    )
             elif v.verdict == "veto":
                 snapshot = await _entity_snapshot(db, item.entity_type or "", item.entity_id)  # type: ignore[arg-type]
                 junction_snap = _junction_snapshot_from_item(item)
@@ -1517,7 +1739,8 @@ async def apply_verdicts(
                     deleted = False
                     if not await _entity_has_a_life(db, item.entity_type or "", item.entity_id, entry.id):  # type: ignore[arg-type]
                         deleted = await _delete_entity(db, item.entity_type or "", item.entity_id)  # type: ignore[arg-type]
-                    applied_n += 1
+                    if real is not None or deleted:
+                        applied_n += 1
                     _log(
                         ACTION_VETO if deleted else ACTION_UNLINK,
                         item,
@@ -1536,10 +1759,13 @@ async def apply_verdicts(
                 }
                 snapshot = {"name": item.name}
                 if do_apply:
+                    # A failed merge must not poison the session for the rest
+                    # of the run: the savepoint rolls back just this merge.
                     try:
-                        outcome = await _merge_entity(
-                            db, item.entity_type or "", item.entity_id, v.merge_target, reason
-                        )  # type: ignore[arg-type]
+                        async with db.begin_nested():
+                            outcome = await _merge_entity(
+                                db, item.entity_type or "", item.entity_id, v.merge_target, reason
+                            )  # type: ignore[arg-type]
                         applied_n += 1
                         _log(ACTION_MERGE, item, {"entity": snapshot}, {**after, "outcome": outcome}, applied=True)
                     except Exception as exc:
@@ -1560,7 +1786,7 @@ async def apply_verdicts(
                         {"claim": item.name, **before},
                         after_base,
                         applied=True,
-                        entity_type="relationship",
+                        entity_type=LOG_TYPE_RELATIONSHIP,
                         entity_id=item.edge_id,
                     )
             else:
@@ -1570,7 +1796,7 @@ async def apply_verdicts(
                     {"claim": item.name},
                     after_base,
                     applied=False,
-                    entity_type="relationship",
+                    entity_type=LOG_TYPE_RELATIONSHIP,
                     entity_id=item.edge_id,
                 )
         elif item.kind == "ioc" and v.verdict == "drop":
@@ -1585,7 +1811,7 @@ async def apply_verdicts(
                         {"staged": item.staged, **snap},
                         after,
                         applied=True,
-                        entity_type="observable",
+                        entity_type=OBSERVABLE,
                         entity_id=item.observable_id,
                     )
             else:
@@ -1595,7 +1821,7 @@ async def apply_verdicts(
                     {"staged": item.staged},
                     after,
                     applied=False,
-                    entity_type="observable",
+                    entity_type=OBSERVABLE,
                     entity_id=item.observable_id,
                 )
         elif item.kind == "assessment":
@@ -1605,7 +1831,7 @@ async def apply_verdicts(
                 None,
                 {"verdict": v.verdict, "reason": reason},
                 applied=False,
-                entity_type="entry",
+                entity_type=LOG_TYPE_ENTRY,
                 entity_id=entry.id,
             )
 
@@ -1619,7 +1845,7 @@ async def apply_verdicts(
         "items": items_n,
         "verdicts": counts,
         "applied": applied_n,
-        "shadowed": max(0, len(destructive) - applied_n),
+        "shadowed": max(0, len(changes) - applied_n),
         "breaker": breaker,
         "rolling_breaker": rolling,
         "keep_overridden": overridden,
@@ -1639,6 +1865,47 @@ def _junction_snapshot_from_item(item: ReviewItem) -> dict:
 
 
 # --------------------------------------------------------------------------- queue apply / restore
+
+
+async def _reclassify_entity(
+    db: AsyncSession, entity_type: str, entity_id: uuid.UUID, target_type: str, reason: str
+) -> dict:
+    """Convert a mis-typed entity through the merge engine's reclassify: into
+    the same-named entity of the target type when one exists, else as a new
+    entity of that type. The link follows the entity; nothing is unlinked."""
+    from app.api.entity_merge import ReclassifyRequest, perform_reclassify
+
+    if target_type not in RECLASSIFY_TYPES or entity_type not in RECLASSIFY_TYPES or target_type == entity_type:
+        return {"applied": False, "reason": f"cannot reclassify {entity_type} → {target_type}"}
+    model = _model_for(entity_type)
+    obj = await db.get(model, entity_id) if model else None
+    if obj is None:
+        return {"applied": False, "reason": "entity gone"}
+    target_model = _model_for(target_type)
+    existing = None
+    if target_model is not None:
+        existing = (
+            await db.execute(
+                select(target_model.id).where(func.lower(target_model.name) == func.lower(obj.name)).limit(1)
+            )
+        ).scalar_one_or_none()
+    resp = await perform_reclassify(
+        db,
+        ReclassifyRequest(
+            source_type=entity_type,
+            source_id=entity_id,
+            target_type=target_type,
+            target_id=existing,
+            mode="apply",
+            reasoning=(reason or None),
+        ),
+    )
+    return {
+        "applied": True,
+        "target_type": target_type,
+        "merged_into_existing": existing is not None,
+        "response": getattr(resp, "model_dump", lambda: str(resp))(),
+    }
 
 
 async def apply_adjudication_row(db: AsyncSession, row) -> dict:
@@ -1662,12 +1929,20 @@ async def apply_adjudication_row(db: AsyncSession, row) -> dict:
             before["junction"] = snap
         else:
             outcome = {"applied": True, "note": "link already gone"}
+    elif row.action == ACTION_RECLASSIFY and row.entity_id and after.get("suggested_type"):
+        outcome = await _reclassify_entity(db, row.entity_type, row.entity_id, after["suggested_type"], reason)
+        if not outcome.get("applied"):
+            return outcome
+        after["outcome"] = {k: v for k, v in outcome.items() if k != "applied"}
     elif row.action == ACTION_VETO and row.entity_id:
+        # The shadow-time snapshot can be stale (aliases, description edited
+        # since); what restore re-creates is the entity as it is now.
+        fresh = await _entity_snapshot(db, row.entity_type, row.entity_id)
+        if fresh:
+            before["entity"] = fresh
         snap = await _unlink(db, row.entity_type, entry.id, row.entity_id)
         if snap is not None:
             before["junction"] = snap
-        if not before.get("entity"):
-            before["entity"] = await _entity_snapshot(db, row.entity_type, row.entity_id)
         deleted = False
         if not await _entity_has_a_life(db, row.entity_type, row.entity_id, entry.id):
             deleted = await _delete_entity(db, row.entity_type, row.entity_id)
@@ -1772,8 +2047,8 @@ async def restore_adjudication_row(db: AsyncSession, row) -> dict:
                     was_defanged=bool(sighting.get("was_defanged")),
                     paragraph_indices=sighting.get("paragraph_indices") or None,
                 )
-    elif row.action == ACTION_MERGE:
-        return {"restored": False, "reason": "merges are undone from the merge engine's tombstone"}
+    elif row.action in (ACTION_MERGE, ACTION_RECLASSIFY):
+        return {"restored": False, "reason": "merges and reclassifies are undone from the merge engine's tombstone"}
     else:
         return {"restored": False, "reason": f"nothing to restore for {row.action}"}
 

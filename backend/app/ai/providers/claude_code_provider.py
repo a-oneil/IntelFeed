@@ -160,7 +160,7 @@ class ClaudeCodeProvider(AIProvider):
         self.max_budget_usd: float = float(self.config.get("max_budget_usd", 1.0))
         self.extra_args: list[str] = list(self.config.get("extra_args", []))
         # Per-task tool access. When unset/empty, ALL tools are disallowed
-        # (safe default — entity_link_validation runs pure prompt-in/json-out).
+        # (safe default — extraction tasks run pure prompt-in/json-out).
         # When set, the listed tools are explicitly allowed and --disallowedTools
         # is omitted. Use ["Bash", "Read", "Skill"] for tasks that invoke the
         # intelfeed skill, or ["*"] for full access (avoid).

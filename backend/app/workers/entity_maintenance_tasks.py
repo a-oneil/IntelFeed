@@ -1,20 +1,22 @@
-"""Autonomous entity-maintenance tasks (run on the ai worker).
+"""Entity-maintenance tasks that call an AI provider (run on the ai worker).
 
-Two task families share this module — they're related enough that they reuse
-the same candidate-finder utilities, AI invocation pattern, and maintenance
-log:
+Four task families share this module — the same AI invocation pattern and
+the same maintenance log (``entity_maintenance_log``):
 
-  entity_merge_maintenance   — weekly: find clusters of similarly-named
-                                actors / malware, hand each to Claude, let
-                                it decide and (in apply mode) merge them via
-                                the intelfeed skill.
+  actor_profile_refresh        — weekly: pick the most-active actors whose
+                                  profile description hasn't been touched
+                                  recently and have the model refresh it
+                                  from recent entries (gated by
+                                  ``entity_maintenance_mode``, shadow/apply).
+  assessment backfill          — daily: draft the AI description paragraph
+                                  for entities that have none.
+  entity_name_normalization    — on demand: canonical-name proposals.
+  ai_enrich_gap_batch          — on demand: fill empty profile fields.
 
-  actor_profile_refresh      — weekly: pick the most-active actors whose
-                                profile description hasn't been touched
-                                recently and have Claude refresh it from
-                                recent entries.
+Duplicate entities are judged at creation by the adjudicate stage
+(``services/entry_adjudication.py``), not here.
 
-Both tasks run on the dedicated `celery-worker-ai` service (the serialized
+All of them run on the dedicated `celery-worker-ai` service (the serialized
 "ai" queue) so AI calls hit the provider one at a time.
 """
 

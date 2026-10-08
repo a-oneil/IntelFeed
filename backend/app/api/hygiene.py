@@ -51,6 +51,7 @@ from app.models.entity_link_validation_log import EntityLinkValidationLog
 from app.models.entity_maintenance import EntityMaintenanceLog
 from app.models.entity_note import EntityNote
 from app.models.entity_relationship import EntityRelationship
+from app.models.entry import Entry
 from app.models.entry_sector import EntrySector
 from app.models.malware_family import EntryMalware, MalwareFamily
 from app.models.observable import EntryObservable, Observable
@@ -66,9 +67,12 @@ from app.services.entry_adjudication import (
     ACTION_EDGE_DEMOTE,
     ACTION_IOC_DROP,
     ACTION_MERGE,
+    ACTION_RECLASSIFY,
     ACTION_UNLINK,
     ACTION_VETO,
     ADJUDICATION_ACTIONS,
+    LEGACY_MAINT_ACTIONS,
+    legacy_row_is_orphaned,
 )
 from app.services.entry_adjudication import TASK_NAME as ADJUDICATION_TASK_NAME
 
@@ -551,7 +555,7 @@ async def _apply_advisory_rows(
     advisories: list[EntityLinkValidationLog],
     mode: str,
 ) -> ApplyAdvisoriesResponse:
-    """Core of advisory promotion, shared with the AI-approved bulk apply."""
+    """Core of advisory promotion: dedupe the advisories and run one reclassify per tuple."""
     # Dedupe by (source_type, source_id, suggested_type) — keep the latest reasoning.
     grouped: dict[tuple[str, uuid.UUID, str], list[EntityLinkValidationLog]] = defaultdict(list)
     for a in advisories:
@@ -643,7 +647,7 @@ async def _apply_advisory_rows(
 
 
 # ---------------------------------------------------------------------------
-# AI proposal review — judge pending proposals, bulk-apply the approved ones
+# Enrichment gaps — which profile fields are empty, per entity type
 # ---------------------------------------------------------------------------
 
 
@@ -1043,7 +1047,9 @@ def _row_actions_maint(row: EntityMaintenanceLog) -> list[str]:
             return ["dismiss"] if not row.applied else []
         if not row.applied:
             return ["apply", "dismiss"]
-        if row.action == ACTION_MERGE or (row.after or {}).get("restored"):
+        # A merge or a reclassify is undone from the merge engine's tombstone,
+        # not from this row.
+        if row.action in (ACTION_MERGE, ACTION_RECLASSIFY) or (row.after or {}).get("restored"):
             return []
         return ["restore"]
     return []
@@ -1149,9 +1155,9 @@ def _adjudication_subject(row: EntityMaintenanceLog) -> str:
         return f"Veto: {name} ({row.entity_type}) should not exist"
     if row.action == ACTION_MERGE:
         return f"Merge: {name} → {after.get('merge_into') or '?'} ({after.get('target_type') or row.entity_type})"
+    if row.action == ACTION_RECLASSIFY:
+        return f"Reclassify: {name or row.entity_type} → {after.get('suggested_type') or '?'}"
     if row.action == ACTION_UNLINK:
-        if after.get("suggested_type"):
-            return f"Reclassify: {name or row.entity_type} → {after['suggested_type']}"
         return f"Unlink: {name or row.entity_type} from this article"
     if row.action == ACTION_EDGE_DEMOTE:
         return f"Demote: {before.get('claim') or 'relationship'}"
@@ -1190,7 +1196,7 @@ def _maint_links(row: EntityMaintenanceLog) -> list[FeedLink]:
 
     if row.action in ADJUDICATION_ACTIONS:
         ent = before.get("entity") if isinstance(before.get("entity"), dict) else None
-        if ent and row.entity_id and row.action in (ACTION_VETO, ACTION_MERGE, ACTION_UNLINK):
+        if ent and row.entity_id and row.action in (ACTION_VETO, ACTION_MERGE, ACTION_UNLINK, ACTION_RECLASSIFY):
             _add(row.entity_type, row.entity_id, ent.get("name"), role="subject")
         if row.action == ACTION_MERGE and after.get("target_id"):
             _add(
@@ -1303,6 +1309,13 @@ async def hygiene_feed(
         description="'adjudicator' = rows the post-analysis adjudicate stage filed; "
         "'legacy' = everything else (nightly jobs, scans, analysts).",
     ),
+    orphaned: bool = Query(
+        False,
+        description="Only pending proposals the retired jobs left that no entry can carry to the adjudicate "
+        "stage: link proposals whose entry is gone, and merge-engine / stale-sweep proposals about an entity "
+        "that no longer exists or has no creating entry. They are listed for manual disposition, never "
+        "auto-dismissed.",
+    ),
     since: datetime | None = Query(None, description="Only rows created at or after this timestamp"),
     limit: int = Query(50, ge=1, le=200, description="Rows per page"),
     offset: int = Query(0, ge=0, description="Rows to skip for pagination"),
@@ -1335,6 +1348,18 @@ async def hygiene_feed(
     link_rows: list[EntityLinkValidationLog] = []
     if link_eligible:
         q = select(EntityLinkValidationLog)
+        if orphaned:
+            # A pending legacy proposal whose entry is gone: the backfill can
+            # never reach it. (The entry FK cascades, so this is rare and
+            # means a row written without an entry.)
+            q = q.where(
+                EntityLinkValidationLog.action.in_(["shadow_remove", "needs_reclassification"]),
+                or_(
+                    EntityLinkValidationLog.ai_result_id.is_(None),
+                    ~EntityLinkValidationLog.ai_result_id.in_(adjudicator_results),
+                ),
+                ~EntityLinkValidationLog.entry_id.in_(select(Entry.id)),
+            )
         if origin == "adjudicator":
             q = q.where(EntityLinkValidationLog.ai_result_id.in_(adjudicator_results))
         elif origin == "legacy":
@@ -1367,6 +1392,12 @@ async def hygiene_feed(
             q = q.where(EntityMaintenanceLog.action.in_(sorted(ADJUDICATION_ACTIONS)))
         elif origin == "legacy":
             q = q.where(EntityMaintenanceLog.action.notin_(sorted(ADJUDICATION_ACTIONS)))
+        if orphaned:
+            q = q.where(
+                EntityMaintenanceLog.action.in_(list(LEGACY_MAINT_ACTIONS)),
+                EntityMaintenanceLog.applied.is_(False),
+            )
+            fetch_cap = max(fetch_cap, 500)  # narrowed again in Python below
         if pending:
             q = q.where(
                 EntityMaintenanceLog.applied.is_(False),
@@ -1397,6 +1428,15 @@ async def hygiene_feed(
             q = q.where(EntityMaintenanceLog.created_at >= since)
         q = q.order_by(EntityMaintenanceLog.created_at.desc()).limit(fetch_cap)
         maint_rows = list((await db.execute(q)).scalars().all())
+        if orphaned:
+            # "No entry can carry it" is a per-entity question (the entity is
+            # gone, or nothing records which entry created it), so it is
+            # answered here rather than in the query.
+            keep: list[EntityMaintenanceLog] = []
+            for r in maint_rows:
+                if await legacy_row_is_orphaned(db, r):
+                    keep.append(r)
+            maint_rows = keep
 
     # Which link rows came from the adjudicate stage (maintenance rows carry
     # it in their action code).
@@ -1507,6 +1547,7 @@ class HygieneStats(BaseModel):
     # Adjudicate stage (post-analysis review) — the cleanup path
     adjudication_mode: str  # off | shadow | apply
     adjudication_pending: int  # unapplied verdicts it filed, across both logs
+    adjudication_breaker_until: datetime | None = None  # rolling breaker has paused dispatch until then
     pending_advisories: int  # needs_reclassification rows
     name_normalization_proposed: int  # unapplied normalize_name rows
     applied_24h: int  # actions applied across both logs in last 24h
@@ -1527,9 +1568,11 @@ async def hygiene_stats(
     """Combined hygiene counters across both proposal logs: the adjudicate
     stage's mode and pending verdicts, pending proposals per scan type,
     orphans and recent apply activity."""
+    from app.services.entry_adjudication import breaker_paused_until
     from app.services.system_settings import get_setting
 
     adjudication_mode = str(await get_setting("adjudication_mode", db) or "off").lower()
+    adjudication_breaker_until = await breaker_paused_until()
     adjudicator_results = select(AIResult.id).where(
         AIResult.task_id == select(AITask.id).where(AITask.name == ADJUDICATION_TASK_NAME).scalar_subquery()
     )
@@ -1670,6 +1713,7 @@ async def hygiene_stats(
 
     return HygieneStats(
         adjudication_mode=adjudication_mode,
+        adjudication_breaker_until=adjudication_breaker_until,
         adjudication_pending=int(adjudication_pending),
         pending_advisories=int(pending_advisories),
         name_normalization_proposed=int(name_normalization_proposed),
@@ -2924,15 +2968,22 @@ async def apply_proposed_link_removal(
     """Promote a `shadow_remove` proposal into the actual junction deletion.
     Writes a `removed` row (the proposal stays as history) and decrements the
     entity's article_count. Idempotent when the junction is already gone."""
-    from sqlalchemy import update as sql_update
-
-    from app.intelligence.link_validation_apply import ENTITY_TYPES
-
     row = (
         await db.execute(select(EntityLinkValidationLog).where(EntityLinkValidationLog.id == log_id))
     ).scalar_one_or_none()
     if not row:
         raise AppError(code="not_found", message="proposal not found", status_code=404)
+    already_removed = await _apply_link_removal_row(db, row)
+    return LinkLogResult(log_id=log_id, applied=True, already_removed=already_removed)
+
+
+async def _apply_link_removal_row(db: AsyncSession, row: EntityLinkValidationLog) -> bool:
+    """Promote one shadow_remove row into the junction deletion (+ `removed`
+    audit row). Returns True when the junction was already gone."""
+    from sqlalchemy import update as sql_update
+
+    from app.intelligence.link_validation_apply import ENTITY_TYPES
+
     if row.action != "shadow_remove":
         raise AppError(code="invalid", message=f"can only apply shadow_remove rows (got {row.action})", status_code=400)
     spec = ENTITY_TYPES.get(row.entity_type)
@@ -2957,7 +3008,7 @@ async def apply_proposed_link_removal(
             )
         )
         await db.flush()
-        return LinkLogResult(log_id=log_id, applied=True, already_removed=True)
+        return True
     db.add(
         EntityLinkValidationLog(
             entry_id=row.entry_id,
@@ -2965,7 +3016,7 @@ async def apply_proposed_link_removal(
             entity_id=row.entity_id,
             entity_name_snapshot=row.entity_name_snapshot,
             action="removed",
-            reason=f"Promoted from proposal {log_id}: " + (row.reason or "")[:400],
+            reason=f"Promoted from proposal {row.id}: " + (row.reason or "")[:400],
             original_source=junction.source,
             original_confidence=junction.confidence,
             original_matched_names=list(junction.matched_names or []),
@@ -2981,7 +3032,7 @@ async def apply_proposed_link_removal(
         .values(article_count=func.greatest(emodel.article_count - 1, 0))
     )
     await db.flush()
-    return LinkLogResult(log_id=log_id, applied=True)
+    return False
 
 
 @router.delete("/admin/hygiene/feed/{source}/{row_id}", status_code=204)
@@ -3020,14 +3071,37 @@ class DismissProposalsRequest(BaseModel):
         "null clears every pending type.",
     )
     source: str | None = Field(default=None, description="'link_validator' | 'entity_maintenance' | null (both).")
+    origin: str | None = Field(
+        default=None,
+        description="'adjudicator' = only proposals the adjudicate stage filed; 'legacy' = everything else; "
+        "omit for both",
+    )
 
     model_config = ConfigDict(
-        json_schema_extra={"example": {"action": "needs_reclassification", "source": "link_validator"}}
+        json_schema_extra={
+            "example": {"action": "needs_reclassification", "source": "link_validator", "origin": "legacy"}
+        }
     )
 
 
 class DismissProposalsResponse(BaseModel):
     dismissed: int
+
+
+class ApplyAdjudicationAllRequest(BaseModel):
+    """Scope for the bulk Apply of the adjudicate stage's pending proposals."""
+
+    action: str | None = Field(
+        default=None,
+        description="Only this proposal kind (an adjudication_* action code or shadow_remove); omit for all",
+    )
+    limit: int = Field(default=200, ge=1, le=1000, description="Maximum proposals to apply in one call")
+
+
+class ApplyAdjudicationAllResponse(BaseModel):
+    applied: int
+    skipped: int
+    errors: list[dict] = Field(default_factory=list)
 
 
 @router.post("/admin/hygiene/dismiss-proposals", response_model=DismissProposalsResponse)
@@ -3041,10 +3115,13 @@ async def dismiss_proposals(
 
     Only ever deletes proposals that haven't run: link-validator advisories
     (shadow_remove / needs_reclassification) and unapplied entity-maintenance
-    rows. Applied history is never touched. Scope with action / source / review,
+    rows. Applied history is never touched. Scope with action / source / origin,
     or pass an empty body to clear the whole pending queue.
     """
     dismissed = 0
+    adjudicator_results = select(AIResult.id).where(
+        AIResult.task_id == select(AITask.id).where(AITask.name == ADJUDICATION_TASK_NAME).scalar_subquery()
+    )
 
     # Only actions that surface a per-row Dismiss can be bulk-dismissed — mirrors
     # _row_actions_maint so bulk clears exactly what the UI lets you clear one by
@@ -3063,6 +3140,15 @@ async def dismiss_proposals(
         )
         if link_actions:
             q = q.where(EntityLinkValidationLog.action.in_(sorted(link_actions)))
+        if body.origin == "adjudicator":
+            q = q.where(EntityLinkValidationLog.ai_result_id.in_(adjudicator_results))
+        elif body.origin == "legacy":
+            q = q.where(
+                or_(
+                    EntityLinkValidationLog.ai_result_id.is_(None),
+                    ~EntityLinkValidationLog.ai_result_id.in_(adjudicator_results),
+                )
+            )
         dismissed += (await db.execute(q)).rowcount or 0
 
     if maint_eligible:
@@ -3073,7 +3159,94 @@ async def dismiss_proposals(
         )
         if maint_actions:
             q = q.where(EntityMaintenanceLog.action.in_(sorted(maint_actions)))
+        if body.origin == "adjudicator":
+            q = q.where(EntityMaintenanceLog.action.in_(sorted(ADJUDICATION_ACTIONS)))
+        elif body.origin == "legacy":
+            q = q.where(EntityMaintenanceLog.action.notin_(sorted(ADJUDICATION_ACTIONS)))
         dismissed += (await db.execute(q)).rowcount or 0
 
     await db.flush()
     return DismissProposalsResponse(dismissed=dismissed)
+
+
+@router.post("/admin/hygiene/adjudication/apply-all", response_model=ApplyAdjudicationAllResponse)
+async def apply_adjudication_all(
+    body: ApplyAdjudicationAllRequest = Body(default_factory=ApplyAdjudicationAllRequest),
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> ApplyAdjudicationAllResponse:
+    """Apply every pending proposal the adjudicate stage filed, oldest first:
+    the entity-maintenance rows (unlink, reclassify, veto, merge, demote,
+    drop) through the same code the per-row Apply uses, and its link-removal
+    proposals through the link log's apply-removal. Assessment flags are
+    informational and skipped. Each row is its own savepoint, so one failure
+    is reported and the rest still apply."""
+    from app.services.entry_adjudication import apply_adjudication_row
+
+    adjudicator_results = select(AIResult.id).where(
+        AIResult.task_id == select(AITask.id).where(AITask.name == ADJUDICATION_TASK_NAME).scalar_subquery()
+    )
+    applied = skipped = 0
+    errors: list[dict] = []
+    budget = body.limit
+
+    maint_actions = sorted(ADJUDICATION_ACTIONS - {ACTION_ASSESSMENT})
+    if body.action and body.action != "shadow_remove":
+        if body.action not in ADJUDICATION_ACTIONS or body.action == ACTION_ASSESSMENT:
+            raise AppError(
+                code="invalid", message=f"not an applyable adjudication action: {body.action}", status_code=400
+            )
+        maint_actions = [body.action]
+    if body.action in (None, *maint_actions):
+        rows = (
+            (
+                await db.execute(
+                    select(EntityMaintenanceLog)
+                    .where(EntityMaintenanceLog.action.in_(maint_actions), EntityMaintenanceLog.applied.is_(False))
+                    .order_by(EntityMaintenanceLog.created_at.asc())
+                    .limit(budget)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for row in rows:
+            try:
+                async with db.begin_nested():
+                    outcome = await apply_adjudication_row(db, row)
+            except Exception as exc:  # one bad row must not sink the batch
+                errors.append({"log_id": str(row.id), "action": row.action, "error": str(exc)[:300]})
+                continue
+            if outcome.get("applied"):
+                applied += 1
+            else:
+                skipped += 1
+        budget -= len(rows)
+
+    if budget > 0 and body.action in (None, "shadow_remove"):
+        link_rows = (
+            (
+                await db.execute(
+                    select(EntityLinkValidationLog)
+                    .where(
+                        EntityLinkValidationLog.action == "shadow_remove",
+                        EntityLinkValidationLog.ai_result_id.in_(adjudicator_results),
+                    )
+                    .order_by(EntityLinkValidationLog.created_at.asc())
+                    .limit(budget)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for row in link_rows:
+            try:
+                async with db.begin_nested():
+                    await _apply_link_removal_row(db, row)
+            except Exception as exc:
+                errors.append({"log_id": str(row.id), "action": row.action, "error": str(exc)[:300]})
+                continue
+            applied += 1
+
+    await db.flush()
+    return ApplyAdjudicationAllResponse(applied=applied, skipped=skipped, errors=errors)

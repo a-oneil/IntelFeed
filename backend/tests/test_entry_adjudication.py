@@ -43,12 +43,63 @@ def _reset_settings_cache(monkeypatch):
     yield
 
 
+_REAL_BUDGET = adj._consume_hour_budget
+_REAL_BREAKER = adj._rolling_breaker
+
+
+class FakeRedis:
+    """The handful of commands the budget and breaker use, in memory."""
+
+    def __init__(self):
+        self.kv: dict[str, str] = {}
+        self.lists: dict[str, list[str]] = {}
+
+    async def get(self, key):
+        return self.kv.get(key)
+
+    async def set(self, key, value, ex=None):
+        self.kv[key] = str(value)
+        return True
+
+    async def incr(self, key):
+        self.kv[key] = str(int(self.kv.get(key) or 0) + 1)
+        return int(self.kv[key])
+
+    async def expire(self, key, ttl):
+        return True
+
+    async def lpush(self, key, value):
+        self.lists.setdefault(key, []).insert(0, str(value))
+        return len(self.lists[key])
+
+    async def ltrim(self, key, start, stop):
+        self.lists[key] = self.lists.get(key, [])[start : stop + 1]
+        return True
+
+    async def lrange(self, key, start, stop):
+        return self.lists.get(key, [])[start : stop + 1]
+
+
+def _use_fake_redis(monkeypatch) -> FakeRedis:
+    import app.services.redis_client as rc
+
+    fake = FakeRedis()
+
+    async def _get():
+        return fake
+
+    monkeypatch.setattr(rc, "get_redis", _get)
+    monkeypatch.setattr(adj, "_consume_hour_budget", _REAL_BUDGET)
+    monkeypatch.setattr(adj, "_rolling_breaker", _REAL_BREAKER)
+    return fake
+
+
 @pytest.fixture(autouse=True)
 def _no_redis(monkeypatch):
     """Budget + breaker touch Redis; stub them so tests are DB-only."""
 
-    async def _always_fits(max_per_hour: int) -> bool:
-        return True
+    async def _always_fits(max_per_hour: int, *, backfill: bool = False) -> str | None:
+        return None
 
     async def _never_trips(ratio: float, pct: float) -> bool:
         return False
@@ -198,8 +249,8 @@ async def test_enqueue_score_floor(db_session: AsyncSession, feed):
 async def test_enqueue_budget_exhausted_waits(db_session: AsyncSession, feed, monkeypatch):
     await _seed_settings(db_session)
 
-    async def _full(max_per_hour: int) -> bool:
-        return False
+    async def _full(max_per_hour: int, *, backfill: bool = False) -> str | None:
+        return "budget"
 
     monkeypatch.setattr(adj, "_consume_hour_budget", _full)
     entry = await _make_entry(db_session, feed)
@@ -239,6 +290,11 @@ async def test_manifest_lists_links_with_provenance_and_candidates(db_session: A
             extracted_at=datetime.now(UTC),
         )
     )
+    # An established actor already carries "Warlock Group" as an alias, so the
+    # exact/alias matcher must surface it as a merge candidate.
+    crew = ThreatActor(name="Warlock Crew", aliases=["Warlock Group"], article_count=9)
+    db_session.add(crew)
+    await db_session.flush()
     # The analysis minted a duplicate actor and a victim-as-actor.
     group = await _link_actor(db_session, entry, "Warlock Group", source="ai", minted=True, article_count=1)
     victim = await _link_actor(db_session, entry, "Water Utility Co", source="ai", minted=True, article_count=1)
@@ -269,15 +325,16 @@ async def test_manifest_lists_links_with_provenance_and_candidates(db_session: A
     g = by_id[f"link:threat_actor:{group.id}"]
     assert g.minted_here
     assert "NEW, created by this article" in g.line
-    # The nearest-name lookup found the malware entry (normalised "warlock group" → "warlock"
-    # via the alias index when it exists; the exact/alias matcher otherwise).
-    assert any(c["name"] == "Warlock" for c in g.candidates) or "nearest existing names" in g.line
+    assert any(c["name"] == "Warlock Crew" for c in g.candidates)
+    assert "nearest existing names: Warlock Crew (threat_actor, 9 articles)" in g.line
+    assert all(c["entity_id"] != str(group.id) for c in g.candidates)
 
     v = by_id[f"link:threat_actor:{victim.id}"]
     assert v.minted_here and "nearest existing names: none" in v.line
 
     s = by_id[f"link:threat_actor:{storm.id}"]
     assert s.promoted and "pending tier" in s.line
+    assert "pending match: surface form(s) storm · autolinker confidence medium" in s.line
     assert block.count("\n") >= 4
 
 
@@ -1213,15 +1270,629 @@ async def test_legacy_proposals_are_shown_to_the_reviewer_then_superseded(db_ses
             applied=False,
         )
     )
+    # A name-normalization proposal comes from a scanner that still runs: the
+    # reviewer renders no verdict about names, so it must survive the review.
+    db_session.add(
+        EntityMaintenanceLog(
+            entity_type="threat_actor",
+            entity_id=minted.id,
+            action="normalize_name",
+            mode="shadow",
+            before={"entity": {"name": "Water Utility Co"}},
+            after={"proposed_name": "Water Utility Company"},
+            reasoning="expand abbreviation",
+            applied=False,
+        )
+    )
     await db_session.flush()
 
-    items, block = await build_manifest(db_session, entry, _payload())
+    legacy: list = []
+    items, block = await build_manifest(db_session, entry, _payload(), legacy_out=legacy)
     assert "earlier suggestion (retired nightly job): remove — nightly validator thought it was weather" in block
     assert "earlier suggestion (retired nightly job): stale entity review" in block
+    assert "normalize name" not in block
 
-    legacy = await adj.collect_legacy_rows(db_session, entry, items)
+    assert len(legacy) == 2
+    assert legacy == await adj.collect_legacy_rows(db_session, entry, items)
     superseded = await adj.supersede_legacy_proposals(db_session, legacy)
     await db_session.flush()
     assert superseded == 2
     assert (await db_session.execute(select(EntityLinkValidationLog))).scalars().all() == []
-    assert (await db_session.execute(select(EntityMaintenanceLog))).scalars().all() == []
+    remaining = (await db_session.execute(select(EntityMaintenanceLog))).scalars().all()
+    assert [r.action for r in remaining] == ["normalize_name"]
+
+
+# ------------------------------------------------------------------ review round 2: gaps the audit found
+
+
+@pytest.mark.asyncio
+async def test_enqueue_plan_gate_only_when_pipeline_plans_are_on(db_session: AsyncSession, feed):
+    from app.models.pipeline_plan import PipelinePlan
+
+    await _seed_settings(db_session, pipeline_engine_enabled=True)
+    db_session.add(
+        PipelinePlan(
+            name="quiet vendor blog",
+            scope_type="feed",
+            scope_id=feed.id,
+            stages={"adjudicate": {"enabled": False}},
+            is_active=True,
+        )
+    )
+    entry = await _make_entry(db_session, feed)
+    await _request(db_session, entry)
+    await db_session.flush()
+    assert await enqueue_adjudication(db_session, entry.id, {}, _payload()) == adj.SKIPPED_PLAN
+
+
+@pytest.mark.asyncio
+async def test_settings_keep_a_stored_zero(db_session: AsyncSession):
+    await _seed_settings(db_session, adjudication_max_per_hour=0, adjudication_circuit_breaker_pct=0)
+    cfg = await adj._settings(db_session)
+    assert cfg["max_per_hour"] == 0 and cfg["breaker_pct"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_created_trigger_sees_sector_and_ai_ttp_rows(db_session: AsyncSession, feed):
+    from app.models.entry_sector import EntrySector
+    from app.models.sector import Sector
+    from app.models.ttp import TTP, EntryTTP
+
+    entry = await _make_entry(db_session, feed)
+    assert not await adj._created_something(db_session, entry.id, {})
+
+    sector = Sector(name="Energy Utilities (adj test)", slug="energy-utilities-adj-test")
+    db_session.add(sector)
+    await db_session.flush()
+    db_session.add(
+        EntrySector(entry_id=entry.id, sector=sector.slug, sector_id=sector.id, source="ai", confidence="high")
+    )
+    await db_session.flush()
+    assert await adj._created_something(db_session, entry.id, {})
+
+    other = await _make_entry(db_session, feed)
+    ttp = TTP(technique_id="T1486", technique_name="Data Encrypted for Impact", tactic="impact")
+    db_session.add(ttp)
+    await db_session.flush()
+    db_session.add(EntryTTP(entry_id=other.id, ttp_id=ttp.id, source_text="auto_link:T1486", confidence="high"))
+    await db_session.flush()
+    assert not await adj._created_something(db_session, other.id, {})  # autolinker row is not "created"
+    # An AI-asserted TTP: the autolinker prefix is absent.
+    ai_entry = await _make_entry(db_session, feed)
+    db_session.add(EntryTTP(entry_id=ai_entry.id, ttp_id=ttp.id, source_text="encrypted the files", confidence="high"))
+    await db_session.flush()
+    assert await adj._created_something(db_session, ai_entry.id, {})
+
+
+@pytest.mark.asyncio
+async def test_budget_breaker_and_backfill_share(db_session: AsyncSession, monkeypatch):
+    _use_fake_redis(monkeypatch)
+    # max 4: live entries take the whole hour, backfill only half of it.
+    assert await adj._consume_hour_budget(4, backfill=True) is None
+    assert await adj._consume_hour_budget(4, backfill=True) is None
+    assert await adj._consume_hour_budget(4, backfill=True) == "budget"
+    assert await adj._consume_hour_budget(4) is None
+    assert await adj._consume_hour_budget(4) is None
+    assert await adj._consume_hour_budget(4) == "budget"
+
+    # The rolling breaker needs a sample, then pauses dispatch for an hour.
+    for _ in range(9):
+        assert not await adj._rolling_breaker(1.0, 0.5)
+    assert await adj.breaker_paused_until() is None
+    assert await adj._rolling_breaker(1.0, 0.5)
+    assert await adj.breaker_paused_until() is not None
+    assert await adj._consume_hour_budget(100) == "breaker"
+
+
+@pytest.mark.asyncio
+async def test_resweep_requeues_budget_paused_and_lost_rows(db_session: AsyncSession, feed, monkeypatch):
+    from datetime import timedelta
+
+    await _seed_settings(db_session)
+
+    async def _parsed(db, entry_id):
+        return None, _payload()
+
+    dispatched: list = []
+    monkeypatch.setattr(adj, "_current_analysis", _parsed)
+    monkeypatch.setattr(adj, "dispatch_adjudication", lambda entry_id, countdown=5: dispatched.append(entry_id))
+
+    long_ago = datetime.now(UTC) - timedelta(hours=adj.STALE_PENDING_HOURS + 1)
+    rows = {}
+    for label, status, queued_at in (
+        ("budget", adj.SKIPPED_BUDGET, None),
+        ("paused", adj.SKIPPED_PAUSED, None),
+        ("lost", adj.PENDING, long_ago),
+        ("queued", adj.PENDING, datetime.now(UTC)),
+        ("done", adj.COMPLETED, None),
+    ):
+        entry = await _make_entry(db_session, feed)
+        row = await _request(db_session, entry)
+        row.adjudication_status = status
+        row.adjudication_queued_at = queued_at
+        rows[label] = row
+    await db_session.flush()
+
+    result = await adj.resweep_adjudications(db_session)
+    await db_session.flush()
+    assert result["swept"] == 3
+    for label in ("budget", "paused", "lost"):
+        await db_session.refresh(rows[label])
+        assert rows[label].adjudication_status == adj.PENDING, label
+        assert rows[label].entry_id in dispatched
+    assert rows["lost"].adjudication_queued_at > long_ago
+    assert rows["queued"].entry_id not in dispatched
+    assert rows["done"].adjudication_status == adj.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_resweep_marks_rows_without_an_analysis_failed(db_session: AsyncSession, feed, monkeypatch):
+    await _seed_settings(db_session)
+
+    async def _none(db, entry_id):
+        return None, None
+
+    monkeypatch.setattr(adj, "_current_analysis", _none)
+    entry = await _make_entry(db_session, feed)
+    row = await _request(db_session, entry)
+    row.adjudication_status = adj.SKIPPED_BUDGET
+    await db_session.flush()
+    await adj.resweep_adjudications(db_session)
+    await db_session.flush()
+    await db_session.refresh(row)
+    assert row.adjudication_status == adj.FAILED
+
+
+@pytest.mark.asyncio
+async def test_reclassify_on_a_tool_link_is_advisory_and_apply_converts(
+    client, admin_headers, db_session: AsyncSession, feed
+):
+    await _seed_settings(db_session, adjudication_mode="apply")
+    entry = await _make_entry(db_session, feed)
+    tool = Tool(name="Warlock", article_count=1, created_from_entry_id=entry.id)
+    db_session.add(tool)
+    await db_session.flush()
+    db_session.add(EntryTool(entry_id=entry.id, tool_id=tool.id, confidence="high", source="ai"))
+    await db_session.flush()
+    _items, verdicts = await _verdicts_for(
+        db_session,
+        entry,
+        [
+            {
+                "item_id": f"link:tool:{tool.id}",
+                "verdict": "reclassify",
+                "suggested_type": "malware",
+                "confidence": "high",
+                "reason": "it is a ransomware family",
+            }
+        ],
+    )
+    cfg = await adj._settings(db_session)
+    detail = await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
+    await db_session.commit()
+    # Advisory even in apply mode: the link is intact and no unlink row exists.
+    assert detail["verdicts"] == {"reclassify": 1} and detail["applied"] == 0
+    assert (await db_session.execute(select(EntryTool).where(EntryTool.entry_id == entry.id))).scalar_one()
+    rows = (await db_session.execute(select(EntityMaintenanceLog))).scalars().all()
+    assert [r.action for r in rows] == [adj.ACTION_RECLASSIFY]
+    assert rows[0].after["suggested_type"] == "malware" and not rows[0].applied
+
+    # Applying it from the queue converts the entity; the entry stays linked.
+    tool_id, entry_id = tool.id, entry.id
+    resp = await client.post(f"/api/admin/hygiene/adjudication/{rows[0].id}/apply", headers=admin_headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["applied"] is True
+    db_session.expire_all()
+    assert (await db_session.execute(select(Tool).where(Tool.id == tool_id))).scalar_one_or_none() is None
+    malware = (await db_session.execute(select(MalwareFamily).where(MalwareFamily.name == "Warlock"))).scalar_one()
+    assert (
+        await db_session.execute(select(EntryMalware).where(EntryMalware.malware_family_id == malware.id))
+    ).scalar_one().entry_id == entry_id
+
+
+@pytest.mark.asyncio
+async def test_validate_coerces_reclassify_on_non_convertible_types(db_session: AsyncSession, feed):
+    from app.models.ttp import TTP, EntryTTP
+
+    entry = await _make_entry(db_session, feed)
+    ttp = TTP(technique_id="T1486", technique_name="Data Encrypted for Impact", tactic="impact")
+    db_session.add(ttp)
+    await db_session.flush()
+    db_session.add(EntryTTP(entry_id=entry.id, ttp_id=ttp.id, source_text="encrypted the files", confidence="high"))
+    await db_session.flush()
+    items, _ = await build_manifest(db_session, entry, _payload())
+    verdicts, stats = _validate_verdicts(
+        {"verdicts": [{"item_id": f"link:ttp:{ttp.id}", "verdict": "reclassify", "suggested_type": "malware"}]},
+        items,
+    )
+    assert [v.verdict for v in verdicts] == ["keep"] and stats["coerced"] == 1
+
+
+@pytest.mark.asyncio
+async def test_recently_restored_links_are_flagged_but_never_changed(db_session: AsyncSession, feed):
+    await _seed_settings(db_session, adjudication_mode="apply", adjudication_circuit_breaker_pct=0.9)
+    entry = await _make_entry(db_session, feed)
+    storm = await _link_actor(db_session, entry, "Storm")
+    await _link_actor(db_session, entry, "Nightspire", article_count=5)  # kept: keeps the breaker shut
+    cobalt = Tool(name="Cobalt Strike", article_count=40)
+    db_session.add(cobalt)
+    await db_session.flush()
+    db_session.add(EntryTool(entry_id=entry.id, tool_id=cobalt.id, confidence="high", source="ai"))
+    # An analyst restored the Storm link through the link log…
+    db_session.add(
+        EntityLinkValidationLog(
+            entry_id=entry.id,
+            entity_type="threat_actor",
+            entity_id=storm.id,
+            entity_name_snapshot="Storm",
+            action="restored",
+            reason="analyst: this is the tracked actor",
+        )
+    )
+    # …and the Cobalt Strike link through the stage's own restore (its audit row).
+    db_session.add(
+        EntityMaintenanceLog(
+            entity_type="tool",
+            entity_id=cobalt.id,
+            action=ACTION_UNLINK,
+            mode="apply",
+            before={"entry_id": str(entry.id), "restored_from": str(uuid.uuid4())},
+            after={"restored": True},
+            reasoning="restored",
+            applied=False,
+        )
+    )
+    await db_session.flush()
+
+    items, verdicts = await _verdicts_for(
+        db_session,
+        entry,
+        [
+            {"item_id": f"link:threat_actor:{storm.id}", "verdict": "remove", "confidence": "high", "reason": "x"},
+            {"item_id": f"link:tool:{cobalt.id}", "verdict": "remove", "confidence": "high", "reason": "y"},
+        ],
+    )
+    by_id = {it.item_id: it for it in items}
+    assert by_id[f"link:threat_actor:{storm.id}"].previously_restored
+    assert by_id[f"link:tool:{cobalt.id}"].previously_restored
+    assert "it will not be changed" in by_id[f"link:tool:{cobalt.id}"].line
+
+    cfg = await adj._settings(db_session)
+    detail = await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
+    await db_session.flush()
+    assert detail["mode"] == "apply" and detail["applied"] == 0
+    assert (
+        await db_session.execute(
+            select(EntryThreatActor).where(
+                EntryThreatActor.entry_id == entry.id, EntryThreatActor.threat_actor_id == storm.id
+            )
+        )
+    ).scalar_one()
+    assert (await db_session.execute(select(EntryTool).where(EntryTool.entry_id == entry.id))).scalar_one()
+    link_log = (
+        await db_session.execute(
+            select(EntityLinkValidationLog).where(EntityLinkValidationLog.action == "shadow_remove")
+        )
+    ).scalar_one()
+    assert link_log.entity_id == storm.id
+    unlink = (
+        await db_session.execute(select(EntityMaintenanceLog).where(EntityMaintenanceLog.mode == "shadow"))
+    ).scalar_one()
+    assert unlink.action == ACTION_UNLINK and not unlink.applied
+
+
+@pytest.mark.asyncio
+async def test_a_failed_merge_does_not_sink_the_rest_of_the_run(db_session: AsyncSession, feed, monkeypatch):
+    await _seed_settings(db_session, adjudication_mode="apply", adjudication_circuit_breaker_pct=0.9)
+    entry = await _make_entry(db_session, feed)
+    crew = ThreatActor(name="Warlock Crew", aliases=["Warlock Group"], article_count=9)
+    db_session.add(crew)
+    await db_session.flush()
+    group = await _link_actor(db_session, entry, "Warlock Group", source="ai", minted=True, article_count=1)
+    storm = await _link_actor(db_session, entry, "Storm")
+    keep = await _link_actor(db_session, entry, "Nightspire", article_count=5)
+
+    async def _boom(db, entity_type, entity_id, target, reason):
+        # Leave the session dirty the way a failed flush would.
+        db.add(ThreatActor(name="Warlock Crew", article_count=0))  # duplicate name → IntegrityError on flush
+        await db.flush()
+        raise AssertionError("unreachable")
+
+    monkeypatch.setattr(adj, "_merge_entity", _boom)
+    _items, verdicts = await _verdicts_for(
+        db_session,
+        entry,
+        [
+            {
+                "item_id": f"link:threat_actor:{group.id}",
+                "verdict": "merge",
+                "merge_into": "Warlock Crew",
+                "confidence": "high",
+            },
+            {"item_id": f"link:threat_actor:{storm.id}", "verdict": "remove", "confidence": "high", "reason": "w"},
+            {"item_id": f"link:threat_actor:{keep.id}", "verdict": "keep", "confidence": "high"},
+        ],
+    )
+    cfg = await adj._settings(db_session)
+    detail = await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
+    await db_session.commit()
+    assert detail["mode"] == "apply" and detail["applied"] == 1  # the remove went through
+    merge_row = (
+        await db_session.execute(select(EntityMaintenanceLog).where(EntityMaintenanceLog.action == ACTION_MERGE))
+    ).scalar_one()
+    assert not merge_row.applied and "error" in merge_row.after
+    assert (
+        await db_session.execute(select(EntryThreatActor).where(EntryThreatActor.threat_actor_id == storm.id))
+    ).scalar_one_or_none() is None
+
+
+@pytest.mark.asyncio
+async def test_merge_is_not_counted_by_the_breaker(db_session: AsyncSession, feed):
+    await _seed_settings(db_session, adjudication_mode="apply")
+    entry = await _make_entry(db_session, feed)
+    crew = ThreatActor(name="Warlock Crew", aliases=["Warlock Group"], article_count=9)
+    db_session.add(crew)
+    await db_session.flush()
+    group = await _link_actor(db_session, entry, "Warlock Group", source="ai", minted=True, article_count=1)
+    _items, verdicts = await _verdicts_for(
+        db_session,
+        entry,
+        [
+            {
+                "item_id": f"link:threat_actor:{group.id}",
+                "verdict": "merge",
+                "merge_into": "warlock group",
+                "confidence": "high",
+            }
+        ],
+    )
+    cfg = await adj._settings(db_session)
+    detail = await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
+    assert detail["breaker"] is False and detail["mode"] == "apply" and detail["applied"] == 1
+    assert "merge" not in adj.DESTRUCTIVE
+
+
+@pytest.mark.asyncio
+async def test_task_parks_a_paused_provider_for_the_sweep(db_session: AsyncSession, feed, monkeypatch):
+    from contextlib import asynccontextmanager
+
+    from app.models.ai_result import AIResult
+    from app.models.ai_task import AITask
+    from app.models.user import User
+    from app.workers import adjudication_tasks as tasks
+
+    await _seed_settings(db_session)
+    system = User(username="system", password_hash="x", role="system")
+    db_session.add(system)
+    await db_session.flush()
+    entry = await _make_entry(db_session, feed)
+    await _request(db_session, entry)
+    await _link_actor(db_session, entry, "Storm")
+    task_row = AITask(
+        name="entry_analysis", display_name="t", description="", category="extraction", default_prompt_template="x"
+    )
+    db_session.add(task_row)
+    await db_session.flush()
+    db_session.add(
+        AIResult(
+            entry_id=entry.id,
+            target_type="entry",
+            target_id=entry.id,
+            is_current=True,
+            task_id=task_row.id,
+            prompt_used="",
+            raw_response="",
+            parsed_result=_payload(),
+        )
+    )
+    await db_session.flush()
+
+    @asynccontextmanager
+    async def fake_session():
+        yield db_session
+
+    async def fake_run_task(db, user_id, task_name, variables, **kwargs):
+        return {"_extraction_status": "provider_paused", "_pause_until": "2026-10-08T12:00:00+00:00"}
+
+    class _Lock:
+        def set(self, *a, **k):
+            return True
+
+        def delete(self, *a, **k):
+            return 1
+
+    async def fake_system_user(db):
+        return system.id
+
+    async def noop_commit():
+        await db_session.flush()
+
+    monkeypatch.setattr(tasks, "worker_session", fake_session)
+    monkeypatch.setattr(tasks, "_redis_client", _Lock())
+    monkeypatch.setattr("app.ai.engine.run_task", fake_run_task)
+    monkeypatch.setattr("app.services.system_user.get_system_user_id", fake_system_user)
+    monkeypatch.setattr(db_session, "commit", noop_commit)
+
+    detail = await tasks._adjudicate_entry(entry.id)
+    assert detail["skipped"] == "provider_paused"
+    row = (
+        await db_session.execute(select(AIAnalysisRequest).where(AIAnalysisRequest.entry_id == entry.id))
+    ).scalar_one()
+    assert row.adjudication_status == adj.SKIPPED_PAUSED
+    assert (await db_session.execute(select(EntityLinkValidationLog))).scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_bulk_apply_and_origin_scoped_dismiss(client, admin_headers, db_session: AsyncSession, feed):
+    await _seed_settings(db_session)
+    entry = await _make_entry(db_session, feed)
+    victim = await _link_actor(db_session, entry, "Water Utility Co", source="ai", minted=True, article_count=1)
+    cobalt = Tool(name="Cobalt Strike", article_count=40)
+    db_session.add(cobalt)
+    await db_session.flush()
+    db_session.add(EntryTool(entry_id=entry.id, tool_id=cobalt.id, confidence="high", source="ai"))
+    # A legacy (scanner) proposal that must survive an adjudicator-scoped dismiss.
+    db_session.add(
+        EntityMaintenanceLog(
+            entity_type="tool",
+            entity_id=cobalt.id,
+            action="normalize_name",
+            mode="shadow",
+            before={"entity": {"name": "Cobalt Strike"}},
+            after={"proposed_name": "CobaltStrike"},
+            reasoning="scanner",
+            applied=False,
+        )
+    )
+    await db_session.flush()
+    _items, verdicts = await _verdicts_for(
+        db_session,
+        entry,
+        [
+            {"item_id": f"link:threat_actor:{victim.id}", "verdict": "veto", "confidence": "high", "reason": "victim"},
+            {
+                "item_id": f"link:tool:{cobalt.id}",
+                "verdict": "remove",
+                "confidence": "high",
+                "reason": "generic advice",
+            },
+        ],
+    )
+    cfg = await adj._settings(db_session)
+    await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
+    await db_session.commit()
+
+    entry_id, victim_id = entry.id, victim.id
+    resp = await client.post("/api/admin/hygiene/adjudication/apply-all", headers=admin_headers, json={})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["applied"] == 2 and resp.json()["errors"] == []
+    db_session.expire_all()
+    assert (
+        await db_session.execute(select(EntryTool).where(EntryTool.entry_id == entry_id))
+    ).scalar_one_or_none() is None
+    assert (
+        await db_session.execute(select(ThreatActor).where(ThreatActor.id == victim_id))
+    ).scalar_one_or_none() is None
+    pending = (
+        (await db_session.execute(select(EntityMaintenanceLog).where(EntityMaintenanceLog.applied.is_(False))))
+        .scalars()
+        .all()
+    )
+    assert [r.action for r in pending] == ["normalize_name"]
+
+    # Dismiss-all scoped to the adjudicator leaves the scanner's row alone.
+    resp = await client.post(
+        "/api/admin/hygiene/dismiss-proposals", headers=admin_headers, json={"origin": "adjudicator"}
+    )
+    assert resp.status_code == 200
+    db_session.expire_all()
+    pending = (
+        (await db_session.execute(select(EntityMaintenanceLog).where(EntityMaintenanceLog.applied.is_(False))))
+        .scalars()
+        .all()
+    )
+    assert [r.action for r in pending] == ["normalize_name"]
+    resp = await client.post("/api/admin/hygiene/dismiss-proposals", headers=admin_headers, json={"origin": "legacy"})
+    assert resp.json()["dismissed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_orphaned_feed_lists_legacy_rows_no_entry_can_carry(
+    client, admin_headers, db_session: AsyncSession, feed
+):
+    await _seed_settings(db_session)
+    entry = await _make_entry(db_session, feed)
+    minted = await _link_actor(db_session, entry, "Water Utility Co", source="ai", minted=True, article_count=1)
+    lone = ThreatActor(name="tortilla", article_count=1)  # no creating entry
+    db_session.add(lone)
+    await db_session.flush()
+    for who in (minted, lone):
+        db_session.add(
+            EntityMaintenanceLog(
+                entity_type="threat_actor",
+                entity_id=who.id,
+                action="stale_entity_review",
+                mode="shadow",
+                before={"entity": {"name": who.name}},
+                after={},
+                reasoning="1 article",
+                applied=False,
+            )
+        )
+    await db_session.commit()
+    resp = await client.get("/api/admin/hygiene/feed", headers=admin_headers, params={"orphaned": "true"})
+    assert resp.status_code == 200, resp.text
+    listed = {r["entity_id"] for r in resp.json()["rows"]}
+    assert str(lone.id) in listed  # nothing records which entry created it
+    assert str(minted.id) not in listed  # the backfill will reach its entry
+
+
+@pytest.mark.asyncio
+async def test_hygiene_feed_tool_accepts_origin(db_session: AsyncSession, admin_user):
+    from app.tools.curation import _get_hygiene_feed, _get_hygiene_stats
+
+    out = await _get_hygiene_feed(db_session, admin_user.id, origin="adjudicator", pending=True)
+    assert "rows" in out and "error" not in out
+    assert "error" in await _get_hygiene_feed(db_session, admin_user.id, origin="nightly")
+    stats = await _get_hygiene_stats(db_session, admin_user.id)
+    assert "adjudication_breaker_until" in stats
+
+
+@pytest.mark.asyncio
+async def test_processing_rows_show_queued_and_skip_reason_for_adjudicate(
+    client, admin_headers, db_session: AsyncSession, feed
+):
+    from app.models.entry_pipeline_run import EntryPipelineRun
+
+    await _seed_settings(db_session)
+    waiting = await _make_entry(db_session, feed)
+    row = await _request(db_session, waiting)
+    row.adjudication_status = adj.SKIPPED_BUDGET
+    queued = await _make_entry(db_session, feed)
+    row2 = await _request(db_session, queued)
+    row2.adjudication_status = adj.PENDING
+    row2.adjudication_queued_at = datetime.now(UTC)
+    reviewed = await _make_entry(db_session, feed)
+    row3 = await _request(db_session, reviewed)
+    row3.adjudication_status = adj.COMPLETED
+    db_session.add(
+        EntryPipelineRun(
+            entry_id=reviewed.id, stage="adjudicate", status="success", duration_ms=38000, detail={"mode": "shadow"}
+        )
+    )
+    await db_session.commit()
+
+    resp = await client.get("/api/engine/processing", headers=admin_headers, params={"limit": 50})
+    assert resp.status_code == 200, resp.text
+    cells = {r["id"]: r["stages"].get("adjudicate") for r in resp.json()["entries"]}
+    assert cells[str(waiting.id)]["status"] == "skipped" and cells[str(waiting.id)]["detail"]["skipped"] == "budget"
+    assert cells[str(queued.id)]["status"] == "queued"
+    assert cells[str(reviewed.id)]["status"] == "success" and cells[str(reviewed.id)]["duration_ms"] == 38000
+
+    resp = await client.get(f"/api/engine/entries/{reviewed.id}/adjudication", headers=admin_headers)
+    assert resp.json()["run"]["duration_ms"] == 38000 and resp.json()["run"]["mode"] == "shadow"
+
+
+@pytest.mark.asyncio
+async def test_matrix_retry_requeues_the_request_row(
+    client, admin_headers, db_session: AsyncSession, feed, monkeypatch
+):
+    from app.workers.celery_app import celery_app
+
+    sent: list = []
+
+    class _Result:
+        id = "task-1"
+
+    monkeypatch.setattr(celery_app, "send_task", lambda name, kwargs=None: sent.append((name, kwargs)) or _Result())
+    await _seed_settings(db_session)
+    entry = await _make_entry(db_session, feed)
+    row = await _request(db_session, entry)
+    row.adjudication_status = adj.SKIPPED_SCORE
+    await db_session.commit()
+    resp = await client.post(f"/api/engine/entries/{entry.id}/stages/adjudicate/retry", headers=admin_headers)
+    assert resp.status_code == 200, resp.text
+    assert sent and sent[0][0].endswith("adjudicate_entry_task")
+    db_session.expire_all()
+    await db_session.refresh(row)
+    assert row.adjudication_status == adj.PENDING and row.adjudication_queued_at is not None
