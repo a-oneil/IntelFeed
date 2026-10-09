@@ -393,7 +393,10 @@ _OPENAPI_TAG_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
     (
         "AI",
         [
-            ("ai-providers", "AI provider configuration (Ollama, Claude, OpenAI, custom)."),
+            (
+                "ai-providers",
+                "AI provider configuration (Ollama, Claude API, Claude Code CLI, OpenAI-compatible endpoints).",
+            ),
             ("ai-tasks", "AI task definitions and execution."),
             ("ai-prompts", "Prompt templates behind AI tasks."),
             ("ai-conversations", "Saved AI copilot conversations."),

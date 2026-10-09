@@ -799,11 +799,17 @@ python intelfeed_cli.py \
 **Steps**:
 1. **Settings > AI Configuration > Add Provider**
 2. Configuration:
-   - **Provider**: OpenAI
+   - **Provider**: OpenAI-compatible
    - **API Key**: Your OpenAI API key
-   - **Model**: `gpt-4-turbo`, `gpt-4o`, `gpt-3.5-turbo`, etc.
-   - **Base URL**: `https://api.openai.com/v1` (default)
+   - **Base URL**: `https://api.openai.com/v1`
+   - **Model**: `gpt-4o`, `gpt-4-turbo`, `gpt-3.5-turbo`, etc. — or a reasoning model (`o1`, `o3`,
+     `gpt-5`), which needs two config tweaks via the provider's **Configure** panel:
+     **Max tokens param** → `max_completion_tokens` and **Send temperature** → `no`
 3. Test and assign tasks
+
+**Cost tracking**: set the Configure panel's input/output $-per-1M-token rates (OpenAI's pricing
+page has current numbers) so spend shows up correctly on the Cost Dashboard — the engine prices
+an unrecognized model at $0 otherwise.
 
 ---
 
@@ -816,38 +822,68 @@ python intelfeed_cli.py \
 **Steps**:
 1. **Settings > AI Configuration > Add Provider**
 2. Configuration:
-   - **Provider**: OpenAI-compatible (Ollama uses OpenAI API format)
-   - **API Key**: (leave empty; Ollama doesn't require auth)
-   - **Base URL**: `http://localhost:11434/v1`
+   - **Provider**: Ollama — Ollama is its own provider type with a native tool-calling loop
+     (used by the copilot and agentic maintenance tasks), not the OpenAI-compatible type.
+   - **API Key**: (leave empty; Ollama doesn't require auth unless proxied)
+   - **Base URL**: `http://localhost:11434` — no `/v1` suffix; Ollama's native `/api/chat`
+     endpoint, not the OpenAI dialect
    - **Model**: Name of pulled model (e.g., `mistral`, `neural-chat`)
 3. Test connection
 
-**Note**: For remote Ollama, use full URL (e.g., `http://your-host:11434/v1`) and update config to allow private networks.
+**Note**: For remote Ollama, use the full host URL (e.g., `http://your-host:11434`) and update
+config to allow private networks.
 
 ---
 
-### 17. Configure Custom OpenAI-Compatible Endpoint
+### 17. Configure an OpenAI-Compatible Endpoint (LM Studio, vLLM, llama.cpp, OpenRouter, LiteLLM, Groq)
 
-**Examples**: vLLM, LM Studio, llama.cpp server, custom inference API.
+One provider type, **OpenAI-compatible**, covers every server that speaks the
+`/v1/chat/completions` dialect. They differ only in base URL and whether a key is required.
 
 **Steps**:
-1. Ensure your endpoint is running and accepts OpenAI API format
+1. Ensure your endpoint is running and accepts the OpenAI chat-completions format
 2. **Settings > AI Configuration > Add Provider**
 3. Configuration:
    - **Provider**: OpenAI-compatible
-   - **API Key**: If required by your endpoint
-   - **Base URL**: Full URL of your endpoint (e.g., `http://vllm-server:8000/v1`)
-   - **Model**: Model name your endpoint serves
-4. Test
+   - **API Key**: required for hosted services (OpenRouter, Groq); leave empty for most local
+     servers (LM Studio, llama.cpp, vLLM)
+   - **Base URL**: see the table below
+   - **Model**: the model id your endpoint serves (`Test Connection` lists what's available)
+
+| Server | Base URL |
+|---|---|
+| LM Studio | `http://localhost:1234/v1` |
+| llama.cpp server | `http://localhost:8080/v1` |
+| vLLM | `http://vllm-server:8000/v1` |
+| OpenRouter | `https://openrouter.ai/api/v1` |
+| Groq | `https://api.groq.com/openai/v1` |
+| LiteLLM proxy | whatever your proxy's `/v1` base is |
+
+**Example: LM Studio** — load a model in LM Studio's own UI, start its local server, then point
+IntelFeed at `http://localhost:1234/v1` with no API key. LM Studio supports the `json_schema`
+structured-output mode (the provider's default), so extraction tasks work out of the box.
+
+**Example: llama.cpp server**:
+```bash
+llama-server -m ./your-model.gguf --jinja -c 8192
+```
+`--jinja` enables tool/schema-template rendering most current GGUF models expect. Base URL:
+`http://localhost:8080/v1`.
 
 **Example: vLLM**:
 ```bash
-python -m vllm.entrypoints.openai.api_server --model meta-llama/Llama-2-7b-chat-hf
+python -m vllm.entrypoints.openai.api_server --model Qwen/Qwen2.5-7B-Instruct
 ```
+Base URL: `http://vllm-server:8000/v1`. Model: `Qwen/Qwen2.5-7B-Instruct`.
 
-Then configure IntelFeed:
-- Base URL: `http://vllm-server:8000/v1`
-- Model: `meta-llama/Llama-2-7b-chat-hf`
+**Local-model knobs** (set in the provider's Configure panel): local, grammar-constrained
+decoding at temperature 0 can loop on long extraction prompts the same way Ollama does —
+raise **min_temperature** to `0.2` if a task hangs or returns truncated JSON. If your server
+only supports `json_object` (not `json_schema`), switch **Structured output** to `json_object`.
+
+**Not yet supported**: tool calling (the copilot and agentic maintenance tasks still require
+Ollama or the Claude Code CLI). Cost tracking needs the per-model $-rates set in the Configure
+panel for any paid aggregator (OpenRouter, Groq); local servers default to $0.
 
 ---
 

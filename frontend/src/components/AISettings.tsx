@@ -323,6 +323,157 @@ function OllamaConfigEditor({ provider, onClose }: { provider: AIProvider; onClo
   );
 }
 
+type OpenAICompatKnobs = {
+  structured_output: string; // "" (json_schema default) | json_schema_strict | json_object | prompt
+  system_role: string; // "" (system default) | developer
+  max_tokens_param: string; // "" (max_tokens default) | max_completion_tokens
+  send_temperature: string; // "" (true default) | false
+  timeout_seconds: string;
+  input_per_mtok: string;
+  output_per_mtok: string;
+  report_cost: string; // "" (false default) | true
+};
+
+function openAIKnobsFrom(cfg: Record<string, unknown>): OpenAICompatKnobs {
+  const pricing = (cfg.pricing || {}) as Record<string, unknown>;
+  return {
+    structured_output: cfg.structured_output != null ? String(cfg.structured_output) : "",
+    system_role: cfg.system_role != null ? String(cfg.system_role) : "",
+    max_tokens_param: cfg.max_tokens_param != null ? String(cfg.max_tokens_param) : "",
+    send_temperature: cfg.send_temperature === false ? "false" : "",
+    timeout_seconds: cfg.timeout_seconds != null ? String(cfg.timeout_seconds) : "",
+    input_per_mtok: pricing.input_per_mtok != null ? String(pricing.input_per_mtok) : "",
+    output_per_mtok: pricing.output_per_mtok != null ? String(pricing.output_per_mtok) : "",
+    report_cost: cfg.report_cost ? "true" : "",
+  };
+}
+
+function openAIKnobsToConfig(k: OpenAICompatKnobs): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (k.structured_output) out.structured_output = k.structured_output;
+  if (k.system_role) out.system_role = k.system_role;
+  if (k.max_tokens_param) out.max_tokens_param = k.max_tokens_param;
+  if (k.send_temperature === "false") out.send_temperature = false;
+  if (k.timeout_seconds.trim()) out.timeout_seconds = parseInt(k.timeout_seconds, 10);
+  if (k.input_per_mtok.trim() || k.output_per_mtok.trim()) {
+    out.pricing = {
+      input_per_mtok: parseFloat(k.input_per_mtok || "0"),
+      output_per_mtok: parseFloat(k.output_per_mtok || "0"),
+    };
+  }
+  if (k.report_cost === "true") out.report_cost = true;
+  return out;
+}
+
+function OpenAICompatConfigEditor({ provider, onClose }: { provider: AIProvider; onClose: () => void }) {
+  const updateProvider = useUpdateAIProvider();
+  const cfg = (provider.config || {}) as Record<string, unknown>;
+  const [knobs, setKnobs] = useState<OpenAICompatKnobs>(() => openAIKnobsFrom(cfg));
+  const set = (key: keyof OpenAICompatKnobs, value: string) =>
+    setKnobs((prev) => ({ ...prev, [key]: value }));
+
+  const handleSave = () => {
+    const next: Record<string, unknown> = { ...cfg };
+    delete next.structured_output;
+    delete next.system_role;
+    delete next.max_tokens_param;
+    delete next.send_temperature;
+    delete next.timeout_seconds;
+    delete next.pricing;
+    delete next.report_cost;
+    Object.assign(next, openAIKnobsToConfig(knobs));
+    updateProvider.mutate({ id: provider.id, config: next }, { onSuccess: onClose });
+  };
+
+  return (
+    <div className={styles.configPanel}>
+      <div className={styles.formActions} style={{ flexWrap: "wrap", gap: "0.75rem" }}>
+        <label title="How the structured-output schema is sent. json_schema works on nearly every server; json_schema_strict (OpenAI only) guarantees every field is present but turns optional fields into null; json_object and prompt are fallbacks for servers with weaker support.">
+          Structured output
+          <select value={knobs.structured_output} onChange={(e) => set("structured_output", e.target.value)}>
+            <option value="">json_schema (default)</option>
+            <option value="json_schema_strict">json_schema_strict (OpenAI only)</option>
+            <option value="json_object">json_object</option>
+            <option value="prompt">prompt only</option>
+          </select>
+        </label>
+        <label title="OpenAI's reasoning models (o1, o3, gpt-5) use 'developer' instead of 'system' for the system prompt role.">
+          System role
+          <select value={knobs.system_role} onChange={(e) => set("system_role", e.target.value)}>
+            <option value="">system (default)</option>
+            <option value="developer">developer</option>
+          </select>
+        </label>
+        <label title="OpenAI's reasoning models reject max_tokens and require max_completion_tokens instead.">
+          Max tokens param
+          <select value={knobs.max_tokens_param} onChange={(e) => set("max_tokens_param", e.target.value)}>
+            <option value="">max_tokens (default)</option>
+            <option value="max_completion_tokens">max_completion_tokens</option>
+          </select>
+        </label>
+        <label title="Reasoning models reject a non-default temperature. Turn this off for them.">
+          Send temperature
+          <select value={knobs.send_temperature} onChange={(e) => set("send_temperature", e.target.value)}>
+            <option value="">yes (default)</option>
+            <option value="false">no</option>
+          </select>
+        </label>
+        <label title="Per-request timeout in seconds.">
+          Timeout (s)
+          <input
+            type="number"
+            placeholder="300"
+            value={knobs.timeout_seconds}
+            onChange={(e) => set("timeout_seconds", e.target.value)}
+          />
+        </label>
+      </div>
+      <div className={styles.formActions} style={{ flexWrap: "wrap", gap: "0.75rem" }}>
+        <label title="Dollar rate per 1M input tokens — used to compute cost on the Cost Dashboard. Leave both blank for a free/local endpoint.">
+          Input $/1M tok
+          <input
+            type="number"
+            step="0.01"
+            placeholder="0.00"
+            value={knobs.input_per_mtok}
+            onChange={(e) => set("input_per_mtok", e.target.value)}
+          />
+        </label>
+        <label title="Dollar rate per 1M output tokens.">
+          Output $/1M tok
+          <input
+            type="number"
+            step="0.01"
+            placeholder="0.00"
+            value={knobs.output_per_mtok}
+            onChange={(e) => set("output_per_mtok", e.target.value)}
+          />
+        </label>
+        <label title="Prefer a cost figure the provider itself reports (OpenRouter's usage.cost, or a LiteLLM proxy's response header) over the rates above, when available.">
+          Use provider-reported cost
+          <select value={knobs.report_cost} onChange={(e) => set("report_cost", e.target.value)}>
+            <option value="">no (use rates above)</option>
+            <option value="true">yes, when available</option>
+          </select>
+        </label>
+      </div>
+      <p className={styles.hint}>
+        Per-model overrides, extra headers/body, and a model-id filter can be set via the API's{" "}
+        <code>config.model_overrides</code> / <code>config.extra_headers</code> /{" "}
+        <code>config.extra_body</code> / <code>config.model_filter</code> keys.
+      </p>
+      <div className={styles.formActions}>
+        <button className={styles.saveBtn} onClick={handleSave} disabled={updateProvider.isPending}>
+          {updateProvider.isPending ? "Saving..." : "Save"}
+        </button>
+        <button className={styles.cancelBtn} onClick={onClose}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ProvidersSection() {
   const { data: providers, isLoading } = useAIProviders();
   const createProvider = useCreateAIProvider();
@@ -336,13 +487,19 @@ function ProvidersSection() {
   const [testResult, setTestResult] = useState<{ id: string; success: boolean; message: string } | null>(null);
   const [newProvider, setNewProvider] = useState({
     name: "",
-    provider_type: "claude" as "claude" | "ollama",
+    provider_type: "claude" as "claude" | "ollama" | "openai_compatible",
     base_url: "",
     api_key: "",
   });
   const isOllama = newProvider.provider_type === "ollama";
+  const isOpenAICompatible = newProvider.provider_type === "openai_compatible";
+  const requiresBaseUrl = isOllama || isOpenAICompatible;
   const canSave =
-    !!newProvider.name && (isOllama ? !!newProvider.base_url : !!newProvider.api_key);
+    !!newProvider.name && (requiresBaseUrl ? !!newProvider.base_url : !!newProvider.api_key);
+
+  const baseUrlPlaceholder = isOllama
+    ? "Base URL (e.g. https://ollama.example.com)"
+    : "Base URL (e.g. http://localhost:1234/v1, https://api.openai.com/v1)";
 
   const handleAdd = async () => {
     await createProvider.mutateAsync({
@@ -364,7 +521,9 @@ function ProvidersSection() {
       </div>
 
       <p className={styles.hint}>
-        Add an API key provider to enable AI features.
+        Add a provider to enable AI features — an API key provider (Claude), a self-hosted
+        server (Ollama), or any OpenAI-compatible endpoint (OpenAI, LM Studio, vLLM, llama.cpp,
+        OpenRouter, LiteLLM, Groq).
       </p>
 
       <div className={styles.sectionHeader} style={{ marginTop: "1rem" }}>
@@ -380,23 +539,26 @@ function ProvidersSection() {
             onChange={(e) =>
               setNewProvider({
                 ...newProvider,
-                provider_type: e.target.value as "claude" | "ollama",
+                provider_type: e.target.value as "claude" | "ollama" | "openai_compatible",
               })
             }
           >
             <option value="claude">Claude (Anthropic API)</option>
             <option value="ollama">Ollama (self-hosted)</option>
+            <option value="openai_compatible">
+              OpenAI-compatible (OpenAI, LM Studio, vLLM, llama.cpp, OpenRouter, LiteLLM, Groq)
+            </option>
           </select>
           <input
-            placeholder={isOllama ? "Name (e.g. Ollama Lab)" : "Name (e.g. Claude Production)"}
+            placeholder={requiresBaseUrl ? "Name (e.g. LM Studio)" : "Name (e.g. Claude Production)"}
             value={newProvider.name}
             onChange={(e) =>
               setNewProvider({ ...newProvider, name: e.target.value })
             }
           />
-          {isOllama && (
+          {requiresBaseUrl && (
             <input
-              placeholder="Base URL (e.g. https://ollama.example.com)"
+              placeholder={baseUrlPlaceholder}
               value={newProvider.base_url}
               onChange={(e) =>
                 setNewProvider({ ...newProvider, base_url: e.target.value })
@@ -405,7 +567,13 @@ function ProvidersSection() {
           )}
           <input
             type="password"
-            placeholder={isOllama ? "Bearer token (optional, for proxied instances)" : "Anthropic API Key"}
+            placeholder={
+              isOllama
+                ? "Bearer token (optional, for proxied instances)"
+                : isOpenAICompatible
+                  ? "API key (optional for local servers)"
+                  : "Anthropic API Key"
+            }
             value={newProvider.api_key}
             onChange={(e) =>
               setNewProvider({ ...newProvider, api_key: e.target.value })
@@ -482,14 +650,18 @@ function ProvidersSection() {
               )}
             </div>
             <div className={styles.providerActions}>
-              {(p.provider_type === "ollama" || p.provider_type === "claude_code") && (
+              {(p.provider_type === "ollama" ||
+                p.provider_type === "claude_code" ||
+                p.provider_type === "openai_compatible") && (
                 <button
                   className={styles.testBtn}
                   onClick={() => setConfigureId(configureId === p.id ? null : p.id)}
                   title={
                     p.provider_type === "ollama"
                       ? "Per-model settings: thinking, context window, timeout"
-                      : "Copilot authentication and CLI settings"
+                      : p.provider_type === "openai_compatible"
+                        ? "Structured output mode, token/temperature params, pricing"
+                        : "Copilot authentication and CLI settings"
                   }
                 >
                   Configure
@@ -541,6 +713,9 @@ function ProvidersSection() {
           )}
           {configureId === p.id && p.provider_type === "claude_code" && (
             <ClaudeCodeConfigEditor provider={p} onClose={() => setConfigureId(null)} />
+          )}
+          {configureId === p.id && p.provider_type === "openai_compatible" && (
+            <OpenAICompatConfigEditor provider={p} onClose={() => setConfigureId(null)} />
           )}
           </div>
           );

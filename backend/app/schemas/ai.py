@@ -2,14 +2,14 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # --- AI Provider Schemas ---
 
 
 class AIProviderCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
-    provider_type: str = Field(default="claude", pattern=r"^(claude|ollama)$")
+    provider_type: str = Field(default="claude", pattern=r"^(claude|ollama|openai_compatible)$")
     base_url: str | None = None
     api_key: str | None = None  # plaintext, encrypted before storage
     config: dict = {}
@@ -25,6 +25,12 @@ class AIProviderCreate(BaseModel):
             }
         }
     )
+
+    @model_validator(mode="after")
+    def _openai_compatible_requires_base_url(self) -> "AIProviderCreate":
+        if self.provider_type == "openai_compatible" and not (self.base_url and self.base_url.strip()):
+            raise ValueError("openai_compatible provider requires a non-empty base_url")
+        return self
 
 
 class AIProviderUpdate(BaseModel):

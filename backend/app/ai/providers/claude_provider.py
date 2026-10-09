@@ -35,6 +35,7 @@ from anthropic import AsyncAnthropic
 
 from app.ai.providers.base import AIProvider, AIResponse
 from app.ai.providers.claude_code_provider import QuotaExhaustedError
+from app.ai.providers.schema_utils import enforce_no_additional_properties as _enforce_no_additional_properties
 
 logger = logging.getLogger(__name__)
 
@@ -121,26 +122,11 @@ class ClaudeProvider(AIProvider):
         """Recursively set ``additionalProperties: false`` on every object node.
 
         Anthropic's structured-output API rejects schemas where an ``object``
-        node doesn't explicitly forbid additional properties. The IntelFeed
-        task schemas weren't written with that constraint, so we inject it
-        defensively — preserving any explicit value the schema already sets.
+        node doesn't explicitly forbid additional properties. Thin wrapper
+        over the shared helper in ``schema_utils`` kept for backward-compat
+        call sites.
         """
-
-        def walk(node):
-            if isinstance(node, dict):
-                if node.get("type") == "object" and "additionalProperties" not in node:
-                    node["additionalProperties"] = False
-                for value in node.values():
-                    walk(value)
-            elif isinstance(node, list):
-                for item in node:
-                    walk(item)
-
-        import copy
-
-        cloned = copy.deepcopy(schema)
-        walk(cloned)
-        return cloned
+        return _enforce_no_additional_properties(schema)
 
     @classmethod
     def _build_output_config(cls, response_format: dict | None) -> dict | None:

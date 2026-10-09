@@ -108,10 +108,27 @@ describe("AISettings", () => {
     expect(screen.getByPlaceholderText(/Bearer token \(optional/)).toBeDefined();
   });
 
+  it("add form shows an optional-key openai_compatible option with base URL required", async () => {
+    const user = userEvent.setup();
+    render(<AISettings />, { wrapper: MemoryRouter });
+    await user.click(screen.getByText("+ Add"));
+
+    await user.selectOptions(screen.getByRole("combobox"), "openai_compatible");
+    expect(screen.getByPlaceholderText(/Base URL/)).toBeDefined();
+    expect(screen.getByPlaceholderText("API key (optional for local servers)")).toBeDefined();
+
+    // Save stays disabled until a base URL is entered — no API key required.
+    const saveBtn = screen.getByText("Save");
+    expect(saveBtn).toHaveProperty("disabled", true);
+    await user.type(screen.getByPlaceholderText(/Base URL/), "http://localhost:1234/v1");
+    await user.type(screen.getByPlaceholderText("Name (e.g. LM Studio)"), "LM Studio");
+    expect(saveBtn).toHaveProperty("disabled", false);
+  });
+
   it("shows hint text for providers", () => {
     render(<AISettings />, { wrapper: MemoryRouter });
     expect(
-      screen.getByText(/Add an API key provider/)
+      screen.getByText(/Add a provider to enable AI features/)
     ).toBeDefined();
   });
 

@@ -25,7 +25,7 @@ router = APIRouter()
 
 
 def _get_provider_instance(provider: AIProvider) -> AIProviderInterface:
-    # Shared engine factory — routes claude / claude_code / ollama by provider_type.
+    # Shared engine factory — routes claude / claude_code / ollama / openai_compatible by provider_type.
     return build_provider_instance(provider)
 
 
@@ -139,8 +139,8 @@ async def test_provider(
     if not provider:
         raise AppError(code="not_found", message="Provider not found", status_code=404)
 
-    instance = _get_provider_instance(provider)
     try:
+        instance = _get_provider_instance(provider)
         healthy = await instance.check_health()
         if not healthy:
             return AIProviderTestResult(success=False, message="Provider health check failed")
@@ -173,8 +173,11 @@ async def list_provider_models(
     if provider.models:
         return provider.models
 
-    instance = _get_provider_instance(provider)
-    models = await instance.list_models()
+    try:
+        instance = _get_provider_instance(provider)
+        models = await instance.list_models()
+    except Exception as e:
+        raise AppError(code="provider_error", message=str(e), status_code=400) from e
     provider.models = models
     db.add(provider)
     await db.flush()
