@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 import time as _time
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -42,8 +43,82 @@ def _estimate_cost(model: str, tokens_in: int, tokens_out: int, batch: bool = Fa
     return Decimal(str(round(cost, 6)))
 
 
+#: A backslash that does not start a legal JSON escape. Small models write
+#: Windows paths and command lines into string values verbatim
+#: ("C:\ProgramData\x.exe"), which is an invalid escape and used to lose the
+#: whole analysis. Doubling only the illegal ones is lossless for valid JSON.
+_BAD_ESCAPE_RE = re.compile(r'\\(?![\\/"bfnrtu])')
+
+
+def _repair_json(text: str) -> str:
+    repaired = _BAD_ESCAPE_RE.sub(r"\\\\", text)
+    # A truncated response (output budget hit) is unrecoverable, but a trailing
+    # comma before a closing bracket is not.
+    return re.sub(r",\s*([}\]])", r"\1", repaired)
+
+
+_CLOSER = {"{": "}", "[": "]"}
+
+
+def _salvage_truncated_json(text: str, *, max_attempts: int = 200) -> dict | None:
+    """Recover an object from JSON cut off mid-stream (output budget hit).
+
+    Walks the text once, tracking string/escape state and the open-bracket
+    stack, and records every point where an element closed at depth <= 2 —
+    the end of a top-level scalar, or of one element inside a top-level
+    array. Then, from the latest such point backwards, it cuts the text
+    there, drops a dangling comma, appends the closers the stack still owes,
+    and tries to parse. The first parse that succeeds is the longest prefix
+    made only of complete elements, so a response that died inside the 40th
+    TTP still yields every section emitted before it — which, with the
+    indicator sections front-loaded in the schema, is the ledger's part."""
+    cut_points: list[tuple[int, str]] = []
+    stack: list[str] = []
+    in_string = False
+    escape = False
+    for i, ch in enumerate(text):
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+                if len(stack) <= 2:
+                    cut_points.append((i, "".join(_CLOSER[o] for o in reversed(stack))))
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch in "{[":
+            stack.append(ch)
+        elif ch in "}]":
+            if stack:
+                stack.pop()
+            if len(stack) <= 2:
+                cut_points.append((i, "".join(_CLOSER[o] for o in reversed(stack))))
+        elif ch in "0123456789.eE-+" or ch in "truefalsn":
+            # scalars at depth 1-2 end at the next delimiter; the bracket/quote
+            # points are enough in practice, so no cut point is recorded here.
+            pass
+    if not stack and not cut_points:
+        return None
+    for pos, closers in reversed(cut_points[-max_attempts:]):
+        candidate = re.sub(r",\s*$", "", text[: pos + 1].rstrip()) + closers
+        for attempt in (candidate, _repair_json(candidate)):
+            try:
+                parsed = json.loads(attempt)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict) and parsed:
+                return parsed
+    return None
+
+
 def parse_ai_json(content: str) -> dict:
-    """Parse an AI JSON response, salvaging from markdown code fences (shared with the batch poller)."""
+    """Parse an AI JSON response, salvaging from markdown code fences,
+    repairing illegal backslash escapes, and recovering the complete prefix
+    of a response that was cut off by the output budget (shared with the
+    batch poller). A salvaged result carries ``_truncated: True``."""
     try:
         return json.loads(content)
     except json.JSONDecodeError:
@@ -52,10 +127,16 @@ def parse_ai_json(content: str) -> dict:
             stripped = stripped.split("```json")[1].split("```")[0].strip()
         elif "```" in stripped:
             stripped = stripped.split("```")[1].split("```")[0].strip()
-        try:
-            return json.loads(stripped)
-        except json.JSONDecodeError:
-            return {"raw": content, "_extraction_status": "parse_error"}
+        for candidate in (stripped, _repair_json(stripped)):
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+        salvaged = _salvage_truncated_json(stripped)
+        if salvaged is not None:
+            salvaged["_truncated"] = True
+            return salvaged
+        return {"raw": content, "_extraction_status": "parse_error"}
 
 
 async def demote_current_results(
@@ -300,7 +381,10 @@ async def run_task(
 
     assignment, task, provider_model = assignment_data
 
-    # Dedup guard: skip if target already has a current result for this task
+    # Dedup guard: skip if target already has a current result for this task.
+    # A provider error ({"_error": ...}, no _extraction_status) is current so
+    # the workbench shows the last run failed, but it is not an answer: replaying
+    # it would turn every retry of an outage casualty into an instant failure.
     if target_type and target_id and not force:
         existing = await db.execute(
             select(AIResult.parsed_result)
@@ -313,7 +397,8 @@ async def run_task(
             .limit(1)
         )
         cached = existing.scalar_one_or_none()
-        if cached is not None:
+        provider_error = isinstance(cached, dict) and "_error" in cached and "_extraction_status" not in cached
+        if cached is not None and not provider_error:
             logger.debug("Skipping duplicate AI task %s for %s/%s", task_name, target_type, target_id)
             return cached
 
@@ -347,7 +432,12 @@ async def run_task(
     # half-written JSON into _extraction_status="parse_error", which no caller
     # retries, so the whole extraction is silently lost. The cap only bounds
     # output, so raising it costs nothing on entries that finish early.
-    max_tokens = config.get("max_tokens", 8192)
+    # entry_analysis gets 16384: with the indicator appendix in the prompt and
+    # host-kind observables in the schema, a long research write-up's payload
+    # (TTPs with source sentences, countries, 30+ iocs with evidence) measured
+    # 30k+ characters — ~8k tokens — and was cut mid-field. A truncated
+    # response is a lost analysis; extra budget costs nothing when unused.
+    max_tokens = config.get("max_tokens", 16384 if task_name == "entry_analysis" else 8192)
 
     # Agentic tool wiring for tool-capable non-CLI providers (Ollama). The
     # Claude Code CLI reaches tools via its own subprocess (no injected executor

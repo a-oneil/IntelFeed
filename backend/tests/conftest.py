@@ -73,6 +73,7 @@ async def _engine():
         # story_threads declare halfvec columns, so it has to come back first.
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.run_sync(Base.metadata.create_all)
+        await _seed_vocabularies(conn)
     yield engine
     await engine.dispose()
 
@@ -118,6 +119,22 @@ def _offline_meilisearch():
     meilisearch_client._client = None
 
 
+async def _seed_vocabularies(conn) -> None:
+    """Rows the app assumes exist that ``create_all`` cannot provide.
+
+    Sectors are a seeded closed vocabulary, not extracted data: entry_sectors
+    carries an FK onto the 21 rows, so the test schema seeds them the way the
+    Alembic migration does. Idempotent, because ``_truncate_all`` wipes them
+    along with everything else after a ``committed_db`` test.
+    """
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from app.intelligence.sectors import seed_rows
+    from app.models.sector import Sector
+
+    await conn.execute(pg_insert(Sector).values(seed_rows()).on_conflict_do_nothing())
+
+
 async def _truncate_all(engine) -> None:
     async with engine.begin() as conn:
         tables = await conn.scalar(
@@ -128,6 +145,7 @@ async def _truncate_all(engine) -> None:
         )
         if tables:
             await conn.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
+        await _seed_vocabularies(conn)
 
 
 @pytest_asyncio.fixture

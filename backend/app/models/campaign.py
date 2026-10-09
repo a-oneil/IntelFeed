@@ -1,7 +1,20 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -36,6 +49,7 @@ class Campaign(Base):
     entities = relationship("CampaignEntity", back_populates="campaign", cascade="all, delete-orphan")
     saved_searches = relationship("CampaignSavedSearch", back_populates="campaign", cascade="all, delete-orphan")
     country_links = relationship("CampaignCountry", back_populates="campaign", cascade="all, delete-orphan")
+    sector_links = relationship("CampaignSector", back_populates="campaign", cascade="all, delete-orphan")
     sources = relationship("CampaignSource", back_populates="campaign", cascade="all, delete-orphan")
 
 
@@ -100,9 +114,9 @@ class CampaignSavedSearch(Base):
 class CampaignSource(Base):
     """Something a campaign feeds on, beyond a linked saved search.
 
-    A saved search is a query kept in parallel with the campaign, and it drifts:
-    the campaign's subject changes and the query doesn't. These sources are the
-    campaign feeding on what it has already declared —
+    A *linked saved search* is a query kept in parallel with the campaign, owned
+    by whoever saved it and invisible to their teammates. These sources are the
+    campaign's own intake instead —
 
     * ``entity`` — the actor or malware it names as its subject. New articles
       mentioning it join, which is what makes curating the primary role worth
@@ -110,9 +124,14 @@ class CampaignSource(Base):
     * ``story`` — a thread it has already accepted part of. Later waves of a
       story you are already tracking are the clearest case of "obviously yes",
       and before this they arrived as a suggestion to re-accept every time.
+    * ``query`` — a query-language string typed into the campaign. Same reach as
+      a saved search, but campaign-owned: every analyst on the campaign can read
+      it, pause it and edit it, and nobody's personal saved-search list fills up
+      with campaign plumbing. ``ref_id`` is null and ``query`` carries the text.
 
     ``label`` is frozen at link time so a source still reads after its target is
-    renamed or merged away.
+    renamed or merged away. For a query source it is the query text itself,
+    which is the only name it has.
     """
 
     __tablename__ = "campaign_sources"
@@ -121,9 +140,10 @@ class CampaignSource(Base):
     campaign_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    kind: Mapped[str] = mapped_column(String(20), nullable=False)  # entity | story
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)  # entity | story | query
     entity_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    ref_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    ref_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    query: Mapped[str | None] = mapped_column(Text, nullable=True)
     label: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     auto_sync: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -136,5 +156,20 @@ class CampaignSource(Base):
     campaign = relationship("Campaign", back_populates="sources")
 
     __table_args__ = (
+        # Targets an entity or story by id; a query source has no id and is kept
+        # unique on its text by uq_campaign_sources_query (a partial index,
+        # because NULL ref_id makes every query row distinct to this one).
         UniqueConstraint("campaign_id", "kind", "entity_type", "ref_id", name="uq_campaign_sources_target"),
+        Index(
+            "uq_campaign_sources_query",
+            "campaign_id",
+            "query",
+            unique=True,
+            postgresql_where=text("kind = 'query'"),
+        ),
+        CheckConstraint(
+            "(kind = 'query' AND ref_id IS NULL AND query IS NOT NULL)"
+            " OR (kind <> 'query' AND ref_id IS NOT NULL AND query IS NULL)",
+            name="ck_campaign_sources_shape",
+        ),
     )

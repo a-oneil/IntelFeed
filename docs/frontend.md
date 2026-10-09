@@ -85,7 +85,7 @@ frontend/
 │   │   ├── entityProfile/               # Config-driven profile: header, tabs/, actions
 │   │   ├── ransomware/                  # Ransomware tracker: LeakWatchFeed, RansomwareLandscape
 │   │   ├── triage/                      # TriageControls, corrEventCards
-│   │   ├── widgets/                     # 30+ dashboard widgets + registry
+│   │   ├── widgets/                     # 50+ dashboard widgets + registry
 │   │   └── __tests__/                   # Vitest + RTL component tests
 │   │
 │   └── test/
@@ -434,6 +434,7 @@ affordance of its own — a "Sections" button for its section nav.
 
 ### Reader Experience Components
 - **SafeHTML** (SafeHTML.tsx) — DOMPurify renderer for entry content
+- **ExternalLinkGuard** (ExternalLinkGuard.tsx, ExternalLinkModal.tsx, `utils/externalLinks.ts`) — one capture-phase `click`/`auxclick` listener mounted in `GlobalModals` that holds off-site links for a confirmation dialog. `SafeHTML` marks its wrapper `data-untrusted-content`; that attribute is what the default "article content" scope keys on (add it to any other renderer of feed text). Preferences and the trusted-host list live in `user.settings` (`external_link_mode`, `external_link_trusted_hosts`), saved with `PATCH /auth/me/settings`
 - **ReaderTypography** (ReaderTypography.tsx) — Font size, line height, max-width controls
 - **FindInArticle** (FindInArticle.tsx) — Ctrl+F-like text search within entry
 - **AudioPlayer** (AudioPlayer.tsx, 200+ lines) — Playback controls, queue management, speed/volume
@@ -697,7 +698,6 @@ Playwright configuration in `frontend/playwright.config.ts` (baseURL `localhost:
 Manual chunk configuration (function-form `manualChunks` — required by Vite 8 / rolldown) creates separate bundles:
 - `vendor-react` → React, React DOM, React Router
 - `vendor-tanstack` → TanStack Query (large, separate for caching)
-- `vendor-tiptap` → Rich text editor (TipTap extensions, lowlight syntax highlighter)
 - `vendor-misc` → Zustand, Axios, DOMPurify
 - **Page bundles** → Each lazy-loaded page in its own chunk
 

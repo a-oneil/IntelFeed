@@ -721,6 +721,7 @@
 .sectionAccentActor .sectionHeader { border-left-color: var(--entity-actor); }
 .sectionAccentMalware .sectionHeader { border-left-color: var(--entity-malware); }
 .sectionAccentCountry .sectionHeader { border-left-color: var(--entity-country); }
+.sectionAccentSector .sectionHeader { border-left-color: var(--entity-sector); }
 .sectionAccentMitigation .sectionHeader { border-left-color: var(--entity-mitigation); }
 .sectionAccentTool .sectionHeader { border-left-color: var(--entity-tool); }
 .sectionAccentVendor .sectionHeader { border-left-color: var(--entity-vendor); }
@@ -927,6 +928,7 @@
 .entityCardActor { --entity-accent: var(--entity-actor); }
 .entityCardMalware { --entity-accent: var(--entity-malware); }
 .entityCardCountry { --entity-accent: var(--entity-country); }
+.entityCardSector { --entity-accent: var(--entity-sector); }
 .entityCardMitigation { --entity-accent: var(--entity-mitigation); }
 .entityCardTool { --entity-accent: var(--entity-tool); }
 .entityCardVendor { --entity-accent: var(--entity-vendor); }
@@ -1503,7 +1505,7 @@
   box-sizing: border-box;
 }
 
-/* Constrain tiptap editor toolbar and content inside the notes section */
+/* Keep notes-section content from forcing the panel wider than its column */
 .notesSectionContent > * {
   min-width: 0;
   max-width: 100%;

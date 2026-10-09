@@ -6,7 +6,7 @@ import { useIsMobile } from "@/hooks/useMediaQuery";
 import { useIntelStore, type WorkspaceSection } from "@/stores/intelStore";
 import { useAuthStore } from "@/stores/authStore";
 import api from "@/api/client";
-import type { EntitySearchResult, ThreatActor, MalwareFamily, TTP, CVE, CWEResponse, ObservableResponse, ObservableCandidateRow, Country, Mitigation, OffensiveTool, Vendor, Product, DetectionRuleListItem, FacetBucket, RuleSearchResponse, IntelReport, IntelligenceRequirement, PaginatedResponse } from "@/api/types";
+import type { EntitySearchResult, ThreatActor, MalwareFamily, TTP, CVE, CWEResponse, ObservableResponse, ObservableCandidateRow, Country, Sector, Mitigation, OffensiveTool, Vendor, Product, DetectionRuleListItem, FacetBucket, RuleSearchResponse, IntelReport, IntelligenceRequirement, PaginatedResponse } from "@/api/types";
 import { EntityTableSection, type ColumnDef } from "@/components/EntityTableSection";
 import { DataTable, type SortDir } from "@/components/table/DataTable";
 import { NameCell } from "@/components/table/cells";
@@ -48,6 +48,7 @@ import { TelegramMentionsPanel } from "@/components/TelegramMentionsPanel";
 import { WatchlistPanel } from "@/components/WatchlistPanel";
 import { EntityMergeModal } from "@/components/EntityMergeModal";
 import { formatDate } from "@/utils/formatDate";
+import { observableSourcesLabel, reputationLabel } from "@/utils/observables";
 import { exploitSourcesText } from "@/utils/exploitSources";
 import { TLP_COLORS, getTLPColor } from "@/utils/colorSchemes";
 import { CreateEntityPanel, isCreatableEntityType } from "@/components/CreateEntityPanel";
@@ -71,6 +72,7 @@ const DockedEntryReader = lazy(() =>
   import("@/components/EntryReader").then((m) => ({ default: m.EntryReader }))
 );
 import { RouteFallback } from "@/components/RouteFallback";
+import { alertDialog, confirmDialog } from "@/utils/dialog";
 
 type SortOrder = "asc" | "desc";
 type SortState = { field: string; order: SortOrder };
@@ -257,7 +259,7 @@ export function WorkbenchLayout() {
 // Entity types migrated to the unified full-width profile page — they open via
 // route instead of the legacy inline panel. (Country still uses the panel.)
 const ROUTED_PROFILE_TYPES = new Set<string>([
-  "threat_actor", "malware", "cve", "cwe", "ttp", "country", "tool", "mitigation", "vendor", "product", "observable",
+  "threat_actor", "malware", "cve", "cwe", "ttp", "country", "sector", "tool", "mitigation", "vendor", "product", "observable",
 ]);
 
 export function WorkbenchPage() {
@@ -315,6 +317,8 @@ function SectionContent({ section }: { section: WorkspaceSection }) {
       return <TTPsSection />;
     case "countries":
       return <CountriesSection />;
+    case "sectors":
+      return <SectorsSection />;
     case "mitigations":
       return <MitigationsSection />;
     case "observables":
@@ -1058,6 +1062,60 @@ const COUNTRY_COLUMNS: ColumnDef<Country>[] = [
   },
 ];
 
+const SECTOR_COLUMNS: ColumnDef<Sector>[] = [
+  {
+    key: "name", label: "Name", width: 200, minWidth: 120, flex: true,
+    serverSort: true, serverText: true, serverParam: "search",
+    render: (s) => <span className={`${styles.entityName} ${table.ellipsis}`} title={s.name}>{s.name}</span>,
+  },
+  {
+    key: "targeting_actor_count", label: "Targeted By", width: 120, minWidth: 90, hideable: true,
+    serverSort: true, numValue: (s) => s.targeting_actor_count ?? 0,
+    render: (s) => s.targeting_actor_count
+      ? <span className={styles.entityMeta}>{s.targeting_actor_count} actor{s.targeting_actor_count === 1 ? "" : "s"}</span>
+      : <span className={table.zero}>·</span>,
+  },
+  {
+    key: "targeting_malware_count", label: "Malware", width: 110, minWidth: 80, hideable: true,
+    numValue: (s) => s.targeting_malware_count ?? 0,
+    render: (s) => s.targeting_malware_count
+      ? <span className={styles.entityMeta}>{s.targeting_malware_count} famil{s.targeting_malware_count === 1 ? "y" : "ies"}</span>
+      : <span className={table.zero}>·</span>,
+  },
+  {
+    key: "victim_count", label: "Victims (90d)", width: 120, minWidth: 90, hideable: true,
+    serverSort: true, numValue: (s) => s.victim_count ?? 0,
+    render: (s) => s.victim_count
+      ? <span className={styles.entityMeta}>{s.victim_count}</span>
+      : <span className={table.zero}>·</span>,
+  },
+  {
+    key: "article_count", label: "Articles", width: 80, minWidth: 64, hideable: true,
+    serverSort: true, numValue: (s) => s.article_count ?? 0,
+    render: (s) => <ArticleCount count={s.article_count} />,
+  },
+  {
+    key: "last_seen_at", label: "Last Seen", width: 120, minWidth: 90, hideable: true,
+    serverSort: true,
+    render: (s) => <DateCell value={s.last_seen_at} />,
+  },
+  {
+    key: "aliases", label: "Aliases", width: 220, minWidth: 100, hideable: true, defaultHidden: true,
+    textValue: (s) => listText(s.aliases),
+    render: (s) => <AliasesCell aliases={s.aliases} />,
+  },
+  {
+    key: "slug", label: "Slug", width: 160, minWidth: 100, hideable: true, defaultHidden: true,
+    textValue: (s) => s.slug,
+    render: (s) => <Chip>{s.slug}</Chip>,
+  },
+  {
+    key: "description", label: "Description", width: 320, minWidth: 140, hideable: true, defaultHidden: true,
+    textValue: (s) => s.description ?? "",
+    render: (s) => <MetaCell value={s.description} />,
+  },
+];
+
 const MITIGATION_COLUMNS: ColumnDef<Mitigation>[] = [
   {
     key: "name", label: "Name", width: 220, minWidth: 120, flex: true,
@@ -1375,6 +1433,8 @@ const OBSERVABLE_KIND_CHOICES = [
     "path",
     "mutex",
     "named_pipe",
+    "scheduled_task",
+    "http_header",
     "service_name",
     "user_agent",
     "script",
@@ -1388,9 +1448,10 @@ const OBSERVABLE_STATUS_CHOICES = [
 
 const OBSERVABLE_VIA_CHOICES = [
   { value: "all", label: "Any" },
-  { value: "ai_extraction", label: "analysis ai" },
-  { value: "ttp_observable", label: "ttp observable" },
-  { value: "ioc_list", label: "ioc_list feed" },
+  { value: "ai_extraction", label: "AI analysis" },
+  { value: "ttp_observable", label: "TTP observable" },
+  { value: "ioc_list", label: "indicator feed" },
+  { value: "publisher_ioc", label: "article IOC table" },
   { value: "manual", label: "analyst" },
 ];
 
@@ -1464,16 +1525,41 @@ const OBSERVABLE_COLUMNS: ColumnDef<ObservableResponse>[] = [
     // article_count stays off the column list: sightings count the same
     // junction today, and "Linked" (the shared claims column every entity
     // table gets) is the design mock's linked count.
-    key: "sighting_count", label: "Sightings", width: 90, minWidth: 70,
-    serverSort: true, numValue: (o) => o.sighting_count,
-    render: (o) => <NumCell value={o.sighting_count} />,
+    key: "report_count", label: "Sources", width: 120, minWidth: 90,
+    serverSort: true, numValue: (o) => o.report_count,
+    render: (o) => <span title={`${o.sighting_count} raw sightings`}>{observableSourcesLabel(o)}</span>,
+  },
+  {
+    key: "reputation", label: "Reputation", width: 180, minWidth: 120, hideable: true, defaultHidden: true,
+    sortValue: (o) => (o.reputation ? 1 : 0),
+    render: (o) =>
+      o.reputation ? (
+        <span title={`Enriched ${o.reputation.enriched_at ?? ""}`}>{reputationLabel(o.reputation)}</span>
+      ) : (
+        <span className={styles.muted}>—</span>
+      ),
   },
   {
     key: "role", label: "Role", width: 96, minWidth: 70, hideable: true,
     serverChoice: true, serverParam: "role",
     choices: [
       { value: "all", label: "Any" },
-      ...["c2", "delivery", "payload", "phishing", "exfil", "exploit", "scanning"].map((v) => ({ value: v, label: v })),
+      ...[
+        "c2",
+        "delivery",
+        "payload",
+        "phishing",
+        "exfil",
+        "exploit",
+        "scanning",
+        "persistence",
+        "execution",
+        "defense_evasion",
+        "credential_access",
+        "discovery",
+        "lateral_movement",
+        "collection",
+      ].map((v) => ({ value: v, label: v.replace(/_/g, " ") })),
     ],
     render: (o) => (o.role ? <Chip truncate>{o.role}</Chip> : <span className={table.zero}>·</span>),
   },
@@ -1692,8 +1778,9 @@ function ObservableCandidatesQueue() {
   return (
     <div className={styles.candQueue}>
       <div className={styles.candQueueHead}>
-        Candidates · {rows.length} — pattern nominations no judgment door has confirmed. Promote turns one into a
-        ledger row; dismiss drops it from its latest article; never-capture (admin) tombstones it everywhere.
+        Candidates · {rows.length}{rows.length >= 500 ? "+" : ""} — values a pattern scan spotted but nothing has
+        confirmed, aggregated across the 400 most recent articles that raised one. Promote turns one into a ledger
+        row; dismiss drops it from its latest article; never-capture (admin) tombstones it everywhere.
       </div>
       {rows.length > 0 && (
         <div className={styles.candBulkBar}>
@@ -1740,8 +1827,16 @@ function ObservableCandidatesQueue() {
             <button
               className={styles.candNever}
               disabled={bulkBusy || !selectedRows.length}
-              onClick={() => {
-                if (!confirm(`Tombstone ${selectedRows.length} value${selectedRows.length === 1 ? "" : "s"}? No door will capture them again.`)) return;
+              onClick={async () => {
+                if (
+                  !(await confirmDialog({
+                    title: "Tombstone values",
+                    message: `Tombstone ${selectedRows.length} value${selectedRows.length === 1 ? "" : "s"}? No door will capture them again.`,
+                    confirmLabel: "Tombstone",
+                    destructive: true,
+                  }))
+                )
+                  return;
                 void runBulk((c) => neverCapture.mutateAsync({ kind: c.kind, value: c.value }), "Tombstoned");
               }}
             >
@@ -1754,6 +1849,7 @@ function ObservableCandidatesQueue() {
       {!isLoading && rows.length === 0 && (
         <div className={styles.candQueueEmpty}>Queue is clear — nothing nominated and unjudged.</div>
       )}
+      <div className={styles.candRows}>
       {rows.map((c) => (
         <div key={keyOf(c)} className={styles.candRow}>
           <input
@@ -1824,6 +1920,7 @@ function ObservableCandidatesQueue() {
           )}
         </div>
       ))}
+      </div>
     </div>
   );
 }
@@ -1831,33 +1928,57 @@ function ObservableCandidatesQueue() {
 function ObservablesSection() {
   // ?queue=1 deep-links straight into the candidates queue (the Engine
   // console's attention chip lands here).
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [queueOpen, setQueueOpen] = useState(searchParams.get("queue") === "1");
   const { data: queueRows } = useObservableCandidates(true);
+  // ?linked_entity=<type>:<uuid> is the profile's "Open in observables
+  // browser" pivot: only the infrastructure behind that entity.
+  const linkedEntity = searchParams.get("linked_entity");
+  const linkedType = linkedEntity?.split(":")[0];
 
   return (
     <>
       {queueOpen && <ObservableCandidatesQueue />}
       <EntityTableSection<ObservableResponse>
-        title="Observables"
+        title={linkedEntity ? `Observables · ${linkedType?.replace(/_/g, " ")} infrastructure` : "Observables"}
         entityType="observable"
         columns={OBSERVABLE_COLUMNS}
-        queryKey="observables"
+        queryKey={linkedEntity ? `observables:${linkedEntity}` : "observables"}
         endpoint="/observables"
+        extraQueryParams={linkedEntity ? { linked_entity: linkedEntity } : undefined}
         defaultSort={{ key: "last_seen_at", dir: "desc" }}
-        emptyTitle="No observables yet"
-        emptyDesc="Ledger rows come from judgment: the one-pass analysis, curated ioc_list feeds, TTP observables, or promoting a candidate from an article's intel panel. Run scripts/maintenance/backfill_observables.py to fill from existing extractions."
+        emptyTitle={linkedEntity ? "No infrastructure behind this entity yet" : "No observables yet"}
+        emptyDesc={
+          linkedEntity
+            ? "Nothing is attributed to it or reported alongside it. IPs, domains and hashes found in articles about it will show here."
+            : "Ledger rows come from judgment: the one-pass analysis, curated ioc_list feeds, TTP observables, or promoting a candidate from an article's intel panel. Run scripts/maintenance/backfill_observables.py to fill from existing extractions."
+        }
         getId={(o) => o.id}
         getLabel={(o) => o.label || o.value}
         noun="observable"
         nounPlural="observables"
         filters={
-          <button
-            className={`${styles.candToggle} ${queueOpen ? styles.candToggleOn : ""}`}
-            onClick={() => setQueueOpen(!queueOpen)}
-          >
-            Candidates{queueRows?.length ? ` · ${queueRows.length}` : ""}
-          </button>
+          <>
+            {linkedEntity && (
+              <button
+                className={`${styles.candToggle} ${styles.candToggleOn}`}
+                title="Clear the entity filter"
+                onClick={() => {
+                  const next = new URLSearchParams(searchParams);
+                  next.delete("linked_entity");
+                  setSearchParams(next, { replace: true });
+                }}
+              >
+                Linked to one {linkedType?.replace(/_/g, " ")} · clear
+              </button>
+            )}
+            <button
+              className={`${styles.candToggle} ${queueOpen ? styles.candToggleOn : ""}`}
+              onClick={() => setQueueOpen(!queueOpen)}
+            >
+              Candidates{queueRows?.length ? ` · ${queueRows.length}` : ""}
+            </button>
+          </>
         }
       />
     </>
@@ -1917,6 +2038,25 @@ function CountriesSection() {
       noun="country"
       nounPlural="countries"
       filters={<FindDuplicatesButton entityType="country" />}
+    />
+  );
+}
+
+function SectorsSection() {
+  return (
+    <EntityTableSection<Sector>
+      title="Sectors"
+      entityType="sector"
+      columns={SECTOR_COLUMNS}
+      queryKey="sectors"
+      endpoint="/sectors"
+      defaultSort={{ key: "article_count", dir: "desc" }}
+      emptyTitle="No sectors yet"
+      emptyDesc="Sectors are a seeded vocabulary — run scripts/seed/seed_sectors.py to populate them."
+      getId={(s) => s.id}
+      getLabel={(s) => s.name}
+      noun="sector"
+      nounPlural="sectors"
     />
   );
 }
@@ -2288,7 +2428,10 @@ function RulesSection() {
     importRules.mutate(file, {
       onSuccess: (result) => {
         setShowImport(false);
-        alert(`Imported: ${result.imported}, Skipped: ${result.skipped}${result.errors.length ? `\nErrors:\n${result.errors.map((e: { file: string; error: string }) => `${e.file}: ${e.error}`).join("\n")}` : ""}`);
+        void alertDialog({
+          title: "Import finished",
+          message: `Imported: ${result.imported}, Skipped: ${result.skipped}${result.errors.length ? `\n\nErrors:\n${result.errors.map((e: { file: string; error: string }) => `${e.file}: ${e.error}`).join("\n")}` : ""}`,
+        });
       },
     });
   };

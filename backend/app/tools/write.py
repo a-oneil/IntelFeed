@@ -693,8 +693,8 @@ async def _create_note(
     name="create_entity_note",
     description=(
         "Add an analytical note to an intelligence entity. Supported entity types: campaign, country, "
-        "cve, malware, mitigation, product, threat_actor, tool, ttp, vendor (matches the entity_notes "
-        "DB constraint; ransomware victims are not supported)."
+        "cve, cwe, malware, mitigation, observable, product, sector, threat_actor, tool, ttp, vendor "
+        "(matches the entity_notes DB constraint; ransomware victims are not supported)."
     ),
     input_schema={
         "properties": {
@@ -740,8 +740,13 @@ async def _create_entity_note(
     },
 )
 async def _add_tag(db: AsyncSession, user_id: uuid.UUID, entry_id: str, tag_name: str) -> dict:
-    from app.models.tag import EntryTag
+    """The assignment is the caller's own unless the tag is global."""
+    from app.automation.actions import _clean_tag_name
+    from app.services.entry_tags import ensure_assignment, sync_entry_tags_to_search
 
+    tag_name = _clean_tag_name(tag_name)  # same normalisation as a rule's add_tags
+    if not tag_name:
+        return {"error": "tag_name is required"}
     tag_q = await db.execute(select(Tag).where(Tag.name == tag_name))
     tag = tag_q.scalar_one_or_none()
     if not tag:
@@ -749,14 +754,12 @@ async def _add_tag(db: AsyncSession, user_id: uuid.UUID, entry_id: str, tag_name
         db.add(tag)
         await db.flush()
 
-    existing = await db.execute(
-        select(EntryTag).where(EntryTag.entry_id == uuid.UUID(entry_id), EntryTag.tag_id == tag.id)
-    )
-    if existing.scalar_one_or_none():
+    entry_uuid = uuid.UUID(entry_id)
+    if not await ensure_assignment(db, entry_uuid, tag, user_id):
         return {"tag_id": str(tag.id), "already_tagged": True}
 
-    db.add(EntryTag(entry_id=uuid.UUID(entry_id), tag_id=tag.id))
     await db.flush()
+    await sync_entry_tags_to_search(db, [entry_uuid])
     return {"tag_id": str(tag.id), "created": True, "tag_name": tag_name}
 
 
@@ -1438,6 +1441,8 @@ _PROFILE_SAFE_FIELDS: dict[str, set[str]] = {
     "cve": {"description", "severity", "exploit_status", "affected_products", "exploit_availability"},
     "ttp": {"technique_name", "tactic", "description"},
     "country": {"name", "iso_code", "aliases", "region", "description"},
+    # Closed vocabulary: the name and slug are the vocabulary itself.
+    "sector": {"aliases", "description"},
     "tool": {"name", "aliases", "description", "tool_type", "malpedia_url", "github_url"},
     "vendor": {"name", "aliases", "description", "website", "vendor_type"},
     "product": {"name", "aliases", "description", "product_type", "website", "vendor_id"},
@@ -1456,9 +1461,10 @@ _NAME_GUARDED_TYPES = frozenset({"threat_actor", "malware", "country", "tool", "
         "threat_actor (name/aliases/description/mitre_id/country/motivation), malware (name/aliases/"
         "description/malpedia_url/malware_type), cve (description/severity/exploit_status/"
         "affected_products/exploit_availability), ttp (technique_name/tactic/description), country "
-        "(name/iso_code/aliases/region/description), tool (name/aliases/description/tool_type/"
-        "malpedia_url/github_url), vendor (name/aliases/description/website/vendor_type), product "
-        "(name/aliases/description/product_type/website/vendor_id), campaign (name/description/status/"
+        "(name/iso_code/aliases/region/description), sector (aliases/description), tool (name/aliases/"
+        "description/tool_type/malpedia_url/github_url), vendor (name/aliases/description/website/"
+        "vendor_type), product (name/aliases/description/product_type/website/vendor_id), campaign "
+        "(name/description/status/"
         "tags/tlp_marking). Renames are checked for name clashes; removing aliases unlinks entries "
         "matched only via those aliases; new aliases queue a retro-scan of existing entries; the "
         "search-index document is refreshed."
@@ -1503,6 +1509,10 @@ async def _update_entity_profile(
         model, junction, fk_attr = Campaign, None, None
     else:
         model, junction, fk_attr = ENTITY_MODEL_MAP[entity_type]
+    if entity_type == "sector":
+        # Sectors are never autolinked, so no entry was ever matched *via* an
+        # alias — there is nothing to unlink when one is removed.
+        junction, fk_attr = None, None
 
     eid = uuid.UUID(entity_id)
     result = await db.execute(select(model).where(model.id == eid))

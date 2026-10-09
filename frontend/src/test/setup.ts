@@ -1,5 +1,10 @@
 import { vi } from "vitest";
-import "@testing-library/jest-dom";
+// The `/vitest` subpath, not the bare package: bare `@testing-library/jest-dom`
+// resolves to types/index.d.ts, which only references jest.d.ts and augments
+// *jest's* expect. Vitest 5 no longer picks that up, so every `toBeInTheDocument`
+// fails tsc with TS2339 on `Assertion<void, HTMLElement>`. The subpath augments
+// `declare module "vitest"` directly.
+import "@testing-library/jest-dom/vitest";
 
 // jsdom in this Vitest configuration ships a `localStorage` proxy whose
 // Storage methods (`setItem`, `getItem`, etc.) are undefined, breaking

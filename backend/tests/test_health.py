@@ -3,6 +3,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from httpx import AsyncClient
 
+from app.core.build_info import build_stamp
+
 
 @pytest.mark.asyncio
 async def test_health_returns_200(client: AsyncClient):
@@ -161,7 +163,30 @@ async def test_health_includes_version(client: AsyncClient):
         resp = await client.get("/api/health")
         data = resp.json()
 
-    assert data["version"] == "0.1.0"
+    # The build stamp, not a literal: it comes from the APP_VERSION build arg and
+    # falls back to "dev" in an unstamped image (which is what tests run against).
+    assert data["version"] == build_stamp()["version"]
+    assert "git_sha" in data
+    assert "built_at" in data
+
+
+@pytest.mark.asyncio
+async def test_version_endpoint_needs_no_backing_services(client: AsyncClient):
+    """/api/version reports the build stamp without touching db/redis/meili."""
+    with (
+        patch("app.api.health._check_database", new_callable=AsyncMock) as mock_db,
+        patch("app.api.health._check_redis", new_callable=AsyncMock) as mock_redis,
+        patch("app.api.health._check_meilisearch", new_callable=AsyncMock) as mock_meili,
+    ):
+        resp = await client.get("/api/version")
+
+        # The point of the endpoint: cheap enough to poll.
+        mock_db.assert_not_called()
+        mock_redis.assert_not_called()
+        mock_meili.assert_not_called()
+
+    assert resp.status_code == 200
+    assert resp.json() == build_stamp()
 
 
 @pytest.mark.asyncio

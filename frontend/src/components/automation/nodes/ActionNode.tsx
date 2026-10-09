@@ -10,6 +10,7 @@ import {
   useCreateWebhookPreset,
 } from "@/hooks/useWebhookPresets";
 import { Chip } from "@/components/primitives";
+import { specsFromNames, tagSpecName, toTagSpecs } from "@/utils/tagSpecs";
 import styles from "./NodeStyles.module.css";
 
 const ACTION_TYPES = [
@@ -239,6 +240,34 @@ export const ActionNode = memo(function ActionNode({ data }: NodeProps) {
               placeholder="Auto-linked by automation"
               className={styles.input}
             />
+            <label className={styles.checkLabel}>
+              <input
+                type="checkbox"
+                checked={Boolean(config?.link_observables)}
+                onChange={(e) =>
+                  onUpdate?.({
+                    config: { ...config, link_observables: e.target.checked || undefined },
+                  })
+                }
+              />
+              Also attach the entry's captured observables as campaign entities
+            </label>
+            {Boolean(config?.link_observables) && (
+              <>
+                <label className={styles.fieldLabel}>Observable roles (comma-separated, blank = any)</label>
+                <input
+                  type="text"
+                  value={(config?.observable_roles as string) ?? ""}
+                  onChange={(e) =>
+                    onUpdate?.({
+                      config: { ...config, observable_roles: e.target.value || undefined },
+                    })
+                  }
+                  placeholder="c2, delivery, payload"
+                  className={styles.input}
+                />
+              </>
+            )}
           </div>
         )}
 
@@ -296,15 +325,19 @@ export const ActionNode = memo(function ActionNode({ data }: NodeProps) {
             <label className={styles.fieldLabel}>Tags (comma-separated)</label>
             <input
               type="text"
-              value={((config?.tags as string[]) ?? []).join(", ")}
+              value={toTagSpecs(config?.tags).map(tagSpecName).join(", ")}
               onChange={(e) =>
                 onUpdate?.({
                   config: {
                     ...config,
-                    tags: e.target.value
-                      .split(",")
-                      .map((s) => s.trim())
-                      .filter(Boolean),
+                    // Keep a new tag's colour / chip settings for names still listed.
+                    tags: specsFromNames(
+                      e.target.value
+                        .split(",")
+                        .map((s) => s.trim())
+                        .filter(Boolean),
+                      toTagSpecs(config?.tags),
+                    ),
                   },
                 })
               }

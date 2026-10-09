@@ -112,6 +112,53 @@ TOOLS: dict[str, dict] = {
             },
         },
     },
+    "export_observables": {
+        "description": (
+            "Export a filtered slice of the ledger as lines (EDL), CSV rows, or JSON \u2014 the same "
+            "filters as search_observables plus a minimum report count and an 'exclude dual-use "
+            "infrastructure' switch. Values are returned refanged (operational form). Denied rows "
+            "and, by default, infra-tagged rows are excluded."
+        ),
+        "params": {
+            "format": {
+                "type": 'str',
+                "default": 'edl',
+                "enum": ['edl', 'csv', 'json'],
+            },
+            "kind": {
+                "type": 'str',
+                "default": None,
+            },
+            "role": {
+                "type": 'str',
+                "default": None,
+            },
+            "status": {
+                "type": 'str',
+                "default": None,
+            },
+            "min_confidence": {
+                "type": 'float',
+                "default": None,
+            },
+            "min_reports": {
+                "type": 'int',
+                "default": None,
+            },
+            "include_infra_tagged": {
+                "type": 'bool',
+                "default": False,
+            },
+            "query": {
+                "type": 'str',
+                "default": None,
+            },
+            "limit": {
+                "type": 'int',
+                "default": None,
+            },
+        },
+    },
     "get_analytics": {
         "description": (
             "Get platform analytics: trending entities, intelligence velocity, detection coverage "
@@ -399,6 +446,7 @@ TOOLS: dict[str, dict] = {
                     'mitigation',
                     'observable',
                     'product',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'ttp',
@@ -414,6 +462,30 @@ TOOLS: dict[str, dict] = {
                 "default": 1,
             },
             "window_days": {
+                "type": 'int',
+                "default": None,
+            },
+        },
+    },
+    "get_entity_infrastructure": {
+        "description": (
+            "Pivot from a threat actor, malware family, campaign or tool to its observables, in two "
+            "tiers: 'claimed' (attribution edges with evidence \u2014 uses / communicates_with / controls, "
+            "with trust tier) and 'reported_alongside' (observables a reporting article that names "
+            "the entity also carried; indicator-list files and newsletters excluded). Answers 'what "
+            "infrastructure does X use?'."
+        ),
+        "params": {
+            "entity_type": {
+                "type": 'str',
+                "required": True,
+                "enum": ['threat_actor', 'malware', 'campaign', 'tool'],
+            },
+            "entity_id": {
+                "type": 'str',
+                "required": True,
+            },
+            "limit": {
                 "type": 'int',
                 "default": None,
             },
@@ -441,6 +513,7 @@ TOOLS: dict[str, dict] = {
                     'mitigation',
                     'observable',
                     'product',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'ttp',
@@ -791,6 +864,24 @@ TOOLS: dict[str, dict] = {
         ),
         "params": {},
     },
+    "get_sector": {
+        "description": (
+            "Get a sector's victimology profile: description and aliases, who targets it (reported "
+            "from articles vs asserted claims), campaigns scoped to it, leak-site victim totals and "
+            "top ransomware groups, the country cross-tab, the intel profiles that include it, and "
+            "recent articles."
+        ),
+        "params": {
+            "sector": {
+                "type": 'str',
+                "required": True,
+            },
+            "window_days": {
+                "type": 'int',
+                "default": 90,
+            },
+        },
+    },
     "get_share_link": {
         "description": (
             "Return this user's active public share link for an entry ({token, url, created_at, "
@@ -1051,6 +1142,7 @@ TOOLS: dict[str, dict] = {
                     'mitigation',
                     'observable',
                     'product',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'ttp',
@@ -1086,6 +1178,7 @@ TOOLS: dict[str, dict] = {
                     'malware',
                     'observable',
                     'product',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'ttp',
@@ -1253,6 +1346,29 @@ TOOLS: dict[str, dict] = {
         ),
         "params": {},
     },
+    "list_sectors": {
+        "description": (
+            "List the victim-sector vocabulary (21 closed, seeded industries) with per-sector counts: "
+            "linked articles, actors and malware asserted to target it, and leak-site victims in the "
+            "last 90 days. Use the slug from here with get_sector / who_targets_sector / "
+            "sector_victims / pivot_entity."
+        ),
+        "params": {
+            "search": {
+                "type": 'str',
+                "default": None,
+            },
+            "sort_by": {
+                "type": 'str',
+                "default": 'article_count',
+                "enum": ['name', 'article_count', 'last_seen_at', 'targeting_actor_count', 'victim_count'],
+            },
+            "limit": {
+                "type": 'int',
+                "default": 25,
+            },
+        },
+    },
     "list_telegram_feeds": {
         "description": (
             "List Telegram channel feeds with their adapter config \u2014 channel, last_seen_id, "
@@ -1315,6 +1431,7 @@ TOOLS: dict[str, dict] = {
                     'mitigation',
                     'observable',
                     'product',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'ttp',
@@ -1448,6 +1565,34 @@ TOOLS: dict[str, dict] = {
                 "type": 'str',
                 "default": None,
             },
+            "captured_by": {
+                "type": 'str',
+                "default": None,
+            },
+            "infra_tag": {
+                "type": 'str',
+                "default": None,
+            },
+            "needs_review": {
+                "type": 'bool',
+                "default": None,
+            },
+            "min_confidence": {
+                "type": 'float',
+                "default": None,
+            },
+            "min_reports": {
+                "type": 'int',
+                "default": None,
+            },
+            "linked_entity_type": {
+                "type": 'str',
+                "default": None,
+            },
+            "linked_entity_id": {
+                "type": 'str',
+                "default": None,
+            },
             "limit": {
                 "type": 'int',
                 "default": None,
@@ -1472,6 +1617,27 @@ TOOLS: dict[str, dict] = {
             },
         },
     },
+    "sector_victims": {
+        "description": (
+            "Leak-site ransomware victims in a sector: totals (all time and in the window), a "
+            "12-month monthly series, the top ransomware groups posting victims in that sector, the "
+            "victim-country breakdown and the most recent disclosures."
+        ),
+        "params": {
+            "sector": {
+                "type": 'str',
+                "required": True,
+            },
+            "window_days": {
+                "type": 'int',
+                "default": 90,
+            },
+            "limit": {
+                "type": 'int',
+                "default": 20,
+            },
+        },
+    },
     "suggest_campaign_entries": {
         "description": "Suggest entries that share entities with a campaign but aren't yet linked to it.",
         "params": {
@@ -1485,12 +1651,42 @@ TOOLS: dict[str, dict] = {
             },
         },
     },
+    "who_targets_sector": {
+        "description": (
+            "Rank the threat actors and malware families targeting a sector. 'reported' rows are "
+            "ranked by how many articles describe both the actor/family and the sector being hit; "
+            "'asserted' rows carry an explicit targets-sector claim with its source (rollup, "
+            "enrichment, seed, analyst) and evidence count."
+        ),
+        "params": {
+            "sector": {
+                "type": 'str',
+                "required": True,
+            },
+            "limit": {
+                "type": 'int',
+                "default": 15,
+            },
+        },
+    },
 }
 
 
 # ---------------------------------------------------------------------------
 # API Client (stdlib only — no external dependencies)
 # ---------------------------------------------------------------------------
+
+
+class _RefuseRedirects(urllib.request.HTTPRedirectHandler):
+    """urllib re-sends every header, Authorization included, to wherever a redirect points,
+    even another host over plain http. The API never redirects, so a redirect comes back as
+    its 3xx status (an "API returned 30x" error) instead of being followed."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_OPENER = urllib.request.build_opener(_RefuseRedirects)
 
 
 class IntelFeedClient:
@@ -1517,7 +1713,7 @@ class IntelFeedClient:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
+            with _OPENER.open(req, timeout=120) as resp:
                 raw = resp.read().decode("utf-8")
                 try:
                     return resp.status, json.loads(raw)

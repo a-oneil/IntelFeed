@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import fnmatch
 
-from app.search.query_planner import ExecutionPlan, PendingFacetFilter, SearchBranch
+from app.search.query_planner import ExecutionPlan, PendingFacetFilter, SearchBranch, meili_quote
 from app.services import meilisearch_client
 
 # Maps plan.sort values to Meilisearch sort parameters.
@@ -28,24 +28,40 @@ _SORT_MAP = {
 _MAX_BRANCH_FETCH = 1000
 
 
-def _resolve_facet_filters(index, pending: list[PendingFacetFilter]) -> list[str]:
+def _resolve_facet_filters(index, pending: list[PendingFacetFilter], viewer_id: str | None = None) -> list[str]:
     """Expand wildcard attribute filters against the values actually indexed.
 
     Meilisearch compares filter values exactly, so `tags = "apt*"` matches a tag
     literally named `apt*` and nothing else. The facet distribution is the list
     of values the attribute really takes, which is what the pattern gets matched
     against.
+
+    For `tags`, the viewer's personal assignments live in `user_tags` as
+    `"<viewer_id>:<name>"`; only tokens with the viewer's own prefix are
+    considered, matched on the name part, and ORed in as `user_tags` clauses.
     """
     clauses: list[str] = []
     for pf in pending:
+        personal = pf.attribute == "tags" and bool(viewer_id)
+        facets_wanted = [pf.attribute, "user_tags"] if personal else [pf.attribute]
         try:
-            facets = index.search("", {"limit": 0, "facets": [pf.attribute]})
-            values = list((facets.get("facetDistribution") or {}).get(pf.attribute, {}))
+            facets = index.search("", {"limit": 0, "facets": facets_wanted})
+            dist = facets.get("facetDistribution") or {}
+            values = list(dist.get(pf.attribute, {}))
+            tokens = list(dist.get("user_tags", {})) if personal else []
         except Exception:
-            values = []
+            values, tokens = [], []
 
         pattern = pf.pattern.lower()
-        matched = [v for v in values if fnmatch.fnmatchcase(str(v).lower(), pattern)]
+        matched = [
+            f"{pf.attribute} = {meili_quote(str(v))}" for v in values if fnmatch.fnmatchcase(str(v).lower(), pattern)
+        ]
+        prefix = f"{viewer_id}:"
+        matched += [
+            f"user_tags = {meili_quote(str(t))}"
+            for t in tokens
+            if str(t).startswith(prefix) and fnmatch.fnmatchcase(str(t)[len(prefix) :].lower(), pattern)
+        ]
 
         if not matched:
             # No value matches, so the positive form matches nothing; the negated
@@ -54,7 +70,7 @@ def _resolve_facet_filters(index, pending: list[PendingFacetFilter]) -> list[str
                 clauses.append(f'{pf.attribute} = "__no_match__"')
             continue
 
-        joined = " OR ".join(f'{pf.attribute} = "{v}"' for v in matched)
+        joined = " OR ".join(matched)
         clause = f"({joined})" if len(matched) > 1 else joined
         clauses.append(f"NOT {clause}" if pf.negated else clause)
     return clauses
@@ -143,7 +159,7 @@ def execute_entry_search(
 
     # Filters that apply to every branch: wildcard attribute filters, which need
     # the index to resolve, and the entity join's ID constraint.
-    shared: list[str] = _resolve_facet_filters(index, plan.pending_facet_filters)
+    shared: list[str] = _resolve_facet_filters(index, plan.pending_facet_filters, plan.viewer_id)
     if entry_id_constraint is not None:
         # Use Meilisearch IN operator for compact filtering
         # Cap at 500 IDs to stay within filter size limits
@@ -164,8 +180,12 @@ def execute_entry_search(
         "matchingStrategy": "all",
         # Everything the search page's Entries facets offer. feed_title rather
         # than feed_id so the counts arrive already human-readable; the index's
-        # maxValuesPerFacet is 5000, well clear of the feed count.
-        "facets": ["feed_type", "feed_title", "tags", "media_type", "language"],
+        # maxValuesPerFacet is 5000, well clear of the feed count. With a viewer,
+        # `user_tags` rides along so their personal tags can be folded into the
+        # `tags` facet before the response leaves the server.
+        "facets": meilisearch_client.viewer_facets(
+            ["feed_type", "feed_title", "tags", "media_type", "language"], plan.viewer_id
+        ),
     }
 
     # Sort ("relevance" uses default ranking rules — no explicit sort)
@@ -205,7 +225,9 @@ def execute_entry_search(
 
     # The common case: one search, and the index does the paging.
     if len(branches) == 1:
-        return run(branches[0], limit, offset)
+        return meilisearch_client.strip_private_fields(
+            meilisearch_client.fold_viewer_tags(run(branches[0], limit, offset), plan.viewer_id)
+        )
 
     # An OR across text terms cannot be one search, so the union is assembled
     # here. Each branch is fetched from the top — a branch's own offset means
@@ -222,9 +244,14 @@ def execute_entry_search(
     # drift every time the user pages, which reads as a bug in the UI.
     estimated = max(sum(r.get("estimatedTotalHits", 0) for r in results), len(merged_hits))
 
-    return {
-        "hits": page,
-        "estimatedTotalHits": estimated,
-        "processingTimeMs": sum(r.get("processingTimeMs", 0) for r in results),
-        "facetDistribution": _merge_facets(results),
-    }
+    return meilisearch_client.strip_private_fields(
+        meilisearch_client.fold_viewer_tags(
+            {
+                "hits": page,
+                "estimatedTotalHits": estimated,
+                "processingTimeMs": sum(r.get("processingTimeMs", 0) for r in results),
+                "facetDistribution": _merge_facets(results),
+            },
+            plan.viewer_id,
+        )
+    )

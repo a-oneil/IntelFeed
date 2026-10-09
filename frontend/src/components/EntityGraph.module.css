@@ -32,8 +32,8 @@
   pointer-events: none;
 }
 
-/* ── Sector labels ── */
-.sectorLabel {
+/* ── Arc labels ── */
+.arcLabel {
   fill: var(--text-muted);
   font-size: var(--fs-xs);
   font-weight: 600;

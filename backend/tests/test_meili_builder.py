@@ -156,6 +156,95 @@ class TestFacetWildcards:
     def test_negated_no_match_excludes_nothing(self):
         assert _resolve_facet_filters(self._index(), [PendingFacetFilter("tags", "zzz*", negated=True)]) == []
 
+    def _index_with_personal(self):
+        return FakeIndex(
+            facets={
+                "tags": {"apt-report": 5, "ransomware": 9},
+                "user_tags": {"u-1:apt-x": 1, "u-1:ransom-note": 2, "u-2:apt-y": 1},
+            }
+        )
+
+    def test_viewer_expands_their_own_personal_tokens_too(self):
+        index = self._index_with_personal()
+        clauses = _resolve_facet_filters(index, [PendingFacetFilter("tags", "apt*")], viewer_id="u-1")
+        assert clauses == ['(tags = "apt-report" OR user_tags = "u-1:apt-x")']
+        # The index was asked for both facets in one call.
+        assert index.calls[0][1]["facets"] == ["tags", "user_tags"]
+
+    def test_another_users_tokens_never_match(self):
+        clauses = _resolve_facet_filters(
+            self._index_with_personal(), [PendingFacetFilter("tags", "*y")], viewer_id="u-1"
+        )
+        assert clauses == ['tags = "__no_match__"']
+
+    def test_without_a_viewer_only_global_tags_expand(self):
+        index = self._index_with_personal()
+        clauses = _resolve_facet_filters(index, [PendingFacetFilter("tags", "apt*")])
+        assert clauses == ['tags = "apt-report"']
+        assert index.calls[0][1]["facets"] == ["tags"]
+
+
+class TestViewerFacets:
+    """The `tags` facet a viewer gets back includes their own personal tags and
+    nobody else's; the raw `user_tags` distribution never leaves the server."""
+
+    def test_fold_merges_only_the_viewers_tokens(self):
+        from app.services.meilisearch_client import fold_viewer_tags
+
+        result = {
+            "hits": [],
+            "facetDistribution": {
+                "tags": {"team-wide": 4},
+                "user_tags": {"u-1:customer-a": 3, "u-2:customer-a": 7, "u-1:team-wide": 1},
+            },
+        }
+        folded = fold_viewer_tags(result, "u-1")
+        assert folded["facetDistribution"] == {"tags": {"team-wide": 5, "customer-a": 3}}
+
+    def test_fold_without_viewer_drops_the_tokens(self):
+        from app.services.meilisearch_client import fold_viewer_tags
+
+        result = {"facetDistribution": {"tags": {"a": 1}, "user_tags": {"u-1:x": 1}}}
+        assert fold_viewer_tags(result, None)["facetDistribution"] == {"tags": {"a": 1}}
+
+    def test_fold_is_a_no_op_without_the_facet(self):
+        from app.services.meilisearch_client import fold_viewer_tags
+
+        assert fold_viewer_tags({"hits": [{"id": "1"}]}, "u-1") == {"hits": [{"id": "1"}]}
+
+    def test_user_tags_facet_is_requested_only_with_a_viewer(self):
+        from app.search.query_parser import parse_query
+        from app.search.query_planner import build_execution_plan
+
+        index = FakeIndex()
+        run(build_execution_plan(parse_query("qilin")), index)
+        assert "user_tags" not in index.calls[-1][1]["facets"]
+
+        index = FakeIndex()
+        run(build_execution_plan(parse_query("qilin"), viewer_id="u-1"), index)
+        assert "user_tags" in index.calls[-1][1]["facets"]
+
+    def test_search_response_facets_are_folded_for_the_viewer(self):
+        from app.search.query_parser import parse_query
+        from app.search.query_planner import build_execution_plan
+
+        class FacetIndex(FakeIndex):
+            def search(self, query, params):
+                self.calls.append((query, params))
+                return {
+                    "hits": [{"id": "e1", "user_tags": ["u-1:customer-a"]}],
+                    "estimatedTotalHits": 1,
+                    "processingTimeMs": 1,
+                    "facetDistribution": {
+                        "tags": {"team-wide": 1},
+                        "user_tags": {"u-1:customer-a": 1, "u-2:secret": 1},
+                    },
+                }
+
+        result = run(build_execution_plan(parse_query("qilin"), viewer_id="u-1"), FacetIndex())
+        assert result["facetDistribution"] == {"tags": {"team-wide": 1, "customer-a": 1}}
+        assert result["hits"] == [{"id": "e1"}]
+
 
 class TestEmptyConstraint:
     def test_an_empty_id_constraint_short_circuits(self):

@@ -1,0 +1,12 @@
+{
+  "slug": "neg-talos-patch-tuesday",
+  "title_like": "Microsoft Patch Tuesday for September 2026%",
+  "title": "Microsoft Patch Tuesday for September 2026 — Snort rules and prominent vulnerabilities",
+  "url": "https://blog.talosintelligence.com/microsoft-patch-tuesday-for-september-2026/",
+  "publisher": "Cisco Talos",
+  "kind": "negative",
+  "attribution": [],
+  "expected": [],
+  "optional": [],
+  "must_not": []
+}

@@ -5,6 +5,9 @@ import { useUIStore, type ReaderFontSize, type ReaderLineHeight, type ReaderMaxW
 import { useAppSidebarAutoCollapse } from "@/hooks/useAppSidebarAutoCollapse";
 import { useIsMobile } from "@/hooks/useMediaQuery";
 import { useUpdateProfile, useChangePassword } from "@/hooks/useAuth";
+import { useSaveOnboardingProgress } from "@/hooks/useOnboarding";
+import { useExternalLinkSettings } from "@/hooks/useExternalLinkSettings";
+import { BUILT_IN_TRUSTED_DOMAINS, type ExternalLinkMode } from "@/utils/externalLinks";
 import { useUsers, useUpdateUser, useDeleteUser } from "@/hooks/useUsers";
 import { useAutomationLogs, useClearAutomationLogs } from "@/hooks/useAutomation";
 import { formatDate } from "@/utils/formatDate";
@@ -22,6 +25,7 @@ import styles from "./SettingsPage.module.css";
 import { Chip, MobileNavSheet, RailToggle } from "@/components/primitives";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { useRailWidth } from "@/hooks/useRailWidth";
+import { confirmDialog } from "@/utils/dialog";
 
 /* Chip tints for automation-log statuses — status categories, not entity
    types, so they stay literals (see the --entity-* aliasing rule). */
@@ -74,10 +78,10 @@ const NAV_GROUPS: { group: string; items: NavItem[] }[] = [
     group: "Administration",
     items: [
       { key: "ai", keywords: ["provider", "ollama", "openai", "model", "prompts", "tasks", "copilot", "cost", "budget"],  label: "AI Configuration", icon: "M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1.07A7 7 0 0 1 14 23h-4a7 7 0 0 1-6.93-4H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2zM9 17a1 1 0 1 0 0-2 1 1 0 0 0 0 2zm6 0a1 1 0 1 0 0-2 1 1 0 0 0 0 2z", adminOnly: true },
-      { key: "engine", keywords: ["pipeline", "ingest", "stages", "autolinking", "extraction", "enrichment", "feed health", "jobs", "schedules", "plans", "maintenance", "console"],  label: "Engine", icon: "M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41", adminOnly: true },
+      { key: "engine", keywords: ["pipeline", "ingest", "stages", "autolinking", "extraction", "enrichment", "feed health", "jobs", "schedules", "plans", "maintenance", "console", "thresholds", "api keys", "rate limit", "signal engine", "embeddings", "ranking"],  label: "Engine", icon: "M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41", adminOnly: true },
       { key: "logs", keywords: ["audit", "errors", "activity", "history"],  label: "Logs", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M16 13H8M16 17H8M10 9H8", adminOnly: true },
-      { key: "system", keywords: ["invite", "registration", "rate limit", "retention", "autolinker", "extraction", "thresholds", "signal engine", "embeddings", "ranking", "api keys", "jobs"],  label: "System", icon: "M5 12h14M12 5l7 7-7 7", adminOnly: true },
-      { key: "users", keywords: ["accounts", "admin", "roles", "invite", "permissions"],  label: "Users", icon: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75", adminOnly: true },
+      { key: "system", keywords: ["monitoring", "sentry", "backup", "retention", "maintenance", "search index", "reindex"],  label: "System", icon: "M5 12h14M12 5l7 7-7 7", adminOnly: true },
+      { key: "users", keywords: ["accounts", "admin", "roles", "invite", "registration", "permissions"],  label: "Users", icon: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75", adminOnly: true },
     ],
   },
 ];
@@ -310,6 +314,11 @@ function TagsSection() {
 
 function AccountSection() {
   const user = useAuthStore((s) => s.user);
+  const replayOnboarding = useSaveOnboardingProgress();
+  const tourState = user?.settings as
+    | { onboarding_completed?: boolean; onboarding_step?: string | null }
+    | undefined;
+  const canResumeTour = !tourState?.onboarding_completed && !!tourState?.onboarding_step;
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [passwordMsg, setPasswordMsg] = useState<string | null>(null);
@@ -361,6 +370,48 @@ function AccountSection() {
                 : "—"}
             </span>
           </div>
+        </div>
+      </div>
+
+      <div className={styles.card}>
+        <h3 className={styles.cardTitle}>Getting started</h3>
+        <p className={styles.sectionDesc}>
+          {canResumeTour
+            ? "You closed the tour partway through. Pick it up where you left off, or start it again from the beginning."
+            : "Replay the setup and usage tour from the beginning. It covers the reading loop, the priority queue, entities and search — and, if you're an admin, anything this instance still needs."}
+        </p>
+        <div className={styles.cardActions}>
+          {canResumeTour && (
+            <button
+              // Clearing the deferral reopens the wizard on the saved step; the
+              // step itself is left alone. The run id remounts it, in case this
+              // page's wizard is still mounted-but-dismissed.
+              onClick={() =>
+                replayOnboarding.mutate({
+                  onboarding_deferred_at: null,
+                  onboarding_run_id: crypto.randomUUID(),
+                })
+              }
+              disabled={replayOnboarding.isPending}
+              className={styles.btnPrimary}
+            >
+              {replayOnboarding.isPending ? "Opening…" : "Resume the tour"}
+            </button>
+          )}
+          <button
+            onClick={() =>
+              replayOnboarding.mutate({
+                onboarding_completed: false,
+                onboarding_step: null,
+                onboarding_deferred_at: null,
+                onboarding_run_id: crypto.randomUUID(),
+              })
+            }
+            disabled={replayOnboarding.isPending}
+            className={canResumeTour ? styles.btnSecondary : styles.btnPrimary}
+          >
+            {replayOnboarding.isPending ? "Starting…" : "Replay from the start"}
+          </button>
         </div>
       </div>
 
@@ -607,7 +658,81 @@ function ReadingSection() {
 
       </div>
 
+      <ExternalLinksCard />
+
       <ReaderTypographySettings />
+    </div>
+  );
+}
+
+function ExternalLinksCard() {
+  const { mode, trustedHosts, saving, setMode, untrustHost } = useExternalLinkSettings();
+
+  const run = async (action: () => Promise<unknown>) => {
+    try {
+      await action();
+    } catch {
+      toast.error("Couldn't save that setting");
+    }
+  };
+
+  return (
+    <div className={styles.card}>
+      <h3 className={styles.cardTitle}>External links</h3>
+
+      <div className={styles.settingRow}>
+        <div className={styles.settingInfo}>
+          <span className={styles.settingLabel}>Confirm before leaving IntelFeed</span>
+          <span className={styles.settingHint}>
+            Shows where a link really goes before you follow it, and warns when the link text
+            names a different site. Feed articles and generated summaries can contain
+            untrusted links, so they are the default scope.
+          </span>
+        </div>
+        <select
+          className={styles.select}
+          value={mode}
+          disabled={saving}
+          aria-label="Confirm before leaving IntelFeed"
+          onChange={(e) => run(() => setMode(e.target.value as ExternalLinkMode))}
+        >
+          <option value="article">Articles and summaries</option>
+          <option value="all">All external links</option>
+          <option value="off">Off</option>
+        </select>
+      </div>
+
+      <div className={styles.settingRow}>
+        <div className={styles.settingInfo}>
+          <span className={styles.settingLabel}>Trusted sites</span>
+          <span className={styles.settingHint}>
+            Skipped: {BUILT_IN_TRUSTED_DOMAINS.join(", ")} (and their subdomains) and anything you
+            add with &ldquo;Don&apos;t ask again&rdquo;. Every other outside link asks first.
+            A link whose text names a different site is always confirmed.
+          </span>
+        </div>
+      </div>
+
+      {trustedHosts.length > 0 ? (
+        <ul className={styles.trustedList}>
+          {trustedHosts.map((host) => (
+            <li key={host} className={styles.trustedItem}>
+              <code>{host}</code>
+              <button
+                type="button"
+                className={styles.trustedRemove}
+                disabled={saving}
+                aria-label={`Stop trusting ${host}`}
+                onClick={() => run(() => untrustHost(host))}
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <span className={styles.settingHint}>You haven&apos;t added any trusted sites yet.</span>
+      )}
     </div>
   );
 }
@@ -1213,8 +1338,15 @@ function AutomationLogsPanel() {
           {logsTotal > 0 && (
             <button
               className={styles.logToolbarBtn}
-              onClick={() => {
-                if (confirm("Clear all execution logs? This cannot be undone.")) {
+              onClick={async () => {
+                if (
+                  await confirmDialog({
+                    title: "Clear execution logs",
+                    message: "Clear all execution logs? This cannot be undone.",
+                    confirmLabel: "Clear logs",
+                    destructive: true,
+                  })
+                ) {
                   clearLogs.mutate(undefined, {
                     onSuccess: () => {
                       setExpandedLogs(new Set());
@@ -2037,4 +2169,3 @@ export INTELFEED_PASSWORD=your_password`}</code>
     </div>
   );
 }
-

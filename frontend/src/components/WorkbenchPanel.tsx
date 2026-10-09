@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useUIStore } from "@/stores/uiStore";
 import { Chip } from "@/components/primitives";
 import { severityChipColors } from "@/utils/severity";
-import type { TTP, CVE, Country, ThreatActor, MalwareFamily, Mitigation, OffensiveTool, Vendor, Product, DetectionRule, DetectionRuleListItem, ExtractionStatus, GraphNode, GraphEdge, ObservableEntryPayload } from "@/api/types";
+import type { TTP, CVE, Country, EntrySector, ThreatActor, MalwareFamily, Mitigation, OffensiveTool, Vendor, Product, DetectionRule, DetectionRuleListItem, ExtractionStatus, GraphNode, GraphEdge, ObservableEntryPayload } from "@/api/types";
 import {
   useEntryURLs,
   useEntryTTPs,
@@ -12,6 +12,7 @@ import {
   useEntryArticleMetadata,
   useEntryCVEs,
   useEntryCountries,
+  useEntrySectors,
   useEntryThreatActors,
   useEntryMalware,
   useEntryMitigations,
@@ -74,6 +75,7 @@ interface PreloadedData {
   actors?: ThreatActor[];
   malware?: MalwareFamily[];
   countries?: Country[];
+  sectors?: EntrySector[];
   mitigations?: Mitigation[];
   tools?: OffensiveTool[];
   vendors?: Vendor[];
@@ -115,6 +117,7 @@ export default function WorkbenchPanel({
   const { data: hookActors, isLoading: actorsLoading } = useEntryThreatActors(fetchId);
   const { data: hookMalware, isLoading: malwareLoading } = useEntryMalware(fetchId);
   const { data: hookCountries, isLoading: countriesLoading } = useEntryCountries(fetchId);
+  const { data: hookSectors, isLoading: sectorsLoading } = useEntrySectors(fetchId);
   const { data: hookMitigations, isLoading: mitigationsLoading } = useEntryMitigations(fetchId);
   const { data: hookTools, isLoading: toolsLoading } = useEntryTools(fetchId);
   const { data: hookVendors, isLoading: vendorsLoading } = useEntryVendors(fetchId);
@@ -142,6 +145,7 @@ export default function WorkbenchPanel({
   const actors = readOnly ? (preloadedData?.actors || []) : hookActors;
   const malware = readOnly ? (preloadedData?.malware || []) : hookMalware;
   const countries = readOnly ? (preloadedData?.countries || []) : hookCountries;
+  const sectors = readOnly ? (preloadedData?.sectors || []) : hookSectors;
   const mitigations = readOnly ? (preloadedData?.mitigations || []) : hookMitigations;
   const tools = readOnly ? (preloadedData?.tools || []) : hookTools;
   const vendors = readOnly ? (preloadedData?.vendors || []) : hookVendors;
@@ -255,12 +259,13 @@ export default function WorkbenchPanel({
   const actorCount = actors?.length ?? 0;
   const malwareCount = malware?.length ?? 0;
   const countryCount = countries?.length ?? 0;
+  const sectorCount = sectors?.length ?? 0;
   const mitigationCount = mitigations?.length ?? 0;
   const toolCount = tools?.length ?? 0;
   const vendorCount = vendors?.length ?? 0;
   const productCount = products?.length ?? 0;
   const ruleCount = rules.length;
-  const totalEntities = ttpCount + cveCount + actorCount + malwareCount + countryCount + mitigationCount + toolCount + vendorCount + productCount;
+  const totalEntities = ttpCount + cveCount + actorCount + malwareCount + countryCount + sectorCount + mitigationCount + toolCount + vendorCount + productCount;
 
   return (
     <div className={styles.panel}>
@@ -327,6 +332,16 @@ export default function WorkbenchPanel({
           accentClass={countryCount > 0 ? styles.sectionAccentCountry : undefined}
         >
           <CountryList countries={countries || []} entryId={entryId} hasExtracted={hasExtracted} readOnly={readOnly} />
+        </AccordionSection>
+        <AccordionSection
+          title="Sectors"
+          count={sectorCount}
+          loading={readOnly ? false : sectorsLoading}
+          expanded={expandedSections.has("sectors")}
+          onToggle={() => toggleSection("sectors")}
+          accentClass={sectorCount > 0 ? styles.sectionAccentSector : undefined}
+        >
+          <SectorList sectors={sectors || []} entryId={entryId} hasExtracted={hasExtracted} readOnly={readOnly} />
         </AccordionSection>
         <AccordionSection
           title="Detection Rules"
@@ -815,7 +830,7 @@ const OBSERVABLE_KIND_GROUPS: Array<[string, string[]]> = [
   ["Domains", ["domain"]],
   ["URLs & paths", ["url", "uri_path"]],
   ["Hashes & fingerprints", ["md5", "sha1", "sha256", "cert_fingerprint", "ja3", "ja4"]],
-  ["Commands & host artifacts", ["cmdline", "registry", "path", "mutex", "named_pipe", "service_name", "user_agent"]],
+  ["Commands & host artifacts", ["cmdline", "registry", "path", "mutex", "named_pipe", "service_name", "scheduled_task", "user_agent", "http_header"]],
   ["Scripts", ["script"]],
   ["Emails", ["email"]],
 ];
@@ -1285,6 +1300,44 @@ function MalwareList({ malware, entryId, hasExtracted, readOnly }: { malware: Ma
               </div>
             )}
           </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ─── Sector List ─── */
+
+/** The industries this article describes as targeted — the AI's judgment,
+ *  never a word match, so there is no "wrong match" affordance here. */
+function SectorList({ sectors, entryId, hasExtracted, readOnly }: { sectors: EntrySector[]; entryId: string; hasExtracted: boolean; readOnly?: boolean }) {
+  const navigate = useNavigate();
+  if (!sectors.length)
+    return (
+      <div className={styles.placeholder}>
+        {hasExtracted ? "No targeted sectors identified." : "No extraction run yet."}
+      </div>
+    );
+
+  return (
+    <div className={styles.cardList}>
+      {sectors.map((sector) => (
+        <div
+          key={sector.id}
+          className={`${styles.entityCard} ${styles.entityCardSector} ${!readOnly ? styles.entityCardClickable : ""}`}
+          onClick={readOnly ? undefined : () => navigate(`/workbench/sector/${sector.id}`)}
+        >
+          <div className={styles.entityCardRow}>
+            <span className={styles.entityName}>{sector.name}</span>
+            {sector.confidence && <span className={styles.tacticTag}>{sector.confidence}</span>}
+          </div>
+          {!readOnly && (
+            <div className={styles.entityCardActions} onClick={(e) => e.stopPropagation()}>
+              <div className={styles.entityBtns}>
+                <UnlinkArticleButton entryId={entryId} entityId={sector.id} entityType="sector" />
+              </div>
+            </div>
+          )}
         </div>
       ))}
     </div>

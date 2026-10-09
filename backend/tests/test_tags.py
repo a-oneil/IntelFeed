@@ -7,6 +7,7 @@ from app.models.entry import Entry
 from app.models.feed import Feed
 from app.models.tag import Tag
 from app.models.user import User
+from app.services.entry_tags import ensure_assignment
 
 
 @pytest_asyncio.fixture
@@ -123,15 +124,11 @@ async def test_remove_tag_from_entry(
     test_entry: Entry,
     db_session: AsyncSession,
 ):
-    from app.models.tag import EntryTag
-
     tag = Tag(created_by=test_user.id, name="to-remove")
     db_session.add(tag)
     await db_session.flush()
 
-    et = EntryTag(entry_id=test_entry.id, tag_id=tag.id)
-    db_session.add(et)
-    await db_session.flush()
+    await ensure_assignment(db_session, test_entry.id, tag, test_user.id)
 
     resp = await client.delete(
         f"/api/tags/entries/{test_entry.id}/{tag.id}",
@@ -172,20 +169,13 @@ async def test_bulk_untag(
     test_feed: Feed,
     db_session: AsyncSession,
 ):
-    from app.models.tag import EntryTag
-
     tag = Tag(created_by=test_user.id, name="bulk-untag")
     e1 = Entry(feed_id=test_feed.id, title="U1", guid="untag-1")
     e2 = Entry(feed_id=test_feed.id, title="U2", guid="untag-2")
     db_session.add_all([tag, e1, e2])
     await db_session.flush()
-    db_session.add_all(
-        [
-            EntryTag(entry_id=e1.id, tag_id=tag.id),
-            EntryTag(entry_id=e2.id, tag_id=tag.id),
-        ]
-    )
-    await db_session.flush()
+    await ensure_assignment(db_session, e1.id, tag, test_user.id)
+    await ensure_assignment(db_session, e2.id, tag, test_user.id)
 
     resp = await client.post(
         "/api/tags/entries/bulk-untag",
@@ -207,8 +197,6 @@ async def test_merge_tags(
     test_feed: Feed,
     db_session: AsyncSession,
 ):
-    from app.models.tag import EntryTag
-
     source = Tag(created_by=test_user.id, name="priority-critical")
     target = Tag(created_by=test_user.id, name="critical-cve")
     e1 = Entry(feed_id=test_feed.id, title="M1", guid="merge-1")
@@ -216,14 +204,9 @@ async def test_merge_tags(
     db_session.add_all([source, target, e1, e2])
     await db_session.flush()
     # e1 has only source; e2 has both (tests dedupe)
-    db_session.add_all(
-        [
-            EntryTag(entry_id=e1.id, tag_id=source.id),
-            EntryTag(entry_id=e2.id, tag_id=source.id),
-            EntryTag(entry_id=e2.id, tag_id=target.id),
-        ]
-    )
-    await db_session.flush()
+    await ensure_assignment(db_session, e1.id, source, test_user.id)
+    await ensure_assignment(db_session, e2.id, source, test_user.id)
+    await ensure_assignment(db_session, e2.id, target, test_user.id)
 
     resp = await client.post(
         "/api/tags/merge",

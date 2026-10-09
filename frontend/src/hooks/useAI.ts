@@ -3,6 +3,7 @@ import api from "@/api/client";
 import { useAuthStore } from "@/stores/authStore";
 import type {
   AIProvider,
+  AIProviderCommissionResult,
   AIProviderTestResult,
   AITask,
   AITaskAssignment,
@@ -76,6 +77,33 @@ export function useDeleteAIProvider() {
       await api.delete(`/ai/providers/${id}`);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["ai-providers"] }),
+  });
+}
+
+/**
+ * Test a provider and route the AI tasks at it, in one call.
+ *
+ * Creating a provider configures nothing — work runs off task assignments, and
+ * the startup seeder only fills those from a provider that already existed when
+ * the API booted. Without this, a provider added through the UI did nothing
+ * until the next restart.
+ */
+export function useCommissionAIProvider() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, takeOver }: { id: string; takeOver?: boolean }) => {
+      const { data } = await api.post<AIProviderCommissionResult>(
+        `/ai/providers/${id}/commission`,
+        null,
+        { params: { take_over: takeOver ?? false } },
+      );
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["ai-providers"] });
+      qc.invalidateQueries({ queryKey: ["ai-task-assignments-all"] });
+      qc.invalidateQueries({ queryKey: ["onboarding"] });
+    },
   });
 }
 

@@ -1,9 +1,10 @@
 """Run every reference-data seeder, in dependency order.
 
-A fresh install starts with an empty autolinker vocabulary: entries ingest, but
-nothing links to anything, because there are no countries, techniques, vendors,
-or actors to match against. This runs the whole seed set in the order the later
-steps need — country aliases need countries, actor attribution needs both.
+A fresh install already has countries and a baseline of ATT&CK techniques from
+its migrations, but not the CWE catalog, vendors, products or actor attribution,
+so most of what the autolinker matches against is missing and entries ingest
+without linking to it. This runs the whole seed set in the order the later steps
+need — country aliases need countries, actor attribution needs both.
 
 Run inside the api container:
     docker compose -f docker-compose.dev.yml exec api python scripts/seed/seed_all.py --dry-run
@@ -13,14 +14,15 @@ Every step is idempotent, so re-running fills gaps rather than duplicating.
 Steps run as subprocesses: one failing seeder cannot poison another's database
 session, and a crash mid-run leaves the completed steps committed.
 
-All nine seeders support --dry-run, so `seed_all.py --dry-run` is a genuine
+All ten seeders support --dry-run, so `seed_all.py --dry-run` is a genuine
 preview of the whole set rather than just a plan. The two Wikipedia steps skip
-their network lookups when dry, so the preview is fast; the ATT&CK step still
-downloads its bundles, because that is the only way to know what would change.
+their network lookups when dry, so the preview is fast; the ATT&CK and CWE steps
+still download their catalogs, because that is the only way to know what would
+change.
 
 Useful flags:
     --dry-run              Run every step in its own dry-run mode. Nothing is written.
-    --offline              Skip the three steps that download from MITRE/Wikipedia.
+    --offline              Skip the four steps that download from MITRE/Wikipedia.
     --only countries,cpe   Run just these steps (comma-separated, see --list).
     --skip vendors         Run everything except these.
     --overwrite            Let steps that fill blanks also replace existing values.
@@ -58,6 +60,7 @@ DRY_OVERWRITE = ("--dry-run", "--overwrite")
 STEPS: tuple[Step, ...] = (
     Step("countries", "seed_countries.py", "UN-recognized countries with ISO codes and regions", accepts=DRY),
     Step("aliases", "seed_country_aliases.py", "Country demonyms, so 'Iranian' matches Iran", accepts=DRY),
+    Step("sectors", "seed_sectors.py", "The 21 victim-sector entities (closed vocabulary)", accepts=DRY),
     Step("attack", "seed_mitre_attack.py", "MITRE ATT&CK catalog (Enterprise + Mobile + ICS)", True, DRY),
     # Before vendors/cpe: the catalog has to exist before backfill_cve_weaknesses
     # can resolve the NVD refs already sitting in cves.nvd_data.
@@ -174,7 +177,11 @@ def main() -> int:
 
     if failed:
         print(f"\033[31mFailed: {', '.join(failed)}\033[0m")
-        print(f"Fix the cause, then resume with: --only {','.join(failed)}")
+        # A failure skips everything after it, so the resume list is the failed steps
+        # *and* the skipped ones. Naming only the failed step finishes that step and
+        # leaves the rest of the seed set unrun.
+        unfinished = [s.name for s, status, _ in results if status in (FAILED, SKIPPED)]
+        print(f"Fix the cause, then resume with: --only {','.join(unfinished)}")
         return 1
     print("\033[32mSeeding complete.\033[0m")
     return 0

@@ -1,0 +1,94 @@
+# Dependency updates. Everything is grouped and weekly on purpose: an ungrouped
+# Dependabot on a repo this size opens ~20 PRs a week, each triggering a full
+# CI run, and the result is that nobody reads any of them.
+#
+# Note this only opens *version* PRs. The vulnerability side needs "Dependabot
+# alerts" switched on in the repo's Settings > Code security — on a private
+# repo it is off by default. The weekly pip-audit / pnpm audit in
+# the `security` job in .github/workflows/ci.yml is the backstop either way.
+version: 2
+
+updates:
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+    open-pull-requests-limit: 5
+    groups:
+      # Patch and minor bumps land together; a major gets its own PR so the
+      # breaking-change notes are readable.
+      backend-minor:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    commit-message:
+      prefix: "deps(backend)"
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+    open-pull-requests-limit: 5
+    groups:
+      frontend-minor:
+        patterns: ["*"]
+        update-types: [minor, patch]
+      # These move as a set — bumping one @codemirror package without its
+      # siblings reliably breaks the editor build.
+      codemirror:
+        patterns: ["@codemirror/*", "@lezer/*", "codemirror"]
+    commit-message:
+      prefix: "deps(frontend)"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "deps(ci)"
+
+  - package-ecosystem: docker
+    directories:
+      - /backend
+      - /frontend
+      - /db
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+    groups:
+      base-images:
+        patterns: ["*"]
+    commit-message:
+      prefix: "deps(docker)"
+    ignore:
+      # Both holds below are deliberate, and CI does not protect either one:
+      # the python bump fails the build loudly, the postgres bump goes green
+      # and breaks production. Dependabot re-proposed both in #63 (and the
+      # postgres half in #52), so they are pinned here rather than closed
+      # again every Monday.
+      #
+      # python: stay on 3.14. 3.15 is still pre-release (#63 offered
+      # 3.15.0rc2) and the backend tree cannot install on it at all — every
+      # selectolax release caps at <3.15, so googlenewsdecoder fails to
+      # resolve. Patch bumps (3.14.x) still come through.
+      - dependency-name: "python"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
+      # postgres: stay on 16. The `pgdata` named volume was initdb'd under 16
+      # and a newer major refuses to start against it, so the image builds
+      # clean and the stack then will not boot on real data. Moving majors
+      # needs pg_upgrade or dump/restore in a maintenance window. See the
+      # header comment in db/Dockerfile.
+      - dependency-name: "postgres"
+        update-types:
+          - "version-update:semver-major"

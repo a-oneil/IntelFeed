@@ -304,6 +304,27 @@ def observables_entry_task(entry_id: str):
         CELERY_TASK_DURATION_SECONDS.labels(task_name="observables_entry_task").observe(time.monotonic() - start)
 
 
+async def _codeblock_scan_skipped(db, entry) -> bool:
+    """Whether this entry's feed sits in a category that never nominates host
+    kinds from <pre> blocks (``observables_codeblock_skip_categories``)."""
+    from sqlalchemy import select
+
+    from app.models.category import Category
+    from app.models.feed import Feed
+    from app.services.system_settings import get_setting
+
+    raw = await get_setting("observables_codeblock_skip_categories", db) or ""
+    skip = {c.strip().lower() for c in str(raw).split(",") if c.strip()}
+    if not skip or not entry.feed_id:
+        return False
+    name = (
+        await db.execute(
+            select(Category.name).join(Feed, Feed.category_id == Category.id).where(Feed.id == entry.feed_id)
+        )
+    ).scalar_one_or_none()
+    return bool(name) and name.strip().lower() in skip
+
+
 async def _scan_entry_observables(entry_id: str):
     import uuid
 
@@ -318,6 +339,7 @@ async def _scan_entry_observables(entry_id: str):
         store_ioc_list_observables,
     )
     from app.models.entry import Entry
+    from app.models.feed import Feed
     from app.services.sanitizer import entry_text_with_translation
 
     async with _get_worker_session() as db:
@@ -325,6 +347,21 @@ async def _scan_entry_observables(entry_id: str):
         entry = result.scalar_one_or_none()
         if not entry:
             return {}
+
+        # A feed set to "none" is out of the intel system entirely, and that has
+        # to include the ledger: the curated ioc_list door below creates rows
+        # from a body, so without this check a feed the operator switched off
+        # could still mint observables. Checked here rather than at dispatch for
+        # the same reason `_autolink_entry` does it — the legacy path dispatches
+        # every parallel stage unconditionally — and with the same precedence: a
+        # feed marked "do not analyse" outranks a plan that enables the stage.
+        mode = (
+            await db.execute(select(Feed.intel_extraction_mode).where(Feed.id == entry.feed_id))
+        ).scalar_one_or_none()
+        if mode == "none":
+            logger.debug("Skipping observables for entry %s (feed mode: none)", entry_id)
+            return {}
+
         stats = {"candidates": 0, "sighted": 0, "feed_iocs": 0}
 
         metadata = entry.metadata_ or {}
@@ -340,13 +377,39 @@ async def _scan_entry_observables(entry_id: str):
 
             cap = int(await get_setting("observables_candidate_max", db) or 200)
             title, content_text = entry_text_with_translation(entry)
-            candidates = scan_candidates(f"{title}\n\n{content_text}", max_candidates=cap)
+            # Scan the HTML-rendered text when there is HTML: nh3's plain
+            # strip glues table cells together ("pobelstudio.comdomain"),
+            # the analysis renderer keeps rows as "cell | cell".
+            if entry.content_html:
+                from app.services.analysis_window import html_to_analysis_text
+
+                rendered = html_to_analysis_text(entry.content_html)
+                if rendered.strip():
+                    translated_tail = content_text[len(entry.content_text or "") :]
+                    content_text = rendered + translated_tail
+            # Advisory bulletins / NVD / rule and catalog repositories: a bare
+            # hex string is a checksum or commit, a dotted quad is a version.
+            # Only defanged tokens nominate there.
+            advisory = bool(metadata.get("content_type")) or await _codeblock_scan_skipped(db, entry)
+            if not advisory:
+                from app.models.feed import Feed as _Feed
+
+                feed_type = (
+                    await db.execute(select(_Feed.feed_type).where(_Feed.id == entry.feed_id))
+                ).scalar_one_or_none()
+                advisory = feed_type == "nvd"
+            candidates = scan_candidates(
+                f"{title}\n\n{content_text}", max_candidates=cap, plain_hashes=not advisory, plain_ips=not advisory
+            )
             # Host-kind nominations come from the article's code blocks — where
-            # authors put commands — never from prose regex.
-            existing = {(c.kind, c.value) for c in candidates}
-            for c in scan_code_block_candidates(entry.content_html):
-                if (c.kind, c.value) not in existing and len(candidates) < cap:
-                    candidates.append(c)
+            # authors put commands — never from prose regex. Rule-repository
+            # files (any GitHub content_type) and advisory-bulletin feeds are
+            # preformatted text, not commands, so they never nominate.
+            if not advisory:
+                existing = {(c.kind, c.value) for c in candidates}
+                for c in scan_code_block_candidates(entry.content_html):
+                    if (c.kind, c.value) not in existing and len(candidates) < cap:
+                        candidates.append(c)
             # Replace only scan-origin candidates: AI shadow stagings arrive
             # later and a stage re-run must not wipe them.
             scanned = candidates_as_json(candidates)
@@ -366,8 +429,22 @@ async def _scan_entry_observables(entry_id: str):
                 p for p in scan_sighting_probes(f"{title}\n\n{content_text}") if (p.kind, p.value) not in probe_keys
             ]
             stats["sighted"] = await sight_known_values(db, entry.id, candidates + probes)
+            # The publisher door: the indicator file the write-up links to
+            # (Talos / Bitdefender / Datadog GitHub repos), sighted on the article.
+            if await get_setting("observables_publisher_ioc_enabled", db):
+                from app.intelligence.publisher_iocs import store_publisher_observables
+
+                try:
+                    cap = int(await get_setting("observables_publisher_ioc_max_values", db) or 2000)
+                    stats["publisher_iocs"] = await store_publisher_observables(db, entry, max_values=cap)
+                except Exception:
+                    logger.warning("Publisher IOC door failed for entry %s", entry_id, exc_info=True)
 
         await db.commit()
+        if stats.get("publisher_iocs"):
+            from app.workers.automation_tasks import dispatch_observable_capture_automations
+
+            dispatch_observable_capture_automations(entry_id)
         return stats
 
 
@@ -450,29 +527,41 @@ async def _extract_entry_intel(entry_id: str):
         if not text.strip() and not has_raw_content:
             return stats
 
-        # Regex-based TTP extraction (MITRE ATT&CK technique IDs)
-        ttp_results = extract_ttp_ids_regex(text)
-        if ttp_results:
-            stored = await store_ttps(db, entry.id, ttp_results)
-            stats["ttps"] = len(stored)
-            touched.setdefault("ttp", []).extend(t.id for t, _ in stored)
+        # This task is dispatched when EITHER flag is on
+        # (`auto_extract_on_ingest or extract_detection_rules`), so each half
+        # has to check its own. Without the first check below, turning off
+        # "look up CVEs in NVD" did nothing at all as long as detection-rule
+        # extraction was on — the regex passes ran regardless, and the setting
+        # was decorative.
+        feed_row = (
+            await db.execute(
+                select(Feed.auto_extract_on_ingest, Feed.extract_detection_rules).where(Feed.id == entry.feed_id)
+            )
+        ).one_or_none()
+        run_regex = bool(feed_row and feed_row.auto_extract_on_ingest)
+        extract_rules_flag = bool(feed_row and feed_row.extract_detection_rules)
 
-        # Regex-based CVE extraction + NVD enrichment
-        cves = await extract_and_store_cves(db, entry.id, text)
-        stats["cves"] = len(cves)
-        if cves:
-            touched.setdefault("cve", []).extend(c.id for c in cves)
+        if run_regex:
+            # Regex-based TTP extraction (MITRE ATT&CK technique IDs)
+            ttp_results = extract_ttp_ids_regex(text)
+            if ttp_results:
+                stored = await store_ttps(db, entry.id, ttp_results)
+                stats["ttps"] = len(stored)
+                touched.setdefault("ttp", []).extend(t.id for t, _ in stored)
 
-        # Regex-based mitigation extraction (MITRE M-IDs)
-        mit_results = extract_mitigation_ids_regex(text)
-        if mit_results:
-            stored = await store_mitigations(db, entry.id, mit_results)
-            stats["mitigations"] = len(stored)
-            touched.setdefault("mitigation", []).extend(m.id for m, _ in stored)
+            # Regex-based CVE extraction + NVD enrichment
+            cves = await extract_and_store_cves(db, entry.id, text)
+            stats["cves"] = len(cves)
+            if cves:
+                touched.setdefault("cve", []).extend(c.id for c in cves)
 
-        # Detection rule extraction (if feed has it enabled)
-        feed_result = await db.execute(select(Feed.extract_detection_rules).where(Feed.id == entry.feed_id))
-        extract_rules_flag = feed_result.scalar_one_or_none()
+            # Regex-based mitigation extraction (MITRE M-IDs)
+            mit_results = extract_mitigation_ids_regex(text)
+            if mit_results:
+                stored = await store_mitigations(db, entry.id, mit_results)
+                stats["mitigations"] = len(stored)
+                touched.setdefault("mitigation", []).extend(m.id for m, _ in stored)
+
         if extract_rules_flag:
             # Prefer raw_content from metadata (github_repo entries store file content there)
             rule_text = (entry.metadata_ or {}).get("raw_content") or text
@@ -1397,8 +1486,8 @@ async def _rebuild_search_index(user_id: str) -> dict:
     from app.models.entry_state import UserEntryState
     from app.models.feed import Feed
     from app.models.note import Note
-    from app.models.tag import EntryTag, Tag
     from app.services import meilisearch_client
+    from app.services.entry_tags import search_tag_fields
 
     user_uuid = _uuid.UUID(user_id)
 
@@ -1429,14 +1518,7 @@ async def _rebuild_search_index(user_id: str) -> dict:
 
             entry_ids = [row[0].id for row in rows]
 
-            tags_map: dict = {}
-            tag_result = await db.execute(
-                select(EntryTag.entry_id, Tag.name)
-                .join(Tag, Tag.id == EntryTag.tag_id)
-                .where(EntryTag.entry_id.in_(entry_ids))
-            )
-            for eid, tname in tag_result.all():
-                tags_map.setdefault(eid, []).append(tname)
+            tag_fields = await search_tag_fields(db, entry_ids)
 
             states_map: dict = {}
             state_result = await db.execute(
@@ -1487,7 +1569,8 @@ async def _rebuild_search_index(user_id: str) -> dict:
                         "url": entry.url or "",
                         "media_type": media_map.get(entry.id),
                         "language": entry.language,
-                        "tags": tags_map.get(entry.id, []),
+                        "tags": tag_fields[str(entry.id)]["tags"],
+                        "user_tags": tag_fields[str(entry.id)]["user_tags"],
                         "is_read": state.get("is_read", False),
                         "is_starred": state.get("is_starred", False),
                         "is_bookmarked": state.get("is_bookmarked", False),

@@ -100,6 +100,7 @@ WRITE_TOOLS: frozenset[str] = frozenset(
         "delete_requirement",
         "delete_saved_search",
         "delete_webhook_preset",
+        "deny_observable",
         "export_report",
         "extract_cves",
         "extract_malware",
@@ -117,6 +118,7 @@ WRITE_TOOLS: frozenset[str] = frozenset(
         "merge_threat_actors",
         "merge_tools",
         "merge_vendors",
+        "promote_observable",
         "publish_report",
         "reclassify_entity",
         "refresh_feed",
@@ -129,6 +131,7 @@ WRITE_TOOLS: frozenset[str] = frozenset(
         "run_ai_task",
         "run_automation_rule",
         "set_detection_rule_status",
+        "set_target_sector",
         "star_entry",
         "test_automation_rule",
         "toggle_automation_rule",
@@ -143,6 +146,7 @@ WRITE_TOOLS: frozenset[str] = frozenset(
         "update_feed",
         "update_intel_report",
         "update_note",
+        "update_observable",
         "update_requirement",
         "watch_entity",
     }
@@ -274,6 +278,7 @@ TOOLS: dict[str, dict] = {
                     'observable',
                     'product',
                     'ransomware_victim',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'ttp',
@@ -477,13 +482,13 @@ TOOLS: dict[str, dict] = {
     "create_automation_rule": {
         "description": (
             "Set up an automation rule with trigger, conditions, and actions. Trigger types: "
-            "on_correlation_event, on_cve_detected, on_keyword_match, on_manual, on_new_entry, "
-            "on_schedule. Each action is {type, config}; valid action types: add_tags, "
-            "add_to_campaign, bookmark_entry, branch, chain_rule, create_intel_report, create_note, "
-            "export_to, extract_cves, extract_malware, extract_threat_actors, extract_ttps, "
-            "generate_detection_rules, hide_entry, mark_priority, mark_read, remove_tags, "
-            "run_ai_task, run_webhook, send_notification, star_entry, use_daily_summary. The rule is "
-            "created enabled."
+            "on_correlation_event, on_cve_detected, on_entry_scored, on_keyword_match, on_manual, "
+            "on_new_entry, on_observable_captured, on_schedule. Each action is {type, config}; valid "
+            "action types: add_tags, add_to_campaign, bookmark_entry, branch, chain_rule, "
+            "create_intel_report, create_note, export_to, extract_cves, extract_malware, "
+            "extract_threat_actors, extract_ttps, generate_detection_rules, hide_entry, "
+            "mark_priority, mark_read, remove_tags, run_ai_task, run_webhook, send_notification, "
+            "star_entry, use_daily_summary. The rule is created enabled."
         ),
         "params": {
             "name": {
@@ -500,9 +505,11 @@ TOOLS: dict[str, dict] = {
                 "enum": [
                     'on_correlation_event',
                     'on_cve_detected',
+                    'on_entry_scored',
                     'on_keyword_match',
                     'on_manual',
                     'on_new_entry',
+                    'on_observable_captured',
                     'on_schedule',
                 ],
             },
@@ -619,8 +626,9 @@ TOOLS: dict[str, dict] = {
     "create_entity_note": {
         "description": (
             "Add an analytical note to an intelligence entity. Supported entity types: campaign, "
-            "country, cve, malware, mitigation, product, threat_actor, tool, ttp, vendor (matches the "
-            "entity_notes DB constraint; ransomware victims are not supported)."
+            "country, cve, cwe, malware, mitigation, observable, product, sector, threat_actor, tool, "
+            "ttp, vendor (matches the entity_notes DB constraint; ransomware victims are not "
+            "supported)."
         ),
         "params": {
             "entity_type": {
@@ -635,6 +643,7 @@ TOOLS: dict[str, dict] = {
                     'mitigation',
                     'observable',
                     'product',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'ttp',
@@ -1183,6 +1192,32 @@ TOOLS: dict[str, dict] = {
             },
         },
     },
+    "deny_observable": {
+        "description": (
+            "Admin: tombstone a value so it is never captured, sighted or exported again (false "
+            "positive, benign infrastructure, your own domain). Works on an existing row by UUID or "
+            "on any (kind, value) \u2014 denying a value that is not in the ledger creates the tombstone "
+            "so future doors refuse it. Reversible via the API."
+        ),
+        "params": {
+            "observable_id": {
+                "type": 'str',
+                "default": None,
+            },
+            "kind": {
+                "type": 'str',
+                "default": None,
+            },
+            "value": {
+                "type": 'str',
+                "default": None,
+            },
+            "reason": {
+                "type": 'str',
+                "default": None,
+            },
+        },
+    },
     "detect_glossary_terms": {
         "description": (
             "Detect which glossary terms appear in an entry's text (word-boundary matching over each "
@@ -1241,6 +1276,53 @@ TOOLS: dict[str, dict] = {
             "campaign_id": {
                 "type": 'str',
                 "required": True,
+            },
+        },
+    },
+    "export_observables": {
+        "description": (
+            "Export a filtered slice of the ledger as lines (EDL), CSV rows, or JSON \u2014 the same "
+            "filters as search_observables plus a minimum report count and an 'exclude dual-use "
+            "infrastructure' switch. Values are returned refanged (operational form). Denied rows "
+            "and, by default, infra-tagged rows are excluded."
+        ),
+        "params": {
+            "format": {
+                "type": 'str',
+                "default": 'edl',
+                "enum": ['edl', 'csv', 'json'],
+            },
+            "kind": {
+                "type": 'str',
+                "default": None,
+            },
+            "role": {
+                "type": 'str',
+                "default": None,
+            },
+            "status": {
+                "type": 'str',
+                "default": None,
+            },
+            "min_confidence": {
+                "type": 'float',
+                "default": None,
+            },
+            "min_reports": {
+                "type": 'int',
+                "default": None,
+            },
+            "include_infra_tagged": {
+                "type": 'bool',
+                "default": False,
+            },
+            "query": {
+                "type": 'str',
+                "default": None,
+            },
+            "limit": {
+                "type": 'int',
+                "default": None,
             },
         },
     },
@@ -1704,6 +1786,7 @@ TOOLS: dict[str, dict] = {
                     'mitigation',
                     'observable',
                     'product',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'ttp',
@@ -1719,6 +1802,30 @@ TOOLS: dict[str, dict] = {
                 "default": 1,
             },
             "window_days": {
+                "type": 'int',
+                "default": None,
+            },
+        },
+    },
+    "get_entity_infrastructure": {
+        "description": (
+            "Pivot from a threat actor, malware family, campaign or tool to its observables, in two "
+            "tiers: 'claimed' (attribution edges with evidence \u2014 uses / communicates_with / controls, "
+            "with trust tier) and 'reported_alongside' (observables a reporting article that names "
+            "the entity also carried; indicator-list files and newsletters excluded). Answers 'what "
+            "infrastructure does X use?'."
+        ),
+        "params": {
+            "entity_type": {
+                "type": 'str',
+                "required": True,
+                "enum": ['threat_actor', 'malware', 'campaign', 'tool'],
+            },
+            "entity_id": {
+                "type": 'str',
+                "required": True,
+            },
+            "limit": {
                 "type": 'int',
                 "default": None,
             },
@@ -1746,6 +1853,7 @@ TOOLS: dict[str, dict] = {
                     'mitigation',
                     'observable',
                     'product',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'ttp',
@@ -2096,6 +2204,24 @@ TOOLS: dict[str, dict] = {
         ),
         "params": {},
     },
+    "get_sector": {
+        "description": (
+            "Get a sector's victimology profile: description and aliases, who targets it (reported "
+            "from articles vs asserted claims), campaigns scoped to it, leak-site victim totals and "
+            "top ransomware groups, the country cross-tab, the intel profiles that include it, and "
+            "recent articles."
+        ),
+        "params": {
+            "sector": {
+                "type": 'str',
+                "required": True,
+            },
+            "window_days": {
+                "type": 'int',
+                "default": 90,
+            },
+        },
+    },
     "get_share_link": {
         "description": (
             "Return this user's active public share link for an entry ({token, url, created_at, "
@@ -2313,6 +2439,7 @@ TOOLS: dict[str, dict] = {
                     'malware',
                     'observable',
                     'product',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'ttp',
@@ -2333,6 +2460,7 @@ TOOLS: dict[str, dict] = {
                     'malware',
                     'observable',
                     'product',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'ttp',
@@ -2460,6 +2588,7 @@ TOOLS: dict[str, dict] = {
                     'mitigation',
                     'observable',
                     'product',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'ttp',
@@ -2495,6 +2624,7 @@ TOOLS: dict[str, dict] = {
                     'malware',
                     'observable',
                     'product',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'ttp',
@@ -2661,6 +2791,29 @@ TOOLS: dict[str, dict] = {
             "10-minute cache and are computed inline (via search-index queries) on a cache miss."
         ),
         "params": {},
+    },
+    "list_sectors": {
+        "description": (
+            "List the victim-sector vocabulary (21 closed, seeded industries) with per-sector counts: "
+            "linked articles, actors and malware asserted to target it, and leak-site victims in the "
+            "last 90 days. Use the slug from here with get_sector / who_targets_sector / "
+            "sector_victims / pivot_entity."
+        ),
+        "params": {
+            "search": {
+                "type": 'str',
+                "default": None,
+            },
+            "sort_by": {
+                "type": 'str',
+                "default": 'article_count',
+                "enum": ['name', 'article_count', 'last_seen_at', 'targeting_actor_count', 'victim_count'],
+            },
+            "limit": {
+                "type": 'int',
+                "default": 25,
+            },
+        },
     },
     "list_telegram_feeds": {
         "description": (
@@ -2922,6 +3075,7 @@ TOOLS: dict[str, dict] = {
                     'mitigation',
                     'observable',
                     'product',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'ttp',
@@ -2953,6 +3107,42 @@ TOOLS: dict[str, dict] = {
                 "type": 'str',
                 "default": None,
                 "enum": ['weak', 'moderate', 'strong'],
+            },
+        },
+    },
+    "promote_observable": {
+        "description": (
+            "The analyst door into the observables ledger: turn a staged candidate (or any value the "
+            "article prints) into a ledger row sighted in that entry, with role and evidence. Use "
+            "kind from: ipv4, ipv6, domain, url, uri_path, email, md5, sha1, sha256, ja3, ja4, "
+            "cert_fingerprint, cmdline, path, registry, scheduled_task, service_name, mutex, "
+            "named_pipe, user_agent, http_header. Defanged input is normalized; values that fail the "
+            "kind's plausibility check are rejected with the reason."
+        ),
+        "params": {
+            "entry_id": {
+                "type": 'str',
+                "required": True,
+            },
+            "kind": {
+                "type": 'str',
+                "required": True,
+            },
+            "value": {
+                "type": 'str',
+                "required": True,
+            },
+            "role": {
+                "type": 'str',
+                "default": None,
+            },
+            "evidence": {
+                "type": 'str',
+                "default": None,
+            },
+            "label": {
+                "type": 'str',
+                "default": None,
             },
         },
     },
@@ -3068,6 +3258,7 @@ TOOLS: dict[str, dict] = {
                     'observable',
                     'product',
                     'ransomware_victim',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'ttp',
@@ -3117,6 +3308,7 @@ TOOLS: dict[str, dict] = {
                     'mitigation',
                     'observable',
                     'product',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'ttp',
@@ -3316,6 +3508,34 @@ TOOLS: dict[str, dict] = {
                 "type": 'str',
                 "default": None,
             },
+            "captured_by": {
+                "type": 'str',
+                "default": None,
+            },
+            "infra_tag": {
+                "type": 'str',
+                "default": None,
+            },
+            "needs_review": {
+                "type": 'bool',
+                "default": None,
+            },
+            "min_confidence": {
+                "type": 'float',
+                "default": None,
+            },
+            "min_reports": {
+                "type": 'int',
+                "default": None,
+            },
+            "linked_entity_type": {
+                "type": 'str',
+                "default": None,
+            },
+            "linked_entity_id": {
+                "type": 'str',
+                "default": None,
+            },
             "limit": {
                 "type": 'int',
                 "default": None,
@@ -3340,6 +3560,27 @@ TOOLS: dict[str, dict] = {
             },
         },
     },
+    "sector_victims": {
+        "description": (
+            "Leak-site ransomware victims in a sector: totals (all time and in the window), a "
+            "12-month monthly series, the top ransomware groups posting victims in that sector, the "
+            "victim-country breakdown and the most recent disclosures."
+        ),
+        "params": {
+            "sector": {
+                "type": 'str',
+                "required": True,
+            },
+            "window_days": {
+                "type": 'int',
+                "default": 90,
+            },
+            "limit": {
+                "type": 'int',
+                "default": 20,
+            },
+        },
+    },
     "set_detection_rule_status": {
         "description": (
             "Set a detection rule's lifecycle status: 'draft' or 'published' (mirrors the API's "
@@ -3354,6 +3595,35 @@ TOOLS: dict[str, dict] = {
                 "type": 'str',
                 "required": True,
                 "enum": ['draft', 'published'],
+            },
+        },
+    },
+    "set_target_sector": {
+        "description": (
+            "Assert or withdraw that a threat actor or malware family targets a sector (an analyst "
+            "claim on the target-sector junction; the profile's sector chips are rebuilt from it). "
+            "action='add' upgrades an existing rolled-up or enriched claim to the analyst's; "
+            "action='remove' withdraws the claim \u2014 the nightly rollup re-asserts it if the entity's "
+            "own articles still carry the evidence."
+        ),
+        "params": {
+            "entity_type": {
+                "type": 'str',
+                "required": True,
+                "enum": ['threat_actor', 'malware'],
+            },
+            "entity_id": {
+                "type": 'str',
+                "required": True,
+            },
+            "sector": {
+                "type": 'str',
+                "required": True,
+            },
+            "action": {
+                "type": 'str',
+                "default": 'add',
+                "enum": ['add', 'remove'],
             },
         },
     },
@@ -3468,6 +3738,7 @@ TOOLS: dict[str, dict] = {
                     'observable',
                     'product',
                     'ransomware_victim',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'vendor',
@@ -3483,13 +3754,13 @@ TOOLS: dict[str, dict] = {
         "description": (
             "Partially update an automation rule \u2014 only the provided fields change (mirrors PUT "
             "/api/automation/rules/{id}). Trigger types: on_correlation_event, on_cve_detected, "
-            "on_keyword_match, on_manual, on_new_entry, on_schedule. Each action is {type, config}; "
-            "valid action types: add_tags, add_to_campaign, bookmark_entry, branch, chain_rule, "
-            "create_intel_report, create_note, export_to, extract_cves, extract_malware, "
-            "extract_threat_actors, extract_ttps, generate_detection_rules, hide_entry, "
-            "mark_priority, mark_read, remove_tags, run_ai_task, run_webhook, send_notification, "
-            "star_entry, use_daily_summary (branch sub-actions are validated recursively). Note: "
-            "actions replaces the whole list."
+            "on_entry_scored, on_keyword_match, on_manual, on_new_entry, on_observable_captured, "
+            "on_schedule. Each action is {type, config}; valid action types: add_tags, "
+            "add_to_campaign, bookmark_entry, branch, chain_rule, create_intel_report, create_note, "
+            "export_to, extract_cves, extract_malware, extract_threat_actors, extract_ttps, "
+            "generate_detection_rules, hide_entry, mark_priority, mark_read, remove_tags, "
+            "run_ai_task, run_webhook, send_notification, star_entry, use_daily_summary (branch "
+            "sub-actions are validated recursively). Note: actions replaces the whole list."
         ),
         "params": {
             "rule_id": {
@@ -3510,9 +3781,11 @@ TOOLS: dict[str, dict] = {
                 "enum": [
                     'on_correlation_event',
                     'on_cve_detected',
+                    'on_entry_scored',
                     'on_keyword_match',
                     'on_manual',
                     'on_new_entry',
+                    'on_observable_captured',
                     'on_schedule',
                 ],
             },
@@ -3626,7 +3899,8 @@ TOOLS: dict[str, dict] = {
             "(name/aliases/description/malpedia_url/malware_type), cve "
             "(description/severity/exploit_status/affected_products/exploit_availability), ttp "
             "(technique_name/tactic/description), country (name/iso_code/aliases/region/description), "
-            "tool (name/aliases/description/tool_type/malpedia_url/github_url), vendor "
+            "sector (aliases/description), tool "
+            "(name/aliases/description/tool_type/malpedia_url/github_url), vendor "
             "(name/aliases/description/website/vendor_type), product "
             "(name/aliases/description/product_type/website/vendor_id), campaign "
             "(name/description/status/tags/tlp_marking). Renames are checked for name clashes; "
@@ -3643,6 +3917,7 @@ TOOLS: dict[str, dict] = {
                     'cve',
                     'malware',
                     'product',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'ttp',
@@ -3743,6 +4018,10 @@ TOOLS: dict[str, dict] = {
                 "default": None,
                 "enum": ['full', 'selective', 'manual', 'none'],
             },
+            "ai_analysis_enabled": {
+                "type": 'bool',
+                "default": None,
+            },
             "auto_extract_on_ingest": {
                 "type": 'bool',
                 "default": None,
@@ -3796,6 +4075,34 @@ TOOLS: dict[str, dict] = {
             },
             "title": {
                 "type": 'str',
+                "default": None,
+            },
+        },
+    },
+    "update_observable": {
+        "description": (
+            "Correct a ledger row: set or change its role, label or description, or pin its "
+            "confidence so decay stops. Fields left out are untouched."
+        ),
+        "params": {
+            "observable_id": {
+                "type": 'str',
+                "required": True,
+            },
+            "role": {
+                "type": 'str',
+                "default": None,
+            },
+            "label": {
+                "type": 'str',
+                "default": None,
+            },
+            "description": {
+                "type": 'str',
+                "default": None,
+            },
+            "confidence_pinned": {
+                "type": 'bool',
                 "default": None,
             },
         },
@@ -3860,6 +4167,7 @@ TOOLS: dict[str, dict] = {
                     'observable',
                     'product',
                     'ransomware_victim',
+                    'sector',
                     'threat_actor',
                     'tool',
                     'vendor',
@@ -3880,12 +4188,42 @@ TOOLS: dict[str, dict] = {
             },
         },
     },
+    "who_targets_sector": {
+        "description": (
+            "Rank the threat actors and malware families targeting a sector. 'reported' rows are "
+            "ranked by how many articles describe both the actor/family and the sector being hit; "
+            "'asserted' rows carry an explicit targets-sector claim with its source (rollup, "
+            "enrichment, seed, analyst) and evidence count."
+        ),
+        "params": {
+            "sector": {
+                "type": 'str',
+                "required": True,
+            },
+            "limit": {
+                "type": 'int',
+                "default": 15,
+            },
+        },
+    },
 }
 
 
 # ---------------------------------------------------------------------------
 # API Client (stdlib only — no external dependencies)
 # ---------------------------------------------------------------------------
+
+
+class _RefuseRedirects(urllib.request.HTTPRedirectHandler):
+    """urllib re-sends every header, Authorization included, to wherever a redirect points,
+    even another host over plain http. The API never redirects, so a redirect comes back as
+    its 3xx status (an "API returned 30x" error) instead of being followed."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_OPENER = urllib.request.build_opener(_RefuseRedirects)
 
 
 class IntelFeedClient:
@@ -3912,7 +4250,7 @@ class IntelFeedClient:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
+            with _OPENER.open(req, timeout=120) as resp:
                 raw = resp.read().decode("utf-8")
                 try:
                     return resp.status, json.loads(raw)

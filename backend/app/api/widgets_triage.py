@@ -17,6 +17,7 @@ from app.models.saved_search import SavedSearch
 from app.models.tag import EntryTag, Tag
 from app.models.telegram_mention import TelegramChannelMention
 from app.models.user import User
+from app.services.entry_tags import visible_to
 from app.services.read_state import unread_by_user
 
 logger = logging.getLogger(__name__)
@@ -142,7 +143,7 @@ async def top_tags(
             )
             .join(EntryTag, EntryTag.tag_id == Tag.id)
             .join(Entry, Entry.id == EntryTag.entry_id)
-            .where(Entry.published_at >= start, Entry.published_at <= end)
+            .where(Entry.published_at >= start, Entry.published_at <= end, visible_to(user.id))
             .group_by(Tag.id, Tag.name, Tag.color)
             .order_by(func.count(func.distinct(EntryTag.entry_id)).desc())
             .limit(limit)

@@ -66,7 +66,7 @@ Tables: `users`, `user_entry_states`, `playback_progress`
 - `is_active` (Boolean, indexed) — subscription status
 - `reliability_rating`, `timeliness_rating`, `relevance_rating` — analyst ratings (A-F or similar)
 - `intel_extraction_mode` ("full", "selective", "manual", "none") — TTP/CVE/Actor extraction strategy
-- `auto_extract_on_ingest`, `extract_detection_rules` — automation flags
+- `ai_analysis_enabled`, `auto_extract_on_ingest`, `extract_detection_rules` — per-feed pipeline switches. `ai_analysis_enabled` gates the one-pass AI analysis independently of `intel_extraction_mode`, so a noisy source can stay matched against the catalog without the AI reading it
 - `category_id` (FK, nullable, SET NULL on category delete)
 - `retention_days` — auto-delete entries older than N days
 - `adapter_config` (JSONB) — feed-type-specific config
@@ -125,7 +125,7 @@ Each analyst's visibility and personal mute over the shared feed pool; only cons
 
 ### 3. Intelligence Entities
 
-**Tables:** `ttps`, `cves`, `cve_affected`, `cve_weaknesses`, `cwes`, `observables`, `threat_actors`, `malware_families`, `countries`, `vendors`, `products`, `mitigations`, `tools`, `ransomware_victims`, `victim_disclosures`
+**Tables:** `ttps`, `cves`, `cve_affected`, `cve_weaknesses`, `cwes`, `observables`, `threat_actors`, `malware_families`, `countries`, `sectors`, `vendors`, `products`, `mitigations`, `tools`, `ransomware_victims`, `victim_disclosures`
 
 **Maintenance & audit tables:** `entity_maintenance_log`, `actor_description_history`, `entity_link_validation_log`, `entity_merge_suggestion_dismissals`, `entity_reclassify_tombstones`
 
@@ -209,7 +209,7 @@ Authoritative CVE → vendor/product affects-links parsed from NVD CPE data (tab
 - `country` (String 100) — attributed country (denormalized)
 - `origin_country_id` (FK, nullable, SET NULL) — link to `Country` record
 - `motivation` (String 100) — e.g., "financial", "espionage", "activism"
-- `targeted_sectors` (ARRAY(Text)) — e.g., ["finance", "healthcare"]
+- `targeted_sectors` (ARRAY(Text)) — read cache of the sector *labels* on `threat_actor_target_sectors`, rebuilt by `services/sector_links.refresh_targeted_sectors_cache` and written by nothing else
 - `associated_ttps` (JSONB) — list of TTPs used by this actor
 - `first_seen_at`, `last_seen_at`, `article_count` — temporal & frequency
 - `wikipedia_url`, `wikipedia_content`, `wikipedia_image_url` — enrichment
@@ -227,7 +227,7 @@ Authoritative CVE → vendor/product affects-links parsed from NVD CPE data (tab
 - `description`, `malpedia_url` — metadata
 - `malware_type` (String 50, indexed) — e.g., "trojan", "ransomware", "worm"
 - `associated_actors` (JSONB) — list of actors known to use this malware
-- `targeted_sectors` (ARRAY(Text)) — victimology chips, mirrors `threat_actors.targeted_sectors`
+- `targeted_sectors` (ARRAY(Text)) — read cache of `malware_target_sectors`, same rule as the actor column
 - `first_seen_at`, `last_seen_at`, `article_count` — temporal & frequency
 - `wikipedia_url`, `wikipedia_content`, `wikipedia_image_url` — enrichment
 - `metadata_` (JSONB)
@@ -241,6 +241,20 @@ Authoritative CVE → vendor/product affects-links parsed from NVD CPE data (tab
 - `name` (String 100, unique, indexed) — country name
 - `iso_code` (String 2, unique) — ISO 3166-1 alpha-2 code
 - `region` (String 50, indexed) — geographic region
+
+#### Sector
+
+The victim-industry vocabulary as an entity: 21 rows seeded from `app/intelligence/sectors.py` (one per canonical slug), ids minted as `uuid5(SECTOR_NAMESPACE, slug)` so every install agrees on them. Closed — no create, merge, convert or delete — and never autolinked, because sector names are everyday words.
+
+**Columns:**
+- `id` (UUID PK) — deterministic from the slug
+- `slug` (String 50, unique, indexed) — canonical slug, e.g. `financial-services`
+- `name` (String 100, unique) — display label, e.g. `Financial Services`
+- `aliases` (ARRAY(Text)) — the vocabulary's alias map (`banks`, `hospitals`), so `sector:banks` resolves; never fed to the autolinker
+- `description` (Text) — analyst-editable
+- `article_count`, `first_seen_at`, `last_seen_at`, `metadata_` (JSONB)
+
+Linked to entries through `entry_sectors` (written only by the one-pass AI analysis) and to actors / malware / campaigns through `threat_actor_target_sectors`, `malware_target_sectors` and `campaign_sectors` (see Junction Tables). The `targeted_sectors` arrays on actors and malware are a read cache of those junctions' labels.
 
 #### Vendor & Product
 
@@ -405,10 +419,10 @@ match.
 
 **Columns:**
 - `id` (UUID PK)
-- `kind` (String 20, indexed) — one of `ALL_KINDS` (`backend/app/models/observable.py:43`), in four families:
+- `kind` (String 20, indexed) — one of `ALL_KINDS` (`backend/app/models/observable.py:55`), in four families:
   - **network** — `ipv4`, `ipv6`, `domain`, `url`, `uri_path`, `ja3`, `ja4`, `cert_fingerprint`, `email` (stored refanged/canonical; the defanged surface form lives on the sighting)
   - **hash** — `md5`, `sha1`, `sha256`
-  - **host** — `cmdline`, `registry`, `path`, `mutex`, `named_pipe`, `service_name`, `user_agent` (mapped from `EntryTTP.observable_type`'s vocabulary)
+  - **host** — `cmdline`, `registry`, `path`, `mutex`, `named_pipe`, `service_name`, `scheduled_task`, `user_agent`, `http_header` (judged by the one-pass AI's `iocs` array, or mapped from `EntryTTP.observable_type`'s vocabulary)
   - **script** — `script`, for a body-carrying fragment rather than an atom
 - `value` (Text, indexed) — the canonical refanged form; `evil[.]com` and `hxxps://` normalise on the way in
 - `label`, `content`, `language` — for body-carrying kinds (a rule/script fragment rather than an atom)
@@ -418,9 +432,10 @@ match.
 - `confidence_pinned` (Boolean) — exempt this row from decay
 - `status` (String 12, indexed, default `active`) — derived from current confidence: `active` ≥ 0.5, `aging` < 0.5, `expired` < 0.15; `is_denied` (Boolean) — analyst denial is separate from lifecycle status
 - `infra_tag` (String 20, indexed) — dual-use infrastructure kept but marked (shared hosting, CDN, URL shortener) so publishing can exclude it without deleting the intel
-- `created_via` (String 20, indexed) — **which judgment door created the row**: `ai_extraction` (the one-pass `entry_analysis` `iocs` array, base confidence 0.8), `ttp_observable` (`EntryTTP.observable_value` upsert, 0.85), `ioc_list` (curated indicator-list feed body, 0.85), or `manual` (analyst promote/create, 1.0). There is intentionally **no value meaning "regex"**. Author-defanged input earns a +0.1 bonus — someone who defangs a string is telling you it is an indicator
+- `created_via` (String 20, indexed) — **which judgment door created the row**: `ai_extraction` (the one-pass `entry_analysis` `iocs` array, base confidence 0.8), `ttp_observable` (`EntryTTP.observable_value` upsert, 0.85), `ioc_list` / `publisher_ioc` (curated indicator-list feed body, 0.85), or `manual` (analyst promote/create, 1.0). There is intentionally **no value meaning "regex"**. Author-defanged input earns a +0.1 bonus — someone who defangs a string is telling you it is an indicator
 - `created_from_entry_id` (FK, SET NULL), `created_confidence`, `needs_review`
-- `article_count`, `sighting_count` (Integer) — maintained as O(1) counters, reconciled nightly by `reconcile-observable-counters`
+- `article_count`, `sighting_count` (Integer) — raw junction counts, maintained as O(1) counters, reconciled nightly by `reconcile-observable-counters`
+- `report_count`, `feed_source_count` (Integer) — the corroboration pair the UI shows as *Sources*: distinct reporting entries (articles, advisories, rule files) and distinct indicator feeds carrying the value. A feed that republishes one list as eighteen CSV variants is `feed_source_count = 1`, `report_count = 0`. `record_sighting` increments `report_count` for every door but the feed door; the nightly reconcile recomputes both from `entry_observables` (migration `s8j0l2n4p6r8`)
 - `first_seen_at`, `last_seen_at`
 
 **Unique Constraint:** `uq_observable_kind_value` on `(kind, value)` — the same
@@ -428,7 +443,7 @@ string is a different observable as a domain than as a URL path component.
 
 **Confidence decay** (`decay-observable-confidence`, daily 02:20 UTC, gated by
 `observables_decay_enabled`) is per kind (`DECAY_HALF_LIFE_DAYS`,
-`observable.py:47`): `ipv4`/`ipv6` 30-day half-life, `url` 60, `domain`/`email`
+`observable.py:59`): `ipv4`/`ipv6` 30-day half-life, `url` 60, `domain`/`email`
 90, `uri_path` 120. Hashes, host artifacts, scripts, JA3/JA4 and certificate
 fingerprints never decay — behaviour and math persist, infrastructure rotates.
 A new sighting resets the clock, and `confidence_pinned` opts a row out.
@@ -839,7 +854,7 @@ Provenance for scalar profile fields — the field-level counterpart to `EntityR
 
 ### 7. Dashboards & Reporting
 
-**Tables:** `dashboards`, `dashboard_widgets`, `saved_searches`, `intel_profiles`, `intel_reports`, `intel_report_versions`, `report_templates`, `campaigns`, `campaign_entries`, `campaign_entities`, `campaign_saved_searches`, `campaign_countries`, `campaign_sources`
+**Tables:** `dashboards`, `dashboard_widgets`, `saved_searches`, `intel_profiles`, `intel_reports`, `intel_report_versions`, `report_templates`, `campaigns`, `campaign_entries`, `campaign_entities`, `campaign_saved_searches`, `campaign_countries`, `campaign_sectors`, `campaign_sources`
 
 **Purpose:** User dashboards, intelligence reports, campaigns, and saved searches.
 
@@ -932,21 +947,39 @@ Provenance for scalar profile fields — the field-level counterpart to `EntityR
 
 #### CampaignSource
 
-Something a campaign feeds on beyond a linked saved search. A saved search is a
-query kept *in parallel* with the campaign and it drifts — the campaign's
-subject changes and the query doesn't. A source is the campaign feeding on what
-it has already declared.
+Standing intake the **campaign** owns. The alternative, a linked saved search,
+belongs to whoever saved it: teammates cannot see it in their own list, it can
+only be linked if it already exists, and it drifts — the campaign's subject
+changes and the query doesn't.
 
 **Columns:**
 - `id` (UUID PK)
 - `campaign_id` (FK, CASCADE, indexed)
-- `kind` (String 20) — `entity` (the actor or malware the campaign names as its subject; new articles mentioning it join, which is what makes curating the primary role worth doing) or `story` (a thread the campaign has already accepted part of; later waves of a story you are tracking are the clearest "obviously yes")
-- `entity_type` (String 32, nullable), `ref_id` (UUID) — the target
-- `label` (Text) — **frozen at link time**, so a source still reads after its target is renamed or merged away
+- `kind` (String 20) — one of:
+  - `entity` — the actor, malware, CVE or other entity named as the subject. Every article carrying it joins, which is what makes curating the primary role worth doing.
+  - `story` — a thread the campaign has already accepted part of; later waves of a story you are tracking are the clearest "obviously yes".
+  - `query` — a query-language string typed into the campaign. Same reach as a saved search; campaign-owned, so every analyst on it can read, pause and rewrite the query.
+- `entity_type` (String 32, nullable), `ref_id` (UUID, nullable) — the target. Both null for a `query` source.
+- `query` (Text, nullable) — the query-language string; set **only** when `kind = 'query'`
+- `label` (Text) — **frozen at link time**, so a source still reads after its target is renamed or merged away. For a `query` source it is the query text, truncated to 120 characters.
 - `auto_sync` (Boolean, default true), `last_synced_at`, `entries_added` (Integer)
 - `added_by` (FK → users, SET NULL), `created_at`
 
-**Unique Constraint:** `uq_campaign_sources_target` on `(campaign_id, kind, entity_type, ref_id)`.
+**Constraints:**
+- `uq_campaign_sources_target` on `(campaign_id, kind, entity_type, ref_id)` — identity for an entity/story source.
+- `uq_campaign_sources_query`, a partial unique index on `(campaign_id, query) WHERE kind = 'query'` — Postgres treats NULL `ref_id`s as distinct, so query rows need their own uniqueness on the text.
+- `ck_campaign_sources_shape` — `query` rows carry a query and no `ref_id`; every other kind carries a `ref_id` and no query.
+
+**Followable types.** An entity source is refused for a type with no entry
+junction (`entry_scope_junction` answers `None`): it would be created and then
+never add anything. `GET /api/campaigns/source-options` is the server's own list
+— the pickers read it rather than keeping a copy.
+
+**Sync semantics.** Every kind recomputes its *full* claimed set each run and
+inserts only what the campaign does not already hold, so an article that joins a
+story, gains an entity link or starts matching the query later still arrives.
+(The older `campaign_saved_searches` sweep diffs instead, which is why an
+article that gains a link later never reaches a campaign through one.)
 
 #### CampaignCountry
 
@@ -1018,21 +1051,52 @@ threat-surface previews all take a profile as input.
 
 #### Tag
 
-Tags are global (shared across users), managed via the Tag Manager UI.
+The tag *list* is shared: one row per name, with its colour, chip flag and
+tooltip, managed via the Tag Manager UI. Who sees a tag *on an entry* is per
+user (see EntryTag) unless the tag is global. A tag promoted to a chip
+(`display_as_chip`) renders in the entry's badge row (`EntryIntelBadges`)
+instead of the quiet meta line, with `description` as its tooltip.
 
 **Columns:**
 - `id` (UUID PK)
-- `created_by` (FK, nullable, SET NULL)
+- `created_by` (FK, nullable, SET NULL) — audit only
 - `name` (String 100, unique, indexed)
 - `color` (String 7, default "#6B7280")
+- `display_as_chip` (Boolean, default false)
+- `description` (String 255, nullable) — chip tooltip
+- `is_global` (Boolean, default false) — global: one shared assignment per
+  entry that everyone sees; personal: each user's assignments are their own.
+  Anyone can flip it in Tag Manager; flipping re-homes the tag's existing
+  assignments (to global collapses everyone's rows into one shared row per
+  entry; to personal hands the shared row to every human account) and
+  reindexes the affected entries
 - `created_at`
 
 #### EntryTag
 
+One tag on one entry. For a personal tag (the default) `user_id` is the user
+who applied it — by hand, in bulk, through the copilot tool, or via their
+automation rule — and only they see it, in entry responses, tag counts, `tag:`
+search, the Tags facet and `tag_matches`. For a global tag there is one row per
+entry with `user_id` NULL that everyone sees. Read through
+`app.services.entry_tags.visible_to`; write through `ensure_assignment`, which
+derives the owner from the tag's scope and inserts with `ON CONFLICT`. In
+Meilisearch, global tag names live in `tags`; personal assignments live in the
+filter-only `user_tags` as `"<user_id>:<name>"`, which is stripped from every
+hit and folded into the viewer's own `tags` facet server-side.
+
+Migration `y6q8s0u2w4y6` introduced the per-user model by copying every
+existing shared assignment to every non-system user (the saved-searches
+precedent) and dropping the shared rows; every pre-existing tag started
+personal. `scripts/maintenance/reindex_entry_tags.py` re-pushes the index's
+tag fields afterwards.
+
 **Columns:**
-- `entry_id` (FK, CASCADE) — PK
-- `tag_id` (FK, CASCADE) — PK
-- `tagged_at` (DateTime)
+- `id` (UUID PK)
+- `entry_id` (FK, CASCADE)
+- `tag_id` (FK, CASCADE)
+- `user_id` (FK users, CASCADE, nullable, indexed)
+- Unique (`entry_id`, `tag_id`, `user_id`), NULLs not distinct
 
 #### Comment
 
@@ -1385,9 +1449,11 @@ Data-defined pipeline stage composition per scope. A seeded "Global default" row
 - **`entry_vendors`** — links entries to vendors (with confidence, matched_names)
 - **`entry_products`** — links entries to products (with confidence, matched_names)
 - **`entry_tools`** — links entries to tools (with confidence, matched_names, paragraph_indices)
-- **`entry_sectors`** — links entries to targeted victim sectors (with confidence, source; sector is a controlled-vocabulary slug from `app/intelligence/sectors.py`, not an entity FK)
-- **`entry_tags`** — links entries to user-defined tags
+- **`entry_sectors`** — links entries to the victim sectors the article describes as *targeted* (`sector_id` FK to `sectors` plus the canonical slug as a natural key; confidence, source, role, paragraph_indices). Written only by the one-pass AI analysis (`store_sectors`) — sectors are never autolinked, so a row is a judgment, not a word match
+- **`entry_tags`** — links entries to user-defined tags; one row per (entry, tag, user) for a personal tag, one shared row (`user_id` NULL) for a global tag
 - **`threat_actor_target_countries`** — links threat actors to targeted countries
+- **`threat_actor_target_sectors`** / **`malware_target_sectors`** — "X targets sector S" claims, each with a `source` (`rollup` from the entity's own articles, `enrichment`, `seed`, `analyst`) and an `article_count` of evidence; the nightly rollup owns only its own rows
+- **`campaign_sectors`** — the victim verticals a campaign is scoped to
 - **`campaign_countries`** — links campaigns to countries (origin/target role)
 - **`ttp_mitigations`** — links TTPs to mitigations
 
@@ -1561,7 +1627,7 @@ Enums are defined as string columns with CHECK constraints or documented in Pyth
 - **`countries(iso_code)`** — one country per ISO code
 - **`entity_relationships(source_type, source_id, target_type, target_id, relationship_type)`** — one relationship per directed pair and type
 - **`glossary_terms(name)`** — unique glossary entries
-- **`tags(name)`** — tags are global; unique by name
+- **`tags(name)`** — the tag list is shared; unique by name (assignments are per user unless the tag is global)
 - **`ai_tasks(name)`** — one task per name
 - **`campaign_saved_searches(campaign_id, saved_search_id)`** — one link per pair
 - **`entry_signals(entry_id, signal_type)`** — one signal per type per entry (upsert)
@@ -1599,7 +1665,6 @@ All tables have UUID PKs with btree indexes (default).
 - `threat_actors.origin_country_id` — actor by country
 - `products.vendor_id` — product by vendor
 - `cves.severity` — by CVSS severity
-- `threat_actors.targeted_sectors` — sector filtering (GIN index on ARRAY)
 - `detection_rules.rule_type` — by rule type
 - `automation_rules.is_enabled` — active rules
 - `campaigns.status` — campaign lifecycle
@@ -1734,6 +1799,10 @@ Common migration prefixes:
 - `m2a2b3c4d5g9` — pruned ~1.9M duplicate bulk-sync enrichment_results rows
 - `n2b3c4d5e6f7`–`t6h8i9j0k1l2` — signal engine + pipeline observability (entry_signals, job_runs, user_entity_watches, ai_analysis queue, entry_pipeline_runs, pipeline_plans, signal feedback)
 - `u7i9j0k1l2m3` — cross-type reclassify tombstones
+
+**Notable migrations (September–October 2026):**
+- `q6h8j0l2n4p6` — sector as an entity: `sectors` table seeded from the vocabulary, `entry_sectors.sector_id` FK, the three target-sector junctions, enum CHECKs widened to `sector`
+- `r7i9k1m3o5q7` — `my_sectors` setting folded into per-user `sector` watches and removed
 
 **Previous major migrations:**
 - Phase 1: Core schema (users, feeds, entries, TTPs, CVEs, threat actors)

@@ -11,6 +11,7 @@
 import { useRef, useState } from "react";
 import { NoteBody } from "./NoteBody";
 import styles from "./InlineNoteEditor.module.css";
+import { promptDialog } from "@/utils/dialog";
 
 export interface InlineNoteSubmit {
   title: string;
@@ -106,8 +107,13 @@ export function InlineNoteEditor({
     });
   };
 
-  const addLink = () => {
-    const url = prompt("Enter URL:");
+  const addLink = async () => {
+    const url = await promptDialog({
+      title: "Add link",
+      message: "Enter URL:",
+      placeholder: "https://example.com",
+      confirmLabel: "Add link",
+    });
     if (url) wrap("[", `](${url})`);
   };
 

@@ -1,0 +1,12 @@
+{
+  "slug": "neg-auscert-kernel-bulletin",
+  "title_like": "Linux kernel: CVSS (Max): 9.8",
+  "title": "Linux kernel: CVSS (Max): 9.8",
+  "url": "http://portal.auscert.org.au/bulletins/ESB-2026.8191/",
+  "publisher": "AusCERT",
+  "kind": "negative",
+  "attribution": [],
+  "expected": [],
+  "optional": [],
+  "must_not": []
+}

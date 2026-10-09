@@ -24,6 +24,7 @@ from app.services.entity_markdown import (
     ENTITY_TYPE_LABELS,
     build_entity_profile_markdown,
 )
+from app.services.entry_tags import visible_to
 from app.services.markdown import (
     entry_to_markdown,
     note_to_markdown,
@@ -39,6 +40,7 @@ _ENTITY_NAME_ATTR = {
     "cwe": "cwe_id",
     "ttp": "technique_id",
     "country": "name",
+    "sector": "name",
     "mitigation": "name",
     "tool": "name",
     "vendor": "name",
@@ -197,7 +199,9 @@ async def export_entry(
         .join(EntryTag, EntryTag.tag_id == Tag.id)
         .where(
             EntryTag.entry_id == entry_id,
+            visible_to(user.id),
         )
+        .distinct()
     )
     tags = [r[0] for r in tag_result.all()]
 

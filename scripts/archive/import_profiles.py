@@ -784,8 +784,8 @@ async def apply_bucket(db, buckets: dict, profiles_by_file: dict, backlink: bool
             obj.malware_type = rec["malware_type"]
         if rec["type"] == "tool" and rec.get("platforms") and not (obj.platforms or []):
             obj.platforms = rec["platforms"]
-        if rec.get("sectors") and hasattr(obj, "targeted_sectors") and not (obj.targeted_sectors or []):
-            obj.targeted_sectors = rec["sectors"]
+        # targeted_sectors is a cache rebuilt from the target-sector junctions
+        # (app/services/sector_links.py); frontmatter sectors are no longer written.
 
         # provenance metadata (merge, don't clobber — a rerun must not wipe
         # ai_reworked_at / pre_import_description written by the AI pass)
@@ -1203,10 +1203,8 @@ def _fill_structured(obj, et: str, fm: dict) -> None:
         platforms = [str(x) for x in (fm.get("platform") or [])]
         if platforms:
             obj.platforms = platforms
-    if hasattr(obj, "targeted_sectors") and not (obj.targeted_sectors or []):
-        sectors = sectors_from(fm)
-        if sectors:
-            obj.targeted_sectors = sectors
+    # targeted_sectors is a cache rebuilt from the target-sector junctions; see
+    # scripts/maintenance/backfill_targeted_sectors.py for the vocabulary-checked path.
 
 
 async def ai_classify_files(

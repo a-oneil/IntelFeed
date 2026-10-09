@@ -9,7 +9,16 @@ Every article that arrives is scanned against a dictionary of known entity names
 and aliases. Matches become links in the article body and rows in the database,
 which is what makes a profile page accumulate.
 
+![The Threat Actors table in the Workbench, with columns for aliases, country, motivation, sectors, activity and first seen](../assets/screenshots/entities-list.png)
+
+*Every entity type gets the same table: filterable per column, with the columns you pick.*
+
 ## Profile pages
+
+![The Scattered Spider profile page showing aliases, best-evidenced claims, an AI assessment, and a detection-gap panel](../assets/screenshots/entity-profile.png)
+
+*A profile page is assembled from every article that mentioned the entity.*
+
 
 Click any linked name in an article, or browse by type under **Workbench →
 Entities**. Every type shares the same page shape:
@@ -28,6 +37,14 @@ seen, when it was last active, and what happened in between.
 evidence behind each link, not just the link. See below.
 
 **Articles** lists everything mentioning it, newest first.
+
+**Sectors** are the one entity nobody extracts by name. An article links to
+*Healthcare* only when the analysis judged healthcare to be the target, never
+because the word appeared, so a sector profile's **Victimology** tab is built
+from judgments: who targets it (split into *reported* — co-occurring on those
+articles — and *asserted* — an explicit claim with its source), the leak-site
+victims posted in it, and where in the world it is being hit. The chips on an
+actor's header link to these profiles.
 
 **Notes** are yours to write and everyone's to read.
 
@@ -84,6 +101,22 @@ a confidence that **decays** — an IP halves every 30 days, a URL every 60, a
 domain every 90, while hashes and host artifacts never decay, because behaviour
 and math persist while infrastructure rotates. A fresh sighting resets the
 clock.
+
+The **Sources** column says how many *independent* places back a value:
+"3 reports · 1 feed" means three articles or advisories mentioned it and one
+indicator feed lists it. A curated feed that republishes the same list as
+eighteen CSV files counts once, so a value with "1 feed" and no reports is
+exactly that — on a blocklist, never written up — and its profile says so
+instead of showing an empty page under a large number.
+
+Beyond IPs, domains, URLs and hashes, the ledger holds the behavioural
+observables research write-ups quote: full command lines, dropped file paths,
+registry values, scheduled-task and service names, mutexes, user-agents and
+custom HTTP headers. Each carries the role it played (persistence, execution,
+credential access, …) and, where the article makes it clear, the ATT&CK
+technique. Generic discovery commands (`whoami /priv`, `systeminfo`), system
+binaries named as the technique's target (`C:\Windows\System32\cmd.exe`) and
+redacted or templated values are kept out by design.
 
 Browse them under **Workbench → Entities → Observables**. Dual-use infrastructure (shared
 hosting, CDNs, URL shorteners) is kept but tagged, so it stays visible as intel

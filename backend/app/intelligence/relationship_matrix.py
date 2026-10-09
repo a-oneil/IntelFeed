@@ -2,9 +2,9 @@
 
 Every path that writes EntityRelationship rows (co-occurrence, AI extraction,
 copilot tools, the REST API) must validate against this matrix. Types absent
-as a source (country, ttp, vendor/product except catalog edges) are
-target-only: countries are targeted or attribution anchors, TTPs are used,
-vendors/products are targeted. CVE↔vendor/product affects-links live in
+as a source (country, sector, ttp, vendor/product except catalog edges) are
+target-only: countries are targeted or attribution anchors, sectors are
+targeted, TTPs are used, vendors/products are targeted. CVE↔vendor/product affects-links live in
 cve_affected, not here.
 
 Symmetric ``related_to`` pairs store one canonical direction (the one listed
@@ -21,6 +21,7 @@ ALLOWED_RELATIONSHIPS: frozenset[tuple[str, str, str]] = frozenset(
         ("threat_actor", "uses", "ttp"),
         ("threat_actor", "exploits", "cve"),
         ("threat_actor", "targets", "country"),
+        ("threat_actor", "targets", "sector"),
         ("threat_actor", "attributed_to", "country"),
         ("threat_actor", "targets", "vendor"),
         ("threat_actor", "targets", "product"),
@@ -44,6 +45,7 @@ ALLOWED_RELATIONSHIPS: frozenset[tuple[str, str, str]] = frozenset(
         ("malware", "uses", "ttp"),
         ("malware", "exploits", "cve"),
         ("malware", "targets", "country"),
+        ("malware", "targets", "sector"),
         ("malware", "targets", "vendor"),
         ("malware", "targets", "product"),
         # tool as source
@@ -59,6 +61,7 @@ ALLOWED_RELATIONSHIPS: frozenset[tuple[str, str, str]] = frozenset(
         ("campaign", "uses", "ttp"),
         ("campaign", "exploits", "cve"),
         ("campaign", "targets", "country"),
+        ("campaign", "targets", "sector"),
         ("campaign", "targets", "vendor"),
         ("campaign", "targets", "product"),
         # vendor/product catalog edges

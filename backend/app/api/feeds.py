@@ -7,6 +7,7 @@ from fastapi import APIRouter, Body, Depends, Path, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.adapters import _EXTENDED_ADAPTERS
 from app.core.exceptions import AppError
 from app.core.pagination import CursorPaginatedResponse, PaginatedResponse
 from app.core.security import get_admin_user, get_current_user
@@ -32,22 +33,15 @@ from app.services.feed_visibility import (
     get_subscription,
     subscribe_all_users,
     subscription_mute_map,
+    subscription_pause_map,
     subscriptions_enabled,
     visible_feed_ids_query,
 )
 
-# Extended adapter feed types that skip URL discovery
-_EXTENDED_FEED_TYPES = {
-    "github_repo",
-    "github_releases",
-    "github_advisories",
-    "reddit",
-    "nvd",
-    "mastodon",
-    "web_scraper",
-    "telegram",
-    "bluesky",
-}
+# Extended adapter feed types that skip URL discovery. Derived from the adapter
+# registry rather than hand-listed: the update endpoint's own copy of a feed-type
+# set had silently drifted from it, and this one would have gone the same way.
+_EXTENDED_FEED_TYPES = frozenset(_EXTENDED_ADAPTERS)
 _EXTENDED_FEED_DEFAULTS: dict[str, dict] = {
     "github_repo": {"interval": 1440},
     "nvd": {"interval": 60},
@@ -210,6 +204,7 @@ async def list_feeds(
                     pass
 
     mute_map = await subscription_mute_map(db, user.id, feed_ids) if enabled else {}
+    pause_map = await subscription_pause_map(db, user.id, feed_ids) if enabled else {}
 
     items = []
     for feed in feeds:
@@ -217,6 +212,8 @@ async def list_feeds(
         resp.unread_count = unread_map.get(feed.id, 0)
         if enabled:
             resp.is_muted = mute_map.get(feed.id, feed.is_muted)
+            # Reads as paused if the instance switched it off OR this reader did.
+            resp.is_active = feed.is_active and not pause_map.get(feed.id, False)
             resp.per_user = True
         items.append(resp)
 
@@ -570,6 +567,9 @@ async def bulk_update_category_feeds(
         if request.intel_extraction_mode is not None and feed.intel_extraction_mode != request.intel_extraction_mode:
             feed.intel_extraction_mode = request.intel_extraction_mode
             changed = True
+        if request.ai_analysis_enabled is not None and feed.ai_analysis_enabled != request.ai_analysis_enabled:
+            feed.ai_analysis_enabled = request.ai_analysis_enabled
+            changed = True
         if request.auto_extract_on_ingest is not None and feed.auto_extract_on_ingest != request.auto_extract_on_ingest:
             feed.auto_extract_on_ingest = request.auto_extract_on_ingest
             changed = True
@@ -581,12 +581,18 @@ async def bulk_update_category_feeds(
         if request.extract_tools is not None and feed.extract_tools != request.extract_tools:
             feed.extract_tools = request.extract_tools
             changed = True
-        if request.reliability_rating is not None and feed.reliability_rating != request.reliability_rating:
-            feed.reliability_rating = request.reliability_rating
-            changed = True
-        if request.analyst_notes is not None and feed.analyst_notes != request.analyst_notes:
-            feed.analyst_notes = request.analyst_notes
-            changed = True
+        # Assessment fields stamp the review date, exactly as the single-feed
+        # PUT does. Without this, rating a whole category left every feed
+        # reading "never assessed" on its own Overview.
+        assessed = False
+        for field in ("reliability_rating", "timeliness_rating", "relevance_rating"):
+            value = getattr(request, field)
+            if value is not None and getattr(feed, field) != value:
+                setattr(feed, field, value)
+                assessed = True
+                changed = True
+        if assessed:
+            feed.last_reviewed_at = datetime.now(UTC)
 
         # Retention is now on Feed directly
         if request.clear_retention:
@@ -787,18 +793,27 @@ async def update_feed(
     _ADMIN_FEED_FIELDS = (
         "url",
         "feed_type",
-        "is_active",
         "fetch_interval_minutes",
         "retention_days",
         "adapter_config",
         "exclude_shorts",
         "intel_extraction_mode",
+        "ai_analysis_enabled",
         "auto_extract_on_ingest",
         "extract_detection_rules",
         "extract_tools",
     )
+    # `model_fields_set` rather than a None check: for the nullable fields below,
+    # None is a real value ("uncategorized", "keep forever") and must not be
+    # mistaken for "absent" — in either direction.
+    sent = request.model_fields_set
+    enabled = await subscriptions_enabled(db)
     if user.role != "admin":
-        touched = [f for f in _ADMIN_FEED_FIELDS if getattr(request, f) is not None]
+        touched = [f for f in _ADMIN_FEED_FIELDS if f in sent]
+        # Pause is personal once subscriptions are on, so anyone may set it.
+        # With the flag off it writes the one shared column and stays admin-only.
+        if "is_active" in sent and not enabled:
+            touched.append("is_active")
         if touched:
             raise AppError(
                 code="forbidden",
@@ -819,10 +834,12 @@ async def update_feed(
             feed.last_error = None
     if request.custom_title is not None:
         feed.custom_title = request.custom_title
-    if request.category_id is not None:
+    if "category_id" in sent:
+        # None = move to Uncategorized. The old `is not None` guard dropped it,
+        # so a feed could be filed but never unfiled from this endpoint.
         feed.category_id = request.category_id
-    enabled = await subscriptions_enabled(db)
     per_user_mute: bool | None = None
+    per_user_paused: bool | None = None
     if request.is_muted is not None:
         if enabled:
             # Mute is personal: write the caller's subscription row, not the pool
@@ -836,7 +853,17 @@ async def update_feed(
         else:
             feed.is_muted = request.is_muted
     if request.is_active is not None:
-        feed.is_active = request.is_active
+        if enabled:
+            # Pause is personal: write the caller's subscription row, not the pool
+            sub = await get_subscription(db, user.id, feed.id)
+            if sub:
+                sub.is_paused = not request.is_active
+                db.add(sub)
+            else:
+                await ensure_subscription(db, user.id, feed.id, is_paused=not request.is_active)
+            per_user_paused = not request.is_active
+        else:
+            feed.is_active = request.is_active
     if request.fetch_interval_minutes is not None:
         feed.fetch_interval_minutes = request.fetch_interval_minutes
     if request.exclude_shorts is not None and feed.feed_type == "youtube":
@@ -870,7 +897,9 @@ async def update_feed(
             config.pop("last_commit_sha", None)
             feed.adapter_config = config
     if request.feed_type is not None:
-        allowed = {"rss", "atom", "youtube", "podcast", "reddit", "github", "web_scraper", "telegram", "bluesky"}
+        from app.adapters import known_feed_types
+
+        allowed = known_feed_types()
         if request.feed_type not in allowed:
             raise AppError(
                 code="invalid_feed_type",
@@ -878,8 +907,11 @@ async def update_feed(
                 status_code=400,
             )
         feed.feed_type = request.feed_type
-    if request.retention_days is not None:
-        feed.retention_days = request.retention_days if request.retention_days > 0 else None
+    if "retention_days" in sent:
+        # None or <= 0 = keep forever. Same bug as category_id: the previous
+        # guard meant a feed on a 90-day window could never be set back to
+        # unlimited, which is why the bulk-category path needed `clear_retention`.
+        feed.retention_days = request.retention_days if (request.retention_days or 0) > 0 else None
 
     # Source reliability fields
     reliability_changed = False
@@ -900,6 +932,8 @@ async def update_feed(
 
     if request.intel_extraction_mode is not None:
         feed.intel_extraction_mode = request.intel_extraction_mode
+    if request.ai_analysis_enabled is not None:
+        feed.ai_analysis_enabled = request.ai_analysis_enabled
     if request.auto_extract_on_ingest is not None:
         feed.auto_extract_on_ingest = request.auto_extract_on_ingest
     if request.extract_detection_rules is not None:
@@ -912,12 +946,12 @@ async def update_feed(
 
     resp = FeedResponse.model_validate(feed)
     if enabled:
-        if per_user_mute is not None:
-            resp.is_muted = per_user_mute
-        else:
-            sub = await get_subscription(db, user.id, feed.id)
-            if sub:
-                resp.is_muted = sub.is_muted
+        sub = await get_subscription(db, user.id, feed.id)
+        resp.is_muted = per_user_mute if per_user_mute is not None else (sub.is_muted if sub else resp.is_muted)
+        if per_user_paused is not None:
+            resp.is_active = not per_user_paused
+        elif sub:
+            resp.is_active = feed.is_active and not sub.is_paused
         resp.per_user = True
     return resp
 
@@ -1196,6 +1230,65 @@ async def refresh_feed(
 
     fetch_feed.delay(str(feed_id))
     return {"message": "Feed refresh queued"}
+
+
+@router.get("/{feed_id}/pipeline")
+async def get_feed_pipeline(
+    feed_id: uuid.UUID = Path(..., description="UUID of the feed"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Which stages run for this feed, and what decided each one.
+
+    The edit modal's Pipeline pane reads this so it can say where a value comes
+    from. While `pipeline_engine_enabled` is off every stage reads "legacy" and
+    the Feed booleans are authoritative; once it is on, a plan at global,
+    category or feed scope can override a stage, and the pane has to stop
+    presenting its own checkbox as the thing in charge.
+    """
+    feed = await db.get(Feed, feed_id)
+    if not feed:
+        raise AppError(code="not_found", message="Feed not found", status_code=404)
+
+    from app.pipeline.plans import explain_feed_plan
+
+    return await explain_feed_plan(db, feed)
+
+
+@router.get("/{feed_id}/value")
+async def get_one_feed_value(
+    feed_id: uuid.UUID = Path(..., description="UUID of the feed to score"),
+    days: int = Query(90, ge=7, le=365, description="Scoring window in days."),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """One feed's intelligence value score, plus its rank among the scored set.
+
+    Scoring runs over every active feed rather than this one alone, because
+    "entity introductions" means *first seen anywhere* — scoped to a single
+    feed the subquery would count every entity it ever mentioned as an
+    introduction and the number would be meaningless. The response is one row
+    either way, so the modal fetches kilobytes, not the whole table.
+    """
+    feed = await db.get(Feed, feed_id)
+    if not feed:
+        raise AppError(code="not_found", message="Feed not found", status_code=404)
+
+    from app.intelligence.source_analytics import compute_feed_value_scores
+
+    active_ids = [row[0] for row in (await db.execute(select(Feed.id).where(Feed.is_active.is_(True)))).all()]
+    # A paused feed is not in the active set but still has a history worth showing.
+    if feed_id not in active_ids:
+        active_ids.append(feed_id)
+
+    rows = await compute_feed_value_scores(db, feed_ids=active_ids, days=days)
+    mine = next((r for r in rows if r["feed_id"] == str(feed_id)), None)
+    if mine is None:
+        return {"feed_id": str(feed_id), "scored": False}
+
+    ranked = sorted(rows, key=lambda r: r["score"], reverse=True)
+    rank = next((i + 1 for i, r in enumerate(ranked) if r["feed_id"] == str(feed_id)), None)
+    return {**mine, "scored": True, "rank": rank, "of": len(rows), "days": days}
 
 
 @router.post("/{feed_id}/full-sync")

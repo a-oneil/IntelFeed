@@ -65,6 +65,54 @@ async def bump_plan_version() -> None:
         logger.debug("Failed to bump pipeline plan version", exc_info=True)
 
 
+async def explain_feed_plan(db: AsyncSession, feed) -> dict:
+    """The resolved plan plus which scope decided each stage's `enabled`.
+
+    Same merge order as `resolve_feed_plan` — the UI must not re-implement it in
+    the client and drift. `decided_by` is "legacy" when no plan row touched the
+    stage, so the value still comes from the Feed booleans and editing them in
+    the feed modal still does something; otherwise it names the scope that won,
+    and that stage is only changeable from the Engine's plan editor.
+    """
+    from app.models.pipeline_plan import PipelinePlan
+    from app.services.system_settings import get_setting
+
+    engine_enabled = bool(await get_setting("pipeline_engine_enabled", db))
+    plan = synthesize_from_feed(feed)
+    decided_by = dict.fromkeys(plan, "legacy")
+
+    if not engine_enabled:
+        return {"engine_enabled": False, "stages": plan, "decided_by": decided_by}
+
+    rows = (
+        (
+            await db.execute(
+                select(PipelinePlan).where(
+                    PipelinePlan.is_active == True,  # noqa: E712
+                    (
+                        (PipelinePlan.scope_type == "global")
+                        | ((PipelinePlan.scope_type == "category") & (PipelinePlan.scope_id == feed.category_id))
+                        | ((PipelinePlan.scope_type == "feed") & (PipelinePlan.scope_id == feed.id))
+                    ),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    by_scope = {row.scope_type: row for row in rows}
+    for scope in ("global", "category", "feed"):
+        row = by_scope.get(scope)
+        if not row:
+            continue
+        for stage_name, spec in (row.stages or {}).items():
+            if stage_name in plan and "enabled" in (spec or {}):
+                decided_by[stage_name] = scope
+        plan = _merge(plan, row.stages or {})
+
+    return {"engine_enabled": True, "stages": plan, "decided_by": decided_by}
+
+
 async def resolve_feed_plan(db: AsyncSession, feed) -> dict[str, dict] | None:
     """Resolved stage plan for a feed, or None when the pipeline engine is off
     (callers then use the legacy run_extraction boolean path)."""

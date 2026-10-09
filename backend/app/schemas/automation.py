@@ -9,7 +9,7 @@ class AutomationRuleCreate(BaseModel):
     description: str | None = None
     trigger_type: str = Field(
         pattern=r"^(on_new_entry|on_schedule|on_keyword_match"
-        r"|on_cve_detected|on_manual|on_correlation_event|on_entry_scored)$"
+        r"|on_cve_detected|on_manual|on_correlation_event|on_entry_scored|on_observable_captured)$"
     )
     trigger_config: dict = {}
     conditions: dict = {}
@@ -42,7 +42,7 @@ class AutomationRuleUpdate(BaseModel):
     trigger_type: str | None = Field(
         default=None,
         pattern=r"^(on_new_entry|on_schedule|on_keyword_match"
-        r"|on_cve_detected|on_manual|on_correlation_event|on_entry_scored)$",
+        r"|on_cve_detected|on_manual|on_correlation_event|on_entry_scored|on_observable_captured)$",
     )
     trigger_config: dict | None = None
     conditions: dict | None = None
@@ -123,6 +123,8 @@ VALID_TRIGGER_TYPES = {
     "on_cve_detected",
     "on_manual",
     "on_correlation_event",
+    "on_entry_scored",
+    "on_observable_captured",
 }
 
 VALID_ACTION_TYPES = {

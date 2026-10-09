@@ -37,6 +37,11 @@ CONFIGURABLE_KEYS: dict[str, type] = {
     "observables_decay_enabled": bool,
     "observables_candidate_max": int,
     "observables_ai_capture_mode": str,
+    "observables_analysis_tail_reserve": float,
+    "observables_ai_capture_kinds": str,
+    "observables_publisher_ioc_enabled": bool,
+    "observables_publisher_ioc_max_values": int,
+    "observables_codeblock_skip_categories": str,
     "observables_publish_enabled": bool,
     "observables_publish_token": str,
     "observables_publish_min_confidence": float,
@@ -141,7 +146,6 @@ CONFIGURABLE_KEYS: dict[str, type] = {
     "feed_value_weight_detection": float,
     "feed_value_weight_pir": float,
     "cve_epss_high_risk_threshold": float,
-    "my_sectors": str,
     # Signal engine
     "signal_engine_shadow": bool,
     "signal_engine_surface": bool,
@@ -281,6 +285,48 @@ SETTING_METADATA: dict[str, dict] = {
         ),
         "group": "observables",
         "options": ["shadow", "capture"],
+    },
+    "observables_publisher_ioc_enabled": {
+        "label": "Article IOC Tables",
+        "description": (
+            "When an article links its IOC table in an allow-listed repository (Cisco Talos IOCs, Bitdefender "
+            "malware-ioc, Datadog indicators-of-compromise on GitHub), fetch it and capture its atoms — with the "
+            "roles the table states — sighted on the article. Only those repositories are ever fetched"
+        ),
+        "group": "observables",
+    },
+    "observables_publisher_ioc_max_values": {
+        "label": "Article IOC Table Cap",
+        "description": "Maximum indicators taken from one article's linked IOC table",
+        "group": "observables",
+    },
+    "observables_ai_capture_kinds": {
+        "label": "AI Capture Kinds",
+        "description": (
+            "In capture mode, only these observable kinds become ledger rows from the one-pass AI; every other "
+            "kind the AI reports is still staged as a promotable candidate. Flip host kinds (cmdline, path, "
+            "registry, scheduled_task, service_name, mutex, named_pipe, user_agent, http_header) in once the "
+            "extraction fixture shows they are precise"
+        ),
+        "group": "observables",
+    },
+    "observables_analysis_tail_reserve": {
+        "label": "Analysis Tail Reserve",
+        "description": (
+            "Share of the one-pass analysis text budget reserved for an article's indicator appendix when "
+            "the body exceeds ai_analysis_content_max_chars. Research write-ups put their IOC tables and "
+            "command blocks at the end; 0 disables the appendix and the model only sees the head"
+        ),
+        "group": "observables",
+    },
+    "observables_codeblock_skip_categories": {
+        "label": "Code-Block Scan Skip Categories",
+        "description": (
+            "Comma list of feed categories whose entries never nominate host-kind candidates from <pre> "
+            "blocks (advisory bulletins are preformatted prose, not commands). Rule-repository entries "
+            "(any GitHub content_type) are always skipped"
+        ),
+        "group": "observables",
     },
     "observables_publish_enabled": {
         "label": "Publishing",
@@ -806,16 +852,6 @@ SETTING_METADATA: dict[str, dict] = {
         ),
         "group": "intelligence",
     },
-    "my_sectors": {
-        "label": "My Sectors",
-        "description": (
-            "Comma-separated industry sectors your organization belongs to "
-            "(e.g. 'healthcare, financial services'). Aliases like 'banks' or "
-            "'hospitals' are accepted. Priority Queue boosts entries whose "
-            "extracted victim sectors match."
-        ),
-        "group": "intelligence",
-    },
     "registration_enabled": {
         "label": "Account Registration",
         "description": "Allow new users to register accounts. Disable to lock registration.",
@@ -1168,6 +1204,11 @@ _ENGINE_SECTION_GROUPS: dict[str, str] = {
     "observables_decay_enabled": "observables",
     "observables_candidate_max": "observables",
     "observables_ai_capture_mode": "observables",
+    "observables_analysis_tail_reserve": "observables",
+    "observables_ai_capture_kinds": "observables",
+    "observables_publisher_ioc_enabled": "observables",
+    "observables_publisher_ioc_max_values": "observables",
+    "observables_codeblock_skip_categories": "observables",
     "observables_publish_enabled": "observables",
     "observables_publish_token": "observables",
     "observables_publish_min_confidence": "observables",
@@ -1187,7 +1228,6 @@ _ENGINE_SECTION_GROUPS: dict[str, str] = {
     "radar_personalization_window_days": "scoring",
     "my_stack_exposure_enabled": "scoring",
     "exposure_attack_visibility_enabled": "scoring",
-    "my_sectors": "scoring",
     # Maintenance browse view (link validation, hygiene, merge engine)
     "entity_maintenance_mode": "maintenance",
     "link_validation_mode": "maintenance",

@@ -20,6 +20,7 @@ export type TabKey =
   | "relationships"
   | "detection"
   | "geography"
+  | "victimology"
   // Not in any tabs array — reachable only via the rail's "Review gaps"
   // action; ProfileTabs appends it as an ephemeral tab while active.
   | "detection_gaps";
@@ -31,6 +32,7 @@ export const TAB_LABELS: Record<TabKey, string> = {
   relationships: "Relationships",
   detection: "Detection",
   geography: "Geography",
+  victimology: "Victimology",
   detection_gaps: "Detection Gaps",
 };
 
@@ -42,6 +44,11 @@ export const TAB_HINTS: Partial<Record<TabKey, { title: string; body: string; as
   relationships: {
     title: "Relationships",
     body: "Who this is tied to and how strongly, built only from articles that named both.",
+  },
+  victimology: {
+    title: "Victimology",
+    body: "Who targets this industry — reported in articles vs asserted as a claim — and the leak-site victims posted in it.",
+    aside: "Leak-site claims are the gang's claims, not confirmed breaches.",
   },
   detection_gaps: {
     title: "Detection Gaps",
@@ -70,7 +77,7 @@ export interface BadgeSpec {
    * placeholder. `editKind: "country"` links to the country profile when the
    * country id is resolvable, mirroring the old identity-field behavior. */
   editKey?: string;
-  editKind?: "text" | "country";
+  editKind?: "text" | "country" | "sector";
   placeholder?: string;
   /** Entity field this badge represents, for the "who says so" provenance
    * marker. Defaults to `editKey`; set it explicitly on badges that display a
@@ -146,7 +153,9 @@ export type OverviewPanelKey =
   | "cwe_mitigations"
   | "cwe_affected_vendors"
   | "cwe_vendors"
-  | "observable_provenance";
+  | "observable_provenance"
+  | "observable_backlinks"
+  | "infrastructure";
 
 // ── Actions ───────────────────────────────────────────────────────────────
 export type ActionKey =
@@ -197,6 +206,9 @@ function sectorBadges(sectors: string[] | undefined): BadgeSpec[] {
     label: s,
     tone: "neutral" as BadgeTone,
     title: sectors.length > 4 ? `Targeted sectors: ${all}` : "Targeted sector",
+    // Not editable — the kind only tells SignalBadges to link the chip to the
+    // sector profile (resolved by display name).
+    editKind: "sector" as const,
     // One marker for the whole group — the claim is about the list, not each chip.
     ...(i === 0 ? { provenanceKey: "targeted_sectors", provenanceLabel: "Targeted sectors" } : {}),
   }));
@@ -226,7 +238,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     hasAliases: false,
     hasDescription: true,
     nameEditable: true,
-    overviewPanels: [],
+    overviewPanels: ["infrastructure"],
     // Campaigns are internal objects; there is nothing to look them up in.
     externalLinks: () => [],
     // No cascadeType: the preview counts extraction links that would be severed,
@@ -253,7 +265,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     nameEditable: true,
     // Techniques/attribution now live in the hero (associates strip, badges) —
     // no overview panels repeat them.
-    overviewPanels: [],
+    overviewPanels: ["infrastructure"],
     externalLinks: (e) => getPivotLinks("threat_actor", e.name || ""),
     cascadeType: "threat_actor",
     actions: ["add_to_campaign", "generate_report", "ai_summary", "convert", "merge", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
@@ -270,7 +282,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     hasDescription: true,
     nameEditable: true,
     // Malpedia moved into the Sources rail card.
-    overviewPanels: [],
+    overviewPanels: ["infrastructure"],
     externalLinks: (e) => getPivotLinks("malware", e.name || ""),
     cascadeType: "malware",
     actions: ["add_to_campaign", "generate_report", "ai_summary", "convert", "merge", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
@@ -451,6 +463,22 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     actions: ["add_to_campaign", "generate_report", "ai_summary", "convert", "merge", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
   },
 
+  // A sector is a closed vocabulary, not an extracted entity: no create, merge,
+  // convert, delete, or rescan (sectors are never autolinked). Its name and
+  // slug are the vocabulary itself; aliases and description are editable.
+  sector: {
+    tabs: ["overview", "victimology", "relationships"],
+    signalBadges: (e) =>
+      e.slug ? [{ label: e.slug, tone: "neutral", title: "Canonical slug — what sector.slug: searches" }] : [],
+    identityFields: [],
+    hasAliases: true,
+    hasDescription: true,
+    nameEditable: false,
+    overviewPanels: [],
+    externalLinks: (e) => getPivotLinks("sector", e.name || ""),
+    actions: ["add_to_campaign", "generate_report", "ai_summary"],
+  },
+
   tool: {
     tabs: ["overview", "relationships"],
     // Tool type is read-only — the badge is its single representation.
@@ -463,7 +491,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     hasDescription: true,
     nameEditable: true,
     // Malpedia/GitHub moved into the Sources rail card.
-    overviewPanels: [],
+    overviewPanels: ["infrastructure"],
     cascadeType: "tool",
     actions: ["add_to_campaign", "generate_report", "ai_summary", "convert", "merge", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
   },
@@ -487,14 +515,14 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
       ...(e.status && e.status !== "active"
         ? [{ label: e.status, tone: "warning" as BadgeTone, title: "Lifecycle state" }]
         : []),
-      ...(e.created_via ? [{ label: `via ${String(e.created_via).replace(/_/g, " ")}`, tone: "neutral" as BadgeTone, title: "The judgment door that created this row" }] : []),
+      ...(e.created_via ? [{ label: `via ${String(e.created_via).replace(/_/g, " ")}`, tone: "neutral" as BadgeTone, title: "What created this row" }] : []),
     ],
     identityFields: [],
     hasAliases: false,
     hasDescription: true,
     nameEditable: false,
     monoIdKey: "value",
-    overviewPanels: ["observable_provenance"],
+    overviewPanels: ["observable_provenance", "observable_backlinks"],
     externalLinks: (e) =>
       e.kind && e.value
         ? observablePivotLinks(e.kind, e.value).map((l) => ({ platform: l.label, url: l.url }))

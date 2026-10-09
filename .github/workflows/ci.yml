@@ -1,63 +1,173 @@
 name: CI
 
+# One workflow for the whole repo, because GitHub bills Actions by the *job*,
+# rounded up to a whole minute. Four workflows meant four `changed?` jobs and
+# four aggregate jobs on every commit — eight billed minutes for ~40 seconds of
+# real work, before a single test ran. Measured on this repo: 213 minutes of
+# wall time billed as 416. Everything below is shaped around that one fact.
+#
+#   - One `changes` job does all the path filtering, once.
+#   - Each area is ONE job that runs its checks in sequence. Splitting ruff,
+#     alembic and pytest into three jobs cost three minimums and three
+#     dependency installs to save ~90 seconds of wall clock.
+#   - One aggregate job reports. Mark `CI` required in branch protection —
+#     never the individual jobs.
+#
+# The tradeoff is deliberate: slightly slower feedback, and a failure names a
+# step rather than a job. In exchange a full-fat commit costs ~13 billed
+# minutes instead of 33.
 on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    # Mondays 07:00 UTC — a fresh advisory list at the start of the week. This
+    # is what catches advisories filed against dependencies nobody touched.
+    - cron: "0 7 * * 1"
   workflow_dispatch:
 
-# A second push to the same PR cancels the first run.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Supersede a PR's older run, but never kill a build of main — that run is
+  # the record of whether the default branch is green.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 env:
-  # The version the Docker images ship (backend/Dockerfile). Used by the lint
-  # and migration jobs; the test job runs a matrix (see backend-test).
-  PYTHON_VERSION: "3.12"
+  # The version every container that runs app code ships: backend/Dockerfile is
+  # python:3.14.7, and api / celery-worker / celery-worker-ai / celery-beat /
+  # telegram-listener are all built from it. The host venvs are 3.14 too.
+  #
+  # This used to be a 3.12/3.13/3.14 matrix. Both bugs it caught
+  # (urllib.robotparser in 3.13, fnmatch.translate in 3.14) were found climbing
+  # *toward* 3.14 — and we landed there. Testing 3.12 and 3.13 was 120 of those
+  # 416 minutes spent on interpreters nothing runs. pyproject's requires-python
+  # was narrowed to >=3.14 to match.
+  #
+  # (piper/Dockerfile is 3.12, but that sidecar installs piper-tts and its own
+  # server.py — no IntelFeed code — so it is not in scope here.)
+  PYTHON_VERSION: "3.14"
   # frontend/Dockerfile builds on node:22 with pnpm 10.
   NODE_VERSION: "22"
 
 jobs:
-  backend-lint:
-    name: Backend · ruff
+  # Single source of truth for "what moved". Filtering lives here rather than in
+  # `on.*.paths` because a workflow filtered out at the `on:` level never
+  # reports a status at all — a required check would then sit pending forever.
+  changes:
+    name: changed?
     runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      images: ${{ steps.filter.outputs.images }}
+      python: ${{ steps.filter.outputs.python }}
+      node: ${{ steps.filter.outputs.node }}
+      android: ${{ steps.filter.outputs.android }}
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          # Need the base commit in the local object store to diff against.
+          fetch-depth: 0
 
-      # Lint needs ruff only — skip the ~50-package runtime install.
-      # Pinned exactly: ruff's formatter changes between releases, and an
-      # unpinned install turns `ruff format --check` red on an unrelated PR the
-      # day a new version ships. Bump deliberately, then run `ruff format .`.
-      - name: Install ruff
-        run: pipx install ruff==0.16.8
+      - id: filter
+        name: What changed?
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
 
-      - name: ruff check
-        working-directory: backend
-        run: ruff check --output-format=github .
+          emit() { echo "$1=$2" >> "$GITHUB_OUTPUT"; }
 
-      - name: ruff format --check
-        working-directory: backend
-        run: ruff format --check .
+          everything() {
+            for key in backend frontend images python node android; do emit "$key" true; done
+            echo "### $1" >> "$GITHUB_STEP_SUMMARY"
+          }
 
-  backend-test:
-    name: Backend · pytest (py${{ matrix.python }})
+          # A scheduled sweep or a manual dispatch verifies the repo as it
+          # stands, not a diff — there is no sensible base to compare against.
+          if [ "$EVENT" = "schedule" ] || [ "$EVENT" = "workflow_dispatch" ]; then
+            everything "Event is '$EVENT' — running every check."
+            exit 0
+          fi
+
+          if [ "$EVENT" = "pull_request" ]; then
+            base="$PR_BASE"
+          else
+            base="$PUSH_BEFORE"
+          fi
+
+          # A branch's first push, a force-push, or a squash-merge whose parent
+          # was GC'd all leave us without a usable base. Verify everything
+          # rather than guess that nothing moved.
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            everything "No usable diff base ('$base') — running every check."
+            exit 0
+          fi
+
+          changed=$(git diff --name-only "$base" HEAD)
+          match() { printf '%s\n' "$changed" | grep -qE "$1"; }
+
+          verdicts=""
+          decide() {
+            if match "$2"; then value=true; else value=false; fi
+            emit "$1" "$value"
+            verdicts="${verdicts}- \`$1\`: **$value**"$'\n'
+          }
+
+          # Editing this workflow re-runs everything it gates.
+          self='|\.github/workflows/ci\.yml$'
+
+          decide backend  "^(backend/$self)"
+          decide frontend "^(frontend/$self)"
+          decide android  "^(android/$self)"
+
+          # Deliberately narrower than backend/**: editing a Python module
+          # changes what an image *contains*, not how it *builds*, and the
+          # backend job already tests that.
+          images='^(backend/(Dockerfile|\.dockerignore|pyproject\.toml|entrypoint\.sh)'
+          images="$images"'|frontend/(Dockerfile|\.dockerignore|package\.json|pnpm-lock\.yaml|nginx\.conf)'
+          images="$images"'|db/Dockerfile'
+          images="$images"'|docker-compose.*\.yml'
+          images="$images"'|\.env\.example'
+          images="$images$self)"
+          decide images "$images"
+
+          # The dependency audits grade the repo's dependency state, not the
+          # diff, so they are gated on the manifests. Running them per-PR just
+          # turns a CSS change red the morning a new advisory lands against
+          # lxml; the Monday sweep is what catches those.
+          decide python "^(backend/pyproject\.toml$self)"
+          decide node   "^(frontend/(package\.json|pnpm-lock\.yaml)$self)"
+
+          {
+            echo "### Changed areas"
+            echo
+            printf '%s' "$verdicts"
+            echo
+            echo '<details><summary>Files changed</summary>'
+            echo
+            echo '```'
+            printf '%s\n' "$changed"
+            echo '```'
+            echo
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ruff + alembic + pytest in one job. They share a checkout, a Python, and a
+  # ~50-package editable install; as three jobs that install ran three times
+  # and billed three minimums. Ordered cheapest-first so an obvious failure
+  # surfaces without waiting on the suite.
+  backend:
+    name: backend
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
-
-    # Both bugs this matrix would have caught were stdlib behaviour changes
-    # (urllib.robotparser in 3.13, fnmatch.translate in 3.14) that only showed
-    # up off the pinned version. The images ship 3.12; contributors run newer.
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ["3.12", "3.13", "3.14"]
 
     services:
       postgres:
@@ -95,14 +205,30 @@ jobs:
       REDIS_URL: redis://localhost:6379/0
       # Meilisearch is patched off in conftest; no service needed.
 
-    steps:
-      - uses: actions/checkout@v4
+    defaults:
+      run:
+        working-directory: backend
 
-      - uses: actions/setup-python@v5
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
         with:
-          python-version: ${{ matrix.python }}
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
           cache-dependency-path: backend/pyproject.toml
+
+      # Pinned exactly: ruff's formatter changes between releases, and an
+      # unpinned install turns `ruff format --check` red on an unrelated PR the
+      # day a new version ships. Bump deliberately, then run `ruff format .`.
+      - name: Install ruff
+        run: pipx install ruff==0.16.8
+
+      - name: ruff check
+        run: ruff check --output-format=github .
+
+      - name: ruff format --check
+        run: ruff format --check .
 
       # WeasyPrint loads these through cffi at call time, so the PDF export
       # test fails with "cannot load library libgobject" without them. Same
@@ -114,7 +240,6 @@ jobs:
             libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libcairo2
 
       - name: Install backend
-        working-directory: backend
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
@@ -127,97 +252,56 @@ jobs:
           python -c "from cryptography.fernet import Fernet; print('ENCRYPTION_KEY=' + Fernet.generate_key().decode())" >> "$GITHUB_ENV"
           echo "SECRET_KEY=ci-only-$(openssl rand -hex 16)" >> "$GITHUB_ENV"
 
-      - name: pytest
-        working-directory: backend
-        run: pytest tests/ -q
-
-  backend-migrations:
-    name: Backend · alembic
-    runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: intelfeed
-          POSTGRES_PASSWORD: intelfeed
-          POSTGRES_DB: intelfeed
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U intelfeed"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
-
-    env:
-      POSTGRES_HOST: localhost
-      POSTGRES_PORT: 5432
-      POSTGRES_USER: intelfeed
-      POSTGRES_PASSWORD: intelfeed
-      POSTGRES_DB: intelfeed
-      REDIS_URL: redis://localhost:6379/0
-      PYTHONPATH: .
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
-          cache-dependency-path: backend/pyproject.toml
-
-      - name: Install backend
-        working-directory: backend
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: Generate ephemeral test keys
-        run: |
-          python -c "from cryptography.fernet import Fernet; print('ENCRYPTION_KEY=' + Fernet.generate_key().decode())" >> "$GITHUB_ENV"
-          echo "SECRET_KEY=ci-only-$(openssl rand -hex 16)" >> "$GITHUB_ENV"
-
       # Two heads means two migrations claim the same parent — the API
       # container then fails to start on `alembic upgrade head`.
       - name: Exactly one migration head
-        working-directory: backend
+        env:
+          PYTHONPATH: .
         run: |
           heads=$(alembic heads 2>/dev/null | grep -c '(head)' || true)
           echo "heads: $heads"
           test "$heads" -eq 1
 
       - name: Migrate a fresh database to head
-        working-directory: backend
+        env:
+          PYTHONPATH: .
         run: alembic upgrade head
 
       - name: Newest migration downgrades and re-applies
-        working-directory: backend
+        env:
+          PYTHONPATH: .
         run: |
           alembic downgrade -1
           alembic upgrade head
 
+      # Uses its own `intelfeed_test` database (conftest appends the suffix), so
+      # the migrated `intelfeed` above is untouched.
+      - name: pytest
+        run: pytest tests/ -q
+
+  # eslint + vitest + build in one job, sharing a single `pnpm install` that
+  # previously ran three times.
   frontend:
-    name: Frontend · lint, test, build
+    name: frontend
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: frontend
-
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Version comes from "packageManager" in frontend/package.json. The path
       # is explicit because this is a `uses:` step — the job's
       # defaults.run.working-directory applies only to `run:` steps, so the
       # action would otherwise look for a package.json at the repo root, where
       # there isn't one.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: frontend/package.json
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -230,9 +314,385 @@ jobs:
       - name: ESLint
         run: pnpm lint
 
-      - name: Vitest
-        run: pnpm test
-
       # `pnpm build` is `tsc -b && vite build` — this is the type check too.
       - name: Type check and build
         run: pnpm build
+
+      - name: Vitest
+        run: pnpm test
+
+      # A quick read on bundle weight, in the job summary. Not a gate: there is
+      # no agreed budget yet, and a failing build already blocks the PR.
+      - name: Bundle size
+        if: always()
+        run: |
+          {
+            echo "### Built assets (largest 15)"
+            echo
+            echo '```'
+            du -ah dist/assets 2>/dev/null | sort -rh | head -15
+            echo
+            echo "total: $(du -sh dist 2>/dev/null | cut -f1)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Unit tests + the debug APK in one job, sharing one Gradle daemon. On main it
+  # also publishes the APK as a GitHub release — but only when
+  # android/version.properties holds a version with no `android-v<version>`
+  # release yet, so a merge that bumps the version (scripts/build_apk.sh) is
+  # what ships, and every other android/ change is built and tested only.
+  # Skipped on the Monday sweep: nothing here is an advisory check, so it would
+  # rebuild an unchanged tree.
+  android:
+    name: android
+    needs: changes
+    if: needs.changes.outputs.android == 'true' && github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      # `gh release create` on main. PRs only read releases.
+      contents: write
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v7
+
+      # app/build.gradle.kts pins jvmToolchain(17).
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # Caches Gradle's dependencies and build cache (written on main, read on
+      # PRs) and validates the committed gradle-wrapper.jar checksum.
+      - uses: gradle/actions/setup-gradle@v6
+
+      # Android only installs an update over an app signed with the same key,
+      # so every release must be signed with the one shared debug keystore
+      # (the secret), or it refuses to install over the copy already on the
+      # phone ("App not installed"). The Android Gradle plugin signs debug
+      # builds with the debug.keystore in its preferences folder and invents a
+      # random key when that file is missing. It finds the folder by searching
+      # several variables, and on the hosted runner that search did not land
+      # on ~/.android: every build came out signed with a fresh throwaway key
+      # while the job summary claimed the shared one. So the keystore goes in a
+      # folder of our own and ANDROID_USER_HOME, the variable the plugin checks
+      # first, points straight at it; the step after the build then proves the
+      # APK really carries the key before anything can be published. Without
+      # the secret the build still runs, signed with a throwaway key, and is
+      # never published.
+      - name: Restore the shared debug key
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_DEBUG_KEYSTORE }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "SHARED_KEY=false" >> "$GITHUB_ENV"
+            echo "::warning::ANDROID_DEBUG_KEYSTORE is not set: this APK is signed with a throwaway key and will not be published."
+            exit 0
+          fi
+          home="$RUNNER_TEMP/android-user-home"
+          mkdir -p "$home"
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$home/debug.keystore"
+          # The key's certificate fingerprint, for the check after the build.
+          sha=$(keytool -list -v -keystore "$home/debug.keystore" -storepass android -alias androiddebugkey \
+                  | sed -n 's/^[[:space:]]*SHA256: //p' | tr -d ':' | tr 'A-F' 'a-f')
+          [ -n "$sha" ] || { echo "::error::The ANDROID_DEBUG_KEYSTORE secret did not decode to a keystore with an androiddebugkey entry."; exit 1; }
+          {
+            echo "ANDROID_USER_HOME=$home"
+            echo "SHARED_KEY=true"
+            echo "SHARED_KEY_SHA256=$sha"
+          } >> "$GITHUB_ENV"
+
+      - name: Unit tests and debug APK
+        run: ./gradlew :app:testDebugUnitTest :app:assembleDebug
+
+      # The summary used to say "signed with the shared key" whenever the
+      # secret existed. Now it is checked: the certificate in the APK must be
+      # the one in the keystore, or the job fails before the release step.
+      - name: Check the APK is signed with the shared key
+        if: env.SHARED_KEY == 'true'
+        run: |
+          set -euo pipefail
+          apksigner=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          certs=$("$apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk)
+          # The signer line's label varies by apksigner version: "Signer #1",
+          # "Signer (minSdkVersion=24, ...)", "V2 Signer:". Only the digest matters.
+          apk_sha=$(printf '%s\n' "$certs" | sed -n 's/^.*[Ss]igner.*certificate SHA-256 digest: //p' | head -1)
+          echo "keystore: $SHARED_KEY_SHA256"
+          echo "apk:      $apk_sha"
+          if [ "$apk_sha" != "$SHARED_KEY_SHA256" ]; then
+            echo "::error::The APK is not signed with the shared debug key. Gradle looked for debug.keystore somewhere other than ANDROID_USER_HOME."
+            printf '%s\n' "$certs"
+            echo "ANDROID_USER_HOME=$ANDROID_USER_HOME"; ls -la "$ANDROID_USER_HOME" || true
+            env | grep -E '^(ANDROID_|XDG_|HOME=|TEST_TMPDIR)' || true
+            find / -name debug.keystore -newer "$GITHUB_WORKSPACE/.git/HEAD" 2>/dev/null || true
+            exit 1
+          fi
+
+      - name: Read the app version
+        id: version
+        run: |
+          set -euo pipefail
+          echo "name=$(grep '^versionName=' version.properties | cut -d= -f2)" >> "$GITHUB_OUTPUT"
+          echo "code=$(grep '^versionCode=' version.properties | cut -d= -f2)" >> "$GITHUB_OUTPUT"
+          cp app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/IntelFeed.apk"
+
+      # Every build is downloadable from its run, released or not.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: IntelFeed-${{ steps.version.outputs.name }}-apk
+          path: ${{ runner.temp }}/IntelFeed.apk
+          retention-days: 30
+          # An APK is already a zip.
+          compression-level: 0
+
+      - name: Publish a release for a new version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NAME: ${{ steps.version.outputs.name }}
+          CODE: ${{ steps.version.outputs.code }}
+        run: |
+          set -euo pipefail
+          tag="android-v$NAME"
+          apk="$RUNNER_TEMP/IntelFeed.apk"
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            verdict="$tag is already released, so this build is not published. Bump android/version.properties (scripts/build_apk.sh) to ship it."
+          elif [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            verdict="Version $NAME has no release yet: merging this publishes $tag."
+          elif [ "$SHARED_KEY" != "true" ]; then
+            verdict="Not publishing $tag: the ANDROID_DEBUG_KEYSTORE secret is not set."
+            echo "::warning::$verdict"
+          else
+            # The merge commit's subject. Title app PRs "android: <what
+            # changed>"; a squash merge keeps that as the subject.
+            what=$(git log -1 --format=%s | sed -E 's/^android: *//; s/ *\(#[0-9]+\)$//')
+            {
+              echo "**IntelFeed for Android $NAME** (build $CODE)"
+              echo
+              if [ -n "$what" ]; then echo "$what"; echo; fi
+              echo "Download \`IntelFeed.apk\` below and open it on the phone. It installs over the previous version and keeps the login and settings."
+              echo
+              echo "Built from $GITHUB_SHA. SHA-256 \`$(sha256sum "$apk" | cut -d' ' -f1)\`."
+            } > "$RUNNER_TEMP/notes.md"
+            gh release create "$tag" "$apk" \
+              --target "$GITHUB_SHA" \
+              --title "IntelFeed for Android $NAME" \
+              --notes-file "$RUNNER_TEMP/notes.md"
+            verdict="Published $tag."
+          fi
+
+          {
+            echo "### $verdict"
+            echo
+            echo "APK: $(du -h "$apk" | cut -f1), version $NAME (build $CODE), signed with the shared key: $SHARED_KEY${SHARED_KEY_SHA256:+ (cert SHA-256 \`$SHARED_KEY_SHA256\`)}."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # The Dockerfiles are the supported install path for a self-hosted deploy, so
+  # a PR that breaks one breaks the product. All three builds share one job and
+  # one buildx setup; the gha cache is scoped per image exactly as before.
+  images:
+    name: images
+    needs: changes
+    if: needs.changes.outputs.images == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build backend image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          target: production
+          push: false
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: false
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
+
+      - name: Build db image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./db
+          file: ./db/Dockerfile
+          push: false
+          cache-from: type=gha,scope=db
+          cache-to: type=gha,scope=db,mode=max
+
+      # `compose config` resolves every interpolation, so a typo'd ${VAR} or a
+      # malformed service block fails here instead of on someone's server.
+      # Every service declares `env_file: - .env`, and `compose config` fails if
+      # that file is absent — so a real .env has to exist here. `--env-file`
+      # only redirects variable *interpolation*; it does not satisfy the
+      # service-level directive. A fresh CI checkout has no .env, so writing one
+      # is safe (never do this on a developer machine — it would clobber theirs).
+      - name: Validate dev and prod compose
+        run: |
+          cp .env.example .env
+          # .env.example ships SITE_DOMAIN empty, but prod marks it required
+          # (${SITE_DOMAIN:?}). Give it a placeholder purely to interpolate.
+          sed -i 's|^SITE_DOMAIN=.*|SITE_DOMAIN=ci.example.com|' .env
+          docker compose -f docker-compose.dev.yml config --quiet
+          docker compose -f docker-compose.prod.yml config --quiet
+
+  # This job has no `if:` — gitleaks must run on every PR, because a committed
+  # credential is diff-local: it is this PR's fault and this PR's job to fix.
+  # The two dependency audits are step-gated instead, so a CSS-only PR still
+  # gets the secret scan for the same one billed minute.
+  security:
+    name: security
+    needs: changes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # The upstream gitleaks-action wants a GITLEAKS_LICENSE for anything that
+      # is not a public repo; the binary itself is MIT and has no such gate, so
+      # install it straight from the release. Pinned — a new default rule in a
+      # minor release would otherwise turn an unrelated PR red.
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: "8.30.1"
+        run: |
+          set -euo pipefail
+          curl -sSL --fail \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+
+      # Scans the checked-out tree rather than history: what matters for a PR
+      # is that the code it lands is clean. Auditing the full history is a
+      # one-off job (`gitleaks git .`), not a per-PR gate.
+      #
+      # Findings are real often enough to block on. If one is a placeholder,
+      # add it to .gitleaks.toml with a comment saying why — do not silence the
+      # rule wholesale.
+      - name: Scan for committed secrets
+        run: gitleaks dir . --config .gitleaks.toml --redact --no-banner --verbose
+
+      - uses: actions/setup-python@v7
+        if: needs.changes.outputs.python == 'true'
+        with:
+          # The version the images ship — audit what actually gets deployed.
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      # Resolve the dependency tree without building the project: --dry-run
+      # --report gives the exact set pip would install, and pip-audit reads the
+      # pinned list. Far faster than a real install, and it audits the *fresh*
+      # resolution rather than whatever a cached environment happens to hold.
+      - name: Resolve backend dependencies
+        if: needs.changes.outputs.python == 'true'
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install --dry-run --ignore-installed --quiet \
+            --report resolved.json "./backend[dev]"
+          python - <<'PY'
+          import json
+
+          with open("resolved.json") as fh:
+              report = json.load(fh)
+
+          pins = sorted(
+              f"{item['metadata']['name']}=={item['metadata']['version']}"
+              for item in report["install"]
+              if item["metadata"]["name"].lower() != "intelfeed"
+          )
+          with open("resolved.txt", "w") as fh:
+              fh.write("\n".join(pins) + "\n")
+          print(f"resolved {len(pins)} packages")
+          PY
+
+      # --ignore-vuln is for advisories with no upstream fix. Every entry needs
+      # a comment naming the package, why it is unfixable, and what pulls it
+      # in — otherwise this list silently becomes the place vulnerabilities go
+      # to be forgotten. Anything with a fix version available gets upgraded,
+      # not ignored.
+      #
+      #   PYSEC-2026-1325  ecdsa — side-channel in signature verification.
+      #                    Upstream declines to fix (pure-Python ECDSA cannot
+      #                    be made constant-time). Reaches us through
+      #                    python-jose[cryptography], which only uses ecdsa for
+      #                    ES* JWT algorithms; IntelFeed signs its tokens with
+      #                    HS256, so the vulnerable path is not exercised.
+      - name: Audit backend dependencies
+        if: needs.changes.outputs.python == 'true'
+        run: |
+          pipx install pip-audit==2.10.1
+          pip-audit -r resolved.txt \
+            --progress-spinner off \
+            --ignore-vuln PYSEC-2026-1325
+
+      - uses: pnpm/action-setup@v6
+        if: needs.changes.outputs.node == 'true'
+        with:
+          package_json_file: frontend/package.json
+
+      # No `cache: pnpm` here on purpose: this job never runs an install, so
+      # there is no pnpm store for setup-node's post-job cache save to write,
+      # and it fails the whole job with "Path Validation Error" when it finds
+      # nothing at the store path.
+      - uses: actions/setup-node@v7
+        if: needs.changes.outputs.node == 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # `pnpm audit` resolves from the lockfile, so no install is needed.
+      #
+      # --prod is the gate: those are the packages that end up in the bundle a
+      # browser executes. Every high-severity advisory in this tree today is in
+      # the dev tree instead (eslint, stylelint, jsdom) — real debt, but not
+      # something that should block an unrelated PR, so it is reported below
+      # rather than enforced.
+      - name: Audit shipped dependencies
+        if: needs.changes.outputs.node == 'true'
+        working-directory: frontend
+        run: pnpm audit --prod --audit-level=high
+
+      - name: Report dev-tree advisories
+        if: always() && needs.changes.outputs.node == 'true'
+        continue-on-error: true
+        working-directory: frontend
+        run: |
+          {
+            echo "### Dev-dependency advisories (not a gate)"
+            echo
+            echo '```'
+            pnpm audit --audit-level=high 2>&1 | tail -60 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # The one check to put in branch protection. It reports on every PR —
+  # including ones that skip every area — so a required check never hangs
+  # pending. Mark THIS job required, not the ones above.
+  ci:
+    name: CI
+    needs: [changes, backend, frontend, android, images, security]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: No job failed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          set -euo pipefail
+          echo "job results: $RESULTS"
+          for result in $RESULTS; do
+            case "$result" in
+              success|skipped) ;;
+              *) echo "::error::a CI job reported '$result'"; exit 1 ;;
+            esac
+          done

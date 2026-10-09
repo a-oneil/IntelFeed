@@ -55,6 +55,7 @@ const PROVENANCE_TYPES = new Set([
   "ttp",
   "cve",
   "country",
+  "sector",
   "tool",
   "vendor",
   "product",

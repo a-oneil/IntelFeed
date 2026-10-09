@@ -20,6 +20,7 @@ const PROFILE_TYPES: readonly EntityType[] = [
   "cve",
   "ttp",
   "country",
+  "sector",
   "tool",
   "mitigation",
   "cwe",

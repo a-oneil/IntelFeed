@@ -41,6 +41,7 @@ async def _seed_ai_tasks() -> None:
         DEFAULT_PROVIDER_TYPE_ASSIGNMENTS,
         SYSTEM_TASKS,
     )
+    from app.ai.provisioning import pick_model
     from app.database import async_session
     from app.models.ai_provider import AIProvider as AIProviderModel
     from app.models.ai_task import AITask
@@ -118,7 +119,7 @@ async def _seed_ai_tasks() -> None:
 
         # Auto-create a 'claude_code' provider on first startup so the entity
         # link validator has an assignment target. The provider only works
-        # once OAuth credentials are bootstrapped (see setup.md section 12),
+        # once OAuth credentials are bootstrapped (see setup.md section 14),
         # but seeding it now means the task assignment exists from day one.
         cc_provider_result = await db.execute(
             select(AIProviderModel).where(AIProviderModel.provider_type == "claude_code").limit(1)
@@ -186,22 +187,9 @@ async def _seed_ai_tasks() -> None:
                     chosen = default_provider
                 if not chosen:
                     continue
-                # The default model name assumes a Claude-family provider; when
-                # the chosen provider doesn't serve it (e.g. Ollama), fall back
-                # to the provider's first model so the assignment works out of
-                # the box instead of 404ing on an unknown model.
-                model_name = DEFAULT_MODEL_ASSIGNMENTS[task_name]
-                # Embedding models are listed alongside chat models on an Ollama
-                # host (Story Threads needs one there), and they cannot answer a
-                # prompt — never let the fallback below pick one.
-                provider_models = [m for m in (chosen.models or []) if "embed" not in m.lower()]
-                if provider_models and model_name not in provider_models:
-                    # Prefer a model whose id contains the alias ("sonnet" →
-                    # "claude-sonnet-4-6") before falling back to the first
-                    # listed model (Ollama lists are alphabetical, so [0] can
-                    # be an unfit pick — better than a guaranteed 404).
-                    match = next((m for m in provider_models if model_name in m), None)
-                    model_name = match or provider_models[0]
+                # The default names are Claude-family; pick_model resolves them
+                # against what the chosen provider actually serves.
+                model_name = pick_model(DEFAULT_MODEL_ASSIGNMENTS[task_name], chosen.models)
                 db.add(
                     AITaskAssignment(
                         created_by=first_user,
@@ -339,6 +327,7 @@ _OPENAPI_TAG_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
             ("notes", "Free-form notes attached to entries."),
             ("comments", "Per-entry comment threads."),
             ("ingest", "Manual URL ingestion into the entry pipeline."),
+            ("onboarding", "First-run readiness: is this instance seeded, polling and linking?"),
             ("opml", "OPML import/export of feed subscriptions."),
             ("podcasts", "Podcast episode listing and metadata."),
             ("playback", "Audio playback position sync."),
@@ -758,6 +747,7 @@ from app.api.link_validation import router as link_validation_router
 from app.api.logs import router as logs_router
 from app.api.metrics import router as metrics_router
 from app.api.notes import router as notes_router
+from app.api.onboarding import router as onboarding_router
 from app.api.opml import router as opml_router
 from app.api.playback import router as playback_router
 from app.api.podcasts import router as podcasts_router
@@ -797,6 +787,7 @@ app.include_router(users_router, prefix="/api/admin/users", tags=["admin"])
 app.include_router(feeds_router, prefix="/api/feeds", tags=["feeds"])
 app.include_router(entries_router, prefix="/api/entries", tags=["entries"])
 app.include_router(categories_router, prefix="/api/categories", tags=["categories"])
+app.include_router(onboarding_router, prefix="/api/onboarding", tags=["onboarding"])
 app.include_router(opml_router, prefix="/api/opml", tags=["opml"])
 app.include_router(events_router, prefix="/api/events", tags=["events"])
 app.include_router(proxy_router, prefix="/api/proxy", tags=["proxy"])

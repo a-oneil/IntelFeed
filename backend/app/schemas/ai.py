@@ -75,6 +75,23 @@ class AIProviderTestResult(BaseModel):
     models: list[str] = []
 
 
+class AIProviderCommissionResult(BaseModel):
+    """The outcome of making a provider the one that actually runs the AI tasks."""
+
+    success: bool
+    # Straight from the provider: a real connectivity check ran, so a failure
+    # here can say what went wrong instead of guessing at the cause.
+    message: str
+    models: list[str] = []
+    # The model the assignments were given, resolved against the live model list.
+    model: str | None = None
+    tasks_assigned: int = 0
+    tasks_reassigned: int = 0
+    # Agentic tasks left where they were because this provider can't run tools.
+    # Not a failure — a plain chat provider would return merges it never applied.
+    tasks_skipped_agentic: list[str] = []
+
+
 # --- AI Task Schemas ---
 
 

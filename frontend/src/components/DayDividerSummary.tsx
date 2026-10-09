@@ -49,7 +49,7 @@ type MetaLink = { label: string; url: string };
 /** Match the entity profile routes the remark plugin emits. The popover lookup
  *  and per-type styling both key off these. group 2 = entity slug. */
 const ENTITY_HREF_RE =
-  /^\/(intelligence|workbench)\/(actor|malware|cve|ttp|vendor|product|country|tool|mitigation)\//;
+  /^\/(intelligence|workbench)\/(actor|malware|cve|ttp|vendor|product|country|sector|tool|mitigation)\//;
 
 function entityTypeFromHref(href: string | undefined): string | null {
   if (!href) return null;
@@ -493,7 +493,7 @@ export function DayDividerSummary({ dayKey, dayCount, filters, label }: Props) {
       <div ref={fullBodyRef} aria-hidden style={{ display: "none" }}>
         <Markdown remarkPlugins={remarkPlugins}>{summary}</Markdown>
       </div>
-      <div ref={bodyRef} className={`${styles.body} ${showFull ? styles.bodyExpanded : ""}`}>
+      <div ref={bodyRef} className={`${styles.body} ${showFull ? styles.bodyExpanded : ""}`} data-untrusted-content="">
         <Markdown
           remarkPlugins={remarkPlugins}
           components={{

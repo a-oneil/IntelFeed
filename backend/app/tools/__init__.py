@@ -56,6 +56,10 @@ ADMIN_TOOLS: frozenset[str] = frozenset(
         "delete_intel_report",
         "bulk_unlink_entities",
         "confirm_extraction_entities",
+        # Target-sector claims are global profile edits, like the merges above.
+        "set_target_sector",
+        # A never-capture tombstone silences a value for every door and every user.
+        "deny_observable",
     }
 )
 
@@ -89,7 +93,7 @@ def _tool(name: str, description: str, input_schema: dict, mutating: bool | None
     return decorator
 
 
-# Default tool subset for the Ollama copilot. The full read-only registry (54
+# Default tool subset for the Ollama copilot. The full read-only registry (97
 # tools) serializes to ~6.6k tokens of schema per round — that bloats every
 # request's context AND overwhelms local models' tool selection. This curated
 # set covers the copilot's actual workload (search, entity lookups, pivots,
@@ -181,9 +185,11 @@ from app.tools import (  # noqa: E402
     extraction,  # noqa: F401
     feeds_automation,  # noqa: F401
     landscape,  # noqa: F401
+    observables,  # noqa: F401
     read,  # noqa: F401
     reader_ops,  # noqa: F401
     search,  # noqa: F401
+    sector,  # noqa: F401
     threads,  # noqa: F401
     workspace,  # noqa: F401
     write,  # noqa: F401

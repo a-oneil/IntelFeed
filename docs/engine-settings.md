@@ -4,10 +4,11 @@ Every runtime setting IntelFeed exposes, what it actually does, and where in the
 UI it lives. This is the companion to [engine.md](engine.md), which explains the
 subsystems these settings steer; here the unit of organisation is the **knob**.
 
-IntelFeed has **187 settings** in total:
+IntelFeed has **194 settings** in total:
 
-- **142** are DB-overridable and editable in the UI (`CONFIGURABLE_KEYS`, `backend/app/services/system_settings.py:19`).
-- **45** are env-only — infrastructure and secrets — see [Env-only settings](#env-only-settings) at the end.
+- **146** are DB-overridable and editable in the UI (`CONFIGURABLE_KEYS`, `backend/app/services/system_settings.py:19`).
+  Two of them exist only in the database, with no `Settings` field behind them — see [How a setting resolves](#how-a-setting-resolves).
+- **48** are env-only — infrastructure, secrets and build stamps — see [Env-only settings](#env-only-settings) at the end.
 - Five are **secrets** (encrypted at rest, masked in API responses): `github_token`,
   `nvd_api_key`, `observables_publish_token`, `registration_invite_code`, `sentry_dsn`
   (`SECRET_KEYS`, `system_settings.py:14`).
@@ -44,9 +45,10 @@ environment's own Settings UI.
 |---|---|---|
 | `CONFIGURABLE_KEYS` | `system_settings.py:19` | Which keys are DB-overridable, and the type each value is coerced to |
 | `SETTING_METADATA` | `system_settings.py:186` | Label, description and group shown in the UI |
-| `_ENGINE_SECTION_GROUPS` | `system_settings.py:1159` | Re-groups engine-owned keys onto Engine console sections, overwriting the `group` above |
+| `_ENGINE_SECTION_GROUPS` | `backend/app/services/system_settings.py:1195` | Re-groups engine-owned keys onto Engine console sections, overwriting the `group` above |
 | `SECRET_KEYS` | `system_settings.py:14` | Encrypted at rest, masked on read |
-| `GROUP_DEST` / `KEY_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:26`, `:52` | Group → which console surface renders it; powers the Engine settings search |
+| `GROUP_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:26` | Group → which console surface renders it; powers the Engine settings search |
+| `KEY_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:52` | Key-level exceptions to `GROUP_DEST` |
 
 Adding a setting means touching all of `config.py` (default), `CONFIGURABLE_KEYS`
 (type), `SETTING_METADATA` (label/description/group), and — if a scheduled job
@@ -98,6 +100,11 @@ feeds, analyst promotion), and known values are then sighted by exact match.
 | Setting | Type / default | What it does |
 |---|---|---|
 | `observables_candidate_max` | int, `200` | Cap on candidates staged per entry by the refang+regex scan. Candidates are nominations attached to the entry, never ledger rows. |
+| `observables_analysis_tail_reserve` | float, `0.4` | Share of the one-pass analysis text budget reserved for the article's **indicator appendix** when the body exceeds `ai_analysis_content_max_chars`. Research write-ups put their IOC tables and command blocks at the end; the window keeps the head and appends the IOC section (found by heading or table header, hash dumps compressed) after a marker line. `0` disables it and the model sees only the head. |
+| `observables_codeblock_skip_categories` | csv, `Security Advisories,Government / CERT` | Feed categories whose entries never nominate host-kind candidates from `<pre>` blocks — bulletins are preformatted prose, not commands. Rule-repository entries (any GitHub `content_type`) are always skipped. |
+| `observables_publisher_ioc_enabled` | bool, `true` | Fetch and capture the indicator file an article links to when it lives in an allow-listed publisher repository (Cisco Talos IOCs, Bitdefender malware-ioc, Datadog indicators-of-compromise). Roles come from the publisher's own labels; rows are sighted on the article. |
+| `observables_publisher_ioc_max_values` | int, `2000` | Cap on indicators taken from one article IOC table. |
+| `observables_ai_capture_kinds` | csv, network + hash kinds + `script` | In `capture` mode, only these kinds become ledger rows from the one-pass AI; every other kind it reports is still staged as a promotable candidate (with its role, evidence and confidence). Add the host kinds — `cmdline`, `path`, `registry`, `scheduled_task`, `service_name`, `mutex`, `named_pipe`, `user_agent`, `http_header` — once the extraction fixture (`scripts/dev/eval_observable_extraction.py`) shows they are precise. |
 | `observables_ai_capture_mode` | `shadow` \| `capture`, default `shadow` | `shadow`: indicators the one-pass AI confirms land on the entry as *promotable candidates* — you eyeball the judge before trusting it. `capture`: confirmations become ledger rows directly. |
 | `observables_decay_enabled` | bool, `true` | Nightly per-kind confidence decay for network observables — IP 30d half-life, URL 60d, domain 90d; hashes and host artifacts never decay. A new sighting resets the clock. Job: `decay-observable-confidence`, daily 02:20 UTC. |
 
@@ -136,7 +143,7 @@ Job: `ai-analysis-batch-submit` (every 30 min) and `ai-analysis-batch-poll`
 | `ai_daily_budget_usd` | float, `2.0` | Hard daily spend cap. On reaching it, pending entries wait; the next run takes the highest-priority ones first. |
 | `ai_analysis_relevance_threshold` | float, `0.15` | Junk gate: entries scoring below this on the keyword relevance pass skip AI analysis entirely. The question it answers is "is there anything here to extract", not "is this important". |
 | `ai_batch_max_requests` | int, `500` | Maximum entries per batch submission. |
-| `ai_analysis_content_max_chars` | int, `12000` | Characters of article body sent per entry. Extraction quality plateaus well before this; the cap is about cost and context, not truncation risk. |
+| `ai_analysis_content_max_chars` | int, `12000` | Characters of article body sent per entry. Bodies over the cap are windowed as head + indicator appendix (see `observables_analysis_tail_reserve`) so a long write-up's IOC section is never cut; narrative past the head is. |
 | `ai_use_batches` | bool, `true` | Use the Anthropic Message Batches API (50% discount) when the provider supports it. Otherwise sequential calls with prompt caching. |
 | `ai_est_cost_per_request` | float, `0.0024` | Per-entry cost estimate used to size a batch against the daily budget. Set near zero for local providers (Ollama), where the budget is meaningless. |
 | `ai_tool_evidence_required` | bool, `true` | Only store an extracted **tool** when the model names who wielded it *and* quotes the sentence showing its use. This is the evidence door that stopped tool extraction turning every mention of `certutil` into an entity. Turn off only if tool extraction stops finding anything at all. |
@@ -174,7 +181,6 @@ and story threads (`threads`). The scoring model itself is documented in
 | `radar_personalization_window_days` | int, `90` | Lookback for the nightly per-user fit. Longer than the global 30-day nudge window because one analyst votes far less often than all of them together. |
 | `my_stack_exposure_enabled` | bool, `false` | Vendor Watch: float CVEs affecting followed vendors/products in the Priority Queue and power the Vendor Watch board with detection-library coverage. Read-time and per-user, reusing the entity watchlist — no rescore. **Requires `signal_engine_surface`.** |
 | `exposure_attack_visibility_enabled` | bool, `false` | On the Vendor Watch board, for vulns with no detection rule, estimate detectability by mapping the CVE's co-occurring ATT&CK techniques to their data sources and on to configured telemetry. Explicitly lower confidence than rule-backed coverage — the CVE→technique link is article co-occurrence, not a curated mapping. |
-| `my_sectors` | csv, empty | Sectors your organisation belongs to, normalised against the `app.intelligence.sectors` vocabulary (aliases like "banks" or "hospitals" are accepted). Entries whose extracted victim sectors intersect this list get a Priority Queue boost. |
 
 Jobs: `signal-rate-recompute` (daily 04:20 UTC),
 `signal-personal-weight-fit` (daily 04:35 UTC), `signal-rescore-recent`
@@ -315,7 +321,7 @@ Settings → Engine → **Feeds** table view (`feeds`, `rate_limiting`,
 | `default_feed_fetch_interval` | int, `30` min | Default interval between fetches for a feed that doesn't set its own. |
 | `user_agent` | str, browser-like | `User-Agent` sent when fetching feeds. The browser-like default exists because many sites (CISA/gov, Cloudflare-fronted blogs) return 403 to obvious bot agents. |
 | `rate_limit_default_interval` | float, `2.0` s | Default seconds between requests to the same domain. Per-domain overrides are env-only (`rate_limit_overrides`). |
-| `per_user_subscriptions_enabled` | bool, `false` | Each analyst manages their own feed list and mutes over the shared pool. Off is the legacy single shared list where a mute affects everyone. The migration backfills every user as subscribed to every feed, so flipping it on changes nothing until someone unsubscribes. |
+| `per_user_subscriptions_enabled` | bool, `false` | Each analyst manages their own feed list and mutes over the shared pool. Off is a single shared list where a mute affects everyone. While the flag is off, a mute is written to the shared `Feed.is_muted` only, not to anyone's subscription, so a feed muted while the flag is off reappears for everyone when it is turned on. |
 | `image_proxy_enabled` | bool, `true` | Proxy external images through IntelFeed so reading an article doesn't beacon to the publisher. |
 | `image_proxy_cache_ttl_days` | int, `30` | Days a proxied image stays cached (`evict-image-cache`, daily 04:10 UTC). |
 | `image_proxy_max_size_bytes` | int, `10 MB` | Largest image the proxy will fetch. |
@@ -533,13 +539,14 @@ The full 70-job registry, including the jobs with no settings, is documented in
 
 ## Env-only settings
 
-These 45 are **not** in `CONFIGURABLE_KEYS` — they come from the environment or
+These 48 are **not** in `CONFIGURABLE_KEYS` — they come from the environment or
 `.env` and take a process restart to change. Infrastructure and secrets that
 should not be editable from a web UI.
 
 | Area | Keys |
 |---|---|
 | Environment | `env` |
+| Build stamp | `app_version`, `git_sha`, `build_time` — baked into the image by `scripts/ops/version.sh` and compose build args, not set in `.env`; they feed the version string in the app footer |
 | Postgres | `postgres_host`, `postgres_port`, `postgres_db`, `postgres_user`, `postgres_password`, `postgres_ssl`, `db_pool_size`, `db_max_overflow`, `worker_db_pool_size`, `worker_db_max_overflow` |
 | Redis / Meilisearch | `redis_url`, `meili_url`, `meili_master_key`, `meili_timeout` |
 | Auth & crypto | `secret_key`, `access_token_expire_minutes`, `refresh_token_expire_days`, `encryption_key`, `encryption_key_previous` |
@@ -553,7 +560,7 @@ should not be editable from a web UI.
 
 `postgres_password`, `meili_master_key`, `secret_key` and `encryption_key` are
 validated at startup: the literal `changeme` warns in development and **raises**
-in production (`_reject_insecure_defaults`, `config.py:416`). `encryption_key`
+in production (`_reject_insecure_defaults`, `backend/app/config.py:425`). `encryption_key`
 must additionally be a valid 32-byte URL-safe base64 Fernet key.
 
 ---

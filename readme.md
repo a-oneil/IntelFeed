@@ -1,11 +1,19 @@
 <p align="center">
-  <img src="assets/intelfeed-logo.svg" alt="IntelFeed" width="300">
+  <img src="docs/assets/intelfeed-logo.svg" alt="IntelFeed" width="300">
 </p>
 
 <p align="center">
 A self-hosted, security-focused RSS aggregator and threat intelligence platform. Built for security
 analysts and detection engineers to consume threat feeds, extract TTPs/CVEs, correlate entities, and
 generate detection rules.
+</p>
+
+<p align="center">
+  <a href="https://github.com/a-oneil/IntelFeed/actions/workflows/ci.yml"><img src="https://github.com/a-oneil/IntelFeed/actions/workflows/ci.yml/badge.svg?branch=main&event=push" alt="CI"></a>
+</p>
+
+<p align="center">
+  <img src="docs/assets/screenshots/reader.png" alt="The IntelFeed reader: today's articles in magazine view, with CVE and detection-opportunity chips inline" width="900">
 </p>
 
 ---
@@ -50,7 +58,7 @@ your collection.
   exposure views
 
 **Detection engineering**
-- Rule extraction in six formats — Sigma, Splunk SPL, CrowdStrike QL, Elastic QL, KQL, YARA — with
+- Rule extraction in six formats — Sigma, Splunk SPL, Elastic QL, KQL, YARA, Snort/Suricata — with
   per-format syntax validation and source provenance back to the article
 - A rule library and workbench, detection-gap analysis, telemetry-source mapping, ATT&CK coverage
   and Navigator layer export
@@ -69,8 +77,45 @@ your collection.
 - Meilisearch-backed full-text search with a purpose-built query language, saved searches, and a
   command palette
 - Configurable dashboards and widgets, a three-panel reader, runtime-switchable themes
-- Export to CSV and Markdown; outbound observable feeds (EDL blocklists, SIEM lookups, TAXII 2.1); token-gated public RSS re-publishing; shareable read-only links
-- REST API covering every feature, plus a zero-dependency CLI (170 tools) for scripting and agents
+- Export to CSV and Markdown; outbound observable feeds (EDL blocklists, SIEM lookups, TAXII 2.1); token-gated public RSS re-publishing; shareable public links to articles and copilot conversations
+- REST API covering every feature, plus a zero-dependency CLI (180 tools) for scripting and agents
+
+## What it looks like
+
+**Read, and keep what you read.** Open an article and the entities it mentions are already linked —
+actors, malware, CVEs, techniques — with an extracted summary above the text.
+
+![An open article in the reader, with autolinked entities underlined in the body and an AI-written summary at the top](docs/assets/screenshots/reader-article.png)
+
+**A queue that ranks stories, not outlets.** The Priority Queue folds duplicate coverage of the same
+event into one story card, scored by how much it probably matters to you.
+
+![The Priority Queue showing story cards, each with a score, outlet and article counts, and entity chips](docs/assets/screenshots/priority-queue.png)
+
+**Entity profiles that accumulate.** Every article that mentions an actor feeds its profile: claims
+ranked by evidence, a coverage sparkline, detection gaps, and the reading that matters.
+
+![The Scattered Spider threat actor profile, showing aliases, best-evidenced claims, an AI assessment, and a detection-gap panel](docs/assets/screenshots/entity-profile.png)
+
+**A board of what's actually moving.** Threats ranks recent activity by attention and new tradecraft,
+with a one-click path from a threat to a drafted detection rule.
+
+![The Threats board listing ranked threats with story and outlet counts and draft-detection-rule actions](docs/assets/screenshots/threats-board.png)
+
+**One search box over everything.** Articles and entities in one result set, with a facet rail to
+narrow by type, malware family, actor, or detection rule.
+
+![Search results for "ransomware" showing direct entity matches, grouped threat actors and malware, and a faceted filter rail](docs/assets/screenshots/search.png)
+
+**Detection content as a first-class library.** Rules across nine formats (the six above, plus CrowdStrike QL, Nuclei and Panther), filterable by telemetry you
+actually have, with coverage gaps called out.
+
+![The Rules Library listing Sigma and SPL detection rules with severity, source CVE, and telemetry columns](docs/assets/screenshots/detection-rules.png)
+
+**A dashboard you arrange.** Widgets for triage flow, the morning briefing, under-the-radar items, and
+entity counts, on a grid you lay out yourself.
+
+![The IntelFeed dashboard with overview stat tiles, a morning briefing panel, a triage flow chart, and an under-the-radar list](docs/assets/screenshots/dashboard.png)
 
 ## Who it's for
 
@@ -90,7 +135,7 @@ upstream of one.
 Requirements: Docker and Docker Compose.
 
 ```bash
-git clone <your-repo-url> intelfeed
+git clone https://github.com/a-oneil/IntelFeed.git intelfeed
 cd intelfeed
 cp .env.example .env
 ```
@@ -113,21 +158,32 @@ Open <http://localhost:3001> and register the first account — it becomes the a
 automatically on API startup, and the first boot seeds AI tasks, enrichment sources, and defaults.
 The API is on <http://localhost:8000> (`/docs` for Swagger).
 
-Then seed the reference data the intelligence engine matches against — countries, MITRE ATT&CK,
-vendors and products, threat-actor attribution. Without it entries ingest but nothing links to
-anything:
+Then seed the reference data the intelligence engine matches against — the CWE catalog, vendors
+and products, CPE curation, threat-actor attribution, and a fuller ATT&CK set. Migrations only load
+countries and a baseline of ATT&CK techniques, so without it most entity types never link:
 
 ```bash
 docker compose -f docker-compose.dev.yml exec api python scripts/seed/seed_all.py
 ```
 
+Then give it something to read. The onboarding wizard's first step offers curated **starter feed
+packs** that ship with the build — a 37-feed **Core** set (security news, government and CERT
+advisories, NVD and vendor bulletins, the best vendor research and detection-engineering sources),
+plus optional add-ons per category. Nothing is created until you pick. For a scripted install:
+
+```bash
+docker compose -f docker-compose.dev.yml exec api python scripts/seed/seed_feeds.py --list
+docker compose -f docker-compose.dev.yml exec api python scripts/seed/seed_feeds.py            # core only
+docker compose -f docker-compose.dev.yml exec api python scripts/seed/seed_feeds.py --all       # everything
+```
+
 From there, add feeds under **Settings → Feeds** or import an OPML file, and configure an AI provider
 under **Settings → AI Configuration** if you want summarization and extraction. Nearly everything
-else — thresholds, rate limits, image proxy, backups — is editable at runtime under
-**Settings → System**; the database-backed settings table takes precedence over `.env`, so env vars
-act as defaults.
+else — thresholds, enrichment API keys, rate limits, the image proxy — is editable at runtime under
+**Settings → Engine** (backups and monitoring are under **Settings → System**); the database-backed
+settings table takes precedence over `.env`, so env vars act as defaults.
 
-For a production deployment (EC2, Caddy auto-TLS, DNS, data migration), see [setup.md](setup.md).
+For a production deployment (any Linux host, Caddy auto-TLS, DNS, seeding, data migration), see [setup.md](setup.md).
 
 ## Documentation
 
@@ -155,7 +211,7 @@ in your own environment.
 
 ## Tech stack
 
-Python 3.12 · FastAPI · SQLAlchemy (async) · Alembic · Celery + Redis · PostgreSQL 16 · Meilisearch ·
+Python 3.14 · FastAPI · SQLAlchemy (async) · Alembic · Celery + Redis · PostgreSQL 16 · Meilisearch ·
 React 18 · TypeScript · Vite · TanStack Query + Zustand · Docker Compose · Caddy
 
 ## License

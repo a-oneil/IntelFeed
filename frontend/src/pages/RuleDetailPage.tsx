@@ -44,6 +44,7 @@ import {
 } from "@/components/ruleBench";
 import styles from "./RuleDetailPage.module.css";
 import { AsyncStateLoading } from "@/components/AsyncState";
+import { confirmDialog } from "@/utils/dialog";
 
 const RULE_TYPE_LABELS: Record<string, string> = {
   sigma: "SIGMA",
@@ -543,9 +544,16 @@ export default function RuleDetailPage() {
     toggleStatus.mutate({ ruleId: id, is_draft: !rule.is_draft });
   };
 
-  const handleRollback = (versionId: string) => {
+  const handleRollback = async (versionId: string) => {
     if (!id) return;
-    if (!window.confirm("Rollback to this version? Current content will be saved as a new version.")) return;
+    if (
+      !(await confirmDialog({
+        title: "Roll back",
+        message: "Rollback to this version? Current content will be saved as a new version.",
+        confirmLabel: "Roll back",
+      }))
+    )
+      return;
     rollbackVersion.mutate({ ruleId: id, versionId }, { onSuccess: () => setViewingVersion(null) });
   };
 

@@ -108,3 +108,113 @@
   border-radius: 0 0 var(--r-md) var(--r-md);
   margin-top: 3px;
 }
+
+.chipMark {
+  font-size: var(--fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 0 4px;
+}
+
+/* Presentation for tags the rule will create. */
+.newTags {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.newTag {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px dashed var(--border);
+  border-radius: var(--r-md);
+}
+
+.newTagHead {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.preview {
+  height: 20px;
+}
+
+.newBadge {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+.chipToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.swatches {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.swatch {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: var(--r-full);
+  cursor: pointer;
+}
+
+.swatch[aria-checked="true"] {
+  border-color: var(--text-primary);
+}
+
+.swatch:focus-visible,
+.colorInput:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.colorInput {
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: none;
+  cursor: pointer;
+}
+
+.description {
+  width: 100%;
+  padding: 5px 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--text-primary);
+  font-size: var(--fs-sm);
+  font-family: var(--font-display);
+}
+
+.description:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.newTagsHint {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}

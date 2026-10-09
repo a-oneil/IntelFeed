@@ -56,8 +56,17 @@ import { SinceLastVisitRibbon } from "../SinceLastVisitRibbon";
 import type { PivotResponse } from "@/api/types";
 import { entityDisplayName, entityProfilePath, type EntityProfileConfig, type OverviewPanelKey } from "../entityProfileConfig";
 import { dedupeProducts, extractNvd, type RefLink } from "../cveRefs";
-import { defangObservable } from "@/utils/observables";
+import { capturedByLabel, defangObservable, observableSourcesLabel, reputationLabel, stixBundle, STIX_PATTERNS } from "@/utils/observables";
+import { Chip } from "@/components/primitives";
+import {
+  infrastructureCsvUrl,
+  useEntityInfrastructure,
+  useObservableBacklinks,
+  type ClaimedObservable,
+  type ReportedObservable,
+} from "@/hooks/useInfrastructure";
 import styles from "../entityProfile.module.css";
+import { confirmDialog } from "@/utils/dialog";
 
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
@@ -168,6 +177,9 @@ export function OverviewTab({
   // for the CVE hero this fetches the detail record for the stat row.
   const { data: cweDetail } = useCWE(entityType === "cwe" ? entityId : undefined);
   const { data: observableDetail } = useObservable(entityType === "observable" ? entityId : undefined);
+  const { data: infrastructure } = useEntityInfrastructure(entityType, entityId);
+  const [infraKind, setInfraKind] = useState<string | null>(null);
+  const { data: backlinks } = useObservableBacklinks(entityType === "observable" ? entityId : undefined);
   const updateObservable = useUpdateObservable();
   const denyObservable = useDenyObservable();
   const isAdmin = useAuthStore((s) => s.user?.role === "admin");
@@ -382,13 +394,180 @@ export function OverviewTab({
           </Panel>
         );
       }
+      case "infrastructure": {
+        const infra = infrastructure;
+        if (!infra) return null;
+        const claimed = infra.claimed;
+        const reported = infra.reported_alongside;
+        if (claimed.length === 0 && reported.length === 0) {
+          const staged = infra.counts?.staged_candidate_articles ?? 0;
+          return (
+            <Panel key={key} title="Infrastructure">
+              <div className={styles.metaLabel} style={{ textTransform: "none", letterSpacing: 0 }}>
+                No infrastructure captured yet. IPs, domains and hashes found in{" "}
+                {entityType === "campaign" ? "this campaign's articles" : "articles about it"} will appear here —
+                ones attributed to it first, then ones merely reported alongside it.
+                {staged > 0 && (
+                  <>
+                    {" "}
+                    {staged === 1 ? "One article has" : `${staged} articles have`} indicators waiting for review —{" "}
+                    <Link to="/workbench/observables?queue=1">open the candidates queue</Link>.
+                  </>
+                )}
+              </div>
+            </Panel>
+          );
+        }
+        const allValues = [...claimed, ...reported];
+        const copyAll = async () => {
+          try {
+            await navigator.clipboard.writeText(allValues.map((r) => defangObservable(r.kind, r.value)).join("\n"));
+            toast.success(`Copied ${allValues.length} defanged values`);
+          } catch {
+            toast.error("Clipboard unavailable");
+          }
+        };
+        const exportCsv = async () => {
+          try {
+            const { data } = await api.get(infrastructureCsvUrl(entityType, entityId), { responseType: "blob" });
+            const url = URL.createObjectURL(data as Blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `${entityType}-infrastructure.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+          } catch {
+            toast.error("Export failed");
+          }
+        };
+        const byKind = infra.counts?.by_kind ?? {};
+        const kindKeys = Object.keys(byKind).sort((a, b) => byKind[b] - byKind[a]);
+        const visibleClaimed = infraKind ? claimed.filter((r) => r.kind === infraKind) : claimed;
+        const visibleReported = infraKind ? reported.filter((r) => r.kind === infraKind) : reported;
+        const exportStix = () => {
+          const items = [...visibleClaimed, ...visibleReported].filter((r) => STIX_PATTERNS[r.kind]);
+          const blob = new Blob([stixBundle(items)], { type: "application/json" });
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = `${entityType}-infrastructure.stix.json`;
+          a.click();
+          URL.revokeObjectURL(a.href);
+        };
+        const trust = (c: ClaimedObservable) =>
+          c.relationship_confidence === "confirmed" ? "corroborated" : c.relationship_confidence === "probable" ? "reported" : "signal";
+        const renderRow = (r: ClaimedObservable | ReportedObservable, meta: string) => (
+          <div key={r.id} className={styles.affRow}>
+            <Link className={styles.affProdLink} to={entityProfilePath("observable", r.id)} style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
+              {defangObservable(r.kind, r.value)}
+            </Link>
+            <span className={styles.metaLabel}>
+              {[r.kind.replace(/_/g, " "), r.role?.replace(/_/g, " "), meta, r.infra_tag ? `${r.infra_tag} · dual-use` : null]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
+          </div>
+        );
+        return (
+          <Panel key={key} title={`Infrastructure · ${allValues.length}`}>
+            {kindKeys.length > 1 && (
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 8 }}>
+                {kindKeys.map((k) => (
+                  <Chip
+                    key={k}
+                    tone={infraKind === k ? "toned" : "default"}
+                    tint={infraKind === k ? "var(--entity-observable)" : undefined}
+                    aria-pressed={infraKind === k}
+                    onClick={() => setInfraKind(infraKind === k ? null : k)}
+                  >
+                    {k.replace(/_/g, " ")} · {byKind[k]}
+                  </Chip>
+                ))}
+              </div>
+            )}
+            {claimed.length > 0 && (
+              <div className={styles.affGroup}>
+                <div className={styles.affGroupHead}>
+                  <span>Claimed</span>
+                  <span className={styles.metaLabel}>attribution edges with evidence</span>
+                </div>
+                {visibleClaimed.map((c) => renderRow(c, `${c.relationship_type.replace(/_/g, " ")} · ${trust(c)}${c.evidence_count > 1 ? ` ×${c.evidence_count}` : ""}`))}
+              </div>
+            )}
+            {reported.length > 0 && (
+              <div className={styles.affGroup}>
+                <div className={styles.affGroupHead}>
+                  <span>Reported alongside</span>
+                  <span className={styles.metaLabel}>same articles, not yet an attribution claim</span>
+                </div>
+                {visibleReported.map((r) => renderRow(r, `${r.article_count} article${r.article_count === 1 ? "" : "s"}`))}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
+              <button className={styles.railBtn} onClick={copyAll}>Copy all defanged</button>
+              <button className={styles.railBtn} onClick={exportCsv}>Export CSV</button>
+              <button className={styles.railBtn} onClick={exportStix} title="STIX 2.1 bundle of the patternable values">Export STIX</button>
+              <Link
+                className={styles.railBtn}
+                to={`/workbench/observables?linked_entity=${entityType}:${entityId}`}
+                title="Open the observables browser filtered to this entity's infrastructure"
+              >
+                Open in observables browser
+              </Link>
+            </div>
+          </Panel>
+        );
+      }
+      case "observable_backlinks": {
+        const b = backlinks;
+        if (!b || (b.claimed_by.length === 0 && b.reported_with.length === 0)) return null;
+        const row = (x: { entity_type: string; entity_id: string; name: string | null }, meta: string) => (
+          <div key={`${x.entity_type}-${x.entity_id}`} className={styles.affRow}>
+            <Link className={styles.affProdLink} to={entityProfilePath(x.entity_type as EntityType, x.entity_id)}>
+              {x.name ?? x.entity_id}
+            </Link>
+            <span className={styles.metaLabel}>{meta}</span>
+          </div>
+        );
+        return (
+          <Panel key={key} title="Attribution">
+            {b.claimed_by.length > 0 && (
+              <div className={styles.affGroup}>
+                <div className={styles.affGroupHead}>
+                  <span>Claimed by</span>
+                  <span className={styles.metaLabel}>evidence-backed edges</span>
+                </div>
+                {b.claimed_by.map((c) =>
+                  row(c, `${c.entity_type.replace(/_/g, " ")} · ${(c.relationship_type ?? "").replace(/_/g, " ")} · ${c.relationship_confidence}`),
+                )}
+              </div>
+            )}
+            {b.reported_with.length > 0 && (
+              <div className={styles.affGroup}>
+                <div className={styles.affGroupHead}>
+                  <span>Reported with</span>
+                  <span className={styles.metaLabel}>named in the same articles</span>
+                </div>
+                {b.reported_with.map((r) =>
+                  row(r, `${r.entity_type.replace(/_/g, " ")} · ${r.article_count} article${r.article_count === 1 ? "" : "s"}`),
+                )}
+              </div>
+            )}
+          </Panel>
+        );
+      }
       case "observable_provenance": {
         const o = observableDetail;
         if (!o) return null;
         const pct = (v: number) => `${Math.round(v * 100)}%`;
         return (
           <Panel key={key} title="Provenance & confidence">
-            {o.created_via && <Row k="Captured by" v={o.created_via.replace(/_/g, " ")} />}
+            {o.created_via && <Row k="Captured by" v={capturedByLabel(o.created_via)} />}
+            {o.reputation && (
+              <Row
+                k="Reputation"
+                v={`${reputationLabel(o.reputation)}${o.reputation.enriched_at ? ` (enriched ${String(o.reputation.enriched_at).slice(0, 10)})` : ""}`}
+              />
+            )}
             {o.infra_tag && (
               <Row
                 k="Infrastructure"
@@ -415,7 +594,20 @@ export function OverviewTab({
             {o.expires_at && !o.confidence_pinned && (
               <Row k="Expires" v={`~${new Date(o.expires_at).toLocaleDateString()} unless re-sighted`} />
             )}
-            <Row k="Sightings" v={String(o.sighting_count)} />
+            <Row
+              k="Sources"
+              v={
+                o.report_count || o.feed_source_count
+                  ? `${observableSourcesLabel(o)} (${o.sighting_count} raw sightings)`
+                  : `${o.sighting_count} raw sightings`
+              }
+            />
+            {!o.report_count && o.feed_source_count > 0 && (
+              <Row
+                k="Reporting"
+                v="None — this value is listed on an indicator feed; no article has reported it yet, so there is nothing to attribute"
+              />
+            )}
             {["ipv4", "ipv6", "domain", "url", "email"].includes(o.kind) && (
               <Row k="Defanged" v={<code style={{ fontSize: 11 }}>{defangObservable(o.kind, o.value)}</code>} />
             )}
@@ -458,8 +650,16 @@ export function OverviewTab({
                 <button
                   className={styles.railBtn}
                   disabled={denyObservable.isPending}
-                  onClick={() => {
-                    if (confirm(`Never capture or export ${o.value} again?`)) denyObservable.mutate(o.id);
+                  onClick={async () => {
+                    if (
+                      await confirmDialog({
+                        title: "Never capture this value",
+                        message: `Never capture or export ${o.value} again?`,
+                        confirmLabel: "Never capture",
+                        destructive: true,
+                      })
+                    )
+                      denyObservable.mutate(o.id);
                   }}
                   title="Tombstone: never capture or export this value"
                 >

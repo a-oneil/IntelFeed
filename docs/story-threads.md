@@ -1,5 +1,7 @@
 # Story Threads
 
+For operators and contributors: how threads are built, how the spine is written, where they surface, and the settings that tune them. If you only want to *use* threads, read the user-guide page [Story threads](guide/story-threads.md).
+
 *Last verified: 2026-09-13*
 
 Search is keyword-only, so one story arrives twenty-three times. Before this
@@ -226,7 +228,8 @@ Google News anchor wrapped around a 400-character tracking token — so
     actor, malware or CVE cannot key an entity row at all, which is why the
     board has never been able to show it. `build_story_rows` gives it one, keyed
     by thread slug, with `is_story` set and `collect` as its action, and opening
-    it goes to `/priority-queue?thread=<slug>`. It has to carry something
+    it opens the thread (in the Workbench's docked reader when opened from the board;
+    `/priority-queue?thread=<slug>` is its shareable address). It has to carry something
     extractable — a technique, an observable, or a product in your stack — or a
     funding round and a webinar qualify for the same reason a zero-day does.
     Its unit count is its beats, and its tradecraft term is its technique count

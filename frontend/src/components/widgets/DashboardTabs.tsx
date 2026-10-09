@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Dashboard } from "@/api/types";
 import styles from "./DashboardTabs.module.css";
+import { confirmDialog } from "@/utils/dialog";
 
 interface Props {
   /** Board summaries, already ordered. Names have the storage prefix stripped. */
@@ -184,9 +185,16 @@ export default function DashboardTabs({
                   className={`${styles.tabAction} ${styles.tabDelete}`}
                   title="Delete dashboard"
                   aria-label={`Delete ${board.name}`}
-                  onClick={(e) => {
+                  onClick={async (e) => {
                     e.stopPropagation();
-                    if (window.confirm(`Delete dashboard "${board.name}" and its widgets?`)) {
+                    if (
+                      await confirmDialog({
+                        title: "Delete dashboard",
+                        message: `Delete dashboard "${board.name}" and its widgets?`,
+                        confirmLabel: "Delete",
+                        destructive: true,
+                      })
+                    ) {
                       onDelete(board.id);
                     }
                   }}

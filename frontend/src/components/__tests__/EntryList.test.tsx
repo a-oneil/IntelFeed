@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import type { Entry, CursorPaginatedResponse } from "@/api/types";
@@ -45,7 +45,7 @@ vi.mock("@/components/IntelLevelBadge", () => ({
   IntelLevelBadge: () => null,
 }));
 
-vi.mock("@/components/EditFeedModal", () => ({
+vi.mock("@/components/feedModal/EditFeedModal", () => ({
   EditFeedModal: () => null,
 }));
 
@@ -103,10 +103,12 @@ vi.mock("@/stores/uiStore", () => ({
   ),
 }));
 
-import { useEntries } from "@/hooks/useEntries";
+import { useEntries, usePriorityQueue } from "@/hooks/useEntries";
 import { EntryList } from "@/components/EntryList";
+import type { PriorityQueueRow, StoryThread } from "@/api/types";
 
 const mockUseEntries = vi.mocked(useEntries);
+const mockUsePriorityQueue = vi.mocked(usePriorityQueue);
 
 function createQueryClient() {
   return new QueryClient({
@@ -114,12 +116,12 @@ function createQueryClient() {
   });
 }
 
-function renderEntryList() {
+function renderEntryList(props: Parameters<typeof EntryList>[0] = {}) {
   const queryClient = createQueryClient();
   return render(
     <MemoryRouter>
       <QueryClientProvider client={queryClient}>
-        <EntryList />
+        <EntryList {...props} />
       </QueryClientProvider>
     </MemoryRouter>
   );
@@ -216,6 +218,33 @@ describe("EntryList", () => {
     expect(screen.getByText("No entries to display")).toBeInTheDocument();
   });
 
+  it("lets Enter follow a focused OUTSIDE link, but leaves links within the app exactly as before", () => {
+    mockUseEntries.mockReturnValue({
+      data: makeInfiniteData([]),
+      isLoading: false,
+      fetchNextPage: vi.fn(),
+      hasNextPage: false,
+      isFetchingNextPage: false,
+    } as unknown as ReturnType<typeof useEntries>);
+
+    renderEntryList();
+    const outside = document.createElement("a");
+    outside.href = "https://evil.example/x";
+    const inside = document.createElement("a");
+    inside.href = "/settings";
+    document.body.append(outside, inside);
+    try {
+      // fireEvent returns false when the keypress was default-prevented (i.e. the
+      // list's Enter shortcut took it). The outside link is exempt; the inside
+      // link keeps its previous behaviour.
+      expect(fireEvent.keyDown(outside, { key: "Enter" })).toBe(true);
+      expect(fireEvent.keyDown(inside, { key: "Enter" })).toBe(false);
+    } finally {
+      outside.remove();
+      inside.remove();
+    }
+  });
+
   it("teaches how a zero-count folder earns a count instead of saying nothing", () => {
     mockUseEntries.mockReturnValue({
       data: makeInfiniteData([]),
@@ -271,6 +300,22 @@ describe("EntryList", () => {
     delete mockUiState.showUnreadOnly;
   });
 
+  it("renders magazine cards for the entries it is given", () => {
+    mockUseEntries.mockReturnValue({
+      data: makeInfiniteData(mockEntries),
+      isLoading: false,
+      fetchNextPage: vi.fn(),
+      hasNextPage: false,
+      isFetchingNextPage: false,
+    } as unknown as ReturnType<typeof useEntries>);
+
+    mockUiState.viewMode = "magazine";
+    renderEntryList();
+
+    expect(screen.getByText("Critical CVE-2026-1234 in OpenSSL")).toBeInTheDocument();
+    delete mockUiState.viewMode;
+  });
+
   it("prepares entries for virtualized rendering", () => {
     mockUseEntries.mockReturnValue({
       data: makeInfiniteData(mockEntries),
@@ -284,5 +329,118 @@ describe("EntryList", () => {
     // This test verifies the component mounts without errors when entries are provided
     const { container } = renderEntryList();
     expect(container.firstChild).toBeTruthy();
+  });
+});
+
+function storyThread(overrides: Partial<StoryThread> = {}): StoryThread {
+  return {
+    id: "t1",
+    slug: "bluemoon-exploit-kit",
+    title: "BlueMoon exploit kit",
+    summary: null,
+    status: "open",
+    entry_count: 23,
+    source_count: 11,
+    echo_count: 0,
+    first_seen: null,
+    last_seen: null,
+    peak_at: null,
+    key_entities: [],
+    unread_count: 6,
+    new_since_opened: 6,
+    top_score: 7.4,
+    top_entry_id: "entry-1",
+    entry_ids: ["entry-9"],
+    narrated_at: null,
+    ...overrides,
+  };
+}
+
+function makeQueueData(items: PriorityQueueRow[]) {
+  return {
+    pages: [{ items, next_cursor: null, has_more: false, radar_threshold: null }],
+    pageParams: [undefined],
+  };
+}
+
+function mockQueue(items: PriorityQueueRow[]) {
+  mockUsePriorityQueue.mockReturnValue({
+    data: makeQueueData(items),
+    isLoading: false,
+    fetchNextPage: vi.fn(),
+    hasNextPage: false,
+    isFetchingNextPage: false,
+  } as unknown as ReturnType<typeof usePriorityQueue>);
+}
+
+/**
+ * The Priority Queue withholds every article a thread absorbed, so a magazine
+ * grid built from the entry stream alone loses the story *and* its coverage —
+ * a 23-article thread contributing nothing at all, with no gap to notice.
+ */
+describe("EntryList magazine view, Priority Queue", () => {
+  const magazineQueue = { sortOverride: "radar" as const, withThreads: true, priorityMode: true };
+
+  afterEach(() => {
+    delete mockUiState.viewMode;
+    delete mockUiState.setSelectedThread;
+  });
+
+  it("gives a story thread a card of its own beside the article cards", () => {
+    mockQueue([
+      {
+        kind: "thread",
+        score: 7.4,
+        entry: null,
+        thread: storyThread(),
+        absorbed_entry_ids: ["entry-9"],
+      },
+      { kind: "entry", score: 6, entry: mockEntries[0], thread: null, absorbed_entry_ids: [] },
+    ]);
+    mockUiState.viewMode = "magazine";
+
+    renderEntryList(magazineQueue);
+
+    expect(screen.getByText("BlueMoon exploit kit")).toBeInTheDocument();
+    expect(screen.getByText("11 outlets · 23 articles · 6 new")).toBeInTheDocument();
+    expect(screen.getByText("◆ 7.4")).toBeInTheDocument();
+    expect(screen.getByText("Critical CVE-2026-1234 in OpenSSL")).toBeInTheDocument();
+  });
+
+  it("opens the story when the card is clicked", () => {
+    const setSelectedThread = vi.fn();
+    mockQueue([
+      {
+        kind: "thread",
+        score: 7.4,
+        entry: null,
+        thread: storyThread(),
+        absorbed_entry_ids: [],
+      },
+    ]);
+    mockUiState.viewMode = "magazine";
+    mockUiState.setSelectedThread = setSelectedThread;
+
+    renderEntryList(magazineQueue);
+    fireEvent.click(screen.getByText("BlueMoon exploit kit"));
+
+    expect(setSelectedThread).toHaveBeenCalledWith("bluemoon-exploit-kit");
+  });
+
+  it("does not claim to be empty when the queue is all threads", () => {
+    mockQueue([
+      {
+        kind: "thread",
+        score: 7.4,
+        entry: null,
+        thread: storyThread(),
+        absorbed_entry_ids: [],
+      },
+    ]);
+    mockUiState.viewMode = "magazine";
+
+    renderEntryList(magazineQueue);
+
+    expect(screen.queryByText("No entries to display")).not.toBeInTheDocument();
   });
 });

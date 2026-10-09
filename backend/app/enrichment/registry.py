@@ -136,7 +136,10 @@ DEFAULT_SOURCES = [
     {
         "source_type": "shodan",
         "display_name": "Shodan InternetDB",
-        "default_trigger_mode": "manual",
+        # Keyless and cheap: run automatically for freshly judged IPs. (Existing
+        # installs keep their row's trigger_mode — flip it under Settings →
+        # Engine → Enrichment.)
+        "default_trigger_mode": "auto",
         "requires_api_key": False,
         "default_rate_limit": {"requests_per_period": 30, "period_seconds": 60},
         "default_min_confidence_threshold": "medium",

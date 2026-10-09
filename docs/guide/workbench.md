@@ -6,6 +6,10 @@ today.
 
 The nav opens with **Dashboard** and **Reports**, then groups into three blocks: Detection, Entities, Intelligence.
 
+![The Threats board listing ranked threats with story and outlet counts and draft-detection-rule actions](../assets/screenshots/threats-board.png)
+
+*The Threats board ranks recent activity by attention and new tradecraft.*
+
 ## Dashboard
 
 The workbench landing page, and a customisable widget board.
@@ -57,7 +61,9 @@ than just valid.
 **Threats** — the board covering what's active right now, ranked by story rather
 than by outlet, so ten articles about one campaign are one row. Four tabs: All,
 Actors, Malware and Vulnerabilities. The Vulnerabilities tab ranks CVEs by
-exploitation and is where vendor and product exposure lives.
+exploitation and is where vendor and product exposure lives. Each row's button
+names the job — draft a rule, extend one, adopt one — and the drawer shows its
+working; see [The Threats board](threats-board.md).
 
 ## Entities
 
@@ -79,6 +85,11 @@ the hover tooltips read from.
 
 **Ransomware** — leak-site victim tracking as structured data rather than as
 articles.
+
+**Regions** — a card per region with its country count and article volume, a
+quick read on where coverage is concentrated. It isn't in the Workbench nav: open
+it from the command palette (**Regions & countries**), and open a single country
+from the Countries browser under Entities.
 
 **Requirements** — your standing intelligence requirements. Worth doing
 properly: the *PIR match* signal in the [Priority Queue](priority-queue.md)
@@ -104,3 +115,7 @@ extraction producing junk, enrichment rate-limited — and where enrichment
 sources and their API keys are configured. Day to day, most users never open it.
 Every setting it exposes is catalogued in
 [engine-settings.md](../engine-settings.md).
+
+![The Glossary listing security terms with category and maturity columns](../assets/screenshots/glossary.png)
+
+*The Glossary maps terms to the articles that use them, so a term is a starting point for a search.*

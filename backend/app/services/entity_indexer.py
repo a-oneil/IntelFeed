@@ -13,6 +13,7 @@ from app.models.malware_family import EntryMalware, MalwareFamily
 from app.models.mitigation import Mitigation
 from app.models.observable import Observable
 from app.models.product import EntryProduct, Product
+from app.models.sector import Sector
 from app.models.threat_actor import EntryThreatActor, ThreatActor
 from app.models.tool import EntryTool, Tool
 from app.models.ttp import TTP
@@ -64,6 +65,8 @@ def _observable_to_doc(obs) -> dict:
         "infra_tag": obs.infra_tag or "",
         "current_confidence": float(obs.current_confidence or 0.0),
         "sighting_count": obs.sighting_count or 0,
+        "report_count": obs.report_count or 0,
+        "feed_source_count": obs.feed_source_count or 0,
         "article_count": obs.article_count or 0,
         "first_seen_at": obs.first_seen_at.isoformat() if obs.first_seen_at else "",
         "last_seen_at": obs.last_seen_at.isoformat() if obs.last_seen_at else "",
@@ -122,6 +125,19 @@ def _country_to_doc(country: Country) -> dict:
         "first_seen_at": country.first_seen_at.isoformat() if country.first_seen_at else "",
         "last_seen_at": country.last_seen_at.isoformat() if country.last_seen_at else "",
         "entity_type": "country",
+    }
+
+
+def _sector_to_doc(sector: Sector) -> dict:
+    return {
+        "id": str(sector.id),
+        "name": sector.name,
+        "slug": sector.slug,
+        "aliases": ", ".join(sector.aliases) if sector.aliases else "",
+        "article_count": sector.article_count or 0,
+        "first_seen_at": sector.first_seen_at.isoformat() if sector.first_seen_at else "",
+        "last_seen_at": sector.last_seen_at.isoformat() if sector.last_seen_at else "",
+        "entity_type": "sector",
     }
 
 
@@ -320,6 +336,7 @@ async def sync_all_entities(db: AsyncSession) -> dict[str, int]:
         ),
         "malware": await _sync_entity_type(db, MalwareFamily, "entities_malware", _malware_to_doc, "malware families"),
         "country": await _sync_entity_type(db, Country, "entities_country", _country_to_doc, "countries"),
+        "sector": await _sync_entity_type(db, Sector, "entities_sector", _sector_to_doc, "sectors"),
         "mitigation": await _sync_entity_type(db, Mitigation, "entities_mitigation", _mitigation_to_doc, "mitigations"),
         "tool": await _sync_entity_type(db, Tool, "entities_tool", _tool_to_doc, "tools"),
         "observable": await _sync_entity_type(db, Observable, "entities_observable", _observable_to_doc, "observables"),
@@ -337,6 +354,7 @@ _INDEX_BY_TYPE: dict[str, tuple[str, type, object]] = {
     "threat_actor": ("entities_threat_actor", ThreatActor, _actor_to_doc),
     "malware": ("entities_malware", MalwareFamily, _malware_to_doc),
     "country": ("entities_country", Country, _country_to_doc),
+    "sector": ("entities_sector", Sector, _sector_to_doc),
     "mitigation": ("entities_mitigation", Mitigation, _mitigation_to_doc),
     "tool": ("entities_tool", Tool, _tool_to_doc),
     "observable": ("entities_observable", Observable, _observable_to_doc),
@@ -395,6 +413,7 @@ _DELETE_INDEX_BY_TYPE = {
     "threat_actor": "entities_threat_actor",
     "malware": "entities_malware",
     "country": "entities_country",
+    "sector": "entities_sector",
     "mitigation": "entities_mitigation",
     "tool": "entities_tool",
     "observable": "entities_observable",

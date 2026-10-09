@@ -42,6 +42,7 @@ async def _enrich_names(db: AsyncSession, relationships: list[EntityRelationship
     from app.models.malware_family import MalwareFamily
     from app.models.mitigation import Mitigation
     from app.models.product import Product
+    from app.models.sector import Sector
     from app.models.threat_actor import ThreatActor
     from app.models.tool import Tool
     from app.models.ttp import TTP
@@ -54,6 +55,7 @@ async def _enrich_names(db: AsyncSession, relationships: list[EntityRelationship
         "malware": (MalwareFamily, MalwareFamily.name),
         "campaign": (Campaign, Campaign.name),
         "country": (Country, Country.name),
+        "sector": (Sector, Sector.name),
         "mitigation": (Mitigation, Mitigation.name),
         "tool": (Tool, Tool.name),
         "vendor": (Vendor, Vendor.name),

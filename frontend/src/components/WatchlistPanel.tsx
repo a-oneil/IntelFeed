@@ -18,6 +18,7 @@ const ENTITY_TYPE_LABEL: Record<string, string> = {
   vendor: "Vendor",
   product: "Product",
   country: "Country",
+  sector: "Sector",
 };
 
 function isKnownEntityType(t: string): t is EntityType {

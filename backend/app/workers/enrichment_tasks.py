@@ -623,9 +623,11 @@ async def _run_misp_galaxy_sync():
         # the blanks on actors we already track — never overwrite a value an
         # analyst or an earlier source already set.
         from app import entity_types
-        from app.intelligence.actor_attributes import coerce_motivation, coerce_sectors, resolve_country_name
+        from app.intelligence.actor_attributes import coerce_motivation, resolve_country_name
+        from app.intelligence.sectors import normalize_sectors, sector_uuid
         from app.models.threat_actor import ThreatActor
         from app.services.claim_provenance import record_claims
+        from app.services.sector_links import add_target_sector, list_target_sectors, refresh_targeted_sectors_cache
 
         synonyms_by_name = dict(items)
         filled = {"country": 0, "sectors": 0, "motivation": 0, "description": 0, "matched": 0}
@@ -648,11 +650,15 @@ async def _run_misp_galaxy_sync():
                     filled["country"] += 1
                     changed = True
 
-            if not actor.targeted_sectors and attrs.get("sectors"):
-                sectors = coerce_sectors(attrs["sectors"])
-                if sectors:
-                    actor.targeted_sectors = sectors
-                    asserted["targeted_sectors"] = sectors
+            if attrs.get("sectors") and not await list_target_sectors(db, "threat_actor", actor.id):
+                # Fill-if-empty against the junction, not the cache column; the
+                # rows land as `enrichment` claims the nightly rollup never prunes.
+                slugs = normalize_sectors(attrs["sectors"])
+                if slugs:
+                    for slug in slugs:
+                        await add_target_sector(db, "threat_actor", actor.id, sector_uuid(slug), "enrichment")
+                    labels = await refresh_targeted_sectors_cache(db, "threat_actor", actor)
+                    asserted["targeted_sectors"] = labels
                     filled["sectors"] += 1
                     changed = True
 

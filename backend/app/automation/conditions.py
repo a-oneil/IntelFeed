@@ -15,6 +15,7 @@ from app.models.entry_state import UserEntryState
 from app.models.feed import Feed
 from app.models.note import Note
 from app.models.tag import EntryTag, Tag
+from app.services.entry_tags import visible_to
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +69,7 @@ async def _evaluate_single(db: AsyncSession, entry: Entry, condition: dict, user
             case "author_matches":
                 return _eval_author_matches(entry, config)
             case "tag_matches":
-                return await _eval_tag_matches(db, entry, config)
+                return await _eval_tag_matches(db, entry, config, user_id)
             case "feed_type_matches":
                 return await _eval_feed_type_matches(db, entry, config)
             case "is_read":
@@ -85,6 +86,8 @@ async def _evaluate_single(db: AsyncSession, entry: Entry, condition: dict, user
                 return await _eval_has_signal(db, entry, config)
             case "entity_watchlisted":
                 return await _eval_entity_watchlisted(db, entry, user_id)
+            case "has_observable":
+                return await _eval_has_observable(db, entry, config)
             case _:
                 logger.warning(f"Unknown condition type: {cond_type}")
                 return False
@@ -153,14 +156,20 @@ def _eval_author_matches(entry: Entry, config: dict) -> bool:
     return any(a.lower() in entry.author.lower() for a in authors)
 
 
-async def _eval_tag_matches(db: AsyncSession, entry: Entry, config: dict) -> bool:
-    """Check if entry has any of the specified tags."""
+async def _eval_tag_matches(db: AsyncSession, entry: Entry, config: dict, user_id=None) -> bool:
+    """Check if entry has any of the specified tags.
+
+    Sees what the rule's owner sees: their own tag assignments plus global
+    tags, so a tag one of their rules applies can trigger another of their rules.
+    """
     tag_names = config.get("tags", [])
     if not tag_names:
         return True
 
     result = await db.execute(
-        select(Tag.name).join(EntryTag, EntryTag.tag_id == Tag.id).where(EntryTag.entry_id == entry.id)
+        select(Tag.name)
+        .join(EntryTag, EntryTag.tag_id == Tag.id)
+        .where(EntryTag.entry_id == entry.id, visible_to(user_id))
     )
     entry_tags = {row[0].lower() for row in result.all()}
     return any(t.lower() in entry_tags for t in tag_names)
@@ -270,6 +279,48 @@ async def _eval_has_signal(db: AsyncSession, entry: Entry, config: dict) -> bool
     query = select(EntrySignal.id).where(EntrySignal.entry_id == entry.id)
     if types:
         query = query.where(EntrySignal.signal_type.in_(types))
+    result = await db.execute(query.limit(1))
+    return result.scalar_one_or_none() is not None
+
+
+async def _eval_has_observable(db: AsyncSession, entry: Entry, config: dict) -> bool:
+    """Entry carries at least one captured observable matching the filters.
+
+    Config: ``kinds`` / ``roles`` (lists or comma strings, blank = any),
+    ``min_confidence`` (current, post-decay), ``exclude_infra_tagged``
+    (default true — a VPN exit is context, not an alert), ``sources``
+    (sighting doors; default excludes the indicator-feed door so a rule
+    on "C2 captured" fires on reporting, not on a blocklist mirror).
+    """
+    from app.models.observable import EntryObservable, Observable
+
+    def _as_list(v) -> list[str]:
+        if not v:
+            return []
+        if isinstance(v, str):
+            return [x.strip() for x in v.split(",") if x.strip()]
+        return [str(x).strip() for x in v if str(x).strip()]
+
+    kinds = _as_list(config.get("kinds"))
+    roles = _as_list(config.get("roles"))
+    sources = _as_list(config.get("sources")) or ["ai", "ttp", "manual", "publisher", "sighting"]
+    exclude_tagged = str(config.get("exclude_infra_tagged", "true")).lower() not in ("false", "0", "no")
+    query = (
+        select(Observable.id)
+        .join(EntryObservable, EntryObservable.observable_id == Observable.id)
+        .where(EntryObservable.entry_id == entry.id, Observable.is_denied.is_(False))
+    )
+    if sources:
+        query = query.where(EntryObservable.source.in_(sources))
+    if kinds:
+        query = query.where(Observable.kind.in_(kinds))
+    if roles:
+        query = query.where(Observable.role.in_(roles))
+    if exclude_tagged:
+        query = query.where(Observable.infra_tag.is_(None))
+    min_conf = config.get("min_confidence")
+    if min_conf not in (None, ""):
+        query = query.where(Observable.current_confidence >= float(min_conf))
     result = await db.execute(query.limit(1))
     return result.scalar_one_or_none() is not None
 

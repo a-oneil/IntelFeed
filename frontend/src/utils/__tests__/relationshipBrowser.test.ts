@@ -360,3 +360,14 @@ describe("buildStoryMap", () => {
     expect(clusterHeading(clusters[0])).toContain("Trezor");
   });
 });
+
+describe("observable endpoints (issue #1)", () => {
+  it("offers the matrix verbs for actor/malware/tool/campaign → observable and reads controls", () => {
+    expect(allowedVerbsForPair("threat_actor", "observable")).toEqual(["uses", "communicates_with", "controls"]);
+    expect(allowedVerbsForPair("malware", "observable")).toEqual(["uses", "communicates_with"]);
+    expect(allowedVerbsForPair("campaign", "observable")).toEqual(["uses"]);
+    expect(allowedVerbsForPair("cve", "observable")).toEqual([]);
+    expect(verbChipLabel(item({ relationship_type: "controls", relationship_direction: "outbound" }))).toBe("controls");
+    expect(verbChipLabel(item({ relationship_type: "controls", relationship_direction: "inbound" }))).toBe("controlled by");
+  });
+});

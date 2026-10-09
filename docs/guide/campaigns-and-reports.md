@@ -3,6 +3,10 @@
 A **campaign** is how you hold an investigation together while it's happening. A
 **report** is how you hand it to someone else when it's done.
 
+![The Reports page with template starter cards above a table of drafted and published reports](../assets/screenshots/reports.png)
+
+*Reports start from a template and carry a TLP marking and version history.*
+
 ## Campaigns
 
 A campaign binds articles, entities, detection rules and notes under one name —

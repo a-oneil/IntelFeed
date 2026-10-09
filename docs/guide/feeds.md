@@ -6,6 +6,10 @@ deliberately rather than importing everything you've ever subscribed to.
 
 Adding and editing feeds is admin-only on most instances.
 
+![The Engine feed health view showing 307 feeds split into healthy, stale and erroring, with a table of erroring feeds](../assets/screenshots/feeds.png)
+
+*Feed health lives in the Engine console: what is healthy, what is stale, and what is erroring.*
+
 ## Adding one
 
 **+ Add Feed** in the sidebar. The modal has five tabs.

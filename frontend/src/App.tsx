@@ -9,7 +9,7 @@ import { useSSE } from "@/hooks/useSSE";
 import { useTableLayoutSync } from "@/hooks/useTableLayoutSync";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AudioPlayer } from "@/components/AudioPlayer";
-import { OnboardingWizard } from "@/components/OnboardingWizard";
+import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard";
 import { ReportWizardModal } from "@/components/ReportWizardModal";
 import { SendToReportModal } from "@/components/SendToReportModal";
 import { GlobalModals } from "@/components/GlobalModals";
@@ -156,7 +156,14 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuth = useAuthStore((s) => s.isAuthenticated());
   const user = useAuthStore((s) => s.user);
   if (!isAuth) return <Navigate to="/login" replace />;
-  const showOnboarding = !!user && !user.settings?.onboarding_completed;
+  // Auto-open until they finish it — but a close counts too, otherwise every
+  // hard refresh reopens the tour over a user who already dismissed it. Both
+  // keys are cleared from Settings → Account.
+  const onboarding = user?.settings as
+    | { onboarding_completed?: boolean; onboarding_deferred_at?: string | null }
+    | undefined;
+  const showOnboarding =
+    !!user && !onboarding?.onboarding_completed && !onboarding?.onboarding_deferred_at;
   return (
     <>
       {children}
@@ -253,6 +260,7 @@ export default function App() {
               <Route path="cwe/:id" element={<EntityProfilePage slug="cwe" />} />
               <Route path="ttp/:id" element={<EntityProfilePage slug="ttp" />} />
               <Route path="country/:id" element={<EntityProfilePage slug="country" />} />
+              <Route path="sector/:id" element={<EntityProfilePage slug="sector" />} />
               <Route path="tool/:id" element={<EntityProfilePage slug="tool" />} />
               <Route path="mitigation/:id" element={<EntityProfilePage slug="mitigation" />} />
               <Route path="observable/:id" element={<EntityProfilePage slug="observable" />} />

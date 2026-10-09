@@ -4,6 +4,7 @@
  * describe the same consequences.
  */
 import { toast } from "sonner";
+import { confirmDialog, promptDialog } from "@/utils/dialog";
 import { getEntityLabel } from "@/utils/entityTheme";
 import type { EntityType } from "@/stores/intelStore";
 
@@ -44,15 +45,24 @@ interface RunConvertArgs {
   onConverted?: () => void;
 }
 
-/** Prompt, confirm, then convert. No-op if the analyst cancels either prompt. */
-export function runEntityConvert({ entityType, entityId, target, convert, onConverted }: RunConvertArgs): void {
+/** Prompt, confirm, then convert. No-op if the analyst cancels either dialog. */
+export async function runEntityConvert({
+  entityType,
+  entityId,
+  target,
+  convert,
+  onConverted,
+}: RunConvertArgs): Promise<void> {
   let targetIdentifier: string | undefined;
   if (target.needsIdentifier) {
-    const promptLabel =
-      target.needsIdentifier === "cve"
+    const isCve = target.needsIdentifier === "cve";
+    const answer = await promptDialog({
+      title: isCve ? "CVE ID" : "ATT&CK technique ID",
+      message: isCve
         ? "Enter the CVE ID for the new record (e.g. CVE-2024-1234):"
-        : "Enter the ATT&CK technique ID for the new record (e.g. T1059 or T1059.001):";
-    const answer = window.prompt(promptLabel)?.trim();
+        : "Enter the ATT&CK technique ID for the new record (e.g. T1059 or T1059.001):",
+      placeholder: isCve ? "CVE-2024-1234" : "T1059.001",
+    });
     if (!answer) return;
     targetIdentifier = answer;
   }
@@ -62,9 +72,12 @@ export function runEntityConvert({ entityType, entityId, target, convert, onConv
       ? " Type-specific fields (and any origin/targeting links) will be dropped."
       : "";
   if (
-    !confirm(
-      `Convert this ${getEntityLabel(entityType)} to ${target.label}? Entry links, relationships, notes and campaign memberships will be migrated.${dropsNote}`,
-    )
+    !(await confirmDialog({
+      title: `Convert to ${target.label}`,
+      message: `Convert this ${getEntityLabel(entityType)} to ${target.label}? Entry links, relationships, notes and campaign memberships will be migrated.${dropsNote}`,
+      confirmLabel: "Convert",
+      destructive: true,
+    }))
   )
     return;
 

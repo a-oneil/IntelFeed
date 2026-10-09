@@ -17,6 +17,9 @@ generated here: every registry tool flagged ``mutating``, plus the
 EXTRA_WRITE_TOOLS below. Before this it was hand-maintained and silently
 missed 50 of 79 mutating tools after the 2026-08 registry expansion.
 
+It also writes intelfeed-mcp/registry.json, the MCP server's offline copy of
+the registry (the server reads the live one from /api/tools/tools when it can).
+
 Usage (stack running, creds in env like the CLIs themselves):
     INTELFEED_API_URL=http://localhost:8000 python3 scripts/dev/sync_skill_clis.py
     python3 scripts/dev/sync_skill_clis.py --check   # exit 1 if anything would change
@@ -36,6 +39,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]  # scripts/dev/<this file> -> repo root
 FULL_CLI = REPO / "intelfeed-skill" / "scripts" / "intelfeed_cli.py"
 LITE_CLI = REPO / "intelfeed-lite-skill" / "scripts" / "intelfeed_cli.py"
+MCP_REGISTRY = REPO / "intelfeed-mcp" / "registry.json"
 
 # Read-only tools deliberately excluded from the lite (retrieval-only) skill:
 # they invoke AI providers or build export documents rather than retrieve data.
@@ -178,6 +182,20 @@ def build_write_tools_block(registry: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def build_mcp_registry(registry: list[dict]) -> str:
+    keep = ("name", "description", "input_schema", "mutating")
+    tools = [{k: t[k] for k in keep if k in t} for t in sorted(registry, key=lambda t: t["name"])]
+    return json.dumps(tools, indent=1, ensure_ascii=False) + "\n"
+
+
+def write_if_changed(path: Path, text: str, check: bool) -> bool:
+    if path.is_file() and path.read_text() == text:
+        return False
+    if not check:
+        path.write_text(text)
+    return True
+
+
 def splice(path: Path, block: str, check: bool, target: str = "TOOLS") -> bool:
     src = path.read_text()
     tree = ast.parse(src)
@@ -222,6 +240,11 @@ def main() -> None:
     drift = drift or changed
     state = "drifted" if (changed and args.check) else ("updated" if changed else "in sync")
     print(f"{FULL_CLI.relative_to(REPO)}: WRITE_TOOLS {wt_block.count(',')} tools — {state}")
+
+    changed = write_if_changed(MCP_REGISTRY, build_mcp_registry(registry), args.check)
+    drift = drift or changed
+    state = "drifted" if (changed and args.check) else ("updated" if changed else "in sync")
+    print(f"{MCP_REGISTRY.relative_to(REPO)}: {len(registry)} tools — {state}")
 
     # Both files must still parse.
     if not args.check:

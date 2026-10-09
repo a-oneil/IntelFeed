@@ -1,6 +1,6 @@
 # CLI Reference
 
-This is the complete reference for the IntelFeed CLI — a zero-dependency Python tool that exposes 170 tools (organized into two flavors: full and lite) to query and manage a running IntelFeed deployment.
+This is the complete reference for the IntelFeed CLI — a zero-dependency Python tool that exposes 180 tools (organized into two flavors: full and lite) to query and manage a running IntelFeed deployment.
 
 **Table of Contents:**
 1. [Overview](#overview)
@@ -10,6 +10,19 @@ This is the complete reference for the IntelFeed CLI — a zero-dependency Pytho
 5. [The Lite Skill vs. Full Skill](#the-lite-skill-vs-full-skill)
 6. [Search Query Language](#search-query-language)
 7. [Tool Reference](#tool-reference)
+   - [Search & Discovery (4 tools)](#search--discovery-4-tools)
+   - [Read Operations (17 tools)](#read-operations-17-tools)
+   - [Campaign Analysis (6 tools)](#campaign-analysis-6-tools)
+   - [Automation (5 tools)](#automation-5-tools)
+   - [Advanced Analytics (5 tools)](#advanced-analytics-5-tools)
+   - [Intelligence Extraction (5 tools)](#intelligence-extraction-5-tools)
+   - [Correlation & Analysis (8 tools)](#correlation--analysis-8-tools)
+   - [Detection Engineering (3 tools)](#detection-engineering-3-tools)
+   - [Write Operations (28 tools)](#write-operations-28-tools)
+   - [Export (1 tool)](#export-1-tool)
+   - [Delete (1 tool)](#delete-1-tool)
+   - [Telegram (2 tools)](#telegram-2-tools)
+   - [Extended Tool Surface](#extended-tool-surface)
 8. [Common Workflows](#common-workflows)
 9. [Error Handling & Troubleshooting](#error-handling--troubleshooting)
 10. [Extending the CLI](#extending-the-cli)
@@ -33,7 +46,7 @@ The CLI is shipped in two variants:
 
 | Feature | Full CLI | Lite CLI |
 |---------|----------|----------|
-| **Tools** | 170 | 81 |
+| **Tools** | 180 | 87 |
 | **Write Operations** | Yes (create, update, extract, generate) | No |
 | **Read-Only Mode** | Opt-in via `INTELFEED_READ_ONLY=1` (write-tool denylist) | Effectively always (no write tools shipped) |
 | **Delete Operations** | Yes | No |
@@ -103,6 +116,7 @@ docker run -e INTELFEED_API_URL=http://api:8000 \
 2. **Tokens are returned** as `access_token` and `refresh_token` and stored in memory for the duration of the CLI process.
 3. **Token refresh** happens automatically if the access token expires (401 response). The CLI uses the refresh token to get a new access token without re-prompting for credentials.
 4. **No persistent cache** between invocations. Each CLI invocation logs in fresh. For high-frequency scripts, this is inefficient; consider a persistent client or API gateway (future enhancement).
+5. **Redirects are not followed.** urllib would re-send the `Authorization` header to whatever host a redirect names, so a 3xx comes back as an `API returned 30x` error instead. Point `INTELFEED_API_URL` at the final `https://` address (not an `http://` one that redirects).
 
 ---
 
@@ -225,7 +239,7 @@ python3 intelfeed-skill/scripts/intelfeed_cli.py create_campaign '{"name": "Test
 
 **Semantics:**
 
-- The check runs against a `WRITE_TOOLS` denylist (a frozenset in the CLI script) — **84 tools**: every registry tool flagged `mutating` (79), plus the five AI tools that persist new or linked entities as a side effect despite being registry-read-only (`extract_ttps`, `extract_cves`, `extract_threat_actors`, `extract_malware`, `run_ai_task`).
+- The check runs against a `WRITE_TOOLS` denylist (a frozenset in the CLI script) — **88 tools**: every registry tool flagged `mutating` (83), plus the five AI tools that persist new or linked entities as a side effect despite being registry-read-only (`extract_ttps`, `extract_cves`, `extract_threat_actors`, `extract_malware`, `run_ai_task`).
 - The denylist is **generated, not hand-maintained**: `scripts/dev/sync_skill_clis.py` rewrites it from the registry's `mutating` flags (plus its `EXTRA_WRITE_TOOLS` set), and `backend/tests/test_tool_registry_sync.py` fails if any mutating tool is missing from the CLI's denylist or a denylist entry no longer exists in the registry. Every tool not in the set (`search_*`, `get_*`, `list_*`, `check_*`, `pivot_*`, `export_attack_layer`, `export_campaign`, `validate_detection_rule`, `generate_detection_rules`, `build_detection_summary`, etc.) runs normally.
 - In a **batched invocation**, if *any* requested tool is on the denylist, the **entire batch is refused** — no tool in the batch executes.
 - The refusal is a JSON error printed to **stdout** with **exit code 2** (distinct from exit code 1 usage errors).
@@ -240,7 +254,7 @@ See the [CLI invocation & read-only gating diagram](diagrams/cli-readonly-gating
 
 Use **`intelfeed-lite-skill`** when:
 - You only need to **read** data (search, lookup, browse, analyze)
-- You want **smaller context windows** (81 tool definitions vs. 170)
+- You want **smaller context windows** (87 tool definitions vs. 180)
 - You're building a **read-only dashboard** or **query interface**
 - Your Claude skill doesn't need to create entries, extract intelligence, or generate rules
 
@@ -254,8 +268,8 @@ Use **`intelfeed-skill` (full)** when:
 
 Both CLIs are code-generated from the backend tool registry by `scripts/dev/sync_skill_clis.py`, so the split is rule-based rather than a hand-picked list:
 
-- **Full CLI (170 tools):** every tool in the backend registry (`backend/app/tools/`), read and write.
-- **Lite CLI (81 tools):** every tool the registry does **not** flag as `mutating` (79 write tools are excluded), minus the compute-heavy read-only tools in the script's `LITE_EXCLUDE` set (AI invocation and document export: `extract_ttps`, `extract_cves`, `extract_threat_actors`, `extract_malware`, `run_ai_task`, `generate_detection_rules`, `validate_detection_rule`, `build_detection_summary`, `export_attack_layer`, `export_campaign`).
+- **Full CLI (180 tools):** every tool in the backend registry (`backend/app/tools/`), read and write.
+- **Lite CLI (87 tools):** every tool the registry does **not** flag as `mutating` (83 write tools are excluded), minus the compute-heavy read-only tools in the script's `LITE_EXCLUDE` set (AI invocation and document export: `extract_ttps`, `extract_cves`, `extract_threat_actors`, `extract_malware`, `run_ai_task`, `generate_detection_rules`, `validate_detection_rule`, `build_detection_summary`, `export_attack_layer`, `export_campaign`).
 
 In practice the lite CLI covers all search/lookup/pivot/analytics/landscape reads (including the newer curation-stats, ransomware-tracker, and reader read tools), while creation, updates, merges, deletes, extraction, automation execution, and report generation are full-CLI only. Run `--list-tools` against either script for the authoritative listing.
 
@@ -281,13 +295,12 @@ All search tools (`search_entries`, `search_entities`, `search_unified`) support
 | Language | `lang:...` | `lang:en` |
 | Category | `category:...` | `category:Blogs` — the feed's folder |
 | Signal | `signal:...` | `signal:under_reported`, `signal:kev_added`, `signal:novel_entity` — the signal engine's reason for ranking an entry |
-| Sector | `sector:...` | `sector:healthcare` — sector mentioned in the article |
 | URL | `url:...` | `url:github.com` |
 | Length | `words:` | `words:>1500`, `words:500..2000` |
 | Source grade | `feed.reliability:` | `feed.reliability:B` — Admiralty-code grade (also `feed.timeliness:`, `feed.relevance:`) |
 | Sort | `sort:` | `relevance`, `newest`, `oldest`, `radar`, `title_asc`, `title_desc`, `shortest`, `longest` |
 
-`category`, `signal`, `sector`, `url`, `feed.*` and the `is:muted/translated/image`
+`category`, `signal`, `url`, `feed.*` and the `is:muted/translated/image`
 values are answered from PostgreSQL rather than the search index, so they need no
 re-index; the endpoint folds their entry IDs into the same constraint an entity
 join uses. `sort:radar` is likewise PostgreSQL-backed — it orders by the signal
@@ -298,7 +311,7 @@ Three things to know before trusting a filter's output:
 
 - **`OR` between two entry-scoped PostgreSQL filters silently means AND.** `signal:kev_added OR
   signal:scoop` intersects rather than unions and returns a plausible wrong number, not an error.
-  Affects `signal:`, `sector:`, `url:` and `is:translated`/`is:image`. `is:muted` is worse still —
+  Affects `signal:`, `url:` and `is:translated`/`is:image`. `is:muted` is worse still —
   it does not participate in OR at all, giving neither the union nor a reliable intersection.
   `feed:`, `category:` and the source grades OR correctly. Run the two queries separately.
 - **A negated PostgreSQL filter only subtracts from an entry-ID set.** `NOT signal:feed_echo`
@@ -320,6 +333,7 @@ Three things to know before trusting a filter's output:
 | TTP shape | `ttp.platform:` | `ttp.platform:Windows`, `ttp.data_source:process`, `ttp.domain:ics`, `ttp.subtechnique:true` |
 | Actor | `threat_actor:` | `threat_actor:APT29`, `threat_actor.country:Russia`, `threat_actor.motivation:espionage`, `threat_actor.sector:healthcare`, `threat_actor.type:ransomware` |
 | Malware | `malware:` | `malware:Emotet`, `malware.type:trojan`, `malware.sector:finance` |
+| Sector | `sector:` | `sector:healthcare`, `sector:banks` (name, slug or alias — articles the analysis judged to describe the industry as targeted), `sector.slug:financial-services` |
 | Tool | `tool:` | `tool:Mimikatz`, `tool.type:...`, `tool.platform:Windows` |
 | Country | `country:` | `country:"United States"`, `country.region:Europe`, `country.iso:RU` |
 | Vendor / product | `vendor:` | `vendor:Cisco`, `product:ASA`, `product.vendor:Cisco` |
@@ -388,7 +402,7 @@ threat_actor:APT29 AND (malware:APT29_Malware* OR threat_actor.country:Russia)
 
 ## Tool Reference
 
-The registry contains 170 tools. The sections below document 83 core tools in full detail; the remaining 87 are summarized in [Extended Tool Surface](#extended-tool-surface) at the end of this section — use `--help-tool <name>` for their parameters. Each fully documented tool includes:
+The registry contains 180 tools. The sections below document 83 core tools in full detail; the remaining 97 are summarized in [Extended Tool Surface](#extended-tool-surface) at the end of this section — use `--help-tool <name>` for their parameters. Each fully documented tool includes:
 
 - **Name & Purpose** — what it does (1-line summary)
 - **Arguments** — required and optional parameters with types and defaults
@@ -557,6 +571,17 @@ python3 intelfeed-skill/scripts/intelfeed_cli.py get_malware '{"malware_id": "Em
 ```
 
 ---
+
+#### list_sectors / get_sector / who_targets_sector / sector_victims / set_target_sector
+
+The victim-industry vocabulary as an entity (21 closed, seeded sectors). `list_sectors` carries per-sector article, targeting-actor/malware and 90-day victim counts; `get_sector` is the victimology profile (reported vs asserted targeting, campaigns, leak-site victims, the country cross-tab, intel profiles, recent articles); `who_targets_sector` and `sector_victims` are its two halves trimmed for a model's context. A sector is addressable by UUID, slug (`healthcare`), display name or alias (`banks`). `set_target_sector` (admin) asserts or withdraws a targets-sector claim on an actor or malware family. Pivot, graph and timeline on a sector go through `pivot_entity` / `get_entity_graph` / `get_entity_timeline` with `entity_type: "sector"`.
+
+**Backed by:** `POST /api/tools/execute` → `app.tools.sector`
+
+```bash
+python3 intelfeed-skill/scripts/intelfeed_cli.py who_targets_sector '{"sector": "healthcare", "limit": 10}'
+python3 intelfeed-skill/scripts/intelfeed_cli.py sector_victims '{"sector": "financial-services", "window_days": 30}'
+```
 
 #### get_cve
 
@@ -2143,10 +2168,13 @@ python3 intelfeed-skill/scripts/intelfeed_cli.py discover_telegram_channels '{"o
 
 ### Extended Tool Surface
 
-The 2026-08 registry expansion added 78 tools in five backend modules; Story Threads, the observables ledger, CWE, the server-side Priority Queue and the in-app docs added nine more over September, bringing the registry to **170**. They follow the same invocation pattern as everything above; run `--help-tool <name>` for parameters and defaults. Grouped by module (`backend/app/tools/`):
+The 2026-08 registry expansion added 78 tools in five backend modules; Story Threads, the observables ledger, CWE, the server-side Priority Queue and the in-app docs added nine more over September, the sector entity four, and the observables-intelligence work five more (`observables.py`), bringing the registry to **180**. They follow the same invocation pattern as everything above; run `--help-tool <name>` for parameters and defaults. Grouped by module (`backend/app/tools/`):
 
 **Ledger, queue & catalog reads (`read.py`, 4 tools)** — the September additions to the largest module:
 `get_observable` (one IOC ledger row by UUID or value — kind, role, current/base confidence with decay state, sighting count, the judgment door that captured it with its evidence sentence, first/last seen, recent sighting articles; defanged input like `evil[.]com` or `hxxps://` is normalised), `search_observables` (filter the ledger by substring, kind, role, lifecycle status or capture door, sorted by last sighting), `get_cwe` (a MITRE CWE with its abstraction rung, parent and lineage, mapping guidance, catalog mitigations and detection methods, direct and subtree CVE counts, KEV count, linked articles), `get_priority_queue` (the reading queue exactly as the Priority Queue page shows it — radar-clearing unread entries with story threads folded in as single rows; prefer it over `get_triage_queue`, the older heuristic that does not fold stories)
+
+**Observables (`observables.py`, 5 tools)** — working the IOC ledger from a skill:
+`promote_observable` (the analyst door — a staged candidate or any value the article prints becomes a ledger row sighted in that entry, with role and evidence), `update_observable` (role, label, description, or pin confidence so decay stops), `deny_observable` (admin — tombstone a value so no door captures, sights or exports it again; works on a row or on any kind+value), `get_entity_infrastructure` (an actor's / family's / campaign's / tool's observables in two tiers — claimed attribution edges with trust tier, and values reported alongside it in the same articles, newsletters and list files excluded), `export_observables` (a filtered slice as EDL lines, CSV rows or JSON, refanged, dual-use infra excluded unless asked). `search_observables` also grew `captured_by`, `infra_tag`, `needs_review`, `min_confidence` and `min_reports` filters, and `get_observable` returns the corroboration counts (`report_count` / `feed_source_count`), reputation and `claimed_by`.
 
 **Documentation (`docs.py`, 3 tools)** — the copilot's route into these very docs:
 `list_documentation_pages` (slug, title, section and one-line summary for every page shipped with the deployment), `search_documentation` (full-text with excerpts, to find which page covers a topic), `get_documentation_page` (one page in full as markdown; the slug is the path under `docs/` without `.md`, e.g. `architecture` or `diagrams/entries-lifecycle` — cite it back as a `/documentation/<slug>` link)

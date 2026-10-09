@@ -27,11 +27,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import entity_types
 from app.adapters.base import ParsedEntry
 from app.adapters.ransomware_live import RansomwareLiveAdapter, _parse_dt
-from app.api.events import broadcast_event, publish_event
-from app.config import settings
+from app.api.events import publish_event
 from app.intelligence.entity_dedup import find_entity_by_name_or_alias
 from app.intelligence.entity_resolution import gate_aliases, resolve_entity_creation
-from app.intelligence.sectors import normalize_sector, parse_sector_setting, sector_label
+from app.intelligence.sectors import normalize_sector, sector_label, sector_uuid
 from app.models.country import Country
 from app.models.ransomware import RansomwareVictim, VictimDisclosure
 from app.models.threat_actor import ThreatActor
@@ -323,9 +322,9 @@ async def emit_watchlist_alerts(db: AsyncSession, new_disclosures: list[dict]) -
     This is the disclosure-level counterpart to the entry-pipeline `entity_watchlisted`
     automation condition — the automation engine is Entry-typed and can't see
     VictimDisclosure rows, so a watch here IS the subscription (no rule to configure).
-    Org/group watches are per-user (UserEntityWatch → publish_event(user)); sectors are
-    a global setting → broadcast. Delivered via the same Redis/SSE bus as keyword_match
-    and correlation_event alerts. Never raises — alerting must not fail a sync.
+    Org, group and sector watches are all per-user (UserEntityWatch → publish_event(user)).
+    Delivered via the same Redis/SSE bus as keyword_match and correlation_event alerts.
+    Never raises — alerting must not fail a sync.
     """
     if not new_disclosures:
         return 0
@@ -333,14 +332,17 @@ async def emit_watchlist_alerts(db: AsyncSession, new_disclosures: list[dict]) -
     victim_ids = {d["victim_id"] for d in new_disclosures}
     group_ids = {d["group_id"] for d in new_disclosures if d["group_id"]}
 
+    sector_ids = {sector_uuid(d["sector"]): d["sector"] for d in new_disclosures if d.get("sector")}
+
     watchers_by_victim: dict[str, set[str]] = defaultdict(set)
     watchers_by_group: dict[str, set[str]] = defaultdict(set)
+    watchers_by_sector: dict[str, set[str]] = defaultdict(set)
     try:
         rows = (
             await db.execute(
                 select(UserEntityWatch.created_by, UserEntityWatch.entity_type, UserEntityWatch.entity_id).where(
                     UserEntityWatch.mode == "watch",
-                    UserEntityWatch.entity_type.in_(["ransomware_victim", "threat_actor"]),
+                    UserEntityWatch.entity_type.in_(["ransomware_victim", "threat_actor", "sector"]),
                 )
             )
         ).all()
@@ -353,23 +355,21 @@ async def emit_watchlist_alerts(db: AsyncSession, new_disclosures: list[dict]) -
             watchers_by_victim[sid].add(str(created_by))
         elif etype == "threat_actor" and sid in group_ids:
             watchers_by_group[sid].add(str(created_by))
-
-    my_sectors = set(parse_sector_setting(settings.get("my_sectors") or ""))
+        elif etype == "sector" and eid in sector_ids:
+            watchers_by_sector[sector_ids[eid]].add(str(created_by))
 
     sent = 0
     for d in new_disclosures:
-        # Per-user org/group hits (org reason wins if both match for a user).
+        # Per-user hits, one event per user: org beats group beats sector as the reason.
         reason_by_user: dict[str, str] = {}
+        for uid in watchers_by_sector.get(d.get("sector") or "", ()):
+            reason_by_user[uid] = "watched sector"
         for uid in watchers_by_group.get(d["group_id"] or "", ()):
             reason_by_user[uid] = "watched group"
         for uid in watchers_by_victim.get(d["victim_id"], ()):
             reason_by_user[uid] = "watched org"
         for uid, reason in reason_by_user.items():
             publish_event(uid, "ransomware_disclosure", {**d, "reason": reason})
-            sent += 1
-        # Watched-sector hit (global my_sectors) → broadcast once.
-        if d["sector"] and d["sector"] in my_sectors:
-            broadcast_event("ransomware_disclosure", {**d, "reason": "watched sector"})
             sent += 1
     if sent:
         logger.info("ransomware alerts: emitted %d watchlist SSE events", sent)

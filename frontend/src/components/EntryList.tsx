@@ -18,7 +18,7 @@ import { useEntryIntelBadges } from "@/hooks/useEntryIntelBadges";
 import { previewSnippet } from "@/utils/previewText";
 import { formatDate } from "@/utils/formatDate";
 import { groupConsecutiveEntries } from "@/utils/groupEntries";
-import { injectDayDividers, filterCollapsedDays } from "@/utils/dayDividers";
+import { injectDayDividers, filterCollapsedDays, type DayDividerItem } from "@/utils/dayDividers";
 import { DayDividerSummary } from "@/components/DayDividerSummary";
 import { DayIntelChips, type DayFocus } from "@/components/DayIntelChips";
 import { MarkDayReadButton } from "@/components/MarkDayReadButton";
@@ -30,7 +30,8 @@ import { usePullToRefresh } from "@/hooks/usePullToRefresh";
 import { SwipeableEntryRow } from "@/components/SwipeableEntryRow";
 import { CVEGroupRow } from "@/components/CVEGroupRow";
 import { ThreadRow } from "@/components/ThreadRow";
-import { queueItems, type QueueItem } from "@/utils/threads";
+import { queueItems, magazineQueueItems, type QueueItem, type MagazineItem } from "@/utils/threads";
+import { MagazineThreadCard } from "@/components/MagazineThreadCard";
 import { EntryIntelBadges } from "@/components/EntryIntelBadges";
 import { EntryTableView } from "@/components/EntryTableView";
 import { IntelLevelBadge } from "@/components/IntelLevelBadge";
@@ -48,6 +49,8 @@ import { ExposureChip } from "./ExposureChip";
 import { ToolbarDropdown, DropdownItem } from "@/components/ToolbarDropdown";
 import { DEFAULT_TABLE_LAYOUTS } from "@/components/table/defaultLayouts";
 import { adjacentEntryId } from "@/utils/entryNavigation";
+import { openExternalUrl } from "@/utils/openExternal";
+import { isExternalWebUrl } from "@/utils/externalLinks";
 
 function stripHtml(html: string): string {
   const doc = new DOMParser().parseFromString(html, "text/html");
@@ -78,6 +81,16 @@ interface MetaColumn {
   defaultHidden?: boolean;
   /** Inline projection; null when this entry has nothing to say for the column. */
   render: (entry: Entry, counts?: EntryIntelCounts) => ReactNode;
+}
+
+/** Tags that stay a quiet label — the ones not promoted to a badge-row chip. */
+function plainTagsOf(entry: Entry) {
+  return (entry.tags ?? []).filter((t) => !t.display_as_chip);
+}
+
+function plainTagNames(entry: Entry): string | null {
+  const names = plainTagsOf(entry).map((t) => t.name);
+  return names.length ? names.join(", ") : null;
 }
 
 function domainOf(url: string | null | undefined): string | null {
@@ -154,7 +167,8 @@ const META_COLUMNS: Record<string, MetaColumn> = {
     defaultHidden: true,
     render: (_e, c) => (c?.notes ? `${c.notes} note${c.notes === 1 ? "" : "s"}` : null),
   },
-  tags: { render: (e) => (e.tags?.length ? e.tags.map((t) => t.name).join(", ") : null) },
+  // Chips already lead the badge row; this column carries the quiet tags.
+  tags: { render: (e) => plainTagNames(e) },
   type: { defaultHidden: true, render: (e) => (e.feed_type ? e.feed_type.replace(/_/g, " ") : null) },
   domain: { defaultHidden: true, render: (e) => domainOf(e.url) },
   author: { defaultHidden: true, render: (e) => e.author || null },
@@ -314,6 +328,7 @@ export const EntryRow = memo(function EntryRow({
   searchSnippet,
   intelCounts,
   intelMode,
+  aiAnalysis,
   autoExtract,
   metaColumns,
   undimRead,
@@ -340,6 +355,7 @@ export const EntryRow = memo(function EntryRow({
   intelCounts?: EntryIntelCounts;
   /** Feed-level intel extraction mode */
   intelMode?: string;
+  aiAnalysis?: boolean;
   /** Whether feed auto-extracts on ingest */
   autoExtract?: boolean;
   /**
@@ -361,6 +377,7 @@ export const EntryRow = memo(function EntryRow({
     return out;
   }, [metaColumns, entry, intelCounts]);
   const useColumnMeta = metaFields.length > 0;
+  const plainTags = plainTagsOf(entry);
 
   return (
     <div
@@ -389,7 +406,13 @@ export const EntryRow = memo(function EntryRow({
         {!useColumnMeta && (
           <div className={styles.entryHeader}>
             <FeedNameMenuButton feedId={entry.feed_id} className={styles.feedNameBtn}>
-              {intelMode && <IntelLevelBadge mode={intelMode} autoExtract={autoExtract ?? false} />}
+              {intelMode && (
+                <IntelLevelBadge
+                  mode={intelMode}
+                  aiAnalysis={aiAnalysis}
+                  autoExtract={autoExtract ?? false}
+                />
+              )}
               {entry.feed_type && <FeedTypeIcon type={entry.feed_type} size={11} />}
               {entry.feed_title}
             </FeedNameMenuButton>
@@ -411,7 +434,7 @@ export const EntryRow = memo(function EntryRow({
             ))}
           </div>
         )}
-        <EntryIntelBadges counts={intelCounts} starred={entry.is_starred} bookmarked={entry.is_bookmarked} echo={entry.is_echo} />
+        <EntryIntelBadges counts={intelCounts} starred={entry.is_starred} bookmarked={entry.is_bookmarked} echo={entry.is_echo} tags={entry.tags} entryId={entry.id} />
         {searchSnippet ? (
           <p className={styles.summary} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(searchSnippet, { ALLOWED_TAGS: ["em", "mark", "strong", "b", "i", "span"], ALLOWED_ATTR: ["class"] }) }} />
         ) : (
@@ -431,13 +454,13 @@ export const EntryRow = memo(function EntryRow({
               {formatDuration(entry.media[0].duration_seconds)}
             </span>
           )}
-          {entry.tags?.length > 0 && (
+          {plainTags.length > 0 && (
             <span className={styles.tagList}>
-              {entry.tags.map((tag, i) => (
+              {plainTags.map((tag, i) => (
                 <span key={tag.name} className={styles.tagInline}>
                   <span className={styles.tagDot} style={{ backgroundColor: tag.color }} />
                   {tag.name}
-                  {i < entry.tags.length - 1 && <span className={styles.tagSep}>·</span>}
+                  {i < plainTags.length - 1 && <span className={styles.tagSep}>·</span>}
                 </span>
               ))}
             </span>
@@ -518,7 +541,7 @@ const MagazineCard = memo(function MagazineCard({
         </div>
         <h3 className={styles.magazineTitle}>{entry.translated_title || entry.title}</h3>
         {plainSummary && <p className={styles.magazineSummary}>{plainSummary}</p>}
-        <EntryIntelBadges counts={intelCounts} starred={entry.is_starred} bookmarked={entry.is_bookmarked} echo={entry.is_echo} />
+        <EntryIntelBadges counts={intelCounts} starred={entry.is_starred} bookmarked={entry.is_bookmarked} echo={entry.is_echo} tags={entry.tags} entryId={entry.id} />
         <div className={styles.magazineMeta}>
           {entry.author && <span>{entry.author}</span>}
           {readTime && <span>{readTime} read</span>}
@@ -587,10 +610,11 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
   const navTrailIndex = useUIStore((s) => s.entryNavTrailIndex);
   const { data: feedsData } = useFeeds();
   const feedIntelMap = useMemo(() => {
-    const map: Record<string, { mode: string; auto: boolean }> = {};
+    const map: Record<string, { mode: string; ai: boolean; auto: boolean }> = {};
     for (const sub of feedsData?.items ?? []) {
       map[sub.id] = {
         mode: sub.intel_extraction_mode || "selective",
+        ai: sub.ai_analysis_enabled ?? true,
         auto: sub.auto_extract_on_ingest ?? false,
       };
     }
@@ -852,18 +876,19 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
     const withDividers = injectDayDividers(displayItems, showDividers);
     return filterCollapsedDays(withDividers, collapsedDays);
   }, [priorityMode, queueRows, displayItems, showDividers, collapsedDays]);
-  const magazineItems = useMemo(() => {
+  const magazineItems = useMemo<(MagazineItem | DayDividerItem)[]>(() => {
     if (effectiveViewMode !== "magazine") return [];
-    const singles = entries.map((entry, i) => ({
-      type: "single" as const,
-      entry,
-      flatIndex: i,
-    }));
+    // Built from the queue rows, not from `entries`: the endpoint withholds
+    // every article a thread absorbed, so a grid mapped over the entry stream
+    // drops a whole story — the thread card and the coverage behind it both.
+    const items: MagazineItem[] = priorityMode
+      ? magazineQueueItems(queueRows)
+      : entries.map((entry, i) => ({ type: "single" as const, entry, flatIndex: i }));
     return filterCollapsedDays(
-      injectDayDividers(singles, showDividers),
+      injectDayDividers(items, showDividers),
       collapsedDays,
     );
-  }, [entries, effectiveViewMode, showDividers, collapsedDays]);
+  }, [priorityMode, queueRows, entries, effectiveViewMode, showDividers, collapsedDays]);
 
   // Every day key rendered by the *active* view — powers the collapse-all /
   // expand-all toolbar toggle. Derived from the same injected item list the
@@ -871,7 +896,10 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
   // exactly what's on screen. Magazine renders ungrouped singles while the list
   // renders CVE-grouped items, and a group can straddle midnight — so the two
   // views can surface different day dividers, and reading from the wrong one
-  // would leave some days uncollapsed.
+  // would leave some days uncollapsed. In the Priority Queue the list forgoes
+  // dividers entirely (it isn't date-ordered) while magazine would date a
+  // thread by its last beat — moot today, since the queue's forced "radar" sort
+  // turns dividers off in both.
   const activeDividerItems = effectiveViewMode === "magazine" ? magazineItems : virtualItems2D;
   const allDayKeys = useMemo(
     () =>
@@ -1061,11 +1089,26 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
+      // A <select> counts as typing too. Without it, every dropdown in every
+      // modal above this list leaked its keystrokes through: with a feed's
+      // "Poll interval" focused, j/k and the arrows navigated the list behind
+      // the dialog, s starred, m marked read and Enter opened an article.
       if (
         target instanceof HTMLInputElement ||
         target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
         target?.isContentEditable
       ) return;
+
+      // Enter on a focused OUTSIDE link means "follow it". Without this the
+      // shortcut below preventDefault()s the keypress and opens the selected
+      // entry's own URL instead — the link never fires, and neither does the
+      // external-link confirmation that guards it. Links within the app are
+      // left exactly as they were.
+      if (e.key === "Enter") {
+        const link = target?.closest("a[href]");
+        if (link instanceof HTMLAnchorElement && isExternalWebUrl(link.getAttribute("href") ?? "")) return;
+      }
 
       // Escape clears bulk selection
       if (e.key === "Escape" && bulkMode) {
@@ -1109,7 +1152,8 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
       } else if (e.key === "o" || e.key === "Enter") {
         e.preventDefault();
         const current = navEntries[currentIndex];
-        if (current?.url) window.open(current.url, "_blank");
+        // "noopener" only (no noreferrer): keeps the referrer this shortcut has always sent.
+        if (current?.url) openExternalUrl(current.url, { features: "noopener" });
       } else if (e.key === "s") {
         e.preventDefault();
         if (selectedEntryId) toggleStar.mutate(selectedEntryId);
@@ -1405,6 +1449,10 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
         /* Table view — flat, sortable, filterable grid of all entries */
         <EntryTableView
           entries={entries}
+          // Priority mode: the table needs the queue rows, not the flattened
+          // entries — `entries` drops the thread rows, and the server already
+          // withheld the articles those threads absorbed.
+          queueRows={priorityMode ? queueRows : undefined}
           intelBadges={intelBadges}
           totalCount={totalCount ?? undefined}
           hasNextPage={!!hasNextPage}
@@ -1485,6 +1533,18 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
                   </div>
                 );
               }
+              if (item.type === "thread") {
+                // No expand-in-place here: the spine is a stack of beats, a
+                // row's shape rather than a card's. The card opens the story.
+                return (
+                  <MagazineThreadCard
+                    key={item.key}
+                    thread={item.thread}
+                    score={item.score}
+                    onOpen={() => setSelectedThread(item.thread.slug)}
+                  />
+                );
+              }
               if (item.type !== "single") return null;
               return (
                 <MagazineCard
@@ -1501,7 +1561,10 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
             })}
           </div>
           {isFetchingNextPage && <div className={styles.loading}>Loading more...</div>}
-          {!isLoading && entries.length === 0 && (
+          {/* Counted over the rendered cards, not over `entries` — a queue made
+              entirely of story threads has no standalone entries and would
+              otherwise claim it was empty underneath a full grid. */}
+          {!isLoading && magazineItems.length === 0 && (
             <div className={styles.empty}>No entries to display</div>
           )}
         </div>
@@ -1667,6 +1730,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
                         onCheck={(e) => handleCheckboxClick(item.flatIndex, item.entry.id, e)}
                           intelCounts={intelBadges?.[item.entry.id]}
                         intelMode={feedIntelMap[item.entry.feed_id]?.mode}
+                        aiAnalysis={feedIntelMap[item.entry.feed_id]?.ai}
                         autoExtract={feedIntelMap[item.entry.feed_id]?.auto}
                         metaColumns={metaColumnKeys}
                       />
@@ -1682,6 +1746,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
                       onCheck={(e) => handleCheckboxClick(item.flatIndex, item.entry.id, e)}
                       intelCounts={intelBadges?.[item.entry.id]}
                       intelMode={feedIntelMap[item.entry.feed_id]?.mode}
+                        aiAnalysis={feedIntelMap[item.entry.feed_id]?.ai}
                       autoExtract={feedIntelMap[item.entry.feed_id]?.auto}
                       metaColumns={metaColumnKeys}
                     />

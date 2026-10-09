@@ -4,6 +4,7 @@ import { useCampaigns, useAddCampaignEntity } from "@/hooks/useCampaigns";
 import { useUnlinkEntity } from "@/hooks/useIntelligence";
 import { useUIStore } from "@/stores/uiStore";
 import { getEntityColor, getEntityLabel } from "@/utils/entityTheme";
+import { confirmDialog } from "@/utils/dialog";
 import styles from "./EntityActionMenu.module.css";
 
 export interface EntityActionTarget {
@@ -221,8 +222,15 @@ export default function EntityActionMenu({
           {entity.entryId && (
             <button
               className={`${styles.menuItem} ${styles.menuItemDanger}`}
-              onClick={() => {
-                if (confirm(`Unlink this ${getEntityLabel(entity.type)} from the article?`)) {
+              onClick={async () => {
+                if (
+                  await confirmDialog({
+                    title: "Unlink entity",
+                    message: `Unlink this ${getEntityLabel(entity.type)} from the article?`,
+                    confirmLabel: "Unlink",
+                    destructive: true,
+                  })
+                ) {
                   unlinkEntity.mutate({
                     entryId: entity.entryId!,
                     entityId: entity.id,

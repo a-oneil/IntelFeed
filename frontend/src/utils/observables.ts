@@ -86,3 +86,64 @@ export function stixBundle(items: StixIndicatorSource[]): string {
     });
   return JSON.stringify({ type: "bundle", id: `bundle--${uuid4()}`, objects }, null, 2);
 }
+
+
+/**
+ * How many independent sources back an observable, in words an analyst reads
+ * the way they mean it: reporting articles first, indicator feeds second. A
+ * value on one feed's eighteen CSV variants is "1 feed", never "18 sightings".
+ */
+export function observableSourcesLabel(o: {
+  report_count?: number | null;
+  feed_source_count?: number | null;
+  sighting_count?: number | null;
+}): string {
+  const reports = o.report_count ?? 0;
+  const feeds = o.feed_source_count ?? 0;
+  const parts: string[] = [];
+  if (reports) parts.push(`${reports} report${reports === 1 ? "" : "s"}`);
+  if (feeds) parts.push(`${feeds} feed${feeds === 1 ? "" : "s"}`);
+  if (!parts.length) return (o.sighting_count ?? 0) ? `${o.sighting_count} sightings` : "no sources";
+  return parts.join(" · ");
+}
+
+/** One-line reputation summary for a table cell or a profile row. */
+export function reputationLabel(r: ObservableResponseLike["reputation"] | undefined): string {
+  if (!r) return "";
+  const bits: string[] = [];
+  if (r.gn_riot) bits.push("RIOT");
+  if (r.gn_classification) bits.push(`GN ${r.gn_classification}`);
+  if (r.vt_ratio) bits.push(`VT ${r.vt_ratio}`);
+  if (r.asn) bits.push(`AS${String(r.asn).replace(/^AS/i, "")}`);
+  if (r.country) bits.push(String(r.country));
+  if (r.ports) bits.push(`ports ${r.ports}`);
+  if (r.tags) bits.push(String(r.tags));
+  return bits.join(" · ");
+}
+
+interface ObservableResponseLike {
+  reputation?: {
+    asn?: number | string | null;
+    country?: string | null;
+    ports?: string | null;
+    tags?: string | null;
+    vt_ratio?: string | null;
+    gn_classification?: string | null;
+    gn_riot?: boolean | null;
+    enriched_at?: string | null;
+  } | null;
+}
+
+/** Human labels for the ledger's capture doors (`Observable.created_via`). */
+export const CAPTURED_BY_LABELS: Record<string, string> = {
+  ai_extraction: "AI analysis",
+  ttp_observable: "TTP observable",
+  ioc_list: "indicator feed",
+  publisher_ioc: "article IOC table",
+  manual: "analyst",
+};
+
+export function capturedByLabel(createdVia: string | null | undefined): string {
+  if (!createdVia) return "";
+  return CAPTURED_BY_LABELS[createdVia] ?? createdVia.replace(/_/g, " ");
+}

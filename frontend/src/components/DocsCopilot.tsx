@@ -190,7 +190,7 @@ export function DocsCopilot({ docSlug }: { docSlug?: string }) {
               </div>
             )}
             {m.role === "assistant" ? (
-              <div className={styles.markdown}>
+              <div className={styles.markdown} data-untrusted-content="">
                 <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
                   {m.content}
                 </Markdown>

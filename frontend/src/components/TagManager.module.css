@@ -251,7 +251,10 @@
 
 .row {
   display: grid;
-  grid-template-columns: 34px 1fr 130px 190px;
+  /* Actions size to their buttons (six of them since Share/Unshare) rather
+     than a fixed track they'd overflow across the count column; the name
+     column gives way instead. */
+  grid-template-columns: 34px minmax(0, 1fr) 130px max-content;
   align-items: center;
   gap: var(--sp-3);
   padding: var(--sp-3) 10px;
@@ -390,20 +393,12 @@
   gap: var(--sp-3);
 }
 
-.bar {
-  display: inline-block;
-  height: 5px;
-  border-radius: var(--r-sm);
-  background: var(--accent-intel);
-  opacity: 0.5;
-  flex-shrink: 0;
-}
-
 .rowActions {
   display: flex;
   gap: var(--sp-2);
   justify-content: flex-end;
   align-items: center;
+  white-space: nowrap;
 }
 
 /* Row-level buttons match SettingsPage's .btnSmall / .btnDangerSmall. */
@@ -463,4 +458,39 @@
   .btn {
     min-height: 44px;
   }
+}
+
+.chipMark {
+  flex-shrink: 0;
+  font-size: var(--fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 0 4px;
+}
+
+/* Same mark, tinted so "global" reads apart from "chip" at a glance. */
+.globalMark {
+  color: var(--accent-detect);
+  border-color: color-mix(in srgb, var(--accent-detect) 45%, transparent);
+}
+
+.tagDescription {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.chipToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
 }

@@ -11,6 +11,8 @@ import { useIsMobile } from "@/hooks/useMediaQuery";
 import { useDocumentationIndex, useDocumentationPage } from "@/hooks/useDocumentation";
 import { DocsCopilot } from "@/components/DocsCopilot";
 import { useUIStore } from "@/stores/uiStore";
+import { useAuthStore } from "@/stores/authStore";
+import { headingIdsByLine, nodeText, slugify } from "@/utils/headingAnchors";
 import type { DocumentationPageSummary } from "@/hooks/useDocumentation";
 import styles from "./DocumentationPage.module.css";
 
@@ -30,15 +32,10 @@ function ExternalIcon() {
   );
 }
 
-/** Anchor id matching GitHub's slugger, so in-doc `#heading` links resolve. */
-function headingId(children: React.ReactNode): string {
-  const text = String(children);
-  return text
-    .toLowerCase()
-    .replace(/[^\w\s-]/g, "")
-    .trim()
-    .replace(/\s+/g, "-");
-}
+/** What react-markdown hands a heading renderer: the DOM props plus its source position. */
+type HeadingProps = React.ComponentPropsWithoutRef<"h2"> & {
+  node?: { position?: { start: { line: number } } };
+};
 
 /**
  * Root-relative paths the API serves itself, not the SPA router: handing these
@@ -80,6 +77,36 @@ function resolveHref(href: string | undefined, currentSlug: string): string | nu
   // `../readme.md`, `../setup.md` and friends escape docs/ — not ours to serve.
   if (!target || target.startsWith("..")) return null;
   return `/documentation/${target}${hash ? `#${hash}` : ""}`;
+}
+
+/**
+ * Map a relative image in the markdown to the API route that serves it.
+ *
+ * The docs render from raw markdown, so `../assets/screenshots/x.png` would
+ * otherwise resolve against the SPA route and 404. Normalise it against the
+ * current slug the way resolveHref does, keep it inside docs/assets/, and point
+ * it at /api/documentation/assets/. That route is auth-gated and an <img> tag
+ * cannot set a header, so the access token rides in the query string — the same
+ * bargain EntryReader makes for /api/telegram-media.
+ */
+function resolveAssetSrc(src: string | undefined, currentSlug: string): string | undefined {
+  if (!src) return undefined;
+  if (/^[a-z]+:/i.test(src) || src.startsWith("//") || src.startsWith("/")) return src;
+
+  const dir = currentSlug.includes("/") ? currentSlug.slice(0, currentSlug.lastIndexOf("/")) : "";
+  const stack: string[] = [];
+  for (const part of (dir ? `${dir}/${src}` : src).split("/")) {
+    if (part === "." || part === "") continue;
+    if (part === "..") stack.pop();
+    else stack.push(part);
+  }
+  const target = stack.join("/");
+  // Anything that climbs out of docs/assets/ is not ours to serve.
+  if (!target.startsWith("assets/")) return undefined;
+
+  const url = `/api/documentation/${target}`;
+  const accessToken = useAuthStore.getState().accessToken;
+  return accessToken ? `${url}?token=${encodeURIComponent(accessToken)}` : url;
 }
 
 function groupBySection(pages: DocumentationPageSummary[]) {
@@ -202,6 +229,11 @@ export default function DocumentationPage() {
     );
   }, [index, filter]);
 
+  // Heading anchors worked out from the markdown source, so a repeated heading gets
+  // its `-1` suffix and every id is the one GitHub would give it. The renderers
+  // below look theirs up by line; the slug of the rendered text is the fallback.
+  const headingIds = useMemo(() => headingIdsByLine(page?.markdown ?? ""), [page?.markdown]);
+
   const components = useMemo(
     () => ({
       code({ className, children, ...props }: React.ComponentPropsWithoutRef<"code">) {
@@ -237,18 +269,23 @@ export default function DocumentationPage() {
           </a>
         );
       },
-      h2: ({ children, ...props }: React.ComponentPropsWithoutRef<"h2">) => (
-        <h2 id={headingId(children)} {...props}>
+      img({ src, alt, ...props }: React.ComponentPropsWithoutRef<"img">) {
+        const resolved = resolveAssetSrc(typeof src === "string" ? src : undefined, slug);
+        if (!resolved) return null;
+        return <img src={resolved} alt={alt ?? ""} loading="lazy" {...props} />;
+      },
+      h2: ({ node, children, ...props }: HeadingProps) => (
+        <h2 id={headingIds.get(node?.position?.start.line ?? -1) ?? slugify(nodeText(children))} {...props}>
           {children}
         </h2>
       ),
-      h3: ({ children, ...props }: React.ComponentPropsWithoutRef<"h3">) => (
-        <h3 id={headingId(children)} {...props}>
+      h3: ({ node, children, ...props }: HeadingProps) => (
+        <h3 id={headingIds.get(node?.position?.start.line ?? -1) ?? slugify(nodeText(children))} {...props}>
           {children}
         </h3>
       ),
     }),
-    [slug, navigate],
+    [slug, navigate, headingIds],
   );
 
   // Where you are, named on the mobile trigger the way Settings names its

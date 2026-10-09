@@ -54,7 +54,17 @@ _EDL_FILES: dict[str, list[str]] = {
 #: CSV files: hashes for SIEM lookup tables, host artifacts for hunting.
 _CSV_FILES: dict[str, list[str]] = {
     "hashes.csv": ["md5", "sha1", "sha256"],
-    "host_artifacts.csv": ["cmdline", "registry", "path", "mutex", "named_pipe", "service_name", "user_agent"],
+    "host_artifacts.csv": [
+        "cmdline",
+        "registry",
+        "path",
+        "mutex",
+        "named_pipe",
+        "service_name",
+        "scheduled_task",
+        "user_agent",
+        "http_header",
+    ],
 }
 
 

@@ -2,6 +2,8 @@ import { useUIStore } from "@/stores/uiStore";
 import { AddFeedModal } from "@/components/AddFeedModal";
 import { KeyboardShortcutsHelp } from "@/components/KeyboardShortcutsHelp";
 import { IngestModal } from "@/components/IngestModal";
+import { ExternalLinkGuard } from "@/components/ExternalLinkGuard";
+import { DialogHost } from "@/components/DialogHost";
 
 /**
  * App-shell modals whose triggers are scattered across layouts, the sidebar and
@@ -22,6 +24,8 @@ export function GlobalModals() {
       {addFeedOpen && <AddFeedModal onClose={closeAddFeed} />}
       {ingestOpen && <IngestModal onClose={closeIngest} />}
       {shortcutsHelpOpen && <KeyboardShortcutsHelp onClose={closeShortcutsHelp} />}
+      <ExternalLinkGuard />
+      <DialogHost />
     </>
   );
 }

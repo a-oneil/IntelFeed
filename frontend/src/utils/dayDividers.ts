@@ -11,6 +11,20 @@ export interface DayDividerItem {
 
 export type DisplayItemWithDividers = DisplayItem | DayDividerItem;
 
+/**
+ * A story-thread row, as far as day bucketing is concerned.
+ *
+ * Structural on purpose: `ThreadItem` lives in utils/threads, which already
+ * imports this module, and a thread only owes the dividers a date.
+ */
+export interface DatedThreadItem {
+  type: "thread";
+  thread: { last_seen: string | null };
+}
+
+/** Anything a divider run can be injected into. */
+export type DividerSource = DisplayItem | DatedThreadItem;
+
 function dayKeyOf(date: Date): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
@@ -39,19 +53,39 @@ function entryDate(entry: Entry): Date | null {
   return d;
 }
 
-function representativeEntry(item: DisplayItem): Entry | null {
-  if (item.type === "single") return item.entry;
-  return item.entries[0] ?? null;
+/**
+ * The date a row sits under.
+ *
+ * A thread is dated by its most recent coverage, not its first: the story is
+ * filed on the day it last said something, which is the day a reader scanning
+ * dividers expects to find it under.
+ */
+function itemDate(item: DividerSource): Date | null {
+  if (item.type === "thread") {
+    if (!item.thread.last_seen) return null;
+    const d = new Date(item.thread.last_seen);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  const e = item.type === "single" ? item.entry : (item.entries[0] ?? null);
+  return e ? entryDate(e) : null;
 }
 
-function entryCountOf(item: DisplayItem): number {
+/**
+ * How many entries a row is worth in the day's count.
+ *
+ * A thread counts as one, not as the articles it swallowed: those articles are
+ * spread across the whole run of the story, and crediting all of them to the
+ * day of its last beat would inflate that day past what is on screen.
+ */
+function entryCountOf(item: DividerSource): number {
+  if (item.type === "thread") return 1;
   return item.type === "single" ? 1 : item.entries.length;
 }
 
-export function injectDayDividers(
-  items: DisplayItem[],
+export function injectDayDividers<T extends DividerSource>(
+  items: T[],
   enabled: boolean,
-): DisplayItemWithDividers[] {
+): (T | DayDividerItem)[] {
   if (!enabled || items.length === 0) return items;
 
   const now = new Date();
@@ -62,8 +96,7 @@ export function injectDayDividers(
   const nowYear = now.getFullYear();
 
   const dayKeys: (string | null)[] = items.map((it) => {
-    const e = representativeEntry(it);
-    const d = e ? entryDate(e) : null;
+    const d = itemDate(it);
     return d ? dayKeyOf(d) : null;
   });
 
@@ -74,14 +107,13 @@ export function injectDayDividers(
     counts[k] = (counts[k] ?? 0) + entryCountOf(items[i]);
   }
 
-  const result: DisplayItemWithDividers[] = [];
+  const result: (T | DayDividerItem)[] = [];
   let lastKey: string | null = null;
   let entryIndex = 0;
   for (let i = 0; i < items.length; i++) {
     const key = dayKeys[i];
     if (key && key !== lastKey) {
-      const e = representativeEntry(items[i]);
-      const d = e ? entryDate(e) : null;
+      const d = itemDate(items[i]);
       if (d) {
         result.push({
           type: "divider",
@@ -99,8 +131,8 @@ export function injectDayDividers(
   return result;
 }
 
-/** Hide entries that fall under a collapsed day; dividers stay visible. */
-export function filterCollapsedDays<T extends DisplayItemWithDividers>(
+/** Hide rows that fall under a collapsed day; dividers stay visible. */
+export function filterCollapsedDays<T extends DividerSource | DayDividerItem>(
   items: T[],
   collapsedDays: Set<string>,
 ): T[] {

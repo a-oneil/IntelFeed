@@ -142,3 +142,79 @@ async def test_missing_docs_dir_degrades_to_empty(client: AsyncClient, auth_head
         assert (await client.get(f"{BASE_URL}/architecture", headers=auth_headers)).status_code == 404
     finally:
         docs_service.reset_index_cache()
+
+
+# --- docs/assets/** images -------------------------------------------------
+# The docs render from raw markdown in the browser, so images are served by the
+# API rather than resolved against the SPA route.
+
+PNG_BYTES = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a"
+    "49444154789c6360000002000100ffff03000006000557bfabd40000000049454e44ae426082"
+)
+
+
+@pytest.fixture
+def docs_asset(docs_dir):
+    """A real image file under the scratch docs/assets/ tree."""
+    target = docs_dir / "assets" / "screenshots" / "dashboard.png"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(PNG_BYTES)
+    return target
+
+
+@pytest.mark.asyncio
+async def test_asset_requires_auth(client: AsyncClient, docs_asset):
+    resp = await client.get(f"{BASE_URL}/assets/screenshots/dashboard.png")
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_asset_served_with_header_auth(client: AsyncClient, auth_headers: dict, docs_asset):
+    resp = await client.get(f"{BASE_URL}/assets/screenshots/dashboard.png", headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/png"
+    assert resp.content == PNG_BYTES
+
+
+@pytest.mark.asyncio
+async def test_asset_served_with_query_token(client: AsyncClient, auth_headers: dict, docs_asset):
+    """An <img> tag cannot set a header, so the token rides in the query string."""
+    token = auth_headers["Authorization"].split(" ", 1)[1]
+    resp = await client.get(f"{BASE_URL}/assets/screenshots/dashboard.png?token={token}")
+    assert resp.status_code == 200
+    assert resp.content == PNG_BYTES
+
+
+@pytest.mark.asyncio
+async def test_asset_route_is_not_shadowed_by_the_page_route(client: AsyncClient, auth_headers: dict, docs_asset):
+    """`/{slug:path}` would swallow `assets/...` if declared first — it must not."""
+    resp = await client.get(f"{BASE_URL}/assets/screenshots/dashboard.png", headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/png"
+
+
+@pytest.mark.asyncio
+async def test_missing_asset_404s(client: AsyncClient, auth_headers: dict, docs_asset):
+    resp = await client.get(f"{BASE_URL}/assets/screenshots/nope.png", headers=auth_headers)
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_non_image_asset_is_refused(client: AsyncClient, auth_headers: dict, docs_dir):
+    """Only image types are served — docs/assets/ is not a general file drop."""
+    secret = docs_dir / "assets" / "notes.txt"
+    secret.parent.mkdir(parents=True)
+    secret.write_text("private-notes-body\n")
+    resp = await client.get(f"{BASE_URL}/assets/notes.txt", headers=auth_headers)
+    assert resp.status_code == 404
+    assert "private-notes-body" not in resp.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["../architecture.md", "../../CLAUDE.md", "screenshots/../../README.md"])
+async def test_asset_cannot_escape_the_assets_dir(client: AsyncClient, auth_headers: dict, docs_asset, path):
+    (docs_asset.parent.parent.parent.parent / "CLAUDE.md").write_text("# Secret\n\nnot a doc\n")
+    resp = await client.get(f"{BASE_URL}/assets/{path}", headers=auth_headers)
+    assert resp.status_code in (400, 404)
+    assert "Secret" not in resp.text

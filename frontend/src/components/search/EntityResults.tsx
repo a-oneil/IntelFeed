@@ -28,6 +28,7 @@ export const ENTITY_TYPE_LABELS: Record<string, string> = {
   cve: "CVEs",
   ttp: "TTPs",
   country: "Countries",
+  sector: "Sectors",
   mitigation: "Mitigations",
   tool: "Tools",
   vendor: "Vendors",
@@ -99,6 +100,7 @@ export const TYPE_FILTER_MAP: Record<string, string> = {
   malware: "malware",
   rule: "detection_rule",
   country: "country",
+  sector: "sector",
   tool: "tool",
   vendor: "vendor",
   product: "product",
@@ -222,7 +224,7 @@ export function useEntityResultNavigate() {
       return;
     }
 
-    const entityTypes = ["threat_actor", "malware", "cve", "ttp", "country", "tool", "vendor", "product", "mitigation"];
+    const entityTypes = ["threat_actor", "malware", "cve", "ttp", "country", "sector", "tool", "vendor", "product", "mitigation"];
     if (entityTypes.includes(type)) {
       const label = r.name || r.value || r.cve_id || r.technique_id || r.title;
       const entityType = type as import("@/stores/intelStore").EntityType;

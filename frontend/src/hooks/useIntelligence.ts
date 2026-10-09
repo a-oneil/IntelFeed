@@ -15,6 +15,8 @@ import type {
   ThreatActor,
   MalwareFamily,
   Country,
+  Sector,
+  EntrySector,
   DetectionRule,
   DetectionRuleListItem,
   Mitigation,
@@ -545,6 +547,50 @@ export function useCountry(countryId: string | undefined) {
   });
 }
 
+// --- Sectors ---
+// Sectors are never autolinked: an entry's sectors are the ones the one-pass
+// AI analysis judged *targeted*, so there is no extract-and-link mutation here
+// beyond the shared entry_analysis task.
+
+export function useEntrySectors(entryId: string | undefined) {
+  return useQuery({
+    queryKey: ["entry-sectors", entryId],
+    queryFn: async () => {
+      const { data } = await api.get<EntrySector[]>(`/entries/${entryId}/sectors`);
+      return data;
+    },
+    enabled: !!entryId,
+  });
+}
+
+export function useSectors(params?: {
+  search?: string;
+  sort_by?: string;
+  sort_order?: string;
+  limit?: number;
+  offset?: number;
+}) {
+  return useQuery({
+    queryKey: ["sectors", params],
+    queryFn: async () => {
+      const { data } = await api.get<PaginatedResponse<Sector>>("/sectors", { params });
+      return data;
+    },
+  });
+}
+
+/** `ref` is a UUID, the canonical slug ("healthcare") or the display name. */
+export function useSector(ref: string | undefined) {
+  return useQuery({
+    queryKey: ["sector", ref],
+    queryFn: async () => {
+      const { data } = await api.get<Sector>(`/sectors/${ref}`);
+      return data;
+    },
+    enabled: !!ref,
+  });
+}
+
 // --- Autolink Entry ---
 
 export function useAutolinkEntry() {
@@ -573,6 +619,7 @@ type EntityType =
   | "threat_actor"
   | "malware"
   | "country"
+  | "sector"
   | "mitigation"
   | "tool"
   | "vendor"
@@ -586,6 +633,7 @@ const ENTITY_URL_SEGMENT: Record<EntityType, string> = {
   threat_actor: "threat-actors",
   malware: "malware",
   country: "countries",
+  sector: "sectors",
   mitigation: "mitigations",
   tool: "tools",
   vendor: "vendors",
@@ -600,6 +648,7 @@ const ENTITY_QUERY_KEY: Record<EntityType, string> = {
   threat_actor: "entry-threat-actors",
   malware: "entry-malware",
   country: "entry-countries",
+  sector: "entry-sectors",
   mitigation: "entry-mitigations",
   tool: "entry-tools",
   vendor: "entry-vendors",
@@ -908,7 +957,7 @@ export function useObservableCandidates(enabled: boolean, kind?: string) {
     queryKey: ["observable-candidates", kind ?? "all"],
     queryFn: async () => {
       const { data } = await api.get<ObservableCandidateRow[]>("/observables/candidates", {
-        params: kind && kind !== "all" ? { kind } : undefined,
+        params: { limit: 500, ...(kind && kind !== "all" ? { kind } : {}) },
       });
       return data;
     },

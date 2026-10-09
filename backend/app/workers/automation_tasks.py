@@ -134,6 +134,66 @@ async def _run_scored_entry_automations(entry_id: str):
 
 
 @celery_app.task(
+    name="app.workers.automation_tasks.run_observable_capture_automations",
+    bind=True,
+    max_retries=2,
+    soft_time_limit=120,
+    time_limit=180,
+)
+def run_observable_capture_automations(self, entry_id: str):
+    """Run on_observable_captured rules after a judgment door wrote observables for an entry."""
+    start = _time.monotonic()
+    try:
+        run_async(_run_observable_capture_automations(entry_id))
+        CELERY_TASKS_TOTAL.labels(task_name="run_observable_capture_automations", status="success").inc()
+    except Exception as exc:
+        CELERY_TASKS_TOTAL.labels(task_name="run_observable_capture_automations", status="retry").inc()
+        logger.error(f"Error running observable-capture automations for entry {entry_id}: {exc}")
+        raise self.retry(exc=exc, countdown=min(300, 2**self.request.retries * 10 + random.uniform(0, 10)))
+    finally:
+        CELERY_TASK_DURATION_SECONDS.labels(task_name="run_observable_capture_automations").observe(
+            _time.monotonic() - start
+        )
+
+
+def dispatch_observable_capture_automations(entry_id, *, countdown: int = 5) -> None:
+    """Queue the on_observable_captured runner for an entry. Called from inside
+    the capturing transaction (ingest, the publisher door, analyst promote),
+    so a short countdown lets that commit land before the worker reads the
+    sightings. A broker hiccup must never fail the capture itself."""
+    try:
+        run_observable_capture_automations.apply_async(args=[str(entry_id)], countdown=countdown)
+    except Exception:  # pragma: no cover - broker outage
+        logger.warning("Could not queue observable-capture automations for entry %s", entry_id, exc_info=True)
+
+
+async def _run_observable_capture_automations(entry_id: str):
+    import uuid
+
+    from app.automation.engine import run_automations_for_observable_capture
+    from app.models.entry import Entry
+
+    async with _get_worker_session() as db:
+        result = await db.execute(select(Entry).where(Entry.id == uuid.UUID(entry_id)))
+        entry = result.scalar_one_or_none()
+        if not entry:
+            logger.warning(f"Entry {entry_id} not found for observable-capture automation")
+            return
+
+        logs = await run_automations_for_observable_capture(db, entry)
+        await db.commit()
+
+        for log_entry in logs:
+            AUTOMATION_RUNS_TOTAL.labels(
+                trigger_type="on_observable_captured",
+                status="success" if log_entry.status != "skipped" else "skipped",
+            ).inc()
+        executed = [lg for lg in logs if lg.status != "skipped"]
+        if executed:
+            logger.info(f"Observable capture on entry {entry_id}: {len(executed)} automation(s) executed")
+
+
+@celery_app.task(
     name="app.workers.automation_tasks.detect_correlation_events",
     bind=True,
     max_retries=2,

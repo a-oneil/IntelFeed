@@ -21,6 +21,7 @@ import { useAuthStore } from "@/stores/authStore";
 import { useUIStore } from "@/stores/uiStore";
 import { formatDate } from "@/utils/formatDate";
 import styles from "./EntityPopover.module.css";
+import { confirmDialog } from "@/utils/dialog";
 
 function truncate(text: string, max: number): string {
   return text.length > max ? text.slice(0, max).trimEnd() + "…" : text;
@@ -146,13 +147,17 @@ export function EntityPopover({
     setShowConvertMenu(false);
   };
 
-  const handleReportFalsePositive = (scope: FalsePositiveScope) => {
+  const handleReportFalsePositive = async (scope: FalsePositiveScope) => {
     setShowFpMenu(false);
     if (scope === "global") {
-      const ok = confirm(
-        `Stop matching "${entity.value}" for every entity, everywhere?\n\n` +
+      const ok = await confirmDialog({
+        title: "Stop matching this name",
+        message:
+          `Stop matching "${entity.value}" for every entity, everywhere?\n\n` +
           "Existing links stay — use \u201cUnlink from every article\u201d to clear those.",
-      );
+        confirmLabel: "Stop matching",
+        destructive: true,
+      });
       if (!ok) return;
     }
     reportFalsePositive.mutate(
@@ -208,12 +213,16 @@ export function EntityPopover({
     onClose();
   };
 
-  const handleObservableNeverCapture = () => {
+  const handleObservableNeverCapture = async () => {
     setShowFpMenu(false);
-    const ok = confirm(
-      `Never capture "${entity.value}" again?\n\n` +
+    const ok = await confirmDialog({
+      title: "Never capture this value",
+      message:
+        `Never capture "${entity.value}" again?\n\n` +
         "Tombstones the ledger row everywhere: every capture door refuses the value and it leaves the outbound feeds. Sightings are kept as history.",
-    );
+      confirmLabel: "Never capture",
+      destructive: true,
+    });
     if (!ok) return;
     denyObservable.mutate(entity.id, {
       onSuccess: () => toast.success(`"${entity.value}" is tombstoned — no door will capture it again`),
@@ -222,13 +231,17 @@ export function EntityPopover({
     onClose();
   };
 
-  const handleUnlinkAll = () => {
+  const handleUnlinkAll = async () => {
     setShowFpMenu(false);
     if (
-      !confirm(
-        `Unlink ${canonicalName} from every article it's linked to?\n\n` +
+      !(await confirmDialog({
+        title: "Unlink from every article",
+        message:
+          `Unlink ${canonicalName} from every article it's linked to?\n\n` +
           "The entity and its relationships stay; only the article links go. This cannot be undone.",
-      )
+        confirmLabel: "Unlink all",
+        destructive: true,
+      }))
     )
       return;
     unlinkAll.mutate(
@@ -592,10 +605,10 @@ export function EntityPopover({
                 <button
                   key={target.key}
                   className={styles.enrichMenuItem}
-                  onClick={() => {
+                  onClick={async () => {
                     setShowConvertMenu(false);
                     setShowFpMenu(false);
-                    runEntityConvert({
+                    await runEntityConvert({
                       entityType: entity.type,
                       entityId: entity.id,
                       target,

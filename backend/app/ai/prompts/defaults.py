@@ -2204,7 +2204,8 @@ For each entity, decide `filled` (with cited value) or `unknown`. Return strict 
 		- path.resolve
 		- Info-ZIP Zip 3.0
 - `ttps`: 
-	- MITRE ATT&CK technique IDs only when the article describes the actual behavior; include the exact source_text sentence. 
+	- MITRE ATT&CK technique IDs only when the article describes the actual behavior; include the exact source_text sentence, cut to its first 160 characters.
+	- At most 20 techniques per article — the ones with a concrete artefact first — and never the same technique twice. The output has a hard size budget; a runaway `ttps` list is how an analysis gets cut off and lost.
 	- When that sentence documents a concrete artefact, also fill `observable_type` (domain_pattern, path, cmdline, registry, client_id, header, hash, or other) and observable_value with the artefact VERBATIM (the actual path, domain pattern, command line, registry key, client id, header value or hash — never a paraphrase). 
 	- The observable is the single most valuable output: it is what a detection rule is written from. Leave both empty when the article gives no concrete artefact for the technique.
 	- Also set `telemetry` to where a defender would SEE this activity: endpoint, dns, netflow, proxy, firewall, vpn, identity, cloudtrail, email_gw, or ot. Cloud/identity/network activity is not an endpoint story — "attackers created a malicious OAuth app" is identity, "beacons over TLS" is netflow. Empty string only when genuinely unclear.
@@ -2219,13 +2220,20 @@ For each entity, decide `filled` (with cited value) or `unknown`. Return strict 
 - `victim_organizations`: named victim organizations only (never vendors or researchers).
 - `timeline` dates as YYYY-MM-DD when stated; patch.status is available, workaround, none, or unknown.
 
-**Network observables (the "iocs" list):**
-- Report a network indicator ONLY when the article presents the value as attacker infrastructure or attack material: C2 addresses, malicious domains/URLs, implant check-in or exploit URI paths, malware file hashes, phishing sender addresses, TLS client fingerprints (JA3/JA4), certificate fingerprints.
-- `kind` is one of ipv4, ipv6, domain, url, uri_path, ja3, ja4, cert_fingerprint, md5, sha1, sha256, email.
+**Observables (the "iocs" list) — exact-match atoms a defender can search telemetry for:**
+- NETWORK kinds (ipv4, ipv6, domain, url, uri_path, email, ja3, ja4, cert_fingerprint) and HASH kinds (md5, sha1, sha256): report a value ONLY when the article presents it as attacker infrastructure or attack material — C2 addresses, malicious domains/URLs, implant check-in or exploit URI paths, malware file hashes, phishing sender addresses, TLS client or certificate fingerprints. `uri_path` is the path (+ query template) without the host, when the author presents it as the implant's endpoint.
+- HOST kinds — the behavioral observables a write-up quotes from the intrusion:
+	- `cmdline`: the full command as executed, VERBATIM, only when it carries something the attacker chose (a path, host, filename, account, key, encoded blob, or a state-changing flag like /add, /create, -enc). Generic discovery/admin commands (whoami, systeminfo, ipconfig, nltest, net group ... /domain, tasklist, quser) are NOT observables — leave them to the technique's `observable_value`.
+	- `path`: an attacker-created or attacker-chosen absolute file path (env-var prefixes like %LOCALAPPDATA%\... are fine). Never a system binary path (C:\Windows\System32\cmd.exe), never a bare system directory, never a lab/sandbox path.
+	- `registry`: the key AND the value name the attacker wrote (HKCU\...\CurrentVersion\Run\AppResolver) — never the bare well-known key.
+	- `scheduled_task`, `service_name`, `mutex`, `named_pipe`: the exact name the attacker created, as printed.
+	- `user_agent`: the full User-Agent string the malware sends.
+	- `http_header`: a custom header the implant uses as a fingerprint (X-Mesh-Auth), optionally `Name: value`.
 - `value` VERBATIM as the article prints it — keep defanging exactly as written (evil[.]com, hxxps://) — and set `defanged` accordingly.
-- `role`: what the value was doing — c2, delivery, payload, phishing, exfil, exploit, or scanning.
-- `evidence` is the exact sentence that presents the value as malicious.
-- **DO NOT**: report the publisher's own links or reference URLs, vendor/researcher domains, sandbox or analysis links, tracking URLs, private/reserved IPs, or any value the article does not itself call malicious. A bare mention is not an indicator — when in doubt, leave it out. Most news and opinion pieces have an empty list.
+- `role`: what the value was doing. Network/hash: c2, delivery (staging, download, tracking and lure infrastructure count as delivery), payload (loaders, stagers, droppers, implants), phishing, exfil, exploit, scanning. Host kinds: persistence, execution, defense_evasion, credential_access, discovery, lateral_movement, collection.
+- `technique_id`: the ATT&CK technique the artifact belongs to (T1053.005 for a scheduled task) when the article makes it clear; empty string otherwise.
+- `evidence` is the sentence that presents the value as malicious, cut to its first 160 characters (long articles carry dozens of values; the output must stay compact).
+- **DO NOT**: report the publisher's own links or reference URLs, vendor/researcher domains, sandbox or analysis links (VirusTotal, MITRE, NVD), tracking URLs, private/reserved IPs; Windows/Nt API names, exports, config keys, CLSIDs, package names; filenames alone (a filename without its directory is not an atom); anything containing REDACTED, <placeholders> or {templates}; legitimate-platform apex domains the attacker merely used (keep the full attacker subdomain/path instead, e.g. the specific pages.dev host or chatgpt.com/g/... URL); hex strings the article calls a key, token, or secret (not hashes); or any value the article does not itself call malicious. A bare mention is not an indicator — when in doubt, leave it out. Most news and opinion pieces have an empty list.
 - CANDIDATE OBSERVABLES may accompany the article. They are unfiltered pattern hits — nominations, not judgments. Judge each against these rules and ignore the benign ones; also report real indicators the scanner missed.
 
 **Malicious scripts (the "scripts" list):**
@@ -2236,7 +2244,7 @@ For each entity, decide `filled` (with cited value) or `unknown`. Return strict 
 - Report a relationship ONLY when a sentence in the article explicitly asserts it — attribution, usage, targeting, exploitation, variant/succession, subgroup/overlap. Never infer one from co-mention: newsletters, roundups, lists, and link dumps name many entities without relating them — extract NO relationships from such listings.
 - `evidence` is the exact sentence making the assertion and must name both entities. Both endpoints must also appear in your extracted entity lists.
 - `source_type`/`target_type`: threat_actor, malware, tool, country, or observable. relationship_type: uses, targets, exploits, attributed_to, variant_of, successor_of, subgroup_of, overlaps_with, communicates_with, controls, or related_to.
-- observable endpoints are target-only and allowed ONLY for values you also reported in the iocs list, with `target_name` the value EXACTLY as the article prints it (keep defanging). communicates_with for C2 traffic ("X beacons to Y"), uses for delivery/payload material, controls when the article attributes the infrastructure to an actor.
+- observable endpoints are target-only and allowed ONLY for values you also reported in the iocs list, with `target_name` the value EXACTLY as the article prints it (keep defanging) and `target_kind` the same `kind` you gave it there. communicates_with for C2 traffic ("X beacons to Y"), uses for delivery/payload material and for host artifacts (the family's mutex, scheduled task, dropped path, command line), controls when the article attributes the infrastructure to an actor.
 
 **Link validation (the "link_validations" list):**
 - The article may come with CANDIDATE ENTITY TAGS applied by an automated name matcher, each with the local context where the name matched. Judge every candidate and return one decision per entity_key:
@@ -2246,7 +2254,7 @@ For each entity, decide `filled` (with cited value) or `unknown`. Return strict 
 - Default to KEEP whenever uncertain — a wrongly removed link destroys real intelligence signal; a wrongly kept one is easily corrected. Judge the sentence where the name appears, not the article's overall topic. References to any member of the same family (parent, subsidiary, alias, variant, product line) are KEEP. `previously_restored=true` means an analyst explicitly confirmed this link — REMOVE only on an unambiguous name collision.
 - `reason`: one short evidence-based sentence citing the local phrase. Empty array when no candidates given.
 
-Output valid JSON matching the provided schema. Every key is present in the schema; use an empty array for lists with nothing of that type, and an empty string for any scalar field you cannot fill from the article. **Never** invent or extract an arbitrary value just to fill a field.
+Output valid JSON matching the provided schema, with the keys in the schema's order — `summary`, `iocs`, `scripts` and `relationships` come first, so the indicators survive even if the output is cut short. Every key is present in the schema; use an empty array for lists with nothing of that type, and an empty string for any scalar field you cannot fill from the article. **Never** invent or extract an arbitrary value just to fill a field.
 """,
         "default_prompt_template": """Analyze this article:
 
@@ -2274,6 +2282,7 @@ CANDIDATE OBSERVABLES — unfiltered pattern hits, judge per the iocs rules
                 "summary": {"type": "string"},
                 "ttps": {
                     "type": "array",
+                    "maxItems": 20,
                     "items": {
                         "type": "object",
                         "properties": {
@@ -2450,18 +2459,43 @@ CANDIDATE OBSERVABLES — unfiltered pattern hits, judge per the iocs rules
                                     "sha1",
                                     "sha256",
                                     "email",
+                                    "cmdline",
+                                    "path",
+                                    "registry",
+                                    "scheduled_task",
+                                    "service_name",
+                                    "mutex",
+                                    "named_pipe",
+                                    "user_agent",
+                                    "http_header",
                                 ],
                             },
                             "value": {"type": "string"},
                             "role": {
                                 "type": "string",
-                                "enum": ["c2", "delivery", "payload", "phishing", "exfil", "exploit", "scanning"],
+                                "enum": [
+                                    "c2",
+                                    "delivery",
+                                    "payload",
+                                    "phishing",
+                                    "exfil",
+                                    "exploit",
+                                    "scanning",
+                                    "persistence",
+                                    "execution",
+                                    "defense_evasion",
+                                    "credential_access",
+                                    "discovery",
+                                    "lateral_movement",
+                                    "collection",
+                                ],
                             },
+                            "technique_id": {"type": "string"},
                             "defanged": {"type": "boolean"},
                             "evidence": {"type": "string"},
                             "confidence": {"type": "string"},
                         },
-                        "required": ["kind", "value", "role", "defanged", "evidence", "confidence"],
+                        "required": ["kind", "value", "role", "technique_id", "defanged", "evidence", "confidence"],
                     },
                 },
                 "scripts": {
@@ -2489,6 +2523,10 @@ CANDIDATE OBSERVABLES — unfiltered pattern hits, judge per the iocs rules
                             "source_name": {"type": "string"},
                             "target_type": {"type": "string"},
                             "target_name": {"type": "string"},
+                            "target_kind": {
+                                "type": "string",
+                                "description": "For observable targets: the kind given in iocs",
+                            },
                             "relationship_type": {"type": "string"},
                             "evidence": {"type": "string"},
                             "confidence": {"type": "string"},
@@ -2891,3 +2929,22 @@ for _fam in _REPORT_FAMILY_TASKS:
         }
     )
     DEFAULT_MODEL_ASSIGNMENTS[_name] = DEFAULT_MODEL_ASSIGNMENTS["report_section"]
+
+
+def _front_load_schema_keys(schema: dict, first: tuple[str, ...]) -> None:
+    """Reorder a JSON schema's top-level properties so ``first`` lead.
+
+    Models emit object keys in schema order, and a response that hits the
+    output budget is cut from the end — so the sections the ledger depends on
+    (``iocs``, ``scripts``, ``relationships``) must come before the one that
+    runs long (``ttps``) to survive a truncated analysis."""
+    props = schema.get("properties") or {}
+    ordered = {k: props[k] for k in first if k in props}
+    ordered.update({k: v for k, v in props.items() if k not in ordered})
+    props.clear()
+    props.update(ordered)
+
+
+for _task in SYSTEM_TASKS:
+    if _task.get("name") == "entry_analysis":
+        _front_load_schema_keys(_task["output_schema"], ("summary", "iocs", "scripts", "relationships"))

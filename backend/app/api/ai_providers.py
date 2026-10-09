@@ -2,12 +2,13 @@
 
 import uuid
 
-from fastapi import APIRouter, Depends, Path
+from fastapi import APIRouter, Depends, Path, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.engine import _get_provider_instance as build_provider_instance
 from app.ai.providers.base import AIProvider as AIProviderInterface
+from app.ai.provisioning import route_tasks_to_provider
 from app.core.encryption import encrypt_value
 from app.core.exceptions import AppError
 from app.core.security import get_admin_user, get_current_user
@@ -15,6 +16,7 @@ from app.database import get_db
 from app.models.ai_provider import AIProvider
 from app.models.user import User
 from app.schemas.ai import (
+    AIProviderCommissionResult,
     AIProviderCreate,
     AIProviderResponse,
     AIProviderTestResult,
@@ -158,6 +160,61 @@ async def test_provider(
         return AIProviderTestResult(success=True, message="Connected", models=models)
     except Exception as e:
         return AIProviderTestResult(success=False, message=str(e))
+
+
+@router.post("/{provider_id}/commission", response_model=AIProviderCommissionResult)
+async def commission_provider(
+    provider_id: uuid.UUID = Path(..., description="ID of the AI provider to put to work"),
+    take_over: bool = Query(
+        False,
+        description="Also re-point tasks already assigned to another provider, not just unassigned ones",
+    ),
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Test a provider and route the AI tasks at it, in one admin action (admin only).
+
+    Registering a provider does not configure AI: work runs off `ai_task_assignments`,
+    and nothing writes those rows except the startup seeder and a per-task PUT. The
+    seeder only fills gaps, and only from a provider that already existed when the
+    API booted — so a provider added through the UI did nothing at all until the
+    next restart. This closes that gap.
+
+    The connectivity check runs first and a failure stops there: assigning 30 tasks
+    to a host that cannot be reached would just move the error somewhere harder to
+    find. On success the live model list is cached and each assignment gets a model
+    this provider actually serves. Agentic tasks are left alone when the provider
+    cannot run tools, and are named in the response.
+    """
+    result = await db.execute(select(AIProvider).where(AIProvider.id == provider_id))
+    provider = result.scalar_one_or_none()
+    if not provider:
+        raise AppError(code="not_found", message="Provider not found", status_code=404)
+
+    instance = _get_provider_instance(provider)
+    try:
+        if not await instance.check_health():
+            return AIProviderCommissionResult(success=False, message="Provider health check failed")
+        models = await instance.list_models()
+    except Exception as e:
+        return AIProviderCommissionResult(success=False, message=str(e))
+
+    provider.models = models
+    provider.is_active = True
+    db.add(provider)
+    await db.flush()
+
+    routing = await route_tasks_to_provider(db, provider, created_by=user.id, take_over=take_over)
+
+    return AIProviderCommissionResult(
+        success=True,
+        message="Connected",
+        models=models,
+        model=routing.model,
+        tasks_assigned=len(routing.assigned),
+        tasks_reassigned=len(routing.reassigned),
+        tasks_skipped_agentic=routing.skipped_agentic,
+    )
 
 
 @router.get("/{provider_id}/models", response_model=list[str])

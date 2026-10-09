@@ -36,6 +36,7 @@ _ENTITY_RESULT_KEYS = {
     "threat_actor": "threat_actors",
     "malware": "malware",
     "country": "countries",
+    "sector": "sectors",
     "tool": "tools",
     "vendor": "vendors",
     "product": "products",
@@ -286,6 +287,16 @@ async def _get_cve(db: AsyncSession, user_id: uuid.UUID, cve_id: str) -> dict:
     }
 
 
+async def _observable_claims(db: AsyncSession, observable_id: uuid.UUID) -> list[dict]:
+    from app.intelligence.infrastructure import get_observable_backlinks
+
+    try:
+        back = await get_observable_backlinks(db, observable_id, limit=20)
+    except Exception:
+        return []
+    return back.get("claimed_by", [])
+
+
 @_tool(
     name="get_observable",
     description=(
@@ -366,6 +377,13 @@ async def _get_observable(db: AsyncSession, user_id: uuid.UUID, observable: str,
         "evidence": obs.evidence,
         "description": obs.description,
         "sighting_count": obs.sighting_count,
+        "report_count": obs.report_count or 0,
+        "feed_source_count": obs.feed_source_count or 0,
+        "infra_tag": obs.infra_tag,
+        "needs_review": obs.needs_review,
+        "reputation": obs.reputation,
+        # Attribution edges onto this row — what the ledger exists to answer.
+        "claimed_by": (await _observable_claims(db, obs.id)),
         "first_seen_at": str(obs.first_seen_at),
         "last_seen_at": str(obs.last_seen_at),
         "recent_sightings": [
@@ -392,9 +410,36 @@ async def _get_observable(db: AsyncSession, user_id: uuid.UUID, observable: str,
     input_schema={
         "properties": {
             "query": {"type": "string", "description": "Substring of the value or label (optional)"},
-            "kind": {"type": "string", "description": "ipv4, ipv6, domain, url, md5, sha256, cmdline, script, ..."},
-            "role": {"type": "string", "description": "c2, delivery, payload, phishing, exfil, exploit, scanning"},
+            "kind": {
+                "type": "string",
+                "description": "ipv4, ipv6, domain, url, uri_path, email, md5, sha1, sha256, cmdline, path, registry, "
+                "scheduled_task, service_name, mutex, named_pipe, user_agent, http_header, script, ...",
+            },
+            "role": {
+                "type": "string",
+                "description": "c2, delivery, payload, phishing, exfil, exploit, scanning, persistence, execution, "
+                "defense_evasion, credential_access, discovery, lateral_movement, collection",
+            },
             "status": {"type": "string", "description": "active, aging, or expired"},
+            "captured_by": {
+                "type": "string",
+                "description": "Capture door: ai_extraction, ttp_observable, ioc_list, publisher_ioc, manual",
+            },
+            "infra_tag": {
+                "type": "string",
+                "description": "Dual-use tag filter: a tag (vpn, proxy, tor, rmm, kvm, scanner, phish_sim, "
+                "benign_service), 'any', or 'none' for untagged rows only",
+            },
+            "needs_review": {"type": "boolean", "description": "Only AI-created rows awaiting review"},
+            "min_confidence": {"type": "number", "description": "Minimum current (decayed) confidence"},
+            "min_reports": {"type": "integer", "description": "Minimum report_count — articles that reported it"},
+            "linked_entity_type": {
+                "type": "string",
+                "description": (
+                    "With linked_entity_id: only this entity's infrastructure (threat_actor, malware, campaign, tool)"
+                ),
+            },
+            "linked_entity_id": {"type": "string", "description": "UUID of the entity to restrict to"},
             "limit": {"type": "integer", "description": "Max rows (default 20, cap 100)"},
         },
         "required": [],
@@ -407,11 +452,32 @@ async def _search_observables(
     kind: str | None = None,
     role: str | None = None,
     status: str | None = None,
+    captured_by: str | None = None,
+    infra_tag: str | None = None,
+    needs_review: bool | None = None,
+    min_confidence: float | None = None,
+    min_reports: int | None = None,
+    linked_entity_type: str | None = None,
+    linked_entity_id: str | None = None,
     limit: int = 20,
 ) -> dict:
     from app.models.observable import Observable
 
     q = select(Observable).where(Observable.is_denied.is_(False))
+    if linked_entity_type or linked_entity_id:
+        from app.intelligence.infrastructure import INFRASTRUCTURE_ENTITY_TYPES, infrastructure_observable_ids
+
+        if linked_entity_type not in INFRASTRUCTURE_ENTITY_TYPES or not linked_entity_id:
+            allowed = sorted(INFRASTRUCTURE_ENTITY_TYPES)
+            return {"error": f"linked_entity_type must be one of {allowed} with linked_entity_id"}
+        try:
+            linked_uuid = uuid.UUID(str(linked_entity_id))
+        except ValueError:
+            return {"error": "linked_entity_id must be a UUID"}
+        ids = await infrastructure_observable_ids(db, linked_entity_type, linked_uuid)
+        if not ids:
+            return {"count": 0, "observables": []}
+        q = q.where(Observable.id.in_(ids))
     if query:
         pattern = f"%{query}%"
         q = q.where(or_(Observable.value.ilike(pattern), Observable.label.ilike(pattern)))
@@ -421,6 +487,20 @@ async def _search_observables(
         q = q.where(Observable.role == role)
     if status:
         q = q.where(Observable.status == status)
+    if captured_by:
+        q = q.where(Observable.created_via == captured_by)
+    if infra_tag == "none":
+        q = q.where(Observable.infra_tag.is_(None))
+    elif infra_tag == "any":
+        q = q.where(Observable.infra_tag.isnot(None))
+    elif infra_tag:
+        q = q.where(Observable.infra_tag == infra_tag)
+    if needs_review is not None:
+        q = q.where(Observable.needs_review.is_(needs_review))
+    if min_confidence is not None:
+        q = q.where(Observable.current_confidence >= min_confidence)
+    if min_reports:
+        q = q.where(Observable.report_count >= min_reports)
     rows = (await db.execute(q.order_by(Observable.last_seen_at.desc()).limit(min(max(limit, 1), 100)))).scalars().all()
     return {
         "count": len(rows),
@@ -432,7 +512,11 @@ async def _search_observables(
                 "label": o.label,
                 "role": o.role,
                 "status": o.status,
+                "infra_tag": o.infra_tag,
+                "needs_review": o.needs_review,
                 "current_confidence": o.current_confidence,
+                "report_count": o.report_count or 0,
+                "feed_source_count": o.feed_source_count or 0,
                 "sighting_count": o.sighting_count,
                 "captured_by": o.created_via,
                 "last_seen_at": str(o.last_seen_at),

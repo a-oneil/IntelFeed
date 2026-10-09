@@ -45,6 +45,13 @@ erDiagram
     ENTRY ||--o{ ENTRY_CWE : mentions
     ENTRY ||--o{ ENTRY_OBSERVABLE : mentions
     ENTRY ||--o{ ENTRY_SECTOR : targets
+    SECTOR ||--o{ ENTRY_SECTOR : targeted_in
+    THREAT_ACTOR ||--o{ THREAT_ACTOR_TARGET_SECTOR : targets
+    SECTOR ||--o{ THREAT_ACTOR_TARGET_SECTOR : targeted_by
+    MALWARE_FAMILY ||--o{ MALWARE_TARGET_SECTOR : targets
+    SECTOR ||--o{ MALWARE_TARGET_SECTOR : targeted_by
+    CAMPAIGN ||--o{ CAMPAIGN_SECTOR : scopes
+    SECTOR ||--o{ CAMPAIGN_SECTOR : targeted_by
     ENTRY ||--o{ NARRATIVE_THEME_MEMBER : grouped_by
     ENTRY ||--o| ENTRY_EMBEDDING : embeds
     ENTRY ||--o| STORY_THREAD_ENTRY : threads
@@ -152,6 +159,9 @@ erDiagram
     }
     INTEL_PROFILE {
         string note "named report scope: regions x sectors x window"
+    }
+    SECTOR {
+        string note "closed victim-industry vocabulary: 21 seeded rows, never autolinked"
     }
     THREAT_BOARD_STATE {
         string note "per-threat triage decision on the Threats board"

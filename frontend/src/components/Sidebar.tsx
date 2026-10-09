@@ -11,17 +11,34 @@ import { useIsMobile } from "@/hooks/useMediaQuery";
 import { useLongPress } from "@/hooks/useLongPress";
 import { useUndoableDelete } from "@/hooks/useUndoableDelete";
 import { useSidebarCustomization } from "@/hooks/useSidebarCustomization";
+import { useStaleBundle } from "@/hooks/useBuildVersion";
 import { WorkbenchNav } from "./WorkbenchNav";
 import { IngestModal } from "./IngestModal";
-import { EditFeedModal } from "./EditFeedModal";
+import { EditFeedModal } from "./feedModal/EditFeedModal";
 import { EditCategoryModal } from "./EditCategoryModal";
 import { Tooltip } from "./Tooltip";
 import { Hint } from "./primitives";
 import { FeedTypeIcon } from "./FeedTypeIcon";
-import { deriveIntelLevel, INTEL_LEVEL_CONFIG } from "./IntelLevelBadge";
+import { deriveIntelLevel } from "./IntelLevelBadge";
 import type { Category, Feed, SidebarSectionId } from "@/api/types";
 import { BrandButton } from "./BrandButton";
 import styles from "./Sidebar.module.css";
+import { promptDialog } from "@/utils/dialog";
+
+/** Where the footer link points. Hard-coded upstream — a fork edits one line. */
+const REPO_URL = "https://github.com/a-oneil/IntelFeed";
+
+/** Hover text for the footer's version: the commit and when it was built. */
+function buildStampTitle(): string {
+  const parts = [`Version ${__APP_VERSION__}`];
+  if (__GIT_SHA__) parts.push(`commit ${__GIT_SHA__}`);
+  if (__BUILD_TIME__) {
+    const built = new Date(__BUILD_TIME__);
+    if (!Number.isNaN(built.getTime())) parts.push(`built ${built.toLocaleString()}`);
+  }
+  if (__GIT_SHA__) parts.push("open on GitHub");
+  return parts.join(" · ");
+}
 
 /** Format large counts to fit in a fixed-width badge (e.g. 13272 → "13.3k") */
 function useClampedContextMenu() {
@@ -196,6 +213,8 @@ export function Sidebar() {
 
   // Sidebar customization
   const { sectionOrder, reorderSections } = useSidebarCustomization();
+  // Only ever true for a stamped image build; see useStaleBundle.
+  const { stale: bundleStale, serverVersion } = useStaleBundle();
   const [draggedSectionId, setDraggedSectionId] = useState<SidebarSectionId | null>(null);
 
   // Default all categories to collapsed on first load
@@ -377,9 +396,17 @@ export function Sidebar() {
               <button
                 className={styles.navItem}
                 onClick={() => { openSavedSearch(s); closeSidebarIfMobile(); }}
-                onDoubleClick={(e) => {
+                onDoubleClick={async (e) => {
                   e.stopPropagation();
-                  const newName = prompt("Set display name:", s.display_name || s.name);
+                  // An empty answer is meaningful here — it clears the display
+                  // name back to the raw query — so it must stay submittable.
+                  const newName = await promptDialog({
+                    title: "Set display name",
+                    message: "Set display name:",
+                    defaultValue: s.display_name || s.name,
+                    required: false,
+                    confirmLabel: "Save",
+                  });
                   if (newName !== null) {
                     updateSavedSearch.mutate({ id: s.id, data: { display_name: newName || null } });
                   }
@@ -730,6 +757,59 @@ export function Sidebar() {
           </SectionDragWrapper>
         );
       })}
+
+      {/* The one path back to the source. Chrome rather than navigation, so it
+          stays muted until hovered and sits under both modes' sections. */}
+      <div className={styles.sidebarFooter}>
+        <a
+          className={styles.repoLink}
+          href={REPO_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="IntelFeed on GitHub"
+          title="IntelFeed on GitHub"
+        >
+          <svg className={styles.repoIcon} width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.65 7.65 0 0 1 4 0c1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.74.54 1.49 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+          </svg>
+          <span className={styles.repoLabel}>GitHub</span>
+        </a>
+        {bundleStale && (
+          <button
+            type="button"
+            className={styles.stale}
+            onClick={() => window.location.reload()}
+            title={`This tab is running ${__APP_VERSION__}; the server is on ${serverVersion}. Reload to catch up.`}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+              <polyline points="21 3 21 9 15 9" />
+            </svg>
+            Reload
+          </button>
+        )}
+
+        {/* What is actually running. A bare short SHA until the repo carries
+            tags, a tag after — see scripts/ops/version.sh. Links to the commit
+            itself, which beats searching main's history for a SHA that is
+            sitting on a branch. Falls back to plain text in an unstamped build,
+            where there is no commit to point at. */}
+        {__GIT_SHA__ ? (
+          <a
+            className={styles.version}
+            href={`${REPO_URL}/commit/${__GIT_SHA__}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={buildStampTitle()}
+          >
+            {__APP_VERSION__}
+          </a>
+        ) : (
+          <span className={styles.version} title={buildStampTitle()}>
+            {__APP_VERSION__}
+          </span>
+        )}
+      </div>
 
       {showIngestModal && <IngestModal onClose={() => setShowIngestModal(false)} />}
     </nav>
@@ -1137,15 +1217,15 @@ function FeedItem({
         {...feedLongPressHandlers}
       >
         {(() => {
-          const lvl = deriveIntelLevel(
-            subscription.intel_extraction_mode || "selective",
-            subscription.auto_extract_on_ingest ?? false,
-          );
-          if (lvl === "none") return null;
-          const { fill, label } = INTEL_LEVEL_CONFIG[lvl];
+          const { fill, label } = deriveIntelLevel({
+            mode: subscription.intel_extraction_mode || "selective",
+            aiAnalysis: subscription.ai_analysis_enabled ?? true,
+            autoExtract: subscription.auto_extract_on_ingest ?? false,
+          });
+          if (fill < 0) return null;
           return (
             <span
-              className={`${styles.levelRail} ${lvl === "full" ? styles.levelRailFull : ""} ${fill === 0 ? styles.levelRailEmpty : ""}`}
+              className={`${styles.levelRail} ${fill === 1 ? styles.levelRailFull : ""} ${fill === 0 ? styles.levelRailEmpty : ""}`}
               title={label}
               aria-label={label}
             >

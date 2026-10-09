@@ -998,7 +998,7 @@ export function ReportBuilderPage() {
                     bodyText = bodyText.replace(/^\s*##\s+[^\n]*\n+/, "");
                     const items = Array.isArray(data.items) ? data.items : [];
                     return (
-                      <section key={sec.name} className={styles.docSection}>
+                      <section key={sec.name} className={styles.docSection} data-untrusted-content="">
                         <h2 className={styles.docHeading}>{sec.title || data.title || sec.name}</h2>
                         {bodyText && <EntityLinkedMarkdown text={bodyText} />}
                         {items.length > 0 && <SectionItemsTable items={items} />}

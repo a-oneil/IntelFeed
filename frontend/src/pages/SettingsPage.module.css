@@ -1416,3 +1416,52 @@
   padding: var(--sp-3) var(--sp-5) var(--sp-1);
   margin: 0;
 }
+
+/* --- External links: user-trusted host list --- */
+.trustedList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.trustedItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+}
+
+.trustedItem code {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--fs-base);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.trustedRemove {
+  flex-shrink: 0;
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+.trustedRemove:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.trustedRemove:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

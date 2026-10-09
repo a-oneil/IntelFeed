@@ -1,5 +1,61 @@
 # Automation, AI Providers, and Enrichment
 
+For contributors and operators working on the three subsystems that act on intelligence automatically: automation rules, AI providers and tasks, and entity enrichment.
+
+**Contents**
+
+- [Overview](#overview)
+- [Part 1: Automation Engine](#part-1-automation-engine)
+  - [Data Model](#data-model)
+  - [Trigger Types](#trigger-types)
+  - [Condition Language](#condition-language)
+  - [Actions](#actions)
+  - [Branch Actions](#branch-actions)
+  - [Execution Flow](#execution-flow)
+  - [Logging & Audit](#logging--audit)
+  - [Webhook Presets](#webhook-presets)
+- [Part 2: AI Provider System](#part-2-ai-provider-system)
+  - [Provider Abstraction](#provider-abstraction)
+  - [Model Configuration](#model-configuration)
+  - [AI Tasks](#ai-tasks)
+  - [Task Assignment & Routing](#task-assignment--routing)
+  - [Prompt Templates](#prompt-templates)
+  - [Task Execution & Results](#task-execution--results)
+  - [Error Handling & Retries](#error-handling--retries)
+  - [Streaming](#streaming)
+- [Part 3: Enrichment Pipeline](#part-3-enrichment-pipeline)
+  - [Architecture Overview](#architecture-overview)
+  - [Data Models](#data-models)
+  - [Adapter Registry](#adapter-registry)
+  - [Adapter Base Class](#adapter-base-class)
+  - [Trigger Modes](#trigger-modes)
+  - [Pipeline Flow](#pipeline-flow)
+  - [API Key Resolution](#api-key-resolution)
+  - [Confidence Thresholds](#confidence-thresholds)
+  - [Caching & TTL](#caching--ttl)
+  - [Rate Limiting](#rate-limiting)
+  - [Daily Budgets](#daily-budgets)
+  - [Scheduled Enrichment](#scheduled-enrichment)
+- [Integration: How Three Systems Work Together](#integration-how-three-systems-work-together)
+  - [Automation Triggering Enrichment](#automation-triggering-enrichment)
+  - [AI Task Extracting Intelligence for Detection Rules](#ai-task-extracting-intelligence-for-detection-rules)
+  - [Automation Sending Enriched Data via Webhook](#automation-sending-enriched-data-via-webhook)
+- [Execution Diagrams](#execution-diagrams)
+  - [Automation Rule Trigger → Action Execution](#automation-rule-trigger--action-execution)
+  - [AI Task Execution Pipeline](#ai-task-execution-pipeline)
+  - [Enrichment Job → Merge](#enrichment-job--merge)
+- [Configuration and Extensibility](#configuration-and-extensibility)
+  - [Adding a New Enrichment Adapter](#adding-a-new-enrichment-adapter)
+  - [Adding a New AI Task](#adding-a-new-ai-task)
+  - [Adding a New Automation Action](#adding-a-new-automation-action)
+- [Testing & Debugging](#testing--debugging)
+  - [Dry-Run Automation Rules](#dry-run-automation-rules)
+  - [AI Task Cost Estimation](#ai-task-cost-estimation)
+  - [Enrichment Budget Tracking](#enrichment-budget-tracking)
+- [Summary](#summary)
+- [One-Pass Entry Analysis (engine phase 4)](#one-pass-entry-analysis-engine-phase-4)
+  - [Signal-engine automation (engine phase 7)](#signal-engine-automation-engine-phase-7)
+
 ## Overview
 
 IntelFeed's backend integrates three closely-related subsystems that work together to automate intelligence workflows, leverage AI for content analysis, and augment entity data with external threat intelligence:
@@ -50,11 +106,14 @@ Rules fire based on four trigger mechanisms (`backend/app/automation/engine.py:1
 | `on_keyword_match` | Title/content matches regex or substring | Checks entry text | "Alert when 'zero-day' appears" |
 | `on_cve_detected` | Entry contains CVEs above CVSS threshold | Requires CVE extraction | "Notify on critical CVEs (CVSS>9)" |
 | `on_correlation_event` | Correlation engine detects event | Event payload provided | "Block rules when new TTP detected for APT29" |
+| `on_entry_scored` | Signal engine finished scoring the entry | Priority score and signals populated | "Notify on KEV adds" |
+| `on_observable_captured` | A judgment door wrote observables for the entry (one-pass AI, article IOC table, analyst promote — never the indicator-feed door) | `trigger_config` = `{kinds, roles, min_confidence, exclude_infra_tagged, sources}`, same shape as `has_observable` | "Notify on new C2 infrastructure" |
 
 Implementation notes:
 - `on_new_entry` and `on_keyword_match` fire immediately during entry ingestion (synchronous)
-- `on_cve_detected` requires prior CVE extraction; uses threshold logic (`engine.py:192-211`)
-- `on_correlation_event` runs asynchronously when correlation events are published (`run_automations_for_correlation_event`, `engine.py:329`)
+- `on_cve_detected` requires prior CVE extraction; uses threshold logic (`backend/app/automation/engine.py:263`)
+- `on_correlation_event` runs asynchronously when correlation events are published (`run_automations_for_correlation_event`, `backend/app/automation/engine.py:402`)
+- `on_observable_captured` runs asynchronously (`run_automations_for_observable_capture`) from a Celery task the capturing door queues after its commit (`dispatch_observable_capture_automations`). It fires **once per rule per entry**: the AI door and the article-IOC-table door can both land on one article, and a rule that already logged a run for that entry is skipped. The replay backfill script never fires it.
 
 ### Condition Language
 
@@ -110,7 +169,7 @@ Implementation: `evaluate_conditions()` at `conditions.py:22-53` recursively eva
 
 ### Actions
 
-Actions execute sequentially and share a mutable context dict. Earlier actions can write outputs that later actions read. Key implementation: `execute_action()` at `backend/app/automation/actions.py:171`.
+Actions execute sequentially and share a mutable context dict. Earlier actions can write outputs that later actions read. Key implementation: `execute_action()` at `backend/app/automation/actions.py:224`.
 
 **Available Actions:**
 
@@ -118,11 +177,11 @@ Actions execute sequentially and share a mutable context dict. Earlier actions c
 |---|---|---|
 | `run_ai_task` | `task_id: str` | Execute AI task; store result in context |
 | `use_daily_summary` | `day: yesterday\|today = yesterday`, `on_missing: generate\|skip = generate` | Reuse the shared day-divider briefing as `{ai_summary}` instead of generating a second one (batch only) |
-| `add_tags` | `tags: list[str]` | Add tags to entry |
-| `remove_tags` | `tags: list[str]` | Remove tags |
+| `add_tags` | `tags: list[str \| {name, color, description, chip, global}]` | Add tags to entry. The object form sets a new tag's colour, tooltip, chip promotion and scope — on create only; an existing tag keeps its own look and scope. Each assignment belongs to the rule's owner (only they see it) unless the tag is global, in which case it is shared. A rule with no owner skips personal tags |
+| `remove_tags` | `tags: list[str]` | Remove the rule owner's own assignment, or the shared one for a global tag; other users' assignments of a personal tag stay |
 | `send_notification` | `platform, webhook_url, channel, message_template, include_embeds` | POST to Slack/Discord/custom webhook |
 | `run_webhook` | `url: str, headers: dict, payload: str` | POST custom JSON to URL |
-| `mark_priority` | `level: str` | Add priority tag (priority-{level}) |
+| `mark_priority` | `level: str` | Add the `priority-{level}` tag via `add_tags`, so it follows that tag's scope: personal to the rule owner unless `priority-{level}` has been made global in Tag Manager |
 | `mark_read` | — | Mark as read for creator user |
 | `star_entry` | — | Star entry |
 | `bookmark_entry` | — | Bookmark entry |
@@ -233,7 +292,7 @@ When running rules against multiple entries (e.g., scheduled digest at 9am), act
    - `use_daily_summary` → reads the day's already-generated briefing instead of prompting again
    - `run_webhook` → one POST with aggregated data
 
-Reference: `actions.py:268` (`execute_actions_batch()`).
+Reference: `backend/app/automation/actions.py:331` (`execute_actions_batch()`).
 
 #### One article per story
 
@@ -441,7 +500,7 @@ class AITask(Base):
 
 The legacy per-entry extraction tasks (`threat_actor_id`, `malware_id`, `tool_extraction`, `country_id`, `sector_id`, `article_metadata`, `mitigation_extraction`, `cve_extraction`) still exist but are flagged `deprecated` — see "One-Pass Entry Analysis" below.
 
-Tasks are invoked via `run_task()` in `backend/app/ai/engine.py:230`.
+Tasks are invoked via `run_task()` in `backend/app/ai/engine.py:331`.
 
 ### Task Assignment & Routing
 
@@ -469,7 +528,7 @@ When `run_task(task_name="article_summary")` is called:
 3. Get or create the provider instance via `_get_provider_instance()`
 4. Execute via `provider.complete()`
 
-Reference: `ai/engine.py:165` (`get_task_assignment()`).
+Reference: `backend/app/ai/engine.py:266` (`get_task_assignment()`).
 
 ### Prompt Templates
 
@@ -488,7 +547,7 @@ class AIPromptTemplate(Base):
     created_at: datetime
 ```
 
-**Prompt Resolution** (`get_active_prompt`, `ai/engine.py:196`):
+**Prompt Resolution** (`get_active_prompt`, `backend/app/ai/engine.py:297`):
 1. User-specific template (highest priority): where `created_by == user_id` AND `is_active` AND highest `version`
 2. System default template: where `created_by IS NULL` AND `is_active` AND highest `version`
 3. Task's `default_prompt_template` field (fallback)
@@ -521,7 +580,7 @@ Summary: {{ entry.summary }}
 Produce a single JSON object with overall briefing and coverage gaps.
 ```
 
-Rendering uses Jinja2 at `render_prompt`, `ai/engine.py:159`.
+Rendering uses Jinja2 at `render_prompt`, `backend/app/ai/engine.py:260`.
 
 ### Task Execution & Results
 
@@ -882,7 +941,7 @@ This allows:
 - Team-wide key (e.g. VulnCheck, CVEDetails) + user's personal key for higher quota
 - Per-user overrides for any source
 
-Note: no current adapter sets `shared_key_group` — the mechanism exists (`base.py:26`, `SHARED_KEY_GROUPS` in `registry.py:115-121`) but the map is empty since the Abuse.ch-family IOC adapters were removed.
+Note: no current adapter sets `shared_key_group` — the mechanism exists (`base.py:26`, `SHARED_KEY_GROUPS` in `backend/app/enrichment/registry.py:151`) but the map is empty.
 
 ### Confidence Thresholds
 
@@ -1516,4 +1575,4 @@ The one-pass `entry_analysis` payload also adjudicates **pending autolinks** —
 
 ### Signal-engine automation (engine phase 7)
 
-Automation rules can react to what the pipeline learned: condition types `priority_score_above` (entry's signal-engine score), `has_signal` (specific signal types, e.g. kev_added / novel_entity / under_reported), and `entity_watchlisted` (entry links an entity the rule creator watches). The "Signal Engine" template category ships recipes for both. Radar items accept ▲/▼ feedback (`entry_signal_feedback`); the nightly rates job converts 30 days of feedback into bounded ±10% per-family weight nudges applied on top of the admin-set multipliers.
+Automation rules can react to what the pipeline learned: condition types `priority_score_above` (entry's signal-engine score), `has_signal` (specific signal types, e.g. kev_added / novel_entity / under_reported), and `entity_watchlisted` (entry links an entity the rule creator watches). The "Signal Engine" template category ships recipes for both. `has_observable` fires when the entry carries a captured observable (config: `kinds`, `roles`, `min_confidence`, `exclude_infra_tagged` — default true — and `sources`, which defaults to every door but the indicator-feed one, so "new C2 captured" means reporting, not a blocklist mirror). Notification and webhook templates can cite them with `{observables_count}` and `{observables}` (defanged, one per line as `kind value (role)`). The `on_observable_captured` trigger takes the same config as the condition, so a rule can be narrow at the trigger ("C2 only") and keep its conditions for everything else about the entry. `add_to_campaign` gains `link_observables` (with optional `observable_kinds` / `observable_roles`): besides linking the entry it attaches the entry's reporting-door observables as `campaign_entities` rows of type `observable`, dual-use infra excluded. Two templates ship for this: "Notify on New C2 Infrastructure" and "Add an Actor's New Infrastructure to Its Campaign". Radar items accept ▲/▼ feedback (`entry_signal_feedback`); the nightly rates job converts 30 days of feedback into bounded ±10% per-family weight nudges applied on top of the admin-set multipliers.

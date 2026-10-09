@@ -996,6 +996,7 @@ async def list_threads(
     user_id: uuid.UUID,
     status: str = "open",
     limit: int = 40,
+    q: str | None = None,
 ) -> list[dict]:
     """Threads for the reading surfaces, most recently active first.
 
@@ -1003,6 +1004,9 @@ async def list_threads(
     the score the thread row takes in the ranked queue, because that member is
     what the reader would have read next anyway. ``unread_count`` counts every
     unread member including echoes, since those are the rows the thread folds.
+
+    ``q`` filters on title, for the pickers that need to *find* a named story
+    rather than read the most recent ones — following one onto a campaign, say.
     """
     rows = await db.execute(
         text(
@@ -1031,11 +1035,17 @@ async def list_threads(
                 WHERE ste.thread_id = t.id
             ) m ON true
             WHERE (:status = 'any' OR t.status = :status)
+              AND (CAST(:q AS text) IS NULL OR t.title ILIKE CAST(:q AS text))
             ORDER BY t.last_seen DESC NULLS LAST
             LIMIT :limit
             """
         ),
-        {"user_id": user_id, "status": status, "limit": limit},
+        {
+            "user_id": user_id,
+            "status": status,
+            "limit": limit,
+            "q": f"%{q.strip()}%" if q and q.strip() else None,
+        },
     )
     return [dict(r) for r in rows.mappings().all()]
 

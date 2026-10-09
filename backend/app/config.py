@@ -13,6 +13,13 @@ class Settings(BaseSettings):
     # Environment
     env: str = "development"
 
+    # Build stamp, baked into the image by scripts/ops/version.sh via compose
+    # build args. Env-only on purpose: a value in system_settings would outlive
+    # the image it describes and misreport what is actually running.
+    app_version: str = "dev"
+    git_sha: str = ""
+    build_time: str = ""
+
     # Database
     postgres_host: str = "db"
     postgres_port: int = 5432
@@ -213,6 +220,13 @@ class Settings(BaseSettings):
     observables_decay_enabled: bool = True
     observables_candidate_max: int = 200
     observables_ai_capture_mode: str = "shadow"
+    observables_analysis_tail_reserve: float = 0.4
+    observables_publisher_ioc_enabled: bool = True
+    observables_publisher_ioc_max_values: int = 2000
+    observables_ai_capture_kinds: str = (
+        "ipv4,ipv6,domain,url,uri_path,email,ja3,ja4,cert_fingerprint,md5,sha1,sha256,script"
+    )
+    observables_codeblock_skip_categories: str = "Security Advisories,Government / CERT"
     observables_publish_enabled: bool = False
     observables_publish_token: str = ""
     observables_publish_min_confidence: float = 0.6
@@ -318,11 +332,6 @@ class Settings(BaseSettings):
     feed_value_weight_pir: float = 0.15
     # CVE risk tiering — EPSS score at/above which a CVE is considered high risk
     cve_epss_high_risk_threshold: float = 0.1
-    # Org context — comma-separated sectors your organization belongs to
-    # (normalized against app.intelligence.sectors vocabulary; aliases like
-    # "banks" or "hospitals" are accepted). Entries whose extracted victim
-    # sectors intersect this list get a Priority Queue boost.
-    my_sectors: str = ""
 
     # Detection-rule maintenance — CVEs/rules processed per backfill run.
     rule_attack_backfill_limit: int = 1500

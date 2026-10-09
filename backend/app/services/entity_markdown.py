@@ -20,6 +20,7 @@ ENTITY_TYPE_LABELS: dict[str, str] = {
     "cwe": "Weakness",
     "ttp": "ATT&CK Technique",
     "country": "Country",
+    "sector": "Sector",
     "tool": "Offensive Tool",
     "mitigation": "Mitigation",
     "vendor": "Vendor",
@@ -34,6 +35,7 @@ RELATED_SECTION_LABELS: dict[str, str] = {
     "cwes": "Weaknesses",
     "ttps": "ATT&CK Techniques",
     "countrys": "Countries",
+    "sectors": "Sectors",
     "mitigations": "Mitigations",
     "tools": "Offensive Tools",
     "vendors": "Vendors",
@@ -116,6 +118,8 @@ def _identity_meta(entity: dict) -> list[tuple[str, str]]:
     elif et == "country":
         add("ISO Code", entity.get("iso_code"))
         add("Region", entity.get("region"))
+    elif et == "sector":
+        add("Slug", entity.get("slug"))
     elif et == "tool":
         add("Tool Type", (entity.get("tool_type") or "").replace("_", " ") or None)
         add("Platforms", ", ".join(entity.get("platforms") or []) or None)

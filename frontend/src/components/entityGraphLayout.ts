@@ -2,7 +2,7 @@
  * Radial/concentric layout engine for the entity graph.
  *
  * Places the seed entity at the center. Direct neighbors form ring 1,
- * grouped by entity type into angular sectors. When a node is expanded,
+ * grouped by entity type into angular arcs. When a node is expanded,
  * its neighbors fan out as ring 2+ segments radiating from that node.
  *
  * Pure function — no React, no side effects, deterministic output.
@@ -56,18 +56,18 @@ export interface NodePosition {
   parentId: string | null;
 }
 
-export interface SectorInfo {
+export interface ArcInfo {
   type: string;
   label: string;
   startAngle: number;
   endAngle: number;
   midAngle: number;
-  /** Nodes shown in this sector */
+  /** Nodes shown in this arc */
   count: number;
   /** Total nodes available (including overflow) */
   total: number;
   ring: number;
-  /** The node whose expansion created this sector (seed for ring 1) */
+  /** The node whose expansion created this arc (seed for ring 1) */
   expandedById: string;
 }
 
@@ -87,8 +87,8 @@ export interface RadialLayoutOutput {
   visibleNodes: LayoutNode[];
   /** Visible edge list */
   visibleEdges: LayoutEdge[];
-  /** Sector metadata for rendering arc labels */
-  sectors: SectorInfo[];
+  /** Arc metadata for rendering arc labels */
+  arcs: ArcInfo[];
   /** Overflow pills for "+N more" indicators */
   overflowPills: OverflowPill[];
   /** Radii of each ring (index = ring level) */
@@ -99,7 +99,7 @@ export interface RadialLayoutOutput {
 
 // ── Constants ──────────────────────────────────────────────────────
 
-const MIN_SECTOR_ARC = 0.25; // ~15 degrees minimum per type sector
+const MIN_ARC = 0.25; // ~15 degrees minimum per type arc
 const START_ANGLE = -Math.PI / 2; // 12 o'clock
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -133,7 +133,7 @@ function getEdgeWeight(
   return edgeWeights.get([a, b].sort().join('|')) ?? 0;
 }
 
-// allocateSectors is now inlined in the main layout loop for ring-specific arcs
+// allocateArcs is now inlined in the main layout loop for ring-specific arcs
 
 // ── Main Layout Function ───────────────────────────────────────────
 
@@ -159,7 +159,7 @@ export function computeRadialLayout(input: RadialLayoutInput): RadialLayoutOutpu
 
   const positions = new Map<string, NodePosition>();
   const visibleNodeIds = new Set<string>();
-  const sectors: SectorInfo[] = [];
+  const arcs: ArcInfo[] = [];
   const overflowPills: OverflowPill[] = [];
   const ringRadii: number[] = [0]; // ring 0 = center (radius 0)
 
@@ -167,7 +167,7 @@ export function computeRadialLayout(input: RadialLayoutInput): RadialLayoutOutpu
   const seedNode = nodeMap.get(seedId);
   if (!seedNode) {
     return {
-      positions, visibleNodes: [], visibleEdges: [], sectors,
+      positions, visibleNodes: [], visibleEdges: [], arcs,
       overflowPills, ringRadii, center: { x: cx, y: cy },
     };
   }
@@ -177,18 +177,18 @@ export function computeRadialLayout(input: RadialLayoutInput): RadialLayoutOutpu
 
   // ── Expand each node in the expansion tree ──
   // Process ring by ring (BFS order) to build outward
-  const expansionQueue: Array<{ nodeId: string; ring: number; parentAngle: number; parentSectorArc: number }> = [];
+  const expansionQueue: Array<{ nodeId: string; ring: number; parentAngle: number; parentArc: number }> = [];
 
   // Seed is always the first expansion
   if (expandedNodes.has(seedId)) {
-    expansionQueue.push({ nodeId: seedId, ring: 1, parentAngle: 0, parentSectorArc: Math.PI * 2 });
+    expansionQueue.push({ nodeId: seedId, ring: 1, parentAngle: 0, parentArc: Math.PI * 2 });
   }
 
   // Track which nodes are already placed to avoid duplicates
   const placed = new Set<string>([seedId]);
 
   while (expansionQueue.length > 0) {
-    const { nodeId, ring, parentAngle, parentSectorArc } = expansionQueue.shift()!;
+    const { nodeId, ring, parentAngle, parentArc } = expansionQueue.shift()!;
 
     // Get neighbors, excluding already-placed nodes and hidden types
     const nodeNeighbors = neighbors.get(nodeId);
@@ -214,34 +214,34 @@ export function computeRadialLayout(input: RadialLayoutInput): RadialLayoutOutpu
     }
 
     // Determine which arc range this expansion gets
-    let sectorArcTotal: number;
-    let sectorStartAngle: number;
+    let arcTotal: number;
+    let arcStartAngle: number;
 
     if (ring === 1) {
-      // Ring 1: full circle, sectors allocated proportionally
-      sectorArcTotal = Math.PI * 2;
-      sectorStartAngle = START_ANGLE;
+      // Ring 1: full circle, arcs allocated proportionally
+      arcTotal = Math.PI * 2;
+      arcStartAngle = START_ANGLE;
     } else {
       // Ring 2+: sub-arc centered on parent's angle
-      sectorArcTotal = Math.min(parentSectorArc * 0.75, Math.PI / 2);
-      sectorStartAngle = parentAngle - sectorArcTotal / 2;
+      arcTotal = Math.min(parentArc * 0.75, Math.PI / 2);
+      arcStartAngle = parentAngle - arcTotal / 2;
     }
 
-    // Allocate sectors within the available arc
+    // Allocate arcs within the available arc
     const typeCounts = new Map<string, number>();
     for (const [type, arr] of candidatesByType) {
       typeCounts.set(type, Math.min(arr.length, nodesPerType));
     }
 
-    // Custom sector allocation within the available arc
+    // Custom arc allocation within the available arc
     const totalVisible = Array.from(typeCounts.values()).reduce((s, c) => s + c, 0);
     if (totalVisible === 0) continue;
 
     // ── Dynamic radius: scale ring size so nodes have enough angular space ──
     // Minimum radius so adjacent nodes are >= MIN_NODE_GAP_PX apart:
-    //   arc_length_per_node = sectorArcTotal * radius / totalVisible >= MIN_NODE_GAP_PX
-    //   radius >= MIN_NODE_GAP_PX * totalVisible / sectorArcTotal
-    const minRadiusForGap = (MIN_NODE_GAP_PX * totalVisible) / sectorArcTotal;
+    //   arc_length_per_node = arcTotal * radius / totalVisible >= MIN_NODE_GAP_PX
+    //   radius >= MIN_NODE_GAP_PX * totalVisible / arcTotal
+    const minRadiusForGap = (MIN_NODE_GAP_PX * totalVisible) / arcTotal;
     // Floor: never smaller than 15% of viewport (keeps small graphs centered nicely)
     const minRadius = viewMin * 0.15;
     // For ring 2+, push outward from ring 1
@@ -252,7 +252,7 @@ export function computeRadialLayout(input: RadialLayoutInput): RadialLayoutOutpu
     while (ringRadii.length <= ring) ringRadii.push(radius);
     ringRadii[ring] = Math.max(ringRadii[ring], radius);
 
-    let cursor = sectorStartAngle;
+    let cursor = arcStartAngle;
     const typeEntries = Array.from(candidatesByType.entries());
 
     for (const [type, arr] of typeEntries) {
@@ -264,32 +264,32 @@ export function computeRadialLayout(input: RadialLayoutInput): RadialLayoutOutpu
 
       // Arc proportional to visible count
       const rawArc = Math.max(
-        (visibleCount / totalVisible) * sectorArcTotal,
-        MIN_SECTOR_ARC * (sectorArcTotal / (Math.PI * 2)), // scale min arc to available arc
+        (visibleCount / totalVisible) * arcTotal,
+        MIN_ARC * (arcTotal / (Math.PI * 2)), // scale min arc to available arc
       );
       // We'll normalize after
-      const sectorArc = rawArc;
+      const arcSpan = rawArc;
 
-      const sectorStart = cursor;
-      const sectorEnd = cursor + sectorArc;
-      const sectorMid = cursor + sectorArc / 2;
+      const arcStart = cursor;
+      const arcEnd = cursor + arcSpan;
+      const arcMid = cursor + arcSpan / 2;
 
-      sectors.push({
+      arcs.push({
         type,
         label: type,
-        startAngle: sectorStart,
-        endAngle: sectorEnd,
-        midAngle: sectorMid,
+        startAngle: arcStart,
+        endAngle: arcEnd,
+        midAngle: arcMid,
         count: visibleCount,
         total: totalCount,
         ring,
         expandedById: nodeId,
       });
 
-      // Position visible nodes evenly within sector
+      // Position visible nodes evenly within arc
       for (let i = 0; i < visible.length; i++) {
         const node = visible[i];
-        const angle = sectorStart + sectorArc * (i + 1) / (visibleCount + 1);
+        const angle = arcStart + arcSpan * (i + 1) / (visibleCount + 1);
         const x = cx + radius * Math.cos(angle);
         const y = cy + radius * Math.sin(angle);
 
@@ -303,14 +303,14 @@ export function computeRadialLayout(input: RadialLayoutInput): RadialLayoutOutpu
             nodeId: node.id,
             ring: ring + 1,
             parentAngle: angle,
-            parentSectorArc: sectorArc,
+            parentArc: arcSpan,
           });
         }
       }
 
-      // Overflow pill position: at the end of the sector arc
+      // Overflow pill position: at the end of the arc arc
       if (overflow.length > 0) {
-        const pillAngle = sectorEnd - sectorArc * 0.05;
+        const pillAngle = arcEnd - arcSpan * 0.05;
         overflowPills.push({
           type,
           count: overflow.length,
@@ -321,23 +321,23 @@ export function computeRadialLayout(input: RadialLayoutInput): RadialLayoutOutpu
         });
       }
 
-      cursor += sectorArc;
+      cursor += arcSpan;
     }
 
-    // Normalize: if sectors don't fill the available arc exactly, stretch them
+    // Normalize: if arcs don't fill the available arc exactly, stretch them
     // This handles the proportional allocation not summing perfectly
     if (typeEntries.length > 0) {
-      const actualTotal = cursor - sectorStartAngle;
-      if (actualTotal > 0 && Math.abs(actualTotal - sectorArcTotal) > 0.01) {
-        const scale = sectorArcTotal / actualTotal;
+      const actualTotal = cursor - arcStartAngle;
+      if (actualTotal > 0 && Math.abs(actualTotal - arcTotal) > 0.01) {
+        const scale = arcTotal / actualTotal;
         // Re-position all nodes placed in this expansion
         for (const [, arr] of typeEntries) {
           const visible = arr.slice(0, nodesPerType);
           for (const node of visible) {
             const pos = positions.get(node.id);
             if (pos && pos.ring === ring && pos.parentId === nodeId) {
-              const relAngle = pos.angle - sectorStartAngle;
-              const newAngle = sectorStartAngle + relAngle * scale;
+              const relAngle = pos.angle - arcStartAngle;
+              const newAngle = arcStartAngle + relAngle * scale;
               pos.angle = newAngle;
               pos.x = cx + radius * Math.cos(newAngle);
               pos.y = cy + radius * Math.sin(newAngle);
@@ -350,19 +350,19 @@ export function computeRadialLayout(input: RadialLayoutInput): RadialLayoutOutpu
             const relX = pill.x - cx;
             const relY = pill.y - cy;
             const oldAngle = Math.atan2(relY, relX);
-            const relAngle = oldAngle - sectorStartAngle;
-            const newAngle = sectorStartAngle + relAngle * scale;
+            const relAngle = oldAngle - arcStartAngle;
+            const newAngle = arcStartAngle + relAngle * scale;
             pill.x = cx + radius * Math.cos(newAngle);
             pill.y = cy + radius * Math.sin(newAngle);
           }
         }
-        // Re-compute sector angles
-        for (const s of sectors) {
+        // Re-compute arc angles
+        for (const s of arcs) {
           if (s.ring === ring && s.expandedById === nodeId) {
-            const relStart = s.startAngle - sectorStartAngle;
-            const relEnd = s.endAngle - sectorStartAngle;
-            s.startAngle = sectorStartAngle + relStart * scale;
-            s.endAngle = sectorStartAngle + relEnd * scale;
+            const relStart = s.startAngle - arcStartAngle;
+            const relEnd = s.endAngle - arcStartAngle;
+            s.startAngle = arcStartAngle + relStart * scale;
+            s.endAngle = arcStartAngle + relEnd * scale;
             s.midAngle = (s.startAngle + s.endAngle) / 2;
           }
         }
@@ -380,7 +380,7 @@ export function computeRadialLayout(input: RadialLayoutInput): RadialLayoutOutpu
     positions,
     visibleNodes,
     visibleEdges,
-    sectors,
+    arcs,
     overflowPills,
     ringRadii,
     center: { x: cx, y: cy },
@@ -391,7 +391,7 @@ export function computeRadialLayout(input: RadialLayoutInput): RadialLayoutOutpu
 
 /**
  * Compute an SVG path for an edge. Uses straight lines for radial edges
- * (seed→ring1, parent→child) and quadratic bezier curves for cross-sector
+ * (seed→ring1, parent→child) and quadratic bezier curves for cross-arc
  * edges to avoid crossing through the center.
  */
 export function computeEdgePath(

@@ -66,7 +66,6 @@ search page can flag it.
 | `sort` | meta | `sort:newest`, `sort:radar`, … ([8 values](#sorting)) |
 | **Signal & Source Fields** | | |
 | `signal` | exact | `signal:under_reported`, `signal:kev_added` |
-| `sector` | substring | `sector:healthcare` |
 | `feed.reliability` | grade | `feed.reliability:B` |
 | `feed.timeliness` | grade | `feed.timeliness:A` |
 | `feed.relevance` | grade | `feed.relevance:C` |
@@ -105,14 +104,17 @@ search page can flag it.
 | `threat_actor` | entity | `threat_actor:APT29` |
 | `threat_actor.country` | property | `threat_actor.country:Russia` |
 | `threat_actor.motivation` | property | `threat_actor.motivation:espionage` |
-| `threat_actor.sector` | array | `threat_actor.sector:healthcare` |
+| `threat_actor.sector` | join | `threat_actor.sector:healthcare` — asserted target-sector claims |
 | `threat_actor.type` | property | `threat_actor.type:ransomware` |
 | `threat_actor.mitre` | property | `threat_actor.mitre:G0016` |
 | `malware` | entity | `malware:Emotet` |
 | `malware.type` | property | `malware.type:trojan` |
-| `malware.sector` | array | `malware.sector:finance` |
+| `malware.sector` | join | `malware.sector:finance` |
 | `malware.mitre` | property | `malware.mitre:S0367` |
 | `tool` | entity | `tool:Mimikatz` |
+| **Entity Fields — Sectors** | | |
+| `sector` | entity | `sector:healthcare`, `sector:banks` — the article describes the industry as *targeted* |
+| `sector.slug` | property | `sector.slug:financial-services` |
 | `tool.type` | property | `tool.type:framework` |
 | `tool.platform` | array | `tool.platform:Windows` |
 | `tool.mitre` | property | `tool.mitre:S0002` |
@@ -291,7 +293,7 @@ Valid values:
 - `type`: feed adapter type — `rss`, `atom`, `youtube`, `podcast`, `reddit`, `github_releases`, `github_advisories`, `github_repo`, `nvd`, `mastodon`, `bluesky`, `telegram`, `web_scraper`
 - `media`: `image`, `video`, `audio`, `document`
 - `lang`: ISO 639-1 codes (`en`, `es`, `fr`, `zh`, `ja`, etc.)
-- `tag`: any tag name (managed in the tag manager; tag names also autocomplete after `tag:`)
+- `tag`: any tag name (managed in the tag manager; tag names also autocomplete after `tag:`). Matches the tags *you* put on an entry plus any global tag — another analyst's personal tagging never matches, and the Tags facet counts the same view
 
 **`url:`, `words:`**
 
@@ -337,11 +339,13 @@ signal:under_reported sort:radar
 
 **`sector:`**
 
-Filter by a sector *mentioned in the article* (substring, case-insensitive) — distinct from `threat_actor.sector:` / `malware.sector:`, which describe who an entity targets:
+Sector is an entity field: it matches the sector's name, slug or any alias from the vocabulary (`banks`, `hospitals`), and returns the articles the one-pass analysis judged to describe that industry as *targeted* — never articles that merely contain the word. Distinct from `threat_actor.sector:` / `malware.sector:`, which read the asserted target-sector claims on an actor or family:
 
 ```
 sector:healthcare
-sector:"critical infrastructure"
+sector:banks
+sector.slug:critical-infrastructure
+threat_actor.sector:healthcare
 ```
 
 #### Status Flags
@@ -498,10 +502,12 @@ heavily-used IDs are marked Discouraged.
 observable:evil.com          # By value — defanged input (evil[.]com) is normalised
 observable.kind:sha256       # ipv4 | ipv6 | domain | url | uri_path | email | md5 |
                              # sha1 | sha256 | ja3 | ja4 | cert_fingerprint | cmdline |
-                             # registry | path | mutex | named_pipe | service_name |
+                             # registry | path | mutex | named_pipe | service_name | scheduled_task | http_header |
                              # user_agent | script
 observable.role:c2           # c2 | delivery | payload | phishing | exfil | exploit | scanning
 observable.status:active     # active | aging | expired — derived from decayed confidence
+observable.reports:>0        # Distinct reporting articles (list files never count) — numeric
+observable.feeds:>=2         # Distinct indicator feeds listing it — numeric
 ```
 
 `observable.status:` is a lifecycle read, not a judgement: `aging` and `expired`
@@ -627,7 +633,7 @@ How a property's value is interpreted depends on its underlying column:
 | Kind | Behaviour | Fields |
 |------|-----------|--------|
 | Boolean | `true`/`yes`/`1`/`y` and `false`/`no`/`0`/`n`. An unparseable value filters nothing rather than matching everything. | `cve.kev`, `ttp.subtechnique`, `ttp.deprecated`, `rule.draft`, `note.pinned`, `<entity>.review` |
-| Array | Substring match against the joined elements, so `rule.data_source:process` finds "Process Creation". | `rule.data_source`, `rule.tactic`, `rule.tag`, `note.tag`, `threat_actor.sector`, `malware.sector`, `tool.platform`, `ttp.platform`, `ttp.data_source` |
+| Array | Substring match against the joined elements, so `rule.data_source:process` finds "Process Creation". | `rule.data_source`, `rule.tactic`, `rule.tag`, `note.tag`, `tool.platform`, `ttp.platform`, `ttp.data_source` |
 | Date | `YYYY-MM-DD` or `YYYY-MM`; bare means "on or after". | `<entity>.seen`, `<entity>.first_seen` |
 | Numeric | `>`, `>=`, `<`, `<=`, or bare equality. | `cve.cvss`, `cve.epss`, `cve.epss_percentile`, `cve.poc`, `<entity>.articles` |
 | Join | Resolved through a second table, then folded back as an `IN (subquery)` so AND/OR/NOT still work. | `cve.product`, `ransomware_victim.group`, `product.vendor` |
@@ -669,7 +675,7 @@ OR works between:
 - filters of *different* entity types (`cve:* OR threat_actor:*` — linked entries are unioned),
 - filterable entry fields (`tag:a OR tag:b`, `is:noted OR is:bookmarked` — combined into a single OR filter clause), including parenthesized AND groups (`(tag:a type:rss) OR tag:b`),
 - an entry predicate and an entity predicate (switches the join to OR mode),
-- the entry-scoped PostgreSQL fields (`signal:`, `sector:`, `url:`, `is:translated`/`is:image`) — these resolve to a *set of entry IDs* rather than a filter clause, so the disjunction is taken on the sets: `signal:under_reported OR signal:kev_added` returns 2,174 where the sides alone return 1,637 and 565 (28 entries carry both). Cross-field works too — `signal:kev_added OR sector:healthcare` unions. Negation inside such an OR goes through the complement: `NOT signal:a OR signal:b` excludes exactly the entries matching `a` but not `b`, since `¬(¬A ∪ B) = A \ B`.
+- the entry-scoped PostgreSQL fields (`signal:`, `url:`, `is:translated`/`is:image`) — these resolve to a *set of entry IDs* rather than a filter clause, so the disjunction is taken on the sets: `signal:under_reported OR signal:kev_added` returns 2,174 where the sides alone return 1,637 and 565 (28 entries carry both). Cross-field works too — `signal:kev_added OR url:github.com` unions. Negation inside such an OR goes through the complement: `NOT signal:a OR signal:b` excludes exactly the entries matching `a` but not `b`, since `¬(¬A ∪ B) = A \ B`.
 - `feed:` and the other feed-scoped PostgreSQL filters (`category:`, `feed.*:`, `is:muted`) — `feed:"Reddit Digest" OR feed:"Red Canary"` returns the union of both feeds, and mixing them with a text term (`ransomware OR feed:"Red Canary"`) unions too. Repeating one without an operator still ANDs — `feed:A feed:B` matches nothing, since no entry belongs to two feeds. `is:muted` is in this family too, so `is:muted OR tag:morning-brief` really is the union of both.
 
 Remaining OR limitations:
@@ -760,7 +766,7 @@ places, which changes what "partial" means:
 | Fields | How the pattern resolves |
 |--------|--------------------------|
 | Entity fields (`threat_actor:`, `cve:`, `malware:`, …) | SQL `ILIKE` against the name, aliases and secondary columns |
-| `feed:`, `category:`, `sector:`, `url:`, `signal:` | SQL `ILIKE` in PostgreSQL — **anchored**, unlike the plain substring these do without a `*` |
+| `feed:`, `category:`, `url:`, `signal:` | SQL `ILIKE` in PostgreSQL — **anchored**, unlike the plain substring these do without a `*` |
 | `tag:`, `type:`, `media:`, `lang:` | Matched against the attribute's indexed values, then expanded to an OR of the ones that hit |
 
 **Not in free text.** The search index has no wildcard operator, so `*` in a bare
@@ -781,14 +787,14 @@ IntelFeed uses a **hybrid backend**: Meilisearch for full-text (entry) queries, 
 The **query planner** walks your AST and classifies each field into one of three lanes:
 
 - **Indexed entry fields** (`title`, `content`, `author`, `feed`, `tag`, `type`, `media`, `lang`, `words`, `date`, most `is:` values) → Meilisearch filter clauses.
-- **PostgreSQL entry fields** (`category`, `signal`, `sector`, `url`, `feed.reliability`, `feed.timeliness`, `feed.relevance`, and `is:muted` / `is:translated` / `is:image`) → resolved against PostgreSQL. None of these live in the search index, and resolving them in the database avoids re-indexing ~95k documents to add them.
-- **Entity fields** (`cve`, `threat_actor`, `ttp`, `malware`, `country`, `tool`, `vendor`, `product`, `mitigation`, `campaign`, `ransomware_victim`, `rule`, `intel_report`, `pir`, `note` + all sub-fields) → PostgreSQL entity tables. `note` is the one type backed by two tables — the conditions are compiled once for each and the results merged.
+- **PostgreSQL entry fields** (`category`, `signal`, `url`, `feed.reliability`, `feed.timeliness`, `feed.relevance`, and `is:muted` / `is:translated` / `is:image`) → resolved against PostgreSQL. None of these live in the search index, and resolving them in the database avoids re-indexing ~95k documents to add them.
+- **Entity fields** (`cve`, `threat_actor`, `ttp`, `malware`, `country`, `sector`, `tool`, `vendor`, `product`, `mitigation`, `campaign`, `ransomware_victim`, `rule`, `intel_report`, `pir`, `note` + all sub-fields) → PostgreSQL entity tables. `note` is the one type backed by two tables — the conditions are compiled once for each and the results merged.
 - **Text terms** (bare words, phrases) → Meilisearch **and**, when the query carries no explicit entity filter, a cross-entity name sweep in PostgreSQL (`search_all_entities`) that also covers analyst notes.
 
 ### Execution
 
 1. **Feed resolution:** `feed:` and the feed-scoped PostgreSQL filters (`category:`, `feed.*:`, `is:muted`) resolve to a set of feed IDs. There are only a few hundred feeds, so these become ordinary Meilisearch `feed_id` clauses.
-2. **Entry-scoped PostgreSQL filters:** `signal:`, `sector:`, `url:`, `is:translated`, `is:image` resolve to a set of *entry* IDs. Multiple such filters intersect.
+2. **Entry-scoped PostgreSQL filters:** `signal:`, `url:`, `is:translated`, `is:image` resolve to a set of *entry* IDs. Multiple such filters intersect.
 3. **Entity Query:** PostgreSQL queries entity tables and junction tables to find linked entry IDs.
 4. **Intersection:** The PostgreSQL entry-ID set and the entity-linked entry-ID set intersect — a `signal:` filter narrows exactly the way an entity join does.
 5. **Entry Query:** Meilisearch searches free text and applies the indexed filters, constrained to the surviving IDs.
@@ -1162,10 +1168,9 @@ The `refresh_saved_search_counts` Celery task recomputes match counts for all sa
 > index nothing to search. Mixed with text it counts the *text term alone*, which
 > over-counts instead.
 >
-> Entry-scoped PostgreSQL filters (`signal:`, `sector:`, `url:`) do apply, but their
+> Entry-scoped PostgreSQL filters (`signal:`, `url:`) do apply, but their
 > entry-ID list is capped at 500 before the index query, so anything matching more
-> under-counts: `signal:scoop` counts 21 against 162, `sector:healthcare` 12 against
-> 276.
+> under-counts: `signal:scoop` counts 21 against 162.
 >
 > Counts are right for searches built from **text, `tag:`, `type:`, `feed:`,
 > `category:`, `date:` and the `is:` states**. Treat the number on an entity-filtered
@@ -1332,7 +1337,7 @@ The `?q=` parameter pre-fills the unified search bar on load.
 
 11. **`note:` is one field over two tables.** `note.type:` and an entity value for `note.about:` only apply to entity notes; `note.pinned:` and `note.about:entry` / `:standalone` only apply to the other table. A field that cannot apply excludes that table rather than matching all of it. A query made entirely of *other* entities' filters still returns no notes.
 
-12. **`OR` between a text term and an entry-scoped PostgreSQL filter means AND.** `ransomware OR signal:kev_added` intersects rather than unions: `signal:`, `sector:`, `url:` and `is:translated`/`is:image` narrow by entry ID *after* the index search, so they cannot be a branch of it. These fields OR correctly against each other and against `feed:`/`category:`/`is:`/the index filters. See [OR (Disjunction)](#or-disjunction).
+12. **`OR` between a text term and an entry-scoped PostgreSQL filter means AND.** `ransomware OR signal:kev_added` intersects rather than unions: `signal:`, `url:` and `is:translated`/`is:image` narrow by entry ID *after* the index search, so they cannot be a branch of it. These fields OR correctly against each other and against `feed:`/`category:`/`is:`/the index filters. See [OR (Disjunction)](#or-disjunction).
 
 13. **`note:` results are not tagged as direct matches.** Every other field filter marks its results `match_kind: "direct"`; note results carry `match_field` but no `match_kind`, so the search page files them under Mentions. Rows and counts are correct — only the grouping is off.
 

@@ -32,6 +32,7 @@ import { getEntityCssVar, getEntityLabel } from "@/utils/entityTheme";
 import { useQueryClient } from "@tanstack/react-query";
 
 import styles from "./ProposalsQueue.module.css";
+import { confirmDialog } from "@/utils/dialog";
 
 type Domain = "links" | "entities";
 
@@ -286,7 +287,14 @@ export function ProposalsQueue({ domain, initialAction }: { domain: Domain; init
     const label = actionFilter
       ? (FILTERS.find((f) => f.value === actionFilter)?.label ?? "these").toLowerCase()
       : "all pending";
-    if (!confirm(`Dismiss ${label} proposals without applying them? The suggestions are deleted; entities and links are untouched.`))
+    if (
+      !(await confirmDialog({
+        title: "Dismiss proposals",
+        message: `Dismiss ${label} proposals without applying them? The suggestions are deleted; entities and links are untouched.`,
+        confirmLabel: "Dismiss",
+        destructive: true,
+      }))
+    )
       return;
     try {
       const r = await dismissProposals.mutateAsync({ source, action: actionFilter || undefined, review: verdictFilter || undefined });

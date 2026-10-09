@@ -249,6 +249,40 @@ async def _repoint_entity_relationships(
     return touched
 
 
+async def _move_target_sectors(db: AsyncSession, entity_type: str, source_id: uuid.UUID, target) -> int:
+    """Re-point the source's target-sector claims at the survivor.
+
+    A sector both already carry keeps the stronger source and the higher
+    evidence count; the duplicate row is dropped. The survivor's cache column is
+    rebuilt afterwards so its chips reflect the union.
+    """
+    from app.services.sector_links import (
+        SOURCE_PRECEDENCE,
+        junction_for,
+        refresh_targeted_sectors_cache,
+    )
+
+    _, junction, fk_attr = junction_for(entity_type)
+    fk = getattr(junction, fk_attr)
+    existing = {
+        row.sector_id: row for row in (await db.execute(select(junction).where(fk == target.id))).scalars().all()
+    }
+    moved = 0
+    for row in (await db.execute(select(junction).where(fk == source_id))).scalars().all():
+        kept = existing.get(row.sector_id)
+        if kept is None:
+            setattr(row, fk_attr, target.id)
+            moved += 1
+            continue
+        if SOURCE_PRECEDENCE[row.source] > SOURCE_PRECEDENCE[kept.source]:
+            kept.source = row.source
+        kept.article_count = max(kept.article_count or 0, row.article_count or 0)
+        await db.delete(row)
+    await db.flush()
+    await refresh_targeted_sectors_cache(db, entity_type, target)
+    return moved
+
+
 def _snapshot_actor(actor: ThreatActor) -> dict:
     return {
         "id": str(actor.id),
@@ -369,6 +403,7 @@ async def perform_actor_merge(
             j.threat_actor_id = target_id
             moved_countries += 1
     await db.flush()
+    await _move_target_sectors(db, "threat_actor", body.source_id, target)
 
     # Aliases + description + article_count
     original_aliases = list(target.aliases or [])
@@ -489,6 +524,7 @@ async def perform_malware_merge(
         target.description = body.new_description
     target.article_count = (target.article_count or 0) + (source.article_count or 0) - dropped
 
+    await _move_target_sectors(db, "malware", body.source_id, target)
     await _repoint_entity_relationships(db, "malware", body.source_id, "malware", target_id)
     await db.delete(source)
     await db.flush()

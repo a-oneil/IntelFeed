@@ -19,6 +19,7 @@ const TYPE_KEYS: Array<[EntityType, string]> = [
   ["cve", "cves"],
   ["ttp", "ttps"],
   ["country", "countrys"],
+  ["sector", "sectors"],
   ["vendor", "vendors"],
   ["product", "products"],
   ["tool", "tools"],
@@ -44,6 +45,7 @@ const ALLOWED_MATRIX: Record<string, readonly string[]> = {
   "threat_actor>ttp": ["uses"],
   "threat_actor>cve": ["exploits"],
   "threat_actor>country": ["targets", "attributed_to"],
+  "threat_actor>sector": ["targets"],
   "threat_actor>vendor": ["targets"],
   "threat_actor>product": ["targets"],
   "threat_actor>threat_actor": ["related_to", "communicates_with", "successor_of", "subgroup_of", "overlaps_with"],
@@ -53,6 +55,7 @@ const ALLOWED_MATRIX: Record<string, readonly string[]> = {
   "malware>ttp": ["uses"],
   "malware>cve": ["exploits"],
   "malware>country": ["targets"],
+  "malware>sector": ["targets"],
   "malware>vendor": ["targets"],
   "malware>product": ["targets"],
   "tool>malware": ["delivers"],
@@ -65,11 +68,18 @@ const ALLOWED_MATRIX: Record<string, readonly string[]> = {
   "campaign>ttp": ["uses"],
   "campaign>cve": ["exploits"],
   "campaign>country": ["targets"],
+  "campaign>sector": ["targets"],
   "campaign>vendor": ["targets"],
   "campaign>product": ["targets"],
   "vendor>vendor": ["related_to"],
   "vendor>product": ["related_to"],
   "product>product": ["related_to"],
+  // Observables are target-only: attribution claims onto the IOC ledger, each
+  // born from an evidence sentence (never from co-occurrence).
+  "threat_actor>observable": ["uses", "communicates_with", "controls"],
+  "malware>observable": ["uses", "communicates_with"],
+  "tool>observable": ["communicates_with"],
+  "campaign>observable": ["uses"],
 };
 
 /**
@@ -98,10 +108,13 @@ export function rowMeta(type: EntityType, item: EntitySearchResult): string | un
     case "malware": return item.malware_type ?? undefined;
     case "cve": return item.severity ?? undefined;
     case "country": return item.region ?? undefined;
+    case "sector": return item.slug ?? undefined;
     case "vendor": return item.vendor_type ?? undefined;
     case "product": return item.product_type ?? undefined;
     case "tool": return item.tool_type ?? undefined;
     case "mitigation": return item.mitre_id ?? undefined;
+    case "observable":
+      return [item.kind, item.role, item.status && item.status !== "active" ? item.status : null].filter(Boolean).join(" · ") || undefined;
     default: return undefined;
   }
 }
@@ -140,6 +153,7 @@ const VERB_CHIP: Record<string, { active: string; passive: string }> = {
   attributed_to: { active: "attributed to", passive: "attribution of" },
   variant_of: { active: "variant of", passive: "has variant" },
   communicates_with: { active: "communicates with", passive: "communicates with" },
+  controls: { active: "controls", passive: "controlled by" },
   delivers: { active: "delivers", passive: "delivered by" },
   drops: { active: "drops", passive: "dropped by" },
   hosts: { active: "hosts", passive: "hosted by" },
@@ -523,6 +537,7 @@ const VERB_ORDER = [
   "subgroup_of",
   "overlaps_with",
   "communicates_with",
+  "controls",
   "hosts",
   "related_to",
   "mitigates",

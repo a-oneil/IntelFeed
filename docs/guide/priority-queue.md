@@ -9,6 +9,11 @@ inside any query.
 
 ## What it looks like
 
+![Priority Queue story cards, each showing a score, outlet and article counts, and entity chips](../assets/screenshots/priority-queue.png)
+
+*Each card is one story, not one article — duplicate coverage is folded in and counted.*
+
+
 It is a normal entry list and reader — same keys, same actions — pinned to the
 priority ranking instead of date order. Two things are different:
 
@@ -23,6 +28,10 @@ the story appears once, not once per outlet. A story ranks by its best unread
 article plus a bump for each extra outlet carrying it, because corroboration
 across newsrooms is itself a signal. A story you have finished reading drops
 out of the queue entirely.
+
+What a story row opens into — the spine, the coverage list, what "N new" counts,
+and why threads may be missing on a fresh instance — is in
+[Story threads](story-threads.md).
 
 ## What the ranking looks at
 
@@ -65,7 +74,9 @@ The queue learns from you, in two ways you control directly.
 their articles and surface them even below the normal threshold; muted entities
 disappear from the queue entirely (but not from search or the feed list). Both
 are per-user. This is the biggest lever you have, and the most underused — watch
-your vendors, your products, and the actors that go after your sector.
+your vendors, your products, the actors that go after your sector, and the sector
+itself: watching **Healthcare** boosts every article the analysis judged to describe
+healthcare as the target.
 
 **Thumbs.** The queue asks whether a ranking was right. Everyone's votes
 together nudge the shared ranking by at most ±10%, which is deliberate — a

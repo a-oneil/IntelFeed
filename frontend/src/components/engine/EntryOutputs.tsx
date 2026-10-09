@@ -13,6 +13,7 @@ import type { EntityType } from "@/stores/intelStore";
 import { getEntityCssVar, getEntityLabel } from "@/utils/entityTheme";
 
 import styles from "./EngineMatrix.module.css";
+import { confirmDialog } from "@/utils/dialog";
 
 const SOURCE_LABELS: Record<string, string> = {
   auto_link: "Autolinker",
@@ -197,11 +198,14 @@ export function EntryOutputs({ entryId }: { entryId: string }) {
                 // (Extraction tab / profile), where its blast radius is clear.
                 const obs = e.entity_type === "observable";
                 if (
-                  !window.confirm(
-                    obs
+                  !(await confirmDialog({
+                    title: obs ? "Remove sighting" : "Delete entity",
+                    message: obs
                       ? `Remove this article's sighting of "${e.name}"? The ledger row and its other sightings stay.`
                       : `Delete "${e.name}"? This removes the entity and all links. This cannot be undone.`,
-                  )
+                    confirmLabel: obs ? "Remove sighting" : "Delete",
+                    destructive: true,
+                  }))
                 )
                   return;
                 try {

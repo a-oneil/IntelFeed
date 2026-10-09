@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Entry, PriorityQueueRow, StoryThread } from "@/api/types";
-import { queueItems, threadSummaryLine } from "../threads";
+import { magazineQueueItems, queueItems, threadSummaryLine } from "../threads";
 
 function entry(id: string, title = `Entry ${id}`): Entry {
   return { id, title, feed_id: "f1" } as unknown as Entry;
@@ -101,6 +101,52 @@ describe("queueItems", () => {
 
   it("is empty for an empty queue", () => {
     expect(queueItems([])).toEqual([]);
+  });
+});
+
+/**
+ * The magazine grid's own walk: same rows, same order, one card each. The bug
+ * it exists to close is silent — the queue withholds a thread's articles, so a
+ * grid built from the entry stream loses the whole story without a gap.
+ */
+describe("magazineQueueItems", () => {
+  it("gives a thread a card of its own, in the server's order", () => {
+    const out = magazineQueueItems([entryRow("x", 9), threadRow(7), entryRow("y", 6)]);
+
+    expect(out.map((i) => i.type)).toEqual(["single", "thread", "single"]);
+    expect(out[1]).toMatchObject({ type: "thread", score: 7, key: "thread-t1" });
+  });
+
+  it("never groups CVE runs — magazine cards stay one per entry", () => {
+    const out = magazineQueueItems([
+      entryRow("a", 9, "CVE-2026-1111 Acme Router flaw"),
+      entryRow("b", 8, "CVE-2026-2222 Acme Router flaw"),
+    ]);
+
+    expect(out.map((i) => i.type)).toEqual(["single", "single"]);
+  });
+
+  it("counts flatIndex over entries only, so range selection still lines up", () => {
+    const out = magazineQueueItems([entryRow("x", 9), threadRow(7), entryRow("y", 6)]);
+
+    const indexes = out.flatMap((i) => (i.type === "single" ? [[i.entry.id, i.flatIndex]] : []));
+    expect(indexes).toEqual([
+      ["x", 0],
+      ["y", 1],
+    ]);
+  });
+
+  it("skips rows the server sent without their payload", () => {
+    expect(
+      magazineQueueItems([
+        { kind: "thread", score: 5, entry: null, thread: null, absorbed_entry_ids: [] },
+        { kind: "entry", score: 4, entry: null, thread: null, absorbed_entry_ids: [] },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("is empty for an empty queue", () => {
+    expect(magazineQueueItems([])).toEqual([]);
   });
 });
 

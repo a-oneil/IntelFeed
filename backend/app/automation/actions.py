@@ -25,7 +25,7 @@ from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.automation.variables import BATCH_ENTRY_FIELDS, PER_ENTRY_FIELDS
@@ -33,6 +33,7 @@ from app.models.entry import Entry
 from app.models.entry_state import UserEntryState
 from app.models.note import Note
 from app.models.tag import EntryTag, Tag
+from app.services.entry_tags import MissingOwner, ensure_assignment, sync_entry_tags_to_search, visible_to
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +81,35 @@ def _validate_webhook_url(url: str) -> str | None:
     return None
 
 
+async def observable_template_context(db: AsyncSession, entry: Entry) -> dict:
+    """``{observables_count}`` / ``{observables}`` for notification templates:
+    the entry's captured observables sighted by a reporting door (the
+    indicator-feed door is excluded — a blocklist mirror is not news),
+    defanged, one per line as ``kind value (role)``."""
+    from app.intelligence.observables import defang
+    from app.models.observable import EntryObservable, Observable
+
+    rows = (
+        (
+            await db.execute(
+                select(Observable)
+                .join(EntryObservable, EntryObservable.observable_id == Observable.id)
+                .where(
+                    EntryObservable.entry_id == entry.id,
+                    EntryObservable.source != "feed",
+                    Observable.is_denied.is_(False),
+                )
+                .order_by(Observable.kind, Observable.value)
+                .limit(50)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    lines = [f"{o.kind} {defang(o.kind, o.value)}" + (f" ({o.role})" if o.role else "") for o in rows]
+    return {"observables_count": len(rows), "observables": "\n".join(lines)}
+
+
 def _render_template(template: str, entry: Entry, context: dict | None = None) -> str:
     """Render a message template with entry and context variables.
 
@@ -100,6 +130,10 @@ def _render_template(template: str, entry: Entry, context: dict | None = None) -
         "published_at": str(entry.published_at) if entry.published_at else "",
         "ai_summary": ai_summary or "",
         "feed_name": getattr(entry, "_feed_title", "") or "",
+        # Seeded by execute_automation (observable_template_context) so a
+        # "new C2 captured" rule can name the indicators in its message.
+        "observables_count": str(ctx.get("observables_count", "")),
+        "observables": ctx.get("observables", "") or "",
     }
 
     result = template
@@ -612,46 +646,95 @@ async def _sync_entry_tags_index(db: AsyncSession, entry_id: uuid.UUID) -> None:
     """Push the entry's current tags to the search index.
 
     Meilisearch stores tags as a full array per document, so we recompute the
-    entry's complete tag list and let update_entry_tags (best-effort) sync it.
-    Without this, automation-applied tags never reach the index and `tag:`
-    search returns nothing.
+    entry's complete tag fields (global tag names + personal assignment tokens)
+    and sync them best-effort. Without this, automation-applied tags never
+    reach the index and `tag:` search returns nothing.
     """
-    from app.services.meilisearch_client import update_entry_tags
-
-    result = await db.execute(
-        select(Tag.name).join(EntryTag, EntryTag.tag_id == Tag.id).where(EntryTag.entry_id == entry_id)
-    )
-    names = [row[0] for row in result.all()]
-    update_entry_tags(entry_id, names)
+    await sync_entry_tags_to_search(db, [entry_id])
 
 
-async def _action_add_tags(db: AsyncSession, entry: Entry, config: dict, user_id: uuid.UUID) -> dict:
-    """Add tags to the entry."""
-    tag_names = config.get("tags", [])
-    if not tag_names:
+_HEX_COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
+
+
+def _clean_tag_name(raw: object) -> str:
+    """A tag name as the Tag model accepts it: trimmed, capped at the column's
+    100 chars, with the two characters a search filter can't take (`"` and `\\`)
+    dropped — see TAG_NAME_PATTERN in app.schemas.tag."""
+    return str(raw or "").replace('"', "").replace("\\", "").strip()[:100]
+
+
+def _tag_spec(item) -> dict | None:
+    """Normalise one `add_tags` entry: a bare name, or a dict that also carries
+    the presentation and scope to use if the tag has to be created."""
+    if isinstance(item, str):
+        name = _clean_tag_name(item)
+        return {"name": name} if name else None
+    if isinstance(item, dict):
+        name = _clean_tag_name(item.get("name"))
+        return {**item, "name": name} if name else None
+    return None
+
+
+async def _action_add_tags(db: AsyncSession, entry: Entry, config: dict, user_id: uuid.UUID | None) -> dict:
+    """Add tags to the entry.
+
+    `config["tags"]` holds bare names or `{name, color, description, chip,
+    global}` objects. The presentation and scope fields apply only when the tag
+    doesn't exist yet: an existing tag's record is the source of truth and is
+    never recoloured or re-scoped from under the other entries carrying it.
+
+    Each assignment belongs to the rule's owner — it shows on their cards and
+    nobody else's — unless the tag is global, in which case it is shared. A
+    rule with no owner cannot apply a personal tag and skips it.
+    """
+    specs = [spec for spec in map(_tag_spec, config.get("tags") or []) if spec]
+    if not specs:
         return {"status": "skipped", "message": "No tags specified"}
 
-    added = []
-    for name in tag_names:
+    added: list[str] = []
+    unowned: list[str] = []
+    for spec in specs:
+        name = spec["name"]
         # Find or create tag
         result = await db.execute(select(Tag).where(Tag.name == name))
         tag = result.scalar_one_or_none()
+        if not tag and user_id is None and not spec.get("global"):
+            # Nobody to own the assignment, so don't mint an orphan definition.
+            unowned.append(name)
+            continue
         if not tag:
-            tag = Tag(created_by=user_id, name=name)
+            color = spec.get("color")
+            description = spec.get("description")
+            tag = Tag(
+                created_by=user_id,
+                name=name,
+                color=color if isinstance(color, str) and _HEX_COLOR.match(color) else "#6B7280",
+                display_as_chip=bool(spec.get("chip")),
+                description=str(description).strip()[:255] or None if description else None,
+                is_global=bool(spec.get("global")),
+            )
             db.add(tag)
             await db.flush()
 
-        # Check if already tagged
-        existing = await db.execute(select(EntryTag).where(EntryTag.entry_id == entry.id, EntryTag.tag_id == tag.id))
-        if not existing.scalar_one_or_none():
-            entry_tag = EntryTag(entry_id=entry.id, tag_id=tag.id)
-            db.add(entry_tag)
-            added.append(name)
+        try:
+            if await ensure_assignment(db, entry.id, tag, user_id):
+                added.append(name)
+        except MissingOwner:
+            unowned.append(name)
 
     await db.flush()
+    if unowned and not added:
+        return {
+            "status": "skipped",
+            "message": f"Rule has no owner; personal tags need one: {', '.join(unowned)}",
+            "tags_skipped": unowned,
+        }
     if added:
         await _sync_entry_tags_index(db, entry.id)
-    return {"status": "success", "tags_added": added}
+    result_payload: dict = {"status": "success", "tags_added": added}
+    if unowned:
+        result_payload["tags_skipped"] = unowned
+    return result_payload
 
 
 async def _action_send_notification(entry: Entry, config: dict, context: dict | None = None) -> dict:
@@ -1356,7 +1439,8 @@ async def _action_hide_entry(db: AsyncSession, entry: Entry, user_id: uuid.UUID)
 
 async def _action_remove_tags(db: AsyncSession, entry: Entry, config: dict, user_id: uuid.UUID) -> dict:
     """Remove tags from an entry."""
-    tag_names = config.get("tags", [])
+    # Names normalised exactly as `add_tags` does, so a rule removes what it added.
+    tag_names = [spec["name"] for spec in map(_tag_spec, config.get("tags") or []) if spec]
     if not tag_names:
         return {"status": "skipped", "message": "No tags specified"}
 
@@ -1367,15 +1451,16 @@ async def _action_remove_tags(db: AsyncSession, entry: Entry, config: dict, user
         if not tag:
             continue
 
+        # The rule owner's own assignment, or the shared one for a global tag;
+        # another analyst's assignment of a personal tag is theirs to keep.
         et_result = await db.execute(
-            select(EntryTag).where(
+            delete(EntryTag).where(
                 EntryTag.entry_id == entry.id,
                 EntryTag.tag_id == tag.id,
+                visible_to(user_id),
             )
         )
-        entry_tag = et_result.scalar_one_or_none()
-        if entry_tag:
-            await db.delete(entry_tag)
+        if et_result.rowcount:
             removed.append(name)
 
     await db.flush()
@@ -1623,6 +1708,12 @@ async def _action_add_to_campaign(
     Config:
       - campaign_id: str (UUID, required)
       - notes: str (optional)
+      - link_observables: bool (optional) — also attach the entry's captured
+        observables (reporting doors only, dual-use infra excluded) as
+        campaign entities, so an on_observable_captured rule builds the
+        campaign's infrastructure list as articles land.
+      - observable_kinds / observable_roles: comma lists narrowing which
+        captured observables are attached (blank = any).
     """
     from app.models.campaign import Campaign, CampaignEntry
 
@@ -1646,18 +1737,84 @@ async def _action_add_to_campaign(
             CampaignEntry.entry_id == entry.id,
         )
     )
-    if existing.scalar_one_or_none():
-        return {"status": "skipped", "message": "Entry already in campaign"}
+    already_linked = existing.scalar_one_or_none() is not None
+    if not already_linked:
+        ce = CampaignEntry(
+            campaign_id=campaign.id,
+            entry_id=entry.id,
+            added_by=user_id,
+            notes=config.get("notes"),
+        )
+        db.add(ce)
+        await db.flush()
 
-    ce = CampaignEntry(
-        campaign_id=campaign.id,
-        entry_id=entry.id,
-        added_by=user_id,
-        notes=config.get("notes"),
+    linked_observables = 0
+    if str(config.get("link_observables", "")).lower() in ("true", "1", "yes"):
+        linked_observables = await _link_captured_observables_to_campaign(db, entry, campaign.id, config, user_id)
+
+    if already_linked and not linked_observables:
+        return {"status": "skipped", "message": "Entry already in campaign"}
+    return {"status": "success", "campaign": campaign.name, "observables_linked": linked_observables}
+
+
+async def _link_captured_observables_to_campaign(
+    db: AsyncSession, entry: Entry, campaign_id: uuid.UUID, config: dict, user_id: uuid.UUID
+) -> int:
+    """CampaignEntity(entity_type="observable") rows for the entry's
+    reporting-door observables; idempotent. Returns rows added."""
+    from app.models.campaign import CampaignEntity
+    from app.models.observable import EntryObservable, Observable
+
+    def _as_list(v) -> list[str]:
+        if not v:
+            return []
+        if isinstance(v, str):
+            return [x.strip() for x in v.split(",") if x.strip()]
+        return [str(x).strip() for x in v if str(x).strip()]
+
+    query = (
+        select(Observable.id)
+        .join(EntryObservable, EntryObservable.observable_id == Observable.id)
+        .where(
+            EntryObservable.entry_id == entry.id,
+            EntryObservable.source != "feed",
+            Observable.is_denied.is_(False),
+            Observable.infra_tag.is_(None),
+        )
     )
-    db.add(ce)
-    await db.flush()
-    return {"status": "success", "campaign": campaign.name}
+    kinds = _as_list(config.get("observable_kinds"))
+    roles = _as_list(config.get("observable_roles"))
+    if kinds:
+        query = query.where(Observable.kind.in_(kinds))
+    if roles:
+        query = query.where(Observable.role.in_(roles))
+    candidate_ids = set((await db.execute(query)).scalars().all())
+    if not candidate_ids:
+        return 0
+    present = set(
+        (
+            await db.execute(
+                select(CampaignEntity.entity_id).where(
+                    CampaignEntity.campaign_id == campaign_id,
+                    CampaignEntity.entity_type == "observable",
+                    CampaignEntity.entity_id.in_(candidate_ids),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    added = 0
+    for oid in candidate_ids - present:
+        db.add(
+            CampaignEntity(
+                campaign_id=campaign_id, entity_type="observable", entity_id=oid, role="related", added_by=user_id
+            )
+        )
+        added += 1
+    if added:
+        await db.flush()
+    return added
 
 
 async def _action_create_intel_report(

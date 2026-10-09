@@ -124,9 +124,13 @@ NOTIFICATION_TEMPLATE_FIELDS: list[str] = [
     "published_at",
     "ai_summary",
     "feed_name",
+    "observables_count",
+    "observables",
 ]
 
 _NOTIFICATION_DESCRIPTIONS: dict[str, str] = {
+    "observables_count": "Captured observables sighted in the entry by a reporting door (feed-list rows excluded)",
+    "observables": "Those observables, one per line, defanged, as 'kind value (role)'",
     "title": "Entry title",
     "url": "Entry URL",
     "author": "Entry author",

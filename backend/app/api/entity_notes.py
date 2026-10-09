@@ -13,6 +13,7 @@ from app.models.cve import CVE
 from app.models.entity_note import EntityNote
 from app.models.malware_family import MalwareFamily
 from app.models.product import Product
+from app.models.sector import Sector
 from app.models.threat_actor import ThreatActor
 from app.models.ttp import TTP
 from app.models.user import User
@@ -31,6 +32,7 @@ _ENTITY_NAME_MAP: dict[str, tuple] = {
     "campaign": (Campaign, Campaign.name),
     "vendor": (Vendor, Vendor.name),
     "product": (Product, Product.name),
+    "sector": (Sector, Sector.name),
 }
 
 

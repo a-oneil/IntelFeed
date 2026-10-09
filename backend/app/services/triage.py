@@ -6,7 +6,7 @@ Priority scoring factors:
 - High-severity correlation events linked to the entry
 - Feed reliability rating (A-F)
 - Automation rule triggers on the entry
-- Victim sectors matching the org's "my sectors" setting
+- Watched entities (including sectors) boost through the generic watch junctions
 """
 
 import uuid
@@ -31,7 +31,6 @@ DEFAULT_TRIAGE_WEIGHTS = {
     "automation_weight": 1,
     "engagement_weight": 1,
     "cve_risk_weight": 3,
-    "sector_weight": 5,
     "min_priority_score": 3,
 }
 
@@ -472,6 +471,7 @@ def _watch_junction_map():
         from app.models.country import EntryCountry
         from app.models.cve import EntryCVE
         from app.models.cwe import EntryCWE
+        from app.models.entry_sector import EntrySector
         from app.models.malware_family import EntryMalware
         from app.models.mitigation import EntryMitigation
         from app.models.product import EntryProduct
@@ -491,6 +491,7 @@ def _watch_junction_map():
             "vendor": (EntryVendor, EntryVendor.vendor_id),
             "product": (EntryProduct, EntryProduct.product_id),
             "country": (EntryCountry, EntryCountry.country_id),
+            "sector": (EntrySector, EntrySector.sector_id),
         }
     return _WATCH_JUNCTIONS
 

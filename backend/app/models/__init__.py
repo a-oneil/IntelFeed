@@ -76,6 +76,7 @@ from app.models.ransomware import RansomwareVictim, VictimDisclosure
 from app.models.report_template import ReportTemplate
 from app.models.rule_coverage import RuleCoverage
 from app.models.saved_search import SavedSearch
+from app.models.sector import CampaignSector, MalwareTargetSector, Sector, ThreatActorTargetSector
 
 # Sharing
 from app.models.shared_entry import SharedEntry
@@ -144,6 +145,10 @@ __all__ = [
     "Country",
     "EntryCountry",
     "EntrySector",
+    "Sector",
+    "ThreatActorTargetSector",
+    "MalwareTargetSector",
+    "CampaignSector",
     "ThreatActorTargetCountry",
     "CampaignCountry",
     "Mitigation",

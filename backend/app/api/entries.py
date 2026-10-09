@@ -26,7 +26,7 @@ from app.models.feed import Feed
 from app.models.malware_family import EntryMalware, MalwareFamily
 from app.models.mitigation import EntryMitigation, Mitigation
 from app.models.product import EntryProduct, Product
-from app.models.tag import EntryTag, Tag
+from app.models.sector import Sector
 from app.models.threat_actor import EntryThreatActor, ThreatActor
 from app.models.tool import EntryTool, Tool
 from app.models.ttp import TTP, EntryTTP
@@ -48,6 +48,7 @@ from app.schemas.priority_queue import PriorityQueueResponse, PriorityQueueRow
 from app.schemas.thread import ThreadSummary
 from app.services import meilisearch_client, translation
 from app.services.atlas import build_atlas_entry_id_query
+from app.services.entry_tags import load_entry_tags
 from app.services.feed_visibility import subscriptions_enabled, visible_feed_ids_query
 from app.services.iso_codes import ALPHA2_TO_ALPHA3
 from app.services.read_state import has_no_state_for_user
@@ -117,6 +118,7 @@ _ENTRY_ENTITY_LINKS: dict[str, tuple] = {
     entity_types.COUNTRY: (EntryCountry.entry_id, EntryCountry.country_id),
     entity_types.TOOL: (EntryTool.entry_id, EntryTool.tool_id),
     entity_types.MITIGATION: (EntryMitigation.entry_id, EntryMitigation.mitigation_id),
+    entity_types.SECTOR: (EntrySector.entry_id, EntrySector.sector_id),
 }
 
 
@@ -950,15 +952,8 @@ async def _entry_page(
             )
 
     # Batch-load tags for all entries
-    tags_map: dict[uuid.UUID, list[dict]] = {}
-    if entry_ids:
-        tag_result = await db.execute(
-            select(EntryTag.entry_id, Tag.name, Tag.color)
-            .join(Tag, Tag.id == EntryTag.tag_id)
-            .where(EntryTag.entry_id.in_(entry_ids))
-        )
-        for entry_id, tag_name, tag_color in tag_result.all():
-            tags_map.setdefault(entry_id, []).append({"name": tag_name, "color": tag_color})
+    # The viewer's own tag assignments plus global tags — never another user's.
+    tags_map = await load_entry_tags(db, entry_ids, user.id)
 
     # Batch-load signal chips (signal engine, only when surfaced)
     signals_map: dict[uuid.UUID, list[dict]] = {}
@@ -1916,19 +1911,21 @@ async def day_intel(
             "count": ttp_row.c,
         }
 
-    # --- Sector: controlled-vocab slug, no entity table; group by the slug ---
+    # --- Sector: the day's most-targeted industry. Carries the slug for the
+    # legacy ?sector= filter and the id so the chip can land on the profile.
     sec_count = func.count(func.distinct(EntrySector.entry_id))
     sec_row = (
         await db.execute(
-            select(EntrySector.sector, sec_count.label("c"))
+            select(EntrySector.sector_id, EntrySector.sector, sec_count.label("c"))
             .where(EntrySector.entry_id.in_(entry_ids))
-            .group_by(EntrySector.sector)
+            .group_by(EntrySector.sector_id, EntrySector.sector)
             .order_by(sec_count.desc(), EntrySector.sector.asc())
             .limit(1)
         )
     ).first()
     if sec_row:
         result["sector"] = {
+            "id": str(sec_row.sector_id),
             "slug": sec_row.sector,
             "name": sector_label(sec_row.sector),
             "count": sec_row.c,
@@ -2179,6 +2176,33 @@ async def day_entities(
         }
 
     actors = await _named_with_matched(ThreatActor, EntryThreatActor, "threat_actor_id", _ser_actor)
+    # Sectors are never autolinked, so the junction carries no matched_names;
+    # the AI door is the only thing that links them.
+    sector_rows = (
+        (
+            await db.execute(
+                select(Sector)
+                .join(EntrySector, EntrySector.sector_id == Sector.id)
+                .where(EntrySector.entry_id.in_(entry_ids_select))
+                .distinct()
+            )
+        )
+        .scalars()
+        .all()
+    )
+    sectors = [
+        {
+            "id": str(sct.id),
+            "name": sct.name,
+            "slug": sct.slug,
+            "aliases": list(sct.aliases or []),
+            "description": sct.description,
+            "article_count": sct.article_count,
+            "first_seen_at": sct.first_seen_at.isoformat() if sct.first_seen_at else None,
+            "matched_names": [],
+        }
+        for sct in sector_rows
+    ]
     malware = await _named_with_matched(MalwareFamily, EntryMalware, "malware_family_id", _ser_malware)
     vendors = await _named_with_matched(Vendor, EntryVendor, "vendor_id", _ser_vendor)
     products = await _named_with_matched(Product, EntryProduct, "product_id", _ser_product)
@@ -2222,6 +2246,7 @@ async def day_entities(
         "vendors": vendors,
         "products": products,
         "countries": countries,
+        "sectors": sectors,
         "tools": tools,
         "mitigations": mitigations,
     }
@@ -2543,6 +2568,7 @@ async def get_entry(
         is_read=state.is_read if state else False,
         is_starred=state.is_starred if state else False,
         is_bookmarked=state.is_bookmarked if state else False,
+        tags=(await load_entry_tags(db, [entry.id], user.id)).get(entry.id, []),
         duplicates=duplicates,
         translated_html=entry.translated_html,
         translation_source_language=entry.translation_source_language,

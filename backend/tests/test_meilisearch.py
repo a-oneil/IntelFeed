@@ -34,7 +34,7 @@ def mock_meili_client():
 
 class TestIndexEntry:
     def test_index_entry(self, mock_meili_client):
-        """index_entry should call add_documents with the correct document."""
+        """index_entry upserts via update_documents (a re-index must keep tag fields)."""
         client, index = mock_meili_client
 
         entry_id = uuid.uuid4()
@@ -52,8 +52,8 @@ class TestIndexEntry:
                 feed_type="rss",
             )
 
-        index.add_documents.assert_called_once()
-        call_args = index.add_documents.call_args[0][0]
+        index.update_documents.assert_called_once()
+        call_args = index.update_documents.call_args[0][0]
 
         assert len(call_args) == 1
         doc = call_args[0]
@@ -82,7 +82,7 @@ class TestIndexEntry:
                 published_at="not-a-date",
             )
 
-        doc = index.add_documents.call_args[0][0][0]
+        doc = index.update_documents.call_args[0][0][0]
         assert doc["published_at"] == 0
 
     def test_index_entry_truncates_content(self, mock_meili_client):
@@ -102,7 +102,7 @@ class TestIndexEntry:
                 published_at=None,
             )
 
-        doc = index.add_documents.call_args[0][0][0]
+        doc = index.update_documents.call_args[0][0][0]
         assert len(doc["content_text"]) == 50000
 
     def test_index_entry_handles_none_fields(self, mock_meili_client):
@@ -120,7 +120,7 @@ class TestIndexEntry:
                 published_at=None,
             )
 
-        doc = index.add_documents.call_args[0][0][0]
+        doc = index.update_documents.call_args[0][0][0]
         assert doc["content_text"] == ""
         assert doc["summary"] == ""
         assert doc["author"] == ""

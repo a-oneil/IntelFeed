@@ -55,7 +55,7 @@ import { RelationshipRow } from "../RelationshipRow";
 import styles from "../entityProfile.module.css";
 
 const NAV_TYPES = new Set([
-  "threat_actor", "malware", "cve", "ttp", "country", "tool", "mitigation", "vendor", "product", "cwe",
+  "threat_actor", "malware", "cve", "ttp", "country", "sector", "tool", "mitigation", "vendor", "product", "cwe",
 ]);
 const MAX_GRAPH_NODES = 500;
 const GROUP_PREVIEW = 12;

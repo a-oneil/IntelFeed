@@ -8,6 +8,7 @@ import styles from "./NodeStyles.module.css";
 const TRIGGER_TYPES = [
   { value: "on_new_entry", label: "New Entry" },
   { value: "on_entry_scored", label: "Entry Scored (Signal Engine)" },
+  { value: "on_observable_captured", label: "Observable Captured (IOC Ledger)" },
   { value: "on_schedule", label: "Schedule (Cron)" },
   { value: "on_keyword_match", label: "Keyword Match" },
   { value: "on_cve_detected", label: "CVE Detected" },
@@ -370,6 +371,62 @@ export const TriggerNode = memo(function TriggerNode({ data }: NodeProps) {
                 );
               })}
             </div>
+          </div>
+        )}
+
+        {triggerType === "on_observable_captured" && (
+          <div className={styles.fieldGroup}>
+            <span className={styles.hint}>
+              Fires once per article when a reporting door (one-pass AI, the article's IOC table, analyst promote)
+              captures an observable. Blocklist feeds never fire it.
+            </span>
+            <label className={styles.fieldLabel}>Kinds (comma-separated, blank = any)</label>
+            <input
+              type="text"
+              value={(triggerConfig?.kinds as string) ?? ""}
+              onChange={(e) =>
+                onUpdate?.({ triggerConfig: { ...triggerConfig, kinds: e.target.value || undefined } })
+              }
+              placeholder="ipv4, domain, url, sha256"
+              className={styles.input}
+            />
+            <label className={styles.fieldLabel}>Roles (comma-separated, blank = any)</label>
+            <input
+              type="text"
+              value={(triggerConfig?.roles as string) ?? ""}
+              onChange={(e) =>
+                onUpdate?.({ triggerConfig: { ...triggerConfig, roles: e.target.value || undefined } })
+              }
+              placeholder="c2, delivery, phishing"
+              className={styles.input}
+            />
+            <label className={styles.fieldLabel}>Minimum confidence (0–1, blank = any)</label>
+            <input
+              type="number"
+              min={0}
+              max={1}
+              step={0.05}
+              value={(triggerConfig?.min_confidence as string | number) ?? ""}
+              onChange={(e) =>
+                onUpdate?.({
+                  triggerConfig: { ...triggerConfig, min_confidence: e.target.value || undefined },
+                })
+              }
+              placeholder="0.6"
+              className={styles.input}
+            />
+            <label className={styles.checkLabel}>
+              <input
+                type="checkbox"
+                checked={String(triggerConfig?.exclude_infra_tagged ?? "true") !== "false"}
+                onChange={(e) =>
+                  onUpdate?.({
+                    triggerConfig: { ...triggerConfig, exclude_infra_tagged: e.target.checked ? "true" : "false" },
+                  })
+                }
+              />
+              Ignore dual-use infrastructure (VPN / proxy / Tor / shared hosting)
+            </label>
           </div>
         )}
 

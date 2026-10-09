@@ -73,28 +73,13 @@ async def _get_search_total_and_ids(
 
     The per-owner count refresh above gets its hits through
     ``_compute_counts_inline`` (which also resolves each owner's read state);
-    this is the plain hit-list form the campaign auto-sync needs.
+    this is the plain hit-list form the campaign auto-sync needs. It lives in
+    ``app.search.entry_query`` so the campaign-source service can run the same
+    query without importing Celery.
     """
-    from app.search.meili_builder import execute_entry_search
-    from app.search.query_parser import ParseError, parse_query
-    from app.search.query_planner import build_execution_plan, resolve_deferred_filters
+    from app.search.entry_query import search_entry_ids
 
-    try:
-        ast = parse_query(query_str)
-    except ParseError:
-        return 0, []
-
-    plan = build_execution_plan(ast)
-    await resolve_deferred_filters(db, plan)
-
-    if not (plan.has_entry_queries or plan.meili_query.strip()):
-        return 0, []
-
-    constraint = list(plan.db_entry_ids) if plan.db_entry_ids is not None else None
-    ids_result = execute_entry_search(plan, constraint, limit, 0)
-    entry_ids = [hit["id"] for hit in ids_result.get("hits", []) if "id" in hit]
-    # Use actual hit count rather than estimatedTotalHits which can overcount
-    return len(entry_ids), entry_ids
+    return await search_entry_ids(query_str, db, limit=limit)
 
 
 @celery_app.task(

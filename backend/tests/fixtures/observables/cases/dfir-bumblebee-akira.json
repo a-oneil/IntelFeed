@@ -1,0 +1,269 @@
+{
+  "slug": "dfir-bumblebee-akira",
+  "title_like": "From Bing Search to Ransomware: Bumblebee and AdaptixC2 Deliver Akira",
+  "title": "From Bing Search to Ransomware: Bumblebee and AdaptixC2 Deliver Akira",
+  "url": "https://thedfirreport.com/2026/06/29/from-bing-search-to-ransomware-bumblebee-and-adaptixc2-deliver-akira-3/",
+  "publisher": "The DFIR Report",
+  "kind": "positive",
+  "attribution": [
+    {
+      "type": "malware",
+      "name": "Bumblebee"
+    },
+    {
+      "type": "malware",
+      "name": "AdaptixC2"
+    },
+    {
+      "type": "malware",
+      "name": "Akira"
+    }
+  ],
+  "expected": [
+    {
+      "kind": "domain",
+      "value": "opmanager.pro",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "download-center.online",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "domain",
+      "value": "ev2sirbd269o5j.org",
+      "role": "",
+      "note": "BumbleBee"
+    },
+    {
+      "kind": "domain",
+      "value": "2rxyt8yrhq0bgj.org",
+      "role": "",
+      "note": "BumbleBee"
+    },
+    {
+      "kind": "domain",
+      "value": "d1hmxkpwby0d4s.org",
+      "role": "",
+      "note": "BumbleBee"
+    },
+    {
+      "kind": "domain",
+      "value": "yj6jurm5qqkye5.org",
+      "role": "",
+      "note": "BumbleBee"
+    },
+    {
+      "kind": "domain",
+      "value": "ewujsfb1dp5ran.org",
+      "role": "",
+      "note": "BumbleBee"
+    },
+    {
+      "kind": "domain",
+      "value": "8doj8uvx604eck.org",
+      "role": "",
+      "note": "BumbleBee"
+    },
+    {
+      "kind": "domain",
+      "value": "kwywztxoo2xdot.org",
+      "role": "",
+      "note": "BumbleBee"
+    },
+    {
+      "kind": "domain",
+      "value": "ky1d1p1daahe5t.org",
+      "role": "",
+      "note": "BumbleBee"
+    },
+    {
+      "kind": "domain",
+      "value": "ovh1kn1tcqw5kp.org",
+      "role": "",
+      "note": "BumbleBee"
+    },
+    {
+      "kind": "domain",
+      "value": "6cimu4mc085em8.org",
+      "role": "",
+      "note": "BumbleBee"
+    },
+    {
+      "kind": "domain",
+      "value": "5ka8rxp6t6eup2.org",
+      "role": "",
+      "note": "BumbleBee"
+    },
+    {
+      "kind": "domain",
+      "value": "ks501oz9nm3v05.org",
+      "role": "",
+      "note": "BumbleBee"
+    },
+    {
+      "kind": "domain",
+      "value": "v5rjsdqogstopr.org",
+      "role": "",
+      "note": "BumbleBee"
+    },
+    {
+      "kind": "ipv4",
+      "value": "192.121.22.94",
+      "role": "",
+      "note": "BumbleBee"
+    },
+    {
+      "kind": "ipv4",
+      "value": "109.205.195.211",
+      "role": "",
+      "note": "BumbleBee"
+    },
+    {
+      "kind": "ipv4",
+      "value": "188.40.187.145",
+      "role": "",
+      "note": "BumbleBee"
+    },
+    {
+      "kind": "ipv4",
+      "value": "171.22.183.43",
+      "role": "",
+      "note": "BumbleBee"
+    },
+    {
+      "kind": "ipv4",
+      "value": "194.127.178.21",
+      "role": "",
+      "note": "BumbleBee"
+    },
+    {
+      "kind": "ipv4",
+      "value": "172.96.137.160",
+      "role": "",
+      "note": "AdaptixC2"
+    },
+    {
+      "kind": "ipv4",
+      "value": "193.242.184.150",
+      "role": "",
+      "note": "Reverse SSH Tunnel"
+    },
+    {
+      "kind": "ipv4",
+      "value": "185.174.100.203",
+      "role": "exfil",
+      "note": "Exfil Server"
+    },
+    {
+      "kind": "md5",
+      "value": "124a48b78060fa851e1cc077ca35713c",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "sha1",
+      "value": "ab82bf27132323861810c0efcac6d5dd01600dd4",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "sha256",
+      "value": "186b26df63df3b7334043b47659cba4185c948629d857d47452cc1936f0aa5da",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "md5",
+      "value": "ca8646dfc88423bb9fffda811160cebe",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "sha1",
+      "value": "febbaf5f08a8e0782ffcce8beef1f2b4e249a52b",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "sha256",
+      "value": "a6df0b49a5ef9ffd6513bfe061fb60f6d2941a440038e2de8a7aeb1914945331",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "md5",
+      "value": "8c113b3aa82c81eee7c6b4ed0ba9a90f",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "sha1",
+      "value": "d66944e1a57daf04d3e809f22cd01946d593acaf",
+      "role": "",
+      "note": ""
+    },
+    {
+      "kind": "sha256",
+      "value": "de730d969854c3697fd0e0803826b4222f3a14efe47e4c60ed749fff6edce19d",
+      "role": "",
+      "note": ""
+    }
+  ],
+  "optional": [
+    {
+      "kind": "domain",
+      "value": "zenmap.pro",
+      "note": "Tier 1: Impersonation Front-ends – Malvertising domains (e.g., opmanager[.]pro, zenmap[.]pro) that appeared in Bing search results. These sites served high-fidelity clones"
+    },
+    {
+      "kind": "domain",
+      "value": "download-server.online",
+      "note": "| ManageEngine OpManager, Advanced IP Scanner, MIB Browser  Download Gateways | download-server[.]online , soft-server[.]online | download-center[.]online , soft-hub[.]pro  DLL Sideloa"
+    },
+    {
+      "kind": "domain",
+      "value": "soft-server.online",
+      "note": "dvanced IP Scanner, MIB Browser  Download Gateways | download-server[.]online , soft-server[.]online | download-center[.]online , soft-hub[.]pro  DLL Sideloading | icardagt.exe → v"
+    },
+    {
+      "kind": "domain",
+      "value": "soft-hub.pro",
+      "note": "| download-server[.]online , soft-server[.]online | download-center[.]online , soft-hub[.]pro  DLL Sideloading | icardagt.exe → version.dll dropped in “ApplicationInstallati"
+    },
+    {
+      "kind": "domain",
+      "value": "netml.shop",
+      "note": "Infrastructure Overlap: Passive DNS analysis confirms that the Ivanti gateways (netml[.]shop, shopping5[.]shop) utilized the same Hostinger staging IP (84.32.84.32) as the"
+    },
+    {
+      "kind": "domain",
+      "value": "shopping5.shop",
+      "note": "Overlap: Passive DNS analysis confirms that the Ivanti gateways (netml[.]shop, shopping5[.]shop) utilized the same Hostinger staging IP (84.32.84.32) as the Wave 1 gateway, so"
+    },
+    {
+      "kind": "domain",
+      "value": "ip-scanner.org",
+      "note": "ion originated from a management server, where an IT administrator navigated to ip-scanner[.]org. This impersonation site masqueraded as the official Advanced IP Scanner portal"
+    },
+    {
+      "kind": "ipv4",
+      "value": "170.130.55.223",
+      "note": "was used to execute Adaptix C2 shellcode, initiating an outbound connection to 170.130.55[.]223.  ## Persistence  Domain Account Creation  On the initial day of the intrusion,"
+    },
+    {
+      "kind": "domain",
+      "value": "2rxyt9urhq0bgj.org",
+      "note": "[.]145:443 and 109.205.195[.]211:443 using the domains ev2sirbd269o5j[.]org and 2rxyt9urhq0bgj[.]org respectively.  The BumbleBee configuration was extracted from Tria.ge and verif"
+    },
+    {
+      "kind": "ipv4",
+      "value": "84.32.84.32",
+      "note": "teways (netml[.]shop, shopping5[.]shop) utilized the same Hostinger staging IP (84.32.84.32) as the Wave 1 gateway, soft-server[.]online.  - Naming Conventions: The Ivanti"
+    }
+  ],
+  "must_not": []
+}

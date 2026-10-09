@@ -1,4 +1,5 @@
 import { useTriageViewStore } from "@/stores/triageViewStore";
+import { clearAllSessionTrust } from "@/utils/sessionTrust";
 
 /**
  * Wipe per-account browser state on logout so the next person to sign in on
@@ -37,6 +38,9 @@ export function clearUserScopedState(): void {
       // sessionStorage unavailable — nothing persisted anyway
     }
   }
+  // Hosts trusted "for this tab" in the external-link dialog belong to the
+  // session that granted them; don't hand them to the next person in this tab.
+  clearAllSessionTrust();
   // In-memory reset for the store that mirrors server-side user data; the
   // others are refreshed by the full page load the logout buttons trigger.
   useTriageViewStore.setState({ view: null, viewOwnerId: null });

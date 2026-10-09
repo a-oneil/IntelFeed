@@ -7,7 +7,7 @@ import type { EntityType } from "@/stores/intelStore";
 import styles from "./entityProfile.module.css";
 
 // Mirrors WATCHABLE_ENTITY_TYPES in backend/app/api/watchlist.py.
-const WATCHABLE_TYPES = new Set(["threat_actor", "malware", "cve", "cwe", "tool", "vendor", "product", "country"]);
+const WATCHABLE_TYPES = new Set(["threat_actor", "malware", "cve", "cwe", "tool", "vendor", "product", "country", "sector"]);
 
 export function WatchToggleButton({
   entityType,

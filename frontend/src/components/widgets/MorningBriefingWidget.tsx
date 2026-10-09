@@ -38,7 +38,7 @@ export default function MorningBriefingWidget({ config }: Props) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-      <div className={styles.briefingBody}>
+      <div className={styles.briefingBody} data-untrusted-content="">
         {/* Entity linking goes through the remark plugin — never post-render DOM
             mutation, which crashes react-markdown's reconciliation. */}
         <EntityLinkedMarkdown text={data.summary} />

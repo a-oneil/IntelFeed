@@ -8,19 +8,18 @@ import { useAITasks } from "@/hooks/useAI";
 import { useWebhookPresets } from "@/hooks/useWebhookPresets";
 import type { AutomationRule } from "@/api/types";
 import { TagPicker } from "./TagPicker";
+import { toTagSpecs, type TagSpec } from "@/utils/tagSpecs";
 import styles from "./AutomationRuleEditor.module.css";
 
-/** Coerce a stored tags config value (array or comma string) to a name array. */
-function tagArray(config: Record<string, unknown>): string[] {
-  const v = config.tags;
-  if (Array.isArray(v)) return v as string[];
-  if (typeof v === "string" && v) return v.split(",").map((s) => s.trim()).filter(Boolean);
-  return [];
+/** Coerce a stored tags config value (array or comma string) to tag specs. */
+function tagArray(config: Record<string, unknown>): TagSpec[] {
+  return toTagSpecs(config.tags);
 }
 
 const TRIGGER_TYPES = [
   { value: "on_new_entry", label: "New entry arrives" },
   { value: "on_entry_scored", label: "Entry scored (signal engine)" },
+  { value: "on_observable_captured", label: "Observable captured (IOC ledger)" },
   { value: "on_schedule", label: "On schedule (cron)" },
   { value: "on_keyword_match", label: "Keyword match" },
   { value: "on_cve_detected", label: "CVE detected" },
@@ -68,6 +67,7 @@ const CONDITION_TYPES = [
   { value: "priority_score_above", label: "Priority score above (signals)" },
   { value: "has_signal", label: "Has signal type" },
   { value: "entity_watchlisted", label: "Watched entity mentioned" },
+  { value: "has_observable", label: "Has captured observable (IOC)" },
 ];
 
 interface ConditionItem {
@@ -146,6 +146,13 @@ function conditionConfigFields(type: string): Array<{
           placeholder: "7.0",
           type: "number",
         },
+      ];
+    case "has_observable":
+      return [
+        { key: "kinds", label: "Kinds (comma-separated, blank = any)", placeholder: "ipv4, domain, sha256, cmdline" },
+        { key: "roles", label: "Roles (comma-separated, blank = any)", placeholder: "c2, delivery, persistence" },
+        { key: "min_confidence", label: "Min confidence (0–1)", placeholder: "0.6", type: "number" },
+        { key: "exclude_infra_tagged", label: "Exclude dual-use infra? (true/false)", placeholder: "true" },
       ];
     case "priority_score_above":
       return [
@@ -315,6 +322,8 @@ function actionConfigFields(
       return [
         { key: "campaign_id", label: "Campaign ID", placeholder: "uuid" },
         { key: "notes", label: "Notes (optional)", placeholder: "Auto-linked by automation" },
+        { key: "link_observables", label: "Attach captured observables as campaign entities? (true/false)", placeholder: "false" },
+        { key: "observable_roles", label: "Observable roles to attach (comma-separated, blank = any)", placeholder: "c2, delivery, payload" },
       ];
     case "mark_priority":
       return [
@@ -449,6 +458,13 @@ function BranchActionEditor({
     onUpdate({ ...config, [branch]: list });
   };
 
+  // Tags are stored as specs (name, or name + presentation), not a comma string.
+  const setSubActionTags = (branch: "then_actions" | "else_actions", index: number, specs: TagSpec[]) => {
+    const list = branch === "then_actions" ? [...thenActions] : [...elseActions];
+    list[index] = { ...list[index], config: { ...list[index].config, tags: specs } };
+    onUpdate({ ...config, [branch]: list });
+  };
+
   const addSubAction = (branch: "then_actions" | "else_actions", type: string) => {
     const list = branch === "then_actions" ? [...thenActions] : [...elseActions];
     list.push({ type, config: {} });
@@ -520,7 +536,8 @@ function BranchActionEditor({
                   {f.key === "tags" ? (
                     <TagPicker
                       value={tagArray(action.config)}
-                      onChange={(names) => updateSubAction("then_actions", i, "tags", names.join(","), action.type)}
+                      onChange={(specs) => setSubActionTags("then_actions", i, specs)}
+                      presentation={action.type === "add_tags"}
                     />
                   ) : (
                     <input
@@ -569,7 +586,8 @@ function BranchActionEditor({
                   {f.key === "tags" ? (
                     <TagPicker
                       value={tagArray(action.config)}
-                      onChange={(names) => updateSubAction("else_actions", i, "tags", names.join(","), action.type)}
+                      onChange={(specs) => setSubActionTags("else_actions", i, specs)}
+                      presentation={action.type === "add_tags"}
                     />
                   ) : (
                     <input
@@ -782,6 +800,15 @@ export function AutomationRuleEditor({ rule, onClose }: Props) {
     },
     []
   );
+
+  // Tags are stored as specs (name, or name + presentation), not a comma string.
+  const setActionTags = useCallback((index: number, specs: TagSpec[]) => {
+    setActionItems((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], config: { ...next[index].config, tags: specs } };
+      return next;
+    });
+  }, []);
 
   const updateTriggerField = useCallback(
     (key: string, value: unknown) => {
@@ -1130,6 +1157,58 @@ export function AutomationRuleEditor({ rule, onClose }: Props) {
                   </div>
                 )}
 
+                {triggerType === "on_observable_captured" && (
+                  <>
+                    <div className={styles.hint}>
+                      Fires once per article when a reporting door (one-pass AI, the article's IOC table, analyst
+                      promote) captures an observable. Blocklist feeds never fire it.
+                    </div>
+                    <div className={styles.itemField}>
+                      <label>Kinds (comma-separated, blank = any)</label>
+                      <input
+                        type="text"
+                        value={(triggerConfig.kinds as string) ?? ""}
+                        onChange={(e) => updateTriggerField("kinds", e.target.value)}
+                        placeholder="ipv4, domain, url, sha256"
+                        className={styles.input}
+                      />
+                    </div>
+                    <div className={styles.itemField}>
+                      <label>Roles (comma-separated, blank = any)</label>
+                      <input
+                        type="text"
+                        value={(triggerConfig.roles as string) ?? ""}
+                        onChange={(e) => updateTriggerField("roles", e.target.value)}
+                        placeholder="c2, delivery, phishing"
+                        className={styles.input}
+                      />
+                    </div>
+                    <div className={styles.itemField}>
+                      <label>Minimum confidence (0–1, blank = any)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={(triggerConfig.min_confidence as string | number) ?? ""}
+                        onChange={(e) => updateTriggerField("min_confidence", e.target.value)}
+                        placeholder="0.6"
+                        className={styles.input}
+                      />
+                    </div>
+                    <div className={styles.itemField}>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={String(triggerConfig.exclude_infra_tagged ?? "true") !== "false"}
+                          onChange={(e) => updateTriggerField("exclude_infra_tagged", e.target.checked ? "true" : "false")}
+                        />
+                        Ignore dual-use infrastructure (VPN / proxy / Tor / shared hosting)
+                      </label>
+                    </div>
+                  </>
+                )}
+
                 {(triggerType === "on_new_entry" || triggerType === "on_manual") && (
                   <div className={styles.hint}>No additional configuration needed</div>
                 )}
@@ -1347,9 +1426,8 @@ export function AutomationRuleEditor({ rule, onClose }: Props) {
                               ) : f.key === "tags" ? (
                                 <TagPicker
                                   value={tagArray(action.config)}
-                                  onChange={(names) =>
-                                    updateActionConfig(i, "tags", names.join(","), action.type)
-                                  }
+                                  onChange={(specs) => setActionTags(i, specs)}
+                                  presentation={action.type === "add_tags"}
                                 />
                               ) : f.multiline ? (
                                 <textarea

@@ -51,6 +51,7 @@ export interface Feed {
   is_active: boolean;
   adapter_config: Record<string, unknown>;
   intel_extraction_mode: "full" | "selective" | "manual" | "none";
+  ai_analysis_enabled: boolean;
   auto_extract_on_ingest: boolean;
   extract_detection_rules: boolean;
   extract_tools: boolean;
@@ -112,7 +113,7 @@ export interface Entry {
   is_read: boolean;
   is_starred: boolean;
   is_bookmarked: boolean;
-  tags: { name: string; color: string }[];
+  tags: EntryTag[];
   // Signal engine (present only when surfaced and above the radar threshold)
   priority_score?: number | null;
   top_signals?: { type: string; explanation: string }[];
@@ -248,6 +249,8 @@ export interface SearchHit {
   published_at: string | number | null;
   url: string | null;
   tags: string[];
+  /** Tags the viewer sees on this hit, with chip presentation: global tags plus their own personal assignments. */
+  tag_details?: EntryTag[];
   word_count: number | null;
   is_read: boolean;
   is_starred: boolean;
@@ -359,6 +362,8 @@ export interface EntitySearchResult {
   // Country
   iso_code?: string;
   region?: string;
+  // Sector
+  slug?: string;
   // Detection Rule
   title?: string;
   rule_type?: string;
@@ -433,8 +438,30 @@ export interface Tag {
   id: string;
   name: string;
   color: string;
+  /** Promoted tags render as chips in the entry's badge row. */
+  display_as_chip: boolean;
+  /** Chip tooltip. */
+  description: string | null;
+  /**
+   * Global: one shared assignment per entry that everyone sees. Personal (the
+   * default): each user's assignments are their own and nobody else sees them.
+   */
+  is_global: boolean;
+  /** Entries carrying the tag as the viewer sees them: their own for a personal tag, everyone's for a global one. */
   entry_count: number;
   created_at: string;
+}
+
+/** A tag as it sits on one entry, from the viewer's point of view. */
+export interface EntryTag {
+  id?: string;
+  name: string;
+  color: string;
+  display_as_chip?: boolean;
+  description?: string | null;
+  is_global?: boolean;
+  /** The viewer's own assignment of a personal tag; false for a global tag's shared row. */
+  personal?: boolean;
 }
 
 // Phase 4: AI & Threat Intelligence
@@ -825,6 +852,95 @@ export interface CountryProfile {
   recent_entries: CountryProfileEntry[];
   role_breakdown: Record<string, number>;
   related_countries: CountryProfileRelated[];
+}
+
+export interface Sector {
+  id: string;
+  slug: string;
+  name: string;
+  aliases: string[];
+  description: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+  article_count: number;
+  /** Actors / malware with an asserted targets-sector claim (list endpoint). */
+  targeting_actor_count?: number;
+  targeting_malware_count?: number;
+  /** Leak-site victim disclosures in the last 90 days (list endpoint). */
+  victim_count?: number;
+}
+
+/** A sector linked to an entry. `sector`/`label` are the pre-entity spellings of `slug`/`name`. */
+export interface EntrySector {
+  id: string;
+  slug: string;
+  name: string;
+  sector: string;
+  label: string;
+  confidence: string | null;
+  source: string | null;
+}
+
+export interface SectorProfileNamed {
+  id: string;
+  name: string;
+  article_count: number;
+}
+
+export interface SectorProfileClaim extends SectorProfileNamed {
+  /** rollup | enrichment | seed | analyst */
+  source: string;
+}
+
+export interface SectorProfileCampaign {
+  id: string;
+  name: string;
+  status: string;
+  start_date: string | null;
+}
+
+export interface SectorProfileVictim {
+  id: string;
+  victim_id: string;
+  victim_name: string;
+  group: string | null;
+  country: string | null;
+  country_code: string | null;
+  posted_at: string | null;
+}
+
+export interface SectorProfileCountry {
+  id: string;
+  name: string;
+  iso_code: string | null;
+  article_count: number;
+  victim_count: number;
+}
+
+export interface MonthCount {
+  month: string;
+  count: number;
+}
+
+export interface SectorProfile {
+  sector: Sector;
+  window_days: number;
+  reported_actors: SectorProfileNamed[];
+  reported_malware: SectorProfileNamed[];
+  asserted_actors: SectorProfileClaim[];
+  asserted_malware: SectorProfileClaim[];
+  campaigns: SectorProfileCampaign[];
+  victims: {
+    total: number;
+    in_window: number;
+    monthly: MonthCount[];
+    top_groups: Array<{ group: string; victims: number }>;
+    recent: SectorProfileVictim[];
+  };
+  countries: SectorProfileCountry[];
+  intel_profiles: Array<{ id: string; name: string }>;
+  recent_entries: Array<{ id: string; title: string; published_at: string | null; confidence: string | null }>;
+  articles_monthly: MonthCount[];
 }
 
 export interface RegionSummary {
@@ -1243,8 +1359,23 @@ export interface ObservableResponse {
   infra_tag?: string | null;
   needs_review: boolean;
   created_via?: string | null;
+  /** Raw junction count — every entry carrying the value, indicator-list files included. */
   sighting_count: number;
-  article_count: number;
+  /** Corroboration: distinct reporting entries (articles/advisories/rules) and distinct indicator feeds. */
+  report_count: number;
+  feed_source_count: number;
+  /** Compact enrichment summary (Shodan / GreyNoise / VT) written by the updater. */
+  reputation?: {
+    asn?: number | string | null;
+    country?: string | null;
+    ports?: string | null;
+    tags?: string | null;
+    hostnames?: string | null;
+    vt_ratio?: string | null;
+    gn_classification?: string | null;
+    gn_riot?: boolean | null;
+    enriched_at?: string | null;
+  } | null;
   first_seen_at: string;
   last_seen_at: string;
   // Decay projection.
@@ -1557,6 +1688,7 @@ export interface PivotResponse {
     threat_actors: EntitySearchResult[];
     malwares: EntitySearchResult[];
     countrys: EntitySearchResult[];
+    sectors?: EntitySearchResult[];
     mitigations?: EntitySearchResult[];
     cwes?: EntitySearchResult[];
     tools?: EntitySearchResult[];
@@ -2317,6 +2449,33 @@ export interface FeedHealthResponse {
 
 // Feed Value Scoring
 
+/** Resolved ingest pipeline for one feed, from GET /feeds/{id}/pipeline. */
+export interface FeedPipeline {
+  engine_enabled: boolean;
+  stages: Record<string, { enabled: boolean; config?: Record<string, unknown> }>;
+  /** Per stage: "legacy" (the Feed booleans) or the plan scope that overrode it. */
+  decided_by: Record<string, "legacy" | "global" | "category" | "feed">;
+}
+
+/** One feed's value score plus its rank, from GET /feeds/{id}/value. */
+export interface FeedValueDetail {
+  feed_id: string;
+  scored: boolean;
+  score?: number;
+  tier?: string;
+  articles?: number;
+  entity_yield?: number;
+  unique_entities?: number;
+  entity_introductions?: number;
+  correlation_events?: number;
+  detection_rules?: number;
+  pir_matches?: number;
+  dimensions?: FeedValueDimensions;
+  rank?: number | null;
+  of?: number;
+  days?: number;
+}
+
 export interface FeedValueDimensions {
   entity_introductions: number;
   correlation_events: number;
@@ -2750,13 +2909,21 @@ export interface ThreadListResponse {
   total: number;
 }
 
-/** Something a campaign follows: an entity it names, or a story it holds part of. */
+export type CampaignSourceKind = "entity" | "story" | "query";
+
+/**
+ * Standing intake owned by the campaign: an entity it names, a story it holds
+ * part of, or a query typed into it. A `query` source has no `ref_id` — unlike
+ * a linked saved search it belongs to the campaign, not to one analyst.
+ */
 export interface CampaignSource {
   id: string;
   campaign_id: string;
-  kind: "entity" | "story";
+  kind: CampaignSourceKind;
   entity_type: string | null;
-  ref_id: string;
+  ref_id: string | null;
+  /** The query-language string, when kind is "query". */
+  query: string | null;
   /** The target's name at link time — stays readable if it is later renamed. */
   label: string;
   auto_sync: boolean;
@@ -2776,6 +2943,37 @@ export interface CampaignSourceSuggestion {
   would_add: number;
   /** The newest few of those, by name — what makes the click informed. */
   preview: Array<{ entry_id: string; title: string; published_at: string | null }>;
+}
+
+/** A dry run of a source that does not exist yet. */
+export interface CampaignSourcePreview {
+  kind: CampaignSourceKind;
+  entity_type: string | null;
+  ref_id: string | null;
+  query: string | null;
+  /** What the source would be called once created. */
+  label: string;
+  would_add: number;
+  /** Articles it claims that the campaign already has — overlap, not waste. */
+  already_held: number;
+  preview: Array<{ entry_id: string; title: string | null; published_at: string | null }>;
+  /** Why the query could not be run, when it could not be parsed. */
+  error: string | null;
+  /**
+   * Field names the query language does not have. Not fatal — they become text
+   * terms — but a standing source built on a typo'd field answers plausibly
+   * forever, so the composer says so before the follow is created.
+   */
+  unknown_fields: string[];
+}
+
+/** What the intake pickers are allowed to offer, straight from the server. */
+export interface CampaignSourceOptions {
+  kinds: CampaignSourceKind[];
+  /** Types that own articles; a source on anything else would never add any. */
+  followable_entity_types: string[];
+  /** Followable *and* findable by name through /intelligence/search. */
+  pickable_entity_types: string[];
 }
 
 // --- Intel profiles (named report scopes: regions × verticals) ---
@@ -2843,4 +3041,55 @@ export interface ExposureGenerateRequest {
   dropped_actor_ids?: string[];
   dropped_malware_ids?: string[];
   tags?: string[];
+}
+
+/** A curated starter feed pack shipped with the build (GET /opml/starter-packs). */
+export interface StarterPack {
+  id: string;
+  title: string;
+  description: string;
+  feed_count: number;
+  recommended: boolean;
+  /** Human-readable prerequisite (an API token, say) this pack needs to work. */
+  requires: string | null;
+}
+
+export interface StarterPackImportResult {
+  feeds_added: number;
+  feeds_skipped: number;
+  categories_created: number;
+  errors: string[];
+  packs: { id: string; title: string; feeds_added: number }[];
+}
+
+/** Instance readiness for the onboarding wizard (GET /onboarding/status). */
+export interface OnboardingStatus {
+  reference_data: {
+    ok: boolean;
+    checks: { key: string; label: string; count: number; ok: boolean }[];
+    missing: string[];
+    /** The exact seeder command to run; server-supplied so the UI can't drift from it. */
+    remedy: string;
+    consequence: string;
+  };
+  feeds: { total: number; polled_ok: number; errored: number; never_polled: number };
+  entries: { total: number; last_24h: number };
+  autolink: { entity_links: number };
+  ai: { providers: number; active: string | null; tasks_assigned: number };
+  /** Seeded, polling and ingesting — the instance can demonstrate itself. */
+  ready: boolean;
+}
+
+/** Outcome of POST /ai/providers/{id}/commission. */
+export interface AIProviderCommissionResult {
+  success: boolean;
+  /** Straight from the provider, so a failure can name the real cause. */
+  message: string;
+  models: string[];
+  /** The model the assignments were given, resolved against the live list. */
+  model: string | null;
+  tasks_assigned: number;
+  tasks_reassigned: number;
+  /** Agentic tasks left on the CLI because this provider can't run tools. */
+  tasks_skipped_agentic: string[];
 }

@@ -4,6 +4,10 @@ One box, one results page. The field in the header is the only search input in
 the app, on every route and every screen size. Typing in it takes you to
 `/search`, which is the only place results are drawn.
 
+![Search results for ransomware showing direct entity matches, grouped actors and malware, and a faceted filter rail](../assets/screenshots/search.png)
+
+*One query returns both articles and entities, with facets to narrow by type.*
+
 ## The basics
 
 Open it with `/`. Type what you're looking for:
@@ -155,4 +159,4 @@ half, so any search built on an entity filter shows a number you can't trust —
 `country:"United States"` reads 0 next to a search that opens 5,896 articles.
 
 Counts are reliable for `tag:`, `feed:`, `category:`, `type:`, `date:`, `is:`
-and plain text. `signal:`, `sector:` and `url:` read low past about 500 matches.
+and plain text. `signal:` and `url:` read low past about 500 matches.

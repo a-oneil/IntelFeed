@@ -48,6 +48,8 @@ NEW_ENTITY_QUERIES = [
     "malware.sector:finance",
     "tool.platform:Windows",
     "country.iso:RU",
+    "sector:healthcare",
+    "sector.slug:financial-services",
     "ransomware_victim.group:lockbit",
     "product.vendor:Cisco",
     "intel_report:quarterly",
@@ -60,7 +62,6 @@ NEW_ENTITY_QUERIES = [
 NEW_ENTRY_QUERIES = [
     "category:Blogs",
     "signal:under_reported",
-    "sector:healthcare",
     "url:github.com",
     "feed.reliability:B",
 ]

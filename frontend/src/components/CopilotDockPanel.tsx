@@ -720,7 +720,7 @@ export function CopilotDockPanel() {
                       ))}
                     </div>
                   )}
-                  <div className={styles.messageContent}>
+                  <div className={styles.messageContent} data-untrusted-content={msg.role === "assistant" ? "" : undefined}>
                     {isEmptyStreaming ? (
                       <span className={styles.thinking}>Thinking...</span>
                     ) : msg.role === "assistant" ? (

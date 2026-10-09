@@ -2,6 +2,10 @@
 
 What to do in your first hour, in order.
 
+![The IntelFeed dashboard with overview stat tiles, a morning briefing, a triage flow chart, and an under-the-radar list](../assets/screenshots/dashboard.png)
+
+*The dashboard once feeds have been ingesting for a while.*
+
 ## Your account
 
 The first account created on an instance becomes the admin. After that,
@@ -11,22 +15,44 @@ you were sent an invite link, it will take you to the register page.
 Admin matters more than it sounds. Non-admins can read everything, write notes,
 build campaigns and reports, save searches, and write detection rules. Admins
 additionally manage feeds, AI configuration, users, the engine, and system
-settings. If a section in this guide says "admin only", that's why.
+settings. If a section in this guide says "admin only", that's why. Running an
+instance for a team — locking registration, invite links, managing accounts —
+is covered in [Users and access](users-and-access.md).
 
-## The onboarding wizard
+## The onboarding tour
 
-On first login a wizard slides open. It's all optional and it won't come back
-once dismissed:
+On first login a tour slides open, in three chapters. Every step is skippable,
+and **closing it saves your place rather than ending it** — it stays closed until
+you ask for it back, and **Settings → Account** then offers **Resume the tour**
+(picking up on the step you closed on) or **Replay from the start**. Only
+reaching the end marks it finished.
 
-1. **Import OPML** — bring feeds over from another reader in bulk.
-2. **Add feeds** — one at a time.
-3. **Configure AI** — pick a provider. Skippable; AI features simply stay off.
-4. **Choose a theme.**
-5. **Keyboard shortcuts** — worth thirty seconds.
-6. **Claude Code skill** — only relevant if you plan to drive IntelFeed from
-   Claude Code.
+**Set up** (admin only, and each step disappears once it's satisfied):
 
-If someone else already set the instance up, the setup steps are skipped.
+1. **Reference data** — checks whether the countries, ATT&CK, CWE and
+   vendor/product catalogues are seeded, and gives you the command if they
+   aren't. Until they are, articles ingest but most entity types never link
+   (migrations load only countries and a baseline of ATT&CK techniques), which
+   is the single most common "IntelFeed looks broken" report.
+2. **Add feeds** — curated starter packs, an OPML import, or a single URL.
+3. **AI provider** — Ollama, Claude, or an explicit "run without AI" that says
+   what you lose. Connecting one tests it for real, then routes the AI tasks at
+   it, because a registered provider on its own runs nothing. The step reports
+   how many tasks are now running and on which model. Agentic tasks stay on the
+   Claude Code CLI if the provider can't call tools.
+4. **Services & team** — optional containers, invites and roles.
+5. **Verify it works** — waits for a real poll and shows feeds fetched, entries
+   ingested and entities linked. Configuring something isn't the same as it
+   working.
+
+**Learn the app** (everyone): the reading loop, the Priority Queue, entities and
+pivoting, search, the workbench, and detection rules and intel products.
+
+**Make it yours** (everyone): theme, keyboard shortcuts, and where help lives.
+
+If someone else already set the instance up, the setup chapter is skipped and
+the rail tells you why — you still get the whole product tour. Driving IntelFeed
+from Claude Code lives in **Settings → Claude Code Skill**, not in first-run.
 
 ## Adding feeds
 

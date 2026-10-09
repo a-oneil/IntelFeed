@@ -1844,6 +1844,137 @@
    clear the activity filter bar that follows the panel. */
 .intakeFootnote { padding-top: var(--sp-3); }
 
+/* The panel title shares its line with "Add intake" — the one verb that opens
+   the composer, and the only affordance a brand-new campaign has. */
+.intakeHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+
+/* A query source's label *is* its query, so it reads in mono like one, and it
+   wraps instead of truncating: half a query is not a name. */
+.intakeLabelQuery {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+/* --- Composer: the four ways to add intake by hand --- */
+
+.intakeComposer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
+  padding: var(--sp-4);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.intakeComposerHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.intakeComposerRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.intakeComposerNote {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.intakeQueryInput,
+.intakeSearchInput,
+.intakeSelect {
+  flex: 1;
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-base);
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+}
+
+.intakeQueryInput {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+
+.intakeSearchInput { font-family: inherit; }
+
+.intakeSelect {
+  flex: 0 0 auto;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.intakeQueryInput:focus,
+.intakeSearchInput:focus,
+.intakeSelect:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* The dry run. Bordered off from the pickers above because it answers a
+   different question: not "which one" but "and then what arrives". */
+.intakeDryRun {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
+}
+
+.intakeDryRunHead {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 30px;
+}
+
+.intakeDryRunCount {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-base);
+  color: var(--text-primary);
+}
+
+/* An unknown field is not an error — the query still runs, as text — so it is
+   a caution rather than a refusal, and the Follow button stays live. */
+.intakeDryRunWarn {
+  font-size: var(--fs-xs);
+  color: var(--warning);
+  line-height: 1.5;
+}
+
+.intakeDryRunError {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+/* Inside the composer the preview is already indented by the card, so it drops
+   the 52px gutter the offer previews use to clear their kind column. */
+.intakeComposer .intakePreview { margin-left: 0; }
+
 .posture {
   background: var(--bg-secondary);
   border: 1px solid var(--border);

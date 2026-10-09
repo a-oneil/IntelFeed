@@ -8,7 +8,7 @@ IntelFeed — a self-hosted, security-focused RSS aggregator and threat intellig
 
 ## Tech Stack
 
-- **Backend:** Python 3.12+ / FastAPI / SQLAlchemy (async) / Alembic / Celery + Redis
+- **Backend:** Python 3.14 / FastAPI / SQLAlchemy (async) / Alembic / Celery + Redis
 - **Frontend:** React 18 / TypeScript / Vite / TanStack Query + Zustand / CSS Modules
 - **Database:** PostgreSQL 16 (async via asyncpg)
 - **Search:** Meilisearch v1.6
@@ -25,10 +25,10 @@ docker compose -f docker-compose.dev.yml down       # Stop all services
 # PostgreSQL: localhost:5433, Redis: localhost:6380
 
 # Create the first user via the register page at localhost:3001 (the first account becomes the admin)
-# (backed by POST /api/auth/register; can be invite-gated under Settings > System)
+# (backed by POST /api/auth/register; can be invite-gated under Settings > Users)
 ```
 
-Prod uses `docker-compose.prod.yml` with Caddy (`Caddyfile`) fronting for auto-TLS. `update.sh` at repo root is a one-shot `git fetch && pull && docker compose up --build -d` helper for production hosts. Full EC2 walkthrough lives in [setup.md](setup.md).
+Prod uses `docker-compose.prod.yml` with Caddy (`Caddyfile`) fronting for auto-TLS. `update.sh` at repo root is the production update helper (it runs on a ~2-minute cron, so a push is a deploy): it fetches, pulls, and then **rebuilds only when the pull actually changed an image** — `backend/**`, `frontend/**`, `db/**`, `piper/**` or a compose file. A `Caddyfile` change reloads caddy in place; a docs/scripts/android/CI commit pulls and stops, since `./docs` and `./scripts` are bind-mounted and nothing needs restarting. The gate diffs against `.update-deployed` (the commit the containers were built from), not the previous HEAD, so a failed build still retries after unrelated commits land on top. See [docs/operations.md](docs/operations.md). Full production walkthrough (EC2 or any Linux host) lives in [setup.md](setup.md).
 
 ### Backend
 ```bash
@@ -56,15 +56,39 @@ pnpm build                            # TypeScript check + production build
 pnpm test                             # Vitest unit tests (one-shot)
 pnpm test:watch                       # Vitest in watch mode
 pnpm lint                             # ESLint
+pnpm exec playwright install chromium # One-time: fetch the browser binary
 pnpm exec playwright test             # E2E tests (needs running stack)
 ```
 
+### Android (`android/`)
+Native client (Kotlin / Jetpack Compose) for the same REST API; see [docs/android-app.md](docs/android-app.md). Documentation for the app lives in `docs/`, not in `android/`. `scripts/build_apk.sh` bumps `android/version.properties`, builds and installs on connected devices; merging the bump makes CI publish the release.
+```bash
+cd android
+./gradlew :app:testDebugUnitTest :app:assembleDebug   # JDK 17 + Android SDK
+```
+
 ### CI
-GitHub Actions (`.github/workflows/ci.yml`) runs on every PR and push to `main`: backend ruff, backend pytest (PostgreSQL 16 + pgvector and Redis service containers, Python 3.12), an alembic job (single head, fresh `upgrade head`, `downgrade -1` + re-apply), and a frontend job (`pnpm install --frozen-lockfile`, lint, vitest, build). `.github/workflows/docker.yml` builds the three images and validates both compose files, but only when a file feeding an image changes.
+GitHub Actions is **one workflow** (`ci.yml`), because Actions bills by the *job*, rounded up to a whole minute. The previous split — one workflow per area — meant four `changed?` jobs and four aggregate jobs on every commit: eight billed minutes for ~40 seconds of work before a test ran. Measured over two days: 213 minutes of wall time billed as 416.
 
-Run the same checks locally first — `ruff check` + `ruff format --check` + `pytest` (backend), `pnpm lint` + `pnpm build` + `pnpm test` (frontend). Playwright E2E and `pnpm lint:css` are deliberately not in CI.
+| Job | Runs when | Does |
+| --- | --- | --- |
+| `changed?` | always | One checkout, one diff; outputs `backend` / `frontend` / `android` / `images` / `python` / `node` |
+| `backend` | `backend/**` changed | `ruff check`, `ruff format --check`, alembic (single head, fresh `upgrade head`, `downgrade -1` + re-apply), `pytest` — in that order, cheapest first, on PostgreSQL 16 + pgvector and Redis service containers |
+| `frontend` | `frontend/**` changed | One `pnpm install`, then `eslint`, `pnpm build` (type check), `vitest` |
+| `android` | `android/**` changed (not on the Monday sweep) | Gradle unit tests + debug APK, attached to the run as an artifact. On `main`, publishes the release `android-v<version>` with the APK when `android/version.properties` has a version that has no release yet. Signs with the `ANDROID_DEBUG_KEYSTORE` secret and doesn't publish without it |
+| `images` | A file feeding an image changed | Builds all three images (per-image `gha` cache scopes), `compose config` on dev + prod |
+| `security` | always (gitleaks); audit steps gated on manifests + Monday sweep | `gitleaks`, `pip-audit`, `pnpm audit` |
+| `CI` | always | Aggregate gate |
 
-**Backend passes on Python 3.12, 3.13 and 3.14.** The images ship 3.12; the pytest job runs all three, because both version bugs found so far were stdlib behaviour changes that only appeared off the pinned version (`urllib.robotparser` group layout in 3.13, `fnmatch.translate`'s anchor spelling in 3.14).
+**Each area is one job, not several.** Splitting `ruff`/`alembic`/`pytest` cost three per-job minimums and three editable installs to save ~90 seconds of wall clock. The tradeoff is accepted deliberately: feedback is a little slower and a failure names a *step* rather than a job. A full-fat commit costs ~13 billed minutes instead of 33; a docs-only commit costs 3 instead of 9.
+
+Filtering lives in the `changed?` job, **not** `on.pull_request.paths` — a workflow filtered out at the `on:` level never reports a status at all, so a required check would sit pending forever. **Mark the single `CI` job required in branch protection**, never the jobs above. Pushes to `main` are path-filtered the same way PRs are (they used to force-run everything, which re-tested the identical tree a squash-merge had just proven green).
+
+Run the same checks locally first — `ruff check` + `ruff format --check` + `pytest` (backend), `pnpm lint` + `pnpm build` + `pnpm test` (frontend). Playwright E2E and `pnpm lint:css` are deliberately not in CI (`lint:css` has a stale suppressions baseline — re-run `pnpm lint:css:baseline` before wiring it up).
+
+**CI tests Python 3.14 only, because that is the only Python that runs IntelFeed code**: `backend/Dockerfile` is `python:3.14.7`, and api / celery-worker / celery-worker-ai / celery-beat / telegram-listener all come from that image; the host venvs are 3.14 too. (`piper/Dockerfile` is 3.12, but that sidecar ships only `piper-tts` and its own `server.py` — no app code.) This was a 3.12/3.13/3.14 matrix, which cost 120 of those 416 minutes. The two bugs it caught (`urllib.robotparser` group layout in 3.13, `fnmatch.translate`'s anchor spelling in 3.14) were found climbing *toward* 3.14 — and we landed there, so the matrix stopped guarding a runtime. `requires-python` is now `>=3.14` to match. Ruff's `target-version` deliberately still says `py312`: bumping it turns on UP043 (25 findings) and changes formatter output across 45 files, which is its own PR.
+
+**Security gates.** `gitleaks` scans every PR against `.gitleaks.toml` — it is the one check with no path gate, because a committed credential is diff-local: this PR's fault, this PR's job to fix. That allowlist silences individual placeholders (example JWTs, `YOUR_TOKEN`, UUID entity ids), never whole files or rules — keep it that way or it stops catching anything. `pip-audit` resolves the backend tree fresh and blocks on any advisory except those in its documented `--ignore-vuln` list (today: `ecdsa`, unfixable upstream, reached only via JWT algorithms IntelFeed doesn't use). `pnpm audit --prod` blocks on high-severity advisories in shipped dependencies; dev-tree advisories are reported in the job summary but don't gate. The two audits grade the repo's dependency state rather than the diff, so they are gated on the manifests plus a Monday sweep — otherwise a CSS change goes red the morning an advisory lands against lxml. Dependabot (`.github/dependabot.yml`) opens grouped weekly upgrade PRs.
 
 ### Utility Scripts
 
@@ -75,11 +99,12 @@ Most use the app's models and session, so they run in the api container. `./scri
 docker compose -f docker-compose.dev.yml exec api python scripts/<folder>/<script>.py
 ```
 ```
-seed/         Reference data for a fresh install. `seed_all.py` runs all nine in
+seed/         Reference data for a fresh install. `seed_all.py` runs all ten in
               dependency order (--dry-run to preview, --offline to skip downloads,
               --only/--skip to resume); each seeder also runs standalone.
+              `seed_feeds.py` is separate — curated starter feeds, not reference data.
 maintenance/  Repeatable repair: CVE enrichment, search reconcile, re-sanitize, requirement
-              re-match, relationship purge
+              re-match, relationship purge, starter-feed-pack audit
 telegram/     telegram_login.py / telegram_join.py (interactive — needs `exec -it`)
 archive/      Completed one-shot backfills, kept for reference
 ```
@@ -90,7 +115,10 @@ scripts/ops/backup.sh | restore.sh        # pg_dump + gzip (7-day retention, Mei
 scripts/ops/deploy.sh                     # Push main, run update.sh on prod host, verify health
 scripts/ops/sync_prod_to_dev.sh           # Dump prod DB over SSH and restore into local dev stack
 scripts/ops/cf-origin-lockdown.sh         # Restrict prod 80/443 to Cloudflare edge ranges
+scripts/ops/version.sh                    # Source (don't run) before a build to stamp images with the commit
 scripts/dev/sync_skill_clis.py            # Regenerate skill CLIs from the live tool registry
+scripts/dev/check_doc_refs.py             # Check the file:line references in docs/ against the code (--fix repairs the unambiguous ones)
+scripts/build_apk.sh                    # Bump the Android app version, test, build, install on devices
 ```
 `deploy.sh` / `sync_prod_to_dev.sh` require `INTELFEED_PROD_HOST` — there is no default host.
 
@@ -113,6 +141,7 @@ scripts/dev/sync_skill_clis.py            # Regenerate skill CLIs from the live 
 - **`intelligence/story_threads.py`** — Story threads: embeddings (pgvector) cluster an unfolding story into one narrative object with a spine. See [docs/story-threads.md](docs/story-threads.md).
 - **`entity_types.py`** — Canonical entity-type vocabulary (one slug per type across API, DB columns, search, AI schemas). Import the constants; never type the strings.
 - **`core/`** — Cross-cutting: logging (structlog), metrics (Prometheus), rate limiting, security (JWT/bcrypt), exceptions (`AppError`)
+- **`feed_packs/`** (loader + the OPML files) — Curated starter feeds, so a fresh install isn't empty. OPML files (reviewable in git, readable by other readers) extended with an `intelfeed:` namespace that carries what plain OPML can't: the real `feed_type`, `adapter_config`, and the per-feed extraction tuning. `app/api/opml.py` parses it on import; plain `type` stays clamped to `PORTABLE_FEED_TYPES` so a third-party export can't mint an extended feed with no config. Served to onboarding via `/opml/starter-packs`, seeded headlessly by `scripts/seed/seed_feeds.py`, re-audited by `scripts/maintenance/audit_feed_packs.py`. Telegram and Bluesky never ship (out-of-band setup / credentials).
 - **`config.py`** — Pydantic settings (reads `.env`); `get()` method checks system_settings DB table before env defaults
 - **`database.py`** — Async SQLAlchemy session setup with `get_db()` dependency
 
@@ -132,7 +161,7 @@ This is the most complex subsystem:
 - **`autolinker.py`** — Aho-Corasick dictionary scans entry content for known entities (actors, malware, CVEs, TTPs, vendors, products, countries). Redis-versioned vocab for distributed workers. Configurable false positive filtering.
 - **`correlation.py`** — Pivot queries across entity types via shared entries. Proximity scoring with paragraph-distance decay. Entity graph building and timeline construction.
 - **`observables.py`** — The IOC ledger (observables entity type, `(kind, value)` identity). Hard rule: regex never creates a row — pattern scanning only stages entry-local candidates; rows come from judgment doors (one-pass AI `iocs` array, TTP observable upserts, curated `ioc_list` feeds, analyst promote) and known values are then sighted by exact match. Per-kind confidence decay (hashes/host artifacts never decay) runs nightly.
-- **`rule_extraction.py`** — Extracts detection rules in 6 formats (Sigma, SPL, CrowdStrike QL, Elastic QL, KQL, YARA) with syntax validation.
+- **`rule_extraction.py`** — Extracts detection rules in 6 formats (Sigma, Splunk SPL, Elastic QL, KQL, YARA, Snort/Suricata) with syntax validation. The validator (`rule_validation.py`) covers 9: those six plus CrowdStrike QL, Nuclei and Panther, which have no text extractor.
 - **`reporting.py`** — Report generation with customizable templates (Markdown/HTML render). Bundle export (CSV/ATT&CK layer) lives in `api/export.py`; outbound indicator feeds in `api/publish.py`.
 
 ### Database Migrations
@@ -147,7 +176,7 @@ db (PostgreSQL:5433, built from `db/Dockerfile` — postgres:16-alpine + pgvecto
 - **Async throughout** — All database operations use `AsyncSession`. Celery tasks wrap async code via `run_async()` helper with a persistent per-process event loop.
 - **Router pattern** — Dependency injection for `get_current_user` and `get_db`. All endpoints use Pydantic schemas. Eager loading via `selectinload()`. Pagination via offset/limit or cursor tokens. Admin-only operations use the `get_admin_user` dependency, and per-user rows enforce author-or-admin checks — new endpoints must follow this.
 - **Custom exceptions** — `AppError` class with structured `{code, message, details}` responses. Handlers in `main.py`.
-- **Config override chain** — `config.py` checks system_settings DB table first, then `.env` defaults. Many settings are editable via Settings > System UI.
+- **Config override chain** — `config.py` checks system_settings DB table first, then `.env` defaults. Many settings are editable in the Settings UI (Engine console, AI Configuration, Users, System).
 - **Worker tasks** — `@celery_app.task(bind=True, max_retries=3, soft_time_limit=600)` pattern. Each task creates/disposes its own async DB engine to prevent connection exhaustion. Tasks that invoke an AI provider (link validation, entity maintenance, assessment backfill) are routed via `task_routes` in `celery_app.py` to the `ai` queue (formerly `claude_code`), served only by the celery-worker-ai container at concurrency 1 — it serializes AI calls (paces a single Ollama GPU; owns the CLI credentials volume for the claude_code provider). New AI-calling tasks must be routed there too.
 - **Intelligence entities** use junction tables (`EntryTTP`, `EntryCVE`, `EntryVendor`, `EntryProduct`, etc.) for many-to-many with entries. Uniqueness constraints: TTP `technique_id`, CVE `cve_id`, ThreatActor `name`.
 
@@ -155,8 +184,8 @@ db (PostgreSQL:5433, built from `db/Dockerfile` — postgres:16-alpine + pgvecto
 - **Server state via TanStack Query v5** — `useInfiniteQuery` for paginated lists, `useMutation` with cache invalidation. `staleTime: 30s`, `retry: 1`, `refetchOnWindowFocus: false`.
 - **Client state via Zustand** — Three stores with `persist` middleware to localStorage. `uiStore` tracks layout, selections, view mode. `intelStore` tracks intelligence workspace navigation and enrichment queue.
 - **CSS theming** — CSS variables in `:root` for colors, elevation, entity types. `applyTheme()` sets variables at runtime. Auto-contrast text via WCAG luminance. Entity-specific colors (`--entity-actor`, `--entity-malware`, `--entity-vendor`, `--entity-product`, etc.).
-- **Code splitting** — All pages lazy-loaded via `React.lazy()`. Manual Vite chunks for vendor-react, vendor-tanstack, vendor-tiptap, vendor-misc.
-- **Key libraries** — @tiptap (rich text), @codemirror (code editing), @xyflow/react (entity graphs), react-grid-layout (dashboards), @tanstack/react-virtual (virtualized lists), sonner (toasts), dompurify (HTML sanitization).
+- **Code splitting** — All pages lazy-loaded via `React.lazy()`. Manual Vite chunks for vendor-react, vendor-tanstack, vendor-misc.
+- **Key libraries** — @codemirror (code editing), @xyflow/react (entity graphs), react-grid-layout (dashboards), @tanstack/react-virtual (virtualized lists), sonner (toasts), dompurify (HTML sanitization).
 
 ### Testing
 - **Backend** (`backend/tests/`): Pytest with async fixtures. `conftest.py` provides `db_session` (fresh schema per test), `client` (ASGI test client with dependency override), `test_user`/`admin_user` with `auth_headers`/`admin_headers`. Test DB uses same URL + `_test` suffix.
@@ -164,11 +193,11 @@ db (PostgreSQL:5433, built from `db/Dockerfile` — postgres:16-alpine + pgvecto
 
 ## Environment Setup
 
-Copy `.env.example` to `.env`. Key variables: `POSTGRES_*`, `REDIS_URL`, `MEILI_URL`, `MEILI_MASTER_KEY`, `SECRET_KEY`, `ENCRYPTION_KEY`. Most operational settings (AI providers, API keys, thresholds) are configurable in the web UI under Settings > System.
+Copy `.env.example` to `.env`. Key variables: `POSTGRES_*`, `REDIS_URL`, `MEILI_URL`, `MEILI_MASTER_KEY`, `SECRET_KEY`, `ENCRYPTION_KEY`. Most operational settings are configurable in the web UI: AI providers under Settings > AI Configuration; thresholds and API keys under Settings > Engine.
 
 ## IntelFeed CLI
 
-`intelfeed-skill/scripts/intelfeed_cli.py` is a zero-dependency CLI tool (170 tools) that executes IntelFeed operations via the API. Used by Claude skills to interact with the platform.
+`intelfeed-skill/scripts/intelfeed_cli.py` is a zero-dependency CLI tool (180 tools) that executes IntelFeed operations via the API. Used by Claude skills to interact with the platform.
 
 ```bash
 # Single tool call
@@ -185,9 +214,12 @@ Requires env vars `INTELFEED_API_URL`, `INTELFEED_USERNAME`, `INTELFEED_PASSWORD
 
 `intelfeed-lite-skill/` is the read-only variant (query/search/pivot tools only, no writes). Both CLIs are code-generated from the `backend/app/tools/` registry by `scripts/dev/sync_skill_clis.py` — regenerate instead of hand-editing them; `backend/tests/test_tool_registry_sync.py` fails on drift.
 
+`intelfeed-mcp/` serves the same registry over MCP (stdio) for local models (LM Studio etc.): nine fixed tools, per-task playbooks in `intelfeed-mcp/skills/*.md` loaded on demand, results shaped to a ~2k-token budget, read-only unless `INTELFEED_MCP_ALLOW_WRITES` is set. It reads the live registry from `/api/tools/tools`; its offline copy `intelfeed-mcp/registry.json` is generated by the same sync script and drift-checked by the same test. See [intelfeed-mcp/README.md](intelfeed-mcp/README.md).
+
 ## Deeper Documentation
 
 - [docs/architecture.md](docs/architecture.md) — full architecture reference beyond the summary above
 - [docs/story-threads.md](docs/story-threads.md) — embeddings, thread clustering/merging, the spine, and its tuning knobs
 - [docs/entity-profiles.md](docs/entity-profiles.md), [docs/entries.md](docs/entries.md) — domain deep-dives
+- [docs/android-app.md](docs/android-app.md) — the Android client: download, features, build, signing key, CI releases, sync from the working folder
 - `planning/` (gitignored) — active phase plans (e.g. `vendor-product-entities.md`, `mobile-responsiveness.md`)

@@ -1,4 +1,10 @@
-FROM python:3.12.13-slim-bookworm AS base
+# Python 3.14, deliberately. 3.15 is held back in .github/dependabot.yml: the
+# backend tree cannot install on it — every selectolax release caps at <3.15,
+# so googlenewsdecoder fails to resolve. Patch bumps within 3.14 are fine.
+#
+# This is also the only Python that runs IntelFeed code, which is why CI tests
+# 3.14 alone (see .github/workflows/ci.yml).
+FROM python:3.14.8-slim-bookworm AS base
 
 WORKDIR /app
 ENV PYTHONPATH=/app
@@ -50,6 +56,14 @@ RUN useradd -m -u 1000 appuser \
     && mkdir -p /home/appuser/.claude \
     && chown -R appuser:appuser /home/appuser/.claude
 COPY --chown=appuser:appuser . .
+# Build stamp, injected by compose from scripts/ops/version.sh. Deliberately
+# below the COPY: these change on every commit, and an ARG any earlier would
+# invalidate the apt/pip layers and turn each deploy into a full rebuild.
+ARG APP_VERSION=dev
+ARG GIT_SHA=""
+ARG BUILD_TIME=""
+ENV APP_VERSION=${APP_VERSION} GIT_SHA=${GIT_SHA} BUILD_TIME=${BUILD_TIME}
+
 USER appuser
 ENTRYPOINT ["./entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
@@ -60,6 +74,14 @@ RUN useradd -m -u 1000 appuser \
     && mkdir -p /home/appuser/.claude \
     && chown -R appuser:appuser /home/appuser/.claude
 COPY --chown=appuser:appuser . .
+# Build stamp, injected by compose from scripts/ops/version.sh. Deliberately
+# below the COPY: these change on every commit, and an ARG any earlier would
+# invalidate the apt/pip layers and turn each deploy into a full rebuild.
+ARG APP_VERSION=dev
+ARG GIT_SHA=""
+ARG BUILD_TIME=""
+ENV APP_VERSION=${APP_VERSION} GIT_SHA=${GIT_SHA} BUILD_TIME=${BUILD_TIME}
+
 USER appuser
 ENTRYPOINT ["./entrypoint.sh"]
 # --timeout 180: AI-generation endpoints (e.g. /entries/daily-summary) can run

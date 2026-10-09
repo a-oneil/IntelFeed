@@ -17,6 +17,7 @@ from app.models.cve_affected import CVEAffected
 from app.models.cwe import CWE, EntryCWE
 from app.models.detection_rule import DetectionRule
 from app.models.entity_note import EntityNote
+from app.models.entry_sector import EntrySector
 from app.models.intel_report import IntelReport
 from app.models.intelligence_requirement import IntelligenceRequirement, RequirementMatch
 from app.models.malware_family import EntryMalware, MalwareFamily
@@ -25,6 +26,7 @@ from app.models.note import Note
 from app.models.observable import EntryObservable, Observable
 from app.models.product import EntryProduct, Product
 from app.models.ransomware import RansomwareVictim, VictimDisclosure
+from app.models.sector import MalwareTargetSector, Sector, ThreatActorTargetSector
 from app.models.threat_actor import EntryThreatActor, ThreatActor
 from app.models.tool import EntryTool, Tool
 from app.models.ttp import TTP, EntryTTP
@@ -40,6 +42,7 @@ ENTITY_TABLE_MAP = {
     "threat_actor": (ThreatActor, EntryThreatActor, EntryThreatActor.threat_actor_id, EntryThreatActor.entry_id),
     "malware": (MalwareFamily, EntryMalware, EntryMalware.malware_family_id, EntryMalware.entry_id),
     "country": (Country, EntryCountry, EntryCountry.country_id, EntryCountry.entry_id),
+    "sector": (Sector, EntrySector, EntrySector.sector_id, EntrySector.entry_id),
     "tool": (Tool, EntryTool, EntryTool.tool_id, EntryTool.entry_id),
     "vendor": (Vendor, EntryVendor, EntryVendor.vendor_id, EntryVendor.entry_id),
     "product": (Product, EntryProduct, EntryProduct.product_id, EntryProduct.entry_id),
@@ -86,6 +89,9 @@ FIELD_MAP = {
     # Country
     "country": ("name", Country),  # also search aliases
     "country.region": ("region", Country),
+    # Sector — the article's *targeted* industries, written only by the AI door
+    "sector": ("name", Sector),  # also search aliases
+    "sector.slug": ("slug", Sector),
     # Tool
     "tool": ("name", Tool),  # also search aliases
     "tool.type": ("tool_type", Tool),
@@ -108,6 +114,12 @@ FIELD_MAP = {
     "ioc.role": ("role", Observable),
     "ioc.status": ("status", Observable),
     "ioc.infra": ("infra_tag", Observable),
+    # Corroboration counts: reports = distinct non-list articles, feeds =
+    # distinct indicator feeds. Numeric (`ioc.reports:>0`).
+    "observable.reports": ("report_count", Observable),
+    "observable.feeds": ("feed_source_count", Observable),
+    "ioc.reports": ("report_count", Observable),
+    "ioc.feeds": ("feed_source_count", Observable),
     # Campaign
     "campaign": ("name", Campaign),
     "campaign.status": ("status", Campaign),
@@ -143,10 +155,9 @@ FIELD_MAP = {
     "rule.license": ("license", DetectionRule),
     # Actor / malware / tool / country attributes
     "threat_actor.motivation": ("motivation", ThreatActor),
-    "threat_actor.sector": ("targeted_sectors", ThreatActor),
+    # threat_actor.sector / malware.sector are JOIN_FIELDS (target-sector junction)
     "threat_actor.type": ("actor_type", ThreatActor),
     "threat_actor.mitre": ("mitre_id", ThreatActor),
-    "malware.sector": ("targeted_sectors", MalwareFamily),
     "malware.mitre": ("mitre_id", MalwareFamily),
     "tool.platform": ("platforms", Tool),
     "tool.mitre": ("mitre_id", Tool),
@@ -172,6 +183,7 @@ _CATALOGUE_MODELS = {
     "threat_actor": ThreatActor,
     "malware": MalwareFamily,
     "country": Country,
+    "sector": Sector,
     "tool": Tool,
     "vendor": Vendor,
     "product": Product,
@@ -201,8 +213,6 @@ ARRAY_FIELDS = {
     "rule.data_source",
     "rule.tactic",
     "rule.tag",
-    "threat_actor.sector",
-    "malware.sector",
     "tool.platform",
 }
 
@@ -228,6 +238,7 @@ ALIAS_SEARCH_FIELDS = {
     "threat_actor": ThreatActor.aliases,
     "malware": MalwareFamily.aliases,
     "country": Country.aliases,
+    "sector": Sector.aliases,
     "tool": Tool.aliases,
     "vendor": Vendor.aliases,
     "product": Product.aliases,
@@ -500,10 +511,29 @@ def _build_join_condition(field: str, cond: EntityCondition):
         sub = select(Vendor.id).where(Vendor.name.ilike(pattern))
         return Product.vendor_id.in_(sub)
 
+    if field in ("threat_actor.sector", "malware.sector"):
+        # Asserted targeting lives on the target-sector junctions; the value is
+        # matched against the vocabulary's name, slug and aliases so
+        # `threat_actor.sector:banks` finds Financial Services.
+        sector_ids = select(Sector.id).where(
+            or_(
+                Sector.name.ilike(pattern),
+                Sector.slug.ilike(pattern),
+                func.array_to_string(Sector.aliases, " ").ilike(pattern),
+            )
+        )
+        if field == "threat_actor.sector":
+            sub = select(ThreatActorTargetSector.threat_actor_id).where(
+                ThreatActorTargetSector.sector_id.in_(sector_ids)
+            )
+            return ThreatActor.id.in_(sub)
+        sub = select(MalwareTargetSector.malware_family_id).where(MalwareTargetSector.sector_id.in_(sector_ids))
+        return MalwareFamily.id.in_(sub)
+
     return None
 
 
-JOIN_FIELDS = {"cve.product", "ransomware_victim.group", "product.vendor"}
+JOIN_FIELDS = {"cve.product", "ransomware_victim.group", "product.vendor", "threat_actor.sector", "malware.sector"}
 
 
 def _build_condition(cond: EntityCondition, model, entity_type: str):
@@ -742,6 +772,16 @@ def _serialize_entity(entity_type: str, entity) -> dict:
                 "aliases": entity.aliases or [],
                 "iso_code": entity.iso_code,
                 "region": entity.region,
+                "description": entity.description,
+                "article_count": entity.article_count,
+            }
+        )
+    elif entity_type == "sector":
+        base.update(
+            {
+                "name": entity.name,
+                "slug": entity.slug,
+                "aliases": entity.aliases or [],
                 "description": entity.description,
                 "article_count": entity.article_count,
             }

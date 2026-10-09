@@ -57,6 +57,7 @@ const ENTITY_FACET_FIELD: Record<string, string> = {
   vendor: "vendor",
   product: "product",
   country: "country",
+  sector: "sector",
   mitigation: "mitigation",
   cwe: "cwe",
   detection_rule: "rule",

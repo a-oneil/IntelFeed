@@ -151,3 +151,103 @@ async def test_export_opml(
     # The uncategorized feed
     assert len(uncategorized_outlines) == 1
     assert uncategorized_outlines[0].get("xmlUrl") == "https://export2.com/feed.xml"
+
+
+EXTENDED_OPML = """<?xml version="1.0" encoding="UTF-8"?>
+<opml version="1.0" xmlns:intelfeed="https://intelfeed.app/ns/opml/1">
+  <head><title>Extended</title></head>
+  <body>
+    <outline text="Rules" title="Rules">
+      <outline text="SigmaHQ/sigma" title="SigmaHQ/sigma" type="rss"
+               xmlUrl="https://github.com/SigmaHQ/sigma"
+               intelfeed:feedType="github_repo"
+               intelfeed:config='{"owner":"SigmaHQ","repo":"sigma","branch":"master"}'
+               intelfeed:interval="1440"
+               intelfeed:extractionMode="full"
+               intelfeed:extractRules="true"
+               intelfeed:extractTools="false" />
+      <outline text="Junk settings" title="Junk settings" type="rss"
+               xmlUrl="https://junk.example.com/feed"
+               intelfeed:feedType="not_a_real_adapter"
+               intelfeed:config="{not json at all"
+               intelfeed:interval="banana"
+               intelfeed:extractionMode="sideways"
+               intelfeed:extractRules="perhaps" />
+    </outline>
+  </body>
+</opml>
+"""
+
+
+@pytest.mark.asyncio
+async def test_import_opml_reads_intelfeed_extension_attrs(
+    client: AsyncClient, admin_headers: dict, db_session: AsyncSession
+):
+    """The extension namespace carries what plain OPML cannot: the real feed
+    type, its adapter_config, and the per-feed extraction tuning."""
+    with patch("app.workers.feed_tasks.fetch_feed.delay"):
+        response = await client.post(
+            "/api/opml/import",
+            headers=admin_headers,
+            files={"file": ("ext.opml", EXTENDED_OPML.encode(), "text/xml")},
+        )
+    assert response.status_code == 200
+    assert response.json()["feeds_added"] == 2
+
+    from sqlalchemy import select
+
+    sigma = (await db_session.execute(select(Feed).where(Feed.url == "https://github.com/SigmaHQ/sigma"))).scalar_one()
+    assert sigma.feed_type == "github_repo"
+    assert sigma.adapter_config == {"owner": "SigmaHQ", "repo": "sigma", "branch": "master"}
+    assert sigma.fetch_interval_minutes == 1440
+    assert sigma.intel_extraction_mode == "full"
+    assert sigma.extract_detection_rules is True
+    assert sigma.extract_tools is False
+
+
+@pytest.mark.asyncio
+async def test_import_opml_ignores_malformed_extension_attrs(
+    client: AsyncClient, admin_headers: dict, db_session: AsyncSession
+):
+    """One unparseable attribute costs that setting, not the whole import."""
+    with patch("app.workers.feed_tasks.fetch_feed.delay"):
+        await client.post(
+            "/api/opml/import",
+            headers=admin_headers,
+            files={"file": ("ext.opml", EXTENDED_OPML.encode(), "text/xml")},
+        )
+
+    from sqlalchemy import select
+
+    junk = (await db_session.execute(select(Feed).where(Feed.url == "https://junk.example.com/feed"))).scalar_one()
+    # An unknown feed type, bad JSON, a non-numeric interval, an invalid mode
+    # and an unparseable boolean all fall back to the column defaults.
+    assert junk.feed_type == "rss"
+    assert junk.adapter_config == {}
+    assert junk.fetch_interval_minutes == 30
+    assert junk.intel_extraction_mode == "selective"
+    assert junk.extract_detection_rules is False
+
+
+@pytest.mark.asyncio
+async def test_plain_opml_cannot_declare_an_extended_feed_type(
+    client: AsyncClient, admin_headers: dict, db_session: AsyncSession
+):
+    """A third-party export saying type="reddit" would create a feed that can
+    never fetch, because the subreddit only travels in adapter_config."""
+    opml = (
+        '<?xml version="1.0"?><opml version="1.0"><body>'
+        '<outline text="r/netsec" type="reddit" xmlUrl="https://reddit.com/r/netsec" />'
+        "</body></opml>"
+    )
+    with patch("app.workers.feed_tasks.fetch_feed.delay"):
+        await client.post(
+            "/api/opml/import",
+            headers=admin_headers,
+            files={"file": ("x.opml", opml.encode(), "text/xml")},
+        )
+
+    from sqlalchemy import select
+
+    feed = (await db_session.execute(select(Feed).where(Feed.url == "https://reddit.com/r/netsec"))).scalar_one()
+    assert feed.feed_type == "rss"

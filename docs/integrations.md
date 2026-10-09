@@ -2,6 +2,44 @@
 
 Recipes for hooking IntelFeed into other systems. Each recipe is a self-contained guide with prerequisites, steps, and copy-paste payloads.
 
+**Contents**
+
+- [Prerequisites for All Recipes](#prerequisites-for-all-recipes)
+  - [Obtain an API Token](#obtain-an-api-token)
+- [Outbound Integrations: IntelFeed → External Systems](#outbound-integrations-intelfeed--external-systems)
+  - [1. Slack Notifications](#1-slack-notifications)
+  - [2. Discord Notifications](#2-discord-notifications)
+  - [3. Custom HTTP Webhook (Generic JSON)](#3-custom-http-webhook-generic-json)
+  - [4. Microsoft Teams (Adaptive Card via Webhook)](#4-microsoft-teams-adaptive-card-via-webhook)
+  - [5. Email Digest (via Webhook to Email Service)](#5-email-digest-via-webhook-to-email-service)
+  - [6. SIEM Ingestion](#6-siem-ingestion)
+  - [7. MISP Push Integration](#7-misp-push-integration)
+  - [8. Detection Rule Export to GitHub / GitLab](#8-detection-rule-export-to-github--gitlab)
+  - [9. CSV Export for Analysis](#9-csv-export-for-analysis)
+- [Inbound Integrations: External Systems → IntelFeed](#inbound-integrations-external-systems--intelfeed)
+  - [10. OPML Import (Bulk Feed Onboarding)](#10-opml-import-bulk-feed-onboarding)
+  - [11. Manual URL/PDF Ingestion via REST API](#11-manual-urlpdf-ingestion-via-rest-api)
+  - [12. Polling IntelFeed via REST API](#12-polling-intelfeed-via-rest-api)
+  - [13. IntelFeed CLI Integration](#13-intelfeed-cli-integration)
+- [Configuration Recipes](#configuration-recipes)
+  - [14. Configure Claude as AI Provider](#14-configure-claude-as-ai-provider)
+  - [15. Configure OpenAI as AI Provider](#15-configure-openai-as-ai-provider)
+  - [16. Configure Local Ollama](#16-configure-local-ollama)
+  - [17. Configure Custom OpenAI-Compatible Endpoint](#17-configure-custom-openai-compatible-endpoint)
+  - [18. Configure Enrichment Sources](#18-configure-enrichment-sources)
+  - [19. Image Proxy Configuration](#19-image-proxy-configuration)
+- [Authoring Complex Automation Patterns](#authoring-complex-automation-patterns)
+  - [20. Multi-Step Automation: AI → Rule Generation → Slack](#20-multi-step-automation-ai--rule-generation--slack)
+  - [21. Morning Briefing: Scheduled Digest](#21-morning-briefing-scheduled-digest)
+  - [22. Watchlist Alerts with Real-Time Toast](#22-watchlist-alerts-with-real-time-toast)
+- [Summary Table: Integration Methods](#summary-table-integration-methods)
+- [Troubleshooting](#troubleshooting)
+  - [Webhook not firing](#webhook-not-firing)
+  - [API authentication fails](#api-authentication-fails)
+  - [Enrichment sources not running](#enrichment-sources-not-running)
+  - [Image proxy issues](#image-proxy-issues)
+- [Related Documentation](#related-documentation)
+
 ## Prerequisites for All Recipes
 
 All recipes require:
@@ -718,7 +756,7 @@ export INTELFEED_PASSWORD=your_pass
 python intelfeed_cli.py search_entries '{"query": "ransomware", "limit": 5}'
 ```
 
-**Available tools** (170 total):
+**Available tools** (180 total):
 - `search_entries` — Full-text search across entries
 - `search_entities` — Search CVEs, TTPs, threat actors, malware
 - `get_entry` — Fetch single entry by ID

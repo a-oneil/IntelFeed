@@ -25,6 +25,7 @@ export default function WatchlistPulseWidget({ config }: Props) {
     "cve",
     "ttp",
     "country",
+    "sector",
     "mitigation",
     "cwe",
     "tool",

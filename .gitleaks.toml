@@ -1,0 +1,90 @@
+# gitleaks configuration — see the `security` job in .github/workflows/ci.yml.
+#
+# The scan runs on every PR and blocks on any finding. That only stays useful
+# if the allowlist below is small and every entry says why the thing it silences
+# is not a secret. The rule of thumb: allowlist the *placeholder*, never the
+# file and never the rule. Excluding `docs/` or `backend/app/schemas/` outright
+# would hide a real key pasted into an OpenAPI example, which is precisely the
+# accident this is here to catch.
+#
+# To reproduce locally:
+#   gitleaks dir . --config .gitleaks.toml --redact --verbose
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Documentation placeholders for credentials the reader supplies"
+# Match against the matched secret itself, not the surrounding line.
+regexTarget = "match"
+regexes = [
+  # docs/*.md and OpenAPI examples: "Authorization: Bearer YOUR_TOKEN",
+  # "Bearer <access_token>", "api_key": "<your-api-key>".
+  '''(?i)\b(your[_-]?(token|api[_-]?key|secret|password))\b''',
+  '''<[a-z_-]*(token|key|secret|password)[a-z_-]*>''',
+]
+
+[[allowlists]]
+description = "Example JWTs in OpenAPI schemas and the integrations guide"
+regexTarget = "match"
+regexes = [
+  # The canonical RFC 7519 HS256 header ({"alg":"HS256","typ":"JWT"}) — the
+  # value every JWT example in the wild starts with. backend/app/schemas/auth.py
+  # pairs it with a literal "sig" in place of a signature.
+  '''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.''',
+  # Truncated tokens in prose: "eyJ0eXAiOiJKV1QiLCJhbGc...".
+  '''eyJ[A-Za-z0-9_-]{4,}\.{3}''',
+]
+
+[[allowlists]]
+description = "Reserved-placeholder service identifiers"
+regexTarget = "match"
+regexes = [
+  # backend/app/schemas/webhook_preset.py — Slack's own documentation
+  # placeholder: all-zero team/channel ids and an X-filled token.
+  '''hooks\.slack\.com/services/T0{6,}/B0{6,}/X{6,}''',
+  # backend/app/schemas/enrichment.py — obviously-fake NVD key example.
+  '''nvd-api-key-0123456789abcdef''',
+]
+
+[[allowlists]]
+description = "Published lure URLs in the observables extraction fixture"
+# The rule's match is the bare token after `filekey=`, so test the whole line
+# for the filemail download shape instead.
+regexTarget = "line"
+# backend/tests/fixtures/observables/cases/unit42-screening-serpens.json —
+# the attacker's filemail download link as Unit 42 printed it. Its
+# `filekey=` query string is the file-share token that *is* the indicator;
+# it names a dropper on someone else's service, not anything of ours. Tied
+# to the filemail download shape so it cannot silence a real key elsewhere.
+regexes = [
+  '''filemail\.com/api/file/get\?filekey=[A-Za-z0-9_-]+''',
+]
+
+[[allowlists]]
+description = "Bare UUIDs are entity identifiers, not credentials"
+regexTarget = "match"
+# generic-api-key fires on any long hex-ish string assigned to a *_key field.
+# IntelFeed's entity_key / thread_id / feed_id examples are all plain UUIDv4,
+# which carry no secret: they name a row, and the API still requires a JWT.
+# Tied to the field-assignment shape rather than matching a bare UUID
+# anywhere, so this cannot silence a real secret that merely contains one.
+regexes = [
+  '''key["']?\s*:\s*["']?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}["']?$''',
+]
+
+[[allowlists]]
+description = "Build output and caches that are not part of the source tree"
+# These are gitignored, so they never reach a CI checkout — but a developer
+# running gitleaks locally would otherwise wade through thousands of hits from
+# the pnpm store and dist/ bundles.
+paths = [
+  '''(^|/)node_modules/''',
+  '''(^|/)\.pnpm-store/''',
+  '''(^|/)dist/''',
+  '''(^|/)__pycache__/''',
+  '''(^|/)venv/''',
+  '''(^|/)logs?/''',
+  '''(^|/)backups?/''',
+  '''(^|/)\.ruff_cache/''',
+]

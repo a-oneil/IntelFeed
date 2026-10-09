@@ -1,12 +1,14 @@
 # REST API Reference
 
+For developers and integrators who want to script IntelFeed or build against its REST API: every router, its endpoints, request and response shapes, and the auth model. For ready-made recipes see [integrations.md](integrations.md); for the same operations as a command-line tool see [cli-reference.md](cli-reference.md).
+
 **Version:** 0.1.0  
 **Base URL:** `/api`  
 **Protocol:** HTTPS (self-hosted)  
 
 ## Overview
 
-IntelFeed's FastAPI backend provides a comprehensive REST API for threat intelligence ingestion, enrichment, analysis, and dissemination. The API is designed for self-hosted deployments with a single authenticated user or small teams. See [`backend/app/main.py:767-846`] for router mounting and prefix definitions — 77 routers in all. The interactive OpenAPI docs at `/docs` (and `/redoc`) are generated from the same source and are always current; this page is the narrative companion, not a replacement.
+IntelFeed's FastAPI backend provides a comprehensive REST API for threat intelligence ingestion, enrichment, analysis, and dissemination. The API is designed for self-hosted deployments with a single authenticated user or small teams. See [`backend/app/main.py:757-837`] for router mounting and prefix definitions — 78 routers in all. The interactive OpenAPI docs at `/docs` (and `/redoc`) are generated from the same source and are always current; this page is the narrative companion, not a replacement.
 
 This documentation covers:
 - **Authentication & Authorization:** JWT-based with access/refresh tokens
@@ -617,7 +619,7 @@ Get a single feed's detailed configuration.
 
 **`PUT /api/feeds/{feed_id}`**
 
-Update feed configuration (title, category, interval, adapter config). Infrastructure fields (`url`, `feed_type`, `is_active`, `fetch_interval_minutes`, `retention_days`, `adapter_config`, `exclude_shorts`, `intel_extraction_mode`, `auto_extract_on_ingest`, `extract_detection_rules`) are admin-only; curation fields (`custom_title`, `category_id`, `is_muted`, ratings, `analyst_notes`) are open to all users. `is_muted` is per-user when per-user subscriptions are enabled.
+Update feed configuration (title, category, interval, adapter config). Infrastructure fields (`url`, `feed_type`, `is_active`, `fetch_interval_minutes`, `retention_days`, `adapter_config`, `exclude_shorts`, `intel_extraction_mode`, `ai_analysis_enabled`, `auto_extract_on_ingest`, `extract_detection_rules`) are admin-only; curation fields (`custom_title`, `category_id`, `is_muted`, ratings, `analyst_notes`) are open to all users. `is_muted` is per-user when per-user subscriptions are enabled.
 
 **Auth:** Bearer token (admin for infrastructure fields)  
 **Status:** 200 OK  
@@ -639,6 +641,54 @@ Delete a feed (admin only) — removes the feed record and cascades its entries.
 
 **Auth:** Bearer token (admin for physical delete; any user to unsubscribe when per-user subscriptions are enabled)  
 **Status:** 204 No Content
+
+---
+
+**`GET /api/feeds/{feed_id}/value`**
+
+One feed's intelligence value score plus its rank among the scored set. Scoring runs over every active feed rather than this one alone — "entity introductions" means *first seen anywhere*, so a single-feed computation would count every entity the feed ever mentioned — but the response is a single row. Backs the Edit Feed modal's Overview pane.
+
+**Auth:** Bearer token
+**Query:** `days` (7-365, default 90)
+**Status:** 200 OK, 404 if the feed does not exist
+**Response:**
+```json
+{
+  "feed_id": "d5b2c8a1-4f3e-4b7a-9c6d-2e8f1a0b3c4d",
+  "scored": true,
+  "score": 48.2,
+  "tier": "B",
+  "articles": 142,
+  "unique_entities": 87,
+  "entity_introductions": 11,
+  "correlation_events": 3,
+  "detection_rules": 0,
+  "pir_matches": 2,
+  "rank": 4,
+  "of": 37,
+  "days": 90
+}
+```
+
+---
+
+**`GET /api/feeds/{feed_id}/pipeline`**
+
+Which pipeline stages run for this feed, and what decided each one. `decided_by` is `"legacy"` when the value still comes from the Feed columns (the case while `pipeline_engine_enabled` is off), otherwise the plan scope that overrode it — `global`, `category` or `feed`. The Edit Feed modal's Pipeline pane reads this so it can stop presenting its own checkbox as authoritative for a stage a plan controls.
+
+**Auth:** Bearer token
+**Status:** 200 OK, 404 if the feed does not exist
+**Response:**
+```json
+{
+  "engine_enabled": true,
+  "stages": {
+    "autolink": { "enabled": true, "config": {} },
+    "extract": { "enabled": false, "config": { "mode": "selective", "detection_rules": false } }
+  },
+  "decided_by": { "autolink": "feed", "extract": "legacy" }
+}
+```
 
 ---
 
@@ -966,7 +1016,7 @@ Fetch a single article with full content and metadata.
   "malware": [ ... ],
   "ttps": [ ... ],
   "cves": [ ... ],
-  "tags": [ { "id": "...", "name": "vulnerability", "color": "#FF0000" } ],
+  "tags": [ { "id": "...", "name": "vulnerability", "color": "#FF0000", "display_as_chip": false, "description": null, "is_global": false, "personal": true } ],
   "comments_count": 5,
   "notes_count": 2
 }
@@ -1400,11 +1450,25 @@ Related catalog endpoints: `GET /api/countries`, `GET /api/countries/{country_id
 
 ---
 
-#### Sectors, Mitigations & Offensive Tools
+#### Sectors
+
+A closed, seeded vocabulary of 21 victim industries, promoted to an entity. Every route accepts a sector by UUID, canonical slug (`healthcare`), display name or alias.
+
+- **`GET /api/sectors`** — paginated list; `search`, `sort_by` in `name|article_count|last_seen_at|linked_count|targeting_actor_count|victim_count`. Items carry `targeting_actor_count`, `targeting_malware_count` and `victim_count` (leak-site disclosures, last 90 days).
+- **`GET /api/sectors/{ref}`**, **`GET /api/sectors/{ref}/profile`** (`window_days`) — the victimology profile: `reported_actors`/`reported_malware` (ranked by articles describing both the entity and the sector being hit), `asserted_actors`/`asserted_malware` (target-sector claims with `source` and `article_count`), `campaigns`, `victims` (totals, 12-month series, top groups, recent disclosures), `countries` (article and victim counts), `intel_profiles`, `recent_entries`, `articles_monthly`.
+- **`GET /api/entries/{entry_id}/sectors`** / **`DELETE /api/entries/{entry_id}/sectors/{sector_id}`** — the sectors an article describes as targeted (written only by the one-pass AI analysis; `POST /api/entries/{entry_id}/extract-sectors` runs it). The response carries `id`/`slug`/`name` and the legacy `sector`/`label` spellings.
+- **`PUT /api/entities/sectors/{sector_id}`** — `aliases`, `description`. Name and slug are the vocabulary itself; there is no create, delete, merge or convert.
+- **`GET/POST /api/entities/{threat_actor|malware}/{id}/target-sectors`**, **`DELETE .../target-sectors/{ref}`** — the asserted targets-sector claims on an actor or family. `POST` records an analyst claim (upgrading a rolled-up or enriched row); the `targeted_sectors` label array on the entity is a cache rebuilt from these rows.
+- **`GET/POST /api/campaigns/{id}/sectors`**, **`DELETE .../sectors/{ref}`**, **`GET .../sectors/suggested`** — a campaign's victim verticals; suggestions come from its own articles' sectors.
+
+Sectors are also watchable (`entity_type: "sector"` on the watchlist) — a watch boosts the sector's articles in the Priority Queue — and pivot/graph/timeline through the generic correlation routes.
+
+---
+
+#### Mitigations & Offensive Tools
 
 Same extract/list pattern as the entity types above:
 
-- **`POST /api/entries/{entry_id}/extract-sectors`** / **`GET /api/entries/{entry_id}/sectors`**
 - **`POST /api/entries/{entry_id}/extract-mitigations`** / **`GET /api/entries/{entry_id}/mitigations`** — catalog at `GET /api/mitigations`, `GET /api/mitigations/{mitigation_id}`
 - **`POST /api/entries/{entry_id}/extract-tools`** / **`GET /api/entries/{entry_id}/tools`** — catalog at `GET /api/tools` (paginated), `GET /api/tools/{tool_id}`
 
@@ -1676,12 +1740,66 @@ Delete a campaign.
 - **`POST /api/campaigns/{id}/entries`** / **`DELETE /api/campaigns/{id}/entries/{entry_id}`** — Attach/detach entries
 - **`GET/POST /api/campaigns/{id}/entities`** / **`DELETE /api/campaigns/{id}/entities/{entity_id}`** — Campaign entity membership
 - **`GET/POST /api/campaigns/{id}/countries`** / **`DELETE .../countries/{country_id}`**, **`GET .../countries/suggested`** — Targeted/attributed countries
+- **`GET/POST /api/campaigns/{id}/sectors`** / **`DELETE .../sectors/{ref}`**, **`GET .../sectors/suggested`** — Victim verticals (sector by UUID, slug or name)
 - **`GET /api/campaigns/{id}/timeline`**, **`GET .../stats`**, **`GET .../attack-layer`**, **`GET .../detection-gaps`**, **`GET .../export`**, **`GET .../suggest`** — Analysis views
-- **`GET/POST /api/campaigns/{id}/saved-searches`**, **`PATCH/DELETE .../saved-searches/{css_id}`**, **`POST .../saved-searches/{css_id}/sync`** — Campaign-scoped saved searches that auto-collect matching entries
+- **`GET/POST /api/campaigns/{id}/saved-searches`**, **`PATCH/DELETE .../saved-searches/{css_id}`**, **`POST .../saved-searches/{css_id}/sync`** — Links to an analyst's own saved searches. Prefer a `query` source below: it belongs to the campaign instead of to one person.
+- **`GET/POST /api/campaigns/{id}/sources`**, **`PATCH/DELETE .../sources/{source_id}`**, **`POST .../sources/{source_id}/sync`** — Standing intake the campaign owns (see below)
+- **`GET /api/campaigns/{id}/sources/suggested`** — What it could follow, drawn from what it already holds
+- **`POST /api/campaigns/{id}/sources/preview`** — Dry run: what a source *would* add, before it exists
+- **`GET /api/campaigns/source-options`** — Which source kinds exist and which entity types can be followed
 - **`POST /api/campaigns/auto-detect`** — Suggest new campaigns from entry clustering
 - **`GET /api/campaigns/by-entry/{entry_id}`** — Campaigns containing an entry
 
 **Auth:** Bearer token
+
+---
+
+#### Campaign Sources
+
+Standing intake owned by the campaign rather than by one analyst. Three kinds:
+
+| `kind` | Body | Claims |
+| --- | --- | --- |
+| `entity` | `entity_type` + `ref_id` | Every article linked to that entity |
+| `story` | `ref_id` (thread UUID) | Every member of that story thread |
+| `query` | `query` (query-language string) | Everything the query matches — see [query-language.md](query-language.md) |
+
+Each recomputes its full claimed set on every run and inserts only what the
+campaign does not already hold, so an article that joins a story, gains an
+entity link or starts matching the query later still arrives. The
+`sync_campaign_sources` beat job runs every 15 minutes; `auto_sync: false`
+pauses a source without losing the row or what it has added.
+
+**`POST /api/campaigns/{id}/sources/preview`**
+
+A dry run. Creates nothing, so it is safe to call as an analyst types.
+
+**Request:** `{"kind": "query", "query": "malware:\"Akira\" AND date:>30d"}`
+
+**Response:**
+```json
+{
+  "kind": "query",
+  "entity_type": null,
+  "ref_id": null,
+  "query": "malware:\"Akira\" AND date:>30d",
+  "label": "malware:\"Akira\" AND date:>30d",
+  "would_add": 47,
+  "already_held": 3,
+  "preview": [{ "entry_id": "...", "title": "...", "published_at": "..." }],
+  "error": null,
+  "unknown_fields": []
+}
+```
+
+`error` is a parse failure (reported in the body, not as a 4xx, because the UI
+previews mid-typing). `unknown_fields` names fields the query language does not
+have — `actor:` instead of `threat_actor:`, say — which are not fatal (they
+become text terms) but on a standing source answer plausibly forever.
+
+**Refusals on `POST .../sources`:** an unparseable query, a `query` source with a
+`ref_id` (or any other kind without one), and an `entity_type` that owns no
+articles — `GET /api/campaigns/source-options` lists the ones that do.
 
 ---
 
@@ -1906,8 +2024,8 @@ List automation rules with execution stats.
       },
       "actions": [
         {
-          "type": "apply_tag",
-          "params": { "tag_id": "..." }
+          "type": "add_tags",
+          "config": { "tags": [ "cve-watch" ] }
         }
       ],
       "is_enabled": true,
@@ -1954,8 +2072,8 @@ Create a new automation rule.
       }
     },
     {
-      "type": "apply_tag",
-      "params": { "tag_id": "550e8402-..." }
+      "type": "add_tags",
+      "config": { "tags": [ "cve-watch", { "name": "customer-a", "color": "#DC2626", "chip": true } ] }
     }
   ],
   "is_enabled": true
@@ -2843,7 +2961,7 @@ On-demand enrichment for a specific entity (cached + rate-limited pipeline).
 
 Base paths: `/api/entries/{id}/share`, `/api/shared`, `/api/public/rss`
 
-**`POST /api/entries/{entry_id}/share`** — Create (or return the existing) public share link for an entry: `{ "token": "...", "url": "/shared/<token>", ... }`.  
+**`POST /api/entries/{entry_id}/share`** — Create (or return the existing) public share link for an entry: `{ "token": "...", "url": "/shared/<token>", ... }`. The caller's existing active link is returned as it is, whatever its `expires_at`; this endpoint never sets an expiry.  
 **`GET /api/entries/{entry_id}/share`** — Current share link or `null`.  
 **`DELETE /api/entries/{entry_id}/share`** — Revoke the link.
 
@@ -3093,7 +3211,7 @@ Full-text search across articles using Meilisearch.
 
 **`POST /api/search/unified`**
 
-The one search endpoint the `/search` page and the header input use. Runs the full query language: text terms and indexed filters against Meilisearch, `category:`/`signal:`/`sector:`/`url:`/`feed.*:`/`is:muted|translated|image` against PostgreSQL, entity filters against the entity tables — then intersects the three.
+The one search endpoint the `/search` page and the header input use. Runs the full query language: text terms and indexed filters against Meilisearch, `category:`/`signal:`/`url:`/`feed.*:`/`is:muted|translated|image` against PostgreSQL, entity filters against the entity tables — then intersects the three.
 
 **Auth:** Bearer token  
 **Body:**
@@ -3187,7 +3305,7 @@ Notes:
 
 **Categories** (`/api/categories`): `GET`, `POST` (201), `PUT /{category_id}`, `DELETE /{category_id}` (admin only — the folder tree is shared), `PUT /reorder`.
 
-**Tags** (`/api/tags`): `GET`, `POST` (201), `PUT /{tag_id}`, `DELETE /{tag_id}`, `GET/POST /entries/{entry_id}` (entry tags), `DELETE /entries/{entry_id}/{tag_id}`, `POST /entries/bulk-tag`, `POST /entries/bulk-untag`, `POST /merge`.
+**Tags** (`/api/tags`): `GET`, `POST` (201), `PUT /{tag_id}`, `DELETE /{tag_id}`, `GET/POST /entries/{entry_id}` (entry tags), `DELETE /entries/{entry_id}/{tag_id}`, `POST /entries/bulk-tag`, `POST /entries/bulk-untag`, `POST /merge`. The tag list is shared; assignments are per user — `POST /entries/{entry_id}` and `bulk-tag` create the caller's own assignment, and every read (entry `tags`, `GET /entries/{entry_id}`, `entry_count`, the search `tags` facet) is the caller's view — unless the tag has `is_global: true`, in which case one shared assignment serves everyone. Tag fields: `name` (1–100 chars; may not contain `"` or `\\`), `color`, `display_as_chip`, `description`, `is_global`. `PUT {is_global}` re-homes existing assignments: to global collapses everyone's rows into one shared row per entry; to personal hands the shared row to every human account. `DELETE /entries/{entry_id}/{tag_id}` and `bulk-untag` remove the caller's own assignment (or the shared one of a global tag) and leave other users' alone.
 
 **Auth:** Bearer token
 
@@ -3217,7 +3335,8 @@ Concise index of the remaining routers (all Bearer-token unless noted; see the r
 | Telegram | `/api/telegram`, `/api/telegram-media` | Channel discovery, listener status, keyword mentions (dismiss/subscribe), media file serving |
 | Events | `/api/events` | SSE stream of server events (`GET`, token via query param) + `POST /ticket` |
 | Proxy | `/api/proxy/image` | Image proxy for entry content |
-| Observables (IOC ledger) | `/api/observables` | `GET` (list/filter by kind, role, status, capture door), `GET /rollup`, `GET /candidates` (the promote queue), `GET /{id}`, `PATCH /{id}`, `DELETE /{id}` (drops the row, its sightings and its relationship claims — no tombstone, so the value can be captured again), `POST /{id}/deny` (admin; keeps the row as the never-capture tombstone), `POST /never-capture`, `GET /{id}/sightings.csv`. Per-entry: `GET/POST /entries/{entry_id}/observables`, `/promote`, `/dismiss` |
+| Observables (IOC ledger) | `/api/observables` | `GET` (list/filter by kind, role, status, capture door, `infra_tag`, `min_confidence`, `linked_entity=<type>:<uuid>` — the profile pivot to one actor's/family's/campaign's/tool's claimed + reported-alongside observables; sortable by `report_count` / `feed_source_count`), `GET /{id}/backlinks` (who claims it, who it is reported with), `GET /rollup`, `GET /candidates` (the promote queue), `GET /{id}`, `PATCH /{id}`, `DELETE /{id}` (drops the row, its sightings and its relationship claims — no tombstone, so the value can be captured again), `POST /{id}/deny` (admin; keeps the row as the never-capture tombstone), `POST /never-capture`, `GET /{id}/sightings.csv`. Per-entry: `GET/POST /entries/{entry_id}/observables`, `/promote` (accepts `role`, `evidence`, `label`), `/dismiss` |
+| Entity infrastructure | `/api/entities/{threat_actor\|malware\|campaign\|tool}/{id}/infrastructure` | `GET` → `{claimed, reported_alongside, counts}` (`counts.staged_candidate_articles` feeds the profile's empty state; cached in the pivot key space so unlink/relationship writes invalidate it); `?format=csv` for the flat export |
 | Publishing (outbound) | `/api/publish`, `/api/taxii2` | Token-authed observable feeds for external pullers — `GET /publish/edl/{filename}` (EDL blocklists), `GET /publish/lookup/{filename}` (SIEM lookup CSVs), the TAXII 2.1 collection under `/taxii2/`, and `GET /publish/status` (normal user auth). Mounted **without** the app auth dependency; 404s entirely unless `observables_publish_enabled` |
 | CWE | `/api/cwes` | MITRE weakness catalog: `GET` (list), `GET /rollup`, `GET /{cwe_id}`, `/family` (lineage), `/affected-cves`, `/vendors`. CVE side: `GET /cves/{cve_id}/weaknesses` |
 | Intel profiles | `/api/intel-profiles` | Named report scopes (regions × verticals × window): CRUD, `GET /{id}/surface` (matched threat surface with why-matched evidence), `POST /surface-preview` (unsaved scope), `GET /sector-vocabulary` |

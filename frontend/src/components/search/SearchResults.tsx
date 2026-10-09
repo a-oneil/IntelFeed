@@ -17,6 +17,7 @@ import { SearchSyntaxHelp } from "./SearchSyntaxHelp";
 import { ENTITY_TYPE_LABELS, getSearchResultName, getSearchResultSubtext, useEntityResultNavigate } from "./EntityResults";
 import type { MatchKind } from "./SearchFacetSidebar";
 import styles from "./SearchResults.module.css";
+import { promptDialog } from "@/utils/dialog";
 
 /** Rows a mention group shows before its "Show all N". */
 const GROUP_CAP = 10;
@@ -70,7 +71,7 @@ function searchHitToEntry(hit: SearchHit, markedReadIds: Set<string>): Entry {
     is_read: markedReadIds.has(hit.id) || (hit.is_read ?? false),
     is_starred: hit.is_starred ?? false,
     is_bookmarked: hit.is_bookmarked ?? false,
-    tags: (hit.tags ?? []).map((t: string) => ({ name: t, color: "" })),
+    tags: hit.tag_details ?? (hit.tags ?? []).map((t: string) => ({ name: t, color: "" })),
   };
 }
 
@@ -185,9 +186,14 @@ export function SearchResults({
   // Saved alongside the query: the rail state the query language cannot say.
   // Without it a saved search reopens as bare text and quietly searches a
   // different scope than the one it was saved from.
-  const handleSaveSearch = useCallback(() => {
+  const handleSaveSearch = useCallback(async () => {
     if (!query.trim()) return;
-    const name = prompt("Save search as:", query);
+    const name = await promptDialog({
+      title: "Save search",
+      message: "Save search as:",
+      defaultValue: query,
+      confirmLabel: "Save",
+    });
     if (!name) return;
     const filters: SavedSearchFilters = {
       scope,
@@ -392,8 +398,13 @@ export function SearchResults({
                       <button
                         className={styles.savedAction}
                         title="Rename"
-                        onClick={() => {
-                          const newName = prompt("Rename saved search:", sv.name);
+                        onClick={async () => {
+                          const newName = await promptDialog({
+                            title: "Rename saved search",
+                            message: "Rename saved search:",
+                            defaultValue: sv.name,
+                            confirmLabel: "Rename",
+                          });
                           if (newName && newName !== sv.name) updateSaved.mutate({ id: sv.id, data: { name: newName } });
                         }}
                       >
