@@ -63,66 +63,83 @@ def enforce_no_additional_properties(schema: dict) -> dict:
 
 
 def to_openai_strict(schema: dict, strip: tuple[str, ...] = DEFAULT_STRICT_STRIP_KEYWORDS) -> dict:
-    """Normalize a schema for OpenAI's ``json_schema`` ``strict: true`` mode.
+    """Normalize a schema for OpenAI's ``json_schema`` ``strict: true`` mode:
+    every object gets ``required`` filled and ``additionalProperties: false``
+    (recursively, through ``items`` and ``anyOf``/``oneOf``), and a property
+    the source schema left optional is kept by making it nullable rather than
+    silently mandatory. Callers should expect optional fields to come back as
+    ``null`` rather than absent.
 
-    Strict mode has stronger requirements than plain ``json_schema``:
-
-    * every object property must be listed in ``required`` (no partial
-      ``required`` lists) and every object must set
-      ``additionalProperties: false``
-    * a property that the source schema left optional is kept in the output
-      by making it nullable (``type: [T, "null"]``, with ``null`` added to
-      its ``enum`` when present) rather than silently becoming mandatory
-    * certain keywords some strict implementations reject are stripped
-      (default: ``minLength``/``maxLength``; ``pattern`` is left alone)
-
-    Callers that need this (vs. plain ``enforce_required`` +
-    ``enforce_no_additional_properties``) should expect previously-optional
-    fields to come back as ``null`` rather than absent — downstream readers
-    of the parsed result must tolerate that.
+    A free-form object (no declared ``properties``) is left untouched —
+    strict mode has no properties to enumerate as required, so the vendor
+    will reject it with its own error rather than this function fabricating
+    one.
     """
 
-    def walk(node):
+    def normalize(node) -> None:
         if not isinstance(node, dict):
-            if isinstance(node, list):
-                for item in node:
-                    walk(item)
             return
 
         for key in strip:
             node.pop(key, None)
 
-        if node.get("type") == "object" and node.get("properties"):
+        node_type = node.get("type")
+        types = node_type if isinstance(node_type, list) else [node_type] if node_type else []
+
+        if "object" in types and node.get("properties"):
             properties = node["properties"]
             original_required = set(node.get("required") or [])
             all_keys = list(properties.keys())
             for key in all_keys:
+                prop = properties[key]
+                # Normalize the child while it's still an "object" — making
+                # it nullable widens its type and would hide it from this
+                # branch on a later pass.
+                normalize(prop)
                 if key not in original_required:
-                    prop = properties[key]
                     _make_nullable(prop)
             node["required"] = all_keys
             node["additionalProperties"] = False
 
-        for value in node.values():
-            walk(value)
+        if "array" in types and isinstance(node.get("items"), dict):
+            normalize(node["items"])
+
+        for combinator in ("anyOf", "oneOf", "allOf"):
+            for sub in node.get(combinator) or []:
+                normalize(sub)
 
     cloned = copy.deepcopy(schema)
-    walk(cloned)
+    normalize(cloned)
     return cloned
 
 
 def _make_nullable(prop: dict) -> None:
-    """Widen a property's ``type``/``enum`` to admit ``null`` in place."""
+    """Widen a property's ``type``/``enum``/combinator to admit ``null`` in place.
+
+    Handles three shapes: an explicit ``type`` (widened to a list with
+    ``"null"`` added), an ``enum`` (gets a ``None`` member), and a property
+    with neither — described only via ``anyOf``/``oneOf`` — which gets a
+    ``{"type": "null"}`` branch appended to whichever combinator it uses.
+    """
     if not isinstance(prop, dict):
         return
     prop_type = prop.get("type")
-    if prop_type is None:
-        return
-    if isinstance(prop_type, list):
-        if "null" not in prop_type:
-            prop_type.append("null")
-    elif prop_type != "null":
-        prop["type"] = [prop_type, "null"]
+    if prop_type is not None:
+        if isinstance(prop_type, list):
+            if "null" not in prop_type:
+                prop_type.append("null")
+        elif prop_type != "null":
+            prop["type"] = [prop_type, "null"]
+
     enum = prop.get("enum")
     if isinstance(enum, list) and None not in enum:
         enum.append(None)
+
+    if prop_type is None and enum is None:
+        for combinator in ("anyOf", "oneOf"):
+            options = prop.get(combinator)
+            if isinstance(options, list):
+                already_nullable = any(isinstance(o, dict) and o.get("type") == "null" for o in options)
+                if not already_nullable:
+                    options.append({"type": "null"})
+                break

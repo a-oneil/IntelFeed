@@ -197,6 +197,9 @@ class OpenAICompatibleProvider(AIProvider):
         if rf:
             payload["response_format"] = rf
 
+        if cfg.get("report_cost") and "openrouter.ai" in self.base_url:
+            payload["usage"] = {"include": True}
+
         extra_body = cfg.get("extra_body")
         if extra_body:
             payload.update(extra_body)
@@ -225,7 +228,7 @@ class OpenAICompatibleProvider(AIProvider):
         body = resp.text.lower()
         return any(term in body for term in ("response_format", "json_schema", "json_object"))
 
-    def _resolve_cost(self, cfg: dict, resolved_model: str, usage: dict, headers: httpx.Headers) -> float | None:
+    def _resolve_cost(self, cfg: dict, usage: dict, headers: httpx.Headers) -> float | None:
         if cfg.get("report_cost"):
             reported = usage.get("cost")
             if isinstance(reported, (int, float)):
@@ -237,8 +240,7 @@ class OpenAICompatibleProvider(AIProvider):
                 except ValueError:
                     pass
 
-        model_cfg = self._model_config(resolved_model)
-        pricing = model_cfg.get("pricing") or cfg.get("pricing")
+        pricing = cfg.get("pricing")
         if pricing:
             tokens_in = usage.get("prompt_tokens") or 0
             tokens_out = usage.get("completion_tokens") or 0
@@ -295,6 +297,8 @@ class OpenAICompatibleProvider(AIProvider):
                     )
                     last_resp = resp
                     continue
+                if mode != mode_chain[0]:
+                    logger.info("%s accepted response_format mode %r after downgrade", self.base_url, mode)
                 last_resp = resp
                 break
         assert last_resp is not None
@@ -332,7 +336,7 @@ class OpenAICompatibleProvider(AIProvider):
             tokens_output=tokens_output,
             model=data.get("model") or resolved_model,
             latency_ms=latency_ms,
-            cost_usd=self._resolve_cost(cfg, resolved_model, usage, last_resp.headers),
+            cost_usd=self._resolve_cost(cfg, usage, last_resp.headers),
         )
 
     async def stream_complete(

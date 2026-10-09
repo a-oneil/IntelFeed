@@ -168,7 +168,7 @@ def _get_provider_instance(
     merged_config = {**(provider_model.config or {}), **(extra_config or {})}
 
     provider_type = (provider_model.provider_type or "claude").lower()
-    if provider_type in ("claude", ""):
+    if provider_type == "claude":
         return ClaudeProvider(
             base_url=provider_model.base_url,
             api_key=api_key,

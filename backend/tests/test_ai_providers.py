@@ -161,6 +161,19 @@ async def test_update_provider(client: AsyncClient, admin_headers: dict):
 
 
 @pytest.mark.asyncio
+async def test_update_provider_rejects_empty_base_url_for_openai_compatible(client: AsyncClient, admin_headers: dict):
+    created = await _create_provider(
+        client, admin_headers, name="LM Studio", provider_type="openai_compatible", base_url="http://x/v1"
+    )
+    resp = await client.put(
+        f"{PROVIDERS_URL}/{created['id']}",
+        json={"base_url": ""},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_update_provider_regular_user_forbidden(client: AsyncClient, auth_headers: dict, admin_headers: dict):
     created = await _create_provider(client, admin_headers, name="Immutable")
     provider_id = created["id"]
@@ -285,6 +298,22 @@ async def test_test_provider_not_found(client: AsyncClient, admin_headers: dict)
 
 
 @pytest.mark.asyncio
+async def test_test_provider_unreachable_host_returns_success_false(client: AsyncClient, admin_headers: dict):
+    """A bad/unreachable row must come back as success=false, not a 500."""
+    created = await _create_provider(
+        client,
+        admin_headers,
+        name="Unreachable",
+        provider_type="openai_compatible",
+        base_url="http://127.0.0.1:1/v1",
+    )
+    resp = await client.post(f"{PROVIDERS_URL}/{created['id']}/test", headers=admin_headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["success"] is False
+
+
+@pytest.mark.asyncio
 async def test_provider_response_includes_supports_tools(client: AsyncClient, admin_headers: dict):
     # Ollama runs a native tool-calling loop, so it is tool-capable. A plain
     # Anthropic-API provider ("claude") is not.
@@ -344,3 +373,33 @@ def test_engine_factory_routes_openai_compatible():
     row = AIProviderModel(name="LM Studio", provider_type="openai_compatible", base_url="http://localhost:1234/v1")
     instance = _get_provider_instance(row)
     assert isinstance(instance, OpenAICompatibleProvider)
+
+
+@pytest.mark.asyncio
+async def test_run_task_with_unknown_provider_type_records_provider_error(db_session, test_user):
+    """The schema blocks an unknown provider_type at create time, so this can
+    only happen via a manually-edited row — run_task must still degrade to a
+    provider_error result rather than crash the Celery task that called it.
+    """
+    from app.ai.engine import run_task
+    from app.models.ai_provider import AIProvider as AIProviderModel
+    from app.models.ai_task import AITask
+    from app.models.ai_task_assignment import AITaskAssignment
+
+    task = AITask(
+        name="unknown_provider_type_test_task",
+        display_name="Unknown Provider Type Test",
+        default_prompt_template="{{ text }}",
+    )
+    db_session.add(task)
+    await db_session.flush()
+
+    provider = AIProviderModel(name="Bogus", provider_type="bogus", base_url="http://example.com")
+    db_session.add(provider)
+    await db_session.flush()
+
+    db_session.add(AITaskAssignment(task_id=task.id, provider_id=provider.id, model_name="whatever"))
+    await db_session.flush()
+
+    result = await run_task(db_session, test_user.id, task.name, variables={"text": "hi"})
+    assert result["_extraction_status"] == "provider_error"

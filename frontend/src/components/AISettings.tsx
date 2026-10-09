@@ -328,10 +328,12 @@ type OpenAICompatKnobs = {
   system_role: string; // "" (system default) | developer
   max_tokens_param: string; // "" (max_tokens default) | max_completion_tokens
   send_temperature: string; // "" (true default) | false
+  min_temperature: string;
   timeout_seconds: string;
   input_per_mtok: string;
   output_per_mtok: string;
   report_cost: string; // "" (false default) | true
+  extra_body: string;
 };
 
 function openAIKnobsFrom(cfg: Record<string, unknown>): OpenAICompatKnobs {
@@ -341,10 +343,12 @@ function openAIKnobsFrom(cfg: Record<string, unknown>): OpenAICompatKnobs {
     system_role: cfg.system_role != null ? String(cfg.system_role) : "",
     max_tokens_param: cfg.max_tokens_param != null ? String(cfg.max_tokens_param) : "",
     send_temperature: cfg.send_temperature === false ? "false" : "",
+    min_temperature: cfg.min_temperature != null ? String(cfg.min_temperature) : "",
     timeout_seconds: cfg.timeout_seconds != null ? String(cfg.timeout_seconds) : "",
     input_per_mtok: pricing.input_per_mtok != null ? String(pricing.input_per_mtok) : "",
     output_per_mtok: pricing.output_per_mtok != null ? String(pricing.output_per_mtok) : "",
     report_cost: cfg.report_cost ? "true" : "",
+    extra_body: cfg.extra_body != null ? JSON.stringify(cfg.extra_body, null, 2) : "",
   };
 }
 
@@ -354,6 +358,7 @@ function openAIKnobsToConfig(k: OpenAICompatKnobs): Record<string, unknown> {
   if (k.system_role) out.system_role = k.system_role;
   if (k.max_tokens_param) out.max_tokens_param = k.max_tokens_param;
   if (k.send_temperature === "false") out.send_temperature = false;
+  if (k.min_temperature.trim()) out.min_temperature = parseFloat(k.min_temperature);
   if (k.timeout_seconds.trim()) out.timeout_seconds = parseInt(k.timeout_seconds, 10);
   if (k.input_per_mtok.trim() || k.output_per_mtok.trim()) {
     out.pricing = {
@@ -362,6 +367,7 @@ function openAIKnobsToConfig(k: OpenAICompatKnobs): Record<string, unknown> {
     };
   }
   if (k.report_cost === "true") out.report_cost = true;
+  if (k.extra_body.trim()) out.extra_body = JSON.parse(k.extra_body);
   return out;
 }
 
@@ -369,19 +375,30 @@ function OpenAICompatConfigEditor({ provider, onClose }: { provider: AIProvider;
   const updateProvider = useUpdateAIProvider();
   const cfg = (provider.config || {}) as Record<string, unknown>;
   const [knobs, setKnobs] = useState<OpenAICompatKnobs>(() => openAIKnobsFrom(cfg));
+  const [extraBodyError, setExtraBodyError] = useState<string | null>(null);
   const set = (key: keyof OpenAICompatKnobs, value: string) =>
     setKnobs((prev) => ({ ...prev, [key]: value }));
 
   const handleSave = () => {
+    let knobConfig: Record<string, unknown>;
+    try {
+      knobConfig = openAIKnobsToConfig(knobs);
+    } catch {
+      setExtraBodyError("Invalid JSON");
+      return;
+    }
+    setExtraBodyError(null);
     const next: Record<string, unknown> = { ...cfg };
     delete next.structured_output;
     delete next.system_role;
     delete next.max_tokens_param;
     delete next.send_temperature;
+    delete next.min_temperature;
     delete next.timeout_seconds;
     delete next.pricing;
     delete next.report_cost;
-    Object.assign(next, openAIKnobsToConfig(knobs));
+    delete next.extra_body;
+    Object.assign(next, knobConfig);
     updateProvider.mutate({ id: provider.id, config: next }, { onSuccess: onClose });
   };
 
@@ -427,6 +444,16 @@ function OpenAICompatConfigEditor({ provider, onClose }: { provider: AIProvider;
             onChange={(e) => set("timeout_seconds", e.target.value)}
           />
         </label>
+        <label title="Floor applied to the engine's temperature. Local grammar-constrained decoding at 0.0 can loop on long extraction prompts — try 0.2 if a task hangs or returns truncated JSON. Hosted APIs don't usually need this.">
+          Min temperature
+          <input
+            type="number"
+            step="0.1"
+            placeholder="0.0"
+            value={knobs.min_temperature}
+            onChange={(e) => set("min_temperature", e.target.value)}
+          />
+        </label>
       </div>
       <div className={styles.formActions} style={{ flexWrap: "wrap", gap: "0.75rem" }}>
         <label title="Dollar rate per 1M input tokens — used to compute cost on the Cost Dashboard. Leave both blank for a free/local endpoint.">
@@ -457,10 +484,23 @@ function OpenAICompatConfigEditor({ provider, onClose }: { provider: AIProvider;
           </select>
         </label>
       </div>
+      <label title="Merged into the request payload last — the escape hatch for vendor options such as chat_template_kwargs (Qwen3 thinking toggle on vLLM/llama.cpp) or OpenRouter's provider routing block. Must be a JSON object.">
+        Extra body (JSON)
+        <textarea
+          rows={4}
+          placeholder={'{\n  "chat_template_kwargs": { "enable_thinking": false }\n}'}
+          value={knobs.extra_body}
+          onChange={(e) => {
+            setExtraBodyError(null);
+            set("extra_body", e.target.value);
+          }}
+        />
+      </label>
+      {extraBodyError && <p className={styles.hint}>{extraBodyError}</p>}
       <p className={styles.hint}>
-        Per-model overrides, extra headers/body, and a model-id filter can be set via the API's{" "}
+        Per-model overrides, extra headers, and a model-id filter can be set via the API's{" "}
         <code>config.model_overrides</code> / <code>config.extra_headers</code> /{" "}
-        <code>config.extra_body</code> / <code>config.model_filter</code> keys.
+        <code>config.model_filter</code> keys.
       </p>
       <div className={styles.formActions}>
         <button className={styles.saveBtn} onClick={handleSave} disabled={updateProvider.isPending}>
@@ -505,7 +545,9 @@ function ProvidersSection() {
     await createProvider.mutateAsync({
       name: newProvider.name,
       provider_type: newProvider.provider_type,
-      base_url: newProvider.base_url || undefined,
+      // ClaudeProvider forwards base_url straight to the Anthropic SDK, so a
+      // stale value from another type must never reach it.
+      base_url: requiresBaseUrl ? newProvider.base_url || undefined : undefined,
       api_key: newProvider.api_key || undefined,
     });
     setShowAdd(false);
@@ -536,12 +578,14 @@ function ProvidersSection() {
         <div className={styles.addForm}>
           <select
             value={newProvider.provider_type}
-            onChange={(e) =>
+            onChange={(e) => {
+              const nextType = e.target.value as "claude" | "ollama" | "openai_compatible";
               setNewProvider({
                 ...newProvider,
-                provider_type: e.target.value as "claude" | "ollama" | "openai_compatible",
-              })
-            }
+                provider_type: nextType,
+                base_url: nextType === "ollama" || nextType === "openai_compatible" ? newProvider.base_url : "",
+              });
+            }}
           >
             <option value="claude">Claude (Anthropic API)</option>
             <option value="ollama">Ollama (self-hosted)</option>

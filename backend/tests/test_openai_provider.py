@@ -197,6 +197,32 @@ async def test_downgrade_chain_on_response_format_rejection(monkeypatch):
     assert resp.raw_response["structured_output_mode_used"] == "json_schema"
 
 
+@pytest.mark.asyncio
+async def test_downgrade_chain_falls_all_the_way_to_prompt(monkeypatch):
+    """A server that rejects every structured response_format still gets a
+    schema instruction injected into the prompt on the final fallback step.
+    """
+    calls: list[dict] = []
+    schema = {"type": "object", "properties": {"x": {"type": "string"}}}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        calls.append(payload)
+        if "response_format" in payload:
+            return httpx.Response(400, json={"error": {"message": "response_format not supported"}})
+        return httpx.Response(200, json=_chat_response())
+
+    monkeypatch.setattr(httpx, "AsyncClient", _mock_client_factory(handler))
+    provider = OpenAICompatibleProvider(base_url=BASE_URL, api_key="k", config={})
+    resp = await provider.complete(prompt="hi", model="gpt-test", response_format=schema)
+
+    assert len(calls) == 3  # json_schema, json_object, prompt
+    assert resp.raw_response["structured_output_mode_used"] == "prompt"
+    final_payload = calls[-1]
+    assert "response_format" not in final_payload
+    assert "JSON schema" in final_payload["messages"][0]["content"]
+
+
 # ── to_openai_strict normalizer ───────────────────────────────────────
 
 
@@ -223,6 +249,107 @@ def test_to_openai_strict_fills_required_and_nullable():
     assert "maxLength" not in strict["properties"]["c"]
 
 
+def test_to_openai_strict_normalizes_optional_nested_object():
+    """A nested object under an OPTIONAL property must still get its own
+    required/additionalProperties — the property's own type is widened to
+    ["object", "null"] only AFTER its children are normalized, otherwise the
+    object-handling branch never recognizes it as an object.
+    """
+    schema = {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string"},
+            "indicators": {
+                "type": "object",
+                "properties": {"ip": {"type": "string"}, "domain": {"type": "string"}},
+                "required": ["ip"],
+            },
+        },
+        "required": ["summary"],
+    }
+    strict = to_openai_strict(schema)
+    nested = strict["properties"]["indicators"]
+    assert set(nested["required"]) == {"ip", "domain"}
+    assert nested["additionalProperties"] is False
+    assert "object" in nested["type"]
+    assert "null" in nested["type"]
+    # the nested optional "domain" field was itself made nullable
+    assert nested["properties"]["domain"]["type"] == ["string", "null"]
+    assert nested["properties"]["ip"]["type"] == "string"
+
+
+def test_to_openai_strict_normalizes_through_array_items():
+    schema = {
+        "type": "object",
+        "properties": {
+            "tools": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string"}, "detection_artifacts": {"type": "string"}},
+                    "required": ["name"],
+                },
+            }
+        },
+        "required": ["tools"],
+    }
+    strict = to_openai_strict(schema)
+    item_schema = strict["properties"]["tools"]["items"]
+    assert set(item_schema["required"]) == {"name", "detection_artifacts"}
+    assert item_schema["additionalProperties"] is False
+
+
+def test_to_openai_strict_leaves_free_form_object_untouched():
+    """A free-form object (no declared properties) has nothing strict mode
+    can enumerate as required — left as-is rather than fabricating one.
+    """
+    schema = {
+        "type": "object",
+        "properties": {"metadata": {"type": "object"}},
+        "required": ["metadata"],
+    }
+    strict = to_openai_strict(schema)
+    assert strict["properties"]["metadata"] == {"type": "object"}
+
+
+def test_to_openai_strict_makes_anyof_only_property_nullable():
+    """A property with neither `type` nor `enum` — described only via
+    anyOf/oneOf — gets a {"type": "null"} branch appended instead of being
+    silently skipped.
+    """
+    schema = {
+        "type": "object",
+        "properties": {
+            "a": {"type": "string"},
+            "b": {"anyOf": [{"type": "string"}, {"type": "integer"}]},
+        },
+        "required": ["a"],
+    }
+    strict = to_openai_strict(schema)
+    options = strict["properties"]["b"]["anyOf"]
+    assert any(isinstance(o, dict) and o.get("type") == "null" for o in options)
+
+
+def test_to_openai_strict_strip_does_not_touch_property_named_like_a_keyword():
+    """The strip pass removes schema KEYWORDS from schema nodes, never a
+    property whose NAME happens to match one (e.g. a field literally called
+    "maxLength") — that would silently delete the field's definition while
+    leaving it listed in `required`, producing an invalid schema.
+    """
+    schema = {
+        "type": "object",
+        "properties": {
+            "maxLength": {"type": "integer"},
+            "a": {"type": "string"},
+        },
+        "required": ["a"],
+    }
+    strict = to_openai_strict(schema)
+    assert "maxLength" in strict["properties"]
+    assert strict["properties"]["maxLength"]["type"] == ["integer", "null"]
+    assert "maxLength" in strict["required"]
+
+
 # ── errors ────────────────────────────────────────────────────────────
 
 
@@ -233,8 +360,27 @@ async def test_429_maps_to_quota_exhausted(monkeypatch):
 
     monkeypatch.setattr(httpx, "AsyncClient", _mock_client_factory(handler))
     provider = OpenAICompatibleProvider(base_url=BASE_URL, api_key="k", config={})
-    with pytest.raises(QuotaExhaustedError):
+    with pytest.raises(QuotaExhaustedError) as exc_info:
         await provider.complete(prompt="hi", model="gpt-test")
+
+    from datetime import UTC, datetime
+
+    reset_at = exc_info.value.reset_at
+    assert reset_at is not None
+    delta = (reset_at - datetime.now(UTC)).total_seconds()
+    assert 25 < delta < 35
+
+
+@pytest.mark.asyncio
+async def test_429_without_retry_after_has_no_reset_at(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, text="rate limited")
+
+    monkeypatch.setattr(httpx, "AsyncClient", _mock_client_factory(handler))
+    provider = OpenAICompatibleProvider(base_url=BASE_URL, api_key="k", config={})
+    with pytest.raises(QuotaExhaustedError) as exc_info:
+        await provider.complete(prompt="hi", model="gpt-test")
+    assert exc_info.value.reset_at is None
 
 
 @pytest.mark.asyncio
@@ -289,6 +435,39 @@ async def test_cost_from_openrouter_usage_field(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_report_cost_sends_usage_include_on_openrouter(monkeypatch):
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        data = _chat_response()
+        data["usage"]["cost"] = 0.005
+        return httpx.Response(200, json=data)
+
+    monkeypatch.setattr(httpx, "AsyncClient", _mock_client_factory(handler))
+    provider = OpenAICompatibleProvider(
+        base_url="https://openrouter.ai/api/v1", api_key="k", config={"report_cost": True}
+    )
+    resp = await provider.complete(prompt="hi", model="gpt-test")
+    assert captured["payload"]["usage"] == {"include": True}
+    assert resp.cost_usd == 0.005
+
+
+@pytest.mark.asyncio
+async def test_report_cost_does_not_send_usage_include_off_openrouter(monkeypatch):
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(200, json=_chat_response())
+
+    monkeypatch.setattr(httpx, "AsyncClient", _mock_client_factory(handler))
+    provider = OpenAICompatibleProvider(base_url=BASE_URL, api_key="k", config={"report_cost": True})
+    await provider.complete(prompt="hi", model="gpt-test")
+    assert "usage" not in captured["payload"]
+
+
+@pytest.mark.asyncio
 async def test_cost_local_flag_forces_zero(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=_chat_response())
@@ -297,6 +476,17 @@ async def test_cost_local_flag_forces_zero(monkeypatch):
     provider = OpenAICompatibleProvider(base_url=BASE_URL, api_key=None, config={"local": True})
     resp = await provider.complete(prompt="hi", model="gpt-test")
     assert resp.cost_usd == 0.0
+
+
+@pytest.mark.asyncio
+async def test_cost_from_litellm_response_header(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_chat_response(), headers={"x-litellm-response-cost": "0.00042"})
+
+    monkeypatch.setattr(httpx, "AsyncClient", _mock_client_factory(handler))
+    provider = OpenAICompatibleProvider(base_url=BASE_URL, api_key="k", config={"report_cost": True})
+    resp = await provider.complete(prompt="hi", model="gpt-test")
+    assert resp.cost_usd == 0.00042
 
 
 # ── list_models / check_health ───────────────────────────────────────
@@ -324,6 +514,16 @@ async def test_check_health_true_on_200(monkeypatch):
     monkeypatch.setattr(httpx, "AsyncClient", _mock_client_factory(handler))
     provider = OpenAICompatibleProvider(base_url=BASE_URL, api_key=None, config={})
     assert await provider.check_health() is True
+
+
+@pytest.mark.asyncio
+async def test_check_health_false_on_error(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500)
+
+    monkeypatch.setattr(httpx, "AsyncClient", _mock_client_factory(handler))
+    provider = OpenAICompatibleProvider(base_url=BASE_URL, api_key=None, config={})
+    assert await provider.check_health() is False
 
 
 # ── embed() ───────────────────────────────────────────────────────────
@@ -397,3 +597,17 @@ async def test_stream_complete_parses_sse(monkeypatch):
     provider = OpenAICompatibleProvider(base_url=BASE_URL, api_key="k", config={})
     chunks = [c async for c in provider.stream_complete(prompt="hi", model="gpt-test")]
     assert chunks == ["Hel", "lo"]
+
+
+@pytest.mark.asyncio
+async def test_stream_complete_raises_on_error_frame(monkeypatch):
+    body = b'data: {"choices":[{"delta":{"content":"Hel"}}]}\n\ndata: {"error":{"message":"model overloaded"}}\n\n'
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=body, headers={"content-type": "text/event-stream"})
+
+    monkeypatch.setattr(httpx, "AsyncClient", _mock_client_factory(handler))
+    provider = OpenAICompatibleProvider(base_url=BASE_URL, api_key="k", config={})
+    with pytest.raises(RuntimeError, match="model overloaded"):
+        async for _ in provider.stream_complete(prompt="hi", model="gpt-test"):
+            pass

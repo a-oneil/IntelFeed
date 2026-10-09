@@ -77,6 +77,10 @@ async def update_provider(
     if body.name is not None:
         provider.name = body.name
     if body.base_url is not None:
+        if not body.base_url.strip() and provider.provider_type in ("ollama", "openai_compatible"):
+            raise AppError(
+                code="validation_error", message="base_url cannot be empty for this provider type", status_code=400
+            )
         provider.base_url = body.base_url
     if body.api_key is not None:
         provider.api_key_encrypted = encrypt_value(body.api_key) if body.api_key else None

@@ -137,10 +137,14 @@ async def _seed_ai_tasks() -> None:
             db.add(cc_provider)
             await db.flush()
 
-        # Auto-create default model assignments for system tasks missing an assignment
+        # Auto-create default model assignments for system tasks missing an assignment.
+        # openai_compatible excluded: its model catalog is too varied to guess a safe default.
         provider_result = await db.execute(
             select(AIProviderModel)
-            .where(AIProviderModel.is_active.is_(True), AIProviderModel.provider_type != "claude_code")
+            .where(
+                AIProviderModel.is_active.is_(True),
+                AIProviderModel.provider_type.not_in(["claude_code", "openai_compatible"]),
+            )
             .limit(1)
         )
         default_provider = provider_result.scalar_one_or_none()
@@ -290,12 +294,31 @@ async def _sync_job_schedules_to_redis() -> None:
                 write_overrides_to_redis(overrides)
 
 
+async def _warn_unknown_provider_types() -> None:
+    """Flag any ai_providers row with a provider_type the engine doesn't
+    route (can only happen via a manual DB edit — the create schema rejects
+    anything else) so it doesn't fail silently on first use.
+    """
+    from sqlalchemy import select
+
+    from app.database import async_session
+    from app.models.ai_provider import AIProvider
+
+    known = {"claude", "claude_code", "ollama", "openai_compatible", ""}
+    async with async_session() as db:
+        result = await db.execute(select(AIProvider.name, AIProvider.provider_type))
+        for name, provider_type in result.all():
+            if (provider_type or "").lower() not in known:
+                logger.warning("AI provider %r has unrecognized provider_type %r", name, provider_type)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     await _seed_enrichment_sources()
     await _seed_ai_tasks()
     await _sync_job_schedules_to_redis()
+    await _warn_unknown_provider_types()
     yield
     # Shutdown
 

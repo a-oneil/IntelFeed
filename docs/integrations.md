@@ -882,8 +882,11 @@ raise **min_temperature** to `0.2` if a task hangs or returns truncated JSON. If
 only supports `json_object` (not `json_schema`), switch **Structured output** to `json_object`.
 
 **Not yet supported**: tool calling (the copilot and agentic maintenance tasks still require
-Ollama or the Claude Code CLI). Cost tracking needs the per-model $-rates set in the Configure
-panel for any paid aggregator (OpenRouter, Groq); local servers default to $0.
+Ollama or the Claude Code CLI). Cost tracking needs the $/1M-token rates set in the Configure
+panel (one rate per provider — a different rate per model needs `config.model_overrides` via
+the API) for any paid aggregator (OpenRouter, Groq); local servers default to $0. OpenRouter
+can also report its own per-call cost instead (toggle "Use provider-reported cost"), though its
+`/models` health check doesn't validate the API key — a bad key still passes Test Connection.
 
 ---
 

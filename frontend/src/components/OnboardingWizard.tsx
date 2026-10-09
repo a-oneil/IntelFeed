@@ -268,9 +268,13 @@ export function OnboardingWizard() {
               <div className={styles.feedInput}>
                 <select
                   value={aiProviderType}
-                  onChange={(e) =>
-                    setAiProviderType(e.target.value as "claude" | "ollama" | "openai_compatible")
-                  }
+                  onChange={(e) => {
+                    const nextType = e.target.value as "claude" | "ollama" | "openai_compatible";
+                    setAiProviderType(nextType);
+                    if (nextType !== "ollama" && nextType !== "openai_compatible") {
+                      setAiBaseUrl("");
+                    }
+                  }}
                 >
                   <option value="claude">Claude (Anthropic API)</option>
                   <option value="ollama">Ollama (self-hosted)</option>
@@ -326,7 +330,7 @@ export function OnboardingWizard() {
                             ? "Ollama"
                             : "OpenAI-compatible",
                       provider_type: aiProviderType,
-                      base_url: aiBaseUrl || undefined,
+                      base_url: aiRequiresBaseUrl ? aiBaseUrl || undefined : undefined,
                       api_key: aiApiKey || undefined,
                     });
                     setAiSaved(true);
