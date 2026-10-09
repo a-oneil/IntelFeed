@@ -347,6 +347,14 @@ const AI_CHOICES = [
     needsKey: true,
   },
   {
+    id: "openai_compatible",
+    title: "OpenAI-compatible",
+    tag: "Any endpoint",
+    desc: "OpenAI, LM Studio, vLLM, llama.cpp, LiteLLM, OpenRouter or Groq — anything speaking the /v1/chat/completions dialect.",
+    needsUrl: true,
+    optionalKey: true,
+  },
+  {
     id: "none",
     title: "Skip — run without AI",
     desc: "You keep ingest, autolinking, search, dedup and regex detection-rule extraction. You lose summaries, the one-pass entry analysis and AI entity assessments. Add a provider any time.",
@@ -377,7 +385,14 @@ function AIStep() {
       const fields =
         choice === "ollama"
           ? { name: "Ollama", provider_type: "ollama", base_url: baseUrl.trim() }
-          : { name: "Anthropic Claude", provider_type: "claude", api_key: apiKey.trim() };
+          : choice === "openai_compatible"
+            ? {
+                name: "OpenAI-compatible",
+                provider_type: "openai_compatible",
+                base_url: baseUrl.trim(),
+                api_key: apiKey.trim() || undefined,
+              }
+            : { name: "Anthropic Claude", provider_type: "claude", api_key: apiKey.trim() };
       const provider = existing
         ? await updateProvider.mutateAsync({ id: existing.id, ...fields, is_active: true })
         : await createProvider.mutateAsync(fields);
@@ -388,8 +403,8 @@ function AIStep() {
       const outcome = await commission.mutateAsync({ id: provider.id, takeOver: true });
       if (!outcome.success) {
         setError(
-          choice === "ollama"
-            ? `Couldn't reach that Ollama host — ${outcome.message}. From inside Docker the URL is usually http://ollama:11434.`
+          choice === "ollama" || choice === "openai_compatible"
+            ? `Couldn't reach that host — ${outcome.message}.`
             : `That key was rejected — ${outcome.message}.`,
         );
         return;
@@ -419,6 +434,8 @@ function AIStep() {
             aria-pressed={choice === c.id}
             onClick={() => {
               setChoice(c.id);
+              setBaseUrl(c.id === "openai_compatible" ? "" : "http://ollama:11434");
+              setApiKey("");
               setResult(null);
               setError("");
             }}
@@ -434,16 +451,32 @@ function AIStep() {
 
       {!saved && "needsUrl" in current && current.needsUrl && (
         <div className={styles.orRow}>
-          <label htmlFor="onb-ollama-url" className={styles.srOnly}>
-            Ollama base URL
+          <label htmlFor="onb-provider-url" className={styles.srOnly}>
+            Base URL
           </label>
           <input
-            id="onb-ollama-url"
+            id="onb-provider-url"
             type="url"
             className={styles.urlInput}
+            placeholder={choice === "openai_compatible" ? "http://localhost:1234/v1" : undefined}
             value={baseUrl}
             onChange={(e) => setBaseUrl(e.target.value)}
           />
+          {"optionalKey" in current && current.optionalKey && (
+            <>
+              <label htmlFor="onb-provider-key" className={styles.srOnly}>
+                API key (optional)
+              </label>
+              <input
+                id="onb-provider-key"
+                type="password"
+                className={styles.urlInput}
+                placeholder="API key (optional)"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+              />
+            </>
+          )}
           <button
             type="button"
             className={`${styles.btn} ${styles.btnPrimary}`}
