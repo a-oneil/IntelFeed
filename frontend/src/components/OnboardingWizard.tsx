@@ -52,10 +52,14 @@ export function OnboardingWizard() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   // AI config state
+  const [aiProviderType, setAiProviderType] = useState<"claude" | "ollama" | "openai_compatible">("claude");
   const [aiApiKey, setAiApiKey] = useState("");
+  const [aiBaseUrl, setAiBaseUrl] = useState("");
   const [aiSaved, setAiSaved] = useState(false);
   const [aiError, setAiError] = useState("");
   const createProvider = useCreateAIProvider();
+  const aiRequiresBaseUrl = aiProviderType === "ollama" || aiProviderType === "openai_compatible";
+  const aiCanSave = aiRequiresBaseUrl ? !!aiBaseUrl.trim() : !!aiApiKey.trim();
 
   // Theme state
   const { data: themes } = useThemes();
@@ -260,14 +264,54 @@ export function OnboardingWizard() {
               extraction, detection rule generation, and content summarization.
               You can skip this and set it up later in Settings.
             </p>
-            <div className={styles.feedInput}>
-              <input
-                type="password"
-                placeholder="Anthropic API Key"
-                value={aiApiKey}
-                onChange={(e) => setAiApiKey(e.target.value)}
-              />
-            </div>
+            {!aiSaved && (
+              <div className={styles.feedInput}>
+                <select
+                  value={aiProviderType}
+                  onChange={(e) =>
+                    setAiProviderType(e.target.value as "claude" | "ollama" | "openai_compatible")
+                  }
+                >
+                  <option value="claude">Claude (Anthropic API)</option>
+                  <option value="ollama">Ollama (self-hosted)</option>
+                  <option value="openai_compatible">OpenAI-compatible</option>
+                </select>
+              </div>
+            )}
+            {!aiSaved && aiProviderType === "openai_compatible" && (
+              <p className={styles.selectHint}>
+                OpenAI, LM Studio, vLLM, llama.cpp, OpenRouter, LiteLLM, or Groq
+              </p>
+            )}
+            {!aiSaved && aiRequiresBaseUrl && (
+              <div className={styles.feedInput}>
+                <input
+                  placeholder={
+                    aiProviderType === "ollama"
+                      ? "Base URL (e.g. http://localhost:11434)"
+                      : "Base URL (e.g. http://localhost:1234/v1, https://api.openai.com/v1)"
+                  }
+                  value={aiBaseUrl}
+                  onChange={(e) => setAiBaseUrl(e.target.value)}
+                />
+              </div>
+            )}
+            {!aiSaved && (
+              <div className={styles.feedInput}>
+                <input
+                  type="password"
+                  placeholder={
+                    aiProviderType === "claude"
+                      ? "Anthropic API Key"
+                      : aiProviderType === "ollama"
+                        ? "Bearer token (optional, for proxied instances)"
+                        : "API key (optional for local servers)"
+                  }
+                  value={aiApiKey}
+                  onChange={(e) => setAiApiKey(e.target.value)}
+                />
+              </div>
+            )}
             {!aiSaved && (
               <button
                 className={styles.btnPrimary}
@@ -275,8 +319,14 @@ export function OnboardingWizard() {
                   setAiError("");
                   try {
                     await createProvider.mutateAsync({
-                      name: "Claude",
-                      provider_type: "claude",
+                      name:
+                        aiProviderType === "claude"
+                          ? "Claude"
+                          : aiProviderType === "ollama"
+                            ? "Ollama"
+                            : "OpenAI-compatible",
+                      provider_type: aiProviderType,
+                      base_url: aiBaseUrl || undefined,
                       api_key: aiApiKey || undefined,
                     });
                     setAiSaved(true);
@@ -284,7 +334,7 @@ export function OnboardingWizard() {
                     setAiError("Failed to save provider. Check your settings.");
                   }
                 }}
-                disabled={createProvider.isPending || !aiApiKey.trim()}
+                disabled={createProvider.isPending || !aiCanSave}
               >
                 {createProvider.isPending ? "Saving..." : "Save Provider"}
               </button>
