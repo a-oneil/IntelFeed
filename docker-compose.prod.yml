@@ -1,3 +1,11 @@
+# Docker's json-file driver never rotates by default; meilisearch alone grew a
+# 2 GB log. 3 x 20 MB per container caps the lot at ~720 MB.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "3"
+
 services:
   db:
     # postgres:16-alpine + pgvector, built from ./db/Dockerfile. Same base image
@@ -6,6 +14,7 @@ services:
       context: ./db
     image: intelfeed-postgres:16
     restart: unless-stopped
+    logging: *default-logging
     # OOM ordering: never sacrifice the database. If the host runs out of memory
     # the kernel kills the highest-scored process first — push db to the bottom.
     oom_score_adj: -900
@@ -44,6 +53,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    logging: *default-logging
     # Protect redis: it's the fattest RSS on the box (correlation cache) and the
     # broker/cache for the whole app, so a global OOM kept picking it — killing it
     # took the app down. Deprioritize it as an OOM target.
@@ -66,6 +76,7 @@ services:
   meilisearch:
     image: getmeili/meilisearch:v1.6
     restart: unless-stopped
+    logging: *default-logging
     environment:
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
       MEILI_ENV: production
@@ -86,6 +97,7 @@ services:
   libretranslate:
     image: libretranslate/libretranslate:v1.9.6
     restart: unless-stopped
+    logging: *default-logging
     # On-demand only: preloading ~20 language models pins ~740MB resident 24/7,
     # which is dead weight on an 8GB box between translations. The `translate`
     # profile keeps it OUT of the default `up`, freeing that headroom. Start it
@@ -123,6 +135,7 @@ services:
       context: ./piper
       dockerfile: Dockerfile
     restart: unless-stopped
+    logging: *default-logging
     environment:
       - PIPER_VOICE=${PIPER_VOICE:-en_US-lessac-medium}
     # Restartable and spikes only ~once/day — safe to sacrifice before core services.
@@ -158,6 +171,7 @@ services:
         GIT_SHA: "${GIT_SHA:-}"
         BUILD_TIME: "${BUILD_TIME:-}"
     restart: unless-stopped
+    logging: *default-logging
     # Protect the API process — user-facing; kill workers before it.
     oom_score_adj: -700
     expose:
@@ -242,6 +256,7 @@ services:
       dockerfile: Dockerfile
       target: production
     restart: unless-stopped
+    logging: *default-logging
     volumes:
       - ./logs:/app/logs
       - image_cache:/app/data/image_cache
@@ -280,6 +295,7 @@ services:
       dockerfile: Dockerfile
       target: production
     restart: unless-stopped
+    logging: *default-logging
     volumes:
       - ./logs:/app/logs
       - claude_cli:/home/appuser/.claude
@@ -319,6 +335,7 @@ services:
       dockerfile: Dockerfile
       target: production
     restart: unless-stopped
+    logging: *default-logging
     volumes:
       - ./logs:/app/logs
     env_file:
@@ -344,6 +361,7 @@ services:
       dockerfile: Dockerfile
       target: production
     restart: unless-stopped
+    logging: *default-logging
     volumes:
       - ./logs:/app/logs
       - ./telegram_data:/data
@@ -376,6 +394,7 @@ services:
         VITE_GIT_SHA: "${GIT_SHA:-}"
         VITE_BUILD_TIME: "${BUILD_TIME:-}"
     restart: unless-stopped
+    logging: *default-logging
     expose:
       - "80"
     networks:
@@ -397,6 +416,7 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    logging: *default-logging
     # Protect the TLS/reverse proxy — if it dies the whole site is unreachable.
     oom_score_adj: -500
     environment:
