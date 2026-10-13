@@ -68,8 +68,9 @@ your collection.
 - Automation rules (triggers → conditions → actions) for tagging, filtering, notifications, AI tasks,
   and Priority Intelligence Requirement matching
 - Watchlists, scheduled briefings, and Slack / Discord / Teams / webhook delivery
-- A model-agnostic AI provider layer (Ollama, Claude, OpenAI, or any custom endpoint) with an
-  editable prompt workspace, per-task model routing, and cost tracking
+- A model-agnostic AI provider layer (Ollama, the Claude API, the Claude Code CLI, or any
+  OpenAI-compatible endpoint — OpenAI, LM Studio, vLLM, llama.cpp, LiteLLM, OpenRouter, Groq)
+  with an editable prompt workspace, per-task model routing, and cost tracking
 - An in-app copilot with streaming tool traces that can query and act on your own instance
 
 **Working with it**

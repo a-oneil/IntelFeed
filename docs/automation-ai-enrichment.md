@@ -426,9 +426,9 @@ class AIProvider(ABC):
         """List available models from this provider."""
 ```
 
-Three providers are implemented (`backend/app/ai/providers/`): `ClaudeProvider` (Anthropic API; also the fallback used for `openai`/`custom` provider types), `ClaudeCodeProvider` (the Claude Code CLI under an OAuth session — see [copilot.md](copilot.md)), and `OllamaProvider` (real Ollama support with a native `/api/chat` function-calling loop against the backend tool registry in `app/tools/`).
+Four providers are implemented (`backend/app/ai/providers/`): `ClaudeProvider` (Anthropic API), `ClaudeCodeProvider` (the Claude Code CLI under an OAuth session — see [copilot.md](copilot.md)), `OllamaProvider` (real Ollama support with a native `/api/chat` function-calling loop against the backend tool registry in `app/tools/`), and `OpenAICompatibleProvider` (the `/v1/chat/completions` dialect shared by OpenAI, LM Studio, vLLM, llama.cpp, LiteLLM, OpenRouter and Groq — one `base_url`-configurable provider type, no tool-calling support yet).
 
-Tool capability is gated centrally in `backend/app/ai/capabilities.py`: `TOOL_CAPABLE_PROVIDER_TYPES = {"claude_code", "ollama"}` and `TOOL_REQUIRED_TASKS` (copilot, entity_merge_maintenance, entity_enrichment_research) together prevent assigning an agentic task to a provider that can't execute tools.
+Tool capability is gated centrally in `backend/app/ai/capabilities.py`: `TOOL_CAPABLE_PROVIDER_TYPES = {"claude_code", "ollama"}` and `TOOL_REQUIRED_TASKS` (copilot, entity_merge_maintenance, entity_enrichment_research) together prevent assigning an agentic task to a provider that can't execute tools. `openai_compatible` is deliberately excluded for now — see the provider's module docstring.
 
 ### Model Configuration
 
@@ -438,7 +438,7 @@ The `AIProvider` database model (`models/ai_provider.py:11-27`) stores provider 
 class AIProvider(Base):
     id: UUID
     name: str                       # "My Claude Instance"
-    provider_type: str              # "claude", "openai", "ollama", "custom"
+    provider_type: str              # "claude", "claude_code", "ollama", "openai_compatible"
     base_url: str | None            # API endpoint (for ollama/custom)
     api_key_encrypted: str | None   # AES-256 encrypted secret
     models: list[dict]              # Available models

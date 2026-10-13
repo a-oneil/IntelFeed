@@ -469,7 +469,7 @@ export interface EntryTag {
 export interface AIProvider {
   id: string;
   name: string;
-  provider_type: "claude" | "claude_code" | "ollama";
+  provider_type: "claude" | "claude_code" | "ollama" | "openai_compatible";
   base_url: string | null;
   models: string[];
   is_active: boolean;

@@ -1231,7 +1231,7 @@ Polymorphic — comments attach to any commentable object, with threading.
 **Columns:**
 - `id` (UUID PK)
 - `name` (String 100)
-- `provider_type` (String 30) — "openai", "anthropic", "groq", etc.
+- `provider_type` (String 30) — "claude", "claude_code", "ollama", or "openai_compatible"
 - `base_url` (Text, nullable)
 - `api_key_encrypted` (Text)
 - `models` (JSONB array) — list of available models

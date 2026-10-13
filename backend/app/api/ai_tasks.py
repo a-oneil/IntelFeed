@@ -289,7 +289,7 @@ async def upsert_task_assignment(
             code="provider_incompatible",
             message=(
                 f"'{task.display_name}' is agentic and requires a tool-capable provider "
-                f"(Claude Code CLI); '{provider.name}' ({provider.provider_type}) cannot run tools."
+                f"(Claude Code CLI or Ollama); '{provider.name}' ({provider.provider_type}) cannot run tools."
             ),
             status_code=400,
         )
