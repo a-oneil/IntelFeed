@@ -371,16 +371,59 @@ async def test_429_maps_to_quota_exhausted(monkeypatch):
     assert 25 < delta < 35
 
 
-@pytest.mark.asyncio
-async def test_429_without_retry_after_has_no_reset_at(monkeypatch):
+async def _quota_error(monkeypatch, response: httpx.Response) -> QuotaExhaustedError:
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(429, text="rate limited")
+        return response
 
     monkeypatch.setattr(httpx, "AsyncClient", _mock_client_factory(handler))
     provider = OpenAICompatibleProvider(base_url=BASE_URL, api_key="k", config={})
     with pytest.raises(QuotaExhaustedError) as exc_info:
         await provider.complete(prompt="hi", model="gpt-test")
-    assert exc_info.value.reset_at is None
+    return exc_info.value
+
+
+def _seconds_until(reset_at) -> float:
+    from datetime import UTC, datetime
+
+    return (reset_at - datetime.now(UTC)).total_seconds()
+
+
+@pytest.mark.asyncio
+async def test_429_without_retry_after_pauses_briefly(monkeypatch):
+    """A bare 429 is a per-minute rate limit, not an hour-long quota pause."""
+    err = await _quota_error(monkeypatch, httpx.Response(429, text="rate limited"))
+    assert err.reset_at is not None
+    assert 0 < _seconds_until(err.reset_at) <= 60
+
+
+@pytest.mark.asyncio
+async def test_429_insufficient_quota_leaves_long_pause_to_engine(monkeypatch):
+    body = {"error": {"type": "insufficient_quota", "code": "insufficient_quota", "message": "out of credits"}}
+    err = await _quota_error(monkeypatch, httpx.Response(429, json=body))
+    assert err.reset_at is None
+
+
+@pytest.mark.asyncio
+async def test_429_retry_after_http_date(monkeypatch):
+    from datetime import UTC, datetime, timedelta
+    from email.utils import format_datetime
+
+    when = format_datetime(datetime.now(UTC) + timedelta(seconds=120), usegmt=True)
+    err = await _quota_error(monkeypatch, httpx.Response(429, text="slow down", headers={"retry-after": when}))
+    assert 100 < _seconds_until(err.reset_at) <= 120
+
+
+@pytest.mark.asyncio
+async def test_stream_429_honours_retry_after(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, text="rate limited", headers={"retry-after": "30"})
+
+    monkeypatch.setattr(httpx, "AsyncClient", _mock_client_factory(handler))
+    provider = OpenAICompatibleProvider(base_url=BASE_URL, api_key="k", config={})
+    with pytest.raises(QuotaExhaustedError) as exc_info:
+        async for _ in provider.stream_complete(prompt="hi", model="gpt-test"):
+            pass
+    assert 25 < _seconds_until(exc_info.value.reset_at) <= 30
 
 
 @pytest.mark.asyncio

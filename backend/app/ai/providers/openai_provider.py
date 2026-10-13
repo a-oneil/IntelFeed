@@ -65,6 +65,8 @@ import json
 import logging
 import re
 import time
+from datetime import UTC, datetime, timedelta
+from email.utils import parsedate_to_datetime
 from typing import ClassVar
 
 import httpx
@@ -79,6 +81,26 @@ logger = logging.getLogger(__name__)
 _STRUCTURED_OUTPUT_MODES = ("json_schema_strict", "json_schema", "json_object", "prompt")
 
 _SCHEMA_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+# Pause after a 429 that names no window: long enough to let a per-minute
+# limit clear, short enough that work resumes on its own.
+_DEFAULT_RATE_LIMIT_PAUSE_SECONDS = 60
+
+
+def _parse_retry_after(value: str | None) -> datetime | None:
+    """``Retry-After`` is either delta-seconds or an HTTP-date (RFC 9110 §10.2.3)."""
+    if not value:
+        return None
+    value = value.strip()
+    try:
+        return datetime.now(UTC) + timedelta(seconds=max(float(value), 0.0))
+    except ValueError:
+        pass
+    try:
+        parsed = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 class OpenAICompatibleProvider(AIProvider):
@@ -201,24 +223,32 @@ class OpenAICompatibleProvider(AIProvider):
             payload["usage"] = {"include": True}
 
         extra_body = cfg.get("extra_body")
-        if extra_body:
+        if isinstance(extra_body, dict):
             payload.update(extra_body)
+        elif extra_body:
+            logger.warning("%s: ignoring extra_body that isn't a JSON object", self.base_url)
 
         return payload, cfg
 
     @staticmethod
-    def _raise_for_status(resp: httpx.Response) -> None:
-        if resp.status_code == 429:
-            retry_after = resp.headers.get("retry-after")
-            reset_at = None
-            if retry_after:
-                try:
-                    from datetime import UTC, datetime, timedelta
+    def _rate_limit_error(status_code: int, headers: httpx.Headers, body: str) -> QuotaExhaustedError:
+        """Turn a 429 into a pause with the shortest window the server allows.
 
-                    reset_at = datetime.now(UTC) + timedelta(seconds=float(retry_after))
-                except ValueError:
-                    reset_at = None
-            raise QuotaExhaustedError(f"{resp.status_code} from provider: {resp.text[:400]}", reset_at=reset_at)
+        The engine pauses the whole provider for ``reset_at`` (an hour when it is
+        ``None``), so the default matters: most 429s from these servers are
+        per-minute rate limits that clear in seconds. Only a spent balance
+        (OpenAI's ``insufficient_quota``) earns the long pause.
+        """
+        message = f"{status_code} from provider: {body[:400]}"
+        reset_at = _parse_retry_after(headers.get("retry-after"))
+        if reset_at is None and "insufficient_quota" not in body:
+            reset_at = datetime.now(UTC) + timedelta(seconds=_DEFAULT_RATE_LIMIT_PAUSE_SECONDS)
+        return QuotaExhaustedError(message, reset_at=reset_at)
+
+    @classmethod
+    def _raise_for_status(cls, resp: httpx.Response) -> None:
+        if resp.status_code == 429:
+            raise cls._rate_limit_error(resp.status_code, resp.headers, resp.text)
         resp.raise_for_status()
 
     @staticmethod
@@ -357,7 +387,7 @@ class OpenAICompatibleProvider(AIProvider):
                 if resp.status_code >= 400:
                     body = (await resp.aread()).decode(errors="replace")
                     if resp.status_code == 429:
-                        raise QuotaExhaustedError(f"429 from provider: {body[:400]}")
+                        raise self._rate_limit_error(resp.status_code, resp.headers, body)
                     resp.raise_for_status()
                 async for line in resp.aiter_lines():
                     line = line.strip()
