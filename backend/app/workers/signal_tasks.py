@@ -5,7 +5,7 @@ import time
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -97,7 +97,7 @@ async def _score_entry(entry_id: str) -> float | None:
 
 
 async def score_entry(db: AsyncSession, entry_id: uuid.UUID) -> float | None:
-    """Compute + persist signals and priority score for an entry. Returns the score."""
+    """Compute + persist signals and priority score for an entry. Returns the 0–10 score."""
     from sqlalchemy.orm import selectinload
 
     from app.intelligence.signals import (
@@ -105,7 +105,9 @@ async def score_entry(db: AsyncSession, entry_id: uuid.UUID) -> float | None:
         compute_priority_score,
         get_family_multipliers,
         get_feedback_nudges,
+        get_scale_cutoffs,
         get_signal_rates,
+        scale_score,
     )
     from app.models.entry import Entry
     from app.models.entry_signal import EntrySignal
@@ -123,7 +125,8 @@ async def score_entry(db: AsyncSession, entry_id: uuid.UUID) -> float | None:
     nudges = await get_feedback_nudges()
     if nudges:
         multipliers = {k: v * nudges.get(k, 1.0) for k, v in multipliers.items()}
-    score = compute_priority_score(hits, rates, multipliers)
+    raw = compute_priority_score(hits, rates, multipliers)
+    score = scale_score(raw, await get_scale_cutoffs(db))
     now = datetime.now(UTC)
 
     fired_types = [h.signal_type for h in hits]
@@ -153,6 +156,7 @@ async def score_entry(db: AsyncSession, entry_id: uuid.UUID) -> float | None:
         )
         await db.execute(stmt)
 
+    entry.priority_raw = raw
     entry.priority_score = score
     entry.scored_at = now
     db.add(entry)
@@ -161,11 +165,11 @@ async def score_entry(db: AsyncSession, entry_id: uuid.UUID) -> float | None:
 
 @celery_app.task(
     name="app.workers.signal_tasks.recompute_signal_rates",
-    soft_time_limit=120,
-    time_limit=180,
+    soft_time_limit=600,
+    time_limit=660,
 )
 def recompute_signal_rates():
-    """Nightly: recompute 30-day per-signal firing rates → redis (IDF self-tuning)."""
+    """Nightly: recompute 30-day firing rates (IDF self-tuning) and the 0–10 scale's cutoffs."""
     start = time.monotonic()
     try:
         rates = run_async(_recompute_signal_rates())
@@ -204,6 +208,19 @@ async def _recompute_signal_rates() -> dict[str, float]:
                 .group_by(EntrySignal.signal_type)
             )
         ).all()
+        # The 0–10 scale's cutoffs move with the distribution, so re-scale the
+        # stored scores against today's before the threshold is read off them.
+        from app.intelligence.signals import SCALE_CUTOFFS_REDIS_KEY, compute_scale_cutoffs
+
+        cutoffs = await compute_scale_cutoffs(db)
+        if cutoffs:
+            # Cache first: entries scored from here on use the new cutoffs, so a
+            # failure later in this job can't leave the stored scores and new
+            # scoring on two different scales.
+            await (await get_redis()).set(SCALE_CUTOFFS_REDIS_KEY, json.dumps(cutoffs))
+            rescaled = await _rescale_priority_scores(db, cutoffs)
+            logger.info("Priority scale cutoffs %s; re-scaled %d entries", cutoffs, rescaled)
+
         # Auto radar threshold: p95 of scores over the trailing 7 days
         p95 = (
             await db.execute(
@@ -250,16 +267,58 @@ async def _recompute_signal_rates() -> dict[str, float]:
         if len(votes) >= min_samples
     }
 
-    from app.intelligence.signals import FEEDBACK_NUDGE_REDIS_KEY, THRESHOLD_REDIS_KEY
+    from app.intelligence.signals import FEEDBACK_NUDGE_REDIS_KEY, LEGACY_THRESHOLD_REDIS_KEY, THRESHOLD_REDIS_KEY
 
     r = await get_redis()
     await r.set(RATES_REDIS_KEY, json.dumps(rates))
+    await r.delete(LEGACY_THRESHOLD_REDIS_KEY)  # raw-sum era auto threshold, read by nothing
     if p95 is not None:
         await r.set(THRESHOLD_REDIS_KEY, str(round(float(p95), 4)))
     # Always write (even {}) so families that fall below the sample floor — or
     # lose all feedback — reset to neutral instead of keeping a stale nudge.
     await r.set(FEEDBACK_NUDGE_REDIS_KEY, json.dumps(nudges))
     return rates
+
+
+# Rows re-scaled per transaction, so the nightly pass never holds row locks on
+# entries for long while ingest workers write to the same table.
+RESCALE_BATCH_SIZE = 2000
+
+
+async def _rescale_priority_scores(db: AsyncSession, cutoffs: list[float]) -> int:
+    """Re-scale stored 0–10 scores against new cutoffs; returns rows written.
+
+    Covers entries scored within SCALE_RESCALE_DAYS (the ones the queue and
+    Radar surface); older scores keep the scale they were last given. One scan
+    finds the rows whose rounded value moves, then they are written in small
+    batches by primary key.
+    """
+    from app.intelligence.signals import SCALE_RESCALE_DAYS, scale_score_sql
+    from app.models.entry import Entry
+
+    scaled = scale_score_sql(Entry.priority_raw, cutoffs)
+    ids = (
+        (
+            await db.execute(
+                select(Entry.id).where(
+                    Entry.scored_at >= datetime.now(UTC) - timedelta(days=SCALE_RESCALE_DAYS),
+                    Entry.priority_raw.isnot(None),
+                    Entry.priority_score.is_distinct_from(scaled),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for i in range(0, len(ids), RESCALE_BATCH_SIZE):
+        await db.execute(
+            update(Entry)
+            .where(Entry.id.in_(ids[i : i + RESCALE_BATCH_SIZE]))
+            .values(priority_score=scaled)
+            .execution_options(synchronize_session=False)
+        )
+        await db.commit()
+    return len(ids)
 
 
 @celery_app.task(
@@ -573,7 +632,7 @@ def fit_user_signal_weights():
     """Nightly: fit per-user signal-family weights from each analyst's own Radar thumbs.
 
     The sibling recompute_signal_rates job pools every user's votes into one
-    global nudge baked into Entry.priority_score. This one keeps the votes
+    global nudge baked into Entry.priority_raw. This one keeps the votes
     separate so each analyst's Radar can diverge from the house ranking at read
     time, without touching a stored score.
     """

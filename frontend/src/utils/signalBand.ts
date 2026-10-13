@@ -4,8 +4,10 @@
 
 export type SignalBand = "high" | "medium" | "low";
 
-// A score at or above each threshold lands in that band.
-export const SIGNAL_BAND_THRESHOLDS = { high: 4, medium: 2.5 } as const;
+// A score at or above each threshold lands in that band. Scores run 0–10,
+// ranked against the last 30 days: 8.5 is roughly the top 8% of entries with
+// signals, 9.5 the top 3%.
+export const SIGNAL_BAND_THRESHOLDS = { high: 9.5, medium: 8.5 } as const;
 
 export const SIGNAL_BAND_LABEL: Record<SignalBand, string> = {
   high: "High",

@@ -346,7 +346,7 @@ class TestSpine:
                 "title": "Broke",
                 "summary": None,
                 "published_at": day1,
-                "priority_score": 1.0,
+                "priority_raw": 1.0,
             },
             {
                 "entry_id": uuid.uuid4(),
@@ -354,7 +354,7 @@ class TestSpine:
                 "title": "Wave A",
                 "summary": None,
                 "published_at": day2,
-                "priority_score": 5.0,
+                "priority_raw": 2.0,
             },
             {
                 "entry_id": uuid.uuid4(),
@@ -362,7 +362,7 @@ class TestSpine:
                 "title": "Wave B",
                 "summary": None,
                 "published_at": day2,
-                "priority_score": 2.0,
+                "priority_raw": 5.0,
             },
             {
                 "entry_id": uuid.uuid4(),
@@ -370,14 +370,14 @@ class TestSpine:
                 "title": "Re-report",
                 "summary": None,
                 "published_at": day2,
-                "priority_score": 0.0,
+                "priority_raw": 0.0,
             },
         ]
 
         beats = heuristic_beats(members)
 
         assert [b["kind"] for b in beats] == ["first_disclosure", "peak"]
-        assert beats[1]["headline"] == "Wave A"  # highest-scoring article of the day leads
+        assert beats[1]["headline"] == "Wave B"  # highest-scoring article of the day leads, not the first listed
         assert beats[1]["collapsed_count"] == 1  # the echo is counted, not listed
 
     def test_markup_and_tracking_blobs_never_reach_a_beat_body(self):
@@ -394,7 +394,7 @@ class TestSpine:
                 "title": f"Article {i}",
                 "summary": None,
                 "published_at": NOW - timedelta(days=3 - i),
-                "priority_score": 0.0,
+                "priority_raw": 0.0,
             }
             for i in range(3)
         ]
@@ -576,8 +576,13 @@ class TestThreadsApi:
         await assign_entries(db_session, limit=50)
         # The loudest article is the last one published, so publication order
         # and score order disagree — which is the whole bug.
-        await db_session.execute(text("UPDATE entries SET priority_score = 9.5 WHERE id = :e"), {"e": entries[-1].id})
-        await db_session.execute(text("UPDATE entries SET priority_score = 1.0 WHERE id <> :e"), {"e": entries[-1].id})
+        loudest = {"e": entries[-1].id}
+        await db_session.execute(
+            text("UPDATE entries SET priority_score = 9.5, priority_raw = 4.0 WHERE id = :e"), loudest
+        )
+        await db_session.execute(
+            text("UPDATE entries SET priority_score = 1.0, priority_raw = 0.1 WHERE id <> :e"), loudest
+        )
         slug = (await db_session.execute(text("SELECT slug FROM story_threads"))).scalar_one()
         await db_session.commit()
 

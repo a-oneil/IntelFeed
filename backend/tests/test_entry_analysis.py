@@ -215,7 +215,7 @@ async def test_submit_priority_order_and_budget(db_session, feed, analysis_task,
     entries = []
     for i, score in enumerate([0.5, 5.0, 2.0]):
         e = await _make_entry(db_session, feed, title=f"prio-{score}")
-        e.priority_score = score
+        e.priority_raw = score
         e.scored_at = datetime.now(UTC)
         db_session.add(e)
         await db_session.flush()
@@ -230,11 +230,11 @@ async def test_submit_priority_order_and_budget(db_session, feed, analysis_task,
             select(AIAnalysisRequest, EntryModel)
             .join(EntryModel, EntryModel.id == AIAnalysisRequest.entry_id)
             .where(AIAnalysisRequest.status == "pending")
-            .order_by(EntryModel.priority_score.desc().nullslast(), AIAnalysisRequest.created_at.asc())
+            .order_by(EntryModel.priority_raw.desc().nullslast(), AIAnalysisRequest.created_at.asc())
             .limit(2)  # simulated budget clamp
         )
     ).all()
-    scores = [entry.priority_score for _, entry in pending]
+    scores = [entry.priority_raw for _, entry in pending]
     assert scores == [5.0, 2.0]
 
     # Provider batches capability probe

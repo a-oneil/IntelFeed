@@ -56,7 +56,7 @@ async def collect_members(db: AsyncSession, thread_id: uuid.UUID) -> list[dict]:
         text(
             """
             SELECT ste.entry_id, ste.role, ste.source_key, ste.duplicate_of_entry_id,
-                   e.title, e.summary, e.published_at, e.priority_score,
+                   e.title, e.summary, e.published_at, e.priority_score, e.priority_raw,
                    COALESCE(f.title, '') AS feed_title,
                    COALESCE(
                        (SELECT array_agg(DISTINCT t.technique_id)
@@ -126,7 +126,7 @@ def heuristic_beats(members: list[dict]) -> list[dict]:
     beats: list[dict] = []
     for position, day in enumerate(days):
         day_members = by_day[day]
-        lead = max(day_members, key=lambda m: (m.get("priority_score") or 0, len(m.get("title") or "")))
+        lead = max(day_members, key=lambda m: (m.get("priority_raw") or 0, len(m.get("title") or "")))
         if position == 0:
             kind = "first_disclosure"
         elif day == peak_day and len(day_members) + echoes_by_day.get(day, 0) > 1:

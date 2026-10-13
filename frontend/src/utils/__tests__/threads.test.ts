@@ -57,15 +57,22 @@ describe("queueItems", () => {
     expect(out.map((i) => i.type)).toEqual(["single", "thread", "single"]);
   });
 
-  it("carries the thread row's score, absorbed members and a stable key", () => {
-    const [row] = queueItems([threadRow(7.5)]);
+  it("badges a thread with its best article's score, not its rank", () => {
+    // Rank 10 includes the outlet bonus; the best unread article scored 5.
+    const [row] = queueItems([threadRow(10)]);
 
     expect(row).toMatchObject({
       type: "thread",
-      score: 7.5,
+      score: 5,
       memberIds: ["a", "b"],
       key: "thread-t1",
     });
+  });
+
+  it("falls back to the row's rank when the thread has no scored article", () => {
+    const [row] = queueItems([threadRow(7.5, { top_score: null })]);
+
+    expect(row).toMatchObject({ type: "thread", score: 7.5 });
   });
 
   it("counts flatIndex over entries only, skipping thread rows", () => {
@@ -114,7 +121,7 @@ describe("magazineQueueItems", () => {
     const out = magazineQueueItems([entryRow("x", 9), threadRow(7), entryRow("y", 6)]);
 
     expect(out.map((i) => i.type)).toEqual(["single", "thread", "single"]);
-    expect(out[1]).toMatchObject({ type: "thread", score: 7, key: "thread-t1" });
+    expect(out[1]).toMatchObject({ type: "thread", score: 5, key: "thread-t1" });
   });
 
   it("never groups CVE runs — magazine cards stay one per entry", () => {

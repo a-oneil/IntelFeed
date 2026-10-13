@@ -293,7 +293,10 @@ class IntelFeedRepository(
                             title = item.thread.title ?: "Story thread",
                             summary = item.thread.summary,
                             publishedAt = item.thread.lastSeen,
-                            priorityScore = item.score,
+                            // The best unread article's 0–10 score, not the row's rank: the rank
+                            // adds an outlet bonus that pins nearly every story at 10 (and would
+                            // make every well-covered story send an alert).
+                            priorityScore = item.thread.topScore ?: item.score,
                             isRead = item.thread.unreadCount == 0,
                             thread = item.thread
                         )

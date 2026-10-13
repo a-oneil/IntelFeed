@@ -21,8 +21,9 @@ class PriorityQueueRow(BaseModel):
     kind: Literal["entry", "thread"] = Field(description="Which of `entry` / `thread` is populated")
     score: float = Field(
         description=(
-            "Rank of this row. For an entry it is its priority score; for a thread, the score of its "
-            "best unread beat plus a capped corroboration bump for each extra outlet covering the story."
+            "Rank of this row on the 0–10 priority scale. For an entry it is its priority score (with any "
+            "read-time stack-exposure or learned-weight lift applied); for a thread, the score of its best "
+            "unread beat plus a capped corroboration bump for each extra outlet covering the story."
         )
     )
     entry: EntryResponse | None = Field(None, description="Populated when kind is `entry`")
@@ -40,7 +41,7 @@ class PriorityQueueResponse(BaseModel):
     radar_threshold: float | None = Field(
         None,
         description=(
-            "Score an entry must clear to enter the queue. Null when the signal engine is not surfacing, "
+            "Score (0–10) an entry must clear to enter the queue. Null when the signal engine is not surfacing, "
             "in which case the queue is every unread entry ranked by score rather than a filtered set."
         ),
     )

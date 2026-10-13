@@ -7,7 +7,10 @@ import type { EntryExposure, EntryPersonalization, PrioritySignal } from "@/api/
 import styles from "./WhyRankedCard.module.css";
 
 interface WhyRankedCardProps {
+  /** The 0–10 priority score. */
   score: number;
+  /** The raw signal sum the score was scaled from — what the rows add up to. */
+  raw?: number | null;
   signals: PrioritySignal[];
   exposure?: EntryExposure | null;
   personal?: EntryPersonalization | null;
@@ -61,7 +64,7 @@ interface Row {
  * Collapsed by default — the one line most readers see carries the score and
  * the top reason, so expanding is optional.
  */
-export function WhyRankedCard({ score, signals, exposure, personal, entryId }: WhyRankedCardProps) {
+export function WhyRankedCard({ score, raw, signals, exposure, personal, entryId }: WhyRankedCardProps) {
   // Local, not persisted: this is an explainer, so every article starts with the
   // one-line summary and expanding is a per-article choice. A stored preference
   // meant one click left the full ledger open on every entry forever.
@@ -112,9 +115,9 @@ export function WhyRankedCard({ score, signals, exposure, personal, entryId }: W
   const band = signalBand(score);
   const lead = rows[0];
   const ledgerTotal = rows.reduce((sum, r) => sum + r.value, 0);
-  // Rows are weighted with today's rates; the stored score was frozen at scoring
+  // Rows are weighted with today's rates; the stored sum was frozen at scoring
   // time. Beyond display rounding, the two legitimately disagree.
-  const drifted = Math.abs(ledgerTotal - score) > 0.1;
+  const drifted = raw != null && Math.abs(ledgerTotal - raw) > 0.1;
 
   return (
     <div className={`${styles.card} ${styles[`edge_${band}`]}`}>
@@ -202,7 +205,9 @@ export function WhyRankedCard({ score, signals, exposure, personal, entryId }: W
                   </div>
                   <div className={styles.mathTotalSub}>
                     <span>Stored score</span>
-                    <span>◆ {score.toFixed(1)}</span>
+                    <span>
+                      {raw != null && `${raw.toFixed(2)} → `}◆ {score.toFixed(1)}
+                    </span>
                   </div>
                 </>
               ) : (
@@ -215,7 +220,8 @@ export function WhyRankedCard({ score, signals, exposure, personal, entryId }: W
               )}
               <p className={styles.mathNote}>
                 Rarity weights self-tune nightly: a signal that fires on 40% of articles is
-                worth less than one that fires on 1%.
+                worth less than one that fires on 1%. The sum is then ranked against the last 30
+                days onto a 0–10 scale: 9 is about the top 5%, 10 the top 1%.
                 {drifted
                   ? " This entry's stored score was computed with earlier weights, so it differs from today's arithmetic."
                   : " This score is the same for everyone."}

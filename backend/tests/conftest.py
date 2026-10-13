@@ -103,6 +103,23 @@ def _reset_redis():
 
 
 @pytest.fixture(autouse=True)
+def _private_scale_cutoffs(monkeypatch):
+    """Give each test its own Redis key for the 0–10 scale's cutoffs.
+
+    Scoring reads the cutoffs from Redis and, on a miss, computes them from the
+    database and caches them. Against the shared key a test would score with the
+    dev stack's real cutoffs, and one that seeded enough scored entries would
+    write cutoffs derived from the test database into dev Redis. A cached-on-miss
+    value expires (SCALE_CUTOFFS_MISS_TTL), so the per-test keys don't pile up.
+    """
+    import uuid
+
+    from app.intelligence import signals
+
+    monkeypatch.setattr(signals, "SCALE_CUTOFFS_REDIS_KEY", f"intelfeed:test:{uuid.uuid4().hex}:scale_cutoffs")
+
+
+@pytest.fixture(autouse=True)
 def _offline_meilisearch():
     """Keep tests off the network.
 

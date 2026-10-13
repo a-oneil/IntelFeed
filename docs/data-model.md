@@ -104,7 +104,7 @@ Each analyst's visibility and personal mute over the shared feed pool; only cons
 - `metadata_` (JSONB) — feed-specific metadata (e.g., feed author's categories, tags)
 - `translated_html`, `translated_title`, `translation_source_language`, `translation_target_language`, `translated_at` — machine translation cache
 - `last_link_validation_at` (DateTime, indexed) — last AI entity-link validation pass
-- `priority_score` (Float, indexed), `scored_at` — signal engine composite score (see Signal Engine cluster)
+- `priority_score` (Float, indexed), `priority_raw` (Float, indexed), `scored_at` — signal engine score on a 0–10 scale, and the unbounded weighted sum it is ranked from (the ordering key; see Signal Engine cluster)
 
 **Relationships:**
 - Belongs to `Feed` (CASCADE delete)
@@ -1352,7 +1352,7 @@ One scored, explainable signal per (entry, signal_type) — upserted, never appe
 - `explanation` (Text), `payload` (JSONB)
 - `created_at`
 
-**Unique Constraint:** `(entry_id, signal_type)`. The composite score lands on `entries.priority_score` / `entries.scored_at`.
+**Unique Constraint:** `(entry_id, signal_type)`. The weighted sum lands on `entries.priority_raw`, its 0–10 placement on `entries.priority_score`, plus `entries.scored_at`.
 
 #### EntrySignalFeedback
 
@@ -1368,7 +1368,7 @@ Per-user thumbs verdict on an entry's Radar placement.
 
 #### UserSignalWeight
 
-Per-analyst learned signal-family weight, fitted nightly from that user's own Radar thumbs by `fit_user_signal_weights`. Applied as a read-time lift on their Radar ordering; the stored `entries.priority_score` stays global, so personalisation is reversible with one toggle. See [engine.md](engine.md).
+Per-analyst learned signal-family weight, fitted nightly from that user's own Radar thumbs by `fit_user_signal_weights`. Applied as a read-time lift on their Radar ordering; the stored `entries.priority_raw` / `priority_score` stay global, so personalisation is reversible with one toggle. See [engine.md](engine.md).
 
 **Columns:**
 - `id` (UUID PK)
@@ -1658,7 +1658,7 @@ All tables have UUID PKs with btree indexes (default).
 - `entries.feed_id` — for feed → entries joins
 - `entries.published_at` — for timeline queries
 - `entries.content_hash` — for dedup detection
-- `entries.priority_score` + composite `(published_at, priority_score)` — Priority Queue / Radar ordering
+- `entries.priority_raw` — Priority Queue / Radar ordering; `entries.priority_score` + composite `(published_at, priority_score)` — threshold filters
 - `cves.is_kev`, `cves.epss_score` — exploited-first CVE sorting
 - `ttps.parent_technique_id`, `ttps.matrix_domain` — ATT&CK catalog navigation
 - `ttps.technique_id`, `threat_actors.name`, `cves.cve_id`, `malware_families.name` — entity lookups

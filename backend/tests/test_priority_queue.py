@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 import pytest_asyncio
 
+from app.intelligence.signals import scale_score
 from app.models.entry import Entry
 from app.models.entry_state import UserEntryState
 from app.models.story_thread import StoryThread, StoryThreadEntry
@@ -29,12 +30,22 @@ def surfaced(monkeypatch):
     monkeypatch.setattr(env_settings, "signal_engine_surface", True)
 
     async def fixed_threshold():
-        return 1.0, True
+        return 1.5, True
+
+    async def fixed_cutoffs(db=None):
+        return IDENTITY_CUTOFFS
 
     monkeypatch.setattr("app.intelligence.signals.get_radar_threshold", fixed_threshold)
+    monkeypatch.setattr("app.intelligence.signals.get_scale_cutoffs", fixed_cutoffs)
+
+
+# Cutoffs at 1..10 make the 0–10 scale read back the raw sum between 1 and 10,
+# so the queue's raw-unit arithmetic (outlet bumps) is visible in its scores.
+IDENTITY_CUTOFFS = [float(i) for i in range(1, 11)]
 
 
 async def make_entry(db_session, feed, *, title: str, score: float, published: datetime | None = None) -> Entry:
+    """``score`` is the raw signal sum; the 0–10 score is derived the way scoring does."""
     entry = Entry(
         feed_id=feed.id,
         title=title,
@@ -43,7 +54,8 @@ async def make_entry(db_session, feed, *, title: str, score: float, published: d
         summary=title,
         content_text="x" * 400,
         published_at=published or NOW,
-        priority_score=score,
+        priority_raw=score,
+        priority_score=scale_score(score, IDENTITY_CUTOFFS),
     )
     db_session.add(entry)
     await db_session.flush()
@@ -112,7 +124,7 @@ class TestQueueShape:
 
         assert kinds(body) == ["entry", "entry"]
         assert titles(body) == ["Loud", "Quiet"]
-        assert body["radar_threshold"] == 1.0
+        assert body["radar_threshold"] == 1.5
 
     async def test_entries_below_the_threshold_stay_out(self, client, auth_headers, db_session, subscribed_feed):
         await make_entry(db_session, subscribed_feed, title="Surfaced", score=4.0)
@@ -172,6 +184,16 @@ class TestThreadFolding:
         body = (await client.get("/api/entries/priority-queue", headers=auth_headers)).json()
 
         assert body["items"][0]["score"] == pytest.approx(7.0)  # 2.0 + capped 5.0
+
+    async def test_a_corroborated_story_never_scores_above_ten(self, client, auth_headers, db_session, subscribed_feed):
+        members = [await make_entry(db_session, subscribed_feed, title="Beat", score=9.0)]
+        await make_thread(db_session, title="Everyone covered it", members=members, source_count=12)
+        await db_session.commit()
+
+        body = (await client.get("/api/entries/priority-queue", headers=auth_headers)).json()
+
+        # 9.0 raw + the capped 5.0 outlet bump ranks as 14.0, but the row reports the 0–10 scale.
+        assert body["items"][0]["score"] == 10.0
 
     async def test_fully_read_thread_does_not_appear(
         self, client, auth_headers, db_session, test_user, subscribed_feed

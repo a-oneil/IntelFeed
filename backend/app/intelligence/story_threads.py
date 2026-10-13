@@ -927,7 +927,7 @@ async def fold_by_thread(db: AsyncSession, entries: list) -> tuple[list, dict]:
     prompt is built: one article per story, the strongest one, plus how many
     outlets carried it.
 
-    Takes anything with ``id`` and ``priority_score`` (ORM rows in both call
+    Takes anything with ``id`` and ``priority_raw`` (ORM rows in both call
     sites). Returns the kept items in their original order and a coverage map
     keyed by the id of each representative. Items no thread holds pass through
     untouched and appear in neither map.
@@ -974,7 +974,7 @@ async def fold_by_thread(db: AsyncSession, entries: list) -> tuple[list, dict]:
         # never represents the story it re-reports.
         representative = max(
             members,
-            key=lambda e: (by_entry.get(e.id, {}).get("role") != "echo", e.priority_score or 0),
+            key=lambda e: (by_entry.get(e.id, {}).get("role") != "echo", e.priority_raw or 0),
         )
         kept.append(representative)
         row = by_entry.get(representative.id)
@@ -1002,7 +1002,8 @@ async def list_threads(
 
     ``top_score`` is the priority score of the best unread, non-echo member —
     the score the thread row takes in the ranked queue, because that member is
-    what the reader would have read next anyway. ``unread_count`` counts every
+    what the reader would have read next anyway. ``top_raw`` is that member's
+    raw signal sum, which the queue actually ranks by. ``unread_count`` counts every
     unread member including echoes, since those are the rows the thread folds.
 
     ``q`` filters on title, for the pickers that need to *find* a named story
@@ -1015,7 +1016,7 @@ async def list_threads(
                    t.echo_count, t.first_seen, t.last_seen, t.peak_at, t.key_entities,
                    t.narrated_at,
                    uts.last_opened_at,
-                   m.unread_count, m.top_score, m.top_entry_id, m.new_since_opened, m.entry_ids
+                   m.unread_count, m.top_score, m.top_raw, m.top_entry_id, m.new_since_opened, m.entry_ids
             FROM story_threads t
             LEFT JOIN user_thread_states uts ON uts.thread_id = t.id AND uts.user_id = :user_id
             JOIN LATERAL (
@@ -1023,7 +1024,10 @@ async def list_threads(
                        MAX(e.priority_score) FILTER (
                            WHERE ues.is_read IS NOT TRUE AND ste.role <> 'echo'
                        ) AS top_score,
-                       (ARRAY_AGG(e.id ORDER BY e.priority_score DESC NULLS LAST)
+                       MAX(e.priority_raw) FILTER (
+                           WHERE ues.is_read IS NOT TRUE AND ste.role <> 'echo'
+                       ) AS top_raw,
+                       (ARRAY_AGG(e.id ORDER BY e.priority_raw DESC NULLS LAST)
                         FILTER (WHERE ues.is_read IS NOT TRUE AND ste.role <> 'echo'))[1] AS top_entry_id,
                        COUNT(*) FILTER (
                            WHERE uts.last_opened_at IS NULL OR ste.added_at > uts.last_opened_at
@@ -1072,7 +1076,7 @@ async def thread_members(db: AsyncSession, thread_id: uuid.UUID, user_id: uuid.U
             """
             SELECT ste.entry_id, ste.role, ste.similarity, ste.duplicate_of_entry_id, ste.source_key,
                    ste.added_at,
-                   e.title, e.url, e.published_at, e.priority_score,
+                   e.title, e.url, e.published_at, e.priority_score, e.priority_raw,
                    COALESCE(f.title, '') AS feed_title,
                    COALESCE(ues.is_read, false) AS is_read
             FROM story_thread_entries ste

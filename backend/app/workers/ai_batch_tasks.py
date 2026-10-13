@@ -161,7 +161,7 @@ async def _submit_analysis_batches() -> dict | None:
                 .join(Entry, Entry.id == AIAnalysisRequest.entry_id)
                 .options(selectinload(Entry.feed))
                 .where(AIAnalysisRequest.status == "pending")
-                .order_by(Entry.priority_score.desc().nullslast(), AIAnalysisRequest.created_at.asc())
+                .order_by(Entry.priority_raw.desc().nullslast(), AIAnalysisRequest.created_at.asc())
                 .limit(max_requests)
             )
         ).all()

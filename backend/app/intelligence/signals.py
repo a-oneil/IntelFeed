@@ -22,7 +22,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlparse
 
-from sqlalchemy import func, select, union_all
+from sqlalchemy import Float, Numeric, case, cast, func, literal, select, union_all
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.correlation_event import CorrelationEventRecord
@@ -43,10 +44,14 @@ logger = logging.getLogger(__name__)
 
 RATES_REDIS_KEY = "intelfeed:signal_engine:rates"
 MULTIPLIERS_REDIS_KEY = "intelfeed:signal_engine:multipliers"
-THRESHOLD_REDIS_KEY = "intelfeed:signal_engine:threshold"  # auto (p95), written by rates job
-THRESHOLD_OVERRIDE_REDIS_KEY = "intelfeed:signal_engine:threshold_override"  # manual
+# Radar threshold, on the 0–10 scale. The keys carry a suffix because the
+# unsuffixed ones held raw sums; a raw override is converted on first read.
+THRESHOLD_REDIS_KEY = "intelfeed:signal_engine:threshold10"  # auto (p95), written by rates job
+LEGACY_THRESHOLD_REDIS_KEY = "intelfeed:signal_engine:threshold"  # raw-sum era; the rates job deletes it
+THRESHOLD_OVERRIDE_REDIS_KEY = "intelfeed:signal_engine:threshold_override10"  # manual
+LEGACY_THRESHOLD_OVERRIDE_REDIS_KEY = "intelfeed:signal_engine:threshold_override"  # raw-sum era
 FEEDBACK_NUDGE_REDIS_KEY = "intelfeed:signal_engine:feedback_nudge"  # bounded ±10%, from Radar thumbs
-DEFAULT_RADAR_THRESHOLD = 1.5
+DEFAULT_RADAR_THRESHOLD = 8.0
 
 SIGNAL_FAMILIES: dict[str, str] = {
     "novel_entity": "novelty",
@@ -151,6 +156,116 @@ def compute_priority_score(
         else:
             total += hit.score * idf_weight(rates.get(hit.signal_type, 0.05)) * mult
     return round(total, 4)
+
+
+# ── The 0–10 scale ──────────────────────────────────────────────────
+#
+# compute_priority_score is an unbounded sum (Entry.priority_raw). What the API,
+# automation rules and thresholds see is Entry.priority_score: that sum placed on
+# a 0–10 scale by rank against the trailing 30 days of signal-bearing entries.
+# 0 = nothing fired (or an echo cancelled it out); 1–10 spread the rest, top-heavy
+# so a 9 is the top ~5% and a 10 the top 1%. Ordering stays on priority_raw:
+# the scale clamps at 10 and rounds to one decimal, so it can't break ties.
+
+# (scale value, percentile of positive raw scores it sits at). Between anchors
+# the scale interpolates linearly in raw space.
+SCALE_ANCHORS: tuple[tuple[float, float], ...] = (
+    (1.0, 0.00),
+    (2.0, 0.15),
+    (3.0, 0.30),
+    (4.0, 0.45),
+    (5.0, 0.60),
+    (6.0, 0.72),
+    (7.0, 0.82),
+    (8.0, 0.90),
+    (9.0, 0.95),
+    (10.0, 0.99),
+)
+SCALE_CUTOFFS_REDIS_KEY = "intelfeed:signal_engine:scale_cutoffs"  # written by the rates job
+# Cutoffs cached on a miss (fresh install, flushed Redis) expire after a day;
+# the nightly job's write has no expiry and replaces them.
+SCALE_CUTOFFS_MISS_TTL = 86400
+SCALE_WINDOW_DAYS = 30
+# How far back the nightly job re-scales stored scores when the cutoffs move.
+SCALE_RESCALE_DAYS = 90
+SCALE_MIN_SAMPLE = 50
+# Cold-start raw cutoffs (one per anchor), measured on a 30-day sample of the
+# dev database; replaced nightly by recompute_signal_rates.
+DEFAULT_SCALE_CUTOFFS: tuple[float, ...] = (0.002, 0.19, 0.192, 0.198, 0.51, 0.82, 1.36, 1.7, 2.8, 4.9)
+
+
+def scale_score(raw: float | None, cutoffs: list[float] | tuple[float, ...] | None = None) -> float | None:
+    """Place a raw priority sum on the 0–10 scale (one decimal)."""
+    if raw is None:
+        return None
+    if raw <= 0:
+        return 0.0
+    cuts = cutoffs or DEFAULT_SCALE_CUTOFFS
+    if raw <= cuts[0]:
+        return 1.0
+    for i in range(1, len(cuts)):
+        lo, hi = cuts[i - 1], cuts[i]
+        if raw < hi:
+            frac = (raw - lo) / (hi - lo)
+            return round(SCALE_ANCHORS[i - 1][0] + frac, 1)
+    return 10.0
+
+
+def scale_score_sql(raw_col, cutoffs: list[float] | tuple[float, ...]):
+    """SQL counterpart of scale_score, for re-scaling stored scores in bulk."""
+    cuts = [float(c) for c in cutoffs]
+    whens = [(raw_col <= 0, literal(0.0)), (raw_col <= cuts[0], literal(1.0))]
+    for i in range(1, len(cuts)):
+        lo, hi = cuts[i - 1], cuts[i]
+        if hi <= lo:
+            continue  # a tied cutoff has no width; raw < hi already matched earlier
+        expr = SCALE_ANCHORS[i - 1][0] + (raw_col - lo) / (hi - lo)
+        whens.append((raw_col < hi, cast(func.round(cast(expr, Numeric), 1), Float)))
+    return case(*whens, else_=literal(10.0))
+
+
+async def compute_scale_cutoffs(db: AsyncSession) -> list[float] | None:
+    """Raw cutoffs at each SCALE_ANCHORS percentile over the trailing window."""
+    pcts = [p for _, p in SCALE_ANCHORS]
+    cuts, n = (
+        await db.execute(
+            select(
+                func.percentile_cont(cast(pcts, ARRAY(Float))).within_group(Entry.priority_raw.asc()),
+                func.count(),
+            ).where(
+                Entry.scored_at >= datetime.now(UTC) - timedelta(days=SCALE_WINDOW_DAYS),
+                Entry.priority_raw > 0,
+            )
+        )
+    ).one()
+    # A handful of scored entries would make every cutoff noise.
+    if not cuts or n < SCALE_MIN_SAMPLE:
+        return None
+    return [round(float(c), 4) for c in cuts]
+
+
+async def get_scale_cutoffs(db: AsyncSession | None = None) -> list[float]:
+    """Raw cutoffs for the 0–10 scale, as last written by the rates job.
+
+    On a miss (fresh install, flushed Redis) a caller holding a session computes
+    them from the database and caches them, so scoring never mixes the defaults
+    with stored scores scaled against real cutoffs.
+    """
+    try:
+        r = await get_redis()
+        raw = await r.get(SCALE_CUTOFFS_REDIS_KEY)
+        if raw:
+            cuts = json.loads(raw)
+            if isinstance(cuts, list) and len(cuts) == len(SCALE_ANCHORS):
+                return [float(c) for c in cuts]
+        if db is not None:
+            cuts = await compute_scale_cutoffs(db)
+            if cuts:
+                await r.set(SCALE_CUTOFFS_REDIS_KEY, json.dumps(cuts), ex=SCALE_CUTOFFS_MISS_TTL)
+                return cuts
+    except Exception:
+        logger.debug("Failed to read scale cutoffs, using defaults", exc_info=True)
+    return list(DEFAULT_SCALE_CUTOFFS)
 
 
 def attribute_feedback_votes(
@@ -296,6 +411,12 @@ async def get_radar_threshold() -> tuple[float, bool]:
         override = await r.get(THRESHOLD_OVERRIDE_REDIS_KEY)
         if override is not None:
             return float(override), False
+        legacy = await r.get(LEGACY_THRESHOLD_OVERRIDE_REDIS_KEY)
+        if legacy is not None:
+            converted = scale_score(float(legacy), await get_scale_cutoffs()) or 0.0
+            await r.set(THRESHOLD_OVERRIDE_REDIS_KEY, str(converted))
+            await r.delete(LEGACY_THRESHOLD_OVERRIDE_REDIS_KEY)
+            return converted, False
         auto = await r.get(THRESHOLD_REDIS_KEY)
         if auto is not None:
             return float(auto), True

@@ -633,7 +633,7 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
     "signal-rate-recompute": {
         "settings_keys": ["signal_feedback_min_samples"],
         "task": "app.workers.signal_tasks.recompute_signal_rates",
-        "description": "Recompute 30-day signal firing rates for IDF self-tuning weights",
+        "description": "Recompute 30-day signal firing rates (IDF weights) and re-scale priority scores to 0–10",
         "category": "intelligence",
         "default_schedule": {"type": "crontab", "minute": "20", "hour": "4"},
     },
