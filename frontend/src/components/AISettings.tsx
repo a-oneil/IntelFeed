@@ -324,6 +324,7 @@ function OllamaConfigEditor({ provider, onClose }: { provider: AIProvider; onClo
 }
 
 type OpenAICompatKnobs = {
+  default_model: string;
   structured_output: string; // "" (json_schema default) | json_schema_strict | json_object | prompt
   system_role: string; // "" (system default) | developer
   max_tokens_param: string; // "" (max_tokens default) | max_completion_tokens
@@ -339,6 +340,7 @@ type OpenAICompatKnobs = {
 function openAIKnobsFrom(cfg: Record<string, unknown>): OpenAICompatKnobs {
   const pricing = (cfg.pricing || {}) as Record<string, unknown>;
   return {
+    default_model: cfg.default_model != null ? String(cfg.default_model) : "",
     structured_output: cfg.structured_output != null ? String(cfg.structured_output) : "",
     system_role: cfg.system_role != null ? String(cfg.system_role) : "",
     max_tokens_param: cfg.max_tokens_param != null ? String(cfg.max_tokens_param) : "",
@@ -354,6 +356,7 @@ function openAIKnobsFrom(cfg: Record<string, unknown>): OpenAICompatKnobs {
 
 function openAIKnobsToConfig(k: OpenAICompatKnobs): Record<string, unknown> {
   const out: Record<string, unknown> = {};
+  if (k.default_model.trim()) out.default_model = k.default_model.trim();
   if (k.structured_output) out.structured_output = k.structured_output;
   if (k.system_role) out.system_role = k.system_role;
   if (k.max_tokens_param) out.max_tokens_param = k.max_tokens_param;
@@ -367,8 +370,23 @@ function openAIKnobsToConfig(k: OpenAICompatKnobs): Record<string, unknown> {
     };
   }
   if (k.report_cost === "true") out.report_cost = true;
-  if (k.extra_body.trim()) out.extra_body = JSON.parse(k.extra_body);
+  if (k.extra_body.trim()) out.extra_body = parseExtraBody(k.extra_body);
   return out;
+}
+
+/** extra_body is merged into every request payload, so anything but a plain
+ *  object (an array, a string, a number) breaks every call on the provider. */
+function parseExtraBody(text: string): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error("Invalid JSON");
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Must be a JSON object, e.g. { \"key\": \"value\" }");
+  }
+  return parsed as Record<string, unknown>;
 }
 
 function OpenAICompatConfigEditor({ provider, onClose }: { provider: AIProvider; onClose: () => void }) {
@@ -383,12 +401,13 @@ function OpenAICompatConfigEditor({ provider, onClose }: { provider: AIProvider;
     let knobConfig: Record<string, unknown>;
     try {
       knobConfig = openAIKnobsToConfig(knobs);
-    } catch {
-      setExtraBodyError("Invalid JSON");
+    } catch (e) {
+      setExtraBodyError(e instanceof Error ? e.message : "Invalid JSON");
       return;
     }
     setExtraBodyError(null);
     const next: Record<string, unknown> = { ...cfg };
+    delete next.default_model;
     delete next.structured_output;
     delete next.system_role;
     delete next.max_tokens_param;
@@ -405,6 +424,15 @@ function OpenAICompatConfigEditor({ provider, onClose }: { provider: AIProvider;
   return (
     <div className={styles.configPanel}>
       <div className={styles.formActions} style={{ flexWrap: "wrap", gap: "0.75rem" }}>
+        <label title="The model used when a task assignment doesn't name one, and the one onboarding routes every task at. Must be an id the server lists.">
+          Default model
+          <input
+            type="text"
+            placeholder="gpt-4o-mini"
+            value={knobs.default_model}
+            onChange={(e) => set("default_model", e.target.value)}
+          />
+        </label>
         <label title="How the structured-output schema is sent. json_schema works on nearly every server; json_schema_strict (OpenAI only) guarantees every field is present but turns optional fields into null; json_object and prompt are fallbacks for servers with weaker support.">
           Structured output
           <select value={knobs.structured_output} onChange={(e) => set("structured_output", e.target.value)}>

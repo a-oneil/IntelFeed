@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.engine import _get_provider_instance as build_provider_instance
 from app.ai.providers.base import AIProvider as AIProviderInterface
-from app.ai.provisioning import route_tasks_to_provider
+from app.ai.provisioning import model_choice_problem, route_tasks_to_provider
 from app.core.encryption import encrypt_value
 from app.core.exceptions import AppError
 from app.core.security import get_admin_user, get_current_user
@@ -203,6 +203,10 @@ async def commission_provider(
     provider.is_active = True
     db.add(provider)
     await db.flush()
+
+    problem = model_choice_problem(provider)
+    if problem:
+        return AIProviderCommissionResult(success=False, message=problem, models=models)
 
     routing = await route_tasks_to_provider(db, provider, created_by=user.id, take_over=take_over)
 

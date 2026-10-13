@@ -57,6 +57,33 @@ def pick_model(preferred: str, available: list[str] | None) -> str:
     return next((m for m in models if preferred in m), models[0])
 
 
+def configured_model(provider: AIProvider) -> str | None:
+    """The one model an ``openai_compatible`` provider's tasks may be pointed at.
+
+    ``pick_model`` guesses from the provider's listing, which is safe for Ollama
+    (every tag is a chat model unless it says ``embed``) but not for an
+    OpenAI-compatible catalog: ``api.openai.com/v1/models`` sorts ``babbage-002``,
+    ``dall-e-3``, ``tts-1`` and ``whisper-1`` ahead of any chat model, so the
+    fallback lands on something that fails every call. For that type the admin
+    names the model (``config.default_model``) and nothing is guessed.
+    """
+    if provider.provider_type != "openai_compatible":
+        return None
+    return ((provider.config or {}).get("default_model") or "").strip() or None
+
+
+def model_choice_problem(provider: AIProvider) -> str | None:
+    """Why tasks can't be routed at ``provider`` yet, or ``None`` when they can."""
+    if provider.provider_type != "openai_compatible":
+        return None
+    model = configured_model(provider)
+    if model is None:
+        return "Choose a model for this provider first — its model list is too varied to pick one automatically"
+    if provider.models and model not in provider.models:
+        return f"The server doesn't list a model named {model!r}"
+    return None
+
+
 class TaskRouting:
     """What routing tasks at a provider did, in terms the UI can show.
 
@@ -100,6 +127,7 @@ async def route_tasks_to_provider(
     tasks = (await db.execute(select(AITask).where(AITask.is_system.is_(True)))).scalars().all()
     existing = {a.task_id: a for a in (await db.execute(select(AITaskAssignment))).scalars().all()}
     supports_tools = provider_type_supports_tools(provider.provider_type)
+    fixed_model = configured_model(provider)
 
     for task in tasks:
         preferred = DEFAULT_MODEL_ASSIGNMENTS.get(task.name)
@@ -109,7 +137,7 @@ async def route_tasks_to_provider(
             out.skipped_agentic.append(task.name)
             continue
 
-        model_name = pick_model(preferred, provider.models)
+        model_name = fixed_model or pick_model(preferred, provider.models)
         out.model = out.model or model_name
         assignment = existing.get(task.id)
 

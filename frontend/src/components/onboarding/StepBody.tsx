@@ -369,6 +369,9 @@ function AIStep() {
   const [choice, setChoice] = useState<string>("ollama");
   const [baseUrl, setBaseUrl] = useState("http://ollama:11434");
   const [apiKey, setApiKey] = useState("");
+  // openai_compatible only: its /models catalog mixes chat models with tts,
+  // whisper, dall-e and embeddings, so the admin names the one to use.
+  const [model, setModel] = useState("");
   const [result, setResult] = useState<AIProviderCommissionResult | null>(null);
   const [error, setError] = useState("");
 
@@ -391,6 +394,7 @@ function AIStep() {
                 provider_type: "openai_compatible",
                 base_url: baseUrl.trim(),
                 api_key: apiKey.trim() || undefined,
+                config: { ...(existing?.config || {}), default_model: model.trim() },
               }
             : { name: "Anthropic Claude", provider_type: "claude", api_key: apiKey.trim() };
       const provider = existing
@@ -403,9 +407,11 @@ function AIStep() {
       const outcome = await commission.mutateAsync({ id: provider.id, takeOver: true });
       if (!outcome.success) {
         setError(
-          choice === "ollama" || choice === "openai_compatible"
-            ? `Couldn't reach that host — ${outcome.message}.`
-            : `That key was rejected — ${outcome.message}.`,
+          choice === "openai_compatible"
+            ? `Couldn't set up that endpoint — ${outcome.message}.`
+            : choice === "ollama"
+              ? `Couldn't reach that host — ${outcome.message}.`
+              : `That key was rejected — ${outcome.message}.`,
         );
         return;
       }
@@ -436,6 +442,7 @@ function AIStep() {
               setChoice(c.id);
               setBaseUrl(c.id === "openai_compatible" ? "" : "http://ollama:11434");
               setApiKey("");
+              setModel("");
               setResult(null);
               setError("");
             }}
@@ -477,11 +484,26 @@ function AIStep() {
               />
             </>
           )}
+          {choice === "openai_compatible" && (
+            <>
+              <label htmlFor="onb-provider-model" className={styles.srOnly}>
+                Model
+              </label>
+              <input
+                id="onb-provider-model"
+                type="text"
+                className={styles.urlInput}
+                placeholder="Model, e.g. gpt-4o-mini"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+              />
+            </>
+          )}
           <button
             type="button"
             className={`${styles.btn} ${styles.btnPrimary}`}
             onClick={save}
-            disabled={busy || !baseUrl.trim()}
+            disabled={busy || !baseUrl.trim() || (choice === "openai_compatible" && !model.trim())}
           >
             {busy ? "Connecting…" : "Connect"}
           </button>

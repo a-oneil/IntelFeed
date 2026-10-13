@@ -919,6 +919,16 @@ decoding at temperature 0 can loop on long extraction prompts the same way Ollam
 raise **min_temperature** to `0.2` if a task hangs or returns truncated JSON. If your server
 only supports `json_object` (not `json_schema`), switch **Structured output** to `json_object`.
 
+**Default model**: an OpenAI-compatible `/models` listing mixes chat models with embedding,
+speech and image models (on `api.openai.com` it sorts `babbage-002`, `dall-e-3`, `tts-1` and
+`whisper-1` ahead of any chat model), so IntelFeed never picks one from it. The onboarding AI
+step asks for the model and saves it as the provider's **Default model** (also in the Configure
+panel); routing tasks at the provider refuses until it is set to a model the server lists.
+
+**Rate limits**: a `429` pauses the provider until the server's `Retry-After` (seconds or an
+HTTP date), or for 60 seconds when it sends none; queued work resumes on its own. A spent
+balance (OpenAI's `insufficient_quota`) pauses it for an hour.
+
 **Not yet supported**: tool calling (the copilot and agentic maintenance tasks still require
 Ollama or the Claude Code CLI). Cost tracking needs the $/1M-token rates set in the Configure
 panel (one rate per provider — a different rate per model needs `config.model_overrides` via
