@@ -174,6 +174,28 @@ async def test_update_provider_rejects_empty_base_url_for_openai_compatible(clie
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"extra_body": [{"chat_template_kwargs": {}}]},
+        {"extra_body": "enable_thinking=false"},
+        {"model_overrides": {"gpt-4o": {"extra_body": 3}}},
+    ],
+)
+async def test_update_provider_rejects_extra_body_that_is_not_an_object(
+    client: AsyncClient, admin_headers: dict, config: dict
+):
+    """extra_body is dict.update()'d into every request — a non-object saves fine
+    and then fails every call on the provider."""
+    created = await _create_provider(
+        client, admin_headers, name="LM Studio", provider_type="openai_compatible", base_url="http://x/v1"
+    )
+    resp = await client.put(f"{PROVIDERS_URL}/{created['id']}", json={"config": config}, headers=admin_headers)
+    assert resp.status_code == 400
+    assert "must be a JSON object" in resp.text
+
+
+@pytest.mark.asyncio
 async def test_update_provider_regular_user_forbidden(client: AsyncClient, auth_headers: dict, admin_headers: dict):
     created = await _create_provider(client, admin_headers, name="Immutable")
     provider_id = created["id"]

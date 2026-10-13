@@ -202,6 +202,55 @@ describe("AISettings", () => {
     );
   });
 
+  it("openai_compatible Configure panel refuses an Extra body that isn't a JSON object", async () => {
+    mockUpdateProviderMutate.mockReset();
+    mockUseAIProviders.mockReturnValue({
+      data: [
+        {
+          id: "oa1",
+          name: "LM Studio",
+          provider_type: "openai_compatible",
+          base_url: "http://localhost:1234/v1",
+          models: ["qwen3-8b"],
+          is_active: true,
+          config: { default_model: "qwen3-8b" },
+          created_at: "2026-01-01",
+          updated_at: "2026-01-01",
+        },
+      ],
+      isLoading: false,
+    });
+
+    const user = userEvent.setup();
+    render(<AISettings />, { wrapper: MemoryRouter });
+    await user.click(screen.getByText("Configure"));
+    expect(screen.getByDisplayValue("qwen3-8b")).toBeDefined();
+
+    // Valid JSON, but merged into every request with dict.update() — an array
+    // would break every call on this provider.
+    const extraBody = screen.getByRole("textbox", { name: /Extra body/ });
+    await user.click(extraBody);
+    await user.paste('[{"chat_template_kwargs": {}}]');
+    await user.click(screen.getByText("Save"));
+
+    expect(screen.getByText(/Must be a JSON object/)).toBeDefined();
+    expect(mockUpdateProviderMutate).not.toHaveBeenCalled();
+
+    await user.clear(extraBody);
+    await user.paste('{"chat_template_kwargs": {"enable_thinking": false}}');
+    await user.click(screen.getByText("Save"));
+    expect(mockUpdateProviderMutate).toHaveBeenCalledWith(
+      {
+        id: "oa1",
+        config: {
+          default_model: "qwen3-8b",
+          extra_body: { chat_template_kwargs: { enable_thinking: false } },
+        },
+      },
+      expect.anything()
+    );
+  });
+
   it("renders prompts tab content when clicked", async () => {
     mockUseAITasks.mockReturnValue({
       data: [
