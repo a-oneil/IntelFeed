@@ -6,7 +6,7 @@ import { groupConsecutiveEntries, type SingleItem } from "./groupEntries";
 export interface ThreadItem {
   type: "thread";
   thread: StoryThread;
-  /** The score the row's badge shows — see {@link threadBadgeScore}. */
+  /** The row's 0–10 rank — its best unread article's score, which the badge shows. */
   score: number;
   /** Members the row absorbed (kept out of the list as standalone entries). */
   memberIds: string[];
@@ -14,16 +14,6 @@ export interface ThreadItem {
 }
 
 export type QueueItem = DisplayItemWithDividers | ThreadItem;
-
-/**
- * A story's badge shows its best unread article's 0–10 score, not the queue's
- * rank for the row. The rank adds a bonus for every extra outlet so a
- * well-covered story sorts above a lone article; on the 0–10 scale that bonus
- * pins nearly every story at 10, which would make the badge meaningless.
- */
-export function threadBadgeScore(row: PriorityQueueRow): number {
-  return row.thread?.top_score ?? row.score;
-}
 
 /** "11 outlets · 23 articles · 6 new" — the row's one-line account of itself. */
 export function threadSummaryLine(thread: StoryThread): string {
@@ -67,7 +57,7 @@ export function queueItems(rows: PriorityQueueRow[]): QueueItem[] {
       out.push({
         type: "thread",
         thread: row.thread,
-        score: threadBadgeScore(row),
+        score: row.score,
         memberIds: row.absorbed_entry_ids,
         key: `thread-${row.thread.id}`,
       });
@@ -109,7 +99,7 @@ export function magazineQueueItems(rows: PriorityQueueRow[]): MagazineItem[] {
       out.push({
         type: "thread",
         thread: row.thread,
-        score: threadBadgeScore(row),
+        score: row.score,
         memberIds: row.absorbed_entry_ids,
         key: `thread-${row.thread.id}`,
       });

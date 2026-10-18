@@ -24,9 +24,9 @@ number you have to take on faith; it always shows its work.
 **Story rows** appear inline when several outlets are covering the same thing.
 Rather than showing you the same story five times, the queue folds it into one
 row you can open — and the articles inside it are withheld from the list, so
-the story appears once, not once per outlet. A story ranks by its best unread
-article plus a bump for each extra outlet carrying it, because corroboration
-across newsrooms is itself a signal. A story you have finished reading drops
+the story appears once, not once per outlet. A story ranks by the score of its
+best unread article, in the same list as everything else — the queue runs
+highest score first whether a row is a story or an article. A story you have finished reading drops
 out of the queue entirely.
 
 What a story row opens into — the spine, the coverage list, what "N new" counts,

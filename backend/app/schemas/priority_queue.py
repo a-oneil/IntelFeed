@@ -23,7 +23,7 @@ class PriorityQueueRow(BaseModel):
         description=(
             "Rank of this row on the 0–10 priority scale. For an entry it is its priority score (with any "
             "read-time stack-exposure or learned-weight lift applied); for a thread, the score of its best "
-            "unread beat plus a capped corroboration bump for each extra outlet covering the story."
+            "unread beat. Rows arrive sorted by this score, highest first."
         )
     )
     entry: EntryResponse | None = Field(None, description="Populated when kind is `entry`")

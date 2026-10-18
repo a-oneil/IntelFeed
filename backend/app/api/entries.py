@@ -1319,21 +1319,20 @@ async def priority_unread_count(
 # row rather than eleven. Assembled here rather than in the client so the SPA,
 # the CLI and an agent all get the same queue in the same order.
 
-# Each independent outlet beyond the first lifts a thread above a lone article of
-# the same base score — corroboration across newsrooms is itself a signal. Capped
-# so a story everyone covered can't own the whole top of the queue.
-_THREAD_OUTLET_BUMP = 1.0
-_THREAD_OUTLET_BUMP_CAP = 5.0
 # How deep into the open-thread list the queue looks. Threads are ranked by their
 # best unread beat, and one below this many is not going to outrank anything.
 _QUEUE_THREAD_LIMIT = 40
 
 
 def _thread_queue_score(row: dict) -> float:
-    """The rank a thread row takes (raw units): its best unread beat plus the outlet bump."""
-    outlets = int(row.get("source_count") or 0)
-    bump = min(max(outlets - 1, 0) * _THREAD_OUTLET_BUMP, _THREAD_OUTLET_BUMP_CAP)
-    return float(row.get("top_raw") or 0.0) + bump
+    """The rank a thread row takes (raw units): the score of its best unread beat.
+
+    Nothing is added for outlet count. The queue is one list sorted by the score
+    each row shows, and a coverage bonus would float stories above articles that
+    outscore them — corroboration already reaches the score through the source
+    convergence signal on the articles themselves.
+    """
+    return float(row.get("top_raw") or 0.0)
 
 
 def _thread_sort_key(row: dict) -> tuple[float, str]:
@@ -1347,8 +1346,8 @@ def _thread_sort_key(row: dict) -> tuple[float, str]:
     summary="Priority Queue",
     description=(
         "The ranked reading queue: unread entries that clear the radar threshold, with open story "
-        "threads folded in as single rows. A thread ranks by the score of its best unread beat plus "
-        "a capped bump for each extra outlet covering the story, and its members are withheld from "
+        "threads folded in as single rows. Entries and threads share one ranking, highest score "
+        "first: a thread ranks by the score of its best unread beat, and its members are withheld from "
         "the queue as standalone entries — the thread row stands for them. Threads with nothing "
         "unread never appear: the queue answers 'what should I read next', and a story you have "
         "finished has no answer to give."

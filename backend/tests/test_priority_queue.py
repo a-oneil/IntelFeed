@@ -40,7 +40,7 @@ def surfaced(monkeypatch):
 
 
 # Cutoffs at 1..10 make the 0–10 scale read back the raw sum between 1 and 10,
-# so the queue's raw-unit arithmetic (outlet bumps) is visible in its scores.
+# so the queue's raw-unit ranking is visible in its scores.
 IDENTITY_CUTOFFS = [float(i) for i in range(1, 11)]
 
 
@@ -164,36 +164,33 @@ class TestThreadFolding:
         row = body["items"][0]
         assert sorted(row["absorbed_entry_ids"]) == sorted(str(m.id) for m in members)
 
-    async def test_outlet_bump_lifts_a_corroborated_story(self, client, auth_headers, db_session, subscribed_feed):
+    async def test_threads_and_entries_share_one_ranking(self, client, auth_headers, db_session, subscribed_feed):
+        await make_entry(db_session, subscribed_feed, title="High", score=8.0)
+        members = [await make_entry(db_session, subscribed_feed, title="Beat", score=6.0)]
+        await make_thread(db_session, title="Story", members=members, source_count=3)
+        await make_entry(db_session, subscribed_feed, title="Low", score=4.0)
+        await db_session.commit()
+
+        body = (await client.get("/api/entries/priority-queue", headers=auth_headers)).json()
+
+        # One list, highest score first — the story sits between the articles it
+        # outscores and the one that outscores it, not in a block of its own.
+        assert titles(body) == ["High", "Story", "Low"]
+        assert [r["score"] for r in body["items"]] == pytest.approx([8.0, 6.0, 4.0])
+
+    async def test_coverage_does_not_lift_a_story_above_a_higher_scored_article(
+        self, client, auth_headers, db_session, subscribed_feed
+    ):
         members = [await make_entry(db_session, subscribed_feed, title="Beat", score=5.0)]
-        await make_thread(db_session, title="Everyone covered it", members=members, source_count=4)
+        await make_thread(db_session, title="Everyone covered it", members=members, source_count=12)
         await make_entry(db_session, subscribed_feed, title="Lone article", score=7.0)
         await db_session.commit()
 
         body = (await client.get("/api/entries/priority-queue", headers=auth_headers)).json()
 
-        # 5.0 + 3 extra outlets = 8.0, which outranks the lone 7.0 article.
-        assert titles(body) == ["Everyone covered it", "Lone article"]
-        assert body["items"][0]["score"] == pytest.approx(8.0)
-
-    async def test_outlet_bump_is_capped(self, client, auth_headers, db_session, subscribed_feed):
-        members = [await make_entry(db_session, subscribed_feed, title="Beat", score=2.0)]
-        await make_thread(db_session, title="Wall to wall", members=members, source_count=40)
-        await db_session.commit()
-
-        body = (await client.get("/api/entries/priority-queue", headers=auth_headers)).json()
-
-        assert body["items"][0]["score"] == pytest.approx(7.0)  # 2.0 + capped 5.0
-
-    async def test_a_corroborated_story_never_scores_above_ten(self, client, auth_headers, db_session, subscribed_feed):
-        members = [await make_entry(db_session, subscribed_feed, title="Beat", score=9.0)]
-        await make_thread(db_session, title="Everyone covered it", members=members, source_count=12)
-        await db_session.commit()
-
-        body = (await client.get("/api/entries/priority-queue", headers=auth_headers)).json()
-
-        # 9.0 raw + the capped 5.0 outlet bump ranks as 14.0, but the row reports the 0–10 scale.
-        assert body["items"][0]["score"] == 10.0
+        # Twelve outlets don't add to the row's score: it ranks on its 5.0 beat.
+        assert titles(body) == ["Lone article", "Everyone covered it"]
+        assert body["items"][1]["score"] == pytest.approx(5.0)
 
     async def test_fully_read_thread_does_not_appear(
         self, client, auth_headers, db_session, test_user, subscribed_feed
