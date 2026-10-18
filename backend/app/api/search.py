@@ -86,7 +86,7 @@ async def _fetch_entries_by_ids(
     # Fetch page with feed relationship
     stmt = select(Entry).options(selectinload(Entry.feed)).where(*conditions)
     if sort == "radar":
-        stmt = stmt.order_by(Entry.priority_score.desc(), Entry.published_at.desc().nullslast())
+        stmt = stmt.order_by(Entry.priority_raw.desc(), Entry.published_at.desc().nullslast())
     elif sort == "oldest":
         stmt = stmt.order_by(Entry.published_at.asc().nullsfirst())
     elif sort == "title_asc":

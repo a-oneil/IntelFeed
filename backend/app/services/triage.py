@@ -363,7 +363,7 @@ async def get_triage_entries_signals(
     """Signal-engine triage ranking (shadow mode: compare against the legacy composite).
 
     Same response shape as get_triage_entries, but driven entirely by the stored
-    Entry.priority_score + entry_signals rows — one indexed scan plus one batched
+    Entry.priority_score / priority_raw + entry_signals rows — one indexed scan plus one batched
     signal fetch, replacing the live multi-subquery composite.
     """
     from app.intelligence.signals import get_radar_threshold
@@ -405,10 +405,12 @@ async def get_triage_entries_signals(
     for mute_clause in mute_filters:
         base = base.where(~mute_clause)
 
-    effective_score = Entry.priority_score
+    # Membership gates on the 0–10 score; ordering uses the raw sum, which the
+    # watch boost is added to and which doesn't clamp at the top.
+    effective_score = Entry.priority_raw
     if watch_boost_sq is not None:
         base = base.outerjoin(watch_boost_sq, watch_boost_sq.c.entry_id == Entry.id)
-        effective_score = Entry.priority_score + func.coalesce(watch_boost_sq.c.boost, 0.0)
+        effective_score = Entry.priority_raw + func.coalesce(watch_boost_sq.c.boost, 0.0)
         base = base.where(or_(Entry.priority_score >= threshold, watch_boost_sq.c.entry_id.is_not(None)))
     else:
         base = base.where(Entry.priority_score >= threshold)

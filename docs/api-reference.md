@@ -913,9 +913,9 @@ List articles with advanced filtering, cursor pagination, and deduplication.
 **`GET /api/entries/priority-queue`**
 
 The ranked reading queue, assembled as the Priority Queue page renders it: unread
-entries clearing the radar threshold, ordered by signal score, with open story
-threads folded in as single rows. A thread ranks by the score of its best unread
-beat plus a capped bump for each extra outlet covering the story, and its members
+entries clearing the radar threshold, ordered by their 0–10 priority score, with
+open story threads folded in as single rows. A thread ranks by the score of its
+best unread beat, and its members
 are withheld from the queue as standalone entries — the thread row stands for
 them. Threads with nothing unread never appear.
 
@@ -933,14 +933,14 @@ them. Threads with nothing unread never appear.
   "items": [
     {
       "kind": "thread",
-      "score": 11.72,
+      "score": 9.6,
       "entry": null,
       "thread": { "slug": "gitlab-path-traversal-exploited", "source_count": 14, "unread_count": 9, "...": "..." },
       "absorbed_entry_ids": ["550e8400-..."]
     },
     {
       "kind": "entry",
-      "score": 7.3,
+      "score": 8.7,
       "entry": { "id": "550e8401-...", "title": "Article Title", "...": "..." },
       "thread": null,
       "absorbed_entry_ids": []
@@ -948,7 +948,7 @@ them. Threads with nothing unread never appear.
   ],
   "next_cursor": "eyJlbnRyeSI6...",
   "has_more": true,
-  "radar_threshold": 1.5
+  "radar_threshold": 8.4
 }
 ```
 

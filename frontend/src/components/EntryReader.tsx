@@ -783,6 +783,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
               // when the reader moves on.
               key={entryId}
               score={entry.priority_score ?? 0}
+              raw={entry.priority_raw}
               signals={entry.priority_signals ?? []}
               exposure={entry.exposure}
               personal={entry.personal}

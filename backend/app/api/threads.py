@@ -83,7 +83,7 @@ async def get_thread(
     # beat, so the entry reported alongside that score has to be the same one.
     best_unread = max(
         (m for m in unread if m["role"] != "echo"),
-        key=lambda m: m["priority_score"] or 0,
+        key=lambda m: m["priority_raw"] or 0,
         default=None,
     )
     last_opened = row.get("last_opened_at")

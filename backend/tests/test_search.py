@@ -231,7 +231,8 @@ class TestHideReadPostgresPath:
                 title=f"radar hide read {i}",
                 guid=f"radar-hide-read-{i}",
                 url=f"https://example.com/radar/{i}",
-                priority_score=90 - i,
+                priority_score=10 - i,
+                priority_raw=90 - i,
             )
             db_session.add(e)
             entries.append(e)

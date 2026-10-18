@@ -256,7 +256,7 @@ async def _eval_has_note(db: AsyncSession, entry: Entry, user_id) -> bool:
 
 
 def _eval_priority_score_above(entry: Entry, config: dict) -> bool:
-    """Entry's signal-engine priority score exceeds a minimum.
+    """Entry's signal-engine priority score (0–10) meets a minimum.
 
     Note: scoring runs after post-processing, so on_new_entry rules see the
     score only if the entry was already scored (e.g. scheduled rules). For

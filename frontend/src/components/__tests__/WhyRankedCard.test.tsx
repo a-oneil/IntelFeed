@@ -63,11 +63,20 @@ describe("WhyRankedCard", () => {
   });
 
   it("says so when the stored score predates today's weights", async () => {
-    renderCard({ score: 6.6 }); // ledger sums to 1.47 — the stored score is stale
+    renderCard({ score: 9.1, raw: 6.6 }); // ledger sums to 1.47 — the stored sum is stale
     await expand();
     await userEvent.click(screen.getByRole("button", { name: "Show the math" }));
     expect(screen.getByText("At today’s weights")).toBeInTheDocument();
+    expect(screen.getByText("6.60 → ◆ 9.1", { exact: false })).toBeInTheDocument();
     expect(screen.getByText(/computed with earlier weights/)).toBeInTheDocument();
+  });
+
+  it("compares the ledger with the raw sum, not the 0–10 score", async () => {
+    renderCard({ score: 8.7, raw: 1.47 });
+    await expand();
+    await userEvent.click(screen.getByRole("button", { name: "Show the math" }));
+    expect(screen.queryByText("At today’s weights")).not.toBeInTheDocument();
+    expect(screen.getByText("1.47 → ◆ 8.7", { exact: false })).toBeInTheDocument();
   });
 
   it("keeps the personal lift to one footer line", async () => {

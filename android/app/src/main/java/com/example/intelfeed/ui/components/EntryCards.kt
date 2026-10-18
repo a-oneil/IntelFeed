@@ -98,11 +98,15 @@ import androidx.compose.foundation.horizontalScroll
 /** One item in a card's overflow menu. */
 data class CardAction(val label: String, val icon: ImageVector? = null, val onClick: () -> Unit)
 
-/** Priority score colour bands (the Radar threshold sits around 1.5–2). */
+/**
+ * Priority score colour bands. Scores run 0–10, ranked against the last 30 days (9 ≈ top 5%,
+ * 10 = top 1%), and the Radar threshold sits around 8. Red and orange match the web app's
+ * high/medium bands (frontend/src/utils/signalBand.ts).
+ */
 fun scoreColor(score: Double): Color = when {
-    score >= 8 -> CyberRed
-    score >= 5 -> CyberOrange
-    score >= 3 -> CyberAmber
+    score >= 9.5 -> CyberRed
+    score >= 8.5 -> CyberOrange
+    score >= 7 -> CyberAmber
     else -> CyberBlue
 }
 

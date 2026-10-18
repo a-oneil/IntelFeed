@@ -6,8 +6,8 @@ Answers two questions about every CVE in an entry:
   2. Can you see it? — is that CVE covered by a rule whose required telemetry the
                        org actually collects (``detection_coverage.classify_cves``)?
 
-The stored ``Entry.priority_score`` stays global. Exposure is a read-time boost
-added to the Radar ordering (mirroring the watchlist boost) plus a detection
+The stored score stays global. Exposure is a read-time boost, in the raw units
+of ``Entry.priority_raw``, added to the Radar ordering (mirroring the watchlist boost) plus a detection
 *posture* used to decorate the entry — never written back as an EntrySignal.
 
 Ordering uses the severity-driven exposure lift (SQL, one grouped join). The

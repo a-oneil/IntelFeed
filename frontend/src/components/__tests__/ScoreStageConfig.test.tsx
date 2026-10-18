@@ -21,7 +21,7 @@ const stats: SignalStats = {
   ],
   family_multipliers: { novelty: 1.0, coverage: 1.0, severity: 1.0, interest: 1.0, content: 1.0 },
   default_family_multipliers: { novelty: 1.0, coverage: 1.0, severity: 1.0, interest: 1.0, content: 1.0 },
-  threshold: 1.5,
+  threshold: 8.4,
   threshold_is_auto: true,
 };
 
@@ -76,9 +76,9 @@ describe("ScoreStageConfig", () => {
 
   it("sends a threshold override when a value is entered", () => {
     render(<ScoreStageConfig />);
-    fireEvent.change(screen.getByPlaceholderText("1.50"), { target: { value: "2.25" } });
+    fireEvent.change(screen.getByPlaceholderText("8.4"), { target: { value: "9.25" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(updateMutate.mock.calls[0][0].threshold_override).toBeCloseTo(2.25);
+    expect(updateMutate.mock.calls[0][0].threshold_override).toBeCloseTo(9.25);
   });
 
   it("lists watched and muted entities with a remove action", () => {

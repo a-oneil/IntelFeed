@@ -718,14 +718,16 @@ async def _entry_page(
 
     # My Stack exposure (read-time, per-user, Radar only): float CVEs affecting the
     # user's declared stack. Adds a joined (entry_id, lift) subquery and re-ranks by
-    # effective_score = priority_score + lift. Gated by surface + the exposure flag +
+    # effective_score = priority_raw + lift. Gated by surface + the exposure flag +
     # a non-empty stack; otherwise the Radar behaves exactly as before.
     surface_on = bool(await get_setting("signal_engine_surface", db))
     exposure_active = False
     exposure_vendor_ids: list = []
     exposure_product_ids: list = []
     exposure_epss_threshold = 0.1
-    effective_score = Entry.priority_score
+    # Radar orders by the raw signal sum: the 0–10 priority_score clamps at 10
+    # and rounds, so it can't tell the top of the queue apart. Lifts are raw too.
+    effective_score = Entry.priority_raw
     exposure_sq = None
     if sort == "radar" and surface_on and bool(await get_setting("my_stack_exposure_enabled", db)):
         from app.intelligence.cve import get_epss_high_risk_threshold
@@ -737,11 +739,11 @@ async def _entry_page(
             exposure_sq = exposure_lift_subquery(exposure_vendor_ids, exposure_product_ids, exposure_epss_threshold)
             if exposure_sq is not None:
                 query = query.outerjoin(exposure_sq, exposure_sq.c.entry_id == Entry.id)
-                effective_score = func.coalesce(Entry.priority_score, 0.0) + func.coalesce(exposure_sq.c.lift, 0.0)
+                effective_score = func.coalesce(Entry.priority_raw, 0.0) + func.coalesce(exposure_sq.c.lift, 0.0)
                 exposure_active = True
 
     # Learned Radar weights (read-time, per-user, Radar only): lift each entry by
-    # the gap between the global family multipliers baked into priority_score and
+    # the gap between the global family multipliers baked into priority_raw and
     # this analyst's own fitted weights. Personalisation RE-ORDERS the Priority
     # Queue and deliberately does not change its membership — the radar threshold
     # below still gates on the global score, so a learned weight can never hide an
@@ -764,12 +766,12 @@ async def _entry_page(
             if personal_sq is not None:
                 personal_weights = await get_user_weights(db, user.id)
                 query = query.outerjoin(personal_sq, personal_sq.c.entry_id == Entry.id)
-                base_expr = effective_score if exposure_active else func.coalesce(Entry.priority_score, 0.0)
+                base_expr = effective_score if exposure_active else func.coalesce(Entry.priority_raw, 0.0)
                 effective_score = base_expr + func.coalesce(personal_sq.c.lift, 0.0)
                 personal_active = True
 
     # Either read-time lift makes effective_score a coalesced expression rather
-    # than the raw priority_score column — cursor and ORDER BY branch on this.
+    # than the bare priority_raw column — cursor and ORDER BY branch on this.
     score_lifted = exposure_active or personal_active
 
     # Cursor pagination
@@ -816,7 +818,7 @@ async def _entry_page(
                         )
                     )
             elif sort == "radar":
-                cursor_score = cursor_data.get("priority_score")
+                cursor_score = cursor_data.get("priority_raw")
                 if score_lifted:
                     # effective_score is coalesced (never NULL) — always numeric branch
                     score_val = float(cursor_score) if cursor_score is not None else 0.0
@@ -827,13 +829,13 @@ async def _entry_page(
                         )
                     )
                 elif cursor_score is None:
-                    query = query.where(and_(Entry.priority_score.is_(None), Entry.id < cursor_id))
+                    query = query.where(and_(Entry.priority_raw.is_(None), Entry.id < cursor_id))
                 else:
                     query = query.where(
                         or_(
-                            Entry.priority_score < float(cursor_score),
+                            Entry.priority_raw < float(cursor_score),
                             and_(
-                                Entry.priority_score == float(cursor_score),
+                                Entry.priority_raw == float(cursor_score),
                                 Entry.id < cursor_id,
                             ),
                         )
@@ -913,7 +915,7 @@ async def _entry_page(
         if score_lifted:
             query = query.order_by(effective_score.desc().nullslast(), Entry.id.desc())
         else:
-            query = query.order_by(Entry.priority_score.desc().nullslast(), Entry.id.desc())
+            query = query.order_by(Entry.priority_raw.desc().nullslast(), Entry.id.desc())
     else:
         query = query.order_by(capped_published.desc().nullslast(), Entry.id.desc())
 
@@ -933,7 +935,7 @@ async def _entry_page(
     )
     if rank_scores is not None:
         for row in rows:
-            rank_scores[row[0].id] = effective_by_id.get(row[0].id, float(row[0].priority_score or 0.0))
+            rank_scores[row[0].id] = effective_by_id.get(row[0].id, float(row[0].priority_raw or 0.0))
 
     # Batch-load media for all entries
     entry_ids = [row[0].id for row in rows]
@@ -1053,12 +1055,12 @@ async def _entry_page(
                 # The exact effective_score Postgres ordered by, carried back from
                 # the SELECT rather than re-added here.
                 cursor_data = {
-                    "priority_score": effective_by_id.get(last_entry.id, float(last_entry.priority_score or 0.0)),
+                    "priority_raw": effective_by_id.get(last_entry.id, float(last_entry.priority_raw or 0.0)),
                     "id": str(last.id),
                 }
             else:
                 cursor_data = {
-                    "priority_score": last_entry.priority_score,
+                    "priority_raw": last_entry.priority_raw,
                     "id": str(last.id),
                 }
         elif sort in ("shortest", "longest"):
@@ -1328,10 +1330,10 @@ _QUEUE_THREAD_LIMIT = 40
 
 
 def _thread_queue_score(row: dict) -> float:
-    """The rank a thread row takes: its best unread beat plus the outlet bump."""
+    """The rank a thread row takes (raw units): its best unread beat plus the outlet bump."""
     outlets = int(row.get("source_count") or 0)
     bump = min(max(outlets - 1, 0) * _THREAD_OUTLET_BUMP, _THREAD_OUTLET_BUMP_CAP)
-    return float(row.get("top_score") or 0.0) + bump
+    return float(row.get("top_raw") or 0.0) + bump
 
 
 def _thread_sort_key(row: dict) -> tuple[float, str]:
@@ -1426,11 +1428,14 @@ async def build_priority_queue(
         rank_scores=rank_scores,
     )
 
+    from app.intelligence.signals import get_scale_cutoffs, scale_score
+
     radar_threshold: float | None = None
     if bool(await get_setting("signal_engine_surface", db)):
         from app.intelligence.signals import get_radar_threshold
 
         radar_threshold, _ = await get_radar_threshold()
+    cutoffs = await get_scale_cutoffs()
 
     # Two-pointer merge: entries keep their ranked order and a thread slots in
     # ahead of the first entry it outranks. The comparison is against the score
@@ -1438,24 +1443,25 @@ async def build_priority_queue(
     # lift moves an entry within the queue, so comparing threads against the raw
     # column instead would interleave them against an order that isn't there.
     # Thread rows carry no such lift: they rank on the house score of their best
-    # unread beat.
+    # unread beat. The merge runs in raw units; each row reports its rank on the
+    # 0–10 scale.
     items: list[PriorityQueueRow] = []
     ti = 0
     last_thread: dict | None = None
     for entry in page.items:
-        escore = rank_scores.get(entry.id, entry.priority_score or 0.0)
+        escore = rank_scores.get(entry.id, 0.0)
         while ti < len(pending) and _thread_queue_score(pending[ti]) >= escore:
             last_thread = pending[ti]
-            items.append(_thread_row(last_thread, member_ids))
+            items.append(_thread_row(last_thread, member_ids, cutoffs))
             ti += 1
-        items.append(PriorityQueueRow(kind="entry", score=escore, entry=entry))
+        items.append(PriorityQueueRow(kind="entry", score=scale_score(escore, cutoffs), entry=entry))
 
     if not page.has_more:
         # Last page of entries — nothing left for a thread to outrank, so flush
         # the tail rather than stranding it behind a cursor that never comes.
         while ti < len(pending):
             last_thread = pending[ti]
-            items.append(_thread_row(last_thread, member_ids))
+            items.append(_thread_row(last_thread, member_ids, cutoffs))
             ti += 1
 
     has_more = page.has_more
@@ -1476,11 +1482,13 @@ async def build_priority_queue(
     )
 
 
-def _thread_row(row: dict, member_ids: set[uuid.UUID]) -> PriorityQueueRow:
+def _thread_row(row: dict, member_ids: set[uuid.UUID], cutoffs: list[float]) -> PriorityQueueRow:
+    from app.intelligence.signals import scale_score
+
     summary = ThreadSummary.from_row(row)
     return PriorityQueueRow(
         kind="thread",
-        score=_thread_queue_score(row),
+        score=scale_score(_thread_queue_score(row), cutoffs),
         thread=summary,
         absorbed_entry_ids=[eid for eid in summary.entry_ids if eid in member_ids],
     )
@@ -2426,6 +2434,7 @@ async def get_entry(
     # Signal engine chips — mirror the list endpoint: only surfaced when the
     # signal_engine_surface setting is on, and the score clears the radar threshold.
     priority_score: float | None = None
+    priority_raw: float | None = None
     top_signals: list[dict] = []
     priority_signals: list[dict] = []
     personal: dict | None = None
@@ -2487,6 +2496,7 @@ async def get_entry(
             )
         if entry.priority_score is not None and entry.priority_score >= chip_threshold:
             priority_score = entry.priority_score
+            priority_raw = entry.priority_raw
         else:
             top_signals = []
             priority_signals = []
@@ -2575,6 +2585,7 @@ async def get_entry(
         translation_target_language=entry.translation_target_language,
         translated_at=entry.translated_at,
         priority_score=priority_score,
+        priority_raw=priority_raw,
         top_signals=top_signals,
         priority_signals=priority_signals,
         is_echo=is_echo,

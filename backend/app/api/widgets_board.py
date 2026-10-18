@@ -801,7 +801,7 @@ async def under_reported(
                     Entry.published_at >= start,
                     Entry.published_at <= end,
                 )
-                .order_by(Entry.priority_score.desc().nulls_last(), Entry.published_at.desc())
+                .order_by(Entry.priority_raw.desc().nulls_last(), Entry.published_at.desc())
                 .limit(limit)
             )
         ).all()

@@ -144,21 +144,21 @@ Diagram: [diagrams/engine-signal-scoring.md](diagrams/engine-signal-scoring.md)
 
 | Signal | Family | Fires when (implementation) |
 |---|---|---|
-| `novel_entity` | novelty | Linked actor/malware/tool has ≤3 prior articles or `first_seen_at` within 14 days; CVEs by first-seen recency only (`_novel_entity`, `signals.py:365`) |
-| `entity_resurgence` | novelty | Known entity's previous coverage is >90 days old; score scales with gap up to 365d (`_entity_resurgence`, `signals.py:423`); only checked when `novel_entity` didn't fire |
-| `new_pairing` | novelty | A co-occurrence `EntityRelationship` created in the last hour has this entry as its *only* evidence, for interesting type pairs (actor+malware, actor+country, malware+CVE, actor+tool) (`_new_pairing`, `signals.py:461`) |
+| `novel_entity` | novelty | Linked actor/malware/tool has ≤3 prior articles or `first_seen_at` within 14 days; CVEs by first-seen recency only (`_novel_entity`, `backend/app/intelligence/signals.py:509`) |
+| `entity_resurgence` | novelty | Known entity's previous coverage is >90 days old; score scales with gap up to 365d (`_entity_resurgence`, `backend/app/intelligence/signals.py:567`); only checked when `novel_entity` didn't fire |
+| `new_pairing` | novelty | A co-occurrence `EntityRelationship` created in the last hour has this entry as its *only* evidence, for interesting type pairs (actor+malware, actor+country, malware+CVE, actor+tool) (`_new_pairing`, `backend/app/intelligence/signals.py:605`) |
 | `scoop` | novelty | `novel_entity` fired, no echo, and the feed's `reliability_rating` is A or B (`signals.py:1030-1038`) |
 | `source_convergence` | coverage | ≥3 independent outlets on this entry's [story thread](story-threads.md); for an entry no thread holds, ≥3 sources (distinct domains, not feeds) sharing ≥2 entities within 24h |
-| `under_reported` | coverage | Severe CVE (KEV, CVSS ≥9, EPSS ≥0.5, or weaponized) that ≤2 feeds have *ever* covered — counted per CVE via the `EntryCVE` junction (`_under_reported`, `signals.py:814`) |
+| `under_reported` | coverage | Severe CVE (KEV, CVSS ≥9, EPSS ≥0.5, or weaponized) that ≤2 feeds have *ever* covered — counted per CVE via the `EntryCVE` junction (`_under_reported`, `backend/app/intelligence/signals.py:958`) |
 | `feed_echo` | coverage | The entry's story thread folded it as a re-report; for an entry no thread holds, an **earlier** entry within 72h sharing ≥70% of its ≥3 entities — negative signal |
-| `kev_added` | severity | Linked CVE added to CISA KEV within 7 days (`_severity_signals`, `signals.py:740`) |
+| `kev_added` | severity | Linked CVE added to CISA KEV within 7 days (`_severity_signals`, `backend/app/intelligence/signals.py:872`) |
 | `epss_jump` | severity | Linked CVE's EPSS score actually rose (`epss_previous_score` → `epss_score`) within the last 7 days (`signals.py:769`) |
 | `epss_high` | severity | Linked CVE at ≥95th EPSS percentile (`signals.py:785`) |
 | `weaponized_poc` | severity | Linked CVE has GitHub PoC repos and `exploit_availability` in (weaponized, poc) (`signals.py:751`) |
 | `critical_cvss` | severity | Linked CVE with CVSS ≥9 first seen within the last 90 days — recency-gated so old criticals in retrospectives don't boost forever (`signals.py:805`) |
-| `pir_match` | interest | `RequirementMatch` rows exist; score = count/3 capped at 1 (`_interest_signals`, `signals.py:883`) |
+| `pir_match` | interest | `RequirementMatch` rows exist; score = count/3 capped at 1 (`_interest_signals`, `backend/app/intelligence/signals.py:1006`) |
 | `correlation_event` | interest | `CorrelationEventRecord` rows exist; score by max severity (high 1.0 / medium 0.6 / low 0.3) (`signals.py:912`) |
-| `detection_content` | content | Entry has extracted `DetectionRule` rows (`_content_signals`, `signals.py:929`) |
+| `detection_content` | content | Entry has extracted `DetectionRule` rows (`_content_signals`, `backend/app/intelligence/signals.py:1065`) |
 | `research_depth` | content | ≥1500 words and (≥3 TTPs or detection rules) (`signals.py:938`) |
 
 **Both coverage signals prefer the story thread.** Shared entities inside a
@@ -176,7 +176,7 @@ newcomer). Switchable at Engine → Score stage → Story threads →
 **Score From Threads**; off, or for the 44% of the corpus too short to thread,
 the entity probe below is still the answer.
 
-The entity-overlap probes share one junction-union query (`_feed_echo`, `signals.py:597`) and exclude **mega-entities** (>500 linked articles, `MEGA_ENTITY_ARTICLE_COUNT`, `signals.py:107`) so "Microsoft"-scale entities neither make everything an echo nor blow up the scan. This is the only fan-out query; everything else is index-backed. Time-window signals anchor on the entry's own timeline (`published_at`, else `fetched_at`) so re-scores and backfills reproduce the same facts.
+The entity-overlap probes share one junction-union query (`_feed_echo`, `backend/app/intelligence/signals.py:741`) and exclude **mega-entities** (>500 linked articles, `MEGA_ENTITY_ARTICLE_COUNT`, `signals.py:107`) so "Microsoft"-scale entities neither make everything an echo nor blow up the scan. This is the only fan-out query; everything else is index-backed. Time-window signals anchor on the entry's own timeline (`published_at`, else `fetched_at`) so re-scores and backfills reproduce the same facts.
 
 ### Weights: IDF, multipliers, echo
 
@@ -192,9 +192,24 @@ score = Σ  raw_score × idf_weight(firing_rate) × family_multiplier
 - Family multipliers (`novelty`/`coverage`/`severity`/`interest`/`content`, all default 1.0) are global, admin-set, clamped 0–2 — coarse steering on top of the self-tuning weights (`DEFAULT_FAMILY_MULTIPLIERS`, `signals.py:70`).
 - `feed_echo` is excluded from IDF: its job is to sink re-reported stories, not to get rarer-therefore-stronger (`ECHO_WEIGHT`, `signals.py:102`).
 
+### The 0–10 scale
+
+The weighted sum is unbounded, so it is stored as `Entry.priority_raw` and placed on a 0–10 scale for everything people and rules read (`Entry.priority_score`, `scale_score` in `signals.py`). The scale ranks the sum against the trailing 30 days of entries that fired at least one signal:
+
+| Score | Means |
+|---|---|
+| 0 | Nothing fired, or an echo cancelled out what did |
+| 1 | The weakest signal-bearing entries |
+| 5 | The 60th percentile |
+| 8 | The 90th percentile |
+| 9 | The 95th percentile (top 5%) |
+| 10 | The 99th percentile and above (top 1%) |
+
+Anchors sit on the whole numbers (`SCALE_ANCHORS`); between two anchors the score interpolates linearly in raw units and rounds to one decimal. The raw value at each anchor (the *cutoffs*) is recomputed nightly by `signal-rate-recompute` and cached in Redis. Scoring converts immediately using the cached cutoffs, so a new entry has its 0–10 score as soon as it is scored. The nightly job also re-scales the stored scores of entries scored in the last 90 days (`SCALE_RESCALE_DAYS`) against the new cutoffs, writing only rows whose value changed, in batches of 2,000 so it never holds locks on `entries` for long. Within that window a 7 today and a 7 last month sit at the same rank; older entries keep the scale they were last scored on. The cutoffs reach Redis before the re-scale starts, so new scoring and the stored scores never run on two different scales.
+
 ### Persistence
 
-`score_entry()` (`backend/app/workers/signal_tasks.py:99`) computes hits, deletes signals that no longer fire, upserts the rest on `(entry_id, signal_type)` (`uq_entry_signals_entry_type`), and writes `Entry.priority_score` + `Entry.scored_at` (`backend/app/models/entry.py:39-40`). Re-scoring overwrites, never appends. `entry_signals` rows cascade-delete with their entry.
+`score_entry()` (`backend/app/workers/signal_tasks.py:99`) computes hits, deletes signals that no longer fire, upserts the rest on `(entry_id, signal_type)` (`uq_entry_signals_entry_type`), and writes `Entry.priority_raw`, `Entry.priority_score` (the 0–10 scale) and `Entry.scored_at`. Re-scoring overwrites, never appends. `entry_signals` rows cascade-delete with their entry.
 
 The task wrapper `score_entry_task` (`signal_tasks.py:39`) no-ops unless `signal_engine_shadow` **or** `signal_engine_surface` is on (`_engine_enabled`, `signal_tasks.py:24`), then also enqueues the entry for one-pass AI analysis (`enqueue_entry_analysis`), dispatches `on_entry_scored` automation rules when any are enabled, and — surface flag only — broadcasts an `entry_scored` SSE event (`signal_tasks.py:56-95`).
 
@@ -204,21 +219,21 @@ Scheduled/dispatchable tasks in `backend/app/workers/signal_tasks.py`, registere
 
 | Job key | Task | Schedule | What it does |
 |---|---|---|---|
-| `signal-rate-recompute` | `recompute_signal_rates` (`signal_tasks.py:167`) | daily 04:20 UTC (`job_registry.py:630`) | Recomputes 30-day firing rates (distinct entries with signal ÷ entries **scored** in window — not entries fetched, so backfills don't skew the denominator), the auto Radar threshold (p95 of `priority_score` over 7 days), and per-family feedback nudges; writes all three to Redis |
-| `signal-rescore-recent` | `rescore_recent_entries` (`signal_tasks.py:270`) | every 6h at :35 (`job_registry.py:648`) | Re-scores recent entries (default 72h/500) so late severity changes — KEV adds, EPSS jumps — propagate into stored scores. Also sweeps up never-scored entries in the window (unscored first when the limit truncates), so scoring failures self-heal instead of leaving entries permanently off Radar |
-| — | `rescore_entries_for_cve` (`signal_tasks.py:295`) | event-dispatched | Re-scores entries linked to one CVE (default 14d/200) when that CVE's severity facts change — dispatched via `dispatch_cve_rescore()` (`backend/app/workers/signal_tasks.py:421`) from CVE enrichment events, so KEV/EPSS/exploit changes propagate without waiting for the 6-hourly sweep |
+| `signal-rate-recompute` | `recompute_signal_rates` (`signal_tasks.py:167`) | daily 04:20 UTC (`job_registry.py:630`) | Recomputes 30-day firing rates (distinct entries with signal ÷ entries **scored** in window — not entries fetched, so backfills don't skew the denominator), the 0–10 scale's cutoffs (then re-scales the last 90 days' stored scores that moved), the auto Radar threshold (p95 of the 0–10 `priority_score` over 7 days), and per-family feedback nudges; writes all four to Redis |
+| `signal-rescore-recent` | `rescore_recent_entries` (`backend/app/workers/signal_tasks.py:329`) | every 6h at :35 (`job_registry.py:648`) | Re-scores recent entries (default 72h/500) so late severity changes — KEV adds, EPSS jumps — propagate into stored scores. Also sweeps up never-scored entries in the window (unscored first when the limit truncates), so scoring failures self-heal instead of leaving entries permanently off Radar |
+| — | `rescore_entries_for_cve` (`backend/app/workers/signal_tasks.py:354`) | event-dispatched | Re-scores entries linked to one CVE (default 14d/200) when that CVE's severity facts change — dispatched via `dispatch_cve_rescore()` (`backend/app/workers/signal_tasks.py:480`) from CVE enrichment events, so KEV/EPSS/exploit changes propagate without waiting for the 6-hourly sweep |
 | `signal-personal-weight-fit` | `fit_user_signal_weights` | daily 04:35 UTC | Fits per-analyst family weights from each user's own thumbs into `user_signal_weights`, and drops rows whose evidence aged out of the window or fell below the floor |
-| — | `backfill_entry_scores` (`signal_tasks.py:461`) | never scheduled | One-shot manual dispatch after enabling shadow mode, so there is historical data to evaluate |
+| — | `backfill_entry_scores` (`backend/app/workers/signal_tasks.py:520`) | never scheduled | One-shot manual dispatch after enabling shadow mode, so there is historical data to evaluate |
 
-**Radar feedback**: analysts thumb Radar items (`RadarFeedbackButtons.tsx` → `PUT /api/engine/radar-feedback`, verdict 1 = useful / −1 = noise / 0 clears), stored one-per-user-per-entry in `entry_signal_feedback`. The nightly job joins feedback to the signals on those entries, averages verdicts per family, and writes a **bounded nudge** `1.0 + 0.1 × mean(verdict)`; reads re-clamp to 0.9–1.1 (`get_feedback_nudges`, `signals.py:280`). Families with fewer than `signal_feedback_min_samples` verdicts in the window (default 20, Settings → Engine → score stage) keep a neutral 1.0 — a handful of votes can't swing scoring — and the nudge key is rewritten every night, so families that fall below the floor reset instead of keeping a stale nudge. Nudges multiply the admin family multipliers at score time (`signal_tasks.py:123-125`) — analyst feedback can shade the ranking by ±10%, never dominate it.
+**Radar feedback**: analysts thumb Radar items (`RadarFeedbackButtons.tsx` → `PUT /api/engine/radar-feedback`, verdict 1 = useful / −1 = noise / 0 clears), stored one-per-user-per-entry in `entry_signal_feedback`. The nightly job joins feedback to the signals on those entries, averages verdicts per family, and writes a **bounded nudge** `1.0 + 0.1 × mean(verdict)`; reads re-clamp to 0.9–1.1 (`get_feedback_nudges`, `backend/app/intelligence/signals.py:414`). Families with fewer than `signal_feedback_min_samples` verdicts in the window (default 20, Settings → Engine → score stage) keep a neutral 1.0 — a handful of votes can't swing scoring — and the nudge key is rewritten every night, so families that fall below the floor reset instead of keeping a stale nudge. Nudges multiply the admin family multipliers at score time (`signal_tasks.py:123-125`) — analyst feedback can shade the ranking by ±10%, never dominate it.
 
 **Learned Radar weights (per analyst)**: the nudge above is *global* — every analyst's thumbs pooled into one multiplier baked into the shared `Entry.priority_score`. `fit_user_signal_weights` keeps the same votes separated per user and fits a personal family weight from each analyst's own verdicts: `1 + 0.35 × mean(verdict) × n/(n+8)`, clamped to 0.65–1.35 (`fit_personal_weight`, `signals.py`). The shrinkage term is what stops three enthusiastic thumbs moving a family as far as thirty do, and attribution reuses `attribute_feedback_votes` verbatim, so a vote credits exactly one family — the signal that contributed most to that entry's score.
 
-Weights apply at **read time only**, mirroring My Stack exposure (`backend/app/services/radar_personalization.py`): the Radar query joins a `(entry_id, lift)` subquery over `entry_signals` where `lift = Σ score × idf_weight × (w−1)`, and orders by `priority_score + exposure_lift + personal_lift`. Because the per-signal contribution is linear, that sum is exactly what the engine would have scored with the analyst's multipliers — no re-scoring, and switching it off drops the term. Personalisation **re-orders** the Priority Queue and deliberately does not change its membership: the radar threshold still gates on the global score, so a learned weight can never hide an entry the badge counted.
+Weights apply at **read time only**, mirroring My Stack exposure (`backend/app/services/radar_personalization.py`): the Radar query joins a `(entry_id, lift)` subquery over `entry_signals` where `lift = Σ score × idf_weight × (w−1)`, and orders by score + `exposure_lift` + `personal_lift`. Because the per-signal contribution is linear, that sum is exactly what the engine would have scored with the analyst's multipliers — no re-scoring, and switching it off drops the term. Personalisation **re-orders** the Priority Queue and deliberately does not change its membership: the radar threshold still gates on the global score, so a learned weight can never hide an entry the badge counted.
 
 Gated by `radar_personalization_enabled` (instance-wide, Settings → Engine → score stage) plus a per-user opt-in in `User.settings["radar_personalized"]`. Settings → Reading → "Your Radar" shows each family's weight, the votes behind it, and both exits: the toggle (back to the house ranking) and a reset that discards the fitted rows. `GET/PUT/DELETE /api/engine/my-radar` back that panel; the reader's "Why it's ranked" card gains a *Tuned for you* row naming the families that moved the entry. When the ordering key is a computed lift, the list query selects it and the cursor carries that exact value — rebuilding it in Python drifts from what Postgres compared and lands rows on two pages.
 
-**Radar threshold**: `get_radar_threshold()` (`signals.py:292`) returns the manual override (`intelfeed:signal_engine:threshold_override`) if set, else the auto p95 written nightly, else the 1.5 default. The threshold gates what the Radar shows and which entries get chips.
+**Radar threshold**: a value on the 0–10 scale. `get_radar_threshold()` returns the manual override (`intelfeed:signal_engine:threshold_override10`) if set, else the auto p95 written nightly, else the 8.0 default. An override left in the raw-sum key `intelfeed:signal_engine:threshold_override` is converted to the scale on first read. The threshold gates what the Radar shows and which entries get chips.
 
 ### Redis state
 
@@ -228,8 +243,9 @@ All mutable tuning state is in Redis (constants at `signals.py:44-48`); Postgres
 |---|---|---|
 | `intelfeed:signal_engine:rates` | `recompute_signal_rates` (nightly) | `get_signal_rates()` at score time, `GET /engine/signals/stats` |
 | `intelfeed:signal_engine:multipliers` | `PUT /engine/signals/settings` | `get_family_multipliers()` at score time |
-| `intelfeed:signal_engine:threshold` | `recompute_signal_rates` (auto p95) | `get_radar_threshold()` — triage, entry chips |
-| `intelfeed:signal_engine:threshold_override` | `PUT /engine/signals/settings` (manual; delete to return to auto) | `get_radar_threshold()` — beats the auto value |
+| `intelfeed:signal_engine:scale_cutoffs` | `recompute_signal_rates` (nightly; after a flush, the first scoring run computes it from Postgres and caches it for a day) | `get_scale_cutoffs()` at score time, Priority Queue row scores |
+| `intelfeed:signal_engine:threshold10` | `recompute_signal_rates` (auto p95, 0–10) | `get_radar_threshold()` — triage, entry chips |
+| `intelfeed:signal_engine:threshold_override10` | `PUT /engine/signals/settings` (manual, 0–10; delete to return to auto) | `get_radar_threshold()` — beats the auto value |
 | `intelfeed:signal_engine:feedback_nudge` | `recompute_signal_rates` (from thumbs) | `get_feedback_nudges()` at score time |
 
 ### Shadow vs surface rollout
@@ -258,15 +274,15 @@ When surfaced, the entry list endpoint (`list_entries`, `backend/app/api/entries
 
 The Priority Queue is a second, ranked entry list: `/priority-queue` renders `MainLayout` in `priorityMode`, which mounts `EntryList` with `sortOverride="radar"` and `withThreads`, a docked reader, and a Why-ranked card (`frontend/src/components/WhyRankedCard.tsx`) explaining the entry's signals. It folds **story threads** into the ranked list as inline rows (`GET /api/threads`).
 
-The ranking and the folding are **server-side** (`build_priority_queue`, `backend/app/api/entries.py:1377`): the endpoint lists open threads with something unread, scores each one, and two-pointer-merges them into the radar-ordered entry page so a thread slots in ahead of the first entry it outranks. A thread takes the score of its best **unread, non-echo** member (`top_score`, `story_threads.py:1003`) plus a capped corroboration bump — +1 per independent outlet beyond the first, capped at +5 (`_thread_queue_score`, `backend/app/api/entries.py:1330`; constants at `:1323-1324`). Every member of a live thread is withheld from the queue as a standalone entry, including members on pages not yet fetched — a thread always scores at or above its best unread member, so the row is reached before the articles it stands for. Corroboration across newsrooms is itself a signal, so a story eleven outlets carried outranks a lone entry with the same base score. A thread with nothing unread does not render at all: the queue answers "read this next", and a story you have finished has no answer to give.
+The ranking and the folding are **server-side** (`build_priority_queue`, `backend/app/api/entries.py:1377`): the endpoint lists open threads with something unread, scores each one, and two-pointer-merges them into the radar-ordered entry page so a thread slots in ahead of the first entry it outranks. A thread ranks by the score of its best **unread, non-echo** member (`top_score`, `story_threads.py:1003`), and its badge shows that score. Every member of a live thread is withheld from the queue as a standalone entry, including members on pages not yet fetched — a thread always scores at or above its best unread member, so the row is reached before the articles it stands for. A thread with nothing unread does not render at all: the queue answers "read this next", and a story you have finished has no answer to give.
 
-The client only flattens the response into display rows (`queueItems`, `frontend/src/utils/threads.ts:38`) and adds day dividers; it does no ranking of its own. Pagination carries a composite cursor holding both the entry cursor and the thread sort key, so a page that emitted no thread row still resumes thread progress instead of re-emitting threads already shown.
+The client only flattens the response into display rows (`queueItems`, `frontend/src/utils/threads.ts:49`) and adds day dividers; it does no ranking of its own. Pagination carries a composite cursor holding both the entry cursor and the thread sort key, so a page that emitted no thread row still resumes thread progress instead of re-emitting threads already shown.
 
 **Temporal convergence clusters** — per-request entity-overlap groups with no name, no spine and no persistence — are not part of the queue. `GET /api/intelligence/temporal-clusters` and its registry tool serve the copilot and the triage widget; nothing in the reading UI calls them. See [story-threads.md](story-threads.md) for how a thread is built and tuned.
 
 ### Automation integration
 
-Automation rules can react to signal outputs via entry conditions in `backend/app/automation/conditions.py` (engine phase 7): `priority_score_above` (`conditions.py:258` — stored `Entry.priority_score` ≥ `config.min`), `has_signal` (`conditions.py:274` — entry carries any/specific `entry_signals` types), and `entity_watchlisted` (`conditions.py:328` — entry links an entity on the rule creator's watchlist). Because scoring is the *final* chord callback while `automate` is a *side* dispatch, `on_new_entry` rules see `priority_score` only if the entry was already scored. For score reactions use the **`on_entry_scored` trigger**: `score_entry_task` dispatches `run_scored_entry_automations` after signals + score are persisted (guarded by a cheap enabled-rule existence check), so `priority_score_above`/`has_signal` conditions evaluate against real values. It fires on initial pipeline scoring only — rescores and backfills don't re-fire rules. See [automation-ai-enrichment.md](automation-ai-enrichment.md) for the rule engine itself.
+Automation rules can react to signal outputs via entry conditions in `backend/app/automation/conditions.py` (engine phase 7): `priority_score_above` (`conditions.py:258` — stored `Entry.priority_score`, on the 0–10 scale, ≥ `config.min`), `has_signal` (`conditions.py:274` — entry carries any/specific `entry_signals` types), and `entity_watchlisted` (`conditions.py:328` — entry links an entity on the rule creator's watchlist). Because scoring is the *final* chord callback while `automate` is a *side* dispatch, `on_new_entry` rules see `priority_score` only if the entry was already scored. For score reactions use the **`on_entry_scored` trigger**: `score_entry_task` dispatches `run_scored_entry_automations` after signals + score are persisted (guarded by a cheap enabled-rule existence check), so `priority_score_above`/`has_signal` conditions evaluate against real values. It fires on initial pipeline scoring only — rescores and backfills don't re-fire rules. See [automation-ai-enrichment.md](automation-ai-enrichment.md) for the rule engine itself.
 
 ### Entity "what's new" developments
 
@@ -360,7 +376,7 @@ Schemas, indexes, and JSONB layouts are documented in [data-model.md](data-model
 | `entry_pipeline_runs` | `backend/app/models/entry_pipeline_run.py` | Terminal per-stage execution records; 30-day retention |
 | `job_runs` | `backend/app/models/job_run.py` | Scheduled-task execution records with clipped detail; 30-day retention |
 
-Plus two columns on `entries`: `priority_score` (indexed, nullable — null means never scored) and `scored_at` (`backend/app/models/entry.py:39-40`).
+Plus three columns on `entries`: `priority_score` (0–10, indexed, nullable — null means never scored), `priority_raw` (the weighted sum it is scaled from, indexed; the ordering key) and `scored_at`.
 
 ---
 
@@ -369,8 +385,8 @@ Plus two columns on `entries`: `priority_score` (indexed, nullable — null mean
 All flags are DB-backed per environment — flipping them in dev does nothing for prod.
 
 1. **Shadow first.** Enable `signal_engine_shadow` (Settings → Engine → score stage). New entries start getting scored as their pipelines complete; nothing changes in the UI.
-2. **Backfill history.** Manually dispatch `backfill_entry_scores` (default: 14 days, batches of 500) so shadow mode has data to evaluate — it is never beat-scheduled and skips itself if both flags are off (`signal_tasks.py:461`). It only scores entries with `scored_at IS NULL`; the 6-hourly rescore sweeps unscored entries too but only inside its 72h window, so without the backfill, older history stays unscored.
-3. **Let the weights settle.** Run (or wait for) `signal-rate-recompute` so IDF weights and the auto p95 threshold reflect the actual river instead of the cold-start defaults.
+2. **Backfill history.** Manually dispatch `backfill_entry_scores` (default: 14 days, batches of 500) so shadow mode has data to evaluate — it is never beat-scheduled and skips itself if both flags are off (`backend/app/workers/signal_tasks.py:520`). It only scores entries with `scored_at IS NULL`; the 6-hourly rescore sweeps unscored entries too but only inside its 72h window, so without the backfill, older history stays unscored.
+3. **Let the weights settle.** Run (or wait for) `signal-rate-recompute` so IDF weights, the 0–10 scale's cutoffs and the auto p95 threshold reflect the actual river instead of the cold-start defaults.
 4. **Validate.** Compare `GET /api/entries/triage?mode=signals` against the default legacy ranking for about a week; tune family multipliers on the score stage card if a family dominates.
 5. **Surface.** Enable `signal_engine_surface` — triage flips to the signal ranking, entry lists gain chips and `sort=radar`, `entry_scored` SSE starts.
 6. **Pipeline plans (independent).** Enable `pipeline_engine_enabled` whenever plan-driven composition is wanted; turning it off is an instant, lossless rollback to the feed booleans because the booleans are still the synthesis base, not a migrated-away snapshot.
