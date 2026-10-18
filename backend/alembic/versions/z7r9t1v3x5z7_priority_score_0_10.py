@@ -17,6 +17,7 @@ conditions or inside a branch action).
 """
 
 import json
+from decimal import ROUND_HALF_UP, Decimal
 
 import sqlalchemy as sa
 from sqlalchemy import text
@@ -67,7 +68,9 @@ def scale(raw: float, cuts: list[float]) -> float:
     for i in range(1, len(cuts)):
         lo, hi = cuts[i - 1], cuts[i]
         if raw < hi:
-            return round(ANCHORS[i - 1][0] + (raw - lo) / (hi - lo), 1)
+            value = ANCHORS[i - 1][0] + (raw - lo) / (hi - lo)
+            # Rounded like the SQL below (half away from zero, 15 digits), not round()'s half-to-even.
+            return float(Decimal(format(value, ".15g")).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP))
     return 10.0
 
 

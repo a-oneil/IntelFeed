@@ -87,7 +87,8 @@ class TestScaleScore:
         assert scale_score(0.0001, CUTS) == 1.0
 
     def test_interpolates_between_anchors_to_one_decimal(self):
-        assert scale_score(4.25, CUTS) == 4.2
+        assert scale_score(4.24, CUTS) == 4.2
+        assert scale_score(4.25, CUTS) == 4.3  # half away from zero, as Postgres rounds
         assert scale_score(7.0, CUTS) == 7.0
 
     def test_clamps_at_ten(self):
@@ -121,6 +122,18 @@ async def test_sql_mapping_matches_python(db_session, test_feed):
     rows = (await db_session.execute(select(Entry.priority_raw, scale_score_sql(Entry.priority_raw, cuts)))).all()
     for raw, sql_value in rows:
         assert sql_value == pytest.approx(scale_score(raw, cuts)), raw
+
+
+@pytest.mark.asyncio
+async def test_sql_and_python_round_exact_halves_alike(db_session, test_feed):
+    """An exact half must round the same both ways, or the nightly job rewrites it every night."""
+    raws = [1.05, 2.15, 2.25, 3.35, 4.25, 4.45, 5.55, 6.65, 7.75, 8.85, 9.95]
+    for raw in raws:
+        await _entry(db_session, test_feed, raw)
+    rows = (await db_session.execute(select(Entry.priority_raw, scale_score_sql(Entry.priority_raw, CUTS)))).all()
+    assert len(rows) == len(raws)
+    for raw, sql_value in rows:
+        assert sql_value == scale_score(raw, CUTS), raw
 
 
 @pytest.mark.asyncio
@@ -284,6 +297,19 @@ async def test_legacy_raw_override_is_converted_once(fake_redis):
 
 
 @pytest.mark.asyncio
+async def test_legacy_override_waits_for_real_cutoffs(fake_redis):
+    """Right after deploy nothing has cached the cutoffs; converting with the defaults would stick."""
+    fake_redis.data[signals.LEGACY_THRESHOLD_OVERRIDE_REDIS_KEY] = "4.5"
+
+    assert await signals.get_radar_threshold() == (signals.DEFAULT_RADAR_THRESHOLD, True)
+    assert fake_redis.data[signals.LEGACY_THRESHOLD_OVERRIDE_REDIS_KEY] == "4.5"
+    assert signals.THRESHOLD_OVERRIDE_REDIS_KEY not in fake_redis.data
+
+    fake_redis.data[signals.SCALE_CUTOFFS_REDIS_KEY] = json.dumps(CUTS)
+    assert await signals.get_radar_threshold() == (4.5, False)
+
+
+@pytest.mark.asyncio
 async def test_threshold_default_is_on_the_scale(fake_redis):
     value, is_auto = await signals.get_radar_threshold()
     assert is_auto and 0 < value <= 10
@@ -300,6 +326,8 @@ _spec.loader.exec_module(migration)
 def test_migration_mapping_matches_live_mapping():
     for raw in [-1, 0, 0.001, 0.19, 0.5, 1.4, 2.0, 4.0, 4.9, 30]:
         assert migration.scale(raw, list(DEFAULT_SCALE_CUTOFFS)) == scale_score(raw, DEFAULT_SCALE_CUTOFFS)
+    for raw in [2.25, 4.25, 8.85]:  # exact halves round alike too
+        assert migration.scale(raw, CUTS) == scale_score(raw, CUTS)
     assert migration.ANCHORS == SCALE_ANCHORS
     assert migration.DEFAULT_CUTOFFS == DEFAULT_SCALE_CUTOFFS
 

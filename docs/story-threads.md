@@ -182,8 +182,7 @@ Google News anchor wrapped around a 400-character tracking token — so
 - **Priority Queue** — `GET /api/entries/priority-queue`
   (`build_priority_queue` in `backend/app/api/entries.py`) returns entries and
   thread rows as one ranked list, and `ThreadRow` renders the thread ones. A
-  thread ranks by its best *unread, non-echo* member plus a capped
-  corroboration bump (its badge shows that member's own 0–10 score), and every
+  thread ranks by the score of its best *unread, non-echo* member, and every
   member is withheld from the entry stream — the
   row stands for them. A thread with nothing unread does not appear at all: the
   queue answers "read this next". This replaced the convergence-cluster rows,

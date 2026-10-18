@@ -20,6 +20,7 @@ import math
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from decimal import ROUND_HALF_UP, Decimal
 from urllib.parse import urlparse
 
 from sqlalchemy import Float, Numeric, case, cast, func, literal, select, union_all
@@ -207,8 +208,19 @@ def scale_score(raw: float | None, cutoffs: list[float] | tuple[float, ...] | No
         lo, hi = cuts[i - 1], cuts[i]
         if raw < hi:
             frac = (raw - lo) / (hi - lo)
-            return round(SCALE_ANCHORS[i - 1][0] + frac, 1)
+            return _round_like_postgres(SCALE_ANCHORS[i - 1][0] + frac)
     return 10.0
+
+
+def _round_like_postgres(value: float) -> float:
+    """One decimal, rounded the way scale_score_sql's ``round(x::numeric, 1)`` does.
+
+    Python's round() is half-to-even on the binary value (4.25 → 4.2) where
+    Postgres casts to 15 significant digits and rounds half away from zero
+    (4.25 → 4.3). Left unmatched, the nightly re-scale would rewrite every
+    exact-half score each night and nudge it by 0.1.
+    """
+    return float(Decimal(format(value, ".15g")).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP))
 
 
 def scale_score_sql(raw_col, cutoffs: list[float] | tuple[float, ...]):
@@ -244,6 +256,15 @@ async def compute_scale_cutoffs(db: AsyncSession) -> list[float] | None:
     return [round(float(c), 4) for c in cuts]
 
 
+async def _cached_scale_cutoffs(r) -> list[float] | None:
+    raw = await r.get(SCALE_CUTOFFS_REDIS_KEY)
+    if raw:
+        cuts = json.loads(raw)
+        if isinstance(cuts, list) and len(cuts) == len(SCALE_ANCHORS):
+            return [float(c) for c in cuts]
+    return None
+
+
 async def get_scale_cutoffs(db: AsyncSession | None = None) -> list[float]:
     """Raw cutoffs for the 0–10 scale, as last written by the rates job.
 
@@ -253,11 +274,9 @@ async def get_scale_cutoffs(db: AsyncSession | None = None) -> list[float]:
     """
     try:
         r = await get_redis()
-        raw = await r.get(SCALE_CUTOFFS_REDIS_KEY)
-        if raw:
-            cuts = json.loads(raw)
-            if isinstance(cuts, list) and len(cuts) == len(SCALE_ANCHORS):
-                return [float(c) for c in cuts]
+        cuts = await _cached_scale_cutoffs(r)
+        if cuts:
+            return cuts
         if db is not None:
             cuts = await compute_scale_cutoffs(db)
             if cuts:
@@ -412,8 +431,12 @@ async def get_radar_threshold() -> tuple[float, bool]:
         if override is not None:
             return float(override), False
         legacy = await r.get(LEGACY_THRESHOLD_OVERRIDE_REDIS_KEY)
-        if legacy is not None:
-            converted = scale_score(float(legacy), await get_scale_cutoffs()) or 0.0
+        # Converted once, and only against real cutoffs: right after deploy
+        # nothing has cached them yet, and converting with the defaults would
+        # store a wrong override for good. Until then the old key is left alone.
+        cuts = await _cached_scale_cutoffs(r) if legacy is not None else None
+        if cuts:
+            converted = scale_score(float(legacy), cuts) or 0.0
             await r.set(THRESHOLD_OVERRIDE_REDIS_KEY, str(converted))
             await r.delete(LEGACY_THRESHOLD_OVERRIDE_REDIS_KEY)
             return converted, False

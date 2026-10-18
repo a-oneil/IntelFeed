@@ -500,7 +500,7 @@ class AITask(Base):
 
 The legacy per-entry extraction tasks (`threat_actor_id`, `malware_id`, `tool_extraction`, `country_id`, `sector_id`, `article_metadata`, `mitigation_extraction`, `cve_extraction`) still exist but are flagged `deprecated` — see "One-Pass Entry Analysis" below.
 
-Tasks are invoked via `run_task()` in `backend/app/ai/engine.py:331`.
+Tasks are invoked via `run_task()` in `backend/app/ai/engine.py:354`.
 
 ### Task Assignment & Routing
 
@@ -528,7 +528,7 @@ When `run_task(task_name="article_summary")` is called:
 3. Get or create the provider instance via `_get_provider_instance()`
 4. Execute via `provider.complete()`
 
-Reference: `backend/app/ai/engine.py:266` (`get_task_assignment()`).
+Reference: `backend/app/ai/engine.py:289` (`get_task_assignment()`).
 
 ### Prompt Templates
 
@@ -547,7 +547,7 @@ class AIPromptTemplate(Base):
     created_at: datetime
 ```
 
-**Prompt Resolution** (`get_active_prompt`, `backend/app/ai/engine.py:297`):
+**Prompt Resolution** (`get_active_prompt`, `backend/app/ai/engine.py:320`):
 1. User-specific template (highest priority): where `created_by == user_id` AND `is_active` AND highest `version`
 2. System default template: where `created_by IS NULL` AND `is_active` AND highest `version`
 3. Task's `default_prompt_template` field (fallback)
@@ -580,7 +580,7 @@ Summary: {{ entry.summary }}
 Produce a single JSON object with overall briefing and coverage gaps.
 ```
 
-Rendering uses Jinja2 at `render_prompt`, `backend/app/ai/engine.py:260`.
+Rendering uses Jinja2 at `render_prompt`, `backend/app/ai/engine.py:283`.
 
 ### Task Execution & Results
 
