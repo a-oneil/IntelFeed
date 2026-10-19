@@ -92,6 +92,7 @@ import com.example.intelfeed.theme.SlateDark800
 import com.example.intelfeed.theme.TextMuted
 import com.example.intelfeed.theme.TextPrimary
 import com.example.intelfeed.theme.TextSecondary
+import com.example.intelfeed.theme.ThemeEngine
 import com.example.intelfeed.ui.components.ErrorState
 import com.example.intelfeed.ui.components.InlineLoading
 import com.example.intelfeed.ui.components.LoadingBox
@@ -103,27 +104,24 @@ import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-// The web's --accent, --entity-victim, --success and --danger.
-private val Accent = Color(0xFFF78166)
-private val Victim = Color(0xFFE0555B)
+// The web's --accent-ops / --accent, --entity-victim, --success and --danger.
+private val Accent: Color
+    get() = ThemeEngine.domainAccentColor("ops")
+private val Victim: Color
+    get() = ThemeEngine.entityColor("ransomware_victim")
 // The web colours a rise in victims with --entity-victim and a fall with --success.
-private val Up = Color(0xFFE0555B)
-private val Down = Color(0xFF3FB950)
+private val Up: Color
+    get() = ThemeEngine.entityColor("ransomware_victim")
+private val Down: Color
+    get() = ThemeEngine.color("success")
 
-/** The web's group palette (--rgroup-*): the server sends a group key in group_color. */
+/** The web's group palette (--rgroup-* from `/api/themes/schema`): the server sends a group key in group_color. */
 fun ransomwareGroupColor(key: String?): Color {
     val k = key?.trim()?.lowercase()?.replace("cl0p", "clop")
     if (k != null && k.startsWith("#") && k.length == 7) k.drop(1).toLongOrNull(16)?.let { return Color(0xFF000000 or it) }
-    return when (k) {
-        "lockbit" -> Color(0xFFE05C2F)
-        "clop" -> Color(0xFF12996A)
-        "akira" -> Color(0xFF2A78D6)
-        "qilin" -> Color(0xFFC2537F)
-        "play" -> Color(0xFFB5820F)
-        "ransomhub" -> Color(0xFF2F8F2F)
-        else -> Color(0xFF8B94A3)
-    }
+    return ThemeEngine.ransomwareGroupColor(k)
 }
+
 
 private fun hoursSince(iso: String?): Double? =
     iso?.let { DateUtils.parseIsoMillis(it) }?.takeIf { it > 0 }?.let { (System.currentTimeMillis() - it) / 3_600_000.0 }

@@ -78,6 +78,7 @@ import com.example.intelfeed.theme.SlateDark900
 import com.example.intelfeed.theme.TextMuted
 import com.example.intelfeed.theme.TextPrimary
 import com.example.intelfeed.theme.TextSecondary
+import com.example.intelfeed.theme.ThemeEngine
 import com.example.intelfeed.util.DateUtils
 import com.example.intelfeed.util.HtmlText
 import java.util.Locale
@@ -106,18 +107,19 @@ data class CardAction(val label: String, val icon: ImageVector? = null, val onCl
 fun scoreColor(score: Double): Color = when {
     score >= 9.5 -> CyberRed
     score >= 8.5 -> CyberOrange
-    score >= 7 -> CyberAmber
-    else -> CyberBlue
+    score >= 7 -> ThemeEngine.severityColor("medium")
+    else -> ThemeEngine.severityColor("info")
 }
 
 fun signalFamilyColor(family: String?): Color = when (family?.lowercase()) {
-    "novelty" -> CyberPurple
-    "coverage" -> CyberBlue
-    "severity" -> CyberRed
-    "interest" -> CyberGreen
-    "content" -> CyberAmber
+    "novelty" -> ThemeEngine.domainAccentColor("dash")
+    "coverage" -> ThemeEngine.severityColor("info")
+    "severity" -> ThemeEngine.severityColor("high")
+    "interest" -> ThemeEngine.severityColor("low")
+    "content" -> ThemeEngine.severityColor("medium")
     else -> TextSecondary
 }
+
 
 /** Readable names for the signal engine's types; unknown ones are humanized ("novel_entity" -> "Novel entity"). */
 fun signalLabel(type: String): String = when (type) {
@@ -376,18 +378,22 @@ data class IntelCue(
     val pirs: List<com.example.intelfeed.data.model.PirMatch> = emptyList()
 )
 
-// The web's --entity-pir, #dc2626 (critical CVE, KEV opportunity) and --warning.
-private val PirColor = Color(0xFF06B6D4)
-private val CriticalRed = Color(0xFFDC2626)
-private val WarningColor = Color(0xFFD29922)
+// The web's --entity-pir, --severity-critical and --warning.
+private val PirColor: Color
+    get() = ThemeEngine.entityColor("pir")
+private val CriticalRed: Color
+    get() = ThemeEngine.severityColor("critical")
+private val WarningColor: Color
+    get() = ThemeEngine.severityColor("medium")
 
-/** The web's PIR categories, in its order, with its --pir-* colours. */
-val PIR_CATEGORIES = listOf(
-    "tactical" to Color(0xFFEF4444),
-    "operational" to Color(0xFFF97316),
-    "technical" to Color(0xFF06B6D4),
-    "strategic" to Color(0xFF8B5CF6)
-)
+/** The web's PIR categories, in its order, with its --pir-* colours from `/api/themes/schema`. */
+val PIR_CATEGORIES: List<Pair<String, Color>>
+    get() = listOf(
+        "tactical" to ThemeEngine.pirCategoryColor("tactical"),
+        "operational" to ThemeEngine.pirCategoryColor("operational"),
+        "technical" to ThemeEngine.pirCategoryColor("technical"),
+        "strategic" to ThemeEngine.pirCategoryColor("strategic")
+    )
 
 /**
  * The web list's intel line (IntelBadges), in its order: notes; the lead actor or malware (+ how
@@ -438,7 +444,7 @@ fun intelCues(c: EntryIntelCounts): List<IntelCue> = buildList {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun IntelCueRow(counts: EntryIntelCounts) {
-    val cues = remember(counts) { intelCues(counts) }
+    val cues = remember(counts, ThemeEngine.variables) { intelCues(counts) }
     if (cues.isEmpty()) return
     var pirSheet by remember { mutableStateOf<List<com.example.intelfeed.data.model.PirMatch>?>(null) }
     FlowRow(
@@ -453,6 +459,7 @@ private fun IntelCueRow(counts: EntryIntelCounts) {
     }
     pirSheet?.let { PirMatchesSheet(it, onDismiss = { pirSheet = null }) }
 }
+
 
 @Composable
 private fun IntelCueChip(cue: IntelCue, onClick: (() -> Unit)?) {
@@ -971,7 +978,7 @@ private fun dayChips(intel: DayIntel, dayKey: String): List<DayChip> = buildList
         add(DayChip("ttp", label, times(t.count), EntityType.TTP.color(),
             focus("ttp", "articles mentioning ${t.techniqueId ?: t.name}", "entity_type" to "ttp", "entity_id" to t.id)))
     }
-    intel.sector?.let { add(DayChip("sector", it.name, times(it.count), TextSecondary, focus("sector", "articles targeting ${it.name}", "sector" to it.slug))) }
+    intel.sector?.let { add(DayChip("sector", it.name, times(it.count), ThemeEngine.entityColor("sector"), focus("sector", "articles targeting ${it.name}", "sector" to it.slug))) }
     intel.cve?.let { c ->
         add(DayChip(if (c.kev) "cve · kev" else "cve", c.name, c.cvssScore?.let { String.format(Locale.US, "%.1f", it) } ?: times(c.count),
             if (c.kev) CyberRed else EntityType.CVE.color(), focus("cve", "articles mentioning ${c.name}", "entity_type" to "cve", "entity_id" to c.id)))
@@ -1022,6 +1029,7 @@ fun DayHeader(
 
     val hasSummary = dailySummary?.summary?.isNotBlank() == true
     val noSummary = summaryChecked && !hasSummary
+    val aiAccent = ThemeEngine.domainAccentColor("ai")
 
     Column(modifier = modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp)) {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -1038,12 +1046,12 @@ fun DayHeader(
             val (chipText, chipColor) = when {
                 summaryLoading -> "Loading…" to TextMuted
                 summaryFailed -> "Retry briefing" to CyberAmber
-                hasSummary -> (if (expanded) "Hide briefing" else "AI briefing") to CyberPurple
+                hasSummary -> (if (expanded) "Hide briefing" else "AI briefing") to aiAccent
                 noSummary -> "No briefing" to TextMuted
                 else -> "AI briefing" to TextMuted
             }
             Surface(
-                color = if (hasSummary) CyberPurple.copy(alpha = 0.16f) else SlateDark700.copy(alpha = 0.5f),
+                color = if (hasSummary) aiAccent.copy(alpha = 0.16f) else SlateDark700.copy(alpha = 0.5f),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
                     .clip(RoundedCornerShape(12.dp))
@@ -1059,7 +1067,7 @@ fun DayHeader(
             }
         }
 
-        val chips = remember(dayIntel, dayKey) { dayIntel?.let { dayChips(it, dayKey) }.orEmpty() }
+        val chips = remember(dayIntel, dayKey, ThemeEngine.variables) { dayIntel?.let { dayChips(it, dayKey) }.orEmpty() }
         if (chips.isNotEmpty()) {
             Spacer(Modifier.height(6.dp))
             Row(
@@ -1078,14 +1086,14 @@ fun DayHeader(
             Surface(
                 color = SlateDark800,
                 shape = RoundedCornerShape(10.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, CyberPurple.copy(alpha = if (hasSummary) 0.4f else 0.15f)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, aiAccent.copy(alpha = if (hasSummary) 0.4f else 0.15f)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(Modifier.padding(12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Bolt, contentDescription = null, tint = CyberPurple, modifier = Modifier.size(15.dp))
+                        Icon(Icons.Default.Bolt, contentDescription = null, tint = aiAccent, modifier = Modifier.size(15.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("AI daily briefing", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = CyberPurple)
+                        Text("AI daily briefing", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = aiAccent)
                     }
                     Spacer(Modifier.height(6.dp))
                     if (dailySummary != null && hasSummary) {
@@ -1146,10 +1154,13 @@ private fun DayChipView(chip: DayChip, active: Boolean, onDayFocus: (com.example
     }
 }
 
-/** Tag colours come from the server as hex strings (#8B5CF6). Colours too dark for the dark theme fall back to grey. */
+/** Tag colours come from the server as hex strings (#8B5CF6). Colours too dark for dark themes (or too light for light themes) fall back to secondary text. */
 fun tagColor(hex: String?): Color {
     val parsed = hex?.removePrefix("#")?.takeIf { it.length == 6 }?.toLongOrNull(16) ?: return CyberBlue
     val color = Color(0xFF000000 or parsed)
     val luminance = 0.299f * color.red + 0.587f * color.green + 0.114f * color.blue
-    return if (luminance < 0.25f) TextSecondary else color
+    return if (!ThemeEngine.isLightTheme && luminance < 0.25f) TextSecondary
+    else if (ThemeEngine.isLightTheme && luminance > 0.85f) TextSecondary
+    else color
 }
+

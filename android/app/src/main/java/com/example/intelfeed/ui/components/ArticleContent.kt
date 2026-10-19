@@ -65,12 +65,14 @@ import com.example.intelfeed.theme.SlateDark800
 import com.example.intelfeed.theme.TextMuted
 import com.example.intelfeed.theme.TextPrimary
 import com.example.intelfeed.theme.TextSecondary
+import com.example.intelfeed.theme.ThemeEngine
 import com.example.intelfeed.ui.reader.ReaderFontSize
 import com.example.intelfeed.data.model.EntityType
 import com.example.intelfeed.util.ArticleHtml
 import com.example.intelfeed.util.Clipboard
 
-private val BodyColor = Color(0xFFD5DCE4)
+private val BodyColor: Color
+    get() = androidx.compose.ui.graphics.lerp(TextPrimary, TextSecondary, 0.25f)
 
 /** A highlighted entity name the reader tapped: which entity, and the phrase as written in the article. */
 data class EntityMark(val type: String, val id: String, val name: String, val text: String)
@@ -108,7 +110,7 @@ fun ArticleContent(
             link = { url -> linkHandler(url) }
         )
     }
-    val rendered = remember(blocks, highlightQuery) {
+    val rendered = remember(blocks, highlightQuery, ThemeEngine.variables) {
         blocks.map { block ->
             when (block) {
                 is ArticleHtml.Paragraph -> block to block.text.toMarked(highlightQuery, handlers)
@@ -170,7 +172,12 @@ private fun ParagraphBlock(kind: ArticleHtml.TextKind, text: MarkedString, fontS
 @Composable
 fun CodeBlock(code: String, modifier: Modifier = Modifier, marked: MarkedString? = null) {
     val context = LocalContext.current
-    Surface(color = Color(0xFF0B0F14), shape = RoundedCornerShape(8.dp), modifier = modifier.fillMaxWidth()) {
+    Surface(
+        color = SlateDark800,
+        shape = RoundedCornerShape(8.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, SlateDark700),
+        modifier = modifier.fillMaxWidth()
+    ) {
         Box {
             MarkedText(
                 text = marked ?: MarkedString(AnnotatedString(code), emptyList()),
@@ -202,7 +209,9 @@ class MarkedString(val text: AnnotatedString, val underlines: List<Underline>)
 class Underline(val start: Int, val end: Int, val color: Color, val thick: Boolean)
 
 // The web's --text-muted, used for the glossary underline.
-private val GlossaryUnderline = SlateDark500
+private val GlossaryUnderline: Color
+    get() = SlateDark500
+
 
 /** Text that draws [MarkedString.underlines] behind itself once it's laid out. */
 @Composable

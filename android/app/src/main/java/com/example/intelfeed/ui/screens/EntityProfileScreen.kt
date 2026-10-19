@@ -285,7 +285,7 @@ private fun ProfileHeader(profile: EntityProfile, type: EntityType, state: Entit
         if (profile.badges.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                profile.badges.forEach { Pill(it.label, it.tone.color()) }
+                profile.badges.forEach { Pill(it.label, it.color()) }
             }
         }
         if (profile.aliases.isNotEmpty()) {
@@ -374,13 +374,14 @@ private fun LazyListScope.overview(
                         val ref = chip.ref
                         Pill(
                             label = chip.label,
-                            color = ref?.type?.color() ?: chip.tone.color(),
+                            color = chip.color(),
                             onClick = ref?.let { { onOpenEntity(it) } },
                             onLongClick = { Clipboard.copy(context, group.title, chip.label) }
                         )
                     }
                 }
             }
+
             if (profile.techniques.isNotEmpty()) {
                 SectionHeader("ATT&CK techniques (${profile.techniques.size})")
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {

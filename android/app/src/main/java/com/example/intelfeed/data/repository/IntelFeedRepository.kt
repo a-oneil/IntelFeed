@@ -43,7 +43,10 @@ import com.example.intelfeed.data.model.SimilarEntry
 import com.example.intelfeed.data.model.TagEntity
 import com.example.intelfeed.data.model.TagIdsRequest
 import com.example.intelfeed.data.model.ThreadDetail
+import com.example.intelfeed.data.model.ColorSchemaDto
 import com.example.intelfeed.data.model.ThreatActor
+import com.example.intelfeed.data.model.ThemeDto
+import com.example.intelfeed.data.model.ThemePreferenceUpdateRequest
 import com.example.intelfeed.data.model.Tool
 import com.example.intelfeed.data.model.Ttp
 import com.example.intelfeed.data.model.UnifiedSearchRequest
@@ -53,6 +56,7 @@ import com.example.intelfeed.data.model.UserProfile
 import com.example.intelfeed.data.model.Vendor
 import com.example.intelfeed.data.model.WatchlistItem
 import com.example.intelfeed.data.model.WatchlistRequest
+
 import com.example.intelfeed.data.network.ApiClient
 import com.example.intelfeed.data.network.IntelFeedApi
 import com.example.intelfeed.util.DateUtils
@@ -258,6 +262,26 @@ class IntelFeedRepository(
                 getApi().logout("Bearer $accessToken", LogoutRequest(refreshToken = refreshToken))
             }
         }
+    }
+
+    // THEMES & COLOR SCHEMA
+
+    suspend fun getThemes(): Result<List<ThemeDto>> = apiCall { getApi().getThemes() }
+
+    suspend fun getDefaultTheme(): Result<ThemeDto?> = apiCall { getApi().getDefaultTheme() }
+
+    suspend fun getColorSchema(): Result<ColorSchemaDto> = apiCall { getApi().getColorSchema() }
+
+    suspend fun updateThemePreference(themeId: String?): Result<UserProfile?> = apiCall {
+        val resp = getApi().updateThemePreference(
+            ThemePreferenceUpdateRequest(
+                themeId = themeId,
+                clearTheme = themeId == null
+            )
+        )
+        val updated = _currentUser.value?.copy(themeId = resp.themeId)
+        _currentUser.value = updated
+        updated
     }
 
     // FEED

@@ -24,14 +24,15 @@ import java.util.Locale
 
 enum class Tone { NEUTRAL, INFO, SUCCESS, WARNING, DANGER, CRITICAL, ACCENT }
 
-data class Badge(val label: String, val tone: Tone = Tone.NEUTRAL)
+data class Badge(val label: String, val tone: Tone = Tone.NEUTRAL, val ruleFormat: String? = null)
 
 /** A tappable reference to another entity. */
 data class EntityRef(val type: EntityType, val id: String, val name: String)
 
 data class ExternalLink(val label: String, val url: String)
 
-data class ProfileChip(val label: String, val ref: EntityRef? = null, val tone: Tone = Tone.NEUTRAL)
+data class ProfileChip(val label: String, val ref: EntityRef? = null, val tone: Tone = Tone.NEUTRAL, val colorKey: String? = null)
+
 
 data class ChipGroup(val title: String, val chips: List<ProfileChip>)
 
@@ -210,11 +211,12 @@ fun DetectionRule.toWorkbenchItem() = WorkbenchItem(
     subtitle = listOfNotNull(sourceRepo, sourceAuthor?.let { "by $it" }).joinToString(" · ").ifBlank { null },
     description = description,
     badges = listOfNotNull(
-        Badge(ruleType.uppercase(Locale.US), Tone.INFO),
+        Badge(ruleType.uppercase(Locale.US), Tone.INFO, ruleFormat = ruleType),
         severity?.let { Badge(it.uppercase(Locale.US), severityTone(it)) },
         if (isDraft) Badge("Draft") else null
     )
 )
+
 
 fun Campaign.toWorkbenchItem() = WorkbenchItem(
     ref = EntityRef(EntityType.CAMPAIGN, id, name),
@@ -275,7 +277,7 @@ fun ThreatActor.toProfile() = EntityProfile(
     ),
     facts = seenFacts(firstSeenAt, lastSeenAt),
     chipGroups = listOfNotNull(
-        targetedSectors.takeIf { it.isNotEmpty() }?.let { s -> ChipGroup("Targeted sectors", s.map { ProfileChip(it) }) }
+        targetedSectors.takeIf { it.isNotEmpty() }?.let { s -> ChipGroup("Targeted sectors", s.map { ProfileChip(it, colorKey = "sector") }) }
     ),
     techniques = ttps.sortedByDescending { it.count },
     links = listOfNotNull(
@@ -300,8 +302,9 @@ fun Malware.toProfile() = EntityProfile(
                 ProfileChip(a.name, a.id?.let { EntityRef(EntityType.THREAT_ACTOR, it, a.name) })
             })
         },
-        targetedSectors.takeIf { it.isNotEmpty() }?.let { s -> ChipGroup("Targeted sectors", s.map { ProfileChip(it) }) }
+        targetedSectors.takeIf { it.isNotEmpty() }?.let { s -> ChipGroup("Targeted sectors", s.map { ProfileChip(it, colorKey = "sector") }) }
     ),
+
     links = listOfNotNull(
         mitreId?.let { ExternalLink("MITRE ATT&CK", "https://attack.mitre.org/software/$it/") },
         malpediaUrl?.let { ExternalLink("Malpedia", it) },
@@ -447,10 +450,11 @@ fun DetectionRule.toProfile() = EntityProfile(
     subtitle = "${ruleType.uppercase(Locale.US)} rule",
     description = HtmlText.cleanAiArtifacts(description),
     badges = listOfNotNull(
-        Badge(ruleType.uppercase(Locale.US), Tone.INFO),
+        Badge(ruleType.uppercase(Locale.US), Tone.INFO, ruleFormat = ruleType),
         severity?.let { Badge(it.uppercase(Locale.US), severityTone(it)) },
         if (isDraft) Badge("Draft") else null
     ),
+
     facts = buildList {
         sourceRepo?.let { add("Repository" to it) }
         sourceAuthor?.let { add("Author" to it) }
