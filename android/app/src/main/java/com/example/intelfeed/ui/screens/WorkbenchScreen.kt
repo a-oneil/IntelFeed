@@ -95,8 +95,11 @@ fun WorkbenchScreen(uiState: IntelFeedUiState, viewModel: IntelFeedViewModel, mo
     val focusManager = LocalFocusManager.current
     val scope = rememberCoroutineScope()
     val tab = uiState.selectedWorkbenchTab
-    val accent = tab.type?.color() ?: CyberPurple
+    val accent = tab.type?.color()
+        ?: if (tab == WorkbenchTab.RANSOMWARE) com.example.intelfeed.theme.ThemeEngine.domainAccentColor("ops")
+        else com.example.intelfeed.theme.ThemeEngine.domainAccentColor("dash")
     val listState = rememberLazyListState()
+
     var showCreateCampaignDialog by remember { mutableStateOf(false) }
 
     val nearEnd by remember {
@@ -196,17 +199,21 @@ fun WorkbenchScreen(uiState: IntelFeedUiState, viewModel: IntelFeedViewModel, mo
                         WorkbenchTab.TTPS -> strings.tabTechniques
                         else -> t.label
                     }
-                    Tab(
+                     Tab(
                         selected = selected,
                         onClick = { viewModel.setWorkbenchTab(t) },
                         text = {
+                            val tAccent = t.type?.color()
+                                ?: if (t == WorkbenchTab.RANSOMWARE) com.example.intelfeed.theme.ThemeEngine.domainAccentColor("ops")
+                                else com.example.intelfeed.theme.ThemeEngine.domainAccentColor("dash")
                             Text(
                                 tabLabel,
                                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (selected) (t.type?.color() ?: CyberPurple) else TextMuted
+                                color = if (selected) tAccent else TextMuted
                             )
                         }
                     )
+
                 }
             }
 
@@ -314,7 +321,7 @@ fun WorkbenchScreen(uiState: IntelFeedUiState, viewModel: IntelFeedViewModel, mo
                     )
                     if (createError != null) {
                         Spacer(Modifier.height(6.dp))
-                        Text(createError!!, color = androidx.compose.ui.graphics.Color(0xFFEF4444), fontSize = 12.sp)
+                        Text(createError!!, color = com.example.intelfeed.theme.CyberRed, fontSize = 12.sp)
                     }
                 }
             },
@@ -395,7 +402,7 @@ private fun WorkbenchCard(item: WorkbenchItem, onClick: () -> Unit) {
             if (item.badges.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    item.badges.forEach { Pill(it.label, it.tone.color()) }
+                    item.badges.forEach { Pill(it.label, it.color()) }
                 }
             }
             item.description?.takeIf { it.isNotBlank() }?.let {
@@ -405,3 +412,4 @@ private fun WorkbenchCard(item: WorkbenchItem, onClick: () -> Unit) {
         }
     }
 }
+

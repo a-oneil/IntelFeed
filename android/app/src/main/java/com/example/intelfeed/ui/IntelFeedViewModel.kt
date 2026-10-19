@@ -16,6 +16,7 @@ import com.example.intelfeed.data.model.EntryIntelCounts
 import com.example.intelfeed.data.model.FeedSource
 import com.example.intelfeed.data.model.SavedSearch
 import com.example.intelfeed.data.model.SearchSuggestion
+import com.example.intelfeed.data.model.ThemeDto
 import com.example.intelfeed.data.model.UnifiedSearchResponse
 import com.example.intelfeed.data.model.UserProfile
 import com.example.intelfeed.data.model.WatchlistItem
@@ -27,6 +28,7 @@ import com.example.intelfeed.data.repository.FeedFilter
 import com.example.intelfeed.data.repository.IntelFeedRepository
 import com.example.intelfeed.data.repository.OffsetPage
 import com.example.intelfeed.data.repository.ViewCounts
+import com.example.intelfeed.theme.ThemeEngine
 import com.example.intelfeed.ui.entity.Badge
 import com.example.intelfeed.ui.entity.EntityRef
 import com.example.intelfeed.ui.entity.Tone
@@ -34,6 +36,7 @@ import com.example.intelfeed.ui.entity.WorkbenchItem
 import com.example.intelfeed.ui.entity.toWorkbenchItem
 import com.example.intelfeed.ui.navigation.Route
 import com.example.intelfeed.ui.navigation.RouteCodec
+
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -160,7 +163,13 @@ data class IntelFeedUiState(
     val recentSearches: List<String> = emptyList(),
     // Tracked keywords (kept on this device): highlighted in articles and checked by the alerts.
     val trackedKeywords: List<String> = emptyList(),
-    val savedSearches: List<SavedSearch> = emptyList()
+    val savedSearches: List<SavedSearch> = emptyList(),
+
+    // Themes & Color Schema
+    val availableThemes: List<ThemeDto> = emptyList(),
+    val activeThemeId: String? = null,
+    val activeThemeName: String = "GitHub Dark",
+    val activeThemeSource: String = "default"
 ) {
     val isSelecting: Boolean get() = selectedIds.isNotEmpty()
     val searchHasMore: Boolean get() = searchEntries.size < searchEntriesTotal
@@ -193,6 +202,7 @@ class IntelFeedViewModel(
     private var workbenchItemsKey: Pair<WorkbenchTab, String?>? = null
     private var searchJob: Job? = null
     private var suggestJob: Job? = null
+    private var themeJob: Job? = null
 
     private var userInitiatedLogout = false
 
@@ -211,6 +221,17 @@ class IntelFeedViewModel(
     init {
         // Before anything loads, so the first feed request uses the restored view.
         restoreSavedState()
+        viewModelScope.launch {
+            val cached = userPreferences.getCachedThemeState()
+            ThemeEngine.restoreFromCache(cached)
+            _uiState.update {
+                it.copy(
+                    activeThemeId = ThemeEngine.activeThemeId,
+                    activeThemeName = ThemeEngine.activeThemeName,
+                    activeThemeSource = ThemeEngine.activeThemeSource
+                )
+            }
+        }
         viewModelScope.launch {
             snapshotFlow { backStack.toList() }.collect { routes -> RouteCodec.encode(routes)?.let { savedState[KEY_BACK_STACK] = it } }
         }
@@ -274,9 +295,152 @@ class IntelFeedViewModel(
                     // Also loads the saved searches (a separate call here sent the request twice).
                     loadViewCounts(force = true)
                     loadWorkbench()
-                    repository.loadCurrentUser()
+                    syncThemesForSignedInUser()
                 } else {
                     resetSession()
+                    syncThemeForSignedOut()
+                }
+            }
+        }
+    }
+
+    /**
+     * Synchronizes the server's color schema (`/api/themes/schema`) and theme list (`/api/themes`)
+     * with the signed-in user's preference (`user.themeId`) or the instance default (`isDefault`).
+     */
+    fun refreshThemes() {
+        if (_uiState.value.isLoggedIn) {
+            syncThemesForSignedInUser()
+        } else {
+            syncThemeForSignedOut()
+        }
+    }
+
+    private fun syncThemesForSignedInUser() {
+        themeJob?.cancel()
+        themeJob = viewModelScope.launch {
+            val cached = userPreferences.getCachedThemeState()
+            val schemaDeferred = async { repository.getColorSchema() }
+            val userDeferred = async { repository.loadCurrentUser() }
+            val themesDeferred = async { repository.getThemes() }
+
+            schemaDeferred.await().getOrNull()?.let { schema ->
+                ThemeEngine.applyColorSchema(schema)
+                userPreferences.saveCachedColorSchema(schema)
+            }
+
+            val user = userDeferred.await().getOrNull()
+            val themes = themesDeferred.await().getOrNull().orEmpty()
+            if (themes.isNotEmpty()) {
+                val resolved = ThemeEngine.resolveSignedInTheme(themes, user, cached)
+                if (resolved != null) {
+                    ThemeEngine.applyThemeDto(resolved.theme, resolved.source)
+                    userPreferences.saveCachedTheme(
+                        themeId = resolved.theme.id,
+                        themeName = resolved.theme.name,
+                        variables = resolved.theme.variables,
+                        source = resolved.source
+                    )
+                }
+                _uiState.update {
+                    it.copy(
+                        availableThemes = themes,
+                        activeThemeId = ThemeEngine.activeThemeId,
+                        activeThemeName = ThemeEngine.activeThemeName,
+                        activeThemeSource = ThemeEngine.activeThemeSource
+                    )
+                }
+            }
+        }
+    }
+
+    private fun syncThemeForSignedOut() {
+        themeJob?.cancel()
+        themeJob = viewModelScope.launch {
+            val cached = userPreferences.getCachedThemeState()
+            val schemaDeferred = async { repository.getColorSchema() }
+            val defaultDeferred = async { repository.getDefaultTheme() }
+
+            schemaDeferred.await().getOrNull()?.let { schema ->
+                ThemeEngine.applyColorSchema(schema)
+                userPreferences.saveCachedColorSchema(schema)
+            }
+
+            val publicDefault = defaultDeferred.await().getOrNull()
+            if (publicDefault != null && ThemeEngine.shouldApplyPublicDefaultWhenSignedOut(publicDefault, cached)) {
+                ThemeEngine.applyThemeDto(publicDefault, "default")
+                userPreferences.saveCachedTheme(
+                    themeId = publicDefault.id,
+                    themeName = publicDefault.name,
+                    variables = publicDefault.variables,
+                    source = "default"
+                )
+                _uiState.update {
+                    it.copy(
+                        activeThemeId = ThemeEngine.activeThemeId,
+                        activeThemeName = ThemeEngine.activeThemeName,
+                        activeThemeSource = ThemeEngine.activeThemeSource
+                    )
+                }
+            }
+        }
+    }
+
+    /** Selects a theme in the mobile app and persists it to the user's server profile (`PUT /api/auth/me/theme`). */
+    fun selectTheme(theme: ThemeDto) {
+        ThemeEngine.applyThemeDto(theme, "user")
+        _uiState.update {
+            it.copy(
+                activeThemeId = theme.id,
+                activeThemeName = theme.name,
+                activeThemeSource = "user"
+            )
+        }
+        viewModelScope.launch {
+            userPreferences.saveCachedTheme(
+                themeId = theme.id,
+                themeName = theme.name,
+                variables = theme.variables,
+                source = "user"
+            )
+            if (_uiState.value.isLoggedIn) {
+                repository.updateThemePreference(theme.id).onFailure { e ->
+                    messenger.show("Saved theme on device, but couldn't sync to server: ${ErrorText.describe(e)}")
+                }
+            }
+        }
+    }
+
+    /** Clears the user's personal theme override and follows the server's instance default theme. */
+    fun useDefaultTheme() {
+        val themes = _uiState.value.availableThemes
+        val defaultTheme = themes.find { it.isDefault } ?: themes.find { it.name == "GitHub Dark" } ?: themes.firstOrNull()
+        if (defaultTheme != null) {
+            ThemeEngine.applyThemeDto(defaultTheme, "default")
+        } else {
+            ThemeEngine.resetToDefault()
+        }
+        _uiState.update {
+            it.copy(
+                activeThemeId = ThemeEngine.activeThemeId,
+                activeThemeName = ThemeEngine.activeThemeName,
+                activeThemeSource = "default"
+            )
+        }
+        viewModelScope.launch {
+            if (defaultTheme != null) {
+                userPreferences.saveCachedTheme(
+                    themeId = defaultTheme.id,
+                    themeName = defaultTheme.name,
+                    variables = defaultTheme.variables,
+                    source = "default"
+                )
+            } else {
+                userPreferences.clearCachedTheme()
+            }
+            if (_uiState.value.isLoggedIn) {
+                repository.updateThemePreference(null).onFailure { e ->
+                    messenger.show("Couldn't reset theme preference on server: ${ErrorText.describe(e)}")
                 }
             }
         }
@@ -312,7 +476,7 @@ class IntelFeedViewModel(
      * doesn't see it.
      */
     private fun resetSession() {
-        listOf(feedJob, drawerJob, workbenchJob, workbenchMoreJob, searchJob, suggestJob, countsJob).forEach { it?.cancel() }
+        listOf(feedJob, drawerJob, workbenchJob, workbenchMoreJob, searchJob, suggestJob, countsJob, themeJob).forEach { it?.cancel() }
         countsLoadedAt = 0L
         dayDataGeneration++
         dayIntelRequested.clear()
@@ -335,11 +499,16 @@ class IntelFeedViewModel(
             feedHideRead = previous.feedHideRead,
             feedSort = previous.feedSort,
             feedAutoRead = previous.feedAutoRead,
+            availableThemes = previous.availableThemes,
+            activeThemeId = previous.activeThemeId,
+            activeThemeName = previous.activeThemeName,
+            activeThemeSource = previous.activeThemeSource,
             loginError = if (sessionExpired) "Your session has expired. Please sign in again." else previous.loginError
         )
         backStack.clear()
         backStack.add(Route.Home)
     }
+
 
     // NAVIGATION
 

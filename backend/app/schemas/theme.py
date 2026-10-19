@@ -70,3 +70,21 @@ class ThemePreferenceUpdate(BaseModel):
             }
         }
     )
+
+
+class ColorSchemaResponse(BaseModel):
+    """Server-driven color coding vocabulary and default theme variables."""
+
+    base: dict[str, str]
+    domain_accents: dict[str, str]
+    entity_types: dict[str, str]
+    severity: dict[str, str]
+    rule_formats: dict[str, str]
+    ransomware_groups: dict[str, str]
+    pir: dict[str, str]
+    tlp: dict[str, str]
+    automation_nodes: dict[str, str]
+    syntax: dict[str, str]
+    heatmap: dict[str, str]
+    css_variables: dict[str, str]
+

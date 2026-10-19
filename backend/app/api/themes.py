@@ -12,10 +12,197 @@ from app.core.security import get_admin_user, get_current_user
 from app.database import get_db
 from app.models.theme import Theme
 from app.models.user import User
-from app.schemas.theme import ThemeCreate, ThemeDuplicate, ThemePreferenceUpdate, ThemeResponse, ThemeUpdate
+from app.schemas.theme import (
+    ColorSchemaResponse,
+    ThemeCreate,
+    ThemeDuplicate,
+    ThemePreferenceUpdate,
+    ThemeResponse,
+    ThemeUpdate,
+)
 from app.services.system_settings import get_default_theme_id, set_default_theme_id
 
 router = APIRouter()
+
+# Canonical workbench color coding vocabulary and base theme variables.
+# Mirrors frontend/src/index.css, entityTheme.ts, colorSchemes.ts, ransomwareColors.ts,
+# and severity.ts so mobile and web clients share one server-driven vocabulary.
+_BASE_VARIABLES: dict[str, str] = {
+    "bg-primary": "#0d1117",
+    "bg-secondary": "#161b22",
+    "bg-tertiary": "#21262d",
+    "bg-hover": "#30363d",
+    "text-primary": "#e6edf3",
+    "text-secondary": "#8b949e",
+    "text-muted": "#484f58",
+    "accent": "#f78166",
+    "accent-hover": "#ffa28b",
+    "accent-text": "#ffffff",
+    "border": "#30363d",
+    "danger": "#f85149",
+    "danger-fg": "#000000",
+    "success": "#3fb950",
+    "warning": "#d29922",
+    "sidebar-bg": "#010409",
+    "sidebar-hover": "#161b22",
+    "sidebar-active": "#21262d",
+    "card-bg": "#161b22",
+    "card-border": "#30363d",
+}
+
+_DOMAIN_ACCENTS: dict[str, str] = {
+    "feeds": "#f78166",
+    "intel": "#58a6ff",
+    "intel-fg": "#0d1117",
+    "detect": "#3fb950",
+    "dash": "#bc8cff",
+}
+
+_ENTITY_TYPES: dict[str, str] = {
+    "threat_actor": "#f97316",
+    "malware": "#a855f7",
+    "ttp": "#3b82f6",
+    "cve": "#ef4444",
+    "cwe": "#b45309",
+    "country": "#06b6d4",
+    "detection_rule": "#22c55e",
+    "campaign": "#14b8a6",
+    "vendor": "#6366f1",
+    "product": "#ec4899",
+    "tool": "#eab308",
+    "mitigation": "#84cc16",
+    "sector": "#10b981",
+    "ransomware_victim": "#e0555b",
+    "pir": "#06b6d4",
+    "observable": "#d946ef",
+    "note": "#9aa4b2",
+}
+
+_ENTITY_CSS_VARIABLES: dict[str, str] = {
+    "entity-actor": _ENTITY_TYPES["threat_actor"],
+    "entity-malware": _ENTITY_TYPES["malware"],
+    "entity-ttp": _ENTITY_TYPES["ttp"],
+    "entity-cve": _ENTITY_TYPES["cve"],
+    "entity-cwe": _ENTITY_TYPES["cwe"],
+    "entity-country": _ENTITY_TYPES["country"],
+    "entity-rule": _ENTITY_TYPES["detection_rule"],
+    "entity-campaign": _ENTITY_TYPES["campaign"],
+    "entity-vendor": _ENTITY_TYPES["vendor"],
+    "entity-product": _ENTITY_TYPES["product"],
+    "entity-tool": _ENTITY_TYPES["tool"],
+    "entity-mitigation": _ENTITY_TYPES["mitigation"],
+    "entity-sector": _ENTITY_TYPES["sector"],
+    "entity-victim": _ENTITY_TYPES["ransomware_victim"],
+    "entity-pir": _ENTITY_TYPES["pir"],
+    "entity-ioc": _ENTITY_TYPES["observable"],
+    "entity-note": _ENTITY_TYPES["note"],
+}
+
+_SEVERITY: dict[str, str] = {
+    "critical": "#dc2626",
+    "high": "#fb923c",
+    "medium": "#d29922",
+    "low": "#3fb950",
+    "info": "#58a6ff",
+}
+
+_RULE_FORMATS: dict[str, str] = {
+    "sigma": "#56d364",
+    "yara": "#d2a8ff",
+    "kql": "#79c0ff",
+    "elastic-ql": "#79c0ff",
+    "nuclei": "#ffa657",
+    "splunk-spl": "#7ee787",
+}
+
+_RANSOMWARE_GROUPS: dict[str, str] = {
+    "lockbit": "#e05c2f",
+    "clop": "#12996a",
+    "akira": "#2a78d6",
+    "qilin": "#c2537f",
+    "play": "#b5820f",
+    "ransomhub": "#2f8f2f",
+    "other": "#8b94a3",
+}
+
+_PIR_CATEGORIES: dict[str, str] = {
+    "strategic": "#8b5cf6",
+    "operational": "#f97316",
+    "tactical": "#ef4444",
+    "technical": "#06b6d4",
+}
+
+_TLP: dict[str, str] = {
+    "TLP:CLEAR": "#6b7280",
+    "TLP:GREEN": "#22c55e",
+    "TLP:AMBER": "#f59e0b",
+    "TLP:AMBER+STRICT": "#f59e0b",
+    "TLP:RED": "#ef4444",
+}
+
+_AUTOMATION_NODES: dict[str, str] = {
+    "trigger": "#f59e0b",
+    "condition": "#3b82f6",
+    "action": "#22c55e",
+    "branch": "#a855f7",
+}
+
+_SYNTAX: dict[str, str] = {
+    "keyword": "#cba6f7",
+    "string": "#a6e3a1",
+    "number": "#fab387",
+    "comment": "#6c7086",
+    "function": "#89b4fa",
+    "operator": "#89dceb",
+    "attr": "#f9e2af",
+}
+
+_HEATMAP: dict[str, str] = {
+    "empty": "rgba(255, 255, 255, 0.04)",
+    "1": "#0e4429",
+    "2": "#006d32",
+    "3": "#26a641",
+    "4": "#39d353",
+    "5": "#56e373",
+}
+
+_CANONICAL_CSS_VARIABLES: dict[str, str] = {
+    **_BASE_VARIABLES,
+    **{f"accent-{k}": v for k, v in _DOMAIN_ACCENTS.items()},
+    **_ENTITY_CSS_VARIABLES,
+    **{f"severity-{k}": v for k, v in _SEVERITY.items()},
+    "severity-critical-fg": "#ffffff",
+    "severity-high-fg": "#0d1117",
+    "severity-medium-fg": "#0d1117",
+    "severity-low-fg": "#0d1117",
+    "severity-info-fg": "#ffffff",
+    **{f"fmt-{k}": v for k, v in _RULE_FORMATS.items()},
+    **{f"rgroup-{k}": v for k, v in _RANSOMWARE_GROUPS.items()},
+    **{f"pir-{k}": v for k, v in _PIR_CATEGORIES.items()},
+    "tlp-clear": _TLP["TLP:CLEAR"],
+    "tlp-green": _TLP["TLP:GREEN"],
+    "tlp-amber": _TLP["TLP:AMBER"],
+    "tlp-amber-strict": _TLP["TLP:AMBER+STRICT"],
+    "tlp-red": _TLP["TLP:RED"],
+    **{f"node-{k}": v for k, v in _AUTOMATION_NODES.items()},
+    **{f"syntax-{k}": v for k, v in _SYNTAX.items()},
+    **{f"heatmap-{k}": v for k, v in _HEATMAP.items()},
+}
+
+COLOR_SCHEMA = ColorSchemaResponse(
+    base=_BASE_VARIABLES,
+    domain_accents=_DOMAIN_ACCENTS,
+    entity_types=_ENTITY_TYPES,
+    severity=_SEVERITY,
+    rule_formats=_RULE_FORMATS,
+    ransomware_groups=_RANSOMWARE_GROUPS,
+    pir=_PIR_CATEGORIES,
+    tlp=_TLP,
+    automation_nodes=_AUTOMATION_NODES,
+    syntax=_SYNTAX,
+    heatmap=_HEATMAP,
+    css_variables=_CANONICAL_CSS_VARIABLES,
+)
 
 
 @router.get("", response_model=list[ThemeResponse])
@@ -32,6 +219,17 @@ async def list_themes(
         resp.is_default = str(t.id) == default_id
         responses.append(resp)
     return responses
+
+
+@router.get("/schema", response_model=ColorSchemaResponse)
+async def get_color_schema():
+    """Public (no auth): canonical workbench color coding vocabulary and default theme tokens.
+
+    Mobile and web clients fetch this so entity types, severity ramps, domain accents,
+    rule formats, ransomware groups, PIR categories, TLP levels, automation nodes, and
+    syntax tokens are driven by the server rather than hardcoded in client builds.
+    """
+    return COLOR_SCHEMA
 
 
 @router.get("/default", response_model=ThemeResponse | None)
