@@ -14,7 +14,7 @@ Threading also trails ingest — it runs on a sweep, up to about half an hour be
 
 ## Where you'll see one
 
-- **The Priority Queue.** A thread is one row, in place of its articles. It ranks as its best *unread* article plus a small bump for every extra outlet carrying it, and the articles inside are withheld from the list so the story appears once. A thread you've finished reading drops out of the queue entirely — the queue answers "what should I read next", not "what exists".
+- **The Priority Queue.** A thread is one row, in place of its articles. It ranks by the score of its best *unread* article, in one list with standalone articles sorted highest score first, and the articles inside are withheld from the list so the story appears once. A thread you've finished reading drops out of the queue entirely — the queue answers "what should I read next", not "what exists".
 - **The reader pane.** Open a thread row and the reader shows the thread itself (below).
 - **The Threats board.** Rows are counted in *stories*, not outlets, so a wave of re-reports counts once. A story that resolved to no actor, malware family or CVE still gets a row if it carries something extractable — a technique, an observable, or a product in your stack — and opening it shows that thread in the Workbench's docked reader. See [The Threats board](threats-board.md).
 - **More like this.** In the reader, similar articles come from the same embeddings, falling back to keyword overlap for anything not yet embedded.
