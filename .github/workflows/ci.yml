@@ -620,21 +620,14 @@ jobs:
       # a comment naming the package, why it is unfixable, and what pulls it
       # in — otherwise this list silently becomes the place vulnerabilities go
       # to be forgotten. Anything with a fix version available gets upgraded,
-      # not ignored.
-      #
-      #   PYSEC-2026-1325  ecdsa — side-channel in signature verification.
-      #                    Upstream declines to fix (pure-Python ECDSA cannot
-      #                    be made constant-time). Reaches us through
-      #                    python-jose[cryptography], which only uses ecdsa for
-      #                    ES* JWT algorithms; IntelFeed signs its tokens with
-      #                    HS256, so the vulnerable path is not exercised.
+      # not ignored. The list is empty today: add a flag below the
+      # --progress-spinner line when an entry is needed.
       - name: Audit backend dependencies
         if: needs.changes.outputs.python == 'true'
         run: |
           pipx install pip-audit==2.10.1
           pip-audit -r resolved.txt \
-            --progress-spinner off \
-            --ignore-vuln PYSEC-2026-1325
+            --progress-spinner off
 
       - uses: pnpm/action-setup@v6
         if: needs.changes.outputs.node == 'true'

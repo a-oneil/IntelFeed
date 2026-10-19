@@ -341,7 +341,9 @@ async def generate_report_content(
     ttps = []
     if entity_ids.get("ttps"):
         result = await db.execute(
-            select(TTP).where(TTP.id.in_([uuid.UUID(i) if isinstance(i, str) else i for i in entity_ids["ttps"]]))
+            select(TTP)
+            .where(TTP.id.in_([uuid.UUID(i) if isinstance(i, str) else i for i in entity_ids["ttps"]]))
+            .order_by(TTP.technique_id)
         )
         ttps = list(result.scalars().all())
 
@@ -563,7 +565,9 @@ async def generate_section_content(
     ttps_context = []
     if entity_ids.get("ttps"):
         result = await db.execute(
-            select(TTP).where(TTP.id.in_([uuid.UUID(i) if isinstance(i, str) else i for i in entity_ids["ttps"]]))
+            select(TTP)
+            .where(TTP.id.in_([uuid.UUID(i) if isinstance(i, str) else i for i in entity_ids["ttps"]]))
+            .order_by(TTP.technique_id)
         )
         for ttp in result.scalars().all():
             ttps_context.append(

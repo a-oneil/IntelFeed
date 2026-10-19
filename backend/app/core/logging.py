@@ -234,10 +234,10 @@ class AuditLoggingMiddleware(BaseHTTPMiddleware):
         if not auth.startswith("Bearer "):
             return {}
         try:
-            from jose import jwt as jose_jwt
+            import jwt
 
             from app.config import settings
 
-            return jose_jwt.decode(auth[7:], settings.secret_key, algorithms=["HS256"])
+            return jwt.decode(auth[7:], settings.secret_key, algorithms=["HS256"])
         except Exception:
             return {}
