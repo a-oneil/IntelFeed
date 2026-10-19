@@ -85,10 +85,11 @@ handful of votes should not swing what the whole instance sees.
 If your administrator has enabled **Personalised Radar**, you can additionally
 opt in under Settings → Reading → *Your Radar*, and then your own votes fit a
 personal weight per signal family: if novelty rankings keep wasting your time
-and KEV rankings keep earning it, your ordering shifts. It only ever *re-orders*
-your queue — it never hides an article the shared score put above the line, and
-the panel shows each family's weight, the votes behind it, and both ways out
-(switch off, or discard the fitted weights).
+and KEV rankings keep earning it, the weights shift a Radar-sorted entry list
+through the API. The Priority Queue itself always runs in the order of the score
+each row shows, highest first, so the weights never move a row there. The panel
+shows each family's weight, the votes behind it, and both ways out (switch off,
+or discard the fitted weights).
 
 **Intelligence requirements.** *PIR match* is the one signal whose meaning you
 define. Write your standing requirements under **Workbench → Requirements** —

@@ -21,8 +21,8 @@ class PriorityQueueRow(BaseModel):
     kind: Literal["entry", "thread"] = Field(description="Which of `entry` / `thread` is populated")
     score: float = Field(
         description=(
-            "Rank of this row on the 0–10 priority scale. For an entry it is its priority score (with any "
-            "read-time stack-exposure or learned-weight lift applied); for a thread, the score of its best "
+            "Rank of this row on the 0–10 priority scale. For an entry it is its stored priority "
+            "score; for a thread, the score of its best "
             "unread beat. Rows arrive sorted by this score, highest first."
         )
     )
