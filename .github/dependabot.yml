@@ -1,6 +1,6 @@
-# Dependency updates. Everything is grouped and weekly on purpose: an ungrouped
-# Dependabot on a repo this size opens ~20 PRs a week, each triggering a full
-# CI run, and the result is that nobody reads any of them.
+# Dependency updates. Weekly, and majors-only for pip and npm, on purpose:
+# Dependabot on a repo this size otherwise opens ~10-20 PRs a week, each
+# triggering a full CI run, and the result is that nobody reads any of them.
 #
 # Note this only opens *version* PRs. The vulnerability side needs "Dependabot
 # alerts" switched on in the repo's Settings > Code security — on a private
@@ -16,12 +16,15 @@ updates:
       day: monday
       time: "07:00"
     open-pull-requests-limit: 5
-    groups:
-      # Patch and minor bumps land together; a major gets its own PR so the
-      # breaking-change notes are readable.
-      backend-minor:
-        patterns: ["*"]
-        update-types: [minor, patch]
+    # Majors only. Minor and patch bumps were a weekly PR nobody needed, and
+    # the >= floors in pyproject.toml don't change what the image installs
+    # anyway. Security fixes still arrive: ignore rules don't apply to
+    # security updates, and pip-audit in ci.yml is the backstop.
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
     commit-message:
       prefix: "deps(backend)"
 
@@ -32,10 +35,13 @@ updates:
       day: monday
       time: "07:00"
     open-pull-requests-limit: 5
+    # Majors only, as for pip above; pnpm audit in ci.yml is the backstop.
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
     groups:
-      frontend-minor:
-        patterns: ["*"]
-        update-types: [minor, patch]
       # These move as a set — bumping one @codemirror package without its
       # siblings reliably breaks the editor build.
       codemirror:

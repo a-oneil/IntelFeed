@@ -126,7 +126,8 @@ export function ExtractionTab({
       if (t === "cve" && hideCves && !types.has("cve")) setHideCves(false);
       setTypes((prev) => {
         const next = new Set(prev);
-        next.has(t) ? next.delete(t) : next.add(t);
+        if (next.has(t)) next.delete(t);
+        else next.add(t);
         return next;
       });
     });
@@ -144,7 +145,8 @@ export function ExtractionTab({
   function toggleSelect(id: string) {
     setSelected((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   }
