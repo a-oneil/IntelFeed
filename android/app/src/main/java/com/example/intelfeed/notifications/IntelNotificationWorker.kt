@@ -113,8 +113,8 @@ class IntelNotificationWorker(
                 }
             }.onFailure { syncComplete = false }
 
-            // 4. Poll Priority Queue for Critical Alerts. Scores run from about 0 to 10 (the Radar
-            // threshold is near 2); the old cut-off of 85 could never be reached.
+            // 4. Poll Priority Queue for Critical Alerts. Scores run 0–10 and everything in the queue
+            // already clears the Radar threshold (around 8), so only the red band alerts.
             app.repository.getEntries(
                 filter = com.example.intelfeed.data.repository.FeedFilter.PRIORITY_QUEUE,
                 limit = 5
@@ -248,7 +248,7 @@ class IntelNotificationWorker(
 
     companion object {
         /** The "critical" band, the same cut-off as the red score badge (EntryCards.scoreColor). */
-        const val PRIORITY_ALERT_SCORE = 8.0
+        const val PRIORITY_ALERT_SCORE = 9.5
 
         private val runLock = Mutex()
     }

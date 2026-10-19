@@ -57,7 +57,9 @@ describe("queueItems", () => {
     expect(out.map((i) => i.type)).toEqual(["single", "thread", "single"]);
   });
 
-  it("carries the thread row's score, absorbed members and a stable key", () => {
+  it("badges a thread with the score it ranks by", () => {
+    // The badge and the queue order use one number, so a story sorts among
+    // articles exactly where its badge says it should.
     const [row] = queueItems([threadRow(7.5)]);
 
     expect(row).toMatchObject({
@@ -65,6 +67,14 @@ describe("queueItems", () => {
       score: 7.5,
       memberIds: ["a", "b"],
       key: "thread-t1",
+    });
+  });
+
+  it("badges a standalone entry with the row's lifted score", () => {
+    const [row] = queueItems([entryRow("x", 8.4)]);
+    expect(row).toMatchObject({
+      type: "single",
+      entry: { id: "x", priority_score: 8.4 },
     });
   });
 

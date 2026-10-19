@@ -202,3 +202,119 @@ async def test_commission_404s_on_an_unknown_provider(client: AsyncClient, admin
 
     response = await client.post(f"/api/ai/providers/{uuid.uuid4()}/commission", headers=admin_headers)
     assert response.status_code == 404
+
+
+# ── openai_compatible: the admin names the model, nothing is guessed ─────────
+
+# What api.openai.com/v1/models returns, sorted: the pick_model fallback would
+# land on babbage-002, which is not a chat model.
+_OPENAI_CATALOG = ["babbage-002", "dall-e-3", "gpt-4o-mini", "text-embedding-3-small", "tts-1", "whisper-1"]
+
+
+def _stub_openai_server(monkeypatch, models=_OPENAI_CATALOG):
+    from app.ai.providers.openai_provider import OpenAICompatibleProvider
+
+    async def healthy(self):
+        return True
+
+    async def list_models(self):
+        return list(models)
+
+    monkeypatch.setattr(OpenAICompatibleProvider, "check_health", healthy)
+    monkeypatch.setattr(OpenAICompatibleProvider, "list_models", list_models)
+
+
+@pytest.mark.asyncio
+async def test_routing_an_openai_compatible_provider_uses_its_configured_model(
+    db_session: AsyncSession, admin_user, system_tasks
+):
+    provider = AIProvider(
+        name="OpenAI",
+        provider_type="openai_compatible",
+        base_url="https://api.openai.com/v1",
+        is_active=True,
+        models=_OPENAI_CATALOG,
+        config={"default_model": "gpt-4o-mini"},
+    )
+    db_session.add(provider)
+    await db_session.flush()
+
+    routing = await route_tasks_to_provider(db_session, provider, created_by=admin_user.id, take_over=False)
+
+    assert routing.model == "gpt-4o-mini"
+    rows = (await db_session.execute(select(AITaskAssignment))).scalars().all()
+    assert rows and {r.model_name for r in rows} == {"gpt-4o-mini"}
+
+
+@pytest.mark.asyncio
+async def test_commission_refuses_an_openai_compatible_provider_with_no_model(
+    client: AsyncClient, admin_headers: dict, db_session: AsyncSession, system_tasks, monkeypatch
+):
+    """Onboarding commissions with take_over: guessing here would move every task
+    off a working provider and onto babbage-002."""
+    _stub_openai_server(monkeypatch)
+    cli = AIProvider(name="CLI", provider_type="claude_code", is_active=True, models=["sonnet"])
+    provider = AIProvider(
+        name="OpenAI", provider_type="openai_compatible", base_url="https://api.openai.com/v1", is_active=True
+    )
+    db_session.add_all([cli, provider])
+    await db_session.flush()
+    task = (await db_session.execute(select(AITask).where(AITask.name == "article_summary"))).scalar_one()
+    db_session.add(AITaskAssignment(task_id=task.id, provider_id=cli.id, model_name="sonnet", is_enabled=True))
+    await db_session.flush()
+
+    response = await client.post(
+        f"/api/ai/providers/{provider.id}/commission", params={"take_over": True}, headers=admin_headers
+    )
+
+    body = response.json()
+    assert body["success"] is False
+    assert "model" in body["message"].lower()
+    assert body["models"] == _OPENAI_CATALOG
+    rows = (await db_session.execute(select(AITaskAssignment))).scalars().all()
+    assert [(r.provider_id, r.model_name) for r in rows] == [(cli.id, "sonnet")]
+
+
+@pytest.mark.asyncio
+async def test_commission_refuses_a_model_the_server_does_not_list(
+    client: AsyncClient, admin_headers: dict, db_session: AsyncSession, system_tasks, monkeypatch
+):
+    _stub_openai_server(monkeypatch)
+    provider = AIProvider(
+        name="OpenAI",
+        provider_type="openai_compatible",
+        base_url="https://api.openai.com/v1",
+        is_active=True,
+        config={"default_model": "gpt-4o-mnii"},
+    )
+    db_session.add(provider)
+    await db_session.flush()
+
+    response = await client.post(f"/api/ai/providers/{provider.id}/commission", headers=admin_headers)
+
+    assert response.json()["success"] is False
+    assert "gpt-4o-mnii" in response.json()["message"]
+    assert (await db_session.execute(select(AITaskAssignment))).scalars().first() is None
+
+
+@pytest.mark.asyncio
+async def test_commission_routes_an_openai_compatible_provider_at_its_model(
+    client: AsyncClient, admin_headers: dict, db_session: AsyncSession, system_tasks, monkeypatch
+):
+    _stub_openai_server(monkeypatch)
+    provider = AIProvider(
+        name="OpenAI",
+        provider_type="openai_compatible",
+        base_url="https://api.openai.com/v1",
+        is_active=True,
+        config={"default_model": "gpt-4o-mini"},
+    )
+    db_session.add(provider)
+    await db_session.flush()
+
+    response = await client.post(f"/api/ai/providers/{provider.id}/commission", headers=admin_headers)
+
+    body = response.json()
+    assert body["success"] is True
+    assert body["model"] == "gpt-4o-mini"
+    assert body["tasks_assigned"] > 0

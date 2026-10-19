@@ -19,14 +19,14 @@ def _require_admin(user: User) -> None:
 
 class SignalSettingsUpdate(BaseModel):
     family_multipliers: dict[str, float] | None = None  # 0..2 per family
-    threshold_override: float | None = Field(default=None, ge=0.0)
+    threshold_override: float | None = Field(default=None, ge=0.0, le=10.0)  # 0–10 scale
     clear_threshold_override: bool = False
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "family_multipliers": {"novelty": 1.5, "coverage": 1.0, "severity": 1.2},
-                "threshold_override": 2.5,
+                "threshold_override": 8.0,
                 "clear_threshold_override": False,
             }
         }
@@ -136,6 +136,7 @@ async def update_signal_settings(
     _require_admin(user)
     from app.intelligence.signals import (
         DEFAULT_FAMILY_MULTIPLIERS,
+        LEGACY_THRESHOLD_OVERRIDE_REDIS_KEY,
         MULTIPLIERS_REDIS_KEY,
         THRESHOLD_OVERRIDE_REDIS_KEY,
     )
@@ -151,7 +152,7 @@ async def update_signal_settings(
         await r.set(MULTIPLIERS_REDIS_KEY, json.dumps({**DEFAULT_FAMILY_MULTIPLIERS, **clamped}))
         changed = True
     if body.clear_threshold_override:
-        await r.delete(THRESHOLD_OVERRIDE_REDIS_KEY)
+        await r.delete(THRESHOLD_OVERRIDE_REDIS_KEY, LEGACY_THRESHOLD_OVERRIDE_REDIS_KEY)
         changed = True
     elif body.threshold_override is not None:
         await r.set(THRESHOLD_OVERRIDE_REDIS_KEY, str(body.threshold_override))
@@ -1494,7 +1495,7 @@ async def radar_feedback(
 
 # --- Personalised Radar (learned per-user signal weights) ------------------
 # The global feedback nudge above pools every analyst's thumbs into one set of
-# family multipliers baked into Entry.priority_score. These endpoints expose the
+# family multipliers baked into Entry.priority_raw. These endpoints expose the
 # per-analyst counterpart: weights fitted nightly from this user's own verdicts
 # and applied as a read-time lift on their Radar ordering. Opting out restores
 # the house ranking immediately — nothing is rewritten either way.

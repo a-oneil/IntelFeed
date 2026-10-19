@@ -13,7 +13,8 @@ class AIProvider(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    provider_type: Mapped[str] = mapped_column(String(30), nullable=False)  # ollama, claude, openai, custom
+    # claude, claude_code, ollama, openai_compatible
+    provider_type: Mapped[str] = mapped_column(String(30), nullable=False)
     base_url: Mapped[str | None] = mapped_column(Text)
     api_key_encrypted: Mapped[str | None] = mapped_column(Text)
     models: Mapped[list] = mapped_column(JSONB, default=list)

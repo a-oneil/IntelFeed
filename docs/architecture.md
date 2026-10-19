@@ -1075,7 +1075,7 @@ The `settings.get(key)` method checks the DB table first, then falls back to the
 - `proximity_decay_rate` — How fast proximity score decays with distance (default 1.0)
 
 **AI providers:**
-- Model-agnostic: Ollama, Claude, OpenAI, custom endpoints
+- Model-agnostic: Ollama, Claude API, Claude Code CLI, OpenAI-compatible endpoints (OpenAI, LM Studio, vLLM, llama.cpp, LiteLLM, OpenRouter, Groq)
 - Models assigned to specific tasks (extraction, summarization, rule generation)
 - All configurable via Settings > AI Configuration in the web UI (providers, prompts, task assignments, and cost tracking)
 

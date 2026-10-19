@@ -90,10 +90,35 @@ async def test_create_ollama_provider(client: AsyncClient, admin_headers: dict):
 async def test_create_provider_unknown_type_rejected(client: AsyncClient, admin_headers: dict):
     resp = await client.post(
         PROVIDERS_URL,
-        json={"name": "Nope", "provider_type": "openai"},
+        json={"name": "Nope", "provider_type": "bogus"},
         headers=admin_headers,
     )
     # App-wide handler maps request validation errors to 400
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_create_openai_compatible_provider_no_key(client: AsyncClient, admin_headers: dict):
+    """LM Studio / llama.cpp need no API key — creation must succeed without one."""
+    data = await _create_provider(
+        client,
+        admin_headers,
+        name="LM Studio",
+        provider_type="openai_compatible",
+        base_url="http://localhost:1234/v1",
+    )
+    assert data["provider_type"] == "openai_compatible"
+    assert data["base_url"] == "http://localhost:1234/v1"
+    assert data["supports_tools"] is False
+
+
+@pytest.mark.asyncio
+async def test_create_openai_compatible_provider_missing_base_url_rejected(client: AsyncClient, admin_headers: dict):
+    resp = await client.post(
+        PROVIDERS_URL,
+        json={"name": "No URL", "provider_type": "openai_compatible"},
+        headers=admin_headers,
+    )
     assert resp.status_code == 400
 
 
@@ -133,6 +158,41 @@ async def test_update_provider(client: AsyncClient, admin_headers: dict):
     data = resp.json()
     assert data["name"] == "New Name"
     assert data["is_active"] is False
+
+
+@pytest.mark.asyncio
+async def test_update_provider_rejects_empty_base_url_for_openai_compatible(client: AsyncClient, admin_headers: dict):
+    created = await _create_provider(
+        client, admin_headers, name="LM Studio", provider_type="openai_compatible", base_url="http://x/v1"
+    )
+    resp = await client.put(
+        f"{PROVIDERS_URL}/{created['id']}",
+        json={"base_url": ""},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"extra_body": [{"chat_template_kwargs": {}}]},
+        {"extra_body": "enable_thinking=false"},
+        {"model_overrides": {"gpt-4o": {"extra_body": 3}}},
+    ],
+)
+async def test_update_provider_rejects_extra_body_that_is_not_an_object(
+    client: AsyncClient, admin_headers: dict, config: dict
+):
+    """extra_body is dict.update()'d into every request — a non-object saves fine
+    and then fails every call on the provider."""
+    created = await _create_provider(
+        client, admin_headers, name="LM Studio", provider_type="openai_compatible", base_url="http://x/v1"
+    )
+    resp = await client.put(f"{PROVIDERS_URL}/{created['id']}", json={"config": config}, headers=admin_headers)
+    assert resp.status_code == 400
+    assert "must be a JSON object" in resp.text
 
 
 @pytest.mark.asyncio
@@ -260,6 +320,22 @@ async def test_test_provider_not_found(client: AsyncClient, admin_headers: dict)
 
 
 @pytest.mark.asyncio
+async def test_test_provider_unreachable_host_returns_success_false(client: AsyncClient, admin_headers: dict):
+    """A bad/unreachable row must come back as success=false, not a 500."""
+    created = await _create_provider(
+        client,
+        admin_headers,
+        name="Unreachable",
+        provider_type="openai_compatible",
+        base_url="http://127.0.0.1:1/v1",
+    )
+    resp = await client.post(f"{PROVIDERS_URL}/{created['id']}/test", headers=admin_headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["success"] is False
+
+
+@pytest.mark.asyncio
 async def test_provider_response_includes_supports_tools(client: AsyncClient, admin_headers: dict):
     # Ollama runs a native tool-calling loop, so it is tool-capable. A plain
     # Anthropic-API provider ("claude") is not.
@@ -288,7 +364,64 @@ def test_provider_classes_agree_with_capability_registry():
     from app.ai.providers.claude_code_provider import ClaudeCodeProvider
     from app.ai.providers.claude_provider import ClaudeProvider
     from app.ai.providers.ollama_provider import OllamaProvider
+    from app.ai.providers.openai_provider import OpenAICompatibleProvider
 
     assert ClaudeCodeProvider.supports_tools is provider_type_supports_tools("claude_code")
     assert ClaudeProvider.supports_tools is provider_type_supports_tools("claude")
     assert OllamaProvider.supports_tools is provider_type_supports_tools("ollama")
+    assert OpenAICompatibleProvider.supports_tools is provider_type_supports_tools("openai_compatible")
+
+
+def test_engine_factory_raises_on_unknown_provider_type():
+    """An unrecognized provider_type must raise, not silently fall through to ClaudeProvider.
+
+    Guards against the historical bug where any value other than
+    "claude_code"/"ollama" sent Anthropic-shaped requests to whatever
+    base_url happened to be set.
+    """
+    from app.ai.engine import UnsupportedProviderTypeError, _get_provider_instance
+    from app.models.ai_provider import AIProvider as AIProviderModel
+
+    bogus = AIProviderModel(name="Bogus", provider_type="bogus", base_url="http://example.com")
+    with pytest.raises(UnsupportedProviderTypeError):
+        _get_provider_instance(bogus)
+
+
+def test_engine_factory_routes_openai_compatible():
+    from app.ai.engine import _get_provider_instance
+    from app.ai.providers.openai_provider import OpenAICompatibleProvider
+    from app.models.ai_provider import AIProvider as AIProviderModel
+
+    row = AIProviderModel(name="LM Studio", provider_type="openai_compatible", base_url="http://localhost:1234/v1")
+    instance = _get_provider_instance(row)
+    assert isinstance(instance, OpenAICompatibleProvider)
+
+
+@pytest.mark.asyncio
+async def test_run_task_with_unknown_provider_type_records_provider_error(db_session, test_user):
+    """The schema blocks an unknown provider_type at create time, so this can
+    only happen via a manually-edited row — run_task must still degrade to a
+    provider_error result rather than crash the Celery task that called it.
+    """
+    from app.ai.engine import run_task
+    from app.models.ai_provider import AIProvider as AIProviderModel
+    from app.models.ai_task import AITask
+    from app.models.ai_task_assignment import AITaskAssignment
+
+    task = AITask(
+        name="unknown_provider_type_test_task",
+        display_name="Unknown Provider Type Test",
+        default_prompt_template="{{ text }}",
+    )
+    db_session.add(task)
+    await db_session.flush()
+
+    provider = AIProviderModel(name="Bogus", provider_type="bogus", base_url="http://example.com")
+    db_session.add(provider)
+    await db_session.flush()
+
+    db_session.add(AITaskAssignment(task_id=task.id, provider_id=provider.id, model_name="whatever"))
+    await db_session.flush()
+
+    result = await run_task(db_session, test_user.id, task.name, variables={"text": "hi"})
+    assert result["_extraction_status"] == "provider_error"

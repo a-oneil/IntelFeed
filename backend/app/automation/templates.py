@@ -495,8 +495,8 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "name": "High-Score Auto-Escalation",
         "description": (
             "When the signal engine scores an entry above your priority threshold, escalate it — "
-            "mark high priority, drop an analyst note, and notify. Tune `min`: priority_score is an "
-            "unbounded signal sum, so ~5 surfaces the top few percent."
+            "mark high priority, drop an analyst note, and notify. Tune `min`: priority_score runs 0–10, "
+            "ranked against the last 30 days, so 9 is about the top 5% and 10 the top 1%."
         ),
         "category": "signals",
         "tags": ["signals", "priority-score", "escalation"],
@@ -505,7 +505,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "conditions": {
             "operator": "AND",
             "conditions": [
-                {"type": "priority_score_above", "config": {"min": 5.0}},
+                {"type": "priority_score_above", "config": {"min": 9.0}},
             ],
         },
         "actions": [
@@ -973,7 +973,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "conditions": {
             "operator": "AND",
             "conditions": [
-                {"type": "priority_score_above", "config": {"min": 5.0}},
+                {"type": "priority_score_above", "config": {"min": 9.0}},
             ],
         },
         "actions": [
@@ -1245,7 +1245,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
             {
                 "type": "branch",
                 "config": {
-                    "condition": {"type": "priority_score_above", "config": {"min": 6.0}},
+                    "condition": {"type": "priority_score_above", "config": {"min": 9.5}},
                     "then_actions": [
                         {
                             "type": "send_notification",

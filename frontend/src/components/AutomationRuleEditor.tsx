@@ -158,8 +158,8 @@ function conditionConfigFields(type: string): Array<{
       return [
         {
           key: "min",
-          label: "Min priority score",
-          placeholder: "2.0",
+          label: "Min priority score (0–10)",
+          placeholder: "9.0",
           type: "number",
         },
       ];

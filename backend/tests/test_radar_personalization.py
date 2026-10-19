@@ -54,6 +54,7 @@ async def _scored_entry(db_session, feed, *, score: float, signals: list[tuple[s
         content_text="content",
         published_at=NOW,
         priority_score=score,
+        priority_raw=score,
         scored_at=NOW,
     )
     db_session.add(entry)

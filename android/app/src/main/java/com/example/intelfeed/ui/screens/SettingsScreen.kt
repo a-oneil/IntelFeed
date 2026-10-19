@@ -41,6 +41,14 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material.icons.filled.Translate
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.Palette
+import com.example.intelfeed.data.model.ThemeDto
+import com.example.intelfeed.theme.SlateDark700
+import com.example.intelfeed.theme.ThemeEngine
 import com.example.intelfeed.ui.i18n.AppLanguage
 import com.example.intelfeed.ui.i18n.LocalStrings
 import androidx.compose.material3.AlertDialog
@@ -113,6 +121,9 @@ fun SettingsScreen(
     userPreferences: UserPreferences,
     onBack: () -> Unit,
     onClearRecentSearches: () -> Unit,
+    onSelectTheme: (ThemeDto) -> Unit = {},
+    onUseDefaultTheme: () -> Unit = {},
+    onRefreshThemes: () -> Unit = {},
     onLogout: () -> Unit
 ) {
     val context = LocalContext.current
@@ -127,6 +138,7 @@ fun SettingsScreen(
     var showTagManager by remember { mutableStateOf(false) }
     var showLanguagePicker by remember { mutableStateOf(false) }
     var showAppLanguagePicker by remember { mutableStateOf(false) }
+    var showThemePicker by remember { mutableStateOf(false) }
     var showVoiceSettings by remember { mutableStateOf(false) }
 
     // Whether Android lets the app post notifications at all (Android 13+ permission and the app's
@@ -206,6 +218,22 @@ fun SettingsScreen(
 
             SectionHeader(strings.settingsReading)
 
+            val themeSubtitle = if (uiState.activeThemeSource == "default") {
+                "${uiState.activeThemeName} (Instance default)"
+            } else {
+                uiState.activeThemeName
+            }
+            SettingsRow(
+                icon = Icons.Default.Palette,
+                title = "Theme",
+                subtitle = themeSubtitle,
+                onClick = {
+                    onRefreshThemes()
+                    showThemePicker = true
+                },
+                tint = CyberBlue
+            )
+
             val appLangCode by userPreferences.appLanguage.collectAsStateWithLifecycle(initialValue = "system")
             val appLang = remember(appLangCode) { AppLanguage.fromCode(appLangCode) }
             SettingsRow(
@@ -215,6 +243,7 @@ fun SettingsScreen(
                 onClick = { showAppLanguagePicker = true },
                 tint = CyberPurple
             )
+
 
             val autoMarkRead by userPreferences.autoMarkRead.collectAsStateWithLifecycle(initialValue = true)
             val feedDensity by userPreferences.feedDensity.collectAsStateWithLifecycle(initialValue = "expanded")
@@ -490,6 +519,24 @@ fun SettingsScreen(
         )
     }
 
+    if (showThemePicker) {
+        ThemePickerSheet(
+            themes = uiState.availableThemes,
+            activeThemeId = uiState.activeThemeId,
+            activeThemeSource = uiState.activeThemeSource,
+            userThemeId = uiState.currentUser?.themeId,
+            onSelectTheme = { theme ->
+                onSelectTheme(theme)
+                showThemePicker = false
+            },
+            onUseDefaultTheme = {
+                onUseDefaultTheme()
+                showThemePicker = false
+            },
+            onDismiss = { showThemePicker = false }
+        )
+    }
+
     if (showVoiceSettings) {
         VoiceSettingsDialog(
             currentRate = speechRate,
@@ -498,6 +545,7 @@ fun SettingsScreen(
         )
     }
 }
+
 
 @Composable
 private fun SettingsRow(icon: ImageVector, title: String, subtitle: String?, onClick: () -> Unit, tint: androidx.compose.ui.graphics.Color = TextSecondary) {
@@ -912,3 +960,211 @@ private fun AppLanguagePickerSheet(
         }
     }
 }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ThemePickerSheet(
+    themes: List<ThemeDto>,
+    activeThemeId: String?,
+    activeThemeSource: String,
+    userThemeId: String?,
+    onSelectTheme: (ThemeDto) -> Unit,
+    onUseDefaultTheme: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val defaultTheme = themes.firstOrNull { it.isDefault }
+    val followingDefault = userThemeId.isNullOrBlank() || activeThemeSource == "default"
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = SlateDark900,
+        dragHandle = null
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 620.dp)
+                .navigationBarsPadding()
+                .imePadding()
+                .padding(horizontal = 20.dp, vertical = 16.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Workbench Theme", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text(
+                        "Synced with your IntelFeed account and instance palette",
+                        fontSize = 12.sp,
+                        color = TextMuted
+                    )
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f, fill = false)
+            ) {
+                item(key = "__instance_default__") {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(onClick = onUseDefaultTheme)
+                            .padding(vertical = 12.dp, horizontal = 4.dp)
+                    ) {
+                        RadioButton(
+                            selected = followingDefault,
+                            onClick = null
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = "Follow Instance Default",
+                                fontSize = 15.sp,
+                                fontWeight = if (followingDefault) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (followingDefault) CyberBlue else TextPrimary
+                            )
+                            Text(
+                                text = defaultTheme?.let { "Currently ${it.name}" } ?: "Uses the instance's default theme",
+                                fontSize = 12.sp,
+                                color = TextMuted
+                            )
+                        }
+                        if (defaultTheme != null) {
+                            ThemeSwatches(variables = defaultTheme.variables)
+                            Spacer(Modifier.width(8.dp))
+                        }
+                        if (followingDefault) {
+                            Pill(label = "Default", color = CyberBlue)
+                        }
+                    }
+                    HorizontalDivider(color = SlateDark800)
+                }
+
+                val builtInThemes = themes.filter { it.isBuiltIn }
+                val customThemes = themes.filter { !it.isBuiltIn }
+
+                if (builtInThemes.isNotEmpty()) {
+                    item(key = "__header_builtin__") {
+                        Text(
+                            text = "BUILT-IN THEMES",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextMuted,
+                            modifier = Modifier.padding(top = 12.dp, bottom = 4.dp, start = 4.dp)
+                        )
+                    }
+                    items(builtInThemes, key = { it.id }) { theme ->
+                        val isSelected = !followingDefault && activeThemeId == theme.id
+                        ThemeOptionRow(
+                            theme = theme,
+                            isSelected = isSelected,
+                            onClick = { onSelectTheme(theme) }
+                        )
+                    }
+                }
+
+                if (customThemes.isNotEmpty()) {
+                    item(key = "__header_custom__") {
+                        Text(
+                            text = "CUSTOM INSTANCE THEMES",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextMuted,
+                            modifier = Modifier.padding(top = 12.dp, bottom = 4.dp, start = 4.dp)
+                        )
+                    }
+                    items(customThemes, key = { it.id }) { theme ->
+                        val isSelected = !followingDefault && activeThemeId == theme.id
+                        ThemeOptionRow(
+                            theme = theme,
+                            isSelected = isSelected,
+                            onClick = { onSelectTheme(theme) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThemeOptionRow(
+    theme: ThemeDto,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 12.dp, horizontal = 4.dp)
+    ) {
+        RadioButton(
+            selected = isSelected,
+            onClick = null
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = theme.name,
+                    fontSize = 15.sp,
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (isSelected) CyberBlue else TextPrimary
+                )
+                if (theme.isDefault) {
+                    Pill(label = "Instance Default", color = TextMuted)
+                }
+            }
+            if (theme.description.isNotBlank()) {
+                Text(
+                    text = theme.description,
+                    fontSize = 12.sp,
+                    color = TextMuted
+                )
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+        ThemeSwatches(variables = theme.variables)
+        if (isSelected) {
+            Spacer(Modifier.width(8.dp))
+            Pill(label = "Active", color = CyberBlue)
+        }
+    }
+    HorizontalDivider(color = SlateDark800)
+}
+
+@Composable
+private fun ThemeSwatches(variables: Map<String, String>) {
+    val swatchCandidates = listOf(
+        listOf("bg-primary", "--bg-primary", "--bg-base"),
+        listOf("bg-secondary", "--bg-secondary", "--bg-elevated"),
+        listOf("accent", "--accent", "--accent-primary"),
+        listOf("text-primary", "--text-primary")
+    )
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        swatchCandidates.forEach { candidates ->
+            val raw = candidates.firstNotNullOfOrNull { variables[it] }
+            val color = ThemeEngine.parseCssColor(raw, SlateDark800)
+            Box(
+                modifier = Modifier
+                    .size(14.dp)
+                    .background(color, RoundedCornerShape(4.dp))
+                    .border(1.dp, SlateDark700, RoundedCornerShape(4.dp))
+            )
+        }
+    }
+}
+

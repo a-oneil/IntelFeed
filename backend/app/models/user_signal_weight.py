@@ -3,7 +3,7 @@
 The global engine already turns Radar feedback into a bounded ±10% family
 nudge (``recompute_signal_rates`` → ``FEEDBACK_NUDGE_REDIS_KEY``), but that
 pools every analyst's votes into one set of multipliers baked into the stored
-``Entry.priority_score``. This table is the per-analyst counterpart: one row
+``Entry.priority_raw``. This table is the per-analyst counterpart: one row
 per (user, family), fitted nightly from that user's own verdicts and applied
 at *read* time as a lift on the Radar ordering — exactly the way My Stack
 exposure works. The stored score stays global, so personalisation is always

@@ -24,9 +24,9 @@ number you have to take on faith; it always shows its work.
 **Story rows** appear inline when several outlets are covering the same thing.
 Rather than showing you the same story five times, the queue folds it into one
 row you can open — and the articles inside it are withheld from the list, so
-the story appears once, not once per outlet. A story ranks by its best unread
-article plus a bump for each extra outlet carrying it, because corroboration
-across newsrooms is itself a signal. A story you have finished reading drops
+the story appears once, not once per outlet. A story ranks by the score of its
+best unread article, in the same list as everything else — the queue runs
+highest score first whether a row is a story or an article. A story you have finished reading drops
 out of the queue entirely.
 
 What a story row opens into — the spine, the coverage list, what "N new" counts,
@@ -85,10 +85,11 @@ handful of votes should not swing what the whole instance sees.
 If your administrator has enabled **Personalised Radar**, you can additionally
 opt in under Settings → Reading → *Your Radar*, and then your own votes fit a
 personal weight per signal family: if novelty rankings keep wasting your time
-and KEV rankings keep earning it, your ordering shifts. It only ever *re-orders*
-your queue — it never hides an article the shared score put above the line, and
-the panel shows each family's weight, the votes behind it, and both ways out
-(switch off, or discard the fitted weights).
+and KEV rankings keep earning it, the weights shift a Radar-sorted entry list
+through the API. The Priority Queue itself always runs in the order of the score
+each row shows, highest first, so the weights never move a row there. The panel
+shows each family's weight, the votes behind it, and both ways out (switch off,
+or discard the fitted weights).
 
 **Intelligence requirements.** *PIR match* is the one signal whose meaning you
 define. Write your standing requirements under **Workbench → Requirements** —

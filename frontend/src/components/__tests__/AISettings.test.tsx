@@ -108,10 +108,27 @@ describe("AISettings", () => {
     expect(screen.getByPlaceholderText(/Bearer token \(optional/)).toBeDefined();
   });
 
+  it("add form shows an optional-key openai_compatible option with base URL required", async () => {
+    const user = userEvent.setup();
+    render(<AISettings />, { wrapper: MemoryRouter });
+    await user.click(screen.getByText("+ Add"));
+
+    await user.selectOptions(screen.getByRole("combobox"), "openai_compatible");
+    expect(screen.getByPlaceholderText(/Base URL/)).toBeDefined();
+    expect(screen.getByPlaceholderText("API key (optional for local servers)")).toBeDefined();
+
+    // Save stays disabled until a base URL is entered — no API key required.
+    const saveBtn = screen.getByText("Save");
+    expect(saveBtn).toHaveProperty("disabled", true);
+    await user.type(screen.getByPlaceholderText(/Base URL/), "http://localhost:1234/v1");
+    await user.type(screen.getByPlaceholderText("Name (e.g. LM Studio)"), "LM Studio");
+    expect(saveBtn).toHaveProperty("disabled", false);
+  });
+
   it("shows hint text for providers", () => {
     render(<AISettings />, { wrapper: MemoryRouter });
     expect(
-      screen.getByText(/Add an API key provider/)
+      screen.getByText(/Add a provider to enable AI features/)
     ).toBeDefined();
   });
 
@@ -179,6 +196,55 @@ describe("AISettings", () => {
         config: {
           keep_alive: "30m", // untouched keys preserved
           model_overrides: { "qwen3.5:9b": { think: true } },
+        },
+      },
+      expect.anything()
+    );
+  });
+
+  it("openai_compatible Configure panel refuses an Extra body that isn't a JSON object", async () => {
+    mockUpdateProviderMutate.mockReset();
+    mockUseAIProviders.mockReturnValue({
+      data: [
+        {
+          id: "oa1",
+          name: "LM Studio",
+          provider_type: "openai_compatible",
+          base_url: "http://localhost:1234/v1",
+          models: ["qwen3-8b"],
+          is_active: true,
+          config: { default_model: "qwen3-8b" },
+          created_at: "2026-01-01",
+          updated_at: "2026-01-01",
+        },
+      ],
+      isLoading: false,
+    });
+
+    const user = userEvent.setup();
+    render(<AISettings />, { wrapper: MemoryRouter });
+    await user.click(screen.getByText("Configure"));
+    expect(screen.getByDisplayValue("qwen3-8b")).toBeDefined();
+
+    // Valid JSON, but merged into every request with dict.update() — an array
+    // would break every call on this provider.
+    const extraBody = screen.getByRole("textbox", { name: /Extra body/ });
+    await user.click(extraBody);
+    await user.paste('[{"chat_template_kwargs": {}}]');
+    await user.click(screen.getByText("Save"));
+
+    expect(screen.getByText(/Must be a JSON object/)).toBeDefined();
+    expect(mockUpdateProviderMutate).not.toHaveBeenCalled();
+
+    await user.clear(extraBody);
+    await user.paste('{"chat_template_kwargs": {"enable_thinking": false}}');
+    await user.click(screen.getByText("Save"));
+    expect(mockUpdateProviderMutate).toHaveBeenCalledWith(
+      {
+        id: "oa1",
+        config: {
+          default_model: "qwen3-8b",
+          extra_body: { chat_template_kwargs: { enable_thinking: false } },
         },
       },
       expect.anything()

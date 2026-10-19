@@ -164,6 +164,9 @@ export interface EntryDetail extends Entry {
   translated_at: string | null;
   // Full signal breakdown for the reader's "Why it's ranked" card
   priority_signals?: PrioritySignal[];
+  // The raw signal sum priority_score (0–10) was scaled from — what the
+  // priority_signals' `weighted` values add up to
+  priority_raw?: number | null;
   // When is_echo is true, the earlier entry this one echoes (near-duplicate of)
   echo_of?: EchoOf | null;
 }
@@ -469,7 +472,7 @@ export interface EntryTag {
 export interface AIProvider {
   id: string;
   name: string;
-  provider_type: "claude" | "claude_code" | "ollama";
+  provider_type: "claude" | "claude_code" | "ollama" | "openai_compatible";
   base_url: string | null;
   models: string[];
   is_active: boolean;

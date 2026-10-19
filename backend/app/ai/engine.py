@@ -8,7 +8,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from jinja2 import Template
+from jinja2.sandbox import ImmutableSandboxedEnvironment
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +16,7 @@ from app.ai.providers.base import AIProvider, AIResponse
 from app.ai.providers.claude_code_provider import ClaudeCodeProvider, QuotaExhaustedError
 from app.ai.providers.claude_provider import ClaudeProvider
 from app.ai.providers.ollama_provider import OllamaProvider
+from app.ai.providers.openai_provider import OpenAICompatibleProvider
 from app.core.encryption import decrypt_value
 from app.core.metrics import AI_COST_TOTAL, AI_REQUEST_DURATION_SECONDS, AI_REQUESTS_TOTAL, AI_TOKENS_TOTAL
 from app.models.ai_prompt_template import AIPromptTemplate
@@ -219,6 +220,18 @@ async def store_external_result(
     return parsed_result
 
 
+class UnsupportedProviderTypeError(ValueError):
+    """Raised for a provider row whose `provider_type` isn't a known value.
+
+    The schema has rejected anything but claude/ollama/openai_compatible
+    since the provider-create endpoint's inception, and claude_code is only
+    ever seeded by the app itself — so this can only fire for a row created
+    by a manual DB edit, and such a row was already broken (it used to
+    silently fall through to ClaudeProvider and send Anthropic-shaped
+    requests to whatever base_url was set).
+    """
+
+
 def _get_provider_instance(
     provider_model: AIProviderModel,
     extra_config: dict | None = None,
@@ -236,6 +249,13 @@ def _get_provider_instance(
     merged_config = {**(provider_model.config or {}), **(extra_config or {})}
 
     provider_type = (provider_model.provider_type or "claude").lower()
+    if provider_type == "claude":
+        return ClaudeProvider(
+            base_url=provider_model.base_url,
+            api_key=api_key,
+            config=merged_config,
+        )
+
     if provider_type == "claude_code":
         return ClaudeCodeProvider(
             base_url=provider_model.base_url,
@@ -250,16 +270,22 @@ def _get_provider_instance(
             config=merged_config,
         )
 
-    return ClaudeProvider(
-        base_url=provider_model.base_url,
-        api_key=api_key,
-        config=merged_config,
-    )
+    if provider_type == "openai_compatible":
+        return OpenAICompatibleProvider(
+            base_url=provider_model.base_url,
+            api_key=api_key,  # optional: not required by LM Studio / llama.cpp
+            config=merged_config,
+        )
+
+    raise UnsupportedProviderTypeError(f"Unknown AI provider_type: {provider_model.provider_type!r}")
+
+
+_PROMPT_ENV = ImmutableSandboxedEnvironment()
 
 
 def render_prompt(template_text: str, variables: dict) -> str:
-    """Render a Jinja2 prompt template with variables."""
-    tmpl = Template(template_text)
+    """Render a Jinja2 prompt template with variables inside a sandboxed environment."""
+    tmpl = _PROMPT_ENV.from_string(template_text)
     return tmpl.render(**variables)
 
 
@@ -399,10 +425,6 @@ async def run_task(
     rendered_system = render_prompt(system_template, variables) if system_template else None
     rendered_user = render_prompt(user_template, variables)
 
-    # Get provider instance (assignment.config layered on provider_model.config so
-    # per-task keys like allowed_tools / timeout_seconds reach the provider).
-    provider = _get_provider_instance(provider_model, extra_config=assignment.config)
-
     # Extract config
     config = {**provider_model.config, **assignment.config}
     temperature = config.get("temperature", 0.0)
@@ -422,8 +444,9 @@ async def run_task(
 
     # Agentic tool wiring for tool-capable non-CLI providers (Ollama). The
     # Claude Code CLI reaches tools via its own subprocess (no injected executor
-    # needed); the Anthropic API provider is not tool-capable. Only agentic
-    # tasks get tools — everything else stays a pure prompt→completion call.
+    # needed); the Anthropic API and OpenAI-compatible providers are not
+    # tool-capable (v1). Only agentic tasks get tools — everything else stays
+    # a pure prompt→completion call.
     complete_kwargs: dict = {}
     if provider_model.provider_type == "ollama":
         from app.ai.capabilities import task_requires_tools
@@ -476,6 +499,11 @@ async def run_task(
     # Execute
     _t0 = _time.monotonic()
     try:
+        # Instantiated inside the try so an unknown/misconfigured provider_type
+        # (UnsupportedProviderTypeError, or a provider-specific ValueError like
+        # a missing base_url) is recorded as a provider_error result below
+        # instead of crashing the Celery task.
+        provider = _get_provider_instance(provider_model, extra_config=assignment.config)
         response: AIResponse = await provider.complete(
             prompt=rendered_user,
             system=rendered_system,

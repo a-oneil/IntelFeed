@@ -2,14 +2,34 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # --- AI Provider Schemas ---
 
 
+def _check_provider_config(config: dict | None) -> dict | None:
+    """Reject config the provider would choke on at call time instead of save time.
+
+    ``extra_body`` is merged into every request with ``dict.update``: an array or
+    a string saves fine and then fails every completion on that provider.
+    """
+    if not config:
+        return config
+    scopes = [("config", config)]
+    overrides = config.get("model_overrides")
+    if overrides is not None and not isinstance(overrides, dict):
+        raise ValueError("config.model_overrides must be a JSON object keyed by model name")
+    scopes += [(f"config.model_overrides[{name!r}]", o) for name, o in (overrides or {}).items() if isinstance(o, dict)]
+    for where, scope in scopes:
+        for key in ("extra_body", "extra_headers"):
+            if scope.get(key) is not None and not isinstance(scope[key], dict):
+                raise ValueError(f"{where}.{key} must be a JSON object")
+    return config
+
+
 class AIProviderCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
-    provider_type: str = Field(default="claude", pattern=r"^(claude|ollama)$")
+    provider_type: str = Field(default="claude", pattern=r"^(claude|ollama|openai_compatible)$")
     base_url: str | None = None
     api_key: str | None = None  # plaintext, encrypted before storage
     config: dict = {}
@@ -26,6 +46,14 @@ class AIProviderCreate(BaseModel):
         }
     )
 
+    _config_shape = field_validator("config")(_check_provider_config)
+
+    @model_validator(mode="after")
+    def _openai_compatible_requires_base_url(self) -> "AIProviderCreate":
+        if self.provider_type == "openai_compatible" and not (self.base_url and self.base_url.strip()):
+            raise ValueError("openai_compatible provider requires a non-empty base_url")
+        return self
+
 
 class AIProviderUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
@@ -33,6 +61,8 @@ class AIProviderUpdate(BaseModel):
     api_key: str | None = None
     is_active: bool | None = None
     config: dict | None = None
+
+    _config_shape = field_validator("config")(_check_provider_config)
 
     model_config = ConfigDict(
         json_schema_extra={

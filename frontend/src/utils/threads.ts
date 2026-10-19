@@ -6,6 +6,7 @@ import { groupConsecutiveEntries, type SingleItem } from "./groupEntries";
 export interface ThreadItem {
   type: "thread";
   thread: StoryThread;
+  /** The row's 0–10 rank — its best unread article's score, which the badge shows. */
   score: number;
   /** Members the row absorbed (kept out of the list as standalone entries). */
   memberIds: string[];
@@ -64,7 +65,7 @@ export function queueItems(rows: PriorityQueueRow[]): QueueItem[] {
     }
     if (!row.entry) continue;
     if (run.length === 0) runStart = entriesSeen;
-    run.push(row.entry);
+    run.push({ ...row.entry, priority_score: row.score });
     entriesSeen++;
   }
   flushRun();
@@ -105,7 +106,7 @@ export function magazineQueueItems(rows: PriorityQueueRow[]): MagazineItem[] {
       continue;
     }
     if (!row.entry) continue;
-    out.push({ type: "single", entry: row.entry, flatIndex: entriesSeen });
+    out.push({ type: "single", entry: { ...row.entry, priority_score: row.score }, flatIndex: entriesSeen });
     entriesSeen++;
   }
   return out;

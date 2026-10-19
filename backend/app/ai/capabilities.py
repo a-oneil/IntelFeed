@@ -26,6 +26,11 @@ TOOL_REQUIRED_TASKS: frozenset[str] = frozenset(
 # full agent harness; Ollama runs a native ``/api/chat`` function-calling loop
 # (OllamaProvider.stream_agent / complete with an injected in-process
 # tool_executor) against the backend tool registry.
+#
+# ``openai_compatible`` is deliberately NOT here yet: local OpenAI-compatible
+# servers (LM Studio, llama.cpp, vLLM) vary too much in tool-calling quality
+# for a blanket type-level capability. Tool support for it is tracked as a
+# follow-up behind a per-provider config opt-in, not a type-level flag.
 TOOL_CAPABLE_PROVIDER_TYPES: frozenset[str] = frozenset({"claude_code", "ollama"})
 
 

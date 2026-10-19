@@ -59,39 +59,34 @@ import com.example.intelfeed.theme.SlateDark900
 import com.example.intelfeed.theme.TextMuted
 import com.example.intelfeed.theme.TextPrimary
 import com.example.intelfeed.theme.TextSecondary
+import com.example.intelfeed.theme.ThemeEngine
+import com.example.intelfeed.ui.entity.Badge
+import com.example.intelfeed.ui.entity.ProfileChip
 import com.example.intelfeed.ui.entity.Tone
 import kotlinx.coroutines.delay
 
 fun Tone.color(): Color = when (this) {
     Tone.NEUTRAL -> TextSecondary
-    Tone.INFO -> CyberBlue
-    Tone.SUCCESS -> CyberGreen
-    Tone.WARNING -> CyberAmber
-    Tone.DANGER -> CyberOrange
-    Tone.CRITICAL -> CyberRed
-    Tone.ACCENT -> CyberPurple
+    Tone.INFO -> ThemeEngine.severityColor("info")
+    Tone.SUCCESS -> ThemeEngine.severityColor("low")
+    Tone.WARNING -> ThemeEngine.severityColor("medium")
+    Tone.DANGER -> ThemeEngine.severityColor("high")
+    Tone.CRITICAL -> ThemeEngine.severityColor("critical")
+    Tone.ACCENT -> ThemeEngine.domainAccentColor("dash")
 }
 
-/** One color per entity type, used for chips and labels everywhere. */
+fun Badge.color(): Color =
+    if (ruleFormat != null) ThemeEngine.ruleFormatColor(ruleFormat) else tone.color()
+
+fun ProfileChip.color(): Color =
+    ref?.type?.color() ?: colorKey?.let { ThemeEngine.entityColor(it) } ?: tone.color()
+
 /**
- * The website's entity colours (its `--entity-*` CSS variables, the same in light and dark), so a
- * type looks the same in chips, highlights and profiles on both.
+ * The workbench's entity colours (`--entity-*` from `/api/themes/schema`), driven by the server so
+ * entity types look identical across web and mobile.
  */
-fun EntityType.color(): Color = when (this) {
-    EntityType.THREAT_ACTOR -> Color(0xFFF97316)
-    EntityType.MALWARE -> Color(0xFFA855F7)
-    EntityType.CVE -> Color(0xFFEF4444)
-    EntityType.TTP -> Color(0xFF3B82F6)
-    EntityType.RULE -> Color(0xFF22C55E)
-    EntityType.CAMPAIGN -> Color(0xFF14B8A6)
-    EntityType.TOOL -> Color(0xFFEAB308)
-    EntityType.VENDOR -> Color(0xFF6366F1)
-    EntityType.PRODUCT -> Color(0xFFEC4899)
-    EntityType.COUNTRY -> Color(0xFF06B6D4)
-    EntityType.MITIGATION -> Color(0xFF84CC16)
-    EntityType.WEAKNESS -> Color(0xFFB45309)
-    EntityType.OBSERVABLE -> Color(0xFFD946EF)
-}
+fun EntityType.color(): Color = ThemeEngine.entityColor(this)
+
 
 /** Small rounded label. Tappable when [onClick] is set (then at least 32dp tall for touch). */
 @OptIn(ExperimentalFoundationApi::class)
@@ -103,6 +98,7 @@ fun Pill(
     monospace: Boolean = false,
     leadingIcon: ImageVector? = null,
     filled: Boolean = false,
+    fgColor: Color? = null,
     onClick: (() -> Unit)? = null,
     onLongClick: (() -> Unit)? = null
 ) {
@@ -112,6 +108,7 @@ fun Pill(
         onLongClick != null -> Modifier.combinedClickable(onClick = {}, onLongClick = onLongClick)
         else -> Modifier
     }
+    val textColor = if (filled) (fgColor ?: ThemeEngine.contrastTextColor(color)) else color
     Surface(
         color = if (filled) color else color.copy(alpha = 0.15f),
         shape = RoundedCornerShape(6.dp),
@@ -122,14 +119,14 @@ fun Pill(
             modifier = Modifier.padding(horizontal = 8.dp, vertical = if (onClick != null) 6.dp else 3.dp)
         ) {
             if (leadingIcon != null) {
-                Icon(leadingIcon, contentDescription = null, tint = if (filled) SlateDark900 else color, modifier = Modifier.size(13.dp))
+                Icon(leadingIcon, contentDescription = null, tint = textColor, modifier = Modifier.size(13.dp))
                 Spacer(Modifier.width(4.dp))
             }
             Text(
                 text = label,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = if (filled) SlateDark900 else color,
+                color = textColor,
                 fontFamily = if (monospace) FontFamily.Monospace else FontFamily.Default,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -137,6 +134,7 @@ fun Pill(
         }
     }
 }
+
 
 @Composable
 fun SectionHeader(text: String, modifier: Modifier = Modifier, trailing: @Composable (() -> Unit)? = null) {
@@ -244,7 +242,10 @@ fun PrimaryButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifi
         onClick = onClick,
         enabled = enabled,
         modifier = modifier,
-        colors = ButtonDefaults.buttonColors(containerColor = CyberBlue, contentColor = SlateDark900)
+        colors = ButtonDefaults.buttonColors(
+            containerColor = CyberBlue,
+            contentColor = ThemeEngine.color("accent-fg", ThemeEngine.contrastTextColor(CyberBlue))
+        )
     ) {
         if (icon != null) {
             Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -253,6 +254,7 @@ fun PrimaryButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifi
         Text(text, fontWeight = FontWeight.Bold)
     }
 }
+
 
 /** Two-column label/value row for profile facts. Long-press to copy value. */
 @OptIn(ExperimentalFoundationApi::class)

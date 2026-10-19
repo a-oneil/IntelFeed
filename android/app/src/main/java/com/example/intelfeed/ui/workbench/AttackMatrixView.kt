@@ -141,9 +141,13 @@ class AttackMatrixViewModel(private val repository: IntelFeedRepository) : ViewM
 }
 
 // The web's --success, --warning and --danger.
-private val Covered = Color(0xFF3FB950)
-private val LibraryOnly = Color(0xFFD29922)
-private val NoRule = Color(0xFFF85149)
+private val Covered: Color
+    get() = com.example.intelfeed.theme.ThemeEngine.color("success")
+private val LibraryOnly: Color
+    get() = com.example.intelfeed.theme.ThemeEngine.color("warning")
+private val NoRule: Color
+    get() = com.example.intelfeed.theme.ThemeEngine.color("danger")
+
 
 private fun coverageColor(coverage: String) = when (coverage) {
     "covered" -> Covered

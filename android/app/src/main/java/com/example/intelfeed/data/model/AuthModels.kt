@@ -30,5 +30,7 @@ data class AuthTokens(
 data class UserProfile(
     val id: String? = null,
     val username: String? = null,
-    val role: String? = null
+    val role: String? = null,
+    @SerialName("theme_id") val themeId: String? = null
 )
+

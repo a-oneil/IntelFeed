@@ -130,6 +130,7 @@ async def _seed_watch_entry(db_session, feed, priority_score, actor, watched_del
         content_text="Some activity.",
         published_at=datetime.now(UTC) - timedelta(hours=watched_delta_hours),
         priority_score=priority_score,
+        priority_raw=priority_score,
     )
     db_session.add(entry)
     await db_session.flush()

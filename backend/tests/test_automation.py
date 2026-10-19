@@ -796,6 +796,7 @@ async def _batch_entry(db_session, feed, title: str, score: float) -> Entry:
         url=f"https://example.com/{uuid.uuid4()}",
         content_text="body",
         priority_score=score,
+        priority_raw=score,
     )
     db_session.add(entry)
     await db_session.flush()
@@ -879,6 +880,7 @@ async def test_daily_briefing_input_is_one_article_per_story(db_session: AsyncSe
             content_text="body text",
             published_at=since,
             priority_score=float(i),
+            priority_raw=float(i),
         )
         db_session.add(entry)
         made.append(entry)

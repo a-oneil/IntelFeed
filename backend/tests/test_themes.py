@@ -505,3 +505,27 @@ async def test_delete_default_custom_theme_clears_default(
 
     resp = await client.get("/api/themes", headers=admin_headers)
     assert all(t["is_default"] is False for t in resp.json())
+
+
+@pytest.mark.asyncio
+async def test_get_color_schema_unauthenticated(client: AsyncClient):
+    """The server-driven color coding vocabulary is readable without auth."""
+    resp = await client.get("/api/themes/schema")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["base"]["bg-primary"] == "#0d1117"
+    assert data["domain_accents"]["feeds"] == "#f78166"
+    assert data["domain_accents"]["intel"] == "#58a6ff"
+    assert data["domain_accents"]["detect"] == "#3fb950"
+    assert data["domain_accents"]["dash"] == "#bc8cff"
+    assert data["entity_types"]["threat_actor"] == "#f97316"
+    assert data["entity_types"]["observable"] == "#d946ef"
+    assert data["severity"]["critical"] == "#dc2626"
+    assert data["rule_formats"]["sigma"] == "#56d364"
+    assert data["ransomware_groups"]["lockbit"] == "#e05c2f"
+    assert data["pir"]["strategic"] == "#8b5cf6"
+    assert data["tlp"]["TLP:AMBER"] == "#f59e0b"
+    assert data["automation_nodes"]["trigger"] == "#f59e0b"
+    assert data["syntax"]["keyword"] == "#cba6f7"
+    assert data["css_variables"]["entity-actor"] == "#f97316"
+    assert data["css_variables"]["fmt-sigma"] == "#56d364"

@@ -782,6 +782,7 @@ async def assign_entries(db: AsyncSession, limit: int = 500) -> dict:
         return stats
 
     touched: set[uuid.UUID] = set()
+    claimed_in_pass: set[uuid.UUID] = set()
     ambient = await ambient_entities(db, cutoff)
     entity_map = {
         entry_id: ents - ambient for entry_id, ents in (await entry_entities(db, [c["id"] for c in candidates])).items()
@@ -790,8 +791,7 @@ async def assign_entries(db: AsyncSession, limit: int = 500) -> dict:
     for entry in candidates:
         # A neighbour processed earlier in this same pass may already have taken
         # this entry into a seeded thread.
-        already = await db.execute(text("SELECT 1 FROM story_thread_entries WHERE entry_id = :e"), {"e": entry["id"]})
-        if already.first():
+        if entry["id"] in claimed_in_pass:
             continue
 
         entry_ents = entity_map.get(entry["id"], set())
@@ -833,6 +833,7 @@ async def assign_entries(db: AsyncSession, limit: int = 500) -> dict:
             role, duplicate_of = ("echo", closest["entry_id"]) if is_echo else ("beat", None)
 
             await _add_member(db, thread["id"], entry, similarity, role, duplicate_of)
+            claimed_in_pass.add(entry["id"])
             touched.add(thread["id"])
             stats["echoed" if role == "echo" else "joined"] += 1
             joined = True
@@ -846,7 +847,10 @@ async def assign_entries(db: AsyncSession, limit: int = 500) -> dict:
         seed_floor = anchor_at - timedelta(days=gap_days)
         seed_ceiling = anchor_at + timedelta(days=gap_days)
         nearby = await _nearest_unthreaded(db, entry["id"], max(cutoff, seed_floor), seed_ceiling, min_body)
-        neighbours = _cap_by_source(entry, [n for n in nearby if float(n["similarity"] or 0) >= seed_sim])
+        neighbours = _cap_by_source(
+            entry,
+            [n for n in nearby if n["id"] not in claimed_in_pass and float(n["similarity"] or 0) >= seed_sim],
+        )
         members = [entry, *neighbours]
         source_counts = Counter(_source_key(m.get("url"), m.get("feed_id")) for m in members)
         # A publisher's own series clears every similarity bar there is, so the
@@ -869,6 +873,7 @@ async def assign_entries(db: AsyncSession, limit: int = 500) -> dict:
 
         thread_id = await _create_thread(db, entry)
         await _add_member(db, thread_id, entry, 1.0, "origin")
+        claimed_in_pass.add(entry["id"])
         for neighbour in neighbours:
             similarity = float(neighbour["similarity"] or 0)
             is_echo = similarity >= dup_sim and not (member_ents.get(neighbour["id"], set()) - entry_ents)
@@ -880,6 +885,7 @@ async def assign_entries(db: AsyncSession, limit: int = 500) -> dict:
                 "echo" if is_echo else "beat",
                 entry["id"] if is_echo else None,
             )
+            claimed_in_pass.add(neighbour["id"])
             stats["echoed" if is_echo else "joined"] += 1
         touched.add(thread_id)
         stats["seeded"] += 1
@@ -927,7 +933,7 @@ async def fold_by_thread(db: AsyncSession, entries: list) -> tuple[list, dict]:
     prompt is built: one article per story, the strongest one, plus how many
     outlets carried it.
 
-    Takes anything with ``id`` and ``priority_score`` (ORM rows in both call
+    Takes anything with ``id`` and ``priority_raw`` (ORM rows in both call
     sites). Returns the kept items in their original order and a coverage map
     keyed by the id of each representative. Items no thread holds pass through
     untouched and appear in neither map.
@@ -974,7 +980,7 @@ async def fold_by_thread(db: AsyncSession, entries: list) -> tuple[list, dict]:
         # never represents the story it re-reports.
         representative = max(
             members,
-            key=lambda e: (by_entry.get(e.id, {}).get("role") != "echo", e.priority_score or 0),
+            key=lambda e: (by_entry.get(e.id, {}).get("role") != "echo", e.priority_raw or 0),
         )
         kept.append(representative)
         row = by_entry.get(representative.id)
@@ -1002,7 +1008,8 @@ async def list_threads(
 
     ``top_score`` is the priority score of the best unread, non-echo member —
     the score the thread row takes in the ranked queue, because that member is
-    what the reader would have read next anyway. ``unread_count`` counts every
+    what the reader would have read next anyway. ``top_raw`` is that member's
+    raw signal sum, which the queue actually ranks by. ``unread_count`` counts every
     unread member including echoes, since those are the rows the thread folds.
 
     ``q`` filters on title, for the pickers that need to *find* a named story
@@ -1015,15 +1022,27 @@ async def list_threads(
                    t.echo_count, t.first_seen, t.last_seen, t.peak_at, t.key_entities,
                    t.narrated_at,
                    uts.last_opened_at,
-                   m.unread_count, m.top_score, m.top_entry_id, m.new_since_opened, m.entry_ids
-            FROM story_threads t
+                   m.unread_count, m.top_score, m.top_raw, m.top_entry_id, m.new_since_opened, m.entry_ids
+            FROM (
+                SELECT id, slug, title, summary, status, entry_count, source_count,
+                       echo_count, first_seen, last_seen, peak_at, key_entities,
+                       narrated_at
+                FROM story_threads
+                WHERE (:status = 'any' OR status = :status)
+                  AND (CAST(:q AS text) IS NULL OR title ILIKE CAST(:q AS text))
+                ORDER BY last_seen DESC NULLS LAST
+                LIMIT :limit
+            ) t
             LEFT JOIN user_thread_states uts ON uts.thread_id = t.id AND uts.user_id = :user_id
             JOIN LATERAL (
                 SELECT COUNT(*) FILTER (WHERE ues.is_read IS NOT TRUE) AS unread_count,
                        MAX(e.priority_score) FILTER (
                            WHERE ues.is_read IS NOT TRUE AND ste.role <> 'echo'
                        ) AS top_score,
-                       (ARRAY_AGG(e.id ORDER BY e.priority_score DESC NULLS LAST)
+                       MAX(e.priority_raw) FILTER (
+                           WHERE ues.is_read IS NOT TRUE AND ste.role <> 'echo'
+                       ) AS top_raw,
+                       (ARRAY_AGG(e.id ORDER BY e.priority_raw DESC NULLS LAST)
                         FILTER (WHERE ues.is_read IS NOT TRUE AND ste.role <> 'echo'))[1] AS top_entry_id,
                        COUNT(*) FILTER (
                            WHERE uts.last_opened_at IS NULL OR ste.added_at > uts.last_opened_at
@@ -1034,10 +1053,7 @@ async def list_threads(
                 LEFT JOIN user_entry_states ues ON ues.entry_id = e.id AND ues.user_id = :user_id
                 WHERE ste.thread_id = t.id
             ) m ON true
-            WHERE (:status = 'any' OR t.status = :status)
-              AND (CAST(:q AS text) IS NULL OR t.title ILIKE CAST(:q AS text))
             ORDER BY t.last_seen DESC NULLS LAST
-            LIMIT :limit
             """
         ),
         {
@@ -1072,7 +1088,7 @@ async def thread_members(db: AsyncSession, thread_id: uuid.UUID, user_id: uuid.U
             """
             SELECT ste.entry_id, ste.role, ste.similarity, ste.duplicate_of_entry_id, ste.source_key,
                    ste.added_at,
-                   e.title, e.url, e.published_at, e.priority_score,
+                   e.title, e.url, e.published_at, e.priority_score, e.priority_raw,
                    COALESCE(f.title, '') AS feed_title,
                    COALESCE(ues.is_read, false) AS is_read
             FROM story_thread_entries ste

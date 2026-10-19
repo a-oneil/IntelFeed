@@ -12,7 +12,7 @@ IntelFeed — a self-hosted, security-focused RSS aggregator and threat intellig
 - **Frontend:** React 18 / TypeScript / Vite / TanStack Query + Zustand / CSS Modules
 - **Database:** PostgreSQL 16 (async via asyncpg)
 - **Search:** Meilisearch v1.6
-- **AI:** Model-agnostic provider system (Ollama, Claude, OpenAI, custom)
+- **AI:** Model-agnostic provider system (Ollama, Claude API, Claude Code CLI, OpenAI-compatible endpoints — OpenAI, LM Studio, vLLM, llama.cpp, LiteLLM, OpenRouter, Groq)
 - **Package managers:** pip (backend), pnpm (frontend)
 
 ## Common Commands
