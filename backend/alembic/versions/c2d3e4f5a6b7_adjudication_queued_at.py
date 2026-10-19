@@ -5,7 +5,7 @@ Revises: b1c2d3e4f5a6
 Create Date: 2026-10-08
 
 ``adjudication_status = 'pending'`` says a review is queued or running; it
-says nothing about how long. The hourly sweep needs that to tell a row the
+says nothing about how long. The resweep needs that to tell a row the
 AI queue is still draining from one whose task was lost (worker crash,
 dispatch failure, retries exhausted), so the enqueue path stamps
 ``adjudication_queued_at`` and the sweep re-enqueues pending rows older than

@@ -366,8 +366,11 @@ After an entry's one-pass analysis lands, a second, smaller AI call re-reads the
 article next to a manifest of everything the analysis wrote to it — entity
 links of every source, entities it minted (with their nearest catalogue names
 pre-fetched), pending-tier promotions, relationship claims, AI observables —
-and returns one verdict per item: keep, remove, reclassify, veto, merge,
-demote or drop. A manifest holds at most 60 entity links, 10 relationship
+and returns a verdict — remove, reclassify, veto, merge, demote or drop — for
+each item it would change. Items it leaves out are kept, so a clean review
+returns an empty list: at the manifest caps below, one line per item would not
+fit in the task's 4096 output tokens, and a truncated response is a parse
+error that throws the whole review away. A manifest holds at most 60 entity links, 10 relationship
 claims and 25 observables; when an article has more links than that, the ones
 only this review can judge come first — entities it minted, then pending-tier
 promotions, then AI assertions, then the autolinker's bulk — the prompt says
@@ -383,11 +386,11 @@ behind it is `entry_adjudication` (Settings → AI Configuration → Prompts).
 | Setting | Type / default | What it does |
 |---|---|---|
 | `adjudication_mode` | `off` \| `shadow` \| `apply`, default `off` | The master switch (pipeline plans only subtract feeds). `shadow` files every verdict as a proposal in the Links / AI-entities Proposals lens and touches nothing. `apply` acts on verdicts at or above the confidence floor at ingest, through the same code the queue's Apply buttons use; lower ones still become proposals. The Proposed/Applied switch on the Proposals lens writes `shadow` / `apply`; `off` is set from the Adjudicate stage panel. |
-| `adjudication_trigger` | `all` \| `created`, default `all` | `all` reviews every analysed entry (~100–500/day). `created` reviews only entries whose analysis minted an entity, wrote an AI junction row (actor/malware/tool/country/sector), asserted a TTP or a relationship, promoted a pending match or captured an observable (~20–50/day) — the fallback when the GPU is saturated. |
-| `adjudication_max_per_hour` | int, `30` | Reviews started per hour on the AI worker (~40 s each on a 9B model). Over-budget entries wait for the hourly sweep. The backfill may use at most half of each hour's budget; live entries get the rest. |
-| `adjudication_min_priority_score` | float, `0` | Skip entries below this priority score (`0` = off). Keep it at 0: CVE/NVD entries are the main source of junk tool entities and score low, so a floor would exempt exactly those. |
+| `adjudication_trigger` | `all` \| `created`, default `all` | `all` reviews every analysed entry (~100–500/day). `created` reviews only entries whose analysis minted an entity, wrote an AI junction row (actor/malware/tool/country/sector), asserted a TTP or a relationship, promoted a pending match or captured an observable (~20–50/day) — the fallback when reviews cannot keep up with ingest. |
+| `adjudication_max_per_hour` | int, `0` | Reviews started per hour; `0` (the default) = no ceiling. The AI worker runs one call at a time, so with no ceiling the worker itself is the only pacing. Set a number for two reasons only: to hold down spend on a metered provider, and to stop a review backlog queueing ahead of the one-pass analysis, which shares that worker. Over-budget entries wait for the resweep. While a ceiling is set, the backfill may use at most half of each hour's budget; live entries get the rest. With no ceiling the backfill has no share, so dispatch it in batches via its own `limit`. |
+| `adjudication_min_priority_score` | float, `0` | Skip entries below this priority score, on the 0–10 scale (`0` = off). Keep it at 0: CVE/NVD entries are the main source of junk tool entities and score low, so a floor would exempt exactly those. |
 | `adjudication_apply_min_confidence` | `high` \| `medium` \| `low`, default `high` | In apply mode, verdicts below this confidence are filed as proposals instead of applied. |
-| `adjudication_circuit_breaker_pct` | float, `0.5` | If more than this share of an entry's items come back destructive (remove + veto + demote + drop), the whole run is downgraded to proposals. A rolling mean over the last 50 runs above the same threshold (once 10 samples exist) pauses dispatch for an hour, logs a warning, and surfaces as `adjudication_breaker_until` in the hygiene stats and a chip in the Engine needs-you row. |
+| `adjudication_circuit_breaker_pct` | float, `0.5` | If more than this share of an entry's items come back destructive (remove + veto + demote + drop), the whole run is downgraded to proposals. A rolling mean over the last 50 **apply** runs above the same threshold (once 10 samples exist) pauses dispatch for an hour, logs a warning, and surfaces as `adjudication_breaker_until` in the hygiene stats and a chip in the Engine needs-you row. Shadow runs are not sampled: the breaker stops damage, and a shadow run makes no changes. |
 | `adjudication_content_max_chars` | int, `8000` | Article text in the review prompt (head + indicator tail, the extraction window). |
 | `adjudication_scope` | csv, `links,entities,relationships,observables` | Manifest sections the reviewer sees. `links` puts every entity link on the article under review; `entities` adds the catalogue lookup that makes `veto` and `merge` answerable, and on its own narrows the review to what this article minted. `assessment` is opt-in and only ever logged. |
 
@@ -401,20 +404,28 @@ Rows that pass go `pending` (stamping `adjudication_queued_at`) and end
 itself re-checks only the master switch; a manual retry from the matrix
 bypasses the other gates and re-queues the row.
 
-**The hourly sweep** (`resweep_adjudications`, run from
-`submit_analysis_batches`) re-enqueues, newest first: completed analyses with
+**The resweep** (`resweep_adjudications`, run from
+`submit_analysis_batches`, so every 30 minutes — the budget it drains
+against is the hourly one) re-enqueues, newest first: completed analyses with
 no decision after two hours, `skipped_budget` / `skipped_paused` rows every
 hour, and `pending` rows queued more than six hours ago with no run (a lost
 task).
 
-**What never changes, in any mode:** edges an analyst rejected, and links an
-analyst restored within the last 90 days (flagged to the reviewer, never
-applied). Veto deletes an entity only when this entry created it and nothing
+**What never changes, in any mode:** edges an analyst rejected, and links of a
+validator junction type (actor, malware, vendor, product, country) that an
+analyst restored within the last 90 days — flagged to the reviewer, never
+applied. The guard reads the link log, which is the only place a restore is
+recorded per entry per link, so tool, sector and TTP links are reviewed again
+like any other row. Veto deletes an entity only when this entry created it and nothing
 else holds it (no other article, edge or claim); otherwise it only unlinks.
 Promotion of a relationship edge to *confirmed* is a counter on the edge
 (`reviewer_kept_entry_ids`): a keep in apply mode from a new entry appends it,
 and at `relationship_evidence_promote_count` distinct entries the edge is
-promoted. Stale entities (one article at most, no edge, 90 days idle) are a
+promoted. A keep only counts when the reviewer **named that edge** and did so
+at or above the confidence floor — it is the one verdict that raises trust
+rather than lowering it, so silence is not agreement. Since the prompt
+otherwise asks for changes only, it carves edges out and requires a verdict on
+every one of them (at most ten per article). Stale entities (one article at most, no edge, 90 days idle) are a
 live `stale` filter on the AI-entities view.
 
 **Queue.** The Proposals lens has an origin facet (`adjudicator` | `legacy`),
@@ -441,7 +452,7 @@ Drafts and refreshes the AI-written description paragraph on entity profiles.
 
 | Setting | Type / default | What it does |
 |---|---|---|
-| `assessment_backfill_batch_size` | int, `50` | Entities dispatched per daily run. They queue serially on the single-concurrency AI worker, so the batch paces itself — raise to drain a backlog, lower to leave GPU time for ingest extraction. |
+| `assessment_backfill_batch_size` | int, `50` | Entities dispatched per daily run. They queue serially on the single-concurrency AI worker, so the batch paces itself — raise to drain a backlog, lower to leave more of the worker's time for ingest extraction. |
 | `assessment_backfill_min_articles` | int, `1` | Fewest linked entries before an entity is worth summarising. Raise it to spend the daily budget on better-covered entities first. |
 | `assessment_backfill_retry_days` | int, `7` | Don't re-attempt an entity within this window. Without it the highest-article-count entities are re-picked every run and starve the rest of the queue. |
 | `assessment_refresh_enabled` | bool, `true` | Also re-write assessments that have gone **stale**, not just missing ones — otherwise an entity assessed once keeps a paragraph describing the month it was written in. Only touches text this writer produced; analyst and enrichment descriptions are never overwritten. |

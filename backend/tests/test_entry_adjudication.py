@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.ai_analysis import AIAnalysisRequest
@@ -580,7 +580,6 @@ async def test_shadow_writes_proposals_and_mutates_nothing(db_session: AsyncSess
     assert maint[(ACTION_EDGE_DEMOTE, "relationship")].entity_id == edge.id
     assert maint[(ACTION_IOC_DROP, "observable")].after["value"] == "blog.vendor-research.example"
     assert all(r.mode == "shadow" and r.applied is False for r in maint.values())
-    assert (await db_session.get(Entry, entry.id)).last_link_validation_at is not None
 
 
 @pytest.mark.asyncio
@@ -1038,6 +1037,32 @@ async def test_apply_breaker_downgrades_whole_run_to_proposals(db_session: Async
 
 
 @pytest.mark.asyncio
+async def test_shadow_runs_never_sample_the_rolling_breaker(db_session: AsyncSession, feed, monkeypatch):
+    """The rolling breaker pauses dispatch for an hour. A shadow run changes
+    nothing, so sampling one would throttle the soak that is meant to collect
+    verdicts at full rate."""
+    _use_fake_redis(monkeypatch)
+    await _seed_settings(db_session, adjudication_mode="shadow")
+    cfg = await adj._settings(db_session)
+
+    # Twelve all-destructive shadow runs — well past the 10 samples the rolling
+    # breaker needs — and dispatch is still open.
+    for i in range(12):
+        entry = await _make_entry(db_session, feed)
+        actor = await _link_actor(db_session, entry, f"Storm {i}")
+        _items, verdicts = await _verdicts_for(
+            db_session,
+            entry,
+            [{"item_id": f"link:threat_actor:{actor.id}", "verdict": "remove", "confidence": "high"}],
+        )
+        detail = await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
+        assert detail["mode"] == "shadow" and detail["rolling_breaker"] is False
+
+    assert await adj.breaker_paused_until() is None
+    assert await adj._consume_hour_budget(100) is None
+
+
+@pytest.mark.asyncio
 async def test_queue_apply_then_restore_recreates_a_vetoed_entity(
     client, admin_headers, db_session: AsyncSession, feed
 ):
@@ -1102,6 +1127,31 @@ def test_extraction_prompt_no_longer_judges_links():
     assert "link_validations" not in task["default_system_template"]
 
 
+def test_the_reviewer_is_asked_for_changes_only():
+    """One line per item does not fit in the task's 4096 output tokens at the
+    manifest caps (60 links + 10 edges + 25 observables), and a truncated
+    response is a parse error that discards the whole review. So the prompt
+    asks for the changes alone, and an omitted item_id has to mean keep."""
+    from app.ai.prompts.defaults import DEFAULT_ASSIGNMENT_CONFIGS, SYSTEM_TASKS
+
+    task = next(t for t in SYSTEM_TASKS if t["name"] == "entry_adjudication")
+    assert "RETURN ONLY THE ITEMS YOU WOULD CHANGE" in task["default_system_template"]
+    assert "ONLY for the ones you would change" in task["default_prompt_template"]
+    assert DEFAULT_ASSIGNMENT_CONFIGS["entry_adjudication"]["max_tokens"] == 4096
+
+    items = [_item("link:threat_actor:a"), _item("edge:1", kind="edge"), _item("ioc:domain:x", kind="ioc")]
+    # The clean review: no verdicts at all.
+    verdicts, stats = _validate_verdicts({"verdicts": []}, items)
+    assert [v.verdict for v in verdicts] == ["keep", "keep", "keep"]
+    assert stats == {"unknown": 0, "coerced": 0, "duplicate": False}
+    # And the usual case: one changed item, the rest kept by omission.
+    verdicts, _stats = _validate_verdicts(
+        {"verdicts": [{"item_id": "ioc:domain:x", "verdict": "drop", "confidence": "high"}]}, items
+    )
+    by = {v.item.item_id: v.verdict for v in verdicts}
+    assert by == {"link:threat_actor:a": "keep", "edge:1": "keep", "ioc:domain:x": "drop"}
+
+
 @pytest.mark.asyncio
 async def test_keep_counter_promotes_edge_after_three_distinct_entries(db_session: AsyncSession, feed):
     await _seed_settings(db_session, adjudication_mode="apply")
@@ -1128,7 +1178,9 @@ async def test_keep_counter_promotes_edge_after_three_distinct_entries(db_sessio
         db_session.add(edge)
         await db_session.flush()
         items, _ = await build_manifest(db_session, entry, _payload())
-        verdicts, _ = _validate_verdicts({"verdicts": [{"item_id": f"edge:{edge.id}", "verdict": "keep"}]}, items)
+        verdicts, _ = _validate_verdicts(
+            {"verdicts": [{"item_id": f"edge:{edge.id}", "verdict": "keep", "confidence": "high"}]}, items
+        )
         cfg = await adj._settings(db_session)
         await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
         await db_session.flush()
@@ -1166,11 +1218,93 @@ async def test_keep_counter_never_touches_shadow_or_demoted_edges(db_session: As
     db_session.add(edge)
     await db_session.flush()
     items, _ = await build_manifest(db_session, entry, _payload())
-    verdicts, _ = _validate_verdicts({"verdicts": [{"item_id": f"edge:{edge.id}", "verdict": "keep"}]}, items)
+    verdicts, _ = _validate_verdicts(
+        {"verdicts": [{"item_id": f"edge:{edge.id}", "verdict": "keep", "confidence": "high"}]}, items
+    )
     cfg = await adj._settings(db_session)
     await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
     await db_session.refresh(edge)
     assert edge.reviewer_kept_entry_ids == []
+
+
+async def _edge_for(db_session, entry, name="Warlock"):
+    """An AI-asserted edge on this entry, the shape the manifest reviews."""
+    actor = await _link_actor(db_session, entry, name, source="ai")
+    cobalt = Tool(name=f"Cobalt Strike {uuid.uuid4().hex[:6]}", article_count=40)
+    db_session.add(cobalt)
+    await db_session.flush()
+    edge = EntityRelationship(
+        source_type="threat_actor",
+        source_id=actor.id,
+        target_type="tool",
+        target_id=cobalt.id,
+        relationship_type="uses",
+        confidence="probable",
+        source="auto_extracted",
+        description=f"{name} deploys Cobalt Strike",
+        evidence_entry_ids=[entry.id],
+    )
+    db_session.add(edge)
+    await db_session.flush()
+    return edge
+
+
+@pytest.mark.asyncio
+async def test_silence_on_an_edge_is_not_corroboration(db_session: AsyncSession, feed):
+    """The prompt asks for changes only, so an unmentioned edge comes back as a
+    filled-in keep. Counting those would promote a relationship to `confirmed`
+    on three reviews that never weighed in — corroboration has to be something
+    the reviewer actually said."""
+    await _seed_settings(db_session, adjudication_mode="apply")
+    entry = await _make_entry(db_session, feed)
+    edge = await _edge_for(db_session, entry)
+
+    items, _ = await build_manifest(db_session, entry, _payload())
+    assert any(it.item_id == f"edge:{edge.id}" for it in items)
+    # An empty verdict list: every item keeps, none of it explicit.
+    verdicts, _stats = _validate_verdicts({"verdicts": []}, items)
+    edge_verdict = next(v for v in verdicts if v.item.item_id == f"edge:{edge.id}")
+    assert edge_verdict.verdict == "keep" and edge_verdict.explicit is False
+
+    cfg = await adj._settings(db_session)
+    detail = await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
+    await db_session.refresh(edge)
+    assert edge.reviewer_kept_entry_ids == []
+    assert detail["promoted"] == 0 and edge.confidence == "probable"
+
+
+@pytest.mark.asyncio
+async def test_a_low_confidence_keep_does_not_corroborate_either(db_session: AsyncSession, feed):
+    """A keep is the one verdict that raises trust rather than lowering it, so
+    it clears the same confidence floor the destructive verdicts do."""
+    await _seed_settings(db_session, adjudication_mode="apply")  # floor defaults to high
+    entry = await _make_entry(db_session, feed)
+    edge = await _edge_for(db_session, entry)
+
+    items, _ = await build_manifest(db_session, entry, _payload())
+    verdicts, _stats = _validate_verdicts(
+        {"verdicts": [{"item_id": f"edge:{edge.id}", "verdict": "keep", "confidence": "low"}]}, items
+    )
+    edge_verdict = next(v for v in verdicts if v.item.item_id == f"edge:{edge.id}")
+    assert edge_verdict.explicit is True  # said, but not confidently
+
+    cfg = await adj._settings(db_session)
+    await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
+    await db_session.refresh(edge)
+    assert edge.reviewer_kept_entry_ids == []
+
+
+def test_the_prompt_still_demands_a_verdict_on_every_edge():
+    """The changes-only rule would otherwise retire edge corroboration
+    outright: the reviewer would never volunteer a keep again. Edges are capped
+    at 10 per article, so answering on all of them is affordable."""
+    from app.ai.prompts.defaults import SYSTEM_TASKS
+
+    task = next(t for t in SYSTEM_TASKS if t["name"] == "entry_adjudication")
+    system = task["default_system_template"]
+    assert "ONE EXCEPTION: every `edge:` item needs a verdict, keep or demote." in system
+    assert "counted as corroboration" in system
+    assert "`edge:` item" in task["default_prompt_template"]
 
 
 @pytest.mark.asyncio
@@ -1293,8 +1427,9 @@ async def test_legacy_proposals_are_shown_to_the_reviewer_then_superseded(db_ses
     assert "earlier suggestion (retired nightly job): stale entity review" in block
     assert "normalize name" not in block
 
-    assert len(legacy) == 2
-    assert legacy == await adj.collect_legacy_rows(db_session, entry, items)
+    # Collected while the manifest was built — before the model runs — so the
+    # reviewer's own rows can never be mistaken for a retired job's.
+    assert sorted(r.action for r in legacy) == ["shadow_remove", "stale_entity_review"]
     superseded = await adj.supersede_legacy_proposals(db_session, legacy)
     await db_session.flush()
     assert superseded == 2
@@ -1383,6 +1518,23 @@ async def test_budget_breaker_and_backfill_share(db_session: AsyncSession, monke
     assert await adj._rolling_breaker(1.0, 0.5)
     assert await adj.breaker_paused_until() is not None
     assert await adj._consume_hour_budget(100) == "breaker"
+
+
+@pytest.mark.asyncio
+async def test_a_zero_budget_is_no_ceiling_not_one_an_hour(monkeypatch):
+    """0 reads as "off" on the sibling score floor, and an operator whose
+    provider keeps up with ingest should be able to turn the ceiling off.
+    `max(1, …)` used to turn 0 into the most restrictive setting there is."""
+    _use_fake_redis(monkeypatch)
+    for _ in range(50):
+        assert await adj._consume_hour_budget(0) is None
+    # No share to run out of either: the backfill's own limit is the brake.
+    for _ in range(50):
+        assert await adj._consume_hour_budget(0, backfill=True) is None
+    # The breaker still outranks it — an uncapped install is not an unguarded one.
+    for _ in range(10):
+        await adj._rolling_breaker(1.0, 0.5)
+    assert await adj._consume_hour_budget(0) == "breaker"
 
 
 @pytest.mark.asyncio
@@ -1510,7 +1662,12 @@ async def test_validate_coerces_reclassify_on_non_convertible_types(db_session: 
 
 
 @pytest.mark.asyncio
-async def test_recently_restored_links_are_flagged_but_never_changed(db_session: AsyncSession, feed):
+async def test_a_link_log_restore_shields_the_link_but_a_tool_link_is_not_shielded(db_session: AsyncSession, feed):
+    """The 90-day "never touched" guard reads the link log, which records a
+    restore per entry per link — so it covers the five validator junction
+    types and nothing else. A restore on the maintenance side writes an
+    ACTION_RESTORED audit line that does not say which junction it put back,
+    so tool / sector / TTP links get no shield and are reviewed again."""
     await _seed_settings(db_session, adjudication_mode="apply", adjudication_circuit_breaker_pct=0.9)
     entry = await _make_entry(db_session, feed)
     storm = await _link_actor(db_session, entry, "Storm")
@@ -1519,7 +1676,7 @@ async def test_recently_restored_links_are_flagged_but_never_changed(db_session:
     db_session.add(cobalt)
     await db_session.flush()
     db_session.add(EntryTool(entry_id=entry.id, tool_id=cobalt.id, confidence="high", source="ai"))
-    # An analyst restored the Storm link through the link log…
+    # An analyst restored the Storm link through the link log.
     db_session.add(
         EntityLinkValidationLog(
             entry_id=entry.id,
@@ -1528,19 +1685,6 @@ async def test_recently_restored_links_are_flagged_but_never_changed(db_session:
             entity_name_snapshot="Storm",
             action="restored",
             reason="analyst: this is the tracked actor",
-        )
-    )
-    # …and the Cobalt Strike link through the stage's own restore (its audit row).
-    db_session.add(
-        EntityMaintenanceLog(
-            entity_type="tool",
-            entity_id=cobalt.id,
-            action=ACTION_UNLINK,
-            mode="apply",
-            before={"entry_id": str(entry.id), "restored_from": str(uuid.uuid4())},
-            after={"restored": True},
-            reasoning="restored",
-            applied=False,
         )
     )
     await db_session.flush()
@@ -1555,13 +1699,14 @@ async def test_recently_restored_links_are_flagged_but_never_changed(db_session:
     )
     by_id = {it.item_id: it for it in items}
     assert by_id[f"link:threat_actor:{storm.id}"].previously_restored
-    assert by_id[f"link:tool:{cobalt.id}"].previously_restored
-    assert "it will not be changed" in by_id[f"link:tool:{cobalt.id}"].line
+    assert "it will not be changed" in by_id[f"link:threat_actor:{storm.id}"].line
+    assert not by_id[f"link:tool:{cobalt.id}"].previously_restored
 
     cfg = await adj._settings(db_session)
     detail = await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
     await db_session.flush()
-    assert detail["mode"] == "apply" and detail["applied"] == 0
+    # The shielded actor link is only flagged; the tool link actually goes.
+    assert detail["mode"] == "apply" and detail["applied"] == 1
     assert (
         await db_session.execute(
             select(EntryThreatActor).where(
@@ -1569,7 +1714,9 @@ async def test_recently_restored_links_are_flagged_but_never_changed(db_session:
             )
         )
     ).scalar_one()
-    assert (await db_session.execute(select(EntryTool).where(EntryTool.entry_id == entry.id))).scalar_one()
+    assert (
+        await db_session.execute(select(EntryTool).where(EntryTool.entry_id == entry.id))
+    ).scalar_one_or_none() is None
     link_log = (
         await db_session.execute(
             select(EntityLinkValidationLog).where(EntityLinkValidationLog.action == "shadow_remove")
@@ -1577,9 +1724,9 @@ async def test_recently_restored_links_are_flagged_but_never_changed(db_session:
     ).scalar_one()
     assert link_log.entity_id == storm.id
     unlink = (
-        await db_session.execute(select(EntityMaintenanceLog).where(EntityMaintenanceLog.mode == "shadow"))
+        await db_session.execute(select(EntityMaintenanceLog).where(EntityMaintenanceLog.action == ACTION_UNLINK))
     ).scalar_one()
-    assert unlink.action == ACTION_UNLINK and not unlink.applied
+    assert unlink.entity_id == cobalt.id and unlink.applied is True
 
 
 @pytest.mark.asyncio
@@ -1935,6 +2082,19 @@ async def test_a_restore_is_history_not_a_fresh_verdict(client, admin_headers, d
         await db_session.execute(select(EntityMaintenanceLog).where(EntityMaintenanceLog.action == adj.ACTION_RESTORED))
     ).scalar_one()
     assert audit.applied is True and audit.before["undid"] == ACTION_VETO
+
+    # The row stays applied=True, so `after.restored` is the only thing that
+    # stops a second POST re-running the undo and filing a second audit line.
+    again = await client.post(f"/api/admin/hygiene/adjudication/{row.id}/restore", headers=admin_headers)
+    assert again.status_code == 200 and again.json()["restored"] is False
+    assert again.json()["reason"] == "already restored"
+    assert (
+        await db_session.execute(
+            select(func.count())
+            .select_from(EntityMaintenanceLog)
+            .where(EntityMaintenanceLog.action == adj.ACTION_RESTORED)
+        )
+    ).scalar_one() == 1
 
     stats = (await client.get("/api/admin/hygiene/stats", headers=admin_headers)).json()
     assert stats["adjudication_pending"] == 0

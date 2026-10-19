@@ -21,7 +21,7 @@ const OK: AIProviderCommissionResult = {
   model: "qwen3.5:9b",
   tasks_assigned: 24,
   tasks_reassigned: 4,
-  tasks_skipped_agentic: ["copilot", "entity_merge_maintenance"],
+  tasks_skipped_agentic: ["copilot", "entity_enrichment_research"],
 };
 
 vi.mock("@/hooks/useAI", () => ({

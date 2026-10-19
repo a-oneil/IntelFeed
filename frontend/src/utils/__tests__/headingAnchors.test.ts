@@ -27,11 +27,11 @@ describe("slugify", () => {
 describe("nodeText", () => {
   it("reads through inline code and nested elements", () => {
     const children = [
-      "Link Validation (",
-      createElement("code", null, "workers/link_validation_tasks.py"),
+      "Adjudicate (",
+      createElement("code", null, "workers/adjudication_tasks.py"),
       ")",
     ];
-    expect(nodeText(children)).toBe("Link Validation (workers/link_validation_tasks.py)");
+    expect(nodeText(children)).toBe("Adjudicate (workers/adjudication_tasks.py)");
     expect(nodeText(createElement("strong", null, "bold ", createElement("em", null, "and italic")))).toBe(
       "bold and italic",
     );

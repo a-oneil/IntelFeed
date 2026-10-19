@@ -18,7 +18,7 @@ class AIAnalysisRequest(Base):
     ``adjudication_status`` tracks the post-analysis adjudicate stage for the
     same entry: pending | completed | failed | skipped_<reason> (off, plan,
     echo, nothing_new, score, budget, paused). NULL = not yet decided. The
-    hourly sweep re-enqueues completed analyses left NULL, budget/paused
+    resweep re-enqueues completed analyses left NULL, budget/paused
     rows every hour, and pending rows whose ``adjudication_queued_at`` is
     older than its stale window (a lost task).
     Pruned after 30 days by prune_engine_tables.

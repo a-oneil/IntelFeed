@@ -41,7 +41,6 @@ class Entry(Base):
     translation_source_language: Mapped[str | None] = mapped_column(String(10))
     translation_target_language: Mapped[str | None] = mapped_column(String(10))
     translated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    last_link_validation_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     priority_score: Mapped[float | None] = mapped_column(Float, index=True)
     scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

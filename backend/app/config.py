@@ -243,7 +243,7 @@ class Settings(BaseSettings):
     # verdicts applied inline, the rest filed). Master switch — plans only subtract.
     adjudication_mode: str = "off"
     adjudication_trigger: str = "all"  # all | created
-    adjudication_max_per_hour: int = 30
+    adjudication_max_per_hour: int = 0  # 0 = no ceiling; set one to cap spend or protect the ai queue
     adjudication_min_priority_score: float = 0.0  # 0 = no floor (keep it: junk comes from low-score CVE entries)
     adjudication_apply_min_confidence: str = "high"  # high | medium | low
     adjudication_circuit_breaker_pct: float = 0.5

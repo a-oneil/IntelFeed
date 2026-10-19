@@ -388,7 +388,8 @@ SETTING_METADATA: dict[str, dict] = {
         "description": (
             "all = every analysed entry (what replacing the nightly validator needs; ~100-500/day). "
             "created = only entries whose analysis minted an entity, asserted a link or edge, promoted a "
-            "pending match, or captured an observable (~20-50/day) — the fallback when the GPU is saturated"
+            "pending match, or captured an observable (~20-50/day) — the fallback when reviews cannot "
+            "keep up with ingest"
         ),
         "group": "adjudication",
         "options": ["all", "created"],
@@ -396,17 +397,20 @@ SETTING_METADATA: dict[str, dict] = {
     "adjudication_max_per_hour": {
         "label": "Hourly Budget",
         "description": (
-            "Reviews started per hour on the AI worker (~40 s each on a 9B model). Over-budget entries "
-            "wait for the next hour's sweep; they are never dropped. The backfill may use at most half of "
-            "each hour; live entries get the rest"
+            "Reviews started per hour. 0, the default, means no ceiling: the AI worker runs one call "
+            "at a time, so it paces itself. Set a number for one of two reasons — to cap spend on a "
+            "metered provider, or to stop a review backlog queueing ahead of the entry analysis, which "
+            "shares that worker. Over-budget entries wait for the next sweep; they are never dropped. "
+            "While a ceiling is set the backfill may use at most half of each hour, live entries get "
+            "the rest; with no ceiling, dispatch the backfill in batches via its own limit instead"
         ),
         "group": "adjudication",
     },
     "adjudication_min_priority_score": {
         "label": "Score Floor",
         "description": (
-            "Skip entries below this priority score. 0 = no floor — keep it there while CVE/NVD entries "
-            "are the main source of junk tool entities; a floor would exempt exactly those"
+            "Skip entries below this priority score (0–10). 0 = no floor — keep it there while CVE/NVD "
+            "entries are the main source of junk tool entities; a floor would exempt exactly those"
         ),
         "group": "adjudication",
     },
@@ -420,8 +424,9 @@ SETTING_METADATA: dict[str, dict] = {
         "label": "Circuit Breaker",
         "description": (
             "If more than this share of an entry's items come back remove / veto / demote / drop, the "
-            "whole run is downgraded to proposals (0.5 = half). A rolling mean over the last 50 runs "
-            "above the same threshold pauses dispatch for the hour"
+            "whole run is downgraded to proposals (0.5 = half). A rolling mean over the last 50 apply "
+            "runs above the same threshold pauses dispatch for the hour; shadow runs are not sampled, "
+            "because they change nothing"
         ),
         "group": "adjudication",
     },
@@ -607,7 +612,7 @@ SETTING_METADATA: dict[str, dict] = {
         "description": (
             "Entities dispatched per daily run of the assessment backfill. They queue serially on "
             "the single-concurrency AI worker, so the batch paces itself — raise this to drain a "
-            "backlog faster, lower it to leave more GPU time for ingest extraction."
+            "backlog faster, lower it to leave more of the worker's time for ingest extraction."
         ),
         "group": "intelligence",
     },

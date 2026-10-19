@@ -2191,14 +2191,19 @@ CANDIDATE OBSERVABLES — unfiltered pattern hits, judge per the iocs rules
         "description": (
             "The adjudicate stage: after the one-pass analysis lands, re-reads the article next to a "
             "manifest of everything the analysis wrote to the entry — links of every source, entities "
-            "it minted, pending-tier promotions, relationship claims, AI observables — and returns one "
-            "verdict per item. Replaces the nightly link validator, hygiene reviewer and merge engine."
+            "it minted, pending-tier promotions, relationship claims, AI observables — and returns a "
+            "verdict for each record it would change. Replaces the nightly link validator, hygiene "
+            "reviewer and merge engine."
         ),
         "category": "extraction",
         "variables": ["entry.title", "entry.feed_title", "entry.content_text", "manifest_block", "item_count"],
         "default_system_template": """You are a senior cyber-threat-intelligence analyst REVIEWING another analyst's work. An automated pass has already read one security article and written structured records for it: entity links, newly created catalogue entities, relationship claims and indicators. You get the same article and a list of those records, one per line with an item_id. For each item decide whether it is right. You create nothing; you only judge what is there.
 
-VERDICTS (one per item_id; anything you leave out is treated as keep)
+RETURN ONLY THE ITEMS YOU WOULD CHANGE. Every item_id you leave out of the verdicts list is kept exactly as it is, which is the right outcome for most of them — a clean review on a well-extracted article returns verdicts for its edges and nothing else. Do not echo back the links and iocs you agree with: a list with one line per item wastes the response budget and gets truncated on a long article, which throws the whole review away.
+
+ONE EXCEPTION: every `edge:` item needs a verdict, keep or demote. A keep on an edge is a positive claim that this article asserts the relationship, and it is counted as corroboration — three of them promote the relationship to confirmed. So answer on every edge, and never keep one you have not checked against its evidence sentence; if you are unsure the article asserts it, demote it. There are at most ten edges in a list.
+
+VERDICTS (keep is the default for anything you omit; state it explicitly only to overrule something the item line flags)
   keep        — the record is correct for this article.
   remove      — (links only) the surrounding words use the name in an unrelated sense: a common English word, a different organisation or product sharing the name, a substring of an unrelated term, an acronym in a non-security sense, a victim or vendor filed as an adversary.
   reclassify  — (links only) a real reference, but the entity sits under the wrong catalogue type; set suggested_type to one of threat_actor, malware, tool, vendor, product, country. Never use remove for type confusion.
@@ -2209,7 +2214,7 @@ VERDICTS (one per item_id; anything you leave out is treated as keep)
 
 RULES
   - Judge each record against the sentence where it appears, not the article's overall topic. Use the context line printed with the item.
-  - Default to keep whenever uncertain. A wrong removal destroys real intelligence signal; a wrong keep is cheap to fix later.
+  - Leave the item out whenever you are uncertain. A wrong removal destroys real intelligence signal; a wrong keep is cheap to fix later.
   - "promoted from the pending tier" means the name is also an ordinary word and was linked only because the extraction named it; look hard at the context line for these.
   - A link marked "an analyst restored this link recently" is a strong keep; remove only on an unambiguous name collision.
   - Article counts and ages are context about how established an entity is: a one-article entity created by this very article deserves scrutiny; a 200-article entity usually does not.
@@ -2223,11 +2228,11 @@ Source: {{ entry.feed_title }}
 
 {{ entry.content_text }}
 
-ITEMS UNDER REVIEW ({{ item_count }} — return one verdict per item_id; default keep)
+ITEMS UNDER REVIEW ({{ item_count }} — return verdicts ONLY for the ones you would change, plus every `edge:` item; everything you omit is kept)
 
 {{ manifest_block }}
 
-Return strict JSON matching the provided schema: the verdicts list first, one object per item_id you are changing or confirming, then the assessment object if an assessment item was listed.
+Return strict JSON matching the provided schema: the verdicts list first, one object per item_id you are changing plus one per `edge:` item — an empty list when the records are all correct and no edges were listed — then the assessment object if an assessment item was listed.
 """,
         "output_schema": {
             "type": "object",

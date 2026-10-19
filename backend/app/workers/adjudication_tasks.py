@@ -2,8 +2,8 @@
 
 One task per entry, dispatched by services/entry_adjudication after the
 one-pass analysis has been stored and committed. Runs on the `ai` queue
-(celery-worker-ai, concurrency 1) so it never competes with the analysis
-itself for the GPU. Wrapped with @pipeline_stage so the Engine matrix gets a
+(celery-worker-ai, concurrency 1) so a review and the analysis it reviews
+never hold the provider at once. Wrapped with @pipeline_stage so the Engine matrix gets a
 column and the verdict counts land in the run's `detail`.
 
 The task re-checks the master switch only: the plan, trigger, score and
@@ -11,7 +11,7 @@ budget gates were decided at enqueue time (``enqueue_adjudication``), and a
 manual re-run from the matrix deliberately bypasses them. An entry whose
 mode was switched off meanwhile, a lost lock, or a missing analysis all end
 in a recorded status rather than a review. A review that exhausts its
-retries records ``failed`` so the hourly sweep can tell it from a queued one.
+retries records ``failed`` so the resweep can tell it from a queued one.
 """
 
 from __future__ import annotations
@@ -168,7 +168,7 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
                 )
             except QuotaExhaustedError as e:
                 # The provider is paused: park the row like an over-budget
-                # one; the hourly sweep re-enqueues it when a new hour starts.
+                # one; the resweep re-enqueues it when a new hour starts.
                 pause_until = getattr(e, "reset_at", None) or getattr(e, "pause_until", None)
                 return await _finish(
                     SKIPPED_PAUSED,
@@ -212,7 +212,7 @@ def backfill_entry_adjudications(limit: int = 500, since_days: int | None = None
     """One-off walk: queue every analysed entry the stage has not decided on,
     newest first, through the normal gates. Backfill draws on its share of
     each hour's budget only (live entries keep the rest); the ones that do
-    not fit wait as `skipped_budget` and the hourly sweep drains them, newest
+    not fit wait as `skipped_budget` and the resweep drains them, newest
     first. Not scheduled — dispatch it once per rollout, like
     backfill_entry_scores:
 

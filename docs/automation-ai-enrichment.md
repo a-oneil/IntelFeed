@@ -491,7 +491,7 @@ class AITask(Base):
 | `ttp_mapping` | extraction | Entry text | MITRE ATT&CK technique extraction |
 | `detection_rules` | generation | Entry + TTPs | Detection rule generation |
 | `entry_analysis` | extraction | Entry content | One-pass consolidated extraction (see below) |
-| `entry_adjudication` | extraction | Article + manifest of what `entry_analysis` wrote | Post-analysis review: one verdict per link, minted entity, relationship claim and observable (the `adjudicate` pipeline stage; max_tokens 4096, no tools) |
+| `entry_adjudication` | extraction | Article + manifest of what `entry_analysis` wrote | Post-analysis review of the links, minted entities, relationship claims and observables the analysis wrote; returns verdicts only for what it would change (the `adjudicate` pipeline stage; max_tokens 4096, no tools) |
 | `daily_summary` / `intelligence_briefing` / `threat_assessment` | analysis | Multiple entries | Batch briefings |
 | `detection_engineering_summary` | analysis | Multiple entries | Detection-focused briefing with coverage gaps |
 | `video_transcript_summary` / `reddit_digest` / `report_section` | analysis / generation | Source-specific | Adapter/report helpers |

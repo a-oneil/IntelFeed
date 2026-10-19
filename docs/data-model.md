@@ -103,7 +103,6 @@ Each analyst's visibility and personal mute over the shared feed pool; only cons
 - `extracted_urls` (JSONB array) — URLs found in content
 - `metadata_` (JSONB) — feed-specific metadata (e.g., feed author's categories, tags)
 - `translated_html`, `translated_title`, `translation_source_language`, `translation_target_language`, `translated_at` — machine translation cache
-- `last_link_validation_at` (DateTime, indexed) — when the adjudicate stage last judged this entry's links
 - `priority_score` (Float, indexed), `scored_at` — signal engine composite score (see Signal Engine cluster)
 
 **Relationships:**
@@ -374,7 +373,7 @@ Audit trail for autonomous entity maintenance (merge/alias/description actions b
 
 #### EntityLinkValidationLog
 
-One row per decision on an entity↔entry link of a validator junction type: written by the adjudicate stage (`entry_adjudication` task — `shadow_remove` / `needs_reclassification` verdicts in shadow mode, `removed` in apply mode) and by analyst restores (`restored`, via `POST /api/admin/hygiene/link-log/{id}/restore` or the adjudication restore). Snapshots the junction row so removals can be restored; a restore within 90 days shields the link from the adjudicator.
+One row per decision on an entity↔entry link of a validator junction type: written by the adjudicate stage (`entry_adjudication` task — `shadow_remove` / `needs_reclassification` verdicts in shadow mode, `removed` in apply mode) and by analyst restores (`restored`, via `POST /api/admin/hygiene/link-log/{id}/restore` or the adjudication restore). Snapshots the junction row so removals can be restored; a `restored` row within 90 days shields the link from the adjudicator (this log is what that guard reads, so only these five junction types are shielded).
 
 **Columns:**
 - `id` (UUID PK)
@@ -740,7 +739,7 @@ Bookkeeping for the one-pass `entry_analysis` batch extraction pipeline and the 
 - `status` (String 20) — "pending", "submitted", "completed", "failed", "skipped_junk", "reused_echo"
 - `batch_id` (String 80, indexed), `custom_id` (String 64)
 - `attempts` (Integer), `reused_from_entry_id` (UUID), `error` (Text)
-- `adjudication_status` (String 24, indexed) — the adjudicate stage's decision for this entry: "pending", "completed", "failed", or a gate skip ("skipped_off", "skipped_plan", "skipped_echo", "skipped_nothing_new", "skipped_score", "skipped_budget", "skipped_paused"); the hourly sweep re-enqueues budget/paused rows and lost pending rows
+- `adjudication_status` (String 24, indexed) — the adjudicate stage's decision for this entry: "pending", "completed", "failed", or a gate skip ("skipped_off", "skipped_plan", "skipped_echo", "skipped_nothing_new", "skipped_score", "skipped_budget", "skipped_paused"); the resweep re-enqueues budget/paused rows and lost pending rows
 - `adjudicated_at` — when the review completed
 - `adjudication_queued_at` — when the row went pending; a pending row older than 6 hours with no run is treated as a lost task and re-enqueued
 - `created_at`, `submitted_at`, `completed_at`
@@ -850,7 +849,7 @@ Provenance for scalar profile fields — the field-level counterpart to `EntityR
 - `source` (String 20) — "co_occurrence", "auto_extracted", "analyst_confirmed", "analyst_created", "analyst_rejected" (hidden + never resurrected by co-occurrence), "external_feed"
 - `description` (Text)
 - `adjudication_verdict` (String 20, nullable), `adjudicated_at` — the adjudicate stage's outcome: "corroborated" (promoted to confirmed) or "coincidental" (demoted to possible, sticky — never re-promoted by co-occurrence)
-- `reviewer_kept_entry_ids` (ARRAY(UUID)) — entries whose adjudicate-stage review kept this edge in apply mode; at `relationship_evidence_promote_count` distinct entries the edge becomes confirmed/corroborated
+- `reviewer_kept_entry_ids` (ARRAY(UUID)) — entries whose adjudicate-stage review explicitly kept this edge in apply mode, at or above the apply confidence floor (an edge the review did not name does not count); at `relationship_evidence_promote_count` distinct entries the edge becomes confirmed/corroborated
 - `evidence_entry_ids` (ARRAY(UUID)) — entries supporting this relationship
 - `created_by` (FK, nullable, CASCADE)
 - `created_at`, `updated_at`

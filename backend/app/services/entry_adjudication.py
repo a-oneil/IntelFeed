@@ -149,7 +149,7 @@ SKIPPED_ECHO = "skipped_echo"
 SKIPPED_NOTHING_NEW = "skipped_nothing_new"
 SKIPPED_SCORE = "skipped_score"
 SKIPPED_BUDGET = "skipped_budget"
-# The provider is paused (quota); re-enqueued by the hourly sweep like budget.
+# The provider is paused (quota); re-enqueued by the resweep like budget.
 SKIPPED_PAUSED = "skipped_paused"
 PENDING = "pending"
 COMPLETED = "completed"
@@ -179,7 +179,7 @@ async def _settings(db: AsyncSession) -> dict:
     return {
         "mode": mode if mode in MODES else "off",
         "trigger": trigger if trigger in TRIGGERS else "all",
-        "max_per_hour": _num(await get_setting("adjudication_max_per_hour", db), 30, int),
+        "max_per_hour": _num(await get_setting("adjudication_max_per_hour", db), 0, int),
         "min_score": _num(await get_setting("adjudication_min_priority_score", db), 0.0),
         "min_conf": min_conf if min_conf in CONFIDENCES else "high",
         "breaker_pct": _num(await get_setting("adjudication_circuit_breaker_pct", db), 0.5),
@@ -274,7 +274,15 @@ async def _consume_hour_budget(max_per_hour: int, *, backfill: bool = False) -> 
     """INCR the current hour's counter. Returns None when this entry fits,
     else why not: ``"budget"`` (hour is full) or ``"breaker"`` (the rolling
     breaker paused dispatch). Live entries may use the whole budget; the
-    backfill only its share, so a backfill run can never starve the hour."""
+    backfill only its share, so a backfill run can never starve the hour.
+
+    ``max_per_hour <= 0`` means no ceiling at all: the AI worker's single slot
+    is then the only thing pacing reviews. That is the right setting when the
+    provider keeps up with ingest and nothing is metering the calls — but it
+    also removes the backfill's share, so a history walk queues on the same
+    worker as live reviews and as the one-pass analysis itself. Dispatch the
+    backfill in batches (its own ``limit``) when the ceiling is off.
+    """
     from app.services.redis_client import get_redis
 
     try:
@@ -282,6 +290,8 @@ async def _consume_hour_budget(max_per_hour: int, *, backfill: bool = False) -> 
         until = await r.get(_BREAKER_KEY)
         if until and float(until) > datetime.now(UTC).timestamp():
             return "breaker"
+        if max_per_hour <= 0:
+            return None
         key = _HOUR_KEY.format(hour=datetime.now(UTC).strftime("%Y%m%d%H"))
         cap = max(1, max_per_hour)
         if backfill:
@@ -377,7 +387,8 @@ async def enqueue_and_dispatch(
     """enqueue + dispatch for callers that commit immediately afterwards.
 
     The task starts after ``countdown`` seconds, by which time the caller's
-    commit has landed; the task re-checks the gates and the row anyway.
+    commit has landed. It re-checks only the master switch — every other gate
+    was decided here (see ``adjudication_tasks``).
     """
     status = await enqueue_adjudication(db, entry_id, stored_counts, parsed)
     if status == PENDING:
@@ -386,7 +397,8 @@ async def enqueue_and_dispatch(
 
 
 async def resweep_adjudications(db: AsyncSession, limit: int = 200) -> dict:
-    """Hourly self-heal (called from submit_analysis_batches). Re-enqueues,
+    """Self-heal, run from submit_analysis_batches (every 30 minutes — the
+    budget it drains against is the hourly one). Re-enqueues,
     newest analysis first:
 
     - completed analyses whose review decision never landed (crash between
@@ -673,16 +685,22 @@ def _age_days(ts: datetime | None) -> int | None:
 
 
 async def _recently_restored(db: AsyncSession, entry_id: uuid.UUID) -> set[tuple[str, uuid.UUID]]:
-    """Links on this entry an analyst restored within RESTORED_GUARD_DAYS —
-    from the link log (validator-type links) and from the stage's own restore
-    audit rows (tool / sector / ttp links and vetoes)."""
+    """Links on this entry an analyst restored within RESTORED_GUARD_DAYS, from
+    the link log — the validator junction types (actor, malware, vendor,
+    product, country), the only ones that record a restore per entry.
+
+    The maintenance log cannot answer this: a restore there writes an
+    ACTION_RESTORED audit line, which says the link was put back but not which
+    link kind it was, and its subject may be an entity the restore re-created
+    rather than a junction row. So tool / sector / TTP links and vetoes are not
+    shielded; they are reviewed again like any other row.
+    """
     from datetime import timedelta
 
     from app.models.entity_link_validation_log import EntityLinkValidationLog
-    from app.models.entity_maintenance import EntityMaintenanceLog
 
     cutoff = datetime.now(UTC) - timedelta(days=RESTORED_GUARD_DAYS)
-    out = {
+    return {
         (t, eid)
         for t, eid in (
             await db.execute(
@@ -694,21 +712,6 @@ async def _recently_restored(db: AsyncSession, entry_id: uuid.UUID) -> set[tuple
             )
         ).all()
     }
-    out |= {
-        (t, eid)
-        for t, eid in (
-            await db.execute(
-                select(EntityMaintenanceLog.entity_type, EntityMaintenanceLog.entity_id).where(
-                    EntityMaintenanceLog.action.in_([ACTION_UNLINK, ACTION_VETO]),
-                    EntityMaintenanceLog.before["entry_id"].astext == str(entry_id),
-                    EntityMaintenanceLog.before["restored_from"].astext.isnot(None),
-                    EntityMaintenanceLog.created_at >= cutoff,
-                )
-            )
-        ).all()
-        if eid is not None
-    }
-    return out
 
 
 def _review_priority(item: ReviewItem) -> int:
@@ -985,14 +988,6 @@ def _legacy_suggestions(link_rows: list, maint_rows: list, items: list[ReviewIte
     return out
 
 
-async def collect_legacy_rows(db: AsyncSession, entry, items: list[ReviewItem]) -> list:
-    """The retired jobs' pending rows this review is about to replace. Taken
-    BEFORE the model runs so the reviewer's own freshly written rows can never
-    be mistaken for legacy ones."""
-    link_rows, maint_rows = await _legacy_rows(db, entry, items)
-    return [*link_rows, *maint_rows]
-
-
 async def supersede_legacy_proposals(db: AsyncSession, legacy_rows: list) -> int:
     """After the review has judged the entry, the retired jobs' pending rows
     for the same links and entities are superseded: deleted, not archived,
@@ -1037,33 +1032,20 @@ async def _edge_items(db: AsyncSession, entry) -> list[ReviewItem]:
 
 
 async def _ioc_items(db: AsyncSession, entry) -> list[ReviewItem]:
+    """Observables this entry's analysis produced, captured ledger rows first.
+
+    The cap trims the tail, so the order decides what gets judged. A captured
+    row is live data — a drop takes a sighting off the ledger and recounts it —
+    while a staged candidate is entry-local and already has a dismiss button on
+    the candidates queue. Collecting the captured rows first also means that a
+    value which is both renders as the captured one, and dropping that handles
+    the staged half too (see ``_drop_ioc``).
+    """
     from app.models.observable import EntryObservable, Observable
 
-    items: list[ReviewItem] = []
+    captured: list[ReviewItem] = []
+    staged: list[ReviewItem] = []
     seen: set[tuple[str, str]] = set()
-    for cand in entry.observable_candidates or []:
-        if not isinstance(cand, dict) or cand.get("origin") != "ai":
-            continue
-        kind, value = str(cand.get("kind") or ""), str(cand.get("value") or "")
-        if not kind or not value or (kind, value) in seen:
-            continue
-        seen.add((kind, value))
-        line = f"ioc:{kind}:{value}  {kind} · staged by the AI, not yet a ledger row"
-        if cand.get("was_defanged"):
-            line += " · printed defanged"
-        if cand.get("evidence"):
-            line += f'\n    evidence: "{str(cand["evidence"])[:200]}"'
-        items.append(
-            ReviewItem(
-                item_id=f"ioc:{kind}:{value}",
-                kind="ioc",
-                line=line,
-                name=value,
-                ioc_kind=kind,
-                ioc_value=value,
-                staged=True,
-            )
-        )
     rows = (
         await db.execute(
             select(EntryObservable, Observable)
@@ -1080,7 +1062,7 @@ async def _ioc_items(db: AsyncSession, entry) -> list[ReviewItem]:
             line += f" · printed as {sighting.surface_form}"
         if getattr(sighting, "was_defanged", False):
             line += " · printed defanged"
-        items.append(
+        captured.append(
             ReviewItem(
                 item_id=f"ioc:{obs.kind}:{obs.value}",
                 kind="ioc",
@@ -1091,7 +1073,30 @@ async def _ioc_items(db: AsyncSession, entry) -> list[ReviewItem]:
                 observable_id=obs.id,
             )
         )
-    return items[:_MAX_IOCS]
+    for cand in entry.observable_candidates or []:
+        if not isinstance(cand, dict) or cand.get("origin") != "ai":
+            continue
+        kind, value = str(cand.get("kind") or ""), str(cand.get("value") or "")
+        if not kind or not value or (kind, value) in seen:
+            continue
+        seen.add((kind, value))
+        line = f"ioc:{kind}:{value}  {kind} · staged by the AI, not yet a ledger row"
+        if cand.get("was_defanged"):
+            line += " · printed defanged"
+        if cand.get("evidence"):
+            line += f'\n    evidence: "{str(cand["evidence"])[:200]}"'
+        staged.append(
+            ReviewItem(
+                item_id=f"ioc:{kind}:{value}",
+                kind="ioc",
+                line=line,
+                name=value,
+                ioc_kind=kind,
+                ioc_value=value,
+                staged=True,
+            )
+        )
+    return [*captured, *staged][:_MAX_IOCS]
 
 
 def _assessment_item(parsed: dict | None) -> ReviewItem | None:
@@ -1195,6 +1200,11 @@ class Verdict:
     reason: str
     suggested_type: str | None = None
     merge_target: dict | None = None
+    # True when the model named this item. The prompt asks for changes only, so
+    # most keeps are the fill-in below — an item nobody spoke about. The two
+    # read the same on every path except edge corroboration, where silence must
+    # not count as agreement (see apply_verdicts).
+    explicit: bool = False
 
 
 def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verdict], dict]:
@@ -1251,7 +1261,7 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
                     verdict = "keep"  # never merge into a name it was not shown
             if verdict != asked and asked in VERDICTS:
                 stats["coerced"] += 1
-            verdicts[item_id] = Verdict(item, verdict, confidence, reason, suggested, merge_target)
+            verdicts[item_id] = Verdict(item, verdict, confidence, reason, suggested, merge_target, explicit=True)
     if stats["duplicate"]:
         verdicts = {}
     out = [verdicts.get(it.item_id) or Verdict(it, "keep", "low", "") for it in items]
@@ -1291,7 +1301,8 @@ async def _adjudication_result_id(db: AsyncSession, entry_id: uuid.UUID) -> uuid
 
 async def _rolling_breaker(ratio: float, breaker_pct: float) -> bool:
     """Push this run's destructive ratio; trip (pause dispatch for an hour)
-    when the rolling mean over the last runs exceeds the threshold."""
+    when the rolling mean over the last runs exceeds the threshold. Only apply
+    runs are sampled — see the call site."""
     from app.services.redis_client import get_redis
 
     try:
@@ -1688,7 +1699,6 @@ async def apply_verdicts(
     ai_result_id = await _adjudication_result_id(db, entry.id)
     counts: dict[str, int] = {}
     overridden = 0
-    judged_links = 0
     # Changes that actually ran, vs edges a keep promoted. Promotions are not
     # changes the analyst can undo from the queue, so they are counted apart —
     # folding them into `applied` made `shadowed` under-report.
@@ -1707,11 +1717,21 @@ async def apply_verdicts(
                 overridden += 1
 
     destructive = [v for v in verdicts if v.verdict in DESTRUCTIVE]
-    changes = [v for v in verdicts if v.verdict in DESTRUCTIVE | {"merge"}]
+    # Everything that files a row an analyst still has to decide. `reclassify`
+    # is advisory in both modes, so it never counts as applied — but it is a
+    # pending proposal, and leaving it out made `shadowed` read 0 on a run that
+    # filed nothing but advisories. The breaker still counts only `destructive`.
+    changes = [v for v in verdicts if v.verdict in DESTRUCTIVE | {"merge", "reclassify"}]
     items_n = len([v for v in verdicts if v.item.kind != "assessment"])
     ratio = (len(destructive) / items_n) if items_n else 0.0
     breaker = ratio > cfg["breaker_pct"]
-    rolling = await _rolling_breaker(ratio, cfg["breaker_pct"])
+    # The rolling breaker pauses dispatch for an hour, and it exists to stop
+    # damage — which a shadow run does none of. Sampling shadow runs would
+    # throttle the very soak that is meant to collect verdicts at full rate
+    # (a destructive ratio over the threshold is ordinary there: the validator
+    # it replaces filed 1,036 shadow removals in a week). The per-entry
+    # breaker above still downgrades a lopsided run in any mode.
+    rolling = await _rolling_breaker(ratio, cfg["breaker_pct"]) if mode == "apply" else False
     run_mode = "shadow" if (mode != "apply" or breaker or rolling) else "apply"
     floor = _CONF_RANK[cfg["min_conf"]]
 
@@ -1742,10 +1762,21 @@ async def apply_verdicts(
     for v in verdicts:
         item = v.item
         counts[v.verdict] = counts.get(v.verdict, 0) + 1
-        if item.kind == "link":
-            judged_links += 1
         if v.verdict == "keep":
-            if item.kind == "edge" and run_mode == "apply" and item.edge_id is not None:
+            # Corroboration, and the only verdict that raises trust rather than
+            # lowering it — so it is held to the same bar as the destructive
+            # ones, and it must be something the reviewer actually said. The
+            # prompt returns changes only, which makes nearly every other keep
+            # an omission; counting those would promote an edge to `confirmed`
+            # on three reviews that never weighed in. Edges are the one section
+            # the prompt still demands an answer for.
+            if (
+                item.kind == "edge"
+                and run_mode == "apply"
+                and item.edge_id is not None
+                and v.explicit
+                and _CONF_RANK[v.confidence] >= floor
+            ):
                 if await _count_edge_keep(db, item.edge_id, entry.id):
                     promoted_n += 1
             continue
@@ -1906,10 +1937,6 @@ async def apply_verdicts(
                 entity_id=entry.id,
             )
 
-    if judged_links:
-        entry.last_link_validation_at = datetime.now(UTC)
-        db.add(entry)
-
     return {
         "mode": run_mode,
         "requested_mode": mode,
@@ -2065,6 +2092,12 @@ async def restore_adjudication_row(db: AsyncSession, row) -> dict:
         return {"restored": False, "reason": "not applied"}
     before = row.before or {}
     after = row.after or {}
+    # The row keeps `applied=True` after an undo — a restore is history, not a
+    # reversal of the record. `after.restored` is the only marker that it has
+    # already been put back, and it is what hides the button
+    # (_row_actions_maint); without it here, a second POST re-runs the undo.
+    if after.get("restored"):
+        return {"restored": False, "reason": "already restored"}
     entry = await db.get(Entry, uuid.UUID(before["entry_id"])) if before.get("entry_id") else None
     if entry is None:
         return {"restored": False, "reason": "entry gone"}
