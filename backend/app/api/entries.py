@@ -1287,13 +1287,15 @@ async def priority_unread_count(
     if not feed_ids:
         return {"unread_count": 0}
 
-    # Live open story threads: fold their members out of the standalone entry
-    # count and count each live thread once, matching build_priority_queue.
+    # Open story threads with anything unread fold their members out of the
+    # standalone entry count; only those with an unread beat count as a row.
+    # Matches build_priority_queue.
     rows = await story_threads.list_threads(db, user.id, status="open", limit=_QUEUE_THREAD_LIMIT)
-    live = [r for r in rows if (r.get("unread_count") or 0) > 0 and r.get("top_raw") is not None]
+    folded = [r for r in rows if (r.get("unread_count") or 0) > 0]
     member_ids: set[uuid.UUID] = set()
-    for row in live:
+    for row in folded:
         member_ids.update(row.get("entry_ids") or [])
+    live = [r for r in folded if r.get("top_raw") is not None]
 
     exposure_sq = None
     if bool(await get_setting("my_stack_exposure_enabled", db)):
@@ -1448,18 +1450,18 @@ async def build_priority_queue(
     if with_threads:
         dismissed = set(exclude_thread_ids or [])
         rows = await story_threads.list_threads(db, user.id, status="open", limit=_QUEUE_THREAD_LIMIT)
-        live = [
-            r
-            for r in rows
-            if (r.get("unread_count") or 0) > 0 and r.get("top_raw") is not None and r["id"] not in dismissed
-        ]
-        live.sort(key=_thread_sort_key)
-        for row in live:
+        folded = [r for r in rows if (r.get("unread_count") or 0) > 0 and r["id"] not in dismissed]
+        for row in folded:
             # Every member of a live thread is withheld, including those on pages
             # still to come. A thread scores at or above its best unread member, so
             # the row is always reached before the articles it stands for — the
             # story is never missing from the queue, only folded.
             member_ids.update(row.get("entry_ids") or [])
+        # A thread whose only unread members are echoes (top_raw is NULL) gets no
+        # row, but its members stay withheld above: the beats are read, and an
+        # echo is a reprint of one, so neither belongs back in the queue alone.
+        live = [r for r in folded if r.get("top_raw") is not None]
+        live.sort(key=_thread_sort_key)
         pending = [r for r in live if thread_after is None or _thread_sort_key(r) > thread_after]
 
     rank_scores: dict[uuid.UUID, float] = {}
