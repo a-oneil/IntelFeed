@@ -545,6 +545,7 @@ async def _entry_page(
     cursor: str | None = None,
     exclude_ids: set[uuid.UUID] | None = None,
     rank_scores: dict[uuid.UUID, float] | None = None,
+    rank_by_lift: bool = True,
 ) -> CursorPaginatedResponse[EntryResponse]:
     """Shared body behind GET /api/entries and the surfaces built on it.
 
@@ -557,6 +558,10 @@ async def _entry_page(
     thread row stands for them. A dict passed as ``rank_scores`` is filled with
     the score each entry was actually ordered by, which is the raw priority score
     only when no read-time lift (exposure, personalisation) is in play.
+
+    ``rank_by_lift=False`` keeps a Radar page in stored-score order: the lifts
+    still decide membership (a stack-relevant CVE below the threshold still gets
+    in) and still decorate the entries, but they no longer move anything.
     """
     if country_role is not None and country_role not in _VALID_COUNTRY_ROLES:
         raise AppError(
@@ -772,7 +777,7 @@ async def _entry_page(
 
     # Either read-time lift makes effective_score a coalesced expression rather
     # than the bare priority_raw column — cursor and ORDER BY branch on this.
-    score_lifted = exposure_active or personal_active
+    score_lifted = (exposure_active or personal_active) and rank_by_lift
 
     # Cursor pagination
     if cursor:
@@ -1346,8 +1351,10 @@ def _thread_sort_key(row: dict) -> tuple[float, str]:
     summary="Priority Queue",
     description=(
         "The ranked reading queue: unread entries that clear the radar threshold, with open story "
-        "threads folded in as single rows. Entries and threads share one ranking, highest score "
-        "first: a thread ranks by the score of its best unread beat, and its members are withheld from "
+        "threads folded in as single rows. Entries and threads share one ranking on the stored "
+        "priority score, highest first — read-time lifts (stack exposure, learned weights) can admit "
+        "an entry but don't reorder the queue. A thread ranks by the score of its best unread beat, "
+        "and its members are withheld from "
         "the queue as standalone entries — the thread row stands for them. Threads with nothing "
         "unread never appear: the queue answers 'what should I read next', and a story you have "
         "finished has no answer to give."
@@ -1425,6 +1432,10 @@ async def build_priority_queue(
         cursor=entry_cursor,
         exclude_ids=member_ids or None,
         rank_scores=rank_scores,
+        # The queue sorts by the score its rows show, and the row shows the
+        # stored score. A read-time lift would move an entry above ones whose
+        # badge outscores it.
+        rank_by_lift=False,
     )
 
     from app.intelligence.signals import get_scale_cutoffs, scale_score
@@ -1437,13 +1448,10 @@ async def build_priority_queue(
     cutoffs = await get_scale_cutoffs()
 
     # Two-pointer merge: entries keep their ranked order and a thread slots in
-    # ahead of the first entry it outranks. The comparison is against the score
-    # the entries were actually ordered by — a stack-exposure or learned-weight
-    # lift moves an entry within the queue, so comparing threads against the raw
-    # column instead would interleave them against an order that isn't there.
-    # Thread rows carry no such lift: they rank on the house score of their best
-    # unread beat. The merge runs in raw units; each row reports its rank on the
-    # 0–10 scale.
+    # ahead of the first entry it outranks. Both sides are the stored house
+    # score — an entry's own, a thread's best unread beat — so the merged list
+    # runs highest displayed score first. The merge runs in raw units; each row
+    # reports its rank on the 0–10 scale.
     items: list[PriorityQueueRow] = []
     ti = 0
     last_thread: dict | None = None

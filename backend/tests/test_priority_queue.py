@@ -240,6 +240,40 @@ class TestThreadFolding:
         assert titles(body) == ["Beat"]
 
 
+class TestReadTimeLift:
+    async def test_a_learned_weight_lift_does_not_reorder_the_queue(
+        self, client, auth_headers, db_session, subscribed_feed, monkeypatch
+    ):
+        from app.config import settings as env_settings
+        from app.models.entry_signal import EntrySignal
+
+        monkeypatch.setattr(env_settings, "radar_personalization_enabled", True)
+
+        async def big_lift(db, user_id):
+            return {"actively_exploited": 10.0}
+
+        monkeypatch.setattr("app.services.radar_personalization.get_personal_coefficients", big_lift)
+
+        await make_entry(db_session, subscribed_feed, title="Higher score", score=8.0)
+        lifted = await make_entry(db_session, subscribed_feed, title="Lifted", score=4.0)
+        db_session.add(
+            EntrySignal(entry_id=lifted.id, signal_type="actively_exploited", score=1.0, explanation="x", payload={})
+        )
+        await db_session.commit()
+
+        # The lift (+10 raw) would carry the 4.0 entry past the 8.0 one; the queue
+        # stays in the order of the scores its rows show.
+        body = (await client.get("/api/entries/priority-queue", headers=auth_headers)).json()
+
+        assert titles(body) == ["Higher score", "Lifted"]
+        assert [r["score"] for r in body["items"]] == pytest.approx([8.0, 4.0])
+
+        # Sanity: the same lift does reorder a plain Radar sort, so the test
+        # isn't passing because no lift applied.
+        radar = (await client.get("/api/entries?sort=radar&is_read=false", headers=auth_headers)).json()
+        assert [e["title"] for e in radar["items"]][:2] == ["Lifted", "Higher score"]
+
+
 class TestPaging:
     async def test_pages_never_repeat_a_thread_and_stay_ranked(self, client, auth_headers, db_session, subscribed_feed):
         for i in range(12):
