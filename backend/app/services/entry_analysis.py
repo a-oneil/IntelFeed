@@ -9,6 +9,11 @@ mitigations, severity_assessment, novelty_note). This module:
 - fans a parsed payload out to the existing per-entity store functions
   (`store_entry_analysis`) so links land exactly as the old per-task
   extraction calls produced them.
+
+Judging what was written is not this module's job any more: the adjudicate
+stage (services/entry_adjudication.py) reviews every link, minted entity,
+edge and observable after the payload has landed, with the whole output in
+view. The extraction call only extracts.
 """
 
 import logging
@@ -21,88 +26,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 ECHO_REUSE_MIN_RATIO = 0.7
-
-# Context snippet sizing for candidate entity tags (chars around the first
-# matched surface form, and total cap per candidate across paragraphs).
-_CANDIDATE_CONTEXT_WINDOW = 160
-_CANDIDATE_CONTEXT_MAX_CHARS = 400
-_CANDIDATE_CONTEXT_MAX_PARAGRAPHS = 2
-
-# Payload lists that count as positive evidence per link-validation entity
-# type. Actor/malware share one pool (the AI routinely files ransomware brands
-# under the other slot); vendor/product have no payload list, so no override.
-_OVERRIDE_PAYLOAD_KEYS: dict[str, tuple[str, ...]] = {
-    "threat_actor": ("threat_actors", "malware", "tools"),
-    "malware": ("threat_actors", "malware", "tools"),
-    "country": ("countries",),
-}
-
-_VALID_DECISIONS = {"KEEP", "REMOVE", "RECLASSIFY"}
-_VALID_SUGGESTED_TYPES = {"threat_actor", "malware", "vendor", "product", "country"}
-
-
-def _candidate_context(paragraph_map: dict[int, str], link) -> str:
-    """Short quoted context around the first occurrence of a matched name.
-
-    Pulls from the same paragraph split the autolinker indexed, so the snippet
-    is exact even when the prompt body is truncated or translated-only.
-    """
-    parts: list[str] = []
-    needles = [n for n in (link.matched_names or [link.name]) if n]
-    for idx in (link.paragraph_indices or [])[:_CANDIDATE_CONTEXT_MAX_PARAGRAPHS]:
-        text = paragraph_map.get(idx)
-        if not text:
-            continue
-        lowered = text.lower()
-        pos = -1
-        for needle in needles:
-            pos = lowered.find(needle.lower())
-            if pos != -1:
-                break
-        if pos == -1:
-            snippet = text[:_CANDIDATE_CONTEXT_WINDOW]
-        else:
-            start = max(0, pos - _CANDIDATE_CONTEXT_WINDOW // 2)
-            snippet = text[start : pos + _CANDIDATE_CONTEXT_WINDOW]
-            if start > 0:
-                snippet = "…" + snippet
-        if len(text) > len(snippet.lstrip("…")) + 1:
-            snippet = snippet.rstrip() + "…"
-        parts.append(snippet.strip())
-        if sum(len(p) for p in parts) >= _CANDIDATE_CONTEXT_MAX_CHARS:
-            break
-    return " […] ".join(parts)[:_CANDIDATE_CONTEXT_MAX_CHARS] or "(context unavailable)"
-
-
-async def collect_link_candidates(db: AsyncSession, entry) -> list[dict]:
-    """Auto-link junction rows rendered as candidate tags for the prompt.
-
-    Each candidate carries a context snippet extracted from the autolinker's
-    own paragraph split (original + translated text), so the model judges the
-    local context of the actual match — the prompt body alone may be truncated
-    or translated-only and can't be trusted to contain every match site.
-    """
-    from app.intelligence.autolinker import split_into_paragraphs
-    from app.intelligence.link_validation_apply import fetch_auto_links
-    from app.services.sanitizer import entry_text_with_translation
-
-    links = await fetch_auto_links(db, entry.id)
-    if not links:
-        return []
-    title, content_text = entry_text_with_translation(entry)
-    paragraph_map = dict(split_into_paragraphs(title, entry.summary or "", content_text))
-    return [
-        {
-            "entity_key": link.entity_key,
-            "entity_type": link.entity_type,
-            "name": link.name,
-            "matched_names": link.matched_names,
-            "confidence": link.confidence or "",
-            "previously_restored": link.previously_restored,
-            "context": _candidate_context(paragraph_map, link),
-        }
-        for link in links
-    ]
 
 
 def analysis_content_text(entry) -> str:
@@ -127,7 +50,7 @@ def analysis_content_text(entry) -> str:
 async def build_analysis_variables(db: AsyncSession, entry) -> dict:
     """Template variables for the entry_analysis prompt — shared by the batch
     submit path, the sequential fallback, and manual runs so every path renders
-    the identical prompt (content window + candidate entity tags)."""
+    the identical prompt (content window + observable candidate hints)."""
     from app.models.feed import Feed
     from app.services.analysis_window import analysis_content_window, rank_candidate_hints
     from app.services.system_settings import get_setting
@@ -143,127 +66,11 @@ async def build_analysis_variables(db: AsyncSession, entry) -> dict:
             # at the end, past a plain head slice.
             "content_text": analysis_content_window(analysis_content_text(entry), max_chars, tail_reserve=tail_reserve),
         },
-        "linked_entities": await collect_link_candidates(db, entry),
         # Tier-0 nominations rendered as hints for the iocs rules block, ranked
         # (AI stagings, defanged, hashes, IPs) with scan-origin host kinds
         # excluded. Cap keeps a C2-list entry from flooding the prompt.
         "observable_candidates": rank_candidate_hints(entry.observable_candidates or [], limit=40),
     }
-
-
-async def apply_link_validations(db: AsyncSession, entry_id: uuid.UUID, parsed: dict) -> dict:
-    """Act on the one-pass payload's link_validations verdicts. Returns counts.
-
-    Mirrors the scheduled validator's semantics: default-to-KEEP for anything
-    missing or malformed, shadow/apply per ``link_validation_mode``, RECLASSIFY
-    is audit-log-only. Stamps ``last_link_validation_at`` only when every
-    current auto_link row received a verdict — links created between prompt
-    render and result ingest stay unstamped for the recheck job.
-
-    Provenance: log rows written here carry the one-pass AIResult's id in
-    ``ai_result_id``, so joining ``ai_results`` distinguishes one-pass verdicts
-    (task ``entry_analysis``, target_type "entry") from the scheduled
-    validator's (task ``entity_link_validation``, target_type
-    "entry_validation") — that's the shadow-comparison axis for judging the
-    one-pass model against the recheck model on the same links.
-    """
-    from app.intelligence.autolink_reconcile import _payload_names
-    from app.intelligence.link_validation_apply import (
-        apply_removal,
-        fetch_auto_links,
-        log_reclassification,
-        log_shadow_removal,
-    )
-    from app.models.entry import Entry
-    from app.services.system_settings import get_setting
-
-    counts: dict[str, int] = {}
-    decisions_raw = parsed.get("link_validations")
-    if not isinstance(decisions_raw, list):
-        return counts
-    # Echo-reused payloads were judged against the duplicate's text and link
-    # set — never apply them here; the recheck job covers echo entries.
-    if parsed.get("_reused_from"):
-        return counts
-
-    links = await fetch_auto_links(db, entry_id)
-    entry = await db.get(Entry, entry_id)
-    if entry is None:
-        return counts
-    if not links:
-        entry.last_link_validation_at = datetime.now(UTC)
-        return counts
-
-    by_key: dict[str, dict] = {}
-    bad_shape = False
-    for item in decisions_raw:
-        if not isinstance(item, dict):
-            continue
-        key = item.get("entity_key")
-        decision = item.get("decision")
-        suggested = item.get("suggested_type") or None
-        if not key or decision not in _VALID_DECISIONS:
-            continue
-        if decision == "RECLASSIFY" and suggested not in _VALID_SUGGESTED_TYPES:
-            decision, suggested = "KEEP", None
-        if key in by_key:
-            bad_shape = True
-            break
-        by_key[key] = {"decision": decision, "reason": item.get("reason") or "", "suggested_type": suggested}
-    if bad_shape:
-        logger.warning("Entry %s link_validations had duplicate keys; treating all as KEEP", entry_id)
-        entry.last_link_validation_at = datetime.now(UTC)
-        return {"links_kept": len(links)}
-
-    mode = (await get_setting("link_validation_mode", db) or "shadow").lower()
-    if mode not in {"shadow", "apply"}:
-        mode = "shadow"
-    ai_result, _task = await _current_analysis_result(db, entry_id)
-    ai_result_id = ai_result.id if ai_result else None
-
-    kept = removed = shadowed = reclassified = overridden = 0
-    all_judged = True
-    for link in links:
-        verdict = by_key.get(link.entity_key)
-        if verdict is None:
-            all_judged = False
-            kept += 1
-            continue
-        decision = verdict["decision"]
-        if decision == "REMOVE":
-            # Positive-evidence override: the model can't remove a link to an
-            # entity it simultaneously extracted from the same article.
-            pool = _payload_names(parsed, _OVERRIDE_PAYLOAD_KEYS.get(link.entity_type, ()))
-            entity_names = {link.name.strip().lower()} | {(m or "").strip().lower() for m in link.matched_names}
-            entity_names.discard("")
-            if entity_names & pool:
-                decision = "KEEP"
-                overridden += 1
-        if decision == "KEEP":
-            kept += 1
-        elif decision == "REMOVE":
-            if mode == "apply":
-                if await apply_removal(db, entry_id, link, verdict["reason"], ai_result_id):
-                    removed += 1
-            else:
-                await log_shadow_removal(db, entry_id, link, verdict["reason"], ai_result_id)
-                shadowed += 1
-        elif decision == "RECLASSIFY":
-            await log_reclassification(db, entry_id, link, verdict["reason"], verdict["suggested_type"], ai_result_id)
-            reclassified += 1
-
-    if all_judged:
-        entry.last_link_validation_at = datetime.now(UTC)
-    counts = {"links_kept": kept}
-    if removed:
-        counts["links_removed"] = removed
-    if shadowed:
-        counts["links_shadow_removed"] = shadowed
-    if reclassified:
-        counts["links_reclassified"] = reclassified
-    if overridden:
-        counts["links_keep_overridden"] = overridden
-    return counts
 
 
 async def _tools_allowed_for_entry(db: AsyncSession, entry_id: uuid.UUID, parsed: dict) -> bool:
@@ -418,16 +225,6 @@ async def store_entry_analysis(db: AsyncSession, entry_id: uuid.UUID, parsed: di
         except Exception:
             logger.warning("Relationship store failed for entry %s", entry_id, exc_info=True)
 
-    # Judge instant-tier autolinks with the payload's link_validations verdicts.
-    # Runs BEFORE pending reconcile so rows promoted below (created after the
-    # prompt was rendered) can't block the last_link_validation_at stamp.
-    # Guarded: a validation failure must never lose the analysis payload.
-    try:
-        validated = await apply_link_validations(db, entry_id, parsed)
-        counts.update(validated)
-    except Exception:
-        logger.warning("Link validation apply failed for entry %s", entry_id, exc_info=True)
-
     # Reconcile pending dictionary-word autolinks against what the AI actually
     # read in the article — promote confirmed entities, reject the rest. Guarded:
     # a reconcile failure must never lose the analysis payload itself.
@@ -456,12 +253,8 @@ async def analyze_entry(
     batch queue instead).
     """
     from app.ai.engine import run_task
-    from app.models.entry import Entry
 
     variables: dict = {"entry": entry_data}
-    entry = await db.get(Entry, entry_id)
-    if entry is not None:
-        variables["linked_entities"] = await collect_link_candidates(db, entry)
     result = await run_task(
         db=db,
         user_id=user_id,
@@ -475,6 +268,11 @@ async def analyze_entry(
     if not isinstance(result, dict) or result.get("_extraction_status") not in (None, "success"):
         return result, {}
     counts = await store_entry_analysis(db, entry_id, result)
+    # Manual runs commit in the API handler right after this returns; the
+    # review task starts after its countdown, well past that commit.
+    from app.services.entry_adjudication import enqueue_and_dispatch
+
+    await enqueue_and_dispatch(db, entry_id, counts, result, countdown=15)
     return result, counts
 
 
@@ -610,10 +408,16 @@ async def enqueue_entry_analysis(db: AsyncSession, entry_id: uuid.UUID) -> str |
                     )
                 )
                 await store_entry_analysis(db, entry_id, parsed)
-                return await _write_status(
+                status = await _write_status(
                     "reused_echo",
                     reused_from_entry_id=uuid.UUID(dup_id),
                     completed_at=datetime.now(UTC),
                 )
+                # Echo payloads were judged against the duplicate's text; the
+                # adjudicate stage records the skip rather than reviewing them.
+                from app.services.entry_adjudication import enqueue_adjudication
+
+                await enqueue_adjudication(db, entry_id, None, parsed)
+                return status
 
     return await _write_status("pending")

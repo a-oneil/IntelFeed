@@ -71,7 +71,12 @@ AI_TYPES: dict[str, dict] = {
 _CONF_RANK = {"high": 3, "medium": 2, "low": 1}
 _WINDOW_DAYS = {"24h": 1, "7d": 7, "30d": 30, "all": None}
 
-Status = Literal["linked", "review", "orphan", "dupe"]
+Status = Literal["linked", "review", "orphan", "dupe", "stale"]
+# A stale entity: one article at most, no relationship, and nothing seen for
+# this long. This used to be a weekly job that wrote flag rows; the adjudicate
+# stage made that job redundant, so stale is now a live filter.
+STALE_MAX_ARTICLES = 1
+STALE_IDLE_DAYS = 90
 
 
 class ExtractionEntity(BaseModel):
@@ -211,16 +216,45 @@ async def _fetch_rows(db: AsyncSession, types: list[str], window_start: datetime
                     "needs_review": o.needs_review,
                     "created_from_entry_id": o.created_from_entry_id,
                     "first_seen_at": o.first_seen_at,
+                    "last_seen_at": getattr(o, "last_seen_at", None),
                 }
             )
     return rows
 
 
-def _status(row: dict, dup: dict[str, str]) -> Status:
+async def _related_ids(db: AsyncSession, rows: list[dict]) -> set[uuid.UUID]:
+    """Entity ids that sit on at least one relationship edge (for the stale test)."""
+    from app.models.entity_relationship import EntityRelationship
+
+    ids = [r["id"] for r in rows if r["article_count"] <= STALE_MAX_ARTICLES]
+    if not ids:
+        return set()
+    related: set[uuid.UUID] = set()
+    for col in (EntityRelationship.source_id, EntityRelationship.target_id):
+        related.update((await db.execute(select(col).where(col.in_(ids)).distinct())).scalars().all())
+    return related
+
+
+def _is_stale(row: dict, related: set[uuid.UUID], now: datetime) -> bool:
+    if row["article_count"] > STALE_MAX_ARTICLES or row["id"] in related:
+        return False
+    seen = row.get("last_seen_at") or row.get("first_seen_at")
+    if seen is None:
+        return False
+    if seen.tzinfo is None:
+        seen = seen.replace(tzinfo=UTC)
+    return (now - seen).days >= STALE_IDLE_DAYS
+
+
+def _status(
+    row: dict, dup: dict[str, str], related: set[uuid.UUID] | None = None, now: datetime | None = None
+) -> Status:
     if str(row["id"]) in dup:
         return "dupe"
     if row["article_count"] == 0:
         return "orphan"
+    if related is not None and _is_stale(row, related, now or _now()):
+        return "stale"
     if row["needs_review"]:
         return "review"
     return "linked"
@@ -280,8 +314,8 @@ async def extraction_entities(
     types: str | None = Query(None, description="CSV of entity types to include; default all"),
     status: str = Query(
         "all",
-        pattern="^(all|linked|review|orphan|dupe)$",
-        description="Filter by computed lifecycle status (linked, review, orphan, dupe).",
+        pattern="^(all|linked|review|orphan|dupe|stale)$",
+        description="Filter by computed lifecycle status (linked, review, orphan, dupe, stale).",
     ),
     window: str = Query("7d", pattern="^(24h|7d|30d|all)$", description="Only entities first seen within this window."),
     q: str | None = Query(None, description="Search name / aliases"),
@@ -309,9 +343,11 @@ async def extraction_entities(
     if source_entry_id is not None:
         rows = [r for r in rows if r["created_from_entry_id"] == source_entry_id]
     dup = await _duplicate_map(db, requested)
+    related = await _related_ids(db, rows)
+    now = _now()
 
     for r in rows:
-        r["status"] = _status(r, dup)
+        r["status"] = _status(r, dup, related, now)
         r["duplicate_of"] = dup.get(str(r["id"]))
 
     if status != "all":

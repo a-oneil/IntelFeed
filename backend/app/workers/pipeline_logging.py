@@ -32,7 +32,14 @@ def _extract_entry_id(args, kwargs) -> str | None:
     return None
 
 
-def _record_stage_run(entry_id: str, stage: str, status: str, duration_ms: int, error: str | None) -> None:
+def _record_stage_run(
+    entry_id: str,
+    stage: str,
+    status: str,
+    duration_ms: int,
+    error: str | None,
+    detail: dict | None = None,
+) -> None:
     from app.models.entry_pipeline_run import EntryPipelineRun
     from app.services.system_settings import get_setting
     from app.workers.db import run_async, worker_session
@@ -48,6 +55,7 @@ def _record_stage_run(entry_id: str, stage: str, status: str, duration_ms: int, 
                     status=status,
                     duration_ms=duration_ms,
                     error=(error or None) and str(error)[:4000],
+                    detail=detail or {},
                 )
             )
             await db.commit()
@@ -61,7 +69,9 @@ def _record_stage_run(entry_id: str, stage: str, status: str, duration_ms: int, 
 def pipeline_stage(stage: str):
     """Decorate a sync Celery task body; records an EntryPipelineRun on completion.
 
-    Apply BELOW @celery_app.task:
+    A task that returns a dict gets it stored as the run's ``detail`` (the
+    adjudicate stage returns its verdict counts this way); other return values
+    are ignored. Apply BELOW @celery_app.task:
 
         @celery_app.task(name=..., ...)
         @pipeline_stage("autolink")
@@ -73,8 +83,12 @@ def pipeline_stage(stage: str):
         def wrapper(*args, **kwargs):
             start = time.monotonic()
             status, error = "success", None
+            detail: dict | None = None
             try:
-                return fn(*args, **kwargs)
+                result = fn(*args, **kwargs)
+                if isinstance(result, dict):
+                    detail = result
+                return result
             except Exception as exc:
                 from celery.exceptions import Retry
 
@@ -85,7 +99,7 @@ def pipeline_stage(stage: str):
                 entry_id = _extract_entry_id(args, kwargs)
                 if entry_id:
                     duration_ms = int((time.monotonic() - start) * 1000)
-                    _record_stage_run(entry_id, stage, status, duration_ms, error)
+                    _record_stage_run(entry_id, stage, status, duration_ms, error, detail)
 
         return wrapper
 

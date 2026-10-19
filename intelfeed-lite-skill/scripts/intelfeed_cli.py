@@ -623,11 +623,12 @@ TOOLS: dict[str, dict] = {
     },
     "get_hygiene_feed": {
         "description": (
-            "Chronological hygiene feed: a merge of the link-validator and entity-maintenance logs, "
-            "normalized (action, mode, applied, subject, reason, affected-entity links, AI review "
-            "verdict). Filter by action code (comma-separate for several), log source, mode, AI "
-            "review verdict, pending-only, or a since timestamp. Read-only \u2014 applying or dismissing "
-            "proposals happens in the Hygiene admin UI."
+            "Chronological hygiene feed: a merge of the entity-link log and the entity-maintenance "
+            "log, normalized (action, mode, applied, subject, reason, affected-entity links, origin). "
+            "Filter by action code (comma-separate for several), log source, mode, origin "
+            "(adjudicator = filed by the adjudicate stage, legacy = scans and analysts), "
+            "pending-only, or a since timestamp. Read-only \u2014 applying or dismissing proposals happens "
+            "in the Proposals queue."
         ),
         "params": {
             "action": {
@@ -644,10 +645,10 @@ TOOLS: dict[str, dict] = {
                 "default": None,
                 "enum": ['shadow', 'apply'],
             },
-            "review": {
+            "origin": {
                 "type": 'str',
                 "default": None,
-                "enum": ['approve', 'reject', 'unsure', 'unreviewed'],
+                "enum": ['adjudicator', 'legacy'],
             },
             "pending": {
                 "type": 'bool',
@@ -669,11 +670,10 @@ TOOLS: dict[str, dict] = {
     },
     "get_hygiene_stats": {
         "description": (
-            "Combined entity-hygiene counters across the link validator and entity-maintenance "
-            "systems: operating modes (shadow/apply), pending reclassify advisories and "
-            "merge/name/alias/vendor/id proposals, AI review verdict counts, orphan entity count, "
-            "validator scan progress, last run times, and how many actions were applied in the last "
-            "24h / 7d."
+            "Combined entity-hygiene counters across both proposal logs: the adjudicate stage's mode "
+            "and how many verdicts it has filed that nobody has applied yet, pending reclassify "
+            "advisories and name/alias/vendor/id proposals, orphan entity count, last run times, and "
+            "how many actions were applied in the last 24h / 7d."
         ),
         "params": {},
     },
@@ -1231,7 +1231,7 @@ TOOLS: dict[str, dict] = {
             "status": {
                 "type": 'str',
                 "default": 'all',
-                "enum": ['all', 'linked', 'review', 'orphan', 'dupe'],
+                "enum": ['all', 'linked', 'review', 'orphan', 'dupe', 'stale'],
             },
             "window": {
                 "type": 'str',

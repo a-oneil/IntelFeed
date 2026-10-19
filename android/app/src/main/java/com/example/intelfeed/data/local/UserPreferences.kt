@@ -52,9 +52,16 @@ class UserPreferences(private val context: Context) {
         private const val MAX_NOTIFIED_ALERTS = 500
         // "<server>|<username>" the alert state above belongs to (see claimAlertState).
         private val KEY_ALERT_STATE_OWNER = stringPreferencesKey("alert_state_owner")
+        private val KEY_THEME_ID = stringPreferencesKey("theme_id")
+        private val KEY_THEME_NAME = stringPreferencesKey("theme_name")
+        private val KEY_THEME_SOURCE = stringPreferencesKey("theme_source")
+        private val KEY_THEME_VARS = stringPreferencesKey("theme_vars")
+        private val KEY_COLOR_SCHEMA = stringPreferencesKey("color_schema")
+        private val themeJson = Json { ignoreUnknownKeys = true }
         private const val RECENT_SEPARATOR = "\u001F"
         const val MAX_RECENT_SEARCHES = 8
     }
+
 
     /** Name of a ReaderFontSize value, or null for the default. */
     val readerTextSize: Flow<String?> = context.dataStore.data
@@ -285,4 +292,76 @@ class UserPreferences(private val context: Context) {
             if (previous != owner) prefs[KEY_ALERT_STATE_OWNER] = owner
         }
     }
+
+    val cachedThemeState: Flow<CachedThemeState> = context.dataStore.data
+        .map { prefs ->
+            val varsRaw = prefs[KEY_THEME_VARS]
+            val vars = if (!varsRaw.isNullOrBlank()) {
+                runCatching {
+                    themeJson.decodeFromString(MapSerializer(String.serializer(), String.serializer()), varsRaw)
+                }.getOrDefault(emptyMap())
+            } else {
+                emptyMap()
+            }
+            val schemaRaw = prefs[KEY_COLOR_SCHEMA]
+            val schema = if (!schemaRaw.isNullOrBlank()) {
+                runCatching {
+                    themeJson.decodeFromString(com.example.intelfeed.data.model.ColorSchemaDto.serializer(), schemaRaw)
+                }.getOrNull()
+            } else {
+                null
+            }
+            CachedThemeState(
+                themeId = prefs[KEY_THEME_ID],
+                themeName = prefs[KEY_THEME_NAME],
+                source = prefs[KEY_THEME_SOURCE],
+                variables = vars,
+                colorSchema = schema
+            )
+        }
+        .distinctUntilChanged()
+
+    suspend fun getCachedThemeState(): CachedThemeState = cachedThemeState.first()
+
+    suspend fun saveCachedTheme(
+        themeId: String,
+        themeName: String,
+        variables: Map<String, String>,
+        source: String? = null
+    ) {
+        val varsJson = themeJson.encodeToString(MapSerializer(String.serializer(), String.serializer()), variables)
+        context.dataStore.edit { prefs ->
+            prefs[KEY_THEME_ID] = themeId
+            prefs[KEY_THEME_NAME] = themeName
+            prefs[KEY_THEME_VARS] = varsJson
+            if (source != null) {
+                prefs[KEY_THEME_SOURCE] = source
+            }
+        }
+    }
+
+    suspend fun clearCachedTheme() {
+        context.dataStore.edit { prefs ->
+            prefs.remove(KEY_THEME_ID)
+            prefs.remove(KEY_THEME_NAME)
+            prefs.remove(KEY_THEME_SOURCE)
+            prefs.remove(KEY_THEME_VARS)
+        }
+    }
+
+    suspend fun saveCachedColorSchema(schema: com.example.intelfeed.data.model.ColorSchemaDto) {
+        val schemaJson = themeJson.encodeToString(com.example.intelfeed.data.model.ColorSchemaDto.serializer(), schema)
+        context.dataStore.edit { prefs ->
+            prefs[KEY_COLOR_SCHEMA] = schemaJson
+        }
+    }
 }
+
+data class CachedThemeState(
+    val themeId: String? = null,
+    val themeName: String? = null,
+    val source: String? = null,
+    val variables: Map<String, String> = emptyMap(),
+    val colorSchema: com.example.intelfeed.data.model.ColorSchemaDto? = null
+)
+

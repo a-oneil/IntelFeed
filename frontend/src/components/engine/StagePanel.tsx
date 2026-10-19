@@ -16,6 +16,7 @@ const KIND_LABELS: Record<string, string> = {
   parallel: "parallel",
   post: "post-process",
   final: "final",
+  post_analysis: "after AI analysis",
   side: "side channel",
 };
 
@@ -90,6 +91,19 @@ export function StagePanel({
                 "observables_publish_max_age_days",
               ]}
             />
+          </>
+        )}
+        {stage === "adjudicate" && (
+          <>
+            <p className={styles.note}>
+              After the one-pass analysis lands, a second AI call re-reads the article next to everything
+              the analysis wrote to the entry and judges each item. <strong>Mode</strong> is the master
+              switch: <strong>off</strong> never runs, <strong>shadow</strong> files every verdict as a
+              proposal on the <strong>Links</strong> and <strong>AI entities</strong> Proposals lens,{" "}
+              <strong>apply</strong> fixes high-confidence verdicts at ingest. Per-feed on/off is a chip in{" "}
+              <strong>Plans</strong> and only bites when Pipeline Plans is on.
+            </p>
+            <SystemSettings filterGroups={["adjudication"]} flat hideGroupTitle />
           </>
         )}
         {(stage === "cooccurrence" || stage === "correlation") && <CorrelationTuningPanel />}

@@ -20,7 +20,7 @@ See diagram: [Entry lifecycle](diagrams/entries-lifecycle.md)
 | Correlation | `backend/app/intelligence/correlation_events.py` | Co-occurrence upserts strength-model `EntityRelationship` rows; 15 correlation event types (severity list in diagram) feed correlation automations |
 | Automation | `backend/app/automation/` | Triggers: on_new_entry, on_keyword_match, on_cve_detected, on_correlation_event, on_schedule; condition + action catalog in diagram |
 | Requirements | `backend/app/intelligence/requirement_matching.py` | `match_requirements_task` → `RequirementMatch` → `requirement_match` event |
-| Signal & triage | `backend/app/services/triage.py` | `score_entry_task` writes `priority_score` + entry signals; triage queue ranks by composite priority; story threads rank by their best unread beat plus an outlet bump |
+| Signal & triage | `backend/app/services/triage.py` | `score_entry_task` writes `priority_score` + entry signals; triage queue ranks by composite priority; story threads rank alongside entries by the score of their best unread beat |
 | Daily summaries | `backend/app/services/daily_briefing.py` | `ensure_daily_summary` — one shared, idempotent per-day summary with inline entity links; surfaces as reader day dividers, the Morning Briefing widget, and read-aloud. Called by the `generate_daily_summaries` job (daily 06:00 UTC) and by the `use_daily_summary` automation action, which share the cache row so a day is only ever generated once |
 
 ## Beat-scheduled enrichment

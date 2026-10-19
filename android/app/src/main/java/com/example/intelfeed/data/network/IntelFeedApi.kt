@@ -42,7 +42,11 @@ import com.example.intelfeed.data.model.TagEntity
 import com.example.intelfeed.data.model.TagIdsRequest
 import com.example.intelfeed.data.model.ThreadDetail
 import com.example.intelfeed.data.model.ThreadListResponse
+import com.example.intelfeed.data.model.ColorSchemaDto
 import com.example.intelfeed.data.model.ThreatActor
+import com.example.intelfeed.data.model.ThemeDto
+import com.example.intelfeed.data.model.ThemePreferenceUpdateRequest
+import com.example.intelfeed.data.model.ThemePreferenceUpdateResponse
 import com.example.intelfeed.data.model.Tool
 import com.example.intelfeed.data.model.Ttp
 import com.example.intelfeed.data.model.UnifiedSearchRequest
@@ -81,6 +85,21 @@ interface IntelFeedApi {
 
     @GET("api/auth/me")
     suspend fun getMe(): UserProfile
+
+    @PUT("api/themes/user/preferences")
+    suspend fun updateThemePreference(@Body request: ThemePreferenceUpdateRequest): ThemePreferenceUpdateResponse
+
+    // Themes & Color Schema
+
+    @GET("api/themes")
+    suspend fun getThemes(): List<ThemeDto>
+
+    @GET("api/themes/default")
+    suspend fun getDefaultTheme(): ThemeDto?
+
+    @GET("api/themes/schema")
+    suspend fun getColorSchema(): ColorSchemaDto
+
 
     // Entries
 

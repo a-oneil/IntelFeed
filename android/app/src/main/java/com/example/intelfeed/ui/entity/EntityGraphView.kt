@@ -60,6 +60,7 @@ import com.example.intelfeed.theme.SlateDark900
 import com.example.intelfeed.theme.TextMuted
 import com.example.intelfeed.theme.TextPrimary
 import com.example.intelfeed.theme.TextSecondary
+import com.example.intelfeed.theme.ThemeEngine
 import com.example.intelfeed.ui.components.InlineLoading
 import com.example.intelfeed.ui.components.color
 import kotlin.math.cos
@@ -67,7 +68,8 @@ import kotlin.math.hypot
 import kotlin.math.sin
 
 /** The web's node colour: the entity type's colour, grey for articles. */
-private fun graphColor(type: String): Color = if (type == "entry") Color(0xFF6B7280) else EntityType.fromKey(type)?.color() ?: Color(0xFF6B7280)
+private fun graphColor(type: String): Color = if (type == "entry") TextMuted else EntityType.fromKey(type)?.color() ?: ThemeEngine.entityColor(type)
+
 
 private fun graphTypeLabel(type: String): String = if (type == "entry") "Articles" else EntityType.fromKey(type)?.pluralLabel ?: type
 

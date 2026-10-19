@@ -218,6 +218,9 @@
 .gside {
   color: var(--accent-intel) !important;
 }
+.greview {
+  color: var(--entity-ttp, var(--accent-dash)) !important;
+}
 .gdiv {
   border-left: 1px solid var(--border);
 }
@@ -486,6 +489,10 @@
 }
 .sdotRetry {
   background: var(--warning);
+}
+.sdotSkip {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--text-muted);
 }
 .retrybtn {
   appearance: none;

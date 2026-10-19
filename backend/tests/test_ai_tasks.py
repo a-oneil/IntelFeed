@@ -1115,7 +1115,7 @@ async def claude_code_provider(db_session: AsyncSession) -> AIProvider:
 async def tool_required_task(db_session: AsyncSession) -> AITask:
     """A seeded agentic task — name must be in TOOL_REQUIRED_TASKS."""
     task = AITask(
-        name="entity_merge_maintenance",
+        name="entity_enrichment_research",
         display_name="Entity Merge Maintenance",
         category="maintenance",
         default_prompt_template="Judge cluster {{ cluster }}",
@@ -1215,7 +1215,7 @@ async def test_list_tasks_includes_requires_tools(
     resp = await client.get("/api/ai/tasks", headers=auth_headers)
     assert resp.status_code == 200
     by_name = {t["name"]: t for t in resp.json()}
-    assert by_name["entity_merge_maintenance"]["requires_tools"] is True
+    assert by_name["entity_enrichment_research"]["requires_tools"] is True
     assert by_name["threat_analysis"]["requires_tools"] is False
 
 

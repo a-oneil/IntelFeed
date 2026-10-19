@@ -12,7 +12,17 @@ import {
 
 import styles from "./PipelinePlans.module.css";
 
-const TOGGLEABLE_STAGES = ["autolink", "telegram_links", "extract", "cooccurrence", "correlation", "requirements", "score"];
+const TOGGLEABLE_STAGES = [
+  "autolink",
+  "observables",
+  "telegram_links",
+  "extract",
+  "cooccurrence",
+  "correlation",
+  "requirements",
+  "score",
+  "adjudicate",
+];
 
 /** Pipeline plan editor: per-scope stage toggles layered over the feed booleans.
  *  Only takes effect when the pipeline_engine_enabled flag is on. */

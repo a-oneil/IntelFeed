@@ -306,12 +306,13 @@ export const ConditionNode = memo(function ConditionNode({
 
         {conditionType === "priority_score_above" && (
           <div className={styles.fieldGroup}>
-            <label className={styles.fieldLabel}>Min priority score</label>
+            <label className={styles.fieldLabel}>Min priority score (0–10)</label>
             <input
               type="number"
               min={0}
+              max={10}
               step={0.1}
-              value={(config?.min as number) ?? 2.0}
+              value={(config?.min as number) ?? 1.0}
               onChange={(e) =>
                 onUpdate?.({
                   config: { ...config, min: parseFloat(e.target.value) || 0 },

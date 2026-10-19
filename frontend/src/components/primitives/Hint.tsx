@@ -104,6 +104,14 @@ export function Hint({
 
   useEffect(() => clearTimer, []);
 
+  // A call site that disables the hint mid-hover (the matrix header does, once
+  // its peek popover owns the explanation) hands back the bare child with no
+  // leave handler, so the open anchor would otherwise survive and bring the
+  // card back the moment the hint re-enables.
+  useEffect(() => {
+    if (disabled) close();
+  }, [disabled, close]);
+
   // A fixed card can't travel with a scrolling container, so close rather than
   // let it drift away from the control it describes.
   useEffect(() => {
@@ -176,6 +184,8 @@ export function Hint({
     "aria-describedby": anchor ? id : props["aria-describedby"],
     onMouseEnter: compose(props.onMouseEnter as Handler, onEnter),
     onMouseLeave: compose(props.onMouseLeave as Handler, close),
+    // Activating the control answers the question the card was asking.
+    onClick: compose(props.onClick as Handler, close),
     onFocus: compose(props.onFocus as Handler, onFocus),
     onBlur: compose(props.onBlur as Handler, close),
   } as Record<string, unknown>);

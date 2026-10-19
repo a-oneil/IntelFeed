@@ -636,10 +636,10 @@ async def _confirm_extraction_entities(db: AsyncSession, user_id: uuid.UUID, ent
 @_tool(
     name="get_hygiene_stats",
     description=(
-        "Combined entity-hygiene counters across the link validator and entity-maintenance systems: operating "
-        "modes (shadow/apply), pending reclassify advisories and merge/name/alias/vendor/id proposals, AI "
-        "review verdict counts, orphan entity count, validator scan progress, last run times, and how many "
-        "actions were applied in the last 24h / 7d."
+        "Combined entity-hygiene counters across both proposal logs: the adjudicate stage's mode and how many "
+        "verdicts it has filed that nobody has applied yet, pending reclassify advisories and "
+        "name/alias/vendor/id proposals, orphan entity count, last run times, and how many actions were applied "
+        "in the last 24h / 7d."
     ),
     input_schema={"properties": {}},
     mutating=False,
@@ -653,10 +653,11 @@ async def _get_hygiene_stats(db: AsyncSession, user_id: uuid.UUID) -> dict:
 @_tool(
     name="get_hygiene_feed",
     description=(
-        "Chronological hygiene feed: a merge of the link-validator and entity-maintenance logs, normalized "
-        "(action, mode, applied, subject, reason, affected-entity links, AI review verdict). Filter by action "
-        "code (comma-separate for several), log source, mode, AI review verdict, pending-only, or a since "
-        "timestamp. Read-only — applying or dismissing proposals happens in the Hygiene admin UI."
+        "Chronological hygiene feed: a merge of the entity-link log and the entity-maintenance log, normalized "
+        "(action, mode, applied, subject, reason, affected-entity links, origin). Filter by action code "
+        "(comma-separate for several), log source, mode, origin (adjudicator = filed by the adjudicate stage, "
+        "legacy = scans and analysts), pending-only, or a since timestamp. Read-only — applying or dismissing "
+        "proposals happens in the Proposals queue."
     ),
     input_schema={
         "properties": {
@@ -675,10 +676,10 @@ async def _get_hygiene_stats(db: AsyncSession, user_id: uuid.UUID) -> dict:
                 "enum": ["shadow", "apply"],
                 "description": "shadow = proposals only, apply = actions that actually ran",
             },
-            "review": {
+            "origin": {
                 "type": "string",
-                "enum": ["approve", "reject", "unsure", "unreviewed"],
-                "description": "Filter pending proposals by AI reviewer verdict",
+                "enum": ["adjudicator", "legacy"],
+                "description": "adjudicator = rows the adjudicate stage filed; legacy = scans and analysts",
             },
             "pending": {
                 "type": "boolean",
@@ -698,7 +699,7 @@ async def _get_hygiene_feed(
     action: str | None = None,
     source: str | None = None,
     mode: str | None = None,
-    review: str | None = None,
+    origin: str | None = None,
     pending: bool = False,
     since: str | None = None,
     limit: int = 50,
@@ -710,8 +711,8 @@ async def _get_hygiene_feed(
         return {"error": "source must be 'link_validator' or 'entity_maintenance'"}
     if mode is not None and mode not in ("shadow", "apply"):
         return {"error": "mode must be 'shadow' or 'apply'"}
-    if review is not None and review not in ("approve", "reject", "unsure", "unreviewed"):
-        return {"error": "review must be approve, reject, unsure, or unreviewed"}
+    if origin is not None and origin not in ("adjudicator", "legacy"):
+        return {"error": "origin must be 'adjudicator' or 'legacy'"}
     since_dt = None
     if since is not None:
         try:
@@ -723,7 +724,7 @@ async def _get_hygiene_feed(
         action=action,
         source=source,
         mode=mode,
-        review=review,
+        origin=origin,
         pending=pending,
         since=since_dt,
         limit=max(1, min(limit, 200)),

@@ -1,11 +1,12 @@
 """Per-user Radar personalisation — read-time, never written back.
 
-``Entry.priority_score`` is global: one number per entry, computed by the
-signal engine with admin-set family multipliers and the pooled feedback nudge.
-This module adds the *personal* half on top, the same way My Stack exposure
-does (see ``app/services/exposure.py``):
+``Entry.priority_raw`` is global: one number per entry, computed by the
+signal engine with admin-set family multipliers and the pooled feedback nudge
+(``priority_score`` is the same number on the 0–10 scale). This module adds the
+*personal* half on top, in raw units, the same way My Stack exposure does (see
+``app/services/exposure.py``):
 
-  effective_score = priority_score + exposure_lift + personal_lift
+  effective_score = priority_raw + exposure_lift + personal_lift
 
 ``personal_lift`` is the difference between what the engine scored and what it
 would have scored using this analyst's own fitted family weights. Because the

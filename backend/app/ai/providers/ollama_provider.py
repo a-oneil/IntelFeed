@@ -69,6 +69,7 @@ import httpx
 
 from app.ai.providers.base import AIProvider, AIResponse
 from app.ai.providers.claude_code_provider import QuotaExhaustedError
+from app.ai.providers.schema_utils import enforce_required as _enforce_required_schema
 
 logger = logging.getLogger(__name__)
 
@@ -136,23 +137,11 @@ class OllamaProvider(AIProvider):
     def _enforce_required(schema: dict) -> dict:
         """Recursively require every declared property on object nodes.
 
-        Explicit ``required`` lists are preserved.
+        Explicit ``required`` lists are preserved. Thin wrapper over the
+        shared helper in ``schema_utils`` (also used by the OpenAI-compatible
+        provider) kept for backward-compat call sites.
         """
-        import copy
-
-        def walk(node):
-            if isinstance(node, dict):
-                if node.get("type") == "object" and node.get("properties") and "required" not in node:
-                    node["required"] = list(node["properties"].keys())
-                for value in node.values():
-                    walk(value)
-            elif isinstance(node, list):
-                for item in node:
-                    walk(item)
-
-        cloned = copy.deepcopy(schema)
-        walk(cloned)
-        return cloned
+        return _enforce_required_schema(schema)
 
     @staticmethod
     def _effective_temperature(cfg: dict, temperature: float) -> float:
@@ -243,8 +232,8 @@ class OllamaProvider(AIProvider):
 
         # Agentic path: with a tool spec + an in-process dispatcher, run the tool
         # loop and return the final text. Used by engine.run_task for agentic
-        # tasks (entity_merge_maintenance etc.) so Ollama genuinely executes
-        # tools instead of silently producing tool-less output.
+        # tasks (the copilot, entity_enrichment_research) so Ollama genuinely
+        # executes tools instead of silently producing tool-less output.
         if tools and tool_executor is not None:
             return await self._complete_with_tools(
                 prompt,

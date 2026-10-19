@@ -57,7 +57,9 @@ import com.example.intelfeed.theme.SlateDark900
 import com.example.intelfeed.theme.TextMuted
 import com.example.intelfeed.theme.TextPrimary
 import com.example.intelfeed.theme.TextSecondary
+import com.example.intelfeed.theme.ThemeEngine
 import com.example.intelfeed.ui.ErrorText
+
 import com.example.intelfeed.util.HtmlText
 import com.example.intelfeed.ui.components.CardSurface
 import com.example.intelfeed.ui.components.EmptyState
@@ -201,12 +203,7 @@ private fun RequirementCard(
     onOpenEntry: (String, List<String>) -> Unit,
     onSearchKeyword: (String) -> Unit
 ) {
-    val priorityColor = when (requirement.priority?.lowercase()) {
-        "critical" -> CyberRed
-        "high" -> CyberAmber
-        "medium" -> CyberBlue
-        else -> TextSecondary
-    }
+    val priorityColor = ThemeEngine.severityColor(requirement.priority)
     CardSurface(modifier = Modifier.animateContentSize()) {
         Column(Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable(onClickLabel = if (expanded) "Hide matches" else "Show matches", onClick = onToggle)) {
@@ -215,6 +212,10 @@ private fun RequirementCard(
                     Spacer(Modifier.height(4.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         requirement.priority?.let { Pill(it.replaceFirstChar { c -> c.titlecase(Locale.US) }, priorityColor); Spacer(Modifier.width(6.dp)) }
+                        requirement.category?.takeIf { it.isNotBlank() }?.let { cat ->
+                            Pill(cat.replaceFirstChar { c -> c.titlecase(Locale.US) }, ThemeEngine.pirCategoryColor(cat))
+                            Spacer(Modifier.width(6.dp))
+                        }
                         val status = requirement.status?.lowercase()
                         if (status != null && status != "active") { Pill(status, TextMuted); Spacer(Modifier.width(6.dp)) }
                         // "latest just now" / "latest 20m ago" / "latest Sep 3"
@@ -222,13 +223,14 @@ private fun RequirementCard(
                             ?.let { if (it == "Just now" || it == "Yesterday") it.lowercase() else it }
                         val count = String.format(Locale.US, "%,d %s", requirement.matchCount, if (requirement.matchCount == 1) "match" else "matches")
                         Text(
-                            listOfNotNull(requirement.category, count, last?.let { "latest $it" }).joinToString(" · "),
+                            listOfNotNull(count, last?.let { "latest $it" }).joinToString(" · "),
                             fontSize = 12.sp, color = TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
                 Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = null, tint = TextMuted)
             }
+
             requirement.description?.takeIf { it.isNotBlank() }?.let {
                 Spacer(Modifier.height(6.dp))
                 Text(HtmlText.toPlainText(it), fontSize = 13.sp, color = TextSecondary, maxLines = if (expanded) 6 else 2, overflow = TextOverflow.Ellipsis)

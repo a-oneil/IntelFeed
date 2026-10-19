@@ -12,12 +12,12 @@ import {
   type ProcessingStageCell,
   useEngineProcessing,
   useExtractionStatus,
-  useLinkValidationStats,
   usePipelineOverview,
   usePipelinePlans,
   useUpsertPlan,
 } from "@/hooks/useEngine";
 import { useExtractionStats } from "@/hooks/useExtraction";
+import { useHygieneStats } from "@/hooks/useHygiene";
 import { Chip } from "@/components/primitives/Chip";
 import { Hint } from "@/components/primitives";
 import { useFeeds } from "@/hooks/useFeeds";
@@ -32,6 +32,7 @@ import { EntryOutputs } from "./EntryOutputs";
 import { ExtractionTab } from "./ExtractionTab";
 import { ProposalsQueue } from "./ProposalsQueue";
 import { StagePanel } from "./StagePanel";
+import { skipReason } from "./adjudicationCopy";
 import type { EngineDest } from "./engineSettingsIndex";
 import m from "./EngineMatrix.module.css";
 import styles from "./ProcessingTab.module.css";
@@ -53,6 +54,7 @@ const TOGGLEABLE_STAGES = new Set([
   "correlation",
   "requirements",
   "score",
+  "adjudicate",
 ]);
 
 // Stage → column group. Order matches the backend's PROCESSING_STAGE_ORDER, so
@@ -67,6 +69,7 @@ const STAGE_GROUP: Record<string, { key: string; label: string; cls: string }> =
   correlation: { key: "post", label: "post", cls: styles.gpost },
   requirements: { key: "post", label: "post", cls: styles.gpost },
   score: { key: "final", label: "final", cls: styles.gfinal },
+  adjudicate: { key: "review", label: "ai review", cls: styles.greview },
   automate: { key: "side", label: "post-score", cls: styles.gside },
 };
 
@@ -130,7 +133,83 @@ const STAGE_HINTS: Record<string, { title: string; body: string; aside?: string 
     body: "Where AI reads an article and proposes entities, techniques and CVEs.",
     aside: "Nothing it proposes goes live without clearing the creation gates.",
   },
+  adjudicate: {
+    title: "AI review",
+    body: "A second, smaller AI call re-reads the article next to everything the analysis wrote to it — links, new entities, edges, observables — and says keep, remove, merge, demote or drop per item.",
+    aside: "Off by default. Shadow files verdicts as proposals; apply fixes high-confidence ones at ingest.",
+  },
 };
+
+/** A synthetic or real cell's skip code, if any: `status: "skipped"` carries
+ *  it in `detail.skipped`; a success run that bailed carries the same key. */
+function cellSkipCode(cell: ProcessingStageCell | undefined): string | null {
+  if (!cell || cell.status === "error" || cell.status === "retry" || cell.status === "queued") return null;
+  const code = (cell.detail as { skipped?: unknown } | null | undefined)?.skipped;
+  if (typeof code === "string" && code) return code;
+  return cell.status === "skipped" ? "skipped" : null;
+}
+
+/** Verdict glyphs for the adjudicate stage's Output cell. Keys match the
+ *  `detail.verdicts` counters the task returns (see pipeline_logging). */
+const VERDICT_GLYPHS: { key: string; glyph: string; title: string }[] = [
+  { key: "remove", glyph: "✂", title: "links removed" },
+  { key: "reclassify", glyph: "↷", title: "links flagged for reclassification" },
+  { key: "veto", glyph: "⊘", title: "new entities vetoed" },
+  { key: "merge", glyph: "⇄", title: "new entities merged into existing ones" },
+  { key: "demote", glyph: "↓", title: "relationship edges demoted" },
+  { key: "drop", glyph: "✕", title: "observables dropped" },
+];
+
+/** Output-lens cell for the adjudicate stage: what the review decided. Reads
+ *  the run's detail (verdict counters, mode, skip reason). */
+function AdjudicateOutputCell({ cell }: { cell: ProcessingStageCell | undefined }) {
+  const detail = cell?.detail as
+    | { mode?: string; items?: number; verdicts?: Record<string, number>; skipped?: string; breaker?: boolean }
+    | null
+    | undefined;
+  if (!cell) return <span className={`${m.outCell} ${m.outZero}`}>·</span>;
+  if (cell.status === "queued") {
+    return (
+      <span className={`${m.outCell} ${m.outQueued}`} title="queued — waiting on the AI worker">
+        …
+      </span>
+    );
+  }
+  const skip = cellSkipCode(cell);
+  if (skip) {
+    return (
+      <span className={`${m.outCell} ${m.outZero}`} title={`skipped: ${skipReason(skip)}`}>
+        —
+      </span>
+    );
+  }
+  if (cell.status !== "success" || !detail) return <span className={`${m.outCell} ${m.outZero}`}>·</span>;
+  const verdicts = detail.verdicts ?? {};
+  const shown = VERDICT_GLYPHS.filter((v) => (verdicts[v.key] ?? 0) > 0);
+  const shadow = detail.mode !== "apply";
+  const cls = `${m.outCell} ${shadow ? m.outShadow : ""}`;
+  if (!shown.length) {
+    return (
+      <span className={`${m.outCell} ${m.outKept}`} title={`all ${detail.items ?? 0} items kept`}>
+        ✓ {detail.items ?? 0}
+      </span>
+    );
+  }
+  const title =
+    shown.map((v) => `${verdicts[v.key]} ${v.title}`).join(" · ") +
+    (shadow ? " · shadow: proposals only" : " · applied") +
+    (detail.breaker ? " · breaker tripped, downgraded to proposals" : "");
+  return (
+    <span className={cls} title={title}>
+      {shown.map((v) => (
+        <span key={v.key} className={m.outRels}>
+          {verdicts[v.key]}
+          {v.glyph}
+        </span>
+      ))}
+    </span>
+  );
+}
 
 /** Output-lens cell: what the stage produced for this entry. Only the stages
  *  with per-entry output metrics render counts; the rest show a dot. */
@@ -193,7 +272,7 @@ export function EngineMatrix({
   initialStage?: string;
   initialStatus?: string;
   initialView?: MatrixView;
-  initialEntityStatus?: "all" | "review" | "orphan" | "dupe";
+  initialEntityStatus?: "all" | "review" | "orphan" | "dupe" | "stale";
   initialOpenStage?: string | null;
   onBrowse: (view: BrowseView) => void;
   /** Flash a setting once its host surface is open. */
@@ -201,12 +280,13 @@ export function EngineMatrix({
 }) {
   const [window_, setWindow] = useState("24h");
   const [view, setView] = useState<MatrixView>(initialView ?? "entries");
-  const [entStatus, setEntStatus] = useState<"all" | "review" | "orphan" | "dupe">(initialEntityStatus ?? "all");
+  const [entStatus, setEntStatus] = useState<"all" | "review" | "orphan" | "dupe" | "stale">(initialEntityStatus ?? "all");
   const [openStage, setOpenStage] = useState<string | null>(initialOpenStage ?? null);
   const [lens, setLens] = useState<"timing" | "output">("timing");
   const [proposalsMode, setProposalsMode] = useState(false);
   // Pre-applied action filter when a chip deep-links into a proposals queue.
   const [proposalsAction, setProposalsAction] = useState<string | undefined>(undefined);
+  const [proposalsOrigin, setProposalsOrigin] = useState<"adjudicator" | "legacy" | undefined>(undefined);
   const [status, setStatus] = useState<string | undefined>(initialStatus);
   const [stage, setStage] = useState<string | undefined>(initialStage);
   const [feedId, setFeedId] = useState<string | undefined>(undefined);
@@ -260,7 +340,7 @@ export function EngineMatrix({
   const { data: plans } = usePipelinePlans();
   const { data: extractionStats } = useExtractionStats("7d");
   const { data: linkStats } = useEntityLinkStats();
-  const { data: validationStats } = useLinkValidationStats();
+  const { data: hygieneStats } = useHygieneStats();
   const { data: feedHealth } = useFeedHealth();
   const { data: feeds } = useFeeds();
   const upsertPlan = useUpsertPlan();
@@ -459,13 +539,31 @@ export function EngineMatrix({
     },
     {
       key: "reclass",
-      n: validationStats?.reclassify_pending,
+      n: hygieneStats?.pending_advisories,
       label: "reclassify proposals",
       cls: m.aWarn,
       onClick: () => {
         setView("links");
         setProposalsMode(true);
         setProposalsAction("needs_reclassification");
+        setProposalsOrigin(undefined);
+      },
+    },
+    {
+      key: "adjudication",
+      n: hygieneStats?.adjudication_pending,
+      label: "adjudication verdicts",
+      cls: m.aWarn,
+      onClick: () => {
+        setView("links");
+        setProposalsMode(true);
+        setProposalsAction(undefined);
+        setProposalsOrigin("adjudicator");
+      },
+      hint: {
+        title: "Adjudication verdicts",
+        body: "What the post-analysis review wants changed: links to remove, new entities to veto or merge, edges to demote, observables to drop. In shadow mode these are suggestions until you apply them.",
+        aside: "Opens the Proposals lens filtered to the adjudicator.",
       },
     },
     {
@@ -485,7 +583,7 @@ export function EngineMatrix({
       n: stats?.observable_candidates,
       label: "observable candidates",
       cls: m.aInfo,
-      onClick: () => navigate("/workbench/observables?queue=1"),
+      onClick: () => navigate("/workbench/explore?section=observables&queue=1"),
       hint: {
         title: "Observable candidates",
         body: `Pattern nominations no judgment door has confirmed — ${stats?.observable_confirmed ?? 0} sightings were confirmed against them this window. If that ratio drifts, the scan is the first place to look.`,
@@ -501,6 +599,12 @@ export function EngineMatrix({
     },
   ];
   const activeAttention = attention.filter((a) => (a.n ?? 0) > 0);
+  // The adjudicate stage's rolling circuit breaker: not a count, a state —
+  // dispatch is paused until the timestamp lifts.
+  const breakerUntil = hygieneStats?.adjudication_breaker_until
+    ? new Date(hygieneStats.adjudication_breaker_until)
+    : null;
+  const breakerActive = !!breakerUntil && !Number.isNaN(breakerUntil.getTime()) && breakerUntil.getTime() > Date.now();
 
   const peekInfo = peek ? overviewByStage[peek.stage] : undefined;
 
@@ -585,7 +689,23 @@ export function EngineMatrix({
               </button>
             </Hint>
           ))}
-          {activeAttention.length === 0 && <span className={m.attnClear}>All clear — no queues need review.</span>}
+          {breakerActive && breakerUntil && (
+            <button
+              type="button"
+              className={`${m.achip} ${m.aWarn}`}
+              title={`rolling circuit breaker tripped; dispatch resumes at ${breakerUntil.toLocaleTimeString()}`}
+              onClick={() => {
+                switchView("entries");
+                setOpenStage("adjudicate");
+              }}
+            >
+              <span className={m.achipDot} />
+              adjudication paused (breaker)
+            </button>
+          )}
+          {activeAttention.length === 0 && !breakerActive && (
+            <span className={m.attnClear}>All clear — no queues need review.</span>
+          )}
         </div>
         <div className={m.attnTools}>
           <button type="button" className={m.browseBtn} onClick={() => onBrowse("jobs")}>
@@ -613,7 +733,7 @@ export function EngineMatrix({
           <div className={m.pop} style={{ left: peek.left, top: peek.top }}>
             <div className={m.popHead}>
               <h4 className={m.popName}>{peek.stage.replace(/_/g, " ")}</h4>
-              <span className={m.popKind}>{peekInfo?.kind ?? ""}</span>
+              <span className={m.popKind}>{(peekInfo?.kind ?? "").replace(/_/g, " ")}</span>
               <button type="button" className={m.popClose} onClick={() => setPeek(null)} title="Close">
                 ✕
               </button>
@@ -852,22 +972,27 @@ export function EngineMatrix({
                   {proposalsMode && (
                     <span className={m.subLensHint}>
                       {view === "links"
-                        ? "Link-validator suggestions — apply or dismiss without leaving the table"
-                        : "Merge / rename / reclassify suggestions over AI-created entities"}
+                        ? "The review's link verdicts — apply or dismiss without leaving the table"
+                        : "Veto / merge / demote / drop verdicts and scan proposals over AI-created entities"}
                     </span>
                   )}
                 </div>
               )}
               {view === "links" &&
                 (proposalsMode ? (
-                  <ProposalsQueue domain="links" key={proposalsAction ?? "all"} initialAction={proposalsAction} />
+                  <ProposalsQueue
+                    domain="links"
+                    key={`${proposalsAction ?? "all"}:${proposalsOrigin ?? "all"}`}
+                    initialAction={proposalsAction}
+                    initialOrigin={proposalsOrigin}
+                  />
                 ) : (
                   <AutolinkingSection embedded view="links" />
                 ))}
               {view === "relationships" && <AutolinkingSection embedded view="relationships" />}
               {view === "entities" &&
                 (proposalsMode ? (
-                  <ProposalsQueue domain="entities" />
+                  <ProposalsQueue domain="entities" key={proposalsOrigin ?? "all"} initialOrigin={proposalsOrigin} />
                 ) : (
                   <ExtractionTab embedded key={entStatus} initialStatus={entStatus} />
                 ))}
@@ -1098,6 +1223,21 @@ function StatusCell({
         retry
       </span>
     );
+  if (cell.status === "queued")
+    return (
+      <span className={`${styles.pip} ${styles.pend}`} title={`${title} · queued — waiting on the AI worker`}>
+        queued
+      </span>
+    );
+  // A gate skipped the stage, or the run bailed before reviewing anything —
+  // never a green "ok", the reason lives in the tooltip.
+  const skip = cellSkipCode(cell);
+  if (skip)
+    return (
+      <span className={`${styles.pip} ${styles.skip}`} title={`${title} · skipped — ${skipReason(skip)}`}>
+        —
+      </span>
+    );
   return (
     <span className={`${styles.pip} ${styles.ok}`} title={`${title} · success`}>
       {fmtMs(cell.duration_ms) || "ok"}
@@ -1144,7 +1284,11 @@ function Row({
         {stages.map((s, i) => (
           <td key={s} className={groupStartStages.has(s) ? styles.gdiv : ""}>
             {lens === "output" ? (
-              <OutputCell stage={s} outputs={entry.outputs} />
+              s === "adjudicate" ? (
+                <AdjudicateOutputCell cell={entry.stages[s]} />
+              ) : (
+                <OutputCell stage={s} outputs={entry.outputs} />
+              )
             ) : (
               <StatusCell
                 cell={entry.stages[s]}
@@ -1183,13 +1327,28 @@ function Row({
                     .map((s) => {
                       const c = entry.stages[s];
                       const isErr = c.status === "error";
-                      const dotCls = isErr ? styles.sdotErr : c.status === "retry" ? styles.sdotRetry : styles.sdotOk;
+                      const skip = cellSkipCode(c);
+                      const dotCls = isErr
+                        ? styles.sdotErr
+                        : c.status === "retry" || c.status === "queued"
+                          ? styles.sdotRetry
+                          : skip
+                            ? styles.sdotSkip
+                            : styles.sdotOk;
                       return (
                         <div key={s} className={`${styles.srow} ${isErr ? styles.srowErr : ""}`}>
                           <span className={`${styles.sdot} ${dotCls}`} />
                           <span className={styles.sname}>{labelByStage[s] ?? s}</span>
                           <span className={styles.sdetail}>
-                            {isErr ? c.error : c.status === "retry" ? "retrying" : ""}
+                            {isErr
+                              ? c.error
+                              : c.status === "retry"
+                                ? "retrying"
+                                : c.status === "queued"
+                                  ? "queued — waiting on the AI worker"
+                                  : skip
+                                    ? `skipped — ${skipReason(skip)}`
+                                    : ""}
                           </span>
                           {isErr && c.retryable ? (
                             <button className={styles.retrybtn} onClick={() => onRetry(entry.id, s)}>

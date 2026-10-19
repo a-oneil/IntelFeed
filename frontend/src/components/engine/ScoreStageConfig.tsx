@@ -145,8 +145,10 @@ export function ScoreStageConfig() {
         How scoring works: every new entry is checked against 15 signals (hover a signal below for
         what it detects). An entry's priority score is the sum of its firing signals, each weighted
         by rarity — a signal that fires on 5% of entries gets weight 1.0; rarer fires count for
-        more, common ones for less — times its family multiplier. Entries scoring at or above the
-        radar threshold get a signal chip and rank first in Triage.
+        more, common ones for less — times its family multiplier. That sum is then placed on a 0–10
+        scale by ranking it against the last 30 days: 0 means nothing fired, 9 is about the top 5%,
+        10 the top 1%. Entries scoring at or above the radar threshold get a signal chip and rank
+        first in Triage.
       </p>
 
       <h4 className={styles.heading}>Signal families</h4>
@@ -172,17 +174,17 @@ export function ScoreStageConfig() {
       <h4 className={styles.heading}>Radar threshold</h4>
       <p className={styles.hint}>
         The cut line for "on radar": entries scoring at or above it show signal chips and lead the
-        Priority Queue. Currently {stats.threshold.toFixed(2)}{" "}
+        Priority Queue. Currently {stats.threshold.toFixed(1)} out of 10{" "}
         ({stats.threshold_is_auto
           ? "auto: tracks the 95th percentile of the last 7 days' scores, so roughly the top 5% of entries make the cut"
           : "manual override"}).
-        Enter a value to override (lower = more entries on radar), or "auto" to restore
-        self-tuning.
+        Enter a value from 0 to 10 to override (lower = more entries on radar), or "auto" to
+        restore self-tuning.
       </p>
       <div className={styles.thresholdRow}>
         <input
           type="text"
-          placeholder={stats.threshold.toFixed(2)}
+          placeholder={stats.threshold.toFixed(1)}
           value={thresholdInput}
           onChange={(e) => setThresholdInput(e.target.value)}
           className={styles.thresholdInput}

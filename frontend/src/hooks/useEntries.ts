@@ -9,7 +9,6 @@ import type {
   TranslateEntryResponse,
 } from "@/api/types";
 import { useQuery } from "@tanstack/react-query";
-import { useOpenThreads } from "@/hooks/useThreads";
 
 /**
  * Debounced feeds invalidation — mark-read/unread mutations fire rapidly
@@ -172,16 +171,12 @@ export function usePriorityUnreadCount() {
 
 /**
  * Total count for the sidebar's Priority Queue badge, matching the rows the
- * queue actually renders: unread radar-surfaced entries plus the story-thread
- * rows the list slots in (same threads query EntryList uses, so TanStack
- * dedupes the fetch). Only threads with something unread render, so only those
- * are counted.
+ * queue actually renders: unread radar-surfaced entries with live story threads
+ * folded in (computed directly by GET /api/entries/priority-unread-count).
  */
 export function usePriorityQueueCount() {
   const { data: radarUnread } = usePriorityUnreadCount();
-  const { data: threads } = useOpenThreads(true);
-  const liveThreads = (threads?.threads ?? []).filter((t) => t.unread_count > 0).length;
-  return (radarUnread ?? 0) + liveThreads;
+  return radarUnread ?? 0;
 }
 
 export function useEntry(entryId: string | null) {

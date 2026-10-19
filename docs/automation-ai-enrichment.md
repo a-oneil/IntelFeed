@@ -426,9 +426,9 @@ class AIProvider(ABC):
         """List available models from this provider."""
 ```
 
-Three providers are implemented (`backend/app/ai/providers/`): `ClaudeProvider` (Anthropic API; also the fallback used for `openai`/`custom` provider types), `ClaudeCodeProvider` (the Claude Code CLI under an OAuth session — see [copilot.md](copilot.md)), and `OllamaProvider` (real Ollama support with a native `/api/chat` function-calling loop against the backend tool registry in `app/tools/`).
+Four providers are implemented (`backend/app/ai/providers/`): `ClaudeProvider` (Anthropic API), `ClaudeCodeProvider` (the Claude Code CLI under an OAuth session — see [copilot.md](copilot.md)), `OllamaProvider` (real Ollama support with a native `/api/chat` function-calling loop against the backend tool registry in `app/tools/`), and `OpenAICompatibleProvider` (the `/v1/chat/completions` dialect shared by OpenAI, LM Studio, vLLM, llama.cpp, LiteLLM, OpenRouter and Groq — one `base_url`-configurable provider type, no tool-calling support yet).
 
-Tool capability is gated centrally in `backend/app/ai/capabilities.py`: `TOOL_CAPABLE_PROVIDER_TYPES = {"claude_code", "ollama"}` and `TOOL_REQUIRED_TASKS` (copilot, entity_merge_maintenance, entity_enrichment_research) together prevent assigning an agentic task to a provider that can't execute tools.
+Tool capability is gated centrally in `backend/app/ai/capabilities.py`: `TOOL_CAPABLE_PROVIDER_TYPES = {"claude_code", "ollama"}` and `TOOL_REQUIRED_TASKS` (copilot, entity_enrichment_research) together prevent assigning an agentic task to a provider that can't execute tools. `openai_compatible` is deliberately excluded for now — see the provider's module docstring.
 
 ### Model Configuration
 
@@ -438,7 +438,7 @@ The `AIProvider` database model (`models/ai_provider.py:11-27`) stores provider 
 class AIProvider(Base):
     id: UUID
     name: str                       # "My Claude Instance"
-    provider_type: str              # "claude", "openai", "ollama", "custom"
+    provider_type: str              # "claude", "claude_code", "ollama", "openai_compatible"
     base_url: str | None            # API endpoint (for ollama/custom)
     api_key_encrypted: str | None   # AES-256 encrypted secret
     models: list[dict]              # Available models
@@ -491,16 +491,17 @@ class AITask(Base):
 | `ttp_mapping` | extraction | Entry text | MITRE ATT&CK technique extraction |
 | `detection_rules` | generation | Entry + TTPs | Detection rule generation |
 | `entry_analysis` | extraction | Entry content | One-pass consolidated extraction (see below) |
+| `entry_adjudication` | extraction | Article + manifest of what `entry_analysis` wrote | Post-analysis review of the links, minted entities, relationship claims and observables the analysis wrote; returns verdicts only for what it would change (the `adjudicate` pipeline stage; max_tokens 4096, no tools) |
 | `daily_summary` / `intelligence_briefing` / `threat_assessment` | analysis | Multiple entries | Batch briefings |
 | `detection_engineering_summary` | analysis | Multiple entries | Detection-focused briefing with coverage gaps |
 | `video_transcript_summary` / `reddit_digest` / `report_section` | analysis / generation | Source-specific | Adapter/report helpers |
 | `entry_qa` | analysis | User question + article | Per-entry "Ask Agent" chat |
 | `copilot` | analysis | Question + ambient context | Global streaming copilot ([copilot.md](copilot.md)) |
-| `entity_link_validation`, `entity_merge_maintenance`, `actor_profile_refresh`, `entity_name_normalization`, `hygiene_proposal_review`, `entity_enrichment_research`, `relationship_adjudication` | validation / maintenance | Entities/links | Agentic maintenance tasks (CLI or Ollama tool loop) |
+| `actor_profile_refresh`, `entity_name_normalization`, `entity_enrichment_research` | maintenance | Entities | Maintenance tasks (`workers/entity_maintenance_tasks.py`); `entity_enrichment_research` needs a tool-capable provider (CLI or Ollama tool loop) |
 
 The legacy per-entry extraction tasks (`threat_actor_id`, `malware_id`, `tool_extraction`, `country_id`, `sector_id`, `article_metadata`, `mitigation_extraction`, `cve_extraction`) still exist but are flagged `deprecated` — see "One-Pass Entry Analysis" below.
 
-Tasks are invoked via `run_task()` in `backend/app/ai/engine.py:331`.
+Tasks are invoked via `run_task()` in `backend/app/ai/engine.py:354`.
 
 ### Task Assignment & Routing
 
@@ -528,7 +529,7 @@ When `run_task(task_name="article_summary")` is called:
 3. Get or create the provider instance via `_get_provider_instance()`
 4. Execute via `provider.complete()`
 
-Reference: `backend/app/ai/engine.py:266` (`get_task_assignment()`).
+Reference: `backend/app/ai/engine.py:289` (`get_task_assignment()`).
 
 ### Prompt Templates
 
@@ -547,7 +548,7 @@ class AIPromptTemplate(Base):
     created_at: datetime
 ```
 
-**Prompt Resolution** (`get_active_prompt`, `backend/app/ai/engine.py:297`):
+**Prompt Resolution** (`get_active_prompt`, `backend/app/ai/engine.py:320`):
 1. User-specific template (highest priority): where `created_by == user_id` AND `is_active` AND highest `version`
 2. System default template: where `created_by IS NULL` AND `is_active` AND highest `version`
 3. Task's `default_prompt_template` field (fallback)
@@ -580,7 +581,7 @@ Summary: {{ entry.summary }}
 Produce a single JSON object with overall briefing and coverage gaps.
 ```
 
-Rendering uses Jinja2 at `render_prompt`, `backend/app/ai/engine.py:260`.
+Rendering uses Jinja2 at `render_prompt`, `backend/app/ai/engine.py:283`.
 
 ### Task Execution & Results
 

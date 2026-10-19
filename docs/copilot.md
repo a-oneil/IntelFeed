@@ -115,7 +115,7 @@ If the assigned provider is not a `ClaudeCodeProvider`, two paths exist (`copilo
 
 The Claude Code CLI needs OAuth credentials at `~/.claude/.credentials.json`. In production only the **`celery-worker-ai`** container mounts that volume (it is the single writer that rotates tokens — concurrent OAuth refresh from a second mount would corrupt it). The api container has neither the CLI, the credentials, nor the skill mount (`docker-compose.prod.yml:165-170`).
 
-`copilot_worker_dispatch` (`backend/app/config.py:397`, default `true`) selects the topology (it only applies to the `claude_code` provider — the Ollama tool loop always runs in-process):
+`copilot_worker_dispatch` (`backend/app/config.py:389`, default `true`) selects the topology (it only applies to the `claude_code` provider — the Ollama tool loop always runs in-process):
 
 - **Worker dispatch (prod default)** — the api enqueues `app.workers.copilot_tasks.run_copilot_stream` on the `ai` queue (`copilot.py:630-655`) with a fresh `run_id`, and drains a Redis list while the worker runs the CLI.
 - **In-process (dev fallback)** — the api calls `provider.stream_agent()` directly (`copilot.py:656-667`). This only works where the api container itself has the CLI + credentials; the dev compose mounts the skill into the api for this reason (`docker-compose.dev.yml:135`).
@@ -138,7 +138,7 @@ The api drains via BLPOP in `_iter_worker_events` (`copilot.py:430`), with a tim
 
 ### The `ai` queue
 
-All CLI-subprocess tasks are routed to this queue (`backend/app/workers/celery_app.py:58-94`): copilot turns, both auth tasks, link validation, the autonomous entity-maintenance tasks, and the hygiene-review and relationship-adjudication batches. `celery-worker-ai` consumes it with `--concurrency=${CLAUDE_CODE_CONCURRENCY:-1} --prefetch-multiplier=1` (`docker-compose.prod.yml:310`, dev `:212`) to avoid OAuth session-file corruption and respect Max-plan rate limits. Consequence: at the default concurrency of 1, a long copilot turn and a batch maintenance task queue behind each other.
+All CLI-subprocess tasks are routed to this queue (`backend/app/workers/celery_app.py:58-94`): copilot turns, both auth tasks, the one-pass entry analysis and its adjudicate-stage review, and the actor-refresh / assessment / name-normalization / enrichment-gap batches. `celery-worker-ai` consumes it with `--concurrency=${CLAUDE_CODE_CONCURRENCY:-1} --prefetch-multiplier=1` (`docker-compose.prod.yml:310`, dev `:212`) to avoid OAuth session-file corruption and respect Max-plan rate limits. Consequence: at the default concurrency of 1, a long copilot turn and a batch maintenance task queue behind each other.
 
 ### The CLI invocation
 
@@ -271,7 +271,7 @@ Historical note: Celery task results share the copilot's Redis; before `result_e
 
 | Knob | Where | Value / effect |
 |---|---|---|
-| `copilot_worker_dispatch` | `backend/app/config.py:397` | `true` (default): dispatch CLI runs to `celery-worker-ai`; `false`: run in-process in the api (claude_code only — Ollama always runs in-process) |
+| `copilot_worker_dispatch` | `backend/app/config.py:389` | `true` (default): dispatch CLI runs to `celery-worker-ai`; `false`: run in-process in the api (claude_code only — Ollama always runs in-process) |
 | `allowed_tools` / `timeout_seconds` | copilot task assignment config (`defaults.py:118-126`, editable in Settings → AI Configuration) | `["Bash","Read","Skill"]`, 240 s CLI ceiling |
 | `ollama_tools` | copilot assignment config (Prompt Workspace → Routing panel) | Curated read-only tool subset for an Ollama-assigned copilot; defaults to `DEFAULT_COPILOT_OLLAMA_TOOLS` (`backend/app/tools/__init__.py:99`) |
 | History replay | `backend/app/api/copilot.py:45` | Last 20 messages injected as `conversation_history` |

@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.engine import _get_provider_instance as build_provider_instance
 from app.ai.providers.base import AIProvider as AIProviderInterface
-from app.ai.provisioning import route_tasks_to_provider
+from app.ai.provisioning import model_choice_problem, route_tasks_to_provider
 from app.core.encryption import encrypt_value
 from app.core.exceptions import AppError
 from app.core.security import get_admin_user, get_current_user
@@ -27,7 +27,7 @@ router = APIRouter()
 
 
 def _get_provider_instance(provider: AIProvider) -> AIProviderInterface:
-    # Shared engine factory — routes claude / claude_code / ollama by provider_type.
+    # Shared engine factory — routes claude / claude_code / ollama / openai_compatible by provider_type.
     return build_provider_instance(provider)
 
 
@@ -79,6 +79,10 @@ async def update_provider(
     if body.name is not None:
         provider.name = body.name
     if body.base_url is not None:
+        if not body.base_url.strip() and provider.provider_type in ("ollama", "openai_compatible"):
+            raise AppError(
+                code="validation_error", message="base_url cannot be empty for this provider type", status_code=400
+            )
         provider.base_url = body.base_url
     if body.api_key is not None:
         provider.api_key_encrypted = encrypt_value(body.api_key) if body.api_key else None
@@ -141,8 +145,8 @@ async def test_provider(
     if not provider:
         raise AppError(code="not_found", message="Provider not found", status_code=404)
 
-    instance = _get_provider_instance(provider)
     try:
+        instance = _get_provider_instance(provider)
         healthy = await instance.check_health()
         if not healthy:
             return AIProviderTestResult(success=False, message="Provider health check failed")
@@ -200,6 +204,10 @@ async def commission_provider(
     db.add(provider)
     await db.flush()
 
+    problem = model_choice_problem(provider)
+    if problem:
+        return AIProviderCommissionResult(success=False, message=problem, models=models)
+
     routing = await route_tasks_to_provider(db, provider, created_by=user.id, take_over=take_over)
 
     return AIProviderCommissionResult(
@@ -230,8 +238,11 @@ async def list_provider_models(
     if provider.models:
         return provider.models
 
-    instance = _get_provider_instance(provider)
-    models = await instance.list_models()
+    try:
+        instance = _get_provider_instance(provider)
+        models = await instance.list_models()
+    except Exception as e:
+        raise AppError(code="provider_error", message=str(e), status_code=400) from e
     provider.models = models
     db.add(provider)
     await db.flush()

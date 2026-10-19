@@ -176,7 +176,7 @@ and story threads (`threads`). The scoring model itself is documented in
 | `signal_engine_shadow` | bool, `false` | Compute and persist `entry_signals` + `Entry.priority_score`. Nothing changes in the UI. This is stage one of the rollout. |
 | `signal_engine_surface` | bool, `false` | Surface the scores: entry-list priority chips, the `radar` sort, signal-ranked triage, and the `entry_scored` SSE event. |
 | `signal_feedback_min_samples` | int, `20` | A signal family needs at least this many Radar verdicts in the 30-day window before its **global** feedback nudge applies. Below the floor the family keeps a neutral 1.0 — a handful of votes can't swing scoring. |
-| `radar_personalization_enabled` | bool, `false` | Instance-wide switch for per-analyst learned weights, applied as a **read-time lift** on each analyst's own Radar ordering. The stored score stays global; personalisation re-orders the queue and never changes its membership, because the radar threshold still gates on the global score. Also needs a per-user opt-in (`User.settings["radar_personalized"]`). |
+| `radar_personalization_enabled` | bool, `false` | Instance-wide switch for per-analyst learned weights, applied as a **read-time lift** on each analyst's own `sort=radar` entry ordering. The stored score stays global; personalisation re-orders that list and never changes its membership, because the radar threshold still gates on the global score. The Priority Queue sorts on the stored score its rows display and does not apply the lift. Also needs a per-user opt-in (`User.settings["radar_personalized"]`). |
 | `radar_personalization_min_samples` | int, `5` | Minimum verdicts *one* analyst must cast in a family before that family gets a personal weight. |
 | `radar_personalization_window_days` | int, `90` | Lookback for the nightly per-user fit. Longer than the global 30-day nudge window because one analyst votes far less often than all of them together. |
 | `my_stack_exposure_enabled` | bool, `false` | Vendor Watch: float CVEs affecting followed vendors/products in the Priority Queue and power the Vendor Watch board with detection-library coverage. Read-time and per-user, reusing the entity watchlist — no rescore. **Requires `signal_engine_surface`.** |
@@ -360,29 +360,89 @@ Settings → Engine → **Plans**. See
 Settings → Engine → **Maintenance** (`maintenance` + `retention`). This is where
 the AI-driven cleanup jobs and every destructive-ish sweep are configured.
 
-### Entity link validation
+### Adjudicate stage (post-analysis AI review)
 
-An AI validator re-reads articles and judges whether each entity link is really
-supported. `backend/app/workers/link_validation_tasks.py`; job
-`validate-entity-links`, daily 04:00 UTC.
+After an entry's one-pass analysis lands, a second, smaller AI call re-reads the
+article next to a manifest of everything the analysis wrote to it — entity
+links of every source, entities it minted (with their nearest catalogue names
+pre-fetched), pending-tier promotions, relationship claims, AI observables —
+and returns a verdict — remove, reclassify, veto, merge, demote or drop — for
+each item it would change. Items it leaves out are kept, so a clean review
+returns an empty list: at the manifest caps below, one line per item would not
+fit in the task's 4096 output tokens, and a truncated response is a parse
+error that throws the whole review away. A manifest holds at most 60 entity links, 10 relationship
+claims and 25 observables; when an article has more links than that, the ones
+only this review can judge come first — entities it minted, then pending-tier
+promotions, then AI assertions, then the autolinker's bulk — the prompt says
+the list is partial, and the run's `detail.uncapped_links` records the
+remainder. `backend/app/services/entry_adjudication.py`,
+`backend/app/workers/adjudication_tasks.py`; stage `adjudicate` (kind
+`post_analysis`), task `adjudicate_entry_task` on the `ai` Celery queue,
+dispatched from the analysis landing path (`enqueue_adjudication`), not
+scheduled. This is the day-to-day cleanup path: every link, minted entity,
+asserted edge and captured observable is judged once, at ingest. The AI task
+behind it is `entry_adjudication` (Settings → AI Configuration → Prompts).
 
 | Setting | Type / default | What it does |
 |---|---|---|
-| `link_validation_mode` | `shadow` \| `apply`, default `shadow` | `shadow` logs would-be removals to the audit log only; `apply` actually deletes. Run shadow for 1–2 weeks and read the log before flipping. |
-| `link_validation_entries_per_run` | int, `200` | Entries processed per scheduled run. |
-| `link_validation_recheck_days` | int, `30` | Don't re-validate an entry within this many days. |
-| `link_validation_content_max_chars` | int, `3000` | Article body sent per entry, paragraph-sliced around the matches. |
-| `link_validation_circuit_breaker_pct` | float, `0.4` | If one entry has more than this fraction of its links flagged for removal, log a warning — a prompt regression usually looks like "remove everything". |
-| `link_validation_kickoff_canary_count` | int, `3` | Entries the kickoff task runs **synchronously** to catch systemic failures (auth, CLI, prompt regression) before fanning out the full batch. |
-| `link_validation_skip_confidence` | str, unset | Optionally skip validating links at one confidence level. `high` skips canonical-name matches, the cheapest and least likely to be wrong. Blank validates everything. |
-| `link_validation_batch_size` | int, `10` | Entries per AI call. 10 amortises the Claude CLI's 1–2s startup across entries (10–20× throughput). **Set to 1 when the task is assigned to a non-CLI provider** (Anthropic API, Ollama): there is no startup cost to amortise, and local models handle one article per call far more reliably than a batched envelope. |
+| `adjudication_mode` | `off` \| `shadow` \| `apply`, default `off` | The master switch (pipeline plans only subtract feeds). `shadow` files every verdict as a proposal in the Links / AI-entities Proposals lens and touches nothing. `apply` acts on verdicts at or above the confidence floor at ingest, through the same code the queue's Apply buttons use; lower ones still become proposals. The Proposed/Applied switch on the Proposals lens writes `shadow` / `apply`; `off` is set from the Adjudicate stage panel. |
+| `adjudication_trigger` | `all` \| `created`, default `all` | `all` reviews every analysed entry (~100–500/day). `created` reviews only entries whose analysis minted an entity, wrote an AI junction row (actor/malware/tool/country/sector), asserted a TTP or a relationship, promoted a pending match or captured an observable (~20–50/day) — the fallback when reviews cannot keep up with ingest. |
+| `adjudication_max_per_hour` | int, `0` | Reviews started per hour; `0` (the default) = no ceiling. The AI worker runs one call at a time, so with no ceiling the worker itself is the only pacing. Set a number for two reasons only: to hold down spend on a metered provider, and to stop a review backlog queueing ahead of the one-pass analysis, which shares that worker. Over-budget entries wait for the resweep. While a ceiling is set, the backfill may use at most half of each hour's budget; live entries get the rest. With no ceiling the backfill has no share, so dispatch it in batches via its own `limit`. |
+| `adjudication_min_priority_score` | float, `0` | Skip entries below this priority score, on the 0–10 scale (`0` = off). Keep it at 0: CVE/NVD entries are the main source of junk tool entities and score low, so a floor would exempt exactly those. |
+| `adjudication_apply_min_confidence` | `high` \| `medium` \| `low`, default `high` | In apply mode, verdicts below this confidence are filed as proposals instead of applied. |
+| `adjudication_circuit_breaker_pct` | float, `0.5` | If more than this share of an entry's items come back destructive (remove + veto + demote + drop), the whole run is downgraded to proposals. A rolling mean over the last 50 **apply** runs above the same threshold (once 10 samples exist) pauses dispatch for an hour, logs a warning, and surfaces as `adjudication_breaker_until` in the hygiene stats and a chip in the Engine needs-you row. Shadow runs are not sampled: the breaker stops damage, and a shadow run makes no changes. |
+| `adjudication_content_max_chars` | int, `8000` | Article text in the review prompt (head + indicator tail, the extraction window). |
+| `adjudication_scope` | csv, `links,entities,relationships,observables` | Manifest sections the reviewer sees. `links` puts every entity link on the article under review; `entities` adds the catalogue lookup that makes `veto` and `merge` answerable, and on its own narrows the review to what this article minted. `assessment` is opt-in and only ever logged. |
 
-### Hygiene proposal review
+**Gates**, first hit wins, each recorded on `ai_analysis_requests.adjudication_status`:
+mode (`skipped_off`) → feed plan, only when pipeline plans are on
+(`skipped_plan`) → echo-reused analysis (`skipped_echo`) → trigger
+(`skipped_nothing_new`) → score floor (`skipped_score`) → hourly budget
+(`skipped_budget`). A provider quota pause parks the row as `skipped_paused`.
+Rows that pass go `pending` (stamping `adjudication_queued_at`) and end
+`completed`, or `failed` once the task's Celery retries are exhausted. The task
+itself re-checks only the master switch; a manual retry from the matrix
+bypasses the other gates and re-queues the row.
 
-| Setting | Type / default | What it does |
-|---|---|---|
-| `hygiene_review_batch_size` | int, `20` | Pending hygiene proposals judged per AI call. Job `hygiene-proposal-review`, daily 05:30 UTC. |
-| `hygiene_review_auto_apply` | bool, `false` | Apply AI-approved proposals immediately with no human in the loop (and dismiss rejected ones). Off keeps the verdicts advisory — you apply them from the Hygiene tab. |
+**The resweep** (`resweep_adjudications`, run from
+`submit_analysis_batches`, so every 30 minutes — the budget it drains
+against is the hourly one) re-enqueues, newest first: completed analyses with
+no decision after two hours, `skipped_budget` / `skipped_paused` rows every
+hour, and `pending` rows queued more than six hours ago with no run (a lost
+task).
+
+**What never changes, in any mode:** edges an analyst rejected, and links of a
+validator junction type (actor, malware, vendor, product, country) that an
+analyst restored within the last 90 days — flagged to the reviewer, never
+applied. The guard reads the link log, which is the only place a restore is
+recorded per entry per link, so tool, sector and TTP links are reviewed again
+like any other row. Veto deletes an entity only when this entry created it and nothing
+else holds it (no other article, edge or claim); otherwise it only unlinks.
+Promotion of a relationship edge to *confirmed* is a counter on the edge
+(`reviewer_kept_entry_ids`): a keep in apply mode from a new entry appends it,
+and at `relationship_evidence_promote_count` distinct entries the edge is
+promoted. A keep only counts when the reviewer **named that edge** and did so
+at or above the confidence floor — it is the one verdict that raises trust
+rather than lowering it, so silence is not agreement. Since the prompt
+otherwise asks for changes only, it carves edges out and requires a verdict on
+every one of them (at most ten per article). Stale entities (one article at most, no edge, 90 days idle) are a
+live `stale` filter on the AI-entities view.
+
+**Queue.** The Proposals lens has an origin facet (`adjudicator` | `legacy`),
+per-row Apply / Dismiss / Restore, bulk **Apply all**
+(`POST /api/admin/hygiene/adjudication/apply-all`) and **Dismiss all** scoped
+by origin. A restore writes its own `adjudication_restored` audit line rather
+than reusing the verdict's code, so an undo reads as history: it stays out of
+the pending count, out of Apply all, and offers no buttons of its own. When a review completes it deletes the legacy pending rows it showed
+the model as earlier suggestions (merge-engine and stale-sweep proposals about
+entities this entry minted, validator rows on this entry). Legacy proposals no
+entry can carry are listed by `GET /api/admin/hygiene/feed?orphaned=true` for
+manual disposition; nothing automatic touches them.
+
+**Backfill.** `celery -A app.workers.celery_app call
+app.workers.adjudication_tasks.backfill_entry_adjudications` (kwargs `limit`,
+`since_days`) marks older analysed entries pending through the same gates; the
+sweep drains them within the backfill's half of the hourly budget.
 
 ### Entity assessments
 
@@ -392,7 +452,7 @@ Drafts and refreshes the AI-written description paragraph on entity profiles.
 
 | Setting | Type / default | What it does |
 |---|---|---|
-| `assessment_backfill_batch_size` | int, `50` | Entities dispatched per daily run. They queue serially on the single-concurrency AI worker, so the batch paces itself — raise to drain a backlog, lower to leave GPU time for ingest extraction. |
+| `assessment_backfill_batch_size` | int, `50` | Entities dispatched per daily run. They queue serially on the single-concurrency AI worker, so the batch paces itself — raise to drain a backlog, lower to leave more of the worker's time for ingest extraction. |
 | `assessment_backfill_min_articles` | int, `1` | Fewest linked entries before an entity is worth summarising. Raise it to spend the daily budget on better-covered entities first. |
 | `assessment_backfill_retry_days` | int, `7` | Don't re-attempt an entity within this window. Without it the highest-article-count entities are re-picked every run and starve the rest of the queue. |
 | `assessment_refresh_enabled` | bool, `true` | Also re-write assessments that have gone **stale**, not just missing ones — otherwise an entity assessed once keeps a paragraph describing the month it was written in. Only touches text this writer produced; analyst and enrichment descriptions are never overwritten. |
@@ -411,23 +471,11 @@ Weekly AI rewrite of the most-active threat actor profiles. Job
 | `actor_refresh_activity_window_days` | int, `90` | Lookback used to rank "most active". |
 | `actor_refresh_sample_n` | int, `20` | Recent headlines sampled into each refresh prompt. |
 
-### Merge engine and stale entities
+### Narrative themes and actor refresh mode
 
 | Setting | Type / default | What it does |
 |---|---|---|
-| `entity_maintenance_mode` | `shadow` \| `apply`, **no default** | `shadow` logs the AI's proposed merges and reclassifies without touching entities; `apply` auto-executes them as they're generated. Unset means the merge engine does nothing. Start in shadow and review the maintenance log. Job `entity-merge-maintenance`, Sundays 03:00 UTC. |
-| `entity_merge_max_clusters_per_run` | int, `30` | Duplicate/misclassification clusters dispatched per run. |
-| `stale_entity_min_age_days` | int, `90` | Days of no activity before a low-signal entity is **flagged for review**. Never deletes. Job `stale-entity-review`, Sundays 05:30 UTC. |
-| `stale_entity_max_articles` | int, `1` | An entity is only flagged when it has at most this many linked articles. |
-
-### Relationship adjudication and narrative themes
-
-| Setting | Type / default | What it does |
-|---|---|---|
-| `relationship_adjudication_enabled` | bool, `false` | Nightly batch where the AI reads the evidence behind **probable** edges and rules each corroborated (→ confirmed) or coincidental (→ possible, never re-promoted). Uses the copilot AI provider. Job `relationship-adjudication`, daily 06:30 UTC. |
-| `relationship_adjudication_batch_size` | int, `20` | Probable edges judged per AI call. |
-| `relationship_adjudication_min_articles` | int, `3` | Only edges with at least this many evidence articles are sent for adjudication. |
-| `relationship_adjudication_dossier` | bool, `true` | Give the judge each entity's AI assessment paragraph alongside the evidence headlines. Headlines assume the reader already knows who an actor is, so without this the judge returns *unsure* and the edge is re-judged every 14 days forever. Costs no extra AI call — the context rides in the batch that already runs. A dossier is **withheld** when the edge's evidence is mostly the same articles the assessment was written from, so the model can't corroborate itself. |
+| `entity_maintenance_mode` | `shadow` \| `apply`, default `shadow` | The weekly actor profile refresh: `shadow` files the rewritten description as a proposal, `apply` writes it (the description history is the undo). |
 | `narrative_themes_enabled` | bool, `true` | Parse the daily briefing's own `### Theme` grouping back out of its cached markdown and record which articles it placed together. Free — no AI call, no embeddings — and useful as a standalone record before the gate below is on. |
 | `narrative_theme_gating` | bool, `false` | Let that grouping **veto** a co-occurrence promotion: a pair whose evidence all sits under one heading on one day is a single reporting wave, not corroboration. Leave off until a couple of weeks of themes have accumulated — with no parsed coverage the gate has no opinion and changes nothing. |
 
@@ -509,13 +557,8 @@ settings.
 | `signal-personal-weight-fit` | 04:35 | `radar_personalization_*` |
 | `signal-rescore-recent` | every 6 h at :35 | `signal_engine_shadow`, `signal_engine_surface` |
 | `signal-rescore-all` | Mon 03:00 | `signal_engine_shadow`, `signal_engine_surface` |
-| `validate-entity-links` | 04:00 | all `link_validation_*` |
-| `hygiene-proposal-review` | 05:30 | `hygiene_review_batch_size`, `hygiene_review_auto_apply` |
 | `backfill-entity-assessments` | 05:45 | all `assessment_*` |
-| `actor-profile-refresh` | Mon 03:00 | all `actor_refresh_*` |
-| `entity-merge-maintenance` | Sun 03:00 | `entity_maintenance_mode`, `entity_merge_max_clusters_per_run` |
-| `stale-entity-review` | Sun 05:30 | `stale_entity_min_age_days`, `stale_entity_max_articles` |
-| `relationship-adjudication` | 06:30 | all `relationship_adjudication_*` |
+| `actor-profile-refresh` | Mon 03:00 | all `actor_refresh_*`, `entity_maintenance_mode` |
 | `relationship-confidence-decay` | Sun 03:45 | `relationship_recency_half_life_days` |
 | `generate-daily-summaries` | 06:00 | `narrative_themes_enabled` |
 | `generate-threat-briefs` | 04:40 | `threat_brief_limit` |

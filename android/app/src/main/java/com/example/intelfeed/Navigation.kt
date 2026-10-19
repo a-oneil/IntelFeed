@@ -202,6 +202,9 @@ fun MainNavigation(
                                 userPreferences = app.userPreferences,
                                 onBack = { viewModel.goBack() },
                                 onClearRecentSearches = { viewModel.clearRecentSearches() },
+                                onSelectTheme = { theme -> viewModel.selectTheme(theme) },
+                                onUseDefaultTheme = { viewModel.useDefaultTheme() },
+                                onRefreshThemes = { viewModel.refreshThemes() },
                                 onLogout = {
                                     // Alerts name this account's articles; a tap after signing in
                                     // as someone else would open an article they may not have.
@@ -210,6 +213,7 @@ fun MainNavigation(
                                 }
                             )
                         }
+
                     }
                 }
             )
@@ -329,9 +333,10 @@ private fun HomeShell(viewModel: IntelFeedViewModel, uiState: IntelFeedUiState) 
 /** Label, icon and accent colour for a home tab, shared by the bottom bar and the side rail. */
 private fun AppTab.presentation(strings: AppStrings): Triple<String, ImageVector, androidx.compose.ui.graphics.Color> = when (this) {
     AppTab.FEED -> Triple(strings.navFeed, Icons.Default.RssFeed, CyberBlue)
-    AppTab.WORKBENCH -> Triple(strings.navWorkbench, Icons.Default.Hub, CyberPurple)
-    AppTab.SEARCH -> Triple(strings.navSearch, Icons.Default.Search, CyberBlue)
+    AppTab.WORKBENCH -> Triple(strings.navWorkbench, Icons.Default.Hub, com.example.intelfeed.theme.ThemeEngine.domainAccentColor("dash"))
+    AppTab.SEARCH -> Triple(strings.navSearch, Icons.Default.Search, com.example.intelfeed.theme.ThemeEngine.domainAccentColor("search"))
 }
+
 
 /** True when the window is under 480 dp tall (Material's compact height), e.g. a phone in landscape. */
 @Composable

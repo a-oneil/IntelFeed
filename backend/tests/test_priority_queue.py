@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 import pytest_asyncio
 
+from app.intelligence.signals import scale_score
 from app.models.entry import Entry
 from app.models.entry_state import UserEntryState
 from app.models.story_thread import StoryThread, StoryThreadEntry
@@ -29,12 +30,22 @@ def surfaced(monkeypatch):
     monkeypatch.setattr(env_settings, "signal_engine_surface", True)
 
     async def fixed_threshold():
-        return 1.0, True
+        return 1.5, True
+
+    async def fixed_cutoffs(db=None):
+        return IDENTITY_CUTOFFS
 
     monkeypatch.setattr("app.intelligence.signals.get_radar_threshold", fixed_threshold)
+    monkeypatch.setattr("app.intelligence.signals.get_scale_cutoffs", fixed_cutoffs)
+
+
+# Cutoffs at 1..10 make the 0–10 scale read back the raw sum between 1 and 10,
+# so the queue's raw-unit ranking is visible in its scores.
+IDENTITY_CUTOFFS = [float(i) for i in range(1, 11)]
 
 
 async def make_entry(db_session, feed, *, title: str, score: float, published: datetime | None = None) -> Entry:
+    """``score`` is the raw signal sum; the 0–10 score is derived the way scoring does."""
     entry = Entry(
         feed_id=feed.id,
         title=title,
@@ -43,7 +54,8 @@ async def make_entry(db_session, feed, *, title: str, score: float, published: d
         summary=title,
         content_text="x" * 400,
         published_at=published or NOW,
-        priority_score=score,
+        priority_raw=score,
+        priority_score=scale_score(score, IDENTITY_CUTOFFS),
     )
     db_session.add(entry)
     await db_session.flush()
@@ -112,7 +124,7 @@ class TestQueueShape:
 
         assert kinds(body) == ["entry", "entry"]
         assert titles(body) == ["Loud", "Quiet"]
-        assert body["radar_threshold"] == 1.0
+        assert body["radar_threshold"] == 1.5
 
     async def test_entries_below_the_threshold_stay_out(self, client, auth_headers, db_session, subscribed_feed):
         await make_entry(db_session, subscribed_feed, title="Surfaced", score=4.0)
@@ -152,26 +164,33 @@ class TestThreadFolding:
         row = body["items"][0]
         assert sorted(row["absorbed_entry_ids"]) == sorted(str(m.id) for m in members)
 
-    async def test_outlet_bump_lifts_a_corroborated_story(self, client, auth_headers, db_session, subscribed_feed):
+    async def test_threads_and_entries_share_one_ranking(self, client, auth_headers, db_session, subscribed_feed):
+        await make_entry(db_session, subscribed_feed, title="High", score=8.0)
+        members = [await make_entry(db_session, subscribed_feed, title="Beat", score=6.0)]
+        await make_thread(db_session, title="Story", members=members, source_count=3)
+        await make_entry(db_session, subscribed_feed, title="Low", score=4.0)
+        await db_session.commit()
+
+        body = (await client.get("/api/entries/priority-queue", headers=auth_headers)).json()
+
+        # One list, highest score first — the story sits between the articles it
+        # outscores and the one that outscores it, not in a block of its own.
+        assert titles(body) == ["High", "Story", "Low"]
+        assert [r["score"] for r in body["items"]] == pytest.approx([8.0, 6.0, 4.0])
+
+    async def test_coverage_does_not_lift_a_story_above_a_higher_scored_article(
+        self, client, auth_headers, db_session, subscribed_feed
+    ):
         members = [await make_entry(db_session, subscribed_feed, title="Beat", score=5.0)]
-        await make_thread(db_session, title="Everyone covered it", members=members, source_count=4)
+        await make_thread(db_session, title="Everyone covered it", members=members, source_count=12)
         await make_entry(db_session, subscribed_feed, title="Lone article", score=7.0)
         await db_session.commit()
 
         body = (await client.get("/api/entries/priority-queue", headers=auth_headers)).json()
 
-        # 5.0 + 3 extra outlets = 8.0, which outranks the lone 7.0 article.
-        assert titles(body) == ["Everyone covered it", "Lone article"]
-        assert body["items"][0]["score"] == pytest.approx(8.0)
-
-    async def test_outlet_bump_is_capped(self, client, auth_headers, db_session, subscribed_feed):
-        members = [await make_entry(db_session, subscribed_feed, title="Beat", score=2.0)]
-        await make_thread(db_session, title="Wall to wall", members=members, source_count=40)
-        await db_session.commit()
-
-        body = (await client.get("/api/entries/priority-queue", headers=auth_headers)).json()
-
-        assert body["items"][0]["score"] == pytest.approx(7.0)  # 2.0 + capped 5.0
+        # Twelve outlets don't add to the row's score: it ranks on its 5.0 beat.
+        assert titles(body) == ["Lone article", "Everyone covered it"]
+        assert body["items"][1]["score"] == pytest.approx(5.0)
 
     async def test_fully_read_thread_does_not_appear(
         self, client, auth_headers, db_session, test_user, subscribed_feed
@@ -219,6 +238,40 @@ class TestThreadFolding:
         ).json()
 
         assert titles(body) == ["Beat"]
+
+
+class TestReadTimeLift:
+    async def test_a_learned_weight_lift_does_not_reorder_the_queue(
+        self, client, auth_headers, db_session, subscribed_feed, monkeypatch
+    ):
+        from app.config import settings as env_settings
+        from app.models.entry_signal import EntrySignal
+
+        monkeypatch.setattr(env_settings, "radar_personalization_enabled", True)
+
+        async def big_lift(db, user_id):
+            return {"actively_exploited": 10.0}
+
+        monkeypatch.setattr("app.services.radar_personalization.get_personal_coefficients", big_lift)
+
+        await make_entry(db_session, subscribed_feed, title="Higher score", score=8.0)
+        lifted = await make_entry(db_session, subscribed_feed, title="Lifted", score=4.0)
+        db_session.add(
+            EntrySignal(entry_id=lifted.id, signal_type="actively_exploited", score=1.0, explanation="x", payload={})
+        )
+        await db_session.commit()
+
+        # The lift (+10 raw) would carry the 4.0 entry past the 8.0 one; the queue
+        # stays in the order of the scores its rows show.
+        body = (await client.get("/api/entries/priority-queue", headers=auth_headers)).json()
+
+        assert titles(body) == ["Higher score", "Lifted"]
+        assert [r["score"] for r in body["items"]] == pytest.approx([8.0, 4.0])
+
+        # Sanity: the same lift does reorder a plain Radar sort, so the test
+        # isn't passing because no lift applied.
+        radar = (await client.get("/api/entries?sort=radar&is_read=false", headers=auth_headers)).json()
+        assert [e["title"] for e in radar["items"]][:2] == ["Lifted", "Higher score"]
 
 
 class TestPaging:
@@ -271,6 +324,34 @@ class TestPaging:
         ).json()
         assert titles(body) == ["Second", "Late story"]
         assert body["has_more"] is False
+
+    async def test_echo_only_unread_thread_does_not_enter_queue(
+        self, client, auth_headers, db_session, test_user, subscribed_feed
+    ):
+        echo = await make_entry(db_session, subscribed_feed, title="Echo", score=9.0)
+        beat = await make_entry(db_session, subscribed_feed, title="Beat", score=6.0)
+        await make_thread(db_session, title="Echo-only left", members=[echo, beat], source_count=2, echoes=1)
+        await mark_read(db_session, test_user, beat)
+        await make_entry(db_session, subscribed_feed, title="Standalone", score=3.0)
+        await db_session.commit()
+
+        body = (await client.get("/api/entries/priority-queue", headers=auth_headers)).json()
+        assert titles(body) == ["Standalone"]
+
+        count_body = (await client.get("/api/entries/priority-unread-count", headers=auth_headers)).json()
+        assert count_body["unread_count"] == 1
+
+    async def test_priority_unread_count_folds_threads_and_dedups(
+        self, client, auth_headers, db_session, subscribed_feed
+    ):
+        members = [await make_entry(db_session, subscribed_feed, title=f"Beat {i}", score=6.0 - i) for i in range(3)]
+        await make_thread(db_session, title="Folded story", members=members, source_count=3)
+        await make_entry(db_session, subscribed_feed, title="Standalone", score=4.0)
+        await db_session.commit()
+
+        count_body = (await client.get("/api/entries/priority-unread-count", headers=auth_headers)).json()
+        # 1 folded story thread + 1 standalone entry = 2 rows in the queue.
+        assert count_body["unread_count"] == 2
 
     async def test_rejects_a_malformed_cursor(self, client, auth_headers):
         resp = await client.get("/api/entries/priority-queue?cursor=not-base64", headers=auth_headers)

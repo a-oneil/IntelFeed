@@ -28,11 +28,12 @@ import { confirmDialog, promptDialog } from "@/utils/dialog";
 
 const ALL_TYPES: ExtractionType[] = ["threat_actor", "malware", "cve", "tool", "ttp", "observable"];
 const WINDOWS: ExtractionParams["window"][] = ["24h", "7d", "30d", "all"];
-const STATUSES: { key: "all" | "review" | "orphan" | "dupe"; label: string }[] = [
+const STATUSES: { key: "all" | "review" | "orphan" | "dupe" | "stale"; label: string }[] = [
   { key: "all", label: "All" },
   { key: "review", label: "Review" },
   { key: "orphan", label: "Orphans" },
   { key: "dupe", label: "Dupes" },
+  { key: "stale", label: "Stale" },
 ];
 
 const CONF_BAR: Record<string, { pct: number; cls: string }> = {
@@ -48,14 +49,14 @@ export function ExtractionTab({
   initialStatus = "all",
   embedded = false,
 }: {
-  initialStatus?: "all" | "review" | "orphan" | "dupe";
+  initialStatus?: "all" | "review" | "orphan" | "dupe" | "stale";
   /** Render inside the Engine console card: no stat tiles (the console's
    *  healthline + attention chips already carry them). */
   embedded?: boolean;
 }) {
   const navigate = useNavigate();
   const [timeWindow, setTimeWindow] = useState<ExtractionParams["window"]>("7d");
-  const [status, setStatus] = useState<"all" | "review" | "orphan" | "dupe">(initialStatus);
+  const [status, setStatus] = useState<"all" | "review" | "orphan" | "dupe" | "stale">(initialStatus);
   const [types, setTypes] = useState<Set<ExtractionType>>(new Set());
   // CVEs dominate AI-created entities (NVD ingest) and are rarely what you're
   // triaging here, so they're hidden until you ask for them.
@@ -677,6 +678,7 @@ function StatusPill({ status, duplicateOf }: { status: ExtractionEntity["status"
     review: { cls: styles.stReview, text: "Needs review" },
     orphan: { cls: styles.stOrphan, text: "Orphan" },
     dupe: { cls: styles.stDupe, text: duplicateOf ? `Dup of ${duplicateOf}` : "Duplicate" },
+    stale: { cls: styles.stOrphan, text: "Stale" },
   }[status];
   return <span className={`${styles.status} ${map.cls}`}>● {map.text}</span>;
 }

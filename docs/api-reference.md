@@ -8,7 +8,7 @@ For developers and integrators who want to script IntelFeed or build against its
 
 ## Overview
 
-IntelFeed's FastAPI backend provides a comprehensive REST API for threat intelligence ingestion, enrichment, analysis, and dissemination. The API is designed for self-hosted deployments with a single authenticated user or small teams. See [`backend/app/main.py:757-837`] for router mounting and prefix definitions — 78 routers in all. The interactive OpenAPI docs at `/docs` (and `/redoc`) are generated from the same source and are always current; this page is the narrative companion, not a replacement.
+IntelFeed's FastAPI backend provides a comprehensive REST API for threat intelligence ingestion, enrichment, analysis, and dissemination. The API is designed for self-hosted deployments with a single authenticated user or small teams. See [`backend/app/main.py:756-835`] for router mounting and prefix definitions — 77 routers in all. The interactive OpenAPI docs at `/docs` (and `/redoc`) are generated from the same source and are always current; this page is the narrative companion, not a replacement.
 
 This documentation covers:
 - **Authentication & Authorization:** JWT-based with access/refresh tokens
@@ -913,9 +913,9 @@ List articles with advanced filtering, cursor pagination, and deduplication.
 **`GET /api/entries/priority-queue`**
 
 The ranked reading queue, assembled as the Priority Queue page renders it: unread
-entries clearing the radar threshold, ordered by signal score, with open story
-threads folded in as single rows. A thread ranks by the score of its best unread
-beat plus a capped bump for each extra outlet covering the story, and its members
+entries clearing the radar threshold, ordered by their 0–10 priority score, with
+open story threads folded in as single rows. A thread ranks by the score of its
+best unread beat, and its members
 are withheld from the queue as standalone entries — the thread row stands for
 them. Threads with nothing unread never appear.
 
@@ -933,14 +933,14 @@ them. Threads with nothing unread never appear.
   "items": [
     {
       "kind": "thread",
-      "score": 11.72,
+      "score": 9.6,
       "entry": null,
       "thread": { "slug": "gitlab-path-traversal-exploited", "source_count": 14, "unread_count": 9, "...": "..." },
       "absorbed_entry_ids": ["550e8400-..."]
     },
     {
       "kind": "entry",
-      "score": 7.3,
+      "score": 8.7,
       "entry": { "id": "550e8401-...", "title": "Article Title", "...": "..." },
       "thread": null,
       "absorbed_entry_ids": []
@@ -948,7 +948,7 @@ them. Threads with nothing unread never appear.
   ],
   "next_cursor": "eyJlbnRyeSI6...",
   "has_more": true,
-  "radar_threshold": 1.5
+  "radar_threshold": 8.4
 }
 ```
 
@@ -1626,7 +1626,7 @@ Merge-into for a single pair: merges `source_id` **into** `{target_id}` and dele
 ```
 `mode: "shadow"` logs what would happen without changing anything.
 
-Related maintenance endpoints (admin): `POST /api/entity-maintenance/reclassify`, `GET /api/entity-maintenance/log`, `POST /api/entity-maintenance/log/{log_id}/apply`, `POST /api/entity-maintenance/log/apply-all`, `DELETE /api/entity-maintenance/log/{log_id}`.
+Related maintenance endpoints (admin): `POST /api/entity-maintenance/reclassify`, `GET /api/entity-maintenance/log`, `DELETE /api/entity-maintenance/log/{log_id}`. Proposals in the log are applied, dismissed and restored through the hygiene queue (`/api/admin/hygiene/adjudication/...`, `/api/admin/hygiene/feed`).
 
 ---
 
@@ -3323,8 +3323,7 @@ Concise index of the remaining routers (all Bearer-token unless noted; see the r
 | Ransomware tracker | `/api/ransomware` | Leak-site victim disclosures: `GET /disclosures`, `GET /stats`, `GET /victims/{victim_id}`, `GET /groups/{actor_id}/victims` (behind `ransomware_tracker_enabled`) |
 | Stack exposure | `/api/intelligence/exposure` | CVEs affecting the user's vendor/product stack, ranked by exposure lift with detection posture (`GET`) |
 | Documentation | `/api/documentation` | In-app docs: `GET` (page index from `docs/`), `GET /{slug}` (raw markdown for one page) |
-| Hygiene (admin) | `/api/admin/hygiene`, `/api/entities/.../cascade-preview` | Orphan pruning, alias/vendor/ID hygiene scans, enrichment gaps, name normalization, hygiene feed/stats |
-| Link validation (admin) | `/api/admin/link-validation` | Dead-link stats/log, restore, apply-removal, run |
+| Hygiene (admin) | `/api/admin/hygiene`, `/api/entities/.../cascade-preview` | Orphan pruning, alias/vendor/ID hygiene scans, enrichment gaps, name normalization, the proposals feed/stats (`origin`, `orphaned`), adjudicator row apply/restore/apply-all, link-log restore/apply-removal, dismiss-proposals |
 | Intel reports | `/api/intel-reports` | Report CRUD, templates, AI generation (full / per-section / from-campaign), versions, export, publish/archive |
 | Intel feed | `/api/intelligence/feed` | Aggregated intelligence activity feed |
 | Watchlist | `/api/intelligence/watchlist` | Per-user entity watch list (`GET`, `PUT`, `DELETE /{entity_type}/{entity_id}`) |

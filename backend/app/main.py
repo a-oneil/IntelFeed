@@ -117,10 +117,11 @@ async def _seed_ai_tasks() -> None:
 
         await db.flush()
 
-        # Auto-create a 'claude_code' provider on first startup so the entity
-        # link validator has an assignment target. The provider only works
-        # once OAuth credentials are bootstrapped (see setup.md section 14),
-        # but seeding it now means the task assignment exists from day one.
+        # Auto-create a 'claude_code' provider on first startup so the tasks
+        # pinned to that provider type (DEFAULT_PROVIDER_TYPE_ASSIGNMENTS: the
+        # copilot) have an assignment target. The provider only works once
+        # OAuth credentials are bootstrapped (see setup.md section 14), but
+        # seeding it now means the task assignment exists from day one.
         cc_provider_result = await db.execute(
             select(AIProviderModel).where(AIProviderModel.provider_type == "claude_code").limit(1)
         )
@@ -138,10 +139,14 @@ async def _seed_ai_tasks() -> None:
             db.add(cc_provider)
             await db.flush()
 
-        # Auto-create default model assignments for system tasks missing an assignment
+        # Auto-create default model assignments for system tasks missing an assignment.
+        # openai_compatible excluded: its model catalog is too varied to guess a safe default.
         provider_result = await db.execute(
             select(AIProviderModel)
-            .where(AIProviderModel.is_active.is_(True), AIProviderModel.provider_type != "claude_code")
+            .where(
+                AIProviderModel.is_active.is_(True),
+                AIProviderModel.provider_type.not_in(["claude_code", "openai_compatible"]),
+            )
             .limit(1)
         )
         default_provider = provider_result.scalar_one_or_none()
@@ -278,12 +283,31 @@ async def _sync_job_schedules_to_redis() -> None:
                 write_overrides_to_redis(overrides)
 
 
+async def _warn_unknown_provider_types() -> None:
+    """Flag any ai_providers row with a provider_type the engine doesn't
+    route (can only happen via a manual DB edit — the create schema rejects
+    anything else) so it doesn't fail silently on first use.
+    """
+    from sqlalchemy import select
+
+    from app.database import async_session
+    from app.models.ai_provider import AIProvider
+
+    known = {"claude", "claude_code", "ollama", "openai_compatible", ""}
+    async with async_session() as db:
+        result = await db.execute(select(AIProvider.name, AIProvider.provider_type))
+        for name, provider_type in result.all():
+            if (provider_type or "").lower() not in known:
+                logger.warning("AI provider %r has unrecognized provider_type %r", name, provider_type)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     await _seed_enrichment_sources()
     await _seed_ai_tasks()
     await _sync_job_schedules_to_redis()
+    await _warn_unknown_provider_types()
     yield
     # Shutdown
 
@@ -382,7 +406,10 @@ _OPENAPI_TAG_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
     (
         "AI",
         [
-            ("ai-providers", "AI provider configuration (Ollama, Claude, OpenAI, custom)."),
+            (
+                "ai-providers",
+                "AI provider configuration (Ollama, Claude API, Claude Code CLI, OpenAI-compatible endpoints).",
+            ),
             ("ai-tasks", "AI task definitions and execution."),
             ("ai-prompts", "Prompt templates behind AI tasks."),
             ("ai-conversations", "Saved AI copilot conversations."),
@@ -717,7 +744,6 @@ from app.api.intel_profiles import router as intel_profiles_router
 from app.api.intel_reports import router as intel_reports_router
 from app.api.intelligence import router as intelligence_router
 from app.api.job_schedules import router as job_schedules_router
-from app.api.link_validation import router as link_validation_router
 from app.api.logs import router as logs_router
 from app.api.metrics import router as metrics_router
 from app.api.notes import router as notes_router
@@ -826,7 +852,6 @@ app.include_router(ai_results_router, prefix="/api", tags=["ai-results"])
 app.include_router(system_settings_router, prefix="/api/system-settings", tags=["system-settings"])
 app.include_router(shared_router, prefix="/api", tags=["sharing"])
 app.include_router(job_schedules_router, prefix="/api/job-schedules", tags=["job-schedules"])
-app.include_router(link_validation_router, prefix="/api/admin/link-validation", tags=["link-validation"])
 app.include_router(hygiene_router, prefix="/api", tags=["hygiene"])
 app.include_router(extraction_router, prefix="/api/engine/extraction", tags=["extraction"])
 app.include_router(ingest_router, prefix="/api/entries", tags=["ingest"])

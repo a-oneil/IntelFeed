@@ -21,7 +21,7 @@ const OK: AIProviderCommissionResult = {
   model: "qwen3.5:9b",
   tasks_assigned: 24,
   tasks_reassigned: 4,
-  tasks_skipped_agentic: ["copilot", "entity_merge_maintenance"],
+  tasks_skipped_agentic: ["copilot", "entity_enrichment_research"],
 };
 
 vi.mock("@/hooks/useAI", () => ({
@@ -122,6 +122,30 @@ describe("the onboarding AI step", () => {
       expect.objectContaining({ id: "existing", is_active: true }),
     );
     expect(commissionProvider).toHaveBeenCalledWith({ id: "existing", takeOver: true });
+  });
+
+  it("makes an OpenAI-compatible endpoint name its model rather than guessing one", async () => {
+    // /v1/models on api.openai.com sorts babbage-002 first; guessing from it
+    // would move every task onto a model that can't chat.
+    const user = userEvent.setup();
+    renderAIStep();
+    await user.click(screen.getByRole("button", { name: /OpenAI-compatible/ }));
+    await user.type(screen.getByLabelText("Base URL"), "https://api.openai.com/v1");
+
+    const connect = screen.getByRole("button", { name: /^Connect$/ });
+    expect(connect).toBeDisabled();
+
+    await user.type(screen.getByLabelText("Model"), "gpt-4o-mini");
+    await user.click(connect);
+
+    expect(createProvider).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider_type: "openai_compatible",
+        base_url: "https://api.openai.com/v1",
+        config: { default_model: "gpt-4o-mini" },
+      }),
+    );
+    expect(commissionProvider).toHaveBeenCalledWith({ id: "p1", takeOver: true });
   });
 
   it("still lets an admin decline AI outright", async () => {

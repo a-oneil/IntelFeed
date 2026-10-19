@@ -41,7 +41,8 @@ class EntryResponse(BaseModel):
     is_bookmarked: bool = False
     tags: list[dict] = []  # [{id, name, color, display_as_chip, description, is_global, personal}]
     # Signal engine (populated only when signal_engine_surface is enabled and
-    # the entry's score clears the radar threshold; is_echo always set)
+    # the entry's score clears the radar threshold; is_echo always set).
+    # priority_score is 0–10: 0 = no signals, 9+ ≈ top 5%, 10 = top 1%.
     priority_score: float | None = None
     top_signals: list[dict] = []  # [{type, explanation}]
     is_echo: bool = False
@@ -74,6 +75,9 @@ class EntryDetailResponse(EntryResponse):
     # included with a negative ``weighted`` — it is the one signal that
     # subtracts. [{type, family, score, weighted, explanation}]
     priority_signals: list[dict] = []
+    # The raw signal sum priority_score was scaled from — what the ``weighted``
+    # rows add up to. Same gating as priority_signals.
+    priority_raw: float | None = None
     # When is_echo is true, the earlier entry this one echoes (resolved from the
     # feed_echo signal's ``duplicate_of`` payload). Null if the original is gone.
     echo_of: "EchoOf | None" = None
