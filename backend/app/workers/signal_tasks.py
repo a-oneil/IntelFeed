@@ -135,15 +135,20 @@ async def score_entry(db: AsyncSession, entry_id: uuid.UUID) -> float | None:
     if fired_types:
         stale = stale.where(EntrySignal.signal_type.notin_(fired_types))
     await db.execute(stale)
-    for hit in hits:
+    if hits:
         stmt = pg_insert(EntrySignal).values(
-            id=uuid.uuid4(),
-            entry_id=entry_id,
-            signal_type=hit.signal_type,
-            score=hit.score,
-            explanation=hit.explanation,
-            payload=hit.payload,
-            created_at=now,
+            [
+                {
+                    "id": uuid.uuid4(),
+                    "entry_id": entry_id,
+                    "signal_type": hit.signal_type,
+                    "score": hit.score,
+                    "explanation": hit.explanation,
+                    "payload": hit.payload,
+                    "created_at": now,
+                }
+                for hit in hits
+            ]
         )
         stmt = stmt.on_conflict_do_update(
             constraint="uq_entry_signals_entry_type",

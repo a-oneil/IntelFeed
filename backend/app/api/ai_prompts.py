@@ -259,11 +259,13 @@ async def preview_prompt(
 
     variables, sample_source = await _build_preview_variables(db, entry_id=body.entry_id, use_sample=body.use_sample)
 
+    from app.ai.engine import render_prompt
+
     def _render(text: str | None) -> str | None:
         if not text:
             return None
-        # Match the engine's non-strict rendering: undefined vars become "".
-        return jinja2.Template(text).render(**variables)
+        # Match the engine's non-strict sandboxed rendering: undefined vars become "".
+        return render_prompt(text, variables)
 
     try:
         rendered_system = _render(body.system_text)

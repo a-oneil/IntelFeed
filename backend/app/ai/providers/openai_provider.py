@@ -61,6 +61,7 @@ follow-up behind a per-provider opt-in).
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import re
@@ -68,6 +69,7 @@ import time
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from typing import ClassVar
+from urllib.parse import urlparse
 
 import httpx
 
@@ -81,10 +83,27 @@ logger = logging.getLogger(__name__)
 _STRUCTURED_OUTPUT_MODES = ("json_schema_strict", "json_schema", "json_object", "prompt")
 
 _SCHEMA_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_MAX_MODEL_FILTER_LEN = 256
 
 # Pause after a 429 that names no window: long enough to let a per-minute
 # limit clear, short enough that work resumes on its own.
 _DEFAULT_RATE_LIMIT_PAUSE_SECONDS = 60
+
+
+def _validate_provider_base_url(raw_url: str) -> str:
+    """Ensure base_url is http(s) and does not target cloud metadata link-local addresses."""
+    cleaned = raw_url.strip().rstrip("/")
+    parsed = urlparse(cleaned)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise ValueError("OpenAI-compatible provider base_url must be an http:// or https:// URL")
+    try:
+        addr = ipaddress.ip_address(parsed.hostname)
+        if addr.is_link_local:
+            raise ValueError("OpenAI-compatible provider base_url cannot target link-local addresses")
+    except ValueError as e:
+        if "link-local" in str(e):
+            raise
+    return cleaned
 
 
 def _parse_retry_after(value: str | None) -> datetime | None:
@@ -118,7 +137,7 @@ class OpenAICompatibleProvider(AIProvider):
         super().__init__(base_url=base_url, api_key=api_key, config=config)
         if not base_url or not base_url.strip():
             raise ValueError("OpenAI-compatible provider requires a base_url")
-        self.base_url = base_url.rstrip("/")
+        self.base_url = _validate_provider_base_url(base_url)
         self.timeout: float = float(self.config.get("timeout_seconds", 300))
 
     # ---------------------------------------------------------------- helpers
@@ -455,6 +474,11 @@ class OpenAICompatibleProvider(AIProvider):
         ids = sorted(m["id"] for m in data.get("data", []) if m.get("id"))
         model_filter = self.config.get("model_filter")
         if model_filter:
-            pattern = re.compile(model_filter)
+            if not isinstance(model_filter, str) or len(model_filter) > _MAX_MODEL_FILTER_LEN:
+                raise ValueError(f"model_filter must be a regex string of at most {_MAX_MODEL_FILTER_LEN} characters")
+            try:
+                pattern = re.compile(model_filter)
+            except re.error as e:
+                raise ValueError(f"Invalid model_filter regex: {e}") from e
             ids = [m for m in ids if pattern.search(m)]
         return ids

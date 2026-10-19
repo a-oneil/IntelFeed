@@ -70,6 +70,14 @@ describe("queueItems", () => {
     });
   });
 
+  it("badges a standalone entry with the row's lifted score", () => {
+    const [row] = queueItems([entryRow("x", 8.4)]);
+    expect(row).toMatchObject({
+      type: "single",
+      entry: { id: "x", priority_score: 8.4 },
+    });
+  });
+
   it("counts flatIndex over entries only, skipping thread rows", () => {
     const out = queueItems([entryRow("x", 9), threadRow(7), entryRow("y", 6), entryRow("z", 5)]);
 

@@ -1292,6 +1292,27 @@ async def priority_unread_count(
     if not feed_ids:
         return {"unread_count": 0}
 
+    # Open story threads with anything unread fold their members out of the
+    # standalone entry count; only those with an unread beat count as a row.
+    # Matches build_priority_queue.
+    rows = await story_threads.list_threads(db, user.id, status="open", limit=_QUEUE_THREAD_LIMIT)
+    folded = [r for r in rows if (r.get("unread_count") or 0) > 0]
+    member_ids: set[uuid.UUID] = set()
+    for row in folded:
+        member_ids.update(row.get("entry_ids") or [])
+    live = [r for r in folded if r.get("top_raw") is not None]
+
+    exposure_sq = None
+    if bool(await get_setting("my_stack_exposure_enabled", db)):
+        from app.intelligence.cve import get_epss_high_risk_threshold
+        from app.services.exposure import exposure_lift_subquery, get_user_stack
+
+        exposure_vendor_ids, exposure_product_ids = await get_user_stack(db, user.id)
+        if exposure_vendor_ids or exposure_product_ids:
+            exposure_sq = exposure_lift_subquery(
+                exposure_vendor_ids, exposure_product_ids, get_epss_high_risk_threshold()
+            )
+
     query = (
         # See count_entries: same single unique-constrained join, so DISTINCT
         # would only add a sort.
@@ -1302,7 +1323,6 @@ async def priority_unread_count(
             and_(UserEntryState.entry_id == Entry.id, UserEntryState.user_id == user.id),
         )
         .where(Entry.feed_id.in_(feed_ids))
-        .where(Entry.priority_score >= threshold)
         .where(
             or_(UserEntryState.is_read == False, UserEntryState.id.is_(None))  # noqa: E712
         )  # noqa: E711, E712
@@ -1310,11 +1330,37 @@ async def priority_unread_count(
             or_(UserEntryState.is_hidden == False, UserEntryState.is_hidden.is_(None))  # noqa: E712
         )  # noqa: E712
     )
+    if exposure_sq is not None:
+        query = query.outerjoin(exposure_sq, exposure_sq.c.entry_id == Entry.id).where(
+            or_(
+                Entry.priority_score >= threshold,
+                exposure_sq.c.lift.is_not(None),
+            )
+        )
+    else:
+        query = query.where(Entry.priority_score >= threshold)
+
+    if member_ids:
+        query = query.where(Entry.id.notin_(member_ids))
+
+    canonical_subq = (
+        select(Entry.id.label("entry_id"))
+        .where(Entry.feed_id.in_(feed_ids))
+        .where(Entry.content_hash.isnot(None))
+        .distinct(Entry.content_hash)
+        .order_by(Entry.content_hash, Entry.created_at.asc())
+    ).subquery()
+    query = query.where(
+        or_(
+            Entry.content_hash.is_(None),
+            Entry.id.in_(select(canonical_subq.c.entry_id)),
+        )
+    )
     # Backdated stragglers are hidden from the Hide-Read list, so keep them out of
     # its badge too.
     query = _exclude_stale_on_arrival(query)
     total = (await db.execute(query)).scalar_one() or 0
-    return {"unread_count": int(total)}
+    return {"unread_count": int(total) + len(live)}
 
 
 # --- Priority Queue ---------------------------------------------------------
@@ -1411,14 +1457,18 @@ async def build_priority_queue(
     if with_threads:
         dismissed = set(exclude_thread_ids or [])
         rows = await story_threads.list_threads(db, user.id, status="open", limit=_QUEUE_THREAD_LIMIT)
-        live = [r for r in rows if (r.get("unread_count") or 0) > 0 and r["id"] not in dismissed]
-        live.sort(key=_thread_sort_key)
-        for row in live:
+        folded = [r for r in rows if (r.get("unread_count") or 0) > 0 and r["id"] not in dismissed]
+        for row in folded:
             # Every member of a live thread is withheld, including those on pages
             # still to come. A thread scores at or above its best unread member, so
             # the row is always reached before the articles it stands for — the
             # story is never missing from the queue, only folded.
             member_ids.update(row.get("entry_ids") or [])
+        # A thread whose only unread members are echoes (top_raw is NULL) gets no
+        # row, but its members stay withheld above: the beats are read, and an
+        # echo is a reprint of one, so neither belongs back in the queue alone.
+        live = [r for r in folded if r.get("top_raw") is not None]
+        live.sort(key=_thread_sort_key)
         pending = [r for r in live if thread_after is None or _thread_sort_key(r) > thread_after]
 
     rank_scores: dict[uuid.UUID, float] = {}
@@ -1445,7 +1495,7 @@ async def build_priority_queue(
         from app.intelligence.signals import get_radar_threshold
 
         radar_threshold, _ = await get_radar_threshold()
-    cutoffs = await get_scale_cutoffs()
+    cutoffs = await get_scale_cutoffs(db)
 
     # Two-pointer merge: entries keep their ranked order and a thread slots in
     # ahead of the first entry it outranks. Both sides are the stored house

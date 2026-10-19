@@ -317,10 +317,9 @@ class IntelFeedRepository(
                             title = item.thread.title ?: "Story thread",
                             summary = item.thread.summary,
                             publishedAt = item.thread.lastSeen,
-                            // The best unread article's 0–10 score, not the row's rank: the rank
-                            // adds an outlet bonus that pins nearly every story at 10 (and would
-                            // make every well-covered story send an alert).
-                            priorityScore = item.thread.topScore ?: item.score,
+                            // The row's 0–10 rank (its best unread beat's scaled score), matching
+                            // the server's queue order and the web badge.
+                            priorityScore = item.score,
                             isRead = item.thread.unreadCount == 0,
                             thread = item.thread
                         )
@@ -373,7 +372,7 @@ class IntelFeedRepository(
     /**
      * The quick views' unread counts, fetched in parallel the way the web sidebar does: unread
      * entries per view (dedup=true, time windows rounded down to the hour), and for the Priority
-     * Queue its unread count plus open stories that still have unread articles. A failed count is null.
+     * Queue its folded unread count from /api/entries/priority-unread-count. A failed count is null.
      */
     suspend fun getViewCounts(): ViewCounts = coroutineScope {
         val api = getApi()
@@ -386,12 +385,8 @@ class IntelFeedRepository(
         val watched = async { count(watched = true) }
         val starred = async { count(isStarred = true) }
         val bookmarked = async { count(isBookmarked = true) }
-        // Both halves of the Priority Queue count start together; the stories request used to wait
-        // for the entry count (up to ~2 s on the live server) before it was even sent.
-        val priorityEntries = async { apiCall { api.getPriorityUnreadCount().unreadCount }.getOrNull() }
-        val priorityStories = async { apiCall { api.getThreads(status = "open", limit = 40).threads.count { it.unreadCount > 0 } }.getOrDefault(0) }
-        val priority = priorityEntries.await()?.let { it + priorityStories.await() }
-        ViewCounts(priority, unread.await(), day.await(), week.await(), watched.await(), starred.await(), bookmarked.await())
+        val priority = async { apiCall { api.getPriorityUnreadCount().unreadCount }.getOrNull() }
+        ViewCounts(priority.await(), unread.await(), day.await(), week.await(), watched.await(), starred.await(), bookmarked.await())
     }
 
 
