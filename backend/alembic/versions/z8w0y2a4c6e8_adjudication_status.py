@@ -1,7 +1,7 @@
 """Adjudicate stage: per-entry review state on the AI analysis request row.
 
 Revision ID: z8w0y2a4c6e8
-Revises: y6q8s0u2w4y6
+Revises: z7r9t1v3x5z7
 Create Date: 2026-10-08
 
 The post-analysis adjudicate stage (planning/ai-adjudication-stage.md) decides,
@@ -11,7 +11,7 @@ the same per-entry row that already tracks the analysis lifecycle:
 
   adjudication_status  pending | completed | failed | skipped_<reason>
                        (off, plan, echo, nothing_new, score, budget);
-                       NULL = not yet decided, which the hourly sweep picks up
+                       NULL = not yet decided, which the resweep picks up
   adjudicated_at       when the review finished
 
 Both nullable, so existing rows need no backfill and the columns are free
@@ -23,7 +23,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "z8w0y2a4c6e8"
-down_revision = "y6q8s0u2w4y6"
+down_revision = "z7r9t1v3x5z7"
 branch_labels = None
 depends_on = None
 
