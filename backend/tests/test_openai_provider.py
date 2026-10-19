@@ -654,3 +654,30 @@ async def test_stream_complete_raises_on_error_frame(monkeypatch):
     with pytest.raises(RuntimeError, match="model overloaded"):
         async for _ in provider.stream_complete(prompt="hi", model="gpt-test"):
             pass
+
+
+def test_base_url_rejects_non_http_and_link_local():
+    with pytest.raises(ValueError, match="http:// or https://"):
+        OpenAICompatibleProvider(base_url="file:///etc/passwd", api_key=None, config={})
+    with pytest.raises(ValueError, match="link-local"):
+        OpenAICompatibleProvider(base_url="http://169.254.169.254/v1", api_key=None, config={})
+    with pytest.raises(ValueError, match="link-local"):
+        OpenAICompatibleProvider(base_url="http://[fe80::1]/v1", api_key=None, config={})
+    # Localhost and private LAN addresses remain allowed for local inference servers
+    local = OpenAICompatibleProvider(base_url="http://127.0.0.1:1234/v1", api_key=None, config={})
+    assert local.base_url == "http://127.0.0.1:1234/v1"
+
+
+@pytest.mark.asyncio
+async def test_list_models_rejects_oversized_or_invalid_model_filter(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": [{"id": "gpt-4o"}]})
+
+    monkeypatch.setattr(httpx, "AsyncClient", _mock_client_factory(handler))
+    oversized = OpenAICompatibleProvider(base_url=BASE_URL, api_key="k", config={"model_filter": "a" * 300})
+    with pytest.raises(ValueError, match="at most 256"):
+        await oversized.list_models()
+
+    bad_regex = OpenAICompatibleProvider(base_url=BASE_URL, api_key="k", config={"model_filter": "[unclosed"})
+    with pytest.raises(ValueError, match="Invalid model_filter regex"):
+        await bad_regex.list_models()

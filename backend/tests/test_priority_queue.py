@@ -291,6 +291,34 @@ class TestPaging:
         assert titles(body) == ["Second", "Late story"]
         assert body["has_more"] is False
 
+    async def test_echo_only_unread_thread_does_not_enter_queue(
+        self, client, auth_headers, db_session, test_user, subscribed_feed
+    ):
+        echo = await make_entry(db_session, subscribed_feed, title="Echo", score=9.0)
+        beat = await make_entry(db_session, subscribed_feed, title="Beat", score=6.0)
+        await make_thread(db_session, title="Echo-only left", members=[echo, beat], source_count=2, echoes=1)
+        await mark_read(db_session, test_user, beat)
+        await make_entry(db_session, subscribed_feed, title="Standalone", score=3.0)
+        await db_session.commit()
+
+        body = (await client.get("/api/entries/priority-queue", headers=auth_headers)).json()
+        assert titles(body) == ["Standalone"]
+
+        count_body = (await client.get("/api/entries/priority-unread-count", headers=auth_headers)).json()
+        assert count_body["unread_count"] == 1
+
+    async def test_priority_unread_count_folds_threads_and_dedups(
+        self, client, auth_headers, db_session, subscribed_feed
+    ):
+        members = [await make_entry(db_session, subscribed_feed, title=f"Beat {i}", score=6.0 - i) for i in range(3)]
+        await make_thread(db_session, title="Folded story", members=members, source_count=3)
+        await make_entry(db_session, subscribed_feed, title="Standalone", score=4.0)
+        await db_session.commit()
+
+        count_body = (await client.get("/api/entries/priority-unread-count", headers=auth_headers)).json()
+        # 1 folded story thread + 1 standalone entry = 2 rows in the queue.
+        assert count_body["unread_count"] == 2
+
     async def test_rejects_a_malformed_cursor(self, client, auth_headers):
         resp = await client.get("/api/entries/priority-queue?cursor=not-base64", headers=auth_headers)
         assert resp.status_code == 400

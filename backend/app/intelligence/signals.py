@@ -462,37 +462,52 @@ class _EntityLinks:
 
 
 async def _collect_links(db: AsyncSession, entry_id: uuid.UUID) -> _EntityLinks:
-    actor_ids = (
-        (await db.execute(select(EntryThreatActor.threat_actor_id).where(EntryThreatActor.entry_id == entry_id)))
+    actors = (
+        (
+            await db.execute(
+                select(ThreatActor)
+                .join(EntryThreatActor, EntryThreatActor.threat_actor_id == ThreatActor.id)
+                .where(EntryThreatActor.entry_id == entry_id)
+            )
+        )
         .scalars()
         .all()
     )
-    malware_ids = (
-        (await db.execute(select(EntryMalware.malware_family_id).where(EntryMalware.entry_id == entry_id)))
+    malware = (
+        (
+            await db.execute(
+                select(MalwareFamily)
+                .join(EntryMalware, EntryMalware.malware_family_id == MalwareFamily.id)
+                .where(EntryMalware.entry_id == entry_id)
+            )
+        )
         .scalars()
         .all()
     )
-    tool_ids = (await db.execute(select(EntryTool.tool_id).where(EntryTool.entry_id == entry_id))).scalars().all()
-    cve_ids = (await db.execute(select(EntryCVE.cve_id).where(EntryCVE.entry_id == entry_id))).scalars().all()
+    tools = (
+        (
+            await db.execute(
+                select(Tool).join(EntryTool, EntryTool.tool_id == Tool.id).where(EntryTool.entry_id == entry_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    cves = (
+        (
+            await db.execute(
+                select(CVE).join(EntryCVE, EntryCVE.cve_id == CVE.id).where(EntryCVE.entry_id == entry_id).limit(100)
+            )
+        )
+        .scalars()
+        .all()
+    )
     ttp_count = (
         await db.execute(select(func.count()).select_from(EntryTTP).where(EntryTTP.entry_id == entry_id))
     ).scalar_one()
     country_count = (
         await db.execute(select(func.count()).select_from(EntryCountry).where(EntryCountry.entry_id == entry_id))
     ).scalar_one()
-
-    actors = (
-        (await db.execute(select(ThreatActor).where(ThreatActor.id.in_(actor_ids)))).scalars().all()
-        if actor_ids
-        else []
-    )
-    malware = (
-        (await db.execute(select(MalwareFamily).where(MalwareFamily.id.in_(malware_ids)))).scalars().all()
-        if malware_ids
-        else []
-    )
-    tools = (await db.execute(select(Tool).where(Tool.id.in_(tool_ids)))).scalars().all() if tool_ids else []
-    cves = (await db.execute(select(CVE).where(CVE.id.in_(cve_ids)).limit(100))).scalars().all() if cve_ids else []
     return _EntityLinks(
         actors=actors,
         malware=malware,

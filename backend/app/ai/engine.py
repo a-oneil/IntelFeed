@@ -8,7 +8,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from jinja2 import Template
+from jinja2.sandbox import ImmutableSandboxedEnvironment
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -280,9 +280,12 @@ def _get_provider_instance(
     raise UnsupportedProviderTypeError(f"Unknown AI provider_type: {provider_model.provider_type!r}")
 
 
+_PROMPT_ENV = ImmutableSandboxedEnvironment()
+
+
 def render_prompt(template_text: str, variables: dict) -> str:
-    """Render a Jinja2 prompt template with variables."""
-    tmpl = Template(template_text)
+    """Render a Jinja2 prompt template with variables inside a sandboxed environment."""
+    tmpl = _PROMPT_ENV.from_string(template_text)
     return tmpl.render(**variables)
 
 

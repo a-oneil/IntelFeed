@@ -1287,6 +1287,25 @@ async def priority_unread_count(
     if not feed_ids:
         return {"unread_count": 0}
 
+    # Live open story threads: fold their members out of the standalone entry
+    # count and count each live thread once, matching build_priority_queue.
+    rows = await story_threads.list_threads(db, user.id, status="open", limit=_QUEUE_THREAD_LIMIT)
+    live = [r for r in rows if (r.get("unread_count") or 0) > 0 and r.get("top_raw") is not None]
+    member_ids: set[uuid.UUID] = set()
+    for row in live:
+        member_ids.update(row.get("entry_ids") or [])
+
+    exposure_sq = None
+    if bool(await get_setting("my_stack_exposure_enabled", db)):
+        from app.intelligence.cve import get_epss_high_risk_threshold
+        from app.services.exposure import exposure_lift_subquery, get_user_stack
+
+        exposure_vendor_ids, exposure_product_ids = await get_user_stack(db, user.id)
+        if exposure_vendor_ids or exposure_product_ids:
+            exposure_sq = exposure_lift_subquery(
+                exposure_vendor_ids, exposure_product_ids, get_epss_high_risk_threshold()
+            )
+
     query = (
         # See count_entries: same single unique-constrained join, so DISTINCT
         # would only add a sort.
@@ -1297,7 +1316,6 @@ async def priority_unread_count(
             and_(UserEntryState.entry_id == Entry.id, UserEntryState.user_id == user.id),
         )
         .where(Entry.feed_id.in_(feed_ids))
-        .where(Entry.priority_score >= threshold)
         .where(
             or_(UserEntryState.is_read == False, UserEntryState.id.is_(None))  # noqa: E712
         )  # noqa: E711, E712
@@ -1305,11 +1323,37 @@ async def priority_unread_count(
             or_(UserEntryState.is_hidden == False, UserEntryState.is_hidden.is_(None))  # noqa: E712
         )  # noqa: E712
     )
+    if exposure_sq is not None:
+        query = query.outerjoin(exposure_sq, exposure_sq.c.entry_id == Entry.id).where(
+            or_(
+                Entry.priority_score >= threshold,
+                exposure_sq.c.lift.is_not(None),
+            )
+        )
+    else:
+        query = query.where(Entry.priority_score >= threshold)
+
+    if member_ids:
+        query = query.where(Entry.id.notin_(member_ids))
+
+    canonical_subq = (
+        select(Entry.id.label("entry_id"))
+        .where(Entry.feed_id.in_(feed_ids))
+        .where(Entry.content_hash.isnot(None))
+        .distinct(Entry.content_hash)
+        .order_by(Entry.content_hash, Entry.created_at.asc())
+    ).subquery()
+    query = query.where(
+        or_(
+            Entry.content_hash.is_(None),
+            Entry.id.in_(select(canonical_subq.c.entry_id)),
+        )
+    )
     # Backdated stragglers are hidden from the Hide-Read list, so keep them out of
     # its badge too.
     query = _exclude_stale_on_arrival(query)
     total = (await db.execute(query)).scalar_one() or 0
-    return {"unread_count": int(total)}
+    return {"unread_count": int(total) + len(live)}
 
 
 # --- Priority Queue ---------------------------------------------------------
@@ -1404,7 +1448,11 @@ async def build_priority_queue(
     if with_threads:
         dismissed = set(exclude_thread_ids or [])
         rows = await story_threads.list_threads(db, user.id, status="open", limit=_QUEUE_THREAD_LIMIT)
-        live = [r for r in rows if (r.get("unread_count") or 0) > 0 and r["id"] not in dismissed]
+        live = [
+            r
+            for r in rows
+            if (r.get("unread_count") or 0) > 0 and r.get("top_raw") is not None and r["id"] not in dismissed
+        ]
         live.sort(key=_thread_sort_key)
         for row in live:
             # Every member of a live thread is withheld, including those on pages
@@ -1434,7 +1482,7 @@ async def build_priority_queue(
         from app.intelligence.signals import get_radar_threshold
 
         radar_threshold, _ = await get_radar_threshold()
-    cutoffs = await get_scale_cutoffs()
+    cutoffs = await get_scale_cutoffs(db)
 
     # Two-pointer merge: entries keep their ranked order and a thread slots in
     # ahead of the first entry it outranks. The comparison is against the score
