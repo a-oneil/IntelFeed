@@ -103,7 +103,6 @@ Each analyst's visibility and personal mute over the shared feed pool; only cons
 - `extracted_urls` (JSONB array) — URLs found in content
 - `metadata_` (JSONB) — feed-specific metadata (e.g., feed author's categories, tags)
 - `translated_html`, `translated_title`, `translation_source_language`, `translation_target_language`, `translated_at` — machine translation cache
-- `last_link_validation_at` (DateTime, indexed) — last AI entity-link validation pass
 - `priority_score` (Float, indexed), `priority_raw` (Float, indexed), `scored_at` — signal engine score on a 0–10 scale, and the unbounded weighted sum it is ranked from (the ordering key; see Signal Engine cluster)
 
 **Relationships:**
@@ -357,7 +356,10 @@ Audit trail for autonomous entity maintenance (merge/alias/description actions b
 - `id` (UUID PK)
 - `entity_type` (String 30, indexed) — canonical slugs from `app/entity_types.py`, e.g. "threat_actor", "malware"
 - `entity_id` (UUID, nullable, indexed) — surviving/updated entity; NULL for cluster no-ops
-- `action` (String 40, indexed) — "merge", "update_description", "update_aliases", "no_op"
+- `action` (String 40, indexed) — "merge", "update_description", "update_aliases", "no_op", the on-demand
+  scanners' proposal codes, and the adjudicate stage's `adjudication_*` verdicts. An `adjudication_restored`
+  row is the audit line an analyst's undo writes: it is always `applied`, carries the code it undid in
+  `before.undid`, and is deliberately not a proposal, so nothing offers to apply it again
 - `mode` (String 10) — "shadow" or "apply"
 - `before`, `after` (JSONB) — snapshots
 - `reasoning` (Text), `ai_result_id` (FK, SET NULL), `applied` (Boolean)
@@ -371,7 +373,7 @@ Audit trail for autonomous entity maintenance (merge/alias/description actions b
 
 #### EntityLinkValidationLog
 
-One row per AI decision on an entity↔entry link (the `entity_link_validation` task). Snapshots the junction row so removals can be restored.
+One row per decision on an entity↔entry link of a validator junction type: written by the adjudicate stage (`entry_adjudication` task — `shadow_remove` / `needs_reclassification` verdicts in shadow mode, `removed` in apply mode) and by analyst restores (`restored`, via `POST /api/admin/hygiene/link-log/{id}/restore` or the adjudication restore). Snapshots the junction row so removals can be restored; a `restored` row within 90 days shields the link from the adjudicator (this log is what that guard reads, so only these five junction types are shielded).
 
 **Columns:**
 - `id` (UUID PK)
@@ -729,7 +731,7 @@ Server-side persistence for AI copilot chat threads (global dock panel + entry/e
 
 #### AIAnalysisRequest & AIBatchJob
 
-Bookkeeping for the one-pass `entry_analysis` batch extraction pipeline. Rows pruned after 30 days by `prune_engine_tables`.
+Bookkeeping for the one-pass `entry_analysis` batch extraction pipeline and the adjudicate stage that follows it. Rows pruned after 30 days by `prune_engine_tables`.
 
 **Columns (`ai_analysis_requests`):**
 - `id` (UUID PK)
@@ -737,6 +739,9 @@ Bookkeeping for the one-pass `entry_analysis` batch extraction pipeline. Rows pr
 - `status` (String 20) — "pending", "submitted", "completed", "failed", "skipped_junk", "reused_echo"
 - `batch_id` (String 80, indexed), `custom_id` (String 64)
 - `attempts` (Integer), `reused_from_entry_id` (UUID), `error` (Text)
+- `adjudication_status` (String 24, indexed) — the adjudicate stage's decision for this entry: "pending", "completed", "failed", or a gate skip ("skipped_off", "skipped_plan", "skipped_echo", "skipped_nothing_new", "skipped_score", "skipped_budget", "skipped_paused"); the resweep re-enqueues budget/paused rows and lost pending rows
+- `adjudicated_at` — when the review completed
+- `adjudication_queued_at` — when the row went pending; a pending row older than 6 hours with no run is treated as a lost task and re-enqueued
 - `created_at`, `submitted_at`, `completed_at`
 
 **Columns (`ai_batch_jobs`):**
@@ -843,7 +848,8 @@ Provenance for scalar profile fields — the field-level counterpart to `EntityR
 - `confidence` (String 20) — "confirmed", "probable", "possible"
 - `source` (String 20) — "co_occurrence", "auto_extracted", "analyst_confirmed", "analyst_created", "analyst_rejected" (hidden + never resurrected by co-occurrence), "external_feed"
 - `description` (Text)
-- `adjudication_verdict` (String 20, nullable), `adjudicated_at` — AI adjudicator outcome: "corroborated" (promoted to confirmed) or "coincidental" (demoted to possible, never re-promoted by co-occurrence)
+- `adjudication_verdict` (String 20, nullable), `adjudicated_at` — the adjudicate stage's outcome: "corroborated" (promoted to confirmed) or "coincidental" (demoted to possible, sticky — never re-promoted by co-occurrence)
+- `reviewer_kept_entry_ids` (ARRAY(UUID)) — entries whose adjudicate-stage review explicitly kept this edge in apply mode, at or above the apply confidence floor (an edge the review did not name does not count); at `relationship_evidence_promote_count` distinct entries the edge becomes confirmed/corroborated
 - `evidence_entry_ids` (ARRAY(UUID)) — entries supporting this relationship
 - `created_by` (FK, nullable, CASCADE)
 - `created_at`, `updated_at`
@@ -1541,7 +1547,7 @@ reader, and thrown away. Parsing it back costs nothing: it reads markdown that
 was already generated and cached. See
 `backend/app/intelligence/narrative_themes.py`; gated by
 `narrative_themes_enabled` and `narrative_theme_gating`
-([engine-settings.md](engine-settings.md#relationship-adjudication-and-narrative-themes)).
+([engine-settings.md](engine-settings.md#narrative-themes-and-actor-refresh-mode)).
 
 #### NarrativeBriefing
 
@@ -1789,6 +1795,9 @@ Common migration prefixes:
 - `b3d5f7h9j1k3` — detection rule provenance (license, upstream_updated_at, references, source_products)
 - `f1a3c5e7g9i1` — AI-extraction provenance columns on the five extractable entity tables
 - `g2b4d6f8h0j2` — relationship adjudication columns (`adjudication_verdict`, `adjudicated_at`)
+- `z8w0y2a4c6e8`, `c2d3e4f5a6b7` — adjudicate stage bookkeeping on `ai_analysis_requests` (`adjudication_status`, `adjudicated_at`, `adjudication_queued_at`)
+- `a0b1c2d3e4f5` — `entity_relationships.reviewer_kept_entry_ids`
+- `b1c2d3e4f5a6` — drops the reviewer verdict columns from both proposal logs and the pending stale/cluster proposal rows
 
 **Notable migrations (July 2026):**
 - `d2a2b3c4d5g0` — CVE KEV flags + exploit-status provenance

@@ -110,7 +110,7 @@ export function EngineSection() {
               <p className={styles.browseHint}>Global sweeps and destructive resets — run rarely.</p>
               <MaintenancePanel />
               <p className={styles.browseHint}>
-                Link-validation, hygiene-review, assessment-backfill and merge-engine settings.
+                Actor-refresh, assessment-backfill and narrative-theme settings.
               </p>
               {/* Two blocks, not one call with both groups: the "Maintenance" group
                   title would just repeat this view's own heading, so it stays

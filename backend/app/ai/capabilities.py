@@ -18,7 +18,6 @@ can all import it without cycles.
 TOOL_REQUIRED_TASKS: frozenset[str] = frozenset(
     {
         "copilot",
-        "entity_merge_maintenance",
         "entity_enrichment_research",
     }
 )

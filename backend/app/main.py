@@ -117,10 +117,11 @@ async def _seed_ai_tasks() -> None:
 
         await db.flush()
 
-        # Auto-create a 'claude_code' provider on first startup so the entity
-        # link validator has an assignment target. The provider only works
-        # once OAuth credentials are bootstrapped (see setup.md section 14),
-        # but seeding it now means the task assignment exists from day one.
+        # Auto-create a 'claude_code' provider on first startup so the tasks
+        # pinned to that provider type (DEFAULT_PROVIDER_TYPE_ASSIGNMENTS: the
+        # copilot) have an assignment target. The provider only works once
+        # OAuth credentials are bootstrapped (see setup.md section 14), but
+        # seeding it now means the task assignment exists from day one.
         cc_provider_result = await db.execute(
             select(AIProviderModel).where(AIProviderModel.provider_type == "claude_code").limit(1)
         )
@@ -743,7 +744,6 @@ from app.api.intel_profiles import router as intel_profiles_router
 from app.api.intel_reports import router as intel_reports_router
 from app.api.intelligence import router as intelligence_router
 from app.api.job_schedules import router as job_schedules_router
-from app.api.link_validation import router as link_validation_router
 from app.api.logs import router as logs_router
 from app.api.metrics import router as metrics_router
 from app.api.notes import router as notes_router
@@ -852,7 +852,6 @@ app.include_router(ai_results_router, prefix="/api", tags=["ai-results"])
 app.include_router(system_settings_router, prefix="/api/system-settings", tags=["system-settings"])
 app.include_router(shared_router, prefix="/api", tags=["sharing"])
 app.include_router(job_schedules_router, prefix="/api/job-schedules", tags=["job-schedules"])
-app.include_router(link_validation_router, prefix="/api/admin/link-validation", tags=["link-validation"])
 app.include_router(hygiene_router, prefix="/api", tags=["hygiene"])
 app.include_router(extraction_router, prefix="/api/engine/extraction", tags=["extraction"])
 app.include_router(ingest_router, prefix="/api/entries", tags=["ingest"])

@@ -411,7 +411,7 @@ export function OverviewTab({
                   <>
                     {" "}
                     {staged === 1 ? "One article has" : `${staged} articles have`} indicators waiting for review —{" "}
-                    <Link to="/workbench/observables?queue=1">open the candidates queue</Link>.
+                    <Link to="/workbench/explore?section=observables&queue=1">open the candidates queue</Link>.
                   </>
                 )}
               </div>
@@ -508,7 +508,7 @@ export function OverviewTab({
               <button className={styles.railBtn} onClick={exportStix} title="STIX 2.1 bundle of the patternable values">Export STIX</button>
               <Link
                 className={styles.railBtn}
-                to={`/workbench/observables?linked_entity=${entityType}:${entityId}`}
+                to={`/workbench/explore?section=observables&linked_entity=${entityType}:${entityId}`}
                 title="Open the observables browser filtered to this entity's infrastructure"
               >
                 Open in observables browser

@@ -31,6 +31,7 @@ const GROUP_DEST: Record<string, EngineDest> = {
   threads: { kind: "stage", stage: "score" },
   intelligence: { kind: "stage", stage: "correlation" },
   observables: { kind: "stage", stage: "observables" },
+  adjudication: { kind: "stage", stage: "adjudicate" },
   enrichment: { kind: "stage", stage: "enrich" },
   api_keys: { kind: "stage", stage: "enrich" },
   translation: { kind: "stage", stage: "translate" },
@@ -63,6 +64,7 @@ const STAGE_LABEL: Record<string, string> = {
   score: "Score stage",
   correlation: "Correlation stage",
   observables: "Observables stage",
+  adjudicate: "Adjudicate stage",
   enrich: "Enrichment stage",
   translate: "Translate stage",
 };

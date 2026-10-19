@@ -95,6 +95,49 @@ describe("Hint", () => {
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
 
+  it("closes when its control is clicked — activating it answers the question", () => {
+    render(
+      <Hint {...COPY}>
+        <button>Priority Queue</button>
+      </Hint>,
+    );
+    const btn = screen.getByRole("button");
+    fireEvent.mouseEnter(btn);
+    act(() => void vi.advanceTimersByTime(500));
+    expect(screen.getByRole("tooltip")).toBeInTheDocument();
+
+    fireEvent.click(btn);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
+
+  it("does not resurrect an open card after being disabled and re-enabled", () => {
+    // The matrix header disables the hint while its peek popover is open. The
+    // bare child it hands back has no leave handler, so without a reset the
+    // hover anchor would survive and the card would come back on re-enable.
+    const { rerender } = render(
+      <Hint {...COPY}>
+        <button>Priority Queue</button>
+      </Hint>,
+    );
+    fireEvent.mouseEnter(screen.getByRole("button"));
+    act(() => void vi.advanceTimersByTime(500));
+    expect(screen.getByRole("tooltip")).toBeInTheDocument();
+
+    rerender(
+      <Hint {...COPY} disabled>
+        <button>Priority Queue</button>
+      </Hint>,
+    );
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+    rerender(
+      <Hint {...COPY}>
+        <button>Priority Queue</button>
+      </Hint>,
+    );
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
+
   it("omits the aside line when there isn't one", () => {
     render(
       <Hint title="Documentation" body="Guides for every part of IntelFeed.">

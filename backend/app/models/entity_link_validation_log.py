@@ -1,17 +1,17 @@
-"""Audit log for AI-driven validation of entity↔entry links.
+"""Audit log for AI verdicts on entity↔entry links.
 
-One row per decision made by the `entity_link_validation` AI task. Snapshots
-the junction row's original column values so we can restore links the AI
-removed in error (via `POST /api/admin/link-validation/log/{id}/restore`).
+One row per link verdict the adjudicate stage files (services/entry_adjudication.py).
+Snapshots the junction row's original column values so a link removed in error
+can be restored (`POST /api/admin/hygiene/link-log/{id}/restore`).
 
 `action` values:
-  - 'shadow_remove'         — link_validation_mode == 'shadow'; would have
-    removed but did not touch the junction row or article_count.
-  - 'removed'               — link_validation_mode == 'apply'; junction row
+  - 'shadow_remove'         — adjudication_mode == 'shadow' (or below the apply
+    confidence floor); proposed, junction row and article_count untouched.
+  - 'removed'               — adjudication_mode == 'apply'; junction row
     deleted.
   - 'restored'              — operator restored a previously-removed link
     from this log row's snapshot columns.
-  - 'needs_reclassification' — Claude judged that the article correctly
+  - 'needs_reclassification' — the reviewer judged that the article correctly
     references the entity but the entity is filed under the wrong
     entity_type (e.g. a threat actor stored as a malware family). The
     junction stays intact; `suggested_entity_type` names the correct type.
@@ -54,11 +54,6 @@ class EntityLinkValidationLog(Base):
     ai_result_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("ai_results.id", ondelete="SET NULL"), nullable=True
     )
-    # Hygiene-reviewer verdict on pending advisories: 'approve' | 'reject' |
-    # 'unsure'. NULL = not yet reviewed. See workers/hygiene_review_tasks.py.
-    review_decision: Mapped[str | None] = mapped_column(String(10), nullable=True)
-    review_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (

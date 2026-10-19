@@ -38,7 +38,8 @@ Documented in the module docstring (`registry.py:1-19`):
 | `pre` | Chained ahead of the chord | Output (e.g. translated text) visible to every later stage; must never raise or the whole chain dies |
 | `parallel` | First chord header, after entry creation | `autolink` ∥ `observables` ∥ `telegram_links` ∥ `extract` |
 | `post` | Second chord header | Runs after all parallel stages complete |
-| `final` | Second chord callback | Signal scoring — the terminal stage |
+| `final` | Second chord callback | Signal scoring — the terminal chord stage |
+| `post_analysis` | Dispatched from wherever the one-pass AI analysis lands, minutes to hours after `score` | `adjudicate` — never part of the chord; the registry row gives it a matrix column, a plan chip, run logging |
 | `side` | Dispatched independently of the chord | Automation, enrichment |
 
 ### Stage catalog
@@ -60,6 +61,7 @@ The full registry (`registry.py:35-144`):
 | `correlation` | post | `automation_tasks.detect_correlation_events` | on |
 | `requirements` | post | `intel_feed_tasks.match_requirements_task` | on |
 | `score` | final | `signal_tasks.score_entry_task` — signal scoring **and** the one-pass AI analysis enqueue | on |
+| `adjudicate` | post_analysis | `adjudication_tasks.adjudicate_entry_task` — AI review of everything the analysis wrote to the entry (links of every source, minted entities with nearest catalogue names, asserted edges, AI observables); verdicts filed as proposals or applied per `adjudication_mode`. See [engine-settings.md](engine-settings.md#adjudicate-stage-post-analysis-ai-review) | on (mode `off` by default — the mode is the master switch because plans are off in prod) |
 | `enrich` | side | `enrichment_tasks.auto_enrich_entity` | on |
 | `automate` | side | `automation_tasks.run_entry_automations` | on |
 
@@ -120,6 +122,7 @@ Diagram: [diagrams/engine-pipeline-execution.md](diagrams/engine-pipeline-execut
 3. **First callback** — `entry_post_processing` (`feed_tasks.py:75`) runs when the header completes. It builds a **second chord**: all `post` stages (`cooccurrence`, `correlation`, `requirements`) as the header, with the single `final` stage (`score`) as callback. Note: plan gating applies to the parallel header only — post/final stages always run (scoring no-ops on its own flag).
 4. **Final callback** — `score_entry_task` runs once co-occurrence edges, correlation events, and requirement matches all exist, because those are the signal engine's inputs. It accepts positional args since Celery passes the chord header results as the first argument (`backend/app/workers/signal_tasks.py:39-44`).
 5. **Side dispatches** — `automate` and `enrich` are sent independently of the chord (automation per entry from the fetch loop; enrichment triggered by entity creation).
+6. **After the analysis lands** — `services/entry_adjudication.enqueue_adjudication` runs at each of the one-pass analysis landing sites (batch ingest, sequential task, echo reuse, manual run) right after their commit, walks the gates (mode → feed plan → echo → trigger → score floor → hourly budget), records the decision on `ai_analysis_requests.adjudication_status`, and dispatches `adjudicate_entry_task` on the `ai` queue. The task's return dict becomes the run's `detail` (verdict counts) via `@pipeline_stage`, which the matrix's Output lens renders.
 
 ### Per-stage run logging
 
@@ -302,7 +305,7 @@ The Engine console lives at `/settings?section=engine` (Settings > Administratio
 - **Entities** — AI-created entity management (`ExtractionTab.tsx` over `/api/engine/extraction`: provenance stats, filter/merge/delete/confirm) plus its proposals queue.
 - **Feeds** — feed health plus feed/rate-limiting/image-proxy settings.
 
-Four things open as separate **browse views** with a back button (`BrowseView`, `EngineMatrix.tsx:39`): **Jobs** (schedule editor `frontend/src/components/JobSchedules.tsx`, backed by the `JOB_REGISTRY` + Redis schedule overrides, and run history from `GET /api/engine/job-runs`), **Plans** (`PipelinePlans.tsx` for global/category/feed plan CRUD plus the plan-engine switches), **Maintenance** (`MaintenancePanel.tsx` — global sweeps and destructive resets, plus link-validation/hygiene/merge-engine settings), and **Publishing** (`PublishingPanel.tsx` — the outbound observable feeds and their token/confidence/age gates).
+Four things open as separate **browse views** with a back button (`BrowseView`, `EngineMatrix.tsx:39`): **Jobs** (schedule editor `frontend/src/components/JobSchedules.tsx`, backed by the `JOB_REGISTRY` + Redis schedule overrides, and run history from `GET /api/engine/job-runs`), **Plans** (`PipelinePlans.tsx` for global/category/feed plan CRUD plus the plan-engine switches), **Maintenance** (`MaintenancePanel.tsx` — global sweeps, destructive resets and the on-demand hygiene scanners), and **Publishing** (`PublishingPanel.tsx` — the outbound observable feeds and their token/confidence/age gates).
 
 Enrichment, Job Schedules, Feed Health, and Workbench settings all live inside the console. Bookmarked `?tab=` and `?section=` deep links are remapped onto console states (`legacyState`, `EngineSection.tsx:30-53`). Every setting the console exposes is catalogued in [engine-settings.md](engine-settings.md).
 
@@ -394,7 +397,7 @@ All flags are DB-backed per environment — flipping them in dev does nothing fo
 ## Operational notes
 
 - **Plan edits outside the API don't propagate immediately.** Cached resolutions live up to 600s keyed on the version counter; the API bumps it on every write, but a direct DB edit to `pipeline_plans` without `bump_plan_version()` waits out the TTL.
-- **Global plans can't be deleted** via the API (`delete_plan`, `api/engine.py:1147`) — deactivate or empty them instead.
+- **Global plans can't be deleted** via the API (`delete_plan`, `backend/app/api/engine.py:1389`) — deactivate or empty them instead.
 - **Run logging is write-path-only.** Disabling `pipeline_run_logging_enabled` stops new `entry_pipeline_runs` rows but the ops console keeps serving existing ones until retention prunes them.
 - **Retry re-runs the whole stage.** The retry endpoint just re-sends the task with the entry id; stages are idempotent (junction upserts, signal upserts), so this is safe, but it does not resume the chord — downstream stages are not re-triggered.
 - **Rate recompute denominator** is entries *scored* in the 30-day window, not entries fetched (`signal_tasks.py:192-196`) — so a large backfill shifts rates only in proportion to what it scored, not what it skimmed past.

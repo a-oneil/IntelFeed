@@ -74,7 +74,7 @@ describe("onboarding step selection", () => {
   });
 
   it("does not treat the auto-created claude_code provider as a chosen one", () => {
-    // main.py seeds a claude_code provider at startup for the link validator,
+    // main.py seeds a claude_code provider at startup for the copilot's default assignment,
     // so its presence says nothing about whether anyone picked a provider.
     const ai = STEPS.find((s) => s.id === "ai")!;
     expect(skipReason(ai, true, FRESH)).toBeNull();

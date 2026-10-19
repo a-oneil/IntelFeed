@@ -398,6 +398,7 @@ PIPELINE_STAGE_LABELS: dict[str, str] = {
     "correlation": "Correlation events",
     "requirements": "Requirement matching",
     "score": "Signal scoring",
+    "adjudicate": "AI review",
     "automate": "Automation rules",
     "translate": "Translation",
 }
@@ -413,6 +414,9 @@ RETRYABLE_STAGE_TASKS: dict[str, str] = {
     "correlation": "app.workers.automation_tasks.detect_correlation_events",
     "requirements": "app.workers.intel_feed_tasks.match_requirements_task",
     "score": "app.workers.signal_tasks.score_entry_task",
+    # A manual retry is a deliberate bypass of the enqueue gates — the task
+    # re-checks only the master switch. See retry_pipeline_stage.
+    "adjudicate": "app.workers.adjudication_tasks.adjudicate_entry_task",
 }
 
 
@@ -461,6 +465,163 @@ async def entry_pipeline_runs(
             }
             for run in latest.values()
         ]
+    }
+
+
+@router.get("/entries/{entry_id}/adjudication")
+async def entry_adjudication(
+    entry_id: str = Path(..., description="Entry UUID"),
+    user: User = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """What the adjudicate stage decided for this entry: the review status,
+    the latest run detail, and one row per verdict it filed, keyed by the
+    manifest item id so the entry drawer can badge its links, relationships
+    and observables in place."""
+    import uuid as _uuid
+
+    from sqlalchemy import select
+
+    from app.models.ai_analysis import AIAnalysisRequest
+    from app.models.ai_result import AIResult
+    from app.models.ai_task import AITask
+    from app.models.entity_link_validation_log import EntityLinkValidationLog
+    from app.models.entity_maintenance import EntityMaintenanceLog
+    from app.models.entry_pipeline_run import EntryPipelineRun
+    from app.services.entry_adjudication import (
+        ACTION_ASSESSMENT,
+        ACTION_EDGE_DEMOTE,
+        ACTION_IOC_DROP,
+        ACTION_MERGE,
+        ACTION_RECLASSIFY,
+        ACTION_UNLINK,
+        ACTION_VETO,
+        ADJUDICATION_PROPOSAL_ACTIONS,
+        TASK_NAME,
+    )
+
+    try:
+        eid = _uuid.UUID(entry_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid entry id") from None
+
+    request = (
+        await db.execute(select(AIAnalysisRequest).where(AIAnalysisRequest.entry_id == eid))
+    ).scalar_one_or_none()
+    run = (
+        await db.execute(
+            select(EntryPipelineRun)
+            .where(EntryPipelineRun.entry_id == eid, EntryPipelineRun.stage == "adjudicate")
+            .order_by(EntryPipelineRun.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    adjudicator_results = select(AIResult.id).where(
+        AIResult.task_id == select(AITask.id).where(AITask.name == TASK_NAME).scalar_subquery()
+    )
+    verdicts: list[dict] = []
+    link_rows = (
+        (
+            await db.execute(
+                select(EntityLinkValidationLog).where(
+                    EntityLinkValidationLog.entry_id == eid,
+                    EntityLinkValidationLog.ai_result_id.in_(adjudicator_results),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for r in link_rows:
+        verdict = {
+            "shadow_remove": "remove",
+            "removed": "remove",
+            "needs_reclassification": "reclassify",
+            "restored": "keep",
+        }.get(r.action, r.action)
+        verdicts.append(
+            {
+                "item_id": f"link:{r.entity_type}:{r.entity_id}",
+                "kind": "link",
+                "entity_type": r.entity_type,
+                "entity_id": str(r.entity_id),
+                "verdict": verdict,
+                "reason": r.reason,
+                "suggested_type": r.suggested_entity_type,
+                "applied": r.action in ("removed", "restored"),
+                "restored": r.action == "restored",
+                "log": f"link_validator:{r.id}",
+                "action": r.action,
+            }
+        )
+    maint_rows = (
+        (
+            await db.execute(
+                # Proposal actions only: an ACTION_RESTORED row is the audit
+                # line for an undo, and its verdict is already on the row it undid.
+                select(EntityMaintenanceLog).where(
+                    EntityMaintenanceLog.action.in_(sorted(ADJUDICATION_PROPOSAL_ACTIONS)),
+                    EntityMaintenanceLog.before["entry_id"].astext == str(eid),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    verdict_by_action = {
+        ACTION_UNLINK: "remove",
+        ACTION_RECLASSIFY: "reclassify",
+        ACTION_VETO: "veto",
+        ACTION_MERGE: "merge",
+        ACTION_EDGE_DEMOTE: "demote",
+        ACTION_IOC_DROP: "drop",
+        ACTION_ASSESSMENT: "assessment",
+    }
+    for r in maint_rows:
+        after = r.after or {}
+        if r.action == ACTION_EDGE_DEMOTE:
+            item_id, kind = f"edge:{r.entity_id}", "edge"
+        elif r.action == ACTION_IOC_DROP:
+            item_id, kind = f"ioc:{after.get('kind')}:{after.get('value')}", "ioc"
+        elif r.action == ACTION_ASSESSMENT:
+            item_id, kind = "assessment", "assessment"
+        else:
+            item_id, kind = f"link:{r.entity_type}:{r.entity_id}", "link"
+        verdict = verdict_by_action.get(r.action, r.action)
+        if r.action == ACTION_ASSESSMENT:
+            verdict = after.get("verdict") or "ok"
+        verdicts.append(
+            {
+                "item_id": item_id,
+                "kind": kind,
+                "entity_type": r.entity_type,
+                "entity_id": str(r.entity_id) if r.entity_id else None,
+                "verdict": verdict,
+                "reason": r.reasoning,
+                "suggested_type": after.get("suggested_type"),
+                "merge_into": after.get("merge_into"),
+                "applied": bool(r.applied),
+                # An analyst already put this one back: neither Apply nor
+                # Restore is on offer any more.
+                "restored": bool(after.get("restored")),
+                "log": f"entity_maintenance:{r.id}",
+                "action": r.action,
+            }
+        )
+    return {
+        "status": request.adjudication_status if request else None,
+        "adjudicated_at": request.adjudicated_at.isoformat() if request and request.adjudicated_at else None,
+        "run": {
+            "status": run.status,
+            "created_at": run.created_at.isoformat() if run.created_at else None,
+            "duration_ms": run.duration_ms,
+            "mode": (run.detail or {}).get("mode"),
+            "detail": run.detail or None,
+        }
+        if run
+        else None,
+        "verdicts": verdicts,
     }
 
 
@@ -515,8 +676,13 @@ async def retry_pipeline_stage(
     entry_id: str = Path(..., description="Entry UUID"),
     stage: str = Path(..., description="Stage to re-dispatch; must be retryable (automate/translate are not)"),
     user: User = Depends(get_current_user),
+    db=Depends(get_db),
 ):
-    """Re-dispatch one pipeline stage task for an entry. Admin only."""
+    """Re-dispatch one pipeline stage task for an entry. Admin only.
+
+    For the adjudicate stage this is a deliberate bypass of the enqueue gates
+    (plan, trigger, score, hourly budget): the request row is marked queued
+    so the matrix shows it, and the task re-checks only the master switch."""
     _require_admin(user)
     import uuid as _uuid
 
@@ -525,9 +691,19 @@ async def retry_pipeline_stage(
     if stage not in RETRYABLE_STAGE_TASKS:
         raise HTTPException(status_code=422, detail=f"Stage not retryable: {stage}")
     try:
-        _uuid.UUID(entry_id)
+        eid = _uuid.UUID(entry_id)
     except ValueError:
         raise HTTPException(status_code=422, detail="Invalid entry id") from None
+    if stage == "adjudicate":
+        from datetime import UTC, datetime
+
+        from app.services.entry_adjudication import PENDING, _request_row
+
+        row = await _request_row(db, eid)
+        row.adjudication_status = PENDING
+        row.adjudication_queued_at = datetime.now(UTC)
+        db.add(row)
+        await db.commit()
     result = celery_app.send_task(RETRYABLE_STAGE_TASKS[stage], kwargs={"entry_id": entry_id})
     return {"dispatched": True, "task_id": result.id}
 
@@ -623,6 +799,7 @@ PROCESSING_STAGE_ORDER: list[str] = [
     "correlation",
     "requirements",
     "score",
+    "adjudicate",
     "automate",
 ]
 
@@ -889,20 +1066,85 @@ async def processing_flow(
         for r in runs:
             latest.setdefault((r.entry_id, r.stage), r)
 
+    # The adjudicate stage's gate decisions (skipped_*, pending) live on the
+    # entry's AI request row, not in a pipeline run: an entry the gates
+    # skipped never ran the task. Read them so the column can say why.
+    from app.models.ai_analysis import AIAnalysisRequest
+
+    adjudication_by_entry: dict = {}
+    if entry_ids:
+        for req in (
+            (
+                await db.execute(
+                    select(AIAnalysisRequest).where(
+                        AIAnalysisRequest.entry_id.in_(entry_ids), AIAnalysisRequest.adjudication_status.isnot(None)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        ):
+            adjudication_by_entry[req.entry_id] = req
+
+    def _adjudication_cell(e: Entry) -> dict | None:
+        """A synthetic cell for the adjudicate column when the task never ran
+        (gate skip, or queued and waiting on the AI worker)."""
+        req = adjudication_by_entry.get(e.id)
+        if req is None:
+            return None
+        status = req.adjudication_status or ""
+        if status == "pending":
+            return {
+                "status": "queued",
+                "duration_ms": None,
+                "error": None,
+                "retryable": True,
+                "created_at": req.adjudication_queued_at.isoformat() if req.adjudication_queued_at else None,
+                "detail": {"queued_at": req.adjudication_queued_at.isoformat() if req.adjudication_queued_at else None},
+            }
+        if status.startswith("skipped_"):
+            return {
+                "status": "skipped",
+                "duration_ms": None,
+                "error": None,
+                "retryable": True,
+                "created_at": req.adjudicated_at.isoformat() if req.adjudicated_at else None,
+                "detail": {"skipped": status.removeprefix("skipped_")},
+            }
+        return None
+
     def _row(e: Entry) -> dict:
         stages: dict[str, dict] = {}
         last_run_at = None
         for st in PROCESSING_STAGE_ORDER:
             r = latest.get((e.id, st))
             if r is None:
+                if st == "adjudicate":
+                    cell = _adjudication_cell(e)
+                    if cell is not None:
+                        stages[st] = cell
                 continue
-            stages[st] = {
+            cell = {
                 "status": r.status,
                 "duration_ms": r.duration_ms,
                 "error": r.error,
                 "retryable": st in RETRYABLE_STAGE_TASKS,
                 "created_at": r.created_at.isoformat() if r.created_at else None,
+                # Stage-specific run detail (the adjudicate stage's verdict counts).
+                "detail": r.detail or None,
             }
+            if st == "adjudicate":
+                req = adjudication_by_entry.get(e.id)
+                queued_at = getattr(req, "adjudication_queued_at", None) if req else None
+                if (
+                    req is not None
+                    and req.adjudication_status == "pending"
+                    and queued_at is not None
+                    and r.created_at is not None
+                    and queued_at > r.created_at
+                ):
+                    cell = _adjudication_cell(e) or cell
+            stages[st] = cell
             if r.created_at and (last_run_at is None or r.created_at > last_run_at):
                 last_run_at = r.created_at
         has_err = any(s["status"] == "error" for s in stages.values())

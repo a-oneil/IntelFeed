@@ -1,20 +1,22 @@
-"""Autonomous entity-maintenance tasks (run on the ai worker).
+"""Entity-maintenance tasks that call an AI provider (run on the ai worker).
 
-Two task families share this module — they're related enough that they reuse
-the same candidate-finder utilities, AI invocation pattern, and maintenance
-log:
+Four task families share this module — the same AI invocation pattern and
+the same maintenance log (``entity_maintenance_log``):
 
-  entity_merge_maintenance   — weekly: find clusters of similarly-named
-                                actors / malware, hand each to Claude, let
-                                it decide and (in apply mode) merge them via
-                                the intelfeed skill.
+  actor_profile_refresh        — weekly: pick the most-active actors whose
+                                  profile description hasn't been touched
+                                  recently and have the model refresh it
+                                  from recent entries (gated by
+                                  ``entity_maintenance_mode``, shadow/apply).
+  assessment backfill          — daily: draft the AI description paragraph
+                                  for entities that have none.
+  entity_name_normalization    — on demand: canonical-name proposals.
+  ai_enrich_gap_batch          — on demand: fill empty profile fields.
 
-  actor_profile_refresh      — weekly: pick the most-active actors whose
-                                profile description hasn't been touched
-                                recently and have Claude refresh it from
-                                recent entries.
+Duplicate entities are judged at creation by the adjudicate stage
+(``services/entry_adjudication.py``), not here.
 
-Both tasks run on the dedicated `celery-worker-ai` service (the serialized
+All of them run on the dedicated `celery-worker-ai` service (the serialized
 "ai" queue) so AI calls hit the provider one at a time.
 """
 
@@ -26,13 +28,11 @@ import time
 import uuid
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
-from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai.capabilities import provider_type_supports_tools
-from app.ai.engine import get_task_assignment, run_task
+from app.ai.engine import run_task
 from app.config import settings
 from app.core.metrics import CELERY_TASK_DURATION_SECONDS, CELERY_TASKS_TOTAL
 from app.models.ai_result import AIResult
@@ -89,536 +89,25 @@ logger = logging.getLogger(__name__)
 # ============================================================
 
 
+def _current_mode() -> str:
+    """Actor profile refresh mode: 'shadow' logs the rewritten description as a
+    proposal; 'apply' writes it (with ActorDescriptionHistory as the undo)."""
+    raw = (settings.get("entity_maintenance_mode") or "shadow").lower()
+    if raw not in ("shadow", "apply"):
+        logger.warning("Unknown entity_maintenance_mode=%r; defaulting to shadow", raw)
+        return "shadow"
+    return raw
+
+
 async def _resolve_system_user(db: AsyncSession) -> uuid.UUID | None:
     from app.services.system_user import get_system_user_id
 
     return await get_system_user_id(db)
 
 
-def _current_mode() -> str:
-    """Read the global shadow/apply mode flag from system_settings (default: shadow).
-
-    Both entity_merge_maintenance and actor_profile_refresh respect the same
-    flag — there's no benefit to operating in different modes for the two
-    tasks, and a single switch is easier to audit.
-    """
-    raw = (settings.get("entity_maintenance_mode") or "shadow").lower()
-    if raw not in {"shadow", "apply"}:
-        logger.warning("Unknown entity_maintenance_mode=%r; defaulting to shadow", raw)
-        return "shadow"
-    return raw
-
-
-async def _resolve_ai_result_id(db: AsyncSession, task_name: str, target_id: uuid.UUID) -> uuid.UUID | None:
-    """Find the AIResult row that the engine just wrote for a given target.
-
-    The engine ensures one is_current=True row per (target, task), so we
-    can look it up by target_id alone.
-    """
-    from app.models.ai_task import AITask
-
-    result = await db.execute(
-        select(AIResult.id)
-        .join(AITask, AITask.id == AIResult.task_id)
-        .where(
-            AITask.name == task_name,
-            AIResult.target_type == "entity_cluster",
-            AIResult.target_id == target_id,
-            AIResult.is_current.is_(True),
-        )
-        .order_by(AIResult.created_at.desc())
-        .limit(1)
-    )
-    return result.scalar_one_or_none()
-
-
-# ============================================================
-# Cluster discovery
-# ============================================================
-
-
-TypedMember = tuple[str, uuid.UUID]  # (entity_type, entity_id)
-
-
-async def _find_cross_type_clusters(
-    db: AsyncSession,
-    max_clusters: int,
-) -> list[list[TypedMember]]:
-    """Group entities across ALL 5 maintenance-managed types by shared normalized
-    (name OR alias) token. Returns clusters of (entity_type, id) tuples — a
-    single-type cluster is just a cluster where all tuples share the same type.
-
-    Same DSU logic as before but the nodes are (etype, id) tuples so cross-table
-    matches collapse correctly. Min token length = 4 to filter spurious noise.
-    """
-    union_subqueries = []
-    for etype, spec in _WORKER_ENTITY_TYPES.items():
-        tbl = spec["table"]
-        union_subqueries.append(
-            f"SELECT '{etype}' AS etype, id, lower(trim(name)) AS norm FROM {tbl} "
-            f"WHERE name IS NOT NULL AND length(trim(name)) >= 4"
-        )
-        union_subqueries.append(
-            f"SELECT '{etype}' AS etype, id, lower(trim(unnest(aliases))) AS norm FROM {tbl} WHERE aliases IS NOT NULL"
-        )
-    union_sql = "\nUNION ALL\n".join(union_subqueries)
-
-    stmt = text(
-        f"""
-        WITH names AS (
-            {union_sql}
-        )
-        SELECT norm, array_agg(DISTINCT etype || ':' || id::text) AS members
-        FROM names
-        WHERE length(norm) >= 4
-        GROUP BY norm
-        HAVING count(DISTINCT etype || ':' || id::text) > 1
-        """
-    )
-    result = await db.execute(stmt)
-    rows = result.all()
-
-    # DSU over typed nodes.
-    parent: dict[TypedMember, TypedMember] = {}
-
-    def find(x: TypedMember) -> TypedMember:
-        while parent.setdefault(x, x) != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    def union(a: TypedMember, b: TypedMember) -> None:
-        ra, rb = find(a), find(b)
-        if ra != rb:
-            parent[ra] = rb
-
-    def _parse(member_str: str) -> TypedMember | None:
-        try:
-            etype, raw_id = member_str.split(":", 1)
-            return (etype, uuid.UUID(raw_id))
-        except (ValueError, TypeError):
-            return None
-
-    for _norm, members in rows:
-        parsed = [m for m in (_parse(s) for s in members) if m is not None]
-        if len(parsed) < 2:
-            continue
-        first = parsed[0]
-        parent.setdefault(first, first)
-        for other in parsed[1:]:
-            union(first, other)
-
-    clusters: dict[TypedMember, list[TypedMember]] = defaultdict(list)
-    for node in parent:
-        clusters[find(node)].append(node)
-
-    filtered = sorted(
-        (members for members in clusters.values() if len(members) >= 2),
-        key=lambda m: -len(m),
-    )
-    return filtered[:max_clusters]
-
-
 # ============================================================
 # Entity-merge maintenance — kickoff + per-cluster
 # ============================================================
-
-
-@celery_app.task(
-    name="app.workers.entity_maintenance_tasks.kickoff_entity_merge_maintenance",
-    soft_time_limit=300,
-    time_limit=360,
-)
-def kickoff_entity_merge_maintenance() -> dict:
-    """Beat-scheduled kickoff. Finds candidate clusters; fans out per-cluster tasks."""
-    start = time.monotonic()
-    try:
-        stats = run_async(_kickoff_merge_async())
-        CELERY_TASKS_TOTAL.labels(task_name="kickoff_entity_merge_maintenance", status="success").inc()
-        logger.info("kickoff_entity_merge_maintenance: %s", stats)
-        return stats
-    except Exception:
-        CELERY_TASKS_TOTAL.labels(task_name="kickoff_entity_merge_maintenance", status="error").inc()
-        logger.exception("kickoff_entity_merge_maintenance failed")
-        raise
-    finally:
-        CELERY_TASK_DURATION_SECONDS.labels(task_name="kickoff_entity_merge_maintenance").observe(
-            time.monotonic() - start
-        )
-
-
-async def _kickoff_merge_async() -> dict:
-    """Cross-type cluster discovery across actors / malware / vendors / products / tools."""
-    async with worker_session() as db:
-        from app.services.system_settings import _ensure_cache, invalidate_cache
-
-        invalidate_cache()
-        await _ensure_cache(db)
-
-        # Read knobs only after the cache is warmed — settings.get() consults the
-        # in-process cache, so a read above this line never sees a DB override.
-        max_clusters = int(settings.get("entity_merge_max_clusters_per_run") or 30)
-
-        clusters = await _find_cross_type_clusters(db, max_clusters)
-
-    enqueued = 0
-    type_breakdown: dict[str, int] = defaultdict(int)
-    cross_type_count = 0
-    for cluster in clusters:
-        # Serialize as list of [etype, id_str] pairs for the JSON-serialized task arg.
-        serialized = [[etype, str(eid)] for etype, eid in cluster]
-        process_merge_candidate.apply_async(
-            args=[serialized],
-            queue="ai",
-        )
-        enqueued += 1
-        types_in_cluster = {etype for etype, _ in cluster}
-        if len(types_in_cluster) > 1:
-            cross_type_count += 1
-        for t in types_in_cluster:
-            type_breakdown[t] += 1
-
-    return {
-        "clusters_enqueued": enqueued,
-        "cross_type_clusters": cross_type_count,
-        "type_breakdown": dict(type_breakdown),
-    }
-
-
-@celery_app.task(
-    name="app.workers.entity_maintenance_tasks.process_merge_candidate",
-    bind=True,
-    soft_time_limit=420,
-    time_limit=480,
-    autoretry_for=(TimeoutError,),
-    max_retries=2,
-)
-def process_merge_candidate(self, cluster_members: list[list[str]]) -> dict:
-    """Per-cluster: load typed entity profiles, run AI, apply or shadow-log decisions.
-
-    `cluster_members` is a list of [entity_type, entity_id_str] pairs. A single-type
-    cluster has all pairs sharing the same entity_type; cross-type clusters mix.
-    """
-    start = time.monotonic()
-    try:
-        members: list[TypedMember] = [(etype, uuid.UUID(eid)) for etype, eid in cluster_members]
-        stats = run_async(_process_merge_candidate_async(members))
-        status = stats.get("status", "unknown")
-        if status == "provider_paused":
-            pause_until_str = stats.get("pause_until")
-            countdown = 3600
-            if pause_until_str:
-                try:
-                    pause_until = datetime.fromisoformat(pause_until_str)
-                    countdown = max(60, min(3600, int((pause_until - datetime.now(UTC)).total_seconds()) + 30))
-                except ValueError:
-                    pass
-            CELERY_TASKS_TOTAL.labels(task_name="process_merge_candidate", status="provider_paused").inc()
-            raise self.retry(countdown=countdown, max_retries=24)
-        CELERY_TASKS_TOTAL.labels(
-            task_name="process_merge_candidate",
-            status="success" if status in {"processed", "no_op", "empty"} else "error",
-        ).inc()
-        return stats
-    except self.MaxRetriesExceededError:
-        CELERY_TASKS_TOTAL.labels(task_name="process_merge_candidate", status="error").inc()
-        raise
-    except Exception:
-        CELERY_TASKS_TOTAL.labels(task_name="process_merge_candidate", status="error").inc()
-        logger.exception("process_merge_candidate failed for cluster %s", cluster_members)
-        raise
-    finally:
-        CELERY_TASK_DURATION_SECONDS.labels(task_name="process_merge_candidate").observe(time.monotonic() - start)
-
-
-async def _process_merge_candidate_async(members: list[TypedMember]) -> dict:
-    if not members or len(members) < 2:
-        return {"status": "empty", "cluster_size": len(members)}
-
-    async with worker_session() as db:
-        from app.services.system_settings import _ensure_cache, invalidate_cache
-
-        invalidate_cache()
-        await _ensure_cache(db)
-
-        mode = _current_mode()
-        system_user_id = await _resolve_system_user(db)
-        if not system_user_id:
-            return {"status": "no_admin_user"}
-
-        # Apply mode only works when the assigned provider can execute the
-        # merge/reclassify skill tools. On a tool-less provider (e.g. ollama)
-        # the model would emit merge JSON without any merge having run, and
-        # the log below would record applied=True falsely — downgrade to
-        # shadow so the audit trail stays truthful. Must happen before
-        # `variables` is built: mode is injected into the prompt.
-        downgraded_to_shadow = False
-        if mode == "apply":
-            assignment_data = await get_task_assignment(db, system_user_id, "entity_merge_maintenance")
-            if assignment_data and not provider_type_supports_tools(assignment_data[2].provider_type):
-                logger.warning(
-                    "entity_merge_maintenance: apply mode requested but provider %r (%s) "
-                    "cannot run tools; downgrading this run to shadow — no merges will be applied",
-                    assignment_data[2].name,
-                    assignment_data[2].provider_type,
-                )
-                mode = "shadow"
-                downgraded_to_shadow = True
-
-        cluster_payload = await _build_cluster_payload(db, members)
-        if not cluster_payload or len(cluster_payload.get("members", [])) < 2:
-            return {"status": "empty", "cluster_size": len(cluster_payload.get("members", []))}
-
-        # Stable target_id for this cluster — survives across runs of the same set.
-        target_id = uuid.uuid5(
-            uuid.NAMESPACE_URL,
-            ",".join(sorted(f"{etype}:{eid}" for etype, eid in members)),
-        )
-
-        # Dominant type — used to tag the log row's entity_type so existing
-        # filters still work for same-type clusters. Cross-type clusters get
-        # the most common type; the typed cluster_members carry the truth.
-        type_counts: dict[str, int] = defaultdict(int)
-        for etype, _ in members:
-            type_counts[etype] += 1
-        dominant_type = max(type_counts, key=type_counts.get)
-        types_present = sorted(type_counts.keys())
-        is_cross_type = len(types_present) > 1
-
-        variables = {
-            "cluster": json.dumps(cluster_payload, indent=2, default=str),
-            "cluster_types": ", ".join(types_present),
-            "is_cross_type": "yes" if is_cross_type else "no",
-            "mode": mode,
-        }
-
-        try:
-            result = await run_task(
-                db=db,
-                user_id=system_user_id,
-                task_name="entity_merge_maintenance",
-                variables=variables,
-                target_type="entity_cluster",
-                target_id=target_id,
-                force=True,
-            )
-        except Exception as e:
-            logger.exception("entity_merge_maintenance run_task failed: %s", e)
-            await db.commit()
-            return {"status": "ai_error", "error": str(e)}
-
-        if result and result.get("_extraction_status") == "provider_paused":
-            await db.commit()
-            return {
-                "status": "provider_paused",
-                "pause_until": result.get("_pause_until"),
-                "cluster_size": len(cluster_payload["members"]),
-            }
-
-        if not result or result.get("_extraction_status") != "success":
-            logger.warning(
-                "entity_merge_maintenance: AI returned non-success status=%r",
-                (result or {}).get("_extraction_status"),
-            )
-            await db.commit()
-            return {
-                "status": "ai_no_success",
-                "ai_status": (result or {}).get("_extraction_status"),
-            }
-
-        ai_result_id = await _resolve_ai_result_id(db, "entity_merge_maintenance", target_id)
-
-        action = result.get("action")
-        reasoning = (result.get("reasoning") or "")[:2000]
-
-        # Snapshot names at proposal time so the audit log stays readable
-        # AFTER the underlying entities get merged/deleted. Without this, the
-        # list endpoint's DB lookup returns "(unknown)" for any source entity
-        # that's been merged away since the proposal was generated.
-        name_index: dict[tuple[str, str], str] = {}
-        for m in cluster_payload.get("members", []):
-            etype = m.get("entity_type")
-            eid = m.get("id")
-            name = m.get("name")
-            if etype and eid and name:
-                name_index[(etype, str(eid))] = name
-
-        def _lookup_name(etype: str | None, eid: str | None) -> str | None:
-            if not etype or not eid:
-                return None
-            return name_index.get((etype, str(eid)))
-
-        typed_members_payload = [
-            {
-                "entity_type": etype,
-                "entity_id": str(eid),
-                "name": _lookup_name(etype, str(eid)),
-            }
-            for etype, eid in members
-        ]
-
-        if action == "no_op":
-            db.add(
-                EntityMaintenanceLog(
-                    entity_type=dominant_type,
-                    entity_id=None,
-                    action="no_op",
-                    mode=mode,
-                    before={"cluster_members": typed_members_payload},
-                    after=None,
-                    reasoning=reasoning,
-                    ai_result_id=ai_result_id,
-                    applied=False,
-                )
-            )
-            await db.commit()
-            return {"status": "no_op", "cluster_size": len(cluster_payload["members"])}
-
-        if action != "merge":
-            await db.commit()
-            return {"status": "ai_bad_action", "action": action}
-
-        # `merges` are same-type pairs scoped to the cluster's dominant type (Claude
-        # is told not to mix types in this array). Cross-type moves go in
-        # `reclassifies` and self-describe their source/target types.
-        merges = result.get("merges") or []
-        reclassifies = result.get("reclassifies") or []
-
-        # Inject snapshot names so the audit row survives entity deletion.
-        enriched_merges = []
-        for m in merges:
-            if not isinstance(m, dict):
-                continue
-            enriched_merges.append(
-                {
-                    **m,
-                    "target_name": m.get("target_name") or _lookup_name(dominant_type, m.get("target_id")),
-                    "source_name": m.get("source_name") or _lookup_name(dominant_type, m.get("source_id")),
-                }
-            )
-        enriched_reclassifies = []
-        for r in reclassifies:
-            if not isinstance(r, dict):
-                continue
-            enriched_reclassifies.append(
-                {
-                    **r,
-                    "source_name": r.get("source_name") or _lookup_name(r.get("source_type"), r.get("source_id")),
-                    "target_name": r.get("target_name") or _lookup_name(r.get("target_type"), r.get("target_id")),
-                }
-            )
-
-        db.add(
-            EntityMaintenanceLog(
-                entity_type=dominant_type,
-                entity_id=None,
-                action="merge_cluster_summary",
-                mode=mode,
-                before={"cluster_members": typed_members_payload},
-                after={"merges": enriched_merges, "reclassifies": enriched_reclassifies},
-                reasoning=reasoning,
-                ai_result_id=ai_result_id,
-                applied=(mode == "apply"),
-            )
-        )
-        await db.commit()
-        stats = {
-            "status": "processed",
-            "cluster_size": len(cluster_payload["members"]),
-            "mode": mode,
-            "merges_proposed": len(merges),
-            "reclassifies_proposed": len(reclassifies),
-            "cross_type": is_cross_type,
-        }
-        if downgraded_to_shadow:
-            stats["downgraded_to_shadow"] = True
-        return stats
-
-
-async def _build_cluster_payload(
-    db: AsyncSession,
-    members: list[TypedMember],
-) -> dict[str, Any]:
-    """Pull profiles + sample-entry titles for every member, regardless of type.
-
-    Returns a unified `members` list where each entry has `entity_type`,
-    common fields (id, name, aliases, description, article_count, first/last seen)
-    and the type-specific fields the AI needs to judge identity (motivation,
-    mitre_id, malware_type, vendor_type, tool_type, etc.).
-    """
-    sample_entries_per = 8
-    out_members: list[dict] = []
-
-    # Group ids by entity_type for bulk SELECT per table.
-    by_type: dict[str, list[uuid.UUID]] = defaultdict(list)
-    for etype, eid in members:
-        by_type[etype].append(eid)
-
-    for etype, ids in by_type.items():
-        spec = _WORKER_ENTITY_TYPES.get(etype)
-        if not spec:
-            continue
-        model = spec["model"]
-        junction_model = spec["junction_model"]
-        junction_fk = spec["junction_fk"]
-        rows = (await db.execute(select(model).where(model.id.in_(ids)))).scalars().all()
-        for r in rows:
-            sample_q = (
-                select(Entry.title, Entry.published_at)
-                .join(junction_model, junction_model.entry_id == Entry.id)
-                .where(getattr(junction_model, junction_fk) == r.id)
-                .order_by(Entry.published_at.desc().nullslast())
-                .limit(sample_entries_per)
-            )
-            sample = await db.execute(sample_q)
-
-            member: dict[str, Any] = {
-                "entity_type": etype,
-                "id": str(r.id),
-                "name": r.name,
-                "aliases": list(getattr(r, "aliases", []) or []),
-                "description": getattr(r, "description", None),
-                "article_count": getattr(r, "article_count", None),
-                "first_seen_at": r.first_seen_at.isoformat() if getattr(r, "first_seen_at", None) else None,
-                "last_seen_at": r.last_seen_at.isoformat() if getattr(r, "last_seen_at", None) else None,
-                "recent_entries": [{"title": t, "published_at": p.isoformat() if p else None} for t, p in sample.all()],
-            }
-            # Type-specific signal fields the AI uses to judge cross-type identity.
-            if etype == "threat_actor":
-                member.update(
-                    {
-                        "mitre_id": getattr(r, "mitre_id", None),
-                        "country": getattr(r, "country", None),
-                        "motivation": getattr(r, "motivation", None),
-                        "targeted_sectors": list(getattr(r, "targeted_sectors", []) or []),
-                    }
-                )
-            elif etype == "malware":
-                member.update({"malware_type": getattr(r, "malware_type", None)})
-            elif etype == "vendor":
-                member.update(
-                    {
-                        "vendor_type": getattr(r, "vendor_type", None),
-                        "website": getattr(r, "website", None),
-                    }
-                )
-            elif etype == "product":
-                member.update(
-                    {
-                        "product_type": getattr(r, "product_type", None),
-                        "vendor_id": str(r.vendor_id) if getattr(r, "vendor_id", None) else None,
-                    }
-                )
-            elif etype == "tool":
-                member.update(
-                    {
-                        "tool_type": getattr(r, "tool_type", None),
-                        "platforms": list(getattr(r, "platforms", []) or []),
-                    }
-                )
-            out_members.append(member)
-
-    return {"members": out_members}
 
 
 # ============================================================

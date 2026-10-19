@@ -1,28 +1,25 @@
 /**
  * ProposalsQueue — the "Proposals" lens for the Engine console's Links and
  * AI-entities tabs. The complete hygiene surface for its domain (this replaced
- * the old standalone WorkbenchHygiene page): a Queue view of pending AI/scan
- * suggestions with inline Apply / Dismiss, AI-review bulk ops, and a History
- * view of everything that ran (with Restore for removed links).
+ * the old standalone WorkbenchHygiene page): a Queue view of what the
+ * adjudicate stage and the on-demand scans proposed, with inline Apply /
+ * Dismiss, and a History view of everything that ran (with Restore).
  */
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
 import api from "@/api/client";
-import { useApplyAllMaintenanceProposals } from "@/hooks/useEntityMaintenance";
 import {
+  useApplyAdjudicationAll,
   useApplyAdvisories,
-  useApplyAiApproved,
   useDismissProposals,
   useHygieneFeed,
   useHygieneStats,
-  useKickoffAiReview,
   useRunNameNormalization,
   useScanAliasHygiene,
   useScanIdHygiene,
   useScanVendorAutolink,
-  type FeedFilters,
   type FeedLink,
   type FeedRow,
 } from "@/hooks/useHygiene";
@@ -41,13 +38,20 @@ const CHANGE_META: Record<string, { label: string; cls: string }> = {
   shadow_remove: { label: "Remove link", cls: styles.tRemove },
   needs_reclassification: { label: "Reclassify", cls: styles.tRecl },
   vendor_autolink: { label: "Vendor link", cls: styles.tVlink },
-  merge_cluster_summary: { label: "Merge cluster", cls: styles.tMerge },
   normalize_name: { label: "Name fix", cls: styles.tName },
   alias_collision: { label: "Alias trim", cls: styles.tName },
   ttp_malformed_id: { label: "ID fix", cls: styles.tName },
   cve_malformed_id: { label: "ID fix", cls: styles.tName },
   cve_withdrawn: { label: "CVE withdrawn", cls: styles.tRemove },
-  stale_entity_review: { label: "Stale entity", cls: styles.tStale },
+  // adjudicate stage (post-analysis review)
+  adjudication_veto: { label: "Veto entity", cls: styles.tRemove },
+  adjudication_merge: { label: "Merge", cls: styles.tMerge },
+  adjudication_unlink: { label: "Unlink", cls: styles.tRemove },
+  adjudication_reclassify: { label: "Reclassify (review)", cls: styles.tRecl },
+  adjudication_edge_demote: { label: "Demote edge", cls: styles.tRecl },
+  adjudication_ioc_drop: { label: "Drop observable", cls: styles.tRecl },
+  adjudication_assessment: { label: "Assessment", cls: styles.tStale },
+  adjudication_restored: { label: "Verdict restored", cls: styles.tVlink },
   // applied history
   removed: { label: "Link removed", cls: styles.tRemove },
   restored: { label: "Link restored", cls: styles.tVlink },
@@ -70,13 +74,30 @@ const LINK_FILTERS = [
 ];
 const ENTITY_FILTERS = [
   { value: "", label: "All" },
-  { value: "merge_cluster_summary", label: "Merge" },
   { value: "normalize_name", label: "Name fix" },
   { value: "alias_collision", label: "Alias trim" },
   { value: "vendor_autolink", label: "Vendor link" },
   { value: "ttp_malformed_id,cve_malformed_id,cve_withdrawn", label: "ID fix" },
-  { value: "stale_entity_review", label: "Stale" },
+  { value: "adjudication_veto", label: "Veto" },
+  { value: "adjudication_merge", label: "Merge (review)" },
+  { value: "adjudication_reclassify", label: "Reclassify (review)" },
+  { value: "adjudication_edge_demote", label: "Demote" },
+  { value: "adjudication_ioc_drop,adjudication_unlink", label: "Drop / unlink" },
 ];
+type OriginFacet = "" | "adjudicator" | "legacy" | "orphaned";
+const ORIGINS: { value: OriginFacet; label: string; title: string; queueOnly?: boolean }[] = [
+  { value: "", label: "All", title: "Every proposal" },
+  { value: "adjudicator", label: "Adjudicator", title: "Filed by the post-analysis review, with the article in hand" },
+  { value: "legacy", label: "Legacy", title: "Filed by the retired nightly jobs and on-demand scans" },
+  {
+    value: "orphaned",
+    label: "Orphaned",
+    title: "Legacy proposals no entry can carry to the adjudicate stage — yours to dismiss or apply by hand",
+    queueOnly: true,
+  },
+];
+const ORPHANED_NOTE =
+  "Left by the retired jobs with no entry to re-judge them against. Dismiss or apply by hand; nothing automatic touches them.";
 const LINK_HISTORY_FILTERS = [
   { value: "", label: "All" },
   { value: "removed", label: "Removed" },
@@ -89,14 +110,9 @@ const ENTITY_HISTORY_FILTERS = [
   { value: "orphan_prune", label: "Orphans" },
   { value: "update_description,update_aliases", label: "Profile" },
   { value: "ai_enrich_filled,ai_enrich_unknown", label: "AI enrich" },
+  { value: "adjudication_restored", label: "Restored" },
 ];
 
-
-const VERDICT_META: Record<string, { cls: string; text: string }> = {
-  approve: { cls: styles.vOk, text: "✓ approve" },
-  reject: { cls: styles.vNo, text: "✕ reject" },
-  unsure: { cls: styles.vMaybe, text: "? unsure" },
-};
 
 // Row-action code → button label + tone.
 const ACTION_BTN: Record<string, { label: string; cls: string }> = {
@@ -120,25 +136,37 @@ function feedLinkHref(link: FeedLink): string | null {
   return slug && link.entity_id ? `/workbench/${slug}/${link.entity_id}` : null;
 }
 
-export function ProposalsQueue({ domain, initialAction }: { domain: Domain; initialAction?: string }) {
+export function ProposalsQueue({
+  domain,
+  initialAction,
+  initialOrigin,
+}: {
+  domain: Domain;
+  initialAction?: string;
+  initialOrigin?: "adjudicator" | "legacy";
+}) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [hist, setHist] = useState(false);
   const [actionFilter, setActionFilter] = useState(initialAction ?? "");
-  const [verdictFilter, setVerdictFilter] = useState("");
+  const [originFilter, setOriginFilter] = useState<OriginFacet>(initialOrigin ?? "");
   const [modePending, setModePending] = useState(false);
   const [busyRow, setBusyRow] = useState<string | null>(null);
 
   const source = domain === "links" ? "link_validator" : "entity_maintenance";
+  // "Orphaned" is its own feed switch, not an origin value.
+  const orphaned = originFilter === "orphaned";
+  const origin = orphaned || !originFilter ? undefined : originFilter;
   const stats = useHygieneStats();
   const feed = useHygieneFeed(
     hist
-      ? { source, mode: "apply", action: actionFilter || undefined, limit: 100 }
+      ? { source, mode: "apply", action: actionFilter || undefined, origin, limit: 100 }
       : {
           source,
           pending: true,
           action: actionFilter || undefined,
-          review: (verdictFilter || undefined) as FeedFilters["review"],
+          origin,
+          orphaned: orphaned || undefined,
           limit: 100,
         },
   );
@@ -146,44 +174,17 @@ export function ProposalsQueue({ domain, initialAction }: { domain: Domain; init
   const runRowAction = useHygieneRowAction();
   const dismissProposals = useDismissProposals();
   const applyAdvisories = useApplyAdvisories();
-  const applyAllMerges = useApplyAllMaintenanceProposals();
-  const kickoffAiReview = useKickoffAiReview();
-  const applyAiApproved = useApplyAiApproved();
+  const applyAdjudication = useApplyAdjudicationAll();
   const scanNames = useRunNameNormalization();
   const scanAliases = useScanAliasHygiene();
   const scanIds = useScanIdHygiene();
   const scanVendors = useScanVendorAutolink();
-  const [draining, setDraining] = useState(false);
 
-  // Scans that mint fresh proposals into this domain's queue.
+  // Scans that mint fresh proposals into this domain's queue (entities only —
+  // link verdicts come from the adjudicate stage at ingest).
   const scans =
     domain === "links"
-      ? [
-          {
-            label: "Run validator",
-            busy: false,
-            run: () =>
-              api
-                .post("/admin/link-validation/run", {})
-                .then(() => toast.success("Validator queued — proposals appear as it runs"))
-                .catch((e) => toast.error(`Failed: ${(e as Error).message}`)),
-          },
-          {
-            label: `Drain pending (${(stats.data?.link_validator_pending ?? 0).toLocaleString()})`,
-            busy: draining,
-            run: async () => {
-              setDraining(true);
-              try {
-                const res = await api.post<{ enqueued: number }>("/admin/link-validation/run", { all_pending: true });
-                toast.success(`Draining ~${res.data.enqueued ?? 0} pending entries`);
-              } catch (e) {
-                toast.error(`Failed: ${(e as Error).message}`);
-              } finally {
-                setDraining(false);
-              }
-            },
-          },
-        ]
+      ? []
       : [
           {
             label: "Propose name fixes",
@@ -228,13 +229,12 @@ export function ProposalsQueue({ domain, initialAction }: { domain: Domain; init
     return hist ? all : all.filter(isPending);
   }, [feed.data, hist]);
 
-  const mode: "shadow" | "apply" =
-    (domain === "links" ? stats.data?.link_validator_mode : stats.data?.entity_maintenance_mode) === "apply"
-      ? "apply"
-      : "shadow";
-  const modeKey = domain === "links" ? "link_validation_mode" : "entity_maintenance_mode";
-
-  const statsField = domain === "links" ? "link_validator_mode" : "entity_maintenance_mode";
+  // The Proposed / Applied switch is the adjudicate stage's mode: shadow files
+  // proposals, apply acts on high-confidence verdicts at ingest.
+  const statsField = "adjudication_mode";
+  const mode: "off" | "shadow" | "apply" =
+    stats.data?.adjudication_mode === "apply" ? "apply" : stats.data?.adjudication_mode === "shadow" ? "shadow" : "off";
+  const modeKey = "adjudication_mode";
   const setMode = async (next: "shadow" | "apply") => {
     if (next === mode || modePending) return;
     setModePending(true);
@@ -247,7 +247,9 @@ export function ProposalsQueue({ domain, initialAction }: { domain: Domain; init
     try {
       await api.patch("/system-settings", { settings: { [modeKey]: next } });
       toast.success(
-        next === "apply" ? "Applied mode — scans now auto-run proposals" : "Proposed mode — suggestions held for review",
+        next === "apply"
+          ? "Applied mode — the review now applies high-confidence verdicts at ingest"
+          : "Proposed mode — verdicts filed as suggestions for review",
       );
     } catch (e) {
       qc.setQueryData(["hygiene", "stats"], (prev: unknown) =>
@@ -271,7 +273,8 @@ export function ProposalsQueue({ domain, initialAction }: { domain: Domain; init
     if (next === hist) return;
     setHist(next);
     setActionFilter("");
-    setVerdictFilter("");
+    // Orphaned is a queue-only lens — history has no notion of it.
+    if (next && orphaned) setOriginFilter("");
   };
 
   const doRow = async (row: FeedRow, action: string) => {
@@ -283,39 +286,68 @@ export function ProposalsQueue({ domain, initialAction }: { domain: Domain; init
     }
   };
 
+  // Scoped to what the table shows: the action filter AND the origin facet.
   const clearAll = async () => {
     const label = actionFilter
       ? (FILTERS.find((f) => f.value === actionFilter)?.label ?? "these").toLowerCase()
       : "all pending";
+    const who = origin ? ` ${origin}` : "";
     if (
       !(await confirmDialog({
         title: "Dismiss proposals",
-        message: `Dismiss ${label} proposals without applying them? The suggestions are deleted; entities and links are untouched.`,
+        message: `Dismiss ${label}${who} proposals without applying them? The suggestions are deleted; entities and links are untouched.`,
         confirmLabel: "Dismiss",
         destructive: true,
       }))
     )
       return;
     try {
-      const r = await dismissProposals.mutateAsync({ source, action: actionFilter || undefined, review: verdictFilter || undefined });
+      const r = await dismissProposals.mutateAsync({ source, action: actionFilter || undefined, origin });
       toast.success(`Dismissed ${r.dismissed} proposal${r.dismissed === 1 ? "" : "s"}`);
     } catch (e) {
       toast.error(`Dismiss failed: ${(e as Error).message}`);
     }
   };
 
-  // Counts derived from the loaded queue so the toolbar always matches the table
-  // (the global stats mix both domains and applied history).
-  const unreviewed = rows.filter((r) => !r.review_decision).length;
-  const approved = rows.filter((r) => r.review_decision === "approve").length;
-  const rejected = rows.filter((r) => r.review_decision === "reject").length;
+  // Every pending adjudicator proposal, both logs, through the stage's own
+  // apply path — the bulk form of the per-row Apply.
+  const applyAllAdjudicator = async () => {
+    const label = actionFilter
+      ? (FILTERS.find((f) => f.value === actionFilter)?.label ?? "these").toLowerCase()
+      : "every pending";
+    if (
+      !(await confirmDialog({
+        title: "Apply adjudicator proposals",
+        message: `Apply ${label} adjudicator proposals now? Each one is applied the way the stage would in apply mode, and each stays undoable from History.`,
+        confirmLabel: "Apply all",
+        destructive: true,
+      }))
+    )
+      return;
+    try {
+      const r = await applyAdjudication.mutateAsync({ action: actionFilter || undefined, limit: 500 });
+      const errs = r.errors.length;
+      const msg = `Applied ${r.applied}, skipped ${r.skipped}${errs ? `, ${errs} error${errs === 1 ? "" : "s"}` : ""}`;
+      if (errs) toast.warning(msg, { description: r.errors[0]?.error });
+      else toast.success(msg);
+    } catch (e) {
+      toast.error(`Apply failed: ${(e as Error).message}`);
+    }
+  };
 
   return (
     <div className={styles.wrap}>
       {/* toolbar */}
       <div className={styles.toolbar}>
-        <span className={styles.system}>{domain === "links" ? "Link validator" : "Merge engine"}</span>
-        <div className={styles.modeSeg} title="Proposed: suggestions held for review · Applied: auto-run on scan">
+        <span className={styles.system}>Adjudicator</span>
+        <div
+          className={styles.modeSeg}
+          title={
+            mode === "off"
+              ? "The adjudicate stage is off — pick a mode here, or turn it on from the Adjudicate stage panel (Engine → Entries → adjudicate column)"
+              : "Proposed: the review files suggestions · Applied: high-confidence verdicts applied at ingest"
+          }
+        >
           <button className={mode === "shadow" ? styles.modeOn : ""} disabled={modePending} onClick={() => setMode("shadow")}>
             Proposed
           </button>
@@ -341,109 +373,49 @@ export function ProposalsQueue({ domain, initialAction }: { domain: Domain; init
           ))}
         </div>
 
-        {!hist && (
-          <select className={styles.verdict} value={verdictFilter} onChange={(e) => setVerdictFilter(e.target.value)}>
-            <option value="">Any verdict</option>
-            <option value="approve">AI approved</option>
-            <option value="reject">AI rejected</option>
-            <option value="unsure">AI unsure</option>
-            <option value="unreviewed">Unreviewed</option>
-          </select>
-        )}
+        <div className={styles.seg} title="Who proposed it">
+          {ORIGINS.filter((o) => !hist || !o.queueOnly).map((o) => (
+            <button
+              key={o.value || "all"}
+              className={originFilter === o.value ? styles.segOn : ""}
+              title={o.title}
+              onClick={() => setOriginFilter(o.value)}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+
 
         <span className={styles.grow} />
 
-        {!hist && (
+        {!hist && !orphaned && (
           <>
-            <button
-              className={styles.btn}
-              disabled={kickoffAiReview.isPending || unreviewed === 0}
-              title="Have Claude judge every unreviewed proposal (approve / reject / unsure)"
-              onClick={() =>
-                kickoffAiReview
-                  .mutateAsync()
-                  .then(() => toast.success("AI review queued"))
-                  .catch((e) => toast.error(`Review failed: ${(e as Error).message}`))
-              }
-            >
-              {kickoffAiReview.isPending ? "Queueing…" : `Review (${unreviewed})`}
-            </button>
-
-            {domain === "links" ? (
-              <>
-                <button
-                  className={styles.btnPrimary}
-                  disabled={applyAdvisories.isPending || approved === 0}
-                  title="Apply every AI-approved reclassify advisory"
-                  onClick={() =>
-                    applyAdvisories
-                      .mutateAsync({ mode: "apply", limit: 200 })
-                      .then((r) => toast.success(`Applied ${r.applied} reclassifications`))
-                      .catch((e) => toast.error(`Apply failed: ${(e as Error).message}`))
-                  }
-                >
-                  Apply approved
-                </button>
+            {origin === "adjudicator" ? (
+              <button
+                className={styles.btn}
+                disabled={applyAdjudication.isPending || rows.length === 0}
+                title="Apply every pending adjudicator proposal (both logs) through the stage's own apply path"
+                onClick={applyAllAdjudicator}
+              >
+                {applyAdjudication.isPending ? "Applying…" : "Apply all"}
+              </button>
+            ) : (
+              domain === "links" && (
                 <button
                   className={styles.btn}
                   disabled={applyAdvisories.isPending || rows.length === 0}
-                  title="Apply every proposed reclassification, skipping only the ones the AI rejected"
+                  title="Apply every proposed reclassification"
                   onClick={() =>
                     applyAdvisories
-                      .mutateAsync({ mode: "apply", limit: 500, exclude_rejected: true })
+                      .mutateAsync({ mode: "apply", limit: 500 })
                       .then((r) => toast.success(`Applied ${r.applied} reclassifications`))
                       .catch((e) => toast.error(`Apply failed: ${(e as Error).message}`))
                   }
                 >
                   Apply all
                 </button>
-              </>
-            ) : (
-              <>
-                <button
-                  className={styles.btnPrimary}
-                  disabled={applyAiApproved.isPending || approved === 0}
-                  title="Apply every proposal the AI approved"
-                  onClick={() =>
-                    applyAiApproved
-                      .mutateAsync({ dismiss_rejected: false })
-                      .then((r) => toast.success(`Applied ${r.applied} AI-approved`))
-                      .catch((e) => toast.error(`Apply failed: ${(e as Error).message}`))
-                  }
-                >
-                  Apply AI-approved ({approved})
-                </button>
-                {rejected > 0 && (
-                  <button
-                    className={styles.btn}
-                    disabled={applyAiApproved.isPending}
-                    title="Apply approved AND delete rejected proposals — full sweep of everything the AI has judged"
-                    onClick={() =>
-                      applyAiApproved
-                        .mutateAsync({ dismiss_rejected: true })
-                        .then((r) =>
-                          toast.success(`Applied ${r.applied} · dismissed ${r.dismissed_rejected} rejected`),
-                        )
-                        .catch((e) => toast.error(`Apply failed: ${(e as Error).message}`))
-                    }
-                  >
-                    Apply + clear rejected
-                  </button>
-                )}
-                <button
-                  className={styles.btn}
-                  disabled={applyAllMerges.isPending || (stats.data?.shadow_proposals ?? 0) === 0}
-                  title="Apply every proposed merge cluster"
-                  onClick={() =>
-                    applyAllMerges
-                      .mutateAsync(undefined)
-                      .then(() => toast.success("Applied proposed merges"))
-                      .catch((e) => toast.error(`Apply failed: ${(e as Error).message}`))
-                  }
-                >
-                  Apply merges
-                </button>
-              </>
+              )
             )}
 
             <button className={styles.btnDanger} disabled={dismissProposals.isPending} onClick={clearAll}>
@@ -453,6 +425,8 @@ export function ProposalsQueue({ domain, initialAction }: { domain: Domain; init
         )}
       </div>
 
+      {orphaned && !hist && <p className={styles.note}>{ORPHANED_NOTE}</p>}
+
       {/* table */}
       <div className={styles.tableWrap}>
         <table className={styles.table}>
@@ -461,7 +435,6 @@ export function ProposalsQueue({ domain, initialAction }: { domain: Domain; init
               <th>{hist ? "Change" : "Proposed change"}</th>
               <th>Entity</th>
               <th>Detail</th>
-              {!hist && <th>AI verdict</th>}
               <th>When</th>
               <th className={styles.actCol} />
             </tr>
@@ -469,7 +442,6 @@ export function ProposalsQueue({ domain, initialAction }: { domain: Domain; init
           <tbody>
             {rows.map((row) => {
               const meta = CHANGE_META[row.action] ?? { label: row.action, cls: styles.tName };
-              const verdict = row.review_decision ? VERDICT_META[row.review_decision] : null;
               const slug = row.entity_type;
               const acts = [...row.actions].sort((a, b) => ACTION_ORDER.indexOf(a) - ACTION_ORDER.indexOf(b));
               const extraLinks = (row.links ?? []).filter((l) => l.kind !== "entity");
@@ -477,6 +449,11 @@ export function ProposalsQueue({ domain, initialAction }: { domain: Domain; init
                 <tr key={row.id}>
                   <td>
                     <span className={`${styles.tag} ${meta.cls}`}>{meta.label}</span>
+                    {row.origin === "adjudicator" && (
+                      <span className={styles.originTag} title="Filed by the post-analysis review, with the article in hand">
+                        adjudicator
+                      </span>
+                    )}
                   </td>
                   <td>
                     {row.entity_name ? (
@@ -496,11 +473,6 @@ export function ProposalsQueue({ domain, initialAction }: { domain: Domain; init
                   <td className={styles.detail}>
                     <span className={styles.subject}>{row.subject ?? "—"}</span>
                     {row.reason && <span className={styles.reason}>{row.reason}</span>}
-                    {row.review_reason && (
-                      <span className={styles.aiReason} title={row.review_reason}>
-                        AI: {row.review_reason}
-                      </span>
-                    )}
                     {extraLinks.length > 0 && (
                       <span className={styles.linkChips}>
                         {extraLinks.map((l, i) => {
@@ -523,17 +495,6 @@ export function ProposalsQueue({ domain, initialAction }: { domain: Domain; init
                       </span>
                     )}
                   </td>
-                  {!hist && (
-                    <td>
-                      {verdict ? (
-                        <span className={`${styles.vpill} ${verdict.cls}`} title={row.review_reason ?? undefined}>
-                          {verdict.text}
-                        </span>
-                      ) : (
-                        <span className={styles.muted}>—</span>
-                      )}
-                    </td>
-                  )}
                   <td className={styles.when}>{formatDateTime(row.when)}</td>
                   <td>
                     <div className={styles.acts}>
@@ -553,16 +514,20 @@ export function ProposalsQueue({ domain, initialAction }: { domain: Domain; init
             })}
             {!feed.isLoading && rows.length === 0 && (
               <tr>
-                <td colSpan={hist ? 5 : 6} className={styles.empty}>
+                <td colSpan={5} className={styles.empty}>
                   {hist
                     ? `No applied ${domain === "links" ? "link" : "entity"} changes match — nothing has run yet.`
-                    : `No pending ${domain === "links" ? "link" : "entity"} proposals — nothing waiting for review. Run a scan below to generate some.`}
+                    : orphaned
+                      ? "No orphaned proposals — every pending legacy proposal has an entry the stage can re-judge it against."
+                      : `No pending ${domain === "links" ? "link" : "entity"} proposals — nothing waiting for review.${
+                          scans.length ? " Run a scan below to generate some." : ""
+                        }`}
                 </td>
               </tr>
             )}
             {feed.isLoading && (
               <tr>
-                <td colSpan={hist ? 5 : 6} className={styles.empty}>
+                <td colSpan={5} className={styles.empty}>
                   Loading {hist ? "history" : "proposals"}…
                 </td>
               </tr>
@@ -572,7 +537,7 @@ export function ProposalsQueue({ domain, initialAction }: { domain: Domain; init
       </div>
 
       {/* scans that generate proposals into this queue */}
-      {!hist && (
+      {!hist && scans.length > 0 && (
         <div className={styles.genRow}>
           <span className={styles.genLabel}>Generate proposals</span>
           {scans.map((s) => (

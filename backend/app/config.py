@@ -238,6 +238,17 @@ class Settings(BaseSettings):
     # Phase 2 creation/alias gates: 'off' | 'shadow' (log would-block decisions
     # to the maintenance log, still create) | 'on' (enforce).
     entity_creation_gates: str = "shadow"
+    # Adjudicate stage (post-analysis AI review; planning/ai-adjudication-stage.md).
+    # 'off' | 'shadow' (file verdicts as proposals) | 'apply' (high-confidence
+    # verdicts applied inline, the rest filed). Master switch — plans only subtract.
+    adjudication_mode: str = "off"
+    adjudication_trigger: str = "all"  # all | created
+    adjudication_max_per_hour: int = 0  # 0 = no ceiling; set one to cap spend or protect the ai queue
+    adjudication_min_priority_score: float = 0.0  # 0 = no floor (keep it: junk comes from low-score CVE entries)
+    adjudication_apply_min_confidence: str = "high"  # high | medium | low
+    adjudication_circuit_breaker_pct: float = 0.5
+    adjudication_content_max_chars: int = 8000
+    adjudication_scope: str = "links,entities,relationships,observables"
     # ICS/OT context keywords — ICS-matrix (T0xxx) ATT&CK techniques are only
     # linked when the entry text matches one of these (comma-separated,
     # word-boundary matched). See app.intelligence.attack_catalog.
@@ -246,19 +257,10 @@ class Settings(BaseSettings):
         "industrial,operational technology,industrial control,critical infrastructure,"
         "manufacturing,utilities,water treatment,pipeline,substation,safety instrumented"
     )
-    # Entity-link AI validator (claude-code provider)
-    link_validation_mode: str = "shadow"  # "shadow" logs would-be removals; "apply" actually deletes
-    link_validation_entries_per_run: int = 200
-    link_validation_recheck_days: int = 30
-    link_validation_content_max_chars: int = 3000
-    link_validation_circuit_breaker_pct: float = 0.4
-    link_validation_kickoff_canary_count: int = 3
-    link_validation_skip_confidence: str | None = None  # e.g. "high" to skip canonical-name matches
-    link_validation_batch_size: int = 10  # entries per CLI call; 1 = legacy single-entry path
-    # Hygiene proposal reviewer (claude-code provider)
-    hygiene_review_batch_size: int = 20  # proposals judged per CLI call
-    hygiene_review_auto_apply: bool = False  # apply AI-approved proposals with no human in the loop
     # Entity assessment backfill (drafts descriptions for entities that have none)
+    # Actor profile refresh: 'shadow' files the rewritten description as a
+    # proposal, 'apply' writes it (ActorDescriptionHistory is the undo).
+    entity_maintenance_mode: str = "shadow"
     assessment_backfill_batch_size: int = 50  # entities dispatched per daily run
     assessment_backfill_min_articles: int = 1  # minimum linked entries to be worth summarizing
     assessment_backfill_retry_days: int = 7  # don't re-attempt an entity within this many days
@@ -271,11 +273,7 @@ class Settings(BaseSettings):
     actor_refresh_min_age_days: int = 60  # skip actors refreshed more recently than this
     actor_refresh_activity_window_days: int = 90  # window used to rank "most active"
     actor_refresh_sample_n: int = 20  # headlines sampled into the refresh prompt
-    # Autonomous merge/reclassify engine — duplicate clusters dispatched per run.
-    entity_merge_max_clusters_per_run: int = 30
     # Low-signal entity review sweep (flags for analyst review, never deletes).
-    stale_entity_min_age_days: int = 90
-    stale_entity_max_articles: int = 1
 
     correlation_cache_ttl_seconds: int = 3600
     # Proximity correlation tuning
@@ -302,15 +300,9 @@ class Settings(BaseSettings):
     relationship_reporting_source_specificity: float = 0.45
     # Platform-wide default tier floor for pivot related lists (all/moderate/strong).
     relationship_min_tier_default: str = "all"
-    # Nightly AI adjudication of probable relationship edges.
-    relationship_adjudication_enabled: bool = False
-    relationship_adjudication_batch_size: int = 20
-    relationship_adjudication_min_articles: int = 3
     # Evidence structure: cluster each edge's evidence entries into stories
     # via the entry embeddings, so relationship views can say "recurring
     # across N incidents" vs "scattered roundup co-mentions". Also gates the
-    # promotion story floor and adjudication queue ordering. Needs embeddings.
-    relationship_adjudication_dossier: bool = True  # profile paragraphs into the adjudication prompt
     relationship_evidence_structure: bool = False
     narrative_themes_enabled: bool = True  # parse the briefing's grouping (free, no AI call)
     narrative_theme_gating: bool = False  # let it veto promotions — flip on once themes exist

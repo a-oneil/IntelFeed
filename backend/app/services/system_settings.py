@@ -50,19 +50,16 @@ CONFIGURABLE_KEYS: dict[str, type] = {
     "entity_resolution_normalized_match": bool,
     "entity_creation_gates": str,
     "attack_ics_context_keywords": str,
-    # Entity maintenance (merge engine / autonomous cleanup)
+    # Adjudicate stage
+    "adjudication_mode": str,
+    "adjudication_trigger": str,
+    "adjudication_max_per_hour": int,
+    "adjudication_min_priority_score": float,
+    "adjudication_apply_min_confidence": str,
+    "adjudication_circuit_breaker_pct": float,
+    "adjudication_content_max_chars": int,
+    "adjudication_scope": str,
     "entity_maintenance_mode": str,
-    # Entity link AI validator
-    "link_validation_mode": str,
-    "link_validation_entries_per_run": int,
-    "link_validation_recheck_days": int,
-    "link_validation_content_max_chars": int,
-    "link_validation_circuit_breaker_pct": float,
-    "link_validation_kickoff_canary_count": int,
-    "link_validation_skip_confidence": str,
-    "link_validation_batch_size": int,
-    "hygiene_review_batch_size": int,
-    "hygiene_review_auto_apply": bool,
     "assessment_backfill_batch_size": int,
     "assessment_backfill_min_articles": int,
     "assessment_backfill_retry_days": int,
@@ -73,9 +70,6 @@ CONFIGURABLE_KEYS: dict[str, type] = {
     "actor_refresh_min_age_days": int,
     "actor_refresh_activity_window_days": int,
     "actor_refresh_sample_n": int,
-    "entity_merge_max_clusters_per_run": int,
-    "stale_entity_min_age_days": int,
-    "stale_entity_max_articles": int,
     "rule_attack_backfill_limit": int,
     # Enrichment job batch sizes
     "cve_reenrich_batch_size": int,
@@ -126,10 +120,6 @@ CONFIGURABLE_KEYS: dict[str, type] = {
     "relationship_specificity_weight": float,
     "relationship_reporting_source_specificity": float,
     "relationship_min_tier_default": str,
-    "relationship_adjudication_enabled": bool,
-    "relationship_adjudication_batch_size": int,
-    "relationship_adjudication_min_articles": int,
-    "relationship_adjudication_dossier": bool,
     "relationship_evidence_structure": bool,
     "narrative_themes_enabled": bool,
     "narrative_theme_gating": bool,
@@ -381,6 +371,77 @@ SETTING_METADATA: dict[str, dict] = {
             "create), or 'on' (enforce). Manual creation keeps a logged override"
         ),
         "group": "intelligence",
+        "options": ["off", "shadow", "on"],
+    },
+    "adjudication_mode": {
+        "label": "Adjudication Mode",
+        "description": (
+            "off = never runs. shadow = every verdict is filed as a proposal in the Links / AI-entities "
+            "queues and nothing is touched. apply = high-confidence verdicts are applied at ingest; lower "
+            "ones still become proposals. This is the master switch; plans only subtract feeds."
+        ),
+        "group": "adjudication",
+        "options": ["off", "shadow", "apply"],
+    },
+    "adjudication_trigger": {
+        "label": "Trigger",
+        "description": (
+            "all = every analysed entry (what replacing the nightly validator needs; ~100-500/day). "
+            "created = only entries whose analysis minted an entity, asserted a link or edge, promoted a "
+            "pending match, or captured an observable (~20-50/day) — the fallback when reviews cannot "
+            "keep up with ingest"
+        ),
+        "group": "adjudication",
+        "options": ["all", "created"],
+    },
+    "adjudication_max_per_hour": {
+        "label": "Hourly Budget",
+        "description": (
+            "Reviews started per hour. 0, the default, means no ceiling: the AI worker runs one call "
+            "at a time, so it paces itself. Set a number for one of two reasons — to cap spend on a "
+            "metered provider, or to stop a review backlog queueing ahead of the entry analysis, which "
+            "shares that worker. Over-budget entries wait for the next sweep; they are never dropped. "
+            "While a ceiling is set the backfill may use at most half of each hour, live entries get "
+            "the rest; with no ceiling, dispatch the backfill in batches via its own limit instead"
+        ),
+        "group": "adjudication",
+    },
+    "adjudication_min_priority_score": {
+        "label": "Score Floor",
+        "description": (
+            "Skip entries below this priority score (0–10). 0 = no floor — keep it there while CVE/NVD "
+            "entries are the main source of junk tool entities; a floor would exempt exactly those"
+        ),
+        "group": "adjudication",
+    },
+    "adjudication_apply_min_confidence": {
+        "label": "Apply Only At Confidence",
+        "description": "In apply mode, verdicts below this confidence are filed as proposals instead of applied",
+        "group": "adjudication",
+        "options": ["high", "medium", "low"],
+    },
+    "adjudication_circuit_breaker_pct": {
+        "label": "Circuit Breaker",
+        "description": (
+            "If more than this share of an entry's items come back remove / veto / demote / drop, the "
+            "whole run is downgraded to proposals (0.5 = half). A rolling mean over the last 50 apply "
+            "runs above the same threshold pauses dispatch for the hour; shadow runs are not sampled, "
+            "because they change nothing"
+        ),
+        "group": "adjudication",
+    },
+    "adjudication_content_max_chars": {
+        "label": "Article Text Cap",
+        "description": "Characters of article text in the review prompt (head + indicator tail, like extraction)",
+        "group": "adjudication",
+    },
+    "adjudication_scope": {
+        "label": "Review Scope",
+        "description": (
+            "Comma-separated manifest sections the reviewer sees: links, entities, relationships, "
+            "observables, assessment. assessment is opt-in and only ever logged"
+        ),
+        "group": "adjudication",
     },
     "attack_ics_context_keywords": {
         "label": "ICS Context Keywords",
@@ -538,93 +599,20 @@ SETTING_METADATA: dict[str, dict] = {
         "group": "intelligence",
     },
     "entity_maintenance_mode": {
-        "label": "Merge Engine Mode",
+        "label": "Actor Refresh Mode",
         "description": (
-            "'shadow' = log Claude's proposed merges + reclassifies without touching entities; 'apply' = auto-execute "
-            "proposals as they're generated. Start in shadow, review the maintenance log, then flip when comfortable."
+            "'shadow' files the weekly actor-profile rewrite as a proposal in the maintenance log; "
+            "'apply' writes the new description directly (the description history is the undo)"
         ),
         "group": "intelligence",
-    },
-    "link_validation_mode": {
-        "label": "Link Validation Mode",
-        "description": (
-            "'shadow' = log would-be removals only; 'apply' = actually delete bad links. Start in shadow, review the "
-            "audit log for 1–2 weeks before flipping."
-        ),
-        "group": "intelligence",
-    },
-    "link_validation_entries_per_run": {
-        "label": "Validator: Entries Per Run",
-        "description": (
-            "Number of entries the validator processes per scheduled run (200 = ~2.5 hrs at 45s/entry on a single CLI "
-            "worker)"
-        ),
-        "group": "intelligence",
-    },
-    "link_validation_recheck_days": {
-        "label": "Validator: Recheck Window",
-        "description": "Don't re-validate an entry within this many days",
-        "group": "intelligence",
-    },
-    "link_validation_content_max_chars": {
-        "label": "Validator: Content Cap",
-        "description": "Maximum characters of article body sent to Claude per entry (paragraph-sliced around matches)",
-        "group": "intelligence",
-    },
-    "link_validation_circuit_breaker_pct": {
-        "label": "Validator: Circuit Breaker %",
-        "description": (
-            "If a single entry has more than this fraction of links flagged for removal, log a warning (0.4 = 40%)"
-        ),
-        "group": "intelligence",
-    },
-    "link_validation_kickoff_canary_count": {
-        "label": "Validator: Canary Count",
-        "description": (
-            "Number of entries the kickoff task runs synchronously to catch systemic failures (auth, CLI, prompt "
-            "regression) before fanning out the full batch"
-        ),
-        "group": "intelligence",
-    },
-    "link_validation_skip_confidence": {
-        "label": "Validator: Skip Confidence",
-        "description": (
-            "Optionally skip validating links at this confidence level. 'high' = skip canonical-name matches "
-            "(cheapest). Leave blank to validate all."
-        ),
-        "group": "intelligence",
-    },
-    "link_validation_batch_size": {
-        "label": "Validator: Batch Size",
-        "description": (
-            "Entries validated per AI call. 10 amortizes ~1-2s of Claude CLI "
-            "startup across multiple entries (typical 10-20x throughput vs. 1). "
-            "Set to 1 when the task is assigned to a non-CLI provider (Anthropic "
-            "API, Ollama) — there is no startup cost to amortize, and local models "
-            "handle one article per call far more reliably than a batched envelope."
-        ),
-        "group": "intelligence",
-    },
-    "hygiene_review_batch_size": {
-        "label": "Hygiene Review: Batch Size",
-        "description": "Pending hygiene proposals judged per Claude CLI call by the AI proposal reviewer",
-        "group": "intelligence",
-    },
-    "hygiene_review_auto_apply": {
-        "label": "Hygiene Review: Auto-Apply Approved",
-        "description": (
-            "When enabled, proposals the AI reviewer approves are applied immediately with no "
-            "human in the loop (rejected ones are dismissed). Leave off to keep approve/reject "
-            "verdicts advisory — apply them from the Hygiene tab."
-        ),
-        "group": "intelligence",
+        "options": ["shadow", "apply"],
     },
     "assessment_backfill_batch_size": {
         "label": "Assessment Backfill: Batch Size",
         "description": (
             "Entities dispatched per daily run of the assessment backfill. They queue serially on "
             "the single-concurrency AI worker, so the batch paces itself — raise this to drain a "
-            "backlog faster, lower it to leave more GPU time for ingest extraction."
+            "backlog faster, lower it to leave more of the worker's time for ingest extraction."
         ),
         "group": "intelligence",
     },
@@ -700,37 +688,6 @@ SETTING_METADATA: dict[str, dict] = {
         ),
         "group": "intelligence",
         "options": ["all", "moderate", "strong"],
-    },
-    "relationship_adjudication_enabled": {
-        "label": "AI Relationship Adjudication",
-        "description": (
-            "Nightly batch: the AI reads the evidence behind probable relationship edges and rules "
-            "each corroborated (promoted to confirmed) or coincidental (demoted to possible, never "
-            "re-promoted). Uses the copilot AI provider."
-        ),
-        "group": "intelligence",
-    },
-    "relationship_adjudication_batch_size": {
-        "label": "Adjudication: Batch Size",
-        "description": "Probable edges judged per AI call by the nightly relationship adjudicator",
-        "group": "intelligence",
-    },
-    "relationship_adjudication_min_articles": {
-        "label": "Adjudication: Min Evidence Articles",
-        "description": "Only edges with at least this many evidence articles are sent for adjudication",
-        "group": "intelligence",
-    },
-    "relationship_adjudication_dossier": {
-        "label": "Adjudication: Profile Context",
-        "description": (
-            "Give the nightly adjudicator each entity's AI assessment paragraph alongside the "
-            "evidence headlines. Headlines assume the reader already knows who an actor is, so "
-            "without this the judge returns 'unsure' and the edge is re-judged every 14 days "
-            "forever. No extra AI call — the context rides in the batch that already runs. "
-            "A dossier is withheld when the edge's evidence is mostly the same articles the "
-            "assessment was written from, so the model can't corroborate itself."
-        ),
-        "group": "intelligence",
     },
     "relationship_evidence_structure": {
         "label": "Relationship Evidence Structure",
@@ -926,21 +883,6 @@ SETTING_METADATA: dict[str, dict] = {
     "actor_refresh_sample_n": {
         "label": "Actor Refresh — Headline Sample",
         "description": "Recent headlines sampled into each actor-refresh prompt",
-        "group": "maintenance",
-    },
-    "entity_merge_max_clusters_per_run": {
-        "label": "Merge Engine — Clusters Per Run",
-        "description": "Duplicate/misclassification clusters the merge engine dispatches per run",
-        "group": "maintenance",
-    },
-    "stale_entity_min_age_days": {
-        "label": "Stale Entity — Idle Days",
-        "description": "Days of no activity before a low-signal entity is flagged for review (never deleted)",
-        "group": "maintenance",
-    },
-    "stale_entity_max_articles": {
-        "label": "Stale Entity — Max Articles",
-        "description": "An entity is only flagged when it has at most this many linked articles",
         "group": "maintenance",
     },
     "rule_attack_backfill_limit": {
@@ -1170,6 +1112,7 @@ GROUP_LABELS: dict[str, str] = {
     "extraction": "Extraction",
     "observables": "Observables",
     "scoring": "Scoring",
+    "adjudication": "Adjudication",
     "maintenance": "Maintenance",
     "enrichment": "Enrichment",
     "retention": "Retention & Eviction",
@@ -1219,6 +1162,15 @@ _ENGINE_SECTION_GROUPS: dict[str, str] = {
     "entity_creation_gates": "extraction",
     "attack_ics_context_keywords": "extraction",
     "cve_epss_high_risk_threshold": "extraction",
+    # Adjudicate stage (post-analysis AI review)
+    "adjudication_mode": "adjudication",
+    "adjudication_trigger": "adjudication",
+    "adjudication_max_per_hour": "adjudication",
+    "adjudication_min_priority_score": "adjudication",
+    "adjudication_apply_min_confidence": "adjudication",
+    "adjudication_circuit_breaker_pct": "adjudication",
+    "adjudication_content_max_chars": "adjudication",
+    "adjudication_scope": "adjudication",
     # Score stage
     "signal_engine_shadow": "scoring",
     "signal_engine_surface": "scoring",
@@ -1228,28 +1180,14 @@ _ENGINE_SECTION_GROUPS: dict[str, str] = {
     "radar_personalization_window_days": "scoring",
     "my_stack_exposure_enabled": "scoring",
     "exposure_attack_visibility_enabled": "scoring",
-    # Maintenance browse view (link validation, hygiene, merge engine)
+    # Maintenance browse view (assessments, actor refresh, narrative themes)
     "entity_maintenance_mode": "maintenance",
-    "link_validation_mode": "maintenance",
-    "link_validation_entries_per_run": "maintenance",
-    "link_validation_recheck_days": "maintenance",
-    "link_validation_content_max_chars": "maintenance",
-    "link_validation_circuit_breaker_pct": "maintenance",
-    "link_validation_kickoff_canary_count": "maintenance",
-    "link_validation_skip_confidence": "maintenance",
-    "link_validation_batch_size": "maintenance",
-    "hygiene_review_batch_size": "maintenance",
-    "hygiene_review_auto_apply": "maintenance",
     "assessment_backfill_batch_size": "maintenance",
     "assessment_backfill_min_articles": "maintenance",
     "assessment_backfill_retry_days": "maintenance",
     "assessment_refresh_enabled": "maintenance",
     "assessment_refresh_min_new_articles": "maintenance",
     "assessment_refresh_batch_size": "maintenance",
-    "relationship_adjudication_enabled": "maintenance",
-    "relationship_adjudication_batch_size": "maintenance",
-    "relationship_adjudication_min_articles": "maintenance",
-    "relationship_adjudication_dossier": "maintenance",
     "narrative_themes_enabled": "maintenance",
     "narrative_theme_gating": "maintenance",
     # Score stage — Story Threads block

@@ -956,6 +956,48 @@ async def test_pipeline_stage_decorator_records_run(db_session, reliable_feed, m
     assert ("extract", "error") in statuses
 
 
+@pytest.mark.asyncio
+async def test_pipeline_stage_decorator_stores_dict_return_as_detail(db_session, reliable_feed, monkeypatch):
+    """A stage task that returns a dict (the adjudicate stage's verdict counts)
+    gets it persisted as the run's ``detail``; string returns leave it empty."""
+    from contextlib import asynccontextmanager
+
+    from app.models.entry_pipeline_run import EntryPipelineRun
+    from app.workers.pipeline_logging import pipeline_stage
+
+    entry = await _make_entry(db_session, reliable_feed, title="Pipeline detail entry")
+
+    @asynccontextmanager
+    async def fake_session():
+        yield db_session
+
+    recorded = {}
+
+    def fake_run_async(coro):
+        recorded["coro"] = coro
+
+    monkeypatch.setattr("app.workers.db.worker_session", fake_session)
+    monkeypatch.setattr("app.workers.db.run_async", fake_run_async)
+
+    @pipeline_stage("adjudicate")
+    def adjudicate_task(entry_id: str):
+        return {"mode": "shadow", "items": 3, "verdicts": {"keep": 2, "remove": 1}}
+
+    assert adjudicate_task(str(entry.id))["items"] == 3
+    await recorded["coro"]
+    await db_session.flush()
+
+    run = (
+        await db_session.execute(
+            select(EntryPipelineRun).where(
+                EntryPipelineRun.entry_id == entry.id, EntryPipelineRun.stage == "adjudicate"
+            )
+        )
+    ).scalar_one()
+    assert run.status == "success"
+    assert run.detail == {"mode": "shadow", "items": 3, "verdicts": {"keep": 2, "remove": 1}}
+
+
 def test_pipeline_stage_extracts_entry_id_from_bind_tasks():
     from app.workers.pipeline_logging import _extract_entry_id
 

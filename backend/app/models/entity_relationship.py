@@ -30,6 +30,12 @@ class EntityRelationship(Base):
     adjudication_verdict: Mapped[str | None] = mapped_column(String(20))
     adjudicated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     evidence_entry_ids: Mapped[list[uuid.UUID]] = mapped_column(ARRAY(UUID(as_uuid=True)), default=list)
+    # Entries on which the adjudicate stage, in apply mode, kept this edge.
+    # Distinct entries; at relationship_evidence_promote_count the edge is
+    # promoted to confirmed (replaces the nightly adjudicator's promotion).
+    reviewer_kept_entry_ids: Mapped[list[uuid.UUID]] = mapped_column(
+        ARRAY(UUID(as_uuid=True)), default=list, server_default="{}"
+    )
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True
     )

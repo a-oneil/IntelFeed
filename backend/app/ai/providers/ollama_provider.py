@@ -232,8 +232,8 @@ class OllamaProvider(AIProvider):
 
         # Agentic path: with a tool spec + an in-process dispatcher, run the tool
         # loop and return the final text. Used by engine.run_task for agentic
-        # tasks (entity_merge_maintenance etc.) so Ollama genuinely executes
-        # tools instead of silently producing tool-less output.
+        # tasks (the copilot, entity_enrichment_research) so Ollama genuinely
+        # executes tools instead of silently producing tool-less output.
         if tools and tool_executor is not None:
             return await self._complete_with_tools(
                 prompt,

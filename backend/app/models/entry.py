@@ -41,7 +41,6 @@ class Entry(Base):
     translation_source_language: Mapped[str | None] = mapped_column(String(10))
     translation_target_language: Mapped[str | None] = mapped_column(String(10))
     translated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    last_link_validation_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     # Signal engine: the 0–10 score everything reads, and the unbounded weighted
     # sum it is scaled from (the ordering key — see app/intelligence/signals.py).
     priority_score: Mapped[float | None] = mapped_column(Float, index=True)

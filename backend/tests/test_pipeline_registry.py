@@ -156,6 +156,9 @@ def test_registry_kinds_cover_expected_stages():
     assert [s.name for s in stages_of_kind("parallel")] == ["autolink", "observables", "telegram_links", "extract"]
     assert [s.name for s in stages_of_kind("post")] == ["cooccurrence", "correlation", "requirements"]
     assert [s.name for s in stages_of_kind("final")] == ["score"]
+    # post_analysis stages are never part of a chord — the registry row exists
+    # for the matrix column, plan chip, run logging and docs.
+    assert [s.name for s in stages_of_kind("post_analysis")] == ["adjudicate"]
 
 
 def test_plan_synthesis_and_merge():

@@ -182,7 +182,7 @@ Keys are declared in `CONFIGURABLE_KEYS` in `backend/app/services/system_setting
   "ai_one_pass_enabled": true,
   "ai_daily_budget_usd": 5.0,
   "autolinker_min_name_length": 4,
-  "link_validation_mode": "shadow",
+  "adjudication_mode": "shadow",
   "_job_schedule_overrides": {
     "fetch-feeds": {"type": "crontab", "minute": "*/15"}
   }

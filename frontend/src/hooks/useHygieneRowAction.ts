@@ -2,7 +2,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import api from "@/api/client";
-import { useApplyMaintenanceProposal } from "@/hooks/useEntityMaintenance";
 import {
   useApplyAdvisories,
   useApplyAliasCollision,
@@ -26,7 +25,6 @@ export function extractLogId(row: FeedRow): string {
 export function useHygieneRowAction() {
   const qc = useQueryClient();
   const dismissRow = useDismissFeedRow();
-  const applyMaintenance = useApplyMaintenanceProposal();
   const applyNormalizeName = useApplyNormalizeName();
   const applyAliasCollision = useApplyAliasCollision();
   const applyVendorAutolink = useApplyVendorAutolink();
@@ -36,6 +34,26 @@ export function useHygieneRowAction() {
   const invalidate = () => qc.invalidateQueries({ queryKey: ["hygiene"] });
 
   return async function handleRowAction(row: FeedRow, action: string) {
+    // Proposals the adjudicate stage filed (veto / merge / unlink / reclassify /
+    // edge demote / ioc drop): one apply / restore endpoint for every kind, the
+    // stage's own code path.
+    if (row.source === "entity_maintenance" && row.action.startsWith("adjudication_") && (action === "apply" || action === "restore")) {
+      try {
+        const res = await api.post<{ applied: boolean; restored: boolean; reason: string | null; detail: Record<string, unknown> }>(
+          `/admin/hygiene/adjudication/${extractLogId(row)}/${action}`,
+        );
+        if (action === "apply") {
+          if (res.data.applied) toast.success(res.data.detail?.deleted ? "Applied — entity deleted" : "Applied");
+          else toast.message(res.data.reason ?? "Nothing to apply");
+        } else if (res.data.restored) toast.success("Restored");
+        else toast.message(res.data.reason ?? "Nothing to restore");
+        invalidate();
+        qc.invalidateQueries({ queryKey: ["engine"] });
+      } catch (e) {
+        toast.error(`${action === "apply" ? "Apply" : "Restore"} failed: ${(e as Error).message}`);
+      }
+      return;
+    }
     if (action === "dismiss") {
       try {
         await dismissRow.mutateAsync({ source: row.source, id: extractLogId(row) });
@@ -47,7 +65,7 @@ export function useHygieneRowAction() {
     }
     if (action === "restore") {
       try {
-        await api.post(`/admin/link-validation/log/${extractLogId(row)}/restore`);
+        await api.post(`/admin/hygiene/link-log/${extractLogId(row)}/restore`);
         toast.success("Link restored");
         invalidate();
       } catch (e) {
@@ -100,13 +118,10 @@ export function useHygieneRowAction() {
         }
         return;
       }
-      // merge_cluster_summary + orphan_prune go through the legacy apply endpoint.
-      try {
-        const result = await applyMaintenance.mutateAsync(extractLogId(row));
-        toast.success(`Applied ${result.succeeded}/${result.attempted} (skipped ${result.skipped})`);
-      } catch (e) {
-        toast.error(`Apply failed: ${(e as Error).message}`);
-      }
+      // Reachable: a shadow `orphan_prune` row still advertises apply (see
+      // _row_actions_maint) and the flagger that minted them is retired, so
+      // those legacy rows only have Dismiss here.
+      toast.error(`No apply path for ${row.action}`);
       return;
     }
     if (action === "apply_reclassify" && row.source === "link_validator") {
@@ -125,7 +140,7 @@ export function useHygieneRowAction() {
     if (action === "promote_to_remove") {
       try {
         const res = await api.post<{ already_removed: boolean }>(
-          `/admin/link-validation/log/${extractLogId(row)}/apply-removal`,
+          `/admin/hygiene/link-log/${extractLogId(row)}/apply-removal`,
         );
         toast.success(res.data.already_removed ? "Link was already removed" : "Link removed");
         invalidate();

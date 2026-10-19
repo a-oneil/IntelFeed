@@ -1,8 +1,12 @@
 import { useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+
+import api from "@/api/client";
 
 import { entityProfilePath } from "@/components/entityProfile/entityProfileConfig";
 import { useAllRelationships, useEntityLinks, useUnlink } from "@/hooks/useAutolinking";
+import { useEntryAdjudication, type EntryAdjudicationVerdict } from "@/hooks/useEngine";
 import { useConfirmExtraction, useDeleteExtractionEntity, useExtractionEntities } from "@/hooks/useExtraction";
 import {
   useConfirmRelationship,
@@ -13,6 +17,7 @@ import type { EntityType } from "@/stores/intelStore";
 import { getEntityCssVar, getEntityLabel } from "@/utils/entityTheme";
 
 import styles from "./EngineMatrix.module.css";
+import { skipReason } from "./adjudicationCopy";
 import { confirmDialog } from "@/utils/dialog";
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -50,6 +55,94 @@ function EntityChip({ type, id, name }: { type: string; id: string; name: string
 
 const LIST_LIMIT = 25;
 
+function fmtDuration(ms: number | null | undefined): string {
+  if (ms == null) return "";
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+  return `${(ms / 60_000).toFixed(1)}m`;
+}
+
+/** `ioc:<kind>:<value>` — the value may itself contain colons (URLs, IPv6). */
+function parseIocItemId(itemId: string): { kind: string; value: string } {
+  const m = /^ioc:([^:]*):(.*)$/.exec(itemId);
+  return m ? { kind: m[1], value: m[2] } : { kind: "", value: itemId };
+}
+
+const VERDICT_LABEL: Record<string, string> = {
+  keep: "keep",
+  remove: "remove",
+  reclassify: "reclassify",
+  veto: "veto",
+  merge: "merge",
+  demote: "demote",
+  drop: "drop",
+};
+
+/** The adjudicate stage's verdict for one drawer row, as a badge with the
+ *  matching action: Apply while it is a shadow proposal, Restore once it was
+ *  applied. Dashed = proposed; solid = applied. */
+function VerdictBadge({ verdict, entryId }: { verdict: EntryAdjudicationVerdict | undefined; entryId: string }) {
+  const qc = useQueryClient();
+  if (!verdict || verdict.verdict === "keep") return null;
+  const [logSource, logId] = verdict.log.split(":");
+  const maint = logSource === "entity_maintenance";
+  const canApply = !verdict.applied && !verdict.restored && verdict.kind !== "assessment";
+  // Merges are undone from the merge engine's tombstone, not from here.
+  const canRestore = verdict.applied && !verdict.restored && verdict.verdict !== "merge";
+  const run = async (what: "apply" | "restore") => {
+    try {
+      if (maint) {
+        const res = await api.post<{ applied: boolean; restored: boolean; reason: string | null }>(
+          `/admin/hygiene/adjudication/${logId}/${what}`,
+        );
+        const ok = what === "apply" ? res.data.applied : res.data.restored;
+        if (ok) toast.success(what === "apply" ? "Applied" : "Restored");
+        else toast.message(res.data.reason ?? "Nothing to do");
+      } else {
+        await api.post(`/admin/hygiene/link-log/${logId}/${what === "apply" ? "apply-removal" : "restore"}`);
+        toast.success(what === "apply" ? "Link removed" : "Link restored");
+      }
+      qc.invalidateQueries({ queryKey: ["engine", "adjudication", entryId] });
+      qc.invalidateQueries({ queryKey: ["hygiene"] });
+      qc.invalidateQueries({ queryKey: ["entity-links"] });
+      qc.invalidateQueries({ queryKey: ["relationships"] });
+      qc.invalidateQueries({ queryKey: ["extraction"] });
+    } catch (e) {
+      toast.error(`${what === "apply" ? "Apply" : "Restore"} failed: ${(e as Error).message}`);
+    }
+  };
+  const label = VERDICT_LABEL[verdict.verdict] ?? verdict.verdict;
+  const detail =
+    verdict.verdict === "merge" && verdict.merge_into
+      ? `${label} → ${verdict.merge_into}`
+      : verdict.verdict === "reclassify" && verdict.suggested_type
+        ? `${label} → ${verdict.suggested_type}`
+        : label;
+  const state = verdict.restored
+    ? " (applied, then restored by an analyst)"
+    : verdict.applied
+      ? " (applied)"
+      : " (proposed, not applied)";
+  const title = `AI review: ${detail}${state}${verdict.reason ? ` — ${verdict.reason}` : ""}`;
+  return (
+    <>
+      <span className={`${styles.verdictPill} ${verdict.applied ? styles.verdictApplied : styles.verdictShadow}`} title={title}>
+        {detail}
+      </span>
+      {canApply && (
+        <button type="button" className={styles.verdictBtn} title="Apply this verdict now" onClick={() => run("apply")}>
+          apply
+        </button>
+      )}
+      {canRestore && (
+        <button type="button" className={styles.verdictBtn} title="Undo this applied verdict" onClick={() => run("restore")}>
+          restore
+        </button>
+      )}
+    </>
+  );
+}
+
 /** Drawer zone: everything the engine produced for one entry — links,
  *  relationships, created entities — each manageable in place. */
 export function EntryOutputs({ entryId }: { entryId: string }) {
@@ -70,12 +163,45 @@ export function EntryOutputs({ entryId }: { entryId: string }) {
   const created = createdQ.data?.items ?? [];
   const loading = linksQ.isLoading || relsQ.isLoading || createdQ.isLoading;
 
+  const adjQ = useEntryAdjudication(entryId);
+  const verdictById = new Map<string, EntryAdjudicationVerdict>();
+  for (const v of adjQ.data?.verdicts ?? []) verdictById.set(v.item_id, v);
+  const adjRun = adjQ.data?.run;
+  const adjDetail = adjRun?.detail as
+    | { mode?: string; items?: number; verdicts?: Record<string, number>; skipped?: string }
+    | null
+    | undefined;
+  const adjStatus = adjQ.data?.status;
+  const adjMode = adjRun?.mode ?? adjDetail?.mode;
+  const adjDur = fmtDuration(adjRun?.duration_ms);
+  const adjSummary =
+    adjStatus === "completed" && adjDetail
+      ? adjDetail.skipped
+        ? `AI review: skipped — ${skipReason(adjDetail.skipped)}`
+        : `AI review: ${[adjDur ? `reviewed in ${adjDur}` : "reviewed", adjMode ?? "shadow"].join(" · ")} · ${
+            adjDetail.items ?? 0
+          } items · ${
+            Object.entries(adjDetail.verdicts ?? {})
+              .filter(([k]) => k !== "keep")
+              .map(([k, n]) => `${n} ${k}`)
+              .join(", ") || "all kept"
+          }${adjMode === "apply" ? " · applied" : " · proposals only"}`
+      : adjStatus === "pending"
+        ? "AI review: queued"
+        : adjStatus?.startsWith("skipped_")
+          ? `AI review: skipped — ${skipReason(adjStatus.replace("skipped_", ""))}`
+          : null;
+  const iocVerdicts = (adjQ.data?.verdicts ?? []).filter((v) => v.kind === "ioc");
+  const assessment = (adjQ.data?.verdicts ?? []).find((v) => v.kind === "assessment");
+
   return (
     <div className={styles.outputsZone}>
+      {adjSummary && <p className={styles.ozAdj}>{adjSummary}</p>}
       <p className={styles.ozSub}>Links — entry → entity ({linksQ.data?.total ?? "…"})</p>
       {links.map((l) => (
         <div key={`${l.entity_type}|${l.entity_id}`} className={styles.orow}>
           <EntityChip type={l.entity_type} id={l.entity_id} name={l.entity_name} />
+          <VerdictBadge verdict={verdictById.get(`link:${l.entity_type}:${l.entity_id}`)} entryId={entryId} />
           {l.matched_names?.length ? <span className={styles.surf}>{l.matched_names[0]}</span> : null}
           <span className={`${styles.srcPill} ${srcClass(l.source)}`}>
             {SOURCE_LABELS[l.source ?? ""] ?? l.source ?? "unattributed"}
@@ -111,6 +237,7 @@ export function EntryOutputs({ entryId }: { entryId: string }) {
           <EntityChip type={r.source_type} id={r.source_id} name={r.source_name} />
           <span className={styles.verb}>{r.relationship_type}</span>
           <EntityChip type={r.target_type} id={r.target_id} name={r.target_name} />
+          <VerdictBadge verdict={verdictById.get(`edge:${r.id}`)} entryId={entryId} />
           <span className={`${styles.srcPill} ${srcClass(r.source)}`}>
             {SOURCE_LABELS[r.source ?? ""] ?? r.source ?? "—"}
           </span>
@@ -158,6 +285,7 @@ export function EntryOutputs({ entryId }: { entryId: string }) {
         <div key={e.id} className={styles.orow}>
           <EntityChip type={e.entity_type} id={e.id} name={e.name} />
           <span className={styles.newTag}>NEW</span>
+          <VerdictBadge verdict={verdictById.get(`link:${e.entity_type}:${e.id}`)} entryId={entryId} />
           <span className={styles.popMuted}>
             {e.article_count} linked {e.article_count === 1 ? "entry" : "entries"}
             {e.created_confidence ? ` · ${e.created_confidence}` : ""}
@@ -222,6 +350,52 @@ export function EntryOutputs({ entryId }: { entryId: string }) {
         </div>
       ))}
       {!loading && created.length === 0 && <div className={styles.ozEmpty}>No entities were created from this entry.</div>}
+
+      {/* The review's observable verdicts. The drawer has no sightings list of
+          its own, so each ioc verdict is its own row: kind · value, the badge
+          (Apply while proposed, Restore once applied), and the reason. */}
+      {iocVerdicts.length > 0 && (
+        <>
+          <p className={styles.ozSub}>Observables — review verdicts ({iocVerdicts.length})</p>
+          {iocVerdicts.map((v) => {
+            const { kind, value } = parseIocItemId(v.item_id);
+            return (
+              <div key={v.item_id} className={styles.orow} data-testid="ioc-verdict">
+                {kind && <span className={styles.surf}>{kind}</span>}
+                {v.entity_id ? (
+                  <EntityChip type="observable" id={v.entity_id} name={value} />
+                ) : (
+                  <span className={styles.entName} title={value}>
+                    {value}
+                  </span>
+                )}
+                <VerdictBadge verdict={v} entryId={entryId} />
+                {v.reason && <span className={styles.popMuted}>{v.reason}</span>}
+              </div>
+            );
+          })}
+        </>
+      )}
+
+      {/* The review's read on the analysis itself — logged, never applied. */}
+      {assessment && (
+        <>
+          <p className={styles.ozSub}>Assessment</p>
+          <div className={styles.orow} data-testid="assessment-verdict">
+            <span className={styles.entName}>severity/summary</span>
+            <span
+              className={`${styles.verdictPill} ${assessment.verdict === "ok" ? styles.verdictOk : styles.verdictShadow}`}
+              title={`AI review: the analysis's severity/summary reads as ${assessment.verdict}`}
+            >
+              {assessment.verdict}
+            </span>
+            {assessment.reason && <span className={styles.popMuted}>{assessment.reason}</span>}
+            <span className={styles.loggedOnly} title="Assessment verdicts are recorded for the record; nothing is changed">
+              logged only
+            </span>
+          </div>
+        </>
+      )}
     </div>
   );
 }

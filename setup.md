@@ -112,7 +112,7 @@ That is everything the stack needs to boot. These are optional:
 | --- | --- |
 | `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` | You want Telegram channel ingestion (step 12). Leave `TELEGRAM_API_ID=0` to keep it off. |
 | `PUBLIC_BASE_URL` | You post to Discord or Slack from automation rules and want in-app links in those posts to be absolute. Empty means relative links only. |
-| `INTELFEED_USERNAME`, `INTELFEED_PASSWORD` | You want the autonomous entity-maintenance tasks to run; use a dedicated admin account. |
+| `INTELFEED_USERNAME`, `INTELFEED_PASSWORD` | You assign tool-using AI tasks (copilot, enrichment research) to the Claude Code CLI provider; its IntelFeed skill CLI signs in with these. Use a dedicated admin account. |
 | `ANTHROPIC_API_KEY` | Emergency fallback for the Claude Code provider if its OAuth token lapses (step 14). |
 
 Everything else is editable in the web UI and needs no `.env` entry, in the section for the thing it controls:
@@ -308,9 +308,9 @@ export INTELFEED_PASSWORD=your-password
 
 ## 14. (Optional) Claude Code CLI authentication
 
-The scheduled entity-link validator (`validate-entity-links` job, runs daily at 04:00 by default) uses the Claude Code CLI shipped inside the backend image. It runs in the dedicated `celery-worker-ai` service which mounts a named volume (`claude_cli`) at `/home/appuser/.claude` to persist OAuth tokens across container rebuilds.
+The `claude_code` AI provider runs the Claude Code CLI shipped inside the backend image. It is the default provider assignment for the **copilot** task (the global streaming assistant — see [docs/copilot.md](docs/copilot.md)), and any other AI task an operator assigns to it under Settings → AI Configuration runs through it too. CLI turns execute on the dedicated `celery-worker-ai` service, which mounts a named volume (`claude_cli`) at `/home/appuser/.claude` to persist OAuth tokens across container rebuilds. Skip this section if every task is assigned to Ollama or an API-key provider.
 
-Until you bootstrap auth, the job will run and log failures (each `claude -p` call will exit with an auth-required error). Validation tasks simply no-op; nothing else is affected.
+Until you bootstrap auth, each `claude -p` call exits with an auth-required error and the task that invoked it fails; nothing else is affected.
 
 **Prod (Ubuntu, SSH-only, no browser on the box)** — use the long-lived token flow:
 
@@ -346,6 +346,5 @@ docker compose -f docker-compose.dev.yml exec -it celery-worker-ai claude /login
 **Notes:**
 
 - The `claude_cli` named volume persists across rebuilds. Only `docker compose down -v` wipes it.
-- Tokens revoked at claude.ai will require re-running setup-token.
+- Tokens revoked at claude.ai require re-running setup-token. Credential health is checked every 30 minutes (`refresh_claude_auth_status`) and shown on the provider card at Settings → AI Configuration, which also offers in-app re-auth.
 - Emergency fallback: set `ANTHROPIC_API_KEY` in `.env` to switch to pay-per-token billing if the OAuth token lapses. The provider auto-uses the env var when present.
-- Validator runs in **shadow mode** on first deploy — it logs would-be removals to `entity_link_validation_log` without touching junction rows. Review the log via the admin API for 1–2 weeks before flipping `link_validation_mode` to `"apply"`.

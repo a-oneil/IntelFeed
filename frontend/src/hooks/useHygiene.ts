@@ -2,40 +2,20 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "@/api/client";
 
 export interface HygieneStats {
-  link_validator_mode: string;
-  entity_maintenance_mode: string;
+  /** Adjudicate stage: mode and the unapplied verdicts it has filed. */
+  adjudication_mode: string;
+  adjudication_pending: number;
+  /** Set while the rolling circuit breaker has paused dispatch (ISO time it lifts). */
+  adjudication_breaker_until: string | null;
   pending_advisories: number;
-  shadow_proposals: number;
   name_normalization_proposed: number;
   applied_24h: number;
   applied_7d: number;
   orphan_count: number;
-  last_validator_run_at: string | null;
   last_maintenance_run_at: string | null;
-  link_validator_pending: number;
-  link_validator_validated_24h: number;
   alias_collisions_proposed: number;
   vendor_autolinks_proposed: number;
   ttp_cve_issues_proposed: number;
-  ai_review_approved: number;
-  ai_review_rejected: number;
-  ai_review_unsure: number;
-  ai_review_unreviewed: number;
-}
-
-export type ReviewDecision = "approve" | "reject" | "unsure";
-
-export interface AiReviewKickoffResult {
-  pending_unreviewed: number;
-  dispatched: boolean;
-}
-
-export interface ApplyAiApprovedResult {
-  applied: number;
-  skipped: number;
-  failed: number;
-  dismissed_rejected: number;
-  errors: Array<Record<string, string>>;
 }
 
 export interface AliasScanResult {
@@ -139,8 +119,8 @@ export interface FeedRow {
   payload: Record<string, unknown>;
   actions: string[];
   links: FeedLink[];
-  review_decision: ReviewDecision | null;
-  review_reason: string | null;
+  /** Who proposed it: the post-analysis adjudicate stage, or the legacy jobs/scans. */
+  origin: "adjudicator" | "legacy" | null;
 }
 
 export interface FeedResponse {
@@ -153,11 +133,20 @@ export interface FeedFilters {
   action?: string;
   source?: "link_validator" | "entity_maintenance";
   mode?: "shadow" | "apply";
-  review?: ReviewDecision | "unreviewed";
   /** Only unapplied proposals (review-queue mode) — skips applied history. */
   pending?: boolean;
+  origin?: "adjudicator" | "legacy";
+  /** Pending legacy proposals no entry can carry to the adjudicate stage —
+   *  listed for manual disposition; nothing automatic touches them. */
+  orphaned?: boolean;
   limit?: number;
   offset?: number;
+}
+
+export interface ApplyAdjudicationAllResult {
+  applied: number;
+  skipped: number;
+  errors: Array<{ log_id: string; action: string; error: string }>;
 }
 
 export interface OrphanRow {
@@ -236,8 +225,9 @@ export function useHygieneFeed(filters: FeedFilters) {
       if (filters.action) params.action = filters.action;
       if (filters.source) params.source = filters.source;
       if (filters.mode) params.mode = filters.mode;
-      if (filters.review) params.review = filters.review;
       if (filters.pending) params.pending = "true";
+      if (filters.origin) params.origin = filters.origin;
+      if (filters.orphaned) params.orphaned = "true";
       const { data } = await api.get<FeedResponse>("/admin/hygiene/feed", { params });
       return data;
     },
@@ -299,7 +289,6 @@ export function useApplyAdvisories() {
       limit?: number;
       entity_type?: string;
       mode?: "shadow" | "apply";
-      exclude_rejected?: boolean;
     }) => {
       const { data } = await api.post<ApplyAdvisoriesResult>(
         "/admin/hygiene/apply-reclassify-advisories",
@@ -309,37 +298,6 @@ export function useApplyAdvisories() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: HYGIENE_KEYS });
-      qc.invalidateQueries({ queryKey: ["entity-maintenance-log"] });
-    },
-  });
-}
-
-export function useKickoffAiReview() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async () => {
-      const { data } = await api.post<AiReviewKickoffResult>("/admin/hygiene/ai-review");
-      return data;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: HYGIENE_KEYS });
-    },
-  });
-}
-
-export function useApplyAiApproved() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (body: { dismiss_rejected?: boolean }) => {
-      const { data } = await api.post<ApplyAiApprovedResult>(
-        "/admin/hygiene/apply-ai-approved",
-        body,
-      );
-      return data;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: HYGIENE_KEYS });
-      qc.invalidateQueries({ queryKey: ["entity-maintenance-log"] });
     },
   });
 }
@@ -357,16 +315,39 @@ export function useDismissFeedRow() {
 }
 
 /** Bulk-discard pending proposals without applying them. Scope with
- *  action / source / review, or pass {} to clear the whole pending queue. */
+ *  action / source / origin, or pass {} to clear the whole pending queue. */
 export function useDismissProposals() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (body: { action?: string; source?: string; review?: string }) => {
+    mutationFn: async (body: {
+      action?: string;
+      source?: string;
+      origin?: "adjudicator" | "legacy";
+    }) => {
       const { data } = await api.post<{ dismissed: number }>("/admin/hygiene/dismiss-proposals", body);
       return data;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: HYGIENE_KEYS });
+    },
+  });
+}
+
+/** Apply every pending adjudicator proposal (both logs) through the stage's
+ *  own apply path. `action` narrows to one `adjudication_*` code or `shadow_remove`. */
+export function useApplyAdjudicationAll() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: { action?: string; limit?: number }) => {
+      const { data } = await api.post<ApplyAdjudicationAllResult>("/admin/hygiene/adjudication/apply-all", body);
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: HYGIENE_KEYS });
+      qc.invalidateQueries({ queryKey: ["engine"] });
+      qc.invalidateQueries({ queryKey: ["entity-links"] });
+      qc.invalidateQueries({ queryKey: ["relationships"] });
+      qc.invalidateQueries({ queryKey: ["extraction"] });
     },
   });
 }
@@ -387,7 +368,6 @@ export function useRunNameNormalization() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: HYGIENE_KEYS });
-      qc.invalidateQueries({ queryKey: ["entity-maintenance-log"] });
     },
   });
 }
@@ -419,7 +399,6 @@ export function useApplyNormalizeName() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: HYGIENE_KEYS });
-      qc.invalidateQueries({ queryKey: ["entity-maintenance-log"] });
     },
   });
 }

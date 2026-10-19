@@ -196,6 +196,45 @@ export interface StageRunRow {
   retryable: boolean;
 }
 
+export interface EntryAdjudicationVerdict {
+  item_id: string;
+  kind: "link" | "edge" | "ioc" | "assessment";
+  entity_type: string | null;
+  entity_id: string | null;
+  verdict: string;
+  reason: string | null;
+  suggested_type?: string | null;
+  merge_into?: string | null;
+  applied: boolean;
+  /** An analyst already put this one back: neither Apply nor Restore applies. */
+  restored: boolean;
+  log: string;
+  action: string;
+}
+
+export interface EntryAdjudication {
+  status: string | null;
+  adjudicated_at: string | null;
+  run: {
+    status: string;
+    created_at: string | null;
+    duration_ms: number | null;
+    mode: string | null;
+    detail: Record<string, unknown> | null;
+  } | null;
+  verdicts: EntryAdjudicationVerdict[];
+}
+
+/** What the adjudicate stage decided for one entry (drawer badges). */
+export function useEntryAdjudication(entryId: string, enabled = true) {
+  return useQuery({
+    queryKey: ["engine", "adjudication", entryId],
+    queryFn: async () => (await api.get<EntryAdjudication>(`/engine/entries/${entryId}/adjudication`)).data,
+    enabled: enabled && !!entryId,
+    staleTime: 15_000,
+  });
+}
+
 export function useStageRuns(stage: string, status?: string) {
   return useQuery({
     queryKey: ["engine", "stage-runs", stage, status ?? "all"],
@@ -207,28 +246,6 @@ export function useStageRuns(stage: string, status?: string) {
     },
     enabled: !!stage,
     staleTime: 30_000,
-  });
-}
-
-export interface LinkValidationStats {
-  mode: string;
-  pending_count: number;
-  validated_24h: number;
-  removed_24h: number;
-  removed_7d: number;
-  shadow_removed_7d: number;
-  restored_7d: number;
-  reclassify_pending: number;
-  last_run_at: string | null;
-  recheck_days: number;
-}
-
-/** Link-validator overview counts — feeds the "reclassifies" attention chip. */
-export function useLinkValidationStats() {
-  return useQuery({
-    queryKey: ["link-validation", "stats"],
-    queryFn: async () => (await api.get<LinkValidationStats>("/admin/link-validation/stats")).data,
-    staleTime: 60_000,
   });
 }
 
@@ -268,11 +285,17 @@ export interface ProcessingEntity {
 }
 
 export interface ProcessingStageCell {
-  status: string; // success | error | retry
+  /** success / error / retry are real runs. queued and skipped are synthetic
+   *  cells for a stage task that never ran (the adjudicate stage waiting on
+   *  the AI worker, or gated off before dispatch). */
+  status: "success" | "error" | "retry" | "queued" | "skipped";
   duration_ms: number | null;
   error: string | null;
   retryable: boolean;
   created_at: string | null;
+  /** Stage-specific run detail: the adjudicate stage's verdict counters and
+   *  mode on a run, `{queued_at}` on a queued cell, `{skipped}` on a skip. */
+  detail?: Record<string, unknown> | null;
 }
 
 /** Output-lens counts: what each stage produced for one entry. */

@@ -15,6 +15,9 @@ Stage kinds:
 - parallel — chord header after entry creation (autolink ∥ telegram_links ∥ extract)
 - post     — second chord header after the parallel stages complete
 - final    — second chord callback (signal scoring)
+- post_analysis — runs after the entry's one-pass AI analysis has landed
+             (minutes to hours after `score`, from the ai queue); dispatched by
+             services/entry_adjudication.enqueue_adjudication, never by the chord
 - side     — dispatched independently of the chord (automation)
 """
 
@@ -24,7 +27,7 @@ from dataclasses import dataclass, field
 @dataclass(frozen=True)
 class StageDef:
     name: str
-    kind: str  # inline | pre | parallel | post | final | side
+    kind: str  # inline | pre | parallel | post | final | post_analysis | side
     task_path: str | None
     description: str
     default_enabled: bool = True
@@ -127,6 +130,20 @@ PIPELINE_STAGES: dict[str, StageDef] = {
         kind="final",
         task_path="app.workers.signal_tasks.score_entry_task",
         description="Signal engine scoring + one-pass AI analysis enqueue",
+    ),
+    "adjudicate": StageDef(
+        name="adjudicate",
+        kind="post_analysis",
+        task_path="app.workers.adjudication_tasks.adjudicate_entry_task",
+        description=(
+            "AI review of everything the one-pass analysis wrote to the entry — links, minted entities, "
+            "asserted edges, observables — with the article in hand; verdicts are filed as proposals "
+            "(shadow) or applied inline. Replaces the nightly hygiene jobs"
+        ),
+        # Enabled in the registry so that, with pipeline plans off (prod today),
+        # the adjudication_mode setting alone decides; plans only subtract feeds.
+        default_enabled=True,
+        config_schema={"mode": {"type": "string", "setting": "adjudication_mode"}},
     ),
     "enrich": StageDef(
         name="enrich",
