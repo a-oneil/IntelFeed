@@ -87,4 +87,3 @@ class ColorSchemaResponse(BaseModel):
     syntax: dict[str, str]
     heatmap: dict[str, str]
     css_variables: dict[str, str]
-

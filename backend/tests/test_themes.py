@@ -529,4 +529,3 @@ async def test_get_color_schema_unauthenticated(client: AsyncClient):
     assert data["syntax"]["keyword"] == "#cba6f7"
     assert data["css_variables"]["entity-actor"] == "#f97316"
     assert data["css_variables"]["fmt-sigma"] == "#56d364"
-
