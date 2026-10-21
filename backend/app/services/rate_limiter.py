@@ -8,6 +8,16 @@ from app.services.redis_client import get_redis_bytes
 
 logger = logging.getLogger(__name__)
 
+
+def _default_interval() -> float:
+    """Seconds between requests to one domain: the Settings UI value when
+    set, else the env default."""
+    try:
+        return float(settings.get("rate_limit_default_interval") or settings.rate_limit_default_interval)
+    except (TypeError, ValueError):
+        return float(settings.rate_limit_default_interval)
+
+
 # Atomic rate limiter: claims the slot and returns when the request should fire.
 # Returns 0 if it can go now, or the number of seconds the caller must wait.
 # Either way, the slot is claimed (timestamp updated to now + wait_time).
@@ -39,7 +49,7 @@ async def acquire_rate_limit(url: str, min_interval: float | None = None) -> boo
     The slot is claimed atomically so concurrent workers queue up properly.
     """
     domain = _get_domain(url)
-    interval = settings.rate_limit_overrides.get(domain, settings.rate_limit_default_interval)
+    interval = settings.rate_limit_overrides.get(domain, _default_interval())
     if min_interval and min_interval > interval:
         interval = min_interval
     key = f"ratelimit:{domain}"
@@ -79,7 +89,7 @@ async def check_rate_limit(url: str) -> float:
     Returns 0 if allowed now, or seconds to wait.
     """
     domain = _get_domain(url)
-    interval = settings.rate_limit_overrides.get(domain, settings.rate_limit_default_interval)
+    interval = settings.rate_limit_overrides.get(domain, _default_interval())
     key = f"ratelimit:{domain}"
 
     r = await get_redis_bytes()

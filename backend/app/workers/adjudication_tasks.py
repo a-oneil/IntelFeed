@@ -127,6 +127,14 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
             cfg = await _settings(db)
             row = await _request_row(db, entry_id)
 
+            # A duplicate dispatch — the resweep re-queued a row whose first
+            # task was still waiting its turn — must not re-run the model: the
+            # first task's verdicts already landed. A fresh analysis always
+            # resets the row to `pending` before it dispatches, so `completed`
+            # here can only mean "already done".
+            if row.adjudication_status == COMPLETED:
+                return {"skipped": "already_reviewed", "mode": cfg["mode"], "items": 0}
+
             async def _finish(status: str, detail: dict) -> dict:
                 row.adjudication_status = status
                 row.adjudicated_at = datetime.now(UTC)

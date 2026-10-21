@@ -33,6 +33,23 @@ def _parse_kev_date(value: str | None) -> date | None:
         return None
 
 
+def coerce_exploit_sources(sources) -> list[dict]:
+    """`cves.exploit_sources` as a list of `{"source": ...}` dicts.
+
+    The column was written as dicts by the KEV sync and, for a while, as bare
+    strings by the Metasploit sync — and `.get()` on a string took the KEV
+    sync down with it for two weeks. Every writer and reader goes through
+    this so one odd row can never break a whole catalog run again.
+    """
+    out: list[dict] = []
+    for item in sources or []:
+        if isinstance(item, dict):
+            out.append(item)
+        elif isinstance(item, str) and item.strip():
+            out.append({"source": item.strip()})
+    return out
+
+
 def apply_kev_record(cve_obj: CVE, kev_data: dict) -> bool:
     """Apply a KEV catalog record to a CVE. Returns True if newly added to KEV.
 
@@ -47,9 +64,11 @@ def apply_kev_record(cve_obj: CVE, kev_data: dict) -> bool:
     cve_obj.kev_date_added = _parse_kev_date(kev_data.get("dateAdded"))
     cve_obj.kev_due_date = _parse_kev_date(kev_data.get("dueDate"))
 
-    existing_sources = cve_obj.exploit_sources or []
+    existing_sources = coerce_exploit_sources(cve_obj.exploit_sources)
     if not any(s.get("source") == "kev" for s in existing_sources):
         cve_obj.exploit_sources = [*existing_sources, {"source": "kev", **kev_data}]
+    elif existing_sources != list(cve_obj.exploit_sources or []):
+        cve_obj.exploit_sources = existing_sources
 
     if cve_obj.exploit_status_source != "manual":
         cve_obj.exploit_status = "kev"

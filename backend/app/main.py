@@ -20,15 +20,36 @@ logger = logging.getLogger(__name__)
 
 setup_logging()
 
-if settings.sentry_dsn:
+
+def _init_sentry() -> None:
+    """Sentry from the effective settings (Settings → System overrides the
+    env). Runs at startup once the settings cache is warm; the SDK cannot be
+    re-pointed afterwards, which is why the UI says these need a restart."""
+    dsn = settings.get("sentry_dsn")
+    if not dsn:
+        return
     import sentry_sdk
 
     sentry_sdk.init(
-        dsn=settings.sentry_dsn,
-        traces_sample_rate=settings.sentry_traces_sample_rate,
-        profiles_sample_rate=settings.sentry_profiles_sample_rate,
+        dsn=str(dsn),
+        traces_sample_rate=float(settings.get("sentry_traces_sample_rate") or 0.0),
+        profiles_sample_rate=float(settings.get("sentry_profiles_sample_rate") or 0.0),
         send_default_pii=False,
     )
+
+
+async def _warm_settings() -> None:
+    """Load the system_settings overrides into the in-process cache so
+    `settings.get()` sees them from the first request, not the first time
+    some endpoint happens to read a setting through the DB."""
+    from app.database import async_session
+    from app.services.system_settings import warm_settings_cache
+
+    try:
+        async with async_session() as db:
+            await warm_settings_cache(db)
+    except Exception:
+        logger.warning("settings cache warm-up failed; env defaults apply until the first read", exc_info=True)
 
 
 async def _seed_ai_tasks() -> None:
@@ -304,6 +325,8 @@ async def _warn_unknown_provider_types() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    await _warm_settings()
+    _init_sentry()
     await _seed_enrichment_sources()
     await _seed_ai_tasks()
     await _sync_job_schedules_to_redis()

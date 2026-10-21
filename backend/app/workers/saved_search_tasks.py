@@ -190,7 +190,7 @@ def sync_campaign_sources():
     start = _time.monotonic()
     try:
         added = run_async(_sync_campaign_sources())
-        logger.info("campaign_sources_synced", **added)
+        logger.info("campaign_sources_synced %s", added)
         CELERY_TASKS_TOTAL.labels(task_name="sync_campaign_sources", status="success").inc()
     except Exception:
         CELERY_TASKS_TOTAL.labels(task_name="sync_campaign_sources", status="error").inc()

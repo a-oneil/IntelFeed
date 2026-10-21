@@ -1458,6 +1458,7 @@ async def _run_metasploit_sync():
     """
     import httpx
 
+    from app.intelligence.external_feeds import coerce_exploit_sources
     from app.models.cve import CVE
 
     stats = {"modules_seen": 0, "cves_matched": 0, "cves_updated": 0, "escalated": 0}
@@ -1492,9 +1493,13 @@ async def _run_metasploit_sync():
                 cve.metasploit_module = primary
                 changed = True
 
-            sources = list(cve.exploit_sources or [])
-            if "metasploit" not in sources:
-                sources.append("metasploit")
+            sources = coerce_exploit_sources(cve.exploit_sources)
+            if not any(s.get("source") == "metasploit" for s in sources):
+                sources.append({"source": "metasploit", "module": primary})
+                cve.exploit_sources = sources
+                changed = True
+            elif sources != list(cve.exploit_sources or []):
+                # Rows this sync wrote as bare strings before it used dicts.
                 cve.exploit_sources = sources
                 changed = True
 

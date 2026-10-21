@@ -19,6 +19,7 @@ SECRET_KEYS = frozenset(
 CONFIGURABLE_KEYS: dict[str, type] = {
     # Feeds
     "default_feed_fetch_interval": int,
+    "feed_auto_pause_days": int,
     "user_agent": str,
     # Image Proxy
     "image_proxy_enabled": bool,
@@ -181,6 +182,16 @@ SETTING_METADATA: dict[str, dict] = {
     "default_feed_fetch_interval": {
         "label": "Default Fetch Interval",
         "description": "Default interval between feed fetches (minutes)",
+        "group": "feeds",
+    },
+    "feed_auto_pause_days": {
+        "label": "Auto-Pause Dead Feeds",
+        "description": (
+            "Pause a feed once every fetch has answered HTTP 4xx (404 gone, 403 blocked) for this many "
+            "days in a row. Only client errors count and the clock is the failure streak, not the last "
+            "post, so a seldom-posting blog is never paused for being quiet. Paused feeds show as dead "
+            "on the Engine Feeds view and resume with one click. 0 disables"
+        ),
         "group": "feeds",
     },
     "user_agent": {

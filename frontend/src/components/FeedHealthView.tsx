@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import api from "@/api/client";
 import { useFeedHealth, useFeedValueScores } from "@/hooks/useAnalytics";
 import { useUpdateFeed, useDeleteFeed } from "@/hooks/useFeeds";
 import { useUndoableDelete } from "@/hooks/useUndoableDelete";
@@ -125,6 +126,16 @@ export function FeedHealthView({
   const updateFeed = useUpdateFeed();
   const deleteFeed = useDeleteFeed();
   const undoableDelete = useUndoableDelete();
+  // Pool-level resume (admin): with per-user subscriptions on, the PUT
+  // is_active toggle only writes the caller's own pause, so a feed the health
+  // check paused needs this to come back for everyone.
+  const resumeFeed = useMutation({
+    mutationFn: async (feedId: string) => (await api.post(`/feeds/${feedId}/resume`)).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["feed-health"] });
+      queryClient.invalidateQueries({ queryKey: ["feeds"] });
+    },
+  });
 
   const handleRemove = (feedId: string, title: string) => {
     undoableDelete({
@@ -248,6 +259,13 @@ export function FeedHealthView({
                     <span className={styles.summaryCount}>{healthData.summary.erroring}</span>
                     <span className={styles.summaryLabel}>Erroring</span>
                   </div>
+                  <div
+                    className={`${styles.summaryCard} ${styles.dead}`}
+                    title="Paused by the health check: every fetch answered HTTP 4xx for the configured window"
+                  >
+                    <span className={styles.summaryCount}>{healthData.summary.dead ?? 0}</span>
+                    <span className={styles.summaryLabel}>Dead</span>
+                  </div>
                   <div className={`${styles.summaryCard} ${styles.disabled}`}>
                     <span className={styles.summaryCount}>{healthData.summary.disabled}</span>
                     <span className={styles.summaryLabel}>Disabled</span>
@@ -257,6 +275,67 @@ export function FeedHealthView({
                     <span className={styles.summaryLabel}>Total</span>
                   </div>
                 </div>
+
+                {(healthData.dead_feeds?.length ?? 0) > 0 && (
+                  <section className={styles.section}>
+                    <h2 className={styles.sectionTitle}>
+                      Dead Feeds ({healthData.dead_feeds.length})
+                    </h2>
+                    <p className={styles.sectionHint}>
+                      Paused automatically: every fetch answered HTTP 4xx for the whole auto-pause window
+                      (Fetch settings, below). Fix the URL and resume, or remove the feed.
+                    </p>
+                    <div className={styles.list}>
+                      <div className={styles.listHeader}>
+                        <span className={styles.nameCol}>Feed</span>
+                        <span className={styles.errorCountCol}>Errors</span>
+                        <span className={styles.errorMsgCol}>Last Error</span>
+                        <span className={styles.reachCol}>Readers</span>
+                        <span className={styles.actionCol}>Actions</span>
+                      </div>
+                      {healthData.dead_feeds.map((f) => (
+                        <div key={f.id} className={styles.row}>
+                          <span className={styles.nameCol}>
+                            <span className={styles.feedNameRow}>
+                              <span className={styles.feedName}>{f.title}</span>
+                              <ReliabilityBadge rating={f.reliability_rating} />
+                            </span>
+                          </span>
+                          <span className={`${styles.errorCountCol} ${styles.errorCount}`}>
+                            {f.error_count}
+                            {f.failing_for_days != null && (
+                              <span className={styles.errorAge}> · {f.failing_for_days}d</span>
+                            )}
+                          </span>
+                          <span className={`${styles.errorMsgCol} ${styles.errorMsg}`}>
+                            {f.last_error ?? "\u2014"}
+                            {f.auto_paused_at && (
+                              <span className={styles.errorAge}> · paused {formatDate(f.auto_paused_at)}</span>
+                            )}
+                          </span>
+                          <ReachCell feed={f} />
+                          <span className={styles.actionCol}>
+                            <button
+                              className={styles.actionBtn}
+                              onClick={() => resumeFeed.mutate(f.id)}
+                              disabled={resumeFeed.isPending}
+                              title="Re-activate and clear the failure streak"
+                            >
+                              Resume
+                            </button>
+                            <button
+                              className={`${styles.actionBtn} ${styles.removeBtn}`}
+                              onClick={() => handleRemove(f.id, f.title)}
+                              disabled={deleteFeed.isPending}
+                            >
+                              Remove
+                            </button>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
 
                 {healthData.erroring_feeds.length > 0 && (
                   <section className={styles.section}>
@@ -279,8 +358,18 @@ export function FeedHealthView({
                               <ReliabilityBadge rating={f.reliability_rating} />
                             </span>
                           </span>
-                          <span className={`${styles.errorCountCol} ${styles.errorCount}`}>
+                          <span
+                            className={`${styles.errorCountCol} ${styles.errorCount}`}
+                            title={
+                              f.failing_for_days != null
+                                ? `Failing for ${f.failing_for_days} days (since ${f.error_since ? formatDate(f.error_since) : "?"})`
+                                : undefined
+                            }
+                          >
                             {f.error_count}
+                            {f.failing_for_days != null && (
+                              <span className={styles.errorAge}> · {f.failing_for_days}d</span>
+                            )}
                           </span>
                           <span className={`${styles.errorMsgCol} ${styles.errorMsg}`}>
                             {f.last_error

@@ -296,3 +296,23 @@ async def test_bluesky_fetch_extended_feed_routes_to_adapter():
     assigned_config = feed.adapter_config
     assert assigned_config.get("last_seen_cid") == "bafyrei001"
     assert "_feed_id" not in assigned_config
+
+
+def test_apply_kev_record_tolerates_string_sources(mock_kev_catalog):
+    """The Metasploit sync once wrote bare strings into exploit_sources; one
+    such row crashed the whole KEV sync (`.get` on a str) for two weeks."""
+    cve = CVE(cve_id="CVE-2024-21762", exploit_sources=["metasploit"])
+    assert apply_kev_record(cve, _kev_data(mock_kev_catalog)) is True
+    assert {"source": "metasploit"} in cve.exploit_sources
+    assert any(s["source"] == "kev" for s in cve.exploit_sources)
+    assert all(isinstance(s, dict) for s in cve.exploit_sources)
+
+
+def test_coerce_exploit_sources_normalizes_strings_and_drops_junk():
+    from app.intelligence.external_feeds import coerce_exploit_sources
+
+    assert coerce_exploit_sources(None) == []
+    assert coerce_exploit_sources(["metasploit", {"source": "kev"}, 3, " ", None]) == [
+        {"source": "metasploit"},
+        {"source": "kev"},
+    ]

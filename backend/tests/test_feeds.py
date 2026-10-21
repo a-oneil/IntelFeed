@@ -745,3 +745,76 @@ async def test_single_feed_update_still_writes_analyst_notes(
     )
     assert response.status_code == 200
     assert response.json()["analyst_notes"] == "Fast on ransomware."
+
+
+@pytest.mark.asyncio
+async def test_feed_health_lists_dead_feeds(
+    client: AsyncClient, auth_headers: dict, test_user: User, db_session: AsyncSession
+):
+    """Auto-paused feeds are reported as dead, apart from feeds switched off by hand."""
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+    dead = Feed(
+        title="Gone",
+        url="https://gone.example/rss",
+        feed_type="rss",
+        is_active=False,
+        error_count=900,
+        last_error="HTTP 404",
+        error_since=now - timedelta(days=45),
+        auto_paused_at=now - timedelta(days=1),
+    )
+    off = Feed(title="Off", url="https://off.example/rss", feed_type="rss", is_active=False)
+    failing = Feed(
+        title="Failing",
+        url="https://fail.example/rss",
+        feed_type="rss",
+        error_count=5,
+        last_error="HTTP 403",
+        error_since=now - timedelta(days=3),
+    )
+    db_session.add_all([dead, off, failing])
+    await db_session.flush()
+
+    response = await client.get("/api/feeds/health", headers=auth_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["summary"]["dead"] == 1
+    assert [f["title"] for f in data["dead_feeds"]] == ["Gone"]
+    assert data["dead_feeds"][0]["failing_for_days"] == 45
+    assert data["dead_feeds"][0]["auto_paused_at"] is not None
+    assert [f["title"] for f in data["disabled_feeds"]] == ["Off"]
+    erroring = next(f for f in data["erroring_feeds"] if f["title"] == "Failing")
+    assert erroring["failing_for_days"] == 3 and erroring["auto_paused_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_resume_feed_is_admin_only_and_clears_the_streak(
+    client: AsyncClient, auth_headers: dict, admin_headers: dict, db_session: AsyncSession
+):
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+    dead = Feed(
+        title="Gone",
+        url="https://gone2.example/rss",
+        feed_type="rss",
+        is_active=False,
+        error_count=900,
+        last_error="HTTP 404",
+        error_since=now - timedelta(days=45),
+        auto_paused_at=now,
+    )
+    db_session.add(dead)
+    await db_session.flush()
+
+    response = await client.post(f"/api/feeds/{dead.id}/resume", headers=auth_headers)
+    assert response.status_code == 403
+
+    response = await client.post(f"/api/feeds/{dead.id}/resume", headers=admin_headers)
+    assert response.status_code == 200
+    assert response.json() == {"id": str(dead.id), "is_active": True}
+    await db_session.refresh(dead)
+    assert dead.is_active and dead.auto_paused_at is None
+    assert dead.error_count == 0 and dead.last_error is None and dead.error_since is None

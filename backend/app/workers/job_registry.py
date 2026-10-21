@@ -55,8 +55,9 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
     },
     "check-feed-health": {
         "task": "app.workers.feed_tasks.check_feed_health",
-        "description": "Detect stale feeds and persistent fetch errors",
+        "description": "Detect stale feeds and persistent fetch errors; pause feeds dead on 4xx past the window",
         "category": "feeds",
+        "settings_keys": ["feed_auto_pause_days"],
         "default_schedule": {"type": "crontab", "minute": "30", "hour": "*/6"},
     },
     # --- Intelligence ---

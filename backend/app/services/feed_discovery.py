@@ -55,7 +55,7 @@ async def discover_feed(url: str) -> FeedDiscoverResult | None:
     async with httpx.AsyncClient(
         follow_redirects=True,
         timeout=15.0,
-        headers={"User-Agent": settings.user_agent},
+        headers={"User-Agent": str(settings.get("user_agent") or settings.user_agent)},
     ) as client:
         # Check if it's a YouTube feed XML URL (already resolved)
         yt_feed_match = YOUTUBE_FEED_RE.search(url)

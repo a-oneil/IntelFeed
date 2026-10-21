@@ -25,6 +25,12 @@ class Feed(Base):
     last_modified: Mapped[str | None] = mapped_column(String(255))
     error_count: Mapped[int] = mapped_column(Integer, default=0)
     last_error: Mapped[str | None] = mapped_column(Text)
+    # Start of the current failure streak (cleared on success). The health
+    # check pauses a feed whose 4xx streak has outlasted feed_auto_pause_days.
+    error_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Set when the health check paused the feed, so the Feeds view can show a
+    # dead feed as dead rather than merely disabled; cleared on resume.
+    auto_paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     adapter_config: Mapped[dict] = mapped_column(JSONB, default=dict)
     # Source reliability
