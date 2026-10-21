@@ -44,6 +44,62 @@ FEED_ACCEPT_LANGUAGE = "en-US,en;q=0.9"
 # Attempt RSS autodiscovery only after this many consecutive HTTP 404 failures
 FEED_404_AUTODISCOVERY_MIN_FAILURES = 3
 
+# "HTTP 4xx" as written by the fetchers below. Only client errors count as a
+# dead feed: a 5xx or a timeout is the publisher's bad day, not a moved feed.
+_HTTP_4XX = re.compile(r"^HTTP 4\d\d\b")
+
+
+def _note_fetch_error(feed: Feed, message: str) -> None:
+    """Count a failed fetch. `error_since` marks the start of the streak so
+    the health check can tell a feed dead for a month from one that hiccupped
+    this morning; a successful fetch clears it."""
+    now = datetime.now(UTC)
+    feed.error_count += 1
+    feed.last_error = message
+    if feed.error_since is None:
+        feed.error_since = now
+    feed.last_fetched_at = now
+
+
+def _note_fetch_success(feed: Feed) -> None:
+    """A clean fetch ends the failure streak."""
+    feed.error_count = 0
+    feed.last_error = None
+    feed.error_since = None
+
+
+async def _auto_pause_dead_feeds(db: AsyncSession, pause_days: int) -> int:
+    """Pause active feeds whose current failure streak is a 4xx that began
+    more than `pause_days` ago. Returns how many were paused."""
+    cutoff = datetime.now(UTC) - timedelta(days=pause_days)
+    result = await db.execute(
+        select(Feed).where(
+            Feed.is_active.is_(True),
+            Feed.error_since.isnot(None),
+            Feed.error_since <= cutoff,
+            Feed.error_count >= 3,
+        )
+    )
+    paused = 0
+    for feed in result.scalars().all():
+        if not feed.last_error or not _HTTP_4XX.match(feed.last_error):
+            continue
+        feed.is_active = False
+        feed.auto_paused_at = datetime.now(UTC)
+        db.add(feed)
+        paused += 1
+        logger.warning(
+            "Feed %s (%s) auto-paused: %s since %s (%d consecutive failures)",
+            feed.id,
+            feed.url,
+            feed.last_error,
+            feed.error_since.date(),
+            feed.error_count,
+        )
+    if paused:
+        await db.commit()
+    return paused
+
 
 async def _resolve_user_agent(db: AsyncSession) -> str:
     """Effective User-Agent: system_settings DB override > env default."""
@@ -273,13 +329,16 @@ async def _fetch_feed(feed_id: str):
         if feed.feed_type in NON_FETCHABLE_FEED_TYPES or not feed.url.lower().startswith(("http://", "https://")):
             feed.last_fetched_at = datetime.now(UTC)
             if feed.error_count:
-                feed.error_count = 0
-                feed.last_error = None
+                _note_fetch_success(feed)
             db.add(feed)
             await db.commit()
             FEED_FETCH_TOTAL.labels(status="skipped").inc()
             logger.debug("Feed %s (%s): non-fetchable feed type %r, skipping", feed.id, feed.url, feed.feed_type)
             return
+
+        # Resolve the User-Agent first: that read warms the settings cache the
+        # rate limiter's per-domain interval comes from.
+        base_headers = _feed_request_headers(await _resolve_user_agent(db))
 
         # Acquire domain rate limit
         from app.services.rate_limiter import acquire_rate_limit
@@ -288,8 +347,6 @@ async def _fetch_feed(feed_id: str):
             FEED_FETCH_TOTAL.labels(status="rate_limited").inc()
             logger.warning(f"Rate limited for feed {feed.id}, will retry on next poll")
             return
-
-        base_headers = _feed_request_headers(await _resolve_user_agent(db))
         headers = dict(base_headers)
         if feed.etag:
             headers["If-None-Match"] = feed.etag
@@ -304,9 +361,7 @@ async def _fetch_feed(feed_id: str):
             try:
                 response = await client.get(feed.url)
             except httpx.HTTPError as e:
-                feed.error_count += 1
-                feed.last_error = str(e)
-                feed.last_fetched_at = datetime.now(UTC)
+                _note_fetch_error(feed, str(e))
                 db.add(feed)
                 await db.commit()
                 await _maybe_create_feed_error_event(db, feed)
@@ -351,9 +406,7 @@ async def _fetch_feed(feed_id: str):
 
                 if response.status_code != 200:
                     prev_error = feed.last_error
-                    feed.error_count += 1
-                    feed.last_error = f"HTTP {response.status_code}"
-                    feed.last_fetched_at = datetime.now(UTC)
+                    _note_fetch_error(feed, f"HTTP {response.status_code}")
                     db.add(feed)
                     await db.commit()
                     await _maybe_create_feed_error_event(db, feed)
@@ -393,9 +446,9 @@ async def _fetch_feed(feed_id: str):
         if feed.feed_type in ("rss", "atom") and not parsed_entries:
             content_type = (response.headers.get("content-type") or "").lower()
             if "html" in content_type:
-                feed.error_count += 1
-                feed.last_error = f"Non-feed response: HTTP 200 with content-type {content_type!r} and 0 entries parsed"
-                feed.last_fetched_at = datetime.now(UTC)
+                _note_fetch_error(
+                    feed, f"Non-feed response: HTTP 200 with content-type {content_type!r} and 0 entries parsed"
+                )
                 db.add(feed)
                 await db.commit()
                 await _maybe_create_feed_error_event(db, feed)
@@ -572,8 +625,7 @@ async def _fetch_feed(feed_id: str):
         feed.last_fetched_at = datetime.now(UTC)
         feed.etag = response.headers.get("etag")
         feed.last_modified = response.headers.get("last-modified")
-        feed.error_count = 0
-        feed.last_error = None
+        _note_fetch_success(feed)
 
         # Update feed title/description from parsed metadata
         if feed_meta.title and not feed.title:
@@ -888,9 +940,7 @@ async def _fetch_extended_feed(db: AsyncSession, feed: Feed) -> None:
     try:
         feed_meta, parsed_entries = await adapter.fetch_entries(config, since=feed.last_fetched_at)
     except Exception as e:
-        feed.error_count += 1
-        feed.last_error = str(e)
-        feed.last_fetched_at = datetime.now(UTC)
+        _note_fetch_error(feed, str(e))
         db.add(feed)
         await db.commit()
         await _maybe_create_feed_error_event(db, feed)
@@ -1012,8 +1062,7 @@ async def _fetch_extended_feed(db: AsyncSession, feed: Feed) -> None:
 
     # Update feed metadata
     feed.last_fetched_at = datetime.now(UTC)
-    feed.error_count = 0
-    feed.last_error = None
+    _note_fetch_success(feed)
 
     if feed_meta.title and not feed.title:
         feed.title = feed_meta.title
@@ -1435,7 +1484,7 @@ async def _extract_full_text(url: str) -> tuple[str | None, str | None]:
             async with httpx.AsyncClient(
                 follow_redirects=True,
                 timeout=15.0,
-                headers={"User-Agent": settings.user_agent},
+                headers={"User-Agent": str(settings.get("user_agent") or settings.user_agent)},
             ) as client:
                 response = await client.get(url)
                 content_type = response.headers.get("content-type", "")
@@ -1517,7 +1566,7 @@ async def _fetch_og_image(url: str) -> str | None:
         async with httpx.AsyncClient(
             follow_redirects=True,
             timeout=10.0,
-            headers={"User-Agent": settings.user_agent},
+            headers={"User-Agent": str(settings.get("user_agent") or settings.user_agent)},
         ) as client:
             async with client.stream("GET", url) as response:
                 if response.status_code != 200:
@@ -1606,8 +1655,7 @@ async def _attempt_feed_url_autodiscovery(db: AsyncSession, feed: Feed, headers:
                 feed.url = candidate
                 feed.etag = None
                 feed.last_modified = None
-                feed.error_count = 0
-                feed.last_error = None
+                _note_fetch_success(feed)
                 db.add(feed)
                 await db.commit()
                 logger.info(
@@ -1649,8 +1697,10 @@ async def _check_feed_health():
     from sqlalchemy import func as sqlfunc
 
     from app.intelligence.correlation_events import create_feed_stale_event
+    from app.services.system_settings import warm_settings_cache
 
     async with _get_worker_session() as db:
+        await warm_settings_cache(db)
         # Find active feeds where last entry is older than 4 months
         # and last_fetched_at is recent (so we know the feed IS being polled)
         stale_threshold = datetime.now(UTC) - timedelta(days=120)
@@ -1708,6 +1758,17 @@ async def _check_feed_health():
         if error_created:
             await db.commit()
             logger.info("Created %d feed_error events from health check", error_created)
+
+        # Dead feeds: a 4xx streak that has outlasted the window is a moved or
+        # withdrawn feed, not a quiet one. Only client errors count — a
+        # seldom-posting blog answers 200 with an old feed, never 404 — and
+        # the clock is the streak start, not the last post, so a quiet source
+        # is never paused for being quiet.
+        pause_days = int(settings.get("feed_auto_pause_days") or 0)
+        if pause_days > 0:
+            paused = await _auto_pause_dead_feeds(db, pause_days)
+            if paused:
+                logger.info("Auto-paused %d dead feeds (HTTP 4xx for %d+ days)", paused, pause_days)
 
 
 @celery_app.task(name="app.workers.feed_tasks.backfill_transcripts", soft_time_limit=1800, time_limit=1860)

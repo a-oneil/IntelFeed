@@ -189,7 +189,7 @@ class WebScraperAdapter(ExtendedAdapter):
             async with httpx.AsyncClient(
                 follow_redirects=True,
                 timeout=20.0,
-                headers={"User-Agent": settings.user_agent},
+                headers={"User-Agent": str(settings.get("user_agent") or settings.user_agent)},
             ) as client:
                 response = await client.get(url)
                 content_type = response.headers.get("content-type", "")

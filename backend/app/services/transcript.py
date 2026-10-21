@@ -48,7 +48,7 @@ async def fetch_transcript(url: str) -> str | None:
         async with httpx.AsyncClient(
             follow_redirects=True,
             timeout=15.0,
-            headers={"User-Agent": settings.user_agent},
+            headers={"User-Agent": str(settings.get("user_agent") or settings.user_agent)},
         ) as client:
             response = await client.get(url)
             if response.status_code != 200:

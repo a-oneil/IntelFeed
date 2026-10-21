@@ -99,6 +99,23 @@
   color: var(--text-muted);
 }
 
+.dead .summaryCount {
+  color: var(--danger);
+}
+
+.sectionHint {
+  margin: 0 0 var(--space-3, 0.75rem);
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+/* "· 45d" next to an error count: how long the streak has lasted. */
+.errorAge {
+  color: var(--text-muted);
+  font-size: 0.8em;
+  font-weight: normal;
+}
+
 /* Sections */
 .section {
   margin-bottom: var(--sp-6);

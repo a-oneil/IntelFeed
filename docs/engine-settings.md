@@ -4,10 +4,10 @@ Every runtime setting IntelFeed exposes, what it actually does, and where in the
 UI it lives. This is the companion to [engine.md](engine.md), which explains the
 subsystems these settings steer; here the unit of organisation is the **knob**.
 
-IntelFeed has **194 settings** in total:
+IntelFeed has **186 settings** in total:
 
-- **146** are DB-overridable and editable in the UI (`CONFIGURABLE_KEYS`, `backend/app/services/system_settings.py:19`).
-  Two of them exist only in the database, with no `Settings` field behind them — see [How a setting resolves](#how-a-setting-resolves).
+- **138** are DB-overridable and editable in the UI (`CONFIGURABLE_KEYS`, `backend/app/services/system_settings.py:19`).
+  One of them exists only in the database, with no `Settings` field behind it — see [How a setting resolves](#how-a-setting-resolves).
 - **48** are env-only — infrastructure, secrets and build stamps — see [Env-only settings](#env-only-settings) at the end.
 - Five are **secrets** (encrypted at rest, masked in API responses): `github_token`,
   `nvd_api_key`, `observables_publish_token`, `registration_invite_code`, `sentry_dsn`
@@ -26,9 +26,15 @@ Everything goes through `settings.get(key)` (`backend/app/config.py:448`), never
    or a real environment variable can override at process start.
 3. **Code default** — the literal in `config.py`.
 
-Two keys exist **only** in the DB and have no env default at all:
-`entity_maintenance_mode` and `registration_invite_code`. Reading them before
-anyone sets them returns `None`.
+One key exists **only** in the DB and has no env default at all:
+`registration_invite_code`. Reading it before anyone sets it returns `None`.
+
+Reading `settings.key` as an attribute bypasses the override, which is how
+several knobs were editable in the UI yet inert (`correlation_cache_ttl_seconds`,
+`rate_limit_default_interval`, the `image_proxy_*` keys, `backup_retention_days`,
+`sentry_*`, and `user_agent` outside feed polling). Every runtime-editable key
+now resolves through `settings.get()`; the API warms the cache at startup and
+Celery tasks call `warm_settings_cache()` before reading knobs.
 
 **Caching.** Resolved values are cached in-process for 5 seconds
 (`_CACHE_TTL`, `system_settings.py`). A `PATCH` on one API worker therefore
@@ -319,6 +325,7 @@ Settings → Engine → **Feeds** table view (`feeds`, `rate_limiting`,
 | Setting | Type / default | What it does |
 |---|---|---|
 | `default_feed_fetch_interval` | int, `30` min | Default interval between fetches for a feed that doesn't set its own. |
+| `feed_auto_pause_days` | int, `30` | The `check-feed-health` job pauses an active feed once every fetch has answered **HTTP 4xx** for this many days in a row (`Feed.error_since` marks the streak start; a clean fetch clears it). Only client errors count — a 5xx, a timeout or an HTML page at the feed URL never pauses anything — and the clock is the streak, not the last post, so a seldom-posting blog that still answers 200 is never paused for being quiet. Paused feeds are listed as **Dead** on the Feeds view (`auto_paused_at`), apart from feeds switched off by hand, and `POST /api/feeds/{id}/resume` (admin) re-activates one and clears the streak. `0` disables. |
 | `user_agent` | str, browser-like | `User-Agent` sent when fetching feeds. The browser-like default exists because many sites (CISA/gov, Cloudflare-fronted blogs) return 403 to obvious bot agents. |
 | `rate_limit_default_interval` | float, `2.0` s | Default seconds between requests to the same domain. Per-domain overrides are env-only (`rate_limit_overrides`). |
 | `per_user_subscriptions_enabled` | bool, `false` | Each analyst manages their own feed list and mutes over the shared pool. Off is a single shared list where a mute affects everyone. While the flag is off, a mute is written to the shared `Feed.is_muted` only, not to anyone's subscription, so a feed muted while the flag is off reappears for everyone when it is turned on. |
@@ -409,7 +416,12 @@ bypasses the other gates and re-queues the row.
 against is the hourly one) re-enqueues, newest first: completed analyses with
 no decision after two hours, `skipped_budget` / `skipped_paused` rows every
 hour, and `pending` rows queued more than six hours ago with no run (a lost
-task).
+task). It does nothing while the `ai` queue holds more than
+`RESWEEP_QUEUE_CEILING` (200) tasks: a deep queue is reviews waiting their
+turn, not lost ones, and the entry analyses behind them need the worker more
+than a history walk does. A task that finds its row already `completed`
+(a duplicate dispatch) returns `skipped: already_reviewed` without calling
+the model.
 
 **What never changes, in any mode:** edges an analyst rejected, and links of a
 validator junction type (actor, malware, vendor, product, country) that an
@@ -512,9 +524,9 @@ sections rather than the Engine console.
 
 | Setting | Type / default | What it does |
 |---|---|---|
-| `sentry_dsn` | secret, empty | Sentry DSN. Empty disables Sentry entirely. |
-| `sentry_traces_sample_rate` | float, `0.1` | Performance trace sampling. |
-| `sentry_profiles_sample_rate` | float, `0.1` | Profiling sampling. |
+| `sentry_dsn` | secret, empty | Sentry DSN. Empty disables Sentry entirely. Read once at API startup (after the settings cache is warmed), so a change needs a restart. |
+| `sentry_traces_sample_rate` | float, `0.1` | Performance trace sampling. Read at startup, with the DSN. |
+| `sentry_profiles_sample_rate` | float, `0.1` | Profiling sampling. Read at startup, with the DSN. |
 | `backup_retention_days` | int, `7` | Days of `pg_dump` backups kept. Job `backup-database`, daily 02:00 UTC. |
 
 ### Settings → Feeds (public RSS)
@@ -549,6 +561,7 @@ settings.
 | Job key | Schedule (UTC) | Settings |
 |---|---|---|
 | `poll-feeds` | every 60 s | `default_feed_fetch_interval`, `user_agent` |
+| `check-feed-health` | every 6 h at :30 | `feed_auto_pause_days` |
 | `embed-entries` | every 15 min | `embeddings_enabled`, `embedding_model`, `embedding_base_url`, `embedding_batch_size`, `embedding_backfill_limit` |
 | `story-threads` | every 30 min | all `thread_*` except `thread_narrate_limit`, `thread_signals_enabled` |
 | `narrate-story-threads` | 06:10 | `thread_narrate_limit` |

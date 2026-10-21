@@ -227,7 +227,7 @@ def evict_image_cache():
         CELERY_TASKS_TOTAL.labels(task_name="evict_image_cache", status="success").inc()
         return
 
-    ttl_seconds = settings.image_proxy_cache_ttl_days * 86400
+    ttl_seconds = run_async(_setting("image_proxy_cache_ttl_days", settings.image_proxy_cache_ttl_days)) * 86400
     cutoff = time.time() - ttl_seconds
     evicted = 0
 
@@ -444,7 +444,7 @@ def backup_database():
         logger.info(f"Database backup created: {backup_file}")
 
         # Enforce retention policy
-        retention_days = settings.backup_retention_days
+        retention_days = run_async(_setting("backup_retention_days", settings.backup_retention_days))
         cutoff = datetime.now(UTC) - timedelta(days=retention_days)
         for old_backup in sorted(backup_dir.glob("intelfeed_*.sql.gz")):
             try:
@@ -645,6 +645,7 @@ async def _refresh_correlation_cache():
     from app.intelligence.correlation_cache import refresh_top_entities_cache
 
     async with _get_worker_session() as db:
+        await warm_settings_cache(db)
         refreshed = await refresh_top_entities_cache(db, limit=100)
         if refreshed:
             logger.info(f"Refreshed correlation cache for {refreshed} entities")

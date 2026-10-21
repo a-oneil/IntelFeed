@@ -1548,6 +1548,7 @@ async def test_resweep_requeues_budget_paused_and_lost_rows(db_session: AsyncSes
 
     dispatched: list = []
     monkeypatch.setattr(adj, "_current_analysis", _parsed)
+    monkeypatch.setattr(adj, "_ai_queue_depth", _zero_depth)
     monkeypatch.setattr(adj, "dispatch_adjudication", lambda entry_id, countdown=5: dispatched.append(entry_id))
 
     long_ago = datetime.now(UTC) - timedelta(hours=adj.STALE_PENDING_HOURS + 1)
@@ -1586,6 +1587,7 @@ async def test_resweep_marks_rows_without_an_analysis_failed(db_session: AsyncSe
         return None, None
 
     monkeypatch.setattr(adj, "_current_analysis", _none)
+    monkeypatch.setattr(adj, "_ai_queue_depth", _zero_depth)
     entry = await _make_entry(db_session, feed)
     row = await _request(db_session, entry)
     row.adjudication_status = adj.SKIPPED_BUDGET
@@ -2303,3 +2305,76 @@ def test_a_title_cased_suggested_type_still_reclassifies():
         [item],
     )
     assert out[0].verdict == "reclassify" and out[0].suggested_type == "malware"
+
+
+# ------------------------------------------------------------------ queue-aware resweep + duplicate dispatch
+
+
+async def _zero_depth() -> int:
+    return 0
+
+
+@pytest.mark.asyncio
+async def test_resweep_defers_while_the_ai_queue_is_deep(db_session: AsyncSession, feed, monkeypatch):
+    """A deep queue means reviews are waiting, not lost: the sweep must not
+    pile re-enqueues (or a history walk) on top of the analyses behind it."""
+    await _seed_settings(db_session)
+
+    async def _deep() -> int:
+        return adj.RESWEEP_QUEUE_CEILING + 1
+
+    dispatched: list = []
+    monkeypatch.setattr(adj, "_ai_queue_depth", _deep)
+    monkeypatch.setattr(adj, "dispatch_adjudication", lambda entry_id, countdown=5: dispatched.append(entry_id))
+    entry = await _make_entry(db_session, feed)
+    row = await _request(db_session, entry)
+    row.adjudication_status = adj.SKIPPED_BUDGET
+    await db_session.flush()
+
+    result = await adj.resweep_adjudications(db_session)
+    assert result == {"swept": 0, "deferred": adj.RESWEEP_QUEUE_CEILING + 1}
+    assert dispatched == []
+    await db_session.refresh(row)
+    assert row.adjudication_status == adj.SKIPPED_BUDGET
+
+
+@pytest.mark.asyncio
+async def test_task_skips_a_row_already_reviewed(db_session: AsyncSession, feed, monkeypatch):
+    """A duplicate dispatch finds the row completed and never calls the model."""
+    from contextlib import asynccontextmanager
+
+    from app.workers import adjudication_tasks as tasks
+
+    await _seed_settings(db_session)
+    entry = await _make_entry(db_session, feed)
+    row = await _request(db_session, entry)
+    row.adjudication_status = adj.COMPLETED
+    row.adjudicated_at = datetime.now(UTC)
+    await db_session.flush()
+
+    @asynccontextmanager
+    async def fake_session():
+        yield db_session
+
+    class _Lock:
+        def set(self, *a, **k):
+            return True
+
+        def delete(self, *a, **k):
+            return 1
+
+    async def boom(*a, **k):
+        raise AssertionError("model must not be called for a row that is already reviewed")
+
+    async def noop_commit():
+        await db_session.flush()
+
+    monkeypatch.setattr(tasks, "worker_session", fake_session)
+    monkeypatch.setattr(tasks.redis, "from_url", lambda *a, **k: _Lock())
+    monkeypatch.setattr("app.ai.engine.run_task", boom)
+    monkeypatch.setattr(db_session, "commit", noop_commit)
+
+    detail = await tasks._adjudicate_entry(entry.id)
+    assert detail["skipped"] == "already_reviewed" and detail["items"] == 0
+    await db_session.refresh(row)
+    assert row.adjudication_status == adj.COMPLETED

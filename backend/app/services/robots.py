@@ -99,12 +99,13 @@ async def can_fetch(url: str) -> bool:
     if domain in _cache:
         parser, expiry = _cache[domain]
         if time.time() < expiry:
-            return _rule_allows(parser, settings.user_agent, url)
+            return _rule_allows(parser, str(settings.get("user_agent") or settings.user_agent), url)
 
     # Fetch robots.txt
     parser = RobotFileParser()
     try:
-        async with httpx.AsyncClient(timeout=10.0, headers={"User-Agent": settings.user_agent}) as client:
+        user_agent = str(settings.get("user_agent") or settings.user_agent)
+        async with httpx.AsyncClient(timeout=10.0, headers={"User-Agent": user_agent}) as client:
             response = await client.get(robots_url)
             if response.status_code == 200:
                 parser.parse(response.text.splitlines())
@@ -116,7 +117,7 @@ async def can_fetch(url: str) -> bool:
         parser.allow_all = True
 
     _cache[domain] = (parser, time.time() + _CACHE_TTL)
-    return _rule_allows(parser, settings.user_agent, url)
+    return _rule_allows(parser, str(settings.get("user_agent") or settings.user_agent), url)
 
 
 async def get_crawl_delay(url: str) -> float | None:
@@ -129,7 +130,7 @@ async def get_crawl_delay(url: str) -> float | None:
 
     if domain in _cache:
         parser, _ = _cache[domain]
-        delay = parser.crawl_delay(settings.user_agent)
+        delay = parser.crawl_delay(str(settings.get("user_agent") or settings.user_agent))
         if delay is not None:
             return float(delay)
 

@@ -130,6 +130,12 @@ _ROLLING_MIN_SAMPLES = 10
 _BACKFILL_SHARE = 0.5
 # A `pending` row older than this with no run is a lost task, not a queue.
 STALE_PENDING_HOURS = 6
+# The resweep only re-enqueues while the ai queue is this shallow. A deep
+# queue means reviews are waiting their turn, not lost — re-queueing them
+# (and walking never-reviewed history) on top of it is how the queue
+# compounded to 8k tasks ahead of the entry analyses that share the worker.
+RESWEEP_QUEUE_CEILING = 200
+AI_QUEUE_NAME = "ai"
 # Links an analyst restored this recently are never changed again by the
 # stage (planning §4.3 "never touched"); the reviewer only sees the flag.
 RESTORED_GUARD_DAYS = 90
@@ -396,6 +402,19 @@ async def enqueue_and_dispatch(
     return status
 
 
+async def _ai_queue_depth() -> int:
+    """Tasks waiting on the ai queue (the Celery broker's list). 0 when Redis
+    is unreachable, so the sweep errs toward running."""
+    from app.services.redis_client import get_redis
+
+    try:
+        r = await get_redis()
+        return int(await r.llen(AI_QUEUE_NAME) or 0)
+    except Exception:
+        logger.debug("ai queue depth unavailable", exc_info=True)
+        return 0
+
+
 async def resweep_adjudications(db: AsyncSession, limit: int = 200) -> dict:
     """Self-heal, run from submit_analysis_batches (every 30 minutes — the
     budget it drains against is the hourly one). Re-enqueues,
@@ -407,7 +426,11 @@ async def resweep_adjudications(db: AsyncSession, limit: int = 200) -> dict:
     - ``pending`` rows queued longer than STALE_PENDING_HOURS with no run —
       a lost task (dispatch failure, worker crash, retries exhausted).
 
-    Newest first means live entries drain before backfilled history."""
+    Newest first means live entries drain before backfilled history.
+
+    Skipped entirely while the ai queue is deeper than RESWEEP_QUEUE_CEILING:
+    nothing is lost in a deep queue, it is waiting, and the entry analyses
+    behind it need the worker more than a history walk does."""
     from datetime import timedelta
 
     from app.models.ai_analysis import AIAnalysisRequest
@@ -415,6 +438,10 @@ async def resweep_adjudications(db: AsyncSession, limit: int = 200) -> dict:
     cfg = await _settings(db)
     if cfg["mode"] == "off":
         return {"swept": 0}
+    depth = await _ai_queue_depth()
+    if depth > RESWEEP_QUEUE_CEILING:
+        logger.info("adjudication resweep deferred: ai queue %d deep", depth)
+        return {"swept": 0, "deferred": depth}
     now = datetime.now(UTC)
     stale = now - timedelta(hours=2)
     lost = now - timedelta(hours=STALE_PENDING_HOURS)

@@ -20,7 +20,7 @@ _PREFIX_GRAPH = "intelfeed:corr:graph3"
 
 
 def _default_ttl() -> int:
-    return settings.correlation_cache_ttl_seconds
+    return int(settings.get("correlation_cache_ttl_seconds") or settings.correlation_cache_ttl_seconds)
 
 
 def pivot_cache_variant(

@@ -2404,6 +2404,8 @@ export interface FeedHealthSummary {
   stale: number;
   erroring: number;
   disabled: number;
+  /** Auto-paused by the health check — distinct from switched off by hand. */
+  dead: number;
   total: number;
 }
 
@@ -2430,6 +2432,11 @@ export interface FeedHealthFeed {
   last_error: string | null;
   is_active: boolean;
   reliability_rating: string | null;
+  /** Start of the current failure streak; null once a fetch succeeds. */
+  error_since?: string | null;
+  failing_for_days?: number | null;
+  /** Set when the health check paused the feed (a 4xx streak past the window). */
+  auto_paused_at?: string | null;
   reach?: FeedReach;
 }
 
@@ -2448,6 +2455,7 @@ export interface FeedHealthResponse {
   stale_feeds: FeedHealthFeed[];
   erroring_feeds: FeedHealthFeed[];
   disabled_feeds: FeedHealthFeed[];
+  dead_feeds: FeedHealthFeed[];
 }
 
 // Feed Value Scoring

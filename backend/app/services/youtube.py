@@ -25,7 +25,7 @@ async def check_is_short(video_id: str) -> bool:
 
         async with httpx.AsyncClient(
             timeout=10.0,
-            headers={"User-Agent": settings.user_agent},
+            headers={"User-Agent": str(settings.get("user_agent") or settings.user_agent)},
             follow_redirects=False,
         ) as client:
             response = await client.head(url)

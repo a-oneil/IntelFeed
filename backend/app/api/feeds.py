@@ -639,6 +639,7 @@ async def get_feed_health(
     stale = []
     erroring = []
     disabled = []
+    dead = []
 
     for feed in feeds:
         feed_info = {
@@ -650,10 +651,15 @@ async def get_feed_health(
             "last_error": feed.last_error,
             "is_active": feed.is_active,
             "reliability_rating": feed.reliability_rating,
+            "error_since": feed.error_since.isoformat() if feed.error_since else None,
+            "failing_for_days": (now - feed.error_since).days if feed.error_since else None,
+            "auto_paused_at": feed.auto_paused_at.isoformat() if feed.auto_paused_at else None,
         }
 
         if not feed.is_active:
-            disabled.append(feed_info)
+            # Dead = paused by the health check (a 4xx streak past the window),
+            # distinct from a feed someone switched off on purpose.
+            (dead if feed.auto_paused_at else disabled).append(feed_info)
         elif feed.error_count and feed.error_count >= 3:
             erroring.append(feed_info)
         elif not feed.last_fetched_at or feed.last_fetched_at < stale_cutoff:
@@ -662,7 +668,7 @@ async def get_feed_health(
         else:
             healthy.append(feed_info)
 
-    listed = stale + erroring + disabled
+    listed = stale + erroring + disabled + dead
     await _attach_reach(db, listed, user)
 
     return {
@@ -671,11 +677,13 @@ async def get_feed_health(
             "stale": len(stale),
             "erroring": len(erroring),
             "disabled": len(disabled),
+            "dead": len(dead),
             "total": len(feeds),
         },
         "stale_feeds": stale,
         "erroring_feeds": erroring,
         "disabled_feeds": disabled,
+        "dead_feeds": dead,
     }
 
 
@@ -728,6 +736,32 @@ async def get_failing_feeds(
         "high_value_count": sum(1 for f in items if f["is_high_value"]),
         "feeds": items,
     }
+
+
+@router.post("/{feed_id}/resume")
+async def resume_feed(
+    feed_id: uuid.UUID = Path(..., description="UUID of the feed to resume"),
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-activate a feed the health check auto-paused (or an admin paused)
+    and clear its failure streak, so the next poll starts from a clean slate.
+
+    Pool-level and admin-only: with per-user subscriptions on, `is_active`
+    on PUT /feeds/{id} writes only the caller's own pause, which is what
+    made a dead feed impossible to bring back from the Feeds view.
+    """
+    feed = await db.get(Feed, feed_id)
+    if not feed:
+        raise AppError(code="not_found", message="Feed not found", status_code=404)
+    feed.is_active = True
+    feed.auto_paused_at = None
+    feed.error_count = 0
+    feed.last_error = None
+    feed.error_since = None
+    db.add(feed)
+    await db.commit()
+    return {"id": str(feed.id), "is_active": True}
 
 
 @router.get("/{feed_id}/analytics")
@@ -832,6 +866,7 @@ async def update_feed(
             feed.last_modified = None
             feed.error_count = 0
             feed.last_error = None
+            feed.error_since = None
     if request.custom_title is not None:
         feed.custom_title = request.custom_title
     if "category_id" in sent:

@@ -10,6 +10,7 @@ export const SKIP_REASONS: Record<string, string> = {
   budget: "waiting: hourly budget",
   paused: "waiting: provider paused",
   locked: "another review held the lock",
+  already_reviewed: "already reviewed — duplicate dispatch, nothing re-run",
   nothing_to_review: "nothing to review",
   provider_paused: "waiting: provider paused",
   ai_parse_error: "model returned unusable JSON",

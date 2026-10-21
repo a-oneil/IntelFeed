@@ -71,7 +71,7 @@ async def proxy_image(
     user: User = Depends(get_current_user),
 ):
     """Proxy and optionally resize an external image."""
-    if not settings.image_proxy_enabled:
+    if not settings.get("image_proxy_enabled"):
         return Response(status_code=404)
 
     # Validate URL scheme and block private/reserved IPs (SSRF protection)
@@ -100,7 +100,7 @@ async def proxy_image(
             content=content,
             media_type=content_type,
             headers={
-                "Cache-Control": f"public, max-age={settings.image_proxy_cache_ttl_days * 86400}",
+                "Cache-Control": f"public, max-age={int(settings.get('image_proxy_cache_ttl_days') or 0) * 86400}",
                 "X-Content-Type-Options": "nosniff",
             },
         )
@@ -110,7 +110,7 @@ async def proxy_image(
     async with httpx.AsyncClient(
         follow_redirects=True,
         timeout=10.0,
-        headers={"User-Agent": settings.user_agent, "Referer": referer},
+        headers={"User-Agent": str(settings.get("user_agent") or settings.user_agent), "Referer": referer},
     ) as client:
         try:
             response = await client.get(url)
@@ -147,7 +147,7 @@ async def proxy_image(
         if content_type not in ALLOWED_CONTENT_TYPES:
             return Response(status_code=415)
 
-        if len(content) > settings.image_proxy_max_size_bytes:
+        if len(content) > int(settings.get("image_proxy_max_size_bytes") or settings.image_proxy_max_size_bytes):
             return Response(status_code=413)
 
         # Detect and block tracking pixels (1x1 images)
@@ -189,7 +189,7 @@ async def proxy_image(
             content=content,
             media_type=content_type,
             headers={
-                "Cache-Control": f"public, max-age={settings.image_proxy_cache_ttl_days * 86400}",
+                "Cache-Control": f"public, max-age={int(settings.get('image_proxy_cache_ttl_days') or 0) * 86400}",
                 "X-Content-Type-Options": "nosniff",
             },
         )

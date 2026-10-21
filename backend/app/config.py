@@ -89,6 +89,10 @@ class Settings(BaseSettings):
 
     # Feed defaults
     default_feed_fetch_interval: int = 30  # minutes
+    # Pause a feed whose fetches have answered HTTP 4xx for this many days
+    # straight (0 disables). Only client errors count, so a quiet blog that
+    # still answers 200 is never paused for being quiet.
+    feed_auto_pause_days: int = 30
 
     # Encryption
     encryption_key: str = "changeme"
