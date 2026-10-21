@@ -116,15 +116,29 @@ async def _submit_analysis_batches() -> dict | None:
             return None
         assignment, task, provider_model = assignment_row
 
-        # Self-healing sweep: entries whose score task failed before enqueueing
+        # Self-healing sweep: entries whose score task failed before enqueueing,
+        # and feed-policy skips whose feed has since let the AI back in.
+        from sqlalchemy import and_, or_
+
+        from app.models.feed import Feed
+        from app.services.entry_analysis import FEED_SKIP_STATUSES
+
         stale_cutoff = datetime.now(UTC) - timedelta(hours=2)
         missed = (
             (
                 await db.execute(
                     select(Entry.id)
+                    .join(Feed, Feed.id == Entry.feed_id)
                     .outerjoin(AIAnalysisRequest, AIAnalysisRequest.entry_id == Entry.id)
                     .where(
-                        AIAnalysisRequest.id.is_(None),
+                        or_(
+                            AIAnalysisRequest.id.is_(None),
+                            and_(
+                                AIAnalysisRequest.status.in_(FEED_SKIP_STATUSES),
+                                Feed.ai_analysis_enabled.is_(True),
+                                Feed.intel_extraction_mode != "none",
+                            ),
+                        ),
                         Entry.fetched_at < stale_cutoff,
                         Entry.fetched_at >= datetime.now(UTC) - timedelta(days=3),
                         Entry.scored_at.isnot(None),

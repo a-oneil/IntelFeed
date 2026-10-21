@@ -138,6 +138,9 @@ RESTORED_GUARD_DAYS = 90
 _MAX_LINKS = 60
 _MAX_EDGES = 10
 _MAX_IOCS = 25
+# Relationship sources the reviewer may judge. Analyst edges (confirmed,
+# created, rejected) and external-feed imports (MITRE) are settled by hand.
+REVIEWABLE_EDGE_SOURCES = ("auto_extracted", "co_occurrence")
 _MAX_CANDIDATES = 3
 _SNIPPET_WINDOW = 160
 _SNIPPET_MAX = 320
@@ -997,28 +1000,44 @@ async def supersede_legacy_proposals(db: AsyncSession, legacy_rows: list) -> int
     return len(legacy_rows)
 
 
-async def _edge_items(db: AsyncSession, entry) -> list[ReviewItem]:
+async def _edge_items(db: AsyncSession, entry, dropped_out: list | None = None) -> list[ReviewItem]:
+    """The relationship claims this article is evidence for and the reviewer
+    may still decide: machine-asserted edges whose verdict is open. Analyst
+    and external-feed edges are not the AI's to demote, and a settled verdict
+    stays settled — corroborated edges would otherwise be undone by one later
+    article that merely co-mentions the pair, and coincidental ones (sticky,
+    keeps ignored) would only spend the edge budget.
+
+    The cap keeps the claims born here (this entry is their only evidence):
+    nothing else will ever review them, while an edge with more evidence
+    gets another look from its next article. Overflow goes to ``dropped_out``
+    so the prompt can say the list is partial."""
     from app.models.entity_relationship import EntityRelationship
 
+    evidence_n = func.coalesce(func.array_length(EntityRelationship.evidence_entry_ids, 1), 0)
     rows = (
         (
             await db.execute(
                 select(EntityRelationship)
                 .where(
                     EntityRelationship.evidence_entry_ids.any(entry.id),
-                    EntityRelationship.source != "analyst_rejected",
-                    or_(
-                        EntityRelationship.source == "auto_extracted",
-                        func.coalesce(func.array_length(EntityRelationship.evidence_entry_ids, 1), 0) == 1,
-                    ),
+                    EntityRelationship.source.in_(REVIEWABLE_EDGE_SOURCES),
+                    EntityRelationship.adjudication_verdict.is_distinct_from("corroborated"),
+                    EntityRelationship.adjudication_verdict.is_distinct_from("coincidental"),
+                    or_(EntityRelationship.source == "auto_extracted", evidence_n == 1),
                 )
-                .order_by(EntityRelationship.created_at.desc())
-                .limit(_MAX_EDGES)
+                .order_by(evidence_n, EntityRelationship.created_at.desc())
             )
         )
         .scalars()
         .all()
     )
+    if len(rows) > _MAX_EDGES:
+        if dropped_out is not None:
+            dropped_out.extend(
+                ReviewItem(item_id=f"edge:{e.id}", kind="edge", line="", edge_id=e.id) for e in rows[_MAX_EDGES:]
+            )
+        rows = rows[:_MAX_EDGES]
     items: list[ReviewItem] = []
     for edge in rows:
         src = await _entity_label(db, edge.source_type, edge.source_id)
@@ -1127,7 +1146,7 @@ async def build_manifest(
     collects the retired jobs' pending rows the manifest rendered as earlier
     suggestions, so the caller can supersede exactly those after the review
     (taken before the model runs: the reviewer's own rows are never among them).
-    ``dropped_out`` collects link items the per-entry cap left out."""
+    ``dropped_out`` collects the link and edge items the per-entry caps left out."""
     from app.services.entry_analysis import analysis_content_text
 
     scope = scope or {"links", "entities", "relationships", "observables"}
@@ -1139,7 +1158,7 @@ async def build_manifest(
         # in the manifest at all.
         items += await _link_items(db, entry, scope, text, legacy_out, dropped_out)
     if "relationships" in scope:
-        items += await _edge_items(db, entry)
+        items += await _edge_items(db, entry, dropped_out)
     if "observables" in scope:
         items += await _ioc_items(db, entry)
     if "assessment" in scope:
@@ -1147,13 +1166,23 @@ async def build_manifest(
         if item:
             items.append(item)
     if dropped_out:
+        n_links = sum(1 for it in dropped_out if it.kind == "link")
+        n_edges = sum(1 for it in dropped_out if it.kind == "edge")
+        partial = [
+            s
+            for s, n in (
+                (f"{n_links} further autolinked entity links", n_links),
+                (f"{n_edges} further relationship claims", n_edges),
+            )
+            if n
+        ]
         items.append(
             ReviewItem(
                 item_id="_note",
                 kind="note",
                 line=(
-                    f"(note: this article has {len(dropped_out)} further autolinked entity links that are not "
-                    "in this list — judge only the items above)"
+                    f"(note: this article has {' and '.join(partial)} that are not in this list — "
+                    "judge only the items above)"
                 ),
             )
         )
@@ -1580,7 +1609,10 @@ async def _demote_edge(db: AsyncSession, edge_id: uuid.UUID, reason: str) -> dic
     from app.models.entity_relationship import EntityRelationship
 
     edge = await db.get(EntityRelationship, edge_id)
-    if edge is None or edge.source == "analyst_rejected":
+    # Same door as the manifest: an analyst's edge, or one already
+    # corroborated by the required number of reviews, is not demoted by a
+    # single article that fails to assert it.
+    if edge is None or edge.source not in REVIEWABLE_EDGE_SOURCES or edge.adjudication_verdict == "corroborated":
         return None
     before = {"confidence": edge.confidence, "adjudication_verdict": edge.adjudication_verdict}
     edge.confidence = "possible"

@@ -126,13 +126,31 @@ app auth dependency — these endpoints authenticate their own pullers by token.
 
 ## Extract stage
 
-Settings → Engine → *extract* stage panel. Two groups render here: the one-pass
-AI extraction knobs (`ai`) and the entity-creation guardrails (`extraction`).
+Settings → Engine → *extract* stage panel. Pattern matching only — the stage
+pulls CVE, ATT&CK technique and mitigation IDs out of the text at ingest and
+never calls a model — so only the two pattern knobs of the `extraction` group
+render here. The AI read, and everything that tunes it, lives on the
+[Analyze stage](#analyze-stage).
 
-### One-pass AI extraction
+| Setting | Type / default | What it does |
+|---|---|---|
+| `attack_ics_context_keywords` | csv | ICS-matrix ATT&CK techniques (`T0xxx`) are linked only when the entry text word-boundary-matches one of these. Without it, IT articles pick up ICS techniques on ID collisions. Read by `backend/app/intelligence/attack_catalog.py`. |
+| `cve_epss_high_risk_threshold` | float, `0.1` | EPSS score at or above which a CVE is tiered **high** risk. Drives CVE risk tiers, triage scoring and opportunity badges (`backend/app/intelligence/cve.py`). |
+
+---
+
+## Analyze stage
+
+Settings → Engine → *analyze* stage panel (`AnalyzeStageConfig.tsx`). Two groups
+render here: the one-pass AI analysis knobs (`ai`) and the entity-creation
+guardrails its output passes through (the rest of `extraction`), plus the
+`entry_analysis` model assignment, its max-output-tokens override, and the
+entity-name denylist.
+
+### One-pass AI analysis
 
 One consolidated `entry_analysis` call per entry replaces the old per-task
-extraction fan-out. Batched hourly and budget-capped;
+extraction fan-out. Requested when scoring finishes, batched hourly and budget-capped;
 `backend/app/services/entry_analysis.py` + `backend/app/workers/ai_batch_tasks.py`.
 Job: `ai-analysis-batch-submit` (every 30 min) and `ai-analysis-batch-poll`
 (every 10 min).
@@ -157,8 +175,6 @@ name and a new row in an entity table.
 |---|---|---|
 | `entity_resolution_normalized_match` | bool, `true` | Match incoming names against existing profiles *after* normalisation (case, punctuation, spacing, leetspeak folding) so `Cl0p` resolves to `Clop` and `Silver Fox` to `SilverFox` instead of creating a duplicate. Only prevents duplicate creation, so it is safe on. |
 | `entity_creation_gates` | `off` \| `shadow` \| `on`, default `shadow` | The generic-name / denylist / cross-type / alias-quality gates. `shadow` logs every would-block decision to the maintenance log but still creates — the right setting for watching what enforcement *would* do. `on` enforces. Manual creation always succeeds but is logged as an override. |
-| `attack_ics_context_keywords` | csv | ICS-matrix ATT&CK techniques (`T0xxx`) are linked only when the entry text word-boundary-matches one of these. Without it, IT articles pick up ICS techniques on ID collisions. Read by `backend/app/intelligence/attack_catalog.py`. |
-| `cve_epss_high_risk_threshold` | float, `0.1` | EPSS score at or above which a CVE is tiered **high** risk. Drives CVE risk tiers, triage scoring and opportunity badges (`backend/app/intelligence/cve.py`). |
 
 ---
 
@@ -375,7 +391,10 @@ claims and 25 observables; when an article has more links than that, the ones
 only this review can judge come first — entities it minted, then pending-tier
 promotions, then AI assertions, then the autolinker's bulk — the prompt says
 the list is partial, and the run's `detail.uncapped_links` records the
-remainder. `backend/app/services/entry_adjudication.py`,
+remainder. Relationship claims over the cap work the same way (claims born
+here — this entry their only evidence — come first, since no later article
+will review them; `detail.uncapped_edges`); the manifest only ever holds
+machine-asserted edges whose verdict is still open. `backend/app/services/entry_adjudication.py`,
 `backend/app/workers/adjudication_tasks.py`; stage `adjudicate` (kind
 `post_analysis`), task `adjudicate_entry_task` on the `ai` Celery queue,
 dispatched from the analysis landing path (`enqueue_adjudication`), not

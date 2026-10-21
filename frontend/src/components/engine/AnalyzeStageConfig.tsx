@@ -10,10 +10,12 @@ import { useExtractionStatus } from "@/hooks/useEngine";
 
 import { DenylistPanel } from "./DenylistPanel";
 
-import styles from "./ExtractStageConfig.module.css";
+import styles from "./AnalyzeStageConfig.module.css";
 
-/** Extract stage panel: one-pass AI extraction status + model + budget/gate settings. */
-export function ExtractStageConfig() {
+/** Analyze stage panel: one-pass AI analysis status + model + budget/gate
+ *  settings, plus the entity-creation guardrails its output passes through.
+ *  (The extract stage is pattern matching; the AI read lives here.) */
+export function AnalyzeStageConfig() {
   const { data: status } = useExtractionStatus();
   const { data: tasks } = useAITasks();
   const { data: providers } = useAIProviders();
@@ -54,7 +56,7 @@ export function ExtractStageConfig() {
 
   return (
     <div className={styles.wrap}>
-      <h4 className={styles.heading}>One-pass AI extraction</h4>
+      <h4 className={styles.heading}>One-pass AI analysis</h4>
       {status && (
         <div className={styles.statusGrid}>
           <div className={styles.stat}>
@@ -85,7 +87,7 @@ export function ExtractStageConfig() {
       )}
       {entryTask && (
         <div className={styles.modelRow}>
-          <span className={styles.modelLabel}>Extraction model</span>
+          <span className={styles.modelLabel}>Analysis model</span>
           <AssignmentSelect
             providers={providers}
             value={currentValue}
@@ -119,15 +121,18 @@ export function ExtractStageConfig() {
           </span>
         </div>
       )}
+      {/* The two pattern-matching knobs in the extraction group (ICS keywords,
+          EPSS tier) stay on the extract stage panel. */}
       <SystemSettings
         filterGroups={["ai", "extraction"]}
         flat
+        excludeKeys={["attack_ics_context_keywords", "cve_epss_high_risk_threshold"]}
         renderAfterKey={{
           ai_use_batches: () =>
             assignedProvider && assignedProvider.provider_type !== "claude" ? (
               <div className={styles.batchesNote}>
                 The Batches API only applies to Anthropic-API (claude) providers — the current
-                extraction provider ({assignedProvider.name}) runs sequential per-entry calls
+                analysis provider ({assignedProvider.name}) runs sequential per-entry calls
                 regardless of this toggle.
               </div>
             ) : null,

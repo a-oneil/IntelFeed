@@ -4,7 +4,7 @@ import { usePipelineOverview } from "@/hooks/useEngine";
 
 import { EnrichmentGaps } from "./EnrichmentGaps";
 
-import { ExtractStageConfig } from "./ExtractStageConfig";
+import { AnalyzeStageConfig } from "./AnalyzeStageConfig";
 import { FpNamesPanel } from "./FpNamesPanel";
 import { ScoreStageConfig } from "./ScoreStageConfig";
 import { CorrelationTuningPanel } from "./WorkbenchAdminPanel";
@@ -16,6 +16,7 @@ const KIND_LABELS: Record<string, string> = {
   parallel: "parallel",
   post: "post-process",
   final: "final",
+  analysis: "AI queue",
   post_analysis: "after AI analysis",
   side: "side channel",
 };
@@ -52,7 +53,21 @@ export function StagePanel({
         </button>
       </div>
       <div className={styles.body}>
-        {stage === "extract" && <ExtractStageConfig />}
+        {stage === "extract" && (
+          <>
+            <p className={styles.note}>
+              Pattern matching, no AI: pulls CVE, ATT&amp;CK technique and mitigation IDs (and detection
+              rules, where the feed asks for them) straight out of the text at ingest. The AI reads the
+              article later — its switch, model, budget and gates live on the{" "}
+              <strong>AI analysis</strong> column.
+            </p>
+            <SystemSettings
+              filterKeys={["attack_ics_context_keywords", "cve_epss_high_risk_threshold"]}
+              flat
+              hideGroupTitle
+            />
+          </>
+        )}
         {stage === "score" && <ScoreStageConfig />}
         {stage === "autolink" && (
           <>
@@ -104,6 +119,19 @@ export function StagePanel({
               <strong>Plans</strong> and only bites when Pipeline Plans is on.
             </p>
             <SystemSettings filterGroups={["adjudication"]} flat hideGroupTitle />
+          </>
+        )}
+        {stage === "analyze" && (
+          <>
+            <p className={styles.note}>
+              The one-pass AI read of each article, requested when scoring finishes and run on the AI
+              worker. An article skips it when the switch below is off, when its feed's{" "}
+              <strong>AI analysis</strong> toggle is off or its extraction mode is <strong>none</strong>{" "}
+              (feed settings), or when it scores under the junk gate. A near-duplicate of an article
+              already analyzed copies that analysis instead. The <strong>AI review</strong> column runs
+              after this one.
+            </p>
+            <AnalyzeStageConfig />
           </>
         )}
         {(stage === "cooccurrence" || stage === "correlation") && <CorrelationTuningPanel />}

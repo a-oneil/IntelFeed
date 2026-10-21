@@ -736,7 +736,7 @@ Bookkeeping for the one-pass `entry_analysis` batch extraction pipeline and the 
 **Columns (`ai_analysis_requests`):**
 - `id` (UUID PK)
 - `entry_id` (FK, CASCADE, unique) — one request per entry
-- `status` (String 20) — "pending", "submitted", "completed", "failed", "skipped_junk", "reused_echo"
+- `status` (String 20) — "pending", "submitted", "completed", "failed", "skipped_junk", "reused_echo", "skipped_feed_ai" (feed AI toggle off), "skipped_feed_none" (feed extraction mode none — both re-decided by the missed-entry sweep when the feed allows AI again)
 - `batch_id` (String 80, indexed), `custom_id` (String 64)
 - `attempts` (Integer), `reused_from_entry_id` (UUID), `error` (Text)
 - `adjudication_status` (String 24, indexed) — the adjudicate stage's decision for this entry: "pending", "completed", "failed", or a gate skip ("skipped_off", "skipped_plan", "skipped_echo", "skipped_nothing_new", "skipped_score", "skipped_budget", "skipped_paused"); the resweep re-enqueues budget/paused rows and lost pending rows

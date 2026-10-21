@@ -398,6 +398,7 @@ PIPELINE_STAGE_LABELS: dict[str, str] = {
     "correlation": "Correlation events",
     "requirements": "Requirement matching",
     "score": "Signal scoring",
+    "analyze": "AI analysis",
     "adjudicate": "AI review",
     "automate": "Automation rules",
     "translate": "Translation",
@@ -765,24 +766,58 @@ async def pipeline_overview(
             )
         ).all()
     }
+    stages = [
+        {
+            "name": s.name,
+            "kind": s.kind,
+            "description": s.description,
+            "default_enabled": s.default_enabled,
+            "config_schema": s.config_schema,
+            "runs_24h": {
+                "success": counts.get((s.name, "success"), 0),
+                "error": errored_now.get(s.name, 0),
+                "retry": counts.get((s.name, "retry"), 0),
+            },
+        }
+        for s in PIPELINE_STAGES.values()
+    ]
+    # The AI analysis is not a registry stage (no task to plan, no run rows):
+    # its queue rows are its runs. One synthetic row so the console's analyze
+    # column has a header dot, a peek popover and a stage panel like the rest.
+    from app.models.ai_analysis import AIAnalysisRequest
+
+    Req = AIAnalysisRequest
+    analysis_counts = {
+        status: n
+        for status, n in (
+            await db.execute(
+                select(Req.status, func.count())
+                .where(func.coalesce(Req.completed_at, Req.created_at) >= cutoff)
+                .group_by(Req.status)
+            )
+        ).all()
+    }
+    analyze_row = {
+        "name": "analyze",
+        "kind": "analysis",
+        "description": (
+            "The one-pass AI read of the article — entities, techniques, relationships, observables — "
+            "requested when scoring finishes and run from the ai queue; the adjudicate stage reviews its output"
+        ),
+        "default_enabled": True,
+        "config_schema": {"enabled": {"type": "boolean", "setting": "ai_one_pass_enabled"}},
+        "runs_24h": {
+            "success": analysis_counts.get("completed", 0) + analysis_counts.get("reused_echo", 0),
+            "error": analysis_counts.get("failed", 0),
+            "retry": 0,
+            "queued": analysis_counts.get("pending", 0) + analysis_counts.get("submitted", 0),
+        },
+    }
+    stages.insert(next(i for i, s in enumerate(stages) if s["name"] == "adjudicate"), analyze_row)
     return {
         "pipeline_engine_enabled": bool(await get_setting("pipeline_engine_enabled", db)),
         "run_logging_enabled": bool(await get_setting("pipeline_run_logging_enabled", db)),
-        "stages": [
-            {
-                "name": s.name,
-                "kind": s.kind,
-                "description": s.description,
-                "default_enabled": s.default_enabled,
-                "config_schema": s.config_schema,
-                "runs_24h": {
-                    "success": counts.get((s.name, "success"), 0),
-                    "error": errored_now.get(s.name, 0),
-                    "retry": counts.get((s.name, "retry"), 0),
-                },
-            }
-            for s in PIPELINE_STAGES.values()
-        ],
+        "stages": stages,
     }
 
 
@@ -799,6 +834,7 @@ PROCESSING_STAGE_ORDER: list[str] = [
     "correlation",
     "requirements",
     "score",
+    "analyze",
     "adjudicate",
     "automate",
 ]
@@ -892,7 +928,20 @@ async def processing_flow(
         if stage not in PROCESSING_STAGE_ORDER:
             raise HTTPException(status_code=422, detail=f"Unknown stage: {stage}")
         stage_status = status or "error"
-        if stage_status == "error":
+        if stage == "analyze":
+            # No pipeline runs: the analysis queue row is the stage's state.
+            from app.models.ai_analysis import AIAnalysisRequest as _Req
+
+            req_cond = {
+                "error": _Req.status == "failed",
+                "success": _Req.status.in_(["completed", "reused_echo"]),
+                "queued": _Req.status.in_(["pending", "submitted"]),
+                "skipped": _Req.status.like("skipped\\_%"),
+            }.get(stage_status)
+            if req_cond is None:
+                raise HTTPException(status_code=422, detail=f"Unknown status for analyze: {stage_status}")
+            base = base.where(exists().where(and_(_Req.entry_id == Entry.id, req_cond)))
+        elif stage_status == "error":
             # Only entries still stuck at this stage — not ones already re-run green.
             base = base.where(_latest_is_error(stage))
         else:
@@ -1066,25 +1115,59 @@ async def processing_flow(
         for r in runs:
             latest.setdefault((r.entry_id, r.stage), r)
 
-    # The adjudicate stage's gate decisions (skipped_*, pending) live on the
-    # entry's AI request row, not in a pipeline run: an entry the gates
-    # skipped never ran the task. Read them so the column can say why.
+    # The AI analysis and the adjudicate stage's gate decisions live on the
+    # entry's AI request row, not in pipeline runs: the analysis never writes
+    # one, and an entry the review gates skipped never ran its task. Read the
+    # rows so both columns can say what happened, and why.
     from app.models.ai_analysis import AIAnalysisRequest
+    from app.services.system_settings import get_setting
 
     adjudication_by_entry: dict = {}
     if entry_ids:
         for req in (
-            (
-                await db.execute(
-                    select(AIAnalysisRequest).where(
-                        AIAnalysisRequest.entry_id.in_(entry_ids), AIAnalysisRequest.adjudication_status.isnot(None)
-                    )
-                )
-            )
+            (await db.execute(select(AIAnalysisRequest).where(AIAnalysisRequest.entry_id.in_(entry_ids))))
             .scalars()
             .all()
         ):
             adjudication_by_entry[req.entry_id] = req
+    analysis_enabled = bool(await get_setting("ai_one_pass_enabled", db))
+
+    def _synthetic(status: str, at, detail: dict | None = None, error: str | None = None) -> dict:
+        return {
+            "status": status,
+            "duration_ms": None,
+            "error": error,
+            "retryable": False,
+            "created_at": at.isoformat() if at else None,
+            "detail": detail,
+        }
+
+    def _analysis_cell(e: Entry, scored: bool) -> dict | None:
+        """The AI analysis column, from the entry's queue row. No row: the
+        global switch is off, or scoring hasn't reached the entry yet."""
+        req = adjudication_by_entry.get(e.id)
+        if req is None:
+            if scored and not analysis_enabled:
+                return _synthetic("skipped", None, {"skipped": "analysis_disabled"})
+            return None
+        st = req.status or ""
+        if st == "pending":
+            return _synthetic("queued", req.created_at, {"waiting_on": "submit"})
+        if st == "submitted":
+            return _synthetic("queued", req.submitted_at or req.created_at, {"waiting_on": "ai_worker"})
+        if st == "completed":
+            return _synthetic("success", req.completed_at)
+        if st == "reused_echo":
+            return _synthetic(
+                "success",
+                req.completed_at,
+                {"reused_from": str(req.reused_from_entry_id) if req.reused_from_entry_id else None},
+            )
+        if st == "failed":
+            return _synthetic("error", req.completed_at or req.created_at, error=req.error or "analysis failed")
+        if st.startswith("skipped_"):
+            return _synthetic("skipped", req.created_at, {"skipped": st.removeprefix("skipped_")})
+        return None
 
     def _adjudication_cell(e: Entry) -> dict | None:
         """A synthetic cell for the adjudicate column when the task never ran
@@ -1093,6 +1176,14 @@ async def processing_flow(
         if req is None:
             return None
         status = req.adjudication_status or ""
+        if not status:
+            # Undecided: the review waits on the analysis it reviews, or the
+            # analysis never ran, so there is nothing to review.
+            if req.status in ("pending", "submitted"):
+                return _synthetic("queued", req.created_at, {"waiting_on": "analysis"})
+            if req.status == "failed" or (req.status or "").startswith("skipped_"):
+                return _synthetic("skipped", None, {"skipped": "no_analysis"})
+            return None
         if status == "pending":
             return {
                 "status": "queued",
@@ -1117,6 +1208,11 @@ async def processing_flow(
         stages: dict[str, dict] = {}
         last_run_at = None
         for st in PROCESSING_STAGE_ORDER:
+            if st == "analyze":
+                cell = _analysis_cell(e, scored=latest.get((e.id, "score")) is not None)
+                if cell is not None:
+                    stages[st] = cell
+                continue
             r = latest.get((e.id, st))
             if r is None:
                 if st == "adjudicate":
@@ -1211,6 +1307,17 @@ async def processing_flow(
             )
         ).all()
     }
+    # The analysis column has no runs; its failures are failed queue rows.
+    analyze_failed = (
+        await db.execute(
+            select(func.count())
+            .select_from(AIAnalysisRequest)
+            .join(Entry, Entry.id == AIAnalysisRequest.entry_id)
+            .where(Entry.created_at >= cutoff, AIAnalysisRequest.status == "failed")
+        )
+    ).scalar_one()
+    if analyze_failed:
+        by_stage_errors["analyze"] = analyze_failed
     # Observables precision funnel over the window: staged candidates vs
     # judgment-confirmed sightings. If the ratio drifts, this is where it shows
     # before the workbench feels it.

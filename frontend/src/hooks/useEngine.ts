@@ -100,7 +100,8 @@ export interface PipelineStageInfo {
   description: string;
   default_enabled: boolean;
   config_schema: Record<string, unknown>;
-  runs_24h: { success: number; error: number; retry: number };
+  /** `queued` only on the synthetic analyze row: queue rows waiting on the AI worker. */
+  runs_24h: { success: number; error: number; retry: number; queued?: number };
 }
 
 export interface PipelineOverview {
@@ -287,14 +288,16 @@ export interface ProcessingEntity {
 export interface ProcessingStageCell {
   /** success / error / retry are real runs. queued and skipped are synthetic
    *  cells for a stage task that never ran (the adjudicate stage waiting on
-   *  the AI worker, or gated off before dispatch). */
+   *  the AI worker, or gated off before dispatch). Every `analyze` cell is
+   *  synthetic: the AI analysis writes no runs, its queue row is the state. */
   status: "success" | "error" | "retry" | "queued" | "skipped";
   duration_ms: number | null;
   error: string | null;
   retryable: boolean;
   created_at: string | null;
   /** Stage-specific run detail: the adjudicate stage's verdict counters and
-   *  mode on a run, `{queued_at}` on a queued cell, `{skipped}` on a skip. */
+   *  mode on a run, `{queued_at}` or `{waiting_on}` on a queued cell,
+   *  `{skipped}` on a skip, `{reused_from}` on a copied analysis. */
   detail?: Record<string, unknown> | null;
 }
 

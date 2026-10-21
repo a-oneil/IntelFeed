@@ -51,6 +51,12 @@ vi.mock("@/components/SystemSettings", async () => {
 vi.mock("../engine/MaintenancePanel", () => ({
   MaintenancePanel: () => <div data-testid="maintenance-panel" />,
 }));
+vi.mock("@/components/EnrichmentSettings", () => ({
+  default: () => <div data-testid="enrichment-settings" />,
+}));
+vi.mock("../engine/EnrichmentGaps", () => ({
+  EnrichmentGaps: () => <div data-testid="enrichment-gaps" />,
+}));
 
 function renderSection(search = "") {
   return render(
@@ -130,8 +136,10 @@ describe("EngineSection", () => {
     expect(screen.getByTestId("engine-matrix")).toHaveAttribute("data-view", "feeds");
   });
 
-  it("maps legacy ?section=enrichment to the enrich stage panel", () => {
+  it("maps legacy ?section=enrichment to the enrichment browse view", () => {
     renderSection("?section=enrichment");
-    expect(screen.getByTestId("engine-matrix")).toHaveAttribute("data-openstage", "enrich");
+    expect(screen.getByTestId("enrichment-settings")).toBeInTheDocument();
+    expect(screen.getByTestId("enrichment-gaps")).toBeInTheDocument();
+    expect(screen.queryByTestId("engine-matrix")).not.toBeInTheDocument();
   });
 });
