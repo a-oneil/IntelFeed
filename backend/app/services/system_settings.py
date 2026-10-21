@@ -1157,7 +1157,8 @@ _ENGINE_SECTION_GROUPS: dict[str, str] = {
     "observables_publish_min_confidence": "observables",
     "observables_publish_max_age_days": "observables",
     "observables_publish_never_suffixes": "observables",
-    # Extract stage
+    # Extraction: the first two gate AI-extracted entities and render on the
+    # analyze stage panel; the last two tune pattern matching (extract stage).
     "entity_resolution_normalized_match": "extraction",
     "entity_creation_gates": "extraction",
     "attack_ics_context_keywords": "extraction",

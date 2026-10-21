@@ -27,6 +27,13 @@ logger = logging.getLogger(__name__)
 
 ECHO_REUSE_MIN_RATIO = 0.7
 
+# Feed-policy skips are recorded (so the Engine matrix can say why an entry
+# was never analyzed) but stay re-evaluable: turning the feed's AI back on
+# lets the missed-entry sweep pick the row up again.
+SKIPPED_FEED_AI_OFF = "skipped_feed_ai"
+SKIPPED_FEED_NONE = "skipped_feed_none"
+FEED_SKIP_STATUSES = (SKIPPED_FEED_AI_OFF, SKIPPED_FEED_NONE)
+
 
 def analysis_content_text(entry) -> str:
     """Prompt body for entry analysis — the translated text when one exists
@@ -268,6 +275,21 @@ async def analyze_entry(
     if not isinstance(result, dict) or result.get("_extraction_status") not in (None, "success"):
         return result, {}
     counts = await store_entry_analysis(db, entry_id, result)
+    # A manual run on an entry the gates skipped (junk, feed policy) or whose
+    # batch attempts failed: the entry is analyzed now, so its queue row says
+    # so — otherwise the Engine matrix keeps showing the stale skip or error.
+    from sqlalchemy import or_, update
+
+    from app.models.ai_analysis import AIAnalysisRequest
+
+    await db.execute(
+        update(AIAnalysisRequest)
+        .where(
+            AIAnalysisRequest.entry_id == entry_id,
+            or_(AIAnalysisRequest.status.like("skipped\\_%"), AIAnalysisRequest.status == "failed"),
+        )
+        .values(status="completed", completed_at=datetime.now(UTC), error=None)
+    )
     # Manual runs commit in the API handler right after this returns; the
     # review task starts after its countdown, well past that commit.
     from app.services.entry_adjudication import enqueue_and_dispatch
@@ -321,11 +343,12 @@ async def enqueue_entry_analysis(db: AsyncSession, entry_id: uuid.UUID) -> str |
     if not bool(await get_setting("ai_one_pass_enabled", db)):
         return None
 
-    # Already queued / handled?
+    # Already queued / handled? A feed-policy skip is re-decided below: the
+    # feed's switches may have changed since.
     existing = (
         await db.execute(select(AIAnalysisRequest.status).where(AIAnalysisRequest.entry_id == entry_id))
     ).scalar_one_or_none()
-    if existing is not None:
+    if existing is not None and existing not in FEED_SKIP_STATUSES:
         return existing
 
     # Already analyzed (manual run, or re-score of an old entry)?
@@ -339,8 +362,23 @@ async def enqueue_entry_analysis(db: AsyncSession, entry_id: uuid.UUID) -> str |
     if entry is None:
         return None
 
-    # Feed policy: feeds with intelligence extraction disabled skip AI analysis
+    from sqlalchemy import func
+
     from app.models.feed import Feed
+
+    async def _write_status(status: str, **extra) -> str:
+        # Insert, or overwrite a feed-policy skip (the only re-decided status);
+        # any other existing row wins, as before.
+        stmt = pg_insert(AIAnalysisRequest).values(
+            id=uuid.uuid4(), entry_id=entry_id, status=status, custom_id=f"ea-{entry_id}", **extra
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["entry_id"],
+            set_={"status": status, "created_at": func.now(), **extra},
+            where=AIAnalysisRequest.status.in_(FEED_SKIP_STATUSES),
+        )
+        await db.execute(stmt)
+        return status
 
     # Feed policy. Two separate switches, because they answer different
     # questions: mode "none" means "extract nothing from this feed at all",
@@ -351,18 +389,9 @@ async def enqueue_entry_analysis(db: AsyncSession, entry_id: uuid.UUID) -> str |
     feed = await db.get(Feed, entry.feed_id)
     if feed is not None:
         if getattr(feed, "intel_extraction_mode", None) == "none":
-            return None
+            return existing if existing == SKIPPED_FEED_NONE else await _write_status(SKIPPED_FEED_NONE)
         if not getattr(feed, "ai_analysis_enabled", True):
-            return None
-
-    async def _write_status(status: str, **extra) -> str:
-        stmt = (
-            pg_insert(AIAnalysisRequest)
-            .values(id=uuid.uuid4(), entry_id=entry_id, status=status, custom_id=f"ea-{entry_id}", **extra)
-            .on_conflict_do_nothing(index_elements=["entry_id"])
-        )
-        await db.execute(stmt)
-        return status
+            return existing if existing == SKIPPED_FEED_AI_OFF else await _write_status(SKIPPED_FEED_AI_OFF)
 
     # Junk gate: skip non-security chatter (threshold configurable). Scans
     # translated text too so non-English entries aren't gated as junk.

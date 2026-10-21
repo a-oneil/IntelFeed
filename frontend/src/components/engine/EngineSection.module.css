@@ -42,6 +42,14 @@
   font-size: var(--fs-md);
   color: var(--text-secondary);
 }
+/* The card every browse view draws its content in (MaintenancePanel's own
+   wrap, JobSchedules' groups) — for panels that arrive without one. */
+.browseCard {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 14px;
+  background: var(--bg-secondary);
+}
 
 .tabs {
   display: flex;

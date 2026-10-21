@@ -32,9 +32,11 @@ def test_registry_row():
     assert stage.config_schema["mode"]["setting"] == "adjudication_mode"
 
 
-def test_matrix_column_follows_score():
-    assert PROCESSING_STAGE_ORDER.index("adjudicate") == PROCESSING_STAGE_ORDER.index("score") + 1
-    assert PIPELINE_STAGE_LABELS["adjudicate"]
+def test_matrix_columns_follow_score():
+    # score enqueues the AI analysis; the review follows the analysis.
+    assert PROCESSING_STAGE_ORDER.index("analyze") == PROCESSING_STAGE_ORDER.index("score") + 1
+    assert PROCESSING_STAGE_ORDER.index("adjudicate") == PROCESSING_STAGE_ORDER.index("analyze") + 1
+    assert PIPELINE_STAGE_LABELS["analyze"] and PIPELINE_STAGE_LABELS["adjudicate"]
 
 
 def test_settings_registered_with_metadata_and_group():

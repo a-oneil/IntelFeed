@@ -11,7 +11,6 @@ import {
   type ProcessingOutputs,
   type ProcessingStageCell,
   useEngineProcessing,
-  useExtractionStatus,
   usePipelineOverview,
   usePipelinePlans,
   useUpsertPlan,
@@ -38,7 +37,7 @@ import m from "./EngineMatrix.module.css";
 import styles from "./ProcessingTab.module.css";
 import { confirmDialog } from "@/utils/dialog";
 
-export type BrowseView = "jobs" | "plans" | "maintenance" | "publishing";
+export type BrowseView = "jobs" | "plans" | "enrichment" | "maintenance" | "publishing";
 /** The card's data views — all engine data lives in the one table card. */
 export type MatrixView = "entries" | "links" | "relationships" | "entities" | "feeds";
 
@@ -69,7 +68,8 @@ const STAGE_GROUP: Record<string, { key: string; label: string; cls: string }> =
   correlation: { key: "post", label: "post", cls: styles.gpost },
   requirements: { key: "post", label: "post", cls: styles.gpost },
   score: { key: "final", label: "final", cls: styles.gfinal },
-  adjudicate: { key: "review", label: "ai review", cls: styles.greview },
+  analyze: { key: "ai", label: "ai", cls: styles.greview },
+  adjudicate: { key: "ai", label: "ai", cls: styles.greview },
   automate: { key: "side", label: "post-score", cls: styles.gside },
 };
 
@@ -130,8 +130,13 @@ function Sparkline({ series, className }: { series: number[]; className?: string
 const STAGE_HINTS: Record<string, { title: string; body: string; aside?: string }> = {
   extract: {
     title: "Extract",
-    body: "Where AI reads an article and proposes entities, techniques and CVEs.",
-    aside: "Nothing it proposes goes live without clearing the creation gates.",
+    body: "Pattern matching, no AI: pulls CVE, technique and mitigation IDs (and detection rules, where the feed asks for them) straight out of the text.",
+    aside: "Runs on ingest. The AI reads the article later, in the analysis column.",
+  },
+  analyze: {
+    title: "AI analysis",
+    body: "The one-pass AI read: entities, techniques, relationships and observables. Requested once scoring finishes, then waits its turn on the AI worker.",
+    aside: "Skipped when it's switched off globally, when the feed turns AI off or extracts nothing, or when the article looks like non-security chatter. Near-duplicates copy an earlier analysis.",
   },
   adjudicate: {
     title: "AI review",
@@ -139,6 +144,18 @@ const STAGE_HINTS: Record<string, { title: string; body: string; aside?: string 
     aside: "Off by default. Shadow files verdicts as proposals; apply fixes high-confidence ones at ingest.",
   },
 };
+
+/** What a queued cell is waiting for, in plain words. */
+function waitingOn(cell: ProcessingStageCell): string {
+  switch (cell.detail?.waiting_on) {
+    case "analysis":
+      return "waiting on the AI analysis it reviews";
+    case "submit":
+      return "waiting to be sent to the AI worker";
+    default:
+      return "waiting on the AI worker";
+  }
+}
 
 /** A synthetic or real cell's skip code, if any: `status: "skipped"` carries
  *  it in `detail.skipped`; a success run that bailed carries the same key. */
@@ -170,7 +187,7 @@ function AdjudicateOutputCell({ cell }: { cell: ProcessingStageCell | undefined 
   if (!cell) return <span className={`${m.outCell} ${m.outZero}`}>·</span>;
   if (cell.status === "queued") {
     return (
-      <span className={`${m.outCell} ${m.outQueued}`} title="queued — waiting on the AI worker">
+      <span className={`${m.outCell} ${m.outQueued}`} title={`queued — ${waitingOn(cell)}`}>
         …
       </span>
     );
@@ -225,7 +242,7 @@ function OutputCell({ stage, outputs }: { stage: string; outputs: ProcessingOutp
         title: "entity links (dictionary + unattributed CVE/TTP links)",
       },
     ];
-  } else if (stage === "extract") {
+  } else if (stage === "analyze") {
     parts = [
       { n: outputs.entities_created, cls: m.outEnts, glyph: "◆", title: "entities created by AI" },
       { n: outputs.links_ai, cls: m.outLinks, glyph: "🔗", title: "AI-validated links" },
@@ -335,7 +352,6 @@ export function EngineMatrix({
   }, [searchInput]);
 
   const query = useEngineProcessing({ window: window_, status, stage, feedId, search });
-  const { data: extraction } = useExtractionStatus();
   const { data: overview } = usePipelineOverview();
   const { data: plans } = usePipelinePlans();
   const { data: extractionStats } = useExtractionStats("7d");
@@ -497,23 +513,36 @@ export function EngineMatrix({
     setPeek({ stage: st, left, top });
   };
 
-  const statusChips: { key: string | undefined; label: string; count?: number }[] = [
-    { key: undefined, label: "All", count: stats?.ingested },
-    { key: "error", label: "Errored", count: stats?.errored },
-    { key: "in_flight", label: "Processing", count: stats?.processing },
-    { key: "complete", label: "Complete", count: stats?.complete },
-  ];
+  // The entries table's own filter, in words, for the "showing …" readout.
+  // A stage alone means "errored at that stage" (the API's default).
+  const entriesFilter = !status && !stage
+    ? undefined
+    : status === "in_flight"
+      ? "in flight"
+      : status === "complete"
+        ? "complete"
+        : stage
+          ? `errored at ${labelByStage[stage] ?? stage}`
+          : "errored";
+  const clearEntriesFilter = () => {
+    setStatus(undefined);
+    setStage(undefined);
+  };
 
-  const pct = stats && stats.ingested ? Math.round((stats.complete / stats.ingested) * 1000) / 10 : 0;
   const failingFeeds = feedHealth?.erroring_feeds?.length ?? 0;
-  const aiQueue = extraction ? (extraction.queue.pending ?? 0) : undefined;
 
+  // The queues that need a person. Each chip is a filter on the table: the
+  // ones with `active` light up while their view+filter is showing and clear
+  // it on a second click; the rest just jump (`away` leaves the console).
   const attention: {
     key: string;
     n: number | undefined;
     label: string;
     cls: string;
     onClick: () => void;
+    active?: boolean;
+    clear?: () => void;
+    away?: boolean;
     hint?: { title: string; body: string; aside?: string };
   }[] = [
     {
@@ -521,6 +550,8 @@ export function EngineMatrix({
       n: stats?.errored,
       label: "stage errors",
       cls: m.aErr,
+      active: view === "entries" && status === "error",
+      clear: clearEntriesFilter,
       onClick: () => {
         switchView("entries");
         setStatus("error");
@@ -532,6 +563,8 @@ export function EngineMatrix({
       n: extractionStats?.likely_duplicates,
       label: "duplicate candidates",
       cls: m.aWarn,
+      active: view === "entities" && entStatus === "dupe",
+      clear: () => setEntStatus("all"),
       onClick: () => {
         setEntStatus("dupe");
         switchView("entities");
@@ -542,6 +575,8 @@ export function EngineMatrix({
       n: hygieneStats?.pending_advisories,
       label: "reclassify proposals",
       cls: m.aWarn,
+      active: view === "links" && proposalsMode && proposalsAction === "needs_reclassification",
+      clear: () => switchView("links"),
       onClick: () => {
         setView("links");
         setProposalsMode(true);
@@ -554,6 +589,11 @@ export function EngineMatrix({
       n: hygieneStats?.adjudication_pending,
       label: "adjudication verdicts",
       cls: m.aWarn,
+      active: view === "links" && proposalsMode && !proposalsAction && proposalsOrigin === "adjudicator",
+      clear: () => {
+        switchView("links");
+        setProposalsOrigin(undefined);
+      },
       onClick: () => {
         setView("links");
         setProposalsMode(true);
@@ -583,6 +623,7 @@ export function EngineMatrix({
       n: stats?.observable_candidates,
       label: "observable candidates",
       cls: m.aInfo,
+      away: true,
       onClick: () => navigate("/workbench/explore?section=observables&queue=1"),
       hint: {
         title: "Observable candidates",
@@ -610,103 +651,17 @@ export function EngineMatrix({
 
   return (
     <div className={styles.wrap}>
-      {/* healthline — one row of clearly labeled stats */}
-      <div className={m.healthline}>
-        <span className={`${m.hdot} ${stats?.errored ? m.hdotErr : ""}`} />
-        <span className={m.hitem}>
-          <b>{stats?.ingested?.toLocaleString() ?? "—"}</b>
-          <span>entries</span>
-          {stats?.ingest_series && <Sparkline series={stats.ingest_series} className={m.hspark} />}
-        </span>
-        <span className={m.hitem}>
-          <b className={m.hok}>{pct}%</b>
-          <span>scored</span>
-        </span>
-        <span className={m.hitem}>
-          {(stats?.errored ?? 0) > 0 ? (
-            <button
-              type="button"
-              className={m.herr}
-              onClick={() => {
-                switchView("entries");
-                setStatus("error");
-                setStage(undefined);
-              }}
-            >
-              {stats?.errored} errored
-            </button>
-          ) : (
-            <>
-              <b>0</b>
-              <span>errored</span>
-            </>
-          )}
-        </span>
-        {(stats?.processing ?? 0) > 0 && (
-          <span className={m.hitem}>
-            <b className={m.hproc}>{stats?.processing}</b>
-            <span>in flight</span>
-          </span>
-        )}
-        <span className={m.hitem}>
-          <b>{stats ? fmtMs(stats.median_latency_ms) || "—" : "—"}</b>
-          <span>median</span>
-        </span>
-        <span className={m.hitem}>
-          <b>${extraction?.spent_today_usd.toFixed(2) ?? "—"}</b>
-          <span>of ${extraction?.daily_budget_usd.toFixed(0) ?? "—"} AI</span>
-        </span>
-        {aiQueue != null && aiQueue > 0 && (
-          <span className={m.hitem}>
-            <b>{aiQueue.toLocaleString()}</b>
-            <span>queued</span>
-          </span>
-        )}
-        <div className={m.hwin}>
-          {WINDOWS.map((w) => (
-            <button key={w} className={window_ === w ? m.hwinOn : ""} onClick={() => setWindow(w)}>
-              {w}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* attention chips */}
-      <div className={m.attn}>
-        <div className={m.attnLeft}>
-          <span className={m.attnCap}>Needs you</span>
-          {activeAttention.map((a) => (
-            <Hint
-              key={a.key}
-              title={a.hint?.title ?? a.label}
-              body={a.hint?.body ?? ""}
-              aside={a.hint?.aside}
-              disabled={!a.hint}
-            >
-              <button type="button" className={`${m.achip} ${a.cls}`} onClick={a.onClick}>
-                <span className={m.achipDot} />
-                <span className={m.achipN}>{a.n?.toLocaleString()}</span> {a.label}
-              </button>
-            </Hint>
-          ))}
-          {breakerActive && breakerUntil && (
-            <button
-              type="button"
-              className={`${m.achip} ${m.aWarn}`}
-              title={`rolling circuit breaker tripped; dispatch resumes at ${breakerUntil.toLocaleTimeString()}`}
-              onClick={() => {
-                switchView("entries");
-                setOpenStage("adjudicate");
-              }}
-            >
-              <span className={m.achipDot} />
-              adjudication paused (breaker)
-            </button>
-          )}
-          {activeAttention.length === 0 && !breakerActive && (
-            <span className={m.attnClear}>All clear — no queues need review.</span>
-          )}
-        </div>
+      {/* top bar — the pulse (is anything stuck, is ingest flowing), the
+          browse views, the window and the setting finder. The counts
+          themselves live on the table card, next to what they count. */}
+      <div className={m.topbar}>
+        <span
+          className={`${m.hdot} ${stats?.errored ? m.hdotErr : ""}`}
+          role="img"
+          aria-label={stats?.errored ? `${stats.errored} entries stuck at a stage` : "pipeline healthy"}
+          title={stats?.errored ? `${stats.errored} entries stuck at a stage` : "pipeline healthy"}
+        />
+        {stats?.ingest_series && <Sparkline series={stats.ingest_series} className={m.hspark} />}
         <div className={m.attnTools}>
           <button type="button" className={m.browseBtn} onClick={() => onBrowse("jobs")}>
             Jobs
@@ -714,7 +669,7 @@ export function EngineMatrix({
           <button type="button" className={m.browseBtn} onClick={() => onBrowse("plans")}>
             Plans
           </button>
-          <button type="button" className={m.browseBtn} onClick={() => setOpenStage("enrich")}>
+          <button type="button" className={m.browseBtn} onClick={() => onBrowse("enrichment")}>
             Enrichment
           </button>
           <button type="button" className={m.browseBtn} onClick={() => onBrowse("publishing")}>
@@ -723,8 +678,15 @@ export function EngineMatrix({
           <button type="button" className={m.browseBtn} onClick={() => onBrowse("maintenance")}>
             Maintenance
           </button>
-          <EngineSettingsSearch onPick={gotoSetting} className={m.attnSearch} />
         </div>
+        <div className={m.hwin}>
+          {WINDOWS.map((w) => (
+            <button key={w} className={window_ === w ? m.hwinOn : ""} onClick={() => setWindow(w)}>
+              {w}
+            </button>
+          ))}
+        </div>
+        <EngineSettingsSearch onPick={gotoSetting} className={m.attnSearch} />
       </div>
 
       {/* matrix */}
@@ -749,6 +711,9 @@ export function EngineMatrix({
                 )}
                 {(peekInfo?.runs_24h.retry ?? 0) > 0 && (
                   <span className={m.popStat}>{peekInfo?.runs_24h.retry} retrying</span>
+                )}
+                {(peekInfo?.runs_24h.queued ?? 0) > 0 && (
+                  <span className={m.popStat}>{peekInfo?.runs_24h.queued} queued</span>
                 )}
               </div>
               <div className={m.popRow}>
@@ -800,7 +765,9 @@ export function EngineMatrix({
                   <span className={m.popMuted}>
                     {peek.stage === "translate"
                       ? "Runs for feeds with translation enabled — not plan-gated."
-                      : "Always on — not plan-gated."}
+                      : peek.stage === "analyze"
+                        ? "Not plan-gated: the global switch, each feed's AI analysis toggle and the junk gate decide."
+                        : "Always on — not plan-gated."}
                   </span>
                 )}
               </div>
@@ -881,29 +848,6 @@ export function EngineMatrix({
                     Output
                   </button>
                 </div>
-                {statusChips.map((c) => (
-                  <button
-                    key={c.label}
-                    className={`${styles.chip} ${status === c.key ? styles.chipActive : ""}`}
-                    onClick={() => setStatus(c.key)}
-                  >
-                    {c.label}
-                    {c.count != null && <span className={styles.chipCount}>{c.count.toLocaleString()}</span>}
-                  </button>
-                ))}
-                <select
-                  className={styles.stageSelect}
-                  value={stage ?? ""}
-                  onChange={(e) => setStage(e.target.value || undefined)}
-                  title="Filter to entries that errored at a stage"
-                >
-                  <option value="">Errored at: any stage</option>
-                  {stages.map((s) => (
-                    <option key={s.name} value={s.name}>
-                      Errored at: {s.label}
-                    </option>
-                  ))}
-                </select>
                 <select
                   className={styles.stageSelect}
                   value={feedId ?? ""}
@@ -925,7 +869,84 @@ export function EngineMatrix({
                     onChange={(e) => setSearchInput(e.target.value)}
                   />
                 </div>
+                {/* the engine's counts for the window — a readout, not a filter */}
+                <div className={m.counts}>
+                  {entriesFilter && (
+                    <span className={m.showing}>
+                      showing {entries.length.toLocaleString()}
+                      {query.hasNextPage ? "+" : ""} · {entriesFilter} ·{" "}
+                      <button type="button" className={m.clearBtn} onClick={clearEntriesFilter}>
+                        clear
+                      </button>
+                    </span>
+                  )}
+                  <span>
+                    <b>{stats?.ingested?.toLocaleString() ?? "—"}</b> entries
+                  </span>
+                  <span>
+                    <b>{stats?.complete?.toLocaleString() ?? "—"}</b> complete
+                  </span>
+                  <span>
+                    <b className={stats?.errored ? m.cErr : ""}>{stats?.errored?.toLocaleString() ?? "—"}</b> errored
+                  </span>
+                  <span>
+                    <b className={stats?.processing ? m.cProc : ""}>{stats?.processing?.toLocaleString() ?? "—"}</b>{" "}
+                    in flight
+                  </span>
+                </div>
               </>
+            )}
+          </div>
+
+          {/* needs-you — the queues that want a person, as filters on this card */}
+          <div className={m.needs}>
+            <span className={m.attnCap}>Needs you</span>
+            {activeAttention.map((a) => (
+              <Hint
+                key={a.key}
+                title={a.hint?.title ?? a.label}
+                body={a.hint?.body ?? ""}
+                aside={a.hint?.aside}
+                disabled={!a.hint}
+              >
+                <button
+                  type="button"
+                  className={`${m.achip} ${a.cls} ${a.active ? m.achipOn : ""}`}
+                  aria-pressed={a.clear ? !!a.active : undefined}
+                  title={a.active ? "Clear this filter" : undefined}
+                  onClick={a.active && a.clear ? a.clear : a.onClick}
+                >
+                  <span className={m.achipDot} />
+                  <span className={m.achipN}>{a.n?.toLocaleString()}</span> {a.label}
+                  {a.away && (
+                    <span className={m.achipAway} aria-hidden="true">
+                      ↗
+                    </span>
+                  )}
+                  {a.active && (
+                    <span className={m.achipX} aria-hidden="true">
+                      ✕
+                    </span>
+                  )}
+                </button>
+              </Hint>
+            ))}
+            {breakerActive && breakerUntil && (
+              <button
+                type="button"
+                className={`${m.achip} ${m.aWarn}`}
+                title={`rolling circuit breaker tripped; dispatch resumes at ${breakerUntil.toLocaleTimeString()}`}
+                onClick={() => {
+                  switchView("entries");
+                  setOpenStage("adjudicate");
+                }}
+              >
+                <span className={m.achipDot} />
+                adjudication paused (breaker)
+              </button>
+            )}
+            {activeAttention.length === 0 && !breakerActive && (
+              <span className={m.attnClear}>All clear — no queues need review.</span>
             )}
           </div>
 
@@ -1225,8 +1246,14 @@ function StatusCell({
     );
   if (cell.status === "queued")
     return (
-      <span className={`${styles.pip} ${styles.pend}`} title={`${title} · queued — waiting on the AI worker`}>
-        queued
+      <span className={`${styles.pip} ${styles.pend}`} title={`${title} · queued — ${waitingOn(cell)}`}>
+        {cell.detail?.waiting_on === "analysis" ? "waits" : "queued"}
+      </span>
+    );
+  if (cell.status === "success" && cell.detail?.reused_from)
+    return (
+      <span className={`${styles.pip} ${styles.ok}`} title={`${title} · copied from a near-duplicate article`}>
+        copy
       </span>
     );
   // A gate skipped the stage, or the run bailed before reviewing anything —

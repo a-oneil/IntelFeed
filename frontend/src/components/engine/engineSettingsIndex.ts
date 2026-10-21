@@ -32,8 +32,8 @@ const GROUP_DEST: Record<string, EngineDest> = {
   intelligence: { kind: "stage", stage: "correlation" },
   observables: { kind: "stage", stage: "observables" },
   adjudication: { kind: "stage", stage: "adjudicate" },
-  enrichment: { kind: "stage", stage: "enrich" },
-  api_keys: { kind: "stage", stage: "enrich" },
+  enrichment: { kind: "browse", browse: "enrichment" },
+  api_keys: { kind: "browse", browse: "enrichment" },
   translation: { kind: "stage", stage: "translate" },
   feeds: { kind: "view", view: "feeds" },
   rate_limiting: { kind: "view", view: "feeds" },
@@ -80,9 +80,11 @@ export function destLabel(dest: EngineDest): string {
         ? "Scheduled jobs"
         : dest.browse === "plans"
           ? "Pipeline plans"
-          : dest.browse === "publishing"
-            ? "Publishing"
-            : "Maintenance";
+          : dest.browse === "enrichment"
+            ? "Enrichment"
+            : dest.browse === "publishing"
+              ? "Publishing"
+              : "Maintenance";
     case "settings":
       return `Settings → ${dest.section}`;
   }
@@ -119,7 +121,7 @@ const PANELS: { label: string; hint: string; terms: string; dest: EngineDest }[]
     label: "Enrichment sources",
     hint: "Per-source enable, order and rate limits for entity enrichment",
     terms: "enrichment sources rate limit order adapters otx virustotal",
-    dest: { kind: "stage", stage: "enrich" },
+    dest: { kind: "browse", browse: "enrichment" },
   },
   {
     label: "Scheduled jobs",

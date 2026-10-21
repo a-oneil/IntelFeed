@@ -365,10 +365,37 @@ async def test_manifest_edges_and_ai_iocs(db_session: AsyncSession, feed):
     ]
     await db_session.flush()
 
+    # Not the reviewer's to judge: an analyst's edge, and edges whose verdict
+    # is already settled — a later co-mention must not undo three keeps.
+    mimikatz = Tool(name="Mimikatz", article_count=90)
+    db_session.add(mimikatz)
+    await db_session.flush()
+    for src, verdict, verb in (
+        ("analyst_confirmed", None, "uses"),
+        ("auto_extracted", "corroborated", "drops"),
+        ("auto_extracted", "coincidental", "delivers"),
+    ):
+        db_session.add(
+            EntityRelationship(
+                source_type="threat_actor",
+                source_id=warlock.id,
+                target_type="tool",
+                target_id=mimikatz.id,
+                relationship_type=verb,
+                confidence="confirmed" if verdict == "corroborated" else "possible",
+                source=src,
+                adjudication_verdict=verdict,
+                evidence_entry_ids=[entry.id],
+            )
+        )
+    await db_session.flush()
+
     items, block = await build_manifest(db_session, entry, _payload())
     kinds = {it.kind for it in items}
     assert {"link", "edge", "ioc"} <= kinds
-    edge = next(it for it in items if it.kind == "edge")
+    edges = [it for it in items if it.kind == "edge"]
+    assert len(edges) == 1
+    edge = edges[0]
     assert "Warlock uses Cobalt Strike" in edge.line and "Defenders should watch" in edge.line
     iocs = [it for it in items if it.kind == "ioc"]
     assert [it.ioc_value for it in iocs] == ["blog.vendor-research.example"]  # scan-origin excluded
@@ -1227,6 +1254,31 @@ async def test_keep_counter_never_touches_shadow_or_demoted_edges(db_session: As
     assert edge.reviewer_kept_entry_ids == []
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source", "verdict"),
+    [
+        ("analyst_confirmed", None),
+        ("analyst_created", None),
+        ("external_feed", None),
+        ("auto_extracted", "corroborated"),
+    ],
+)
+async def test_demote_never_touches_analyst_or_corroborated_edges(db_session: AsyncSession, feed, source, verdict):
+    """One article failing to assert a claim is not grounds to overrule an
+    analyst, an external catalogue, or the three reviews that corroborated it."""
+    entry = await _make_entry(db_session, feed)
+    edge = await _edge_for(db_session, entry)
+    edge.source = source
+    edge.confidence = "confirmed"
+    edge.adjudication_verdict = verdict
+    await db_session.flush()
+
+    assert await adj._demote_edge(db_session, edge.id, "roundup co-mention") is None
+    await db_session.refresh(edge)
+    assert (edge.confidence, edge.adjudication_verdict) == ("confirmed", verdict)
+
+
 async def _edge_for(db_session, entry, name="Warlock"):
     """An AI-asserted edge on this entry, the shape the manifest reviews."""
     actor = await _link_actor(db_session, entry, name, source="ai")
@@ -2022,6 +2074,46 @@ async def test_processing_rows_show_queued_and_skip_reason_for_adjudicate(
 
 
 @pytest.mark.asyncio
+async def test_processing_rows_show_the_ai_analysis_column(client, admin_headers, db_session: AsyncSession, feed):
+    """The analysis writes no pipeline runs; its column comes from the queue
+    row, and a review waiting on it says so instead of rendering blank."""
+    await _seed_settings(db_session)
+    rows = {}
+    for st in ("submitted", "completed", "skipped_junk", "skipped_feed_ai", "failed"):
+        entry = await _make_entry(db_session, feed)
+        await _request(db_session, entry, status=st)
+        rows[st] = str(entry.id)
+    await db_session.commit()
+
+    resp = await client.get("/api/engine/processing", headers=admin_headers, params={"limit": 50})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert "analyze" in [s["name"] for s in body["stages"]]
+    by_id = {r["id"]: r["stages"] for r in body["entries"]}
+    assert by_id[rows["submitted"]]["analyze"]["status"] == "queued"
+    assert by_id[rows["submitted"]]["adjudicate"]["detail"] == {"waiting_on": "analysis"}
+    assert by_id[rows["completed"]]["analyze"]["status"] == "success"
+    assert by_id[rows["skipped_junk"]]["analyze"]["detail"]["skipped"] == "junk"
+    assert by_id[rows["skipped_feed_ai"]]["analyze"]["detail"]["skipped"] == "feed_ai"
+    assert by_id[rows["skipped_feed_ai"]]["adjudicate"]["detail"]["skipped"] == "no_analysis"
+    assert by_id[rows["failed"]]["analyze"]["status"] == "error"
+    assert body["stats"]["by_stage_errors"].get("analyze") == 1
+
+    resp = await client.get(
+        "/api/engine/processing", headers=admin_headers, params={"stage": "analyze", "status": "skipped"}
+    )
+    assert {r["id"] for r in resp.json()["entries"]} == {rows["skipped_junk"], rows["skipped_feed_ai"]}
+
+    # The stage overview carries a synthetic analyze row (queue rows as runs),
+    # so the column header, popover and panel work like a registry stage's.
+    resp = await client.get("/api/engine/pipeline", headers=admin_headers)
+    names = [s["name"] for s in resp.json()["stages"]]
+    assert names.index("analyze") == names.index("adjudicate") - 1
+    analyze = next(s for s in resp.json()["stages"] if s["name"] == "analyze")
+    assert analyze["runs_24h"] == {"success": 1, "error": 1, "retry": 0, "queued": 1}
+
+
+@pytest.mark.asyncio
 async def test_matrix_retry_requeues_the_request_row(
     client, admin_headers, db_session: AsyncSession, feed, monkeypatch
 ):
@@ -2241,6 +2333,26 @@ async def test_the_link_cap_keeps_the_rows_only_this_review_can_judge(db_session
     assert len([b for b in bulk if f"link:threat_actor:{b.id}" in ids]) == 1
     # The model is told the list is partial, and the note is never an item.
     assert "not in this list" in block and "_note" not in ids
+
+
+@pytest.mark.asyncio
+async def test_the_edge_cap_keeps_the_claims_born_here(db_session: AsyncSession, feed, monkeypatch):
+    """Over the cap, edges this entry alone evidences win the slots — nothing
+    else will ever review them — and the overflow is counted, not lost."""
+    monkeypatch.setattr(adj, "_MAX_EDGES", 2)
+    entry = await _make_entry(db_session, feed)
+    seasoned = [await _edge_for(db_session, entry, f"Old Crew {i}") for i in range(3)]
+    for e in seasoned:
+        e.evidence_entry_ids = [uuid.uuid4(), entry.id]
+    born_here = [await _edge_for(db_session, entry, f"New Crew {i}") for i in range(2)]
+    await db_session.flush()
+
+    dropped: list = []
+    items, block = await build_manifest(db_session, entry, _payload(), dropped_out=dropped)
+    edge_ids = {it.edge_id for it in items if it.kind == "edge"}
+    assert edge_ids == {e.id for e in born_here}
+    assert {it.edge_id for it in dropped if it.kind == "edge"} == {e.id for e in seasoned}
+    assert "3 further relationship claims" in block and "autolinked" not in block
 
 
 @pytest.mark.asyncio

@@ -75,15 +75,22 @@
   text-decoration: underline;
 }
 
+/* Pinned to the right edge on its own, so a stage with no registry row (no
+   kind, description or runs link — the analyze column) still closes from
+   the corner. Next to the runs link, that link keeps the gap. */
 .close {
   appearance: none;
   background: none;
   border: none;
+  margin-left: auto;
   color: var(--text-muted);
   font-size: var(--fs-md);
   cursor: pointer;
   padding: 2px 8px;
   border-radius: var(--r-md);
+}
+.errLink + .close {
+  margin-left: 0;
 }
 .close:hover {
   color: var(--text-primary);

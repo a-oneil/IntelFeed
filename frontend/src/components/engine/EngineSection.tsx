@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
+import EnrichmentSettings from "@/components/EnrichmentSettings";
 import JobSchedules from "@/components/JobSchedules";
 import SystemSettings, { SettingsHighlightContext } from "@/components/SystemSettings";
 
 import { type BrowseView, EngineMatrix, type MatrixView } from "./EngineMatrix";
+import { EnrichmentGaps } from "./EnrichmentGaps";
 import { MaintenancePanel } from "./MaintenancePanel";
 import { PipelinePlans } from "./PipelinePlans";
 import { PublishingPanel } from "./PublishingPanel";
@@ -13,6 +15,7 @@ import styles from "./EngineSection.module.css";
 const BROWSE_TITLES: Record<BrowseView, string> = {
   jobs: "Scheduled jobs",
   plans: "Pipeline plans",
+  enrichment: "Enrichment",
   maintenance: "Maintenance",
   publishing: "Publishing",
 };
@@ -45,7 +48,7 @@ function legacyState(params: URLSearchParams): ConsoleState {
     case "schedules":
       return { browse: "jobs" };
     case "enrichment":
-      return { openStage: "enrich" };
+      return { browse: "enrichment" };
     case "feed-health":
       return { view: "feeds" };
     case "workbench":
@@ -56,7 +59,8 @@ function legacyState(params: URLSearchParams): ConsoleState {
 
 /** Workbench → Engine: single-surface console. Everything lives in the one
  *  table card (entries matrix, links, relationships, AI entities, stage
- *  settings); only Jobs / Feeds / Plans open as separate views. */
+ *  settings); only the browse views — Jobs, Plans, Enrichment, Publishing,
+ *  Maintenance — open as separate screens with a back button. */
 export function EngineSection() {
   const [searchParams] = useSearchParams();
   const [browse, setBrowse] = useState<BrowseView | null>(null);
@@ -102,6 +106,17 @@ export function EngineSection() {
               <PipelinePlans />
               <p className={styles.browseHint}>Engine-wide switches for plan-based stage composition.</p>
               <SystemSettings filterGroups={["plans"]} hideGroupTitle />
+            </>
+          )}
+          {browse === "enrichment" && (
+            <>
+              <div className={styles.browseCard}>
+                <EnrichmentSettings />
+                {/* Entities missing key fields — one-click AI enrichment, next to
+                    the sources that fill them in. */}
+                <EnrichmentGaps />
+              </div>
+              <SystemSettings filterGroups={["enrichment", "api_keys"]} />
             </>
           )}
           {browse === "publishing" && <PublishingPanel />}

@@ -1,17 +1,16 @@
-/* Engine console additions layered over ProcessingTab.module.css: healthline,
-   attention chips, live stage headers, peek popover, output lens, drawer
-   output-manager. Colors resolve through the runtime theme variables. */
+/* Engine console additions layered over ProcessingTab.module.css: top bar,
+   needs-you filter strip, live stage headers, peek popover, output lens,
+   drawer output-manager. Colors resolve through the runtime theme variables. */
 
-/* ---- healthline: unboxed one-breath funnel under the page title ---- */
-.healthline {
+/* ---- top bar: pulse dot + ingest sparkline, browse views, window, finder.
+   One quiet row under the page title; the counts live on the card. ---- */
+.topbar {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: var(--sp-2) var(--sp-3);
   padding: 0 var(--sp-1);
   margin-top: -6px;
-  font-size: var(--fs-md);
-  color: var(--text-secondary);
 }
 .hdot {
   width: 8px;
@@ -25,54 +24,16 @@
   background: var(--danger);
   box-shadow: 0 0 8px color-mix(in srgb, var(--danger) 55%, transparent);
 }
-.hitem {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  white-space: nowrap;
-  font-size: var(--fs-base);
-  color: var(--text-muted);
-}
-.hitem + .hitem {
-  border-left: 1px solid var(--border);
-  padding-left: var(--sp-5);
-  margin-left: 6px;
-}
-.hitem b {
-  font-family: var(--font-display);
-  font-size: var(--fs-md);
-  font-weight: 600;
-  color: var(--text-primary);
-  font-variant-numeric: tabular-nums;
-}
-.hok {
-  color: var(--success) !important;
-}
-.hproc {
-  color: var(--warning) !important;
-}
-.herr {
-  appearance: none;
-  background: none;
-  border: none;
-  padding: 0;
-  font-family: var(--font-display);
-  font-size: var(--fs-md);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  color: var(--danger);
-  cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
 .hspark {
   width: 56px;
   height: 18px;
   opacity: 0.85;
   margin: 0 6px;
+  flex: none;
 }
 .hwin {
   margin-left: auto;
+  flex: none;
   display: flex;
   border: 1px solid var(--border);
   border-radius: var(--r-md);
@@ -218,20 +179,16 @@
 /* Two fluid rows: queues on the first, console tools on the second. Each row
  * spans the full width at every viewport — nothing hugs an edge or strands a
  * half-empty line. */
-.attn {
+/* ---- needs-you strip: inside the card, under the toolbar. Each chip is a
+   filter on the card (or a jump to the queue's own view); chips take their
+   natural width so the strip reads as a row of filters, not a dashboard. ---- */
+.needs {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: var(--sp-2) var(--sp-3);
-}
-.attnLeft {
-  /* always its own row — the queues line never mixes with the tools line */
-  flex: 1 1 100%;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--sp-2) var(--sp-3);
+  gap: var(--sp-2);
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
 }
 .attnCap {
   flex: none;
@@ -245,24 +202,40 @@
 .achip {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  background: var(--card-bg);
+  gap: 6px;
+  background: none;
   border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  padding: 6px var(--sp-4);
+  border-radius: var(--r-full);
+  padding: 4px 11px;
   cursor: pointer;
   font: inherit;
-  font-size: var(--fs-base);
-  color: var(--text-primary);
-}
-/* chips split the row the same way the tools below them do — both lines run
-   edge to edge instead of ending wherever the labels happen to stop */
-.attnLeft .achip {
-  flex: 1 1 auto;
-  justify-content: center;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
 }
 .achip:hover {
   border-color: var(--text-muted);
+  color: var(--text-primary);
+}
+/* the chip whose filter the card is showing */
+.achipOn {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: var(--accent);
+}
+.aErr.achipOn {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  border-color: var(--danger);
+}
+.aWarn.achipOn {
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+  border-color: var(--warning);
+}
+.achipX,
+.achipAway {
+  margin-left: 2px;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
 }
 .achipDot {
   width: 7px;
@@ -724,40 +697,76 @@
   padding-top: var(--sp-2);
 }
 
-/* ---- console tools row (Jobs / Plans / Enrichment / Publishing / Maintenance) ---- */
-/* second row of the strip: a toolbar that spans the full width at any size —
- * the finder takes a capped share, the browse buttons split what's left evenly
- * so the line stays edge-to-edge instead of clustering at one end. */
+/* ---- browse views (Jobs / Plans / Enrichment / Publishing / Maintenance):
+   quiet text buttons on the top bar; the finder keeps a capped share. ---- */
 .attnTools {
-  flex: 1 1 100%;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 2px;
   flex-wrap: wrap;
 }
 .attnSearch {
-  flex: 1 1 300px;
-  max-width: 440px;
-}
-.attnTools .browseBtn {
-  flex: 1 1 auto;
-  text-align: center;
+  flex: 0 1 260px;
+  min-width: 180px;
 }
 .browseBtn {
   appearance: none;
   background: none;
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
+  border: none;
+  color: var(--text-muted);
   border-radius: var(--r-md);
-  padding: 4px 11px;
+  padding: 4px 8px;
   font: inherit;
   font-size: var(--fs-sm);
+  font-weight: 500;
   cursor: pointer;
-  font-variant-numeric: tabular-nums;
 }
 .browseBtn:hover {
   color: var(--text-primary);
-  border-color: var(--text-muted);
+  background: var(--bg-tertiary);
+}
+
+/* ---- the engine's counts on the card toolbar: a readout, never a filter ---- */
+.counts {
+  margin-left: auto;
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  font-family: var(--font-display);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.counts b {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.cErr {
+  color: var(--danger) !important;
+}
+.cProc {
+  color: var(--warning) !important;
+}
+.showing {
+  font-family: var(--font-body, inherit);
+  color: var(--text-secondary);
+  padding-right: var(--sp-3);
+  border-right: 1px solid var(--border);
+}
+.clearBtn {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--text-secondary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.clearBtn:hover {
+  color: var(--text-primary);
 }
 
 .drawerGrid {

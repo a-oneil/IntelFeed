@@ -13,7 +13,12 @@ class AIAnalysisRequest(Base):
 
     Lifecycle: pending → submitted (in a provider batch) → completed | failed.
     Terminal shortcut statuses: skipped_junk (relevance gate), reused_echo
-    (analysis copied from a near-duplicate entry at zero cost).
+    (analysis copied from a near-duplicate entry at zero cost). Feed-policy
+    skips — skipped_feed_ai (the feed's AI analysis toggle is off) and
+    skipped_feed_none (extraction mode "none") — are recorded but re-decided:
+    the missed-entry sweep re-enqueues them once the feed allows AI again.
+    No row at all means the global switch or the task assignment is off, or
+    scoring hasn't reached the entry yet.
 
     ``adjudication_status`` tracks the post-analysis adjudicate stage for the
     same entry: pending | completed | failed | skipped_<reason> (off, plan,
@@ -31,7 +36,7 @@ class AIAnalysisRequest(Base):
         UUID(as_uuid=True), ForeignKey("entries.id", ondelete="CASCADE"), nullable=False, unique=True, index=True
     )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
-    # pending | submitted | completed | failed | skipped_junk | reused_echo
+    # pending | submitted | completed | failed | skipped_junk | reused_echo | skipped_feed_ai | skipped_feed_none
     batch_id: Mapped[str | None] = mapped_column(String(80), index=True)
     custom_id: Mapped[str | None] = mapped_column(String(64))  # "ea-{entry_id}"
     attempts: Mapped[int] = mapped_column(Integer, default=0)

@@ -128,6 +128,38 @@ async def test_enqueue_junk_gate_and_pending(db_session, feed, analysis_task, mo
 
 
 @pytest.mark.asyncio
+async def test_enqueue_records_feed_skips_and_redecides_them(db_session, feed, analysis_task, monkeypatch):
+    """A feed-policy skip leaves a row the Engine matrix can explain, and the
+    row is re-decided once the feed lets the AI back in."""
+    from app.config import settings as env_settings
+
+    monkeypatch.setattr(env_settings, "ai_one_pass_enabled", True)
+    entry = await _make_entry(
+        db_session,
+        feed,
+        title="Ransomware exploits CVE-2026-1234",
+        content="A new ransomware campaign exploits CVE-2026-1234 vulnerability against healthcare targets.",
+    )
+
+    feed.ai_analysis_enabled = False
+    await db_session.flush()
+    assert await enqueue_entry_analysis(db_session, entry.id) == "skipped_feed_ai"
+
+    feed.ai_analysis_enabled = True
+    feed.intel_extraction_mode = "none"
+    await db_session.flush()
+    assert await enqueue_entry_analysis(db_session, entry.id) == "skipped_feed_none"
+
+    feed.intel_extraction_mode = "selective"
+    await db_session.flush()
+    assert await enqueue_entry_analysis(db_session, entry.id) == "pending"
+    statuses = (await db_session.execute(select(AIAnalysisRequest.status))).scalars().all()
+    assert statuses == ["pending"]
+    # Any other status is still final.
+    assert await enqueue_entry_analysis(db_session, entry.id) == "pending"
+
+
+@pytest.mark.asyncio
 async def test_enqueue_echo_reuse_zero_cost(db_session, feed, analysis_task, monkeypatch):
     from app.config import settings as env_settings
 
@@ -418,3 +450,30 @@ async def test_run_task_still_dedups_a_current_answer(db_session, feed, analysis
 
     provider.complete.assert_not_awaited()
     assert result["summary"] == SAMPLE_PARSED["summary"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stale", ["failed", "skipped_junk"])
+async def test_manual_analysis_clears_a_stale_queue_row(db_session, feed, analysis_task, test_user, monkeypatch, stale):
+    """A manual run on an entry whose batch attempts failed, or that a gate
+    skipped, leaves the queue row saying completed — the Engine matrix's
+    analyze column reads that row, and would otherwise stay red forever."""
+    from unittest.mock import AsyncMock
+
+    import app.services.entry_adjudication as adjudication
+    from app.services.entry_analysis import analyze_entry
+
+    entry = await _make_entry(db_session, feed, title="Retried by hand")
+    db_session.add(AIAnalysisRequest(entry_id=entry.id, status=stale, custom_id=f"ea-{entry.id}", error="boom"))
+    await db_session.flush()
+    _stub_provider(monkeypatch, analysis_task)
+    monkeypatch.setattr(adjudication, "enqueue_and_dispatch", AsyncMock())
+
+    result, _ = await analyze_entry(db_session, test_user.id, entry.id, {"title": "t"})
+
+    assert result["_extraction_status"] == "success"
+    row = (
+        await db_session.execute(select(AIAnalysisRequest).where(AIAnalysisRequest.entry_id == entry.id))
+    ).scalar_one()
+    assert (row.status, row.error) == ("completed", None)
+    assert row.completed_at is not None

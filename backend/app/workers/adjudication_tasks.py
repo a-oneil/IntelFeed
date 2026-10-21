@@ -191,8 +191,9 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
             detail["superseded"] = await supersede_legacy_proposals(db, legacy_rows)
             detail["unknown_ids"] = stats["unknown"]
             detail["coerced_verdicts"] = stats["coerced"]
-            if dropped:
-                detail["uncapped_links"] = len(dropped)
+            for kind, key in (("link", "uncapped_links"), ("edge", "uncapped_edges")):
+                if n := sum(1 for it in dropped if it.kind == kind):
+                    detail[key] = n
             if stats["duplicate"]:
                 detail["skipped"] = "ai_bad_shape"
             return await _finish(COMPLETED, detail)
