@@ -1,4 +1,5 @@
 import hmac
+import logging
 import secrets
 import uuid
 from datetime import UTC, datetime
@@ -7,8 +8,6 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-import logging
 
 from app.core.exceptions import AppError
 from app.core.security import (
