@@ -426,7 +426,7 @@ behind it is `entry_adjudication` (Settings → AI Configuration → Prompts).
 
 | Setting | Type / default | What it does |
 |---|---|---|
-| `adjudication_mode` | `off` \| `shadow` \| `apply`, default `apply` | The master switch (pipeline plans only subtract feeds). `shadow` files every verdict as a proposal in the Links / AI-entities Proposals lens and touches nothing. `apply` acts on verdicts at or above the confidence floor at ingest, through the same code the queue's Apply buttons use; lower ones still become proposals. The Proposed/Applied switch on the Proposals lens writes `shadow` / `apply`; `off` is set from the Adjudicate stage panel. |
+| `adjudication_mode` | `off` \| `shadow` \| `apply`, default `apply` | The master switch (pipeline plans only subtract feeds). `shadow` files every verdict as a proposal on Review › Proposals and touches nothing. `apply` acts on verdicts at or above the confidence floor at ingest, through the same code the queue's Apply buttons use; lower ones still become proposals. The Proposed/Applied switch on Review › Proposals writes `shadow` / `apply`; `off` is set from the Adjudicate stage panel. |
 | `adjudication_trigger` | `all` \| `created`, default `all` | `all` reviews every analysed entry (~100–500/day). `created` reviews only entries whose analysis minted an entity, wrote an AI junction row (actor/malware/tool/country/sector), asserted a TTP or a relationship, promoted a pending match or captured an observable (~20–50/day) — the fallback when reviews cannot keep up with ingest. |
 | `adjudication_max_per_hour` | int, `0` | Reviews started per hour; `0` (the default) = no ceiling. The AI worker runs one call at a time, so with no ceiling the worker itself is the only pacing. Set a number for two reasons only: to hold down spend on a metered provider, and to stop a review backlog queueing ahead of the one-pass analysis, which shares that worker. Over-budget entries wait for the resweep. While a ceiling is set, the backfill may use at most half of each hour's budget; live entries get the rest. With no ceiling the backfill has no share, so dispatch it in batches via its own `limit`. |
 | `adjudication_min_priority_score` | float, `0` | Skip entries below this priority score, on the 0–10 scale (`0` = off). Keep it at 0: CVE/NVD entries are the main source of junk tool entities and score low, so a floor would exempt exactly those. |
@@ -472,9 +472,9 @@ at or above the confidence floor — it is the one verdict that raises trust
 rather than lowering it, so silence is not agreement. Since the prompt
 otherwise asks for changes only, it carves edges out and requires a verdict on
 every one of them (at most ten per article). Stale entities (one article at most, no edge, 90 days idle) are a
-live `stale` filter on the AI-entities view.
+live `stale` filter on Review › New entities.
 
-**Queue.** The Proposals lens has an origin facet (`adjudicator` | `legacy`),
+**Queue.** Review › Proposals has a domain facet (what applying the row changes: links / entities / relationships), an origin facet (`adjudicator` | `legacy`),
 per-row Apply / Dismiss / Restore, bulk **Apply all**
 (`POST /api/admin/hygiene/adjudication/apply-all`) and **Dismiss all** scoped
 by origin. A restore writes its own `adjudication_restored` audit line rather

@@ -41,7 +41,7 @@ function legacyState(params: URLSearchParams): ConsoleState {
     return {};
   }
   if (tab === "autolinking") return { view: "links" };
-  if (tab === "extraction") return { view: "entities" };
+  if (tab === "extraction") return { view: "review" };
   if (tab === "jobs") return { browse: "jobs" };
   if (tab === "plans") return { browse: "plans" };
   switch (params.get("section")) {
@@ -58,7 +58,7 @@ function legacyState(params: URLSearchParams): ConsoleState {
 }
 
 /** Workbench → Engine: single-surface console. Everything lives in the one
- *  table card (entries matrix, links, relationships, AI entities, stage
+ *  table card (entries matrix, links, relationships, review queue, stage
  *  settings); only the browse views — Jobs, Plans, Enrichment, Publishing,
  *  Maintenance — open as separate screens with a back button. */
 export function EngineSection() {

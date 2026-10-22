@@ -48,7 +48,80 @@ from app.services.entry_adjudication import (
 )
 from app.services.entry_adjudication import TASK_NAME as ADJUDICATION_TASK_NAME
 
-BULK_APPLY_KINDS = ("adjudication", "advisories")
+BULK_APPLY_KINDS = ("adjudication", "advisories", "all")
+
+# The Review tab's Domain facet: what a proposal would change if applied.
+# Both logs feed one queue there, so the split is by effect, not by table.
+# Observables are an entity type, so dropping one is an entities proposal.
+DOMAINS = ("links", "entities", "relationships")
+_MAINT_DOMAIN_ACTIONS: dict[str, frozenset[str]] = {
+    "links": frozenset({"adjudication_unlink"}),
+    "relationships": frozenset({"adjudication_edge_demote"}),
+}
+_LINK_LOG_LINK_ACTIONS = frozenset({"shadow_remove", "removed", "restored"})
+
+
+def proposal_domain(source: str, action: str) -> str:
+    """Which part of the graph a log row is about.
+
+    Link-log rows are entry↔entity links, except the reclassify advisories,
+    which are about the entity. Maintenance rows are about the entity unless
+    the adjudicator's action names an edge (demote) or an entry link (unlink).
+    """
+    if source == "link_validator":
+        return "links" if action in _LINK_LOG_LINK_ACTIONS else "entities"
+    for domain, actions in _MAINT_DOMAIN_ACTIONS.items():
+        if action in actions:
+            return domain
+    return "entities"
+
+
+def maint_actions_for_domain(domain: str | None) -> frozenset[str] | None:
+    """Maintenance-log actions in ``domain``; None means no restriction.
+    'entities' is everything the other domains do not claim."""
+    if not domain:
+        return None
+    if domain == "entities":
+        claimed = frozenset().union(*_MAINT_DOMAIN_ACTIONS.values())
+        return frozenset(a for a in ADJUDICATION_PROPOSAL_ACTIONS if a not in claimed) | frozenset(
+            {
+                "normalize_name",
+                "alias_collision",
+                "vendor_autolink",
+                "ttp_malformed_id",
+                "cve_malformed_id",
+                "cve_withdrawn",
+                "merge",
+                "reclassify",
+                "orphan_prune",
+                "no_op",
+                "update_description",
+                "update_aliases",
+                "ai_enrich_filled",
+                "ai_enrich_unknown",
+            }
+        )
+    return _MAINT_DOMAIN_ACTIONS.get(domain, frozenset())
+
+
+def link_log_actions_for_domain(domain: str | None) -> frozenset[str] | None:
+    """Link-log actions in ``domain``; None means no restriction."""
+    if not domain:
+        return None
+    if domain == "links":
+        return _LINK_LOG_LINK_ACTIONS
+    if domain == "entities":
+        return frozenset({"needs_reclassification"})
+    return frozenset()
+
+
+def parse_actions(action: str | None) -> set[str]:
+    """A filter is one code or a comma list (the UI groups id fixes as one chip)."""
+    if not action:
+        return set()
+    return {a.strip() for a in action.split(",") if a.strip()}
+
+
 PROGRESS_TTL_SECONDS = 2 * 60 * 60
 BATCH_SIZE = 50
 MAX_ERRORS_KEPT = 25
@@ -124,21 +197,42 @@ async def apply_link_removal_row(db: AsyncSession, row: EntityLinkValidationLog)
 # ---------------------------------------------------------------------------
 
 
-def adjudication_maint_actions(action: str | None) -> list[str]:
-    """The entity-maintenance actions a bulk apply covers for ``action``.
+def adjudication_scope(action: str | None, domain: str | None = None) -> tuple[list[str], bool]:
+    """What a bulk apply of the adjudicator's proposals covers.
 
-    ``None`` means every applyable kind; ``shadow_remove`` means the link log
-    only (so no maintenance actions); anything else must be one applyable
-    adjudication action.
+    Returns ``(maintenance actions, include link-log removals)``. ``action``
+    is one code or a comma list: adjudication actions, ``shadow_remove`` for
+    the link log, or empty for everything applyable. ``domain`` narrows
+    further (the Review tab's facet). A code that is neither is a 400; a
+    legacy scan code (``normalize_name``) is simply ignored here, since the
+    scans' proposals have their own appliers.
     """
-    applyable = sorted(ADJUDICATION_PROPOSAL_ACTIONS - {ACTION_ASSESSMENT})
-    if action is None:
-        return applyable
-    if action == "shadow_remove":
-        return []
-    if action not in applyable:
-        raise AppError(code="invalid", message=f"not an applyable adjudication action: {action}", status_code=400)
-    return [action]
+    applyable = ADJUDICATION_PROPOSAL_ACTIONS - {ACTION_ASSESSMENT}
+    wanted = parse_actions(action)
+    unknown = wanted - applyable - {"shadow_remove"} - _LEGACY_SCAN_ACTIONS - {"needs_reclassification"}
+    if unknown:
+        raise AppError(
+            code="invalid",
+            message=f"not an applyable adjudication action: {', '.join(sorted(unknown))}",
+            status_code=400,
+        )
+    maint = set(applyable) if not wanted else wanted & applyable
+    links = not wanted or "shadow_remove" in wanted
+    if domain:
+        allowed = maint_actions_for_domain(domain) or frozenset()
+        maint &= allowed
+        links = links and "shadow_remove" in (link_log_actions_for_domain(domain) or frozenset())
+    return sorted(maint), links
+
+
+_LEGACY_SCAN_ACTIONS = frozenset(
+    {"normalize_name", "alias_collision", "vendor_autolink", "ttp_malformed_id", "cve_malformed_id", "cve_withdrawn"}
+)
+
+
+def adjudication_maint_actions(action: str | None) -> list[str]:
+    """Back-compat shim for the synchronous apply-all endpoint."""
+    return adjudication_scope(action)[0]
 
 
 def _adjudicator_results():
@@ -147,10 +241,10 @@ def _adjudicator_results():
     )
 
 
-async def count_adjudication_pending(db: AsyncSession, action: str | None = None) -> int:
+async def count_adjudication_pending(db: AsyncSession, action: str | None = None, domain: str | None = None) -> int:
     """How many proposals ``apply_adjudication_batch`` would work through."""
     total = 0
-    maint = adjudication_maint_actions(action)
+    maint, include_links = adjudication_scope(action, domain)
     if maint:
         total += (
             await db.execute(
@@ -159,7 +253,7 @@ async def count_adjudication_pending(db: AsyncSession, action: str | None = None
                 .where(EntityMaintenanceLog.action.in_(maint), EntityMaintenanceLog.applied.is_(False))
             )
         ).scalar_one()
-    if action in (None, "shadow_remove"):
+    if include_links:
         total += (
             await db.execute(
                 select(func.count())
@@ -196,6 +290,7 @@ async def apply_adjudication_batch(
     db: AsyncSession,
     *,
     action: str | None = None,
+    domain: str | None = None,
     limit: int = BATCH_SIZE,
     exclude_ids: set[uuid.UUID] | None = None,
 ) -> dict[str, Any]:
@@ -212,7 +307,7 @@ async def apply_adjudication_batch(
     failed_ids: set[uuid.UUID] = set()
     budget = limit
 
-    maint_actions = adjudication_maint_actions(action)
+    maint_actions, include_links = adjudication_scope(action, domain)
     if maint_actions:
         q = (
             select(EntityMaintenanceLog)
@@ -238,7 +333,7 @@ async def apply_adjudication_batch(
         processed += len(rows)
         budget -= len(rows)
 
-    if budget > 0 and action in (None, "shadow_remove"):
+    if budget > 0 and include_links:
         q = (
             select(EntityLinkValidationLog)
             .where(

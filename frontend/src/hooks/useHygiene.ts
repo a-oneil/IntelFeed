@@ -16,6 +16,9 @@ export interface HygieneStats {
   alias_collisions_proposed: number;
   vendor_autolinks_proposed: number;
   ttp_cve_issues_proposed: number;
+  /** Every pending proposal across both logs, and the split by what applying it changes. */
+  pending_total: number;
+  pending_by_domain: Partial<Record<ProposalDomain, number>>;
 }
 
 export interface AliasScanResult {
@@ -121,7 +124,13 @@ export interface FeedRow {
   links: FeedLink[];
   /** Who proposed it: the post-analysis adjudicate stage, or the legacy jobs/scans. */
   origin: "adjudicator" | "legacy" | null;
+  /** What applying it changes (the Review tab's Domain facet). */
+  domain: ProposalDomain;
 }
+
+/** Observables are an entity type, so dropping one is an "entities" proposal. */
+export type ProposalDomain = "links" | "entities" | "relationships";
+export const PROPOSAL_DOMAINS: ProposalDomain[] = ["links", "entities", "relationships"];
 
 export interface FeedResponse {
   rows: FeedRow[];
@@ -132,6 +141,8 @@ export interface FeedResponse {
 export interface FeedFilters {
   action?: string;
   source?: "link_validator" | "entity_maintenance";
+  /** Spans both logs; a link-log reclassify advisory counts as "entities". */
+  domain?: ProposalDomain;
   mode?: "shadow" | "apply";
   /** Only unapplied proposals (review-queue mode) — skips applied history. */
   pending?: boolean;
@@ -224,6 +235,7 @@ export function useHygieneFeed(filters: FeedFilters) {
       };
       if (filters.action) params.action = filters.action;
       if (filters.source) params.source = filters.source;
+      if (filters.domain) params.domain = filters.domain;
       if (filters.mode) params.mode = filters.mode;
       if (filters.pending) params.pending = "true";
       if (filters.origin) params.origin = filters.origin;
@@ -323,6 +335,7 @@ export function useDismissProposals() {
       action?: string;
       source?: string;
       origin?: "adjudicator" | "legacy";
+      domain?: ProposalDomain;
     }) => {
       const { data } = await api.post<{ dismissed: number }>("/admin/hygiene/dismiss-proposals", body);
       return data;
@@ -355,7 +368,7 @@ export function useApplyAdjudicationAll() {
 /** A background "Apply all" over one proposals queue (see useStartBulkApply). */
 export interface BulkApplyProgress {
   job_id: string;
-  kind: "adjudication" | "advisories";
+  kind: "adjudication" | "advisories" | "all";
   scope: Record<string, unknown>;
   status: "queued" | "running" | "done" | "error";
   /** Rows in scope when the job was queued. */
@@ -372,9 +385,11 @@ export interface BulkApplyProgress {
 }
 
 export interface BulkApplyRequest {
-  kind: "adjudication" | "advisories";
-  /** adjudication only: one adjudication_* code or shadow_remove; omit for all. */
+  /** "all" is the Review tab's one button: the adjudicator's queue, then the reclassify advisories. */
+  kind: "adjudication" | "advisories" | "all";
+  /** adjudication_* codes, shadow_remove and/or needs_reclassification, comma-separated; omit for all. */
   action?: string;
+  domain?: ProposalDomain;
   /** advisories only. */
   entity_type?: string;
   mode?: "shadow" | "apply";

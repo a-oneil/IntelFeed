@@ -94,9 +94,9 @@ describe("EngineSection", () => {
     expect(screen.getByTestId("engine-matrix")).toHaveAttribute("data-view", "links");
   });
 
-  it("routes legacy ?tab=extraction into the card's entities view", () => {
+  it("routes legacy ?tab=extraction into the card's review view", () => {
     renderSection("?tab=extraction");
-    expect(screen.getByTestId("engine-matrix")).toHaveAttribute("data-view", "entities");
+    expect(screen.getByTestId("engine-matrix")).toHaveAttribute("data-view", "review");
   });
 
   it("routes legacy ?tab=jobs to the jobs browse view", () => {

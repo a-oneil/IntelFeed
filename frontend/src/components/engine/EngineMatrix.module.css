@@ -913,3 +913,18 @@
   color: var(--text-primary);
   border-color: var(--text-muted);
 }
+
+/* Review tab: pending-proposal count, loud because it is work waiting on a person */
+.viewBadge {
+  font-family: var(--font-display);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--bg-primary);
+  background: var(--warning);
+  border-radius: 10px;
+  padding: 1px 7px;
+}
+.lens button .viewCnt {
+  margin-left: 6px;
+}
