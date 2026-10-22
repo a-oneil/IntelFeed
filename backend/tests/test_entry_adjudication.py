@@ -2490,3 +2490,37 @@ async def test_task_skips_a_row_already_reviewed(db_session: AsyncSession, feed,
     assert detail["skipped"] == "already_reviewed" and detail["items"] == 0
     await db_session.refresh(row)
     assert row.adjudication_status == adj.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_bulk_apply_start_and_progress(client, admin_headers, monkeypatch):
+    """Starting a bulk apply records the job, queues the worker, and the
+    progress endpoint reads the record back. An unknown action is a 400 and a
+    missing job a 404."""
+    from app.workers import proposal_apply_tasks
+
+    queued: list[dict] = []
+    monkeypatch.setattr(
+        proposal_apply_tasks.bulk_apply_proposals, "apply_async", lambda *a, **kw: queued.append(kw["kwargs"])
+    )
+
+    resp = await client.post(
+        "/api/admin/hygiene/bulk-apply", headers=admin_headers, json={"kind": "adjudication", "action": "shadow_remove"}
+    )
+    assert resp.status_code == 202, resp.text
+    job = resp.json()
+    assert job["status"] == "queued"
+    assert job["total"] == 0
+    assert queued and queued[0]["job_id"] == job["job_id"] and queued[0]["action"] == "shadow_remove"
+
+    resp = await client.get(f"/api/admin/hygiene/bulk-apply/{job['job_id']}", headers=admin_headers)
+    assert resp.status_code == 200
+    assert resp.json()["kind"] == "adjudication"
+
+    resp = await client.post(
+        "/api/admin/hygiene/bulk-apply", headers=admin_headers, json={"kind": "adjudication", "action": "nope"}
+    )
+    assert resp.status_code == 400
+
+    resp = await client.get("/api/admin/hygiene/bulk-apply/doesnotexist", headers=admin_headers)
+    assert resp.status_code == 404

@@ -5,15 +5,16 @@
  * adjudicate stage and the on-demand scans proposed, with inline Apply /
  * Dismiss, and a History view of everything that ran (with Restore).
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
 import api from "@/api/client";
 import {
-  useApplyAdjudicationAll,
-  useApplyAdvisories,
+  invalidateAfterBulkApply,
+  useBulkApplyProgress,
   useDismissProposals,
+  useStartBulkApply,
   useHygieneFeed,
   useHygieneStats,
   useRunNameNormalization,
@@ -173,8 +174,28 @@ export function ProposalsQueue({
 
   const runRowAction = useHygieneRowAction();
   const dismissProposals = useDismissProposals();
-  const applyAdvisories = useApplyAdvisories();
-  const applyAdjudication = useApplyAdjudicationAll();
+  // "Apply all" runs in the background: start a job, poll it, then refresh.
+  const startBulkApply = useStartBulkApply();
+  const [bulkJobId, setBulkJobId] = useState<string | null>(null);
+  const { data: bulkProgress } = useBulkApplyProgress(bulkJobId);
+  const bulkRunning = startBulkApply.isPending || (!!bulkJobId && bulkProgress?.status !== "done" && bulkProgress?.status !== "error");
+  useEffect(() => {
+    if (!bulkJobId || !bulkProgress) return;
+    if (bulkProgress.status === "done") {
+      const errs = bulkProgress.error_count;
+      const msg = `Applied ${bulkProgress.applied.toLocaleString()}, skipped ${bulkProgress.skipped.toLocaleString()}${
+        errs ? `, ${errs.toLocaleString()} error${errs === 1 ? "" : "s"}` : ""
+      }`;
+      if (errs) toast.warning(msg, { description: bulkProgress.errors[0]?.error });
+      else toast.success(msg);
+      invalidateAfterBulkApply(qc);
+      setBulkJobId(null);
+    } else if (bulkProgress.status === "error") {
+      toast.error(`Apply all stopped: ${bulkProgress.message ?? "unknown error"}`);
+      invalidateAfterBulkApply(qc);
+      setBulkJobId(null);
+    }
+  }, [bulkJobId, bulkProgress, qc]);
   const scanNames = useRunNameNormalization();
   const scanAliases = useScanAliasHygiene();
   const scanIds = useScanIdHygiene();
@@ -310,7 +331,7 @@ export function ProposalsQueue({
   };
 
   // Every pending adjudicator proposal, both logs, through the stage's own
-  // apply path — the bulk form of the per-row Apply.
+  // apply path — the bulk form of the per-row Apply, as a background job.
   const applyAllAdjudicator = async () => {
     const label = actionFilter
       ? (FILTERS.find((f) => f.value === actionFilter)?.label ?? "these").toLowerCase()
@@ -318,22 +339,37 @@ export function ProposalsQueue({
     if (
       !(await confirmDialog({
         title: "Apply adjudicator proposals",
-        message: `Apply ${label} adjudicator proposals now? Each one is applied the way the stage would in apply mode, and each stays undoable from History.`,
+        message: `Apply ${label} adjudicator proposals now? Each one is applied the way the stage would in apply mode, and each stays undoable from History. This runs in the background; the count here updates as it goes.`,
         confirmLabel: "Apply all",
         destructive: true,
       }))
     )
       return;
     try {
-      const r = await applyAdjudication.mutateAsync({ action: actionFilter || undefined, limit: 500 });
-      const errs = r.errors.length;
-      const msg = `Applied ${r.applied}, skipped ${r.skipped}${errs ? `, ${errs} error${errs === 1 ? "" : "s"}` : ""}`;
-      if (errs) toast.warning(msg, { description: r.errors[0]?.error });
-      else toast.success(msg);
+      const job = await startBulkApply.mutateAsync({ kind: "adjudication", action: actionFilter || undefined });
+      setBulkJobId(job.job_id);
+      toast.info(`Applying ${job.total.toLocaleString()} proposal${job.total === 1 ? "" : "s"} in the background`);
     } catch (e) {
       toast.error(`Apply failed: ${(e as Error).message}`);
     }
   };
+
+  // Every proposed reclassification, as a background job.
+  const applyAllAdvisories = async () => {
+    try {
+      const job = await startBulkApply.mutateAsync({ kind: "advisories", mode: "apply" });
+      setBulkJobId(job.job_id);
+      toast.info(`Applying ${job.total.toLocaleString()} reclassification${job.total === 1 ? "" : "s"} in the background`);
+    } catch (e) {
+      toast.error(`Apply failed: ${(e as Error).message}`);
+    }
+  };
+
+  const bulkLabel = bulkRunning
+    ? bulkProgress && bulkProgress.total > 0
+      ? `Applying ${bulkProgress.processed.toLocaleString()} / ${bulkProgress.total.toLocaleString()}…`
+      : "Applying…"
+    : "Apply all";
 
   return (
     <div className={styles.wrap}>
@@ -394,26 +430,21 @@ export function ProposalsQueue({
             {origin === "adjudicator" ? (
               <button
                 className={styles.btn}
-                disabled={applyAdjudication.isPending || rows.length === 0}
-                title="Apply every pending adjudicator proposal (both logs) through the stage's own apply path"
+                disabled={bulkRunning || rows.length === 0}
+                title="Apply every pending adjudicator proposal (both logs) through the stage's own apply path, in the background"
                 onClick={applyAllAdjudicator}
               >
-                {applyAdjudication.isPending ? "Applying…" : "Apply all"}
+                {bulkLabel}
               </button>
             ) : (
               domain === "links" && (
                 <button
                   className={styles.btn}
-                  disabled={applyAdvisories.isPending || rows.length === 0}
-                  title="Apply every proposed reclassification"
-                  onClick={() =>
-                    applyAdvisories
-                      .mutateAsync({ mode: "apply", limit: 500 })
-                      .then((r) => toast.success(`Applied ${r.applied} reclassifications`))
-                      .catch((e) => toast.error(`Apply failed: ${(e as Error).message}`))
-                  }
+                  disabled={bulkRunning || rows.length === 0}
+                  title="Apply every proposed reclassification, in the background"
+                  onClick={applyAllAdvisories}
                 >
-                  Apply all
+                  {bulkLabel}
                 </button>
               )
             )}
