@@ -108,3 +108,20 @@ def test_find_redundant_overrides_classifies_the_prod_shape():
     assert report["unknown"] == ["max_graph_nodes"]
     assert report["job_overrides_orphaned"] == ["validate-entity-links"]
     assert report["job_overrides_equal_to_default"] == ["actor-profile-refresh", "story-threads"]
+
+
+# ---------------------------------------------------------------------------
+# Bulk apply (the background "Apply all" behind the Proposals lens)
+# ---------------------------------------------------------------------------
+
+
+def test_adjudication_maint_actions_scope():
+    from app.services.entry_adjudication import ACTION_ASSESSMENT, ADJUDICATION_PROPOSAL_ACTIONS
+    from app.services.proposal_apply import adjudication_maint_actions
+
+    everything = adjudication_maint_actions(None)
+    assert ACTION_ASSESSMENT not in everything
+    assert set(everything) == ADJUDICATION_PROPOSAL_ACTIONS - {ACTION_ASSESSMENT}
+    assert adjudication_maint_actions("shadow_remove") == []
+    only = everything[0]
+    assert adjudication_maint_actions(only) == [only]

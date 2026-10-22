@@ -77,6 +77,16 @@ from app.services.entry_adjudication import (
     legacy_row_is_orphaned,
 )
 from app.services.entry_adjudication import TASK_NAME as ADJUDICATION_TASK_NAME
+from app.services.proposal_apply import (
+    adjudication_maint_actions,
+    apply_adjudication_batch,
+    apply_link_removal_row,
+    count_adjudication_pending,
+    count_advisories_pending,
+    new_progress,
+    read_progress,
+    write_progress,
+)
 
 router = APIRouter()
 
@@ -2985,62 +2995,8 @@ async def apply_proposed_link_removal(
     return LinkLogResult(log_id=log_id, applied=True, already_removed=already_removed)
 
 
-async def _apply_link_removal_row(db: AsyncSession, row: EntityLinkValidationLog) -> bool:
-    """Promote one shadow_remove row into the junction deletion (+ `removed`
-    audit row). Returns True when the junction was already gone."""
-    from sqlalchemy import update as sql_update
-
-    from app.intelligence.link_validation_apply import ENTITY_TYPES
-
-    if row.action != "shadow_remove":
-        raise AppError(code="invalid", message=f"can only apply shadow_remove rows (got {row.action})", status_code=400)
-    spec = ENTITY_TYPES.get(row.entity_type)
-    if not spec:
-        raise AppError(code="invalid", message=f"unsupported entity_type: {row.entity_type}", status_code=400)
-    jmodel, emodel, fk_attr = spec
-    junction = (
-        await db.execute(
-            select(jmodel).where(jmodel.entry_id == row.entry_id, getattr(jmodel, fk_attr) == row.entity_id)
-        )
-    ).scalar_one_or_none()
-    if junction is None:
-        db.add(
-            EntityLinkValidationLog(
-                entry_id=row.entry_id,
-                entity_type=row.entity_type,
-                entity_id=row.entity_id,
-                entity_name_snapshot=row.entity_name_snapshot,
-                action="removed",
-                reason="Promoted from proposal; junction was already absent.",
-                ai_result_id=row.ai_result_id,
-            )
-        )
-        await db.flush()
-        return True
-    db.add(
-        EntityLinkValidationLog(
-            entry_id=row.entry_id,
-            entity_type=row.entity_type,
-            entity_id=row.entity_id,
-            entity_name_snapshot=row.entity_name_snapshot,
-            action="removed",
-            reason=f"Promoted from proposal {row.id}: " + (row.reason or "")[:400],
-            original_source=junction.source,
-            original_confidence=junction.confidence,
-            original_matched_names=list(junction.matched_names or []),
-            original_paragraph_indices=list(junction.paragraph_indices or []),
-            original_extracted_at=junction.extracted_at,
-            ai_result_id=row.ai_result_id,
-        )
-    )
-    await db.delete(junction)
-    await db.execute(
-        sql_update(emodel)
-        .where(emodel.id == row.entity_id)
-        .values(article_count=func.greatest(emodel.article_count - 1, 0))
-    )
-    await db.flush()
-    return False
+# The per-row promoter moved to the service so the bulk worker can share it.
+_apply_link_removal_row = apply_link_removal_row
 
 
 @router.delete("/admin/hygiene/feed/{source}/{row_id}", status_code=204)
@@ -3183,78 +3139,101 @@ async def apply_adjudication_all(
     user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ) -> ApplyAdjudicationAllResponse:
-    """Apply every pending proposal the adjudicate stage filed, oldest first:
-    the entity-maintenance rows (unlink, reclassify, veto, merge, demote,
-    drop) through the same code the per-row Apply uses, and its link-removal
-    proposals through the link log's apply-removal. Assessment flags are
-    informational and skipped. Each row is its own savepoint, so one failure
-    is reported and the rest still apply."""
-    from app.services.entry_adjudication import apply_adjudication_row
+    """Apply up to `limit` pending proposals the adjudicate stage filed,
+    oldest first, inside this request: the entity-maintenance rows (unlink,
+    reclassify, veto, merge, demote, drop) through the same code the per-row
+    Apply uses, and its link-removal proposals through the link log's
+    apply-removal. Assessment flags are informational and skipped. Each row
+    is its own savepoint, so one failure is reported and the rest still
+    apply. For a whole backlog use `POST /admin/hygiene/bulk-apply`, which
+    runs in the background and reports progress."""
+    out = await apply_adjudication_batch(db, action=body.action, limit=body.limit)
+    return ApplyAdjudicationAllResponse(applied=out["applied"], skipped=out["skipped"], errors=out["errors"])
 
-    adjudicator_results = select(AIResult.id).where(
-        AIResult.task_id == select(AITask.id).where(AITask.name == ADJUDICATION_TASK_NAME).scalar_subquery()
+
+class BulkApplyRequest(BaseModel):
+    """Scope for a background "Apply all" over one proposals queue."""
+
+    kind: Literal["adjudication", "advisories"] = Field(
+        description=(
+            "adjudication: the adjudicate stage's pending proposals (both logs). "
+            "advisories: the link validator's needs_reclassification advisories"
+        )
     )
-    applied = skipped = 0
-    errors: list[dict] = []
-    budget = body.limit
+    action: str | None = Field(
+        default=None,
+        description="adjudication only: one adjudication_* action code or shadow_remove; omit for all",
+    )
+    entity_type: str | None = Field(default=None, description="advisories only: limit to one source entity type")
+    mode: Literal["shadow", "apply"] = Field(default="apply", description="advisories only")
+    limit: int | None = Field(default=None, ge=1, le=100_000, description="Stop after this many rows; omit to drain")
 
-    maint_actions = sorted(ADJUDICATION_PROPOSAL_ACTIONS - {ACTION_ASSESSMENT})
-    if body.action and body.action != "shadow_remove":
-        if body.action not in ADJUDICATION_PROPOSAL_ACTIONS or body.action == ACTION_ASSESSMENT:
-            raise AppError(
-                code="invalid", message=f"not an applyable adjudication action: {body.action}", status_code=400
-            )
-        maint_actions = [body.action]
-    if body.action in (None, *maint_actions):
-        rows = (
-            (
-                await db.execute(
-                    select(EntityMaintenanceLog)
-                    .where(EntityMaintenanceLog.action.in_(maint_actions), EntityMaintenanceLog.applied.is_(False))
-                    .order_by(EntityMaintenanceLog.created_at.asc())
-                    .limit(budget)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        for row in rows:
-            try:
-                async with db.begin_nested():
-                    outcome = await apply_adjudication_row(db, row)
-            except Exception as exc:  # one bad row must not sink the batch
-                errors.append({"log_id": str(row.id), "action": row.action, "error": str(exc)[:300]})
-                continue
-            if outcome.get("applied"):
-                applied += 1
-            else:
-                skipped += 1
-        budget -= len(rows)
+    model_config = ConfigDict(json_schema_extra={"example": {"kind": "adjudication", "action": "shadow_remove"}})
 
-    if budget > 0 and body.action in (None, "shadow_remove"):
-        link_rows = (
-            (
-                await db.execute(
-                    select(EntityLinkValidationLog)
-                    .where(
-                        EntityLinkValidationLog.action == "shadow_remove",
-                        EntityLinkValidationLog.ai_result_id.in_(adjudicator_results),
-                    )
-                    .order_by(EntityLinkValidationLog.created_at.asc())
-                    .limit(budget)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        for row in link_rows:
-            try:
-                async with db.begin_nested():
-                    await _apply_link_removal_row(db, row)
-            except Exception as exc:
-                errors.append({"log_id": str(row.id), "action": row.action, "error": str(exc)[:300]})
-                continue
-            applied += 1
 
-    await db.flush()
-    return ApplyAdjudicationAllResponse(applied=applied, skipped=skipped, errors=errors)
+class BulkApplyProgress(BaseModel):
+    """Where a background Apply all stands. Polled until `status` is done or error."""
+
+    job_id: str
+    kind: str
+    scope: dict[str, Any] = Field(default_factory=dict)
+    status: Literal["queued", "running", "done", "error"]
+    total: int = Field(description="Rows in scope when the job was queued; the loop may find fewer or more")
+    processed: int
+    applied: int
+    skipped: int
+    errors: list[dict] = Field(default_factory=list, description="First few row errors")
+    error_count: int = 0
+    started_at: str | None = None
+    finished_at: str | None = None
+    duration_ms: int | None = None
+    message: str | None = None
+
+
+@router.post("/admin/hygiene/bulk-apply", response_model=BulkApplyProgress, status_code=202)
+async def start_bulk_apply(
+    body: BulkApplyRequest,
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> BulkApplyProgress:
+    """Queue a background Apply all over one proposals queue and return its
+    progress record. The worker drains the queue in batches of 50 through
+    the same appliers the per-row buttons use, committing per batch; poll
+    `GET /admin/hygiene/bulk-apply/{job_id}` for progress. Rows that fail are
+    reported and left in place."""
+    from app.workers.proposal_apply_tasks import bulk_apply_proposals
+
+    if body.kind == "adjudication":
+        adjudication_maint_actions(body.action)  # validates the action code
+        total = await count_adjudication_pending(db, body.action)
+        scope: dict[str, Any] = {"action": body.action}
+    else:
+        total = await count_advisories_pending(db, body.entity_type)
+        scope = {"entity_type": body.entity_type, "mode": body.mode}
+
+    job_id = uuid.uuid4().hex
+    progress = new_progress(job_id, kind=body.kind, scope=scope, total=total)
+    await write_progress(progress)
+    bulk_apply_proposals.apply_async(
+        kwargs={
+            "job_id": job_id,
+            "kind": body.kind,
+            "action": body.action,
+            "entity_type": body.entity_type,
+            "mode": body.mode,
+            "limit": body.limit,
+        }
+    )
+    return BulkApplyProgress(**progress)
+
+
+@router.get("/admin/hygiene/bulk-apply/{job_id}", response_model=BulkApplyProgress)
+async def get_bulk_apply(
+    job_id: str = Path(..., description="Job id returned by POST /admin/hygiene/bulk-apply"),
+    user: User = Depends(get_admin_user),
+) -> BulkApplyProgress:
+    """Progress of a background Apply all. Records expire two hours after the job finishes."""
+    progress = await read_progress(job_id)
+    if progress is None:
+        raise AppError(code="not_found", message="No such bulk apply job (or it expired)", status_code=404)
+    return BulkApplyProgress(**progress)

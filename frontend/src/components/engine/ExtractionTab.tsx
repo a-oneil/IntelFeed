@@ -58,9 +58,6 @@ export function ExtractionTab({
   const [timeWindow, setTimeWindow] = useState<ExtractionParams["window"]>("7d");
   const [status, setStatus] = useState<"all" | "review" | "orphan" | "dupe" | "stale">(initialStatus);
   const [types, setTypes] = useState<Set<ExtractionType>>(new Set());
-  // CVEs dominate AI-created entities (NVD ingest) and are rarely what you're
-  // triaging here, so they're hidden until you ask for them.
-  const [hideCves, setHideCves] = useState(true);
   const [searchInput, setSearchInput] = useState("");
   const [q, setQ] = useState("");
   const [sortBy, setSortBy] = useState<NonNullable<ExtractionParams["sort_by"]>>("created");
@@ -77,13 +74,9 @@ export function ExtractionTab({
     return () => clearTimeout(h);
   }, [searchInput]);
 
-  // Chip selection narrows; "hide CVEs" subtracts. Empty result means every
-  // type is in play, which the API expects as no filter at all.
-  const effectiveTypes = useMemo(() => {
-    const chosen = types.size ? [...types] : ALL_TYPES;
-    const kept = hideCves ? chosen.filter((t) => t !== "cve") : chosen;
-    return kept.length === ALL_TYPES.length ? undefined : kept;
-  }, [types, hideCves]);
+  // Chip selection narrows. No selection means every type is in play, which
+  // the API expects as no filter at all.
+  const effectiveTypes = useMemo(() => (types.size ? [...types] : undefined), [types]);
 
   const { data: stats } = useExtractionStats(timeWindow);
   const { data, isLoading, isFetching } = useExtractionEntities({
@@ -122,8 +115,6 @@ export function ExtractionTab({
 
   function toggleType(t: ExtractionType) {
     resetTo(() => {
-      // Asking for CVEs explicitly overrides the hide toggle.
-      if (t === "cve" && hideCves && !types.has("cve")) setHideCves(false);
       setTypes((prev) => {
         const next = new Set(prev);
         if (next.has(t)) next.delete(t);
@@ -401,15 +392,6 @@ export function ExtractionTab({
             </button>
           ))}
         </div>
-
-        <label className={styles.toggle}>
-          <input
-            type="checkbox"
-            checked={hideCves}
-            onChange={(e) => resetTo(() => setHideCves(e.target.checked))}
-          />
-          Hide CVEs
-        </label>
 
         <div className={styles.seg}>
           {STATUSES.map((s) => (

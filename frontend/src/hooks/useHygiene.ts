@@ -352,6 +352,78 @@ export function useApplyAdjudicationAll() {
   });
 }
 
+/** A background "Apply all" over one proposals queue (see useStartBulkApply). */
+export interface BulkApplyProgress {
+  job_id: string;
+  kind: "adjudication" | "advisories";
+  scope: Record<string, unknown>;
+  status: "queued" | "running" | "done" | "error";
+  /** Rows in scope when the job was queued. */
+  total: number;
+  processed: number;
+  applied: number;
+  skipped: number;
+  errors: Array<Record<string, string>>;
+  error_count: number;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_ms: number | null;
+  message: string | null;
+}
+
+export interface BulkApplyRequest {
+  kind: "adjudication" | "advisories";
+  /** adjudication only: one adjudication_* code or shadow_remove; omit for all. */
+  action?: string;
+  /** advisories only. */
+  entity_type?: string;
+  mode?: "shadow" | "apply";
+  limit?: number;
+}
+
+export const BULK_APPLY_KEY = ["hygiene", "bulk-apply"] as const;
+
+/**
+ * Queue a background Apply all. The whole backlog (thousands of rows on a
+ * busy instance) used to go through one request, which the client gave up
+ * on at 15 s while the server kept applying. Poll the returned job with
+ * useBulkApplyProgress.
+ */
+export function useStartBulkApply() {
+  return useMutation({
+    mutationFn: async (body: BulkApplyRequest) => {
+      const { data } = await api.post<BulkApplyProgress>("/admin/hygiene/bulk-apply", body);
+      return data;
+    },
+  });
+}
+
+/** Progress of a background Apply all; polls every 1.5 s until it finishes. */
+export function useBulkApplyProgress(jobId: string | null) {
+  return useQuery({
+    queryKey: [...BULK_APPLY_KEY, jobId],
+    enabled: !!jobId,
+    queryFn: async () => {
+      const { data } = await api.get<BulkApplyProgress>(`/admin/hygiene/bulk-apply/${jobId}`);
+      return data;
+    },
+    refetchInterval: (q) => {
+      const st = q.state.data?.status;
+      return st === "done" || st === "error" ? false : 1500;
+    },
+    staleTime: 0,
+  });
+}
+
+/** Everything a bulk apply can change on screen. */
+export function invalidateAfterBulkApply(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: HYGIENE_KEYS });
+  qc.invalidateQueries({ queryKey: ["engine"] });
+  qc.invalidateQueries({ queryKey: ["entity-links"] });
+  qc.invalidateQueries({ queryKey: ["relationships"] });
+  qc.invalidateQueries({ queryKey: ["extraction"] });
+}
+
 export function useRunNameNormalization() {
   const qc = useQueryClient();
   return useMutation({
