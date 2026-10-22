@@ -182,10 +182,10 @@ def test_false_positive_filtering():
 
 def test_min_length_filtering():
     """Entities shorter than MIN_NAME_LENGTH are excluded."""
-    actor = _make_actor("APT")  # 3 chars, below MIN_NAME_LENGTH=4
+    actor = _make_actor("AP")  # 2 chars, below the shipped autolinker_min_name_length of 3
     _build_and_activate(actors=[actor])
 
-    matches = scan_text("APT was mentioned in the report.")
+    matches = scan_text("AP was mentioned in the report.")
     assert len([m for m in matches if m["entity_type"] == "threat_actor"]) == 0
 
 

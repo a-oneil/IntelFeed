@@ -5,6 +5,7 @@ import { useUIStore, type ReaderFontSize, type ReaderLineHeight, type ReaderMaxW
 import { useAppSidebarAutoCollapse } from "@/hooks/useAppSidebarAutoCollapse";
 import { useIsMobile } from "@/hooks/useMediaQuery";
 import { useUpdateProfile, useChangePassword } from "@/hooks/useAuth";
+import { readingPrefs, type ReadingPrefs } from "@/hooks/useReadingPrefs";
 import { useSaveOnboardingProgress } from "@/hooks/useOnboarding";
 import { useExternalLinkSettings } from "@/hooks/useExternalLinkSettings";
 import { BUILT_IN_TRUSTED_DOMAINS, type ExternalLinkMode } from "@/utils/externalLinks";
@@ -482,14 +483,12 @@ function ReadingSection() {
   const updateProfile = useUpdateProfile();
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
 
-  const getSetting = useCallback(
-    (key: string, fallback: unknown) => {
-      return (user?.settings as Record<string, unknown>)?.[key] ?? fallback;
-    },
-    [user?.settings]
-  );
+  // Account preferences over the shipped defaults (hooks/useReadingPrefs).
+  // The four list toggles are pushed into this browser's UI store by
+  // useReadingPrefsSync once the profile saves.
+  const prefs = readingPrefs(user?.settings as Record<string, unknown> | undefined);
 
-  const updateSetting = async (key: string, value: unknown) => {
+  const updateSetting = async (key: keyof ReadingPrefs, value: unknown) => {
     try {
       setSaveMsg(null);
       const newSettings = { ...(user?.settings || {}), [key]: value };
@@ -518,12 +517,12 @@ function ReadingSection() {
           <div className={styles.settingInfo}>
             <span className={styles.settingLabel}>Default view</span>
             <span className={styles.settingHint}>
-              Choose which entries to show when opening a feed.
+              What a feed opens on. The list&apos;s Hide-read toggle changes it for this browser.
             </span>
           </div>
           <select
             className={styles.select}
-            value={getSetting("default_view", "all") as string}
+            value={prefs.default_view}
             onChange={(e) => updateSetting("default_view", e.target.value)}
           >
             <option value="all">All entries</option>
@@ -540,7 +539,7 @@ function ReadingSection() {
           </div>
           <select
             className={styles.select}
-            value={getSetting("entries_per_page", 50) as number}
+            value={prefs.entries_per_page}
             onChange={(e) => updateSetting("entries_per_page", Number(e.target.value))}
           >
             <option value={25}>25</option>
@@ -553,12 +552,12 @@ function ReadingSection() {
           <div className={styles.settingInfo}>
             <span className={styles.settingLabel}>Default sort order</span>
             <span className={styles.settingHint}>
-              How entries are ordered in the feed list.
+              Order of the feed list on load. The list&apos;s sort menu changes it for this browser.
             </span>
           </div>
           <select
             className={styles.select}
-            value={getSetting("default_sort", "newest") as string}
+            value={prefs.default_sort}
             onChange={(e) => updateSetting("default_sort", e.target.value)}
           >
             <option value="newest">Newest first</option>
@@ -575,7 +574,7 @@ function ReadingSection() {
           </div>
           <select
             className={styles.select}
-            value={getSetting("date_format", "relative") as string}
+            value={prefs.date_format}
             onChange={(e) => updateSetting("date_format", e.target.value)}
           >
             <option value="relative">Relative (2 hours ago)</option>
@@ -598,7 +597,7 @@ function ReadingSection() {
           <label className={styles.toggle}>
             <input
               type="checkbox"
-              checked={getSetting("open_links_new_tab", true) as boolean}
+              checked={prefs.open_links_new_tab}
               onChange={(e) => updateSetting("open_links_new_tab", e.target.checked)}
             />
             <span className={styles.toggleSlider} />
@@ -615,7 +614,7 @@ function ReadingSection() {
           <label className={styles.toggle}>
             <input
               type="checkbox"
-              checked={getSetting("mark_read_on_scroll", false) as boolean}
+              checked={prefs.mark_read_on_scroll}
               onChange={(e) => updateSetting("mark_read_on_scroll", e.target.checked)}
             />
             <span className={styles.toggleSlider} />
@@ -632,7 +631,7 @@ function ReadingSection() {
           <label className={styles.toggle}>
             <input
               type="checkbox"
-              checked={getSetting("show_entry_preview", true) as boolean}
+              checked={prefs.show_entry_preview}
               onChange={(e) => updateSetting("show_entry_preview", e.target.checked)}
             />
             <span className={styles.toggleSlider} />
@@ -649,7 +648,7 @@ function ReadingSection() {
           <label className={styles.toggle}>
             <input
               type="checkbox"
-              checked={getSetting("compact_view", false) as boolean}
+              checked={prefs.compact_view}
               onChange={(e) => updateSetting("compact_view", e.target.checked)}
             />
             <span className={styles.toggleSlider} />

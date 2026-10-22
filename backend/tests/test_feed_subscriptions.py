@@ -232,7 +232,13 @@ async def test_first_registered_user_is_admin(client: AsyncClient, db_session: A
     founder = (await db_session.execute(select(User).where(User.username == "founder"))).scalar_one()
     assert founder.role == "admin"
 
-    resp = await client.post("/api/auth/register", json={"username": "second", "password": "hunter22"})
+    # The founder's registration gates sign-ups behind a generated invite code.
+    from app.services.system_settings import get_setting
+
+    code = await get_setting("registration_invite_code", db_session)
+    resp = await client.post(
+        "/api/auth/register", json={"username": "second", "password": "hunter22", "invite_code": code or None}
+    )
     assert resp.status_code == 201
     second = (await db_session.execute(select(User).where(User.username == "second"))).scalar_one()
     assert second.role == "user"

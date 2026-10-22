@@ -25,6 +25,7 @@ import { MarkDayReadButton } from "@/components/MarkDayReadButton";
 import type { DailySummaryFilters } from "@/hooks/useDailySummary";
 import { dayWindowIso } from "@/hooks/useDayIntel";
 import { useUIStore, type SortOrder, type ViewMode } from "@/stores/uiStore";
+import { useReadingPrefs } from "@/hooks/useReadingPrefs";
 import { useIsMobile } from "@/hooks/useMediaQuery";
 import { usePullToRefresh } from "@/hooks/usePullToRefresh";
 import { SwipeableEntryRow } from "@/components/SwipeableEntryRow";
@@ -365,6 +366,8 @@ export const EntryRow = memo(function EntryRow({
    */
   metaColumns?: string[];
 }) {
+  // Settings → Reading → "Show entry previews".
+  const showPreview = useReadingPrefs().show_entry_preview;
   const metaFields = useMemo(() => {
     if (!metaColumns?.length) return [];
     const out: { key: string; node: ReactNode }[] = [];
@@ -438,7 +441,7 @@ export const EntryRow = memo(function EntryRow({
         {searchSnippet ? (
           <p className={styles.summary} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(searchSnippet, { ALLOWED_TAGS: ["em", "mark", "strong", "b", "i", "span"], ALLOWED_ATTR: ["class"] }) }} />
         ) : (
-          viewMode !== "compact" && entry.summary && (
+          viewMode !== "compact" && showPreview && entry.summary && (
             <p className={styles.summary}>{previewSnippet(stripHtml(entry.summary), 200)}</p>
           )
         )}

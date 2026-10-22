@@ -3,6 +3,7 @@ import DOMPurify from "dompurify";
 import api from "@/api/client";
 import { annotateGlossaryHTML, type GlossaryTermHighlight } from "@/utils/highlightText";
 import { UNTRUSTED_CONTENT_ATTR, isExternalWebUrl } from "@/utils/externalLinks";
+import { useReadingPrefs } from "@/hooks/useReadingPrefs";
 
 interface SafeHTMLProps {
   html: string;
@@ -13,10 +14,21 @@ interface SafeHTMLProps {
 
 export function SafeHTML({ html, className, style, glossaryTerms }: SafeHTMLProps) {
   const ref = useRef<HTMLDivElement>(null);
+  // Settings → Reading → "Open links in new tab": outside links in article
+  // content get target="_blank" (on) or lose it (off). Same-site links are
+  // left alone either way.
+  const openLinksNewTab = useReadingPrefs().open_links_new_tab;
 
   const clean = useMemo(() => {
-    // Enforce rel="noopener noreferrer" on all target="_blank" links
     DOMPurify.addHook("afterSanitizeAttributes", (node) => {
+      if (node.tagName === "A") {
+        const href = node.getAttribute("href") || "";
+        if (isExternalWebUrl(href)) {
+          if (openLinksNewTab) node.setAttribute("target", "_blank");
+          else node.removeAttribute("target");
+        }
+      }
+      // Enforce rel="noopener noreferrer" on all target="_blank" links
       if (node.tagName === "A" && node.getAttribute("target") === "_blank") {
         node.setAttribute("rel", "noopener noreferrer");
       }
@@ -45,7 +57,7 @@ export function SafeHTML({ html, className, style, glossaryTerms }: SafeHTMLProp
       result = annotateGlossaryHTML(result, glossaryTerms);
     }
     return result;
-  }, [html, glossaryTerms]);
+  }, [html, glossaryTerms, openLinksNewTab]);
 
   useEffect(() => {
     const el = ref.current;

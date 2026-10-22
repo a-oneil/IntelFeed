@@ -93,6 +93,36 @@ def _cheap_bcrypt():
 
 
 @pytest.fixture(autouse=True)
+def _single_tenant_feed_visibility(monkeypatch):
+    """Run the suite with the legacy every-feed-visible behaviour.
+
+    ``per_user_subscriptions_enabled`` ships on (issue #15), under which a
+    user sees only the feeds they are subscribed to. Most tests create feeds
+    straight in the database with no subscription rows and then list them as
+    some user, so they assume the flag is off. The subscription tests flip it
+    on themselves through the DB override, which beats this field default.
+    """
+    from app.config import settings as env_settings
+
+    monkeypatch.setattr(env_settings, "per_user_subscriptions_enabled", False)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_settings_cache():
+    """Forget the in-process system_settings cache between tests.
+
+    The cache lives 5 s, longer than most tests, so a code or flag one test
+    stored (the generated invite code, say) would still be served to the
+    next test after its own schema is gone.
+    """
+    from app.services.system_settings import invalidate_cache
+
+    invalidate_cache()
+    yield
+    invalidate_cache()
+
+
+@pytest.fixture(autouse=True)
 def _reset_redis():
     """Reset Redis singletons between tests to avoid stale event-loop references."""
     from app.services.redis_client import reset_pools

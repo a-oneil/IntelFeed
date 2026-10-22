@@ -7,6 +7,7 @@ import { useIsMobile } from "@/hooks/useMediaQuery";
 import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
 import { useSSE } from "@/hooks/useSSE";
 import { useTableLayoutSync } from "@/hooks/useTableLayoutSync";
+import { useReadingPrefsSync } from "@/hooks/useReadingPrefs";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AudioPlayer } from "@/components/AudioPlayer";
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard";
@@ -184,6 +185,8 @@ export default function App() {
   useSSE();
   // Table column layouts live on the user profile, not just this browser.
   useTableLayoutSync();
+  // Settings → Reading seeds this browser's list toggles (unread, sort, density).
+  useReadingPrefsSync();
   const isMobile = useIsMobile();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated());
 

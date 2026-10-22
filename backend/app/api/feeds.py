@@ -301,7 +301,9 @@ async def create_feed(
             )
 
         adapter_config = {}
-        if discovered.feed_type == "youtube" and (user.settings or {}).get("youtube_exclude_shorts_default"):
+        # Shorts are noise for an intel feed, so the per-user default is on
+        # unless the user switched it off (Settings → Feeds).
+        if discovered.feed_type == "youtube" and (user.settings or {}).get("youtube_exclude_shorts_default", True):
             adapter_config["exclude_shorts"] = True
 
         feed = Feed(

@@ -240,9 +240,15 @@ Return the CVE list now.""",
         "description": "Generate a concise summary",
         "category": "analysis",
         "variables": ["entry.title", "entry.content_text", "entry.feed_title", "focus"],
-        "default_prompt_template": """Summarize the following article concisely in 2-4 sentences, focusing on the key security implications.
-
-## Article
+        # Entry-shaped: it summarises one article, so it has no place on an
+        # entity profile's AI tab.
+        "show_in_entity_actions": False,
+        # The instruction is the stable, cacheable part; the article is the
+        # per-call content.
+        "default_system_template": (
+            "Summarize the following article concisely in 2-4 sentences, focusing on the key security implications."
+        ),
+        "default_prompt_template": """## Article
 **Title**: {{ entry.title }}
 **Source**: {{ entry.feed_title }}
 
@@ -265,6 +271,10 @@ Respond with JSON:
         "display_name": "Intelligence Briefing",
         "description": "Produce a combined intelligence briefing from multiple articles — designed for scheduled automation digests",
         "category": "analysis",
+        # Batch/automation output (scheduled digests), not an action on a
+        # single article or entity.
+        "show_in_entry_actions": False,
+        "show_in_entity_actions": False,
         "variables": ["entries", "entry_count", "article_count", "focus"],
         "default_system_template": """You are a senior cyber threat intelligence analyst preparing a morning intelligence briefing that will be sent as a chat notification (Discord/Slack).
 
@@ -312,6 +322,10 @@ Write the briefing now per the rules above.""",
         "display_name": "Daily Divider Summary",
         "description": "Summarize all articles within a day-divider group in the feed list",
         "category": "analysis",
+        # Batch/automation output (the day-divider summary), not an action on
+        # a single article or entity.
+        "show_in_entry_actions": False,
+        "show_in_entity_actions": False,
         "variables": ["entries", "entry_count", "date_label", "scope_label", "focus"],
         "default_system_template": """You are a senior cyber threat intelligence analyst producing a detailed daily briefing for another security analyst. The user is looking at one day of articles in their feed reader and wants a thorough analytical writeup — not a bullet skim. Treat this like a morning intel brief: someone is going to actually read it and make decisions about what to investigate.
 
@@ -597,6 +611,8 @@ Produce the "What? So What?" analysis now per the rules in your instructions."""
         "display_name": "Detection Rules",
         "description": "Generate SIEM detection rules from article context",
         "category": "generation",
+        # Entry-shaped: rules come from one article's context.
+        "show_in_entity_actions": False,
         "variables": [
             "entry.title",
             "entry.content_text",
@@ -1145,6 +1161,8 @@ Produce the detection engineering summary JSON now per the schema in your instru
         "display_name": "Video/Podcast Summary",
         "description": "Summarize a video or podcast transcript with key security takeaways",
         "category": "analysis",
+        # Entry-shaped: it summarises one transcript.
+        "show_in_entity_actions": False,
         "variables": ["entry.title", "entry.content_text", "entry.published_at", "entry.feed_title", "focus"],
         "default_system_template": """You are a cyber threat intelligence analyst. Summarize video or podcast transcripts, focusing on security-relevant content.
 
@@ -1583,20 +1601,7 @@ Answer per your instructions. Use the intelfeed skill to look up live data whene
             "recent_entries",
             "mode",
         ],
-        "default_prompt_template": """You are a senior threat-intelligence analyst maintaining the profile description for a tracked threat actor. The current description may be months old. You have a sample of recent articles mentioning this actor. Decide whether the description needs updating, and if so, write a better one.
-
-ACTOR
-Name:     {{ actor_name }}
-Aliases:  {{ actor_aliases }}
-Actor ID: {{ actor_id }}
-
-CURRENT DESCRIPTION
-{{ current_description | default("(none)") }}
-
-RECENT ACTIVITY (titles + summaries from the last 90 days)
-{{ recent_entries }}
-
-MODE: {{ mode }}
+        "default_system_template": """You are a senior threat-intelligence analyst maintaining the profile description for a tracked threat actor. The current description may be months old. You have a sample of recent articles mentioning this actor. Decide whether the description needs updating, and if so, write a better one.
 
 DECISION
 
@@ -1612,8 +1617,19 @@ HARD CONSTRAINTS
   - Keep it analyst-readable, not marketing copy. No hedging like "may have" / "is believed to" unless that hedge is in the sources.
   - The Skill is available for verification (search_entries, get_threat_actor) — use it when an article reference is ambiguous. Do NOT call update_entity_profile yourself; the worker writes the new description based on your JSON output.
 
-OUTPUT CONTRACT — strict JSON matching the provided schema.
-""",
+OUTPUT CONTRACT — strict JSON matching the provided schema.""",
+        "default_prompt_template": """ACTOR
+Name:     {{ actor_name }}
+Aliases:  {{ actor_aliases }}
+Actor ID: {{ actor_id }}
+
+CURRENT DESCRIPTION
+{{ current_description | default("(none)") }}
+
+RECENT ACTIVITY (titles + summaries from the last 90 days)
+{{ recent_entries }}
+
+MODE: {{ mode }}""",
         "output_schema": {
             "type": "object",
             "required": ["action"],

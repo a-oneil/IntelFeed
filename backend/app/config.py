@@ -45,9 +45,9 @@ class Settings(BaseSettings):
     registration_enabled: bool = True
 
     # Signal engine (see planning/engine-plan.md)
-    signal_engine_shadow: bool = False
-    signal_engine_surface: bool = False
-    per_user_subscriptions_enabled: bool = False
+    signal_engine_shadow: bool = True
+    signal_engine_surface: bool = True
+    per_user_subscriptions_enabled: bool = True
     signal_feedback_min_samples: int = 20
     # Per-user Radar personalisation — read-time lift from each analyst's own
     # thumbs (see services/radar_personalization.py). Off until enabled here.
@@ -57,13 +57,13 @@ class Settings(BaseSettings):
 
     # My Stack exposure scoring (see planning/my-stack-exposure-scoring.md) —
     # per-user, read-time boost of CVEs that affect declared vendors/products.
-    my_stack_exposure_enabled: bool = False
+    my_stack_exposure_enabled: bool = True
     # Phase 7: heuristic "could you detect it" via CVE → co-occurring ATT&CK
     # techniques → their data sources → telemetry. Lower confidence than rules.
-    exposure_attack_visibility_enabled: bool = False
+    exposure_attack_visibility_enabled: bool = True
 
     # One-pass AI extraction (engine phase 4)
-    ai_one_pass_enabled: bool = False
+    ai_one_pass_enabled: bool = True
     ai_daily_budget_usd: float = 2.0
     ai_analysis_relevance_threshold: float = 0.15
     ai_tool_evidence_required: bool = True
@@ -181,7 +181,7 @@ class Settings(BaseSettings):
     tts_max_text_chars: int = 25_000
 
     # Intelligence thresholds
-    autolinker_min_name_length: int = 4
+    autolinker_min_name_length: int = 3
     autolinker_false_positive_names: str = (
         # Generic animal/nature words used as group name components
         "agent,storm,chaos,poison,ghost,hunter,shadow,razor,phantom,sniper,cobra,viper,dragon,tiger,eagle"
@@ -223,7 +223,7 @@ class Settings(BaseSettings):
     autolink_pending_tier_enabled: bool = True
     observables_decay_enabled: bool = True
     observables_candidate_max: int = 200
-    observables_ai_capture_mode: str = "shadow"
+    observables_ai_capture_mode: str = "capture"
     observables_analysis_tail_reserve: float = 0.4
     observables_publisher_ioc_enabled: bool = True
     observables_publisher_ioc_max_values: int = 2000
@@ -241,11 +241,11 @@ class Settings(BaseSettings):
     entity_resolution_normalized_match: bool = True
     # Phase 2 creation/alias gates: 'off' | 'shadow' (log would-block decisions
     # to the maintenance log, still create) | 'on' (enforce).
-    entity_creation_gates: str = "shadow"
+    entity_creation_gates: str = "on"
     # Adjudicate stage (post-analysis AI review; planning/ai-adjudication-stage.md).
     # 'off' | 'shadow' (file verdicts as proposals) | 'apply' (high-confidence
     # verdicts applied inline, the rest filed). Master switch — plans only subtract.
-    adjudication_mode: str = "off"
+    adjudication_mode: str = "apply"
     adjudication_trigger: str = "all"  # all | created
     adjudication_max_per_hour: int = 0  # 0 = no ceiling; set one to cap spend or protect the ai queue
     adjudication_min_priority_score: float = 0.0  # 0 = no floor (keep it: junk comes from low-score CVE entries)
@@ -307,7 +307,7 @@ class Settings(BaseSettings):
     # Evidence structure: cluster each edge's evidence entries into stories
     # via the entry embeddings, so relationship views can say "recurring
     # across N incidents" vs "scattered roundup co-mentions". Also gates the
-    relationship_evidence_structure: bool = False
+    relationship_evidence_structure: bool = True
     narrative_themes_enabled: bool = True  # parse the briefing's grouping (free, no AI call)
     narrative_theme_gating: bool = False  # let it veto promotions — flip on once themes exist
     # Single-link join threshold for evidence story clustering (validated
@@ -343,7 +343,7 @@ class Settings(BaseSettings):
     # Embeddings are configured on their own rather than through an AI task
     # assignment: the sweeper is a bulk, non-generative job that must keep
     # running when every generative provider is paused or inactive.
-    embeddings_enabled: bool = False
+    embeddings_enabled: bool = True
     embedding_model: str = "nomic-embed-text"
     # Blank falls back to the Ollama provider row's base_url, then OLLAMA_BASE_URL.
     embedding_base_url: str = ""

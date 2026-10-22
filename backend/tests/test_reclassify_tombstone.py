@@ -97,7 +97,12 @@ async def test_store_malware_matches_tombstone_on_alias(db_session, test_entry):
     assert await _count_malware(db_session, "Clop") == 0
 
 
-async def test_inactive_tombstone_does_not_suppress(db_session, test_entry):
+async def test_inactive_tombstone_does_not_suppress(db_session, test_entry, monkeypatch):
+    from app.config import settings as env_settings
+
+    # "Hive" is a dictionary word, so the shipped `entity_creation_gates="on"`
+    # would refuse it on its own; this test is about the tombstone, not the gate.
+    monkeypatch.setattr(env_settings, "entity_creation_gates", "shadow")
     actor = ThreatActor(name="Hive", aliases=[])
     db_session.add(actor)
     await db_session.flush()

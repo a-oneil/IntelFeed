@@ -126,7 +126,11 @@ async def test_get_pivot_ttl_returns_redis_ttl(mock_redis):
     with patch("app.intelligence.correlation_cache.get_redis", return_value=mock_redis):
         ttl = await get_pivot_ttl("ioc", "abc")
         assert ttl == 1800
-        mock_redis.ttl.assert_awaited_once_with(_pivot_key("ioc", "abc"))
+        # The key carries the display-confidence / evidence-structure variant,
+        # so the expectation has to compute it the same way.
+        from app.intelligence.correlation_cache import confidence_cache_variant
+
+        mock_redis.ttl.assert_awaited_once_with(_pivot_key("ioc", "abc", confidence_cache_variant()))
 
 
 @pytest.mark.asyncio

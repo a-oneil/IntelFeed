@@ -1,4 +1,5 @@
 import { useInfiniteQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
+import { currentReadingPrefs } from "@/hooks/useReadingPrefs";
 import { useRef, useCallback, useMemo } from "react";
 import api from "@/api/client";
 import type {
@@ -58,7 +59,7 @@ export function useEntries(filters: EntryFilters, { enabled = true }: { enabled?
     queryFn: async ({ pageParam }) => {
       const params: Record<string, string | boolean | undefined> = {
         ...filters,
-        limit: "50",
+        limit: String(currentReadingPrefs().entries_per_page),
       };
       if (pageParam) {
         params.cursor = pageParam;

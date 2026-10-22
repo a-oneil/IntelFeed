@@ -194,6 +194,9 @@ interface UIState {
   /** Whose layouts the `tables` map currently holds. Null on a browser that
    *  hasn't synced yet; a mismatch means someone else logged in here. */
   tablesOwnerId: string | null;
+  /** Stamp of the account Reading preferences last pushed into this
+   *  browser's toggles (see hooks/useReadingPrefs). Null: never seeded. */
+  readingPrefsApplied: string | null;
   /** Hand the tables over to a different user: their server layouts replace
    *  what the previous account left behind, filters and all. */
   takeOverTableLayouts: (userId: string, remote: TableLayoutMap) => void;
@@ -531,6 +534,7 @@ export const useUIStore = create<UIState>()(
           })
         ),
       tablesOwnerId: null,
+      readingPrefsApplied: null,
       takeOverTableLayouts: (userId, remote) =>
         set(() => ({
           tablesOwnerId: userId,
@@ -939,6 +943,7 @@ export const useUIStore = create<UIState>()(
         sortOrder: state.sortOrder,
         tables: state.tables,
         tablesOwnerId: state.tablesOwnerId,
+        readingPrefsApplied: state.readingPrefsApplied,
         showUnreadOnly: state.showUnreadOnly,
         priorityShowUnreadOnly: state.priorityShowUnreadOnly,
         markReadOnScroll: state.markReadOnScroll,

@@ -870,6 +870,8 @@ async def test_entries_list_chips_when_surfaced(client, auth_headers, db_session
     from app.config import settings as env_settings
     from app.workers.signal_tasks import score_entry
 
+    # Surfacing ships on; this test checks the switch both ways.
+    monkeypatch.setattr(env_settings, "signal_engine_surface", False)
     entry = await _make_entry(db_session, reliable_feed, title="Chip entry")
     await _link_actor(db_session, entry, "ChipActor", article_count=1)
     await score_entry(db_session, entry.id)

@@ -102,11 +102,13 @@ interface DropdownItemProps {
   label: string;
   onClick?: () => void;
   href?: string;
+  /** Link items open a new tab unless told otherwise (Settings → Reading). */
+  newTab?: boolean;
   active?: boolean;
   shortcut?: string;
 }
 
-export function DropdownItem({ icon, label, onClick, href, active, shortcut }: DropdownItemProps) {
+export function DropdownItem({ icon, label, onClick, href, newTab = true, active, shortcut }: DropdownItemProps) {
   const className = `${styles.item} ${active ? styles.itemActive : ""}`;
 
   if (href) {
@@ -114,7 +116,7 @@ export function DropdownItem({ icon, label, onClick, href, active, shortcut }: D
       <a
         className={className}
         href={href}
-        target="_blank"
+        target={newTab ? "_blank" : undefined}
         rel="noopener noreferrer"
         role="menuitem"
       >

@@ -58,16 +58,16 @@ def test_enum_settings_render_as_selects():
     assert SETTING_METADATA["entity_creation_gates"]["options"] == ["off", "shadow", "on"]
 
 
-def test_defaults_are_off_all_and_no_ceilings():
+def test_defaults_are_apply_all_and_no_ceilings():
     """Every dial that could quietly hold the stage back ships neutral: the
-    master switch off, every analysed entry in scope, and no floor or ceiling.
-    A rate ceiling is worth setting on a metered provider or to protect the
-    shared `ai` queue — neither is true of every install, so neither is a
-    default."""
+    master switch on (apply — what production settled on, see issue #15),
+    every analysed entry in scope, and no floor or ceiling. A rate ceiling is
+    worth setting on a metered provider or to protect the shared `ai` queue —
+    neither is true of every install, so neither is a default."""
     from app.config import Settings
 
     fields = Settings.model_fields
-    assert fields["adjudication_mode"].default == "off"
+    assert fields["adjudication_mode"].default == "apply"
     assert fields["adjudication_trigger"].default == "all"
     assert fields["adjudication_min_priority_score"].default == 0.0
     assert fields["adjudication_max_per_hour"].default == 0

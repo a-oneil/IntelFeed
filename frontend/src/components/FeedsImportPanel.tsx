@@ -20,7 +20,7 @@ export function FeedsImportPanel() {
   const bulkExcludeShorts = useBulkExcludeShorts();
 
   const [excludeShortsDefault, setExcludeShortsDefault] = useState(
-    (user?.settings?.youtube_exclude_shorts_default as boolean) ?? false
+    (user?.settings?.youtube_exclude_shorts_default as boolean) ?? true
   );
   const [ytMsg, setYtMsg] = useState<string | null>(null);
 
