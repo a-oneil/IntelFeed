@@ -17,8 +17,9 @@ using the native ``/api/chat`` endpoint:
 
 Config keys (``ai_providers.config`` / assignment config):
 
-* ``timeout_seconds`` — per-request timeout (default 300; local models
-  can be slow, especially on cold load).
+* ``timeout_seconds`` — per-request timeout (default 900; local models
+  can be slow, especially on cold load, and a long article on a mid-range
+  GPU can run past five minutes).
 * ``keep_alive`` — forwarded to Ollama verbatim (e.g. ``"30m"`` keeps
   the model resident between calls; unset uses the server default).
 * ``num_ctx`` — FIXED context window forwarded via ``options``; disables
@@ -74,6 +75,9 @@ from app.ai.providers.schema_utils import enforce_required as _enforce_required_
 logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "http://localhost:11434"
+# Prod needed 900 s for long articles on a 2070-class GPU; a faster card is not hurt by headroom.
+DEFAULT_TIMEOUT_SECONDS = 900
+
 
 # Type of the injected in-process tool dispatcher: (tool_name, args) -> JSON str.
 # The caller (copilot endpoint / engine) builds this as a closure over the
@@ -113,7 +117,7 @@ class OllamaProvider(AIProvider):
     ):
         super().__init__(base_url=base_url, api_key=api_key, config=config)
         self.base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
-        self.timeout: float = float(self.config.get("timeout_seconds", 300))
+        self.timeout: float = float(self.config.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS))
 
     # ---------------------------------------------------------------- helpers
 
@@ -249,7 +253,7 @@ class OllamaProvider(AIProvider):
 
         payload = self._build_payload(prompt, system, temperature, max_tokens, response_format, model, stream=False)
         cfg = self._model_config(payload["model"])
-        timeout = timeout_seconds or float(cfg.get("timeout_seconds", 300))
+        timeout = timeout_seconds or float(cfg.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS))
 
         start = time.monotonic()
         async with httpx.AsyncClient(timeout=timeout, headers=self._headers()) as client:
@@ -494,7 +498,7 @@ class OllamaProvider(AIProvider):
         """
         del heartbeat_label
         cfg = self._model_config(self._resolve_model(model))
-        timeout = timeout_seconds or float(cfg.get("timeout_seconds", 300))
+        timeout = timeout_seconds or float(cfg.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS))
         max_iterations = int(cfg.get("max_tool_iterations", _DEFAULT_MAX_TOOL_ITERATIONS))
 
         messages: list[dict] = []
@@ -541,7 +545,7 @@ class OllamaProvider(AIProvider):
         start = time.monotonic()
         resolved_model = self._resolve_model(model)
         cfg = self._model_config(resolved_model)
-        timeout = timeout_seconds or float(cfg.get("timeout_seconds", 300))
+        timeout = timeout_seconds or float(cfg.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS))
         max_iterations = int(cfg.get("max_tool_iterations", _DEFAULT_MAX_TOOL_ITERATIONS))
 
         # Own the message list so the final constrained round (below) sees the

@@ -95,7 +95,10 @@ async def test_store_entry_analysis_fans_out(db_session, feed):
 
 
 @pytest.mark.asyncio
-async def test_enqueue_flag_off_noop(db_session, feed, analysis_task):
+async def test_enqueue_flag_off_noop(db_session, feed, analysis_task, monkeypatch):
+    from app.config import settings as env_settings
+
+    monkeypatch.setattr(env_settings, "ai_one_pass_enabled", False)
     entry = await _make_entry(db_session, feed, title="Flag off")
     status = await enqueue_entry_analysis(db_session, entry.id)
     assert status is None

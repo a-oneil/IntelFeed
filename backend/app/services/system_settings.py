@@ -1404,6 +1404,107 @@ async def reset_setting(db: AsyncSession, key: str) -> dict[str, Any]:
 # Reserved (non-CONFIGURABLE) keys stored directly in the settings JSONB.
 PUBLIC_RSS_TOKEN_KEY = "_public_rss_token"
 DEFAULT_THEME_KEY = "_default_theme_id"
+JOB_OVERRIDES_KEY = "_job_schedule_overrides"
+
+
+def find_redundant_overrides(
+    db_settings: dict[str, Any],
+    *,
+    job_registry: dict[str, Any] | None = None,
+) -> dict[str, list]:
+    """Classify the override row's dead weight, without touching the DB.
+
+    An override that equals the shipped default pins the install to a stale
+    copy of that default: when the default moves, the install silently does
+    not. A key the code no longer reads is just confusing on the next audit.
+    Returns the keys to drop, grouped by why::
+
+        {"equal_to_default": [...], "unknown": [...],
+         "job_overrides_orphaned": [...], "job_overrides_equal_to_default": [...]}
+
+    Reserved keys (``_public_rss_token`` and the job overrides themselves)
+    and secrets are never listed. ``job_registry`` defaults to the live
+    registry; pass one to test with.
+    """
+    if job_registry is None:
+        from app.workers.job_registry import JOB_REGISTRY
+
+        job_registry = JOB_REGISTRY
+
+    equal: list[str] = []
+    unknown: list[str] = []
+    for key, value in db_settings.items():
+        if key in (PUBLIC_RSS_TOKEN_KEY, JOB_OVERRIDES_KEY):
+            continue
+        if key == DEFAULT_THEME_KEY:
+            continue  # an explicit choice; a theme id has no code default to compare against
+        if key not in CONFIGURABLE_KEYS:
+            unknown.append(key)
+            continue
+        if key in SECRET_KEYS:
+            continue
+        default = getattr(env_settings, key, None)
+        try:
+            same = _coerce_type(key, value) == default
+        except (TypeError, ValueError):
+            same = False
+        if same:
+            equal.append(key)
+
+    orphaned: list[str] = []
+    job_equal: list[str] = []
+    for job_name, override in (db_settings.get(JOB_OVERRIDES_KEY) or {}).items():
+        job = job_registry.get(job_name)
+        if job is None:
+            orphaned.append(job_name)
+            continue
+        override = override or {}
+        enabled_default = job.get("enabled_by_default", True)
+        redundant = True
+        if "enabled" in override and bool(override["enabled"]) != bool(enabled_default):
+            redundant = False
+        if override.get("schedule") and override["schedule"] != job.get("default_schedule"):
+            redundant = False
+        if redundant:
+            job_equal.append(job_name)
+
+    return {
+        "equal_to_default": sorted(equal),
+        "unknown": sorted(unknown),
+        "job_overrides_orphaned": sorted(orphaned),
+        "job_overrides_equal_to_default": sorted(job_equal),
+    }
+
+
+async def prune_redundant_overrides(db: AsyncSession) -> dict[str, list]:
+    """Drop the overrides ``find_redundant_overrides`` names and return them."""
+    result = await db.execute(select(SystemSettings).where(SystemSettings.id == 1))
+    row = result.scalar_one_or_none()
+    if not row:
+        return {
+            "equal_to_default": [],
+            "unknown": [],
+            "job_overrides_orphaned": [],
+            "job_overrides_equal_to_default": [],
+        }
+
+    db_settings = dict(row.settings or {})
+    report = find_redundant_overrides(db_settings)
+    for key in report["equal_to_default"] + report["unknown"]:
+        db_settings.pop(key, None)
+    overrides = dict(db_settings.get(JOB_OVERRIDES_KEY) or {})
+    for job_name in report["job_overrides_orphaned"] + report["job_overrides_equal_to_default"]:
+        overrides.pop(job_name, None)
+    if overrides:
+        db_settings[JOB_OVERRIDES_KEY] = overrides
+    else:
+        db_settings.pop(JOB_OVERRIDES_KEY, None)
+
+    row.settings = db_settings
+    db.add(row)
+    await db.flush()
+    invalidate_cache()
+    return report
 
 
 async def get_default_theme_id(db: AsyncSession) -> str | None:

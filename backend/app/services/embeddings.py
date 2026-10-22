@@ -70,16 +70,17 @@ def content_hash(embed_text: str, model: str) -> str:
     return hashlib.sha256(f"{model}\x00{embed_text}".encode()).hexdigest()
 
 
-async def resolve_provider(db: AsyncSession) -> tuple[AIProvider, str]:
-    """(client, model) for embedding calls, or raise if it isn't configured."""
-    model = str(settings.get("embedding_model") or "").strip()
-    if not model:
-        raise RuntimeError("embedding_model is not set")
+class EmbeddingsNotConfigured(RuntimeError):
+    """Embeddings are switched on but there is nothing to call.
 
-    base_url = str(settings.get("embedding_base_url") or "").strip()
-    api_key = None
+    Raised instead of a connection error so the sweeper can log one quiet line
+    and stop: an install with no Ollama provider row and no explicit
+    ``embedding_base_url`` has nowhere to send the text.
+    """
 
-    row = (
+
+async def _ollama_provider_row(db: AsyncSession) -> AIProviderModel | None:
+    return (
         (
             await db.execute(
                 select(AIProviderModel)
@@ -90,10 +91,32 @@ async def resolve_provider(db: AsyncSession) -> tuple[AIProvider, str]:
         .scalars()
         .first()
     )
+
+
+async def resolve_provider(db: AsyncSession) -> tuple[AIProvider, str]:
+    """(client, model) for embedding calls, or raise if it isn't configured."""
+    model = str(settings.get("embedding_model") or "").strip()
+    if not model:
+        raise EmbeddingsNotConfigured("embedding_model is not set")
+
+    base_url = str(settings.get("embedding_base_url") or "").strip()
+    api_key = None
+
+    row = await _ollama_provider_row(db)
     if row:
         base_url = base_url or (row.base_url or "")
         if row.api_key_encrypted:
             api_key = decrypt_value(row.api_key_encrypted)
+
+    if not base_url and row is None:
+        # Embeddings ship enabled, but a Claude/OpenAI-only install has no
+        # Ollama host to embed with. Say so once per sweep rather than
+        # dialling http://ollama:11434 and logging a connection error.
+        raise EmbeddingsNotConfigured(
+            "no Ollama provider and no embedding_base_url — add an Ollama provider "
+            "under Settings → AI Configuration (serving the embedding model) or set "
+            "embedding_base_url, or turn embeddings_enabled off"
+        )
 
     return OllamaProvider(base_url=base_url or DEFAULT_BASE_URL, api_key=api_key), model
 
@@ -240,7 +263,11 @@ async def sweep(db: AsyncSession, limit: int | None = None) -> dict:
     limit = int(limit or settings.get("embedding_backfill_limit") or 2000)
     batch_size = max(1, int(settings.get("embedding_batch_size") or 32))
 
-    provider, model = await resolve_provider(db)
+    try:
+        provider, model = await resolve_provider(db)
+    except EmbeddingsNotConfigured as exc:
+        logger.info("embeddings sweep skipped: %s", exc)
+        return {"status": "unconfigured", "embedded": 0, "reason": str(exc)}
     # Cheapest first: never embedded, then embedded under another model, then —
     # only once both are empty — re-hashing what is already stored.
     mode = "pending"

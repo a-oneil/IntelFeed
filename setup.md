@@ -142,7 +142,7 @@ docker compose -f docker-compose.prod.yml logs -f
 
 ## 7. Create your user account
 
-In your browser: open `https://intelfeed.example.com` and register the first account — the first account registered becomes the admin. Registration can then be disabled or invite-gated under **Settings → Users** (see [Users and access](docs/guide/users-and-access.md)).
+In your browser: open `https://intelfeed.example.com` and register the first account — the first account registered becomes the admin, and registration closes behind a generated invite code at that moment. The code (and the switch to disable registration altogether) is under **Settings → Users** (see [Users and access](docs/guide/users-and-access.md)).
 
 ## 8. Seed the reference data
 

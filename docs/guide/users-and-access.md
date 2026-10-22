@@ -15,7 +15,7 @@ The **first human account** registered on a fresh instance becomes the admin; ev
 **Settings → Users** has two settings at the top:
 
 - **Account Registration** — on by default. Turn it off to lock the instance: the register page refuses with "Account registration is currently disabled". There is no "add user" button — accounts only come from the register page — so to add someone to a locked instance, turn registration back on while they sign up.
-- **Invite Code** — a code the register page asks for. Leave it empty and anyone who can reach the register page can sign up; set it and registration needs the code.
+- **Invite Code** — a code the register page asks for. One is generated the moment the first account (the admin) registers, so a fresh install is never open to strangers by accident. Clear it and anyone who can reach the register page can sign up; change it whenever you want a fresh one.
 
 Once a code is set, **Copy Invite Link** puts a link on your clipboard — your instance's `/register` page with the code already filled in. Send that instead of the bare code.
 

@@ -154,7 +154,7 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
             "continue, seed threads for stories that just broke, and fold near-duplicate re-reports."
         ),
         "category": "intelligence",
-        "default_schedule": {"type": "interval", "seconds": 1800},
+        "default_schedule": {"type": "interval", "seconds": 7200},
     },
     "narrate-story-threads": {
         "settings_keys": ["thread_narrate_limit"],
@@ -297,7 +297,9 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
         "task": "app.workers.maintenance.refresh_correlation_cache",
         "description": "Pre-warm correlation cache for high-activity entities",
         "category": "maintenance",
-        "default_schedule": {"type": "crontab", "minute": "*/15"},
+        # Hourly: the cache lives `correlation_cache_ttl_seconds` (3600 s), so
+        # warming it four times an hour just redid the same work.
+        "default_schedule": {"type": "crontab", "minute": "10"},
     },
     "sync-entity-search-indexes": {
         "task": "app.workers.maintenance.sync_entity_search_indexes",

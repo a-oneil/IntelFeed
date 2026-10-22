@@ -220,7 +220,9 @@ async def test_watch_boost_value_affects_ranking(db_session, test_user):
 async def test_triage_endpoint_returns_components(client, auth_headers, db_session, test_user):
     await _seed_scored_entry(db_session, test_user)
 
-    resp = await client.get("/api/entries/triage", headers=auth_headers)
+    # The legacy ranking is what exposes `priority_components`; with the
+    # signal engine surfaced by default, ask for it explicitly.
+    resp = await client.get("/api/entries/triage?mode=legacy", headers=auth_headers)
     assert resp.status_code == 200
     data = resp.json()
     assert data["total"] == 1

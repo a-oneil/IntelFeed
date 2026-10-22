@@ -1,4 +1,5 @@
 import { readExternalLinkSettings } from "@/hooks/useExternalLinkSettings";
+import { currentReadingPrefs } from "@/hooks/useReadingPrefs";
 import { useAuthStore } from "@/stores/authStore";
 import { readSessionTrustedHosts, useExternalLinkStore } from "@/stores/externalLinkStore";
 import {
@@ -44,5 +45,18 @@ export function openExternalUrl(
     useExternalLinkStore.getState().hold(info);
     return;
   }
-  window.open(url, "_blank", features);
+  openAllowedExternal(url, features);
+}
+
+/**
+ * Open an outside URL that has already passed the confirmation: a new tab by
+ * default, or this tab when Settings → Reading → "Open links in new tab" is
+ * off.
+ */
+export function openAllowedExternal(url: string, features = "noopener,noreferrer"): void {
+  if (currentReadingPrefs().open_links_new_tab) {
+    window.open(url, "_blank", features);
+  } else {
+    window.location.assign(url);
+  }
 }

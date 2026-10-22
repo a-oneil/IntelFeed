@@ -26,6 +26,21 @@ Everything goes through `settings.get(key)` (`backend/app/config.py:448`), never
    or a real environment variable can override at process start.
 3. **Code default** — the literal in `config.py`.
 
+The code defaults are the values the reference production instance settled on
+after months of tuning, so a fresh install behaves like a tuned one without
+anyone touching the Engine console. The instance-specific knobs are the
+exceptions: content budgets that depend on the AI host's memory
+(`ai_analysis_content_max_chars`), anything that exposes data outward
+(`public_rss_enabled`, `observables_publish_enabled`), the per-instance
+curation lists (`autolinker_false_positive_names`,
+`autolinker_blocked_surface_forms`), and every secret and URL.
+
+An override that equals the shipped default is dead weight — it pins the
+install to a stale copy when the default moves again.
+`scripts/maintenance/prune_setting_overrides.py --dry-run` lists those, plus
+keys no setting reads any more and job overrides for jobs that no longer
+exist; without the flag it removes them.
+
 One key exists **only** in the DB and has no env default at all:
 `registration_invite_code`. Reading it before anyone sets it returns `None`.
 
@@ -79,7 +94,7 @@ dictionary scan in `backend/app/intelligence/autolinker.py`; see
 
 | Setting | Type / default | What it does |
 |---|---|---|
-| `autolinker_min_name_length` | int, `4` | Names shorter than this are never added to the automaton. The floor that keeps two- and three-letter aliases out of the scan entirely. |
+| `autolinker_min_name_length` | int, `3` | Names shorter than this are never added to the automaton. The floor that keeps two- and three-letter aliases out of the scan entirely. |
 | `autolinker_ambiguous_name_max_length` | int, `10` | Single-word, alpha-only names up to this length must appear **capitalised** in the source text to match — the rule that lets "Royal" the actor match *Royal ransomware* but not *the royal family*. |
 | `autolinker_ambiguous_max_occurrences` | int, `3` | An ambiguous name appearing more than this many times in one article is skipped for that article. High repetition reads as ordinary English usage, not a named-entity reference. |
 | `autolinker_false_positive_names` | csv, ~150 names | The curated FP vocabulary: generic animal/nature words, malware category words, OS/vendor brand words, Windows built-ins, and known-bad Malpedia aliases. **Only applies to actor / malware / country matching** — vendors, products, tools and mitigations deliberately bypass it, since their real names *are* common brand words (Norton the vendor still matches). Editable as rows via `GET/POST/DELETE /api/engine/autolink/fp-names`. |
@@ -111,7 +126,7 @@ feeds, analyst promotion), and known values are then sighted by exact match.
 | `observables_publisher_ioc_enabled` | bool, `true` | Fetch and capture the indicator file an article links to when it lives in an allow-listed publisher repository (Cisco Talos IOCs, Bitdefender malware-ioc, Datadog indicators-of-compromise). Roles come from the publisher's own labels; rows are sighted on the article. |
 | `observables_publisher_ioc_max_values` | int, `2000` | Cap on indicators taken from one article IOC table. |
 | `observables_ai_capture_kinds` | csv, network + hash kinds + `script` | In `capture` mode, only these kinds become ledger rows from the one-pass AI; every other kind it reports is still staged as a promotable candidate (with its role, evidence and confidence). Add the host kinds — `cmdline`, `path`, `registry`, `scheduled_task`, `service_name`, `mutex`, `named_pipe`, `user_agent`, `http_header` — once the extraction fixture (`scripts/dev/eval_observable_extraction.py`) shows they are precise. |
-| `observables_ai_capture_mode` | `shadow` \| `capture`, default `shadow` | `shadow`: indicators the one-pass AI confirms land on the entry as *promotable candidates* — you eyeball the judge before trusting it. `capture`: confirmations become ledger rows directly. |
+| `observables_ai_capture_mode` | `shadow` \| `capture`, default `capture` | `shadow`: indicators the one-pass AI confirms land on the entry as *promotable candidates* — you eyeball the judge before trusting it. `capture`: confirmations become ledger rows directly. |
 | `observables_decay_enabled` | bool, `true` | Nightly per-kind confidence decay for network observables — IP 30d half-life, URL 60d, domain 90d; hashes and host artifacts never decay. A new sighting resets the clock. Job: `decay-observable-confidence`, daily 02:20 UTC. |
 
 ### Publishing (Engine → Publishing browse screen)
@@ -163,7 +178,7 @@ Job: `ai-analysis-batch-submit` (every 30 min) and `ai-analysis-batch-poll`
 
 | Setting | Type / default | What it does |
 |---|---|---|
-| `ai_one_pass_enabled` | bool, `false` | Master switch. Requires an enabled `entry_analysis` AI task assignment — the flag alone does nothing. |
+| `ai_one_pass_enabled` | bool, `true` | Master switch. Requires an enabled `entry_analysis` AI task assignment — the flag alone does nothing. |
 | `ai_daily_budget_usd` | float, `2.0` | Hard daily spend cap. On reaching it, pending entries wait; the next run takes the highest-priority ones first. |
 | `ai_analysis_relevance_threshold` | float, `0.15` | Junk gate: entries scoring below this on the keyword relevance pass skip AI analysis entirely. The question it answers is "is there anything here to extract", not "is this important". |
 | `ai_batch_max_requests` | int, `500` | Maximum entries per batch submission. |
@@ -180,7 +195,7 @@ name and a new row in an entity table.
 | Setting | Type / default | What it does |
 |---|---|---|
 | `entity_resolution_normalized_match` | bool, `true` | Match incoming names against existing profiles *after* normalisation (case, punctuation, spacing, leetspeak folding) so `Cl0p` resolves to `Clop` and `Silver Fox` to `SilverFox` instead of creating a duplicate. Only prevents duplicate creation, so it is safe on. |
-| `entity_creation_gates` | `off` \| `shadow` \| `on`, default `shadow` | The generic-name / denylist / cross-type / alias-quality gates. `shadow` logs every would-block decision to the maintenance log but still creates — the right setting for watching what enforcement *would* do. `on` enforces. Manual creation always succeeds but is logged as an override. |
+| `entity_creation_gates` | `off` \| `shadow` \| `on`, default `on` | The generic-name / denylist / cross-type / alias-quality gates. `shadow` logs every would-block decision to the maintenance log but still creates — the right setting for watching what enforcement *would* do. `on` enforces. Manual creation always succeeds but is logged as an override. |
 
 ---
 
@@ -195,14 +210,14 @@ and story threads (`threads`). The scoring model itself is documented in
 
 | Setting | Type / default | What it does |
 |---|---|---|
-| `signal_engine_shadow` | bool, `false` | Compute and persist `entry_signals` + `Entry.priority_score`. Nothing changes in the UI. This is stage one of the rollout. |
-| `signal_engine_surface` | bool, `false` | Surface the scores: entry-list priority chips, the `radar` sort, signal-ranked triage, and the `entry_scored` SSE event. |
+| `signal_engine_shadow` | bool, `true` | Compute and persist `entry_signals` + `Entry.priority_score`. Nothing changes in the UI. This is stage one of the rollout. |
+| `signal_engine_surface` | bool, `true` | Surface the scores: entry-list priority chips, the `radar` sort, signal-ranked triage, and the `entry_scored` SSE event. |
 | `signal_feedback_min_samples` | int, `20` | A signal family needs at least this many Radar verdicts in the 30-day window before its **global** feedback nudge applies. Below the floor the family keeps a neutral 1.0 — a handful of votes can't swing scoring. |
 | `radar_personalization_enabled` | bool, `false` | Instance-wide switch for per-analyst learned weights, applied as a **read-time lift** on each analyst's own `sort=radar` entry ordering. The stored score stays global; personalisation re-orders that list and never changes its membership, because the radar threshold still gates on the global score. The Priority Queue sorts on the stored score its rows display and does not apply the lift. Also needs a per-user opt-in (`User.settings["radar_personalized"]`). |
 | `radar_personalization_min_samples` | int, `5` | Minimum verdicts *one* analyst must cast in a family before that family gets a personal weight. |
 | `radar_personalization_window_days` | int, `90` | Lookback for the nightly per-user fit. Longer than the global 30-day nudge window because one analyst votes far less often than all of them together. |
-| `my_stack_exposure_enabled` | bool, `false` | Vendor Watch: float CVEs affecting followed vendors/products in the Priority Queue and power the Vendor Watch board with detection-library coverage. Read-time and per-user, reusing the entity watchlist — no rescore. **Requires `signal_engine_surface`.** |
-| `exposure_attack_visibility_enabled` | bool, `false` | On the Vendor Watch board, for vulns with no detection rule, estimate detectability by mapping the CVE's co-occurring ATT&CK techniques to their data sources and on to configured telemetry. Explicitly lower confidence than rule-backed coverage — the CVE→technique link is article co-occurrence, not a curated mapping. |
+| `my_stack_exposure_enabled` | bool, `true` | Vendor Watch: float CVEs affecting followed vendors/products in the Priority Queue and power the Vendor Watch board with detection-library coverage. Read-time and per-user, reusing the entity watchlist — no rescore. **Requires `signal_engine_surface`.** |
+| `exposure_attack_visibility_enabled` | bool, `true` | On the Vendor Watch board, for vulns with no detection rule, estimate detectability by mapping the CVE's co-occurring ATT&CK techniques to their data sources and on to configured telemetry. Explicitly lower confidence than rule-backed coverage — the CVE→technique link is article co-occurrence, not a curated mapping. |
 
 Jobs: `signal-rate-recompute` (daily 04:20 UTC),
 `signal-personal-weight-fit` (daily 04:35 UTC), `signal-rescore-recent`
@@ -220,7 +235,7 @@ is paused. Job: `embed-entries`, every 15 minutes.
 
 | Setting | Type / default | What it does |
 |---|---|---|
-| `embeddings_enabled` | bool, `false` | Master switch for entry embeddings. Story threads, evidence structure, and thread-based signals are all dormant without it. |
+| `embeddings_enabled` | bool, `true` | Master switch for entry embeddings. Story threads, evidence structure, and thread-based signals are all dormant without it. Needs an Ollama provider (serving `embedding_model`) or an explicit `embedding_base_url`; with neither, the sweep logs one line and skips. |
 | `embedding_model` | str, `nomic-embed-text` | Ollama model used. Must output **768 dimensions** — the pgvector column is fixed at that width. |
 | `embedding_base_url` | str, empty | Ollama host for embeddings. Blank falls back to the Ollama provider row's `base_url`, then `OLLAMA_BASE_URL`. |
 | `embedding_batch_size` | int, `32` | Texts per embedding request. |
@@ -296,13 +311,13 @@ Formula: `1 / (1 + decay_rate × distance)`.
 | `relationship_reporting_source_specificity` | float, `0.45` | Vendors/products below this specificity are treated as *reporting sources* and folded into a collapsed group on profile relationship views. |
 | `graph_max_neighbors_per_node` | int, `30` | Cap on neighbours expanded per node when building an entity graph. |
 | `graph_max_claim_edges` | int, `300` | Cap on typed relationship edges per graph, trust-ranked — protects against degenerate hubs. |
-| `correlation_cache_ttl_seconds` | int, `3600` | Seconds correlation-engine results stay cached (`correlation_cache.py`). The `refresh-correlation-cache` job re-warms it every 15 minutes. |
+| `correlation_cache_ttl_seconds` | int, `3600` | Seconds correlation-engine results stay cached (`correlation_cache.py`). The `refresh-correlation-cache` job re-warms it hourly (at :10), matching the TTL. |
 
 ### Evidence structure
 
 | Setting | Type / default | What it does |
 |---|---|---|
-| `relationship_evidence_structure` | bool, `false` | Cluster each edge's evidence articles into **stories** via the entry embeddings, so relationship views can say "recurring across N incidents" instead of treating scattered roundup co-mentions as corroboration. Also adds a story floor to co-occurrence promotion and orders the adjudication queue. **Requires embeddings coverage.** |
+| `relationship_evidence_structure` | bool, `true` | Cluster each edge's evidence articles into **stories** via the entry embeddings, so relationship views can say "recurring across N incidents" instead of treating scattered roundup co-mentions as corroboration. Also adds a story floor to co-occurrence promotion and orders the adjudication queue. **Requires embeddings coverage.** |
 | `relationship_story_threshold` | float, `0.75` | Single-link join threshold for that clustering. Validated empirically: 0.70 chains digests into incidents, 0.75 keeps them separate. |
 
 ---
@@ -344,7 +359,7 @@ Settings → Engine → **Feeds** table view (`feeds`, `rate_limiting`,
 | `feed_auto_pause_days` | int, `30` | The `check-feed-health` job pauses an active feed once every fetch has answered **HTTP 4xx** for this many days in a row (`Feed.error_since` marks the streak start; a clean fetch clears it). Only client errors count — a 5xx, a timeout or an HTML page at the feed URL never pauses anything — and the clock is the streak, not the last post, so a seldom-posting blog that still answers 200 is never paused for being quiet. Paused feeds are listed as **Dead** on the Feeds view (`auto_paused_at`), apart from feeds switched off by hand, and `POST /api/feeds/{id}/resume` (admin) re-activates one and clears the streak. `0` disables. |
 | `user_agent` | str, browser-like | `User-Agent` sent when fetching feeds. The browser-like default exists because many sites (CISA/gov, Cloudflare-fronted blogs) return 403 to obvious bot agents. |
 | `rate_limit_default_interval` | float, `2.0` s | Default seconds between requests to the same domain. Per-domain overrides are env-only (`rate_limit_overrides`). |
-| `per_user_subscriptions_enabled` | bool, `false` | Each analyst manages their own feed list and mutes over the shared pool. Off is a single shared list where a mute affects everyone. While the flag is off, a mute is written to the shared `Feed.is_muted` only, not to anyone's subscription, so a feed muted while the flag is off reappears for everyone when it is turned on. |
+| `per_user_subscriptions_enabled` | bool, `true` | Each analyst manages their own feed list and mutes over the shared pool. Off is a single shared list where a mute affects everyone. While the flag is off, a mute is written to the shared `Feed.is_muted` only, not to anyone's subscription, so a feed muted while the flag is off reappears for everyone when it is turned on. |
 | `image_proxy_enabled` | bool, `true` | Proxy external images through IntelFeed so reading an article doesn't beacon to the publisher. |
 | `image_proxy_cache_ttl_days` | int, `30` | Days a proxied image stays cached (`evict-image-cache`, daily 04:10 UTC). |
 | `image_proxy_max_size_bytes` | int, `10 MB` | Largest image the proxy will fetch. |
@@ -411,7 +426,7 @@ behind it is `entry_adjudication` (Settings → AI Configuration → Prompts).
 
 | Setting | Type / default | What it does |
 |---|---|---|
-| `adjudication_mode` | `off` \| `shadow` \| `apply`, default `off` | The master switch (pipeline plans only subtract feeds). `shadow` files every verdict as a proposal in the Links / AI-entities Proposals lens and touches nothing. `apply` acts on verdicts at or above the confidence floor at ingest, through the same code the queue's Apply buttons use; lower ones still become proposals. The Proposed/Applied switch on the Proposals lens writes `shadow` / `apply`; `off` is set from the Adjudicate stage panel. |
+| `adjudication_mode` | `off` \| `shadow` \| `apply`, default `apply` | The master switch (pipeline plans only subtract feeds). `shadow` files every verdict as a proposal in the Links / AI-entities Proposals lens and touches nothing. `apply` acts on verdicts at or above the confidence floor at ingest, through the same code the queue's Apply buttons use; lower ones still become proposals. The Proposed/Applied switch on the Proposals lens writes `shadow` / `apply`; `off` is set from the Adjudicate stage panel. |
 | `adjudication_trigger` | `all` \| `created`, default `all` | `all` reviews every analysed entry (~100–500/day). `created` reviews only entries whose analysis minted an entity, wrote an AI junction row (actor/malware/tool/country/sector), asserted a TTP or a relationship, promoted a pending match or captured an observable (~20–50/day) — the fallback when reviews cannot keep up with ingest. |
 | `adjudication_max_per_hour` | int, `0` | Reviews started per hour; `0` (the default) = no ceiling. The AI worker runs one call at a time, so with no ceiling the worker itself is the only pacing. Set a number for two reasons only: to hold down spend on a metered provider, and to stop a review backlog queueing ahead of the one-pass analysis, which shares that worker. Over-budget entries wait for the resweep. While a ceiling is set, the backfill may use at most half of each hour's budget; live entries get the rest. With no ceiling the backfill has no share, so dispatch it in batches via its own `limit`. |
 | `adjudication_min_priority_score` | float, `0` | Skip entries below this priority score, on the 0–10 scale (`0` = off). Keep it at 0: CVE/NVD entries are the main source of junk tool entities and score low, so a floor would exempt exactly those. |
@@ -537,7 +552,7 @@ sections rather than the Engine console.
 | Setting | Type / default | What it does |
 |---|---|---|
 | `registration_enabled` | bool, `true` | Whether `POST /api/auth/register` accepts new accounts. The first account created becomes the admin. |
-| `registration_invite_code` | secret, **no default** | When set, registration also requires this code. Unset means open (subject to the flag above). |
+| `registration_invite_code` | secret, generated | When set, registration also requires this code. One is generated the moment the first account (the admin) registers, so an install is never open to strangers by accident; clear it under Settings → Users to reopen registration. |
 
 ### Settings → System
 
@@ -582,7 +597,7 @@ settings.
 | `poll-feeds` | every 60 s | `default_feed_fetch_interval`, `user_agent` |
 | `check-feed-health` | every 6 h at :30 | `feed_auto_pause_days` |
 | `embed-entries` | every 15 min | `embeddings_enabled`, `embedding_model`, `embedding_base_url`, `embedding_batch_size`, `embedding_backfill_limit` |
-| `story-threads` | every 30 min | all `thread_*` except `thread_narrate_limit`, `thread_signals_enabled` |
+| `story-threads` | every 2 h | all `thread_*` except `thread_narrate_limit`, `thread_signals_enabled` |
 | `narrate-story-threads` | 06:10 | `thread_narrate_limit` |
 | `ai-analysis-batch-submit` | every 30 min | all `ai_*` |
 | `signal-rate-recompute` | 04:20 | `signal_feedback_min_samples` |
@@ -599,7 +614,7 @@ settings.
 | `reenrich-cve-nvd` | 03:05 | `cve_reenrich_batch_size` |
 | `github-poc-scan` | 05:00 | `github_poc_batch_limit`, `github_poc_rescan_days` |
 | `backfill-rule-attack-mappings` | Sun 05:30 | `rule_attack_backfill_limit` |
-| `refresh-correlation-cache` | every 15 min | `correlation_cache_ttl_seconds` |
+| `refresh-correlation-cache` | hourly at :10 | `correlation_cache_ttl_seconds` |
 | `retry-untranslated-entries` | every 30 min | `translation_default_target` |
 | `evict-image-cache` | 04:10 | `image_proxy_cache_ttl_days`, `image_proxy_max_size_bytes` |
 | `evict-tts-cache` | 04:15 | `tts_cache_ttl_days`, `tts_cache_max_bytes` |

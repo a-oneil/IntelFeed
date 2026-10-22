@@ -364,7 +364,7 @@ ssh "$INTELFEED_PROD_HOST" 'cd intelfeed && docker compose -f docker-compose.pro
    threads start forming on the recent window within the first run. Raising
    `embedding_backfill_limit` shortens that at the cost of more load on the
    Ollama host.
-5. `story-threads` runs every 30 minutes and needs no intervention. Keep
+5. `story-threads` runs every two hours and needs no intervention. Keep
    `thread_sweep_limit` above the number of articles published inside
    `thread_gap_days`, or re-checks crowd out the newest arrivals (guard 6).
 

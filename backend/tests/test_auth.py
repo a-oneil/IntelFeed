@@ -118,9 +118,7 @@ async def test_update_me(client: AsyncClient, auth_headers: dict, test_user: Use
 
 
 @pytest.mark.asyncio
-async def test_patch_me_settings_merges_top_level_keys(
-    client: AsyncClient, auth_headers: dict, test_user: User
-):
+async def test_patch_me_settings_merges_top_level_keys(client: AsyncClient, auth_headers: dict, test_user: User):
     """A settings patch must leave keys it doesn't mention alone — independent
     client-side auto-savers share this blob."""
     await client.put(
@@ -182,3 +180,52 @@ async def test_change_password(client: AsyncClient, auth_headers: dict, test_use
         json={"username": "testuser", "password": "newstrongpassword"},
     )
     assert login_resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_first_admin_gates_registration_with_an_invite_code(client: AsyncClient, db_session: AsyncSession):
+    """The first account is open; the second needs the code that was generated for it."""
+    from app.models.system_setting import SystemSettings
+    from app.services.system_settings import get_setting, invalidate_cache
+
+    db_session.add(SystemSettings(id=1, settings={}, secrets={}))
+    await db_session.flush()
+    invalidate_cache()
+
+    status_before = (await client.get("/api/auth/registration-status")).json()
+    assert status_before == {"registration_enabled": True, "invite_code_required": False}
+
+    first = await client.post("/api/auth/register", json={"username": "founder", "password": "strongpassword"})
+    assert first.status_code == 201
+
+    code = await get_setting("registration_invite_code", db_session)
+    assert code and len(code) >= 8
+
+    status_after = (await client.get("/api/auth/registration-status")).json()
+    assert status_after["invite_code_required"] is True
+
+    blocked = await client.post("/api/auth/register", json={"username": "stranger", "password": "strongpassword"})
+    assert blocked.status_code == 403
+
+    invited = await client.post(
+        "/api/auth/register",
+        json={"username": "colleague", "password": "strongpassword", "invite_code": code},
+    )
+    assert invited.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_first_admin_keeps_an_invite_code_the_operator_already_set(client: AsyncClient, db_session: AsyncSession):
+    from app.models.system_setting import SystemSettings
+    from app.services.system_settings import get_setting, invalidate_cache, update_settings
+
+    db_session.add(SystemSettings(id=1, settings={}, secrets={}))
+    await db_session.flush()
+    await update_settings(db_session, {"registration_invite_code": "TEAM-2026"})
+    invalidate_cache()
+
+    first = await client.post(
+        "/api/auth/register", json={"username": "founder", "password": "strongpassword", "invite_code": "TEAM-2026"}
+    )
+    assert first.status_code == 201
+    assert await get_setting("registration_invite_code", db_session) == "TEAM-2026"

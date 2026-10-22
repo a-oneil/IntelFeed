@@ -1,10 +1,9 @@
-import { useAuthStore } from "@/stores/authStore";
+import { currentReadingPrefs } from "@/hooks/useReadingPrefs";
 
 type DateInput = string | Date | null | undefined;
 
 function getDateFormat(): "relative" | "absolute" | "both" {
-  const user = useAuthStore.getState().user;
-  return (user?.settings?.date_format as "relative" | "absolute" | "both") ?? "relative";
+  return currentReadingPrefs().date_format;
 }
 
 function toAbsolute(date: Date): string {

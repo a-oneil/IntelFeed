@@ -581,7 +581,7 @@ function Extras() {
       </Lead>
       <Facts
         rows={[
-          ["Invites", <>Registration is open by default. Gate it behind invites under <b>Settings → Users</b>.</>],
+          ["Invites", <>Registration closed behind an invite code the moment your account was created. Find the code, change it, or reopen registration under <b>Settings → Users</b>.</>],
           ["Roles", <>Promote or demote accounts under <b>Settings → Users</b>.</>],
         ]}
       />

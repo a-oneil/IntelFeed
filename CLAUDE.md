@@ -25,7 +25,7 @@ docker compose -f docker-compose.dev.yml down       # Stop all services
 # PostgreSQL: localhost:5433, Redis: localhost:6380
 
 # Create the first user via the register page at localhost:3001 (the first account becomes the admin)
-# (backed by POST /api/auth/register; can be invite-gated under Settings > Users)
+# (backed by POST /api/auth/register; an invite code is generated once the first admin exists — see Settings > Users)
 ```
 
 Prod uses `docker-compose.prod.yml` with Caddy (`Caddyfile`) fronting for auto-TLS. `update.sh` at repo root is the production update helper (it runs on a ~2-minute cron, so a push is a deploy): it fetches, pulls, and then **rebuilds only when the pull actually changed an image** — `backend/**`, `frontend/**`, `db/**`, `piper/**` or a compose file. A `Caddyfile` change reloads caddy in place; a docs/scripts/android/CI commit pulls and stops, since `./docs` and `./scripts` are bind-mounted and nothing needs restarting. The gate diffs against `.update-deployed` (the commit the containers were built from), not the previous HEAD, so a failed build still retries after unrelated commits land on top. See [docs/operations.md](docs/operations.md). Full production walkthrough (EC2 or any Linux host) lives in [setup.md](setup.md).

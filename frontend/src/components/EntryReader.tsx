@@ -10,6 +10,7 @@ import { useOpenSavedSearch } from "@/hooks/useOpenSavedSearch";
 import { usePlayerStore } from "@/stores/playerStore";
 import { useTts } from "@/hooks/useTts";
 import { useAuthStore } from "@/stores/authStore";
+import { useReadingPrefs } from "@/hooks/useReadingPrefs";
 import { useIsMobile } from "@/hooks/useMediaQuery";
 import { useSwipe } from "@/hooks/useSwipe";
 import { SafeHTML } from "@/components/SafeHTML";
@@ -68,9 +69,10 @@ function formatYouTubeDescription(html: string): string {
   if (/<br\s*\/?>/i.test(html)) return html;
   const text = html.replace(/<[^>]+>/g, "").trim();
   if (!text) return "";
+  // No target here: SafeHTML applies the reader's open-in-new-tab preference.
   const linked = text.replace(
     /(https?:\/\/[^\s<>"')\]]+)/g,
-    '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>',
+    '<a href="$1" rel="noopener noreferrer">$1</a>',
   );
   const formatted = linked.replace(/\n/g, "<br>\n");
   return `<div>${formatted}</div>`;
@@ -98,6 +100,9 @@ export function EntryReader({ entryId }: EntryReaderProps) {
   const openThread = useOpenThread();
   const openCopilotWith = useUIStore((s) => s.openCopilotWith);
   const playTrack = usePlayerStore((s) => s.play);
+  // Settings → Reading → "Open links in new tab" (article-body links are
+  // handled inside SafeHTML).
+  const openLinksNewTab = useReadingPrefs().open_links_new_tab;
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const activeReaderPanel = useUIStore((s) => s.activeReaderPanel);
   const setActiveReaderPanel = useUIStore((s) => s.setActiveReaderPanel);
@@ -694,6 +699,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
                   }
                   label="Open original"
                   href={entry.url}
+                  newTab={openLinksNewTab}
                 />
               )}
             </ToolbarDropdown>
@@ -926,7 +932,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
             return (
               <p className={styles.noContent}>
                 No content available.{" "}
-                <a href={entry.url || "#"} target="_blank" rel="noopener noreferrer">
+                <a href={entry.url || "#"} target={openLinksNewTab ? "_blank" : undefined} rel="noopener noreferrer">
                   Open original article
                 </a>
               </p>

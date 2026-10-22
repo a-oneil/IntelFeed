@@ -1,4 +1,5 @@
 import hmac
+import secrets
 import uuid
 from datetime import UTC, datetime
 
@@ -6,6 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+import logging
 
 from app.core.exceptions import AppError
 from app.core.security import (
@@ -32,6 +35,8 @@ from app.schemas.auth import (
     UserSettingsPatch,
     UserUpdateRequest,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -61,10 +66,34 @@ async def get_invite_code(
     return {"invite_code": code if code else None}
 
 
+async def _gate_registration_after_first_admin(db: AsyncSession) -> None:
+    """Put an invite code on registration the moment the first admin exists.
+
+    Registration has to be open for the very first account, but an install
+    reachable from the internet should not stay open to strangers after that.
+    The code is shown to the admin under Settings → Users, where it can be
+    changed or cleared to reopen registration. An operator who set a code
+    before the first login (env or DB) keeps theirs.
+    """
+    from app.services.system_settings import get_setting, update_settings
+
+    if await get_setting("registration_invite_code", db):
+        return
+    try:
+        await update_settings(db, {"registration_invite_code": secrets.token_urlsafe(9)})
+    except ValueError as exc:
+        # The code is a secret, so it is stored encrypted; a dev box still on
+        # the placeholder ENCRYPTION_KEY cannot encrypt. Registration must not
+        # fail over that — the admin can set a code once the key is real.
+        logger.warning("registration left open: could not store an invite code (%s)", exc)
+
+
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db)):
     """Create a new user account and return an access/refresh token pair.
 
+    The first human account becomes the admin, and an invite code is generated
+    right after it so later sign-ups need the code (Settings → Users shows it).
     Fails with 403 when registration is disabled or the invite code is invalid,
     and 409 when the username is already taken.
     """
@@ -100,6 +129,9 @@ async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db))
     )
     db.add(user)
     await db.flush()
+
+    if is_first_user:
+        await _gate_registration_after_first_admin(db)
 
     # Seed the newcomer with the instance's default feed list (the earliest
     # admin's subscriptions). Done regardless of the per-user-subscriptions
