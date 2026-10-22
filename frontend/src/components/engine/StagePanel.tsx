@@ -73,7 +73,7 @@ export function StagePanel({
           <>
             <p className={styles.note}>
               Entity &amp; link cleanup lives in the table: the <strong>Review</strong> tab holds every
-              proposal (links, entities, relationships, observables) with Apply and Dismiss, or open{" "}
+              proposal (links, entities, relationships) with Apply and Dismiss, or open{" "}
               <strong>Maintenance</strong> (top-right) for global sweeps.
             </p>
             <SystemSettings

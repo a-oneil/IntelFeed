@@ -52,11 +52,11 @@ BULK_APPLY_KINDS = ("adjudication", "advisories", "all")
 
 # The Review tab's Domain facet: what a proposal would change if applied.
 # Both logs feed one queue there, so the split is by effect, not by table.
-DOMAINS = ("links", "entities", "relationships", "observables")
+# Observables are an entity type, so dropping one is an entities proposal.
+DOMAINS = ("links", "entities", "relationships")
 _MAINT_DOMAIN_ACTIONS: dict[str, frozenset[str]] = {
     "links": frozenset({"adjudication_unlink"}),
     "relationships": frozenset({"adjudication_edge_demote"}),
-    "observables": frozenset({"adjudication_ioc_drop"}),
 }
 _LINK_LOG_LINK_ACTIONS = frozenset({"shadow_remove", "removed", "restored"})
 
@@ -66,8 +66,7 @@ def proposal_domain(source: str, action: str) -> str:
 
     Link-log rows are entry↔entity links, except the reclassify advisories,
     which are about the entity. Maintenance rows are about the entity unless
-    the adjudicator's action names an edge (demote), an observable (drop) or
-    an entry link (unlink).
+    the adjudicator's action names an edge (demote) or an entry link (unlink).
     """
     if source == "link_validator":
         return "links" if action in _LINK_LOG_LINK_ACTIONS else "entities"

@@ -128,8 +128,9 @@ export interface FeedRow {
   domain: ProposalDomain;
 }
 
-export type ProposalDomain = "links" | "entities" | "relationships" | "observables";
-export const PROPOSAL_DOMAINS: ProposalDomain[] = ["links", "entities", "relationships", "observables"];
+/** Observables are an entity type, so dropping one is an "entities" proposal. */
+export type ProposalDomain = "links" | "entities" | "relationships";
+export const PROPOSAL_DOMAINS: ProposalDomain[] = ["links", "entities", "relationships"];
 
 export interface FeedResponse {
   rows: FeedRow[];

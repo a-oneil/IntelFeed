@@ -2590,17 +2590,19 @@ async def test_review_domain_facet_spans_both_logs(client, admin_headers, db_ses
         return resp.json()["rows"]
 
     everything = await feed(None)
-    assert {r["domain"] for r in everything} == {"links", "entities", "relationships", "observables"}
+    assert {r["domain"] for r in everything} == {"links", "entities", "relationships"}
     assert sorted(r["action"] for r in await feed("links")) == ["shadow_remove"]
-    assert sorted(r["action"] for r in await feed("entities")) == sorted([ACTION_VETO, "needs_reclassification"])
+    # An observable is an entity type, so dropping one is an entities proposal.
+    assert sorted(r["action"] for r in await feed("entities")) == sorted(
+        [ACTION_IOC_DROP, ACTION_VETO, "needs_reclassification"]
+    )
     assert [r["action"] for r in await feed("relationships")] == [ACTION_EDGE_DEMOTE]
-    assert [r["action"] for r in await feed("observables")] == [ACTION_IOC_DROP]
     assert (
         await client.get("/api/admin/hygiene/feed", params={"domain": "nope"}, headers=admin_headers)
     ).status_code == 400
 
     stats = (await client.get("/api/admin/hygiene/stats", headers=admin_headers)).json()
-    assert stats["pending_by_domain"] == {"links": 1, "entities": 2, "relationships": 1, "observables": 1}
+    assert stats["pending_by_domain"] == {"links": 1, "entities": 3, "relationships": 1}
     assert stats["pending_total"] == 5
 
     # The one Apply all: kind "all" counts the adjudicator's rows in the domain
@@ -2613,7 +2615,7 @@ async def test_review_domain_facet_spans_both_logs(client, admin_headers, db_ses
         "/api/admin/hygiene/bulk-apply", headers=admin_headers, json={"kind": "all", "domain": "entities"}
     )
     assert resp.status_code == 202, resp.text
-    assert resp.json()["total"] == 2  # the veto + the advisory
+    assert resp.json()["total"] == 3  # the veto, the observable drop, the advisory
     assert queued[-1]["domain"] == "entities" and queued[-1]["kind"] == "all"
     resp = await client.post(
         "/api/admin/hygiene/bulk-apply", headers=admin_headers, json={"kind": "all", "domain": "relationships"}
@@ -2622,8 +2624,8 @@ async def test_review_domain_facet_spans_both_logs(client, admin_headers, db_ses
 
     # Dismiss honours the facet too.
     resp = await client.post(
-        "/api/admin/hygiene/dismiss-proposals", headers=admin_headers, json={"domain": "observables"}
+        "/api/admin/hygiene/dismiss-proposals", headers=admin_headers, json={"domain": "relationships"}
     )
     assert resp.json()["dismissed"] == 1
-    assert await feed("observables") == []
+    assert await feed("relationships") == []
     assert len(await feed(None)) == 4

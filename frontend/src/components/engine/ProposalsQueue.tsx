@@ -2,8 +2,8 @@
  * ProposalsQueue — the Engine console's Review tab: everything the AI wants a
  * person to approve, in one queue over both proposal logs. The adjudicate
  * stage's verdicts and the on-demand scans' suggestions land here with a
- * Domain facet (what applying them changes: links, entities, relationships,
- * observables), an Origin facet (who proposed it), inline Apply / Dismiss,
+ * Domain facet (what applying them changes: links, entities, relationships;
+ * observables are entities), an Origin facet (who proposed it), inline Apply / Dismiss,
  * one background Apply all, and a History lens of everything that ran
  * (with Restore).
  */
@@ -76,7 +76,6 @@ const DOMAIN_LABELS: Record<ProposalDomain, string> = {
   links: "Links",
   entities: "Entities",
   relationships: "Relationships",
-  observables: "Observables",
 };
 
 // Action filter: one dropdown over both logs. Values may be comma-lists —

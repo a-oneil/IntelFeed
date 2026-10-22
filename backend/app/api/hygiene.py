@@ -976,8 +976,8 @@ class FeedRow(BaseModel):
     # Who proposed it: "adjudicator" (the post-analysis adjudicate stage, with
     # the article in hand) or "legacy" (the retired nightly jobs / scans).
     origin: str | None = None
-    # What applying it changes: links | entities | relationships | observables
-    # (the Review tab's Domain facet; both logs feed that one queue).
+    # What applying it changes: links | entities | relationships (the Review
+    # tab's Domain facet; both logs feed that one queue; observables are entities).
     domain: str = "entities"
 
 
@@ -1325,8 +1325,8 @@ async def hygiene_feed(
     source: str | None = Query(None, description="'link_validator' | 'entity_maintenance' | null (all)."),
     domain: str | None = Query(
         None,
-        description="What applying the proposal changes: 'links' | 'entities' | 'relationships' | 'observables'; "
-        "null for every domain. Spans both logs (a link-log reclassify advisory is 'entities').",
+        description="What applying the proposal changes: 'links' | 'entities' | 'relationships'; null for every "
+        "domain. Spans both logs (a link-log reclassify advisory is 'entities'; observables are entities).",
     ),
     mode: str | None = Query(None, description="'shadow' | 'apply' — applies to entity_maintenance rows."),
     pending: bool = Query(
@@ -3108,7 +3108,7 @@ class DismissProposalsRequest(BaseModel):
         "omit for both",
     )
     domain: str | None = Field(
-        default=None, description="'links' | 'entities' | 'relationships' | 'observables'; omit for every domain"
+        default=None, description="'links' | 'entities' | 'relationships'; omit for every domain"
     )
 
     model_config = ConfigDict(
@@ -3253,7 +3253,7 @@ class BulkApplyRequest(BaseModel):
         "omit for all",
     )
     domain: str | None = Field(
-        default=None, description="'links' | 'entities' | 'relationships' | 'observables'; omit for every domain"
+        default=None, description="'links' | 'entities' | 'relationships'; omit for every domain"
     )
     entity_type: str | None = Field(default=None, description="advisories only: limit to one source entity type")
     mode: Literal["shadow", "apply"] = Field(default="apply", description="advisories only")

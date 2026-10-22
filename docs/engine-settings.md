@@ -474,7 +474,7 @@ otherwise asks for changes only, it carves edges out and requires a verdict on
 every one of them (at most ten per article). Stale entities (one article at most, no edge, 90 days idle) are a
 live `stale` filter on Review › New entities.
 
-**Queue.** Review › Proposals has a domain facet (what applying the row changes: links / entities / relationships / observables), an origin facet (`adjudicator` | `legacy`),
+**Queue.** Review › Proposals has a domain facet (what applying the row changes: links / entities / relationships), an origin facet (`adjudicator` | `legacy`),
 per-row Apply / Dismiss / Restore, bulk **Apply all**
 (`POST /api/admin/hygiene/adjudication/apply-all`) and **Dismiss all** scoped
 by origin. A restore writes its own `adjudication_restored` audit line rather
