@@ -172,7 +172,7 @@ export function useDeleteExtractionEntity() {
   });
 }
 
-/** Delete from the AI entities table: drops the entities AND adds their names to
+/** Delete from Review › New entities: drops the entities AND adds their names to
  *  the analyst do-not-recreate denylist, so the one-pass extractor and the
  *  autolinker stop re-minting them. The plain per-entity delete above (used by
  *  the entry drawer) deliberately does not deny.

@@ -723,6 +723,7 @@ async def _get_hygiene_feed(
     resp = await _route(
         action=action,
         source=source,
+        domain=None,
         mode=mode,
         origin=origin,
         pending=pending,

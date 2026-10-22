@@ -1,28 +1,33 @@
 /**
- * ProposalsQueue — the "Proposals" lens for the Engine console's Links and
- * AI-entities tabs. The complete hygiene surface for its domain (this replaced
- * the old standalone WorkbenchHygiene page): a Queue view of what the
- * adjudicate stage and the on-demand scans proposed, with inline Apply /
- * Dismiss, and a History view of everything that ran (with Restore).
+ * ProposalsQueue — the Engine console's Review tab: everything the AI wants a
+ * person to approve, in one queue over both proposal logs. The adjudicate
+ * stage's verdicts and the on-demand scans' suggestions land here with a
+ * Domain facet (what applying them changes: links, entities, relationships,
+ * observables), an Origin facet (who proposed it), inline Apply / Dismiss,
+ * one background Apply all, and a History lens of everything that ran
+ * (with Restore).
  */
+
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
 import api from "@/api/client";
 import {
+  PROPOSAL_DOMAINS,
   invalidateAfterBulkApply,
   useBulkApplyProgress,
   useDismissProposals,
-  useStartBulkApply,
   useHygieneFeed,
   useHygieneStats,
   useRunNameNormalization,
   useScanAliasHygiene,
   useScanIdHygiene,
   useScanVendorAutolink,
+  useStartBulkApply,
   type FeedLink,
   type FeedRow,
+  type ProposalDomain,
 } from "@/hooks/useHygiene";
 import { useHygieneRowAction } from "@/hooks/useHygieneRowAction";
 import { formatDateTime } from "@/utils/formatDate";
@@ -32,7 +37,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import styles from "./ProposalsQueue.module.css";
 import { confirmDialog } from "@/utils/dialog";
 
-type Domain = "links" | "entities";
+export type ReviewLens = "queue" | "history";
+export type ProposalOrigin = "adjudicator" | "legacy";
 
 const CHANGE_META: Record<string, { label: string; cls: string }> = {
   // pending proposals
@@ -66,30 +72,44 @@ const CHANGE_META: Record<string, { label: string; cls: string }> = {
   no_op: { label: "No change", cls: styles.tName },
 };
 
-// Per-domain quick filters over the action column. Values may be comma-lists —
+const DOMAIN_LABELS: Record<ProposalDomain, string> = {
+  links: "Links",
+  entities: "Entities",
+  relationships: "Relationships",
+  observables: "Observables",
+};
+
+// Action filter: one dropdown over both logs. Values may be comma-lists —
 // the backend feed matches any of the listed action codes.
-const LINK_FILTERS = [
-  { value: "", label: "All" },
-  { value: "needs_reclassification", label: "Reclassify" },
-  { value: "shadow_remove", label: "Remove" },
-];
-const ENTITY_FILTERS = [
-  { value: "", label: "All" },
+const QUEUE_FILTERS = [
+  { value: "", label: "Any change" },
+  { value: "adjudication_unlink,shadow_remove", label: "Unlink / remove link" },
+  { value: "adjudication_edge_demote", label: "Demote edge" },
+  { value: "needs_reclassification,adjudication_reclassify", label: "Reclassify" },
+  { value: "adjudication_veto", label: "Veto entity" },
+  { value: "adjudication_merge", label: "Merge" },
+  { value: "adjudication_ioc_drop", label: "Drop observable" },
   { value: "normalize_name", label: "Name fix" },
   { value: "alias_collision", label: "Alias trim" },
   { value: "vendor_autolink", label: "Vendor link" },
   { value: "ttp_malformed_id,cve_malformed_id,cve_withdrawn", label: "ID fix" },
-  { value: "adjudication_veto", label: "Veto" },
-  { value: "adjudication_merge", label: "Merge (review)" },
-  { value: "adjudication_reclassify", label: "Reclassify (review)" },
-  { value: "adjudication_edge_demote", label: "Demote" },
-  { value: "adjudication_ioc_drop,adjudication_unlink", label: "Drop / unlink" },
 ];
-type OriginFacet = "" | "adjudicator" | "legacy" | "orphaned";
+const HISTORY_FILTERS = [
+  { value: "", label: "Any change" },
+  { value: "removed", label: "Link removed" },
+  { value: "restored", label: "Link restored" },
+  { value: "merge", label: "Merged" },
+  { value: "reclassify", label: "Reclassified" },
+  { value: "orphan_prune", label: "Orphans pruned" },
+  { value: "update_description,update_aliases", label: "Profile" },
+  { value: "ai_enrich_filled,ai_enrich_unknown", label: "AI enrich" },
+  { value: "adjudication_restored", label: "Verdict restored" },
+];
+type OriginFacet = "" | ProposalOrigin | "orphaned";
 const ORIGINS: { value: OriginFacet; label: string; title: string; queueOnly?: boolean }[] = [
   { value: "", label: "All", title: "Every proposal" },
   { value: "adjudicator", label: "Adjudicator", title: "Filed by the post-analysis review, with the article in hand" },
-  { value: "legacy", label: "Legacy", title: "Filed by the retired nightly jobs and on-demand scans" },
+  { value: "legacy", label: "Scans", title: "Filed by the on-demand scans and the retired nightly jobs" },
   {
     value: "orphaned",
     label: "Orphaned",
@@ -99,21 +119,6 @@ const ORIGINS: { value: OriginFacet; label: string; title: string; queueOnly?: b
 ];
 const ORPHANED_NOTE =
   "Left by the retired jobs with no entry to re-judge them against. Dismiss or apply by hand; nothing automatic touches them.";
-const LINK_HISTORY_FILTERS = [
-  { value: "", label: "All" },
-  { value: "removed", label: "Removed" },
-  { value: "restored", label: "Restored" },
-];
-const ENTITY_HISTORY_FILTERS = [
-  { value: "", label: "All" },
-  { value: "merge", label: "Merged" },
-  { value: "reclassify", label: "Reclassified" },
-  { value: "orphan_prune", label: "Orphans" },
-  { value: "update_description,update_aliases", label: "Profile" },
-  { value: "ai_enrich_filled,ai_enrich_unknown", label: "AI enrich" },
-  { value: "adjudication_restored", label: "Restored" },
-];
-
 
 // Row-action code → button label + tone.
 const ACTION_BTN: Record<string, { label: string; cls: string }> = {
@@ -138,35 +143,39 @@ function feedLinkHref(link: FeedLink): string | null {
 }
 
 export function ProposalsQueue({
-  domain,
+  lens,
   initialAction,
   initialOrigin,
+  initialDomain,
 }: {
-  domain: Domain;
+  /** queue: pending proposals with Apply / Dismiss. history: what ran, with Restore. */
+  lens: ReviewLens;
   initialAction?: string;
-  initialOrigin?: "adjudicator" | "legacy";
+  initialOrigin?: ProposalOrigin;
+  initialDomain?: ProposalDomain;
 }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const [hist, setHist] = useState(false);
+  const hist = lens === "history";
   const [actionFilter, setActionFilter] = useState(initialAction ?? "");
   const [originFilter, setOriginFilter] = useState<OriginFacet>(initialOrigin ?? "");
+  const [domainFilter, setDomainFilter] = useState<ProposalDomain | "">(initialDomain ?? "");
   const [modePending, setModePending] = useState(false);
   const [busyRow, setBusyRow] = useState<string | null>(null);
 
-  const source = domain === "links" ? "link_validator" : "entity_maintenance";
   // "Orphaned" is its own feed switch, not an origin value.
-  const orphaned = originFilter === "orphaned";
-  const origin = orphaned || !originFilter ? undefined : originFilter;
+  const orphaned = !hist && originFilter === "orphaned";
+  const origin = orphaned || !originFilter ? undefined : (originFilter as ProposalOrigin);
+  const domain = domainFilter || undefined;
   const stats = useHygieneStats();
   const feed = useHygieneFeed(
     hist
-      ? { source, mode: "apply", action: actionFilter || undefined, origin, limit: 100 }
+      ? { mode: "apply", action: actionFilter || undefined, origin, domain, limit: 100 }
       : {
-          source,
           pending: true,
           action: actionFilter || undefined,
           origin,
+          domain,
           orphaned: orphaned || undefined,
           limit: 100,
         },
@@ -178,7 +187,8 @@ export function ProposalsQueue({
   const startBulkApply = useStartBulkApply();
   const [bulkJobId, setBulkJobId] = useState<string | null>(null);
   const { data: bulkProgress } = useBulkApplyProgress(bulkJobId);
-  const bulkRunning = startBulkApply.isPending || (!!bulkJobId && bulkProgress?.status !== "done" && bulkProgress?.status !== "error");
+  const bulkRunning =
+    startBulkApply.isPending || (!!bulkJobId && bulkProgress?.status !== "done" && bulkProgress?.status !== "error");
   useEffect(() => {
     if (!bulkJobId || !bulkProgress) return;
     if (bulkProgress.status === "done") {
@@ -196,15 +206,21 @@ export function ProposalsQueue({
       setBulkJobId(null);
     }
   }, [bulkJobId, bulkProgress, qc]);
+  // While a job runs, keep the table moving with it.
+  useEffect(() => {
+    if (bulkJobId && bulkProgress?.status === "running") feed.refetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bulkProgress?.processed]);
+
   const scanNames = useRunNameNormalization();
   const scanAliases = useScanAliasHygiene();
   const scanIds = useScanIdHygiene();
   const scanVendors = useScanVendorAutolink();
 
-  // Scans that mint fresh proposals into this domain's queue (entities only —
-  // link verdicts come from the adjudicate stage at ingest).
+  // Scans that mint fresh entity proposals into the queue (link verdicts
+  // come from the adjudicate stage at ingest, so there is nothing to scan for).
   const scans =
-    domain === "links"
+    hist || (domainFilter && domainFilter !== "entities")
       ? []
       : [
           {
@@ -282,20 +298,14 @@ export function ProposalsQueue({
     }
   };
 
-  const FILTERS = hist
-    ? domain === "links"
-      ? LINK_HISTORY_FILTERS
-      : ENTITY_HISTORY_FILTERS
-    : domain === "links"
-      ? LINK_FILTERS
-      : ENTITY_FILTERS;
-
-  const switchHist = (next: boolean) => {
-    if (next === hist) return;
-    setHist(next);
-    setActionFilter("");
-    // Orphaned is a queue-only lens — history has no notion of it.
-    if (next && orphaned) setOriginFilter("");
+  const FILTERS = hist ? HISTORY_FILTERS : QUEUE_FILTERS;
+  const scopeLabel = () => {
+    const what = actionFilter
+      ? (FILTERS.find((f) => f.value === actionFilter)?.label ?? "these").toLowerCase()
+      : "every pending";
+    const where = domainFilter ? ` ${DOMAIN_LABELS[domainFilter].toLowerCase()}` : "";
+    const who = origin === "adjudicator" ? " adjudicator" : origin === "legacy" ? " scan" : "";
+    return `${what}${who}${where}`;
   };
 
   const doRow = async (row: FeedRow, action: string) => {
@@ -307,59 +317,46 @@ export function ProposalsQueue({
     }
   };
 
-  // Scoped to what the table shows: the action filter AND the origin facet.
+  // Scoped to what the table shows: the action filter, the origin and the domain.
   const clearAll = async () => {
-    const label = actionFilter
-      ? (FILTERS.find((f) => f.value === actionFilter)?.label ?? "these").toLowerCase()
-      : "all pending";
-    const who = origin ? ` ${origin}` : "";
     if (
       !(await confirmDialog({
         title: "Dismiss proposals",
-        message: `Dismiss ${label}${who} proposals without applying them? The suggestions are deleted; entities and links are untouched.`,
+        message: `Dismiss ${scopeLabel()} proposals without applying them? The suggestions are deleted; entities and links are untouched.`,
         confirmLabel: "Dismiss",
         destructive: true,
       }))
     )
       return;
     try {
-      const r = await dismissProposals.mutateAsync({ source, action: actionFilter || undefined, origin });
+      const r = await dismissProposals.mutateAsync({ action: actionFilter || undefined, origin, domain });
       toast.success(`Dismissed ${r.dismissed} proposal${r.dismissed === 1 ? "" : "s"}`);
     } catch (e) {
       toast.error(`Dismiss failed: ${(e as Error).message}`);
     }
   };
 
-  // Every pending adjudicator proposal, both logs, through the stage's own
-  // apply path — the bulk form of the per-row Apply, as a background job.
-  const applyAllAdjudicator = async () => {
-    const label = actionFilter
-      ? (FILTERS.find((f) => f.value === actionFilter)?.label ?? "these").toLowerCase()
-      : "every pending";
+  // Every pending proposal the table shows, through the same code the per-row
+  // Apply uses, as a background job. The adjudicator's rows go first, then the
+  // scans' reclassify advisories when the filters allow them.
+  const applyAll = async () => {
     if (
       !(await confirmDialog({
-        title: "Apply adjudicator proposals",
-        message: `Apply ${label} adjudicator proposals now? Each one is applied the way the stage would in apply mode, and each stays undoable from History. This runs in the background; the count here updates as it goes.`,
+        title: "Apply proposals",
+        message: `Apply ${scopeLabel()} proposals now? Each one is applied the way the stage would in apply mode, and each stays undoable from History. This runs in the background; the queue updates as it goes.`,
         confirmLabel: "Apply all",
         destructive: true,
       }))
     )
       return;
     try {
-      const job = await startBulkApply.mutateAsync({ kind: "adjudication", action: actionFilter || undefined });
+      const job = await startBulkApply.mutateAsync({
+        kind: origin === "adjudicator" ? "adjudication" : "all",
+        action: actionFilter || undefined,
+        domain,
+      });
       setBulkJobId(job.job_id);
       toast.info(`Applying ${job.total.toLocaleString()} proposal${job.total === 1 ? "" : "s"} in the background`);
-    } catch (e) {
-      toast.error(`Apply failed: ${(e as Error).message}`);
-    }
-  };
-
-  // Every proposed reclassification, as a background job.
-  const applyAllAdvisories = async () => {
-    try {
-      const job = await startBulkApply.mutateAsync({ kind: "advisories", mode: "apply" });
-      setBulkJobId(job.job_id);
-      toast.info(`Applying ${job.total.toLocaleString()} reclassification${job.total === 1 ? "" : "s"} in the background`);
     } catch (e) {
       toast.error(`Apply failed: ${(e as Error).message}`);
     }
@@ -370,6 +367,7 @@ export function ProposalsQueue({
       ? `Applying ${bulkProgress.processed.toLocaleString()} / ${bulkProgress.total.toLocaleString()}…`
       : "Applying…"
     : "Apply all";
+  const byDomain = stats.data?.pending_by_domain ?? {};
 
   return (
     <div className={styles.wrap}>
@@ -392,23 +390,20 @@ export function ProposalsQueue({
           </button>
         </div>
 
-        <div className={styles.seg} title="Queue: pending suggestions awaiting review · History: everything that ran">
-          <button className={!hist ? styles.segOn : ""} onClick={() => switchHist(false)}>
-            Queue
+        <span className={styles.facetLabel}>Domain</span>
+        <div className={styles.seg} title="What applying the proposal changes">
+          <button className={domainFilter === "" ? styles.segOn : ""} onClick={() => setDomainFilter("")}>
+            All
           </button>
-          <button className={hist ? styles.segOn : ""} onClick={() => switchHist(true)}>
-            History
-          </button>
-        </div>
-
-        <div className={styles.seg}>
-          {FILTERS.map((f) => (
-            <button key={f.value || "all"} className={actionFilter === f.value ? styles.segOn : ""} onClick={() => setActionFilter(f.value)}>
-              {f.label}
+          {PROPOSAL_DOMAINS.map((d) => (
+            <button key={d} className={domainFilter === d ? styles.segOn : ""} onClick={() => setDomainFilter(d)}>
+              {DOMAIN_LABELS[d]}
+              {!hist && byDomain[d] ? <span className={styles.segCnt}>{byDomain[d]?.toLocaleString()}</span> : null}
             </button>
           ))}
         </div>
 
+        <span className={styles.facetLabel}>Origin</span>
         <div className={styles.seg} title="Who proposed it">
           {ORIGINS.filter((o) => !hist || !o.queueOnly).map((o) => (
             <button
@@ -422,41 +417,37 @@ export function ProposalsQueue({
           ))}
         </div>
 
+        <label className={styles.facetLabel}>
+          Action
+          <select className={styles.sel} value={actionFilter} onChange={(e) => setActionFilter(e.target.value)}>
+            {FILTERS.map((f) => (
+              <option key={f.value || "all"} value={f.value}>
+                {f.label}
+              </option>
+            ))}
+          </select>
+        </label>
 
         <span className={styles.grow} />
 
         {!hist && !orphaned && (
           <>
-            {origin === "adjudicator" ? (
-              <button
-                className={styles.btn}
-                disabled={bulkRunning || rows.length === 0}
-                title="Apply every pending adjudicator proposal (both logs) through the stage's own apply path, in the background"
-                onClick={applyAllAdjudicator}
-              >
-                {bulkLabel}
-              </button>
-            ) : (
-              domain === "links" && (
-                <button
-                  className={styles.btn}
-                  disabled={bulkRunning || rows.length === 0}
-                  title="Apply every proposed reclassification, in the background"
-                  onClick={applyAllAdvisories}
-                >
-                  {bulkLabel}
-                </button>
-              )
-            )}
-
-            <button className={styles.btnDanger} disabled={dismissProposals.isPending} onClick={clearAll}>
+            <button
+              className={styles.btn}
+              disabled={bulkRunning || rows.length === 0}
+              title="Apply every proposal the table shows, in the background, through the same code the per-row Apply uses"
+              onClick={applyAll}
+            >
+              {bulkLabel}
+            </button>
+            <button className={styles.btnDanger} disabled={dismissProposals.isPending || bulkRunning} onClick={clearAll}>
               {dismissProposals.isPending ? "Clearing…" : "Dismiss all"}
             </button>
           </>
         )}
       </div>
 
-      {orphaned && !hist && <p className={styles.note}>{ORPHANED_NOTE}</p>}
+      {orphaned && <p className={styles.note}>{ORPHANED_NOTE}</p>}
 
       {/* table */}
       <div className={styles.tableWrap}>
@@ -464,6 +455,7 @@ export function ProposalsQueue({
           <thead>
             <tr>
               <th>{hist ? "Change" : "Proposed change"}</th>
+              <th>Domain</th>
               <th>Entity</th>
               <th>Detail</th>
               <th>When</th>
@@ -486,6 +478,7 @@ export function ProposalsQueue({
                       </span>
                     )}
                   </td>
+                  <td className={styles.muted}>{DOMAIN_LABELS[row.domain] ?? row.domain}</td>
                   <td>
                     {row.entity_name ? (
                       <button
@@ -545,20 +538,18 @@ export function ProposalsQueue({
             })}
             {!feed.isLoading && rows.length === 0 && (
               <tr>
-                <td colSpan={5} className={styles.empty}>
+                <td colSpan={6} className={styles.empty}>
                   {hist
-                    ? `No applied ${domain === "links" ? "link" : "entity"} changes match — nothing has run yet.`
+                    ? "No applied changes match — nothing has run yet."
                     : orphaned
                       ? "No orphaned proposals — every pending legacy proposal has an entry the stage can re-judge it against."
-                      : `No pending ${domain === "links" ? "link" : "entity"} proposals — nothing waiting for review.${
-                          scans.length ? " Run a scan below to generate some." : ""
-                        }`}
+                      : `No pending proposals match — nothing waiting for review.${scans.length ? " Run a scan below to generate some." : ""}`}
                 </td>
               </tr>
             )}
             {feed.isLoading && (
               <tr>
-                <td colSpan={5} className={styles.empty}>
+                <td colSpan={6} className={styles.empty}>
                   Loading {hist ? "history" : "proposals"}…
                 </td>
               </tr>
@@ -568,7 +559,7 @@ export function ProposalsQueue({
       </div>
 
       {/* scans that generate proposals into this queue */}
-      {!hist && scans.length > 0 && (
+      {scans.length > 0 && (
         <div className={styles.genRow}>
           <span className={styles.genLabel}>Generate proposals</span>
           {scans.map((s) => (

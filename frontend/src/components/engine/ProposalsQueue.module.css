@@ -321,3 +321,36 @@
   text-transform: uppercase;
   vertical-align: middle;
 }
+
+/* Review tab facets */
+.facetLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.segCnt {
+  margin-left: 5px;
+  font-weight: 500;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.segOn .segCnt {
+  color: var(--text-secondary);
+}
+.sel {
+  font: inherit;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 4px 8px;
+}

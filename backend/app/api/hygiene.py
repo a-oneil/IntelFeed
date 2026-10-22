@@ -78,12 +78,16 @@ from app.services.entry_adjudication import (
 )
 from app.services.entry_adjudication import TASK_NAME as ADJUDICATION_TASK_NAME
 from app.services.proposal_apply import (
-    adjudication_maint_actions,
+    DOMAINS,
+    adjudication_scope,
     apply_adjudication_batch,
     apply_link_removal_row,
     count_adjudication_pending,
     count_advisories_pending,
+    link_log_actions_for_domain,
+    maint_actions_for_domain,
     new_progress,
+    proposal_domain,
     read_progress,
     write_progress,
 )
@@ -972,6 +976,9 @@ class FeedRow(BaseModel):
     # Who proposed it: "adjudicator" (the post-analysis adjudicate stage, with
     # the article in hand) or "legacy" (the retired nightly jobs / scans).
     origin: str | None = None
+    # What applying it changes: links | entities | relationships | observables
+    # (the Review tab's Domain facet; both logs feed that one queue).
+    domain: str = "entities"
 
 
 class FeedResponse(BaseModel):
@@ -1316,6 +1323,11 @@ async def hygiene_feed(
         "comma-separate to match several (e.g. 'ttp_malformed_id,cve_malformed_id').",
     ),
     source: str | None = Query(None, description="'link_validator' | 'entity_maintenance' | null (all)."),
+    domain: str | None = Query(
+        None,
+        description="What applying the proposal changes: 'links' | 'entities' | 'relationships' | 'observables'; "
+        "null for every domain. Spans both logs (a link-log reclassify advisory is 'entities').",
+    ),
     mode: str | None = Query(None, description="'shadow' | 'apply' — applies to entity_maintenance rows."),
     pending: bool = Query(
         False,
@@ -1353,11 +1365,26 @@ async def hygiene_feed(
     # The previous elif-chain failed to exclude one side when the action was
     # valid on the OTHER side, leaking unfiltered rows through. Compute
     # eligibility up-front so the queries are obviously scoped.
+    if not isinstance(domain, str):
+        domain = None  # called directly (the curation tool), not through FastAPI
+    if domain is not None and domain not in DOMAINS:
+        raise AppError(code="invalid", message=f"unknown domain: {domain}", status_code=400)
     actions = _parse_action_list(action)
     link_actions = actions & _LINK_VALIDATOR_ACTIONS
     maint_actions = actions & _MAINTENANCE_ACTIONS
-    link_eligible = source in (None, "link_validator") and (not actions or bool(link_actions))
-    maint_eligible = source in (None, "entity_maintenance") and (not actions or bool(maint_actions))
+    # The domain facet is a second action filter, per log.
+    domain_link_actions = link_log_actions_for_domain(domain)
+    domain_maint_actions = maint_actions_for_domain(domain)
+    link_eligible = (
+        source in (None, "link_validator")
+        and (not actions or bool(link_actions))
+        and (domain_link_actions is None or bool(domain_link_actions))
+    )
+    maint_eligible = (
+        source in (None, "entity_maintenance")
+        and (not actions or bool(maint_actions))
+        and (domain_maint_actions is None or bool(domain_maint_actions))
+    )
 
     adjudicator_results = select(AIResult.id).where(
         AIResult.task_id == select(AITask.id).where(AITask.name == ADJUDICATION_TASK_NAME).scalar_subquery()
@@ -1366,6 +1393,8 @@ async def hygiene_feed(
     link_rows: list[EntityLinkValidationLog] = []
     if link_eligible:
         q = select(EntityLinkValidationLog)
+        if domain_link_actions is not None:
+            q = q.where(EntityLinkValidationLog.action.in_(sorted(domain_link_actions)))
         if orphaned:
             # A pending legacy proposal whose entry is gone: the backfill can
             # never reach it. (The entry FK cascades, so this is rare and
@@ -1406,6 +1435,8 @@ async def hygiene_feed(
     maint_rows: list[EntityMaintenanceLog] = []
     if maint_eligible:
         q = select(EntityMaintenanceLog)
+        if domain_maint_actions is not None:
+            q = q.where(EntityMaintenanceLog.action.in_(sorted(domain_maint_actions)))
         if origin == "adjudicator":
             q = q.where(EntityMaintenanceLog.action.in_(sorted(ADJUDICATION_ACTIONS)))
         elif origin == "legacy":
@@ -1518,6 +1549,7 @@ async def hygiene_feed(
                 actions=_row_actions_link(r),
                 links=links,
                 origin="adjudicator" if r.ai_result_id in adjudicator_ids else "legacy",
+                domain=proposal_domain("link_validator", r.action),
             )
         )
     for r in maint_rows:
@@ -1543,6 +1575,7 @@ async def hygiene_feed(
                 actions=_row_actions_maint(r),
                 links=_maint_links(r),
                 origin="adjudicator" if r.action in ADJUDICATION_ACTIONS else "legacy",
+                domain=proposal_domain("entity_maintenance", r.action),
             )
         )
 
@@ -1576,6 +1609,37 @@ class HygieneStats(BaseModel):
     alias_collisions_proposed: int
     vendor_autolinks_proposed: int
     ttp_cve_issues_proposed: int
+    # Every pending proposal across both logs, and the same split by what
+    # applying it changes (the Review tab's badge and Domain facet counts).
+    pending_total: int = 0
+    pending_by_domain: dict[str, int] = Field(default_factory=dict)
+
+
+async def _pending_by_domain(db: AsyncSession) -> dict[str, int]:
+    """Unapplied proposals per Review domain, both logs."""
+    link_counts = (
+        await db.execute(
+            select(EntityLinkValidationLog.action, func.count())
+            .where(EntityLinkValidationLog.action.in_(["shadow_remove", "needs_reclassification"]))
+            .group_by(EntityLinkValidationLog.action)
+        )
+    ).all()
+    maint_counts = (
+        await db.execute(
+            select(EntityMaintenanceLog.action, func.count())
+            .where(
+                EntityMaintenanceLog.applied.is_(False),
+                EntityMaintenanceLog.action.in_(sorted(_MAINTENANCE_PROPOSAL_ACTIONS | {"orphan_prune"})),
+            )
+            .group_by(EntityMaintenanceLog.action)
+        )
+    ).all()
+    out = {d: 0 for d in DOMAINS}
+    for action, n in link_counts:
+        out[proposal_domain("link_validator", action)] += int(n)
+    for action, n in maint_counts:
+        out[proposal_domain("entity_maintenance", action)] += int(n)
+    return out
 
 
 @router.get("/admin/hygiene/stats", response_model=HygieneStats)
@@ -1729,6 +1793,7 @@ async def hygiene_stats(
         )
     ).scalar_one()
 
+    pending_by_domain = await _pending_by_domain(db)
     return HygieneStats(
         adjudication_mode=adjudication_mode,
         adjudication_breaker_until=adjudication_breaker_until,
@@ -1742,6 +1807,8 @@ async def hygiene_stats(
         alias_collisions_proposed=int(alias_collisions_proposed),
         vendor_autolinks_proposed=int(vendor_autolinks_proposed),
         ttp_cve_issues_proposed=int(ttp_cve_issues_proposed),
+        pending_total=sum(pending_by_domain.values()),
+        pending_by_domain=pending_by_domain,
     )
 
 
@@ -3040,6 +3107,9 @@ class DismissProposalsRequest(BaseModel):
         description="'adjudicator' = only proposals the adjudicate stage filed; 'legacy' = everything else; "
         "omit for both",
     )
+    domain: str | None = Field(
+        default=None, description="'links' | 'entities' | 'relationships' | 'observables'; omit for every domain"
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -3092,16 +3162,30 @@ async def dismiss_proposals(
     # one (never no_op / ai_enrich_* / applied-history rows).
     dismissable_maint = _MAINTENANCE_PROPOSAL_ACTIONS | {"orphan_prune"}
 
+    if body.domain is not None and body.domain not in DOMAINS:
+        raise AppError(code="invalid", message=f"unknown domain: {body.domain}", status_code=400)
     actions = _parse_action_list(body.action)
     link_actions = actions & {"shadow_remove", "needs_reclassification"}
     maint_actions = actions & dismissable_maint
-    link_eligible = body.source in (None, "link_validator") and (not actions or bool(link_actions))
-    maint_eligible = body.source in (None, "entity_maintenance") and (not actions or bool(maint_actions))
+    domain_link_actions = link_log_actions_for_domain(body.domain)
+    domain_maint_actions = maint_actions_for_domain(body.domain)
+    link_eligible = (
+        body.source in (None, "link_validator")
+        and (not actions or bool(link_actions))
+        and (domain_link_actions is None or bool(domain_link_actions))
+    )
+    maint_eligible = (
+        body.source in (None, "entity_maintenance")
+        and (not actions or bool(maint_actions))
+        and (domain_maint_actions is None or bool(domain_maint_actions))
+    )
 
     if link_eligible:
         q = delete(EntityLinkValidationLog).where(
             EntityLinkValidationLog.action.in_(["shadow_remove", "needs_reclassification"])
         )
+        if domain_link_actions is not None:
+            q = q.where(EntityLinkValidationLog.action.in_(sorted(domain_link_actions)))
         if link_actions:
             q = q.where(EntityLinkValidationLog.action.in_(sorted(link_actions)))
         if body.origin == "adjudicator":
@@ -3121,6 +3205,8 @@ async def dismiss_proposals(
             EntityMaintenanceLog.applied.is_(False),
             EntityMaintenanceLog.action.in_(sorted(dismissable_maint)),
         )
+        if domain_maint_actions is not None:
+            q = q.where(EntityMaintenanceLog.action.in_(sorted(domain_maint_actions)))
         if maint_actions:
             q = q.where(EntityMaintenanceLog.action.in_(sorted(maint_actions)))
         if body.origin == "adjudicator":
@@ -3154,15 +3240,20 @@ async def apply_adjudication_all(
 class BulkApplyRequest(BaseModel):
     """Scope for a background "Apply all" over one proposals queue."""
 
-    kind: Literal["adjudication", "advisories"] = Field(
+    kind: Literal["adjudication", "advisories", "all"] = Field(
         description=(
             "adjudication: the adjudicate stage's pending proposals (both logs). "
-            "advisories: the link validator's needs_reclassification advisories"
+            "advisories: the link validator's needs_reclassification advisories. "
+            "all: both, the adjudicator's first (the Review tab's one button)"
         )
     )
     action: str | None = Field(
         default=None,
-        description="adjudication only: one adjudication_* action code or shadow_remove; omit for all",
+        description="adjudication_* action codes, shadow_remove and/or needs_reclassification, comma-separated; "
+        "omit for all",
+    )
+    domain: str | None = Field(
+        default=None, description="'links' | 'entities' | 'relationships' | 'observables'; omit for every domain"
     )
     entity_type: str | None = Field(default=None, description="advisories only: limit to one source entity type")
     mode: Literal["shadow", "apply"] = Field(default="apply", description="advisories only")
@@ -3203,13 +3294,20 @@ async def start_bulk_apply(
     reported and left in place."""
     from app.workers.proposal_apply_tasks import bulk_apply_proposals
 
-    if body.kind == "adjudication":
-        adjudication_maint_actions(body.action)  # validates the action code
-        total = await count_adjudication_pending(db, body.action)
-        scope: dict[str, Any] = {"action": body.action}
-    else:
-        total = await count_advisories_pending(db, body.entity_type)
-        scope = {"entity_type": body.entity_type, "mode": body.mode}
+    if body.domain is not None and body.domain not in DOMAINS:
+        raise AppError(code="invalid", message=f"unknown domain: {body.domain}", status_code=400)
+    total = 0
+    scope: dict[str, Any] = {"action": body.action, "domain": body.domain}
+    if body.kind in ("adjudication", "all"):
+        adjudication_scope(body.action, body.domain)  # validates the action codes
+        total += await count_adjudication_pending(db, body.action, body.domain)
+    if body.kind == "advisories" or (
+        body.kind == "all"
+        and body.domain in (None, "entities")
+        and (not body.action or "needs_reclassification" in body.action)
+    ):
+        total += await count_advisories_pending(db, body.entity_type)
+        scope.update({"entity_type": body.entity_type, "mode": body.mode})
 
     job_id = uuid.uuid4().hex
     progress = new_progress(job_id, kind=body.kind, scope=scope, total=total)
@@ -3222,6 +3320,7 @@ async def start_bulk_apply(
             "entity_type": body.entity_type,
             "mode": body.mode,
             "limit": body.limit,
+            "domain": body.domain,
         }
     )
     return BulkApplyProgress(**progress)

@@ -503,7 +503,7 @@ interface Widget {
 - **SystemSettings** — Admin system toggles (image proxy, backup, etc.)
 - **ThemeEditor** — Create/edit custom themes with live CSS variable preview
 - **AISettings** — Providers | Prompts | Cost tabs; includes CopilotAuthCard for in-app Claude re-auth; the Prompts tab renders the master–detail **PromptWorkspace**
-- **engine/EngineSection** — the Settings → Engine console (rendered by SettingsPage's `engine` section at `/settings?section=engine`): a single-surface table card (entries matrix, links, relationships, AI entities, in-card stage settings) with Jobs / Feeds / Plans as separate views; hosts feed health, enrichment, and job schedules, and maps bookmarked `?tab=` / `?section=` deep links onto console states
+- **engine/EngineSection** — the Settings → Engine console (rendered by SettingsPage's `engine` section at `/settings?section=engine`): a single-surface table card (entries matrix, links, relationships, Review, in-card stage settings) with Jobs / Feeds / Plans as separate views; hosts feed health, enrichment, and job schedules, and maps bookmarked `?tab=` / `?section=` deep links onto console states
 - **TagManager** (TagManager.tsx) — Settings → Tags: rename, recolor, merge, and delete tags with usage counts; **TagPicker** is the reusable tag-selection dropdown used by the reader tag panel, report wizard, and automation editor
 - **TelegramSection** (in SettingsPage.tsx) — Admin walkthrough for Telegram user-session setup
 

@@ -30,6 +30,7 @@ import { EngineSettingsSearch } from "./EngineSettingsSearch";
 import { EntryOutputs } from "./EntryOutputs";
 import { ExtractionTab } from "./ExtractionTab";
 import { ProposalsQueue } from "./ProposalsQueue";
+import type { ProposalDomain } from "@/hooks/useHygiene";
 import { StagePanel } from "./StagePanel";
 import { skipReason } from "./adjudicationCopy";
 import type { EngineDest } from "./engineSettingsIndex";
@@ -39,7 +40,9 @@ import { confirmDialog } from "@/utils/dialog";
 
 export type BrowseView = "jobs" | "plans" | "enrichment" | "maintenance" | "publishing";
 /** The card's data views — all engine data lives in the one table card. */
-export type MatrixView = "entries" | "links" | "relationships" | "entities" | "feeds";
+export type MatrixView = "entries" | "links" | "relationships" | "review" | "feeds";
+/** The Review tab's lenses: the proposals queue, AI-created entity curation, applied history. */
+export type ReviewLens = "proposals" | "entities" | "history";
 
 const WINDOWS = ["1h", "24h", "7d"] as const;
 
@@ -300,10 +303,15 @@ export function EngineMatrix({
   const [entStatus, setEntStatus] = useState<"all" | "review" | "orphan" | "dupe" | "stale">(initialEntityStatus ?? "all");
   const [openStage, setOpenStage] = useState<string | null>(initialOpenStage ?? null);
   const [lens, setLens] = useState<"timing" | "output">("timing");
-  const [proposalsMode, setProposalsMode] = useState(false);
-  // Pre-applied action filter when a chip deep-links into a proposals queue.
+  // Review tab: which lens is showing. A deep link into the AI-entities table
+  // (?entity_status=dupe) lands on the New entities lens.
+  const [reviewLens, setReviewLens] = useState<ReviewLens>(
+    initialEntityStatus && initialEntityStatus !== "all" ? "entities" : "proposals",
+  );
+  // Pre-applied filters when a chip deep-links into the proposals queue.
   const [proposalsAction, setProposalsAction] = useState<string | undefined>(undefined);
   const [proposalsOrigin, setProposalsOrigin] = useState<"adjudicator" | "legacy" | undefined>(undefined);
+  const [proposalsDomain, setProposalsDomain] = useState<ProposalDomain | undefined>(undefined);
   const [status, setStatus] = useState<string | undefined>(initialStatus);
   const [stage, setStage] = useState<string | undefined>(initialStage);
   const [feedId, setFeedId] = useState<string | undefined>(undefined);
@@ -313,13 +321,22 @@ export function EngineMatrix({
   const [peek, setPeek] = useState<{ stage: string; left: number; top: number } | null>(null);
   const popWrapRef = useRef<HTMLDivElement>(null);
 
-  // Proposals mode only applies to Links / AI-entities; drop it on any tab
-  // switch. Explicit helper (not a view-effect) so attention chips can switch
-  // view AND land in proposals mode in one click without the reset racing them.
+  // Deep-link filters are one-shot; drop them on any tab switch. Explicit
+  // helper (not a view-effect) so attention chips can switch view AND land on
+  // a filtered lens in one click without the reset racing them.
   const switchView = (v: MatrixView) => {
     setView(v);
-    setProposalsMode(false);
     setProposalsAction(undefined);
+    setProposalsOrigin(undefined);
+    setProposalsDomain(undefined);
+    if (v !== "review") setReviewLens("proposals");
+  };
+  const openProposals = (opts: { action?: string; origin?: "adjudicator" | "legacy"; domain?: ProposalDomain }) => {
+    setView("review");
+    setReviewLens("proposals");
+    setProposalsAction(opts.action);
+    setProposalsOrigin(opts.origin);
+    setProposalsDomain(opts.domain);
   };
 
   // "Find a setting" result → open whichever surface owns it, then flash the
@@ -563,11 +580,12 @@ export function EngineMatrix({
       n: extractionStats?.likely_duplicates,
       label: "duplicate candidates",
       cls: m.aWarn,
-      active: view === "entities" && entStatus === "dupe",
+      active: view === "review" && reviewLens === "entities" && entStatus === "dupe",
       clear: () => setEntStatus("all"),
       onClick: () => {
         setEntStatus("dupe");
-        switchView("entities");
+        switchView("review");
+        setReviewLens("entities");
       },
     },
     {
@@ -575,35 +593,22 @@ export function EngineMatrix({
       n: hygieneStats?.pending_advisories,
       label: "reclassify proposals",
       cls: m.aWarn,
-      active: view === "links" && proposalsMode && proposalsAction === "needs_reclassification",
-      clear: () => switchView("links"),
-      onClick: () => {
-        setView("links");
-        setProposalsMode(true);
-        setProposalsAction("needs_reclassification");
-        setProposalsOrigin(undefined);
-      },
+      active: view === "review" && reviewLens === "proposals" && proposalsAction === "needs_reclassification",
+      clear: () => switchView("review"),
+      onClick: () => openProposals({ action: "needs_reclassification" }),
     },
     {
       key: "adjudication",
       n: hygieneStats?.adjudication_pending,
       label: "adjudication verdicts",
       cls: m.aWarn,
-      active: view === "links" && proposalsMode && !proposalsAction && proposalsOrigin === "adjudicator",
-      clear: () => {
-        switchView("links");
-        setProposalsOrigin(undefined);
-      },
-      onClick: () => {
-        setView("links");
-        setProposalsMode(true);
-        setProposalsAction(undefined);
-        setProposalsOrigin("adjudicator");
-      },
+      active: view === "review" && reviewLens === "proposals" && !proposalsAction && proposalsOrigin === "adjudicator",
+      clear: () => switchView("review"),
+      onClick: () => openProposals({ origin: "adjudicator" }),
       hint: {
         title: "Adjudication verdicts",
         body: "What the post-analysis review wants changed: links to remove, new entities to veto or merge, edges to demote, observables to drop. In shadow mode these are suggestions until you apply them.",
-        aside: "Opens the Proposals lens filtered to the adjudicator.",
+        aside: "Opens Review filtered to the adjudicator.",
       },
     },
     {
@@ -825,9 +830,15 @@ export function EngineMatrix({
                 Relationships
                 {linkStats ? <span className={m.viewCnt}>{linkStats.relationships_total.toLocaleString()}</span> : null}
               </button>
-              <button className={view === "entities" ? m.viewOn : ""} onClick={() => switchView("entities")}>
-                AI entities
-                {extractionStats ? <span className={m.viewCnt}>{extractionStats.total_created.toLocaleString()}</span> : null}
+              <button
+                className={view === "review" ? m.viewOn : ""}
+                onClick={() => switchView("review")}
+                title="Everything the AI wants a person to approve: proposals, new entities, history"
+              >
+                Review
+                {hygieneStats?.pending_total ? (
+                  <span className={m.viewBadge}>{hygieneStats.pending_total.toLocaleString()}</span>
+                ) : null}
               </button>
             </div>
             {view === "entries" && (
@@ -966,57 +977,45 @@ export function EngineMatrix({
 
           {view !== "entries" && (
             <div className={m.subView}>
-              {/* Data ↔ Proposals lens — Links and AI-entities tabs can flip to
-                  the AI/scan cleanup queue that maintains that surface. */}
-              {(view === "links" || view === "entities") && (
+              {view === "review" && (
                 <div className={m.subLens}>
                   <div className={m.lens}>
-                    <button
-                      className={!proposalsMode ? m.lensOn : ""}
-                      onClick={() => {
-                        setProposalsMode(false);
-                        setProposalsAction(undefined);
-                      }}
-                    >
-                      {view === "links" ? "Links" : "Entities"}
-                    </button>
-                    <button
-                      className={proposalsMode ? m.lensOn : ""}
-                      onClick={() => {
-                        setProposalsMode(true);
-                        setProposalsAction(undefined);
-                      }}
-                    >
+                    <button className={reviewLens === "proposals" ? m.lensOn : ""} onClick={() => setReviewLens("proposals")}>
                       Proposals
+                      {hygieneStats?.pending_total ? <span className={m.viewCnt}>{hygieneStats.pending_total.toLocaleString()}</span> : null}
+                    </button>
+                    <button className={reviewLens === "entities" ? m.lensOn : ""} onClick={() => setReviewLens("entities")}>
+                      New entities
+                      {extractionStats ? <span className={m.viewCnt}>{extractionStats.total_created.toLocaleString()}</span> : null}
+                    </button>
+                    <button className={reviewLens === "history" ? m.lensOn : ""} onClick={() => setReviewLens("history")}>
+                      History
                     </button>
                   </div>
-                  {proposalsMode && (
-                    <span className={m.subLensHint}>
-                      {view === "links"
-                        ? "The review's link verdicts — apply or dismiss without leaving the table"
-                        : "Veto / merge / demote / drop verdicts and scan proposals over AI-created entities"}
-                    </span>
-                  )}
+                  <span className={m.subLensHint}>
+                    {reviewLens === "proposals"
+                      ? "Everything the adjudicator and the scans want changed, one queue. Apply or dismiss here; every apply stays undoable from History."
+                      : reviewLens === "entities"
+                        ? "Entities the analysis created that nobody has confirmed yet. Confirm, merge, convert or delete."
+                        : "Everything that was applied, by a person or by the stage in apply mode. Restore puts it back."}
+                  </span>
                 </div>
               )}
-              {view === "links" &&
-                (proposalsMode ? (
-                  <ProposalsQueue
-                    domain="links"
-                    key={`${proposalsAction ?? "all"}:${proposalsOrigin ?? "all"}`}
-                    initialAction={proposalsAction}
-                    initialOrigin={proposalsOrigin}
-                  />
-                ) : (
-                  <AutolinkingSection embedded view="links" />
-                ))}
+              {view === "links" && <AutolinkingSection embedded view="links" />}
               {view === "relationships" && <AutolinkingSection embedded view="relationships" />}
-              {view === "entities" &&
-                (proposalsMode ? (
-                  <ProposalsQueue domain="entities" key={proposalsOrigin ?? "all"} initialOrigin={proposalsOrigin} />
-                ) : (
-                  <ExtractionTab embedded key={entStatus} initialStatus={entStatus} />
-                ))}
+              {view === "review" && reviewLens === "proposals" && (
+                <ProposalsQueue
+                  lens="queue"
+                  key={`q:${proposalsAction ?? "all"}:${proposalsOrigin ?? "all"}:${proposalsDomain ?? "all"}`}
+                  initialAction={proposalsAction}
+                  initialOrigin={proposalsOrigin}
+                  initialDomain={proposalsDomain}
+                />
+              )}
+              {view === "review" && reviewLens === "history" && <ProposalsQueue lens="history" key="hist" />}
+              {view === "review" && reviewLens === "entities" && (
+                <ExtractionTab embedded key={entStatus} initialStatus={entStatus} />
+              )}
               {view === "feeds" && (
                 <>
                   <FeedHealthView embedded />

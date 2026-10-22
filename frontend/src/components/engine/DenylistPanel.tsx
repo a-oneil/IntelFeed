@@ -27,7 +27,7 @@ const TYPES: { key: DenyType; label: string }[] = [
 
 const TYPE_LABEL = Object.fromEntries(TYPES.map((t) => [t.key, t.label]));
 
-/** Names the extract stage refuses to mint. Rows land here from the AI entities
+/** Names the extract stage refuses to mint. Rows land here from Review › New entities
  *  table's delete, the entity profile's delete popover, or the box below —
  *  every name is mirrored into Autolink → False Positive Names too. */
 export function DenylistPanel() {
@@ -72,7 +72,7 @@ export function DenylistPanel() {
       </h4>
       <p className={styles.sub}>
         Names the extract stage won&apos;t mint, whatever an article says. Deleting an entity from{" "}
-        <strong>AI entities</strong> or its profile adds it here (with its aliases) and to{" "}
+        <strong>Review › New entities</strong> or its profile adds it here (with its aliases) and to{" "}
         <strong>Autolink → False Positive Names</strong>. Removing a row lifts both.
       </p>
 

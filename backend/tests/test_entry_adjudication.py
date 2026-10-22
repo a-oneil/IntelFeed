@@ -2524,3 +2524,106 @@ async def test_bulk_apply_start_and_progress(client, admin_headers, monkeypatch)
 
     resp = await client.get("/api/admin/hygiene/bulk-apply/doesnotexist", headers=admin_headers)
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_review_domain_facet_spans_both_logs(client, admin_headers, db_session, test_entry, monkeypatch):
+    """The Review tab's Domain facet sorts proposals by what applying them
+    changes, not by which log holds them: a link-log reclassify advisory is
+    an entities proposal, an adjudicator edge demote is a relationships one,
+    and the stats carry the same split."""
+    from app.models.entity_link_validation_log import EntityLinkValidationLog
+    from app.models.entity_maintenance import EntityMaintenanceLog
+    from app.models.threat_actor import ThreatActor
+    from app.services.entry_adjudication import ACTION_EDGE_DEMOTE, ACTION_IOC_DROP, ACTION_VETO
+    from app.workers import proposal_apply_tasks
+
+    actor = ThreatActor(name="Facet Actor", aliases=[])
+    db_session.add(actor)
+    await db_session.flush()
+    db_session.add(
+        EntityLinkValidationLog(
+            entry_id=test_entry.id,
+            entity_type="threat_actor",
+            entity_id=actor.id,
+            entity_name_snapshot="Facet Actor",
+            action="shadow_remove",
+            reason="link",
+        )
+    )
+    db_session.add(
+        EntityLinkValidationLog(
+            entry_id=test_entry.id,
+            entity_type="threat_actor",
+            entity_id=actor.id,
+            entity_name_snapshot="Facet Actor",
+            action="needs_reclassification",
+            suggested_entity_type="malware",
+            reason="advisory",
+        )
+    )
+    for action, after in (
+        (ACTION_VETO, {"reason": "junk", "confidence": "high"}),
+        (ACTION_EDGE_DEMOTE, {"reason": "co-mention", "confidence": "high"}),
+        (ACTION_IOC_DROP, {"reason": "platform ip", "confidence": "high"}),
+    ):
+        db_session.add(
+            EntityMaintenanceLog(
+                entity_type="threat_actor",
+                entity_id=actor.id,
+                action=action,
+                mode="shadow",
+                before={"entry_id": str(test_entry.id), "entity": {"name": "Facet Actor", "aliases": []}},
+                after=after,
+                reasoning=after["reason"],
+                applied=False,
+            )
+        )
+    await db_session.commit()
+
+    async def feed(domain: str | None):
+        params = {"pending": "true"}
+        if domain:
+            params["domain"] = domain
+        resp = await client.get("/api/admin/hygiene/feed", params=params, headers=admin_headers)
+        assert resp.status_code == 200, resp.text
+        return resp.json()["rows"]
+
+    everything = await feed(None)
+    assert {r["domain"] for r in everything} == {"links", "entities", "relationships", "observables"}
+    assert sorted(r["action"] for r in await feed("links")) == ["shadow_remove"]
+    assert sorted(r["action"] for r in await feed("entities")) == sorted([ACTION_VETO, "needs_reclassification"])
+    assert [r["action"] for r in await feed("relationships")] == [ACTION_EDGE_DEMOTE]
+    assert [r["action"] for r in await feed("observables")] == [ACTION_IOC_DROP]
+    assert (
+        await client.get("/api/admin/hygiene/feed", params={"domain": "nope"}, headers=admin_headers)
+    ).status_code == 400
+
+    stats = (await client.get("/api/admin/hygiene/stats", headers=admin_headers)).json()
+    assert stats["pending_by_domain"] == {"links": 1, "entities": 2, "relationships": 1, "observables": 1}
+    assert stats["pending_total"] == 5
+
+    # The one Apply all: kind "all" counts the adjudicator's rows in the domain
+    # plus the advisories when the domain allows them.
+    queued: list[dict] = []
+    monkeypatch.setattr(
+        proposal_apply_tasks.bulk_apply_proposals, "apply_async", lambda *a, **kw: queued.append(kw["kwargs"])
+    )
+    resp = await client.post(
+        "/api/admin/hygiene/bulk-apply", headers=admin_headers, json={"kind": "all", "domain": "entities"}
+    )
+    assert resp.status_code == 202, resp.text
+    assert resp.json()["total"] == 2  # the veto + the advisory
+    assert queued[-1]["domain"] == "entities" and queued[-1]["kind"] == "all"
+    resp = await client.post(
+        "/api/admin/hygiene/bulk-apply", headers=admin_headers, json={"kind": "all", "domain": "relationships"}
+    )
+    assert resp.json()["total"] == 1
+
+    # Dismiss honours the facet too.
+    resp = await client.post(
+        "/api/admin/hygiene/dismiss-proposals", headers=admin_headers, json={"domain": "observables"}
+    )
+    assert resp.json()["dismissed"] == 1
+    assert await feed("observables") == []
+    assert len(await feed(None)) == 4
