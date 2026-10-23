@@ -786,6 +786,9 @@ async def test_routes_are_mine_and_only_for_open_tasks(
     )
     assert default.status_code == 200, default.text
     assert default.json()["task_id"] is None and default.json()["provider_name"] == "OpenRouter personal"
+    # The overview names the default key even when every task has a route of its own.
+    overview = (await client.get("/api/ai/me/overview", headers=auth_headers)).json()
+    assert overview["default_route"]["provider_id"] == str(my_key.id)
 
     per_task = await client.put(
         "/api/ai/me/routes",
@@ -857,6 +860,7 @@ async def test_overview_shows_policy_spend_and_routable_tasks(
     assert usage["by_key"][0]["provider_name"] == "OpenRouter personal"
     assert Decimal(usage["by_key"][0]["month_cost"]) == Decimal("1.62")
     assert [t["task_name"] for t in body["tasks"]] == ["detection_rules"]
+    assert body["default_route"] is None
     row = body["tasks"][0]
     assert row["site_provider_name"] == "Lab Ollama" and row["site_model_name"] == "qwen"
     assert row["route"]["model_name"] == "gpt-x" and Decimal(row["month_cost"]) == Decimal("1.62")
@@ -1066,3 +1070,44 @@ async def test_results_record_the_prompt_version_that_ran(db_session, test_user,
     await db_session.flush()
     out = await run_task(db_session, test_user.id, task.name, variables={"text": "x"}, force=True)
     assert out["_prompt_version"] == 7
+
+
+async def test_a_task_can_opt_out_of_the_default_key(
+    client: AsyncClient, db_session, auth_headers, test_user, site_provider, my_key, policy_on, monkeypatch
+):
+    """A default key covers every task; a per-task route with no key sends one task back to the instance."""
+    from app.ai.engine import UserKeyRequired, resolve_assignment
+
+    copilot = await _task(db_session, site_provider, "copilot")
+    rules = await _task(db_session, site_provider, "detection_rules")
+    await _route(db_session, test_user, my_key, None)
+
+    # The default route itself can't be an opt-out.
+    bad = await client.put("/api/ai/me/routes", json={"task_id": None, "provider_id": None}, headers=auth_headers)
+    assert bad.status_code == 400
+    # A key without a model is refused.
+    no_model = await client.put(
+        "/api/ai/me/routes", json={"task_id": str(rules.id), "provider_id": str(my_key.id)}, headers=auth_headers
+    )
+    assert no_model.status_code == 400
+
+    out = await client.put(
+        "/api/ai/me/routes", json={"task_id": str(copilot.id), "provider_id": None}, headers=auth_headers
+    )
+    assert out.status_code == 200, out.text
+    assert out.json()["provider_id"] is None and out.json()["model_name"] is None
+
+    caller = Caller.user(test_user.id)
+    on_copilot = await resolve_assignment(db_session, caller, copilot.name)
+    assert on_copilot.source == "site" and on_copilot.fallback_reason is None
+    assert (await resolve_assignment(db_session, caller, rules.name)).source == "user"
+
+    overview = (await client.get("/api/ai/me/overview", headers=auth_headers)).json()
+    row = next(t for t in overview["tasks"] if t["task_name"] == "copilot")
+    assert row["route"]["provider_id"] is None
+    assert overview["default_route"]["provider_id"] == str(my_key.id)
+
+    # Under Required an opt-out is still "no key" for that task.
+    monkeypatch.setattr(env_settings, "require_user_ai_provider", True)
+    with pytest.raises(UserKeyRequired):
+        await resolve_assignment(db_session, caller, copilot.name)

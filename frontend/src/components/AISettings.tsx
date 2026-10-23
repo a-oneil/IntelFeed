@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import type { AIProvider } from "@/api/types";
 import {
   useAIProviders,
@@ -11,19 +11,30 @@ import {
   useAICostSummary,
   useAICostBreakdown,
   type AICostBreakdownRow,
+  type AICallerCostRow,
+  type AICostBreakdown,
 } from "@/hooks/useAI";
 import { formatDate } from "@/utils/formatDate";
 import { useUndoableDelete } from "@/hooks/useUndoableDelete";
 import ClaudeCodeConfigEditor from "./ClaudeCodeConfigEditor";
 import PromptWorkspace from "./PromptWorkspace";
-import { Chip } from "./primitives";
+import { Chip, Segmented } from "./primitives";
+import { UserKeysSection } from "./UserKeysSection";
+import { compactCount, formatUsd } from "@/utils/format";
 import styles from "./AISettings.module.css";
 import { AsyncStateLoading } from "@/components/AsyncState";
 
+type AISection = "providers" | "prompts" | "keys" | "cost";
+const SECTIONS: readonly AISection[] = ["providers", "prompts", "keys", "cost"];
+
 export default function AISettings() {
-  const [activeSection, setActiveSection] = useState<
-    "providers" | "prompts" | "cost"
-  >("providers");
+  // `?tab=` is how the Engine's settings search deep-links a key that lives
+  // here (the personal-key policy on User keys).
+  const [searchParams] = useSearchParams();
+  const requested = searchParams.get("tab");
+  const [activeSection, setActiveSection] = useState<AISection>(
+    SECTIONS.find((s) => s === requested) ?? "providers",
+  );
 
   return (
     <div className={styles.container}>
@@ -56,6 +67,12 @@ export default function AISettings() {
           Prompts
         </button>
         <button
+          className={activeSection === "keys" ? styles.tabActive : styles.tab}
+          onClick={() => setActiveSection("keys")}
+        >
+          User keys
+        </button>
+        <button
           className={activeSection === "cost" ? styles.tabActive : styles.tab}
           onClick={() => setActiveSection("cost")}
         >
@@ -69,6 +86,11 @@ export default function AISettings() {
         </div>
       )}
       {activeSection === "prompts" && <PromptWorkspace />}
+      {activeSection === "keys" && (
+        <div className={styles.panelCard}>
+          <UserKeysSection />
+        </div>
+      )}
       {activeSection === "cost" && (
         <div className={styles.panelCard}>
           <CostSection />
@@ -84,7 +106,9 @@ export default function AISettings() {
  * top of AI Configuration regardless of the active tab, with a one-click Resume.
  */
 function ProviderHealthBanner({ onGoToProviders }: { onGoToProviders?: () => void }) {
-  const { data: providers } = useAIProviders();
+  const { data: allProviders } = useAIProviders();
+  // The admin's own personal key is listed alongside; it is not the instance's.
+  const providers = allProviders?.filter((p) => !p.user_id);
   const resumeProvider = useResumeAIProvider();
 
   if (!providers?.length) return null;
@@ -543,7 +567,10 @@ function OpenAICompatConfigEditor({ provider, onClose }: { provider: AIProvider;
 }
 
 function ProvidersSection() {
-  const { data: providers, isLoading } = useAIProviders();
+  const { data: allProviders, isLoading } = useAIProviders();
+  // GET /ai/providers also returns the caller's personal keys; those live on
+  // My AI, and the instance's assignments can't point at them.
+  const providers = allProviders?.filter((p) => !p.user_id);
   const createProvider = useCreateAIProvider();
   const updateProvider = useUpdateAIProvider();
   const testProvider = useTestAIProvider();
@@ -839,6 +866,118 @@ function BreakdownTable({ title, rows }: { title: string; rows: AICostBreakdownR
   );
 }
 
+const CALLER_LABELS: Record<AICallerCostRow["caller_kind"], string> = {
+  system: "Pipeline",
+  automation: "Automation",
+  share: "Share links",
+  user: "",
+  unattributed: "Unattributed (before Oct 2026)",
+};
+
+/**
+ * Spend by who asked, with each person's day against the site allowance. The
+ * headline splits instance spend (the admin's) from user-key spend (theirs);
+ * one total would mix money paid by different people.
+ */
+function ByUserTable({ breakdown }: { breakdown: AICostBreakdown }) {
+  const [filter, setFilter] = useState<"all" | "instance" | "user">("all");
+  const allowance = breakdown.site_allowance_per_user;
+  // Filter on requests, not dollars: on an Ollama instance almost every call is $0.
+  const rows = breakdown.by_caller.filter((r) => {
+    if (filter === "instance") return r.caller_kind !== "user" || r.requests - r.own_key_requests > 0;
+    if (filter === "user") return r.own_key_requests > 0;
+    return true;
+  });
+  const nearLimit = allowance > 0 ? breakdown.by_caller.filter((r) => r.caller_kind === "user" && r.requests_today >= allowance * 0.9) : [];
+  const name = (r: AICallerCostRow) => (r.caller_kind === "user" ? r.username ?? "(deleted user)" : CALLER_LABELS[r.caller_kind]);
+  const note = (r: AICallerCostRow) => {
+    if (r.caller_kind === "system") return "pipeline work";
+    if (r.caller_kind === "automation") return "counted as pipeline";
+    if (r.caller_kind === "share") return "always instance";
+    if (r.caller_kind === "unattributed") return "history can't be rebuilt";
+    return null;
+  };
+
+  return (
+    <div style={{ marginTop: 20 }}>
+      <div className={styles.sectionHeader}>
+        <h4 style={{ margin: 0 }}>By user</h4>
+        <Segmented<"all" | "instance" | "user">
+          label="By user filter"
+          size="sm"
+          value={filter}
+          onChange={setFilter}
+          options={[
+            { value: "all", label: "All" },
+            { value: "instance", label: "Instance keys" },
+            { value: "user", label: "User keys" },
+          ]}
+        />
+      </div>
+      <div style={{ overflowX: "auto" }}>
+        <table className={styles.byUserTable}>
+          <thead>
+            <tr>
+              <th>Who</th>
+              <th className={styles.num}>Reqs</th>
+              <th className={styles.num}>Instance $</th>
+              <th className={styles.num}>Own key $</th>
+              <th>Today vs allowance</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => {
+              const pct = allowance > 0 ? Math.min(100, (r.requests_today / allowance) * 100) : 0;
+              return (
+                <tr key={`${r.caller_kind}-${r.user_id ?? ""}`}>
+                  <td>
+                    {name(r)}{" "}
+                    {r.caller_kind !== "user" && <Chip size="sm" tone="quiet">{r.caller_kind}</Chip>}
+                  </td>
+                  <td className={styles.num}>{r.requests.toLocaleString()}</td>
+                  <td className={styles.num}>{formatUsd(r.instance_cost)}</td>
+                  <td className={styles.num}>{Number(r.own_key_cost) > 0 ? formatUsd(r.own_key_cost) : "—"}</td>
+                  <td>
+                    {r.caller_kind === "user" ? (
+                      allowance > 0 ? (
+                        <span className={styles.allowance} title={`${r.requests_today} of ${allowance} today`}>
+                          <span className={styles.meter}>
+                            <i style={{ width: `${pct}%`, background: pct >= 90 ? "var(--warning)" : "var(--success)" }} />
+                          </span>
+                          <span className={styles.meterLabel}>
+                            {r.requests_today}/{allowance}
+                          </span>
+                        </span>
+                      ) : (
+                        <span className={styles.muted}>{r.requests_today} today · no allowance</span>
+                      )
+                    ) : (
+                      <span className={styles.muted}>{note(r)}</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={5} className={styles.muted} style={{ padding: 8 }}>
+                  No spend yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      {nearLimit.map((r) => (
+        <div key={r.user_id ?? r.caller_kind} className={styles.allowanceNote}>
+          <b>{r.username}</b> has used {r.requests_today} of {allowance} instance requests today. Interactive tasks
+          will stop for them at the limit. Pipeline work isn't affected.
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function CostSection() {
   const { data: cost, isLoading } = useAICostSummary();
   const { data: breakdown } = useAICostBreakdown();
@@ -848,6 +987,12 @@ function CostSection() {
   const alerts = (breakdown?.budgets ?? []).filter(
     (b) => b.percent_of_budget != null && b.percent_of_budget >= 0.8,
   );
+  const byCaller = breakdown?.by_caller ?? [];
+  const interactive = byCaller.filter((r) => r.caller_kind === "user").reduce((s, r) => s + Number(r.instance_cost), 0);
+  const pipeline = byCaller.filter((r) => r.caller_kind !== "user").reduce((s, r) => s + Number(r.instance_cost), 0);
+  const people = byCaller.filter((r) => r.caller_kind === "user" && r.own_key_requests > 0).length;
+  const totalReqs = breakdown?.total_requests_30d ?? cost?.total_requests_30d ?? 0;
+  const pipelineReqs = byCaller.filter((r) => r.caller_kind !== "user").reduce((s, r) => s + r.requests, 0);
 
   return (
     <div className={styles.section}>
@@ -855,26 +1000,35 @@ function CostSection() {
       {cost && (
         <div className={styles.costGrid}>
           <div className={styles.costCard}>
-            <span className={styles.costLabel}>Total Cost</span>
+            <span className={styles.costLabel}>Instance keys</span>
             <span className={styles.costValue}>
-              ${cost.total_cost_30d.toFixed(2)}
+              {breakdown ? formatUsd(breakdown.instance_cost_30d) : `$${cost.total_cost_30d.toFixed(2)}`}
+            </span>
+            {breakdown && (
+              <span className={styles.costSub}>
+                pipeline {formatUsd(pipeline)} · interactive {formatUsd(interactive)}
+              </span>
+            )}
+          </div>
+          <div className={styles.costCard}>
+            <span className={styles.costLabel}>User keys</span>
+            <span className={styles.costValue}>{breakdown ? formatUsd(breakdown.user_key_cost_30d) : "—"}</span>
+            <span className={styles.costSub}>
+              {people} {people === 1 ? "person" : "people"} · not billed to you
             </span>
           </div>
           <div className={styles.costCard}>
             <span className={styles.costLabel}>Total Requests</span>
-            <span className={styles.costValue}>{cost.total_requests_30d}</span>
-          </div>
-          <div className={styles.costCard}>
-            <span className={styles.costLabel}>Input Tokens</span>
-            <span className={styles.costValue}>
-              {(cost.total_tokens_30d.input / 1000).toFixed(1)}K
+            <span className={styles.costValue}>{compactCount(totalReqs)}</span>
+            <span className={styles.costSub}>
+              {totalReqs > 0 ? `${Math.round((pipelineReqs / totalReqs) * 100)}% pipeline` : "no requests yet"} ·{" "}
+              {compactCount(cost.total_tokens_30d.input)} tokens in / {compactCount(cost.total_tokens_30d.output)} out
             </span>
           </div>
           <div className={styles.costCard}>
-            <span className={styles.costLabel}>Output Tokens</span>
-            <span className={styles.costValue}>
-              {(cost.total_tokens_30d.output / 1000).toFixed(1)}K
-            </span>
+            <span className={styles.costLabel}>Unpriced</span>
+            <span className={styles.costValue}>{breakdown ? compactCount(breakdown.unpriced_requests_30d) : "—"}</span>
+            <span className={styles.costSub}>requests at $0 (Ollama, unpriced models)</span>
           </div>
         </div>
       )}
@@ -907,6 +1061,8 @@ function CostSection() {
           })}
         </div>
       )}
+
+      {breakdown && <ByUserTable breakdown={breakdown} />}
 
       {breakdown && (
         <div

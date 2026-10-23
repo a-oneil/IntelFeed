@@ -33,7 +33,7 @@ export default function AssignmentSelect({
       }}
     >
       <option value="">{placeholder}</option>
-      {providers?.map((p) => {
+      {providers?.filter((p) => !p.user_id).map((p) => {
         const incompatible = requiresTools && !p.supports_tools;
         return p.models.map((m) => (
           <option

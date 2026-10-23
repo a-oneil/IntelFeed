@@ -27,7 +27,10 @@ interface EntryAIPanelProps {
   aiRunTaskFn?: (taskName: string) => Promise<RunTaskResult>;
   aiCompletedTasks?: Set<string>;
   aiStaticResults?: AIResult[];
-  aiAskAgentFn?: (question: string, history: Array<{ role: string; content: string }>) => Promise<{ answer: string }>;
+  aiAskAgentFn?: (
+    question: string,
+    history: Array<{ role: string; content: string }>,
+  ) => Promise<{ answer: string; remaining_today?: number | null }>;
 }
 
 /**
@@ -140,6 +143,12 @@ export default function EntryAIPanel({
               tokens_output: null,
               cost_estimate: data.cost_estimate,
               processing_time_ms: null,
+              // A share-page result: the instance answered, and the row
+              // never comes back from the API with who asked.
+              caller_kind: "share",
+              user_id: null,
+              key_owner_id: null,
+              provider_name: null,
               created_at: new Date().toISOString(),
             }]);
           } : undefined}

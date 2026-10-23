@@ -1,0 +1,337 @@
+.cardHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-4);
+  padding-bottom: 0.625rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.cardHead .cardTitle {
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.cardTitle {
+  font-family: var(--font-body);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 var(--sp-4);
+  padding-bottom: 0.625rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.muted {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.note {
+  padding: var(--sp-3) var(--sp-4);
+  margin-bottom: var(--sp-5);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-tertiary);
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.noteInfo {
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.noteBad {
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  color: var(--text-primary);
+  margin-bottom: 0;
+}
+
+/* ─── Usage ─────────────────────────────────────────── */
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--sp-3);
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-tertiary);
+}
+
+.tileLabel {
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.tileValue {
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.tileSub {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.meterWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: var(--sp-4);
+}
+
+.meter {
+  display: flex;
+  height: 8px;
+  border-radius: var(--r-full);
+  background: var(--bg-tertiary);
+  overflow: hidden;
+}
+
+.meter i {
+  display: block;
+  height: 100%;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+/* ─── Keys ──────────────────────────────────────────── */
+
+.keyList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.key {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-tertiary);
+}
+
+.keyOff {
+  opacity: 0.6;
+}
+
+.keyWarn {
+  border-color: color-mix(in srgb, var(--warning) 50%, transparent);
+}
+
+.keyLeft {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.keyName {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.keyUrl {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.keyActions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
+
+.empty {
+  padding: var(--sp-4);
+  color: var(--text-muted);
+  font-size: var(--fs-md);
+  text-align: center;
+}
+
+/* ─── Forms ─────────────────────────────────────────── */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  margin-bottom: var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-tertiary);
+}
+
+.formTitle {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
+.field input,
+.field select {
+  flex: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.fieldHint {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+}
+
+.formActions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.formError {
+  font-size: var(--fs-base);
+  color: var(--danger);
+}
+
+.ok {
+  font-size: var(--fs-sm);
+  color: var(--success);
+}
+
+/* ─── Routes table ──────────────────────────────────── */
+
+.tableWrap {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-base);
+}
+
+.table th {
+  text-align: left;
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  padding: 4px var(--sp-2);
+  font-weight: 500;
+}
+
+.table td {
+  padding: var(--sp-2);
+  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  vertical-align: middle;
+}
+
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.selectSm {
+  min-width: 140px;
+  padding: 4px var(--sp-3);
+  font-size: var(--fs-sm);
+}
+
+.modelInput {
+  width: 220px;
+  padding: 4px var(--sp-3);
+  font-size: var(--fs-sm);
+}
+
+.toolsChip {
+  margin-left: var(--sp-2);
+}
+
+.capInput {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.capInput input {
+  width: 90px;
+  flex: none;
+}
+
+.footnote {
+  margin: var(--sp-4) 0 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+@media (max-width: 767px) {
+  .tiles {
+    grid-template-columns: 1fr;
+  }
+  .key {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+.capField {
+  width: 120px !important;
+}

@@ -434,6 +434,9 @@ class AICallerCostRow(BaseModel):
     # operator pays — versus on a personal key, which the operator does not.
     instance_cost: Decimal
     own_key_cost: Decimal
+    # Calls on a personal key, so a person on an unpriced key (Ollama) still
+    # shows as using one when the dollar figure is zero.
+    own_key_requests: int = 0
     # Calls today on the instance's own providers: what the per-user daily
     # allowance (site_ai_user_daily_requests) counts.
     requests_today: int = 0
@@ -462,11 +465,15 @@ class AICostBreakdown(BaseModel):
 
 
 class UserAIRouteUpsert(BaseModel):
-    """Point one task, or every allowed task (task_id null), at one of my keys."""
+    """Point one task, or every allowed task (task_id null), at one of my keys.
+
+    A per-task route with ``provider_id`` null sends that task back to the
+    instance's provider even though a default key exists.
+    """
 
     task_id: uuid.UUID | None = None
-    provider_id: uuid.UUID
-    model_name: str = Field(min_length=1, max_length=100)
+    provider_id: uuid.UUID | None = None
+    model_name: str | None = Field(default=None, min_length=1, max_length=100)
     config: dict = {}
 
     # Same shape rules as a provider's config: the two are merged at call time.
@@ -488,9 +495,10 @@ class UserAIRouteResponse(BaseModel):
     id: uuid.UUID
     task_id: uuid.UUID | None
     task_name: str | None = None
-    provider_id: uuid.UUID
+    # Both null = this task is routed to the instance's provider by choice.
+    provider_id: uuid.UUID | None
     provider_name: str | None = None
-    model_name: str
+    model_name: str | None
     config: dict
     updated_at: datetime
 
@@ -557,3 +565,6 @@ class UserAIOverview(BaseModel):
     monthly_cap_usd: Decimal | None
     usage: UserAIUsage
     tasks: list[UserAITaskRow]
+    # The person's default key (task_id null), listed on its own because a
+    # task row only carries it when the task has no route of its own.
+    default_route: UserAIRouteResponse | None = None

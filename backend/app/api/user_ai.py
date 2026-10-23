@@ -88,7 +88,7 @@ async def _routes(db: AsyncSession, user: User) -> list[tuple[UserAIRoute, str |
         await db.execute(
             select(UserAIRoute, AITask.name, AIProvider.name)
             .outerjoin(AITask, AITask.id == UserAIRoute.task_id)
-            .join(AIProvider, AIProvider.id == UserAIRoute.provider_id)
+            .outerjoin(AIProvider, AIProvider.id == UserAIRoute.provider_id)
             .where(UserAIRoute.user_id == user.id)
             .order_by(UserAIRoute.task_id.is_not(None), AITask.name)
         )
@@ -149,9 +149,9 @@ async def my_ai_overview(
         ],
     )
 
-    routes = {
-        route.task_id: (route, task_name, provider_name) for route, task_name, provider_name in await _routes(db, user)
-    }
+    all_routes = await _routes(db, user)
+    routes = {route.task_id: (route, task_name, provider_name) for route, task_name, provider_name in all_routes}
+    default_route = routes.get(None)
 
     # Spend per task on my keys this month, so each row can show what it cost.
     task_cost = dict(
@@ -196,6 +196,7 @@ async def my_ai_overview(
         monthly_cap_usd=prefs.monthly_cap_usd if prefs is not None else None,
         usage=usage,
         tasks=tasks,
+        default_route=_route_response(*default_route) if default_route else None,
     )
 
 
@@ -247,8 +248,19 @@ async def upsert_my_route(
 ):
     """Point a task at one of my keys, or set my default key with task_id null. One route per
     task and one default per person: sending the same target again replaces it. The key must be
-    mine, and the task must be one the admin has opened to personal keys."""
-    provider = await _own_provider(db, user, body.provider_id)
+    mine, and the task must be one the admin has opened to personal keys. A per-task route with
+    no provider sends that task back to the instance's provider despite a default key."""
+    provider = None
+    if body.provider_id is not None:
+        provider = await _own_provider(db, user, body.provider_id)
+        if not body.model_name:
+            raise AppError(code="validation_error", message="Choose a model for this key.", status_code=400)
+    elif body.task_id is None:
+        raise AppError(
+            code="validation_error",
+            message="The default route needs a key; remove it to go back to the instance's providers.",
+            status_code=400,
+        )
 
     task_name: str | None = None
     if body.task_id is not None:
@@ -274,12 +286,12 @@ async def upsert_my_route(
     if existing is None:
         existing = UserAIRoute(user_id=user.id, task_id=body.task_id)
         db.add(existing)
-    existing.provider_id = provider.id
-    existing.model_name = body.model_name
+    existing.provider_id = provider.id if provider else None
+    existing.model_name = body.model_name if provider else None
     existing.config = body.config or {}
     await db.flush()
     await db.refresh(existing)
-    return _route_response(existing, task_name, provider.name)
+    return _route_response(existing, task_name, provider.name if provider else None)
 
 
 @router.delete("/routes/{route_id}", status_code=204)

@@ -7,6 +7,9 @@ const mockUseAIProviders = vi.fn(() => ({ data: [] as Record<string, unknown>[],
 const mockUseAITasks = vi.fn(() => ({ data: [] as Record<string, unknown>[] }));
 const mockUpdateProviderMutate = vi.fn();
 
+// The User keys tab has its own test file; here it only needs to be reachable.
+vi.mock("../UserKeysSection", () => ({ UserKeysSection: () => <div>User keys section</div> }));
+
 // Mock hooks
 vi.mock("@/hooks/useAI", () => ({
   useAIProviders: (...args: unknown[]) => mockUseAIProviders(...(args as [])),
@@ -49,7 +52,27 @@ vi.mock("@/hooks/useAI", () => ({
   useUpdatePrompt: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
   useResetPrompt: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
   usePromptHistory: vi.fn(() => ({ data: [] })),
-  useAICostBreakdown: vi.fn(() => ({ data: undefined, isLoading: false })),
+  useAICostBreakdown: vi.fn(() => ({
+    data: {
+      total_cost_30d: "57.94",
+      total_requests_30d: 48200,
+      total_tokens_30d: { input: 125000, output: 18000 },
+      instance_cost_30d: "38.10",
+      user_key_cost_30d: "19.84",
+      unpriced_requests_30d: 44000,
+      site_allowance_per_user: 150,
+      by_task: [],
+      by_model: [],
+      budgets: [],
+      by_caller: [
+        { caller_kind: "system", user_id: null, username: null, requests: 43906, tokens_input: 0, tokens_output: 0, instance_cost: "31.72", own_key_cost: "0", own_key_requests: 0, requests_today: 0 },
+        { caller_kind: "user", user_id: "u1", username: "kchen", requests: 902, tokens_input: 0, tokens_output: 0, instance_cost: "2.41", own_key_cost: "0", own_key_requests: 0, requests_today: 141 },
+        { caller_kind: "user", user_id: "u2", username: "mreyes", requests: 1384, tokens_input: 0, tokens_output: 0, instance_cost: "0.88", own_key_cost: "12.06", own_key_requests: 300, requests_today: 40 },
+      ],
+    },
+    isLoading: false,
+  })),
+  useUserKeys: vi.fn(() => ({ data: [] })),
   usePromptPreview: vi.fn(() => ({ mutate: vi.fn(), isPending: false, data: undefined })),
   useRunAIOnEntry: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
   usePromptBenchEntries: vi.fn(() => ({ data: [] })),
@@ -87,6 +110,33 @@ describe("AISettings", () => {
     expect(tabTexts).toContain("Providers");
     expect(tabTexts).toContain("Prompts");
     expect(tabTexts).toContain("Cost Dashboard");
+  });
+
+  it("has a User keys tab", () => {
+    render(<AISettings />, { wrapper: MemoryRouter });
+    expect(screen.getByRole("button", { name: "User keys" })).toBeInTheDocument();
+  });
+
+  it("opens the tab a settings deep link names", () => {
+    render(
+      <MemoryRouter initialEntries={["/settings?section=ai&tab=keys"]}>
+        <AISettings />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("User keys section")).toBeInTheDocument();
+  });
+
+  it("cost dashboard splits instance from user-key spend and lists who asked", async () => {
+    const user = userEvent.setup();
+    render(<AISettings />, { wrapper: MemoryRouter });
+    await user.click(screen.getByRole("button", { name: "Cost Dashboard" }));
+    expect(screen.getByText("$38.10")).toBeInTheDocument();
+    expect(screen.getByText("$19.84")).toBeInTheDocument();
+    expect(screen.getByText("Pipeline")).toBeInTheDocument();
+    expect(screen.getByText("mreyes")).toBeInTheDocument();
+    expect(screen.getByText("$12.06")).toBeInTheDocument();
+    // A person near the site allowance gets a warning.
+    expect(screen.getByText(/has used 141 of 150 instance requests today/)).toBeInTheDocument();
   });
 
   it("renders add provider button", () => {
@@ -132,7 +182,7 @@ describe("AISettings", () => {
     ).toBeDefined();
   });
 
-  it("renders providers when data available", () => {
+  it("renders providers when data available, leaving personal keys to My AI", () => {
     mockUseAIProviders.mockReturnValue({
       data: [
         {
@@ -142,6 +192,18 @@ describe("AISettings", () => {
           models: ["claude-sonnet-4-6"],
           is_active: true,
           config: {},
+          user_id: null,
+          created_at: "2026-01-01",
+          updated_at: "2026-01-01",
+        },
+        {
+          id: "2",
+          name: "My OpenRouter",
+          provider_type: "openai_compatible",
+          models: [],
+          is_active: true,
+          config: {},
+          user_id: "me",
           created_at: "2026-01-01",
           updated_at: "2026-01-01",
         },
@@ -152,6 +214,7 @@ describe("AISettings", () => {
     render(<AISettings />, { wrapper: MemoryRouter });
     expect(screen.getByText("Claude Production")).toBeDefined();
     expect(screen.getByText("claude")).toBeDefined();
+    expect(screen.queryByText("My OpenRouter")).toBeNull();
   });
 
   it("ollama provider Configure panel edits per-model overrides", async () => {

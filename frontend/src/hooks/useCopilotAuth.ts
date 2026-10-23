@@ -52,6 +52,15 @@ export interface CopilotConfig {
    * commands in the dock whose backing tool isn't currently enabled.
    */
   enabled_tools?: string[] | null;
+  /** Whose provider answers: a personal key ("user") or the instance's ("site"). */
+  source?: "site" | "user" | null;
+  model?: string | null;
+  /** False on a key without a tool loop (Claude API, openai_compatible). */
+  supports_tools?: boolean;
+  /** Set when the person has a key that can't answer and the instance's provider took over. */
+  fallback_reason?: string | null;
+  /** Set when the policy refuses the turn; the dock shows what to fix. */
+  refused?: { reason: string; message: string } | null;
 }
 
 /**

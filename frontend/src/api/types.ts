@@ -481,6 +481,10 @@ export interface AIProvider {
   supports_tools: boolean;
   paused_until: string | null;
   paused_reason: string | null;
+  /** null = the instance's provider; set = a personal key owned by that user. */
+  user_id: string | null;
+  /** Only on the admin's user-keys listing. */
+  owner_username?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -510,6 +514,10 @@ export interface AITask {
   output_schema: Record<string, unknown> | null;
   /** UI-set replacement; providers use override ?? default. */
   output_schema_override: Record<string, unknown> | null;
+  /** A person's own key may answer this task. */
+  allows_user_provider: boolean;
+  /** Pipeline tasks: the flag can't be turned on. */
+  user_provider_locked: boolean;
   created_at: string;
 }
 
@@ -555,7 +563,78 @@ export interface AIResult {
   tokens_output: number | null;
   cost_estimate: string | null;
   processing_time_ms: number | null;
+  /** Who asked and who answered. provider_name outlives the provider row. */
+  caller_kind: "user" | "system" | "automation" | "share" | null;
+  user_id: string | null;
+  /** Set when a personal key paid for this result. */
+  key_owner_id: string | null;
+  provider_name: string | null;
   created_at: string;
+}
+
+// --- Personal AI (Settings → My AI) ---
+
+export interface UserAIRoute {
+  id: string;
+  task_id: string | null;
+  task_name: string | null;
+  /** Both null on a per-task row = this task goes to the instance's provider by choice. */
+  provider_id: string | null;
+  provider_name: string | null;
+  model_name: string | null;
+  config: Record<string, unknown>;
+  updated_at: string;
+}
+
+export interface UserAIPolicy {
+  allow_user_ai_providers: boolean;
+  require_user_ai_provider: boolean;
+  provider_types: string[];
+  allow_private_endpoints: boolean;
+  default_monthly_usd: string;
+  daily_request_cap: number;
+  site_allowance_per_user: number;
+}
+
+export interface UserAIKeyUsage {
+  provider_id: string;
+  provider_name: string;
+  provider_type: string;
+  month_cost: string;
+  month_requests: number;
+}
+
+export interface UserAIUsage {
+  month_cost: string;
+  monthly_cap_usd: string;
+  requests_today: number;
+  daily_request_cap: number;
+  site_requests_today: number;
+  site_allowance_per_user: number;
+  month_resets_at: string;
+  by_key: UserAIKeyUsage[];
+}
+
+export interface UserAITaskRow {
+  task_id: string;
+  task_name: string;
+  display_name: string;
+  category: string | null;
+  requires_tools: boolean;
+  site_provider_name: string | null;
+  site_model_name: string | null;
+  route: UserAIRoute | null;
+  month_cost: string;
+}
+
+export interface UserAIOverview {
+  policy: UserAIPolicy;
+  fallback_to_site: boolean;
+  monthly_cap_usd: string | null;
+  usage: UserAIUsage;
+  tasks: UserAITaskRow[];
+  /** The default key route (task_id null), whether or not any task row still shows it. */
+  default_route: UserAIRoute | null;
 }
 
 // --- AI Conversations ---

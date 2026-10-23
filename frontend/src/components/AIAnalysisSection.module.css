@@ -177,3 +177,18 @@
 .hiddenLink:hover {
   color: var(--text-primary);
 }
+
+/* Whose provider a click runs on: coral = your key, grey = the instance. */
+.keyDot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  vertical-align: middle;
+}
+
+.keyDotMine {
+  background: var(--accent);
+}

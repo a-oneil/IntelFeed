@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { apiErrorInfo } from "@/api/errors";
 import type { AskAgentMessage } from "@/hooks/useAI";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -12,7 +13,10 @@ interface AskAgentPanelProps {
    * entry_qa endpoint. This panel only exists for that surface now; the
    * authenticated app routes all article Q&A through the global copilot.
    */
-  askFn?: (question: string, history: AskAgentMessage[]) => Promise<{ answer: string }>;
+  askFn?: (
+    question: string,
+    history: AskAgentMessage[],
+  ) => Promise<{ answer: string; remaining_today?: number | null }>;
 }
 
 /**
@@ -50,8 +54,9 @@ export function AskAgentPanel({ onClose, askFn }: AskAgentPanelProps) {
         next[next.length - 1] = { role: "assistant", content: result.answer };
         return next;
       });
+      if (typeof result.remaining_today === "number") setRemaining(result.remaining_today);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to get response";
+      const message = apiErrorInfo(err).message;
       setMessages((prev) => {
         const next = [...prev];
         next[next.length - 1] = { role: "assistant", content: `Error: ${message}` };
@@ -61,6 +66,10 @@ export function AskAgentPanel({ onClose, askFn }: AskAgentPanelProps) {
       setPending(false);
     }
   }, [input, pending, askFn, messages]);
+
+  // Questions left on this link today, from the last answer. The link has a
+  // daily budget of its own because it answers without a login.
+  const [remaining, setRemaining] = useState<number | null>(null);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -72,8 +81,15 @@ export function AskAgentPanel({ onClose, askFn }: AskAgentPanelProps) {
   return (
     <div className={styles.panel}>
       <div className={styles.header}>
-        <span className={styles.headerTitle}>Ask Agent</span>
+        <span className={styles.headerTitle}>
+          Ask Agent <span className={styles.headerNote}>instance AI</span>
+        </span>
         <div className={styles.headerActions}>
+          {remaining != null && (
+            <span className={styles.remaining}>
+              {remaining} {remaining === 1 ? "question" : "questions"} left on this link today
+            </span>
+          )}
           <button className={styles.closeBtn} onClick={onClose} title="Close">
             &times;
           </button>
@@ -82,7 +98,12 @@ export function AskAgentPanel({ onClose, askFn }: AskAgentPanelProps) {
 
       <div className={styles.messages}>
         {messages.length === 0 && (
-          <div className={styles.emptyHint}>Ask a question about this article...</div>
+          <div className={styles.emptyHint}>
+            Ask a question about this article...
+            <div className={styles.emptyNote}>
+              Answers on this page come from the IntelFeed instance's AI, not the person who shared it.
+            </div>
+          </div>
         )}
         {messages.map((msg, i) => {
           const isLast = i === messages.length - 1;

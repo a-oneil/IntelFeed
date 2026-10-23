@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { useAITasks, useRunAIOnEntry, useRunAIOnEntity, useAllTaskAssignments, useAIProviders } from "@/hooks/useAI";
+import { useAITasks, useRunAIOnEntry, useRunAIOnEntity, useAllTaskAssignments, useAIProviders, useMyAI } from "@/hooks/useAI";
 import { useAuthStore } from "@/stores/authStore";
 import type { AITask } from "@/api/types";
 import { estimateTask } from "@/utils/aiTaskEstimate";
+import { apiErrorInfo } from "@/api/errors";
 import styles from "./AIAnalysisSection.module.css";
 
 // Tasks that need a special UI instead of one-click run (Ask Agent chat lives
@@ -81,11 +82,15 @@ export function AIAnalysisSection({ entryId, entityType, entityId, tasks: tasksP
   const hookRunEntity = useRunAIOnEntity();
   const { data: assignments } = useAllTaskAssignments();
   const { data: providers } = useAIProviders();
+  // Which tasks a click would run on the person's own key, so the row says so
+  // before they click. Empty when the admin has personal keys off.
+  const signedIn = useAuthStore((s) => !!s.accessToken);
+  const { data: myAI } = useMyAI(signedIn && !runTaskFn);
   const qc = useQueryClient();
   // The customize link targets the admin-only Settings > AI section.
   const isAdmin = useAuthStore((s) => s.user?.role === "admin");
   const [localCompleted, setLocalCompleted] = useState<Set<string>>(new Set());
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [errors, setErrors] = useState<Record<string, { message: string; code: string | null }>>({});
   const [runningTask, setRunningTask] = useState<string | null>(null);
   // Which task's focus field is open, and its current text.
   const [focusOpen, setFocusOpen] = useState<string | null>(null);
@@ -138,17 +143,20 @@ export function AIAnalysisSection({ entryId, entityType, entityId, tasks: tasksP
       // Notify parent
       onTaskComplete?.(data);
     } catch (err) {
+      const info = apiErrorInfo(err);
       const msg = err instanceof Error ? err.message : "Task failed";
-      let errorText = msg;
-      try {
-        const parsed = JSON.parse(msg);
-        errorText = parsed.message || parsed.detail || msg;
-      } catch {
-        if (msg.includes("422")) {
-          errorText = "Not configured — assign a provider + model in Settings > AI";
+      let errorText = info.code ? info.message : msg;
+      if (!info.code) {
+        try {
+          const parsed = JSON.parse(msg);
+          errorText = parsed.message || parsed.detail || msg;
+        } catch {
+          if (msg.includes("422")) {
+            errorText = "Not configured — assign a provider + model in Settings > AI";
+          }
         }
       }
-      setErrors((prev) => ({ ...prev, [taskName]: errorText }));
+      setErrors((prev) => ({ ...prev, [taskName]: { message: errorText, code: info.code } }));
     } finally {
       setRunningTask(null);
     }
@@ -172,6 +180,15 @@ export function AIAnalysisSection({ entryId, entityType, entityId, tasks: tasksP
               const titleParts = [task.description || task.display_name];
               if (est.unassigned) titleParts.push("Not configured — assign a provider + model in Settings > AI");
               else if (est.label) titleParts.push(`Estimated ${est.label}`);
+              // Personal keys on: a dot says whose provider a click runs on. A
+              // task's own route wins (an opt-out row has no key); otherwise
+              // the default key, if there is one.
+              const myRow = myAI?.policy.allow_user_ai_providers
+                ? myAI.tasks.find((t) => t.task_name === task.name)
+                : undefined;
+              const onMyKey =
+                !!myRow && (myRow.route ? myRow.route.provider_id !== null : !!myAI?.default_route);
+              if (myRow && !est.unassigned) titleParts.push(onMyKey ? "Runs on your own key" : "Runs on the instance's provider");
               return (
                 <div key={task.id}>
                   <div className={`${styles.taskRow} ${isCompleted ? styles.taskRowDone : ""}`}>
@@ -188,8 +205,17 @@ export function AIAnalysisSection({ entryId, entityType, entityId, tasks: tasksP
                         {task.display_name}
                         {isCompleted && <span className={styles.check}> &#10003;</span>}
                       </span>
-                      {est.unassigned ? (
+                      {est.unassigned && !onMyKey ? (
                         <span className={styles.hintMuted}>not set</span>
+                      ) : myRow ? (
+                        <span className={styles.hint}>
+                          <span
+                            className={`${styles.keyDot} ${onMyKey ? styles.keyDotMine : ""}`}
+                            aria-label={onMyKey ? "your key" : "instance"}
+                          />
+                          {onMyKey ? "your key" : "instance"}
+                          {est.label && !est.unassigned ? ` · ${est.label}` : ""}
+                        </span>
                       ) : est.label ? (
                         <span className={styles.hint}>{est.label}</span>
                       ) : null}
@@ -223,7 +249,17 @@ export function AIAnalysisSection({ entryId, entityType, entityId, tasks: tasksP
                     />
                   )}
                   {errors[task.name] && (
-                    <div className={styles.error}>{errors[task.name]}</div>
+                    <div className={styles.error}>
+                      {errors[task.name].message}
+                      {errors[task.name].code === "user_ai_key_required" && (
+                        <>
+                          {" "}
+                          <Link to="/settings?section=myai" className={styles.hiddenLink}>
+                            Add a key
+                          </Link>
+                        </>
+                      )}
+                    </div>
                   )}
                 </div>
               );

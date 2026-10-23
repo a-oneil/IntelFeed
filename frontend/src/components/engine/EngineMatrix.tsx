@@ -358,7 +358,7 @@ export function EngineMatrix({
         onBrowse(dest.browse);
         break;
       case "settings":
-        navigate(`/settings?section=${dest.section}`);
+        navigate(`/settings?section=${dest.section}${dest.tab ? `&tab=${dest.tab}` : ""}`);
         break;
     }
   };

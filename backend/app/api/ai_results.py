@@ -343,6 +343,7 @@ async def get_cost_breakdown(
                 func.coalesce(func.sum(AIResult.tokens_output), 0),
                 func.coalesce(func.sum(AIResult.cost_estimate).filter(on_instance), 0),
                 func.coalesce(func.sum(AIResult.cost_estimate).filter(~on_instance), 0),
+                func.count(AIResult.id).filter(~on_instance),
                 func.count(AIResult.id).filter(on_instance, AIResult.created_at >= today_start),
             )
             .outerjoin(User, User.id == billed_user)
@@ -362,9 +363,10 @@ async def get_cost_breakdown(
             tokens_output=tout,
             instance_cost=Decimal(str(inst)),
             own_key_cost=Decimal(str(own)),
+            own_key_requests=own_reqs,
             requests_today=today,
         )
-        for kind, uid, username, reqs, tin, tout, inst, own, today in by_caller_rows
+        for kind, uid, username, reqs, tin, tout, inst, own, own_reqs, today in by_caller_rows
     ]
     from app.services.system_settings import get_setting
 

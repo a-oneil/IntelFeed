@@ -30,10 +30,12 @@ class UserAIRoute(Base):
     task_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("ai_tasks.id", ondelete="CASCADE"), nullable=True
     )
-    provider_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("ai_providers.id", ondelete="CASCADE"), nullable=False
+    # NULL on a per-task row = "use the instance's provider for this task":
+    # the opt-out from a default key. Never NULL on the default row itself.
+    provider_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ai_providers.id", ondelete="CASCADE"), nullable=True
     )
-    model_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    model_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     config: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

@@ -530,7 +530,9 @@ async def _user_route(db: AsyncSession, user_id: uuid.UUID, task_id: uuid.UUID) 
     )
     for route in rows:
         if route.task_id == task_id:
-            return route
+            # A per-task row with no key is the person's opt-out: the
+            # instance answers this task, and the default key is not consulted.
+            return None if route.provider_id is None else route
     return rows[0] if rows else None
 
 

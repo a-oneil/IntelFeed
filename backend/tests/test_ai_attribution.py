@@ -370,6 +370,7 @@ async def test_cost_breakdown_rolls_up_by_caller(
     assert me["requests"] == 2
     assert Decimal(me["instance_cost"]) == Decimal("0.10")
     assert Decimal(me["own_key_cost"]) == Decimal("0.30")
+    assert me["own_key_requests"] == 1
     # Only the instance-key call counts toward today's allowance.
     assert me["requests_today"] == 1
     assert body["site_allowance_per_user"] == 150

@@ -561,3 +561,75 @@
   border-radius: var(--r-sm);
   padding: 0.05rem 0.3rem;
 }
+
+/* ─── Cost dashboard: tiles' second line and the by-user table ───────── */
+
+.costSub {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+.byUserTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.byUserTable th {
+  text-align: left;
+  color: var(--text-muted);
+  font-weight: 500;
+  padding: 4px 8px;
+}
+
+.byUserTable td {
+  padding: 6px 8px;
+  border-top: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.muted {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+
+.allowance {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.meter {
+  display: inline-flex;
+  width: 120px;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: var(--bg-tertiary);
+  overflow: hidden;
+}
+
+.meter i {
+  display: block;
+  height: 100%;
+}
+
+.meterLabel {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.allowanceNote {
+  margin-top: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}

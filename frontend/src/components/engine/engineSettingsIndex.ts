@@ -8,7 +8,7 @@ export type EngineDest =
   | { kind: "stage"; stage: string }
   | { kind: "view"; view: MatrixView }
   | { kind: "browse"; browse: BrowseView }
-  | { kind: "settings"; section: string };
+  | { kind: "settings"; section: string; tab?: string };
 
 export interface SettingHit {
   key: string;
@@ -48,9 +48,32 @@ const GROUP_DEST: Record<string, EngineDest> = {
   public_rss: { kind: "settings", section: "feeds" },
 };
 
+/** The `ai` group's people-facing keys: the personal-key policy, the
+ *  per-person allowance and the share-link limit. They render on the User keys
+ *  tab of AI Configuration and are excluded from the Analyze stage panel. */
+export const USER_AI_SETTING_KEYS = [
+  "allow_user_ai_providers",
+  "require_user_ai_provider",
+  "user_ai_provider_types",
+  "user_ai_allow_private_endpoints",
+  "user_ai_default_monthly_usd",
+  "user_ai_daily_request_cap",
+  "site_ai_user_daily_requests",
+  "share_ai_daily_requests",
+] as const;
+
 /** Key-level exceptions to GROUP_DEST: the observables publish knobs render
- *  on the Publishing browse screen, not the stage panel. */
+ *  on the Publishing browse screen, not the stage panel; the personal-key
+ *  settings on the User keys tab. */
 const KEY_DEST: Record<string, EngineDest> = {
+  allow_user_ai_providers: { kind: "settings", section: "ai", tab: "keys" },
+  require_user_ai_provider: { kind: "settings", section: "ai", tab: "keys" },
+  user_ai_provider_types: { kind: "settings", section: "ai", tab: "keys" },
+  user_ai_allow_private_endpoints: { kind: "settings", section: "ai", tab: "keys" },
+  user_ai_default_monthly_usd: { kind: "settings", section: "ai", tab: "keys" },
+  user_ai_daily_request_cap: { kind: "settings", section: "ai", tab: "keys" },
+  site_ai_user_daily_requests: { kind: "settings", section: "ai", tab: "keys" },
+  share_ai_daily_requests: { kind: "settings", section: "ai", tab: "keys" },
   observables_publish_enabled: { kind: "browse", browse: "publishing" },
   observables_publish_token: { kind: "browse", browse: "publishing" },
   observables_publish_min_confidence: { kind: "browse", browse: "publishing" },

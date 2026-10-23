@@ -10,6 +10,8 @@ import type {
   AIPromptTemplate,
   AICostSummary,
   AIResult,
+  UserAIOverview,
+  UserAIRoute,
   AIConversation,
   AIConversationScope,
   AIConversationSummary,
@@ -35,17 +37,42 @@ export function useAIProviders() {
 export function useCreateAIProvider() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (body: {
+    mutationFn: async ({
+      test,
+      ...body
+    }: {
       name: string;
       provider_type: string;
       base_url?: string;
       api_key?: string;
       config?: Record<string, unknown>;
+      /** A personal key, owned by the caller (implied for non-admins). */
+      personal?: boolean;
+      /** Contact the provider first; nothing is saved unless it answers. */
+      test?: boolean;
     }) => {
-      const { data } = await api.post<AIProvider>("/ai/providers", body);
+      const { data } = await api.post<AIProvider>("/ai/providers", body, {
+        params: test ? { test: true } : undefined,
+        timeout: 60000,
+      });
       return data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["ai-providers"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["ai-providers"] });
+      qc.invalidateQueries({ queryKey: ["my-ai"] });
+    },
+  });
+}
+
+/** Every personal key on the instance with its owner (admin only). */
+export function useUserKeys(enabled = true) {
+  return useQuery({
+    queryKey: ["ai-providers", "user-keys"],
+    queryFn: async () => {
+      const { data } = await api.get<AIProvider[]>("/ai/providers/user-keys");
+      return data;
+    },
+    enabled,
   });
 }
 
@@ -66,7 +93,12 @@ export function useUpdateAIProvider() {
       const { data } = await api.put<AIProvider>(`/ai/providers/${id}`, body);
       return data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["ai-providers"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["ai-providers"] });
+      // A personal key's name or state shows on My AI and in the copilot header.
+      qc.invalidateQueries({ queryKey: ["my-ai"] });
+      qc.invalidateQueries({ queryKey: ["copilot-config"] });
+    },
   });
 }
 
@@ -76,7 +108,71 @@ export function useDeleteAIProvider() {
     mutationFn: async (id: string) => {
       await api.delete(`/ai/providers/${id}`);
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["ai-providers"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["ai-providers"] });
+      qc.invalidateQueries({ queryKey: ["my-ai"] });
+      qc.invalidateQueries({ queryKey: ["copilot-config"] });
+    },
+  });
+}
+
+// --- Personal AI (Settings → My AI) ---
+
+export function useMyAI(enabled = true) {
+  return useQuery({
+    queryKey: ["my-ai"],
+    queryFn: async () => {
+      const { data } = await api.get<UserAIOverview>("/ai/me/overview");
+      return data;
+    },
+    enabled,
+    // Read on every reader AI panel for the key dots; the mutations that
+    // change it invalidate it, so it can stay fresh for a while.
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useUpdateMyAIPreferences() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: { fallback_to_site?: boolean; monthly_cap_usd?: string | null }) => {
+      const { data } = await api.patch<UserAIOverview>("/ai/me/preferences", body);
+      return data;
+    },
+    onSuccess: (data) => qc.setQueryData(["my-ai"], data),
+  });
+}
+
+export function useUpsertMyRoute() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: {
+      task_id: string | null;
+      /** null with a task_id = send that task to the instance's provider despite a default key. */
+      provider_id: string | null;
+      model_name?: string;
+      config?: Record<string, unknown>;
+    }) => {
+      const { data } = await api.put<UserAIRoute>("/ai/me/routes", body);
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["my-ai"] });
+      qc.invalidateQueries({ queryKey: ["copilot-config"] });
+    },
+  });
+}
+
+export function useDeleteMyRoute() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (routeId: string) => {
+      await api.delete(`/ai/me/routes/${routeId}`);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["my-ai"] });
+      qc.invalidateQueries({ queryKey: ["copilot-config"] });
+    },
   });
 }
 
@@ -199,12 +295,15 @@ export function useUpdateAITask() {
       output_schema?: Record<string, unknown> | null;
       /** Explicit null clears the override; omit to leave untouched. */
       output_schema_override?: Record<string, unknown> | null;
+      /** Open or close the task to personal keys (admin; refused on pipeline tasks). */
+      allows_user_provider?: boolean;
     }) => {
       const { data } = await api.patch<AITask>(`/ai/tasks/${taskId}`, body);
       return data;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["ai-tasks"] });
+      qc.invalidateQueries({ queryKey: ["my-ai"] });
     },
   });
 }
@@ -562,6 +661,17 @@ export interface CopilotConfirmResponse {
   message?: string;
 }
 
+/** The reply footer: which provider answered a copilot turn, whose key, and what it cost. */
+export interface CopilotAnsweredBy {
+  provider_name: string | null;
+  provider_type: string | null;
+  source: "site" | "user";
+  model: string | null;
+  cost_usd: number | null;
+  fallback_reason: string | null;
+  supports_tools: boolean;
+}
+
 export interface StreamCopilotOptions {
   question: string;
   /** Existing conversation id to continue, or null to let the backend mint one. */
@@ -576,8 +686,8 @@ export interface StreamCopilotOptions {
   onToolResult?: (result: { id: string; status: "success" | "error"; summary: string }) => void;
   /** The agent proposed a write requiring confirmation before it commits. */
   onConfirmRequest?: (req: CopilotConfirmRequest) => void;
-  /** Terminal success — adopt/persist the returned conversation id. */
-  onDone: (conversationId: string | null) => void;
+  /** Terminal success — adopt/persist the returned conversation id, and who answered. */
+  onDone: (conversationId: string | null, answeredBy?: CopilotAnsweredBy) => void;
   /** Terminal failure. */
   onError: (message: string) => void;
 }
@@ -696,6 +806,9 @@ export async function streamCopilotChat(
               doneEmitted = true;
               options.onDone(
                 typeof data.conversation_id === "string" ? data.conversation_id : null,
+                data.answered_by && typeof data.answered_by === "object"
+                  ? (data.answered_by as CopilotAnsweredBy)
+                  : undefined,
               );
               return;
             case "error":
@@ -860,6 +973,8 @@ export interface AICallerCostRow {
   tokens_output: number;
   instance_cost: string;
   own_key_cost: string;
+  /** Calls on a personal key; counts people on unpriced keys too. */
+  own_key_requests: number;
   requests_today: number;
 }
 export interface AICostBreakdown {

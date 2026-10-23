@@ -11,6 +11,7 @@ import { useExtractionStatus } from "@/hooks/useEngine";
 import { DenylistPanel } from "./DenylistPanel";
 
 import styles from "./AnalyzeStageConfig.module.css";
+import { USER_AI_SETTING_KEYS } from "./engineSettingsIndex";
 
 /** Analyze stage panel: one-pass AI analysis status + model + budget/gate
  *  settings, plus the entity-creation guardrails its output passes through.
@@ -122,11 +123,17 @@ export function AnalyzeStageConfig() {
         </div>
       )}
       {/* The two pattern-matching knobs in the extraction group (ICS keywords,
-          EPSS tier) stay on the extract stage panel. */}
+          EPSS tier) stay on the extract stage panel. The personal-key policy,
+          the per-person allowance and the share-link limit are the User keys
+          tab's (AI Configuration): they govern people, not this stage. */}
       <SystemSettings
         filterGroups={["ai", "extraction"]}
         flat
-        excludeKeys={["attack_ics_context_keywords", "cve_epss_high_risk_threshold"]}
+        excludeKeys={[
+          "attack_ics_context_keywords",
+          "cve_epss_high_risk_threshold",
+          ...USER_AI_SETTING_KEYS,
+        ]}
         renderAfterKey={{
           ai_use_batches: () =>
             assignedProvider && assignedProvider.provider_type !== "claude" ? (
