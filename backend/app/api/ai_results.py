@@ -5,12 +5,12 @@ from datetime import timedelta
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Path
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.core.exceptions import AppError
-from app.core.security import get_current_user
+from app.core.security import get_admin_user, get_current_user
 from app.database import get_db
 from app.models.ai_provider import AIProvider
 from app.models.ai_result import AIResult
@@ -18,6 +18,7 @@ from app.models.ai_task import AITask
 from app.models.ai_task_assignment import AITaskAssignment
 from app.models.user import User
 from app.schemas.ai import (
+    AICallerCostRow,
     AICostBreakdown,
     AICostBreakdownRow,
     AIRunEntityRequest,
@@ -227,12 +228,15 @@ async def run_ai_on_entity(
 
 @router.get("/ai/cost-breakdown", response_model=AICostBreakdown)
 async def get_cost_breakdown(
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ) -> AICostBreakdown:
-    """Trailing-30-day AI spend, broken down by task and by provider/model,
-    plus per-task-assignment budget vs. current spend for over/near-budget
-    flagging in the Cost Dashboard.
+    """Trailing-30-day AI spend, broken down by task, by provider/model and by
+    who asked, plus per-task-assignment budget vs. current spend for
+    over/near-budget flagging in the Cost Dashboard.
+
+    Admin-only: this is the instance-wide bill, including what every other
+    user ran. A user's own figures belong on their own settings page.
 
     Budgets live in AITaskAssignment.config["max_budget_usd"] (the same key the
     claude_code provider reads); a null/absent value means "no budget set".
@@ -240,6 +244,7 @@ async def get_cost_breakdown(
     thirty_days_ago = func.now() - timedelta(days=30)
 
     # --- Totals ---
+    on_instance = AIResult.key_owner_id.is_(None)
     totals = (
         await db.execute(
             select(
@@ -247,6 +252,9 @@ async def get_cost_breakdown(
                 func.count(AIResult.id),
                 func.coalesce(func.sum(AIResult.tokens_input), 0),
                 func.coalesce(func.sum(AIResult.tokens_output), 0),
+                func.coalesce(func.sum(AIResult.cost_estimate).filter(on_instance), 0),
+                func.coalesce(func.sum(AIResult.cost_estimate).filter(~on_instance), 0),
+                func.count(AIResult.id).filter(func.coalesce(AIResult.cost_estimate, 0) == 0),
             ).where(AIResult.created_at >= thirty_days_ago)
         )
     ).first()
@@ -310,6 +318,45 @@ async def get_cost_breakdown(
         for model, reqs, tin, tout, cost in by_model_rows
     ]
 
+    # --- By caller ---
+    # Pipeline, automation and share rows carry no person to bill (automation
+    # and share do record a user_id, but as provenance, not as the payer), so
+    # they fold into one row per kind. People get a row each.
+    kind_label = func.coalesce(AIResult.caller_kind, "unattributed")
+    billed_user = case((AIResult.caller_kind == "user", AIResult.user_id), else_=None)
+    by_caller_rows = (
+        await db.execute(
+            select(
+                kind_label,
+                billed_user,
+                User.username,
+                func.count(AIResult.id),
+                func.coalesce(func.sum(AIResult.tokens_input), 0),
+                func.coalesce(func.sum(AIResult.tokens_output), 0),
+                func.coalesce(func.sum(AIResult.cost_estimate).filter(on_instance), 0),
+                func.coalesce(func.sum(AIResult.cost_estimate).filter(~on_instance), 0),
+            )
+            .outerjoin(User, User.id == billed_user)
+            .where(AIResult.created_at >= thirty_days_ago)
+            .group_by(kind_label, billed_user, User.username)
+            .order_by(func.coalesce(func.sum(AIResult.cost_estimate), 0).desc(), func.count(AIResult.id).desc())
+        )
+    ).all()
+
+    by_caller = [
+        AICallerCostRow(
+            caller_kind=kind,
+            user_id=uid,
+            username=username,
+            requests=reqs,
+            tokens_input=tin,
+            tokens_output=tout,
+            instance_cost=Decimal(str(inst)),
+            own_key_cost=Decimal(str(own)),
+        )
+        for kind, uid, username, reqs, tin, tout, inst, own in by_caller_rows
+    ]
+
     # --- Per-task budgets vs. spend ---
     # Spend per task_id in the window, keyed for a cheap in-memory join.
     spend_rows = (
@@ -371,8 +418,12 @@ async def get_cost_breakdown(
         total_cost_30d=Decimal(str(totals[0])),
         total_requests_30d=totals[1],
         total_tokens_30d={"input": totals[2], "output": totals[3]},
+        instance_cost_30d=Decimal(str(totals[4])),
+        user_key_cost_30d=Decimal(str(totals[5])),
+        unpriced_requests_30d=totals[6],
         by_task=by_task,
         by_model=by_model,
+        by_caller=by_caller,
         budgets=budgets,
     )
 

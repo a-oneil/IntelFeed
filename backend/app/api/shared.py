@@ -773,6 +773,7 @@ async def run_shared_ai_task(
     db: AsyncSession = Depends(get_db),
 ):
     """Run an AI task on a shared entry. Each task can only be executed once per article."""
+    from app.ai.caller import Caller
     from app.ai.engine import run_task
 
     # Validate share token
@@ -832,7 +833,8 @@ async def run_shared_ai_task(
         "published_at": entry.published_at.isoformat() if entry.published_at else "",
     }
 
-    # Run the task using the share creator's user_id
+    # The sharer is recorded as the attributed user, but the caller is the
+    # anonymous link: share traffic is pipeline spend, never a person's.
     parsed = await run_task(
         db=db,
         user_id=share.created_by,
@@ -841,6 +843,7 @@ async def run_shared_ai_task(
         entry_id=entry_id,
         target_type="entry",
         target_id=entry_id,
+        caller=Caller.share(share.created_by),
     )
     if parsed is None:
         raise AppError(
@@ -902,7 +905,14 @@ async def shared_ask_agent(
     db: AsyncSession = Depends(get_db),
 ):
     """Ask the AI agent a question about a shared entry."""
-    from app.ai.engine import _get_provider_instance, get_active_prompt, get_task_assignment, render_prompt
+    from app.ai.caller import Caller
+    from app.ai.engine import (
+        _get_provider_instance,
+        get_active_prompt,
+        get_task_assignment,
+        record_direct_result,
+        render_prompt,
+    )
 
     # Validate share token
     result = await db.execute(select(SharedEntry).where(SharedEntry.token == token, SharedEntry.is_active.is_(True)))
@@ -949,6 +959,16 @@ async def shared_ask_agent(
     temperature = config.get("temperature", 0.3)
     max_tokens = config.get("max_tokens", 2048)
 
+    caller = Caller.share(share.created_by)
+    ledger = dict(
+        caller=caller,
+        task=task,
+        provider_model=provider_model,
+        model_name=assignment.model_name,
+        prompt_used=rendered_user,
+        target_type="share_qa",
+        target_id=share.id,
+    )
     try:
         response = await provider.complete(
             prompt=rendered_user,
@@ -958,8 +978,13 @@ async def shared_ask_agent(
             model=assignment.model_name,
         )
     except Exception as e:
+        # Commit before raising: the session dependency rolls back on any
+        # exception, and a failed call still has to count as a request.
+        await record_direct_result(db, response=None, error=str(e), **ledger)
+        await db.commit()
         raise AppError(code="ai_error", message=f"AI provider error: {e}", status_code=502)
 
+    await record_direct_result(db, response=response, **ledger)
     return {"answer": response.content, "model": response.model}
 
 

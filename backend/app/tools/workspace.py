@@ -380,7 +380,7 @@ async def _set_detection_rule_status(db: AsyncSession, user_id: uuid.UUID, rule_
 async def _convert_detection_rule(
     db: AsyncSession, user_id: uuid.UUID, rule_id: str, target_format: str, save: bool = False
 ) -> dict:
-    from app.ai.engine import _estimate_cost, _get_provider_instance, get_task_assignment
+    from app.ai.engine import _get_provider_instance, derive_caller, get_task_assignment, record_direct_result
     from app.api.intelligence import RULE_TYPE_LABELS
 
     rule = await _get_rule(db, rule_id)
@@ -424,6 +424,17 @@ Return ONLY the converted rule content — no explanation, no markdown fences, j
 
     config = {**provider_model.config, **assignment.config}
     system_prompt = "You are an expert detection engineer. Convert detection rules between formats with perfect syntax."
+    # Tools run as whoever invoked them, which for an agentic maintenance
+    # task is the service account — derive rather than assume a person.
+    ledger = dict(
+        caller=await derive_caller(db, user_id),
+        task=task,
+        provider_model=provider_model,
+        model_name=assignment.model_name,
+        prompt_used=prompt,
+        target_type="detection_rule",
+        target_id=rule.id,
+    )
     try:
         response = await provider.complete(
             prompt=prompt,
@@ -433,6 +444,7 @@ Return ONLY the converted rule content — no explanation, no markdown fences, j
             model=assignment.model_name,
         )
     except Exception as e:  # provider/network failure is user-visible, not a crash
+        await record_direct_result(db, response=None, error=str(e), **ledger)
         return {"error": f"AI conversion failed: {e}"}
 
     converted_content = response.content.strip()
@@ -442,7 +454,7 @@ Return ONLY the converted rule content — no explanation, no markdown fences, j
             lines = lines[:-1]
         converted_content = "\n".join(lines)
 
-    cost = _estimate_cost(response.model, response.tokens_input, response.tokens_output)
+    cost = (await record_direct_result(db, response=response, content=converted_content, **ledger)).cost_estimate
     result = {
         "converted_content": converted_content,
         "source_type": rule.rule_type,

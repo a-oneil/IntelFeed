@@ -9,6 +9,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.caller import Caller
 from app.ai.engine import run_task
 from app.models.ttp import TTP, EntryTTP
 
@@ -86,6 +87,7 @@ async def extract_ttps(
     entry_id: uuid.UUID,
     entry_data: dict,
     use_ai: bool = True,
+    caller: Caller | None = None,
 ) -> tuple[list[dict], str, str | None]:
     """Extract TTPs — always runs regex, optionally runs AI, merges results.
 
@@ -109,6 +111,7 @@ async def extract_ttps(
             task_name="ttp_mapping",
             variables={"entry": entry_data, "telemetry_sources": telemetry_sources},
             entry_id=entry_id,
+            caller=caller,
         )
         if result is None:
             ai_status = "ai_not_configured"

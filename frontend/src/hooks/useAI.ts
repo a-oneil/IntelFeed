@@ -851,12 +851,26 @@ export interface AITaskBudgetRow {
   requests_30d: number;
   percent_of_budget: number | null;
 }
+export interface AICallerCostRow {
+  caller_kind: "user" | "system" | "automation" | "share" | "unattributed";
+  user_id: string | null;
+  username: string | null;
+  requests: number;
+  tokens_input: number;
+  tokens_output: number;
+  instance_cost: string;
+  own_key_cost: string;
+}
 export interface AICostBreakdown {
   total_cost_30d: string;
   total_requests_30d: number;
   total_tokens_30d: Record<string, number>;
+  instance_cost_30d: string;
+  user_key_cost_30d: string;
+  unpriced_requests_30d: number;
   by_task: AICostBreakdownRow[];
   by_model: AICostBreakdownRow[];
+  by_caller: AICallerCostRow[];
   budgets: AITaskBudgetRow[];
 }
 export interface AIPromptPreviewResponse {

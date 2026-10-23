@@ -31,6 +31,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import entity_types
+from app.ai.caller import Caller
 
 logger = logging.getLogger(__name__)
 
@@ -404,6 +405,7 @@ async def ensure_threat_brief(
         target_id=target_id,
         force=True,
         timeout_seconds=timeout_seconds,
+        caller=Caller.system(),
     )
     if not result or not isinstance(result.get("brief"), str) or not result["brief"].strip():
         return {"status": "skipped", "reason": "no_result"}

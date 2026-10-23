@@ -28,7 +28,6 @@ from sqlalchemy.orm.attributes import flag_modified
 from app import entity_types
 from app.config import settings
 from app.core.exceptions import AppError
-from app.core.metrics import AI_COST_TOTAL, AI_REQUESTS_TOTAL, AI_TOKENS_TOTAL
 from app.core.security import get_current_user
 from app.core.utils import now_iso
 from app.database import get_db
@@ -518,8 +517,11 @@ async def copilot_stream(
     """
     from sse_starlette.sse import EventSourceResponse
 
+    from app.ai.caller import Caller
     from app.ai.engine import (
+        _count_ai_call,
         _get_provider_instance,
+        attribution_fields,
         get_active_prompt,
         get_task_assignment,
         render_prompt,
@@ -815,13 +817,11 @@ async def copilot_stream(
                         tokens_output=tokens_output,
                         cost_estimate=cost,
                         processing_time_ms=int((time.monotonic() - turn_started) * 1000),
+                        **attribution_fields(Caller.user(user.id), provider_model),
                     )
                 )
                 await db.commit()
-                AI_REQUESTS_TOTAL.labels(provider=provider_model.provider_type, task=task.name).inc()
-                AI_TOKENS_TOTAL.labels(provider=provider_model.provider_type, direction="input").inc(tokens_input)
-                AI_TOKENS_TOTAL.labels(provider=provider_model.provider_type, direction="output").inc(tokens_output)
-                AI_COST_TOTAL.labels(provider=provider_model.provider_type).inc(float(cost))
+                _count_ai_call(provider_model.provider_type, task.name, tokens_input, tokens_output, cost)
             except Exception as e:  # usage accounting must never break the stream
                 logger.warning("copilot failed to record ai_result for conversation %s: %s", conversation_id, e)
                 await db.rollback()

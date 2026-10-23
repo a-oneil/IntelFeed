@@ -28,6 +28,7 @@ import httpx
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.caller import Caller, caller_scope
 from app.automation.variables import BATCH_ENTRY_FIELDS, PER_ENTRY_FIELDS
 from app.models.entry import Entry
 from app.models.entry_state import UserEntryState
@@ -228,6 +229,23 @@ async def execute_action(
     user_id: uuid.UUID,
     context: dict | None = None,
 ) -> dict:
+    """Execute a single automation action against an entry, as automation.
+
+    The rule's author is ``user_id``, but nothing in here is the author
+    clicking: every AI call beneath this frame defaults to an automation
+    caller, so a new action can't bill a personal key by omission.
+    """
+    with caller_scope(Caller.automation(user_id)):
+        return await _execute_action(db, entry, action, user_id, context)
+
+
+async def _execute_action(
+    db: AsyncSession,
+    entry: Entry,
+    action: dict,
+    user_id: uuid.UUID,
+    context: dict | None = None,
+) -> dict:
     """Execute a single automation action against an entry.
 
     Args:
@@ -329,6 +347,17 @@ PER_ENTRY_ACTIONS = {
 
 
 async def execute_actions_batch(
+    db: AsyncSession,
+    entries: list[Entry],
+    actions: list[dict],
+    user_id: uuid.UUID,
+) -> list[dict]:
+    """Execute actions in batch mode for scheduled/manual runs, as automation."""
+    with caller_scope(Caller.automation(user_id)):
+        return await _execute_actions_batch(db, entries, actions, user_id)
+
+
+async def _execute_actions_batch(
     db: AsyncSession,
     entries: list[Entry],
     actions: list[dict],
@@ -449,7 +478,14 @@ async def _action_run_ai_task(db: AsyncSession, entry: Entry, config: dict, user
     }
     variables = {"entry": {f: entry_values[f] for f in PER_ENTRY_FIELDS}}
 
-    result = await run_task(db=db, user_id=user_id, task_name=task_name, variables=variables, entry_id=entry.id)
+    result = await run_task(
+        db=db,
+        user_id=user_id,
+        task_name=task_name,
+        variables=variables,
+        entry_id=entry.id,
+        caller=Caller.automation(user_id),
+    )
 
     if result is None:
         return {"status": "skipped", "message": f"AI task '{task_name}' not configured for user"}
@@ -542,6 +578,7 @@ async def _action_run_ai_task_batch(
         task_name=task_name,
         variables=variables,
         entry_id=entries[0].id,
+        caller=Caller.automation(user_id),
     )
 
     if result is None:
@@ -1538,7 +1575,9 @@ async def _action_extract_ttps(
     use_ai = config.get("use_ai", True)
     entry_data = _entry_to_dict(entry)
 
-    ttp_results, status, err = await extract_ttps(db, user_id, entry.id, entry_data, use_ai=use_ai)
+    ttp_results, status, err = await extract_ttps(
+        db, user_id, entry.id, entry_data, use_ai=use_ai, caller=Caller.automation(user_id)
+    )
     if status != "success":
         return {"status": "error", "message": err or f"TTP extraction {status}"}
 
@@ -1591,7 +1630,9 @@ async def _action_extract_threat_actors(
     from app.intelligence.enrichment import extract_threat_actors
 
     entry_data = _entry_to_dict(entry)
-    items, status, err = await extract_threat_actors(db, user_id, entry.id, entry_data)
+    items, status, err = await extract_threat_actors(
+        db, user_id, entry.id, entry_data, caller=Caller.automation(user_id)
+    )
 
     if status != "success":
         return {"status": "error", "message": err or f"Threat actor extraction {status}"}
@@ -1622,7 +1663,7 @@ async def _action_extract_malware(
     from app.intelligence.enrichment import extract_malware
 
     entry_data = _entry_to_dict(entry)
-    items, status, err = await extract_malware(db, user_id, entry.id, entry_data)
+    items, status, err = await extract_malware(db, user_id, entry.id, entry_data, caller=Caller.automation(user_id))
 
     if status != "success":
         return {"status": "error", "message": err or f"Malware extraction {status}"}
@@ -1683,7 +1724,9 @@ async def _action_generate_detection_rules(
     if not ttps_data:
         return {"status": "skipped", "message": "No TTPs available for rule generation"}
 
-    rules = await generate_detection_rules(db, user_id, entry.id, entry_data, ttps_data, rule_types)
+    rules = await generate_detection_rules(
+        db, user_id, entry.id, entry_data, ttps_data, rule_types, caller=Caller.automation(user_id)
+    )
     await db.flush()
 
     context.setdefault("extraction_results", {})["detection_rules"] = [

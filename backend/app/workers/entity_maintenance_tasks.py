@@ -32,6 +32,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.caller import Caller
 from app.ai.engine import run_task
 from app.config import settings
 from app.core.metrics import CELERY_TASK_DURATION_SECONDS, CELERY_TASKS_TOTAL
@@ -284,6 +285,7 @@ async def _refresh_actor_async(actor_id: uuid.UUID) -> dict:
                 target_type="threat_actor",
                 target_id=actor.id,
                 force=True,
+                caller=Caller.system(system_user_id),
             )
         except Exception as e:
             logger.exception("actor_profile_refresh run_task failed: %s", e)
@@ -680,7 +682,9 @@ async def _backfill_assessment_async(entity_type: str, entity_id: uuid.UUID, ref
         # writing a description between kickoff and execution is never clobbered.
         # A refresh is the deliberate exception: the candidate query already
         # established that the text there is this writer's own, now stale.
-        return await generate_entity_assessment(db, system_user_id, entity_type, entity_id, only_if_empty=not refresh)
+        return await generate_entity_assessment(
+            db, system_user_id, entity_type, entity_id, only_if_empty=not refresh, caller=Caller.system(system_user_id)
+        )
 
 
 # ============================================================
@@ -834,6 +838,7 @@ async def _process_name_normalization_batch_async(entity_type: str, batch: list[
                 target_type="name_normalization_batch",
                 target_id=synthetic_target,
                 force=True,
+                caller=Caller.system(system_user_id),
             )
         except Exception as e:  # provider quota / transient
             from app.ai.providers.claude_code_provider import QuotaExhaustedError
@@ -1097,6 +1102,7 @@ async def _ai_enrich_gap_batch_async(entity_type: str, field: str, batch: list[d
                 target_type="enrichment_gap_batch",
                 target_id=synthetic_target,
                 force=True,
+                caller=Caller.system(system_user_id),
             )
         except Exception as e:  # provider quota / transient
             from app.ai.providers.claude_code_provider import QuotaExhaustedError

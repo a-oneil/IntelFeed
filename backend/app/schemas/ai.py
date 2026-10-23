@@ -395,10 +395,37 @@ class AITaskBudgetRow(BaseModel):
     percent_of_budget: float | None = None
 
 
+class AICallerCostRow(BaseModel):
+    """Spend over the trailing 30 days for one principal.
+
+    One row per person (``caller_kind == "user"``), plus one each for the
+    pipeline, automation rules and share links, which never bill a person.
+    Rows written before attribution existed are one ``unattributed`` row.
+    """
+
+    caller_kind: str  # user | system | automation | share | unattributed
+    user_id: uuid.UUID | None = None
+    username: str | None = None
+    requests: int
+    tokens_input: int
+    tokens_output: int
+    # Spend on the instance's own providers (key_owner_id IS NULL) — what the
+    # operator pays — versus on a personal key, which the operator does not.
+    instance_cost: Decimal
+    own_key_cost: Decimal
+
+
 class AICostBreakdown(BaseModel):
     total_cost_30d: Decimal
     total_requests_30d: int
     total_tokens_30d: dict[str, int]
+    # The headline split: the operator's bill versus spend on users' own keys.
+    instance_cost_30d: Decimal = Decimal("0")
+    user_key_cost_30d: Decimal = Decimal("0")
+    # Requests that came in at $0 (Ollama, unpriced endpoints), so a low
+    # dollar figure isn't mistaken for low usage.
+    unpriced_requests_30d: int = 0
     by_task: list[AICostBreakdownRow]
     by_model: list[AICostBreakdownRow]
+    by_caller: list[AICallerCostRow] = []
     budgets: list[AITaskBudgetRow]

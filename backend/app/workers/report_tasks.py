@@ -5,6 +5,7 @@ import logging
 
 from celery.exceptions import SoftTimeLimitExceeded
 
+from app.ai.caller import Caller
 from app.api.events import publish_event
 from app.intelligence.reporting import (
     REPORT_TEMPLATES,
@@ -29,16 +30,20 @@ RETRY_BASE_DELAY = 5  # seconds
     time_limit=720,
     max_retries=1,
 )
-def generate_full_report(self, report_id: str, user_id: str):
+def generate_full_report(self, report_id: str, user_id: str, caller_kind: str = "user"):
     """Generate all narrative sections of a report via AI.
 
     Iterates through template sections sequentially, generating AI prose
     for each empty narrative section. Publishes SSE events for progress.
+
+    ``caller_kind`` travels with the job because the worker can't tell a
+    person's report from a scheduled one by the user id alone, and only a
+    person's run may use that person's provider.
     """
-    run_async(_generate_full_report(self, report_id, user_id))
+    run_async(_generate_full_report(self, report_id, user_id, caller_kind))
 
 
-async def _generate_full_report(task, report_id: str, user_id: str):
+async def _generate_full_report(task, report_id: str, user_id: str, caller_kind: str = "user"):
     import uuid
 
     report_uuid = uuid.UUID(report_id)
@@ -46,6 +51,7 @@ async def _generate_full_report(task, report_id: str, user_id: str):
 
     async with worker_session() as db:
         try:
+            caller = Caller.of_kind(caller_kind, user_uuid)
             report = await db.get(IntelReport, report_uuid)
             if not report:
                 logger.error("Report %s not found for full generation", report_id)
@@ -104,6 +110,7 @@ async def _generate_full_report(task, report_id: str, user_id: str):
                         section_name=section_name,
                         focus=focus,
                         audience=audience,
+                        caller=caller,
                     )
                     if "error" not in result:
                         break

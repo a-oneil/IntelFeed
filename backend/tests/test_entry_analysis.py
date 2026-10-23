@@ -388,6 +388,7 @@ def _stub_provider(monkeypatch, analysis_task, content='{"summary": "fresh"}'):
     provider.complete = AsyncMock(return_value=response)
     assignment = MagicMock(config={}, model_name="m")
     provider_model = MagicMock(id=None, config={}, provider_type="test")
+    provider_model.name = "test"
     monkeypatch.setattr(
         engine, "get_task_assignment", AsyncMock(return_value=(assignment, analysis_task, provider_model))
     )

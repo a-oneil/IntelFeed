@@ -17,6 +17,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.caller import Caller
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -146,6 +147,7 @@ async def ensure_daily_summary(db: AsyncSession, day_key: str, *, force: bool = 
         target_type="daily_summary",
         target_id=target_id,
         force=force,
+        caller=Caller.system(),
     )
 
     if parsed is None:

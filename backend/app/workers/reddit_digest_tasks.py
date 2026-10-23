@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import Integer, cast, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.caller import Caller
 from app.core.metrics import CELERY_TASK_DURATION_SECONDS, CELERY_TASKS_TOTAL
 from app.workers.celery_app import celery_app
 from app.workers.db import run_async, worker_session
@@ -163,6 +164,7 @@ async def _generate_reddit_digest():
                 target_type="digest",
                 target_id=uuid.uuid5(uuid.NAMESPACE_URL, digest_guid),
                 force=True,
+                caller=Caller.system(system_user_id),
             )
 
         if not result or "_error" in (result or {}):

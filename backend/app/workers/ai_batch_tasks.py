@@ -18,6 +18,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select, update
 
+from app.ai.caller import Caller
 from app.core.metrics import CELERY_TASK_DURATION_SECONDS, CELERY_TASKS_TOTAL
 from app.workers.celery_app import celery_app
 from app.workers.db import run_async, worker_session
@@ -492,6 +493,7 @@ async def _run_entry_analysis(entry_id_str: str, force: bool = False):
             target_type="entry",
             target_id=entry_id,
             force=force,
+            caller=Caller.system(user_id),
         )
         request_row = (
             await db.execute(select(AIAnalysisRequest).where(AIAnalysisRequest.entry_id == entry_id))

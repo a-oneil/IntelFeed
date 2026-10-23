@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.caller import Caller
 from app.models.country import Country, EntryCountry
 from app.models.cve import CVE, EntryCVE
 from app.models.detection_rule import DetectionRule
@@ -526,6 +527,7 @@ async def generate_section_content(
     section_name: str,
     focus: str | None = None,
     audience: str | None = None,
+    caller: Caller | None = None,
 ) -> dict:
     """Generate AI prose for a specific section of an intel report.
 
@@ -704,6 +706,7 @@ async def generate_section_content(
         target_type="intel_report",
         target_id=report.id,
         force=True,
+        caller=caller,
     )
     if result is None and task_name != "report_section":
         task_name = "report_section"
@@ -715,6 +718,7 @@ async def generate_section_content(
             target_type="intel_report",
             target_id=report.id,
             force=True,
+            caller=caller,
         )
 
     if result is None:

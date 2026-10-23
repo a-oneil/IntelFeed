@@ -43,13 +43,21 @@ async def parent_rule(db_session, test_user) -> DetectionRule:
     return rule
 
 
-@pytest.fixture
-def fake_converter(monkeypatch):
+@pytest_asyncio.fixture
+async def fake_converter(db_session, monkeypatch):
     """Stand in for the AI provider so the convert endpoint is testable offline.
 
     All three providers read ``is_active = false`` in dev, so nothing AI-backed
-    runs locally without this.
+    runs locally without this. The task and provider are real rows because a
+    conversion is ledgered in ai_results, which points at both.
     """
+    from app.models.ai_provider import AIProvider
+    from app.models.ai_task import AITask
+
+    task = AITask(name="detection_rules", display_name="Detection Rules", default_prompt_template="{{ entry }}")
+    provider_model = AIProvider(name="Test Provider", provider_type="ollama", base_url="http://ollama.test")
+    db_session.add_all([task, provider_model])
+    await db_session.flush()
 
     def _install(content: str = 'process where process.name == "vssadmin.exe"\n'):
         response = MagicMock()
@@ -57,6 +65,8 @@ def fake_converter(monkeypatch):
         response.model = "test-model"
         response.tokens_input = 100
         response.tokens_output = 50
+        response.latency_ms = 5
+        response.cost_usd = None
 
         provider = MagicMock()
         provider.complete = AsyncMock(return_value=response)
@@ -64,14 +74,10 @@ def fake_converter(monkeypatch):
         assignment = MagicMock()
         assignment.config = {}
         assignment.model_name = "test-model"
-        provider_model = MagicMock()
-        provider_model.config = {}
 
         import app.ai.engine as engine
 
-        monkeypatch.setattr(
-            engine, "get_task_assignment", AsyncMock(return_value=(assignment, MagicMock(), provider_model))
-        )
+        monkeypatch.setattr(engine, "get_task_assignment", AsyncMock(return_value=(assignment, task, provider_model)))
         monkeypatch.setattr(engine, "_get_provider_instance", lambda pm: provider)
         monkeypatch.setattr(engine, "_estimate_cost", lambda *a, **kw: 0.0012)
         return provider
@@ -325,3 +331,29 @@ async def test_extend_creates_a_draft_child_with_lineage(db_session, client, aut
 async def test_extend_404s_for_an_unknown_rule(client, auth_headers):
     resp = await client.post(f"/api/detection-rules/{uuid.uuid4()}/extend", headers=auth_headers)
     assert resp.status_code == 404
+
+
+# ── a failed conversion is still a request ──────────────────────────
+
+
+async def test_failed_conversion_is_ledgered(db_session, client, auth_headers, parent_rule, fake_converter, test_user):
+    from app.models.ai_result import AIResult
+
+    provider = fake_converter()
+    provider.complete = AsyncMock(side_effect=RuntimeError("provider down"))
+
+    resp = await _convert(client, auth_headers, parent_rule.id)
+
+    assert resp.status_code == 502
+    rows = (await db_session.execute(select(AIResult).where(AIResult.target_id == parent_rule.id))).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].caller_kind == "user"
+    assert rows[0].user_id == test_user.id
+    assert rows[0].parsed_result["_error"] == "provider down"
+    # Nothing was converted: no sibling rule appeared.
+    siblings = (
+        (await db_session.execute(select(DetectionRule).where(DetectionRule.derived_from == parent_rule.id)))
+        .scalars()
+        .all()
+    )
+    assert siblings == []

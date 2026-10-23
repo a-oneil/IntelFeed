@@ -5,6 +5,7 @@ import time
 
 from sqlalchemy.exc import DBAPIError
 
+from app.ai.caller import Caller
 from app.config import settings
 from app.core.metrics import CELERY_TASK_DURATION_SECONDS, CELERY_TASKS_TOTAL
 from app.workers.celery_app import celery_app
@@ -977,7 +978,7 @@ async def _bulk_extract(entry_ids: list[str], extract_types: list[str], user_id:
                 # country_id, sector_id, article_metadata — now deprecated seeds).
                 from app.services.entry_analysis import analyze_entry
 
-                _parsed, counts = await analyze_entry(db, uid, eid, entry_data, force=True)
+                _parsed, counts = await analyze_entry(db, uid, eid, entry_data, force=True, caller=Caller.system(uid))
                 stats["ttps"] += counts.get("ttps", 0)
                 stats["actors"] += counts.get("threat_actors", 0)
                 stats["malware"] += counts.get("malware", 0)

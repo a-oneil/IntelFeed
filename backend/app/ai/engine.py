@@ -12,6 +12,7 @@ from jinja2.sandbox import ImmutableSandboxedEnvironment
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.caller import Caller, current_caller
 from app.ai.providers.base import AIProvider, AIResponse
 from app.ai.providers.claude_code_provider import ClaudeCodeProvider, QuotaExhaustedError
 from app.ai.providers.claude_provider import ClaudeProvider
@@ -41,6 +42,32 @@ def _estimate_cost(model: str, tokens_in: int, tokens_out: int, batch: bool = Fa
     if batch:
         cost *= 0.5  # Anthropic Message Batches API flat discount
     return Decimal(str(round(cost, 6)))
+
+
+def _count_ai_call(provider_type: str, task_name: str, tokens_in: int, tokens_out: int, cost: Decimal) -> None:
+    """Bump the Prometheus counters every result write shares."""
+    AI_REQUESTS_TOTAL.labels(provider=provider_type, task=task_name).inc()
+    AI_TOKENS_TOTAL.labels(provider=provider_type, direction="input").inc(tokens_in)
+    AI_TOKENS_TOTAL.labels(provider=provider_type, direction="output").inc(tokens_out)
+    AI_COST_TOTAL.labels(provider=provider_type).inc(float(cost))
+
+
+def attribution_fields(
+    caller: Caller, provider_model: AIProviderModel | None, *, key_owner_id: uuid.UUID | None = None
+) -> dict:
+    """The AIResult columns that say who asked and who answered.
+
+    Every result write — run_task's three, the batch poller's, copilot's and
+    the direct-call ledger — splats this in, so the cost dashboard and the
+    per-user caps see one consistent record. ``key_owner_id`` stays None
+    until a personal provider answers a call.
+    """
+    return {
+        "user_id": caller.user_id,
+        "key_owner_id": key_owner_id,
+        "caller_kind": caller.kind,
+        "provider_name": provider_model.name if provider_model is not None else None,
+    }
 
 
 #: A backslash that does not start a legal JSON escape. Small models write
@@ -181,6 +208,7 @@ async def store_external_result(
     latency_ms: int = 0,
     batch: bool = False,
     prompt_used: str = "",
+    caller: Caller | None = None,
 ) -> dict:
     """Persist an AI result produced outside run_task (e.g. the Batches API poller).
 
@@ -192,11 +220,8 @@ async def store_external_result(
     if parsed_result and isinstance(parsed_result, dict) and "_extraction_status" not in parsed_result:
         parsed_result["_extraction_status"] = "success"
 
-    AI_REQUESTS_TOTAL.labels(provider=provider_model.provider_type, task=task.name).inc()
-    AI_TOKENS_TOTAL.labels(provider=provider_model.provider_type, direction="input").inc(tokens_input)
-    AI_TOKENS_TOTAL.labels(provider=provider_model.provider_type, direction="output").inc(tokens_output)
     cost = _estimate_cost(model_name, tokens_input, tokens_output, batch=batch)
-    AI_COST_TOTAL.labels(provider=provider_model.provider_type).inc(float(cost))
+    _count_ai_call(provider_model.provider_type, task.name, tokens_input, tokens_output, cost)
 
     await demote_current_results(db, target_type="entry", target_id=entry_id, task_id=task.id)
     ai_result = AIResult(
@@ -214,10 +239,98 @@ async def store_external_result(
         tokens_output=tokens_output,
         cost_estimate=cost,
         processing_time_ms=latency_ms,
+        **attribution_fields(caller or Caller.system(), provider_model),
     )
     db.add(ai_result)
     await db.flush()
     return parsed_result
+
+
+async def record_direct_result(
+    db: AsyncSession,
+    *,
+    caller: Caller,
+    task: AITask,
+    provider_model: AIProviderModel,
+    model_name: str | None,
+    prompt_used: str,
+    response: AIResponse | None,
+    content: str | None = None,
+    error: str | None = None,
+    target_type: str | None = None,
+    target_id: uuid.UUID | None = None,
+    latency_ms: int | None = None,
+) -> AIResult:
+    """Ledger a provider call made outside run_task.
+
+    Rule conversion, rule chat, copilot-style Q&A on a share link: they call
+    the provider directly because their prompts aren't task templates, but
+    their spend has to land in ai_results or the cost dashboard and the
+    per-user caps never see it. The row is never ``is_current`` — it is a
+    spend record, not an answer the reader shows for a target.
+
+    ``response`` is None for streamed calls, which report no usage: the row
+    then counts as one request at zero tokens, which is still what a request
+    cap needs.
+    """
+    tokens_in = response.tokens_input if response else 0
+    tokens_out = response.tokens_output if response else 0
+    model = response.model if response else model_name
+    reported = getattr(response, "cost_usd", None)
+    if isinstance(reported, (int, float)) and not isinstance(reported, bool):
+        cost = Decimal(str(round(reported, 6)))
+    else:
+        cost = _estimate_cost(model or "", tokens_in, tokens_out)
+    if latency_ms is None:
+        latency_ms = response.latency_ms if response else 0
+
+    parsed: dict = {"_extraction_status": "provider_error" if error else "success"}
+    if error:
+        parsed["_error"] = error
+
+    _count_ai_call(provider_model.provider_type, task.name, tokens_in, tokens_out, cost)
+
+    row = AIResult(
+        target_type=target_type,
+        target_id=target_id,
+        is_current=False,
+        task_id=task.id,
+        provider_id=provider_model.id,
+        model_name=model,
+        prompt_used=prompt_used[:20000],
+        raw_response=error if error else (content if content is not None else (response.content if response else "")),
+        parsed_result=parsed,
+        tokens_input=tokens_in,
+        tokens_output=tokens_out,
+        cost_estimate=cost,
+        processing_time_ms=latency_ms,
+        **attribution_fields(caller, provider_model),
+    )
+    db.add(row)
+    await db.flush()
+    return row
+
+
+async def derive_caller(db: AsyncSession, user_id: uuid.UUID | None) -> Caller:
+    """The caller a bare ``user_id`` stands for, when nobody built one.
+
+    A real person's id is a user caller. The ``system`` service account is
+    background work even when a worker forgot to say so, and an id that
+    matches no users row (the all-zero sentinel, a deleted account) is
+    background work with nobody to attribute it to — writing such an id to
+    the result's foreign key would fail the whole call.
+    """
+    caller = Caller.user(user_id) if user_id is not None else Caller.system()
+    if not caller.is_user:
+        return caller
+    from app.models.user import User as _User
+
+    role = (await db.execute(select(_User.role).where(_User.id == user_id))).scalar_one_or_none()
+    if role is None:
+        return Caller.system()
+    if role == "system":
+        return Caller.system(user_id)
+    return caller
 
 
 class UnsupportedProviderTypeError(ValueError):
@@ -364,8 +477,16 @@ async def run_task(
     target_id: uuid.UUID | None = None,
     force: bool = False,
     timeout_seconds: float | None = None,
+    caller: Caller | None = None,
 ) -> dict | None:
     """Execute an AI task and store the result. Returns parsed_result or None if no assignment.
+
+    `caller` says who the call runs for and is written onto the result. Omit
+    it only from a request a signed-in person made themselves: it then
+    derives from ``user_id`` (see ``derive_caller`` — the service account and
+    the all-zero sentinel map to system). Workers, automation and share
+    routes must pass theirs, or their spend is attributed to a person who
+    never clicked.
 
     Pass `timeout_seconds` from synchronous request paths to bound the provider
     call below the gunicorn worker timeout. For the claude_code provider this is
@@ -378,11 +499,15 @@ async def run_task(
         target_type = "entry"
         target_id = entry_id
 
+    if caller is None:
+        caller = current_caller.get() or await derive_caller(db, user_id)
+
     assignment_data = await get_task_assignment(db, user_id, task_name)
     if not assignment_data:
         return None
 
     assignment, task, provider_model = assignment_data
+    attribution = attribution_fields(caller, provider_model)
 
     # Dedup guard: skip if target already has a current result for this task.
     # A provider error ({"_error": ...}, no _extraction_status) is current so
@@ -549,6 +674,7 @@ async def run_task(
             tokens_input=0,
             tokens_output=0,
             cost_estimate=Decimal("0"),
+            **attribution,
         )
         db.add(ai_result)
         await db.flush()
@@ -574,6 +700,7 @@ async def run_task(
             tokens_input=0,
             tokens_output=0,
             cost_estimate=Decimal("0"),
+            **attribution,
         )
         db.add(ai_result)
         await db.flush()
@@ -581,10 +708,6 @@ async def run_task(
 
     _duration = _time.monotonic() - _t0
 
-    # Record metrics
-    AI_REQUESTS_TOTAL.labels(provider=provider_model.provider_type, task=task_name).inc()
-    AI_TOKENS_TOTAL.labels(provider=provider_model.provider_type, direction="input").inc(response.tokens_input)
-    AI_TOKENS_TOTAL.labels(provider=provider_model.provider_type, direction="output").inc(response.tokens_output)
     AI_REQUEST_DURATION_SECONDS.labels(provider=provider_model.provider_type, task=task_name).observe(_duration)
 
     # Parse JSON result (fenced-JSON salvage shared with the batch poller)
@@ -603,7 +726,7 @@ async def run_task(
         cost = Decimal(str(round(response.cost_usd, 6)))
     else:
         cost = _estimate_cost(response.model, response.tokens_input, response.tokens_output)
-    AI_COST_TOTAL.labels(provider=provider_model.provider_type).inc(float(cost))
+    _count_ai_call(provider_model.provider_type, task_name, response.tokens_input, response.tokens_output, cost)
 
     # Store result
     await demote_current_results(db, target_type=target_type, target_id=target_id, task_id=task.id)
@@ -622,6 +745,7 @@ async def run_task(
         tokens_output=response.tokens_output,
         cost_estimate=cost,
         processing_time_ms=response.latency_ms,
+        **attribution,
     )
     db.add(ai_result)
     await db.flush()

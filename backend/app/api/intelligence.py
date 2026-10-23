@@ -2753,7 +2753,8 @@ async def convert_detection_rule(
     if rule.rule_type == body.target_type:
         raise AppError(code="same_type", message="Source and target rule types are the same", status_code=400)
 
-    from app.ai.engine import _get_provider_instance, get_task_assignment
+    from app.ai.caller import Caller
+    from app.ai.engine import _get_provider_instance, get_task_assignment, record_direct_result
 
     assignment_data = await get_task_assignment(db, user.id, "detection_rules")
     if not assignment_data:
@@ -2800,14 +2801,30 @@ Return ONLY the converted rule content — no explanation, no markdown fences, j
     # its automatic retry outlasts the worker and the request dies as a 502
     # instead of a readable error. Passing an explicit per-call timeout also
     # forces the CLI provider to a single attempt.
-    response = await provider.complete(
-        prompt=prompt,
-        system="You are an expert detection engineer. Convert detection rules between formats with perfect syntax.",
-        temperature=config.get("temperature", 0.1),
-        max_tokens=config.get("max_tokens", 4096),
-        model=assignment.model_name,
-        timeout_seconds=float(config.get("timeout_seconds", 150)),
+    ledger = dict(
+        caller=Caller.user(user.id),
+        task=task,
+        provider_model=provider_model,
+        model_name=assignment.model_name,
+        prompt_used=prompt,
+        target_type="detection_rule",
+        target_id=rule.id,
     )
+    try:
+        response = await provider.complete(
+            prompt=prompt,
+            system="You are an expert detection engineer. Convert detection rules between formats with perfect syntax.",
+            temperature=config.get("temperature", 0.1),
+            max_tokens=config.get("max_tokens", 4096),
+            model=assignment.model_name,
+            timeout_seconds=float(config.get("timeout_seconds", 150)),
+        )
+    except Exception as e:
+        # Commit before raising: the session dependency rolls back on any
+        # exception, and a failed call still has to count as a request.
+        await record_direct_result(db, response=None, error=str(e), **ledger)
+        await db.commit()
+        raise AppError(code="ai_error", message=f"AI provider error: {e}", status_code=502)
 
     converted_content = response.content.strip()
     # Strip markdown fences if the model added them despite instructions
@@ -2818,9 +2835,7 @@ Return ONLY the converted rule content — no explanation, no markdown fences, j
             lines = lines[:-1]
         converted_content = "\n".join(lines)
 
-    from app.ai.engine import _estimate_cost
-
-    cost = _estimate_cost(response.model, response.tokens_input, response.tokens_output)
+    cost = (await record_direct_result(db, response=response, content=converted_content, **ledger)).cost_estimate
 
     sibling = await _upsert_conversion_sibling(
         db,
@@ -3046,7 +3061,8 @@ async def chat_rule_assistant(
     """Streaming AI chat for detection rule development assistance."""
     from sse_starlette.sse import EventSourceResponse
 
-    from app.ai.engine import _get_provider_instance, get_task_assignment
+    from app.ai.caller import Caller
+    from app.ai.engine import _get_provider_instance, get_task_assignment, record_direct_result
 
     assignment_data = await get_task_assignment(db, user.id, "detection_rules")
     if not assignment_data:
@@ -3096,12 +3112,35 @@ GUIDELINES:
 
     config = {**provider_model.config, **assignment.config}
 
+    async def _ledger(prompt: str, answer: str, error: str | None) -> None:
+        # Streamed replies report no usage, so the row counts a request at
+        # zero tokens. Accounting must never break the stream.
+        try:
+            await record_direct_result(
+                db,
+                caller=Caller.user(user.id),
+                task=task,
+                provider_model=provider_model,
+                model_name=assignment.model_name,
+                prompt_used=prompt,
+                response=None,
+                content=answer,
+                error=error,
+                target_type="rule_chat",
+            )
+            await db.commit()
+        except Exception as e:
+            logger.warning("rule chat failed to record ai_result: %s", e)
+            await db.rollback()
+
     async def generate():
         import json as _json
 
+        conversation_text = ""
+        answer_parts: list[str] = []
+        ledgered = False
         try:
             # Build the full prompt from conversation
-            conversation_text = ""
             for msg in messages[:-1]:
                 role_label = "Analyst" if msg["role"] == "user" else "Assistant"
                 conversation_text += f"\n{role_label}: {msg['content']}\n"
@@ -3114,10 +3153,20 @@ GUIDELINES:
                 max_tokens=config.get("max_tokens", 4096),
                 model=assignment.model_name,
             ):
+                answer_parts.append(chunk)
                 yield {"event": "chunk", "data": _json.dumps({"text": chunk})}
+            await _ledger(conversation_text, "".join(answer_parts), None)
+            ledgered = True
             yield {"event": "done", "data": _json.dumps({"status": "complete"})}
         except Exception as e:
+            await _ledger(conversation_text, "".join(answer_parts), str(e))
+            ledgered = True
             yield {"event": "error", "data": _json.dumps({"error": str(e)})}
+        finally:
+            # The client went away mid-stream: what was already generated is
+            # still spend, and a disconnect-and-retry loop must not be free.
+            if not ledgered and answer_parts:
+                await _ledger(conversation_text, "".join(answer_parts), "client disconnected")
 
     return EventSourceResponse(generate())
 
