@@ -19,6 +19,7 @@ from app.ai.providers.claude_provider import ClaudeProvider
 from app.ai.providers.ollama_provider import OllamaProvider
 from app.ai.providers.openai_provider import OpenAICompatibleProvider
 from app.core.encryption import decrypt_value
+from app.core.exceptions import AppError
 from app.core.metrics import AI_COST_TOTAL, AI_REQUEST_DURATION_SECONDS, AI_REQUESTS_TOTAL, AI_TOKENS_TOTAL
 from app.models.ai_prompt_template import AIPromptTemplate
 from app.models.ai_provider import AIProvider as AIProviderModel
@@ -50,6 +51,13 @@ def _count_ai_call(provider_type: str, task_name: str, tokens_in: int, tokens_ou
     AI_TOKENS_TOTAL.labels(provider=provider_type, direction="input").inc(tokens_in)
     AI_TOKENS_TOTAL.labels(provider=provider_type, direction="output").inc(tokens_out)
     AI_COST_TOTAL.labels(provider=provider_type).inc(float(cost))
+
+
+def utc_day_start() -> datetime:
+    """Midnight UTC today: when the per-user allowance, the share-link limit
+    and the dashboard's "today" column all reset. Change it here and they
+    stay on one clock."""
+    return datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
 
 
 def attribution_fields(
@@ -288,7 +296,10 @@ async def record_direct_result(
     if error:
         parsed["_error"] = error
 
-    _count_ai_call(provider_model.provider_type, task.name, tokens_in, tokens_out, cost)
+    # Like run_task, the request counters count answers; a failed call is
+    # ledgered for the caps but is not usage.
+    if error is None:
+        _count_ai_call(provider_model.provider_type, task.name, tokens_in, tokens_out, cost)
 
     row = AIResult(
         target_type=target_type,
@@ -309,6 +320,57 @@ async def record_direct_result(
     db.add(row)
     await db.flush()
     return row
+
+
+class SiteAllowanceExceeded(AppError):
+    """A person has used their daily allowance of the instance's own providers."""
+
+    def __init__(self, cap: int, used: int):
+        super().__init__(
+            code="ai_allowance_exceeded",
+            message=(
+                f"Daily AI allowance reached: {used} of {cap} requests on this instance's providers today. "
+                "It resets at midnight UTC."
+            ),
+            status_code=429,
+        )
+        self.cap = cap
+        self.used = used
+
+
+async def site_requests_today(db: AsyncSession, user_id: uuid.UUID) -> int:
+    """How many calls this person has made today on the instance's own providers."""
+    day_start = utc_day_start()
+    return (
+        await db.execute(
+            select(func.count(AIResult.id)).where(
+                AIResult.user_id == user_id,
+                AIResult.caller_kind == "user",
+                AIResult.key_owner_id.is_(None),
+                AIResult.created_at >= day_start,
+            )
+        )
+    ).scalar_one()
+
+
+async def enforce_site_allowance(db: AsyncSession, caller: Caller) -> None:
+    """Refuse a person's call once they have used the day's allowance.
+
+    Only ``user`` callers are capped: the pipeline, automation rules and
+    share links are the operator's own spend, and a person's own key (once
+    one can answer) is not the instance's. Failed calls count — they were
+    requests — so a broken provider cannot be retried for free.
+    """
+    if not caller.is_user or caller.user_id is None:
+        return
+    from app.services.system_settings import get_setting
+
+    cap = int(await get_setting("site_ai_user_daily_requests", db) or 0)
+    if cap <= 0:
+        return
+    used = await site_requests_today(db, caller.user_id)
+    if used >= cap:
+        raise SiteAllowanceExceeded(cap, used)
 
 
 async def derive_caller(db: AsyncSession, user_id: uuid.UUID | None) -> Caller:
@@ -499,14 +561,13 @@ async def run_task(
         target_type = "entry"
         target_id = entry_id
 
-    if caller is None:
-        caller = current_caller.get() or await derive_caller(db, user_id)
-
     assignment_data = await get_task_assignment(db, user_id, task_name)
     if not assignment_data:
         return None
 
     assignment, task, provider_model = assignment_data
+    if caller is None:
+        caller = current_caller.get() or await derive_caller(db, user_id)
     attribution = attribution_fields(caller, provider_model)
 
     # Dedup guard: skip if target already has a current result for this task.
@@ -529,6 +590,10 @@ async def run_task(
         if cached is not None and not provider_error:
             logger.debug("Skipping duplicate AI task %s for %s/%s", task_name, target_type, target_id)
             return cached
+
+    # After the dedup guard: a cached answer costs nothing. Before the force
+    # demotion: a refused call must not retire the result that is there.
+    await enforce_site_allowance(db, caller)
 
     # If force re-run, mark old results as not current
     if force and target_type and target_id:

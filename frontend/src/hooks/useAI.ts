@@ -860,6 +860,7 @@ export interface AICallerCostRow {
   tokens_output: number;
   instance_cost: string;
   own_key_cost: string;
+  requests_today: number;
 }
 export interface AICostBreakdown {
   total_cost_30d: string;
@@ -868,6 +869,7 @@ export interface AICostBreakdown {
   instance_cost_30d: string;
   user_key_cost_30d: string;
   unpriced_requests_30d: number;
+  site_allowance_per_user: number;
   by_task: AICostBreakdownRow[];
   by_model: AICostBreakdownRow[];
   by_caller: AICallerCostRow[];

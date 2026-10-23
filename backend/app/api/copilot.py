@@ -522,6 +522,7 @@ async def copilot_stream(
         _count_ai_call,
         _get_provider_instance,
         attribution_fields,
+        enforce_site_allowance,
         get_active_prompt,
         get_task_assignment,
         render_prompt,
@@ -543,6 +544,7 @@ async def copilot_stream(
             status_code=422,
         )
     assignment, task, provider_model = assignment_data
+    await enforce_site_allowance(db, Caller.user(user.id))
 
     # Load or create the conversation (scoped to this user).
     scope_type, scope_id = _scope_from_context(ctx)

@@ -413,6 +413,9 @@ class AICallerCostRow(BaseModel):
     # operator pays — versus on a personal key, which the operator does not.
     instance_cost: Decimal
     own_key_cost: Decimal
+    # Calls today on the instance's own providers: what the per-user daily
+    # allowance (site_ai_user_daily_requests) counts.
+    requests_today: int = 0
 
 
 class AICostBreakdown(BaseModel):
@@ -425,6 +428,9 @@ class AICostBreakdown(BaseModel):
     # Requests that came in at $0 (Ollama, unpriced endpoints), so a low
     # dollar figure isn't mistaken for low usage.
     unpriced_requests_30d: int = 0
+    # The per-user daily allowance each person's requests_today is measured
+    # against; 0 = unlimited.
+    site_allowance_per_user: int = 0
     by_task: list[AICostBreakdownRow]
     by_model: list[AICostBreakdownRow]
     by_caller: list[AICallerCostRow] = []

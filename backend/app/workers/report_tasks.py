@@ -51,7 +51,12 @@ async def _generate_full_report(task, report_id: str, user_id: str, caller_kind:
 
     async with worker_session() as db:
         try:
-            caller = Caller.of_kind(caller_kind, user_uuid)
+            # A "user" run still derives: the id may be the service account
+            # (an agentic task made the report) or a user deleted since enqueue.
+            from app.ai.engine import derive_caller
+
+            existing = await derive_caller(db, user_uuid)
+            caller = existing if caller_kind == "user" else Caller.of_kind(caller_kind, existing.user_id)
             report = await db.get(IntelReport, report_uuid)
             if not report:
                 logger.error("Report %s not found for full generation", report_id)

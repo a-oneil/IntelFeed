@@ -17,12 +17,10 @@ Batch mode:
 """
 
 import asyncio
-import ipaddress
 import logging
 import re
 import uuid
 from datetime import UTC, datetime
-from urllib.parse import urlparse
 
 import httpx
 from sqlalchemy import delete, select
@@ -38,48 +36,14 @@ from app.services.entry_tags import MissingOwner, ensure_assignment, sync_entry_
 
 logger = logging.getLogger(__name__)
 
-_PRIVATE_NETWORKS = [
-    ipaddress.ip_network("10.0.0.0/8"),
-    ipaddress.ip_network("172.16.0.0/12"),
-    ipaddress.ip_network("192.168.0.0/16"),
-    ipaddress.ip_network("169.254.0.0/16"),
-    ipaddress.ip_network("127.0.0.0/8"),
-    ipaddress.ip_network("::1/128"),
-    ipaddress.ip_network("fc00::/7"),
-    ipaddress.ip_network("fe80::/10"),
-]
 
-
-def _validate_webhook_url(url: str) -> str | None:
-    """Validate a webhook URL against SSRF. Returns error message or None if valid."""
+async def _validate_webhook_url(url: str) -> str | None:
+    """Why a webhook must not be called, or None. Resolves the hostname: a
+    name that points at the LAN is the attack, not the literal address."""
     from app.config import settings
+    from app.core.outbound import check_outbound_url
 
-    try:
-        parsed = urlparse(url)
-    except Exception:
-        return "Invalid URL"
-
-    if parsed.scheme not in ("http", "https"):
-        return f"Unsupported URL scheme: {parsed.scheme}"
-
-    hostname = parsed.hostname
-    if not hostname:
-        return "No hostname in URL"
-
-    if settings.webhook_allow_private_networks:
-        return None
-
-    try:
-        addr = ipaddress.ip_address(hostname)
-        for network in _PRIVATE_NETWORKS:
-            if addr in network:
-                return f"URL points to private/internal network ({hostname})"
-    except ValueError:
-        # Not an IP literal — hostname. Check for localhost variants.
-        if hostname in ("localhost", "localhost.localdomain"):
-            return "URL points to localhost"
-
-    return None
+    return await check_outbound_url(url, allow_private=settings.webhook_allow_private_networks)
 
 
 async def observable_template_context(db: AsyncSession, entry: Entry) -> dict:
@@ -484,7 +448,6 @@ async def _action_run_ai_task(db: AsyncSession, entry: Entry, config: dict, user
         task_name=task_name,
         variables=variables,
         entry_id=entry.id,
-        caller=Caller.automation(user_id),
     )
 
     if result is None:
@@ -578,7 +541,6 @@ async def _action_run_ai_task_batch(
         task_name=task_name,
         variables=variables,
         entry_id=entries[0].id,
-        caller=Caller.automation(user_id),
     )
 
     if result is None:
@@ -800,7 +762,7 @@ async def _action_send_notification(entry: Entry, config: dict, context: dict | 
     if not webhook_url:
         return {"status": "error", "message": "No webhook_url specified"}
 
-    ssrf_err = _validate_webhook_url(webhook_url)
+    ssrf_err = await _validate_webhook_url(webhook_url)
     if ssrf_err:
         return {"status": "error", "message": ssrf_err}
 
@@ -1148,7 +1110,7 @@ async def _action_send_notification_batch(
     if not webhook_url:
         return {"status": "error", "message": "No webhook_url specified"}
 
-    ssrf_err = _validate_webhook_url(webhook_url)
+    ssrf_err = await _validate_webhook_url(webhook_url)
     if ssrf_err:
         return {"status": "error", "message": ssrf_err}
 
@@ -1279,7 +1241,7 @@ async def _action_run_webhook_batch(
     if not url:
         return {"status": "error", "message": "No URL specified"}
 
-    ssrf_err = _validate_webhook_url(url)
+    ssrf_err = await _validate_webhook_url(url)
     if ssrf_err:
         return {"status": "error", "message": ssrf_err}
 
@@ -1332,7 +1294,7 @@ async def _action_run_webhook(entry: Entry, config: dict, context: dict | None =
     if not url:
         return {"status": "error", "message": "No URL specified"}
 
-    ssrf_err = _validate_webhook_url(url)
+    ssrf_err = await _validate_webhook_url(url)
     if ssrf_err:
         return {"status": "error", "message": ssrf_err}
 
@@ -1575,9 +1537,7 @@ async def _action_extract_ttps(
     use_ai = config.get("use_ai", True)
     entry_data = _entry_to_dict(entry)
 
-    ttp_results, status, err = await extract_ttps(
-        db, user_id, entry.id, entry_data, use_ai=use_ai, caller=Caller.automation(user_id)
-    )
+    ttp_results, status, err = await extract_ttps(db, user_id, entry.id, entry_data, use_ai=use_ai)
     if status != "success":
         return {"status": "error", "message": err or f"TTP extraction {status}"}
 
@@ -1630,9 +1590,7 @@ async def _action_extract_threat_actors(
     from app.intelligence.enrichment import extract_threat_actors
 
     entry_data = _entry_to_dict(entry)
-    items, status, err = await extract_threat_actors(
-        db, user_id, entry.id, entry_data, caller=Caller.automation(user_id)
-    )
+    items, status, err = await extract_threat_actors(db, user_id, entry.id, entry_data)
 
     if status != "success":
         return {"status": "error", "message": err or f"Threat actor extraction {status}"}
@@ -1663,7 +1621,7 @@ async def _action_extract_malware(
     from app.intelligence.enrichment import extract_malware
 
     entry_data = _entry_to_dict(entry)
-    items, status, err = await extract_malware(db, user_id, entry.id, entry_data, caller=Caller.automation(user_id))
+    items, status, err = await extract_malware(db, user_id, entry.id, entry_data)
 
     if status != "success":
         return {"status": "error", "message": err or f"Malware extraction {status}"}
@@ -1724,9 +1682,7 @@ async def _action_generate_detection_rules(
     if not ttps_data:
         return {"status": "skipped", "message": "No TTPs available for rule generation"}
 
-    rules = await generate_detection_rules(
-        db, user_id, entry.id, entry_data, ttps_data, rule_types, caller=Caller.automation(user_id)
-    )
+    rules = await generate_detection_rules(db, user_id, entry.id, entry_data, ttps_data, rule_types)
     await db.flush()
 
     context.setdefault("extraction_results", {})["detection_rules"] = [

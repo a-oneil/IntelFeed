@@ -254,7 +254,12 @@ async def get_cost_breakdown(
                 func.coalesce(func.sum(AIResult.tokens_output), 0),
                 func.coalesce(func.sum(AIResult.cost_estimate).filter(on_instance), 0),
                 func.coalesce(func.sum(AIResult.cost_estimate).filter(~on_instance), 0),
-                func.count(AIResult.id).filter(func.coalesce(AIResult.cost_estimate, 0) == 0),
+                # Answered at $0 (Ollama, an unpriced endpoint). Error rows are
+                # also $0 but moved no tokens, and are not "usage".
+                func.count(AIResult.id).filter(
+                    func.coalesce(AIResult.cost_estimate, 0) == 0,
+                    func.coalesce(AIResult.tokens_input, 0) + func.coalesce(AIResult.tokens_output, 0) > 0,
+                ),
             ).where(AIResult.created_at >= thirty_days_ago)
         )
     ).first()
@@ -324,6 +329,9 @@ async def get_cost_breakdown(
     # they fold into one row per kind. People get a row each.
     kind_label = func.coalesce(AIResult.caller_kind, "unattributed")
     billed_user = case((AIResult.caller_kind == "user", AIResult.user_id), else_=None)
+    from app.ai.engine import utc_day_start
+
+    today_start = utc_day_start()
     by_caller_rows = (
         await db.execute(
             select(
@@ -335,6 +343,7 @@ async def get_cost_breakdown(
                 func.coalesce(func.sum(AIResult.tokens_output), 0),
                 func.coalesce(func.sum(AIResult.cost_estimate).filter(on_instance), 0),
                 func.coalesce(func.sum(AIResult.cost_estimate).filter(~on_instance), 0),
+                func.count(AIResult.id).filter(on_instance, AIResult.created_at >= today_start),
             )
             .outerjoin(User, User.id == billed_user)
             .where(AIResult.created_at >= thirty_days_ago)
@@ -353,9 +362,13 @@ async def get_cost_breakdown(
             tokens_output=tout,
             instance_cost=Decimal(str(inst)),
             own_key_cost=Decimal(str(own)),
+            requests_today=today,
         )
-        for kind, uid, username, reqs, tin, tout, inst, own in by_caller_rows
+        for kind, uid, username, reqs, tin, tout, inst, own, today in by_caller_rows
     ]
+    from app.services.system_settings import get_setting
+
+    site_allowance = int(await get_setting("site_ai_user_daily_requests", db) or 0)
 
     # --- Per-task budgets vs. spend ---
     # Spend per task_id in the window, keyed for a cheap in-memory join.
@@ -421,6 +434,7 @@ async def get_cost_breakdown(
         instance_cost_30d=Decimal(str(totals[4])),
         user_key_cost_30d=Decimal(str(totals[5])),
         unpriced_requests_30d=totals[6],
+        site_allowance_per_user=site_allowance,
         by_task=by_task,
         by_model=by_model,
         by_caller=by_caller,

@@ -154,6 +154,8 @@ CONFIGURABLE_KEYS: dict[str, type] = {
     "ai_analysis_relevance_threshold": float,
     "ai_tool_evidence_required": bool,
     "ai_batch_max_requests": int,
+    "site_ai_user_daily_requests": int,
+    "share_ai_daily_requests": int,
     "ai_analysis_content_max_chars": int,
     "ai_use_batches": bool,
     "ai_est_cost_per_request": float,
@@ -512,6 +514,23 @@ SETTING_METADATA: dict[str, dict] = {
     "ai_batch_max_requests": {
         "label": "Max Batch Size",
         "description": "Maximum entries per hourly analysis batch submission.",
+        "group": "ai",
+    },
+    "site_ai_user_daily_requests": {
+        "label": "Per-User Daily AI Allowance",
+        "description": (
+            "Requests one person may make each day on this instance's own AI providers for the tasks "
+            "they start themselves (copilot, rule help, summaries, reports). Background work, automation "
+            "rules and share links are not counted. Resets at midnight UTC. 0 = unlimited"
+        ),
+        "group": "ai",
+    },
+    "share_ai_daily_requests": {
+        "label": "Share Link Daily AI Limit",
+        "description": (
+            "AI questions and tasks one share link may run per day. Share traffic always uses this "
+            "instance's providers, never the sharer's. Resets at midnight UTC. 0 = unlimited"
+        ),
         "group": "ai",
     },
     "ai_analysis_content_max_chars": {

@@ -72,6 +72,11 @@ class Settings(BaseSettings):
     ai_use_batches: bool = True
     # Per-request cost estimate used to size a batch against the daily budget.
     ai_est_cost_per_request: float = 0.0024
+    # Interactive AI on the instance's own providers, per person per UTC day.
+    # 0 = unlimited. Background work, automation and share links don't count.
+    site_ai_user_daily_requests: int = 0
+    # AI questions + tasks one share link may run per UTC day. 0 = unlimited.
+    share_ai_daily_requests: int = 20
 
     # Per-entry pipeline run logging (engine phase 5) — kill switch
     pipeline_run_logging_enabled: bool = True

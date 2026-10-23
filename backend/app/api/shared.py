@@ -760,6 +760,54 @@ async def get_shared_tts_file(
     return response
 
 
+async def _share_requests_today(db: AsyncSession, share: SharedEntry) -> int:
+    """AI calls this link has made today.
+
+    Questions are ledgered against the share itself. Task runs go through
+    run_task and are ledgered against the entry, so they are counted by
+    entry and sharer: two links the same person made to one article share
+    that part of the budget, which is bounded anyway — each task runs at
+    most once per article.
+    """
+    from app.ai.engine import utc_day_start
+
+    day_start = utc_day_start()
+    same_sharer = AIResult.user_id.is_(None) if share.created_by is None else AIResult.user_id == share.created_by
+    by_entry = (AIResult.entry_id == share.entry_id) & same_sharer
+    return (
+        await db.execute(
+            select(func.count(AIResult.id)).where(
+                AIResult.caller_kind == "share",
+                AIResult.created_at >= day_start,
+                (AIResult.target_id == share.id) | by_entry,
+            )
+        )
+    ).scalar_one()
+
+
+async def _enforce_share_limit(db: AsyncSession, share: SharedEntry) -> int | None:
+    """Refuse once a link has used its day's AI calls.
+
+    Returns how many calls remain after this one, or None when unlimited.
+    These routes are unauthenticated, so the link itself is the budget:
+    a stranger can never run up the sharer's allowance, and one leaked
+    link can only ever cost a day's worth.
+    """
+    from app.services.system_settings import get_setting
+
+    cap = int(await get_setting("share_ai_daily_requests", db) or 0)
+    if cap <= 0:
+        return None
+    used = await _share_requests_today(db, share)
+    if used >= cap:
+        raise AppError(
+            code="share_limit_exceeded",
+            message=f"This share link has used its {cap} AI requests for today. Try again tomorrow.",
+            status_code=429,
+        )
+    return cap - used - 1
+
+
 class RunSharedTaskRequest(BaseModel):
     task_name: str
 
@@ -817,6 +865,8 @@ async def run_shared_ai_task(
             status_code=409,
         )
 
+    remaining = await _enforce_share_limit(db, share)
+
     # Fetch entry for task input
     entry_result = await db.execute(select(Entry).where(Entry.id == entry_id))
     entry = entry_result.scalar_one_or_none()
@@ -873,6 +923,7 @@ async def run_shared_ai_task(
         "result": parsed,
         "model_name": latest.model_name if latest else None,
         "cost_estimate": str(latest.cost_estimate) if latest and latest.cost_estimate else None,
+        "remaining_today": remaining,
     }
 
 
@@ -934,6 +985,7 @@ async def shared_ask_agent(
         raise AppError(code="not_configured", message="Ask Agent is not configured", status_code=422)
 
     assignment, task, provider_model = assignment_data
+    remaining = await _enforce_share_limit(db, share)
     system_template, user_template = await get_active_prompt(db, task.id)
 
     entry_dict = {
@@ -985,7 +1037,7 @@ async def shared_ask_agent(
         raise AppError(code="ai_error", message=f"AI provider error: {e}", status_code=502)
 
     await record_direct_result(db, response=response, **ledger)
-    return {"answer": response.content, "model": response.model}
+    return {"answer": response.content, "model": response.model, "remaining_today": remaining}
 
 
 # --- OpenGraph preview endpoint ---

@@ -1,3 +1,4 @@
+import ipaddress
 import time
 
 import redis.exceptions
@@ -37,6 +38,11 @@ def _get_limit(path: str, method: str = "GET") -> tuple[int, int, str] | None:
         return (*CHAT_LIMIT, "chat")
     if path.startswith(AI_PATH_PREFIX) and not path.startswith(AI_EXEMPT_PREFIXES):
         return (*AI_LIMIT, "ai")
+    # The share page's AI calls need no login, so the only identity is the
+    # client IP: give them the same per-minute budget as the signed-in AI
+    # routes. The per-link daily limit is enforced in the route itself.
+    if method == "POST" and path.startswith("/api/shared/") and path.endswith(("/ask-agent", "/run-ai-task")):
+        return (*AI_LIMIT, "ai")
     # Authenticated read-only API traffic is not rate limited.
     # This is a self-hosted, single-user app — the default 600 req/min
     # limit was too low for normal operation with 200+ feeds triggering
@@ -65,9 +71,34 @@ def _get_identity(request: Request) -> str:
         except Exception:
             pass
 
-    # Fallback to IP
+    return f"ip:{client_ip(request)}"
+
+
+def client_ip(request: Request) -> str:
+    """The address of whoever is really calling.
+
+    In prod the direct peer is always Caddy on the Docker network, and
+    nothing in the stack sets forwarded_allow_ips, so request.client is
+    the proxy for every visitor and every anonymous bucket (login, the
+    share page's AI calls) would be one shared bucket. When the direct
+    peer is on a private network — our proxy, or the dev server — trust
+    the first X-Forwarded-For hop; a public direct peer is the client.
+    """
+    from app.core.outbound import is_public
+
     client = request.client
-    return f"ip:{client.host}" if client else "ip:unknown"
+    host = client.host if client else None
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if host and forwarded:
+        try:
+            direct_is_proxy = not is_public(ipaddress.ip_address(host))
+        except ValueError:
+            direct_is_proxy = False
+        if direct_is_proxy:
+            first = forwarded.split(",")[0].strip()
+            if first:
+                return first
+    return host or "unknown"
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):

@@ -6,6 +6,7 @@ import re
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import anyio
 import sqlalchemy as sa
 from fastapi import APIRouter, Body, Depends, File, Path, Query, Response, UploadFile
 from pydantic import BaseModel, ConfigDict
@@ -2754,7 +2755,7 @@ async def convert_detection_rule(
         raise AppError(code="same_type", message="Source and target rule types are the same", status_code=400)
 
     from app.ai.caller import Caller
-    from app.ai.engine import _get_provider_instance, get_task_assignment, record_direct_result
+    from app.ai.engine import _get_provider_instance, enforce_site_allowance, get_task_assignment, record_direct_result
 
     assignment_data = await get_task_assignment(db, user.id, "detection_rules")
     if not assignment_data:
@@ -2765,6 +2766,7 @@ async def convert_detection_rule(
         )
 
     assignment, task, provider_model = assignment_data
+    await enforce_site_allowance(db, Caller.user(user.id))
     provider = _get_provider_instance(provider_model)
 
     source_label = RULE_TYPE_LABELS.get(rule.rule_type, rule.rule_type)
@@ -3062,7 +3064,7 @@ async def chat_rule_assistant(
     from sse_starlette.sse import EventSourceResponse
 
     from app.ai.caller import Caller
-    from app.ai.engine import _get_provider_instance, get_task_assignment, record_direct_result
+    from app.ai.engine import _get_provider_instance, enforce_site_allowance, get_task_assignment, record_direct_result
 
     assignment_data = await get_task_assignment(db, user.id, "detection_rules")
     if not assignment_data:
@@ -3073,6 +3075,7 @@ async def chat_rule_assistant(
         )
 
     assignment, task, provider_model = assignment_data
+    await enforce_site_allowance(db, Caller.user(user.id))
     provider = _get_provider_instance(provider_model)
 
     rule_type_label = RULE_TYPE_LABELS.get(body.rule_type, body.rule_type)
@@ -3163,10 +3166,14 @@ GUIDELINES:
             ledgered = True
             yield {"event": "error", "data": _json.dumps({"error": str(e)})}
         finally:
-            # The client went away mid-stream: what was already generated is
-            # still spend, and a disconnect-and-retry loop must not be free.
-            if not ledgered and answer_parts:
-                await _ledger(conversation_text, "".join(answer_parts), "client disconnected")
+            # The client went away mid-stream. sse-starlette cancels this task,
+            # so the write has to be shielded or it is cancelled at its first
+            # await. The prompt reached the provider either way, so even a call
+            # abandoned before its first token is spend: a disconnect-and-retry
+            # loop must not be free.
+            if not ledgered:
+                with anyio.CancelScope(shield=True):
+                    await _ledger(conversation_text, "".join(answer_parts), "client disconnected")
 
     return EventSourceResponse(generate())
 
@@ -3799,7 +3806,7 @@ async def import_detection_rules(
 
 @router.get("/ai/cost-summary")
 async def get_cost_summary(
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Aggregate AI usage over the last 30 days: total estimated cost, request count, and input/output tokens."""

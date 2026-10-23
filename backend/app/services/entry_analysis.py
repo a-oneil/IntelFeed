@@ -418,6 +418,7 @@ async def enqueue_entry_analysis(db: AsyncSession, entry_id: uuid.UUID) -> str |
         if dup_id:
             dup_result, _ = await _current_analysis_result(db, uuid.UUID(dup_id))
             if dup_result is not None and isinstance(dup_result.parsed_result, dict):
+                from app.ai.engine import attribution_fields
                 from app.models.ai_result import AIResult
 
                 parsed = dict(dup_result.parsed_result)
@@ -438,8 +439,7 @@ async def enqueue_entry_analysis(db: AsyncSession, entry_id: uuid.UUID) -> str |
                         tokens_output=0,
                         cost_estimate=0,
                         processing_time_ms=0,
-                        caller_kind="system",
-                        provider_name=dup_result.provider_name,
+                        **{**attribution_fields(Caller.system(), None), "provider_name": dup_result.provider_name},
                     )
                 )
                 await store_entry_analysis(db, entry_id, parsed)

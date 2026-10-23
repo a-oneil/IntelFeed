@@ -9,7 +9,6 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import entity_types
-from app.ai.caller import Caller
 from app.ai.engine import run_task
 from app.intelligence.entity_dedup import (
     find_entity_by_name_or_alias,
@@ -331,7 +330,6 @@ async def extract_threat_actors(
     user_id: uuid.UUID,
     entry_id: uuid.UUID,
     entry_data: dict,
-    caller: Caller | None = None,
 ) -> tuple[list[tuple[ThreatActor, bool]], str, str | None]:
     """Extract threat actors from entry using AI and store them.
 
@@ -348,7 +346,6 @@ async def extract_threat_actors(
         entry_id=entry_id,
         target_type="entry",
         target_id=entry_id,
-        caller=caller,
     )
 
     status, error_msg = _ai_status(result)
@@ -495,7 +492,6 @@ async def extract_malware(
     user_id: uuid.UUID,
     entry_id: uuid.UUID,
     entry_data: dict,
-    caller: Caller | None = None,
 ) -> tuple[list[tuple[MalwareFamily, bool]], str, str | None]:
     """Extract malware families from entry using AI and store them.
 
@@ -512,7 +508,6 @@ async def extract_malware(
         entry_id=entry_id,
         target_type="entry",
         target_id=entry_id,
-        caller=caller,
     )
 
     status, error_msg = _ai_status(result)
@@ -662,7 +657,6 @@ async def extract_countries(
     user_id: uuid.UUID,
     entry_id: uuid.UUID,
     entry_data: dict,
-    caller: Caller | None = None,
 ) -> tuple[list[tuple[Country, bool]], str, str | None]:
     """Extract countries from entry using AI and store them.
 
@@ -679,7 +673,6 @@ async def extract_countries(
         entry_id=entry_id,
         target_type="entry",
         target_id=entry_id,
-        caller=caller,
     )
 
     status, error_msg = _ai_status(result)
@@ -769,7 +762,6 @@ async def extract_sectors(
     user_id: uuid.UUID,
     entry_id: uuid.UUID,
     entry_data: dict,
-    caller: Caller | None = None,
 ) -> tuple[list[dict], str, str | None]:
     """Extract targeted victim sectors from an entry using AI and store them.
 
@@ -790,7 +782,6 @@ async def extract_sectors(
         entry_id=entry_id,
         target_type="entry",
         target_id=entry_id,
-        caller=caller,
     )
 
     status, error_msg = _ai_status(result)
@@ -922,7 +913,6 @@ async def extract_article_metadata(
     user_id: uuid.UUID,
     entry_id: uuid.UUID,
     entry_data: dict,
-    caller: Caller | None = None,
 ) -> tuple[dict, str, str | None]:
     """Extract report type, victim orgs, timeline anchors, and patch availability.
 
@@ -940,7 +930,6 @@ async def extract_article_metadata(
         entry_id=entry_id,
         target_type="entry",
         target_id=entry_id,
-        caller=caller,
     )
 
     status, error_msg = _ai_status(result)

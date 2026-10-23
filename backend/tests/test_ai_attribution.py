@@ -323,8 +323,11 @@ async def test_cost_breakdown_is_admin_only(client: AsyncClient, auth_headers: d
 
 
 async def test_cost_breakdown_rolls_up_by_caller(
-    client: AsyncClient, db_session, admin_headers: dict, test_user: User, admin_user: User, provider
+    client: AsyncClient, db_session, admin_headers: dict, test_user: User, admin_user: User, provider, monkeypatch
 ):
+    from app.config import settings as env_settings
+
+    monkeypatch.setattr(env_settings, "site_ai_user_daily_requests", 150)
     task = await _assigned_task(db_session, provider, "attrib_dashboard")
 
     def row(kind, user_id=None, cost="0.10", key_owner_id=None):
@@ -367,6 +370,9 @@ async def test_cost_breakdown_rolls_up_by_caller(
     assert me["requests"] == 2
     assert Decimal(me["instance_cost"]) == Decimal("0.10")
     assert Decimal(me["own_key_cost"]) == Decimal("0.30")
+    # Only the instance-key call counts toward today's allowance.
+    assert me["requests_today"] == 1
+    assert body["site_allowance_per_user"] == 150
     assert by[("user", admin_user.username)]["requests"] == 1
     # Automation records the rule author but never bills them: it folds into
     # one row with no username, like the pipeline and old unattributed rows.

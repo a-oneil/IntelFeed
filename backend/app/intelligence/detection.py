@@ -6,7 +6,6 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai.caller import Caller
 from app.ai.engine import run_task
 from app.intelligence.telemetry_context import get_telemetry_for_prompt
 from app.models.cve import CVE, EntryCVE
@@ -46,7 +45,6 @@ async def generate_detection_rules(
     entry_data: dict,
     ttps: list[dict],
     rule_types: list[str],
-    caller: Caller | None = None,
 ) -> list[DetectionRule]:
     """Generate detection rules for specified formats using AI."""
     # Fetch CVEs linked to this entry for source_cves
@@ -64,7 +62,6 @@ async def generate_detection_rules(
         entry_id=entry_id,
         target_id=entry_id,
         source_cves=entry_cve_ids,
-        caller=caller,
     )
 
 
@@ -79,7 +76,6 @@ async def _generate_and_store_rules(
     target_id: uuid.UUID,
     source_cves: list[str] | None = None,
     source_actors: list[uuid.UUID] | None = None,
-    caller: Caller | None = None,
 ) -> list[DetectionRule]:
     """Run the detection_rules AI task per format and persist parsed rules.
 
@@ -108,7 +104,6 @@ async def _generate_and_store_rules(
             entry_id=entry_id,
             target_type=f"rule_{rt_abbrev}",
             target_id=target_id,
-            caller=caller,
         )
 
         if result:

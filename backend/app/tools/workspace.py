@@ -380,7 +380,14 @@ async def _set_detection_rule_status(db: AsyncSession, user_id: uuid.UUID, rule_
 async def _convert_detection_rule(
     db: AsyncSession, user_id: uuid.UUID, rule_id: str, target_format: str, save: bool = False
 ) -> dict:
-    from app.ai.engine import _get_provider_instance, derive_caller, get_task_assignment, record_direct_result
+    from app.ai.engine import (
+        SiteAllowanceExceeded,
+        _get_provider_instance,
+        derive_caller,
+        enforce_site_allowance,
+        get_task_assignment,
+        record_direct_result,
+    )
     from app.api.intelligence import RULE_TYPE_LABELS
 
     rule = await _get_rule(db, rule_id)
@@ -393,6 +400,13 @@ async def _convert_detection_rule(
     if not assignment_data:
         return {"error": "No AI provider assigned for detection rules. Configure one in Settings > AI."}
     assignment, task, provider_model = assignment_data
+    # Tools run as whoever invoked them, which for an agentic maintenance
+    # task is the service account — derive rather than assume a person.
+    caller = await derive_caller(db, user_id)
+    try:
+        await enforce_site_allowance(db, caller)
+    except SiteAllowanceExceeded as e:
+        return {"error": e.message}
     provider = _get_provider_instance(provider_model)
 
     source_label = RULE_TYPE_LABELS.get(rule.rule_type, rule.rule_type)
@@ -424,10 +438,8 @@ Return ONLY the converted rule content — no explanation, no markdown fences, j
 
     config = {**provider_model.config, **assignment.config}
     system_prompt = "You are an expert detection engineer. Convert detection rules between formats with perfect syntax."
-    # Tools run as whoever invoked them, which for an agentic maintenance
-    # task is the service account — derive rather than assume a person.
     ledger = dict(
-        caller=await derive_caller(db, user_id),
+        caller=caller,
         task=task,
         provider_model=provider_model,
         model_name=assignment.model_name,
