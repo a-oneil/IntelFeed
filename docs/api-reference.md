@@ -2686,7 +2686,7 @@ Base paths: `/api/ai/*`, `/api/enrichment`
 
 **`GET /api/ai/providers`**
 
-List configured AI providers (LLMs).
+List the instance's AI providers plus the caller's own personal keys (`user_id` set). Other people's keys are never listed here.
 
 **Auth:** Bearer token  
 **Response:**
@@ -2710,7 +2710,7 @@ List configured AI providers (LLMs).
 
 **`POST /api/ai/providers`**
 
-Add an AI provider.
+Add an AI provider. An admin registers the instance's providers; anyone may register a personal key (`"personal": true`, implied for non-admins) when the admin has turned personal keys on — the type must be one the admin allows, never `claude_code`, and the endpoint may not resolve to a private address unless the admin allows those. `?test=true` contacts the provider first and saves only if it answers (400 `provider_unreachable` otherwise, nothing written).
 
 **Auth:** Bearer token  
 **Status:** 201 Created  
@@ -2748,7 +2748,22 @@ Remove a provider.
 
 **`POST /api/ai/providers/{provider_id}/test`** — Run a connectivity/inference test.  
 **`GET /api/ai/providers/{provider_id}/models`** — List models available from the provider.  
-**`POST /api/ai/providers/{provider_id}/resume`** — Resume a provider that was auto-paused (e.g. after auth/billing errors).
+**`POST /api/ai/providers/{provider_id}/resume`** — Resume a provider that was auto-paused (e.g. after auth/billing errors).  
+**`GET /api/ai/providers/user-keys`** — Every personal key on the instance with its owner's username (admin only; the User keys tab's list).
+
+**Auth:** Bearer token. The instance's providers are the admin's (403 for anyone else). A personal key is its owner's; the admin may update, resume or delete anyone's key, but `test` and `models` contact the provider, so for those another person's key is a 404 for everyone.
+
+---
+
+#### Personal AI (`/api/ai/me`)
+
+What Settings → My AI reads and writes. Only meaningful while the admin has `allow_user_ai_providers` on; the overview reports the policy either way.
+
+**`GET /api/ai/me/overview`** — The admin's policy, my fallback setting and cap, this month's spend (split by whose provider answered, and per key), today's requests against both caps, and every task I may route with where it runs now and my route for it.  
+**`PATCH /api/ai/me/preferences`** — `fallback_to_site` (let the instance's provider answer when my key can't) and `monthly_cap_usd` (below the admin's default only; null restores it).  
+**`GET /api/ai/me/routes`** — My default key (`task_id` null) first, then per-task routes.  
+**`PUT /api/ai/me/routes`** — `{task_id, provider_id, model_name, config}`: point one task, or every allowed task (`task_id` null), at one of my keys. Same target again replaces. A per-task row with `provider_id` null sends that task back to the instance's provider despite a default key. Someone else's key or a site provider is a 404; a task closed to personal keys is 400 `task_site_only`.  
+**`DELETE /api/ai/me/routes/{route_id}`** — Remove a route.
 
 **Auth:** Bearer token
 
@@ -2837,9 +2852,9 @@ AI results are cached per target (`target_type` is e.g. `entry`, `daily_summary`
 
 **`GET /api/ai/cost-breakdown`**
 
-Cost dashboard: token/cost usage broken down by task, provider, and model over a time window.
+Cost dashboard: 30-day token/cost usage by task and by model, the split between the instance's spend and spend on people's own keys, the count of unpriced ($0) requests, per-task budgets, and `by_caller` — one row per person plus one each for the pipeline, automation rules and share links, with instance versus own-key cost, own-key requests, and today's requests against the per-user site allowance.
 
-**Auth:** Bearer token
+**Auth:** Bearer token (admin)
 
 ---
 
@@ -2853,6 +2868,8 @@ Cost dashboard: token/cost usage broken down by task, provider, and model over a
 #### AI Copilot (Global)
 
 Base paths: `/api/ai/copilot`, `/api/ai/copilot-auth`, `/api/ai/conversations`
+
+**`GET /api/ai/copilot/config`** — Which provider answers this person's copilot turns: `provider_type`, `provider_name`, `source` (`site` / `user`), `model`, `supports_tools`, `fallback_reason`, and `refused` ({reason, message}) when the policy would refuse the turn.
 
 **`POST /api/ai/copilot/stream`**
 

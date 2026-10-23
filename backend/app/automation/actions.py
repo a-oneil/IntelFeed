@@ -455,7 +455,8 @@ async def _action_run_ai_task(db: AsyncSession, entry: Entry, config: dict, user
 
     # Store AI output in context so downstream actions can use it
     ai_results = context.setdefault("ai_results", {})
-    parsed = result.parsed_result if hasattr(result, "parsed_result") else None
+    # run_task returns the parsed dict itself (the cached one on a dedup hit).
+    parsed = result if isinstance(result, dict) else None
     if parsed:
         ai_results[task_name] = parsed
         # Convenience: store summary text for notification/webhook actions

@@ -19,6 +19,9 @@ For contributors and operators working on the three subsystems that act on intel
   - [Model Configuration](#model-configuration)
   - [AI Tasks](#ai-tasks)
   - [Task Assignment & Routing](#task-assignment--routing)
+  - [Callers: Who Is Asking](#callers-who-is-asking)
+  - [Personal Keys & The Lookup](#personal-keys--the-lookup)
+  - [Allowances & Caps](#allowances--caps)
   - [Prompt Templates](#prompt-templates)
   - [Task Execution & Results](#task-execution--results)
   - [Error Handling & Retries](#error-handling--retries)
@@ -169,7 +172,7 @@ Implementation: `evaluate_conditions()` at `conditions.py:22-53` recursively eva
 
 ### Actions
 
-Actions execute sequentially and share a mutable context dict. Earlier actions can write outputs that later actions read. Key implementation: `execute_action()` at `backend/app/automation/actions.py:224`.
+Actions execute sequentially and share a mutable context dict. Earlier actions can write outputs that later actions read. Key implementation: `execute_action()` at `backend/app/automation/actions.py:189`.
 
 **Available Actions:**
 
@@ -292,7 +295,7 @@ When running rules against multiple entries (e.g., scheduled digest at 9am), act
    - `use_daily_summary` → reads the day's already-generated briefing instead of prompting again
    - `run_webhook` → one POST with aggregated data
 
-Reference: `backend/app/automation/actions.py:331` (`execute_actions_batch()`).
+Reference: `backend/app/automation/actions.py:313` (`execute_actions_batch()`).
 
 #### One article per story
 
@@ -430,6 +433,8 @@ Four providers are implemented (`backend/app/ai/providers/`): `ClaudeProvider` (
 
 Tool capability is gated centrally in `backend/app/ai/capabilities.py`: `TOOL_CAPABLE_PROVIDER_TYPES = {"claude_code", "ollama"}` and `TOOL_REQUIRED_TASKS` (copilot, entity_enrichment_research) together prevent assigning an agentic task to a provider that can't execute tools. `openai_compatible` is deliberately excluded for now — see the provider's module docstring.
 
+The same module holds the two sets behind personal keys (see [Personal Keys & The Lookup](#personal-keys--the-lookup)): `PERSONAL_PROVIDER_TYPES` (`backend/app/ai/capabilities.py:74`) is what a person may register as their own — `claude`, `ollama`, `openai_compatible`; never `claude_code`, which is one CLI sign-in shared by the whole instance — and `USER_PROVIDER_ELIGIBLE_TASKS` (`capabilities.py:53`) is the fourteen tasks a personal key may answer.
+
 ### Model Configuration
 
 The `AIProvider` database model (`models/ai_provider.py:11-27`) stores provider definitions:
@@ -444,8 +449,13 @@ class AIProvider(Base):
     models: list[dict]              # Available models
     is_active: bool = True
     config: dict                    # {temperature, max_tokens, etc.}
+    user_id: UUID | None            # NULL = the instance's provider; set = one person's own key
+    paused_until: datetime | None   # auto-pause after a quota/rate-limit response
+    paused_reason: str | None
     created_at, updated_at: datetime
 ```
+
+`user_id` divides the table in two. A row with no owner is one of the instance's providers: the admin registers it, the site's task assignments point at it, the startup seeder, onboarding, embeddings and backup read it. A row with an owner is a **personal key** (`AIProvider.is_personal`): its owner's routes point at it and nothing else does. The providers API lists the instance's rows plus the caller's own; another person's key is a 404 to everyone for anything that would use it (test, model listing, a site assignment), while the admin may disable, resume or delete any key from the User keys tab (`_owned`, `backend/app/api/ai_providers.py:59`). The secret is encrypted with the instance's `ENCRYPTION_KEY` either way, so the operator can read a personal key; both UIs say so.
 
 Example:
 ```json
@@ -480,6 +490,8 @@ class AITask(Base):
     output_schema: dict | None      # JSON schema for structured output
     variables: list[str]            # {{entry.title}}, {{entry.content_text}}, etc.
     is_system: bool = True
+    is_deprecated: bool = False     # superseded seeds, kept for result history
+    allows_user_provider: bool      # may a person's own key answer this task?
     created_at: datetime
 ```
 
@@ -501,7 +513,7 @@ class AITask(Base):
 
 The legacy per-entry extraction tasks (`threat_actor_id`, `malware_id`, `tool_extraction`, `country_id`, `sector_id`, `article_metadata`, `mitigation_extraction`, `cve_extraction`) still exist but are flagged `deprecated` — see "One-Pass Entry Analysis" below.
 
-Tasks are invoked via `run_task()` in `backend/app/ai/engine.py:354`.
+Tasks are invoked via `run_task()` in `backend/app/ai/engine.py:837`.
 
 ### Task Assignment & Routing
 
@@ -521,15 +533,73 @@ class AITaskAssignment(Base):
     __table_args__ = (UniqueConstraint("task_id"),)  # One provider per task
 ```
 
-**Key design:** One-to-one task→provider mapping (enforced by unique constraint on `task_id`). This means "Run article_summary on Claude" but "Run entry_analysis on Ollama" are configured at the assignment level.
+**Key design:** One-to-one task→provider mapping (enforced by unique constraint on `task_id`). This means "Run article_summary on Claude" but "Run entry_analysis on Ollama" are configured at the assignment level. An assignment may only name one of the instance's providers; the per-task `PUT` and the commission action refuse a personal key.
 
-When `run_task(task_name="article_summary")` is called:
-1. Query `AITaskAssignment` where `task_id.name == "article_summary"`
-2. Load the assigned `AIProvider` and its config
-3. Get or create the provider instance via `_get_provider_instance()`
-4. Execute via `provider.complete()`
+The site's assignment is read by `get_task_assignment()` (`backend/app/ai/engine.py:758`), which joins the enabled assignment to an active, unpaused provider. It is the lookup the batch poller uses directly, and the base case of the lookup everything else uses:
 
-Reference: `backend/app/ai/engine.py:289` (`get_task_assignment()`).
+`resolve_assignment(db, caller, task_name)` (`backend/app/ai/engine.py:574`) returns a `Resolved` — the task, the provider, the model, the merged config, and `source` (`"site"` or `"user"`) — or `None` when nothing can answer. For every caller that is not a signed-in person, and for every call while personal keys are off, it is the site's assignment and nothing more. For a person while personal keys are on it layers their own key on top; the next three sections say how.
+
+`run_task()` resolves first, then dedups, then calls `_get_provider_instance()` and `provider.complete()` on whichever provider answered. Direct callers that stream (copilot, rule chat) or that run outside `run_task` (the shared Ask Agent, rule conversion, the workspace tool) resolve the same way and ledger their own rows (see [Task Execution & Results](#task-execution--results)). Work that runs in a worker — report generation — pre-flights the same lookup at enqueue (`preflight_ai`, `backend/app/ai/engine.py:664`, and `preflight_report`, `engine.py:673`), so a refusal arrives as the request's error rather than part-way through the worker.
+
+### Callers: Who Is Asking
+
+Every AI call runs for a `Caller` (`backend/app/ai/caller.py:41`): a *kind* plus the user it is attributed to.
+
+| Kind | Built by | `user_id` means | Personal key? | Site allowance? |
+|---|---|---|---|---|
+| `user` | an API route a signed-in person called | the person | yes | yes, when the site's provider answers |
+| `system` | pipeline stages, maintenance jobs, shared output (daily summary, thread spines, briefs) | the `system` account, or nothing | no | no |
+| `automation` | the automation dispatcher | the rule's author | no | no |
+| `share` | the public share routes | the sharer | no | no (the link has its own limit) |
+
+`run_task` takes `caller=` and, when none is given, reads the context default set by `caller_scope()` (`caller.py:97`) or derives one from the bare `user_id` (`derive_caller`, `engine.py:385`): a real person's id is a `user` caller, the `system` service account and an id that matches no users row (the all-zero sentinel some workers pass, a deleted account) are `system`. The automation dispatcher wraps every action in `caller_scope(Caller.automation(rule.created_by))`, so a new action cannot bill its author's key by forgetting a keyword argument. Share routes pass `Caller.share(share.created_by)` explicitly.
+
+The kind is written to `ai_results.caller_kind` with `user_id`, and the cost dashboard's By-user table groups on it (one row per person, one each for the pipeline, automation and share links, one `unattributed` row for results with no recorded kind).
+
+### Personal Keys & The Lookup
+
+Behind an admin switch, a person may register their own provider key and have the tasks *they* start run on it. Eight settings in the `ai` group (Settings → AI Configuration → User keys; `backend/app/config.py:77-95`, metadata in `backend/app/services/system_settings.py:525`) govern it:
+
+| Setting | Default | What it does |
+|---|---|---|
+| `allow_user_ai_providers` | `false` | The switch. Off means every call resolves to the site's assignment alone; keys and routes already saved stay in the database and are not consulted. |
+| `require_user_ai_provider` | `false` | With the switch on: refuse an interactive task instead of falling back to the instance's providers. Ignored while the switch is off. |
+| `user_ai_provider_types` | `claude,openai_compatible` | Types a person may register; `ollama` may be added. `claude_code` never qualifies. |
+| `user_ai_allow_private_endpoints` | `false` | Let a personal key point at a private address (a LAN Ollama). The server calls whatever URL people enter, so this stays off on a public instance. |
+| `user_ai_default_monthly_usd` | `25.0` | Monthly spend cap on one person's keys. A person may set a lower cap, never a higher one. 0 = unlimited. |
+| `user_ai_daily_request_cap` | `300` | Daily request cap on one person's keys. Counts calls, because Ollama and unpriced models report $0. 0 = unlimited. |
+| `site_ai_user_daily_requests` | `0` | Daily requests one person may make on the *instance's* providers for tasks they start. See [Allowances & Caps](#allowances--caps). |
+| `share_ai_daily_requests` | `20` | Daily AI calls one share link may make, across both share routes. On the User keys tab beside the allowance, since it caps people's use of the instance's providers too. |
+
+A person's routing lives in two tables (`backend/app/models/user_ai_route.py`):
+
+- `user_ai_routes` — one row per `(user, task)` plus at most one default row with `task_id` NULL. A route names one of the person's own keys and a model (`provider_id`, `model_name`) and an optional config merged over the provider's. A per-task row with `provider_id` NULL is the opposite: that task goes back to the instance's provider even though a default key exists (the picker calls it "Instance default").
+- `user_ai_preferences` — `fallback_to_site` (default true) and `monthly_cap_usd` (NULL = the admin's default).
+
+Which tasks a key may answer is per task: `ai_tasks.allows_user_provider`. One test decides membership — does the result belong to the person who clicked? Copilot turns, rule drafts, summaries and report sections do; entity links, adjudication verdicts, briefs and story spines are read by everyone and stay on the instance's providers whoever started them. `USER_PROVIDER_ELIGIBLE_TASKS` seeds the flag, the startup seeder applies it to tasks it creates, and the admin may turn it off per task, or on for a custom task, but cannot open a task outside the set (`PATCH /api/ai/tasks/{id}` refuses with 400 `task_site_only`; the task API reports the lock as `user_provider_locked`).
+
+The lookup, for a `user` caller with the switch on (`resolve_assignment`, `backend/app/ai/engine.py:574`):
+
+1. Read the site's assignment. If the task does not allow personal keys, that is the answer.
+2. Find the person's route: the per-task row, else the default row (`_user_route`, `engine.py:517`). An opt-out row, a row pointing at a key that is not theirs, or no row at all means no key.
+3. Check the key can answer right now (`_route_blocked`, `engine.py:539`), in this order: `key_disabled`, `key_paused`, `type_not_allowed`, `endpoint_blocked` (the base URL is resolved on every call, not only on save — an `ollama`/`openai_compatible` key with no address is blocked too, since the empty default would be the server's own localhost Ollama), `monthly_cap`, `daily_cap`.
+4. A usable key answers: `source="user"`, no site allowance, and `key_owner_id` goes on the result.
+5. Otherwise, if the policy is Required, or the person has a key and has turned fallback off, raise `UserKeyRequired` — HTTP 403, code `user_ai_key_required`, `details.reason` one of the codes above or `no_key`, with the sentence from `FALLBACK_REASONS` as the message. Under Optional with no key there is nothing to fall back *from*, so the site answers silently.
+6. Otherwise the site's provider answers with `fallback_reason` set when the person *had* a key that could not answer — most people have no key, and that is not a warning. The site allowance applies. When the site has no provider for the task and the person's key is blocked, the refusal names the reason rather than reporting the task as unassigned.
+
+The caps are checked before the call, not reserved, so a burst of concurrent requests can overshoot by a few; that is accepted for v1.
+
+The person-facing API is `/api/ai/me` (`backend/app/api/user_ai.py`): `GET /overview` (the policy, their fallback and cap, this month's spend split by whose provider answered and by key, and every routable task with where it runs now), `PATCH /preferences`, `GET/PUT /routes` and `DELETE /routes/{id}`. The providers API accepts a personal key from anyone when the switch is on (`POST /api/ai/providers`, `personal` implied for non-admins; `?test=true` contacts the provider first and saves only if it answers) and lists everyone's keys with their owners to the admin at `GET /api/ai/providers/user-keys`. The Settings → My AI page and the User keys tab are the two UIs over these ([frontend.md](frontend.md)).
+
+### Allowances & Caps
+
+Three limits, three different things being counted, all read from `ai_results` so there is no second ledger:
+
+- **The site allowance** (`site_ai_user_daily_requests`; `enforce_site_allowance`, `backend/app/ai/engine.py:365`) caps what one *person* may ask of the *instance's* providers per UTC day: rows with `caller_kind = user` and no `key_owner_id`. Failed calls count — they were requests — so a broken provider cannot be retried for free; a dedup hit costs nothing, which is why `run_task` resolves with `allowance=False` and enforces after its dedup guard, while every direct caller leaves it on. Exceeding it is HTTP 429 `ai_allowance_exceeded`. The pipeline, automation rules and share links are the operator's own spend and are never capped here; a person's own key is not the instance's either.
+- **The personal caps** (`user_ai_default_monthly_usd`, a person's own lower `monthly_cap_usd`, and `user_ai_daily_request_cap`) count rows with `key_owner_id = the person`: dollars since the first of the month, calls since midnight UTC. A capped key falls back or refuses as above.
+- **The share limit** (`share_ai_daily_requests`) is one budget per link per day across `POST /api/shared/{token}/run-ai-task` and `.../ask-agent`; both report `remaining_today`, and both are under the per-minute `ai` rate-limit bucket keyed on the client behind the proxy. Share traffic always runs on the instance's providers, never the sharer's key.
+
+Prompts run on a personal key are still the instance's templates, which admins edit; the result records `_prompt_version` so the Who-answered card can say which.
 
 ### Prompt Templates
 
@@ -548,7 +618,7 @@ class AIPromptTemplate(Base):
     created_at: datetime
 ```
 
-**Prompt Resolution** (`get_active_prompt`, `backend/app/ai/engine.py:320`):
+**Prompt Resolution** (`get_active_prompt`, `backend/app/ai/engine.py:790`):
 1. User-specific template (highest priority): where `created_by == user_id` AND `is_active` AND highest `version`
 2. System default template: where `created_by IS NULL` AND `is_active` AND highest `version`
 3. Task's `default_prompt_template` field (fallback)
@@ -581,7 +651,7 @@ Summary: {{ entry.summary }}
 Produce a single JSON object with overall briefing and coverage gaps.
 ```
 
-Rendering uses Jinja2 at `render_prompt`, `backend/app/ai/engine.py:283`.
+Rendering uses Jinja2 at `render_prompt`, `backend/app/ai/engine.py:752`.
 
 ### Task Execution & Results
 
@@ -597,15 +667,18 @@ async def run_task(
     target_type: str = None,  # "entry", "campaign", etc.
     target_id: UUID | None = None,
     force: bool = False,
+    timeout_seconds: float | None = None,
+    caller: Caller | None = None,
 ) -> dict | None:
-    # 1. Look up assignment
+    # 1. Resolve the provider for the caller (resolve_assignment)
     # 2. Check for cached result (dedup via target_id)
-    # 3. Get prompt template
-    # 4. Render prompt with variables
-    # 5. Execute provider
-    # 6. Parse JSON response
-    # 7. Store AIResult
-    # 8. Return parsed_result
+    # 3. Enforce the site allowance when the site's provider answers a person
+    # 4. Get the prompt template (and its version)
+    # 5. Render prompt with variables
+    # 6. Execute provider
+    # 7. Parse JSON response
+    # 8. Store AIResult, attributed to the caller and the key owner
+    # 9. Return parsed_result
 ```
 
 The `AIResult` model (`models/ai_result.py:12-38`) captures execution:
@@ -618,7 +691,7 @@ class AIResult(Base):
     target_id: UUID | None          # ID of the target (for dedup)
     is_current: bool = True         # Dedup: mark old results as not_current on re-run
     task_id: UUID
-    provider_id: UUID
+    provider_id: UUID | None        # ON DELETE SET NULL: a deleted key keeps its results
     model_name: str                 # Actual model used
     prompt_used: str                # Full rendered prompt (for debugging)
     raw_response: str               # Unprocessed provider output
@@ -627,6 +700,10 @@ class AIResult(Base):
     tokens_output: int
     cost_estimate: Decimal          # Calculated from cost_table
     processing_time_ms: int
+    caller_kind: str                # user | system | automation | share
+    user_id: UUID | None            # who it is attributed to (SET NULL)
+    key_owner_id: UUID | None       # set = a personal key paid for this (SET NULL)
+    provider_name: str              # survives the provider row
     created_at: datetime
 
     __table_args__ = (
@@ -636,6 +713,8 @@ class AIResult(Base):
 ```
 
 **Deduplication:** If a task is run twice on the same target (entry), the first result is returned (cached) unless `force=True`. When `force=True`, prior results for that target/task are marked `is_current=False` and a new result is computed. This prevents re-running expensive AI tasks.
+
+**Attribution:** `attribution_fields()` (`backend/app/ai/engine.py:71`) fills `caller_kind`, `user_id`, `key_owner_id` and `provider_name` on every row `run_task` writes, error rows included. The four paths that call a provider outside `run_task` — copilot and rule chat (streamed), the shared Ask Agent and rule conversion — ledger a row per call through `record_direct_result()` (`engine.py:265`): a spend row, not an answer, so it is never `is_current` and never served from the dedup cache; a failure or a disconnect mid-stream is ledgered too. Two meta keys ride in `parsed_result` beside `_extraction_status`: `_fallback_reason` when the person's key could not answer and the site's provider did, and `_prompt_version` when a template override ran. The API exposes `caller_kind`, `user_id`, `key_owner_id` and `provider_name` on every result, which is what the result card's provider chip and Who-answered hover read.
 
 **Cost Tracking:**
 
@@ -651,6 +730,8 @@ cost = (tokens_in / 1_000_000) * rate_input + (tokens_out / 1_000_000) * rate_ou
 ```
 
 Costs are tracked in Prometheus metrics and summed in the `AI_COST_TOTAL` counter. When the provider reports a real dollar figure (the Claude Code CLI's `total_cost_usd`), that is recorded instead of the token-table estimate; Anthropic Message Batches submissions apply the 50% batch discount.
+
+`GET /api/ai/cost-breakdown` (admin only) splits the trailing 30 days into what the operator pays (`instance_cost_30d`, rows with no `key_owner_id`) and spend on people's own keys (`user_key_cost_30d`), counts the requests that came in at $0 (`unpriced_requests_30d`, so a low dollar figure is not mistaken for low usage), and adds `by_caller`: one row per person and one each for the pipeline, automation and share links, each with instance versus own-key cost, own-key requests, and today's count against `site_allowance_per_user`. The Cost Dashboard's tiles and By-user table render it.
 
 ### Error Handling & Retries
 
@@ -675,6 +756,8 @@ Automation actions check `_extraction_status` to handle errors gracefully.
 ### Streaming
 
 The base class provides a `stream_complete()` method for real-time streaming. The default implementation falls back to `complete()` and yields the full response. Provider subclasses (like ClaudeProvider) override to yield chunks.
+
+A stream has no `AIResponse` to price, so each provider keeps the usage its stream reports in `last_stream_usage` (set on the base `AIProvider` in `backend/app/ai/providers/base.py`): the Anthropic SDK's final message, Ollama's `done` chunk, an OpenAI-compatible server's trailing usage chunk when it sends one. Copilot and rule chat read it after the stream ends and ledger the turn with real tokens, priced from the cost table when the provider reports tokens but no dollar figure, so a streamed turn on a personal key counts toward its monthly cap.
 
 ---
 
@@ -1221,24 +1304,31 @@ chain   chain     dict
          │
          ↓
 ┌────────────────────────────────────────────────────┐
-│ run_task(task_name, variables, entry_id)           │
-│ (backend/app/ai/engine.py:230)                     │
+│ run_task(task_name, variables, entry_id, caller)   │
+│ (backend/app/ai/engine.py:837)                     │
 └────────┬───────────────────────────────────────────┘
          │
          ↓
 ┌────────────────────────────────────────────────────┐
-│ get_task_assignment(user_id, task_name)            │
-│ Query AITaskAssignment.task_id.name == task_name   │
+│ resolve_assignment(caller, task_name)              │
+│ site assignment; plus the person's own key when    │
+│ personal keys are on and the task allows them      │
 └────────┬───────────────────────────────────────────┘
          │
-    ┌────┴─────┐
-    ↓          ↓
-Found?      Not Found
-    │          └──→ return None (skip)
+    ┌────┴─────┬──────────────┐
+    ↓          ↓              ↓
+Resolved   Nothing        UserKeyRequired
+    │          └──→ None      └──→ 403 user_ai_key_required
     ↓
 ┌────────────────────────────────────────────────────┐
 │ Check dedup: is_current result for (target, task)? │
 │ (skip if fresh, unless force=True)                 │
+└────────┬───────────────────────────────────────────┘
+         │
+         ↓
+┌────────────────────────────────────────────────────┐
+│ Site provider answering a person? Enforce the      │
+│ daily site allowance (429 ai_allowance_exceeded)   │
 └────────┬───────────────────────────────────────────┘
          │
          ↓
@@ -1284,8 +1374,10 @@ Success             Exception
          ↓
 ┌────────────────────────────────────────────────────┐
 │ Create AIResult                                    │
-│ - entry_id, task_id, provider_id                   │
-│ - parsed_result (JSON dict)                        │
+│ - entry_id, task_id, provider_id, provider_name    │
+│ - caller_kind, user_id, key_owner_id               │
+│ - parsed_result (JSON dict, + _fallback_reason,    │
+│   _prompt_version when they apply)                 │
 │ - cost_estimate, tokens_*, processing_time_ms      │
 │ - is_current=True (mark old as not_current)        │
 └────────┬───────────────────────────────────────────┘
@@ -1472,10 +1564,11 @@ AITask(
     category="analysis",
     default_prompt_template="Analyze: {{entry.content_text}}",
     output_schema={"type": "object", "properties": {...}},
+    allows_user_provider=True,   # optional: let a person's own key answer it
 )
 ```
 
-2. Assign to provider via API:
+2. Assign to provider via API (one of the instance's providers; a personal key is refused):
 ```python
 AITaskAssignment(
     task_id=task.id,

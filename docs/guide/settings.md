@@ -1,8 +1,8 @@
 # Settings and personalising
 
 Settings opens with its own nav rail; the app sidebar folds away beside it.
-What you see depends on your role — non-admins get Account, Appearance, Reading,
-Tags and Claude Code Skill; admins get everything.
+What you see depends on your role — non-admins get Account, Appearance, My AI,
+Reading, Tags and Claude Code Skill; admins get everything.
 
 ![The Appearance settings pane showing a grid of selectable light and dark themes](../assets/screenshots/settings.png)
 
@@ -23,6 +23,15 @@ rather than reading the names.
 
 If you're going to be in the app all day, this is worth two minutes. Contrast
 and density matter more than they sound when the job is scanning lists.
+
+## My AI
+
+Your own AI key, if your admin allows personal keys. Add a key of a type your
+admin allows (Claude API, OpenAI-compatible, Ollama), pick which of your tasks run on it (or set it
+as your default), and see this month's spend against your cap. Tasks you start
+yourself — the copilot, rule drafts, summaries, reports — run on your key; the
+pipeline, automation rules and share links never do. If the policy is off, the
+page says so. Covered in [Automation and AI](automation-and-ai.md#your-own-key).
 
 ## Reading
 
@@ -101,10 +110,11 @@ agent that can write.
 
 ## Admin sections
 
-**AI Configuration** — three tabs. *Providers* (which model runs which task, and
+**AI Configuration** — four tabs. *Providers* (which model runs which task, and
 keys), *Prompts* (the prompt behind every AI task, editable), *Cost* (tokens and
-spend per provider and task). Covered in
-[Automation and AI](automation-and-ai.md).
+spend per provider, task and person), *User keys* (whether people may bring
+their own keys, which types, the caps, which tasks, and everyone's keys).
+Covered in [Automation and AI](automation-and-ai.md).
 
 **Engine** — the ingestion pipeline console: feed health, stage settings,
 autolinking, AI extraction, enrichment, scoring, scheduled jobs and pipeline

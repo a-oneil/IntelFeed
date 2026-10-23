@@ -38,6 +38,7 @@ Tables: `users`, `user_entry_states`, `playback_progress`
 - `User.id` (UUID PK, unique `username`)
 - Users have many `UserEntryState` records (cascade delete on user removal)
 - Users can own `Categories`, `Tags`, `SavedSearches`, etc. (soft delete via `created_by` not CASCADE)
+- Users can own personal AI keys (`ai_providers.user_id`), AI routes and AI preferences (all CASCADE); their `ai_results` rows stay, with `user_id` / `key_owner_id` set NULL
 
 **Notes:**
 - Password stored as bcrypt hash (`password_hash` field)
@@ -629,9 +630,9 @@ like.
 
 ### 5. Automation & Execution
 
-**Tables:** `automation_rules`, `automation_logs`, `ai_tasks`, `ai_task_assignments`, `ai_results`, `ai_conversations`, `ai_analysis_requests`, `ai_batch_jobs`
+**Tables:** `automation_rules`, `automation_logs`, `ai_tasks`, `ai_task_assignments`, `user_ai_routes`, `user_ai_preferences`, `ai_results`, `ai_conversations`, `ai_analysis_requests`, `ai_batch_jobs`
 
-**Purpose:** Automation rule definitions, execution logs, and AI task orchestration.
+**Purpose:** Automation rule definitions, execution logs, and AI task orchestration: which provider answers a task for the instance, which answers it for one person, and who each result belongs to. The lookup over these tables is described in [automation-ai-enrichment.md](automation-ai-enrichment.md#personal-keys--the-lookup).
 
 #### AutomationRule
 
@@ -677,9 +678,10 @@ like.
 - `default_system_template` (Text) — default system prompt
 - `is_system` (Boolean) — true for built-in tasks
 - `is_deprecated` (Boolean) — superseded task seeds (kept for `ai_results` history, hidden from run pickers)
+- `allows_user_provider` (Boolean, default false) — a person's own key may answer this task. Seeded true for the tasks in `USER_PROVIDER_ELIGIBLE_TASKS` (`backend/app/ai/capabilities.py:53`); the admin may turn it off, or on for a custom task, but not on for a pipeline task outside that set
 - `created_at`
 
-**Relationships:** Has many `AITaskAssignment` (CASCADE delete).
+**Relationships:** Has many `AITaskAssignment` and `UserAIRoute` (CASCADE delete).
 
 #### AITaskAssignment
 
@@ -687,7 +689,7 @@ like.
 - `id` (UUID PK)
 - `created_by` (FK, nullable, SET NULL)
 - `task_id` (FK, CASCADE) — which AI task
-- `provider_id` (FK, CASCADE) — which AI provider
+- `provider_id` (FK, CASCADE) — which AI provider; always one of the instance's (`ai_providers.user_id` NULL), never a personal key
 - `model_name` (String 100) — model to use (e.g., "claude-opus-4", "gpt-4")
 - `is_enabled` (Boolean, default true)
 - `execution_mode` (String 10) — "api" or "agent"
@@ -697,22 +699,58 @@ like.
 
 **Relationships:** Belongs to `AITask`, `AIProvider`, and `User` (creator).
 
-#### AIResult
+#### UserAIRoute
+
+One person's answer to "which of my keys runs this task": the personal counterpart of `AITaskAssignment` (`backend/app/models/user_ai_route.py:21`). Consulted only for `user` callers while `allow_user_ai_providers` is on, and only for tasks with `allows_user_provider`.
 
 **Columns:**
 - `id` (UUID PK)
-- `entry_id` (FK, nullable, SET NULL)
-- `task_id` (FK, nullable, SET NULL)
-- `provider_id` (FK, nullable, SET NULL)
-- `model_used` (String 100)
-- `input_text` (Text) — what was sent to AI
-- `output_text` (Text) — raw AI response
-- `parsed_output` (JSONB) — structured output (if schema defined)
+- `user_id` (FK, CASCADE, indexed)
+- `task_id` (FK, CASCADE, nullable) — NULL is the person's default key, which covers every allowed task without a row of its own
+- `provider_id` (FK, CASCADE, nullable, indexed) — one of the person's own keys. NULL on a per-task row is an opt-out: that task runs on the instance's provider despite a default key
+- `model_name` (String 100, nullable) — NULL only with a NULL `provider_id`
+- `config` (JSONB) — merged over the provider's config at call time
+- `created_at`, `updated_at`
+
+**Unique Indexes:** one route per task per person (`uq_user_ai_routes_task`, partial on `task_id IS NOT NULL`) and one default per person (`uq_user_ai_routes_default`, partial on `task_id IS NULL`).
+
+**Relationships:** Belongs to `User`, `AITask`, `AIProvider`.
+
+#### UserAIPreferences
+
+One row per person, created on first write (`backend/app/models/user_ai_route.py:58`).
+
+**Columns:**
+- `user_id` (UUID PK, FK CASCADE)
+- `fallback_to_site` (Boolean, default true) — when the person's key can't answer, let the instance's provider take the call. Off refuses instead, like the Required policy, but only once the person has a key
+- `monthly_cap_usd` (Numeric 10,4, nullable) — the person's own cap on their keys' spend; NULL is the admin's `user_ai_default_monthly_usd`, and the API refuses a value above it
+- `updated_at`
+
+#### AIResult
+
+One row per AI call: the answer when `run_task` ran it, or a spend-only row for the paths that stream or call a provider directly (copilot, rule chat, the shared Ask Agent, rule conversion). The row is the only ledger: the cost dashboard, the per-person site allowance and the personal-key caps are all counts and sums over it.
+
+**Columns:**
+- `id` (UUID PK)
+- `entry_id` (FK, nullable, CASCADE, indexed) — an entry's results go with it
+- `target_type` (String 20, indexed), `target_id` (UUID, indexed) — what the result is about ("entry", "conversation", an entity type, …)
+- `is_current` (Boolean, default true, indexed) — the dedup flag; re-runs demote the previous row. Spend-only rows are never current
+- `task_id` (FK) — plain; the task delete route removes a task's results first
+- `provider_id` (FK, nullable, SET NULL) — deleting a provider, or a person whose key has results, keeps the rows
+- `model_name` (String 100)
+- `prompt_used` (Text) — the rendered prompt
+- `raw_response` (Text)
+- `parsed_result` (JSONB) — parsed output plus meta keys: `_extraction_status`, `_error`, `_fallback_reason` (the person's key could not answer and the instance's provider did), `_prompt_version` (a template override ran)
 - `tokens_input`, `tokens_output` (Integer)
-- `cost_usd` (Numeric)
-- `status` — "success", "error", "rate_limited"
-- `error_message` (Text)
+- `cost_estimate` (Numeric 10,6)
+- `processing_time_ms` (Integer)
+- `caller_kind` (String 12) — "user", "system", "automation" or "share": who asked (`backend/app/ai/caller.py:41`). NULL where nothing recorded it, which the dashboard reports as `unattributed`
+- `user_id` (FK, nullable, SET NULL) — who the call is attributed to: the person, the rule's author, the sharer
+- `key_owner_id` (FK, nullable, SET NULL) — set when a personal key paid for the call; NULL means the instance's provider did
+- `provider_name` (String 255) — survives the provider row
 - `created_at`
+
+**Index:** `ix_ai_results_target_task_current` on (`target_type`, `target_id`, `task_id`, `is_current`).
 
 #### AIConversation
 
@@ -1236,16 +1274,18 @@ Polymorphic — comments attach to any commentable object, with threading.
 
 **Columns:**
 - `id` (UUID PK)
-- `name` (String 100)
+- `name` (String 255)
 - `provider_type` (String 30) — "claude", "claude_code", "ollama", or "openai_compatible"
 - `base_url` (Text, nullable)
-- `api_key_encrypted` (Text)
+- `api_key_encrypted` (Text) — encrypted with the instance's `ENCRYPTION_KEY`, personal keys included
 - `models` (JSONB array) — list of available models
 - `is_active` (Boolean)
 - `config` (JSONB) — provider-specific config
+- `user_id` (FK, nullable, CASCADE, indexed) — NULL is one of the instance's providers, which site assignments and background work use. Set is a personal key (`is_personal`): only its owner's `user_ai_routes` point at it, it is never a site assignment, and the owner and the admin are the only people who can see it (`backend/app/api/ai_providers.py:59`)
+- `paused_until` (DateTime, nullable), `paused_reason` (String 500) — auto-pause after a quota or rate-limit response; the lookup treats a paused key as unable to answer
 - `created_at`, `updated_at`
 
-**Relationships:** Has many `AITaskAssignment` (CASCADE delete).
+**Relationships:** Has many `AITaskAssignment` and `UserAIRoute` (CASCADE delete); `AIResult` rows keep their `provider_name` and are set to NULL `provider_id` (`passive_deletes`).
 
 #### AIPromptTemplate
 

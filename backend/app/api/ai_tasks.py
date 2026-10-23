@@ -156,7 +156,7 @@ async def update_task(
                 f"'{task.display_name}' writes results the whole instance reads, "
                 "so it always runs on the instance's providers."
             ),
-            status_code=403,
+            status_code=400,
         )
     if "category" in updates and task.is_system:
         raise AppError(

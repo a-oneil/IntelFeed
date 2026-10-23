@@ -711,7 +711,7 @@ async def test_a_person_manages_their_own_key(
 
 
 async def test_a_personal_key_cannot_be_commissioned_or_site_assigned(
-    client: AsyncClient, db_session, admin_headers, admin_user, site_provider, policy_on
+    client: AsyncClient, db_session, admin_headers, admin_user, site_provider, other_key, policy_on
 ):
     own = AIProvider(name="Admin own", provider_type="claude", user_id=admin_user.id)
     db_session.add(own)
@@ -727,6 +727,20 @@ async def test_a_personal_key_cannot_be_commissioned_or_site_assigned(
         headers=admin_headers,
     )
     assert resp.status_code == 404
+
+    # Someone else's key gets the same answers: commission (admin-only, and the admin sees every
+    # key in the user-keys list) says it is personal; the assignment route, which would use it, 404s.
+    theirs = await client.post(f"/api/ai/providers/{other_key.id}/commission", headers=admin_headers)
+    assert theirs.status_code == 400 and theirs.json()["error"]["code"] == "personal_provider"
+    resp = await client.put(
+        f"/api/ai/tasks/{task.id}/assignments",
+        json={"provider_id": str(other_key.id), "model_name": "sonnet"},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 404
+    # The site's assignment is untouched by the refusals.
+    current = (await client.get(f"/api/ai/tasks/{task.id}/assignments", headers=admin_headers)).json()
+    assert current["provider_id"] == str(site_provider.id)
 
 
 # ---------------------------------------------------------------- task eligibility
@@ -752,7 +766,7 @@ async def test_admin_opens_and_closes_tasks_but_not_pipeline_ones(
     locked = await client.patch(
         f"/api/ai/tasks/{pipeline.id}", json={"allows_user_provider": True}, headers=admin_headers
     )
-    assert locked.status_code == 403 and locked.json()["error"]["code"] == "task_site_only"
+    assert locked.status_code == 400 and locked.json()["error"]["code"] == "task_site_only"
     opened = await client.patch(
         f"/api/ai/tasks/{custom.id}", json={"allows_user_provider": True}, headers=admin_headers
     )
@@ -1111,3 +1125,159 @@ async def test_a_task_can_opt_out_of_the_default_key(
     monkeypatch.setattr(env_settings, "require_user_ai_provider", True)
     with pytest.raises(UserKeyRequired):
         await resolve_assignment(db_session, caller, copilot.name)
+
+
+# ---------------------------------------------------------------- the branches implied so far
+
+
+async def test_policy_off_matches_todays_lookup_for_every_caller(
+    db_session, test_user, site_provider, my_key, monkeypatch
+):
+    """Off is the default, and it has to be exactly today's behaviour: a default key, a route,
+    fallback turned off and even Required are all inert, every caller kind gets what
+    get_task_assignment returns, and an unassigned task is None rather than a refusal."""
+    from app.ai.engine import get_task_assignment, preflight_ai, resolve_assignment
+
+    monkeypatch.setattr(env_settings, "allow_user_ai_providers", False)
+    monkeypatch.setattr(env_settings, "require_user_ai_provider", True)
+    assigned = await _task(db_session, site_provider, "detection_rules")
+    unassigned = await _task(db_session, None, "article_summary")
+    await _route(db_session, test_user, my_key, None)
+    await _route(db_session, test_user, my_key, assigned)
+    db_session.add(UserAIPreferences(user_id=test_user.id, fallback_to_site=False))
+    await db_session.flush()
+
+    callers = (
+        Caller.user(test_user.id),
+        Caller.system(),
+        Caller.system(test_user.id),
+        Caller.automation(test_user.id),
+        Caller.share(test_user.id),
+    )
+    for caller in callers:
+        todays_assignment, _, todays_provider = await get_task_assignment(db_session, caller.user_id, assigned.name)
+        resolved = await resolve_assignment(db_session, caller, assigned.name)
+        assert resolved.provider.id == todays_provider.id, caller
+        assert resolved.model_name == todays_assignment.model_name
+        assert resolved.source == "site" and resolved.fallback_reason is None and resolved.key_owner_id is None
+        assert await resolve_assignment(db_session, caller, unassigned.name) is None, caller
+        assert await preflight_ai(db_session, caller, unassigned.name) is None
+
+
+async def test_an_unknown_or_unassigned_task_under_each_policy(
+    db_session, test_user, site_provider, policy_on, monkeypatch
+):
+    """Nothing can answer: Optional says so with None (today's "not configured"), Required
+    says "add a key" for a task a key could answer and None for one it never could."""
+    from app.ai.engine import UserKeyRequired, preflight_ai, resolve_assignment
+
+    caller = Caller.user(test_user.id)
+    assert await resolve_assignment(db_session, caller, "no_such_task") is None
+    assert await preflight_ai(db_session, caller, "no_such_task") is None
+
+    open_task = await _task(db_session, None, "detection_rules")
+    closed_task = await _task(db_session, None, "entry_analysis", allows=False)
+    assert await resolve_assignment(db_session, caller, open_task.name) is None
+    assert await resolve_assignment(db_session, caller, closed_task.name) is None
+
+    monkeypatch.setattr(env_settings, "require_user_ai_provider", True)
+    with pytest.raises(UserKeyRequired) as exc:
+        await resolve_assignment(db_session, caller, open_task.name)
+    assert exc.value.reason == "no_key"
+    assert exc.value.details == {"reason": "no_key"}
+    with pytest.raises(UserKeyRequired):
+        await preflight_ai(db_session, caller, open_task.name)
+    assert await resolve_assignment(db_session, caller, closed_task.name) is None
+    assert await resolve_assignment(db_session, caller, "no_such_task") is None
+
+
+async def test_a_fallback_to_the_site_spends_the_site_allowance(
+    db_session, test_user, site_provider, my_key, policy_on, monkeypatch
+):
+    """A person whose key can't answer is a person on the instance's providers again, and the
+    daily allowance counts those calls; the status read a direct caller makes first is free."""
+    from app.ai.engine import SiteAllowanceExceeded, resolve_assignment, run_task
+
+    task = await _task(db_session, site_provider, "detection_rules")
+    await _route(db_session, test_user, my_key, task)
+    await _spend(db_session, task, my_key, test_user, "25.00")
+    monkeypatch.setattr(env_settings, "site_ai_user_daily_requests", 1)
+    _stub_provider(monkeypatch)
+    caller = Caller.user(test_user.id)
+
+    out = await run_task(db_session, test_user.id, task.name, variables={"text": "x"}, force=True)
+    assert out["_fallback_reason"] == "monthly_cap"
+
+    with pytest.raises(SiteAllowanceExceeded) as exc:
+        await resolve_assignment(db_session, caller, task.name)
+    assert exc.value.status_code == 429 and exc.value.used == 1
+    with pytest.raises(SiteAllowanceExceeded):
+        await run_task(db_session, test_user.id, task.name, variables={"text": "y"}, force=True)
+    status = await resolve_assignment(db_session, caller, task.name, allowance=False)
+    assert status.source == "site" and status.fallback_reason == "monthly_cap"
+    # The refused call wrote nothing: the fallback row is still the only one on the site provider.
+    rows = (await db_session.execute(select(AIResult).where(AIResult.provider_id == site_provider.id))).scalars().all()
+    assert len(rows) == 1
+
+
+async def test_an_automation_rule_runs_on_the_site_despite_its_authors_default_key(
+    db_session, test_user, test_entry, test_feed, site_provider, my_key, policy_on, monkeypatch
+):
+    """The dispatcher scopes every AI call beneath it as automation, so a rule never bills its
+    author's key, Required (a rule for people) does not refuse it, and the person's site
+    allowance does not count it, while the same person clicking the same task is capped."""
+    from app.ai.engine import SiteAllowanceExceeded, run_task
+    from app.automation.actions import execute_action
+    from app.models.entry import Entry
+
+    task = await _task(db_session, site_provider, "detection_rules")
+    await _route(db_session, test_user, my_key, None)
+    monkeypatch.setattr(env_settings, "require_user_ai_provider", True)
+    monkeypatch.setattr(env_settings, "site_ai_user_daily_requests", 1)
+    stub = _stub_provider(monkeypatch)
+    second = Entry(feed_id=test_feed.id, title="Second", guid="second", url="https://example.com/2")
+    db_session.add(second)
+    await db_session.flush()
+
+    action = {"type": "run_ai_task", "config": {"task_name": task.name}}
+    context: dict = {}
+    for entry in (test_entry, second):  # two real calls, past a person's one-request allowance
+        out = await execute_action(db_session, entry, action, test_user.id, context)
+        assert out["status"] == "success", out
+    assert stub.complete.await_count == 2
+    assert {p.id for p in stub.seen} == {site_provider.id}
+    # The result reaches the rule's shared context for the actions after it.
+    assert context["ai_results"][task.name] == {"answer": "ok", "_extraction_status": "success"}
+    rows = (await db_session.execute(select(AIResult).where(AIResult.task_id == task.id))).scalars().all()
+    assert {r.caller_kind for r in rows} == {"automation"}
+    assert all(r.user_id == test_user.id and r.key_owner_id is None for r in rows)
+    assert all(r.provider_name == "Lab Ollama" for r in rows)
+
+    # The cap is real for the same person clicking: the rule's rows did not count, so their
+    # first call on the instance's provider passes and the second is refused.
+    monkeypatch.setattr(env_settings, "require_user_ai_provider", False)
+    for route in (await db_session.execute(select(UserAIRoute))).scalars().all():
+        await db_session.delete(route)  # no key, so the site's provider answers the person
+    await db_session.flush()
+    await run_task(db_session, test_user.id, task.name, variables={"text": "x"}, force=True)
+    with pytest.raises(SiteAllowanceExceeded):
+        await run_task(db_session, test_user.id, task.name, variables={"text": "y"}, force=True)
+
+
+async def test_a_share_links_task_runs_on_the_site_despite_the_sharers_default_key(
+    client: AsyncClient, db_session, test_user, test_entry, site_provider, my_key, policy_on, monkeypatch
+):
+    task = await _task(db_session, site_provider, "threat_assessment", category="analysis")
+    await _route(db_session, test_user, my_key, None)
+    monkeypatch.setattr(env_settings, "require_user_ai_provider", True)
+    share = SharedEntry(entry_id=test_entry.id, created_by=test_user.id, is_active=True)
+    db_session.add(share)
+    await db_session.flush()
+    stub = _stub_provider(monkeypatch, content='{"what": "x", "so_what": "y"}')
+
+    resp = await client.post(f"/api/shared/{share.token}/run-ai-task", json={"task_name": task.name})
+
+    assert resp.status_code == 200, resp.text
+    assert stub.seen[0].id == site_provider.id
+    row = await _only_result(db_session, task)
+    assert row.caller_kind == "share" and row.user_id == test_user.id and row.key_owner_id is None

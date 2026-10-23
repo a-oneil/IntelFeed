@@ -502,7 +502,9 @@ interface Widget {
 ### Settings & System Components
 - **SystemSettings** — Admin system toggles (image proxy, backup, etc.)
 - **ThemeEditor** — Create/edit custom themes with live CSS variable preview
-- **AISettings** — Providers | Prompts | Cost tabs; includes CopilotAuthCard for in-app Claude re-auth; the Prompts tab renders the master–detail **PromptWorkspace**
+- **AISettings** — Providers | Prompts | Cost | User keys tabs; includes CopilotAuthCard for in-app Claude re-auth; the Prompts tab renders the master–detail **PromptWorkspace**; the Providers tab, health banner and assignment pickers show the instance's providers only; the Cost tab's tiles split instance spend from people's own keys and its By-user table (`ByUserTable`) carries allowance meters
+- **UserKeysSection** (UserKeysSection.tsx) — the User keys tab: the personal-key policy as one segmented control (Off / Optional / Required, writing both flags), allowed key types as chips, the private-endpoint switch, the four limits (monthly and daily caps on personal keys, the per-person site allowance, the share-link limit), the per-task eligibility table (pipeline tasks locked), and everyone's keys to disable or delete
+- **MyAISection** (MyAISection.tsx) — Settings → My AI (`?section=myai`): this month's spend against the cap with a per-key meter, the person's keys (test, edit, delete, set as default; the add form tests-and-saves and refuses Claude Code), per-task route and model pickers with the "no tools" chip and an "Instance default" opt-out, the fallback switch (hidden under Required) and the personal cap; `utils/aiProvenance.ts` holds the fallback-reason wording that result cards (`AIResultsDisplay`'s Who-answered hover and fallback stripe), task rows (`AIAnalysisSection`'s key dot) and the copilot dock share
 - **engine/EngineSection** — the Settings → Engine console (rendered by SettingsPage's `engine` section at `/settings?section=engine`): a single-surface table card (entries matrix, links, relationships, Review, in-card stage settings) with Jobs / Feeds / Plans as separate views; hosts feed health, enrichment, and job schedules, and maps bookmarked `?tab=` / `?section=` deep links onto console states
 - **TagManager** (TagManager.tsx) — Settings → Tags: rename, recolor, merge, and delete tags with usage counts; **TagPicker** is the reusable tag-selection dropdown used by the reader tag panel, report wizard, and automation editor
 - **TelegramSection** (in SettingsPage.tsx) — Admin walkthrough for Telegram user-session setup
@@ -522,7 +524,7 @@ interface Widget {
 - **DetectionWorkbenchPage.tsx** — Rule creation & testing (rendered inside the workbench; `/detection-workbench` redirects to `/workbench`)
 - **GlossaryPage.tsx** — Glossary term management (rendered inside the workbench)
 - **RuleDetailPage.tsx** (lazy) — Single rule versioning & testing
-- **SettingsPage.tsx** (lazy) — Section-based settings (Account, AI Configuration, Appearance, Claude Code Skill, Engine, Telegram Setup, Feeds & Import, Logs, Reading, Tags, System, Users). Engine is the admin-only pipeline console section (`?section=engine`, hosting `engine/EngineSection`); legacy `?section=schedules|enrichment|feed-health|workbench` deep links resolve onto it.
+- **SettingsPage.tsx** (lazy) — Section-based settings (Account, AI Configuration, Appearance, My AI, Claude Code Skill, Engine, Telegram Setup, Feeds & Import, Logs, Reading, Tags, System, Users). Engine is the admin-only pipeline console section (`?section=engine`, hosting `engine/EngineSection`); legacy `?section=schedules|enrichment|feed-health|workbench` deep links resolve onto it.
 - **CampaignsPage.tsx** (lazy) — Campaign management & correlation
 - **CampaignProfilePage.tsx** (lazy) — Campaign detail with related entities
 - **RegionsPage.tsx** (lazy) — Region/sub-region aggregation

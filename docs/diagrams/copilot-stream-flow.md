@@ -12,7 +12,7 @@ sequenceDiagram
     participant SK as intelfeed skill CLI<br/>(read-only)
 
     UI->>API: fetch POST {question, conversation_id?, context?}<br/>Authorization: Bearer JWT
-    API->>API: get_task_assignment("copilot") → claude_code provider
+    API->>API: resolve_assignment(Caller.user, "copilot")<br/>→ the site's claude_code provider, or the person's own key
     API->>API: load/create AIConversation (scope from context)
     API->>API: render system+user prompt<br/>(ambient context + last 20 messages)
     API->>Q: send_task run_copilot_stream(run_id, ...) → ai queue

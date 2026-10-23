@@ -18,6 +18,10 @@ erDiagram
     USER ||--o{ DASHBOARD : creates
     USER ||--o{ DETECTION_SUMMARY : creates
     USER ||--o{ AI_TASK_ASSIGNMENT : creates
+    USER ||--o{ AI_PROVIDER : "owns (personal keys)"
+    USER ||--o{ USER_AI_ROUTE : routes
+    USER ||--o| USER_AI_PREFERENCES : prefers
+    USER ||--o{ AI_RESULT : "attributed / key owner"
     USER ||--o{ ENRICHMENT_OVERRIDE : creates
     USER ||--o{ TELEMETRY_SOURCE : creates
     USER ||--o{ WEBHOOK_PRESET : creates
@@ -122,9 +126,12 @@ erDiagram
     ENRICHMENT_SOURCE ||--o{ ENRICHMENT_RESULT : results
 
     AI_PROVIDER ||--o{ AI_TASK_ASSIGNMENT : assignments
+    AI_PROVIDER ||--o{ USER_AI_ROUTE : routes
+    AI_PROVIDER |o--o{ AI_RESULT : answered
     AI_PROVIDER ||--o{ AI_BATCH_JOB : batches
 
     AI_TASK ||--o{ AI_TASK_ASSIGNMENT : assignments
+    AI_TASK ||--o{ USER_AI_ROUTE : routes
     AI_TASK ||--o{ AI_RESULT : results
 
     ENTITY_RELATIONSHIP {
