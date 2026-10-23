@@ -960,9 +960,9 @@ async def shared_ask_agent(
     from app.ai.engine import (
         _get_provider_instance,
         get_active_prompt,
-        get_task_assignment,
         record_direct_result,
         render_prompt,
+        resolve_assignment,
     )
 
     # Validate share token
@@ -980,11 +980,14 @@ async def shared_ask_agent(
     if not body.question.strip():
         raise AppError(code="bad_request", message="Question is required", status_code=400)
 
-    assignment_data = await get_task_assignment(db, share.created_by, "entry_qa")
-    if not assignment_data:
+    # Share traffic is never a person: the lookup answers with the
+    # instance's provider whatever the sharer has set up.
+    caller = Caller.share(share.created_by)
+    resolved = await resolve_assignment(db, caller, "entry_qa")
+    if resolved is None:
         raise AppError(code="not_configured", message="Ask Agent is not configured", status_code=422)
 
-    assignment, task, provider_model = assignment_data
+    task, provider_model = resolved.task, resolved.provider
     remaining = await _enforce_share_limit(db, share)
     system_template, user_template = await get_active_prompt(db, task.id)
 
@@ -1006,17 +1009,16 @@ async def shared_ask_agent(
     rendered_system = render_prompt(system_template, variables) if system_template else None
     rendered_user = render_prompt(user_template, variables)
 
-    provider = _get_provider_instance(provider_model)
-    config = {**provider_model.config, **assignment.config}
+    provider = _get_provider_instance(provider_model, extra_config=resolved.config)
+    config = resolved.config
     temperature = config.get("temperature", 0.3)
     max_tokens = config.get("max_tokens", 2048)
 
-    caller = Caller.share(share.created_by)
     ledger = dict(
         caller=caller,
         task=task,
         provider_model=provider_model,
-        model_name=assignment.model_name,
+        model_name=resolved.model_name,
         prompt_used=rendered_user,
         target_type="share_qa",
         target_id=share.id,
@@ -1027,7 +1029,7 @@ async def shared_ask_agent(
             system=rendered_system,
             temperature=temperature,
             max_tokens=max_tokens,
-            model=assignment.model_name,
+            model=resolved.model_name,
         )
     except Exception as e:
         # Commit before raising: the session dependency rolls back on any

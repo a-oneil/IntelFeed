@@ -421,12 +421,12 @@ async def generate_full_intel_report(
 
     # 6. Dispatch Celery task
     from app.ai.caller import Caller
-    from app.ai.engine import enforce_site_allowance
+    from app.ai.engine import preflight_report
     from app.workers.report_tasks import generate_full_report
 
-    # Refuse here, with a 429 the person sees, rather than part-way through
-    # the worker run after some sections have already been written.
-    await enforce_site_allowance(db, Caller.user(user.id))
+    # Refuse here, with an error the person sees, rather than part-way
+    # through the worker run after some sections have already been written.
+    await preflight_report(db, Caller.user(user.id), report.template_type)
 
     task = generate_full_report.delay(str(report.id), str(user.id))
 
@@ -508,12 +508,12 @@ async def regenerate_all_sections(
     await db.commit()
 
     from app.ai.caller import Caller
-    from app.ai.engine import enforce_site_allowance
+    from app.ai.engine import preflight_report
     from app.workers.report_tasks import generate_full_report
 
-    # Refuse here, with a 429 the person sees, rather than part-way through
-    # the worker run after some sections have already been written.
-    await enforce_site_allowance(db, Caller.user(user.id))
+    # Refuse here, with an error the person sees, rather than part-way
+    # through the worker run after some sections have already been written.
+    await preflight_report(db, Caller.user(user.id), report.template_type)
 
     task = generate_full_report.delay(str(report.id), str(user.id))
     return {"report_id": str(report.id), "task_id": task.id}
@@ -660,12 +660,12 @@ async def generate_report_from_campaign(
 
     # Dispatch AI generation
     from app.ai.caller import Caller
-    from app.ai.engine import enforce_site_allowance
+    from app.ai.engine import preflight_report
     from app.workers.report_tasks import generate_full_report
 
-    # Refuse here, with a 429 the person sees, rather than part-way through
-    # the worker run after some sections have already been written.
-    await enforce_site_allowance(db, Caller.user(user.id))
+    # Refuse here, with an error the person sees, rather than part-way
+    # through the worker run after some sections have already been written.
+    await preflight_report(db, Caller.user(user.id), report.template_type)
 
     task = generate_full_report.delay(str(report.id), str(user.id))
 
@@ -745,12 +745,12 @@ async def clone_report_as_type(
     task_id = None
     if body.get("generate", True):
         from app.ai.caller import Caller
-        from app.ai.engine import enforce_site_allowance
+        from app.ai.engine import preflight_report
         from app.workers.report_tasks import generate_full_report
 
-        # Refuse here, with a 429 the person sees, rather than part-way through
-        # the worker run after some sections have already been written.
-        await enforce_site_allowance(db, Caller.user(user.id))
+        # Refuse here, with an error the person sees, rather than part-way
+        # through the worker run after some sections have already been written.
+        await preflight_report(db, Caller.user(user.id), report.template_type)
 
         task = generate_full_report.delay(str(report.id), str(user.id))
         task_id = task.id

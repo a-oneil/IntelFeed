@@ -629,6 +629,7 @@ class OllamaProvider(AIProvider):
         payload = self._build_payload(
             prompt, system, temperature, max_tokens, response_format=None, model=model, stream=True
         )
+        self.last_stream_usage = None
         async with httpx.AsyncClient(timeout=self.timeout, headers=self._headers()) as client:
             async with client.stream("POST", f"{self.base_url}/api/chat", json=payload) as resp:
                 if resp.status_code >= 400:
@@ -648,6 +649,11 @@ class OllamaProvider(AIProvider):
                     if text:
                         yield text
                     if chunk.get("done"):
+                        self.last_stream_usage = {
+                            "tokens_input": int(chunk.get("prompt_eval_count") or 0),
+                            "tokens_output": int(chunk.get("eval_count") or 0),
+                            "cost_usd": 0.0,
+                        }
                         break
 
     async def embed(self, texts: list[str], model: str) -> list[list[float]]:

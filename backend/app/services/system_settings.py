@@ -156,6 +156,12 @@ CONFIGURABLE_KEYS: dict[str, type] = {
     "ai_batch_max_requests": int,
     "site_ai_user_daily_requests": int,
     "share_ai_daily_requests": int,
+    "allow_user_ai_providers": bool,
+    "require_user_ai_provider": bool,
+    "user_ai_provider_types": str,
+    "user_ai_allow_private_endpoints": bool,
+    "user_ai_default_monthly_usd": float,
+    "user_ai_daily_request_cap": int,
     "ai_analysis_content_max_chars": int,
     "ai_use_batches": bool,
     "ai_est_cost_per_request": float,
@@ -530,6 +536,55 @@ SETTING_METADATA: dict[str, dict] = {
         "description": (
             "AI questions and tasks one share link may run per day. Share traffic always uses this "
             "instance's providers, never the sharer's. Resets at midnight UTC. 0 = unlimited"
+        ),
+        "group": "ai",
+    },
+    "allow_user_ai_providers": {
+        "label": "Personal AI Keys",
+        "description": (
+            "Let people add their own AI provider keys. Tasks they start themselves run on their key and "
+            "fall back to this instance's providers when it is missing, failing or over its cap. Background "
+            "work, automation rules and share links always use this instance's providers."
+        ),
+        "group": "ai",
+    },
+    "require_user_ai_provider": {
+        "label": "Require Personal Keys",
+        "description": (
+            "With personal keys on: refuse an interactive task instead of falling back to this instance's "
+            "providers when the person has no working key. Ignored while personal keys are off."
+        ),
+        "group": "ai",
+    },
+    "user_ai_provider_types": {
+        "label": "Personal Key Types",
+        "description": (
+            "Comma-separated provider types people may register as their own: claude, openai_compatible, "
+            "ollama. Claude Code can't be personal; it is one CLI sign-in for the whole instance."
+        ),
+        "group": "ai",
+    },
+    "user_ai_allow_private_endpoints": {
+        "label": "Personal Keys May Use Private Endpoints",
+        "description": (
+            "Let a personal key point at a private network address such as a LAN Ollama. Leave off on a "
+            "public instance: the server calls whatever URL people enter."
+        ),
+        "group": "ai",
+    },
+    "user_ai_default_monthly_usd": {
+        "label": "Personal Key Monthly Cap (USD)",
+        "description": (
+            "Default monthly spend cap on one person's own keys. People can set themselves a lower cap, "
+            "not a higher one. 0 = unlimited"
+        ),
+        "group": "ai",
+    },
+    "user_ai_daily_request_cap": {
+        "label": "Personal Key Daily Request Cap",
+        "description": (
+            "Requests one person may make on their own keys each day. Counts calls, not dollars, because "
+            "Ollama and unpriced models report $0. Resets at midnight UTC. 0 = unlimited"
         ),
         "group": "ai",
     },

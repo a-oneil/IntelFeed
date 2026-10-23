@@ -629,7 +629,7 @@ async def test_stream_complete_parses_sse(monkeypatch):
         b": OPENROUTER PROCESSING\n\n"
         b'data: {"choices":[{"delta":{"content":"Hel"}}]}\n\n'
         b'data: {"choices":[{"delta":{"content":"lo"}}]}\n\n'
-        b'data: {"choices":[],"usage":{"prompt_tokens":1}}\n\n'
+        b'data: {"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":2}}\n\n'
         b"data: [DONE]\n\n"
     )
 
@@ -637,9 +637,23 @@ async def test_stream_complete_parses_sse(monkeypatch):
         return httpx.Response(200, content=body, headers={"content-type": "text/event-stream"})
 
     monkeypatch.setattr(httpx, "AsyncClient", _mock_client_factory(handler))
-    provider = OpenAICompatibleProvider(base_url=BASE_URL, api_key="k", config={})
+    provider = OpenAICompatibleProvider(
+        base_url=BASE_URL, api_key="k", config={"pricing": {"input_per_mtok": 1.0, "output_per_mtok": 2.0}}
+    )
     chunks = [c async for c in provider.stream_complete(prompt="hi", model="gpt-test")]
     assert chunks == ["Hel", "lo"]
+    # A trailing usage chunk is kept and priced like a non-streamed call.
+    assert provider.last_stream_usage == {"tokens_input": 1, "tokens_output": 2, "cost_usd": 5e-06}
+
+    # A server that sends no usage reports none, rather than zeros that look like a free call.
+    body_no_usage = b'data: {"choices":[{"delta":{"content":"x"}}]}\n\ndata: [DONE]\n\n'
+
+    def handler_no_usage(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=body_no_usage, headers={"content-type": "text/event-stream"})
+
+    monkeypatch.setattr(httpx, "AsyncClient", _mock_client_factory(handler_no_usage))
+    assert [c async for c in provider.stream_complete(prompt="hi", model="gpt-test")] == ["x"]
+    assert provider.last_stream_usage is None
 
 
 @pytest.mark.asyncio

@@ -98,6 +98,7 @@ from app.models.tool import EntryTool, Tool
 from app.models.ttp import TTP, EntryTTP
 from app.models.tts_audio import TTSAudio
 from app.models.user import User
+from app.models.user_ai_route import UserAIPreferences, UserAIRoute
 from app.models.user_entity_watch import UserEntityWatch
 from app.models.user_feed_subscription import UserFeedSubscription
 from app.models.user_signal_weight import UserSignalWeight
@@ -125,6 +126,8 @@ __all__ = [
     "AITaskAssignment",
     "AIResult",
     "AIConversation",
+    "UserAIRoute",
+    "UserAIPreferences",
     "TTP",
     "EntryTTP",
     "TTSAudio",

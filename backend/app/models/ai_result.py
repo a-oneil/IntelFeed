@@ -27,7 +27,11 @@ class AIResult(Base):
     task_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("ai_tasks.id"), nullable=False, index=True
     )
-    provider_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("ai_providers.id"), index=True)
+    # SET NULL: a result outlives its provider, keeping provider_name and
+    # key_owner_id; only the row link goes.
+    provider_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ai_providers.id", ondelete="SET NULL"), index=True
+    )
     model_name: Mapped[str | None] = mapped_column(String(100))
     prompt_used: Mapped[str | None] = mapped_column(Text)
     raw_response: Mapped[str | None] = mapped_column(Text)

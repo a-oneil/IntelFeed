@@ -401,6 +401,7 @@ class OpenAICompatibleProvider(AIProvider):
             prompt, system, temperature, max_tokens, response_format=None, model=model, stream=True, mode="prompt"
         )
         timeout = float(cfg.get("timeout_seconds", self.timeout))
+        self.last_stream_usage = None
         async with httpx.AsyncClient(timeout=timeout, headers=self._headers()) as client:
             async with client.stream("POST", f"{self.base_url}/chat/completions", json=payload) as resp:
                 if resp.status_code >= 400:
@@ -424,6 +425,17 @@ class OpenAICompatibleProvider(AIProvider):
                         continue
                     if chunk.get("error"):
                         raise RuntimeError(f"{self.base_url} stream error: {chunk['error']}")
+                    # Servers that send usage in the stream (OpenAI with
+                    # stream_options, OpenRouter, LiteLLM, vLLM) put it on a
+                    # trailing chunk; nothing is requested that a strict server
+                    # would reject, so a server that sends none reports none.
+                    usage = chunk.get("usage")
+                    if isinstance(usage, dict) and usage:
+                        self.last_stream_usage = {
+                            "tokens_input": int(usage.get("prompt_tokens") or 0),
+                            "tokens_output": int(usage.get("completion_tokens") or 0),
+                            "cost_usd": self._resolve_cost(cfg, usage, resp.headers),
+                        }
                     choices = chunk.get("choices") or []
                     if not choices:
                         continue

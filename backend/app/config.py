@@ -77,6 +77,22 @@ class Settings(BaseSettings):
     site_ai_user_daily_requests: int = 0
     # AI questions + tasks one share link may run per UTC day. 0 = unlimited.
     share_ai_daily_requests: int = 20
+    # Personal AI keys. Off = every call runs on the instance's providers, as
+    # before. Optional = a person's key answers the tasks they start, falling
+    # back to the instance's provider when it can't. Required = no fallback:
+    # an interactive task without a working personal key is refused.
+    allow_user_ai_providers: bool = False
+    require_user_ai_provider: bool = False
+    # Comma-separated provider types a person may register (claude_code never).
+    user_ai_provider_types: str = "claude,openai_compatible"
+    # Let a personal key point at a private address (a LAN Ollama). Off on a
+    # public instance: the server calls whatever URL a person enters.
+    user_ai_allow_private_endpoints: bool = False
+    # Caps on one person's own keys, counted on ai_results.key_owner_id. The
+    # request cap is the one that works for Ollama, which reports $0.
+    # 0 = unlimited.
+    user_ai_default_monthly_usd: float = 25.0
+    user_ai_daily_request_cap: int = 300
 
     # Per-entry pipeline run logging (engine phase 5) — kill switch
     pipeline_run_logging_enabled: bool = True

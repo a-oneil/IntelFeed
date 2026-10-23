@@ -56,6 +56,7 @@ async def _seed_ai_tasks() -> None:
     """Ensure all built-in AI tasks exist and have default model assignments."""
     from sqlalchemy import delete, select, text
 
+    from app.ai.capabilities import USER_PROVIDER_ELIGIBLE_TASKS
     from app.ai.prompts.defaults import (
         DEFAULT_ASSIGNMENT_CONFIGS,
         DEFAULT_MODEL_ASSIGNMENTS,
@@ -102,6 +103,9 @@ async def _seed_ai_tasks() -> None:
                             "show_in_entity_actions",
                             task_data.get("show_in_entry_actions", True),
                         ),
+                        # Set once, when the task is first created: the admin's
+                        # later choice per task is theirs and is not re-synced.
+                        allows_user_provider=task_data["name"] in USER_PROVIDER_ELIGIBLE_TASKS,
                     )
                 )
             else:
@@ -166,6 +170,7 @@ async def _seed_ai_tasks() -> None:
             select(AIProviderModel)
             .where(
                 AIProviderModel.is_active.is_(True),
+                AIProviderModel.user_id.is_(None),
                 AIProviderModel.provider_type.not_in(["claude_code", "openai_compatible"]),
             )
             .limit(1)
@@ -792,6 +797,7 @@ from app.api.threads import router as threads_router
 from app.api.threat_board import router as threat_board_router
 from app.api.tools import router as tools_router
 from app.api.tts import router as tts_router
+from app.api.user_ai import router as user_ai_router
 from app.api.users import router as users_router
 from app.api.watchlist import router as watchlist_router
 from app.api.webhook_presets import router as webhook_presets_router
@@ -824,6 +830,7 @@ app.include_router(export_router, prefix="/api/export", tags=["export"])
 app.include_router(false_positives_router, prefix="/api/false-positives", tags=["false-positives"])
 app.include_router(ai_providers_router, prefix="/api/ai/providers", tags=["ai-providers"])
 app.include_router(ai_tasks_router, prefix="/api/ai/tasks", tags=["ai-tasks"])
+app.include_router(user_ai_router, prefix="/api/ai/me", tags=["ai-personal"])
 app.include_router(ai_prompts_router, prefix="/api/ai/prompts", tags=["ai-prompts"])
 app.include_router(ai_conversations_router, prefix="/api/ai/conversations", tags=["ai-conversations"])
 app.include_router(copilot_router, prefix="/api/ai/copilot", tags=["ai-copilot"])

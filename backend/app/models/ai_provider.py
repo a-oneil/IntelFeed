@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -20,6 +20,11 @@ class AIProvider(Base):
     models: Mapped[list] = mapped_column(JSONB, default=list)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     config: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # NULL = the instance's provider. Set = one person's key: only they can
+    # list, test, edit or route it, and it goes when their account does.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     # Auto-set by the engine when a provider raises QuotaExhaustedError. While
     # paused_until > now(), get_task_assignment skips the provider; tasks that
     # would have used it re-queue themselves with countdown = paused_until - now.
@@ -36,6 +41,14 @@ class AIProvider(Base):
 
         return provider_type_supports_tools(self.provider_type)
 
+    @property
+    def is_personal(self) -> bool:
+        return self.user_id is not None
+
     # Relationships
+    owner = relationship("User")
     task_assignments = relationship("AITaskAssignment", back_populates="provider", cascade="all, delete-orphan")
-    results = relationship("AIResult", back_populates="provider")
+    # passive_deletes="all": the database nulls ai_results.provider_id (ON
+    # DELETE SET NULL); the ORM must not load a busy key's thousands of
+    # result rows to do it one by one.
+    results = relationship("AIResult", back_populates="provider", passive_deletes="all")

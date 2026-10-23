@@ -251,10 +251,17 @@ class ClaudeProvider(AIProvider):
         if system_blocks is not None:
             kwargs["system"] = system_blocks
 
+        self.last_stream_usage = None
         try:
             async with client.messages.stream(**kwargs) as stream:
                 async for text in stream.text_stream:
                     yield text
+                final = await stream.get_final_message()
+                self.last_stream_usage = {
+                    "tokens_input": final.usage.input_tokens,
+                    "tokens_output": final.usage.output_tokens,
+                    "cost_usd": None,
+                }
         except anthropic.RateLimitError as e:
             headers = e.response.headers if e.response else None
             raise QuotaExhaustedError(str(e)[:500], reset_at=_parse_retry_after(headers))

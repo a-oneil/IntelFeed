@@ -28,6 +28,12 @@ class AIProvider(ABC):
         self.base_url = base_url
         self.api_key = api_key
         self.config = config or {}
+        # What the last ``stream_complete`` call used, when the provider
+        # reports it: {"tokens_input", "tokens_output", "cost_usd"} (cost
+        # None = unknown, estimate from the token table). A stream yields text
+        # only, so this is how a streamed turn still counts toward a dollar
+        # cap. None when the provider sent no usage.
+        self.last_stream_usage: dict | None = None
 
     @abstractmethod
     async def complete(
@@ -51,6 +57,7 @@ class AIProvider(ABC):
         model: str | None = None,
     ):
         """Yield text chunks from streaming response. Default falls back to non-streaming."""
+        self.last_stream_usage = None
         resp = await self.complete(
             prompt=prompt,
             system=system,
@@ -58,6 +65,11 @@ class AIProvider(ABC):
             max_tokens=max_tokens,
             model=model,
         )
+        self.last_stream_usage = {
+            "tokens_input": resp.tokens_input,
+            "tokens_output": resp.tokens_output,
+            "cost_usd": resp.cost_usd,
+        }
         yield resp.content
 
     async def embed(self, texts: list[str], model: str) -> list[list[float]]:

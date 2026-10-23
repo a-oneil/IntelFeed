@@ -468,24 +468,37 @@ async def copilot_config(
     on the ``claude_code`` CLI. On Ollama (or any other provider) there is no
     OAuth session, so the banner must not show.
     """
-    from app.ai.engine import get_task_assignment
+    from app.ai.caller import Caller
+    from app.ai.engine import UserKeyRequired, resolve_assignment
 
-    assignment_data = await get_task_assignment(db, user.id, "copilot")
-    if not assignment_data:
-        return {
-            "configured": False,
-            "provider_type": None,
-            "provider_name": None,
-            "default_ollama_tools": _DEFAULT_OLLAMA_TOOLS,
-            "enabled_tools": None,
-        }
-    assignment, _, provider_model = assignment_data
+    unconfigured = {
+        "configured": False,
+        "provider_type": None,
+        "provider_name": None,
+        "default_ollama_tools": _DEFAULT_OLLAMA_TOOLS,
+        "enabled_tools": None,
+        "source": None,
+        "model": None,
+        "supports_tools": False,
+        "fallback_reason": None,
+        "refused": None,
+    }
+    try:
+        # A status read: no allowance is spent here.
+        resolved = await resolve_assignment(db, Caller.user(user.id), "copilot", allowance=False)
+    except UserKeyRequired as e:
+        # The dock shows what to fix (add a key, raise a cap) instead of the
+        # generic "no provider" message.
+        return {**unconfigured, "refused": {"reason": e.reason, "message": e.message}}
+    if resolved is None:
+        return unconfigured
+    provider_model = resolved.provider
     # Only Ollama restricts the copilot to an explicit tool allowlist; other
     # providers get the full read-only registry, so there's nothing to gate
     # the "/" command menu on for them (enabled_tools stays None = unrestricted).
     enabled_tools = None
     if provider_model.provider_type == "ollama":
-        enabled_tools = assignment.config.get("ollama_tools") or _DEFAULT_OLLAMA_TOOLS
+        enabled_tools = resolved.config.get("ollama_tools") or _DEFAULT_OLLAMA_TOOLS
     return {
         "configured": True,
         "provider_type": provider_model.provider_type,
@@ -497,6 +510,14 @@ async def copilot_config(
         # The assignment's actual effective allowlist (override or default),
         # used by the dock to hide "/" commands whose tool isn't enabled.
         "enabled_tools": enabled_tools,
+        # Whose provider answers: "user" means the person's own key, and the
+        # dock says so in its header. A key without a tool loop (Claude API,
+        # openai_compatible) answers without tools, and the dock says that too.
+        "source": resolved.source,
+        "model": resolved.model_name,
+        "supports_tools": provider_model.supports_tools,
+        "fallback_reason": resolved.fallback_reason,
+        "refused": None,
     }
 
 
@@ -512,7 +533,7 @@ async def copilot_stream(
       {"type": "chunk", "text": ...}
       {"type": "tool_call", "id", "name", "args"}
       {"type": "tool_result", "id", "status", "summary"}
-      {"type": "done", "conversation_id": <uuid>}
+      {"type": "done", "conversation_id": <uuid>, "answered_by": {...}}
       {"type": "error", "message": ...}
     """
     from sse_starlette.sse import EventSourceResponse
@@ -520,12 +541,12 @@ async def copilot_stream(
     from app.ai.caller import Caller
     from app.ai.engine import (
         _count_ai_call,
+        _estimate_cost,
         _get_provider_instance,
         attribution_fields,
-        enforce_site_allowance,
-        get_active_prompt,
-        get_task_assignment,
+        get_active_prompt_versioned,
         render_prompt,
+        resolve_assignment,
     )
     from app.ai.providers.claude_code_provider import ClaudeCodeProvider
 
@@ -534,17 +555,17 @@ async def copilot_stream(
 
     ctx = body.context
 
-    # Resolve the copilot task -> provider assignment. Must be assigned (seeded
-    # to the claude_code provider on startup).
-    assignment_data = await get_task_assignment(db, user.id, "copilot")
-    if not assignment_data:
+    # Resolve the copilot task -> provider: the person's own key when one
+    # applies, else the site assignment (seeded to the claude_code provider
+    # on startup). The lookup enforces the site allowance and the key policy.
+    resolved = await resolve_assignment(db, Caller.user(user.id), "copilot")
+    if resolved is None:
         raise AppError(
             code="not_configured",
             message="The 'Copilot' task has no AI provider assigned. Go to Settings > AI to configure it.",
             status_code=422,
         )
-    assignment, task, provider_model = assignment_data
-    await enforce_site_allowance(db, Caller.user(user.id))
+    task, provider_model = resolved.task, resolved.provider
 
     # Load or create the conversation (scoped to this user).
     scope_type, scope_id = _scope_from_context(ctx)
@@ -576,7 +597,7 @@ async def copilot_stream(
     conversation_id = conv.id
 
     # Build the prompt from the copilot task templates + ambient context.
-    system_template, user_template = await get_active_prompt(db, task.id)
+    system_template, user_template, prompt_version = await get_active_prompt_versioned(db, task.id)
     ambient = await _build_ambient_context(db, ctx)
 
     prior = list(conv.messages or [])[-_MAX_HISTORY_MESSAGES:]
@@ -590,11 +611,11 @@ async def copilot_stream(
     rendered_system = render_prompt(system_template, variables) if system_template else None
     rendered_user = render_prompt(user_template, variables)
 
-    provider = _get_provider_instance(provider_model, extra_config=assignment.config)
-    config = {**(provider_model.config or {}), **(assignment.config or {})}
+    provider = _get_provider_instance(provider_model, extra_config=resolved.config)
+    config = resolved.config
     allowed_tools = config.get("allowed_tools")
     timeout_seconds = config.get("timeout_seconds")
-    model = assignment.model_name
+    model = resolved.model_name
 
     async def generate():
         # ``assistant_parts`` collects only the VISIBLE text (what the client
@@ -607,6 +628,7 @@ async def copilot_stream(
         # ClaudeCodeProvider._extract_usage). None when the CLI died before its
         # result event or a non-CLI fallback provider handled the turn.
         turn_usage: dict | None = None
+        turn_cost: Decimal | None = None
         turn_started = time.monotonic()
         splitter = _FenceSplitter()
 
@@ -738,6 +760,13 @@ async def copilot_stream(
                     payload = _emit_text(chunk)
                     if payload is not None:
                         yield {"data": payload}
+                streamed = getattr(provider, "last_stream_usage", None)
+                if streamed:
+                    turn_usage = {
+                        "tokens_input": streamed.get("tokens_input") or 0,
+                        "tokens_output": streamed.get("tokens_output") or 0,
+                        "total_cost_usd": streamed.get("cost_usd"),
+                    }
         except Exception as e:  # provider / CLI failure mid-stream
             errored = str(e)
             logger.warning("copilot stream error: %s", e)
@@ -793,9 +822,15 @@ async def copilot_stream(
             try:
                 usage = turn_usage or {}
                 cost_usd = usage.get("total_cost_usd")
-                cost = Decimal(str(round(cost_usd, 6))) if cost_usd is not None else Decimal("0")
                 tokens_input = int(usage.get("tokens_input") or 0)
                 tokens_output = int(usage.get("tokens_output") or 0)
+                # A provider that reports tokens but no price (the Anthropic
+                # API) is priced from the engine's table, like run_task does;
+                # otherwise a personal key's dollar cap would never see copilot.
+                if cost_usd is not None:
+                    cost = Decimal(str(round(cost_usd, 6)))
+                else:
+                    cost = _estimate_cost(model, tokens_input, tokens_output)
                 parsed_result: dict = {
                     "_extraction_status": "provider_error" if errored else "success",
                     "conversation_id": str(conversation_id),
@@ -804,6 +839,10 @@ async def copilot_stream(
                     parsed_result["usage"] = usage
                 if errored:
                     parsed_result["_error"] = errored
+                if resolved.fallback_reason:
+                    parsed_result["_fallback_reason"] = resolved.fallback_reason
+                if prompt_version is not None:
+                    parsed_result["_prompt_version"] = prompt_version
                 db.add(
                     AIResult(
                         target_type="conversation",
@@ -819,10 +858,11 @@ async def copilot_stream(
                         tokens_output=tokens_output,
                         cost_estimate=cost,
                         processing_time_ms=int((time.monotonic() - turn_started) * 1000),
-                        **attribution_fields(Caller.user(user.id), provider_model),
+                        **attribution_fields(Caller.user(user.id), provider_model, key_owner_id=resolved.key_owner_id),
                     )
                 )
                 await db.commit()
+                turn_cost = cost
                 _count_ai_call(provider_model.provider_type, task.name, tokens_input, tokens_output, cost)
             except Exception as e:  # usage accounting must never break the stream
                 logger.warning("copilot failed to record ai_result for conversation %s: %s", conversation_id, e)
@@ -868,7 +908,20 @@ async def copilot_stream(
 
         if errored and not answer:
             yield {"data": json.dumps({"type": "error", "message": errored})}
-        yield {"data": json.dumps({"type": "done", "conversation_id": str(conversation_id)})}
+        # The reply footer: which provider answered, whose key, and what the
+        # turn cost when the provider reported it.
+        answered_by = {
+            "provider_name": provider_model.name,
+            "provider_type": provider_model.provider_type,
+            "source": resolved.source,
+            "model": model,
+            "cost_usd": float(turn_cost) if turn_cost is not None else None,
+            "fallback_reason": resolved.fallback_reason,
+            "supports_tools": provider_model.supports_tools,
+        }
+        yield {
+            "data": json.dumps({"type": "done", "conversation_id": str(conversation_id), "answered_by": answered_by})
+        }
 
     return EventSourceResponse(generate())
 

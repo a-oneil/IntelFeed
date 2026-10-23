@@ -58,6 +58,12 @@ async def fake_converter(db_session, monkeypatch):
     provider_model = AIProvider(name="Test Provider", provider_type="ollama", base_url="http://ollama.test")
     db_session.add_all([task, provider_model])
     await db_session.flush()
+    # A real site assignment, so the lookup finds the task the way a deployed
+    # instance would; only the provider call is faked.
+    from app.models.ai_task_assignment import AITaskAssignment
+
+    db_session.add(AITaskAssignment(task_id=task.id, provider_id=provider_model.id, model_name="test-model"))
+    await db_session.flush()
 
     def _install(content: str = 'process where process.name == "vssadmin.exe"\n'):
         response = MagicMock()
@@ -71,14 +77,9 @@ async def fake_converter(db_session, monkeypatch):
         provider = MagicMock()
         provider.complete = AsyncMock(return_value=response)
 
-        assignment = MagicMock()
-        assignment.config = {}
-        assignment.model_name = "test-model"
-
         import app.ai.engine as engine
 
-        monkeypatch.setattr(engine, "get_task_assignment", AsyncMock(return_value=(assignment, task, provider_model)))
-        monkeypatch.setattr(engine, "_get_provider_instance", lambda pm: provider)
+        monkeypatch.setattr(engine, "_get_provider_instance", lambda pm, **kw: provider)
         monkeypatch.setattr(engine, "_estimate_cost", lambda *a, **kw: 0.0012)
         return provider
 

@@ -149,6 +149,15 @@ async def update_task(
         raise AppError(code="not_found", message="Task not found", status_code=404)
 
     updates = body.model_dump(exclude_unset=True)
+    if updates.get("allows_user_provider") and task.user_provider_locked:
+        raise AppError(
+            code="task_site_only",
+            message=(
+                f"'{task.display_name}' writes results the whole instance reads, "
+                "so it always runs on the instance's providers."
+            ),
+            status_code=403,
+        )
     if "category" in updates and task.is_system:
         raise AppError(
             code="forbidden",
@@ -278,8 +287,11 @@ async def upsert_task_assignment(
     if not task:
         raise AppError(code="not_found", message="Task not found", status_code=404)
 
-    # Verify provider exists
-    prov_result = await db.execute(select(AIProvider).where(AIProvider.id == body.provider_id))
+    # Verify provider exists and is the instance's: a personal key answers
+    # its owner's routes, never a site assignment.
+    prov_result = await db.execute(
+        select(AIProvider).where(AIProvider.id == body.provider_id, AIProvider.user_id.is_(None))
+    )
     provider = prov_result.scalar_one_or_none()
     if not provider:
         raise AppError(code="not_found", message="Provider not found", status_code=404)

@@ -2755,19 +2755,18 @@ async def convert_detection_rule(
         raise AppError(code="same_type", message="Source and target rule types are the same", status_code=400)
 
     from app.ai.caller import Caller
-    from app.ai.engine import _get_provider_instance, enforce_site_allowance, get_task_assignment, record_direct_result
+    from app.ai.engine import _get_provider_instance, record_direct_result, resolve_assignment
 
-    assignment_data = await get_task_assignment(db, user.id, "detection_rules")
-    if not assignment_data:
+    resolved = await resolve_assignment(db, Caller.user(user.id), "detection_rules")
+    if resolved is None:
         raise AppError(
             code="no_ai_assignment",
             message="No AI provider assigned for detection rules. Configure one in Settings > AI.",
             status_code=400,
         )
 
-    assignment, task, provider_model = assignment_data
-    await enforce_site_allowance(db, Caller.user(user.id))
-    provider = _get_provider_instance(provider_model)
+    task, provider_model = resolved.task, resolved.provider
+    provider = _get_provider_instance(provider_model, extra_config=resolved.config)
 
     source_label = RULE_TYPE_LABELS.get(rule.rule_type, rule.rule_type)
     target_label = RULE_TYPE_LABELS.get(body.target_type, body.target_type)
@@ -2797,7 +2796,7 @@ CONVERSION INSTRUCTIONS:
 
 Return ONLY the converted rule content — no explanation, no markdown fences, just the raw rule text."""
 
-    config = {**provider_model.config, **assignment.config}
+    config = resolved.config
     # Bound the provider call below the gunicorn worker timeout (180s) and
     # nginx's proxy_read_timeout. Unbounded, a slow claude_code CLI call plus
     # its automatic retry outlasts the worker and the request dies as a 502
@@ -2807,10 +2806,11 @@ Return ONLY the converted rule content — no explanation, no markdown fences, j
         caller=Caller.user(user.id),
         task=task,
         provider_model=provider_model,
-        model_name=assignment.model_name,
+        model_name=resolved.model_name,
         prompt_used=prompt,
         target_type="detection_rule",
         target_id=rule.id,
+        key_owner_id=resolved.key_owner_id,
     )
     try:
         response = await provider.complete(
@@ -2818,7 +2818,7 @@ Return ONLY the converted rule content — no explanation, no markdown fences, j
             system="You are an expert detection engineer. Convert detection rules between formats with perfect syntax.",
             temperature=config.get("temperature", 0.1),
             max_tokens=config.get("max_tokens", 4096),
-            model=assignment.model_name,
+            model=resolved.model_name,
             timeout_seconds=float(config.get("timeout_seconds", 150)),
         )
     except Exception as e:
@@ -3064,19 +3064,18 @@ async def chat_rule_assistant(
     from sse_starlette.sse import EventSourceResponse
 
     from app.ai.caller import Caller
-    from app.ai.engine import _get_provider_instance, enforce_site_allowance, get_task_assignment, record_direct_result
+    from app.ai.engine import _get_provider_instance, record_direct_result, resolve_assignment
 
-    assignment_data = await get_task_assignment(db, user.id, "detection_rules")
-    if not assignment_data:
+    resolved = await resolve_assignment(db, Caller.user(user.id), "detection_rules")
+    if resolved is None:
         raise AppError(
             code="no_ai_assignment",
             message="No AI provider assigned for detection rules. Configure one in Settings > AI.",
             status_code=400,
         )
 
-    assignment, task, provider_model = assignment_data
-    await enforce_site_allowance(db, Caller.user(user.id))
-    provider = _get_provider_instance(provider_model)
+    task, provider_model = resolved.task, resolved.provider
+    provider = _get_provider_instance(provider_model, extra_config=resolved.config)
 
     rule_type_label = RULE_TYPE_LABELS.get(body.rule_type, body.rule_type)
 
@@ -3113,23 +3112,40 @@ GUIDELINES:
             messages.append({"role": msg["role"], "content": msg["content"]})
     messages.append({"role": "user", "content": body.message})
 
-    config = {**provider_model.config, **assignment.config}
+    config = resolved.config
 
     async def _ledger(prompt: str, answer: str, error: str | None) -> None:
-        # Streamed replies report no usage, so the row counts a request at
-        # zero tokens. Accounting must never break the stream.
+        # A streamed reply reports usage only when the provider sends it on
+        # the stream (see AIProvider.last_stream_usage); otherwise the row
+        # counts a request at zero tokens. Accounting must never break the
+        # stream.
         try:
+            streamed = getattr(provider, "last_stream_usage", None)
+            response = None
+            if streamed and error is None:
+                from app.ai.providers.base import AIResponse
+
+                response = AIResponse(
+                    content=answer,
+                    raw_response={},
+                    tokens_input=int(streamed.get("tokens_input") or 0),
+                    tokens_output=int(streamed.get("tokens_output") or 0),
+                    model=resolved.model_name,
+                    latency_ms=0,
+                    cost_usd=streamed.get("cost_usd"),
+                )
             await record_direct_result(
                 db,
                 caller=Caller.user(user.id),
                 task=task,
                 provider_model=provider_model,
-                model_name=assignment.model_name,
+                model_name=resolved.model_name,
                 prompt_used=prompt,
-                response=None,
+                response=response,
                 content=answer,
                 error=error,
                 target_type="rule_chat",
+                key_owner_id=resolved.key_owner_id,
             )
             await db.commit()
         except Exception as e:
@@ -3154,7 +3170,7 @@ GUIDELINES:
                 system=system_prompt,
                 temperature=config.get("temperature", 0.3),
                 max_tokens=config.get("max_tokens", 4096),
-                model=assignment.model_name,
+                model=resolved.model_name,
             ):
                 answer_parts.append(chunk)
                 yield {"event": "chunk", "data": _json.dumps({"text": chunk})}

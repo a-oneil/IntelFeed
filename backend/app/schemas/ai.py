@@ -29,10 +29,15 @@ def _check_provider_config(config: dict | None) -> dict | None:
 
 class AIProviderCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
-    provider_type: str = Field(default="claude", pattern=r"^(claude|ollama|openai_compatible)$")
+    # claude_code is accepted by the schema so the route can say why it is
+    # refused (one CLI sign-in for the whole instance) instead of a bare 422.
+    provider_type: str = Field(default="claude", pattern=r"^(claude|claude_code|ollama|openai_compatible)$")
     base_url: str | None = None
     api_key: str | None = None  # plaintext, encrypted before storage
     config: dict = {}
+    # A personal key: owned by the caller, routed only by them. Non-admins
+    # can only create these; an admin picks.
+    personal: bool = False
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -83,6 +88,10 @@ class AIProviderResponse(BaseModel):
     models: list
     is_active: bool
     config: dict
+    # None = the instance's provider. Set = a personal key, the caller's own
+    # unless this came from the admin's user-keys listing.
+    user_id: uuid.UUID | None = None
+    owner_username: str | None = None
     # Whether this provider type can execute tool calls (agent harness).
     supports_tools: bool = False
     paused_until: datetime | None = None
@@ -172,6 +181,10 @@ class AITaskResponse(BaseModel):
     show_in_entry_actions: bool = True
     entry_action_order: int | None = None
     show_in_entity_actions: bool = True
+    # Whether a person's own key may answer this task, and whether the admin
+    # can change that (pipeline tasks are locked to the instance's providers).
+    allows_user_provider: bool = False
+    user_provider_locked: bool = False
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -183,6 +196,8 @@ class AITaskUpdate(BaseModel):
     show_in_entry_actions: bool | None = None
     entry_action_order: int | None = None
     show_in_entity_actions: bool | None = None
+    # Open or close the task to personal keys. 403 on a locked task.
+    allows_user_provider: bool | None = None
     # Regrouping is only offered for custom tasks in the UI; the API enforces it.
     category: str | None = Field(default=None, max_length=50)
     # Custom tasks only: their schema is user-owned and edited in place
@@ -329,6 +344,12 @@ class AIResultResponse(BaseModel):
     tokens_output: int | None
     cost_estimate: Decimal | None
     processing_time_ms: int | None
+    # Who asked and who answered. provider_name survives the provider row;
+    # key_owner_id set = a personal key paid for this result.
+    caller_kind: str | None = None
+    user_id: uuid.UUID | None = None
+    key_owner_id: uuid.UUID | None = None
+    provider_name: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -435,3 +456,104 @@ class AICostBreakdown(BaseModel):
     by_model: list[AICostBreakdownRow]
     by_caller: list[AICallerCostRow] = []
     budgets: list[AITaskBudgetRow]
+
+
+# --- Personal AI (Settings → My AI) ---
+
+
+class UserAIRouteUpsert(BaseModel):
+    """Point one task, or every allowed task (task_id null), at one of my keys."""
+
+    task_id: uuid.UUID | None = None
+    provider_id: uuid.UUID
+    model_name: str = Field(min_length=1, max_length=100)
+    config: dict = {}
+
+    # Same shape rules as a provider's config: the two are merged at call time.
+    _config_shape = field_validator("config")(_check_provider_config)
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "task_id": None,
+                "provider_id": "d5b2c8a4-3f1e-4b6a-9c2d-8e7f6a5b4c3d",
+                "model_name": "anthropic/claude-sonnet-4.6",
+                "config": {},
+            }
+        }
+    )
+
+
+class UserAIRouteResponse(BaseModel):
+    id: uuid.UUID
+    task_id: uuid.UUID | None
+    task_name: str | None = None
+    provider_id: uuid.UUID
+    provider_name: str | None = None
+    model_name: str
+    config: dict
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class UserAIPreferencesUpdate(BaseModel):
+    fallback_to_site: bool | None = None
+    # Explicit null = back to the admin's default. Must not exceed it, and
+    # must be a real cap: zero would read as "unlimited".
+    monthly_cap_usd: Decimal | None = Field(default=None, gt=0)
+
+
+class UserAIPolicy(BaseModel):
+    """What the admin allows, as the My AI page needs it."""
+
+    allow_user_ai_providers: bool
+    require_user_ai_provider: bool
+    provider_types: list[str]
+    allow_private_endpoints: bool
+    default_monthly_usd: Decimal
+    daily_request_cap: int
+    site_allowance_per_user: int
+
+
+class UserAIKeyUsage(BaseModel):
+    provider_id: uuid.UUID
+    provider_name: str
+    provider_type: str
+    month_cost: Decimal
+    month_requests: int
+
+
+class UserAIUsage(BaseModel):
+    """This person's AI spend, split by whose provider answered."""
+
+    month_cost: Decimal
+    monthly_cap_usd: Decimal
+    requests_today: int
+    daily_request_cap: int
+    site_requests_today: int
+    site_allowance_per_user: int
+    month_resets_at: datetime
+    by_key: list[UserAIKeyUsage] = []
+
+
+class UserAITaskRow(BaseModel):
+    """One task a person may route, with where it runs now."""
+
+    task_id: uuid.UUID
+    task_name: str
+    display_name: str
+    category: str | None
+    requires_tools: bool
+    site_provider_name: str | None
+    site_model_name: str | None
+    route: UserAIRouteResponse | None
+    month_cost: Decimal
+
+
+class UserAIOverview(BaseModel):
+    policy: UserAIPolicy
+    fallback_to_site: bool
+    monthly_cap_usd: Decimal | None
+    usage: UserAIUsage
+    tasks: list[UserAITaskRow]
