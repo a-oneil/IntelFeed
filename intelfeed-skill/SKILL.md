@@ -288,7 +288,7 @@ Answer platform questions from the docs, not from memory.
 
 ## Available Tools
 
-180 tools. Names in **bold** are the CLI tool names. `⚠` marks a tool that needs an **admin** account; `🔒` marks one that runs a **confirmation-token flow** — the first call returns a prompt and a token, which you must show the user and only re-send after they explicitly approve.
+187 tools. Names in **bold** are the CLI tool names. `⚠` marks a tool that needs an **admin** account; `🔒` marks one that runs a **confirmation-token flow** — the first call returns a prompt and a token, which you must show the user and only re-send after they explicitly approve.
 
 Everything that creates, changes or deletes data is refused outright when `INTELFEED_READ_ONLY` is set on the environment — that gate is in the CLI itself, not in your instructions.
 
@@ -308,6 +308,16 @@ Everything that creates, changes or deletes data is refused outright when `INTEL
 - **get_daily_summary** — The cached AI daily briefing for a day, or null (date). Read-only — never generates one
 - **get_entry_story** — Follow-ups and precursors to an entry, chained through shared strong entities in a ±30 day window (entry_id)
 - **get_similar_entries** — Nearest neighbours from the embedding index, falling back to shared-entity overlap when the entry isn't embedded (entry_id, limit)
+
+### Workbench Boards (7 tools)
+
+- **get_threat_board** — The Threats board: actors/malware and exploited CVEs ranked by distinct stories over a window, each with lead headline, cached brief, sources, handled state and (CVEs) exposure lift + detection posture (window: 7d/14d/30d, facet: threats/vulns/all, limit, min_attention, include_handled)
+- **get_coverage_workspace** — One threat's recent articles and extracted behaviours, each with its quote, the telemetry it needs and whether enabled telemetry sees it; `below_line` = a sourcing gap (entity_type: threat_actor/malware/cve/ttp, entity_key, window)
+- **get_entity_whats_new** — An entity's latest developments: novelty and severity signals on its recent articles (entity_type, entity_id, days, scoped)
+- **list_intel_profiles** — The instance's intel profiles: named scopes (a customer, a portfolio) of regions, sectors and technology (limit, offset)
+- **get_intel_profile** — One intel profile with resolved country names and sector labels (profile_id)
+- **get_profile_threat_surface** — Actors and malware active against a profile's regions x sectors, with why each matched (profile_id, limit)
+- **list_tags** — Every tag with entry counts; shared list, counts as the caller sees them
 
 ### Entries & Reader State (16 tools)
 

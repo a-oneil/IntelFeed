@@ -759,7 +759,7 @@ export INTELFEED_PASSWORD=your_pass
 python intelfeed_cli.py search_entries '{"query": "ransomware", "limit": 5}'
 ```
 
-**Available tools** (180 total):
+**Available tools** (187 total):
 - `search_entries` — Full-text search across entries
 - `search_entities` — Search CVEs, TTPs, threat actors, malware
 - `get_entry` — Fetch single entry by ID

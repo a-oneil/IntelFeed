@@ -1,6 +1,6 @@
 # CLI Reference
 
-This is the complete reference for the IntelFeed CLI — a zero-dependency Python tool that exposes 180 tools (organized into two flavors: full and lite) to query and manage a running IntelFeed deployment.
+This is the complete reference for the IntelFeed CLI — a zero-dependency Python tool that exposes 187 tools (organized into two flavors: full and lite) to query and manage a running IntelFeed deployment.
 
 **Table of Contents:**
 1. [Overview](#overview)
@@ -254,7 +254,7 @@ See the [CLI invocation & read-only gating diagram](diagrams/cli-readonly-gating
 
 Use **`intelfeed-lite-skill`** when:
 - You only need to **read** data (search, lookup, browse, analyze)
-- You want **smaller context windows** (87 tool definitions vs. 180)
+- You want **smaller context windows** (94 tool definitions vs. 187)
 - You're building a **read-only dashboard** or **query interface**
 - Your Claude skill doesn't need to create entries, extract intelligence, or generate rules
 
@@ -268,8 +268,8 @@ Use **`intelfeed-skill` (full)** when:
 
 Both CLIs are code-generated from the backend tool registry by `scripts/dev/sync_skill_clis.py`, so the split is rule-based rather than a hand-picked list:
 
-- **Full CLI (180 tools):** every tool in the backend registry (`backend/app/tools/`), read and write.
-- **Lite CLI (87 tools):** every tool the registry does **not** flag as `mutating` (83 write tools are excluded), minus the compute-heavy read-only tools in the script's `LITE_EXCLUDE` set (AI invocation and document export: `extract_ttps`, `extract_cves`, `extract_threat_actors`, `extract_malware`, `run_ai_task`, `generate_detection_rules`, `validate_detection_rule`, `build_detection_summary`, `export_attack_layer`, `export_campaign`).
+- **Full CLI (187 tools):** every tool in the backend registry (`backend/app/tools/`), read and write.
+- **Lite CLI (94 tools):** every tool the registry does **not** flag as `mutating` (83 write tools are excluded), minus the compute-heavy read-only tools in the script's `LITE_EXCLUDE` set (AI invocation and document export: `extract_ttps`, `extract_cves`, `extract_threat_actors`, `extract_malware`, `run_ai_task`, `generate_detection_rules`, `validate_detection_rule`, `build_detection_summary`, `export_attack_layer`, `export_campaign`).
 
 In practice the lite CLI covers all search/lookup/pivot/analytics/landscape reads (including the newer curation-stats, ransomware-tracker, and reader read tools), while creation, updates, merges, deletes, extraction, automation execution, and report generation are full-CLI only. Run `--list-tools` against either script for the authoritative listing.
 
@@ -402,7 +402,7 @@ threat_actor:APT29 AND (malware:APT29_Malware* OR threat_actor.country:Russia)
 
 ## Tool Reference
 
-The registry contains 180 tools. The sections below document 83 core tools in full detail; the remaining 97 are summarized in [Extended Tool Surface](#extended-tool-surface) at the end of this section — use `--help-tool <name>` for their parameters. Each fully documented tool includes:
+The registry contains 187 tools. The sections below document 83 core tools in full detail; the remaining 104 are summarized in [Extended Tool Surface](#extended-tool-surface) at the end of this section — use `--help-tool <name>` for their parameters. Each fully documented tool includes:
 
 - **Name & Purpose** — what it does (1-line summary)
 - **Arguments** — required and optional parameters with types and defaults
@@ -2168,7 +2168,7 @@ python3 intelfeed-skill/scripts/intelfeed_cli.py discover_telegram_channels '{"o
 
 ### Extended Tool Surface
 
-The 2026-08 registry expansion added 78 tools in five backend modules; Story Threads, the observables ledger, CWE, the server-side Priority Queue and the in-app docs added nine more over September, the sector entity four, and the observables-intelligence work five more (`observables.py`), bringing the registry to **180**. They follow the same invocation pattern as everything above; run `--help-tool <name>` for parameters and defaults. Grouped by module (`backend/app/tools/`):
+The 2026-08 registry expansion added 78 tools in five backend modules; Story Threads, the observables ledger, CWE, the server-side Priority Queue and the in-app docs added nine more over September, the sector entity four, the observables-intelligence work five more (`observables.py`), and the workbench boards seven (`boards.py`), bringing the registry to **187**. They follow the same invocation pattern as everything above; run `--help-tool <name>` for parameters and defaults. Grouped by module (`backend/app/tools/`):
 
 **Ledger, queue & catalog reads (`read.py`, 4 tools)** — the September additions to the largest module:
 `get_observable` (one IOC ledger row by UUID or value — kind, role, current/base confidence with decay state, sighting count, the judgment door that captured it with its evidence sentence, first/last seen, recent sighting articles; defanged input like `evil[.]com` or `hxxps://` is normalised), `search_observables` (filter the ledger by substring, kind, role, lifecycle status or capture door, sorted by last sighting), `get_cwe` (a MITRE CWE with its abstraction rung, parent and lineage, mapping guidance, catalog mitigations and detection methods, direct and subtree CVE counts, KEV count, linked articles), `get_priority_queue` (the reading queue exactly as the Priority Queue page shows it — radar-clearing unread entries with story threads folded in as single rows; prefer it over `get_triage_queue`, the older heuristic that does not fold stories)
@@ -2179,6 +2179,9 @@ The 2026-08 registry expansion added 78 tools in five backend modules; Story Thr
 **Documentation (`docs.py`, 3 tools)** — the copilot's route into these very docs:
 `list_documentation_pages` (slug, title, section and one-line summary for every page shipped with the deployment), `search_documentation` (full-text with excerpts, to find which page covers a topic), `get_documentation_page` (one page in full as markdown; the slug is the path under `docs/` without `.md`, e.g. `architecture` or `diagrams/entries-lifecycle` — cite it back as a `/documentation/<slug>` link)
 
+
+**Workbench boards (`boards.py`, 7 tools)** — the pages analysts work from, as data:
+`get_threat_board` (the Threats board: actors/malware and exploited CVEs ranked by distinct stories over 7/14/30 days, with lead headline, brief, sources, handled state and, for CVEs, exposure lift and detection posture), `get_coverage_workspace` (one threat's articles and extracted behaviours with the telemetry each needs; `below_line` marks a sourcing gap), `get_entity_whats_new` (novelty and severity signals on an entity's recent articles), `list_intel_profiles` / `get_intel_profile` / `get_profile_threat_surface` (named customer or portfolio scopes, and the actors and malware active against one), `list_tags` (every tag with the caller's counts)
 
 **Story Threads (`threads.py`, 2 tools)** — an unfolding story as one object rather than the twenty-three articles that reported it:
 `get_story_threads` (open threads with their outlets, counts, key entities and best unread score), `get_story_thread` (one thread's spine, members, yield and nearest neighbours — open it in the UI at `/priority-queue?thread=<slug>`)

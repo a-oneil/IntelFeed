@@ -93,7 +93,7 @@ def _tool(name: str, description: str, input_schema: dict, mutating: bool | None
     return decorator
 
 
-# Default tool subset for the Ollama copilot. The full read-only registry (97
+# Default tool subset for the Ollama copilot. The full read-only registry (104
 # tools) serializes to ~6.6k tokens of schema per round — that bloats every
 # request's context AND overwhelms local models' tool selection. This curated
 # set covers the copilot's actual workload (search, entity lookups, pivots,
@@ -114,6 +114,7 @@ DEFAULT_COPILOT_OLLAMA_TOOLS: list[str] = [
     "pivot_entity",
     "get_entity_timeline",
     "get_trending_entities",
+    "get_threat_board",
     "get_dashboard_stats",
     "search_documentation",
     "get_documentation_page",
@@ -195,6 +196,7 @@ async def execute_tool(name: str, args: dict, db: AsyncSession, user_id: uuid.UU
 # ---------------------------------------------------------------------------
 
 from app.tools import (  # noqa: E402
+    boards,  # noqa: F401
     correlation,  # noqa: F401
     curation,  # noqa: F401
     delete,  # noqa: F401

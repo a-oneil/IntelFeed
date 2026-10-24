@@ -93,7 +93,7 @@ Services: Frontend 3001, API 8000, Meilisearch 7700, PostgreSQL 5433, Redis 6380
 ```
 backend/              FastAPI app, SQLAlchemy models, Alembic migrations, Celery workers
 frontend/             React + TypeScript, Vite, CSS Modules, TanStack Query + Zustand
-intelfeed-skill/      Claude Code skill (180 tools for API access)
+intelfeed-skill/      Claude Code skill (187 tools for API access)
 intelfeed-lite-skill/ Lightweight skill variant
 docs/                 Architecture, domain deep-dives, feed adapters, automation, detection
                       (mounted read-only into the api container — rendered as the in-app docs)
@@ -1090,7 +1090,7 @@ docker compose -f docker-compose.dev.yml exec api python scripts/maintenance/pur
 
 Two zero-dependency Python skills let Claude interact with IntelFeed:
 
-- **`intelfeed-skill/`** — full feature set (180 tools)
+- **`intelfeed-skill/`** — full feature set (187 tools)
 - **`intelfeed-lite-skill/`** — read-only variant (87 tools)
 
 Both execute via `intelfeed-skill/scripts/intelfeed_cli.py`.
