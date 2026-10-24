@@ -924,7 +924,7 @@ async def _process_name_normalization_batch_async(entity_type: str, batch: list[
 
 
 # ───────────────────────────────────────────────────────────────────
-# AI gap research — Claude Code with WebFetch fills missing entity fields.
+# AI gap research — Claude Code with web search fills missing entity fields.
 # Triggered by the Entity Hygiene → "Enrich N" buttons via the
 # /admin/hygiene/enrichment-gaps/enrich endpoint.
 # ───────────────────────────────────────────────────────────────────
@@ -1003,7 +1003,7 @@ def _resolve_fk_by_name(db_data: list[dict], name_value: str) -> uuid.UUID | Non
     max_retries=2,
 )
 def ai_enrich_gap_batch(self, entity_type: str, field: str, batch: list[dict]) -> dict:
-    """Research a batch of entities with Claude Code + WebFetch and write
+    """Research a batch of entities with Claude Code + web search and write
     high-confidence values back into the matching entity column.
 
     `batch` is `[{"id": "<uuid>", "name": "<entity name>"}]`, capped at

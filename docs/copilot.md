@@ -45,7 +45,7 @@ The copilot is a normal AI task named `copilot`, seeded on startup like every ot
 
 - **Default provider type** is `claude_code` (`DEFAULT_TASK_PROVIDERS`, `defaults.py:87`) — the CLI provider under the Claude Max subscription, not the API-key Anthropic provider. Since the 2026-08 Ollama tool-calling work, the copilot can alternatively be assigned to an **Ollama** provider (`TOOL_CAPABLE_PROVIDER_TYPES` in `backend/app/ai/capabilities.py`); see "Execution topologies" below.
 - **Default model** is `sonnet` (`DEFAULT_TASK_MODELS`, `defaults.py:67`).
-- **Assignment config** (`defaults.py:118-126`): `allowed_tools: ["Bash", "Read", "Skill"]` and `timeout_seconds: 240`. When the intelfeed skill isn't mounted where the CLI can load it, these tools simply go unused and the copilot degrades to text-only answers from the prompt + injected context.
+- **Assignment config** (`DEFAULT_ASSIGNMENT_CONFIGS` in `defaults.py`): `allowed_tools: ["IntelFeed"]` and `timeout_seconds: 240`. Configs seeded earlier say `["Bash", "Read", "Skill"]`, which the provider reads as the same thing. When the MCP server isn't mounted where the provider looks, the copilot answers text-only from the prompt and injected context.
 - **Prompt variables**: `question`, `conversation_history`, `ambient_context`. The system template (`defaults.py:1541`) instructs the model to use the intelfeed skill for anything data-dependent, states that write tools are physically blocked, and defines the ` ```intelfeed-action ` proposal fence (see "Proposed writes" below).
 
 Both the provider assignment and the prompt are editable at **Settings → AI Configuration** like any other task (the prompt in the Prompts tab's master–detail `PromptWorkspace`). If nothing can answer, `/stream` fails with a 422 `not_configured` error.
@@ -119,7 +119,7 @@ If the assigned provider is not a `ClaudeCodeProvider`, two paths exist (`copilo
 
 The Claude Code CLI needs OAuth credentials at `~/.claude/.credentials.json`. In production only the **`celery-worker-ai`** container mounts that volume (it is the single writer that rotates tokens — concurrent OAuth refresh from a second mount would corrupt it). The api container has neither the CLI, the credentials, nor the skill mount (`docker-compose.prod.yml:165-170`).
 
-`copilot_worker_dispatch` (`backend/app/config.py:414`, default `true`) selects the topology (it only applies to the `claude_code` provider — the Ollama tool loop always runs in-process):
+`copilot_worker_dispatch` (`backend/app/config.py:429`, default `true`) selects the topology (it only applies to the `claude_code` provider — the Ollama tool loop always runs in-process):
 
 - **Worker dispatch (prod default)** — the api enqueues `app.workers.copilot_tasks.run_copilot_stream` on the `ai` queue (`copilot.py:656-681`) with a fresh `run_id`, and drains a Redis list while the worker runs the CLI.
 - **In-process (dev fallback)** — the api calls `provider.stream_agent()` directly (`copilot.py:682-692`). This only works where the api container itself has the CLI + credentials; the dev compose mounts the skill into the api for this reason (`docker-compose.dev.yml:135`).
@@ -146,20 +146,22 @@ All CLI-subprocess tasks are routed to this queue (`backend/app/workers/celery_a
 
 ### The CLI invocation
 
-`stream_agent` (`claude_code_provider.py:582`) spawns `claude -p --output-format stream-json --verbose --include-partial-messages` (`_build_stream_argv`, `claude_code_provider.py:519`), passes the system prompt via `--append-system-prompt`, the tool allowlist via `--allowedTools`, and `--dangerously-skip-permissions` (safe: read-only tools, no TTY). It maps CLI stream-json lines to typed events in `_map_stream_event` (`claude_code_provider.py:702`): `text_delta` partials → `text`, `tool_use` blocks on assistant messages → `tool_call` (emitted with fully-assembled args, not at block start), `tool_result` blocks → `tool_result` with a 200-char summary. Quota/rate-limit stderr raises `QuotaExhaustedError` (`claude_code_provider.py:36`) with a best-effort reset-time parse.
+`stream_agent` (`backend/app/ai/providers/claude_code_provider.py:769`) spawns `claude -p --output-format stream-json --verbose --include-partial-messages` (`_build_stream_argv`, `backend/app/ai/providers/claude_code_provider.py:709`), passes the system prompt via `--append-system-prompt` and the confinement flags described under [the tool layer](#the-tool-layer-read-only-intelfeed-tools). It maps CLI stream-json lines to typed events in `_map_stream_event` (`backend/app/ai/providers/claude_code_provider.py:892`): `text_delta` partials → `text`, `tool_use` blocks on assistant messages → `tool_call` (emitted with fully-assembled args, not at block start), `tool_result` blocks → `tool_result` with a 200-char summary. Quota/rate-limit stderr raises `QuotaExhaustedError` (`claude_code_provider.py:36`) with a best-effort reset-time parse.
 
 ---
 
-## The tool layer: read-only intelfeed skill
+## The tool layer: read-only IntelFeed tools
 
-The copilot's only tool surface is the **intelfeed skill** — the same zero-dependency CLI documented in [cli-reference.md](cli-reference.md), mounted read-only into the CLI worker at `/home/appuser/.claude/skills/intelfeed` (`docker-compose.prod.yml:286`, dev `:193` and, for the in-process path, into the api at dev `:135`). The skill CLI authenticates back into the api with `INTELFEED_API_URL` / `INTELFEED_USERNAME` / `INTELFEED_PASSWORD` env vars set on the worker.
+On the Claude Code CLI provider, the copilot's only tools are IntelFeed's read-only registry tools, served by the [IntelFeed MCP server](../intelfeed-mcp/README.md). Compose mounts `./intelfeed-mcp` read-only at `/opt/intelfeed-mcp` in `celery-worker-ai` and, for the in-process path, in the dev api. For each turn the provider (`claude_code_provider.py`, "tool policy" at the top) does this:
 
-Two enforcement layers keep the copilot read-only:
+1. **Mints an agent token** for the asking user (`create_agent_token` in `app/core/security.py`): type `agent`, read-only, expiring with the run. Every ordinary route refuses that token type. Only `/api/tools/execute` and `/api/tools/tools` accept it, and `execute` refuses any mutating tool for it with a 403.
+2. **Attaches the MCP server** through `--mcp-config` with `--strict-mcp-config`. The token is in the server's environment, not the model's. The server also runs only its reviewed read-only list.
+3. **Confines the CLI.** `--tools` leaves no built-in tools except WebSearch where a task asks for it. A deny list covers every built-in shell, file, fetch and agent tool. `--permission-mode dontAsk` refuses anything `--allowedTools` did not name, and `--setting-sources project` with an empty per-run working directory keeps `~/.claude` settings from widening it. Permissions are never skipped.
+4. **Scrubs the environment.** The CLI subprocess keeps PATH, HOME, locale, proxy and `CLAUDE_*`/`ANTHROPIC_*` variables only, so the secrets in `.env` are not in it.
 
-1. **CLI tool allowlist** — the copilot turn only allows `Bash`, `Read`, `Skill` (assignment config, `defaults.py:124`). No Write/Edit tools exist in the session.
-2. **Hard write-tool denylist in the skill CLI** — the endpoint sets `INTELFEED_READ_ONLY=1` in the subprocess env for copilot invocations only (`copilot.py:647`, `copilot.py:666`; threaded through `stream_agent`'s `env` parameter, `claude_code_provider.py:612-628`). When truthy, the skill CLI refuses any batch containing a write tool **before any network call** — it prints a JSON error and exits 2 (`intelfeed-skill/scripts/intelfeed_cli.py:50`, gate at `:3894-3906`). The denylist is a generated `WRITE_TOOLS` frozenset (`intelfeed_cli.py:62`) of 88 tools — every registry tool flagged `mutating` plus the persisting AI tools (`extract_*`, `run_ai_task`) — regenerated by `scripts/dev/sync_skill_clis.py` and guarded by `test_tool_registry_sync.py`; everything not listed is a read tool. This is the physical boundary — it holds even if the system prompt is bypassed. See [diagrams/cli-readonly-gating.md](diagrams/cli-readonly-gating.md). (The Ollama copilot path enforces the same boundary differently: `ollama_tool_specs(..., read_only=True)` simply never exposes mutating registry tools to the model.)
+Article text in the prompt can still ask the model to do something. The worst it can then do is read what the asking user could already read.
 
-Autonomous maintenance tasks on the same worker never set `INTELFEED_READ_ONLY`, so they retain write access.
+On Ollama the boundary is the registry itself: `ollama_tool_specs(..., read_only=True)` offers only non-mutating tools, and `restrict_to_offered` refuses any tool the model names that it was not offered.
 
 ---
 
@@ -278,7 +280,7 @@ Historical note: Celery task results share the copilot's Redis; before `result_e
 
 | Knob | Where | Value / effect |
 |---|---|---|
-| `copilot_worker_dispatch` | `backend/app/config.py:414` | `true` (default): dispatch CLI runs to `celery-worker-ai`; `false`: run in-process in the api (claude_code only — Ollama always runs in-process) |
+| `copilot_worker_dispatch` | `backend/app/config.py:429` | `true` (default): dispatch CLI runs to `celery-worker-ai`; `false`: run in-process in the api (claude_code only — Ollama always runs in-process) |
 | `allowed_tools` / `timeout_seconds` | copilot task assignment config (`defaults.py:118-126`, editable in Settings → AI Configuration) | `["Bash","Read","Skill"]`, 240 s CLI ceiling |
 | `ollama_tools` | copilot assignment config (Prompt Workspace → Routing panel) | Curated read-only tool subset for an Ollama-assigned copilot; defaults to `DEFAULT_COPILOT_OLLAMA_TOOLS` (`backend/app/tools/__init__.py:99`) |
 | History replay | `backend/app/api/copilot.py:45` | Last 20 messages injected as `conversation_history` |

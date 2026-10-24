@@ -779,7 +779,7 @@ async def enrichment_gaps(
 
 # (entity_type, field) → (model, missing-field condition, order, name_attr).
 # `name_attr` is the column that becomes the human-readable name passed to the
-# AI researcher. Every tuple here is fair game for Claude + WebFetch — the
+# AI researcher. Every tuple here is fair game for Claude + web search — the
 # worker has a matching field-guidance entry in `_GAP_FIELD_GUIDANCE`.
 _ENRICH_GAP_SPECS: dict[tuple[str, str], dict[str, Any]] = {
     ("threat_actor", "mitre_id"): {
@@ -860,7 +860,7 @@ async def enrich_gap(
     user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ) -> EnrichGapResponse:
-    """Dispatch Claude Code with WebFetch to research and fill the requested
+    """Dispatch Claude Code with web search to research and fill the requested
     field for the top-N entities missing it.
 
     Runs as a single batch (capped at body.limit, ≤50 by the request schema)

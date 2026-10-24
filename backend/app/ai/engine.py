@@ -1016,6 +1016,10 @@ async def run_task(
     # tool-capable (v1). Only agentic tasks get tools — everything else stays
     # a pure prompt→completion call.
     complete_kwargs: dict = {}
+    if provider_model.provider_type == "claude_code":
+        # Who the CLI's IntelFeed tools act for. The provider turns it into a
+        # read-only agent token for that run; nothing else reaches the agent.
+        complete_kwargs["agent_user_id"] = user_id
     if provider_model.provider_type == "ollama":
         from app.ai.capabilities import task_requires_tools
 

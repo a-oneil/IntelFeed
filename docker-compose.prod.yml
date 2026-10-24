@@ -299,14 +299,14 @@ services:
     volumes:
       - ./logs:/app/logs
       - claude_cli:/home/appuser/.claude
-      - ./intelfeed-skill:/home/appuser/.claude/skills/intelfeed:ro
+      # The IntelFeed MCP server the Claude CLI provider attaches for
+      # tool-using tasks. It calls the api with a read-only agent token minted
+      # per run; the CLI itself gets no shell, file or fetch tools.
+      - ./intelfeed-mcp:/opt/intelfeed-mcp:ro
     env_file:
       - .env
     environment:
       - ENV=production
-      - INTELFEED_API_URL=http://api:8000
-      - INTELFEED_USERNAME=${INTELFEED_USERNAME:-}
-      - INTELFEED_PASSWORD=${INTELFEED_PASSWORD:-}
       # CLAUDE_CODE_OAUTH_TOKEN intentionally not forwarded — when present it
       # overrides ~/.claude/.credentials.json and disables silent OAuth refresh.
       # The CLI reads access_token + refresh_token from the credentials file

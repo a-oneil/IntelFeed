@@ -655,3 +655,16 @@ def test_stdio_subprocess():
     assert "search_observables" in replies[2]["result"]["content"][0]["text"]  # registry.json fallback
     assert replies[3]["result"]["isError"]
     assert "credentials are not configured" in replies[3]["result"]["content"][0]["text"]
+
+
+def test_supplied_token_is_the_whole_credential(monkeypatch):
+    """The backend's Claude CLI provider runs this server with a short-lived,
+    read-only INTELFEED_TOKEN. It must be used as-is: never refreshed, and never
+    swapped for a password login when the API refuses it."""
+    monkeypatch.setenv("INTELFEED_TOKEN", "agent-token")
+    monkeypatch.setenv("INTELFEED_USERNAME", "admin")
+    monkeypatch.setenv("INTELFEED_PASSWORD", "hunter2")
+    client = m.IntelFeed(api_url="http://localhost:8000")
+    assert client._access == "agent-token"
+    with pytest.raises(m.ToolError, match="refused this session's token"):
+        client._renew()

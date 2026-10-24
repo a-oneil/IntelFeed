@@ -109,16 +109,15 @@ DEFAULT_ASSIGNMENT_CONFIGS: dict[str, dict] = {
     # docs/story-threads.md; it is inert if the server pins its own default.
     "story_thread_spine": {"max_tokens": 2000, "keep_alive": "30m"},
     "copilot": {
-        # Read-only tool set. The intelfeed skill (invoked via Skill/Bash) is the
-        # lookup surface; Read lets the model read files the skill emits. No write
-        # tools — the P1.0 copilot is strictly read-only. When the skill isn't
-        # installed where the CLI can load it, these tools simply go unused and
-        # the copilot answers from the prompt + injected context (text-only).
-        "allowed_tools": ["Bash", "Read", "Skill"],
+        # IntelFeed's read-only tools, through the MCP server the CLI provider
+        # attaches (no shell or file access; see the tool policy in
+        # claude_code_provider.py). Older seeded configs saying
+        # ["Bash", "Read", "Skill"] mean the same thing.
+        "allowed_tools": ["IntelFeed"],
         "timeout_seconds": 240,
     },
     "actor_profile_refresh": {
-        "allowed_tools": ["Bash", "Read", "Skill"],
+        "allowed_tools": ["IntelFeed"],
         "timeout_seconds": 240,
     },
     "entity_name_normalization": {
@@ -128,8 +127,10 @@ DEFAULT_ASSIGNMENT_CONFIGS: dict[str, dict] = {
     },
     "entity_enrichment_research": {
         # Researches entity gaps (description, mitre_id, country, etc.) via web
-        # lookups. Needs WebFetch + WebSearch; no shell or skill access.
-        "allowed_tools": ["WebFetch", "WebSearch"],
+        # search, which Anthropic runs server-side. WebFetch is not offered: it
+        # fetches from the AI worker, and the entity names in this prompt come
+        # from feed content.
+        "allowed_tools": ["WebSearch"],
         "timeout_seconds": 600,
     },
     "daily_summary": {

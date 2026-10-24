@@ -1,7 +1,7 @@
 """Provider/task tool-capability model.
 
 Some AI tasks are agentic: they only produce their effect by calling tools
-(the Claude Code CLI's Bash/Read/Skill/WebFetch/WebSearch surface). Providers
+(IntelFeed's read-only tools and web search on the Claude Code CLI). Providers
 that run a single-shot chat completion (Ollama, Anthropic API) have no tool
 execution path, so assigning an agentic task to them silently produces
 tool-less output — worst case the entity merge task reports merges that were

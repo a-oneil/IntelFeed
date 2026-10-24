@@ -9,10 +9,9 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
-from app.core.security import get_current_user
+from app.core.security import ToolCaller, get_tool_caller
 from app.database import get_db
-from app.models.user import User
-from app.tools import ADMIN_TOOLS, TOOL_DEFINITIONS, execute_tool
+from app.tools import ADMIN_TOOLS, MUTATING_TOOLS, TOOL_DEFINITIONS, execute_tool
 
 router = APIRouter()
 
@@ -33,14 +32,22 @@ class ToolExecuteResponse(BaseModel):
 @router.post("/execute", response_model=ToolExecuteResponse)
 async def execute_tool_endpoint(
     request: ToolExecuteRequest,
-    user: User = Depends(get_current_user),
+    caller: ToolCaller = Depends(get_tool_caller),
     db: AsyncSession = Depends(get_db),
 ):
     """Execute an agent tool by name and return the JSON result.
 
     Tools whose API equivalents are admin-gated require an admin caller —
-    the registry must not be a side door around the API layer's gates.
+    the registry must not be a side door around the API layer's gates. An
+    agent token (an AI run acting for a user) may only run read-only tools.
     """
+    user = caller.user
+    if caller.read_only and request.tool_name in MUTATING_TOOLS:
+        raise AppError(
+            code="forbidden",
+            message=f"Tool '{request.tool_name}' changes data; this credential is read-only",
+            status_code=403,
+        )
     if request.tool_name in ADMIN_TOOLS and user.role != "admin":
         raise AppError(
             code="forbidden",
@@ -52,6 +59,6 @@ async def execute_tool_endpoint(
 
 
 @router.get("/tools")
-async def list_tools(user: User = Depends(get_current_user)):
+async def list_tools(caller: ToolCaller = Depends(get_tool_caller)):
     """Return all registered tool definitions (name, description, schema)."""
     return TOOL_DEFINITIONS

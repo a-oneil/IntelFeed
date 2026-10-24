@@ -2,13 +2,13 @@
 
 Workstream E (P1.0). Reuses the P0 AIConversation persistence and the SSE
 framing from intelligence.py's ask-agent endpoints, but drives the Claude Code
-CLI provider's ``stream_agent()`` method so it can (when the intelfeed skill is
-installed where the CLI can load it) call read-only skill tools mid-answer and
-surface a tool-call trace to the UI.
+CLI provider's ``stream_agent()`` method so it can call IntelFeed's read-only
+tools mid-answer and surface a tool-call trace to the UI.
 
-Read-only: the copilot task is seeded with an ``allowed_tools`` set of
-``["Bash", "Read", "Skill"]`` against the read-only intelfeed skill — no write
-tools, no confirm_request flow.
+Read-only: on the CLI the tools come from the IntelFeed MCP server holding a
+read-only agent token for the asking user (see ClaudeCodeProvider's tool
+policy); on Ollama, from the registry's non-mutating tools. No write tools, no
+confirm_request flow.
 """
 
 from __future__ import annotations
@@ -720,9 +720,9 @@ async def copilot_stream(
         try:
             try:
                 if isinstance(provider, ClaudeCodeProvider):
-                    # Read-only env: physically forbid writes for this invocation.
-                    # The mounted skill CLI reads INTELFEED_READ_ONLY and refuses
-                    # write tools (autonomous maintenance tasks never set it).
+                    # The CLI's IntelFeed tools act for this user, read-only:
+                    # the provider mints an agent token the API refuses for
+                    # any mutating tool.
                     if settings.copilot_worker_dispatch:
                         # Prod topology: run the CLI on the dedicated claude_code
                         # worker (owns the OAuth credentials volume) and relay its
@@ -740,7 +740,7 @@ async def copilot_stream(
                                 "allowed_tools": allowed_tools,
                                 "timeout_seconds": cli_timeout,
                                 "provider_config": config,
-                                "env": {"INTELFEED_READ_ONLY": "1"},
+                                "agent_user_id": str(user.id),
                             },
                             queue="ai",
                         )
@@ -759,7 +759,7 @@ async def copilot_stream(
                             allowed_tools=allowed_tools,
                             timeout_seconds=cli_timeout,
                             heartbeat_label="copilot stream",
-                            env={"INTELFEED_READ_ONLY": "1"},
+                            agent_user_id=user.id,
                         )
                 elif getattr(provider, "supports_tools", False) and hasattr(provider, "stream_agent"):
                     # Ollama native tool loop — runs in-process (no creds needed, so
