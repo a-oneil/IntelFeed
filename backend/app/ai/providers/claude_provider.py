@@ -31,7 +31,7 @@ import logging
 import time
 
 import anthropic
-from anthropic import AsyncAnthropic
+from anthropic import AsyncAnthropic, DefaultAsyncHttpxClient
 
 from app.ai.providers.base import AIProvider, AIResponse
 from app.ai.providers.claude_code_provider import QuotaExhaustedError
@@ -83,6 +83,13 @@ class ClaudeProvider(AIProvider):
             return self._client
 
         kwargs: dict = {"timeout": self.timeout}
+        if self.config.get("follow_redirects") is False:
+            # A personal key's base_url was vetted as public; a 307 could lead
+            # the SDK's default client past that host to an internal address,
+            # so the engine turns redirects off for those rows (see
+            # _get_provider_instance). The instance's own provider keeps the
+            # SDK default, since a gateway it points at may legitimately redirect.
+            kwargs["http_client"] = DefaultAsyncHttpxClient(follow_redirects=False)
         if self.base_url:
             kwargs["base_url"] = self.base_url
 

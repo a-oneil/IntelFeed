@@ -485,6 +485,9 @@ export interface AIProvider {
   user_id: string | null;
   /** Only on the admin's user-keys listing. */
   owner_username?: string | null;
+  /** When the key last answered a test, and what the last test said if it failed. */
+  last_tested_at?: string | null;
+  last_test_error?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -591,7 +594,6 @@ export interface UserAIPolicy {
   require_user_ai_provider: boolean;
   provider_types: string[];
   allow_private_endpoints: boolean;
-  default_monthly_usd: string;
   daily_request_cap: number;
   site_allowance_per_user: number;
 }
@@ -615,7 +617,17 @@ export interface UserAIUsage {
   by_key: UserAIKeyUsage[];
 }
 
-export interface UserAITaskRow {
+/** Why a person's key can't answer right now (the backend's FALLBACK_REASONS). */
+export type UserAIBlockedReason =
+  | "no_key"
+  | "key_disabled"
+  | "key_paused"
+  | "type_not_allowed"
+  | "endpoint_blocked"
+  | "monthly_cap"
+  | "daily_cap";
+
+export interface UserAIPromptRow {
   task_id: string;
   task_name: string;
   display_name: string;
@@ -625,6 +637,16 @@ export interface UserAITaskRow {
   site_model_name: string | null;
   route: UserAIRoute | null;
   month_cost: string;
+  /** What a click on this task does right now, by the same lookup the server runs. */
+  will_run_on: "user" | "site" | "refused";
+  /** Set when the person's key can't answer: why the click falls back or is refused. */
+  blocked_reason: UserAIBlockedReason | null;
+}
+
+export interface UserAIPolicyStatus extends UserAIPolicy {
+  // Whether this person has any routing set up. False means no personal key
+  // can touch a task, so a reader panel need not fetch the overview.
+  has_routes: boolean;
 }
 
 export interface UserAIOverview {
@@ -632,7 +654,7 @@ export interface UserAIOverview {
   fallback_to_site: boolean;
   monthly_cap_usd: string | null;
   usage: UserAIUsage;
-  tasks: UserAITaskRow[];
+  tasks: UserAIPromptRow[];
   /** The default key route (task_id null), whether or not any task row still shows it. */
   default_route: UserAIRoute | null;
 }

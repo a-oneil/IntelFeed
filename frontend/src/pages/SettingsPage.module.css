@@ -123,6 +123,8 @@
   opacity: 1;
 }
 
+/* A small pill after the label, for a section that is new to the rail. */
+
 .navFooter {
   margin-top: auto;
   padding: var(--sp-4) var(--sp-3) 0;

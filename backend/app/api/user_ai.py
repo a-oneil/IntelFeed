@@ -17,10 +17,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.engine import (
+    _route_blocked,
     allowed_personal_types,
     site_requests_today,
-    user_key_requests_today,
-    user_key_spend_month,
+    user_key_usage,
     user_monthly_cap,
     utc_month_start,
 )
@@ -37,6 +37,7 @@ from app.schemas.ai import (
     UserAIKeyUsage,
     UserAIOverview,
     UserAIPolicy,
+    UserAIPolicyStatus,
     UserAIPreferencesUpdate,
     UserAIRouteResponse,
     UserAIRouteUpsert,
@@ -54,7 +55,6 @@ async def _policy(db: AsyncSession) -> UserAIPolicy:
         require_user_ai_provider=bool(await get_setting("require_user_ai_provider", db)),
         provider_types=sorted(allowed_personal_types(await get_setting("user_ai_provider_types", db))),
         allow_private_endpoints=bool(await get_setting("user_ai_allow_private_endpoints", db)),
-        default_monthly_usd=Decimal(str(await get_setting("user_ai_default_monthly_usd", db) or 0)),
         daily_request_cap=int(await get_setting("user_ai_daily_request_cap", db) or 0),
         site_allowance_per_user=int(await get_setting("site_ai_user_daily_requests", db) or 0),
     )
@@ -96,6 +96,19 @@ async def _routes(db: AsyncSession, user: User) -> list[tuple[UserAIRoute, str |
     return [(route, task_name, provider_name) for route, task_name, provider_name in rows]
 
 
+@router.get("/policy", response_model=UserAIPolicyStatus)
+async def my_ai_policy(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The admin's personal-key policy and whether I have any routes: the cheap read a reader
+    panel makes before fetching the overview. Settings come from the in-process cache; the
+    one query is an existence check on my routes."""
+    policy = await _policy(db)
+    has_routes = (await db.scalar(select(UserAIRoute.id).where(UserAIRoute.user_id == user.id).limit(1))) is not None
+    return UserAIPolicyStatus(**policy.model_dump(), has_routes=has_routes)
+
+
 @router.get("/overview", response_model=UserAIOverview)
 async def my_ai_overview(
     user: User = Depends(get_current_user),
@@ -129,10 +142,11 @@ async def my_ai_overview(
         )
     ).all()
 
+    month_cost, requests_today = await user_key_usage(db, user.id)
     usage = UserAIUsage(
-        month_cost=await user_key_spend_month(db, user.id),
+        month_cost=month_cost,
         monthly_cap_usd=await user_monthly_cap(db, prefs),
-        requests_today=await user_key_requests_today(db, user.id),
+        requests_today=requests_today,
         daily_request_cap=policy.daily_request_cap,
         site_requests_today=await site_requests_today(db, user.id),
         site_allowance_per_user=policy.site_allowance_per_user,
@@ -173,9 +187,47 @@ async def my_ai_overview(
             .order_by(AITask.category, AITask.display_name)
         )
     ).all()
+
+    # What a click would do, by the lookup's own rule (``resolve_assignment``),
+    # so the row says "your key" only when the key can answer. A key is
+    # checked once however many tasks follow it.
+    my_keys = {
+        p.id: p for p in (await db.execute(select(AIProvider).where(AIProvider.user_id == user.id))).scalars().all()
+    }
+    blocked_by_key: dict[uuid.UUID, str | None] = {}
+    fallback = prefs.fallback_to_site if prefs is not None else True
+
+    async def _will_run(route: UserAIRoute | None, has_site: bool) -> tuple[str, str | None]:
+        if not policy.allow_user_ai_providers:
+            return "site", None
+        reason: str | None = None
+        if route is not None and route.provider_id is not None:
+            key = my_keys.get(route.provider_id)
+            if key is not None:
+                if route.provider_id not in blocked_by_key:
+                    blocked_by_key[route.provider_id] = await _route_blocked(
+                        db, route, key, prefs, usage=(month_cost, requests_today)
+                    )
+                reason = blocked_by_key[route.provider_id]
+                if reason is None:
+                    return "user", None
+            else:
+                route = None
+        if route is not None and route.provider_id is None:
+            route = None  # the opt-out row: the instance answers by choice
+        if policy.require_user_ai_provider or (route is not None and not fallback):
+            return "refused", reason or "no_key"
+        if reason is not None and not has_site:
+            # Their key is this prompt's only provider and it can't answer:
+            # the lookup refuses with the reason rather than "not configured".
+            return "refused", reason
+        return "site", reason
+
     tasks = []
     for task, site_model, site_provider in task_rows:
         route = routes.get(task.id)
+        effective = route[0] if route else (default_route[0] if default_route else None)
+        will_run_on, blocked_reason = await _will_run(effective, site_provider is not None)
         tasks.append(
             UserAITaskRow(
                 task_id=task.id,
@@ -187,6 +239,8 @@ async def my_ai_overview(
                 site_model_name=site_model,
                 route=_route_response(*route) if route else None,
                 month_cost=Decimal(str(task_cost.get(task.id, 0))),
+                will_run_on=will_run_on,
+                blocked_reason=blocked_reason,
             )
         )
 
@@ -207,8 +261,8 @@ async def update_my_ai_preferences(
     db: AsyncSession = Depends(get_db),
 ):
     """Set whether my tasks fall back to the instance's providers when my key can't answer, and
-    my own monthly cap. The cap can go below the admin's default, never above it; null restores
-    the default."""
+    my own monthly cap on my keys' spend. It is mine alone: the admin sets no ceiling, and null
+    removes it."""
     updates = body.model_dump(exclude_unset=True)
     prefs = await db.get(UserAIPreferences, user.id)
     if prefs is None:
@@ -217,16 +271,7 @@ async def update_my_ai_preferences(
     if "fallback_to_site" in updates and updates["fallback_to_site"] is not None:
         prefs.fallback_to_site = updates["fallback_to_site"]
     if "monthly_cap_usd" in updates:
-        cap = updates["monthly_cap_usd"]
-        if cap is not None:
-            ceiling = Decimal(str(await get_setting("user_ai_default_monthly_usd", db) or 0))
-            if ceiling > 0 and Decimal(cap) > ceiling:
-                raise AppError(
-                    code="cap_above_ceiling",
-                    message=f"The highest cap allowed here is ${ceiling:.2f} a month.",
-                    status_code=400,
-                )
-        prefs.monthly_cap_usd = cap
+        prefs.monthly_cap_usd = updates["monthly_cap_usd"]
     await db.flush()
     return await my_ai_overview(user=user, db=db)
 

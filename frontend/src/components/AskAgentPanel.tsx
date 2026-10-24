@@ -17,16 +17,28 @@ interface AskAgentPanelProps {
     question: string,
     history: AskAgentMessage[],
   ) => Promise<{ answer: string; remaining_today?: number | null }>;
+  /**
+   * Questions left on this link today, when the parent tracks it (a task run
+   * on the same link spends the same budget). Omit to let the panel keep its
+   * own count from the answers it gets.
+   */
+  remaining?: number | null;
+  onRemaining?: (remaining: number) => void;
 }
 
 /**
  * Minimal article Q&A chat for shared entry pages. Non-streaming, no
  * persistence — the visitor has no account to persist to.
  */
-export function AskAgentPanel({ onClose, askFn }: AskAgentPanelProps) {
+export function AskAgentPanel({ onClose, askFn, remaining: remainingProp, onRemaining }: AskAgentPanelProps) {
   const [messages, setMessages] = useState<AskAgentMessage[]>([]);
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
+  // Questions left on this link today, from the last answer. The link has a
+  // daily budget of its own because it answers without a login. The parent's
+  // count wins when it has one, since task runs on the page spend it too.
+  const [localRemaining, setLocalRemaining] = useState<number | null>(null);
+  const remaining = remainingProp ?? localRemaining;
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -54,7 +66,10 @@ export function AskAgentPanel({ onClose, askFn }: AskAgentPanelProps) {
         next[next.length - 1] = { role: "assistant", content: result.answer };
         return next;
       });
-      if (typeof result.remaining_today === "number") setRemaining(result.remaining_today);
+      if (typeof result.remaining_today === "number") {
+        setLocalRemaining(result.remaining_today);
+        onRemaining?.(result.remaining_today);
+      }
     } catch (err) {
       const message = apiErrorInfo(err).message;
       setMessages((prev) => {
@@ -65,11 +80,7 @@ export function AskAgentPanel({ onClose, askFn }: AskAgentPanelProps) {
     } finally {
       setPending(false);
     }
-  }, [input, pending, askFn, messages]);
-
-  // Questions left on this link today, from the last answer. The link has a
-  // daily budget of its own because it answers without a login.
-  const [remaining, setRemaining] = useState<number | null>(null);
+  }, [input, pending, askFn, messages, onRemaining]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -98,12 +109,7 @@ export function AskAgentPanel({ onClose, askFn }: AskAgentPanelProps) {
 
       <div className={styles.messages}>
         {messages.length === 0 && (
-          <div className={styles.emptyHint}>
-            Ask a question about this article...
-            <div className={styles.emptyNote}>
-              Answers on this page come from the IntelFeed instance's AI, not the person who shared it.
-            </div>
-          </div>
+          <div className={styles.emptyHint}>Ask a question about this article...</div>
         )}
         {messages.map((msg, i) => {
           const isLast = i === messages.length - 1;
@@ -148,6 +154,9 @@ export function AskAgentPanel({ onClose, askFn }: AskAgentPanelProps) {
         >
           &rarr;
         </button>
+      </div>
+      <div className={styles.footerNote}>
+        Answers on this page come from the IntelFeed instance's AI, not the person who shared it.
       </div>
     </div>
   );

@@ -10,7 +10,7 @@
  */
 
 export const FALLBACK_REASON_TEXT: Record<string, string> = {
-  no_key: "You have no personal AI key for this task, so it ran on the instance's provider.",
+  no_key: "You have no personal AI key for this prompt, so it ran on the instance's provider.",
   key_disabled: "Your personal key is disabled, so this ran on the instance's provider.",
   key_paused: "Your personal key is paused after a rate-limit response, so this ran on the instance's provider.",
   type_not_allowed: "Your personal key's provider type is no longer allowed here, so this ran on the instance's provider.",
@@ -25,8 +25,34 @@ export function fallbackMessage(reason: unknown): string | null {
   return FALLBACK_REASON_TEXT[reason] ?? `Your personal key could not answer (${reason}), so this ran on the instance's provider.`;
 }
 
-/** What to offer next to a fallback: the cap can be raised, a key can be fixed. */
+/**
+ * What to offer next to a fallback or a refusal: a missing key is added, a
+ * cap is raised, anything else is fixed on the My AI page.
+ */
 export function fallbackFixLabel(reason: unknown): string {
-  return reason === "monthly_cap" ? "Raise my cap" : "My AI settings";
+  if (reason === "no_key") return "Add a key";
+  if (reason === "monthly_cap" || reason === "daily_cap") return "Raise my cap";
+  return "My AI settings";
+}
+
+/** The short form of a blocked reason, for a prompt row's "instance · key paused". */
+export const BLOCKED_REASON_SHORT: Record<string, string> = {
+  no_key: "no key",
+  key_disabled: "key disabled",
+  key_paused: "key paused",
+  type_not_allowed: "type not allowed",
+  endpoint_blocked: "endpoint blocked",
+  monthly_cap: "over monthly cap",
+  daily_cap: "over daily cap",
+};
+
+export function blockedReasonShort(reason: unknown): string | null {
+  if (typeof reason !== "string" || !reason) return null;
+  return BLOCKED_REASON_SHORT[reason] ?? reason.replace(/_/g, " ");
+}
+
+/** A cap reason: the fix is raising the cap, not adding a key. */
+export function isCapReason(reason: unknown): boolean {
+  return reason === "monthly_cap" || reason === "daily_cap";
 }
 

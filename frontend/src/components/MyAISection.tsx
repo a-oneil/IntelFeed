@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuthStore } from "@/stores/authStore";
-import type { AIProvider, UserAITaskRow } from "@/api/types";
+import type { AIProvider, UserAIRoute, UserAIPromptRow } from "@/api/types";
 import {
   useAIProviders,
   useCreateAIProvider,
   useDeleteAIProvider,
   useDeleteMyRoute,
   useMyAI,
+  useResumeAIProvider,
   useTestAIProvider,
   useUpdateAIProvider,
   useUpdateMyAIPreferences,
@@ -15,9 +16,10 @@ import {
 } from "@/hooks/useAI";
 import { useUndoableDelete } from "@/hooks/useUndoableDelete";
 import { apiErrorInfo } from "@/api/errors";
-import { formatUsd } from "@/utils/format";
+import { formatCapInput, formatUsd } from "@/utils/format";
+import { formatDate, formatRelative } from "@/utils/formatDate";
 import { Chip } from "@/components/primitives";
-import { AsyncStateLoading } from "@/components/AsyncState";
+import { AsyncStateError, AsyncStateLoading } from "@/components/AsyncState";
 import page from "@/pages/SettingsPage.module.css";
 import styles from "./MyAISection.module.css";
 
@@ -39,6 +41,12 @@ function firstModel(provider: AIProvider): string {
   return provider.models[0] ?? DEFAULT_MODELS[provider.provider_type] ?? "";
 }
 
+/** The last test's error, short enough for a chip; the full text sits in the title. */
+function shortError(message: string, max = 40): string {
+  const one = message.replace(/\s+/g, " ").trim();
+  return one.length > max ? `${one.slice(0, max - 1)}…` : one;
+}
+
 function monthResetLabel(iso: string): string {
   const d = new Date(iso);
   // The cap resets at midnight UTC; a local-time render showed "Oct 31" the evening before.
@@ -46,20 +54,30 @@ function monthResetLabel(iso: string): string {
 }
 
 /**
- * Settings → My AI: one person's keys, which tasks use them, what they've
+ * Settings → My AI: one person's keys, which prompts use them, what they've
  * spent, and what happens when a key can't answer. Every number here is the
  * caller's own; the admin's instance-wide view is the Cost Dashboard.
  */
 export function MyAISection() {
   const me = useAuthStore((s) => s.user);
-  const { data: overview, isLoading } = useMyAI();
-  const { data: providers } = useAIProviders();
+  const { data: overview, isLoading, isError, error, refetch } = useMyAI();
+  const { data: providers, isLoading: providersLoading } = useAIProviders();
   const myKeys = useMemo(
     () => (providers ?? []).filter((p) => !!p.user_id && p.user_id === me?.id),
     [providers, me?.id],
   );
 
-  if (isLoading || !overview) return <AsyncStateLoading label="Loading your AI settings…" />;
+  if (isError) {
+    return (
+      <div className={page.sectionContent}>
+        <h2 className={page.sectionTitle}>My AI</h2>
+        <AsyncStateError title="Couldn't load your AI settings" description={apiErrorInfo(error).message} onRetry={() => void refetch()} />
+      </div>
+    );
+  }
+  // The key list is empty until the providers query answers; without this
+  // gate "No keys yet" flashes before the person's keys arrive.
+  if (isLoading || !overview || providersLoading) return <AsyncStateLoading label="Loading your AI settings…" />;
 
   const { policy, usage } = overview;
   const enabled = policy.allow_user_ai_providers;
@@ -70,19 +88,19 @@ export function MyAISection() {
     <div className={page.sectionContent}>
       <h2 className={page.sectionTitle}>My AI</h2>
       <p className={page.sectionDesc}>
-        Use your own AI key for the tasks you start. Background processing always uses this instance's providers.
+        Use your own AI key for the prompts you run.
       </p>
 
       {!enabled && (
         <div className={`${styles.note} ${styles.noteInfo}`}>
-          <b>Personal keys are off on this instance.</b> Your admin hasn't enabled them, so every task you start runs
-          on the instance's providers. Anything you add here waits until they are turned on.
+          <b>Personal keys are off on this instance.</b> Your admin hasn't enabled them, so every prompt you run runs
+          on the instance's providers.
         </div>
       )}
 
       <UsageCard overview={overview} myKeys={myKeys} />
 
-      <KeysCard overview={overview} myKeys={myKeys} defaultKeyId={defaultKey?.id ?? null} />
+      <KeysCard overview={overview} myKeys={myKeys} defaultRoute={defaultKey ? defaultRoute : null} />
 
       {enabled && (
         <RoutesCard overview={overview} myKeys={myKeys} defaultKey={defaultKey} defaultRouteModel={defaultRoute?.model_name ?? null} />
@@ -90,17 +108,12 @@ export function MyAISection() {
 
       {enabled && <FallbackCard overview={overview} />}
 
-      <div className={styles.note}>
-        <b>What "your own key" means here.</b> Your key is stored encrypted on this server, and the instance admin can
-        technically read it. It changes who pays and which rate limits apply. Prompts are the instance's shared
-        templates, which admins edit.
-        {usage.site_allowance_per_user > 0 && (
-          <>
-            {" "}
-            On the instance's providers you may make {usage.site_allowance_per_user} requests a day.
-          </>
-        )}
-      </div>
+      {usage.site_allowance_per_user > 0 && (
+        <div className={styles.note}>
+          On the instance's providers you may make {usage.site_allowance_per_user} requests a day. Your own key is not
+          counted against that.
+        </div>
+      )}
     </div>
   );
 }
@@ -115,7 +128,9 @@ function UsageCard({ overview, myKeys }: { overview: NonNullable<ReturnType<type
   const segments = usage.by_key.map((k, i) => ({
     ...k,
     color: palette[i % palette.length],
-    width: cap > 0 ? Math.min(100, (Number(k.month_cost) / cap) * 100) : 0,
+    // Against the cap when there is one; otherwise each key's share of the
+    // month's spend, so the bar still says something with no cap set.
+    width: cap > 0 ? Math.min(100, (Number(k.month_cost) / cap) * 100) : spent > 0 ? (Number(k.month_cost) / spent) * 100 : 0,
   }));
 
   return (
@@ -145,7 +160,7 @@ function UsageCard({ overview, myKeys }: { overview: NonNullable<ReturnType<type
       </div>
       {myKeys.length > 0 && (
         <div className={styles.meterWrap}>
-          <div className={styles.meter} role="img" aria-label="Spend by key against the monthly cap">
+          <div className={styles.meter} role="img" aria-label={cap > 0 ? "Spend by key against the monthly cap" : "Spend by key"}>
             {segments.map((s) => (
               <i key={s.provider_id} style={{ width: `${s.width}%`, background: s.color }} />
             ))}
@@ -172,19 +187,25 @@ function UsageCard({ overview, myKeys }: { overview: NonNullable<ReturnType<type
 function KeysCard({
   overview,
   myKeys,
-  defaultKeyId,
+  defaultRoute,
 }: {
   overview: NonNullable<ReturnType<typeof useMyAI>["data"]>;
   myKeys: AIProvider[];
-  defaultKeyId: string | null;
+  /** The default-key route, when it points at one of my keys. */
+  defaultRoute: UserAIRoute | null;
 }) {
   const { policy } = overview;
+  const defaultKeyId = defaultRoute?.provider_id ?? null;
   const updateProvider = useUpdateAIProvider();
   const testProvider = useTestAIProvider();
   const deleteProvider = useDeleteAIProvider();
+  const resumeProvider = useResumeAIProvider();
   const undoableDelete = useUndoableDelete();
   const upsertRoute = useUpsertMyRoute();
+  const deleteRoute = useDeleteMyRoute();
   const [showAdd, setShowAdd] = useState(false);
+  // The add form closes on success, so its "Connected · saved" line lives here, above the list.
+  const [added, setAdded] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ id: string; success: boolean; message: string } | null>(null);
 
@@ -202,7 +223,13 @@ function KeysCard({
       <div className={styles.cardHead}>
         <h3 className={styles.cardTitle}>My keys</h3>
         {policy.allow_user_ai_providers && (
-          <button className={page.btnPrimary} onClick={() => setShowAdd((v) => !v)}>
+          <button
+            className={page.btnPrimary}
+            onClick={() => {
+              setAdded(null);
+              setShowAdd((v) => !v);
+            }}
+          >
             + Add key
           </button>
         )}
@@ -213,10 +240,18 @@ function KeysCard({
           overview={overview}
           onClose={() => setShowAdd(false)}
           onAdded={(key, asDefault, keepOpen) => {
-            if (!keepOpen) setShowAdd(false);
+            if (!keepOpen) {
+              setShowAdd(false);
+              setAdded(`${key.name}: connected · ${key.models.length} models · saved`);
+            }
             if (asDefault) makeDefault(key);
           }}
         />
+      )}
+      {added && !showAdd && (
+        <div className={styles.ok} role="status">
+          {added}
+        </div>
       )}
 
       <div className={styles.keyList}>
@@ -224,9 +259,12 @@ function KeysCard({
           const isPaused = !!k.paused_until && new Date(k.paused_until) > new Date();
           const typeAllowed = policy.provider_types.includes(k.provider_type);
           const status = testResult?.id === k.id ? testResult : null;
+          // This session's test result wins; otherwise what the server remembers.
+          const lastFailed = !status && !!k.last_test_error;
+          const warn = (status && !status.success) || lastFailed;
           return (
             <div key={k.id}>
-              <div className={`${styles.key} ${!k.is_active ? styles.keyOff : ""} ${status && !status.success ? styles.keyWarn : ""}`}>
+              <div className={`${styles.key} ${!k.is_active ? styles.keyOff : ""} ${warn ? styles.keyWarn : ""}`}>
                 <div className={styles.keyLeft}>
                   <label className={page.toggle} title={k.is_active ? "Enabled" : "Disabled"}>
                     <input
@@ -240,10 +278,18 @@ function KeysCard({
                   <span className={styles.keyName}>{k.name}</span>
                   <Chip size="sm">{k.provider_type}</Chip>
                   {k.base_url && <span className={styles.keyUrl}>{k.base_url.replace(/^https?:\/\//, "")}</span>}
-                  {defaultKeyId === k.id && (
-                    <Chip size="sm" tone="toned" tint="var(--success)">
-                      Default
-                    </Chip>
+                  {defaultRoute && defaultKeyId === k.id && (
+                    <>
+                      <Chip size="sm" tone="toned" tint="var(--success)">
+                        Default
+                      </Chip>
+                      <DefaultModelPicker
+                        provider={k}
+                        model={defaultRoute.model_name}
+                        disabled={upsertRoute.isPending}
+                        onChange={(model) => upsertRoute.mutate({ task_id: null, provider_id: k.id, model_name: model })}
+                      />
+                    </>
                   )}
                   {!typeAllowed && (
                     <Chip size="sm" tone="toned" tint="var(--warning)" title="Your admin no longer allows this provider type">
@@ -251,20 +297,48 @@ function KeysCard({
                     </Chip>
                   )}
                   {isPaused && (
-                    <Chip size="sm" tone="toned" tint="var(--warning)" title={k.paused_reason ?? undefined}>
-                      Paused
-                    </Chip>
+                    <>
+                      <Chip size="sm" tone="toned" tint="var(--warning)" title={k.paused_reason ?? undefined}>
+                        Paused
+                      </Chip>
+                      <button
+                        className={page.btnSmall}
+                        onClick={() => resumeProvider.mutate(k.id)}
+                        disabled={resumeProvider.isPending}
+                        title="Clear the pause and let this key answer again"
+                      >
+                        Resume
+                      </button>
+                    </>
                   )}
-                  {status && (
+                  {status ? (
                     <Chip size="sm" tone="toned" tint={status.success ? "var(--success)" : "var(--warning)"} title={status.message} truncate>
                       {status.success ? `Connected · ${k.models.length || "?"} models` : status.message}
                     </Chip>
-                  )}
+                  ) : k.last_test_error ? (
+                    <Chip size="sm" tone="toned" tint="var(--warning)" title={k.last_test_error} truncate>
+                      Last test failed · {shortError(k.last_test_error)}
+                    </Chip>
+                  ) : k.last_tested_at ? (
+                    <Chip size="sm" tone="toned" tint="var(--success)" title={`Last tested ${formatDate(k.last_tested_at)}`}>
+                      Tested {formatRelative(k.last_tested_at)}
+                    </Chip>
+                  ) : null}
                 </div>
                 <div className={styles.keyActions}>
                   {defaultKeyId !== k.id && policy.allow_user_ai_providers && (
                     <button className={page.btnSmall} onClick={() => makeDefault(k)} disabled={upsertRoute.isPending}>
                       Set as default
+                    </button>
+                  )}
+                  {defaultRoute && defaultKeyId === k.id && (
+                    <button
+                      className={page.btnSmall}
+                      onClick={() => deleteRoute.mutate(defaultRoute.id)}
+                      disabled={deleteRoute.isPending}
+                      title="Prompts without a route of their own go back to the instance's providers"
+                    >
+                      Clear default
                     </button>
                   )}
                   <button
@@ -304,12 +378,70 @@ function KeysCard({
         {myKeys.length === 0 && (
           <div className={styles.empty}>
             {policy.allow_user_ai_providers
-              ? "No keys yet. Add one and the tasks you start can run on it."
+              ? "No keys yet. Add one and the prompts you run can use it."
               : "No keys."}
           </div>
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * The model the default key answers with. A select when the key's models are
+ * known, else a text field committed on Enter or blur; "Make default" picks
+ * the first model, and this is where the person changes it.
+ */
+function DefaultModelPicker({
+  provider,
+  model,
+  disabled,
+  onChange,
+}: {
+  provider: AIProvider;
+  model: string | null;
+  disabled?: boolean;
+  onChange: (model: string) => void;
+}) {
+  const [text, setText] = useState(model ?? "");
+  useEffect(() => setText(model ?? ""), [model]);
+  const commit = () => {
+    const next = text.trim();
+    if (next && next !== (model ?? "")) onChange(next);
+  };
+  if (provider.models.length > 0) {
+    return (
+      <select
+        className={`${page.select} ${styles.selectSm} ${styles.mono}`}
+        value={model ?? ""}
+        disabled={disabled}
+        aria-label="Default model"
+        title="The model the default key answers with"
+        onChange={(e) => onChange(e.target.value)}
+      >
+        {!model && <option value="">Pick a model…</option>}
+        {model && !provider.models.includes(model) && <option value={model}>{model}</option>}
+        {provider.models.map((m) => (
+          <option key={m} value={m}>
+            {m}
+          </option>
+        ))}
+      </select>
+    );
+  }
+  return (
+    <input
+      className={`${page.input} ${styles.mono} ${styles.modelInput}`}
+      value={text}
+      disabled={disabled}
+      aria-label="Default model"
+      placeholder="Model name, then Enter"
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+      }}
+    />
   );
 }
 
@@ -332,12 +464,10 @@ function AddKeyForm({
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [asDefault, setAsDefault] = useState(true);
-  const [cap, setCap] = useState(overview.monthly_cap_usd ?? "");
+  const [cap, setCap] = useState(formatCapInput(overview.monthly_cap_usd));
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const updatePrefs = useUpdateMyAIPreferences();
-  const ceiling = Number(policy.default_monthly_usd);
-
   const isCli = type === "claude_code";
   const needsUrl = type === "ollama" || type === "openai_compatible";
   const typeAllowed = policy.provider_types.includes(type);
@@ -358,10 +488,10 @@ function AddKeyForm({
       // The cap is the person's, not the key's; the form offers it here
       // because this is where someone first thinks about it. A refused cap
       // keeps the form open so the refusal is seen: the key itself is saved.
-      const capText = cap.trim();
-      if (capText && capText !== (overview.monthly_cap_usd ?? "")) {
+      const capInput = cap.trim();
+      if (capInput && capInput !== formatCapInput(overview.monthly_cap_usd)) {
         try {
-          await updatePrefs.mutateAsync({ monthly_cap_usd: capText });
+          await updatePrefs.mutateAsync({ monthly_cap_usd: capInput });
         } catch (err) {
           setError(`Key saved, but the cap was not: ${apiErrorInfo(err).message}`);
           onAdded(key, asDefault, true);
@@ -431,18 +561,18 @@ function AddKeyForm({
             />
           </label>
           <label className={styles.field}>
-            <span>Monthly cap{ceiling > 0 ? ` (max ${formatUsd(ceiling)})` : ""}</span>
+            <span>Monthly cap on your keys' spend (optional)</span>
             <input
               className={`${page.input} ${styles.mono} ${styles.capField}`}
               value={cap}
               onChange={(e) => setCap(e.target.value)}
-              placeholder={ceiling > 0 ? ceiling.toFixed(2) : "none"}
+              placeholder="none"
               aria-label="Monthly cap"
             />
           </label>
           <label className={styles.check}>
             <input type="checkbox" checked={asDefault} onChange={(e) => setAsDefault(e.target.checked)} /> Make this my
-            default key for all allowed tasks
+            default key for all allowed prompts
           </label>
         </>
       )}
@@ -527,79 +657,79 @@ function RoutesCard({
 }) {
   const upsertRoute = useUpsertMyRoute();
   const deleteRoute = useDeleteMyRoute();
-  // A key picked for a task whose model is not yet known: the row asks for one.
+  // A key picked for a prompt whose model is not yet known: the row asks for one.
   const [pending, setPending] = useState<Record<string, { providerId: string; model: string }>>({});
 
-  const commit = (task: UserAITaskRow, providerId: string, model: string) => {
+  const commit = (prompt: UserAIPromptRow, providerId: string, model: string) => {
     if (!model.trim()) return;
-    upsertRoute.mutate({ task_id: task.task_id, provider_id: providerId, model_name: model.trim() });
+    upsertRoute.mutate({ task_id: prompt.task_id, provider_id: providerId, model_name: model.trim() });
     setPending((p) => {
       const next = { ...p };
-      delete next[task.task_id];
+      delete next[prompt.task_id];
       return next;
     });
   };
 
-  const onPick = (task: UserAITaskRow, value: string) => {
+  const onPick = (prompt: UserAIPromptRow, value: string) => {
     if (value === "") {
-      if (task.route && task.route.task_id !== null) deleteRoute.mutate(task.route.id);
+      if (prompt.route && prompt.route.task_id !== null) deleteRoute.mutate(prompt.route.id);
       setPending((p) => {
         const next = { ...p };
-        delete next[task.task_id];
+        delete next[prompt.task_id];
         return next;
       });
       return;
     }
     if (value === "instance") {
-      // A per-task route with no key: this task goes to the instance's
+      // A per-prompt route with no key: this prompt goes to the instance's
       // provider even though a default key exists.
-      upsertRoute.mutate({ task_id: task.task_id, provider_id: null });
+      upsertRoute.mutate({ task_id: prompt.task_id, provider_id: null });
       return;
     }
     const key = myKeys.find((k) => k.id === value);
     if (!key) return;
     const model = firstModel(key);
-    if (model) commit(task, key.id, model);
-    else setPending((p) => ({ ...p, [task.task_id]: { providerId: key.id, model: "" } }));
+    if (model) commit(prompt, key.id, model);
+    else setPending((p) => ({ ...p, [prompt.task_id]: { providerId: key.id, model: "" } }));
   };
 
   return (
     <div className={page.card}>
       <div className={styles.cardHead}>
-        <h3 className={styles.cardTitle}>Which key each task uses</h3>
-        <span className={styles.muted}>Only tasks your admin allows</span>
+        <h3 className={styles.cardTitle}>Which key each prompt uses</h3>
+        <span className={styles.muted}>Only prompts your admin allows</span>
       </div>
       {overview.tasks.length === 0 ? (
-        <div className={styles.empty}>Your admin hasn't opened any task to personal keys.</div>
+        <div className={styles.empty}>Your admin hasn't opened any prompt to personal keys.</div>
       ) : (
         <div className={styles.tableWrap}>
           <table className={styles.table}>
             <thead>
               <tr>
-                <th>Task</th>
+                <th>Prompt</th>
                 <th>Runs on</th>
                 <th>Model</th>
                 <th className={styles.num}>This month</th>
               </tr>
             </thead>
             <tbody>
-              {overview.tasks.map((task) => {
-                const own = task.route && task.route.task_id !== null ? task.route : null;
+              {overview.tasks.map((prompt) => {
+                const own = prompt.route && prompt.route.task_id !== null ? prompt.route : null;
                 const optedOut = !!own && own.provider_id === null;
-                const p = pending[task.task_id];
+                const p = pending[prompt.task_id];
                 const selected = p?.providerId ?? (optedOut ? "instance" : (own?.provider_id ?? ""));
                 const key = myKeys.find((k) => k.id === selected) ?? null;
                 const effectiveKey = key ?? (own ? null : defaultKey);
-                const noTools = task.requires_tools && effectiveKey && !effectiveKey.supports_tools;
+                const noTools = prompt.requires_tools && effectiveKey && !effectiveKey.supports_tools;
                 return (
-                  <tr key={task.task_id}>
-                    <td>{task.display_name}</td>
+                  <tr key={prompt.task_id}>
+                    <td>{prompt.display_name}</td>
                     <td>
                       <select
                         className={`${page.select} ${styles.selectSm}`}
                         value={selected}
-                        onChange={(e) => onPick(task, e.target.value)}
-                        aria-label={`${task.display_name} route`}
+                        onChange={(e) => onPick(prompt, e.target.value)}
+                        aria-label={`${prompt.display_name} route`}
                       >
                         <option value="">{defaultKey ? `Default key (${defaultKey.name})` : "Instance default"}</option>
                         {defaultKey && <option value="instance">Instance default</option>}
@@ -616,24 +746,24 @@ function RoutesCard({
                           className={`${page.input} ${styles.mono} ${styles.modelInput}`}
                           placeholder="Model name, then Enter"
                           value={p.model}
-                          aria-label={`${task.display_name} model`}
-                          onChange={(e) => setPending((prev) => ({ ...prev, [task.task_id]: { ...p, model: e.target.value } }))}
+                          aria-label={`${prompt.display_name} model`}
+                          onChange={(e) => setPending((prev) => ({ ...prev, [prompt.task_id]: { ...p, model: e.target.value } }))}
                           onKeyDown={(e) => {
-                            if (e.key === "Enter") commit(task, p.providerId, p.model);
+                            if (e.key === "Enter") commit(prompt, p.providerId, p.model);
                           }}
                           autoFocus
                         />
                       ) : optedOut ? (
                         <span className={`${styles.muted} ${styles.mono}`}>
-                          {task.site_provider_name ? `${task.site_provider_name} / ${task.site_model_name}` : "not set"}
+                          {prompt.site_provider_name ? `${prompt.site_provider_name} / ${prompt.site_model_name}` : "not set"}
                         </span>
                       ) : own && key ? (
                         key.models.length > 0 ? (
                           <select
                             className={`${page.select} ${styles.selectSm} ${styles.mono}`}
                             value={own.model_name ?? ""}
-                            onChange={(e) => commit(task, key.id, e.target.value)}
-                            aria-label={`${task.display_name} model`}
+                            onChange={(e) => commit(prompt, key.id, e.target.value)}
+                            aria-label={`${prompt.display_name} model`}
                           >
                             {own.model_name && !key.models.includes(own.model_name) && (
                               <option value={own.model_name}>{own.model_name}</option>
@@ -651,7 +781,7 @@ function RoutesCard({
                         <span className={`${styles.muted} ${styles.mono}`}>follows default · {defaultRouteModel}</span>
                       ) : (
                         <span className={`${styles.muted} ${styles.mono}`}>
-                          {task.site_provider_name ? `${task.site_provider_name} / ${task.site_model_name}` : "not set"}
+                          {prompt.site_provider_name ? `${prompt.site_provider_name} / ${prompt.site_model_name}` : "not set"}
                         </span>
                       )}
                       {noTools && (
@@ -660,7 +790,7 @@ function RoutesCard({
                         </Chip>
                       )}
                     </td>
-                    <td className={styles.num}>{Number(task.month_cost) > 0 ? formatUsd(task.month_cost) : "—"}</td>
+                    <td className={styles.num}>{Number(prompt.month_cost) > 0 ? formatUsd(prompt.month_cost) : "—"}</td>
                   </tr>
                 );
               })}
@@ -675,10 +805,10 @@ function RoutesCard({
 // ---------------------------------------------------------------- fallback + cap
 
 function FallbackCard({ overview }: { overview: NonNullable<ReturnType<typeof useMyAI>["data"]> }) {
+  const isAdmin = useAuthStore((s) => s.user?.role === "admin");
   const update = useUpdateMyAIPreferences();
   const { policy } = overview;
-  const ceiling = Number(policy.default_monthly_usd);
-  const stored = overview.monthly_cap_usd ?? "";
+  const stored = formatCapInput(overview.monthly_cap_usd);
   const [cap, setCap] = useState(stored);
   const [error, setError] = useState<string | null>(null);
   // The add-key form can set the cap too: follow the server's value.
@@ -703,8 +833,8 @@ function FallbackCard({ overview }: { overview: NonNullable<ReturnType<typeof us
           <div className={page.settingInfo}>
             <span className={page.settingLabel}>Fall back to the instance's providers</span>
             <span className={page.settingHint}>
-              If your key fails or reaches a cap, the task runs on the instance's provider and the result is labelled.
-              If this is off, the task stops with an error instead.
+              If your key fails or reaches a cap, the prompt runs on the instance's provider and the result is labelled.
+              If this is off, the prompt stops with an error instead.
             </span>
           </div>
           <label className={page.toggle}>
@@ -720,14 +850,20 @@ function FallbackCard({ overview }: { overview: NonNullable<ReturnType<typeof us
       )}
       {policy.require_user_ai_provider && (
         <p className={page.settingHint}>
-          This instance requires your own key for the tasks you start: there is no fallback to its providers.
+          This instance requires your own key for the prompts you run yourself: there is no fallback to its providers.
         </p>
       )}
       <div className={page.settingRow}>
         <div className={page.settingInfo}>
           <span className={page.settingLabel}>My monthly cap</span>
           <span className={page.settingHint}>
-            {ceiling > 0 ? `Your admin's limit is ${formatUsd(ceiling)}. You can set a lower one.` : "Your admin has set no limit."}
+            Leave it empty for no limit.
+            {isAdmin && (
+              <>
+                {" "}
+                Everyone's spend is on the <Link to="/settings?section=ai&tab=cost">Cost Dashboard</Link>.
+              </>
+            )}
             {error && <span className={styles.formError}> {error}</span>}
           </span>
         </div>
@@ -736,7 +872,7 @@ function FallbackCard({ overview }: { overview: NonNullable<ReturnType<typeof us
           <input
             className={`${page.input} ${styles.mono}`}
             value={cap}
-            placeholder={ceiling > 0 ? ceiling.toFixed(2) : "none"}
+            placeholder="none"
             aria-label="My monthly cap"
             onChange={(e) => setCap(e.target.value)}
             onBlur={saveCap}
@@ -746,10 +882,6 @@ function FallbackCard({ overview }: { overview: NonNullable<ReturnType<typeof us
           />
         </span>
       </div>
-      <p className={styles.footnote}>
-        Everything on this page is yours alone. Admins see instance-wide spend on the{" "}
-        <Link to="/settings?section=ai">Cost Dashboard</Link>.
-      </p>
     </div>
   );
 }

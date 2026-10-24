@@ -19,7 +19,10 @@ import { USER_AI_SETTING_KEYS } from "./engineSettingsIndex";
 export function AnalyzeStageConfig() {
   const { data: status } = useExtractionStatus();
   const { data: tasks } = useAITasks();
-  const { data: providers } = useAIProviders();
+  const { data: allProviders } = useAIProviders();
+  // The one-pass analysis is a pipeline task: only the instance's providers
+  // may run it, never a personal key the response also lists.
+  const providers = allProviders?.filter((p) => !p.user_id);
   const { data: assignments } = useAllTaskAssignments();
   const upsertAssignment = useUpsertTaskAssignment();
 

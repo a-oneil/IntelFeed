@@ -1,5 +1,6 @@
 import { useAIUsage } from "@/hooks/useWidgetOpsData";
 import { WidgetListSkeleton } from "@/components/Skeleton";
+import { formatUsd } from "@/utils/format";
 import styles from "./widgets.module.css";
 
 interface Props {
@@ -9,7 +10,7 @@ interface Props {
 const numberFmt = new Intl.NumberFormat();
 
 function formatCost(value: number): string {
-  return `$${value.toFixed(4)}`;
+  return formatUsd(value, 4);
 }
 
 export default function AIUsageWidget({ config }: Props) {

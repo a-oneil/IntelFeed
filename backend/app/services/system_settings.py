@@ -160,7 +160,6 @@ CONFIGURABLE_KEYS: dict[str, type] = {
     "require_user_ai_provider": bool,
     "user_ai_provider_types": str,
     "user_ai_allow_private_endpoints": bool,
-    "user_ai_default_monthly_usd": float,
     "user_ai_daily_request_cap": int,
     "ai_analysis_content_max_chars": int,
     "ai_use_batches": bool,
@@ -525,8 +524,8 @@ SETTING_METADATA: dict[str, dict] = {
     "site_ai_user_daily_requests": {
         "label": "Per-User Daily AI Allowance",
         "description": (
-            "Requests one person may make each day on this instance's own AI providers for the tasks "
-            "they start themselves (copilot, rule help, summaries, reports). Background work, automation "
+            "Requests one person may make each day on this instance's own AI providers for the prompts "
+            "they run themselves (copilot, rule help, summaries, reports). Background work, automation "
             "rules and share links are not counted. Resets at midnight UTC. 0 = unlimited"
         ),
         "group": "ai",
@@ -534,7 +533,7 @@ SETTING_METADATA: dict[str, dict] = {
     "share_ai_daily_requests": {
         "label": "Share Link Daily AI Limit",
         "description": (
-            "AI questions and tasks one share link may run per day. Share traffic always uses this "
+            "AI questions and prompts one share link may run per day. Share traffic always uses this "
             "instance's providers, never the sharer's. Resets at midnight UTC. 0 = unlimited"
         ),
         "group": "ai",
@@ -542,7 +541,7 @@ SETTING_METADATA: dict[str, dict] = {
     "allow_user_ai_providers": {
         "label": "Personal AI Keys",
         "description": (
-            "Let people add their own AI provider keys. Tasks they start themselves run on their key and "
+            "Let people add their own AI provider keys. Prompts they run themselves use their key and "
             "fall back to this instance's providers when it is missing, failing or over its cap. Background "
             "work, automation rules and share links always use this instance's providers."
         ),
@@ -551,8 +550,8 @@ SETTING_METADATA: dict[str, dict] = {
     "require_user_ai_provider": {
         "label": "Require Personal Keys",
         "description": (
-            "With personal keys on: refuse an interactive task instead of falling back to this instance's "
-            "providers when the person has no working key. Ignored while personal keys are off."
+            "With personal keys on: refuse a prompt a person runs themselves instead of falling back to this "
+            "instance's providers when the person has no working key. Ignored while personal keys are off."
         ),
         "group": "ai",
     },
@@ -572,19 +571,13 @@ SETTING_METADATA: dict[str, dict] = {
         ),
         "group": "ai",
     },
-    "user_ai_default_monthly_usd": {
-        "label": "Personal Key Monthly Cap (USD)",
-        "description": (
-            "Default monthly spend cap on one person's own keys. People can set themselves a lower cap, "
-            "not a higher one. 0 = unlimited"
-        ),
-        "group": "ai",
-    },
     "user_ai_daily_request_cap": {
         "label": "Personal Key Daily Request Cap",
         "description": (
-            "Requests one person may make on their own keys each day. Counts calls, not dollars, because "
-            "Ollama and unpriced models report $0. Resets at midnight UTC. 0 = unlimited"
+            "Requests this server will make on one person's own keys each day. Their key is their money, so "
+            "this is not a spending limit (people set their own in My AI); it bounds how hard a loop or a "
+            "misbehaving client can drive the server. Counts calls, not dollars. Resets at midnight UTC. "
+            "0 = unlimited"
         ),
         "group": "ai",
     },

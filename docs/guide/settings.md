@@ -27,9 +27,10 @@ and density matter more than they sound when the job is scanning lists.
 ## My AI
 
 Your own AI key, if your admin allows personal keys. Add a key of a type your
-admin allows (Claude API, OpenAI-compatible, Ollama), pick which of your tasks run on it (or set it
-as your default), and see this month's spend against your cap. Tasks you start
-yourself — the copilot, rule drafts, summaries, reports — run on your key; the
+admin allows (Claude API, OpenAI-compatible, Ollama), pick which prompts run on it (or set it
+as your default), and see this month's spend against your cap. Each key shows
+when it was last tested and whether that test passed. Prompts you run
+yourself — the copilot, rule drafts, summaries, reports — use your key; the
 pipeline, automation rules and share links never do. If the policy is off, the
 page says so. Covered in [Automation and AI](automation-and-ai.md#your-own-key).
 
@@ -113,7 +114,7 @@ agent that can write.
 **AI Configuration** — four tabs. *Providers* (which model runs which task, and
 keys), *Prompts* (the prompt behind every AI task, editable), *Cost* (tokens and
 spend per provider, task and person), *User keys* (whether people may bring
-their own keys, which types, the caps, which tasks, and everyone's keys).
+their own keys, which types, the caps, which prompts, and everyone's keys).
 Covered in [Automation and AI](automation-and-ai.md).
 
 **Engine** — the ingestion pipeline console: feed health, stage settings,

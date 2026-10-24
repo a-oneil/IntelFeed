@@ -5,11 +5,13 @@ import logging
 
 from celery.exceptions import SoftTimeLimitExceeded
 
-from app.ai.caller import Caller
 from app.api.events import publish_event
 from app.intelligence.reporting import (
     REPORT_TEMPLATES,
     generate_section_content,
+)
+from app.intelligence.reporting import (
+    narrative_sections as narrative_sections_of,
 )
 from app.models.intel_report import IntelReport
 from app.workers.celery_app import celery_app
@@ -30,20 +32,18 @@ RETRY_BASE_DELAY = 5  # seconds
     time_limit=720,
     max_retries=1,
 )
-def generate_full_report(self, report_id: str, user_id: str, caller_kind: str = "user"):
+def generate_full_report(self, report_id: str, user_id: str):
     """Generate all narrative sections of a report via AI.
 
     Iterates through template sections sequentially, generating AI prose
     for each empty narrative section. Publishes SSE events for progress.
-
-    ``caller_kind`` travels with the job because the worker can't tell a
-    person's report from a scheduled one by the user id alone, and only a
-    person's run may use that person's provider.
+    Every dispatcher is a person's request, so the run is theirs: their
+    personal key may answer, and their allowance is spent.
     """
-    run_async(_generate_full_report(self, report_id, user_id, caller_kind))
+    run_async(_generate_full_report(self, report_id, user_id))
 
 
-async def _generate_full_report(task, report_id: str, user_id: str, caller_kind: str = "user"):
+async def _generate_full_report(task, report_id: str, user_id: str):
     import uuid
 
     report_uuid = uuid.UUID(report_id)
@@ -51,12 +51,11 @@ async def _generate_full_report(task, report_id: str, user_id: str, caller_kind:
 
     async with worker_session() as db:
         try:
-            # A "user" run still derives: the id may be the service account
+            # Derived rather than assumed: the id may be the service account
             # (an agentic task made the report) or a user deleted since enqueue.
             from app.ai.engine import derive_caller
 
-            existing = await derive_caller(db, user_uuid)
-            caller = existing if caller_kind == "user" else Caller.of_kind(caller_kind, existing.user_id)
+            caller = await derive_caller(db, user_uuid)
             report = await db.get(IntelReport, report_uuid)
             if not report:
                 logger.error("Report %s not found for full generation", report_id)
@@ -75,18 +74,8 @@ async def _generate_full_report(task, report_id: str, user_id: str, caller_kind:
                 # DB template or fallback: use sections from content
                 section_names = list((report.content or {}).get("sections", {}).keys())
 
-            # Identify narrative sections (empty body, not data-only with items)
-            narrative_sections = []
-            sections = (report.content or {}).get("sections", {})
-            for name in section_names:
-                section = sections.get(name, {})
-                if isinstance(section, dict):
-                    # Skip sections that have items (data sections like IOC tables)
-                    if section.get("items"):
-                        continue
-                    # Include sections with empty body
-                    if not section.get("body"):
-                        narrative_sections.append(name)
+            # Narrative sections: empty body, not a data section with items.
+            narrative_sections = narrative_sections_of(report.content, section_names)
 
             if not narrative_sections:
                 publish_event(
@@ -142,7 +131,6 @@ async def _generate_full_report(task, report_id: str, user_id: str, caller_kind:
                         report_id,
                         result["error"],
                     )
-                    # Continue to next section rather than failing entirely
                     publish_event(
                         user_id,
                         "report_section_generated",
@@ -154,6 +142,18 @@ async def _generate_full_report(task, report_id: str, user_id: str, caller_kind:
                             "error": result["error"],
                         },
                     )
+                    if result.get("refused"):
+                        # A policy refusal (allowance used up, key required):
+                        # every later section would be refused too. Stop with
+                        # the sections written so far and say why.
+                        publish_event(
+                            user_id,
+                            "report_generation_error",
+                            {"report_id": report_id, "error": result["error"]},
+                        )
+                        return
+                    # A provider error: continue to the next section rather
+                    # than failing entirely.
                     continue
 
                 # Update section body in report content

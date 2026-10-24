@@ -109,24 +109,22 @@ your own key — Claude API, OpenAI-compatible or Ollama, whichever types your
 admin allows — and run the tasks *you* start on it: the copilot, rule drafts, summaries, reports. Route one task at a
 time or set a default key for all of them; "Instance default" on a task sends
 that one back to the instance's provider. The page shows this month's spend
-against your cap, and you can set a lower cap than the admin's or turn off
+against your cap, and you can set a monthly cap of your own or turn off
 falling back to the instance's providers when your key can't answer.
 
-Three things to know. The copilot on a Claude API or OpenAI-compatible key has
+Two things to know. The copilot on a Claude API or OpenAI-compatible key has
 no tools, so it answers from the prompt alone, and the dock says "no tools".
 Automation rules, share links and the pipeline never use your key, even when
-they run as you. And the instance admin can read your key: it is stored with the
-instance's encryption key, which is what lets the server call your provider.
-Every result card says who answered — your key, the instance, or a fallback and
-why.
+they run as you. Every result card says who answered — your key, the instance,
+or a fallback and why.
 
 ## Providers and cost (admin)
 
 **Settings → AI Configuration**, four tabs: **Providers** (which model runs
 what), **Prompts** (the prompt behind each task, editable), **Cost**, and
 **User keys** (personal keys: off, optional or required; which key types; a
-private-endpoint switch for homelab Ollamas; the monthly and daily caps, the
-per-person allowance on your own providers and the share-link limit; which tasks a personal key may
+private-endpoint switch for homelab Ollamas; the daily request cap on personal keys, the
+per-person allowance on your own providers and the share-link limit; which prompts a personal key may
 answer; and everyone's keys, to disable or delete but not use).
 
 You can run entirely locally on Ollama, on a hosted API, or mix — different

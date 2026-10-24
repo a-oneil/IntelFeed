@@ -384,7 +384,9 @@ function AIStep() {
     try {
       // Reuse a provider of this type if one is already registered, rather than
       // minting a duplicate every time the step is revisited or the tour replayed.
-      const existing = providers?.find((p) => p.provider_type === choice);
+      // GET /ai/providers also lists the caller's personal keys (user_id set);
+      // one of those is never the instance's provider.
+      const existing = providers?.find((p) => !p.user_id && p.provider_type === choice);
       const fields =
         choice === "ollama"
           ? { name: "Ollama", provider_type: "ollama", base_url: baseUrl.trim() }

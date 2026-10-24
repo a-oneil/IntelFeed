@@ -226,7 +226,10 @@
   white-space: nowrap;
 }
 
-.emptyNote {
-  margin-top: var(--sp-2);
+.footerNote {
+  padding: 0 var(--sp-4) var(--sp-3);
+  background: var(--bg-secondary);
+  color: var(--text-muted);
   font-size: var(--fs-xs);
+  text-align: center;
 }

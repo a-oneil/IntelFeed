@@ -192,3 +192,8 @@
 .keyDotMine {
   background: var(--accent);
 }
+
+/* A click the policy would refuse: the row says what's missing before the click. */
+.hintWarn {
+  color: var(--warning);
+}

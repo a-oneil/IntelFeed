@@ -51,6 +51,9 @@ export default function EntryAIPanel({
   // Shared-page (readOnly) only: the slim Ask Agent chat. Authenticated users
   // get the global copilot instead (tool-calling, article pinned as context).
   const [showAskAgent, setShowAskAgent] = useState(false);
+  // Shared-page only: what the link may still run today. Task runs and Ask
+  // Agent questions spend the same daily budget, so one count serves both.
+  const [remainingToday, setRemainingToday] = useState<number | null>(null);
 
   // In readOnly mode, pass empty entryId to hooks so they don't fire (enabled: !!entryId)
   const fetchId = readOnly ? "" : entryId;
@@ -128,6 +131,7 @@ export default function EntryAIPanel({
           runTaskFn={aiRunTaskFn}
           completedTasks={aiCompletedTasks}
           onTaskComplete={readOnly ? (data) => {
+            if (typeof data.remaining_today === "number") setRemainingToday(data.remaining_today);
             setNewAIResults((prev) => [...prev, {
               id: crypto.randomUUID(),
               entry_id: entryId,
@@ -160,6 +164,8 @@ export default function EntryAIPanel({
             entryId={entryId}
             onClose={() => setShowAskAgent(false)}
             askFn={aiAskAgentFn}
+            remaining={remainingToday}
+            onRemaining={setRemainingToday}
           />
         )}
 

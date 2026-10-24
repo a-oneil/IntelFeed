@@ -34,7 +34,6 @@ const overview = (over: Partial<UserAIOverview> = {}): UserAIOverview => ({
     require_user_ai_provider: false,
     provider_types: ["claude", "openai_compatible"],
     allow_private_endpoints: false,
-    default_monthly_usd: "25.0000",
     daily_request_cap: 300,
     site_allowance_per_user: 150,
   },
@@ -64,6 +63,8 @@ const overview = (over: Partial<UserAIOverview> = {}): UserAIOverview => ({
       site_model_name: "qwen3.5:9b",
       route: { id: "r1", task_id: "t-copilot", task_name: "copilot", provider_id: "k1", provider_name: "OpenRouter personal", model_name: "anthropic/claude-sonnet-4.6", config: {}, updated_at: "2026-10-20" },
       month_cost: "4.18",
+      will_run_on: "user",
+      blocked_reason: null,
     },
     {
       task_id: "t-rules",
@@ -73,9 +74,11 @@ const overview = (over: Partial<UserAIOverview> = {}): UserAIOverview => ({
       requires_tools: false,
       site_provider_name: "Ollama Lab",
       site_model_name: "qwen3.5:9b",
-      // The API puts only a task's own route on its row; the default key lives on default_route.
+      // The API puts only a prompt's own route on its row; the default key lives on default_route.
       route: null,
       month_cost: "0.81",
+      will_run_on: "user",
+      blocked_reason: null,
     },
   ],
   default_route: { id: "r0", task_id: null, task_name: null, provider_id: "k2", provider_name: "Anthropic work key", model_name: "claude-sonnet-4-6", config: {}, updated_at: "2026-10-20" },
@@ -87,6 +90,7 @@ const mockUseAIProviders = vi.fn();
 const mockUpsertRoute = vi.fn();
 const mockDeleteRoute = vi.fn();
 const mockPrefs = vi.fn();
+const mockResume = vi.fn();
 
 vi.mock("@/hooks/useAI", () => ({
   useMyAI: () => mockUseMyAI(),
@@ -98,6 +102,7 @@ vi.mock("@/hooks/useAI", () => ({
   useUpsertMyRoute: () => ({ mutate: mockUpsertRoute, isPending: false }),
   useDeleteMyRoute: () => ({ mutate: mockDeleteRoute }),
   useUpdateMyAIPreferences: () => ({ mutate: mockPrefs, mutateAsync: mockPrefs }),
+  useResumeAIProvider: () => ({ mutate: mockResume, isPending: false }),
 }));
 
 vi.mock("@/hooks/useUndoableDelete", () => ({ useUndoableDelete: () => vi.fn() }));
@@ -131,7 +136,7 @@ describe("MyAISection", () => {
     expect(screen.getByText("Default")).toBeInTheDocument();
   });
 
-  it("says which key each task runs on, and that copilot on this key has no tools", () => {
+  it("says which key each prompt runs on, and that copilot on this key has no tools", () => {
     render(<MyAISection />, { wrapper: MemoryRouter });
     const copilot = screen.getByLabelText("Copilot route") as HTMLSelectElement;
     expect(copilot.value).toBe("k1");
@@ -149,7 +154,7 @@ describe("MyAISection", () => {
     expect(mockUpsertRoute).toHaveBeenCalledWith({ task_id: "t-rules", provider_id: null });
   });
 
-  it("routes a task to a key with its first model", async () => {
+  it("routes a prompt to a key with its first model", async () => {
     const user = userEvent.setup();
     render(<MyAISection />, { wrapper: MemoryRouter });
     await user.selectOptions(screen.getByLabelText("Detection rules route"), "k1");
@@ -178,7 +183,109 @@ describe("MyAISection", () => {
     mockUseMyAI.mockReturnValue({ data, isLoading: false });
     render(<MyAISection />, { wrapper: MemoryRouter });
     expect(screen.getByText(/Personal keys are off on this instance/)).toBeInTheDocument();
+    // Add is hidden and the server refuses adds, so the notice must not promise a queue.
+    expect(screen.getByText(/every prompt you run runs on the instance's providers/)).toBeInTheDocument();
+    expect(screen.queryByText(/waits until/)).toBeNull();
     expect(screen.queryByText("+ Add key")).toBeNull();
+  });
+
+  it("lets the default key's model be changed, through the default route", async () => {
+    const user = userEvent.setup();
+    mockUseAIProviders.mockReturnValue({
+      data: [
+        key({}),
+        key({ id: "k2", name: "Anthropic work key", provider_type: "claude", base_url: null, models: ["claude-sonnet-4-6", "claude-opus-4-1"] }),
+      ],
+    });
+    render(<MyAISection />, { wrapper: MemoryRouter });
+    const picker = screen.getByLabelText("Default model") as HTMLSelectElement;
+    expect(picker.value).toBe("claude-sonnet-4-6");
+    await user.selectOptions(picker, "claude-opus-4-1");
+    expect(mockUpsertRoute).toHaveBeenCalledWith({ task_id: null, provider_id: "k2", model_name: "claude-opus-4-1" });
+  });
+
+  it("takes a typed model for a default key whose models are unknown", async () => {
+    const user = userEvent.setup();
+    mockUseAIProviders.mockReturnValue({
+      data: [key({ id: "k2", name: "Anthropic work key", provider_type: "claude", base_url: null, models: [] })],
+    });
+    render(<MyAISection />, { wrapper: MemoryRouter });
+    const input = screen.getByLabelText("Default model") as HTMLInputElement;
+    expect(input.tagName).toBe("INPUT");
+    await user.clear(input);
+    await user.type(input, "claude-haiku-4-5{Enter}");
+    expect(mockUpsertRoute).toHaveBeenCalledWith({ task_id: null, provider_id: "k2", model_name: "claude-haiku-4-5" });
+  });
+
+  it("clears the default key by deleting the default route", async () => {
+    const user = userEvent.setup();
+    render(<MyAISection />, { wrapper: MemoryRouter });
+    await user.click(screen.getByRole("button", { name: "Clear default" }));
+    expect(mockDeleteRoute).toHaveBeenCalledWith("r0");
+    // Only the default key offers it; the other key offers Set as default.
+    expect(screen.getAllByRole("button", { name: "Clear default" })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Set as default" })).toBeInTheDocument();
+  });
+
+  it("offers Resume on a paused key", async () => {
+    const user = userEvent.setup();
+    mockUseAIProviders.mockReturnValue({
+      data: [key({ paused_until: new Date(Date.now() + 3600_000).toISOString(), paused_reason: "429 from upstream" })],
+    });
+    render(<MyAISection />, { wrapper: MemoryRouter });
+    expect(screen.getByText("Paused")).toHaveAttribute("title", "429 from upstream");
+    await user.click(screen.getByRole("button", { name: "Resume" }));
+    expect(mockResume).toHaveBeenCalledWith("k1");
+  });
+
+  it("does not flash 'No keys yet' while the providers are still loading", () => {
+    mockUseAIProviders.mockReturnValue({ data: undefined, isLoading: true });
+    render(<MyAISection />, { wrapper: MemoryRouter });
+    expect(screen.queryByText(/No keys yet/)).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent(/Loading your AI settings/);
+  });
+
+  it("shows the error and a Retry button when the overview can't load", async () => {
+    const user = userEvent.setup();
+    const refetch = vi.fn();
+    mockUseMyAI.mockReturnValue({ data: undefined, isLoading: false, isError: true, error: new Error("502 Bad Gateway"), refetch });
+    render(<MyAISection />, { wrapper: MemoryRouter });
+    expect(screen.queryByText(/Loading your AI settings/)).toBeNull();
+    expect(screen.getByText("502 Bad Gateway")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(refetch).toHaveBeenCalled();
+  });
+
+  it("shows each key's last test from the server, and marks a failed one", () => {
+    mockUseAIProviders.mockReturnValue({
+      data: [
+        key({ last_tested_at: new Date(Date.now() - 2 * 3600_000).toISOString(), last_test_error: null }),
+        key({ id: "k2", name: "Home Ollama", provider_type: "ollama", last_tested_at: "2026-10-22T10:00:00Z", last_test_error: "502 Bad Gateway from upstream, and a very long tail of detail" }),
+      ],
+    });
+    render(<MyAISection />, { wrapper: MemoryRouter });
+    expect(screen.getByText("Tested 2h ago")).toBeInTheDocument();
+    const failed = screen.getByText(/Last test failed · 502 Bad Gateway/);
+    expect(failed.textContent?.length).toBeLessThan(65);
+    expect(failed.closest("[class*='keyWarn']")).not.toBeNull();
+  });
+
+  it("seeds the cap inputs with two decimals, not the API's Decimal string", async () => {
+    const user = userEvent.setup();
+    mockUseMyAI.mockReturnValue({ data: overview({ monthly_cap_usd: "10.0000" }), isLoading: false });
+    render(<MyAISection />, { wrapper: MemoryRouter });
+    expect(screen.getByLabelText("My monthly cap")).toHaveValue("10.00");
+    await user.click(screen.getByText("+ Add key"));
+    expect(screen.getByLabelText("Monthly cap")).toHaveValue("10.00");
+  });
+
+  it("links the Cost Dashboard only for admins", () => {
+    render(<MyAISection />, { wrapper: MemoryRouter });
+    expect(screen.queryByRole("link", { name: "Cost Dashboard" })).toBeNull();
+    authState.user.role = "admin";
+    render(<MyAISection />, { wrapper: MemoryRouter });
+    expect(screen.getByRole("link", { name: "Cost Dashboard" })).toHaveAttribute("href", "/settings?section=ai&tab=cost");
+    authState.user.role = "user";
   });
 
   it("refuses Claude Code as a personal key in the add form, with the reason", async () => {

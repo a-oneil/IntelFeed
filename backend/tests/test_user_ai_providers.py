@@ -91,7 +91,6 @@ def policy_on(monkeypatch, public_dns):
     monkeypatch.setattr(env_settings, "require_user_ai_provider", False)
     monkeypatch.setattr(env_settings, "user_ai_provider_types", "claude,openai_compatible,ollama")
     monkeypatch.setattr(env_settings, "user_ai_allow_private_endpoints", False)
-    monkeypatch.setattr(env_settings, "user_ai_default_monthly_usd", 25.0)
     monkeypatch.setattr(env_settings, "user_ai_daily_request_cap", 300)
     monkeypatch.setattr(env_settings, "site_ai_user_daily_requests", 0)
 
@@ -138,6 +137,16 @@ def _stub_provider(monkeypatch, content='{"answer": "ok"}', cost_usd=None):
     monkeypatch.setattr(engine, "_get_provider_instance", factory)
     stub.seen = seen
     return stub
+
+
+async def _cap(db_session, user: User, usd: str) -> None:
+    """The person's own monthly cap on their keys; the admin sets none."""
+    prefs = await db_session.get(UserAIPreferences, user.id)
+    if prefs is None:
+        prefs = UserAIPreferences(user_id=user.id)
+        db_session.add(prefs)
+    prefs.monthly_cap_usd = Decimal(usd)
+    await db_session.flush()
 
 
 async def _only_result(db_session, task: AITask) -> AIResult:
@@ -290,6 +299,7 @@ async def test_monthly_cap_falls_back_to_the_site_and_says_why(
 
     task = await _task(db_session, site_provider, "detection_rules")
     await _route(db_session, test_user, my_key, task)
+    await _cap(db_session, test_user, "25")
     await _spend(db_session, task, my_key, test_user, "25.00")
 
     resolved = await resolve_assignment(db_session, Caller.user(test_user.id), task.name)
@@ -381,6 +391,7 @@ async def test_required_policy_refuses_instead_of_falling_back(
     assert exc.value.reason == "no_key"
 
     await _route(db_session, test_user, my_key, task)
+    await _cap(db_session, test_user, "25")
     await _spend(db_session, task, my_key, test_user, "25.00")
     with pytest.raises(UserKeyRequired) as exc:
         await run_task(db_session, test_user.id, task.name, variables={"text": "x"}, force=True)
@@ -402,6 +413,7 @@ async def test_fallback_off_refuses_only_when_a_key_exists(db_session, test_user
     assert (await resolve_assignment(db_session, Caller.user(test_user.id), task.name)).source == "site"
 
     await _route(db_session, test_user, my_key, task)
+    await _cap(db_session, test_user, "25")
     await _spend(db_session, task, my_key, test_user, "25.00")
     with pytest.raises(UserKeyRequired) as exc:
         await resolve_assignment(db_session, Caller.user(test_user.id), task.name)
@@ -512,6 +524,7 @@ async def test_copilot_config_reports_whose_key_and_refusals(
     # An openai_compatible key has no tool loop: the dock says so.
     assert body["supports_tools"] is False
 
+    await _cap(db_session, test_user, "25")
     await _spend(db_session, task, my_key, test_user, "25.00")
     monkeypatch.setattr(env_settings, "require_user_ai_provider", True)
     body = (await client.get("/api/ai/copilot/config", headers=auth_headers)).json()
@@ -566,7 +579,92 @@ async def test_streamed_turns_count_toward_the_dollar_cap(
     assert (row.tokens_input, row.tokens_output) == (1000, 500)
     assert row.cost_estimate == Decimal("0.0105") and row.key_owner_id == test_user.id
 
-    assert await engine.user_key_spend_month(db_session, test_user.id) == Decimal("0.0210")
+    assert (await engine.user_key_usage(db_session, test_user.id))[0] == Decimal("0.0210")
+
+
+async def test_result_routes_say_who_asked_and_who_answered(
+    client: AsyncClient, db_session, auth_headers, test_user, test_entry, site_provider, my_key, policy_on, monkeypatch
+):
+    """The cards read provider_name and key_owner_id off the HTTP response, not the ORM row."""
+    task = await _task(db_session, site_provider, "detection_rules")
+    await _route(db_session, test_user, my_key, task)
+    _stub_provider(monkeypatch)
+    run = await client.post(
+        f"/api/ai/results/entry/{test_entry.id}/run", json={"task_name": task.name}, headers=auth_headers
+    )
+    assert run.status_code == 200, run.text
+
+    listed = (await client.get(f"/api/ai/results/entry/{test_entry.id}", headers=auth_headers)).json()
+    one = (await client.get(f"/api/ai/results/entry/{test_entry.id}/{task.name}", headers=auth_headers)).json()
+    for body in (listed[0], one):
+        assert body["provider_name"] == "OpenRouter personal"
+        assert body["key_owner_id"] == str(test_user.id)
+        assert body["user_id"] == str(test_user.id) and body["caller_kind"] == "user"
+
+
+async def test_a_test_leaves_its_outcome_on_the_key(
+    client: AsyncClient, db_session, auth_headers, my_key, policy_on, public_dns, monkeypatch
+):
+    """ "Tested 2h ago" / "Last test failed" come from the row, not from re-testing."""
+    import app.api.ai_providers as providers_api
+
+    instance = MagicMock(check_health=AsyncMock(return_value=True), list_models=AsyncMock(return_value=["m1"]))
+    monkeypatch.setattr(providers_api, "_get_provider_instance", lambda pm: instance)
+    ok = await client.post(f"/api/ai/providers/{my_key.id}/test", headers=auth_headers)
+    assert ok.json()["success"] is True
+    await db_session.refresh(my_key)
+    assert my_key.last_tested_at is not None and my_key.last_test_error is None
+    shown = next(
+        p for p in (await client.get("/api/ai/providers", headers=auth_headers)).json() if p["id"] == str(my_key.id)
+    )
+    assert shown["last_tested_at"] and shown["last_test_error"] is None
+
+    instance.check_health = AsyncMock(side_effect=RuntimeError("502 Bad Gateway"))
+    failed = await client.post(f"/api/ai/providers/{my_key.id}/test", headers=auth_headers)
+    assert failed.json()["success"] is False
+    await db_session.refresh(my_key)
+    assert my_key.last_test_error == "502 Bad Gateway"
+
+
+async def test_a_copilot_turn_that_dies_before_any_text_still_counts(
+    client: AsyncClient, db_session, auth_headers, test_user, site_provider, policy_on, monkeypatch
+):
+    """A broken key is not a free retry: the failed turn is a row the caps can see."""
+    import app.ai.engine as engine
+
+    key = AIProvider(name="Anthropic work key", provider_type="claude", user_id=test_user.id)
+    db_session.add(key)
+    await db_session.flush()
+    copilot = await _task(db_session, site_provider, "copilot")
+    await _route(db_session, test_user, key, None, model="claude-sonnet-4-6")
+
+    class _Dead(_StreamStub):
+        async def stream_complete(self, **kwargs):
+            raise RuntimeError("401 Unauthorized")
+            yield  # pragma: no cover - makes this an async generator
+
+    monkeypatch.setattr(engine, "_get_provider_instance", lambda pm, **kw: _Dead("", None))
+    turn = await client.post("/api/ai/copilot/stream", json={"question": "hi"}, headers=auth_headers)
+    assert turn.status_code == 200, turn.text
+    row = await _only_result(db_session, copilot)
+    assert row.parsed_result["_extraction_status"] == "provider_error"
+    assert row.key_owner_id == test_user.id and row.cost_estimate == 0
+    assert (await engine.user_key_usage(db_session, test_user.id))[1] == 1
+
+
+async def test_a_personal_claude_key_never_follows_a_redirect(test_user):
+    """check_outbound_url vets the host in a personal key's base_url; the client must not be led
+    past it by a 307. The instance's own provider keeps the SDK default, since a gateway it
+    points at may legitimately redirect."""
+    from app.ai.engine import _get_provider_instance
+
+    site = AIProvider(name="Site", provider_type="claude", base_url="https://gateway.example/v1", config={})
+    assert _get_provider_instance(site)._build_client()._client.follow_redirects is True
+    personal_row = AIProvider(
+        name="Mine", provider_type="claude", base_url="https://proxy.example/v1", user_id=test_user.id, config={}
+    )
+    provider = _get_provider_instance(personal_row)
+    assert provider._build_client()._client.follow_redirects is False
 
 
 # ---------------------------------------------------------------- providers API
@@ -673,7 +771,6 @@ async def test_someone_elses_key_is_invisible(
     for headers in (auth_headers, admin_headers):
         # Using someone else's key (a call to their endpoint) is nobody's to do.
         assert (await client.post(f"{url}/test", headers=headers)).status_code == 404
-        assert (await client.get(f"{url}/models", headers=headers)).status_code == 404
     assert (await client.put(url, json={"name": "x"}, headers=auth_headers)).status_code == 404
     assert (await client.post(f"{url}/resume", headers=auth_headers)).status_code == 404
     assert (await client.delete(url, headers=auth_headers)).status_code == 404
@@ -681,8 +778,11 @@ async def test_someone_elses_key_is_invisible(
     disabled = await client.put(url, json={"is_active": False}, headers=admin_headers)
     assert disabled.status_code == 200 and disabled.json()["is_active"] is False
     assert (await client.post(f"{url}/resume", headers=admin_headers)).status_code == 200
+    # ...but not repoint it: where a key sends its secret is its owner's alone to set.
+    for body in ({"base_url": "https://evil.example/v1"}, {"api_key": "sk-new"}, {"name": "x"}, {"config": {"a": 1}}):
+        assert (await client.put(url, json=body, headers=admin_headers)).status_code == 403, body
     # The site's rows are the admin's to use; a person can read them and nothing more.
-    assert (await client.get(f"/api/ai/providers/{site_provider.id}/models", headers=auth_headers)).status_code == 403
+    assert (await client.post(f"/api/ai/providers/{site_provider.id}/test", headers=auth_headers)).status_code == 403
     assert (await client.delete(f"/api/ai/providers/{site_provider.id}", headers=auth_headers)).status_code == 403
     # The admin may delete a personal key from the User keys tab.
     assert (await client.delete(url, headers=admin_headers)).status_code == 204
@@ -705,7 +805,9 @@ async def test_a_person_manages_their_own_key(
     monkeypatch.setattr(providers_api, "_get_provider_instance", lambda pm: working)
     tested = await client.post(f"{url}/test", headers=auth_headers)
     assert tested.status_code == 200 and tested.json()["success"] is True
-    assert (await client.get(f"{url}/models", headers=auth_headers)).json() == ["m1"]
+    assert tested.json()["models"] == ["m1"]
+    listed = await client.get("/api/ai/providers", headers=auth_headers)
+    assert next(p for p in listed.json() if p["id"] == str(my_key.id))["models"] == ["m1"]
     assert (await client.delete(url, headers=auth_headers)).status_code == 204
     assert await db_session.get(AIProvider, my_key.id) is None
 
@@ -774,8 +876,22 @@ async def test_admin_opens_and_closes_tasks_but_not_pipeline_ones(
 
 
 async def test_eligible_set_matches_the_migrations_data_step():
+    import ast
+    from pathlib import Path
+
     from app.ai.capabilities import USER_PROVIDER_ELIGIBLE_TASKS
     from app.ai.prompts.defaults import SYSTEM_TASKS
+
+    # The migration spells the set out (it must not import app code), so
+    # read its tuple back rather than trusting the two to agree.
+    source = Path(__file__).resolve().parents[1] / "alembic" / "versions" / "a7b8c9d0e1f2_per_user_ai_providers.py"
+    tree = ast.parse(source.read_text())
+    migration = next(
+        set(ast.literal_eval(node.value))
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == "ELIGIBLE_TASKS" for t in node.targets)
+    )
+    assert migration == set(USER_PROVIDER_ELIGIBLE_TASKS)
 
     names = {t["name"] for t in SYSTEM_TASKS}
     assert USER_PROVIDER_ELIGIBLE_TASKS <= names
@@ -868,7 +984,7 @@ async def test_overview_shows_policy_spend_and_routable_tasks(
     assert body["fallback_to_site"] is True and body["monthly_cap_usd"] is None
     usage = body["usage"]
     assert Decimal(usage["month_cost"]) == Decimal("1.62")
-    assert Decimal(usage["monthly_cap_usd"]) == Decimal("25")
+    assert Decimal(usage["monthly_cap_usd"]) == Decimal("0")  # no cap until the person sets one
     assert usage["requests_today"] == 2 and usage["daily_request_cap"] == 300
     assert usage["site_requests_today"] == 1 and usage["site_allowance_per_user"] == 150
     assert usage["by_key"][0]["provider_name"] == "OpenRouter personal"
@@ -880,16 +996,17 @@ async def test_overview_shows_policy_spend_and_routable_tasks(
     assert row["route"]["model_name"] == "gpt-x" and Decimal(row["month_cost"]) == Decimal("1.62")
 
 
-async def test_preferences_cap_cannot_exceed_the_admins(
+async def test_the_monthly_cap_is_the_persons_alone(
     client: AsyncClient, db_session, auth_headers, test_user, policy_on
 ):
-    too_high = await client.patch("/api/ai/me/preferences", json={"monthly_cap_usd": "40"}, headers=auth_headers)
-    assert too_high.status_code == 400
-    # Zero would read as "unlimited" to the cap check: not a lower cap.
+    """Their key is their money: any positive figure is accepted, the admin sets no ceiling, and
+    null means no cap. Zero is refused because the cap check would read it as unlimited."""
+    high = await client.patch("/api/ai/me/preferences", json={"monthly_cap_usd": "400"}, headers=auth_headers)
+    assert high.status_code == 200, high.text
+    assert Decimal(high.json()["usage"]["monthly_cap_usd"]) == Decimal("400")
     assert (
         await client.patch("/api/ai/me/preferences", json={"monthly_cap_usd": "0"}, headers=auth_headers)
     ).status_code == 400
-    assert too_high.json()["error"]["message"] == "The highest cap allowed here is $25.00 a month."
 
     ok = await client.patch(
         "/api/ai/me/preferences", json={"monthly_cap_usd": "10", "fallback_to_site": False}, headers=auth_headers
@@ -900,7 +1017,7 @@ async def test_preferences_cap_cannot_exceed_the_admins(
 
     back = await client.patch("/api/ai/me/preferences", json={"monthly_cap_usd": None}, headers=auth_headers)
     assert back.json()["monthly_cap_usd"] is None
-    assert Decimal(back.json()["usage"]["monthly_cap_usd"]) == Decimal("25")
+    assert Decimal(back.json()["usage"]["monthly_cap_usd"]) == Decimal("0")
     prefs = await db_session.get(UserAIPreferences, test_user.id)
     assert prefs.fallback_to_site is False and prefs.monthly_cap_usd is None
 
@@ -957,12 +1074,13 @@ async def test_claude_stream_reports_usage_from_the_final_message(monkeypatch):
 # ---------------------------------------------------------------- review fixes
 
 
-async def test_a_zero_cap_row_reads_as_the_default(db_session, test_user, site_provider, my_key, policy_on):
+async def test_a_zero_or_missing_cap_row_reads_as_no_cap(db_session, test_user, site_provider, my_key, policy_on):
     from app.ai.engine import user_monthly_cap
 
+    assert await user_monthly_cap(db_session, None) == Decimal("0")
     db_session.add(UserAIPreferences(user_id=test_user.id, monthly_cap_usd=Decimal("0")))
     await db_session.flush()
-    assert await user_monthly_cap(db_session, await db_session.get(UserAIPreferences, test_user.id)) == Decimal("25")
+    assert await user_monthly_cap(db_session, await db_session.get(UserAIPreferences, test_user.id)) == Decimal("0")
 
 
 async def test_a_key_without_an_address_is_refused_and_never_routed(
@@ -983,23 +1101,32 @@ async def test_a_key_without_an_address_is_refused_and_never_routed(
     await _route(db_session, test_user, bare, task)
     resolved = await resolve_assignment(db_session, Caller.user(test_user.id), task.name)
     assert resolved.source == "site" and resolved.fallback_reason == "endpoint_blocked"
-    assert (await client.post(f"/api/ai/providers/{bare.id}/test", headers=auth_headers)).json()["success"] is False
-    assert (await client.get(f"/api/ai/providers/{bare.id}/models", headers=auth_headers)).status_code == 400
+    tested = (await client.post(f"/api/ai/providers/{bare.id}/test", headers=auth_headers)).json()
+    assert tested["success"] is False and "address" in tested["message"]
 
 
-async def test_test_and_models_recheck_the_endpoint(
+async def test_the_test_route_rechecks_the_endpoint(
     client: AsyncClient, db_session, auth_headers, my_key, policy_on, monkeypatch
 ):
-    """A hostname that now resolves privately is not contacted by the test or model-listing routes either."""
+    """A hostname that now resolves privately is not contacted by the test route either: the
+    engine, the save path and the test share one endpoint rule."""
     import ipaddress
 
     import app.core.outbound as outbound
+    from app.ai.engine import personal_endpoint_problem
 
     monkeypatch.setattr(outbound, "resolve_host", AsyncMock(return_value=[ipaddress.ip_address("10.0.0.5")]))
     tested = await client.post(f"/api/ai/providers/{my_key.id}/test", headers=auth_headers)
     assert tested.json()["success"] is False and "private address (10.0.0.5)" in tested.json()["message"]
-    models = await client.get(f"/api/ai/providers/{my_key.id}/models", headers=auth_headers)
-    assert models.status_code == 400 and models.json()["error"]["code"] == "endpoint_not_allowed"
+    assert "ask your admin" in tested.json()["message"]
+    problem = await personal_endpoint_problem(db_session, my_key.provider_type, my_key.base_url)
+    assert problem is not None and problem.switchable
+    # With the switch on, the same address is fine everywhere.
+    monkeypatch.setattr(env_settings, "user_ai_allow_private_endpoints", True)
+    assert await personal_endpoint_problem(db_session, my_key.provider_type, my_key.base_url) is None
+    # A type that defaults to localhost needs an address; one that doesn't, doesn't.
+    assert (await personal_endpoint_problem(db_session, "ollama", "")).switchable is False
+    assert await personal_endpoint_problem(db_session, "claude", None) is None
 
 
 async def test_url_refusals_only_blame_the_private_switch_when_it_applies(
@@ -1019,6 +1146,7 @@ async def test_a_blocked_key_with_no_site_provider_says_why(db_session, test_use
 
     task = await _task(db_session, None, "detection_rules")
     await _route(db_session, test_user, my_key, task)
+    await _cap(db_session, test_user, "25")
     await _spend(db_session, task, my_key, test_user, "25.00")
     with pytest.raises(UserKeyRequired) as exc:
         await resolve_assignment(db_session, Caller.user(test_user.id), task.name)
@@ -1136,7 +1264,7 @@ async def test_policy_off_matches_todays_lookup_for_every_caller(
     """Off is the default, and it has to be exactly today's behaviour: a default key, a route,
     fallback turned off and even Required are all inert, every caller kind gets what
     get_task_assignment returns, and an unassigned task is None rather than a refusal."""
-    from app.ai.engine import get_task_assignment, preflight_ai, resolve_assignment
+    from app.ai.engine import get_task_assignment, resolve_assignment
 
     monkeypatch.setattr(env_settings, "allow_user_ai_providers", False)
     monkeypatch.setattr(env_settings, "require_user_ai_provider", True)
@@ -1161,7 +1289,6 @@ async def test_policy_off_matches_todays_lookup_for_every_caller(
         assert resolved.model_name == todays_assignment.model_name
         assert resolved.source == "site" and resolved.fallback_reason is None and resolved.key_owner_id is None
         assert await resolve_assignment(db_session, caller, unassigned.name) is None, caller
-        assert await preflight_ai(db_session, caller, unassigned.name) is None
 
 
 async def test_an_unknown_or_unassigned_task_under_each_policy(
@@ -1169,11 +1296,10 @@ async def test_an_unknown_or_unassigned_task_under_each_policy(
 ):
     """Nothing can answer: Optional says so with None (today's "not configured"), Required
     says "add a key" for a task a key could answer and None for one it never could."""
-    from app.ai.engine import UserKeyRequired, preflight_ai, resolve_assignment
+    from app.ai.engine import UserKeyRequired, resolve_assignment
 
     caller = Caller.user(test_user.id)
     assert await resolve_assignment(db_session, caller, "no_such_task") is None
-    assert await preflight_ai(db_session, caller, "no_such_task") is None
 
     open_task = await _task(db_session, None, "detection_rules")
     closed_task = await _task(db_session, None, "entry_analysis", allows=False)
@@ -1185,8 +1311,6 @@ async def test_an_unknown_or_unassigned_task_under_each_policy(
         await resolve_assignment(db_session, caller, open_task.name)
     assert exc.value.reason == "no_key"
     assert exc.value.details == {"reason": "no_key"}
-    with pytest.raises(UserKeyRequired):
-        await preflight_ai(db_session, caller, open_task.name)
     assert await resolve_assignment(db_session, caller, closed_task.name) is None
     assert await resolve_assignment(db_session, caller, "no_such_task") is None
 
@@ -1200,6 +1324,7 @@ async def test_a_fallback_to_the_site_spends_the_site_allowance(
 
     task = await _task(db_session, site_provider, "detection_rules")
     await _route(db_session, test_user, my_key, task)
+    await _cap(db_session, test_user, "25")
     await _spend(db_session, task, my_key, test_user, "25.00")
     monkeypatch.setattr(env_settings, "site_ai_user_daily_requests", 1)
     _stub_provider(monkeypatch)
@@ -1281,3 +1406,310 @@ async def test_a_share_links_task_runs_on_the_site_despite_the_sharers_default_k
     assert stub.seen[0].id == site_provider.id
     row = await _only_result(db_session, task)
     assert row.caller_kind == "share" and row.user_id == test_user.id and row.key_owner_id is None
+
+
+async def test_the_policy_read_says_whether_routes_exist(
+    client: AsyncClient, db_session, auth_headers, test_user, my_key, policy_on
+):
+    """The reader panel's cheap read: the policy, and whether fetching the overview could change anything."""
+    before = await client.get("/api/ai/me/policy", headers=auth_headers)
+    assert before.status_code == 200, before.text
+    assert before.json()["allow_user_ai_providers"] is True and before.json()["has_routes"] is False
+    await _route(db_session, test_user, my_key, None)
+    assert (await client.get("/api/ai/me/policy", headers=auth_headers)).json()["has_routes"] is True
+
+
+async def test_a_refused_report_leaves_nothing_behind(
+    client: AsyncClient, db_session, auth_headers, test_user, test_entry, site_provider, policy_on, monkeypatch
+):
+    """Required policy and no key: the refusal comes before a new report's row is written, and
+    before a regenerate clears the sections a finished report already has."""
+    from unittest.mock import patch
+
+    from sqlalchemy.orm.attributes import flag_modified
+
+    from app.models.intel_report import IntelReport
+
+    await _task(db_session, site_provider, "report_section")
+    await _task(db_session, site_provider, "report_section_flash_alert")
+    body = {
+        "source_type": "entry",
+        "entry_id": str(test_entry.id),
+        "template_type": "flash_alert",
+        "title": "Mine",
+        "tlp_marking": "TLP:AMBER",
+    }
+    with patch("app.workers.report_tasks.generate_full_report") as worker:
+        created = await client.post("/api/intel-reports/generate-full", json=body, headers=auth_headers)
+    assert created.status_code == 201, created.text
+    worker.delay.assert_called_once()
+    report = await db_session.get(IntelReport, uuid.UUID(created.json()["report"]["id"]))
+    # The worker wrote its prose.
+    content = dict(report.content)
+    content["sections"] = {name: {**section, "body": "keep me"} for name, section in content["sections"].items()}
+    report.content = content
+    flag_modified(report, "content")
+    await db_session.commit()
+
+    monkeypatch.setattr(env_settings, "require_user_ai_provider", True)
+    with patch("app.workers.report_tasks.generate_full_report") as worker:
+        regen = await client.post(f"/api/intel-reports/{report.id}/regenerate", headers=auth_headers)
+    assert regen.status_code == 403 and regen.json()["error"]["code"] == "user_ai_key_required"
+    worker.delay.assert_not_called()
+    await db_session.refresh(report)
+    assert {section["body"] for section in report.content["sections"].values()} == {"keep me"}
+
+    with patch("app.workers.report_tasks.generate_full_report") as worker:
+        again = await client.post("/api/intel-reports/generate-full", json=body, headers=auth_headers)
+    assert again.status_code == 403
+    worker.delay.assert_not_called()
+    assert (await db_session.execute(select(IntelReport.id))).scalars().all() == [report.id]
+
+
+async def test_a_copilot_turn_the_client_abandons_still_counts(
+    db_session, test_user, site_provider, policy_on, monkeypatch
+):
+    """Closing the tab after the first token is not a free call: the prompt reached the provider,
+    so the turn is ledgered on the way out, as rule chat already does."""
+    import app.ai.engine as engine
+    from app.api.copilot import CopilotStreamRequest, copilot_stream
+
+    key = AIProvider(name="Anthropic work key", provider_type="claude", user_id=test_user.id)
+    db_session.add(key)
+    await db_session.flush()
+    copilot = await _task(db_session, site_provider, "copilot")
+    await _route(db_session, test_user, key, None, model="claude-sonnet-4-6")
+    monkeypatch.setattr(engine, "_get_provider_instance", lambda pm, **kw: _StreamStub("hello there", None))
+
+    response = await copilot_stream(body=CopilotStreamRequest(question="hi"), user=test_user, db=db_session)
+    events = response.body_iterator
+    first = await anext(events)
+    assert '"chunk"' in first["data"]
+    await events.aclose()  # the client went away
+
+    row = await _only_result(db_session, copilot)
+    assert row.parsed_result["_extraction_status"] == "provider_error"
+    assert row.parsed_result["_error"] == "client disconnected"
+    assert row.key_owner_id == test_user.id and row.caller_kind == "user"
+    assert (await engine.user_key_usage(db_session, test_user.id))[1] == 1
+
+
+async def test_the_overview_says_what_a_click_would_do(
+    client: AsyncClient, db_session, auth_headers, test_user, site_provider, my_key, policy_on, monkeypatch
+):
+    """Each task row carries the lookup's own answer, so the reader can say "your key" only when
+    the key can answer, and "needs a key" when a click would be refused."""
+    from datetime import UTC, datetime, timedelta
+
+    rules = await _task(db_session, site_provider, "detection_rules")
+    summary = await _task(db_session, site_provider, "article_summary")
+    await _route(db_session, test_user, my_key, rules)
+
+    async def overview():
+        resp = await client.get("/api/ai/me/overview", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+        return {t["task_name"]: t for t in resp.json()["tasks"]}
+
+    by = await overview()
+    assert (by[rules.name]["will_run_on"], by[rules.name]["blocked_reason"]) == ("user", None)
+    assert (by[summary.name]["will_run_on"], by[summary.name]["blocked_reason"]) == ("site", None)
+
+    my_key.paused_until = datetime.now(UTC) + timedelta(hours=1)
+    await db_session.flush()
+    by = await overview()
+    assert (by[rules.name]["will_run_on"], by[rules.name]["blocked_reason"]) == ("site", "key_paused")
+
+    monkeypatch.setattr(env_settings, "require_user_ai_provider", True)
+    by = await overview()
+    assert (by[rules.name]["will_run_on"], by[rules.name]["blocked_reason"]) == ("refused", "key_paused")
+    assert (by[summary.name]["will_run_on"], by[summary.name]["blocked_reason"]) == ("refused", "no_key")
+
+    monkeypatch.setattr(env_settings, "allow_user_ai_providers", False)
+    by = await overview()
+    assert {(t["will_run_on"], t["blocked_reason"]) for t in by.values()} == {("site", None)}
+
+
+async def test_a_report_is_refused_whole_when_its_sections_would_not_fit(
+    client: AsyncClient, db_session, auth_headers, test_user, test_entry, site_provider, policy_on, monkeypatch
+):
+    """One request short of the prose sections a flash alert needs: refused now, not after
+    section two. Exactly enough: allowed. Data sections that already carry items are not
+    counted, because the worker writes no prose for them."""
+    from unittest.mock import patch
+
+    from app.intelligence.reporting import REPORT_TEMPLATES, generate_report_content, narrative_sections
+    from app.models.intel_report import IntelReport
+
+    task = await _task(db_session, site_provider, "report_section_flash_alert")
+    used = 8
+    for _ in range(used):
+        db_session.add(
+            AIResult(
+                task_id=task.id,
+                provider_id=site_provider.id,
+                is_current=False,
+                caller_kind="user",
+                user_id=test_user.id,
+            )
+        )
+    await db_session.flush()
+    content = await generate_report_content("flash_alert", [str(test_entry.id)], {}, db_session)
+    prose = len(narrative_sections(content, list(REPORT_TEMPLATES["flash_alert"]["sections"])))
+    assert 0 < prose <= len(REPORT_TEMPLATES["flash_alert"]["sections"])
+    body = {
+        "source_type": "entry",
+        "entry_id": str(test_entry.id),
+        "template_type": "flash_alert",
+        "title": "Too big for today",
+        "tlp_marking": "TLP:AMBER",
+    }
+    monkeypatch.setattr(env_settings, "site_ai_user_daily_requests", used + prose - 1)
+    with patch("app.workers.report_tasks.generate_full_report") as worker:
+        resp = await client.post("/api/intel-reports/generate-full", json=body, headers=auth_headers)
+    assert resp.status_code == 429 and resp.json()["error"]["code"] == "ai_allowance_exceeded"
+    worker.delay.assert_not_called()
+    assert (await db_session.execute(select(IntelReport.id))).scalars().all() == []
+
+    monkeypatch.setattr(env_settings, "site_ai_user_daily_requests", used + prose)
+    with patch("app.workers.report_tasks.generate_full_report") as worker:
+        resp = await client.post("/api/intel-reports/generate-full", json=body, headers=auth_headers)
+    assert resp.status_code == 201, resp.text
+    worker.delay.assert_called_once()
+
+
+async def test_a_refusal_mid_report_stops_the_run_and_keeps_what_was_written(
+    db_session, test_user, site_provider, policy_on, monkeypatch
+):
+    """The allowance ran out between the pre-flight and section two: the section generator
+    reports a refusal instead of raising, so the worker stops with section one kept."""
+    from app.intelligence.reporting import generate_section_content
+    from app.models.intel_report import IntelReport
+
+    task = await _task(db_session, site_provider, "report_section_flash_alert")
+    _stub_provider(monkeypatch, content='{"content": "prose"}')
+    report = IntelReport(
+        created_by=test_user.id,
+        title="r",
+        template_type="flash_alert",
+        tlp_marking="TLP:AMBER",
+        content={"sections": {"summary": {"body": ""}, "key_findings": {"body": ""}}, "metadata": {}},
+        entry_ids=[],
+        entity_ids={},
+    )
+    db_session.add(report)
+    await db_session.flush()
+    monkeypatch.setattr(env_settings, "site_ai_user_daily_requests", 1)
+    caller = Caller.user(test_user.id)
+    first = await generate_section_content(db_session, test_user.id, report, "summary", caller=caller)
+    assert first == {"content": "prose"}
+    second = await generate_section_content(db_session, test_user.id, report, "key_findings", caller=caller)
+    assert second.get("refused") is True and "allowance" in second["error"].lower()
+    assert task.id is not None
+
+
+async def test_an_unspeakable_hostname_is_a_refusal_not_a_crash(
+    client: AsyncClient, auth_headers, policy_on, monkeypatch
+):
+    """A label over 63 characters makes getaddrinfo raise UnicodeError, not gaierror; the save
+    path answers with the same 'could not resolve' refusal."""
+    import app.core.outbound as outbound
+
+    monkeypatch.undo()  # drop public_dns: this test wants the real resolver path
+    monkeypatch.setattr(env_settings, "allow_user_ai_providers", True)
+    monkeypatch.setattr(env_settings, "user_ai_provider_types", "openai_compatible")
+    monkeypatch.setattr(outbound, "_resolved", {})
+    body = {"name": "Mine", "provider_type": "openai_compatible", "base_url": f"https://{'a' * 70}.example/v1"}
+    resp = await client.post("/api/ai/providers", json=body, headers=auth_headers)
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["error"]["message"].startswith("Could not resolve host")
+    problem = await outbound.outbound_problem("http://10.0.0.5/v1")
+    assert problem is not None and problem.code == "private"
+    assert (await outbound.outbound_problem("ftp://x.example")).code == "scheme"
+
+
+async def test_provider_test_routes_share_the_ai_rate_bucket():
+    """Any signed-in person can make the server call out through these; they are budgeted like inference."""
+    from app.core.rate_limit import _get_limit
+
+    assert _get_limit("/api/ai/providers", "POST")[2] == "ai"
+    assert _get_limit(f"/api/ai/providers/{uuid.uuid4()}/test", "POST")[2] == "ai"
+    assert _get_limit("/api/ai/providers", "GET") is None
+    assert _get_limit(f"/api/ai/providers/{uuid.uuid4()}", "PUT") is None
+
+
+async def test_a_cached_answer_is_served_past_a_key_refusal(
+    db_session, test_user, test_entry, site_provider, policy_on, monkeypatch
+):
+    """Required policy, no key: a new call is refused, but an answer already on the entry costs
+    nobody anything and is returned as the dedup guard would; forcing a re-run is still refused."""
+    from app.ai.engine import UserKeyRequired, run_task
+
+    task = await _task(db_session, site_provider, "article_summary")
+    _stub_provider(monkeypatch, content='{"summary": "cached"}')
+    first = await run_task(db_session, test_user.id, task.name, variables={"text": "x"}, entry_id=test_entry.id)
+    assert first["summary"] == "cached"
+
+    monkeypatch.setattr(env_settings, "require_user_ai_provider", True)
+    again = await run_task(db_session, test_user.id, task.name, variables={"text": "x"}, entry_id=test_entry.id)
+    assert again["summary"] == "cached"
+    with pytest.raises(UserKeyRequired):
+        await run_task(db_session, test_user.id, task.name, variables={"text": "x"}, entry_id=test_entry.id, force=True)
+    with pytest.raises(UserKeyRequired):
+        await run_task(db_session, test_user.id, task.name, variables={"text": "x"})
+
+
+async def test_the_overview_refuses_when_a_blocked_key_is_the_only_provider(
+    client: AsyncClient, db_session, auth_headers, test_user, my_key, policy_on
+):
+    """No site assignment and a paused key: the lookup refuses with the reason whatever the
+    fallback setting says, and the row says the same rather than promising the instance."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.ai.engine import UserKeyRequired, resolve_assignment
+
+    task = await _task(db_session, None, "detection_rules")
+    await _route(db_session, test_user, my_key, task)
+    my_key.paused_until = datetime.now(UTC) + timedelta(hours=1)
+    await db_session.flush()
+    rows = (await client.get("/api/ai/me/overview", headers=auth_headers)).json()["tasks"]
+    row = next(t for t in rows if t["task_name"] == task.name)
+    assert (row["will_run_on"], row["blocked_reason"]) == ("refused", "key_paused")
+    with pytest.raises(UserKeyRequired) as exc:
+        await resolve_assignment(db_session, Caller.user(test_user.id), task.name)
+    assert exc.value.reason == "key_paused"
+
+
+async def test_a_single_section_regenerate_keeps_the_refusal_code(
+    client: AsyncClient, db_session, auth_headers, test_user, site_provider, policy_on, monkeypatch
+):
+    """The one-section route answers with the same 429/403 envelope as every other interactive
+    route, so the UI can offer the right fix."""
+    from app.models.intel_report import IntelReport
+
+    task = await _task(db_session, site_provider, "report_section_flash_alert")
+    report = IntelReport(
+        created_by=test_user.id,
+        title="r",
+        template_type="flash_alert",
+        tlp_marking="TLP:AMBER",
+        content={"sections": {"summary": {"body": ""}}, "metadata": {}},
+        entry_ids=[],
+        entity_ids={},
+    )
+    db_session.add(report)
+    db_session.add(
+        AIResult(
+            task_id=task.id, provider_id=site_provider.id, is_current=False, caller_kind="user", user_id=test_user.id
+        )
+    )
+    await db_session.flush()
+    monkeypatch.setattr(env_settings, "site_ai_user_daily_requests", 1)
+    resp = await client.post(f"/api/intel-reports/{report.id}/sections/summary/generate", headers=auth_headers)
+    assert resp.status_code == 429 and resp.json()["error"]["code"] == "ai_allowance_exceeded"
+
+    monkeypatch.setattr(env_settings, "site_ai_user_daily_requests", 0)
+    monkeypatch.setattr(env_settings, "require_user_ai_provider", True)
+    resp = await client.post(f"/api/intel-reports/{report.id}/sections/summary/generate", headers=auth_headers)
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == "user_ai_key_required"
+    assert resp.json()["error"]["details"] == {"reason": "no_key"}

@@ -723,7 +723,7 @@ One row per person, created on first write (`backend/app/models/user_ai_route.py
 **Columns:**
 - `user_id` (UUID PK, FK CASCADE)
 - `fallback_to_site` (Boolean, default true) — when the person's key can't answer, let the instance's provider take the call. Off refuses instead, like the Required policy, but only once the person has a key
-- `monthly_cap_usd` (Numeric 10,4, nullable) — the person's own cap on their keys' spend; NULL is the admin's `user_ai_default_monthly_usd`, and the API refuses a value above it
+- `monthly_cap_usd` (Numeric 10,4, nullable) — the person's own cap on their keys' spend, theirs alone to set; NULL is no cap
 - `updated_at`
 
 #### AIResult
@@ -735,7 +735,7 @@ One row per AI call: the answer when `run_task` ran it, or a spend-only row for 
 - `entry_id` (FK, nullable, CASCADE, indexed) — an entry's results go with it
 - `target_type` (String 20, indexed), `target_id` (UUID, indexed) — what the result is about ("entry", "conversation", an entity type, …)
 - `is_current` (Boolean, default true, indexed) — the dedup flag; re-runs demote the previous row. Spend-only rows are never current
-- `task_id` (FK) — plain; the task delete route removes a task's results first
+- `task_id` (FK) — plain, so a task that has results can't be deleted: the task delete route answers 409 `task_has_results`
 - `provider_id` (FK, nullable, SET NULL) — deleting a provider, or a person whose key has results, keeps the rows
 - `model_name` (String 100)
 - `prompt_used` (Text) — the rendered prompt
@@ -1283,6 +1283,7 @@ Polymorphic — comments attach to any commentable object, with threading.
 - `config` (JSONB) — provider-specific config
 - `user_id` (FK, nullable, CASCADE, indexed) — NULL is one of the instance's providers, which site assignments and background work use. Set is a personal key (`is_personal`): only its owner's `user_ai_routes` point at it, it is never a site assignment, and the owner and the admin are the only people who can see it (`backend/app/api/ai_providers.py:59`)
 - `paused_until` (DateTime, nullable), `paused_reason` (String 500) — auto-pause after a quota or rate-limit response; the lookup treats a paused key as unable to answer
+- `last_tested_at` (DateTime, nullable), `last_test_error` (String 500, nullable) — the outcome of the last connectivity test; error NULL means it passed. The keys list shows "Tested 2h ago" or "Last test failed" from these without contacting the provider
 - `created_at`, `updated_at`
 
 **Relationships:** Has many `AITaskAssignment` and `UserAIRoute` (CASCADE delete); `AIResult` rows keep their `provider_name` and are set to NULL `provider_id` (`passive_deletes`).

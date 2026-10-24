@@ -29,7 +29,7 @@ import {
   type CopilotCommand,
 } from "@/components/copilotCommands";
 import type { CopilotAnsweredBy, CopilotContext } from "@/hooks/useAI";
-import { fallbackMessage } from "@/utils/aiProvenance";
+import { fallbackFixLabel, fallbackMessage } from "@/utils/aiProvenance";
 import { formatUsd } from "@/utils/format";
 import styles from "./CopilotDockPanel.module.css";
 import { Chip, RailToggle } from "@/components/primitives";
@@ -644,7 +644,7 @@ export function CopilotDockPanel() {
             <div className={styles.reauthBanner}>
               <span className={styles.reauthText}>{copilotConfig.refused.message}</span>
               <Link className={styles.reauthBtn} to="/settings?section=myai">
-                My AI
+                {fallbackFixLabel(copilotConfig.refused.reason)}
               </Link>
             </div>
           )}

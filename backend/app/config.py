@@ -88,10 +88,10 @@ class Settings(BaseSettings):
     # Let a personal key point at a private address (a LAN Ollama). Off on a
     # public instance: the server calls whatever URL a person enters.
     user_ai_allow_private_endpoints: bool = False
-    # Caps on one person's own keys, counted on ai_results.key_owner_id. The
-    # request cap is the one that works for Ollama, which reports $0.
-    # 0 = unlimited.
-    user_ai_default_monthly_usd: float = 25.0
+    # Cap on one person's own keys, counted on ai_results.key_owner_id as
+    # calls, not dollars: their key is their money, so the only limit the
+    # operator sets is on how hard this server will drive it. 0 = unlimited.
+    # A dollar cap exists too, but it is the person's own to set.
     user_ai_daily_request_cap: int = 300
 
     # Per-entry pipeline run logging (engine phase 5) — kill switch
@@ -395,6 +395,12 @@ class Settings(BaseSettings):
 
     # Webhooks
     webhook_allow_private_networks: bool = True
+    # Header a trusted edge sets to the visitor's address (Cloudflare:
+    # "CF-Connecting-IP"), read only when the direct peer is on a private
+    # network. Set it when the origin accepts traffic from that edge alone;
+    # on an open origin anyone can send the header. Empty = the first
+    # X-Forwarded-For hop, which the proxy in front of the API writes itself.
+    trusted_client_ip_header: str = ""
 
     # Public RSS feed (re-publishes aggregated entries via token-gated URL)
     public_rss_enabled: bool = False

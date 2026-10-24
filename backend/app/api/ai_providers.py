@@ -12,18 +12,18 @@ person's endpoint with the person's key.
 """
 
 import uuid
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Path, Query
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.engine import EndpointProblem, allowed_personal_types, personal_endpoint_problem
 from app.ai.engine import _get_provider_instance as build_provider_instance
-from app.ai.engine import allowed_personal_types
 from app.ai.providers.base import AIProvider as AIProviderInterface
 from app.ai.provisioning import model_choice_problem, route_tasks_to_provider
 from app.core.encryption import encrypt_value
 from app.core.exceptions import AppError
-from app.core.outbound import check_outbound_url
 from app.core.security import get_admin_user, get_current_user
 from app.database import get_db
 from app.models.ai_provider import AIProvider
@@ -73,36 +73,25 @@ def _owned(provider: AIProvider, user: User, *, use: bool = False) -> AIProvider
     return provider
 
 
-async def _usable_personal_endpoint(db: AsyncSession, provider: AIProvider) -> str | None:
-    """Re-check a personal key's endpoint before the server contacts it on demand.
+def _endpoint_message(problem: EndpointProblem) -> str:
+    """The sentence a person sees for an endpoint the engine would refuse."""
+    if problem.switchable:
+        return (
+            f"{problem.reason}. This instance doesn't allow private endpoints for personal keys. "
+            "Use a public URL, or ask your admin to turn on private endpoints."
+        )
+    return f"{problem.reason}."
 
-    The engine re-checks on every routed call; the test and model-listing
-    routes contact the provider too, and a hostname that now resolves to the
-    LAN, or a switch the admin has since turned off, must stop them as well.
+
+async def _personal_url_problem(db: AsyncSession, provider_type: str, base_url: str | None) -> str | None:
+    """Why a personal key of this type may not point at ``base_url``, or None.
+
+    The rule itself lives in the engine (``personal_endpoint_problem``), which
+    re-checks it on every routed call; this is the same check with the words
+    the save and test routes show.
     """
-    if not provider.is_personal:
-        return None
-    if provider.provider_type in ("ollama", "openai_compatible") and not (provider.base_url or "").strip():
-        return "This key has no endpoint address."
-    return await _personal_url_problem(db, provider.base_url)
-
-
-async def _personal_url_problem(db: AsyncSession, base_url: str | None) -> str | None:
-    """Why a personal key may not point at ``base_url``, or None."""
-    if not base_url or not base_url.strip():
-        return None
-    allow_private = bool(await get_setting("user_ai_allow_private_endpoints", db))
-    reason = await check_outbound_url(base_url.strip(), allow_private=allow_private)
-    if reason is None:
-        return None
-    if allow_private or not ("private" in reason or "localhost" in reason):
-        # A bad scheme, a missing hostname or a name that doesn't resolve:
-        # the admin's switch would not help.
-        return f"{reason}."
-    return (
-        f"{reason}. This instance doesn't allow private endpoints for personal keys. "
-        "Use a public URL, or ask your admin to turn on private endpoints."
-    )
+    problem = await personal_endpoint_problem(db, provider_type, base_url)
+    return _endpoint_message(problem) if problem else None
 
 
 async def _check_personal_policy(db: AsyncSession, provider_type: str, base_url: str | None) -> None:
@@ -130,15 +119,7 @@ async def _check_personal_policy(db: AsyncSession, provider_type: str, base_url:
             message=f"This instance allows personal keys of type {names} only.",
             status_code=400,
         )
-    if provider_type in ("ollama", "openai_compatible") and not (base_url or "").strip():
-        # Without an address the provider would default to the server's own
-        # localhost Ollama, which is the instance's GPU under a personal key.
-        raise AppError(
-            code="validation_error",
-            message="A personal key of this type needs the address of your own endpoint.",
-            status_code=400,
-        )
-    problem = await _personal_url_problem(db, base_url)
+    problem = await _personal_url_problem(db, provider_type, base_url)
     if problem:
         raise AppError(code="endpoint_not_allowed", message=problem, status_code=400)
 
@@ -223,6 +204,7 @@ async def create_provider(
             if not await instance.check_health():
                 raise RuntimeError("health check failed")
             provider.models = await instance.list_models()
+            provider.last_tested_at = datetime.now(UTC)
         except Exception as e:
             raise AppError(
                 code="provider_unreachable",
@@ -243,10 +225,18 @@ async def update_provider(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update an AI provider: the instance's (admin only), the caller's own key, or any personal key
-    for the admin. Only the fields present in the body are changed; a non-empty api_key is
-    re-encrypted before storage."""
+    """Update an AI provider: the instance's (admin only) or the caller's own key. On someone
+    else's personal key the admin may set is_active only, not where it points or what it sends.
+    Only the fields present in the body are changed; a non-empty api_key is re-encrypted before
+    storage."""
     provider = _owned(await _load(db, provider_id), user)
+    if provider.is_personal and provider.user_id != user.id:
+        if any(v is not None for v in (body.name, body.base_url, body.api_key, body.config)):
+            raise AppError(
+                code="forbidden",
+                message="Only the key's owner can change its name, address, key or config.",
+                status_code=403,
+            )
 
     if body.name is not None:
         provider.name = body.name
@@ -256,7 +246,7 @@ async def update_provider(
                 code="validation_error", message="base_url cannot be empty for this provider type", status_code=400
             )
         if provider.is_personal:
-            problem = await _personal_url_problem(db, body.base_url)
+            problem = await _personal_url_problem(db, provider.provider_type, body.base_url)
             if problem:
                 raise AppError(code="endpoint_not_allowed", message=problem, status_code=400)
         provider.base_url = body.base_url
@@ -298,13 +288,7 @@ async def delete_provider(
 ):
     """Delete an AI provider. The instance's providers and anyone's personal key are the admin's
     to delete; a person deletes their own. Routes on the key go with it."""
-    provider = await _load(db, provider_id)
-    if provider.user_id is None or provider.user_id != user.id:
-        if user.role != "admin":
-            # A site provider is forbidden to a non-admin; someone else's key is invisible.
-            if provider.user_id is None:
-                raise AppError(code="forbidden", message="Admin access required", status_code=403)
-            raise _not_found()
+    provider = _owned(await _load(db, provider_id), user)
     # Results outlive the provider (ON DELETE SET NULL keeps provider_name
     # and key_owner_id on them); assignments and routes cascade.
     await db.delete(provider)
@@ -322,25 +306,37 @@ async def test_provider(
     the fetched model list is cached on the provider row. Failures are returned as success=false
     rather than an error status."""
     provider = _owned(await _load(db, provider_id), user, use=True)
-    problem = await _usable_personal_endpoint(db, provider)
-    if problem:
-        return AIProviderTestResult(success=False, message=problem)
+
+    async def _outcome(message: str, *, models: list | None = None) -> AIProviderTestResult:
+        # The row remembers its last test, so the keys list can say
+        # "Tested 2h ago" or "Last test failed" without re-testing.
+        provider.last_tested_at = datetime.now(UTC)
+        provider.last_test_error = None if models is not None else message[:500]
+        if models is not None:
+            provider.models = models
+        db.add(provider)
+        await db.flush()
+        if models is not None:
+            return AIProviderTestResult(success=True, message=message, models=models)
+        return AIProviderTestResult(success=False, message=message)
+
+    if provider.is_personal:
+        # Re-checked before the server contacts it: a hostname that now
+        # resolves to the LAN, or a switch the admin has since turned off,
+        # stops a test as it stops a routed call.
+        problem = await _personal_url_problem(db, provider.provider_type, provider.base_url)
+        if problem:
+            return await _outcome(problem)
 
     try:
         instance = _get_provider_instance(provider)
         healthy = await instance.check_health()
         if not healthy:
-            return AIProviderTestResult(success=False, message="Provider health check failed")
-
+            return await _outcome("Provider health check failed")
         models = await instance.list_models()
-        # Cache models
-        provider.models = models
-        db.add(provider)
-        await db.flush()
-
-        return AIProviderTestResult(success=True, message="Connected", models=models)
     except Exception as e:
-        return AIProviderTestResult(success=False, message=str(e))
+        return await _outcome(str(e))
+    return await _outcome("Connected", models=models)
 
 
 @router.post("/{provider_id}/commission", response_model=AIProviderCommissionResult)
@@ -374,7 +370,7 @@ async def commission_provider(
     if provider.is_personal:
         raise AppError(
             code="personal_provider",
-            message="A personal key can't run the instance's tasks; route it from Settings > My AI instead.",
+            message="A personal key can't run the instance's prompts; route it from Settings > My AI instead.",
             status_code=400,
         )
 
@@ -406,33 +402,3 @@ async def commission_provider(
         tasks_reassigned=len(routing.reassigned),
         tasks_skipped_agentic=routing.skipped_agentic,
     )
-
-
-@router.get("/{provider_id}/models", response_model=list[str])
-async def list_provider_models(
-    provider_id: uuid.UUID = Path(..., description="ID of the AI provider to list models for"),
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """List the model names available on a provider. Returns the cached list when present;
-    otherwise fetches from the provider and caches the result. The instance's providers are the
-    admin's to list; a personal key is its owner's alone, since answering means calling the
-    provider with that key."""
-    provider = _owned(await _load(db, provider_id), user, use=True)
-    problem = await _usable_personal_endpoint(db, provider)
-    if problem:
-        raise AppError(code="endpoint_not_allowed", message=problem, status_code=400)
-
-    # Return cached models, or fetch fresh
-    if provider.models:
-        return provider.models
-
-    try:
-        instance = _get_provider_instance(provider)
-        models = await instance.list_models()
-    except Exception as e:
-        raise AppError(code="provider_error", message=str(e), status_code=400) from e
-    provider.models = models
-    db.add(provider)
-    await db.flush()
-    return models

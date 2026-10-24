@@ -124,6 +124,19 @@ describe("the onboarding AI step", () => {
     expect(commissionProvider).toHaveBeenCalledWith({ id: "existing", takeOver: true });
   });
 
+  it("never mistakes the admin's own personal key for the instance provider", async () => {
+    // GET /ai/providers lists the caller's personal keys too; reusing one here
+    // would turn a private key into the provider every pipeline task runs on.
+    providers = [{ id: "mine", provider_type: "ollama", user_id: "u1" } as AIProvider];
+    const user = userEvent.setup();
+    renderAIStep();
+    await user.click(screen.getByRole("button", { name: /^Connect$/ }));
+
+    expect(updateProvider).not.toHaveBeenCalled();
+    expect(createProvider).toHaveBeenCalledWith(expect.objectContaining({ provider_type: "ollama" }));
+    expect(commissionProvider).toHaveBeenCalledWith({ id: "p1", takeOver: true });
+  });
+
   it("makes an OpenAI-compatible endpoint name its model rather than guessing one", async () => {
     // /v1/models on api.openai.com sorts babbage-002 first; guessing from it
     // would move every task onto a model that can't chat.

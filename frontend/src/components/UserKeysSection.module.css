@@ -69,6 +69,12 @@
   opacity: 0.6;
 }
 
+/* Policy Off: the eligibility table is moot, so it is shown but not live. */
+.tableOff {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
 .lock {
   font-size: var(--fs-sm);
   color: var(--text-muted);
@@ -138,16 +144,6 @@
   text-align: center;
 }
 
-.custody {
-  margin-top: var(--sp-5);
-  padding: var(--sp-3) var(--sp-4);
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
-  border-radius: var(--r-md);
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-  font-size: var(--fs-base);
-  color: var(--text-secondary);
-  line-height: 1.5;
-}
 
 @media (max-width: 767px) {
   .key {

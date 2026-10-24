@@ -202,7 +202,7 @@ Rate limiting is implemented via middleware (see [`backend/app/core/rate_limit.p
 - `X-RateLimit-Remaining`: Requests left in window
 - `Retry-After`: Seconds to wait (on 429)
 
-**Identity:** Derived from JWT `sub` claim; fallback to client IP if unauthenticated.
+**Identity:** The `sub` of a JWT whose signature verifies; otherwise the client IP: the first `X-Forwarded-For` hop when the direct peer is on a private network (the proxy writes that header itself), or the header named in `TRUSTED_CLIENT_IP_HEADER` first when an edge such as Cloudflare fronts a locked-down origin. An unverified bearer never names a bucket, so the login-free share routes can't mint one per request.
 
 ---
 
@@ -2730,7 +2730,7 @@ Add an AI provider. An admin registers the instance's providers; anyone may regi
 
 **`PUT /api/ai/providers/{provider_id}`**
 
-Update provider configuration.
+Update provider configuration: the instance's (admin), or the caller's own key. On someone else's personal key the admin may set `is_active` only; any other field is 403.
 
 **Auth:** Bearer token  
 **Status:** 200 OK
@@ -2747,7 +2747,6 @@ Remove a provider.
 ---
 
 **`POST /api/ai/providers/{provider_id}/test`** — Run a connectivity/inference test.  
-**`GET /api/ai/providers/{provider_id}/models`** — List models available from the provider.  
 **`POST /api/ai/providers/{provider_id}/resume`** — Resume a provider that was auto-paused (e.g. after auth/billing errors).  
 **`GET /api/ai/providers/user-keys`** — Every personal key on the instance with its owner's username (admin only; the User keys tab's list).
 
@@ -2759,10 +2758,11 @@ Remove a provider.
 
 What Settings → My AI reads and writes. Only meaningful while the admin has `allow_user_ai_providers` on; the overview reports the policy either way.
 
-**`GET /api/ai/me/overview`** — The admin's policy, my fallback setting and cap, this month's spend (split by whose provider answered, and per key), today's requests against both caps, and every task I may route with where it runs now and my route for it.  
-**`PATCH /api/ai/me/preferences`** — `fallback_to_site` (let the instance's provider answer when my key can't) and `monthly_cap_usd` (below the admin's default only; null restores it).  
-**`GET /api/ai/me/routes`** — My default key (`task_id` null) first, then per-task routes.  
-**`PUT /api/ai/me/routes`** — `{task_id, provider_id, model_name, config}`: point one task, or every allowed task (`task_id` null), at one of my keys. Same target again replaces. A per-task row with `provider_id` null sends that task back to the instance's provider despite a default key. Someone else's key or a site provider is a 404; a task closed to personal keys is 400 `task_site_only`.  
+**`GET /api/ai/me/policy`** — The admin's personal-key policy plus `has_routes`: the cheap read a reader panel makes before fetching the overview.  
+**`GET /api/ai/me/overview`** — The admin's policy, my fallback setting and cap, this month's spend (split by whose provider answered, and per key), today's requests against both caps, and every prompt I may route with my route for it and what a click would do right now (`will_run_on`: `user` / `site` / `refused`, with `blocked_reason` when a key of mine can't answer).  
+**`PATCH /api/ai/me/preferences`** — `fallback_to_site` (let the instance's provider answer when my key can't) and `monthly_cap_usd` (my own cap on my keys' spend; the admin sets no ceiling; null removes it).  
+**`GET /api/ai/me/routes`** — My default key (`task_id` null) first, then per-prompt routes.  
+**`PUT /api/ai/me/routes`** — `{task_id, provider_id, model_name, config}`: point one prompt, or every allowed prompt (`task_id` null), at one of my keys. Same target again replaces. A per-prompt row with `provider_id` null sends that prompt back to the instance's provider despite a default key. Someone else's key or a site provider is a 404; a prompt closed to personal keys is 400 `task_site_only`.  
 **`DELETE /api/ai/me/routes/{route_id}`** — Remove a route.
 
 **Auth:** Bearer token
@@ -2808,10 +2808,10 @@ Create a custom AI task (template for a specific enrichment workflow).
 
 **`DELETE /api/ai/tasks/{task_id}`**
 
-Delete a custom AI task.
+Delete a custom AI task. A task that has results stays: every result points at its task through a plain, required foreign key, so the route answers 409 `task_has_results` rather than failing on the first row.
 
-**Auth:** Bearer token  
-**Status:** 204 No Content
+**Auth:** Bearer token (admin)  
+**Status:** 204 No Content · 403 for a system task · 409 `task_has_results`
 
 ---
 

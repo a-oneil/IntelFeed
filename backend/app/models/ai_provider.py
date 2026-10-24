@@ -30,6 +30,10 @@ class AIProvider(Base):
     # would have used it re-queue themselves with countdown = paused_until - now.
     paused_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     paused_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # The last connectivity test, so the keys list can say "Tested 2h ago"
+    # or "Last test failed" without contacting the provider again.
+    last_tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_test_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

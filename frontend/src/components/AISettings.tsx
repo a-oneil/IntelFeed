@@ -970,8 +970,8 @@ function ByUserTable({ breakdown }: { breakdown: AICostBreakdown }) {
       </div>
       {nearLimit.map((r) => (
         <div key={r.user_id ?? r.caller_kind} className={styles.allowanceNote}>
-          <b>{r.username}</b> has used {r.requests_today} of {allowance} instance requests today. Interactive tasks
-          will stop for them at the limit. Pipeline work isn't affected.
+          <b>{name(r)}</b> has used {r.requests_today} of {allowance} instance requests today. Prompts they run
+          themselves will stop at the limit. Pipeline work isn't affected.
         </div>
       ))}
     </div>
@@ -1073,7 +1073,7 @@ function CostSection() {
             gap: 20,
           }}
         >
-          <BreakdownTable title="By task" rows={breakdown.by_task} />
+          <BreakdownTable title="By prompt" rows={breakdown.by_task} />
           <BreakdownTable title="By model" rows={breakdown.by_model} />
         </div>
       )}

@@ -1,12 +1,13 @@
 import { QueryClient, QueryCache, MutationCache } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { apiErrorInfo, hasErrorEnvelope } from "@/api/errors";
 
+/** The toast text: the same reading of the error envelope the inline errors use. */
 function extractErrorMessage(error: unknown): string {
+  if (hasErrorEnvelope(error)) return apiErrorInfo(error).message;
   if (error && typeof error === "object" && "response" in error) {
-    const axiosErr = error as { response?: { data?: { error?: { message?: string } }; status?: number } };
-    const apiError = axiosErr.response?.data?.error;
-    if (apiError?.message) return apiError.message;
-    if (axiosErr.response?.status === 429) return "Rate limited. Please try again shortly.";
+    const status = (error as { response?: { status?: number } }).response?.status;
+    if (status === 429) return "Rate limited. Please try again shortly.";
   }
   if (error instanceof Error) return error.message;
   return "An unexpected error occurred";

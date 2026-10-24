@@ -21,6 +21,8 @@ import asyncio
 import ipaddress
 import socket
 import time
+from dataclasses import dataclass
+from typing import Literal
 from urllib.parse import urlparse
 
 Address = ipaddress.IPv4Address | ipaddress.IPv6Address
@@ -29,8 +31,13 @@ _LOCAL_NAMES = {"localhost", "localhost.localdomain", "ip6-localhost", "ip6-loop
 
 #: A batch action validates the same webhook once per entry; resolving a name
 #: it saw seconds ago again is wasted round-trips, not safety. Short enough
-#: that a legitimately moved host is picked up within the minute.
+#: that a legitimately moved host is picked up within the minute. A name that
+#: resolved to nothing is cached for the same minute: a personal key whose
+#: host is down would otherwise cost a failed lookup on every call.
 RESOLVE_CACHE_SECONDS = 60.0
+#: Hostnames come from users (webhook URLs, personal keys), so the cache is
+#: bounded: stale entries go on every miss, and past this many the oldest go.
+RESOLVE_CACHE_MAX = 512
 _resolved: dict[str, tuple[float, list[Address]]] = {}
 
 
@@ -53,23 +60,48 @@ async def resolve_host(hostname: str) -> list[Address]:
     cached = _resolved.get(hostname)
     if cached and now - cached[0] < RESOLVE_CACHE_SECONDS:
         return cached[1]
+    _evict(now)
     loop = asyncio.get_running_loop()
     try:
         infos = await loop.getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
-    except socket.gaierror:
-        return []
+    except (socket.gaierror, UnicodeError, OSError):
+        # No such name; or a label the IDNA codec refuses (over 63 chars),
+        # which getaddrinfo raises as UnicodeError rather than gaierror. Either
+        # way the name resolves to nothing the server may call.
+        infos = []
     seen: dict[str, Address] = {}
     for _family, _type, _proto, _canon, sockaddr in infos:
         raw = sockaddr[0]
         if raw not in seen:
             seen[raw] = ipaddress.ip_address(raw)
     addresses = list(seen.values())
-    if addresses:
-        _resolved[hostname] = (now, addresses)
+    _resolved[hostname] = (now, addresses)
     return addresses
 
 
-async def check_outbound_url(url: str, *, allow_private: bool = False) -> str | None:
+def _evict(now: float) -> None:
+    """Drop expired entries; past the size bound, drop the oldest as well."""
+    for name in [name for name, (at, _) in _resolved.items() if now - at >= RESOLVE_CACHE_SECONDS]:
+        del _resolved[name]
+    if len(_resolved) >= RESOLVE_CACHE_MAX:
+        for name in sorted(_resolved, key=lambda n: _resolved[n][0])[: len(_resolved) - RESOLVE_CACHE_MAX + 1]:
+            del _resolved[name]
+
+
+OutboundProblemCode = Literal["invalid", "scheme", "no_host", "private", "unresolved"]
+
+
+@dataclass(frozen=True, slots=True)
+class OutboundProblem:
+    """Why the server must not call a URL. ``code`` is what callers branch on
+    ("private" is the one an operator's trusted-network switch would allow);
+    ``message`` is what they show."""
+
+    code: OutboundProblemCode
+    message: str
+
+
+async def outbound_problem(url: str, *, allow_private: bool = False) -> OutboundProblem | None:
     """Why the server must not call ``url``, or None when it may.
 
     ``allow_private`` is the operator's choice for a trusted network (a
@@ -79,16 +111,16 @@ async def check_outbound_url(url: str, *, allow_private: bool = False) -> str | 
     try:
         parsed = urlparse(url)
     except Exception:
-        return "Invalid URL"
+        return OutboundProblem("invalid", "Invalid URL")
     if parsed.scheme not in ("http", "https"):
-        return f"Unsupported URL scheme: {parsed.scheme or '(none)'}"
+        return OutboundProblem("scheme", f"Unsupported URL scheme: {parsed.scheme or '(none)'}")
     hostname = parsed.hostname
     if not hostname:
-        return "No hostname in URL"
+        return OutboundProblem("no_host", "No hostname in URL")
     if allow_private:
         return None
     if hostname.lower().rstrip(".") in _LOCAL_NAMES:
-        return "URL points to localhost"
+        return OutboundProblem("private", "URL points to localhost")
 
     try:
         literal = ipaddress.ip_address(hostname)
@@ -96,13 +128,19 @@ async def check_outbound_url(url: str, *, allow_private: bool = False) -> str | 
         literal = None
     if literal is not None:
         if not is_public(literal):
-            return f"URL points to a private address ({hostname})"
+            return OutboundProblem("private", f"URL points to a private address ({hostname})")
         return None
 
     addresses = await resolve_host(hostname)
     if not addresses:
-        return f"Could not resolve host {hostname}"
+        return OutboundProblem("unresolved", f"Could not resolve host {hostname}")
     for addr in addresses:
         if not is_public(addr):
-            return f"{hostname} resolves to a private address ({addr})"
+            return OutboundProblem("private", f"{hostname} resolves to a private address ({addr})")
     return None
+
+
+async def check_outbound_url(url: str, *, allow_private: bool = False) -> str | None:
+    """``outbound_problem`` as a sentence, for callers that only report it."""
+    problem = await outbound_problem(url, allow_private=allow_private)
+    return problem.message if problem else None

@@ -72,3 +72,8 @@ USER_PROVIDER_ELIGIBLE_TASKS: frozenset[str] = frozenset(
 # Provider types a person may register as their own. claude_code is never
 # one: it runs a single CLI sign-in shared by the whole instance.
 PERSONAL_PROVIDER_TYPES: frozenset[str] = frozenset({"claude", "ollama", "openai_compatible"})
+
+# Provider types whose client falls back to the server's own localhost when
+# the row has no address. A personal key of one of these must say where it
+# points, or it would run on the instance's GPU under a personal key.
+LOCALHOST_DEFAULT_TYPES: frozenset[str] = frozenset({"ollama", "openai_compatible"})

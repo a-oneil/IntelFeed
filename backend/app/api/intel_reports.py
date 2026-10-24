@@ -14,6 +14,7 @@ from app.intelligence.reporting import (
     REPORT_TEMPLATES,
     generate_report_content,
     generate_section_content,
+    narrative_sections,
     render_html,
     render_markdown,
     resolve_report_sources,
@@ -33,6 +34,24 @@ from app.schemas.intel_report import (
 )
 
 router = APIRouter()
+
+
+async def _preflight(db: AsyncSession, user: User, template_type: str, content: dict) -> None:
+    """Refuse a report the worker could not finish today, before anything is written.
+
+    ``content`` is the report body as it would be saved (built in memory, no
+    write yet); the pre-flight asks for exactly the sections the worker will
+    generate from it, so a person with two requests left is refused a
+    three-section report now rather than after section two, and a template's
+    data sections (IOC tables, references) are not counted against them.
+    """
+    from app.ai.caller import Caller
+    from app.ai.engine import preflight_report
+
+    template = REPORT_TEMPLATES.get(template_type)
+    names = list(template["sections"]) if template else None
+    sections = max(1, len(narrative_sections(content, names)))
+    await preflight_report(db, Caller.user(user.id), template_type, sections=sections)
 
 
 @router.get("", response_model=PaginatedResponse[IntelReportResponse])
@@ -388,7 +407,7 @@ async def generate_full_intel_report(
             )
         template = REPORT_TEMPLATES.get(body.template_type, {"name": body.template_type.replace("_", " ").title()})
 
-    # 3. Pre-fill data sections
+    # 3. Pre-fill data sections (in memory: nothing is written yet)
     content = await generate_report_content(
         template_type=body.template_type,
         entry_ids=entry_ids,
@@ -396,7 +415,11 @@ async def generate_full_intel_report(
         db=db,
     )
 
-    # 4. Store focus/audience in metadata for Celery task
+    # 4. Refuse now what the worker would refuse later — before the row is
+    # written, so a refusal leaves no blank report behind.
+    await _preflight(db, user, body.template_type, content)
+
+    # 5. Store focus/audience in metadata for Celery task
     if body.focus:
         content["metadata"]["focus"] = body.focus
     if body.audience:
@@ -404,7 +427,7 @@ async def generate_full_intel_report(
 
     title = body.title or f"{template.get('name', body.template_type)} - {datetime.now(UTC).strftime('%Y-%m-%d %H:%M')}"
 
-    # 5. Create report
+    # 6. Create report
     report = IntelReport(
         created_by=user.id,
         title=title,
@@ -419,14 +442,8 @@ async def generate_full_intel_report(
     await db.flush()
     await db.refresh(report)
 
-    # 6. Dispatch Celery task
-    from app.ai.caller import Caller
-    from app.ai.engine import preflight_report
+    # 7. Dispatch Celery task
     from app.workers.report_tasks import generate_full_report
-
-    # Refuse here, with an error the person sees, rather than part-way
-    # through the worker run after some sections have already been written.
-    await preflight_report(db, Caller.user(user.id), report.template_type)
 
     task = generate_full_report.delay(str(report.id), str(user.id))
 
@@ -454,6 +471,8 @@ async def generate_report_section(
     if not report:
         raise AppError(code="not_found", message="Report not found", status_code=404)
 
+    from app.ai.caller import Caller
+
     result = await generate_section_content(
         db=db,
         user_id=user.id,
@@ -461,8 +480,15 @@ async def generate_report_section(
         section_name=section_name,
         focus=focus,
         audience=audience,
+        caller=Caller.user(user.id),
     )
 
+    if result.get("refused"):
+        # The allowance or key-policy refusal, with the code and reason the
+        # UI keys its "Add a key" / "Raise my cap" links on.
+        raise AppError(
+            code=result["code"], message=result["error"], status_code=result["status_code"], details=result["details"]
+        )
     if "error" in result:
         raise AppError(code="ai_error", message=result["error"], status_code=422)
 
@@ -501,19 +527,17 @@ async def regenerate_all_sections(
         old_metadata["audience"] = audience
     content["metadata"] = old_metadata
 
+    # Refuse now what the worker would refuse later — before the sections
+    # are cleared, so a refusal leaves the report as it was.
+    await _preflight(db, user, report.template_type, content)
+
     from sqlalchemy.orm.attributes import flag_modified
 
     report.content = content
     flag_modified(report, "content")
     await db.commit()
 
-    from app.ai.caller import Caller
-    from app.ai.engine import preflight_report
     from app.workers.report_tasks import generate_full_report
-
-    # Refuse here, with an error the person sees, rather than part-way
-    # through the worker run after some sections have already been written.
-    await preflight_report(db, Caller.user(user.id), report.template_type)
 
     task = generate_full_report.delay(str(report.id), str(user.id))
     return {"report_id": str(report.id), "task_id": task.id}
@@ -624,13 +648,17 @@ async def generate_report_from_campaign(
                 if eid_str not in entity_ids.get(key, []):
                     entity_ids.setdefault(key, []).append(eid_str)
 
-    # Generate content structure
+    # Generate content structure (in memory: nothing is written yet)
     content = await generate_report_content(
         template_type=template_type,
         entry_ids=entry_ids,
         entity_ids=entity_ids,
         db=db,
     )
+
+    # Refuse now what the worker would refuse later — before the row is
+    # written, so a refusal leaves no blank report behind.
+    await _preflight(db, user, template_type, content)
 
     # Set focus/audience from request
     focus = body.get("focus")
@@ -659,13 +687,7 @@ async def generate_report_from_campaign(
     await db.refresh(report)
 
     # Dispatch AI generation
-    from app.ai.caller import Caller
-    from app.ai.engine import preflight_report
     from app.workers.report_tasks import generate_full_report
-
-    # Refuse here, with an error the person sees, rather than part-way
-    # through the worker run after some sections have already been written.
-    await preflight_report(db, Caller.user(user.id), report.template_type)
 
     task = generate_full_report.delay(str(report.id), str(user.id))
 
@@ -708,6 +730,8 @@ async def clone_report_as_type(
                 status_code=400,
             )
 
+    generate = bool(body.get("generate", True))
+
     # Generate content structure for new template with same entries/entities
     content = await generate_report_content(
         template_type=new_template_type,
@@ -715,6 +739,10 @@ async def clone_report_as_type(
         entity_ids=source.entity_ids or {},
         db=db,
     )
+    if generate:
+        # Refuse now what the worker would refuse later — before the row is
+        # written, so a refusal leaves no blank report behind.
+        await _preflight(db, user, new_template_type, content)
 
     # Preserve focus/audience from source
     source_metadata = (source.content or {}).get("metadata", {})
@@ -743,14 +771,8 @@ async def clone_report_as_type(
 
     # Optionally dispatch AI generation
     task_id = None
-    if body.get("generate", True):
-        from app.ai.caller import Caller
-        from app.ai.engine import preflight_report
+    if generate:
         from app.workers.report_tasks import generate_full_report
-
-        # Refuse here, with an error the person sees, rather than part-way
-        # through the worker run after some sections have already been written.
-        await preflight_report(db, Caller.user(user.id), report.template_type)
 
         task = generate_full_report.delay(str(report.id), str(user.id))
         task_id = task.id

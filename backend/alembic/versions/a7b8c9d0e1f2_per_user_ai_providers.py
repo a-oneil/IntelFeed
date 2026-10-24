@@ -157,6 +157,10 @@ def downgrade() -> None:
     op.drop_index("ix_user_ai_routes_user", table_name="user_ai_routes")
     op.drop_table("user_ai_routes")
     op.drop_column("ai_tasks", "allows_user_provider")
+    # Personal keys go with the column that marks them as personal; left in
+    # place they would surface as the instance's providers. Their results
+    # keep provider_name and lose provider_id (still ON DELETE SET NULL here).
+    op.execute("DELETE FROM ai_providers WHERE user_id IS NOT NULL")
     op.drop_constraint("ai_results_provider_id_fkey", "ai_results", type_="foreignkey")
     op.create_foreign_key("ai_results_provider_id_fkey", "ai_results", "ai_providers", ["provider_id"], ["id"])
     op.drop_index("ix_ai_providers_user_id", table_name="ai_providers")

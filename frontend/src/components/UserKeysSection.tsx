@@ -6,14 +6,16 @@ import {
   useAITasks,
   useAllTaskAssignments,
   useDeleteAIProvider,
+  useResumeAIProvider,
   useUpdateAIProvider,
   useUpdateAITask,
   useUserKeys,
 } from "@/hooks/useAI";
 import { useUndoableDelete } from "@/hooks/useUndoableDelete";
 import { apiErrorInfo } from "@/api/errors";
+import { formatCapInput } from "@/utils/format";
 import { Chip, Segmented } from "@/components/primitives";
-import { AsyncStateLoading } from "@/components/AsyncState";
+import { AsyncStateError, AsyncStateLoading } from "@/components/AsyncState";
 import page from "@/pages/SettingsPage.module.css";
 import ai from "./AISettings.module.css";
 import styles from "./UserKeysSection.module.css";
@@ -22,20 +24,25 @@ type Policy = "off" | "optional" | "required";
 
 const PERSONAL_TYPES = ["claude", "openai_compatible", "ollama"] as const;
 
+/** A dollar cap as the input shows it: "25" from the API becomes "25.00". Counts stay integers. */
+function capText(value: number, money: boolean): string {
+  return money ? formatCapInput(value) : String(value);
+}
+
 /**
- * Where a task's result shows up, from the flags the row already carries.
+ * Where a prompt's result shows up, from the flags the row already carries.
  * The two surfaces with no flag of their own (the copilot dock, Report
- * Studio) are named by task; everything else follows its category and its
- * reader-panel visibility, so a new task lands in the right bucket.
+ * Studio) are named by prompt; everything else follows its category and its
+ * reader-panel visibility, so a new prompt lands in the right bucket.
  */
-function whereItRuns(task: AITask): string {
-  if (task.category === "chat") return task.name === "copilot" ? "Copilot dock" : "Share page";
-  if (task.name.startsWith("report_section")) return "Report Studio";
-  if (task.user_provider_locked) {
-    return task.category === "extraction" ? "Pipeline" : task.category === "maintenance" ? "Maintenance" : "Shared output";
+function whereItRuns(prompt: AITask): string {
+  if (prompt.category === "chat") return prompt.name === "copilot" ? "Copilot dock" : "Share page";
+  if (prompt.name.startsWith("report_section")) return "Report Studio";
+  if (prompt.user_provider_locked) {
+    return prompt.category === "extraction" ? "Pipeline" : prompt.category === "maintenance" ? "Maintenance" : "Shared output";
   }
-  if (task.show_in_entry_actions || task.show_in_entity_actions) return "Reader";
-  return task.category ? task.category[0].toUpperCase() + task.category.slice(1) : "";
+  if (prompt.show_in_entry_actions || prompt.show_in_entity_actions) return "Reader";
+  return prompt.category ? prompt.category[0].toUpperCase() + prompt.category.slice(1) : "";
 }
 
 function NumberSetting({
@@ -44,6 +51,7 @@ function NumberSetting({
   value,
   unit,
   prefix,
+  money = false,
   onSave,
 }: {
   label: string;
@@ -51,19 +59,21 @@ function NumberSetting({
   value: number;
   unit?: string;
   prefix?: string;
+  /** A dollar amount: shown with two decimals. */
+  money?: boolean;
   onSave: (next: number) => Promise<void>;
 }) {
-  const [text, setText] = useState(String(value));
+  const [text, setText] = useState(capText(value, money));
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => setText(String(value)), [value]);
+  useEffect(() => setText(capText(value, money)), [value, money]);
   const commit = async () => {
     const n = Number(text);
     if (!Number.isFinite(n) || n < 0) {
       setError("Enter a number of 0 or more.");
       return;
     }
-    if (n === value) return;
     setError(null);
+    if (n === value) return;
     try {
       await onSave(n);
     } catch (err) {
@@ -99,22 +109,29 @@ function NumberSetting({
 
 /**
  * AI Configuration → User keys: the admin's side of personal AI keys. The
- * policy, the allowed types, the caps, which tasks may use a personal key,
+ * policy, the allowed types, the caps, which prompts may use a personal key,
  * and every key people have added (to disable or delete, never to use).
  */
 export function UserKeysSection() {
-  const { data: settings, isLoading } = useSystemSettings();
+  const { data: settings, isLoading, isError, error, refetch } = useSystemSettings();
   const updateSettings = useUpdateSystemSettings();
-  const { data: tasks } = useAITasks();
+  const { data: prompts } = useAITasks();
   const { data: assignments } = useAllTaskAssignments();
-  const { data: providers } = useAIProviders();
+  const { data: allProviders } = useAIProviders();
+  // Site assignments name the instance's providers; the admin's own personal
+  // keys in the same response are never a prompt's site provider.
+  const providers = allProviders?.filter((p) => !p.user_id);
   const { data: userKeys } = useUserKeys();
-  const updateTask = useUpdateAITask();
+  const updatePrompt = useUpdateAITask();
   const updateProvider = useUpdateAIProvider();
   const deleteProvider = useDeleteAIProvider();
+  const resumeProvider = useResumeAIProvider();
   const undoableDelete = useUndoableDelete();
-  const [taskError, setTaskError] = useState<string | null>(null);
+  const [promptError, setPromptError] = useState<string | null>(null);
 
+  if (isError) {
+    return <AsyncStateError title="Couldn't load the policy" description={apiErrorInfo(error).message} onRetry={() => void refetch()} />;
+  }
   if (isLoading || !settings) return <AsyncStateLoading label="Loading policy…" compact />;
 
   const get = (key: string) => settings.settings[key]?.value;
@@ -126,7 +143,6 @@ export function UserKeysSection() {
     .map((s) => s.trim())
     .filter(Boolean);
   const allowPrivate = Boolean(get("user_ai_allow_private_endpoints"));
-  const monthly = Number(get("user_ai_default_monthly_usd") ?? 0);
   const daily = Number(get("user_ai_daily_request_cap") ?? 0);
   const allowance = Number(get("site_ai_user_daily_requests") ?? 0);
   const shareLimit = Number(get("share_ai_daily_requests") ?? 0);
@@ -144,10 +160,10 @@ export function UserKeysSection() {
     return save({ user_ai_provider_types: next.join(",") });
   };
 
-  const live = (tasks ?? []).filter((t) => !t.is_deprecated);
+  const live = (prompts ?? []).filter((t) => !t.is_deprecated);
   const open = live.filter((t) => t.allows_user_provider).length;
-  const siteFor = (task: AITask) => {
-    const a = assignments?.[task.id];
+  const siteFor = (prompt: AITask) => {
+    const a = assignments?.[prompt.id];
     if (!a) return null;
     const p = providers?.find((x) => x.id === a.provider_id);
     return p ? `${p.name} / ${a.model_name}` : a.model_name;
@@ -155,10 +171,10 @@ export function UserKeysSection() {
 
   const policyHint =
     policy === "off"
-      ? "Every task runs on your providers. People can't add keys."
+      ? "Every prompt runs on your providers. People can't add keys."
       : policy === "optional"
-        ? "People may add their own key. Tasks they start use it, and fall back to your providers if their key is missing, failing or over its cap."
-        : "People must use their own key for the tasks they start. Without a working one, the task is refused.";
+        ? "People may add their own key. Prompts they run themselves use it, and fall back to your providers if their key is missing, failing or over its cap."
+        : "People must use their own key for the prompts they run themselves. Without a working one, the prompt is refused.";
 
   return (
     <div className={ai.section}>
@@ -201,6 +217,7 @@ export function UserKeysSection() {
                 tone={on ? "toned" : "outline"}
                 tint={on ? "var(--success)" : undefined}
                 onClick={() => void toggleType(t)}
+                aria-pressed={on}
                 title={on ? "Allowed — click to disallow" : "Not allowed — click to allow"}
               >
                 {t}
@@ -233,45 +250,42 @@ export function UserKeysSection() {
       </div>
 
       <NumberSetting
-        label="Default monthly cap per user"
-        hint="The starting cap on a person's own keys. Users can lower it, not raise it. 0 = no cap."
-        value={monthly}
-        prefix="$"
-        onSave={(n) => save({ user_ai_default_monthly_usd: n })}
-      />
-      <NumberSetting
         label="Daily request cap per user"
-        hint="Counts calls, not dollars, because Ollama and unpriced models report $0 cost. 0 = no cap."
+        hint="How many calls this server will make on one person's own keys a day. Their key is their money, so this is not a spending limit (they set their own in My AI); it bounds a runaway loop. 0 = no cap."
         value={daily}
         onSave={(n) => save({ user_ai_daily_request_cap: Math.round(n) })}
       />
       <NumberSetting
         label="Site-key allowance per user"
-        hint="Caps how much of your providers one person can use each day for interactive tasks. This works even with user keys off. 0 = unlimited."
+        hint="Caps how much of your providers one person can use each day for interactive prompts. This works even with user keys off. 0 = unlimited."
         value={allowance}
         unit="requests / day"
         onSave={(n) => save({ site_ai_user_daily_requests: Math.round(n) })}
       />
       <NumberSetting
         label="Share link daily limit"
-        hint="AI questions and tasks one public share link may run each day, always on your providers, never the sharer's key. 0 = unlimited."
+        hint="AI questions and prompts one public share link may run each day, always on your providers, never the sharer's key. 0 = unlimited."
         value={shareLimit}
         unit="requests / day"
         onSave={(n) => save({ share_ai_daily_requests: Math.round(n) })}
       />
 
       <div className={ai.sectionHeader} style={{ marginTop: "1.5rem" }}>
-        <h3>Tasks users can route to their own key</h3>
+        <h3>Prompts users can route to their own AI provider</h3>
         <Chip size="sm">
-          {open} of {live.length} live tasks
+          {open} of {live.length} prompts
         </Chip>
       </div>
-      {taskError && <div className={styles.error}>{taskError}</div>}
-      <div className={styles.tableWrap}>
+      {promptError && <div className={styles.error}>{promptError}</div>}
+      <div
+        className={`${styles.tableWrap} ${policy === "off" ? styles.tableOff : ""}`}
+        data-testid="prompt-eligibility"
+        aria-disabled={policy === "off" || undefined}
+      >
         <table className={styles.table}>
           <thead>
             <tr>
-              <th>Task</th>
+              <th>Prompt</th>
               <th>Where it runs</th>
               <th>Site provider</th>
               <th className={styles.right}>User keys</th>
@@ -295,10 +309,10 @@ export function UserKeysSection() {
                         checked={t.allows_user_provider}
                         aria-label={t.display_name}
                         onChange={(e) => {
-                          setTaskError(null);
-                          updateTask.mutate(
+                          setPromptError(null);
+                          updatePrompt.mutate(
                             { taskId: t.id, allows_user_provider: e.target.checked },
-                            { onError: (err) => setTaskError(apiErrorInfo(err).message) },
+                            { onError: (err) => setPromptError(apiErrorInfo(err).message) },
                           );
                         }}
                       />
@@ -312,7 +326,7 @@ export function UserKeysSection() {
         </table>
       </div>
       <p className={styles.footnote}>
-        Locked tasks write results that the whole instance reads, such as entity links, briefs and story spines. They
+        Locked prompts write results that the whole instance reads, such as entity links, briefs and story spines. They
         always run on your providers.
       </p>
 
@@ -321,45 +335,57 @@ export function UserKeysSection() {
         <Chip size="sm">{userKeys?.length ?? 0}</Chip>
       </div>
       <div className={styles.keyList}>
-        {(userKeys ?? []).map((k) => (
-          <div key={k.id} className={`${styles.key} ${!k.is_active ? styles.keyOff : ""}`}>
-            <div className={styles.keyLeft}>
-              <span className={styles.owner}>{k.owner_username}</span>
-              <span className={styles.keyName}>{k.name}</span>
-              <Chip size="sm">{k.provider_type}</Chip>
-              {k.base_url && <span className={styles.keyUrl}>{k.base_url.replace(/^https?:\/\//, "")}</span>}
-              {!k.is_active && <Chip size="sm" tone="quiet">disabled</Chip>}
+        {(userKeys ?? []).map((k) => {
+          const isPaused = !!k.paused_until && new Date(k.paused_until) > new Date();
+          return (
+            <div key={k.id} className={`${styles.key} ${!k.is_active ? styles.keyOff : ""}`}>
+              <div className={styles.keyLeft}>
+                <span className={styles.owner}>{k.owner_username}</span>
+                <span className={styles.keyName}>{k.name}</span>
+                <Chip size="sm">{k.provider_type}</Chip>
+                {k.base_url && <span className={styles.keyUrl}>{k.base_url.replace(/^https?:\/\//, "")}</span>}
+                {!k.is_active && <Chip size="sm" tone="quiet">disabled</Chip>}
+                {isPaused && (
+                  <Chip size="sm" tone="toned" tint="var(--warning)" title={k.paused_reason ?? "Paused after a rate-limit response"}>
+                    paused
+                  </Chip>
+                )}
+              </div>
+              <div className={styles.keyActions}>
+                {isPaused && (
+                  <button
+                    className={page.btnSmall}
+                    onClick={() => resumeProvider.mutate(k.id)}
+                    disabled={resumeProvider.isPending}
+                    title="Clear the pause so the owner's key answers again"
+                  >
+                    Resume
+                  </button>
+                )}
+                <button
+                  className={page.btnSmall}
+                  onClick={() => updateProvider.mutate({ id: k.id, is_active: !k.is_active })}
+                  title="Disable or enable this key without touching it"
+                >
+                  {k.is_active ? "Disable" : "Enable"}
+                </button>
+                <button
+                  className={page.btnDangerSmall}
+                  onClick={() =>
+                    undoableDelete({
+                      label: `${k.owner_username}'s key "${k.name}"`,
+                      key: `ai-provider-${k.id}`,
+                      onDelete: () => deleteProvider.mutate(k.id),
+                    })
+                  }
+                >
+                  Delete
+                </button>
+              </div>
             </div>
-            <div className={styles.keyActions}>
-              <button
-                className={page.btnSmall}
-                onClick={() => updateProvider.mutate({ id: k.id, is_active: !k.is_active })}
-                title="Disable or enable this key without touching it"
-              >
-                {k.is_active ? "Disable" : "Enable"}
-              </button>
-              <button
-                className={page.btnDangerSmall}
-                onClick={() =>
-                  undoableDelete({
-                    label: `${k.owner_username}'s key "${k.name}"`,
-                    key: `ai-provider-${k.id}`,
-                    onDelete: () => deleteProvider.mutate(k.id),
-                  })
-                }
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
         {!userKeys?.length && <div className={styles.empty}>Nobody has added a key yet.</div>}
-      </div>
-
-      <div className={styles.custody}>
-        <b>About custody.</b> User keys are encrypted with this instance's <span className={styles.mono}>ENCRYPTION_KEY</span>.
-        As the admin, you could decrypt them. Users are told this when they add a key. You can disable or delete a key
-        here, but never test or run one: that would call the person's endpoint with the person's key.
       </div>
     </div>
   );

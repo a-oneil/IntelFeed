@@ -1,11 +1,20 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { useAITasks, useRunAIOnEntry, useRunAIOnEntity, useAllTaskAssignments, useAIProviders, useMyAI } from "@/hooks/useAI";
+import {
+  useAITasks,
+  useRunAIOnEntry,
+  useRunAIOnEntity,
+  useAllTaskAssignments,
+  useAIProviders,
+  useMyAI,
+  useMyAIPolicy,
+} from "@/hooks/useAI";
 import { useAuthStore } from "@/stores/authStore";
-import type { AITask } from "@/api/types";
+import type { AITask, UserAIOverview, UserAIPolicyStatus, UserAIPromptRow } from "@/api/types";
 import { estimateTask } from "@/utils/aiTaskEstimate";
-import { apiErrorInfo } from "@/api/errors";
+import { apiErrorInfo, apiErrorReason } from "@/api/errors";
+import { blockedReasonShort, fallbackFixLabel, isCapReason } from "@/utils/aiProvenance";
 import styles from "./AIAnalysisSection.module.css";
 
 // Tasks that need a special UI instead of one-click run (Ask Agent chat lives
@@ -36,6 +45,57 @@ export interface RunTaskResult {
   result: Record<string, unknown>;
   model_name: string | null;
   cost_estimate: string | null;
+  /** Share pages only: what the link may still run today after this call. */
+  remaining_today?: number | null;
+}
+
+/** What a click on a task row does, said before the click. */
+export interface RowRun {
+  /** "user": the person's key; "site": the instance's provider; "refused": the policy stops it. */
+  on: "user" | "site" | "refused";
+  /** Why the person's key can't answer, when it can't (null when it can, or when there is none to speak of). */
+  reason: string | null;
+  /** The personal route that would answer, for the estimate. */
+  route: { provider_id: string; model_name: string | null } | null;
+  /** Whether the row says anything about keys at all (false = plain instance estimate, no dot). */
+  aware: boolean;
+}
+
+/**
+ * Where a click runs, from the overview row when there is one. Without an
+ * overview (the policy says this person has no routes, so it is never
+ * fetched) the policy alone answers: a required key that is missing refuses
+ * every eligible task; otherwise the instance's provider answers quietly.
+ */
+export function rowRun(
+  task: AITask,
+  policy: UserAIPolicyStatus | undefined,
+  overview: UserAIOverview | undefined,
+): RowRun {
+  const none: RowRun = { on: "site", reason: null, route: null, aware: false };
+  if (!policy?.allow_user_ai_providers) return none;
+  const row: UserAIPromptRow | undefined = overview?.policy.allow_user_ai_providers
+    ? overview.tasks.find((t) => t.task_name === task.name)
+    : undefined;
+  if (row) {
+    const myRoute = row.route ?? overview?.default_route ?? null;
+    const routed = !!myRoute && myRoute.provider_id !== null;
+    // Older servers send no verdict; then a routed key is what answers.
+    const on = row.will_run_on ?? (routed ? "user" : "site");
+    const reason = row.blocked_reason ?? null;
+    return {
+      on,
+      reason,
+      route: on === "user" && routed ? { provider_id: myRoute.provider_id as string, model_name: myRoute.model_name } : null,
+      aware: true,
+    };
+  }
+  if (!policy.has_routes && task.allows_user_provider) {
+    return policy.require_user_ai_provider
+      ? { on: "refused", reason: "no_key", route: null, aware: true }
+      : { on: "site", reason: null, route: null, aware: false };
+  }
+  return none;
 }
 
 interface AIAnalysisSectionProps {
@@ -81,16 +141,20 @@ export function AIAnalysisSection({ entryId, entityType, entityId, tasks: tasksP
   const hookRunTask = useRunAIOnEntry();
   const hookRunEntity = useRunAIOnEntity();
   const { data: assignments } = useAllTaskAssignments();
+  // Unfiltered on purpose: the estimate looks up the site assignment's
+  // provider or the person's own key, whichever will answer.
   const { data: providers } = useAIProviders();
   // Which tasks a click would run on the person's own key, so the row says so
-  // before they click. Empty when the admin has personal keys off.
+  // before they click. The policy read is cheap and answers for most people:
+  // personal keys off, or no routes, and the overview is never fetched.
   const signedIn = useAuthStore((s) => !!s.accessToken);
-  const { data: myAI } = useMyAI(signedIn && !runTaskFn);
+  const { data: myPolicy } = useMyAIPolicy(signedIn && !runTaskFn);
+  const { data: myAI } = useMyAI(!!myPolicy?.allow_user_ai_providers && myPolicy.has_routes);
   const qc = useQueryClient();
   // The customize link targets the admin-only Settings > AI section.
   const isAdmin = useAuthStore((s) => s.user?.role === "admin");
   const [localCompleted, setLocalCompleted] = useState<Set<string>>(new Set());
-  const [errors, setErrors] = useState<Record<string, { message: string; code: string | null }>>({});
+  const [errors, setErrors] = useState<Record<string, { message: string; code: string | null; reason: string | null }>>({});
   const [runningTask, setRunningTask] = useState<string | null>(null);
   // Which task's focus field is open, and its current text.
   const [focusOpen, setFocusOpen] = useState<string | null>(null);
@@ -144,7 +208,7 @@ export function AIAnalysisSection({ entryId, entityType, entityId, tasks: tasksP
       onTaskComplete?.(data);
     } catch (err) {
       const info = apiErrorInfo(err);
-      const msg = err instanceof Error ? err.message : "Task failed";
+      const msg = err instanceof Error ? err.message : "Prompt failed";
       let errorText = info.code ? info.message : msg;
       if (!info.code) {
         try {
@@ -156,7 +220,7 @@ export function AIAnalysisSection({ entryId, entityType, entityId, tasks: tasksP
           }
         }
       }
-      setErrors((prev) => ({ ...prev, [taskName]: { message: errorText, code: info.code } }));
+      setErrors((prev) => ({ ...prev, [taskName]: { message: errorText, code: info.code, reason: apiErrorReason(err) } }));
     } finally {
       setRunningTask(null);
     }
@@ -174,21 +238,48 @@ export function AIAnalysisSection({ entryId, entityType, entityId, tasks: tasksP
             <div className={styles.groupLabel}>{group.label}</div>
             {groupTasks.map((task) => {
               const isCompleted = completedTasks?.has(task.name) || localCompleted.has(task.name);
-              const est = estimateTask(task.category, task.name, assignments?.[task.id], providers);
+              // Personal keys on: the row says what a click does before the
+              // click, by the server's own verdict for this task.
+              const run = rowRun(task, myPolicy, myAI);
+              const onMyKey = run.on === "user";
+              const refused = run.on === "refused";
+              // Estimate from whatever will actually answer: the personal key's
+              // provider + model when the click runs there, else the site assignment.
+              const est = estimateTask(
+                task.category,
+                task.name,
+                onMyKey
+                  ? run.route && run.route.model_name
+                    ? { provider_id: run.route.provider_id, model_name: run.route.model_name }
+                    : undefined
+                  : assignments?.[task.id],
+                providers,
+              );
+              const blocked = run.on === "site" ? blockedReasonShort(run.reason) : null;
+              const refusedLabel = refused ? (isCapReason(run.reason) ? "over cap" : "needs a key") : null;
               const canFocus = FOCUSABLE_TASKS.has(task.name);
               const isFocusOpen = focusOpen === task.name;
               const titleParts = [task.description || task.display_name];
-              if (est.unassigned) titleParts.push("Not configured — assign a provider + model in Settings > AI");
-              else if (est.label) titleParts.push(`Estimated ${est.label}`);
-              // Personal keys on: a dot says whose provider a click runs on. A
-              // task's own route wins (an opt-out row has no key); otherwise
-              // the default key, if there is one.
-              const myRow = myAI?.policy.allow_user_ai_providers
-                ? myAI.tasks.find((t) => t.task_name === task.name)
-                : undefined;
-              const onMyKey =
-                !!myRow && (myRow.route ? myRow.route.provider_id !== null : !!myAI?.default_route);
-              if (myRow && !est.unassigned) titleParts.push(onMyKey ? "Runs on your own key" : "Runs on the instance's provider");
+              if (refused) {
+                titleParts.push(
+                  isCapReason(run.reason)
+                    ? "Your key is over its cap and this instance requires your own key"
+                    : "This instance requires your own key for this prompt",
+                );
+              } else if (est.unassigned && !onMyKey) {
+                titleParts.push("Not configured — assign a provider + model in Settings > AI");
+              } else if (est.label) {
+                titleParts.push(`Estimated ${est.label}`);
+              }
+              if (run.aware && !refused && (onMyKey || !est.unassigned)) {
+                titleParts.push(
+                  onMyKey
+                    ? "Runs on your own key"
+                    : blocked
+                      ? `Runs on the instance's provider — your ${blocked}`
+                      : "Runs on the instance's provider",
+                );
+              }
               return (
                 <div key={task.id}>
                   <div className={`${styles.taskRow} ${isCompleted ? styles.taskRowDone : ""}`}>
@@ -205,16 +296,18 @@ export function AIAnalysisSection({ entryId, entityType, entityId, tasks: tasksP
                         {task.display_name}
                         {isCompleted && <span className={styles.check}> &#10003;</span>}
                       </span>
-                      {est.unassigned && !onMyKey ? (
+                      {refused ? (
+                        <span className={`${styles.hint} ${styles.hintWarn}`}>{refusedLabel}</span>
+                      ) : est.unassigned && !onMyKey ? (
                         <span className={styles.hintMuted}>not set</span>
-                      ) : myRow ? (
+                      ) : run.aware ? (
                         <span className={styles.hint}>
                           <span
                             className={`${styles.keyDot} ${onMyKey ? styles.keyDotMine : ""}`}
                             aria-label={onMyKey ? "your key" : "instance"}
                           />
                           {onMyKey ? "your key" : "instance"}
-                          {est.label && !est.unassigned ? ` · ${est.label}` : ""}
+                          {blocked ? ` · ${blocked}` : est.label && !est.unassigned ? ` · ${est.label}` : ""}
                         </span>
                       ) : est.label ? (
                         <span className={styles.hint}>{est.label}</span>
@@ -255,7 +348,7 @@ export function AIAnalysisSection({ entryId, entityType, entityId, tasks: tasksP
                         <>
                           {" "}
                           <Link to="/settings?section=myai" className={styles.hiddenLink}>
-                            Add a key
+                            {fallbackFixLabel(errors[task.name].reason)}
                           </Link>
                         </>
                       )}

@@ -11,6 +11,7 @@ import type {
   AICostSummary,
   AIResult,
   UserAIOverview,
+  UserAIPolicyStatus,
   UserAIRoute,
   AIConversation,
   AIConversationScope,
@@ -60,6 +61,7 @@ export function useCreateAIProvider() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["ai-providers"] });
       qc.invalidateQueries({ queryKey: ["my-ai"] });
+      qc.invalidateQueries({ queryKey: ["copilot-config"] });
     },
   });
 }
@@ -118,6 +120,21 @@ export function useDeleteAIProvider() {
 
 // --- Personal AI (Settings → My AI) ---
 
+export function useMyAIPolicy(enabled = true) {
+  // The cheap read: the admin's policy and whether I have any routes. Keyed
+  // under "my-ai" so every mutation that invalidates the overview refreshes
+  // this too.
+  return useQuery({
+    queryKey: ["my-ai", "policy"],
+    queryFn: async () => {
+      const { data } = await api.get<UserAIPolicyStatus>("/ai/me/policy");
+      return data;
+    },
+    enabled,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 export function useMyAI(enabled = true) {
   return useQuery({
     queryKey: ["my-ai"],
@@ -139,7 +156,10 @@ export function useUpdateMyAIPreferences() {
       const { data } = await api.patch<UserAIOverview>("/ai/me/preferences", body);
       return data;
     },
-    onSuccess: (data) => qc.setQueryData(["my-ai"], data),
+    onSuccess: (data) => {
+      qc.setQueryData(["my-ai"], data);
+      qc.invalidateQueries({ queryKey: ["copilot-config"] });
+    },
   });
 }
 
@@ -227,20 +247,12 @@ export function useResumeAIProvider() {
       const { data } = await api.post<AIProvider>(`/ai/providers/${id}/resume`);
       return data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["ai-providers"] }),
-  });
-}
-
-export function useProviderModels(providerId: string | undefined) {
-  return useQuery({
-    queryKey: ["ai-provider-models", providerId],
-    queryFn: async () => {
-      const { data } = await api.get<string[]>(
-        `/ai/providers/${providerId}/models`
-      );
-      return data;
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["ai-providers"] });
+      // A resumed personal key changes what a click runs on.
+      qc.invalidateQueries({ queryKey: ["my-ai"] });
+      qc.invalidateQueries({ queryKey: ["copilot-config"] });
     },
-    enabled: !!providerId,
   });
 }
 
@@ -529,6 +541,12 @@ export function useRunAIOnEntry() {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["ai-results", data.entry_id] });
     },
+    // Every call, failed ones included, counts toward the personal caps the
+    // My AI overview and the copilot config report.
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["my-ai"] });
+      qc.invalidateQueries({ queryKey: ["copilot-config"] });
+    },
   });
 }
 
@@ -600,6 +618,10 @@ export function useRunAIOnEntity() {
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["ai-results", data.target_type, data.target_id] });
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["my-ai"] });
+      qc.invalidateQueries({ queryKey: ["copilot-config"] });
     },
   });
 }

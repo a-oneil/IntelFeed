@@ -343,7 +343,10 @@ const EMPTY_SEED: CreateSeed = {
 
 export default function PromptWorkspace() {
   const { data: tasks, isLoading } = useAITasks();
-  const { data: providers } = useAIProviders();
+  const { data: allProviders } = useAIProviders();
+  // Site assignments only ever point at the instance's providers; the
+  // caller's personal keys in the same response are not candidates here.
+  const providers = useMemo(() => allProviders?.filter((p) => !p.user_id), [allProviders]);
   const { data: assignments } = useAllTaskAssignments();
   const { data: rulesPage } = useAutomationRules();
   const upsertAssignment = useUpsertTaskAssignment();

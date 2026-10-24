@@ -336,7 +336,7 @@ def _request(host, headers=None):
     return MagicMock(client=MagicMock(host=host), headers=headers or {})
 
 
-async def test_client_ip_trusts_forwarded_header_only_behind_our_proxy():
+async def test_client_ip_trusts_forwarded_header_only_behind_our_proxy(monkeypatch):
     from app.core.rate_limit import client_ip
 
     # Caddy on the Docker network forwards the real client.
@@ -345,6 +345,31 @@ async def test_client_ip_trusts_forwarded_header_only_behind_our_proxy():
     assert client_ip(_request("8.8.4.4", {"x-forwarded-for": "203.0.113.9"})) == "8.8.4.4"
     assert client_ip(_request("172.18.0.5")) == "172.18.0.5"
     assert client_ip(MagicMock(client=None, headers={})) == "unknown"
+    # Behind Cloudflare the forwarded hop is the edge node and CF-Connecting-IP is the
+    # visitor — but only the operator knows the origin accepts the edge alone, so the
+    # header is read only once they name it; on an open origin anyone could send it.
+    spoofed = _request("172.18.0.5", {"cf-connecting-ip": "198.51.100.7", "x-forwarded-for": "104.16.1.1"})
+    assert client_ip(spoofed) == "104.16.1.1"
+    monkeypatch.setattr(env_settings, "trusted_client_ip_header", "CF-Connecting-IP")
+    assert client_ip(spoofed) == "198.51.100.7"
+    assert client_ip(_request("172.18.0.5", {"x-forwarded-for": "104.16.1.1"})) == "104.16.1.1"
+    assert client_ip(_request("8.8.4.4", {"cf-connecting-ip": "198.51.100.7"})) == "8.8.4.4"
+
+
+async def test_limiter_identity_is_a_verified_token_or_the_ip(test_user):
+    """The share routes take no login, so a bearer only names a bucket when its signature checks."""
+    import base64
+    import json
+
+    from app.core.rate_limit import _get_identity
+    from app.core.security import create_access_token
+
+    real = create_access_token(test_user.id, test_user.role)
+    assert _get_identity(_request("203.0.113.9", {"authorization": f"Bearer {real}"})) == f"user:{test_user.id}"
+    forged_payload = base64.urlsafe_b64encode(json.dumps({"sub": str(uuid.uuid4())}).encode()).decode().rstrip("=")
+    forged = f"eyJhbGciOiJIUzI1NiJ9.{forged_payload}.bad"
+    assert _get_identity(_request("203.0.113.9", {"authorization": f"Bearer {forged}"})) == "ip:203.0.113.9"
+    assert _get_identity(_request("203.0.113.9", {"authorization": "Bearer not-a-jwt"})) == "ip:203.0.113.9"
 
 
 # ------------------------------------------------- address ranges + cache
@@ -374,3 +399,37 @@ async def test_resolve_host_caches_for_a_batch(monkeypatch):
     for _ in range(50):
         assert await outbound.resolve_host("hooks.example") == [ipaddress.ip_address("93.184.216.34")]
     assert calls == ["hooks.example"]
+
+
+async def test_resolver_cache_is_bounded_and_remembers_misses(monkeypatch):
+    """Hostnames come from users, so the cache can't grow without bound; a name that resolves
+    to nothing is remembered for the same minute as one that resolves."""
+    import socket
+
+    import app.core.outbound as outbound
+
+    calls: list[str] = []
+
+    async def fake_getaddrinfo(host, *args, **kwargs):
+        calls.append(host)
+        if host == "gone.example":
+            raise socket.gaierror
+        return [(2, 1, 6, "", ("8.8.4.4", 0))]
+
+    loop = MagicMock()
+    loop.getaddrinfo = fake_getaddrinfo
+    monkeypatch.setattr(outbound.asyncio, "get_running_loop", lambda: loop)
+    monkeypatch.setattr(outbound, "_resolved", {})
+    monkeypatch.setattr(outbound, "RESOLVE_CACHE_MAX", 3)
+
+    assert await outbound.resolve_host("gone.example") == []
+    assert await outbound.resolve_host("gone.example") == []
+    assert calls == ["gone.example"]
+    for n in range(5):
+        await outbound.resolve_host(f"h{n}.example")
+    assert len(outbound._resolved) <= 3
+    assert "h4.example" in outbound._resolved
+
+    monkeypatch.setattr(outbound, "RESOLVE_CACHE_SECONDS", 0.0)
+    await outbound.resolve_host("fresh.example")
+    assert set(outbound._resolved) == {"fresh.example"}

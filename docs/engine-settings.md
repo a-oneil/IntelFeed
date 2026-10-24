@@ -69,7 +69,7 @@ environment's own Settings UI.
 | `_ENGINE_SECTION_GROUPS` | `backend/app/services/system_settings.py:1223` | Re-groups engine-owned keys onto Engine console sections, overwriting the `group` above |
 | `SECRET_KEYS` | `system_settings.py:14` | Encrypted at rest, masked on read |
 | `GROUP_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:26` | Group → which console surface renders it; powers the Engine settings search |
-| `KEY_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:52` | Key-level exceptions to `GROUP_DEST` |
+| `KEY_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:68` | Key-level exceptions to `GROUP_DEST` |
 
 Adding a setting means touching all of `config.py` (default), `CONFIGURABLE_KEYS`
 (type), `SETTING_METADATA` (label/description/group), and — if a scheduled job
@@ -576,7 +576,6 @@ they did not exist. The lookup they govern is described in
 | `require_user_ai_provider` | bool, `false` | With personal keys on: refuse an interactive task instead of falling back. Ignored while personal keys are off. |
 | `user_ai_provider_types` | str, `claude,openai_compatible` | Comma-separated types a person may register (`ollama` may be added; `claude_code` never qualifies). Re-checked on every call, so removing a type stops keys already saved. |
 | `user_ai_allow_private_endpoints` | bool, `false` | Let a personal key point at a private address, such as a LAN Ollama. The server resolves the hostname on save and on every call. |
-| `user_ai_default_monthly_usd` | float, `25.0` | Monthly spend cap on one person's own keys. People may set themselves a lower cap, not a higher one. `0` = unlimited. |
 | `user_ai_daily_request_cap` | int, `300` | Requests one person may make on their own keys per UTC day. Counts calls, since Ollama and unpriced models report $0. `0` = unlimited. |
 | `site_ai_user_daily_requests` | int, `0` | Requests one person may make per UTC day on the *instance's* providers for the tasks they start (copilot, rule help, summaries, reports). Background work, automation rules and share links are not counted; failed calls are. `0` = unlimited. |
 | `share_ai_daily_requests` | int, `20` | AI questions and tasks one share link may run per UTC day, across both share routes. Share traffic always uses the instance's providers. `0` = unlimited. |

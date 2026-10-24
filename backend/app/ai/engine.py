@@ -57,9 +57,10 @@ def _count_ai_call(provider_type: str, task_name: str, tokens_in: int, tokens_ou
 
 
 def utc_day_start() -> datetime:
-    """Midnight UTC today: when the per-user allowance, the share-link limit
-    and the dashboard's "today" column all reset. Change it here and they
-    stay on one clock."""
+    """Midnight UTC today: when the per-user allowance, the personal request
+    cap, the share-link limit and the cost dashboard's "today" column reset.
+    (The batch budget, the engine's day stats and the daily summary keep
+    their own midnight-UTC windows and are not tied to this one.)"""
     return datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
 
 
@@ -362,13 +363,15 @@ async def site_requests_today(db: AsyncSession, user_id: uuid.UUID) -> int:
     ).scalar_one()
 
 
-async def enforce_site_allowance(db: AsyncSession, caller: Caller) -> None:
+async def enforce_site_allowance(db: AsyncSession, caller: Caller, *, needed: int = 1) -> None:
     """Refuse a person's call once they have used the day's allowance.
 
     Only ``user`` callers are capped: the pipeline, automation rules and
     share links are the operator's own spend, and a person's own key (once
     one can answer) is not the instance's. Failed calls count — they were
-    requests — so a broken provider cannot be retried for free.
+    requests — so a broken provider cannot be retried for free. ``needed``
+    is how many calls the work ahead will make: a report's pre-flight asks
+    for its section count, so it is refused whole rather than part-way.
     """
     if not caller.is_user or caller.user_id is None:
         return
@@ -378,7 +381,7 @@ async def enforce_site_allowance(db: AsyncSession, caller: Caller) -> None:
     if cap <= 0:
         return
     used = await site_requests_today(db, caller.user_id)
-    if used >= cap:
+    if used + max(needed, 1) > cap:
         raise SiteAllowanceExceeded(cap, used)
 
 
@@ -427,7 +430,7 @@ class UserKeyRequired(AppError):
 
 #: Why a person's key did not answer, in the words the result card shows.
 FALLBACK_REASONS: dict[str, str] = {
-    "no_key": "You have no personal AI key for this task.",
+    "no_key": "You have no personal AI key for this prompt.",
     "key_disabled": "Your personal key is disabled.",
     "key_paused": "Your personal key is paused after a rate-limit response from its provider.",
     "type_not_allowed": "Your personal key's provider type is no longer allowed on this instance.",
@@ -471,47 +474,76 @@ def allowed_personal_types(raw: object) -> set[str]:
     return {name for name in names if name in PERSONAL_PROVIDER_TYPES}
 
 
-async def user_key_spend_month(db: AsyncSession, user_id: uuid.UUID) -> Decimal:
-    """Dollars one person's own keys have spent since the first of the month."""
-    total = (
-        await db.execute(
-            select(func.coalesce(func.sum(AIResult.cost_estimate), 0)).where(
-                AIResult.key_owner_id == user_id,
-                AIResult.created_at >= utc_month_start(),
-            )
-        )
-    ).scalar_one()
-    return Decimal(str(total))
+#: What a personal key with no address is told, on every route that checks.
+NO_ADDRESS_MESSAGE = "A personal key of this type needs the address of your own endpoint"
 
 
-async def user_key_requests_today(db: AsyncSession, user_id: uuid.UUID) -> int:
-    """Calls one person's own keys have taken today, failures included."""
-    return (
+@dataclass(frozen=True, slots=True)
+class EndpointProblem:
+    """Why a personal key may not point where it does.
+
+    ``reason`` is the sentence to show (no trailing period). ``switchable``
+    is True when the admin's private-endpoint switch would allow it, so the
+    message can say who to ask; a bad scheme or an unresolvable name is
+    nobody's switch to flip.
+    """
+
+    reason: str
+    switchable: bool = False
+
+
+async def personal_endpoint_problem(
+    db: AsyncSession, provider_type: str, base_url: str | None
+) -> EndpointProblem | None:
+    """The one rule for where a personal key may point, checked wherever the server
+    is about to contact it: when the key is saved, tested, or routed a call.
+
+    A type that defaults to localhost must carry an address. Any address must
+    pass the outbound check, re-resolved on every call: DNS answers change,
+    and the admin's private-endpoint switch can be turned off after a key
+    was added.
+    """
+    from app.ai.capabilities import LOCALHOST_DEFAULT_TYPES
+    from app.core.outbound import outbound_problem
+    from app.services.system_settings import get_setting
+
+    url = (base_url or "").strip()
+    if not url:
+        return EndpointProblem(NO_ADDRESS_MESSAGE) if provider_type in LOCALHOST_DEFAULT_TYPES else None
+    allow_private = bool(await get_setting("user_ai_allow_private_endpoints", db))
+    problem = await outbound_problem(url, allow_private=allow_private)
+    if problem is None:
+        return None
+    return EndpointProblem(problem.message, switchable=problem.code == "private")
+
+
+async def user_key_usage(db: AsyncSession, user_id: uuid.UUID) -> tuple[Decimal, int]:
+    """One person's own keys: dollars spent since the first of the month, and
+    calls today (failures included). One query, because every routed call
+    checks both caps."""
+    spent, today = (
         await db.execute(
-            select(func.count(AIResult.id)).where(
-                AIResult.key_owner_id == user_id,
-                AIResult.created_at >= utc_day_start(),
-            )
+            select(
+                func.coalesce(func.sum(AIResult.cost_estimate).filter(AIResult.created_at >= utc_month_start()), 0),
+                func.count(AIResult.id).filter(AIResult.created_at >= utc_day_start()),
+            ).where(AIResult.key_owner_id == user_id, AIResult.created_at >= utc_month_start())
         )
-    ).scalar_one()
+    ).one()
+    return Decimal(str(spent)), int(today)
 
 
 async def user_monthly_cap(db: AsyncSession, prefs: UserAIPreferences | None) -> Decimal:
-    """The dollar cap that applies to one person: the admin's default, or
-    their own lower figure. Zero or less means unlimited."""
-    from app.services.system_settings import get_setting
+    """The dollar cap on one person's own keys: their own figure, or none.
 
-    default = Decimal(str(await get_setting("user_ai_default_monthly_usd", db) or 0))
+    Their key is their money, so the admin sets no ceiling on it; the
+    operator's limit on personal keys is the daily request cap. Zero or less
+    means unlimited, which is also what a person with no row has.
+    """
     own = prefs.monthly_cap_usd if prefs is not None else None
-    # A person's own figure must be a real cap: zero is "unlimited" to the
-    # check below, and the API refuses it, but a row that has it is still
-    # read as the default rather than as no cap at all.
-    if own is None or Decimal(str(own)) <= 0:
-        return default
+    if own is None:
+        return Decimal("0")
     own = Decimal(str(own))
-    if default <= 0:
-        return own
-    return min(own, default)
+    return own if own > 0 else Decimal("0")
 
 
 async def _user_route(db: AsyncSession, user_id: uuid.UUID, task_id: uuid.UUID) -> UserAIRoute | None:
@@ -536,14 +568,21 @@ async def _user_route(db: AsyncSession, user_id: uuid.UUID, task_id: uuid.UUID) 
     return rows[0] if rows else None
 
 
-async def _route_blocked(db: AsyncSession, route: UserAIRoute, provider: AIProviderModel) -> str | None:
+async def _route_blocked(
+    db: AsyncSession,
+    route: UserAIRoute,
+    provider: AIProviderModel,
+    prefs: UserAIPreferences | None,
+    usage: tuple[Decimal, int] | None = None,
+) -> str | None:
     """Why this route can't answer right now, or None when it can.
 
     The endpoint is re-checked on every call, not just when the key was
     saved: DNS answers change, and a key's type can stop being allowed
-    after it was added.
+    after it was added. The settings come from the in-process cache, so
+    the cost here is the DNS lookup (cached a minute) and one query for
+    both caps.
     """
-    from app.core.outbound import check_outbound_url
     from app.services.system_settings import get_setting
 
     if not provider.is_active:
@@ -552,21 +591,17 @@ async def _route_blocked(db: AsyncSession, route: UserAIRoute, provider: AIProvi
         return "key_paused"
     if provider.provider_type not in allowed_personal_types(await get_setting("user_ai_provider_types", db)):
         return "type_not_allowed"
-    if provider.base_url:
-        allow_private = bool(await get_setting("user_ai_allow_private_endpoints", db))
-        if await check_outbound_url(provider.base_url, allow_private=allow_private):
-            return "endpoint_blocked"
-    elif provider.provider_type in ("ollama", "openai_compatible"):
-        # No address means the provider's localhost default: the server's own
-        # Ollama under a personal key.
+    if await personal_endpoint_problem(db, provider.provider_type, provider.base_url) is not None:
         return "endpoint_blocked"
 
-    prefs = await db.get(UserAIPreferences, route.user_id)
     cap_usd = await user_monthly_cap(db, prefs)
-    if cap_usd > 0 and await user_key_spend_month(db, route.user_id) >= cap_usd:
-        return "monthly_cap"
     cap_requests = int(await get_setting("user_ai_daily_request_cap", db) or 0)
-    if cap_requests > 0 and await user_key_requests_today(db, route.user_id) >= cap_requests:
+    if cap_usd <= 0 and cap_requests <= 0:
+        return None
+    spent, today = usage if usage is not None else await user_key_usage(db, route.user_id)
+    if cap_usd > 0 and spent >= cap_usd:
+        return "monthly_cap"
+    if cap_requests > 0 and today >= cap_requests:
         return "daily_cap"
     return None
 
@@ -577,6 +612,7 @@ async def resolve_assignment(
     task_name: str,
     *,
     allowance: bool = True,
+    needed: int = 1,
 ) -> Resolved | None:
     """Which provider answers ``task_name`` for ``caller``.
 
@@ -591,7 +627,8 @@ async def resolve_assignment(
     ``allowance`` enforces the site's per-person daily allowance whenever the
     site's provider answers a person's call. ``run_task`` passes False and
     enforces it itself after its dedup guard, so a cached answer costs
-    nothing; every direct caller leaves it on.
+    nothing; every direct caller leaves it on. ``needed`` is the number of
+    calls the work ahead will make (a report's sections).
 
     Returns None when nothing can answer: the task has no site assignment
     and no personal key applies.
@@ -609,7 +646,7 @@ async def resolve_assignment(
     )
     if not personal_ok:
         if site is not None and allowance:
-            await enforce_site_allowance(db, caller)
+            await enforce_site_allowance(db, caller, needed=needed)
         return site
 
     task = (
@@ -621,6 +658,7 @@ async def resolve_assignment(
         return None
 
     blocked: str | None = None
+    prefs: UserAIPreferences | None = None
     route = await _user_route(db, caller.user_id, task.id) if task.allows_user_provider else None
     if route is not None:
         provider = await db.get(AIProviderModel, route.provider_id)
@@ -629,19 +667,21 @@ async def resolve_assignment(
         if provider is None or provider.user_id != caller.user_id:
             route = None
         else:
-            blocked = await _route_blocked(db, route, provider)
+            prefs = await db.get(UserAIPreferences, caller.user_id)
+            blocked = await _route_blocked(db, route, provider, prefs)
             if blocked is None:
                 return Resolved(task, provider, route.model_name, {**provider.config, **route.config}, "user")
 
     required = bool(await get_setting("require_user_ai_provider", db))
     if task.allows_user_provider and (required or route is not None):
         reason = blocked or "no_key"
-        prefs = await db.get(UserAIPreferences, caller.user_id)
+        if prefs is None:
+            prefs = await db.get(UserAIPreferences, caller.user_id)
         fallback = prefs.fallback_to_site if prefs is not None else True
         if required or not fallback:
             message = FALLBACK_REASONS[reason]
             if required:
-                message += " This instance requires a personal key for the tasks you start."
+                message += " This instance requires a personal key for the prompts you run yourself."
             else:
                 message += " You have turned off falling back to the instance's providers."
             raise UserKeyRequired(reason, message)
@@ -653,7 +693,7 @@ async def resolve_assignment(
             raise UserKeyRequired(blocked, FALLBACK_REASONS[blocked])
         return None
     if allowance:
-        await enforce_site_allowance(db, caller)
+        await enforce_site_allowance(db, caller, needed=needed)
     if route is not None:
         return Resolved(
             site.task, site.provider, site.model_name, site.config, "site", fallback_reason=blocked or "no_key"
@@ -661,29 +701,48 @@ async def resolve_assignment(
     return site
 
 
-async def preflight_ai(db: AsyncSession, caller: Caller, task_name: str) -> Resolved | None:
-    """Refuse now what the lookup would refuse later.
+async def _cached_result(
+    db: AsyncSession, task_name: str, target_type: str | None, target_id: uuid.UUID | None
+) -> dict | None:
+    """The current answer for a target, if one exists and is an answer (see run_task's dedup guard)."""
+    if not target_type or not target_id:
+        return None
+    existing = await db.execute(
+        select(AIResult.parsed_result)
+        .join(AITask, AITask.id == AIResult.task_id)
+        .where(
+            AIResult.target_type == target_type,
+            AIResult.target_id == target_id,
+            AITask.name == task_name,
+            AIResult.is_current.is_(True),
+        )
+        .limit(1)
+    )
+    cached = existing.scalar_one_or_none()
+    if isinstance(cached, dict) and "_error" not in cached:
+        return cached
+    return None
 
-    For work that runs in a worker (a report), so the person gets the 429 or
-    the key-required error before anything is queued, not part-way through.
-    """
-    return await resolve_assignment(db, caller, task_name)
 
+async def preflight_report(db: AsyncSession, caller: Caller, template_type: str, *, sections: int = 1) -> None:
+    """Refuse now what the worker's lookup would refuse later.
 
-async def preflight_report(db: AsyncSession, caller: Caller, template_type: str) -> None:
-    """The report pre-flight, on the task the worker will actually run.
-
-    Sections run on the template's own task (report_section_exposure, ...)
-    and fall back to the generic report_section only when that task has no
-    provider, so the check follows the same order; checking the generic task
-    alone would refuse a person whose key is routed to the family task, or
-    pass one whose family task the admin has closed.
+    A report runs in a worker, so the person gets the 429 or the key-required
+    error before anything is written or queued, not part-way through.
+    ``sections`` is how many narrative sections the worker will generate: the
+    site allowance is checked for all of them at once, so a report never
+    starts that cannot finish today. Sections run on the template's own task
+    (report_section_exposure, ...) and fall back to the generic
+    report_section only when that task has no provider, so the check follows
+    the same order; checking the generic task alone would refuse a person
+    whose key is routed to the family task, or pass one whose family task the
+    admin has closed.
     """
     from app.intelligence.reporting import REPORT_SECTION_TASKS
 
     task_name = REPORT_SECTION_TASKS.get(template_type, "report_section")
-    if await preflight_ai(db, caller, task_name) is None and task_name != "report_section":
-        await preflight_ai(db, caller, "report_section")
+    if await resolve_assignment(db, caller, task_name, needed=sections) is None and task_name != "report_section":
+        await resolve_assignment(db, caller, "report_section", needed=sections)
 
 
 class UnsupportedProviderTypeError(ValueError):
@@ -713,6 +772,10 @@ def _get_provider_instance(
         api_key = decrypt_value(provider_model.api_key_encrypted)
 
     merged_config = {**(provider_model.config or {}), **(extra_config or {})}
+    if provider_model.user_id is not None:
+        # A personal key points wherever its owner said; the outbound check
+        # vetted that host, and the client must not be redirected past it.
+        merged_config.setdefault("follow_redirects", False)
 
     provider_type = (provider_model.provider_type or "claude").lower()
     if provider_type == "claude":
@@ -868,7 +931,15 @@ async def run_task(
 
     if caller is None:
         caller = current_caller.get() or await derive_caller(db, user_id)
-    resolved = await resolve_assignment(db, caller, task_name, allowance=False)
+    try:
+        resolved = await resolve_assignment(db, caller, task_name, allowance=False)
+    except UserKeyRequired:
+        # The policy refuses a new call, but an answer that is already there
+        # costs nobody anything: serve it, as the dedup guard below would.
+        cached = await _cached_result(db, task_name, target_type, target_id) if not force else None
+        if cached is not None:
+            return cached
+        raise
     if resolved is None:
         return None
 

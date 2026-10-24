@@ -47,6 +47,11 @@ export function useUpdateSystemSettings() {
       // Surfaces that summarize settings (Engine › Publishing policy line)
       // read their own endpoints — refresh them with the save.
       qc.invalidateQueries({ queryKey: ["publish-status"] });
+      // The personal-key policy is a system setting too: My AI, the reader
+      // panel's key dots and the copilot header all read it from their own
+      // endpoints.
+      qc.invalidateQueries({ queryKey: ["my-ai"] });
+      qc.invalidateQueries({ queryKey: ["copilot-config"] });
     },
   });
 }
@@ -60,8 +65,11 @@ export function useResetSystemSetting() {
       );
       return data;
     },
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: ["system-settings"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["system-settings"] });
+      qc.invalidateQueries({ queryKey: ["my-ai"] });
+      qc.invalidateQueries({ queryKey: ["copilot-config"] });
+    },
   });
 }
 

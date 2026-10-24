@@ -9,6 +9,7 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
+from app.ai.caller import Caller
 from app.core.exceptions import AppError
 from app.core.security import get_admin_user, get_current_user
 from app.database import get_db
@@ -67,6 +68,12 @@ def _to_response(r: AIResult) -> dict:
         "tokens_output": r.tokens_output,
         "cost_estimate": r.cost_estimate,
         "processing_time_ms": r.processing_time_ms,
+        # Who asked and who answered: the cards' provider chip and
+        # "your key" label read these, so every reader route carries them.
+        "caller_kind": r.caller_kind,
+        "user_id": r.user_id,
+        "key_owner_id": r.key_owner_id,
+        "provider_name": r.provider_name,
         "created_at": r.created_at,
     }
 
@@ -187,6 +194,7 @@ async def run_ai_on_entity(
     parsed = await run_task(
         db=db,
         user_id=user.id,
+        caller=Caller.user(user.id),
         task_name=body.task_name,
         variables=variables,
         entry_id=target_id if target_type == "entry" else None,

@@ -768,8 +768,8 @@ function ReaderTypographySettings() {
         >
           <option value={13}>13px — Small</option>
           <option value={14}>14px</option>
-          <option value={15}>15px</option>
-          <option value={16}>16px — Default</option>
+          <option value={15}>15px — Default</option>
+          <option value={16}>16px</option>
           <option value={18}>18px</option>
           <option value={20}>20px — Large</option>
         </select>
@@ -808,9 +808,9 @@ function ReaderTypographySettings() {
           onChange={(e) => setMaxWidth(Number(e.target.value) as ReaderMaxWidth)}
         >
           <option value={600}>Narrow (600px)</option>
-          <option value={720}>Default (720px)</option>
+          <option value={720}>Medium (720px)</option>
           <option value={860}>Wide (860px)</option>
-          <option value={1000}>Extra wide (1000px)</option>
+          <option value={1000}>Extra wide (1000px) — Default</option>
           <option value={0}>Full width</option>
         </select>
       </div>

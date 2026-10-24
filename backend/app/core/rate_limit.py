@@ -1,4 +1,5 @@
 import ipaddress
+import re
 import time
 
 import redis.exceptions
@@ -29,6 +30,8 @@ AUTH_LIMIT = (10, 300)  # 10 req/5 min — prevents brute force
 CHAT_LIMIT = (10, 60)  # 10 req/min — protects API credits
 AI_LIMIT = (20, 60)  # 20 req/min
 
+_PROVIDER_TEST = re.compile(r"^/api/ai/providers/[0-9a-fA-F-]{36}/test$")
+
 
 def _get_limit(path: str, method: str = "GET") -> tuple[int, int, str] | None:
     """Return (max_requests, window_seconds, bucket_name), or None to skip rate limiting."""
@@ -36,6 +39,11 @@ def _get_limit(path: str, method: str = "GET") -> tuple[int, int, str] | None:
         return (*AUTH_LIMIT, "auth")
     if method == "POST" and path == CHAT_POST_PATH:
         return (*CHAT_LIMIT, "chat")
+    # Creating a provider with ?test=true and testing one make the server
+    # open a connection to whatever address the row names, and any signed-in
+    # person may do both for a personal key: budget them like inference.
+    if method == "POST" and (path == "/api/ai/providers" or _PROVIDER_TEST.match(path)):
+        return (*AI_LIMIT, "ai")
     if path.startswith(AI_PATH_PREFIX) and not path.startswith(AI_EXEMPT_PREFIXES):
         return (*AI_LIMIT, "ai")
     # The share page's AI calls need no login, so the only identity is the
@@ -51,24 +59,25 @@ def _get_limit(path: str, method: str = "GET") -> tuple[int, int, str] | None:
 
 
 def _get_identity(request: Request) -> str:
-    """Extract rate limit identity: JWT sub claim or client IP."""
+    """Extract rate limit identity: the sub of a *verified* JWT, else the client IP.
+
+    The signature is checked here, not just the payload: the share page's
+    AI routes take no login, so an unverified bearer would let a caller
+    mint a fresh bucket per request and never meet the per-minute limit.
+    """
     auth = request.headers.get("authorization", "")
     if auth.startswith("Bearer "):
-        token = auth[7:]
-        # Decode just the payload without verification for identity extraction
-        # (auth middleware handles actual verification)
-        try:
-            import base64
-            import json
+        import jwt
 
-            payload_b64 = token.split(".")[1]
-            # Add padding
-            payload_b64 += "=" * (4 - len(payload_b64) % 4)
-            payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+        from app.config import settings
+        from app.core.security import ALGORITHM
+
+        try:
+            payload = jwt.decode(auth[7:], settings.secret_key, algorithms=[ALGORITHM])
             sub = payload.get("sub")
             if sub:
                 return f"user:{sub}"
-        except Exception:
+        except jwt.PyJWTError:
             pass
 
     return f"ip:{client_ip(request)}"
@@ -77,27 +86,34 @@ def _get_identity(request: Request) -> str:
 def client_ip(request: Request) -> str:
     """The address of whoever is really calling.
 
-    In prod the direct peer is always Caddy on the Docker network, and
+    In prod the direct peer is always the proxy on the Docker network, and
     nothing in the stack sets forwarded_allow_ips, so request.client is
     the proxy for every visitor and every anonymous bucket (login, the
     share page's AI calls) would be one shared bucket. When the direct
-    peer is on a private network — our proxy, or the dev server — trust
-    the first X-Forwarded-For hop; a public direct peer is the client.
+    peer is on a private network — our proxy, or the dev server — the
+    first X-Forwarded-For hop is the client: Caddy strips the incoming
+    header and writes its own peer there, so it can't be forged. Behind
+    Cloudflare that hop is the edge node, shared by every visitor through
+    it; the operator names the edge's own header (``CF-Connecting-IP``) in
+    ``trusted_client_ip_header`` once the origin accepts the edge alone,
+    and it is read first. A public direct peer is the client.
     """
+    from app.config import settings
     from app.core.outbound import is_public
 
     client = request.client
     host = client.host if client else None
-    forwarded = request.headers.get("x-forwarded-for", "")
-    if host and forwarded:
+    if host:
         try:
             direct_is_proxy = not is_public(ipaddress.ip_address(host))
         except ValueError:
             direct_is_proxy = False
         if direct_is_proxy:
-            first = forwarded.split(",")[0].strip()
-            if first:
-                return first
+            trusted = (settings.trusted_client_ip_header or "").strip().lower()
+            for header in (trusted, "x-forwarded-for") if trusted else ("x-forwarded-for",):
+                first = request.headers.get(header, "").split(",")[0].strip()
+                if first:
+                    return first
     return host or "unknown"
 
 

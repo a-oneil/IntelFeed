@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -96,6 +97,9 @@ class AIProviderResponse(BaseModel):
     supports_tools: bool = False
     paused_until: datetime | None = None
     paused_reason: str | None = None
+    # Outcome of the last connectivity test; error None = it passed.
+    last_tested_at: datetime | None = None
+    last_test_error: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -507,8 +511,9 @@ class UserAIRouteResponse(BaseModel):
 
 class UserAIPreferencesUpdate(BaseModel):
     fallback_to_site: bool | None = None
-    # Explicit null = back to the admin's default. Must not exceed it, and
-    # must be a real cap: zero would read as "unlimited".
+    # The person's own monthly cap on their keys' spend; the admin sets none.
+    # Explicit null = no cap. Must be a real cap: zero would read as
+    # "unlimited" too, so it is refused rather than stored.
     monthly_cap_usd: Decimal | None = Field(default=None, gt=0)
 
 
@@ -519,9 +524,18 @@ class UserAIPolicy(BaseModel):
     require_user_ai_provider: bool
     provider_types: list[str]
     allow_private_endpoints: bool
-    default_monthly_usd: Decimal
     daily_request_cap: int
     site_allowance_per_user: int
+
+
+class UserAIPolicyStatus(UserAIPolicy):
+    """The policy plus whether this person has set up any routing.
+
+    What a reader panel needs to decide whether personal keys can touch
+    the tasks it shows, before it pays for the full overview.
+    """
+
+    has_routes: bool
 
 
 class UserAIKeyUsage(BaseModel):
@@ -557,6 +571,12 @@ class UserAITaskRow(BaseModel):
     site_model_name: str | None
     route: UserAIRouteResponse | None
     month_cost: Decimal
+    # What a click would do right now, by the same rule as the lookup: the
+    # person's key answers ("user"), the instance's provider does ("site",
+    # with ``blocked_reason`` set when a key of theirs could not), or the
+    # call is refused ("refused": Required policy, or fallback turned off).
+    will_run_on: Literal["user", "site", "refused"] = "site"
+    blocked_reason: str | None = None
 
 
 class UserAIOverview(BaseModel):
