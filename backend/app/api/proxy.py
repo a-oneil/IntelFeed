@@ -1,7 +1,5 @@
 import hashlib
 import logging
-import socket
-from ipaddress import ip_address, ip_network
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -10,28 +8,74 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
 
 from app.config import settings
+from app.core.safe_http import OutboundBlocked, safe_async_client, safe_curl_get
 from app.core.security import get_current_user
 from app.models.user import User
-
-_BLOCKED_NETWORKS = [
-    ip_network("0.0.0.0/8"),
-    ip_network("10.0.0.0/8"),
-    ip_network("100.64.0.0/10"),
-    ip_network("127.0.0.0/8"),
-    ip_network("169.254.0.0/16"),
-    ip_network("172.16.0.0/12"),
-    ip_network("192.0.0.0/24"),
-    ip_network("192.168.0.0/16"),
-    ip_network("198.18.0.0/15"),
-    ip_network("::1/128"),
-    ip_network("fc00::/7"),
-    ip_network("fe80::/10"),
-]
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml"}
+
+# Every proxied image is served from the app's own origin. As an <img> nothing
+# in it runs, but opened directly an SVG is a document; this keeps it inert.
+_IMAGE_HEADERS = {"X-Content-Type-Options": "nosniff", "Content-Security-Policy": "sandbox; default-src 'none'"}
+
+
+class _FetchFailed(Exception):
+    def __init__(self, status: int):
+        super().__init__(status)
+        self.status = status
+
+
+async def _fetch_image(url: str, referer: str, max_bytes: int) -> tuple[bytes, str]:
+    """The image at ``url`` and its content type, or _FetchFailed(status).
+
+    Both clients are the SSRF-guarded ones: every connection, redirects
+    included, goes to a vetted public address (400 when one is refused). The
+    body is streamed and abandoned past ``max_bytes`` (413), and anything that
+    is not an allowed image type is refused (415) before it is read.
+    """
+    headers = {"User-Agent": str(settings.get("user_agent") or settings.user_agent), "Referer": referer}
+    try:
+        async with safe_async_client(follow_redirects=True, timeout=10.0, headers=headers) as client:
+            async with client.stream("GET", url) as response:
+                if response.status_code == 200:
+                    content_type = response.headers.get("content-type", "").split(";")[0].strip()
+                    if content_type not in ALLOWED_CONTENT_TYPES:
+                        raise _FetchFailed(415)
+                    declared = response.headers.get("content-length", "")
+                    if declared.isdigit() and int(declared) > max_bytes:
+                        raise _FetchFailed(413)
+                    body = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        body += chunk
+                        if len(body) > max_bytes:
+                            raise _FetchFailed(413)
+                    return bytes(body), content_type
+                if response.status_code not in (403, 429, 503):
+                    raise _FetchFailed(502)
+    except OutboundBlocked:
+        raise _FetchFailed(400) from None
+    except httpx.HTTPError:
+        raise _FetchFailed(502) from None
+
+    # 403/429/503: likely a bot challenge. Retry with browser impersonation.
+    try:
+        cffi_resp = await safe_curl_get(url, impersonate="chrome", timeout=15, headers={"Referer": referer})
+    except OutboundBlocked:
+        raise _FetchFailed(400) from None
+    except Exception:
+        logger.debug("curl_cffi fallback failed for %s", url, exc_info=True)
+        raise _FetchFailed(502) from None
+    if cffi_resp.status_code != 200:
+        raise _FetchFailed(502)
+    content_type = cffi_resp.headers.get("content-type", "").split(";")[0].strip()
+    if content_type not in ALLOWED_CONTENT_TYPES:
+        raise _FetchFailed(415)
+    if len(cffi_resp.content) > max_bytes:
+        raise _FetchFailed(413)
+    return cffi_resp.content, content_type
 
 
 def _cache_path(url: str) -> Path:
@@ -74,19 +118,9 @@ async def proxy_image(
     if not settings.get("image_proxy_enabled"):
         return Response(status_code=404)
 
-    # Validate URL scheme and block private/reserved IPs (SSRF protection)
+    # Scheme here; the address check runs on every connection in _fetch_image.
     parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        return Response(status_code=400)
-
-    try:
-        hostname = parsed.hostname or ""
-        resolved_ips = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
-        for _, _, _, _, addr in resolved_ips:
-            ip = ip_address(addr[0])
-            if any(ip in net for net in _BLOCKED_NETWORKS):
-                return Response(status_code=400)
-    except (socket.gaierror, ValueError):
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
         return Response(status_code=400)
 
     # Build a cache key that includes the resize width
@@ -101,95 +135,58 @@ async def proxy_image(
             media_type=content_type,
             headers={
                 "Cache-Control": f"public, max-age={int(settings.get('image_proxy_cache_ttl_days') or 0) * 86400}",
-                "X-Content-Type-Options": "nosniff",
+                **_IMAGE_HEADERS,
             },
         )
 
     referer = f"{parsed.scheme}://{parsed.netloc}/"
 
-    async with httpx.AsyncClient(
-        follow_redirects=True,
-        timeout=10.0,
-        headers={"User-Agent": str(settings.get("user_agent") or settings.user_agent), "Referer": referer},
-    ) as client:
+    max_bytes = int(settings.get("image_proxy_max_size_bytes") or settings.image_proxy_max_size_bytes)
+    try:
+        content, content_type = await _fetch_image(url, referer, max_bytes)
+    except _FetchFailed as e:
+        return Response(status_code=e.status)
+
+    # Detect and block tracking pixels (1x1 images)
+    if len(content) < 100:
         try:
-            response = await client.get(url)
-            response.raise_for_status()
-            content = response.content
-            content_type = response.headers.get("content-type", "").split(";")[0].strip()
-        except httpx.HTTPError as e:
-            status = getattr(getattr(e, "response", None), "status_code", None)
-            if status not in (403, 429, 503):
-                return Response(status_code=502)
-            # Likely a bot challenge — retry with curl_cffi browser impersonation.
-            try:
-                import asyncio
+            from io import BytesIO
 
-                from curl_cffi import requests as cffi_requests
+            from PIL import Image
 
-                def _fetch():
-                    return cffi_requests.get(
-                        url,
-                        impersonate="chrome",
-                        timeout=15,
-                        headers={"Referer": referer},
-                    )
+            img = Image.open(BytesIO(content))
+            if img.size[0] <= 1 and img.size[1] <= 1:
+                return Response(status_code=204)
+        except Exception:
+            pass
 
-                cffi_resp = await asyncio.to_thread(_fetch)
-                if cffi_resp.status_code != 200:
-                    return Response(status_code=502)
-                content = cffi_resp.content
-                content_type = cffi_resp.headers.get("content-type", "").split(";")[0].strip()
-            except Exception:
-                logger.debug("curl_cffi fallback failed for %s", url, exc_info=True)
-                return Response(status_code=502)
+    # Resize if requested
+    if w and content_type != "image/svg+xml":
+        try:
+            from io import BytesIO
 
-        if content_type not in ALLOWED_CONTENT_TYPES:
-            return Response(status_code=415)
+            from PIL import Image
 
-        if len(content) > int(settings.get("image_proxy_max_size_bytes") or settings.image_proxy_max_size_bytes):
-            return Response(status_code=413)
+            img = Image.open(BytesIO(content))
+            if img.width > w:
+                ratio = w / img.width
+                new_height = int(img.height * ratio)
+                img = img.resize((w, new_height), Image.LANCZOS)
+                buf = BytesIO()
+                fmt = "JPEG" if content_type == "image/jpeg" else "PNG"
+                img.save(buf, format=fmt)
+                content = buf.getvalue()
+        except Exception:
+            pass
 
-        # Detect and block tracking pixels (1x1 images)
-        if len(content) < 100:
-            try:
-                from io import BytesIO
+    # Write to disk cache
+    _write_cache(cache_url, content, content_type)
 
-                from PIL import Image
-
-                img = Image.open(BytesIO(content))
-                if img.size[0] <= 1 and img.size[1] <= 1:
-                    return Response(status_code=204)
-            except Exception:
-                pass
-
-        # Resize if requested
-        if w and content_type != "image/svg+xml":
-            try:
-                from io import BytesIO
-
-                from PIL import Image
-
-                img = Image.open(BytesIO(content))
-                if img.width > w:
-                    ratio = w / img.width
-                    new_height = int(img.height * ratio)
-                    img = img.resize((w, new_height), Image.LANCZOS)
-                    buf = BytesIO()
-                    fmt = "JPEG" if content_type == "image/jpeg" else "PNG"
-                    img.save(buf, format=fmt)
-                    content = buf.getvalue()
-            except Exception:
-                pass
-
-        # Write to disk cache
-        _write_cache(cache_url, content, content_type)
-
-        return Response(
-            content=content,
-            media_type=content_type,
-            headers={
-                "Cache-Control": f"public, max-age={int(settings.get('image_proxy_cache_ttl_days') or 0) * 86400}",
-                "X-Content-Type-Options": "nosniff",
-            },
-        )
+    return Response(
+        content=content,
+        media_type=content_type,
+        headers={
+            "Cache-Control": f"public, max-age={int(settings.get('image_proxy_cache_ttl_days') or 0) * 86400}",
+            **_IMAGE_HEADERS,
+        },
+    )

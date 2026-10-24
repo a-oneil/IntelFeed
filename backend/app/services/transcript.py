@@ -3,9 +3,8 @@
 import logging
 import re
 
-import httpx
-
 from app.config import settings
+from app.core.safe_http import safe_async_client
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +16,11 @@ _TIMESTAMP_RE = re.compile(
 _SEQUENCE_RE = re.compile(r"^\d+\s*$", re.MULTILINE)
 _VTT_HEADER_RE = re.compile(r"^WEBVTT.*$", re.MULTILINE)
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+# The URL comes from a feed (<podcast:transcript>), so it is fetched through the
+# SSRF-guarded client, read only up to this size, and only kept when it is text.
+_MAX_TRANSCRIPT_BYTES = 2 * 1024 * 1024
+_TRANSCRIPT_TYPES = ("text/", "application/x-subrip", "application/srt", "application/vtt")
 
 
 def parse_transcript(text: str) -> str:
@@ -45,17 +49,26 @@ async def fetch_transcript(url: str) -> str | None:
     Returns None if fetching or parsing fails.
     """
     try:
-        async with httpx.AsyncClient(
+        async with safe_async_client(
             follow_redirects=True,
             timeout=15.0,
             headers={"User-Agent": str(settings.get("user_agent") or settings.user_agent)},
         ) as client:
-            response = await client.get(url)
-            if response.status_code != 200:
-                logger.debug(f"Transcript fetch returned {response.status_code}: {url}")
-                return None
-
-            text = response.text
+            async with client.stream("GET", url) as response:
+                if response.status_code != 200:
+                    logger.debug(f"Transcript fetch returned {response.status_code}: {url}")
+                    return None
+                content_type = response.headers.get("content-type", "").lower()
+                if content_type and not content_type.startswith(_TRANSCRIPT_TYPES):
+                    logger.debug("Transcript at %s is %s, not text; skipped", url, content_type)
+                    return None
+                body = bytearray()
+                async for chunk in response.aiter_bytes():
+                    body += chunk
+                    if len(body) > _MAX_TRANSCRIPT_BYTES:
+                        logger.debug("Transcript at %s is over %d bytes; skipped", url, _MAX_TRANSCRIPT_BYTES)
+                        return None
+                text = body.decode(response.encoding or "utf-8", errors="replace")
             if not text or len(text) < 10:
                 return None
 

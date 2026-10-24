@@ -7,11 +7,11 @@ import re
 from datetime import UTC, datetime
 from urllib.parse import urljoin, urlparse
 
-import httpx
 from lxml import html as lxml_html
 
 from app.adapters.base import ExtendedAdapter, ParsedEntry, ParsedFeedMeta
 from app.config import settings
+from app.core.safe_http import safe_async_client, safe_curl_get
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +186,7 @@ class WebScraperAdapter(ExtendedAdapter):
             return None
 
         try:
-            async with httpx.AsyncClient(
+            async with safe_async_client(
                 follow_redirects=True,
                 timeout=20.0,
                 headers={"User-Agent": str(settings.get("user_agent") or settings.user_agent)},
@@ -202,9 +202,7 @@ class WebScraperAdapter(ExtendedAdapter):
 
             # Fallback to curl_cffi for bot protection
             try:
-                from curl_cffi import requests as cffi_requests
-
-                resp = cffi_requests.get(url, impersonate="chrome", timeout=20)
+                resp = await safe_curl_get(url, impersonate="chrome", timeout=20)
                 if resp.status_code == 200 and "html" in resp.headers.get("content-type", ""):
                     return resp.text
             except Exception as e:

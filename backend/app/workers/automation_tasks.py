@@ -446,7 +446,6 @@ async def _run_scheduled_automations():
 
 async def _execute_scheduled_notification(action: dict, rule, now) -> dict:
     """Execute a notification/webhook action for a scheduled rule without a target entry."""
-    import httpx
 
     action_type = action.get("type", "")
     config = action.get("config", {})
@@ -471,7 +470,9 @@ async def _execute_scheduled_notification(action: dict, rule, now) -> dict:
 
     try:
         headers = config.get("headers", {})
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        from app.automation.actions import _webhook_client
+
+        async with _webhook_client(timeout=15.0) as client:
             response = await client.post(url, json=payload, headers=headers)
             status = "success" if response.status_code < 300 else "error"
             return {"type": action_type, "status": status, "http_status": response.status_code}

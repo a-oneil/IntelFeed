@@ -404,6 +404,11 @@ class Settings(BaseSettings):
 
     # Webhooks
     webhook_allow_private_networks: bool = True
+    # Feeds, full-article fetches, transcripts, manual ingest, the image proxy
+    # and other user-supplied URLs (app/core/safe_http.py). Off: only public
+    # addresses. On: private ranges too, for an instance that reads feeds from
+    # its own LAN. Loopback and link-local (cloud metadata) are refused either way.
+    outbound_allow_private_networks: bool = False
     # Header a trusted edge sets to the visitor's address (Cloudflare:
     # "CF-Connecting-IP"), read only when the direct peer is on a private
     # network. Set it when the origin accepts traffic from that edge alone;

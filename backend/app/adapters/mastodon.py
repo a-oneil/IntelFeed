@@ -4,9 +4,8 @@ import hashlib
 import logging
 from datetime import datetime
 
-import httpx
-
 from app.adapters.base import ExtendedAdapter, ParsedEntry, ParsedFeedMeta
+from app.core.safe_http import safe_async_client
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +62,7 @@ class MastodonAdapter(ExtendedAdapter):
         if since:
             params["since_id"] = "0"
 
-        async with httpx.AsyncClient(timeout=30.0, headers=headers) as client:
+        async with safe_async_client(timeout=30.0, headers=headers) as client:
             response = await client.get(url, params=params)
             if response.status_code != 200:
                 logger.warning(f"Mastodon API returned {response.status_code} for account {account_id}")
@@ -79,7 +78,7 @@ class MastodonAdapter(ExtendedAdapter):
         url = f"{instance_url}/api/v1/timelines/tag/{hashtag}"
         params: dict = {"limit": limit}
 
-        async with httpx.AsyncClient(timeout=30.0, headers=headers) as client:
+        async with safe_async_client(timeout=30.0, headers=headers) as client:
             response = await client.get(url, params=params)
             if response.status_code != 200:
                 logger.warning(f"Mastodon API returned {response.status_code} for #{hashtag}")

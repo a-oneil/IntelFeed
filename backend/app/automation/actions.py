@@ -22,7 +22,6 @@ import re
 import uuid
 from datetime import UTC, datetime
 
-import httpx
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,6 +43,17 @@ async def _validate_webhook_url(url: str) -> str | None:
     from app.core.outbound import check_outbound_url
 
     return await check_outbound_url(url, allow_private=settings.webhook_allow_private_networks)
+
+
+def _webhook_client(**kwargs):
+    """The client every webhook is sent with. _validate_webhook_url gives the
+    user a readable refusal up front; this enforces the same rule on the
+    connection itself, so a hostname that re-resolves after the check (DNS
+    rebinding) cannot land the POST somewhere else. Redirects are not followed."""
+    from app.config import settings
+    from app.core.safe_http import safe_async_client
+
+    return safe_async_client(allow_private=settings.webhook_allow_private_networks, **kwargs)
 
 
 async def observable_template_context(db: AsyncSession, entry: Entry) -> dict:
@@ -791,7 +801,7 @@ async def _action_send_notification(entry: Entry, config: dict, context: dict | 
         # Custom: send structured JSON with all data
         payload = _build_custom_payload(entry, message_text, channel, ctx)
 
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    async with _webhook_client(timeout=15.0) as client:
         response = await client.post(webhook_url, json=payload)
         if response.status_code < 300:
             return {
@@ -1204,7 +1214,7 @@ async def _action_send_notification_batch(
         if channel:
             payloads[0]["channel"] = channel
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with _webhook_client(timeout=30.0) as client:
         for i, payload in enumerate(payloads):
             # Respect webhook rate limits when fanning out: Slack allows
             # ~1 msg/sec, Discord 5 req/2s.
@@ -1278,7 +1288,7 @@ async def _action_run_webhook_batch(
         }
 
     send_headers = {"Connection": "close", **headers}
-    async with httpx.AsyncClient(timeout=30.0, http2=False) as client:
+    async with _webhook_client(timeout=30.0) as client:
         response = await client.post(url, json=payload, headers=send_headers)
         return {
             "status": "success" if response.status_code < 300 else "error",
@@ -1330,7 +1340,7 @@ async def _action_run_webhook(entry: Entry, config: dict, context: dict | None =
             payload["ai_results"] = ai_results
 
     send_headers = {"Connection": "close", **headers}
-    async with httpx.AsyncClient(timeout=15.0, http2=False) as client:
+    async with _webhook_client(timeout=15.0) as client:
         response = await client.post(url, json=payload, headers=send_headers)
         return {"status": "success" if response.status_code < 300 else "error", "http_status": response.status_code}
 

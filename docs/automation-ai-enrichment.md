@@ -172,7 +172,7 @@ Implementation: `evaluate_conditions()` at `conditions.py:22-53` recursively eva
 
 ### Actions
 
-Actions execute sequentially and share a mutable context dict. Earlier actions can write outputs that later actions read. Key implementation: `execute_action()` at `backend/app/automation/actions.py:189`.
+Actions execute sequentially and share a mutable context dict. Earlier actions can write outputs that later actions read. Key implementation: `execute_action()` at `backend/app/automation/actions.py:199`.
 
 **Available Actions:**
 
@@ -295,7 +295,7 @@ When running rules against multiple entries (e.g., scheduled digest at 9am), act
    - `use_daily_summary` → reads the day's already-generated briefing instead of prompting again
    - `run_webhook` → one POST with aggregated data
 
-Reference: `backend/app/automation/actions.py:313` (`execute_actions_batch()`).
+Reference: `backend/app/automation/actions.py:323` (`execute_actions_batch()`).
 
 #### One article per story
 
