@@ -9,6 +9,7 @@ import json
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.feed import Feed
@@ -17,11 +18,25 @@ from app.models.user import User
 from app.tools import ADMIN_TOOLS, MUTATING_TOOLS
 
 
-def test_admin_tools_are_registered_mutating():
-    """Every ADMIN_TOOLS entry must exist in the registry as a mutating tool —
-    a rename there would silently open the gate."""
-    missing = ADMIN_TOOLS - MUTATING_TOOLS
-    assert not missing, f"ADMIN_TOOLS entries not in the mutating registry: {missing}"
+def test_admin_tools_are_registered():
+    """Every ADMIN_TOOLS entry must exist in the registry — a rename there
+    would silently open the gate. Most are writes; the few reads mirror
+    admin-only API views."""
+    from app.tools import TOOL_DEFINITIONS
+
+    names = {t["name"] for t in TOOL_DEFINITIONS}
+    missing = ADMIN_TOOLS - names
+    assert not missing, f"ADMIN_TOOLS entries not in the registry: {missing}"
+    admin_reads = ADMIN_TOOLS - MUTATING_TOOLS
+    assert admin_reads == {"get_hygiene_feed", "get_hygiene_stats", "get_extraction_stats", "list_extraction_entities"}
+
+
+@pytest.mark.asyncio
+async def test_admin_only_views_refused_for_non_admin(client: AsyncClient, auth_headers: dict):
+    resp = await client.post(
+        "/api/tools/execute", json={"tool_name": "get_hygiene_stats", "args": {}}, headers=auth_headers
+    )
+    assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
@@ -107,3 +122,28 @@ async def test_model_facing_executor_refuses_tools_it_was_not_offered():
     refused = json.loads(await guarded("merge_threat_actors", {}))
     assert "error" in refused
     assert ran == ["get_feeds"]
+
+
+@pytest.mark.asyncio
+async def test_create_feed_tool_encrypts_bluesky_app_password(db_session: AsyncSession, admin_user: User):
+    """The tool path applies the same adapter_config handling as POST /api/feeds:
+    a Bluesky app password is encrypted at rest, never stored as typed."""
+    from app.core.encryption import decrypt_value
+    from app.tools import execute_tool
+
+    raw = await execute_tool(
+        "create_feed",
+        {
+            "url": "https://bsky.app/profile/example.bsky.social",
+            "feed_type": "bluesky",
+            "adapter_config": {"handle": "example.bsky.social", "identifier": "me", "app_password": "abcd-efgh"},
+        },
+        db_session,
+        admin_user.id,
+    )
+    assert "error" not in json.loads(raw), raw
+    feed = (
+        await db_session.execute(select(Feed).where(Feed.url == "https://bsky.app/profile/example.bsky.social"))
+    ).scalar_one()
+    stored = feed.adapter_config["app_password"]
+    assert stored != "abcd-efgh" and decrypt_value(stored) == "abcd-efgh"

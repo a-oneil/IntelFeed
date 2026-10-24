@@ -419,12 +419,32 @@ async def _create_feed(
         else:
             warning = f"category '{category}' does not exist; feed created without a category"
 
+    # The same config handling POST /api/feeds applies: Telegram configs are
+    # normalized, and a Bluesky app password is encrypted before it is stored
+    # (the adapter only ever decrypts it).
+    from app.api.feeds import (
+        _encrypt_bluesky_app_password,
+        _normalize_telegram_config,
+        _validate_bluesky_author_entity,
+    )
+    from app.core.exceptions import AppError
+
+    adapter_config = dict(adapter_config or {})
+    try:
+        if feed_type == "telegram":
+            adapter_config = _normalize_telegram_config(adapter_config)
+        elif feed_type == "bluesky":
+            adapter_config = _encrypt_bluesky_app_password(adapter_config)
+            await _validate_bluesky_author_entity(adapter_config, db)
+    except AppError as e:
+        return {"error": e.message}
+
     feed = Feed(
         url=url,
         title=title or url,
         custom_title=title,
         feed_type=feed_type,
-        adapter_config=adapter_config or {},
+        adapter_config=adapter_config,
         category_id=category_id,
         is_active=True,
         error_count=0,

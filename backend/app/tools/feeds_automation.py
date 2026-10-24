@@ -660,7 +660,7 @@ async def _list_webhook_presets(
         base = base.where(WebhookPreset.preset_type == preset_type)
         count_base = count_base.where(WebhookPreset.preset_type == preset_type)
     total = (await db.execute(count_base)).scalar() or 0
-    presets = (await db.execute(base.order_by(WebhookPreset.name).limit(limit))).scalars().all()
+    presets = (await db.execute(base.order_by(WebhookPreset.name).limit(max(1, min(int(limit), 500))))).scalars().all()
 
     items = [
         {
@@ -817,7 +817,7 @@ async def _list_notes(
         count_q = count_q.where(search_filter)
 
     total = (await db.execute(count_q)).scalar() or 0
-    query = query.order_by(Note.is_pinned.desc(), Note.updated_at.desc()).limit(limit)
+    query = query.order_by(Note.is_pinned.desc(), Note.updated_at.desc()).limit(max(1, min(int(limit), 500)))
     rows = (await db.execute(query)).all()
 
     items = [
@@ -943,7 +943,14 @@ async def _list_entity_notes(
     filters = (EntityNote.entity_type == entity_type, EntityNote.entity_id == eid)
     total = (await db.execute(select(func.count()).select_from(EntityNote).where(*filters))).scalar() or 0
     notes = (
-        (await db.execute(select(EntityNote).where(*filters).order_by(EntityNote.created_at.desc()).limit(limit)))
+        (
+            await db.execute(
+                select(EntityNote)
+                .where(*filters)
+                .order_by(EntityNote.created_at.desc())
+                .limit(max(1, min(int(limit), 500)))
+            )
+        )
         .scalars()
         .all()
     )

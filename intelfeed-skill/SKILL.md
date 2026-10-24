@@ -517,15 +517,15 @@ Entry→entity autolinks (edges) and entity→entity relationships (claims) are 
 - **unlink_entity_from_entry** — Remove one entry→entity link (entity_type, entity_id, entry_id)
 - **bulk_unlink_entities** ⚠ — Remove up to 500 links in one call (items)
 - **report_false_positive** — Record autolinker noise and unlink at the chosen scope: entry, alias, entity or word (entity_type, entity_id, entity_value, scope, source_entry_id, reason)
-- **get_extraction_stats** — AI-created entity counts by type: needs-review, orphaned, likely-duplicate (window)
-- **list_extraction_entities** — AI-created entities with lifecycle status: linked, review, orphan or dupe (types, status, window, q, source_entry_id, sort_by, sort_order, limit, offset)
+- **get_extraction_stats** ⚠ — AI-created entity counts by type: needs-review, orphaned, likely-duplicate (window)
+- **list_extraction_entities** ⚠ — AI-created entities with lifecycle status: linked, review, orphan or dupe (types, status, window, q, source_entry_id, sort_by, sort_order, limit, offset)
 - **confirm_extraction_entities** ⚠ — Analyst sign-off: clear needs_review on AI-created entities (entity_type, ids)
 - **list_entity_relationships** — Every relationship where an entity is source or target, with verb, confidence and provenance (entity_type, entity_id, relationship_type, include_rejected)
 - **confirm_relationship** — Trust-ladder confirm: source becomes `analyst_confirmed` (relationship_id)
 - **reject_relationship** — Trust-ladder reject: the row is kept so re-ingestion can't resurrect it (relationship_id)
 - **delete_relationship** — Hard-delete a relationship. Prefer `reject_relationship` when the claim is wrong (relationship_id)
-- **get_hygiene_feed** — Chronological merge of link-validator and entity-maintenance logs (action, source, mode, review, pending, since, limit, offset)
-- **get_hygiene_stats** — Hygiene counters: operating modes (shadow/apply) and pending advisories
+- **get_hygiene_feed** ⚠ — Chronological merge of link-validator and entity-maintenance logs (action, source, mode, review, pending, since, limit, offset)
+- **get_hygiene_stats** ⚠ — Hygiene counters: operating modes (shadow/apply) and pending advisories
 
 ### Entity Writes & Merges (12 tools)
 

@@ -285,7 +285,7 @@ Answer platform questions from the docs, not from memory.
 
 ## Available Tools
 
-94 tools, all read-only. The lite CLI does not carry a single tool that creates, changes or deletes anything — no writes, no AI extraction, no report or document generation (`export_observables` only reads a ledger slice back as EDL/CSV/JSON; it saves nothing). If the user asks for one of those, say the lite skill cannot do it rather than improvising a workaround.
+94 tools, all read-only. The lite CLI does not carry a single tool that creates, changes or deletes anything — no writes, no AI extraction, no report or document generation (`export_observables` only reads a ledger slice back as EDL/CSV/JSON; it saves nothing). If the user asks for one of those, say the lite skill cannot do it rather than improvising a workaround. `⚠` marks a tool that needs an **admin** account; for anyone else the API answers 403.
 
 ### Search & Discovery (4 tools)
 
@@ -424,11 +424,11 @@ Read-only visibility into the link and claim layers — inspect and report, but 
 
 - **get_entity_link_stats** — Autolink health: links by entity type and provenance, held-match queue depth
 - **list_entity_links** — Autolink junction rows across all seven tables, newest first (entity_type, entity_id, entry_id, source, confidence, search, days, limit, offset)
-- **get_extraction_stats** — AI-created entity counts by type: needs-review, orphaned, likely-duplicate (window)
-- **list_extraction_entities** — AI-created entities with lifecycle status: linked, review, orphan or dupe (types, status, window, q, source_entry_id, sort_by, sort_order, limit, offset)
+- **get_extraction_stats** ⚠ — AI-created entity counts by type: needs-review, orphaned, likely-duplicate (window)
+- **list_extraction_entities** ⚠ — AI-created entities with lifecycle status: linked, review, orphan or dupe (types, status, window, q, source_entry_id, sort_by, sort_order, limit, offset)
 - **list_entity_relationships** — Every relationship where an entity is source or target, with verb, confidence and provenance (entity_type, entity_id, relationship_type, include_rejected)
-- **get_hygiene_feed** — Chronological merge of link-validator and entity-maintenance logs (action, source, mode, review, pending, since, limit, offset)
-- **get_hygiene_stats** — Hygiene counters: operating modes (shadow/apply) and pending advisories
+- **get_hygiene_feed** ⚠ — Chronological merge of link-validator and entity-maintenance logs (action, source, mode, review, pending, since, limit, offset)
+- **get_hygiene_stats** ⚠ — Hygiene counters: operating modes (shadow/apply) and pending advisories
 
 ### Documentation (3 tools)
 

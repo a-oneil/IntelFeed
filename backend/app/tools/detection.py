@@ -119,6 +119,8 @@ async def _validate_detection_rule(db: AsyncSession, user_id: uuid.UUID, rule_ty
         },
         "required": ["entry_ids", "rule_formats"],
     },
+    # Runs the detection_engineering_summary AI task and stores its result.
+    mutating=True,
 )
 async def _build_detection_summary(
     db: AsyncSession,

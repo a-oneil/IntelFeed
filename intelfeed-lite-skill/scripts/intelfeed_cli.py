@@ -5,7 +5,8 @@ Executes one or more read-only tool calls against the running IntelFeed API and
 prints JSON results to stdout. Zero external dependencies — stdlib only.
 
 Environment variables:
-    INTELFEED_API_URL       Base URL of the IntelFeed API (default: https://intelfeed.cc)
+    INTELFEED_API_URL       Base URL of the IntelFeed API (default: https://intelfeed.cc); https://, or http://localhost
+    INTELFEED_ALLOW_INSECURE_HTTP  1 to allow plain http:// to another host (a trusted LAN or compose network)
     INTELFEED_USERNAME      Username for authentication
     INTELFEED_PASSWORD      Password for authentication
 
@@ -42,6 +43,29 @@ API_URL = os.environ.get("INTELFEED_API_URL", "https://intelfeed.cc").rstrip("/"
 WEB_URL = os.environ.get("INTELFEED_WEB_URL", "https://intelfeed.cc").rstrip("/")
 USERNAME = os.environ.get("INTELFEED_USERNAME", "")
 PASSWORD = os.environ.get("INTELFEED_PASSWORD", "")
+
+
+def insecure_url_problem(url: str) -> str | None:
+    """Why the CLI must not send the password to ``url``, or None.
+
+    The login posts the password, so the API must be https://, or plain http://
+    to this machine. INTELFEED_ALLOW_INSECURE_HTTP=1 opts in for a trusted
+    network (a LAN dev box, the compose network). Same rule as intelfeed-mcp.
+    """
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(url)
+    if parts.scheme == "https" and parts.hostname:
+        return None
+    if parts.scheme == "http" and parts.hostname:
+        allow = os.environ.get("INTELFEED_ALLOW_INSECURE_HTTP", "").strip().lower() in ("1", "true", "yes", "on")
+        if parts.hostname in ("localhost", "127.0.0.1", "::1") or allow:
+            return None
+        return (
+            f"INTELFEED_API_URL {url} is plain http:// to another host, which would send the password "
+            "unencrypted. Use https://, or set INTELFEED_ALLOW_INSECURE_HTTP=1 for a trusted network."
+        )
+    return f"INTELFEED_API_URL {url!r} must start with https:// (or http://localhost)."
 
 # ---------------------------------------------------------------------------
 # Tool definitions (read-only: search, get, list, discover, pivot, check)
@@ -2049,6 +2073,10 @@ def main() -> None:
         sys.exit(1)
 
     # Execute
+    problem = insecure_url_problem(API_URL)
+    if problem:
+        print(json.dumps({"error": problem}))
+        sys.exit(1)
     client = IntelFeedClient(API_URL)
     client.login()
 

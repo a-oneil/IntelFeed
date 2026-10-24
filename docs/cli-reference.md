@@ -90,6 +90,7 @@ Prints all available tools with their descriptions, required parameters, and def
 | `INTELFEED_USERNAME` | Username for authentication | `analyst@company.com` |
 | `INTELFEED_PASSWORD` | Password for authentication | (store securely, e.g., in `.env` or secrets manager) |
 | `INTELFEED_READ_ONLY` | Optional. Truthy value (`1`, `true`, `yes`, `on`) refuses all write tools before they reach the API | `1` (see [Read-Only Mode](#read-only-mode)) |
+| `INTELFEED_ALLOW_INSECURE_HTTP` | Optional. Truthy value allows plain `http://` to a host other than localhost (a trusted LAN or compose network); otherwise the CLI refuses to send the password there | `1` |
 
 ### Setup
 
@@ -104,7 +105,7 @@ export INTELFEED_PASSWORD="your-password"
 2. **For Docker deployments** (dev), set them when running the CLI container or in `docker-compose.env`:
 
 ```bash
-docker run -e INTELFEED_API_URL=http://api:8000 \
+docker run -e INTELFEED_API_URL=http://api:8000 -e INTELFEED_ALLOW_INSECURE_HTTP=1 \
            -e INTELFEED_USERNAME=admin \
            -e INTELFEED_PASSWORD=password \
            python:3.12 python intelfeed_cli.py search_entries '{"query": "ransomware"}'
@@ -221,7 +222,7 @@ All results are **JSON to stdout**, one per line for single tool, or a JSON arra
 | Code | Meaning |
 |------|---------|
 | `0` | Success |
-| `1` | Usage error (unknown tool, bad JSON, missing env vars, auth failure) |
+| `1` | Usage error (unknown tool, bad JSON, missing env vars, auth failure, or an `INTELFEED_API_URL` that would send the password over plain http to another host) |
 | `2` | Read-only mode refusal — a write tool was requested while `INTELFEED_READ_ONLY` is set |
 
 ---
@@ -239,7 +240,7 @@ python3 intelfeed-skill/scripts/intelfeed_cli.py create_campaign '{"name": "Test
 
 **Semantics:**
 
-- The check runs against a `WRITE_TOOLS` denylist (a frozenset in the CLI script) — **89 tools**: every registry tool flagged `mutating`. That includes the AI tools that persist as a side effect (`extract_ttps`, `extract_cves`, `extract_threat_actors`, `extract_malware`, `run_ai_task`, `generate_detection_rules`): they are flagged in the registry, so the same tools are refused by this gate, by the read-only agent token and by the Ollama read-only copilot.
+- The check runs against a `WRITE_TOOLS` denylist (a frozenset in the CLI script) — **90 tools**: every registry tool flagged `mutating`. That includes the AI tools that persist as a side effect (`extract_ttps`, `extract_cves`, `extract_threat_actors`, `extract_malware`, `run_ai_task`, `generate_detection_rules`, `build_detection_summary`): they are flagged in the registry, so the same tools are refused by this gate, by the read-only agent token and by the Ollama read-only copilot.
 - The denylist is **generated, not hand-maintained**: `scripts/dev/sync_skill_clis.py` rewrites it from the registry's `mutating` flags (plus its `EXTRA_WRITE_TOOLS` set), and `backend/tests/test_tool_registry_sync.py` fails if any mutating tool is missing from the CLI's denylist or a denylist entry no longer exists in the registry. Every tool not in the set (`search_*`, `get_*`, `list_*`, `check_*`, `pivot_*`, `export_attack_layer`, `export_campaign`, `validate_detection_rule`, `generate_detection_rules`, `build_detection_summary`, etc.) runs normally.
 - In a **batched invocation**, if *any* requested tool is on the denylist, the **entire batch is refused** — no tool in the batch executes.
 - The refusal is a JSON error printed to **stdout** with **exit code 2** (distinct from exit code 1 usage errors).
@@ -269,7 +270,7 @@ Use **`intelfeed-skill` (full)** when:
 Both CLIs are code-generated from the backend tool registry by `scripts/dev/sync_skill_clis.py`, so the split is rule-based rather than a hand-picked list:
 
 - **Full CLI (187 tools):** every tool in the backend registry (`backend/app/tools/`), read and write.
-- **Lite CLI (94 tools):** every tool the registry does **not** flag as `mutating` (89 write tools are excluded), minus the compute-heavy read-only tools in the script's `LITE_EXCLUDE` set (AI invocation and document export: `extract_ttps`, `extract_cves`, `extract_threat_actors`, `extract_malware`, `run_ai_task`, `generate_detection_rules`, `validate_detection_rule`, `build_detection_summary`, `export_attack_layer`, `export_campaign`).
+- **Lite CLI (94 tools):** every tool the registry does **not** flag as `mutating` (90 write tools are excluded), minus the compute-heavy read-only tools in the script's `LITE_EXCLUDE` set (AI invocation and document export: `extract_ttps`, `extract_cves`, `extract_threat_actors`, `extract_malware`, `run_ai_task`, `generate_detection_rules`, `validate_detection_rule`, `build_detection_summary`, `export_attack_layer`, `export_campaign`).
 
 In practice the lite CLI covers all search/lookup/pivot/analytics/landscape reads (including the newer curation-stats, ransomware-tracker, and reader read tools), while creation, updates, merges, deletes, extraction, automation execution, and report generation are full-CLI only. Run `--list-tools` against either script for the authoritative listing.
 

@@ -129,7 +129,6 @@ PERSISTING_READ_TOOLS = frozenset(
 # fails when the registry gains a read tool, so each new one gets looked at before it is exposed.
 READ_ONLY_TOOLS = frozenset(
     {
-        "build_detection_summary",
         "check_detection_gaps",
         "check_requirement_match",
         "check_telemetry_feasibility",

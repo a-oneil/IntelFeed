@@ -1118,14 +1118,23 @@ async def copilot_confirm(
         await r.delete(key)
         return {"status": "error", "message": f"Unsupported action type: {action_type}"}
 
+    # One approval runs at a time: a double click or two tabs must not create
+    # the campaign twice. The claim outlives no attempt (released below on
+    # failure, so a retry with edited params works) and expires on its own.
+    claim_key = f"{key}:claim"
+    if not await r.set(claim_key, "1", nx=True, ex=60):
+        raise AppError(code="conflict", message="This action is already being confirmed", status_code=409)
+
     try:
         result = await handler(db, user, params)
     except AppError as e:
         # Keep the key so the user can retry with edited params.
+        await r.delete(claim_key)
         return {"status": "error", "message": e.message}
     except Exception as e:
         logger.error("copilot confirm: %s handler failed: %s", action_type, e)
         await db.rollback()
+        await r.delete(claim_key)
         return {"status": "error", "message": f"Failed to execute action: {e}"}
 
     # Append a success message to the conversation this action came from.
@@ -1155,6 +1164,6 @@ async def copilot_confirm(
             logger.warning("copilot confirm: failed to append conversation message: %s", e)
 
     await db.commit()
-    await r.delete(key)
+    await r.delete(key, claim_key)
 
     return {"status": "executed", "result": result}

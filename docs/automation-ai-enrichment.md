@@ -115,7 +115,7 @@ Rules fire based on four trigger mechanisms (`backend/app/automation/engine.py:1
 Implementation notes:
 - `on_new_entry` and `on_keyword_match` fire immediately during entry ingestion (synchronous)
 - `on_cve_detected` requires prior CVE extraction; uses threshold logic (`backend/app/automation/engine.py:263`)
-- `on_correlation_event` runs asynchronously when correlation events are published (`run_automations_for_correlation_event`, `backend/app/automation/engine.py:402`)
+- `on_correlation_event` runs asynchronously when correlation events are published (`run_automations_for_correlation_event`, `backend/app/automation/engine.py:412`)
 - `on_observable_captured` runs asynchronously (`run_automations_for_observable_capture`) from a Celery task the capturing door queues after its commit (`dispatch_observable_capture_automations`). It fires **once per rule per entry**: the AI door and the article-IOC-table door can both land on one article, and a rule that already logged a run for that entry is skipped. The replay backfill script never fires it.
 
 ### Condition Language

@@ -256,7 +256,7 @@
     "rule_formats"
    ]
   },
-  "mutating": false
+  "mutating": true
  },
  {
   "name": "bulk_entry_action",

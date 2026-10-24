@@ -60,6 +60,12 @@ ADMIN_TOOLS: frozenset[str] = frozenset(
         "set_target_sector",
         # A never-capture tombstone silences a value for every door and every user.
         "deny_observable",
+        # Reads whose API equivalents are admin-only (/api/admin/hygiene/*,
+        # /api/engine/extraction/*): curation and adjudication internals.
+        "get_hygiene_feed",
+        "get_hygiene_stats",
+        "get_extraction_stats",
+        "list_extraction_entities",
     }
 )
 
@@ -93,7 +99,7 @@ def _tool(name: str, description: str, input_schema: dict, mutating: bool | None
     return decorator
 
 
-# Default tool subset for the Ollama copilot. The full read-only registry (98
+# Default tool subset for the Ollama copilot. The full read-only registry (97
 # tools) serializes to ~6.6k tokens of schema per round — that bloats every
 # request's context AND overwhelms local models' tool selection. This curated
 # set covers the copilot's actual workload (search, entity lookups, pivots,

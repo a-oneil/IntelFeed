@@ -17,6 +17,7 @@ Batch mode:
 """
 
 import asyncio
+import contextvars
 import logging
 import re
 import uuid
@@ -1354,25 +1355,50 @@ async def _action_mark_priority(db: AsyncSession, entry: Entry, config: dict, us
     return await _action_add_tags(db, entry, {"tags": [tag_name]}, user_id)
 
 
+# The rules running in this call stack, outermost first (execute_automation
+# pushes each one).
+# A chain that comes back to a rule already on it, or goes deeper than this,
+# stops: every hop re-runs the rule's webhooks and AI tasks.
+_CHAIN_STACK: contextvars.ContextVar[tuple[uuid.UUID, ...]] = contextvars.ContextVar("automation_chain", default=())
+MAX_CHAIN_DEPTH = 5
+
+
 async def _action_chain_rule(db: AsyncSession, entry: Entry, config: dict, user_id: uuid.UUID) -> dict:
-    """Trigger another automation rule by ID."""
+    """Trigger another automation rule by ID.
+
+    The chained rule runs as *its* owner, so it must belong to the owner of the
+    rule doing the chaining (or that owner must be an admin). Otherwise any
+    user could fire someone else's rule, with that person's webhooks, headers
+    and AI budget, on entries of their choosing.
+    """
     from app.models.automation_rule import AutomationRule
+    from app.models.user import User
 
     rule_id = config.get("rule_id", "")
     if not rule_id:
         return {"status": "error", "message": "No rule_id specified"}
+    try:
+        chained_id = uuid.UUID(str(rule_id))
+    except ValueError:
+        return {"status": "error", "message": "rule_id is not a valid UUID"}
 
-    result = await db.execute(
-        select(AutomationRule).where(
-            AutomationRule.id == uuid.UUID(str(rule_id)),
-        )
-    )
-    chained_rule = result.scalar_one_or_none()
+    chained_rule = await db.get(AutomationRule, chained_id)
     if not chained_rule:
         return {"status": "error", "message": "Chained rule not found"}
 
+    if chained_rule.created_by != user_id:
+        owner = await db.get(User, user_id) if user_id else None
+        if owner is None or owner.role != "admin":
+            return {"status": "error", "message": "A rule can only chain to rules owned by the same user"}
+
     if not chained_rule.is_enabled:
         return {"status": "skipped", "message": "Chained rule is disabled"}
+
+    stack = _CHAIN_STACK.get()
+    if chained_id in stack:
+        return {"status": "error", "message": "Chain loops back to a rule already running"}
+    if len(stack) >= MAX_CHAIN_DEPTH:
+        return {"status": "error", "message": f"Chain is deeper than {MAX_CHAIN_DEPTH} rules"}
 
     # Import here to avoid circular dependency
     from app.automation.engine import execute_automation

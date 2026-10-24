@@ -110,7 +110,7 @@ Each `data:` frame is a JSON object (the schema is in `copilot_stream`'s docstri
 
 If the assigned provider is not a `ClaudeCodeProvider`, two paths exist (`copilot.py:694-716`, `:759`):
 
-- **Ollama** (`supports_tools` + `stream_agent`) — a native `/api/chat` function-calling loop runs **in-process** in the api (no CLI, no credentials, so `copilot_worker_dispatch` does not apply). Tools are dispatched against the backend tool registry (`app.tools.execute_tool`) via an in-process executor bound to the request's DB session and user; specs come from `ollama_tool_specs(..., read_only=True)`, so only read tools are exposed. The default curated subset is `DEFAULT_COPILOT_OLLAMA_TOOLS` (`backend/app/tools/__init__.py:99`), overridable via the assignment's `ollama_tools` config key (Prompt Workspace → Routing panel). Tool traces stream to the dock exactly as in the CLI path.
+- **Ollama** (`supports_tools` + `stream_agent`) — a native `/api/chat` function-calling loop runs **in-process** in the api (no CLI, no credentials, so `copilot_worker_dispatch` does not apply). Tools are dispatched against the backend tool registry (`app.tools.execute_tool`) via an in-process executor bound to the request's DB session and user; specs come from `ollama_tool_specs(..., read_only=True)`, so only read tools are exposed. The default curated subset is `DEFAULT_COPILOT_OLLAMA_TOOLS` (`backend/app/tools/__init__.py:109`), overridable via the assignment's `ollama_tools` config key (Prompt Workspace → Routing panel). Tool traces stream to the dock exactly as in the CLI path.
 - **Any other non-tool provider** (the Anthropic API provider, `openai_compatible`, and so every personal key of those types) falls back to the base `stream_complete` contract — text-only chunks, no tool trace. The dock's header chip says "no tools" and the reply footer says "tools unavailable on this key" when it was the person's.
 
 ---
@@ -282,7 +282,7 @@ Historical note: Celery task results share the copilot's Redis; before `result_e
 |---|---|---|
 | `copilot_worker_dispatch` | `backend/app/config.py:429` | `true` (default): dispatch CLI runs to `celery-worker-ai`; `false`: run in-process in the api (claude_code only — Ollama always runs in-process) |
 | `allowed_tools` / `timeout_seconds` | copilot task assignment config (`defaults.py:118-126`, editable in Settings → AI Configuration) | `["Bash","Read","Skill"]`, 240 s CLI ceiling |
-| `ollama_tools` | copilot assignment config (Prompt Workspace → Routing panel) | Curated read-only tool subset for an Ollama-assigned copilot; defaults to `DEFAULT_COPILOT_OLLAMA_TOOLS` (`backend/app/tools/__init__.py:99`) |
+| `ollama_tools` | copilot assignment config (Prompt Workspace → Routing panel) | Curated read-only tool subset for an Ollama-assigned copilot; defaults to `DEFAULT_COPILOT_OLLAMA_TOOLS` (`backend/app/tools/__init__.py:109`) |
 | History replay | `backend/app/api/copilot.py:45` | Last 20 messages injected as `conversation_history` |
 | Pending-action TTL | `copilot.py:58` | 900 s before a proposed write expires |
 | Worker stream buffer TTL | `copilot_tasks.py:39` | 300 s for an undrained `copilot:stream:{run_id}` list |
