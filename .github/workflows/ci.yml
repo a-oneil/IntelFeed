@@ -222,7 +222,8 @@ jobs:
       # without a re-lock must not merge. lock.sh keeps every pin that still
       # fits, so this only differs when pyproject.toml changed. uv's version
       # is pinned in lock.sh; the one here must match it.
-      - uses: astral-sh/setup-uv@v10
+      # setup-uv publishes exact tags only; there is no floating @v10.
+      - uses: astral-sh/setup-uv@v10.3.0
         with:
           version: "0.12.24"
 
