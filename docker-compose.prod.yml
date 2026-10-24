@@ -51,7 +51,7 @@ services:
           memory: 1500M
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4.11-alpine3.21
     restart: unless-stopped
     logging: *default-logging
     # Protect redis: it's the fattest RSS on the box (correlation cache) and the
@@ -74,7 +74,7 @@ services:
           memory: 1500M
 
   meilisearch:
-    image: getmeili/meilisearch:v1.6
+    image: getmeili/meilisearch:v1.6.2
     restart: unless-stopped
     logging: *default-logging
     environment:
@@ -414,7 +414,7 @@ services:
           memory: 128M
 
   caddy:
-    image: caddy:2-alpine
+    image: caddy:2.11.7-alpine
     restart: unless-stopped
     logging: *default-logging
     # Protect the TLS/reverse proxy — if it dies the whole site is unreachable.

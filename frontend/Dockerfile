@@ -1,11 +1,15 @@
-FROM node:26-alpine AS build
+FROM node:26.12.1-alpine3.24 AS build
 
 WORKDIR /app
 
-RUN npm i -g pnpm@10
+# The exact pnpm that package.json's "packageManager" names (CI reads the same
+# field). Bump the two together.
+RUN npm i -g pnpm@10.31.0
 
-COPY package.json pnpm-lock.yaml* ./
-RUN pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+# --frozen-lockfile with no fallback: if pnpm-lock.yaml and package.json
+# disagree the build fails, rather than resolving a tree nobody reviewed.
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 
 COPY . .
 
@@ -22,7 +26,7 @@ ENV VITE_APP_VERSION=${VITE_APP_VERSION} VITE_GIT_SHA=${VITE_GIT_SHA} VITE_BUILD
 RUN pnpm build
 
 # Serve with nginx
-FROM nginx:alpine
+FROM nginx:1.31.8-alpine3.24
 
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
