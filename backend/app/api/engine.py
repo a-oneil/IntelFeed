@@ -427,12 +427,24 @@ async def entry_pipeline_runs(
     user: User = Depends(get_current_user),
     db=Depends(get_db),
 ):
-    """Latest run per pipeline stage for an entry (processing popover)."""
+    """Every pipeline stage for one entry, in execution order (processing popover).
+
+    Dispatched stages come from their latest ``entry_pipeline_runs`` row. The AI
+    analysis writes no run row, and a review the gates skipped never ran, so
+    those two come from the entry's analysis-request row (``_entry_stage_cells``,
+    shared with the Engine → Processing matrix). A stage with neither is listed
+    as ``not_run`` so the popover shows the whole pipeline rather than whichever
+    stages happened to write a row. Translation is the exception — it only exists
+    for non-English feeds — and is listed only when it ran. An entry with no
+    record at all (ingested before run logging) returns an empty list.
+    """
     import uuid as _uuid
 
     from sqlalchemy import select
 
+    from app.models.ai_analysis import AIAnalysisRequest
     from app.models.entry_pipeline_run import EntryPipelineRun
+    from app.services.system_settings import get_setting
 
     try:
         eid = _uuid.UUID(entry_id)
@@ -444,7 +456,7 @@ async def entry_pipeline_runs(
                 select(EntryPipelineRun)
                 .where(EntryPipelineRun.entry_id == eid)
                 .order_by(EntryPipelineRun.created_at.desc())
-                .limit(50)
+                .limit(200)
             )
         )
         .scalars()
@@ -453,20 +465,155 @@ async def entry_pipeline_runs(
     latest: dict[str, EntryPipelineRun] = {}
     for run in rows:  # rows are newest-first
         latest.setdefault(run.stage, run)
+    req = (await db.execute(select(AIAnalysisRequest).where(AIAnalysisRequest.entry_id == eid))).scalar_one_or_none()
+    if not latest and req is None:
+        return {"status": "unknown", "runs": []}
+
+    analysis_enabled = bool(await get_setting("ai_one_pass_enabled", db))
+    cells = _entry_stage_cells(latest, req, analysis_enabled=analysis_enabled)
+    runs = []
+    for stage in PROCESSING_STAGE_ORDER:
+        cell = cells.get(stage)
+        if cell is None:
+            if stage == "translate":
+                continue
+            cell = _synthetic_cell("not_run", None)
+        runs.append({"stage": stage, "label": PIPELINE_STAGE_LABELS.get(stage, stage), **cell})
+    return {"status": _entry_overall_status(cells), "runs": runs}
+
+
+def _entry_overall_status(cells: dict[str, dict]) -> str:
+    """One word for the popover's trigger chip. Unlike the matrix bucket, an
+    error outranks a finished score, and an analysis still queued behind a
+    finished score is still ``in_flight`` — the reader wants to know whether the
+    AI has had its say yet."""
+    statuses = {c["status"] for c in cells.values()}
+    if "error" in statuses:
+        return "errored"
+    if statuses & {"queued", "retry"}:
+        return "in_flight"
+    if cells.get("score", {}).get("status") == "success":
+        return "complete"
+    return "in_flight"
+
+
+# --- per-entry stage cells (shared by the entry popover and the matrix) ------
+
+
+def _synthetic_cell(status: str, at, detail: dict | None = None, error: str | None = None) -> dict:
     return {
-        "runs": [
-            {
-                "stage": run.stage,
-                "label": PIPELINE_STAGE_LABELS.get(run.stage, run.stage),
-                "status": run.status,
-                "duration_ms": run.duration_ms,
-                "error": run.error,
-                "created_at": run.created_at.isoformat() if run.created_at else None,
-                "retryable": run.stage in RETRYABLE_STAGE_TASKS,
-            }
-            for run in latest.values()
-        ]
+        "status": status,
+        "duration_ms": None,
+        "error": error,
+        "retryable": False,
+        "created_at": at.isoformat() if at else None,
+        "detail": detail,
     }
+
+
+def _analysis_cell(req, *, scored: bool, analysis_enabled: bool) -> dict | None:
+    """The AI analysis stage, from the entry's queue row (it writes no pipeline
+    run). No row: the global switch is off, or scoring hasn't reached the entry."""
+    if req is None:
+        if scored and not analysis_enabled:
+            return _synthetic_cell("skipped", None, {"skipped": "analysis_disabled"})
+        return None
+    st = req.status or ""
+    if st == "pending":
+        return _synthetic_cell("queued", req.created_at, {"waiting_on": "submit"})
+    if st == "submitted":
+        return _synthetic_cell("queued", req.submitted_at or req.created_at, {"waiting_on": "ai_worker"})
+    if st == "completed":
+        return _synthetic_cell("success", req.completed_at)
+    if st == "reused_echo":
+        return _synthetic_cell(
+            "success",
+            req.completed_at,
+            {"reused_from": str(req.reused_from_entry_id) if req.reused_from_entry_id else None},
+        )
+    if st == "failed":
+        return _synthetic_cell("error", req.completed_at or req.created_at, error=req.error or "analysis failed")
+    if st.startswith("skipped_"):
+        return _synthetic_cell("skipped", req.created_at, {"skipped": st.removeprefix("skipped_")})
+    return None
+
+
+def _adjudication_cell(req) -> dict | None:
+    """A synthetic cell for the adjudicate stage when the task never ran (gate
+    skip, or queued and waiting on the AI worker)."""
+    if req is None:
+        return None
+    status = req.adjudication_status or ""
+    if not status:
+        # Undecided: the review waits on the analysis it reviews, or the
+        # analysis never ran, so there is nothing to review.
+        if req.status in ("pending", "submitted"):
+            return _synthetic_cell("queued", req.created_at, {"waiting_on": "analysis"})
+        if req.status == "failed" or (req.status or "").startswith("skipped_"):
+            return _synthetic_cell("skipped", None, {"skipped": "no_analysis"})
+        return None
+    queued_at = req.adjudication_queued_at.isoformat() if req.adjudication_queued_at else None
+    if status == "pending":
+        return {
+            "status": "queued",
+            "duration_ms": None,
+            "error": None,
+            "retryable": True,
+            "created_at": queued_at,
+            "detail": {"queued_at": queued_at},
+        }
+    if status.startswith("skipped_"):
+        return {
+            "status": "skipped",
+            "duration_ms": None,
+            "error": None,
+            "retryable": True,
+            "created_at": req.adjudicated_at.isoformat() if req.adjudicated_at else None,
+            "detail": {"skipped": status.removeprefix("skipped_")},
+        }
+    return None
+
+
+def _entry_stage_cells(latest: dict[str, object], req, *, analysis_enabled: bool) -> dict[str, dict]:
+    """One cell per stage that has something to say about an entry, keyed by
+    stage in ``PROCESSING_STAGE_ORDER``. ``latest`` is the newest run per stage;
+    ``req`` the entry's AIAnalysisRequest (or None)."""
+    cells: dict[str, dict] = {}
+    for st in PROCESSING_STAGE_ORDER:
+        if st == "analyze":
+            cell = _analysis_cell(req, scored=latest.get("score") is not None, analysis_enabled=analysis_enabled)
+            if cell is not None:
+                cells[st] = cell
+            continue
+        r = latest.get(st)
+        if r is None:
+            if st == "adjudicate":
+                cell = _adjudication_cell(req)
+                if cell is not None:
+                    cells[st] = cell
+            continue
+        cell = {
+            "status": r.status,
+            "duration_ms": r.duration_ms,
+            "error": r.error,
+            "retryable": st in RETRYABLE_STAGE_TASKS,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            # Stage-specific run detail (the adjudicate stage's verdict counts).
+            "detail": r.detail or None,
+        }
+        if st == "adjudicate":
+            # Re-queued after its last run: the pending request outranks the stale row.
+            queued_at = getattr(req, "adjudication_queued_at", None) if req else None
+            if (
+                req is not None
+                and req.adjudication_status == "pending"
+                and queued_at is not None
+                and r.created_at is not None
+                and queued_at > r.created_at
+            ):
+                cell = _adjudication_cell(req) or cell
+        cells[st] = cell
+    return cells
 
 
 @router.get("/entries/{entry_id}/adjudication")
@@ -1132,117 +1279,11 @@ async def processing_flow(
             adjudication_by_entry[req.entry_id] = req
     analysis_enabled = bool(await get_setting("ai_one_pass_enabled", db))
 
-    def _synthetic(status: str, at, detail: dict | None = None, error: str | None = None) -> dict:
-        return {
-            "status": status,
-            "duration_ms": None,
-            "error": error,
-            "retryable": False,
-            "created_at": at.isoformat() if at else None,
-            "detail": detail,
-        }
-
-    def _analysis_cell(e: Entry, scored: bool) -> dict | None:
-        """The AI analysis column, from the entry's queue row. No row: the
-        global switch is off, or scoring hasn't reached the entry yet."""
-        req = adjudication_by_entry.get(e.id)
-        if req is None:
-            if scored and not analysis_enabled:
-                return _synthetic("skipped", None, {"skipped": "analysis_disabled"})
-            return None
-        st = req.status or ""
-        if st == "pending":
-            return _synthetic("queued", req.created_at, {"waiting_on": "submit"})
-        if st == "submitted":
-            return _synthetic("queued", req.submitted_at or req.created_at, {"waiting_on": "ai_worker"})
-        if st == "completed":
-            return _synthetic("success", req.completed_at)
-        if st == "reused_echo":
-            return _synthetic(
-                "success",
-                req.completed_at,
-                {"reused_from": str(req.reused_from_entry_id) if req.reused_from_entry_id else None},
-            )
-        if st == "failed":
-            return _synthetic("error", req.completed_at or req.created_at, error=req.error or "analysis failed")
-        if st.startswith("skipped_"):
-            return _synthetic("skipped", req.created_at, {"skipped": st.removeprefix("skipped_")})
-        return None
-
-    def _adjudication_cell(e: Entry) -> dict | None:
-        """A synthetic cell for the adjudicate column when the task never ran
-        (gate skip, or queued and waiting on the AI worker)."""
-        req = adjudication_by_entry.get(e.id)
-        if req is None:
-            return None
-        status = req.adjudication_status or ""
-        if not status:
-            # Undecided: the review waits on the analysis it reviews, or the
-            # analysis never ran, so there is nothing to review.
-            if req.status in ("pending", "submitted"):
-                return _synthetic("queued", req.created_at, {"waiting_on": "analysis"})
-            if req.status == "failed" or (req.status or "").startswith("skipped_"):
-                return _synthetic("skipped", None, {"skipped": "no_analysis"})
-            return None
-        if status == "pending":
-            return {
-                "status": "queued",
-                "duration_ms": None,
-                "error": None,
-                "retryable": True,
-                "created_at": req.adjudication_queued_at.isoformat() if req.adjudication_queued_at else None,
-                "detail": {"queued_at": req.adjudication_queued_at.isoformat() if req.adjudication_queued_at else None},
-            }
-        if status.startswith("skipped_"):
-            return {
-                "status": "skipped",
-                "duration_ms": None,
-                "error": None,
-                "retryable": True,
-                "created_at": req.adjudicated_at.isoformat() if req.adjudicated_at else None,
-                "detail": {"skipped": status.removeprefix("skipped_")},
-            }
-        return None
-
     def _row(e: Entry) -> dict:
-        stages: dict[str, dict] = {}
-        last_run_at = None
-        for st in PROCESSING_STAGE_ORDER:
-            if st == "analyze":
-                cell = _analysis_cell(e, scored=latest.get((e.id, "score")) is not None)
-                if cell is not None:
-                    stages[st] = cell
-                continue
-            r = latest.get((e.id, st))
-            if r is None:
-                if st == "adjudicate":
-                    cell = _adjudication_cell(e)
-                    if cell is not None:
-                        stages[st] = cell
-                continue
-            cell = {
-                "status": r.status,
-                "duration_ms": r.duration_ms,
-                "error": r.error,
-                "retryable": st in RETRYABLE_STAGE_TASKS,
-                "created_at": r.created_at.isoformat() if r.created_at else None,
-                # Stage-specific run detail (the adjudicate stage's verdict counts).
-                "detail": r.detail or None,
-            }
-            if st == "adjudicate":
-                req = adjudication_by_entry.get(e.id)
-                queued_at = getattr(req, "adjudication_queued_at", None) if req else None
-                if (
-                    req is not None
-                    and req.adjudication_status == "pending"
-                    and queued_at is not None
-                    and r.created_at is not None
-                    and queued_at > r.created_at
-                ):
-                    cell = _adjudication_cell(e) or cell
-            stages[st] = cell
-            if r.created_at and (last_run_at is None or r.created_at > last_run_at):
-                last_run_at = r.created_at
+        per_stage = {st: latest[(e.id, st)] for st in PROCESSING_STAGE_ORDER if (e.id, st) in latest}
+        stages = _entry_stage_cells(per_stage, adjudication_by_entry.get(e.id), analysis_enabled=analysis_enabled)
+        run_times = [r.created_at for r in per_stage.values() if r.created_at]
+        last_run_at = max(run_times) if run_times else None
         has_err = any(s["status"] == "error" for s in stages.values())
         complete = stages.get("score", {}).get("status") == "success"
         overall = "complete" if complete else ("errored" if has_err else "in_flight")

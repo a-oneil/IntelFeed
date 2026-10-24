@@ -736,15 +736,13 @@ export function EntryReader({ entryId }: EntryReaderProps) {
                 return <ReliabilityBadge rating={sub.reliability_rating} size="md" />;
               })()}
             </FeedNameMenuButton>
-            {entry.published_at && (
-              <span className={styles.date}>
-                {formatDateTime(entry.published_at)}
-              </span>
-            )}
+            {/* The timestamp doubles as the way into the pipeline status popover. */}
+            <EntryPipelineStatus entryId={entry.id} className={styles.date}>
+              {entry.published_at ? formatDateTime(entry.published_at) : "Pipeline"}
+            </EntryPipelineStatus>
             {entry.priority_score != null && (
               <SignalChip score={entry.priority_score} signals={entry.top_signals ?? []} />
             )}
-            <EntryPipelineStatus entryId={entry.id} />
           </div>
           <h1 className={styles.title}>
             {showTranslated && entry.translated_title ? entry.translated_title : entry.title}

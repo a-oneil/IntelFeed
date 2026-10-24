@@ -784,9 +784,9 @@ export const useUIStore = create<UIState>()(
           sidebarAutoCollapsed: true,
         };
       }),
-      readerFontSize: 16,
+      readerFontSize: 15,
       readerLineHeight: 1.7,
-      readerMaxWidth: 720,
+      readerMaxWidth: 1000,
       readerHighlightEntities: true,
       articleSummaryCollapsed: false,
       readAloudEngine: "piper",

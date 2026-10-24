@@ -32,7 +32,7 @@ import { ExtractionTab } from "./ExtractionTab";
 import { ProposalsQueue } from "./ProposalsQueue";
 import type { ProposalDomain } from "@/hooks/useHygiene";
 import { StagePanel } from "./StagePanel";
-import { skipReason } from "./adjudicationCopy";
+import { skipReason, waitingOn } from "./adjudicationCopy";
 import type { EngineDest } from "./engineSettingsIndex";
 import m from "./EngineMatrix.module.css";
 import styles from "./ProcessingTab.module.css";
@@ -147,18 +147,6 @@ const STAGE_HINTS: Record<string, { title: string; body: string; aside?: string 
     aside: "Off by default. Shadow files verdicts as proposals; apply fixes high-confidence ones at ingest.",
   },
 };
-
-/** What a queued cell is waiting for, in plain words. */
-function waitingOn(cell: ProcessingStageCell): string {
-  switch (cell.detail?.waiting_on) {
-    case "analysis":
-      return "waiting on the AI analysis it reviews";
-    case "submit":
-      return "waiting to be sent to the AI worker";
-    default:
-      return "waiting on the AI worker";
-  }
-}
 
 /** A synthetic or real cell's skip code, if any: `status: "skipped"` carries
  *  it in `detail.skipped`; a success run that bailed carries the same key. */

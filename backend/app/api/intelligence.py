@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app import entity_types
+from app.ai.caller import Caller
 from app.core.exceptions import AppError
 from app.core.pagination import PaginatedResponse
 from app.core.security import get_admin_user, get_current_user
@@ -3878,6 +3879,7 @@ async def run_task_on_text(
     parsed = await run_task(
         db=db,
         user_id=user.id,
+        caller=Caller.user(user.id),
         task_name=body.task_name,
         variables={"text": body.text},
     )
@@ -3962,6 +3964,7 @@ async def bulk_summarize_entries(
     parsed = await run_task(
         db=db,
         user_id=user.id,
+        caller=Caller.user(user.id),
         task_name="intelligence_briefing",
         variables=variables,
         force=True,
@@ -4069,6 +4072,7 @@ async def run_task_on_entry(
     parsed = await run_task(
         db=db,
         user_id=user.id,
+        caller=Caller.user(user.id),
         task_name=body.task_name,
         variables=variables,
         entry_id=entry_id,

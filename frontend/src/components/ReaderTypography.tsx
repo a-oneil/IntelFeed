@@ -22,7 +22,7 @@ const LINE_HEIGHTS: { value: ReaderLineHeight; label: string }[] = [
 
 const MAX_WIDTHS: { value: ReaderMaxWidth; label: string }[] = [
   { value: 600, label: "Narrow" },
-  { value: 720, label: "Default" },
+  { value: 720, label: "Medium" },
   { value: 860, label: "Wide" },
   { value: 1000, label: "Extra wide" },
   { value: 0, label: "Full" },
@@ -173,9 +173,9 @@ export function ReaderTypography() {
           <button
             className={styles.reset}
             onClick={() => {
-              setFontSize(16);
+              setFontSize(15);
               setLineHeight(1.7);
-              setMaxWidth(720);
+              setMaxWidth(1000);
               setHighlightEntities(true);
             }}
           >
