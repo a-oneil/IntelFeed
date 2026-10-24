@@ -843,7 +843,12 @@ async def export_intel_report(
             import weasyprint
 
             html_content = render_html(report)
-            pdf_bytes = weasyprint.HTML(string=html_content).write_pdf()
+            # WeasyPrint's default fetcher follows any URL in the document,
+            # file:// included, and a <link rel="attachment"> embeds whatever
+            # it fetched in the PDF. render_html sanitizes the body, and this
+            # is the second wall: nothing but inline data: URIs is loaded.
+            fetcher = weasyprint.URLFetcher(allowed_protocols={"data"})
+            pdf_bytes = weasyprint.HTML(string=html_content, url_fetcher=fetcher).write_pdf()
             return Response(
                 content=pdf_bytes,
                 media_type="application/pdf",

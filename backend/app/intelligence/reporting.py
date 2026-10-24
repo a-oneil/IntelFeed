@@ -969,14 +969,39 @@ def render_markdown(report) -> str:
     return "\n".join(lines)
 
 
+# What a rendered report body may contain. Section bodies are free text that any
+# user (or an AI draft built from feed content) writes, and Python-Markdown
+# passes raw HTML through untouched, so the converted body is cleaned before it
+# reaches a browser or WeasyPrint. Same shape as services.markdown's notes list.
+_REPORT_HTML_TAGS = {
+    "h1", "h2", "h3", "h4", "h5", "h6", "p", "br", "hr", "ul", "ol", "li",
+    "strong", "em", "del", "s", "a", "code", "pre", "table", "thead", "tbody",
+    "tr", "th", "td", "blockquote", "div", "span", "mark", "img",
+}  # fmt: skip
+_REPORT_HTML_ATTRIBUTES = {
+    "*": {"class"},
+    "a": {"href", "title"},
+    "img": {"src", "alt", "title"},
+    "td": {"align"},
+    "th": {"align"},
+}
+
+
 def render_html(report) -> str:
-    """Render an IntelReport to HTML using proper markdown conversion."""
+    """Render an IntelReport to sanitized HTML using proper markdown conversion."""
     import html as html_module
 
     import markdown as md_lib
+    import nh3
 
     md_text = render_markdown(report)
-    body_html = md_lib.markdown(md_text, extensions=["tables", "fenced_code", "codehilite"])
+    body_html = nh3.clean(
+        md_lib.markdown(md_text, extensions=["tables", "fenced_code", "codehilite"]),
+        tags=_REPORT_HTML_TAGS,
+        attributes=_REPORT_HTML_ATTRIBUTES,
+        url_schemes={"http", "https", "mailto"},
+        link_rel="noopener noreferrer",
+    )
 
     tlp_colors = {
         "TLP:CLEAR": "#ffffff",
