@@ -409,3 +409,27 @@
     min-height: 44px;
   }
 }
+
+/* ─── Who answered ───────────────────────────────────── */
+
+.headerTitleWrap {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.fallbackBanner {
+  padding: var(--sp-2) var(--sp-4);
+  flex-shrink: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--warning) 10%, var(--bg-secondary));
+  border-bottom: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+}
+
+.messageFoot {
+  margin-top: 4px;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}

@@ -14,6 +14,13 @@ function toAbsolute(date: Date): string {
   });
 }
 
+/** "2h ago" regardless of the date_format preference, for labels that must stay short. */
+export function formatRelative(input: DateInput, fallback = ""): string {
+  if (!input) return fallback;
+  const date = input instanceof Date ? input : new Date(input);
+  return isNaN(date.getTime()) ? fallback : toRelative(date);
+}
+
 function toRelative(date: Date): string {
   const now = new Date();
   const diff = now.getTime() - date.getTime();

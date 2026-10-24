@@ -267,6 +267,8 @@ sudo ./scripts/ops/cf-origin-lockdown.sh [--dry-run]
 
 File: [scripts/ops/cf-origin-lockdown.sh](../scripts/ops/cf-origin-lockdown.sh)
 
+With the origin locked down, every request's `CF-Connecting-IP` header is Cloudflare's, so set `TRUSTED_CLIENT_IP_HEADER=CF-Connecting-IP` in `.env`: the rate limiter then buckets anonymous traffic (login, the share page's AI calls) per visitor instead of per edge node. Without the lockdown leave it unset — anyone who reaches the origin directly could send the header.
+
 ### Security Headers
 
 **Applied by `SecurityHeadersMiddleware`:**
@@ -323,7 +325,7 @@ Limits are bucketed by path, not a global per-IP cap — general authenticated A
 
 **Exempt:** `/api/health`, `/metrics` (the metrics endpoint has its own IP allowlist), and all `OPTIONS` requests.
 
-**Mechanics:** Redis sliding-window (sorted set per identity). Identity is the JWT `sub` claim when present, else client IP. If Redis is down the limiter fails open (allows the request, logs a warning). Responses carry `X-RateLimit-Limit` / `X-RateLimit-Remaining`; a 429 includes `Retry-After`.
+**Mechanics:** Redis sliding-window (sorted set per identity). Identity is the `sub` of a JWT whose signature verifies, else the client IP: the first `X-Forwarded-For` hop when the direct peer is on a private network (Caddy strips the incoming header and writes its own peer there, so it can't be forged), or the header named in `TRUSTED_CLIENT_IP_HEADER` first (an unverified bearer falls back to the IP). This trusts whatever a private-network peer forwards, so the API port must only be reachable through the proxy, as the prod compose file arranges; a port 8000 published to the LAN would let a caller forge the header and the bucket. If Redis is down the limiter fails open (allows the request, logs a warning). Responses carry `X-RateLimit-Limit` / `X-RateLimit-Remaining`; a 429 includes `Retry-After`.
 
 File: `backend/app/core/rate_limit.py`
 

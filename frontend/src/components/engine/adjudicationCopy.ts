@@ -26,3 +26,15 @@ export const SKIP_REASONS: Record<string, string> = {
 export function skipReason(code: string): string {
   return SKIP_REASONS[code] ?? code.replace(/_/g, " ");
 }
+
+/** What a queued stage cell is waiting for, in plain words. */
+export function waitingOn(cell: { detail?: { waiting_on?: string } | null }): string {
+  switch (cell.detail?.waiting_on) {
+    case "analysis":
+      return "waiting on the AI analysis it reviews";
+    case "submit":
+      return "waiting to be sent to the AI worker";
+    default:
+      return "waiting on the AI worker";
+  }
+}

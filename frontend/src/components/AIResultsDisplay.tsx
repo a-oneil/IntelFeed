@@ -1,11 +1,15 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import type { AIResult } from "@/api/types";
 import { useAIResults, useAIResultHistory, useRunAIOnEntity } from "@/hooks/useAI";
 import { useCreateEntryNote } from "@/hooks/useNotes";
 import { useUIStore } from "@/stores/uiStore";
+import { useAuthStore } from "@/stores/authStore";
 import { formatDate } from "@/utils/formatDate";
-import { Chip } from "./primitives";
+import { fallbackFixLabel, fallbackMessage } from "@/utils/aiProvenance";
+import { formatUsd } from "@/utils/format";
+import { Chip, Hint } from "./primitives";
 import styles from "./AIResultsDisplay.module.css";
 import { AsyncStateLoading } from "@/components/AsyncState";
 
@@ -110,6 +114,11 @@ function AIResultCard({
   const [showHistory, setShowHistory] = useState(false);
   const [showTurnInto, setShowTurnInto] = useState(false);
   const openCopilotWith = useUIStore((s) => s.openCopilotWith);
+  const myId = useAuthStore((s) => s.user?.id);
+  const mine = !!result.key_owner_id && result.key_owner_id === myId;
+  const fallbackReason = result.parsed_result?._fallback_reason;
+  const fallbackText = fallbackMessage(fallbackReason);
+  const promptVersion = result.parsed_result?._prompt_version;
   const createEntryNote = useCreateEntryNote();
   const taskName = result.task_name || "unknown";
   const displayName = taskName.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -145,14 +154,51 @@ function AIResultCard({
   };
 
   return (
-    <div className={styles.resultCard}>
+    <div className={`${styles.resultCard} ${fallbackText ? styles.resultCardFallback : ""}`}>
       <div className={styles.resultHeader}>
         <button className={styles.resultToggle} onClick={() => setCollapsed(!collapsed)}>
           <strong>{displayName}</strong>
           <span className={styles.resultMeta}>
             {result.model_name && <span>{result.model_name}</span>}
+            {result.provider_name && (
+              <Hint
+                title="Who answered"
+                body={
+                  <dl className={styles.answeredBy}>
+                    <dt>Provider</dt>
+                    <dd>
+                      {result.provider_name}
+                      {result.key_owner_id ? (mine ? " (yours)" : " (personal key)") : " (instance)"}
+                    </dd>
+                    <dt>Model</dt>
+                    <dd>{result.model_name ?? "—"}</dd>
+                    <dt>Prompt</dt>
+                    <dd>{typeof promptVersion === "number" ? `Instance template v${promptVersion}` : "Instance default"}</dd>
+                    <dt>Cost</dt>
+                    <dd>
+                      {result.cost_estimate ? formatUsd(result.cost_estimate, 3) : "$0"}
+                      {result.tokens_input != null && result.tokens_output != null && (
+                        <> · {(result.tokens_input / 1000).toFixed(1)}k in / {(result.tokens_output / 1000).toFixed(1)}k out</>
+                      )}
+                    </dd>
+                  </dl>
+                }
+              >
+                <span className={styles.providerChipWrap}>
+                  <Chip
+                    size="sm"
+                    tone="toned"
+                    tint={fallbackText ? "var(--warning)" : mine ? "var(--accent)" : undefined}
+                    className={styles.providerChip}
+                  >
+                    {result.provider_name}
+                    {fallbackText ? " · fallback" : mine ? " · your key" : ""}
+                  </Chip>
+                </span>
+              </Hint>
+            )}
             <span>{formatDate(result.created_at)}</span>
-            {result.cost_estimate && <span>${result.cost_estimate}</span>}
+            {result.cost_estimate && <span>{formatUsd(result.cost_estimate, 3)}</span>}
           </span>
           <span className={styles.resultArrow}>{collapsed ? "\u25BE" : "\u25B4"}</span>
         </button>
@@ -223,6 +269,12 @@ function AIResultCard({
           </div>
         )}
       </div>
+      {fallbackText && (
+        <div className={styles.fallbackNote}>
+          {fallbackText}{" "}
+          <Link to="/settings?section=myai">{fallbackFixLabel(fallbackReason)}</Link>
+        </div>
+      )}
       {!collapsed && result.parsed_result && (
         <ResultContent taskName={taskName} result={result.parsed_result} />
       )}

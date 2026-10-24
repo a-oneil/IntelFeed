@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import Markdown, { type Components } from "react-markdown";
@@ -28,15 +28,19 @@ import {
   filterCopilotCommands,
   type CopilotCommand,
 } from "@/components/copilotCommands";
-import type { CopilotContext } from "@/hooks/useAI";
+import type { CopilotAnsweredBy, CopilotContext } from "@/hooks/useAI";
+import { fallbackFixLabel, fallbackMessage } from "@/utils/aiProvenance";
+import { formatUsd } from "@/utils/format";
 import styles from "./CopilotDockPanel.module.css";
-import { RailToggle } from "@/components/primitives";
+import { Chip, RailToggle } from "@/components/primitives";
 
 /** An assistant turn can interleave tool-trace chips with streamed text. */
 interface CopilotMessage extends AskAgentMessage {
   traces?: ToolTrace[];
   /** A proposed write attached to this turn, awaiting user confirmation. */
   confirm?: CopilotConfirmRequest;
+  /** Which provider answered this turn, whose key, and what it cost. */
+  answeredBy?: CopilotAnsweredBy;
 }
 
 const SUGGESTED_PROMPTS = [
@@ -250,9 +254,10 @@ export function CopilotDockPanel() {
                 : `Error: ${message}`,
             }));
           },
-          onDone: (newConversationId) => {
+          onDone: (newConversationId, answeredBy) => {
             // Adopt the backend-authoritative conversation id.
             if (newConversationId) setConversationId(newConversationId);
+            if (answeredBy) updateAssistant((m) => ({ ...m, answeredBy }));
           },
         },
         controller.signal,
@@ -573,7 +578,30 @@ export function CopilotDockPanel() {
             onResize={(delta) => setWidth(width - delta)}
           />
           <div className={styles.header}>
-            <span className={styles.headerTitle}>✦ Copilot</span>
+            <span className={styles.headerTitleWrap}>
+              <span className={styles.headerTitle}>✦ Copilot</span>
+              {copilotConfig?.configured && copilotConfig.provider_name && (
+                <Chip
+                  size="sm"
+                  tone="toned"
+                  tint={copilotConfig.source === "user" ? "var(--accent)" : undefined}
+                  title={
+                    copilotConfig.source === "user"
+                      ? `Answers come from your own key (${copilotConfig.model ?? ""})`
+                      : `Answers come from this instance's provider (${copilotConfig.model ?? ""})`
+                  }
+                  truncate
+                >
+                  via {copilotConfig.provider_name}
+                  {copilotConfig.source === "user" ? " · your key" : ""}
+                </Chip>
+              )}
+              {copilotConfig?.configured && copilotConfig.supports_tools === false && (
+                <Chip size="sm" tone="toned" tint="var(--warning)" title="This provider has no tool loop: answers come without live data lookups">
+                  no tools
+                </Chip>
+              )}
+            </span>
             <div className={styles.headerActions}>
               <button
                 className={styles.headerBtn}
@@ -611,6 +639,18 @@ export function CopilotDockPanel() {
               </button>
             </div>
           </div>
+
+          {copilotConfig?.refused && (
+            <div className={styles.reauthBanner}>
+              <span className={styles.reauthText}>{copilotConfig.refused.message}</span>
+              <Link className={styles.reauthBtn} to="/settings?section=myai">
+                {fallbackFixLabel(copilotConfig.refused.reason)}
+              </Link>
+            </div>
+          )}
+          {copilotConfig?.fallback_reason && (
+            <div className={styles.fallbackBanner}>{fallbackMessage(copilotConfig.fallback_reason)}</div>
+          )}
 
           {needsReauth && (
             <div className={styles.reauthBanner}>
@@ -729,6 +769,16 @@ export function CopilotDockPanel() {
                       msg.content
                     )}
                   </div>
+                  {msg.role === "assistant" && msg.answeredBy && (
+                    <div className={styles.messageFoot}>
+                      {msg.answeredBy.model ?? msg.answeredBy.provider_name}
+                      {msg.answeredBy.cost_usd != null && ` · ${formatUsd(msg.answeredBy.cost_usd, 3)}`}
+                      {msg.answeredBy.source === "user" && " · your key"}
+                      {!msg.answeredBy.supports_tools &&
+                        (msg.answeredBy.source === "user" ? " · tools unavailable on this key" : " · no tools")}
+                      {msg.answeredBy.fallback_reason && ` · ${fallbackMessage(msg.answeredBy.fallback_reason)}`}
+                    </div>
+                  )}
                   {msg.confirm && (
                     <ConfirmCard
                       request={msg.confirm}

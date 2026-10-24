@@ -6,6 +6,7 @@ import re
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import anyio
 import sqlalchemy as sa
 from fastapi import APIRouter, Body, Depends, File, Path, Query, Response, UploadFile
 from pydantic import BaseModel, ConfigDict
@@ -20,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app import entity_types
+from app.ai.caller import Caller
 from app.core.exceptions import AppError
 from app.core.pagination import PaginatedResponse
 from app.core.security import get_admin_user, get_current_user
@@ -2753,18 +2755,19 @@ async def convert_detection_rule(
     if rule.rule_type == body.target_type:
         raise AppError(code="same_type", message="Source and target rule types are the same", status_code=400)
 
-    from app.ai.engine import _get_provider_instance, get_task_assignment
+    from app.ai.caller import Caller
+    from app.ai.engine import _get_provider_instance, record_direct_result, resolve_assignment
 
-    assignment_data = await get_task_assignment(db, user.id, "detection_rules")
-    if not assignment_data:
+    resolved = await resolve_assignment(db, Caller.user(user.id), "detection_rules")
+    if resolved is None:
         raise AppError(
             code="no_ai_assignment",
             message="No AI provider assigned for detection rules. Configure one in Settings > AI.",
             status_code=400,
         )
 
-    assignment, task, provider_model = assignment_data
-    provider = _get_provider_instance(provider_model)
+    task, provider_model = resolved.task, resolved.provider
+    provider = _get_provider_instance(provider_model, extra_config=resolved.config)
 
     source_label = RULE_TYPE_LABELS.get(rule.rule_type, rule.rule_type)
     target_label = RULE_TYPE_LABELS.get(body.target_type, body.target_type)
@@ -2794,20 +2797,37 @@ CONVERSION INSTRUCTIONS:
 
 Return ONLY the converted rule content — no explanation, no markdown fences, just the raw rule text."""
 
-    config = {**provider_model.config, **assignment.config}
+    config = resolved.config
     # Bound the provider call below the gunicorn worker timeout (180s) and
     # nginx's proxy_read_timeout. Unbounded, a slow claude_code CLI call plus
     # its automatic retry outlasts the worker and the request dies as a 502
     # instead of a readable error. Passing an explicit per-call timeout also
     # forces the CLI provider to a single attempt.
-    response = await provider.complete(
-        prompt=prompt,
-        system="You are an expert detection engineer. Convert detection rules between formats with perfect syntax.",
-        temperature=config.get("temperature", 0.1),
-        max_tokens=config.get("max_tokens", 4096),
-        model=assignment.model_name,
-        timeout_seconds=float(config.get("timeout_seconds", 150)),
+    ledger = dict(
+        caller=Caller.user(user.id),
+        task=task,
+        provider_model=provider_model,
+        model_name=resolved.model_name,
+        prompt_used=prompt,
+        target_type="detection_rule",
+        target_id=rule.id,
+        key_owner_id=resolved.key_owner_id,
     )
+    try:
+        response = await provider.complete(
+            prompt=prompt,
+            system="You are an expert detection engineer. Convert detection rules between formats with perfect syntax.",
+            temperature=config.get("temperature", 0.1),
+            max_tokens=config.get("max_tokens", 4096),
+            model=resolved.model_name,
+            timeout_seconds=float(config.get("timeout_seconds", 150)),
+        )
+    except Exception as e:
+        # Commit before raising: the session dependency rolls back on any
+        # exception, and a failed call still has to count as a request.
+        await record_direct_result(db, response=None, error=str(e), **ledger)
+        await db.commit()
+        raise AppError(code="ai_error", message=f"AI provider error: {e}", status_code=502)
 
     converted_content = response.content.strip()
     # Strip markdown fences if the model added them despite instructions
@@ -2818,9 +2838,7 @@ Return ONLY the converted rule content — no explanation, no markdown fences, j
             lines = lines[:-1]
         converted_content = "\n".join(lines)
 
-    from app.ai.engine import _estimate_cost
-
-    cost = _estimate_cost(response.model, response.tokens_input, response.tokens_output)
+    cost = (await record_direct_result(db, response=response, content=converted_content, **ledger)).cost_estimate
 
     sibling = await _upsert_conversion_sibling(
         db,
@@ -3046,18 +3064,19 @@ async def chat_rule_assistant(
     """Streaming AI chat for detection rule development assistance."""
     from sse_starlette.sse import EventSourceResponse
 
-    from app.ai.engine import _get_provider_instance, get_task_assignment
+    from app.ai.caller import Caller
+    from app.ai.engine import _get_provider_instance, record_direct_result, resolve_assignment
 
-    assignment_data = await get_task_assignment(db, user.id, "detection_rules")
-    if not assignment_data:
+    resolved = await resolve_assignment(db, Caller.user(user.id), "detection_rules")
+    if resolved is None:
         raise AppError(
             code="no_ai_assignment",
             message="No AI provider assigned for detection rules. Configure one in Settings > AI.",
             status_code=400,
         )
 
-    assignment, task, provider_model = assignment_data
-    provider = _get_provider_instance(provider_model)
+    task, provider_model = resolved.task, resolved.provider
+    provider = _get_provider_instance(provider_model, extra_config=resolved.config)
 
     rule_type_label = RULE_TYPE_LABELS.get(body.rule_type, body.rule_type)
 
@@ -3094,14 +3113,54 @@ GUIDELINES:
             messages.append({"role": msg["role"], "content": msg["content"]})
     messages.append({"role": "user", "content": body.message})
 
-    config = {**provider_model.config, **assignment.config}
+    config = resolved.config
+
+    async def _ledger(prompt: str, answer: str, error: str | None) -> None:
+        # A streamed reply reports usage only when the provider sends it on
+        # the stream (see AIProvider.last_stream_usage); otherwise the row
+        # counts a request at zero tokens. Accounting must never break the
+        # stream.
+        try:
+            streamed = getattr(provider, "last_stream_usage", None)
+            response = None
+            if streamed and error is None:
+                from app.ai.providers.base import AIResponse
+
+                response = AIResponse(
+                    content=answer,
+                    raw_response={},
+                    tokens_input=int(streamed.get("tokens_input") or 0),
+                    tokens_output=int(streamed.get("tokens_output") or 0),
+                    model=resolved.model_name,
+                    latency_ms=0,
+                    cost_usd=streamed.get("cost_usd"),
+                )
+            await record_direct_result(
+                db,
+                caller=Caller.user(user.id),
+                task=task,
+                provider_model=provider_model,
+                model_name=resolved.model_name,
+                prompt_used=prompt,
+                response=response,
+                content=answer,
+                error=error,
+                target_type="rule_chat",
+                key_owner_id=resolved.key_owner_id,
+            )
+            await db.commit()
+        except Exception as e:
+            logger.warning("rule chat failed to record ai_result: %s", e)
+            await db.rollback()
 
     async def generate():
         import json as _json
 
+        conversation_text = ""
+        answer_parts: list[str] = []
+        ledgered = False
         try:
             # Build the full prompt from conversation
-            conversation_text = ""
             for msg in messages[:-1]:
                 role_label = "Analyst" if msg["role"] == "user" else "Assistant"
                 conversation_text += f"\n{role_label}: {msg['content']}\n"
@@ -3112,12 +3171,26 @@ GUIDELINES:
                 system=system_prompt,
                 temperature=config.get("temperature", 0.3),
                 max_tokens=config.get("max_tokens", 4096),
-                model=assignment.model_name,
+                model=resolved.model_name,
             ):
+                answer_parts.append(chunk)
                 yield {"event": "chunk", "data": _json.dumps({"text": chunk})}
+            await _ledger(conversation_text, "".join(answer_parts), None)
+            ledgered = True
             yield {"event": "done", "data": _json.dumps({"status": "complete"})}
         except Exception as e:
+            await _ledger(conversation_text, "".join(answer_parts), str(e))
+            ledgered = True
             yield {"event": "error", "data": _json.dumps({"error": str(e)})}
+        finally:
+            # The client went away mid-stream. sse-starlette cancels this task,
+            # so the write has to be shielded or it is cancelled at its first
+            # await. The prompt reached the provider either way, so even a call
+            # abandoned before its first token is spend: a disconnect-and-retry
+            # loop must not be free.
+            if not ledgered:
+                with anyio.CancelScope(shield=True):
+                    await _ledger(conversation_text, "".join(answer_parts), "client disconnected")
 
     return EventSourceResponse(generate())
 
@@ -3750,7 +3823,7 @@ async def import_detection_rules(
 
 @router.get("/ai/cost-summary")
 async def get_cost_summary(
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Aggregate AI usage over the last 30 days: total estimated cost, request count, and input/output tokens."""
@@ -3806,6 +3879,7 @@ async def run_task_on_text(
     parsed = await run_task(
         db=db,
         user_id=user.id,
+        caller=Caller.user(user.id),
         task_name=body.task_name,
         variables={"text": body.text},
     )
@@ -3890,6 +3964,7 @@ async def bulk_summarize_entries(
     parsed = await run_task(
         db=db,
         user_id=user.id,
+        caller=Caller.user(user.id),
         task_name="intelligence_briefing",
         variables=variables,
         force=True,
@@ -3997,6 +4072,7 @@ async def run_task_on_entry(
     parsed = await run_task(
         db=db,
         user_id=user.id,
+        caller=Caller.user(user.id),
         task_name=body.task_name,
         variables=variables,
         entry_id=entry_id,

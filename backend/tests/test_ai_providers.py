@@ -274,23 +274,6 @@ async def test_delete_provider_not_found(client: AsyncClient, admin_headers: dic
     assert resp.status_code == 404
 
 
-# ── Get models ───────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_get_models_not_found(client: AsyncClient, auth_headers: dict):
-    fake_id = uuid.uuid4()
-    resp = await client.get(f"{PROVIDERS_URL}/{fake_id}/models", headers=auth_headers)
-    assert resp.status_code == 404
-
-
-@pytest.mark.asyncio
-async def test_get_models_no_auth(client: AsyncClient):
-    fake_id = uuid.uuid4()
-    resp = await client.get(f"{PROVIDERS_URL}/{fake_id}/models")
-    assert resp.status_code == 401
-
-
 # ── Test connectivity ────────────────────────────────────────────────
 
 

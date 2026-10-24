@@ -380,7 +380,14 @@ async def _set_detection_rule_status(db: AsyncSession, user_id: uuid.UUID, rule_
 async def _convert_detection_rule(
     db: AsyncSession, user_id: uuid.UUID, rule_id: str, target_format: str, save: bool = False
 ) -> dict:
-    from app.ai.engine import _estimate_cost, _get_provider_instance, get_task_assignment
+    from app.ai.engine import (
+        SiteAllowanceExceeded,
+        UserKeyRequired,
+        _get_provider_instance,
+        derive_caller,
+        record_direct_result,
+        resolve_assignment,
+    )
     from app.api.intelligence import RULE_TYPE_LABELS
 
     rule = await _get_rule(db, rule_id)
@@ -389,11 +396,17 @@ async def _convert_detection_rule(
     if rule.rule_type == target_format:
         return {"error": "Source and target rule types are the same"}
 
-    assignment_data = await get_task_assignment(db, user_id, "detection_rules")
-    if not assignment_data:
+    # Tools run as whoever invoked them, which for an agentic maintenance
+    # task is the service account — derive rather than assume a person.
+    caller = await derive_caller(db, user_id)
+    try:
+        resolved = await resolve_assignment(db, caller, "detection_rules")
+    except (SiteAllowanceExceeded, UserKeyRequired) as e:
+        return {"error": e.message}
+    if resolved is None:
         return {"error": "No AI provider assigned for detection rules. Configure one in Settings > AI."}
-    assignment, task, provider_model = assignment_data
-    provider = _get_provider_instance(provider_model)
+    task, provider_model = resolved.task, resolved.provider
+    provider = _get_provider_instance(provider_model, extra_config=resolved.config)
 
     source_label = RULE_TYPE_LABELS.get(rule.rule_type, rule.rule_type)
     target_label = RULE_TYPE_LABELS.get(target_format, target_format)
@@ -422,17 +435,28 @@ CONVERSION INSTRUCTIONS:
 
 Return ONLY the converted rule content — no explanation, no markdown fences, just the raw rule text."""
 
-    config = {**provider_model.config, **assignment.config}
+    config = resolved.config
     system_prompt = "You are an expert detection engineer. Convert detection rules between formats with perfect syntax."
+    ledger = dict(
+        caller=caller,
+        task=task,
+        provider_model=provider_model,
+        model_name=resolved.model_name,
+        prompt_used=prompt,
+        target_type="detection_rule",
+        target_id=rule.id,
+        key_owner_id=resolved.key_owner_id,
+    )
     try:
         response = await provider.complete(
             prompt=prompt,
             system=system_prompt,
             temperature=config.get("temperature", 0.1),
             max_tokens=config.get("max_tokens", 4096),
-            model=assignment.model_name,
+            model=resolved.model_name,
         )
     except Exception as e:  # provider/network failure is user-visible, not a crash
+        await record_direct_result(db, response=None, error=str(e), **ledger)
         return {"error": f"AI conversion failed: {e}"}
 
     converted_content = response.content.strip()
@@ -442,7 +466,7 @@ Return ONLY the converted rule content — no explanation, no markdown fences, j
             lines = lines[:-1]
         converted_content = "\n".join(lines)
 
-    cost = _estimate_cost(response.model, response.tokens_input, response.tokens_output)
+    cost = (await record_direct_result(db, response=response, content=converted_content, **ledger)).cost_estimate
     result = {
         "converted_content": converted_content,
         "source_type": rule.rule_type,

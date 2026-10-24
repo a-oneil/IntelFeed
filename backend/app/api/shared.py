@@ -760,6 +760,54 @@ async def get_shared_tts_file(
     return response
 
 
+async def _share_requests_today(db: AsyncSession, share: SharedEntry) -> int:
+    """AI calls this link has made today.
+
+    Questions are ledgered against the share itself. Task runs go through
+    run_task and are ledgered against the entry, so they are counted by
+    entry and sharer: two links the same person made to one article share
+    that part of the budget, which is bounded anyway — each task runs at
+    most once per article.
+    """
+    from app.ai.engine import utc_day_start
+
+    day_start = utc_day_start()
+    same_sharer = AIResult.user_id.is_(None) if share.created_by is None else AIResult.user_id == share.created_by
+    by_entry = (AIResult.entry_id == share.entry_id) & same_sharer
+    return (
+        await db.execute(
+            select(func.count(AIResult.id)).where(
+                AIResult.caller_kind == "share",
+                AIResult.created_at >= day_start,
+                (AIResult.target_id == share.id) | by_entry,
+            )
+        )
+    ).scalar_one()
+
+
+async def _enforce_share_limit(db: AsyncSession, share: SharedEntry) -> int | None:
+    """Refuse once a link has used its day's AI calls.
+
+    Returns how many calls remain after this one, or None when unlimited.
+    These routes are unauthenticated, so the link itself is the budget:
+    a stranger can never run up the sharer's allowance, and one leaked
+    link can only ever cost a day's worth.
+    """
+    from app.services.system_settings import get_setting
+
+    cap = int(await get_setting("share_ai_daily_requests", db) or 0)
+    if cap <= 0:
+        return None
+    used = await _share_requests_today(db, share)
+    if used >= cap:
+        raise AppError(
+            code="share_limit_exceeded",
+            message=f"This share link has used its {cap} AI requests for today. Try again tomorrow.",
+            status_code=429,
+        )
+    return cap - used - 1
+
+
 class RunSharedTaskRequest(BaseModel):
     task_name: str
 
@@ -773,6 +821,7 @@ async def run_shared_ai_task(
     db: AsyncSession = Depends(get_db),
 ):
     """Run an AI task on a shared entry. Each task can only be executed once per article."""
+    from app.ai.caller import Caller
     from app.ai.engine import run_task
 
     # Validate share token
@@ -816,6 +865,8 @@ async def run_shared_ai_task(
             status_code=409,
         )
 
+    remaining = await _enforce_share_limit(db, share)
+
     # Fetch entry for task input
     entry_result = await db.execute(select(Entry).where(Entry.id == entry_id))
     entry = entry_result.scalar_one_or_none()
@@ -832,7 +883,8 @@ async def run_shared_ai_task(
         "published_at": entry.published_at.isoformat() if entry.published_at else "",
     }
 
-    # Run the task using the share creator's user_id
+    # The sharer is recorded as the attributed user, but the caller is the
+    # anonymous link: share traffic is pipeline spend, never a person's.
     parsed = await run_task(
         db=db,
         user_id=share.created_by,
@@ -841,6 +893,7 @@ async def run_shared_ai_task(
         entry_id=entry_id,
         target_type="entry",
         target_id=entry_id,
+        caller=Caller.share(share.created_by),
     )
     if parsed is None:
         raise AppError(
@@ -870,6 +923,7 @@ async def run_shared_ai_task(
         "result": parsed,
         "model_name": latest.model_name if latest else None,
         "cost_estimate": str(latest.cost_estimate) if latest and latest.cost_estimate else None,
+        "remaining_today": remaining,
     }
 
 
@@ -902,7 +956,14 @@ async def shared_ask_agent(
     db: AsyncSession = Depends(get_db),
 ):
     """Ask the AI agent a question about a shared entry."""
-    from app.ai.engine import _get_provider_instance, get_active_prompt, get_task_assignment, render_prompt
+    from app.ai.caller import Caller
+    from app.ai.engine import (
+        _get_provider_instance,
+        get_active_prompt,
+        record_direct_result,
+        render_prompt,
+        resolve_assignment,
+    )
 
     # Validate share token
     result = await db.execute(select(SharedEntry).where(SharedEntry.token == token, SharedEntry.is_active.is_(True)))
@@ -919,11 +980,15 @@ async def shared_ask_agent(
     if not body.question.strip():
         raise AppError(code="bad_request", message="Question is required", status_code=400)
 
-    assignment_data = await get_task_assignment(db, share.created_by, "entry_qa")
-    if not assignment_data:
+    # Share traffic is never a person: the lookup answers with the
+    # instance's provider whatever the sharer has set up.
+    caller = Caller.share(share.created_by)
+    resolved = await resolve_assignment(db, caller, "entry_qa")
+    if resolved is None:
         raise AppError(code="not_configured", message="Ask Agent is not configured", status_code=422)
 
-    assignment, task, provider_model = assignment_data
+    task, provider_model = resolved.task, resolved.provider
+    remaining = await _enforce_share_limit(db, share)
     system_template, user_template = await get_active_prompt(db, task.id)
 
     entry_dict = {
@@ -944,23 +1009,37 @@ async def shared_ask_agent(
     rendered_system = render_prompt(system_template, variables) if system_template else None
     rendered_user = render_prompt(user_template, variables)
 
-    provider = _get_provider_instance(provider_model)
-    config = {**provider_model.config, **assignment.config}
+    provider = _get_provider_instance(provider_model, extra_config=resolved.config)
+    config = resolved.config
     temperature = config.get("temperature", 0.3)
     max_tokens = config.get("max_tokens", 2048)
 
+    ledger = dict(
+        caller=caller,
+        task=task,
+        provider_model=provider_model,
+        model_name=resolved.model_name,
+        prompt_used=rendered_user,
+        target_type="share_qa",
+        target_id=share.id,
+    )
     try:
         response = await provider.complete(
             prompt=rendered_user,
             system=rendered_system,
             temperature=temperature,
             max_tokens=max_tokens,
-            model=assignment.model_name,
+            model=resolved.model_name,
         )
     except Exception as e:
+        # Commit before raising: the session dependency rolls back on any
+        # exception, and a failed call still has to count as a request.
+        await record_direct_result(db, response=None, error=str(e), **ledger)
+        await db.commit()
         raise AppError(code="ai_error", message=f"AI provider error: {e}", status_code=502)
 
-    return {"answer": response.content, "model": response.model}
+    await record_direct_result(db, response=response, **ledger)
+    return {"answer": response.content, "model": response.model, "remaining_today": remaining}
 
 
 # --- OpenGraph preview endpoint ---

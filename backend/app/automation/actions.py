@@ -17,17 +17,16 @@ Batch mode:
 """
 
 import asyncio
-import ipaddress
 import logging
 import re
 import uuid
 from datetime import UTC, datetime
-from urllib.parse import urlparse
 
 import httpx
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.caller import Caller, caller_scope
 from app.automation.variables import BATCH_ENTRY_FIELDS, PER_ENTRY_FIELDS
 from app.models.entry import Entry
 from app.models.entry_state import UserEntryState
@@ -37,48 +36,14 @@ from app.services.entry_tags import MissingOwner, ensure_assignment, sync_entry_
 
 logger = logging.getLogger(__name__)
 
-_PRIVATE_NETWORKS = [
-    ipaddress.ip_network("10.0.0.0/8"),
-    ipaddress.ip_network("172.16.0.0/12"),
-    ipaddress.ip_network("192.168.0.0/16"),
-    ipaddress.ip_network("169.254.0.0/16"),
-    ipaddress.ip_network("127.0.0.0/8"),
-    ipaddress.ip_network("::1/128"),
-    ipaddress.ip_network("fc00::/7"),
-    ipaddress.ip_network("fe80::/10"),
-]
 
-
-def _validate_webhook_url(url: str) -> str | None:
-    """Validate a webhook URL against SSRF. Returns error message or None if valid."""
+async def _validate_webhook_url(url: str) -> str | None:
+    """Why a webhook must not be called, or None. Resolves the hostname: a
+    name that points at the LAN is the attack, not the literal address."""
     from app.config import settings
+    from app.core.outbound import check_outbound_url
 
-    try:
-        parsed = urlparse(url)
-    except Exception:
-        return "Invalid URL"
-
-    if parsed.scheme not in ("http", "https"):
-        return f"Unsupported URL scheme: {parsed.scheme}"
-
-    hostname = parsed.hostname
-    if not hostname:
-        return "No hostname in URL"
-
-    if settings.webhook_allow_private_networks:
-        return None
-
-    try:
-        addr = ipaddress.ip_address(hostname)
-        for network in _PRIVATE_NETWORKS:
-            if addr in network:
-                return f"URL points to private/internal network ({hostname})"
-    except ValueError:
-        # Not an IP literal — hostname. Check for localhost variants.
-        if hostname in ("localhost", "localhost.localdomain"):
-            return "URL points to localhost"
-
-    return None
+    return await check_outbound_url(url, allow_private=settings.webhook_allow_private_networks)
 
 
 async def observable_template_context(db: AsyncSession, entry: Entry) -> dict:
@@ -228,6 +193,23 @@ async def execute_action(
     user_id: uuid.UUID,
     context: dict | None = None,
 ) -> dict:
+    """Execute a single automation action against an entry, as automation.
+
+    The rule's author is ``user_id``, but nothing in here is the author
+    clicking: every AI call beneath this frame defaults to an automation
+    caller, so a new action can't bill a personal key by omission.
+    """
+    with caller_scope(Caller.automation(user_id)):
+        return await _execute_action(db, entry, action, user_id, context)
+
+
+async def _execute_action(
+    db: AsyncSession,
+    entry: Entry,
+    action: dict,
+    user_id: uuid.UUID,
+    context: dict | None = None,
+) -> dict:
     """Execute a single automation action against an entry.
 
     Args:
@@ -329,6 +311,17 @@ PER_ENTRY_ACTIONS = {
 
 
 async def execute_actions_batch(
+    db: AsyncSession,
+    entries: list[Entry],
+    actions: list[dict],
+    user_id: uuid.UUID,
+) -> list[dict]:
+    """Execute actions in batch mode for scheduled/manual runs, as automation."""
+    with caller_scope(Caller.automation(user_id)):
+        return await _execute_actions_batch(db, entries, actions, user_id)
+
+
+async def _execute_actions_batch(
     db: AsyncSession,
     entries: list[Entry],
     actions: list[dict],
@@ -449,14 +442,21 @@ async def _action_run_ai_task(db: AsyncSession, entry: Entry, config: dict, user
     }
     variables = {"entry": {f: entry_values[f] for f in PER_ENTRY_FIELDS}}
 
-    result = await run_task(db=db, user_id=user_id, task_name=task_name, variables=variables, entry_id=entry.id)
+    result = await run_task(
+        db=db,
+        user_id=user_id,
+        task_name=task_name,
+        variables=variables,
+        entry_id=entry.id,
+    )
 
     if result is None:
         return {"status": "skipped", "message": f"AI task '{task_name}' not configured for user"}
 
     # Store AI output in context so downstream actions can use it
     ai_results = context.setdefault("ai_results", {})
-    parsed = result.parsed_result if hasattr(result, "parsed_result") else None
+    # run_task returns the parsed dict itself (the cached one on a dedup hit).
+    parsed = result if isinstance(result, dict) else None
     if parsed:
         ai_results[task_name] = parsed
         # Convenience: store summary text for notification/webhook actions
@@ -763,7 +763,7 @@ async def _action_send_notification(entry: Entry, config: dict, context: dict | 
     if not webhook_url:
         return {"status": "error", "message": "No webhook_url specified"}
 
-    ssrf_err = _validate_webhook_url(webhook_url)
+    ssrf_err = await _validate_webhook_url(webhook_url)
     if ssrf_err:
         return {"status": "error", "message": ssrf_err}
 
@@ -1111,7 +1111,7 @@ async def _action_send_notification_batch(
     if not webhook_url:
         return {"status": "error", "message": "No webhook_url specified"}
 
-    ssrf_err = _validate_webhook_url(webhook_url)
+    ssrf_err = await _validate_webhook_url(webhook_url)
     if ssrf_err:
         return {"status": "error", "message": ssrf_err}
 
@@ -1242,7 +1242,7 @@ async def _action_run_webhook_batch(
     if not url:
         return {"status": "error", "message": "No URL specified"}
 
-    ssrf_err = _validate_webhook_url(url)
+    ssrf_err = await _validate_webhook_url(url)
     if ssrf_err:
         return {"status": "error", "message": ssrf_err}
 
@@ -1295,7 +1295,7 @@ async def _action_run_webhook(entry: Entry, config: dict, context: dict | None =
     if not url:
         return {"status": "error", "message": "No URL specified"}
 
-    ssrf_err = _validate_webhook_url(url)
+    ssrf_err = await _validate_webhook_url(url)
     if ssrf_err:
         return {"status": "error", "message": ssrf_err}
 

@@ -66,10 +66,10 @@ environment's own Settings UI.
 |---|---|---|
 | `CONFIGURABLE_KEYS` | `system_settings.py:19` | Which keys are DB-overridable, and the type each value is coerced to |
 | `SETTING_METADATA` | `system_settings.py:186` | Label, description and group shown in the UI |
-| `_ENGINE_SECTION_GROUPS` | `backend/app/services/system_settings.py:1195` | Re-groups engine-owned keys onto Engine console sections, overwriting the `group` above |
+| `_ENGINE_SECTION_GROUPS` | `backend/app/services/system_settings.py:1223` | Re-groups engine-owned keys onto Engine console sections, overwriting the `group` above |
 | `SECRET_KEYS` | `system_settings.py:14` | Encrypted at rest, masked on read |
 | `GROUP_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:26` | Group → which console surface renders it; powers the Engine settings search |
-| `KEY_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:52` | Key-level exceptions to `GROUP_DEST` |
+| `KEY_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:68` | Key-level exceptions to `GROUP_DEST` |
 
 Adding a setting means touching all of `config.py` (default), `CONFIGURABLE_KEYS`
 (type), `SETTING_METADATA` (label/description/group), and — if a scheduled job
@@ -563,6 +563,23 @@ sections rather than the Engine console.
 | `sentry_profiles_sample_rate` | float, `0.1` | Profiling sampling. Read at startup, with the DSN. |
 | `backup_retention_days` | int, `7` | Days of `pg_dump` backups kept. Job `backup-database`, daily 02:00 UTC. |
 
+### Settings → AI Configuration → User keys
+
+The `ai` group's personal-key policy. The whole feature sits behind the first
+switch; with it off the others are inert and every AI call runs exactly as if
+they did not exist. The lookup they govern is described in
+[automation-ai-enrichment.md](automation-ai-enrichment.md#personal-keys--the-lookup).
+
+| Setting | Type / default | What it does |
+|---|---|---|
+| `allow_user_ai_providers` | bool, `false` | Let people add their own AI keys; the tasks they start run on them and fall back to the instance's providers when the key is missing, failing or over its cap. |
+| `require_user_ai_provider` | bool, `false` | With personal keys on: refuse an interactive task instead of falling back. Ignored while personal keys are off. |
+| `user_ai_provider_types` | str, `claude,openai_compatible` | Comma-separated types a person may register (`ollama` may be added; `claude_code` never qualifies). Re-checked on every call, so removing a type stops keys already saved. |
+| `user_ai_allow_private_endpoints` | bool, `false` | Let a personal key point at a private address, such as a LAN Ollama. The server resolves the hostname on save and on every call. |
+| `user_ai_daily_request_cap` | int, `300` | Requests one person may make on their own keys per UTC day. Counts calls, since Ollama and unpriced models report $0. `0` = unlimited. |
+| `site_ai_user_daily_requests` | int, `0` | Requests one person may make per UTC day on the *instance's* providers for the tasks they start (copilot, rule help, summaries, reports). Background work, automation rules and share links are not counted; failed calls are. `0` = unlimited. |
+| `share_ai_daily_requests` | int, `20` | AI questions and tasks one share link may run per UTC day, across both share routes. Share traffic always uses the instance's providers. `0` = unlimited. |
+
 ### Settings → Feeds (public RSS)
 
 | Setting | Type / default | What it does |
@@ -650,7 +667,7 @@ should not be editable from a web UI.
 
 `postgres_password`, `meili_master_key`, `secret_key` and `encryption_key` are
 validated at startup: the literal `changeme` warns in development and **raises**
-in production (`_reject_insecure_defaults`, `backend/app/config.py:425`). `encryption_key`
+in production (`_reject_insecure_defaults`, `backend/app/config.py:442`). `encryption_key`
 must additionally be a valid 32-byte URL-safe base64 Fernet key.
 
 ---

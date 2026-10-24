@@ -120,8 +120,9 @@ async def export_config(
         for t in tag_result.scalars().all()
     ]
 
-    # AI providers (redact API keys)
-    provider_result = await db.execute(select(AIProvider))
+    # AI providers (redact API keys). The instance's only: a personal key
+    # restored without its owner would turn into a site provider.
+    provider_result = await db.execute(select(AIProvider).where(AIProvider.user_id.is_(None)))
     providers = [
         {
             "name": p.name,

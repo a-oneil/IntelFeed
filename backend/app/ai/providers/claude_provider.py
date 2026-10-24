@@ -31,7 +31,7 @@ import logging
 import time
 
 import anthropic
-from anthropic import AsyncAnthropic
+from anthropic import AsyncAnthropic, DefaultAsyncHttpxClient
 
 from app.ai.providers.base import AIProvider, AIResponse
 from app.ai.providers.claude_code_provider import QuotaExhaustedError
@@ -83,6 +83,13 @@ class ClaudeProvider(AIProvider):
             return self._client
 
         kwargs: dict = {"timeout": self.timeout}
+        if self.config.get("follow_redirects") is False:
+            # A personal key's base_url was vetted as public; a 307 could lead
+            # the SDK's default client past that host to an internal address,
+            # so the engine turns redirects off for those rows (see
+            # _get_provider_instance). The instance's own provider keeps the
+            # SDK default, since a gateway it points at may legitimately redirect.
+            kwargs["http_client"] = DefaultAsyncHttpxClient(follow_redirects=False)
         if self.base_url:
             kwargs["base_url"] = self.base_url
 
@@ -251,10 +258,17 @@ class ClaudeProvider(AIProvider):
         if system_blocks is not None:
             kwargs["system"] = system_blocks
 
+        self.last_stream_usage = None
         try:
             async with client.messages.stream(**kwargs) as stream:
                 async for text in stream.text_stream:
                     yield text
+                final = await stream.get_final_message()
+                self.last_stream_usage = {
+                    "tokens_input": final.usage.input_tokens,
+                    "tokens_output": final.usage.output_tokens,
+                    "cost_usd": None,
+                }
         except anthropic.RateLimitError as e:
             headers = e.response.headers if e.response else None
             raise QuotaExhaustedError(str(e)[:500], reset_at=_parse_retry_after(headers))

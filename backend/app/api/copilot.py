@@ -19,6 +19,7 @@ import time
 import uuid
 from decimal import Decimal
 
+import anyio
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
@@ -28,7 +29,6 @@ from sqlalchemy.orm.attributes import flag_modified
 from app import entity_types
 from app.config import settings
 from app.core.exceptions import AppError
-from app.core.metrics import AI_COST_TOTAL, AI_REQUESTS_TOTAL, AI_TOKENS_TOTAL
 from app.core.security import get_current_user
 from app.core.utils import now_iso
 from app.database import get_db
@@ -469,24 +469,37 @@ async def copilot_config(
     on the ``claude_code`` CLI. On Ollama (or any other provider) there is no
     OAuth session, so the banner must not show.
     """
-    from app.ai.engine import get_task_assignment
+    from app.ai.caller import Caller
+    from app.ai.engine import UserKeyRequired, resolve_assignment
 
-    assignment_data = await get_task_assignment(db, user.id, "copilot")
-    if not assignment_data:
-        return {
-            "configured": False,
-            "provider_type": None,
-            "provider_name": None,
-            "default_ollama_tools": _DEFAULT_OLLAMA_TOOLS,
-            "enabled_tools": None,
-        }
-    assignment, _, provider_model = assignment_data
+    unconfigured = {
+        "configured": False,
+        "provider_type": None,
+        "provider_name": None,
+        "default_ollama_tools": _DEFAULT_OLLAMA_TOOLS,
+        "enabled_tools": None,
+        "source": None,
+        "model": None,
+        "supports_tools": False,
+        "fallback_reason": None,
+        "refused": None,
+    }
+    try:
+        # A status read: no allowance is spent here.
+        resolved = await resolve_assignment(db, Caller.user(user.id), "copilot", allowance=False)
+    except UserKeyRequired as e:
+        # The dock shows what to fix (add a key, raise a cap) instead of the
+        # generic "no provider" message.
+        return {**unconfigured, "refused": {"reason": e.reason, "message": e.message}}
+    if resolved is None:
+        return unconfigured
+    provider_model = resolved.provider
     # Only Ollama restricts the copilot to an explicit tool allowlist; other
     # providers get the full read-only registry, so there's nothing to gate
     # the "/" command menu on for them (enabled_tools stays None = unrestricted).
     enabled_tools = None
     if provider_model.provider_type == "ollama":
-        enabled_tools = assignment.config.get("ollama_tools") or _DEFAULT_OLLAMA_TOOLS
+        enabled_tools = resolved.config.get("ollama_tools") or _DEFAULT_OLLAMA_TOOLS
     return {
         "configured": True,
         "provider_type": provider_model.provider_type,
@@ -498,6 +511,14 @@ async def copilot_config(
         # The assignment's actual effective allowlist (override or default),
         # used by the dock to hide "/" commands whose tool isn't enabled.
         "enabled_tools": enabled_tools,
+        # Whose provider answers: "user" means the person's own key, and the
+        # dock says so in its header. A key without a tool loop (Claude API,
+        # openai_compatible) answers without tools, and the dock says that too.
+        "source": resolved.source,
+        "model": resolved.model_name,
+        "supports_tools": provider_model.supports_tools,
+        "fallback_reason": resolved.fallback_reason,
+        "refused": None,
     }
 
 
@@ -513,16 +534,20 @@ async def copilot_stream(
       {"type": "chunk", "text": ...}
       {"type": "tool_call", "id", "name", "args"}
       {"type": "tool_result", "id", "status", "summary"}
-      {"type": "done", "conversation_id": <uuid>}
+      {"type": "done", "conversation_id": <uuid>, "answered_by": {...}}
       {"type": "error", "message": ...}
     """
     from sse_starlette.sse import EventSourceResponse
 
+    from app.ai.caller import Caller
     from app.ai.engine import (
+        _count_ai_call,
+        _estimate_cost,
         _get_provider_instance,
-        get_active_prompt,
-        get_task_assignment,
+        attribution_fields,
+        get_active_prompt_versioned,
         render_prompt,
+        resolve_assignment,
     )
     from app.ai.providers.claude_code_provider import ClaudeCodeProvider
 
@@ -531,16 +556,17 @@ async def copilot_stream(
 
     ctx = body.context
 
-    # Resolve the copilot task -> provider assignment. Must be assigned (seeded
-    # to the claude_code provider on startup).
-    assignment_data = await get_task_assignment(db, user.id, "copilot")
-    if not assignment_data:
+    # Resolve the copilot task -> provider: the person's own key when one
+    # applies, else the site assignment (seeded to the claude_code provider
+    # on startup). The lookup enforces the site allowance and the key policy.
+    resolved = await resolve_assignment(db, Caller.user(user.id), "copilot")
+    if resolved is None:
         raise AppError(
             code="not_configured",
             message="The 'Copilot' task has no AI provider assigned. Go to Settings > AI to configure it.",
             status_code=422,
         )
-    assignment, task, provider_model = assignment_data
+    task, provider_model = resolved.task, resolved.provider
 
     # Load or create the conversation (scoped to this user).
     scope_type, scope_id = _scope_from_context(ctx)
@@ -572,7 +598,7 @@ async def copilot_stream(
     conversation_id = conv.id
 
     # Build the prompt from the copilot task templates + ambient context.
-    system_template, user_template = await get_active_prompt(db, task.id)
+    system_template, user_template, prompt_version = await get_active_prompt_versioned(db, task.id)
     ambient = await _build_ambient_context(db, ctx)
 
     prior = list(conv.messages or [])[-_MAX_HISTORY_MESSAGES:]
@@ -586,11 +612,11 @@ async def copilot_stream(
     rendered_system = render_prompt(system_template, variables) if system_template else None
     rendered_user = render_prompt(user_template, variables)
 
-    provider = _get_provider_instance(provider_model, extra_config=assignment.config)
-    config = {**(provider_model.config or {}), **(assignment.config or {})}
+    provider = _get_provider_instance(provider_model, extra_config=resolved.config)
+    config = resolved.config
     allowed_tools = config.get("allowed_tools")
     timeout_seconds = config.get("timeout_seconds")
-    model = assignment.model_name
+    model = resolved.model_name
 
     async def generate():
         # ``assistant_parts`` collects only the VISIBLE text (what the client
@@ -603,8 +629,77 @@ async def copilot_stream(
         # ClaudeCodeProvider._extract_usage). None when the CLI died before its
         # result event or a non-CLI fallback provider handled the turn.
         turn_usage: dict | None = None
+        turn_cost: Decimal | None = None
         turn_started = time.monotonic()
         splitter = _FenceSplitter()
+        ledgered = False
+
+        async def _ledger(error: str | None) -> None:
+            """Record the turn in ai_results so copilot usage shows up in the AI
+            cost dashboard (GET /api/ai/cost-breakdown aggregates these rows).
+
+            Usage comes from the CLI's terminal result event — captured in
+            whichever process ran the CLI and, on the worker topology, relayed
+            verbatim inside the "done" event; this api process owns the DB write
+            either way. Under the flat-rate Claude sign-in the dollar figure is
+            notional: it is the CLI-reported total_cost_usd (what the usage would
+            cost at API rates). This is the ONLY place a copilot turn is billed —
+            the stream path bypasses engine.run_task entirely. A turn that failed
+            before any text, or that the client abandoned, is a row too: failed
+            calls count toward the site allowance and a personal key's request
+            cap, as they do in run_task, so a broken key can't be retried for
+            free. Accounting must never break the stream.
+            """
+            nonlocal turn_cost
+            try:
+                usage = turn_usage or {}
+                cost_usd = usage.get("total_cost_usd")
+                tokens_input = int(usage.get("tokens_input") or 0)
+                tokens_output = int(usage.get("tokens_output") or 0)
+                # A provider that reports tokens but no price (the Anthropic
+                # API) is priced from the engine's table, like run_task does;
+                # otherwise a personal key's dollar cap would never see copilot.
+                if cost_usd is not None:
+                    cost = Decimal(str(round(cost_usd, 6)))
+                else:
+                    cost = _estimate_cost(model, tokens_input, tokens_output)
+                visible = "".join(assistant_parts).strip()
+                parsed_result: dict = {
+                    "_extraction_status": "provider_error" if error else "success",
+                    "conversation_id": str(conversation_id),
+                }
+                if turn_usage:
+                    parsed_result["usage"] = usage
+                if error:
+                    parsed_result["_error"] = error
+                if resolved.fallback_reason:
+                    parsed_result["_fallback_reason"] = resolved.fallback_reason
+                if prompt_version is not None:
+                    parsed_result["_prompt_version"] = prompt_version
+                db.add(
+                    AIResult(
+                        target_type="conversation",
+                        target_id=conversation_id,
+                        is_current=True,
+                        task_id=task.id,
+                        provider_id=provider_model.id,
+                        model_name=model,
+                        prompt_used=rendered_user[:20000],
+                        raw_response=visible,
+                        parsed_result=parsed_result,
+                        tokens_input=tokens_input,
+                        tokens_output=tokens_output,
+                        cost_estimate=cost,
+                        processing_time_ms=int((time.monotonic() - turn_started) * 1000),
+                        **attribution_fields(Caller.user(user.id), provider_model, key_owner_id=resolved.key_owner_id),
+                    )
+                )
+                await db.commit()
+                turn_cost = cost
+                _count_ai_call(provider_model.provider_type, task.name, tokens_input, tokens_output, cost)
+            except Exception as e:
+                logger.warning("copilot failed to record ai_result for conversation %s: %s", conversation_id, e)
+                await db.rollback()
 
         def _emit_text(text: str) -> str | None:
             """Route a text delta through the fence splitter; return SSE json or None."""
@@ -623,250 +718,240 @@ async def copilot_stream(
         event_source = None
 
         try:
-            if isinstance(provider, ClaudeCodeProvider):
-                # Read-only env: physically forbid writes for this invocation.
-                # The mounted skill CLI reads INTELFEED_READ_ONLY and refuses
-                # write tools (autonomous maintenance tasks never set it).
-                if settings.copilot_worker_dispatch:
-                    # Prod topology: run the CLI on the dedicated claude_code
-                    # worker (owns the OAuth credentials volume) and relay its
-                    # events back over Redis. The api never needs the CLI/creds.
-                    from app.workers.celery_app import celery_app
+            try:
+                if isinstance(provider, ClaudeCodeProvider):
+                    # Read-only env: physically forbid writes for this invocation.
+                    # The mounted skill CLI reads INTELFEED_READ_ONLY and refuses
+                    # write tools (autonomous maintenance tasks never set it).
+                    if settings.copilot_worker_dispatch:
+                        # Prod topology: run the CLI on the dedicated claude_code
+                        # worker (owns the OAuth credentials volume) and relay its
+                        # events back over Redis. The api never needs the CLI/creds.
+                        from app.workers.celery_app import celery_app
 
-                    run_id = str(uuid.uuid4())
-                    celery_app.send_task(
-                        "app.workers.copilot_tasks.run_copilot_stream",
-                        kwargs={
-                            "run_id": run_id,
-                            "prompt": rendered_user,
-                            "system": rendered_system,
-                            "model": model,
-                            "allowed_tools": allowed_tools,
-                            "timeout_seconds": cli_timeout,
-                            "provider_config": config,
-                            "env": {"INTELFEED_READ_ONLY": "1"},
-                        },
-                        queue="ai",
-                    )
-                    # BLPOP window: the worker heartbeats between tokens, so any
-                    # single gap should be short; size it off the CLI ceiling
-                    # plus margin for queue pickup / first-token latency.
-                    blpop_timeout = (cli_timeout or 180.0) + 60.0
-                    event_source = _iter_worker_events(run_id, blpop_timeout)
-                else:
-                    # In-process fallback (dev boxes where the api has the CLI +
-                    # credentials). Set copilot_worker_dispatch=false to use this.
+                        run_id = str(uuid.uuid4())
+                        celery_app.send_task(
+                            "app.workers.copilot_tasks.run_copilot_stream",
+                            kwargs={
+                                "run_id": run_id,
+                                "prompt": rendered_user,
+                                "system": rendered_system,
+                                "model": model,
+                                "allowed_tools": allowed_tools,
+                                "timeout_seconds": cli_timeout,
+                                "provider_config": config,
+                                "env": {"INTELFEED_READ_ONLY": "1"},
+                            },
+                            queue="ai",
+                        )
+                        # BLPOP window: the worker heartbeats between tokens, so any
+                        # single gap should be short; size it off the CLI ceiling
+                        # plus margin for queue pickup / first-token latency.
+                        blpop_timeout = (cli_timeout or 180.0) + 60.0
+                        event_source = _iter_worker_events(run_id, blpop_timeout)
+                    else:
+                        # In-process fallback (dev boxes where the api has the CLI +
+                        # credentials). Set copilot_worker_dispatch=false to use this.
+                        event_source = provider.stream_agent(
+                            prompt=rendered_user,
+                            system=rendered_system,
+                            model=model,
+                            allowed_tools=allowed_tools,
+                            timeout_seconds=cli_timeout,
+                            heartbeat_label="copilot stream",
+                            env={"INTELFEED_READ_ONLY": "1"},
+                        )
+                elif getattr(provider, "supports_tools", False) and hasattr(provider, "stream_agent"):
+                    # Ollama native tool loop — runs in-process (no creds needed, so
+                    # copilot_worker_dispatch does not apply). Tools are dispatched
+                    # against the backend registry via an in-process executor bound
+                    # to this request's db session + user; read-only tools only.
+                    from app.tools import execute_tool, ollama_tool_specs
+
+                    async def _tool_executor(name: str, args: dict) -> str:
+                        result = await execute_tool(name, args, db, user.id)
+                        # A handler exception (execute_tool returns {"error": ...})
+                        # can leave the shared session in a failed transaction
+                        # (is_active False); roll back so later tool calls + the
+                        # conversation persistence don't hit PendingRollbackError.
+                        if result.startswith('{"error"') and not db.sync_session.is_active:
+                            await db.rollback()
+                        return result
+
+                    tool_specs = ollama_tool_specs(config.get("ollama_tools") or _DEFAULT_OLLAMA_TOOLS, read_only=True)
+                    # NB: conversation history is already rendered into the prompt via
+                    # the copilot template's ``conversation_history`` variable (same as
+                    # the CLI path), so we do NOT also pass it as ``history`` here —
+                    # that would duplicate the thread.
                     event_source = provider.stream_agent(
                         prompt=rendered_user,
                         system=rendered_system,
                         model=model,
-                        allowed_tools=allowed_tools,
+                        tools=tool_specs,
+                        tool_executor=_tool_executor,
                         timeout_seconds=cli_timeout,
                         heartbeat_label="copilot stream",
-                        env={"INTELFEED_READ_ONLY": "1"},
                     )
-            elif getattr(provider, "supports_tools", False) and hasattr(provider, "stream_agent"):
-                # Ollama native tool loop — runs in-process (no creds needed, so
-                # copilot_worker_dispatch does not apply). Tools are dispatched
-                # against the backend registry via an in-process executor bound
-                # to this request's db session + user; read-only tools only.
-                from app.tools import execute_tool, ollama_tool_specs
 
-                async def _tool_executor(name: str, args: dict) -> str:
-                    result = await execute_tool(name, args, db, user.id)
-                    # A handler exception (execute_tool returns {"error": ...})
-                    # can leave the shared session in a failed transaction
-                    # (is_active False); roll back so later tool calls + the
-                    # conversation persistence don't hit PendingRollbackError.
-                    if result.startswith('{"error"') and not db.sync_session.is_active:
-                        await db.rollback()
-                    return result
-
-                tool_specs = ollama_tool_specs(config.get("ollama_tools") or _DEFAULT_OLLAMA_TOOLS, read_only=True)
-                # NB: conversation history is already rendered into the prompt via
-                # the copilot template's ``conversation_history`` variable (same as
-                # the CLI path), so we do NOT also pass it as ``history`` here —
-                # that would duplicate the thread.
-                event_source = provider.stream_agent(
-                    prompt=rendered_user,
-                    system=rendered_system,
-                    model=model,
-                    tools=tool_specs,
-                    tool_executor=_tool_executor,
-                    timeout_seconds=cli_timeout,
-                    heartbeat_label="copilot stream",
-                )
-
-            if event_source is not None:
-                async for ev in event_source:
-                    kind = ev.get("kind")
-                    if kind == "text":
-                        payload = _emit_text(ev.get("text") or "")
+                if event_source is not None:
+                    async for ev in event_source:
+                        kind = ev.get("kind")
+                        if kind == "text":
+                            payload = _emit_text(ev.get("text") or "")
+                            if payload is not None:
+                                yield {"data": payload}
+                        elif kind == "tool_call":
+                            payload = {
+                                "type": "tool_call",
+                                "id": ev.get("id"),
+                                "name": ev.get("name"),
+                                "args": ev.get("args"),
+                            }
+                            tool_events.append(payload)
+                            yield {"data": json.dumps(payload)}
+                        elif kind == "tool_result":
+                            payload = {
+                                "type": "tool_result",
+                                "id": ev.get("id"),
+                                "status": ev.get("status"),
+                                "summary": ev.get("summary"),
+                            }
+                            tool_events.append(payload)
+                            yield {"data": json.dumps(payload)}
+                        elif kind == "done":
+                            # Capture token usage / CLI-reported cost for the
+                            # ai_results row below. The SSE "done" frame itself is
+                            # emitted after persistence, at the end of generate().
+                            turn_usage = ev.get("usage") or None
+                else:
+                    # Text-only fallback: a non-tool provider (Anthropic API) streams
+                    # via the base stream_complete contract. No tool trace.
+                    async for chunk in provider.stream_complete(
+                        prompt=rendered_user, system=rendered_system, model=model
+                    ):
+                        payload = _emit_text(chunk)
                         if payload is not None:
                             yield {"data": payload}
-                    elif kind == "tool_call":
-                        payload = {
-                            "type": "tool_call",
-                            "id": ev.get("id"),
-                            "name": ev.get("name"),
-                            "args": ev.get("args"),
+                    streamed = getattr(provider, "last_stream_usage", None)
+                    if streamed:
+                        turn_usage = {
+                            "tokens_input": streamed.get("tokens_input") or 0,
+                            "tokens_output": streamed.get("tokens_output") or 0,
+                            "total_cost_usd": streamed.get("cost_usd"),
                         }
-                        tool_events.append(payload)
-                        yield {"data": json.dumps(payload)}
-                    elif kind == "tool_result":
-                        payload = {
-                            "type": "tool_result",
-                            "id": ev.get("id"),
-                            "status": ev.get("status"),
-                            "summary": ev.get("summary"),
-                        }
-                        tool_events.append(payload)
-                        yield {"data": json.dumps(payload)}
-                    elif kind == "done":
-                        # Capture token usage / CLI-reported cost for the
-                        # ai_results row below. The SSE "done" frame itself is
-                        # emitted after persistence, at the end of generate().
-                        turn_usage = ev.get("usage") or None
-            else:
-                # Text-only fallback: a non-tool provider (Anthropic API) streams
-                # via the base stream_complete contract. No tool trace.
-                async for chunk in provider.stream_complete(prompt=rendered_user, system=rendered_system, model=model):
-                    payload = _emit_text(chunk)
-                    if payload is not None:
-                        yield {"data": payload}
-        except Exception as e:  # provider / CLI failure mid-stream
-            errored = str(e)
-            logger.warning("copilot stream error: %s", e)
+            except Exception as e:  # provider / CLI failure mid-stream
+                errored = str(e)
+                logger.warning("copilot stream error: %s", e)
 
-        # Flush any held-back tail that never turned out to be a fence.
-        tail = splitter.flush()
-        if tail:
-            assistant_parts.append(tail)
-            yield {"data": json.dumps({"type": "chunk", "text": tail})}
+            # Flush any held-back tail that never turned out to be a fence.
+            tail = splitter.flush()
+            if tail:
+                assistant_parts.append(tail)
+                yield {"data": json.dumps({"type": "chunk", "text": tail})}
 
-        # If the model proposed an action, parse it and stage it in Redis for the
-        # confirm endpoint. Failure to parse degrades to no proposal (the visible
-        # answer still persists).
-        pending_action: dict | None = None
-        if splitter.fence_seen:
-            pending_action = _parse_action_block(splitter.captured)
+            # If the model proposed an action, parse it and stage it in Redis for the
+            # confirm endpoint. Failure to parse degrades to no proposal (the visible
+            # answer still persists).
+            pending_action: dict | None = None
+            if splitter.fence_seen:
+                pending_action = _parse_action_block(splitter.captured)
 
-        # Persist the turn: append the user question + the assembled assistant
-        # answer. JSONB reassignment + flag_modified so SQLAlchemy detects the
-        # mutation (mirrors ai_conversations.py). The raw action block is NOT
-        # included — only the visible prose.
-        answer = "".join(assistant_parts).strip()
-        try:
-            new_messages = list(conv.messages or [])
-            new_messages.append({"role": "user", "content": body.question, "created_at": now_iso()})
-            assistant_msg: dict = {
-                "role": "assistant",
-                "content": answer,
-                "created_at": now_iso(),
-            }
-            if tool_events:
-                assistant_msg["meta"] = {"tool_events": tool_events}
-            if errored and not answer:
-                assistant_msg["content"] = f"(error: {errored})"
-            new_messages.append(assistant_msg)
-            conv.messages = new_messages
-            flag_modified(conv, "messages")
-            await db.commit()
-        except Exception as e:  # persistence failure shouldn't drop the answer
-            logger.error("copilot failed to persist conversation %s: %s", conversation_id, e)
-            await db.rollback()
-
-        # Record the turn in ai_results so copilot usage shows up in the AI
-        # cost dashboard (GET /api/ai/cost-breakdown aggregates these rows).
-        # Usage comes from the CLI's terminal result event — captured in
-        # whichever process ran the CLI and, on the worker topology, relayed
-        # verbatim inside the "done" event; this api process owns the DB write
-        # either way. Under the flat-rate Claude sign-in the dollar figure is
-        # notional: it is the CLI-reported total_cost_usd (what the usage would
-        # cost at API rates). This is the ONLY place a copilot turn is billed —
-        # the stream path bypasses engine.run_task entirely.
-        if answer or turn_usage:
+            # Persist the turn: append the user question + the assembled assistant
+            # answer. JSONB reassignment + flag_modified so SQLAlchemy detects the
+            # mutation (mirrors ai_conversations.py). The raw action block is NOT
+            # included — only the visible prose.
+            answer = "".join(assistant_parts).strip()
             try:
-                usage = turn_usage or {}
-                cost_usd = usage.get("total_cost_usd")
-                cost = Decimal(str(round(cost_usd, 6))) if cost_usd is not None else Decimal("0")
-                tokens_input = int(usage.get("tokens_input") or 0)
-                tokens_output = int(usage.get("tokens_output") or 0)
-                parsed_result: dict = {
-                    "_extraction_status": "provider_error" if errored else "success",
-                    "conversation_id": str(conversation_id),
+                new_messages = list(conv.messages or [])
+                new_messages.append({"role": "user", "content": body.question, "created_at": now_iso()})
+                assistant_msg: dict = {
+                    "role": "assistant",
+                    "content": answer,
+                    "created_at": now_iso(),
                 }
-                if turn_usage:
-                    parsed_result["usage"] = usage
-                if errored:
-                    parsed_result["_error"] = errored
-                db.add(
-                    AIResult(
-                        target_type="conversation",
-                        target_id=conversation_id,
-                        is_current=True,
-                        task_id=task.id,
-                        provider_id=provider_model.id,
-                        model_name=model,
-                        prompt_used=rendered_user[:20000],
-                        raw_response=answer,
-                        parsed_result=parsed_result,
-                        tokens_input=tokens_input,
-                        tokens_output=tokens_output,
-                        cost_estimate=cost,
-                        processing_time_ms=int((time.monotonic() - turn_started) * 1000),
-                    )
-                )
+                if tool_events:
+                    assistant_msg["meta"] = {"tool_events": tool_events}
+                if errored and not answer:
+                    assistant_msg["content"] = f"(error: {errored})"
+                new_messages.append(assistant_msg)
+                conv.messages = new_messages
+                flag_modified(conv, "messages")
                 await db.commit()
-                AI_REQUESTS_TOTAL.labels(provider=provider_model.provider_type, task=task.name).inc()
-                AI_TOKENS_TOTAL.labels(provider=provider_model.provider_type, direction="input").inc(tokens_input)
-                AI_TOKENS_TOTAL.labels(provider=provider_model.provider_type, direction="output").inc(tokens_output)
-                AI_COST_TOTAL.labels(provider=provider_model.provider_type).inc(float(cost))
-            except Exception as e:  # usage accounting must never break the stream
-                logger.warning("copilot failed to record ai_result for conversation %s: %s", conversation_id, e)
+            except Exception as e:  # persistence failure shouldn't drop the answer
+                logger.error("copilot failed to persist conversation %s: %s", conversation_id, e)
                 await db.rollback()
 
-        # Stage the proposed action in Redis and emit a confirm_request BEFORE
-        # done, so the client can render a confirm prompt.
-        if pending_action is not None:
-            action_id = str(uuid.uuid4())
-            summary = str(pending_action.get("summary") or "").strip()
-            params = pending_action.get("params") or {}
-            action_type = pending_action.get("type")
-            try:
-                from app.services.redis_client import get_redis
+            # Bill the turn (see _ledger). Done before the action is staged and the
+            # footer sent, so the footer can carry the cost.
+            if answer or turn_usage or errored:
+                await _ledger(errored)
+            ledgered = True
 
-                r = await get_redis()
-                await r.set(
-                    f"{_PENDING_KEY_PREFIX}{action_id}",
-                    json.dumps(
-                        {
-                            "user_id": str(user.id),
-                            "conversation_id": str(conversation_id),
-                            "action_type": action_type,
-                            "params": params,
-                            "summary": summary,
-                        }
-                    ),
-                    ex=_PENDING_TTL_SECONDS,
-                )
-                yield {
-                    "data": json.dumps(
-                        {
-                            "type": "confirm_request",
-                            "action_id": action_id,
-                            "action_type": action_type,
-                            "description": summary,
-                            "proposed": params,
-                        }
+            # Stage the proposed action in Redis and emit a confirm_request BEFORE
+            # done, so the client can render a confirm prompt.
+            if pending_action is not None:
+                action_id = str(uuid.uuid4())
+                summary = str(pending_action.get("summary") or "").strip()
+                params = pending_action.get("params") or {}
+                action_type = pending_action.get("type")
+                try:
+                    from app.services.redis_client import get_redis
+
+                    r = await get_redis()
+                    await r.set(
+                        f"{_PENDING_KEY_PREFIX}{action_id}",
+                        json.dumps(
+                            {
+                                "user_id": str(user.id),
+                                "conversation_id": str(conversation_id),
+                                "action_type": action_type,
+                                "params": params,
+                                "summary": summary,
+                            }
+                        ),
+                        ex=_PENDING_TTL_SECONDS,
                     )
-                }
-            except Exception as e:  # staging failure shouldn't crash the stream
-                logger.error("copilot failed to stage pending action: %s", e)
+                    yield {
+                        "data": json.dumps(
+                            {
+                                "type": "confirm_request",
+                                "action_id": action_id,
+                                "action_type": action_type,
+                                "description": summary,
+                                "proposed": params,
+                            }
+                        )
+                    }
+                except Exception as e:  # staging failure shouldn't crash the stream
+                    logger.error("copilot failed to stage pending action: %s", e)
 
-        if errored and not answer:
-            yield {"data": json.dumps({"type": "error", "message": errored})}
-        yield {"data": json.dumps({"type": "done", "conversation_id": str(conversation_id)})}
+            if errored and not answer:
+                yield {"data": json.dumps({"type": "error", "message": errored})}
+            # The reply footer: which provider answered, whose key, and what the
+            # turn cost when the provider reported it.
+            answered_by = {
+                "provider_name": provider_model.name,
+                "provider_type": provider_model.provider_type,
+                "source": resolved.source,
+                "model": model,
+                "cost_usd": float(turn_cost) if turn_cost is not None else None,
+                "fallback_reason": resolved.fallback_reason,
+                "supports_tools": provider_model.supports_tools,
+            }
+            yield {
+                "data": json.dumps(
+                    {"type": "done", "conversation_id": str(conversation_id), "answered_by": answered_by}
+                )
+            }
+        finally:
+            # The client went away mid-turn. sse-starlette cancels this task,
+            # so the write has to be shielded or it is cancelled at its first
+            # await. The prompt reached the provider either way, so even a turn
+            # abandoned before its first token is spend: a disconnect-and-retry
+            # loop must not be free.
+            if not ledgered:
+                with anyio.CancelScope(shield=True):
+                    await _ledger(errored or "client disconnected")
 
     return EventSourceResponse(generate())
 

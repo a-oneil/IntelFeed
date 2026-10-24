@@ -27,6 +27,7 @@ from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.caller import Caller
 from app.services.sanitizer import html_to_text
 
 logger = logging.getLogger(__name__)
@@ -347,6 +348,7 @@ async def _run_spine_task(db: AsyncSession, thread_id: uuid.UUID, title: str, me
             # single-GPU host that unloads between requests, the model reload
             # alone is ~155s before a token is produced.
             timeout_seconds=420.0,
+            caller=Caller.system(),
         )
     except Exception as exc:  # noqa: BLE001 — a thread without AI still renders
         logger.warning("thread spine generation failed for %s: %s", thread_id, exc)

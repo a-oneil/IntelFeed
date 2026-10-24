@@ -1,0 +1,153 @@
+.muted {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.error {
+  font-size: var(--fs-base);
+  color: var(--danger);
+}
+
+.numInput {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
+
+.numInput input {
+  width: 90px;
+  flex: none;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  justify-content: flex-end;
+}
+
+.struck {
+  text-decoration: line-through;
+}
+
+.tableWrap {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-base);
+}
+
+.table th {
+  text-align: left;
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  padding: 4px var(--sp-2);
+  font-weight: 500;
+}
+
+.table td {
+  padding: var(--sp-2);
+  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  vertical-align: middle;
+}
+
+.right {
+  text-align: right;
+}
+
+.dim {
+  opacity: 0.6;
+}
+
+/* Policy Off: the eligibility table is moot, so it is shown but not live. */
+.tableOff {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.lock {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.footnote {
+  margin: var(--sp-3) 0 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.keyList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.key {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-tertiary);
+}
+
+.keyOff {
+  opacity: 0.6;
+}
+
+.keyLeft {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.owner {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.keyName {
+  color: var(--text-primary);
+}
+
+.keyUrl {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.keyActions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
+
+.empty {
+  padding: var(--sp-4);
+  color: var(--text-muted);
+  font-size: var(--fs-md);
+  text-align: center;
+}
+
+
+@media (max-width: 767px) {
+  .key {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

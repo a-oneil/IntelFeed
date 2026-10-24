@@ -10,6 +10,9 @@ from app.intelligence.reporting import (
     REPORT_TEMPLATES,
     generate_section_content,
 )
+from app.intelligence.reporting import (
+    narrative_sections as narrative_sections_of,
+)
 from app.models.intel_report import IntelReport
 from app.workers.celery_app import celery_app
 from app.workers.db import run_async, worker_session
@@ -34,6 +37,8 @@ def generate_full_report(self, report_id: str, user_id: str):
 
     Iterates through template sections sequentially, generating AI prose
     for each empty narrative section. Publishes SSE events for progress.
+    Every dispatcher is a person's request, so the run is theirs: their
+    personal key may answer, and their allowance is spent.
     """
     run_async(_generate_full_report(self, report_id, user_id))
 
@@ -46,6 +51,11 @@ async def _generate_full_report(task, report_id: str, user_id: str):
 
     async with worker_session() as db:
         try:
+            # Derived rather than assumed: the id may be the service account
+            # (an agentic task made the report) or a user deleted since enqueue.
+            from app.ai.engine import derive_caller
+
+            caller = await derive_caller(db, user_uuid)
             report = await db.get(IntelReport, report_uuid)
             if not report:
                 logger.error("Report %s not found for full generation", report_id)
@@ -64,18 +74,8 @@ async def _generate_full_report(task, report_id: str, user_id: str):
                 # DB template or fallback: use sections from content
                 section_names = list((report.content or {}).get("sections", {}).keys())
 
-            # Identify narrative sections (empty body, not data-only with items)
-            narrative_sections = []
-            sections = (report.content or {}).get("sections", {})
-            for name in section_names:
-                section = sections.get(name, {})
-                if isinstance(section, dict):
-                    # Skip sections that have items (data sections like IOC tables)
-                    if section.get("items"):
-                        continue
-                    # Include sections with empty body
-                    if not section.get("body"):
-                        narrative_sections.append(name)
+            # Narrative sections: empty body, not a data section with items.
+            narrative_sections = narrative_sections_of(report.content, section_names)
 
             if not narrative_sections:
                 publish_event(
@@ -104,6 +104,7 @@ async def _generate_full_report(task, report_id: str, user_id: str):
                         section_name=section_name,
                         focus=focus,
                         audience=audience,
+                        caller=caller,
                     )
                     if "error" not in result:
                         break
@@ -130,7 +131,6 @@ async def _generate_full_report(task, report_id: str, user_id: str):
                         report_id,
                         result["error"],
                     )
-                    # Continue to next section rather than failing entirely
                     publish_event(
                         user_id,
                         "report_section_generated",
@@ -142,6 +142,18 @@ async def _generate_full_report(task, report_id: str, user_id: str):
                             "error": result["error"],
                         },
                     )
+                    if result.get("refused"):
+                        # A policy refusal (allowance used up, key required):
+                        # every later section would be refused too. Stop with
+                        # the sections written so far and say why.
+                        publish_event(
+                            user_id,
+                            "report_generation_error",
+                            {"report_id": report_id, "error": result["error"]},
+                        )
+                        return
+                    # A provider error: continue to the next section rather
+                    # than failing entirely.
                     continue
 
                 # Update section body in report content

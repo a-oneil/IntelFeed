@@ -21,6 +21,7 @@ import { EngineSection } from "@/components/engine/EngineSection";
 import ThemeSwitcher from "@/components/ThemeSwitcher";
 import { FeedsImportPanel } from "@/components/FeedsImportPanel";
 import { MyRadarCard } from "@/components/MyRadarCard";
+import { MyAISection } from "@/components/MyAISection";
 import type { JobRunRow } from "@/hooks/useEngine";
 import styles from "./SettingsPage.module.css";
 import { Chip, MobileNavSheet, RailToggle } from "@/components/primitives";
@@ -38,6 +39,7 @@ const AL_STATUS_TINT: Record<string, string | undefined> = {
 type SettingsSection =
   | "account"
   | "appearance"
+  | "myai"
   | "feeds"
   | "reading"
   | "ai"
@@ -63,6 +65,7 @@ const NAV_GROUPS: { group: string; items: NavItem[] }[] = [
     items: [
       { key: "account", keywords: ["password", "username", "profile", "security"],  label: "Account", icon: "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8z" },
       { key: "appearance", keywords: ["theme", "dark mode", "light mode", "colors", "density", "font"],  label: "Appearance", icon: "M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0L12 2.69z" },
+      { key: "myai", keywords: ["api key", "personal key", "own key", "byo", "openrouter", "ollama", "spend", "cap", "fallback", "routes"],  label: "My AI", icon: "M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1.07A7 7 0 0 1 14 23h-4a7 7 0 0 1-6.93-4H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2zM9 17a1 1 0 1 0 0-2 1 1 0 0 0 0 2zm6 0a1 1 0 1 0 0-2 1 1 0 0 0 0 2z" },
       { key: "reading", keywords: ["typography", "font size", "read aloud", "voice", "tts", "auto-read", "mark read", "view mode", "summaries", "translation"],  label: "Reading", icon: "M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2zM22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" },
       { key: "tags", keywords: ["labels", "organize", "tag colors"],  label: "Tags", icon: "M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82zM7 7h.01" },
     ],
@@ -218,6 +221,7 @@ export function SettingsPage() {
     <>
       {activeSection === "account" && <AccountSection />}
       {activeSection === "appearance" && <AppearanceSection />}
+      {activeSection === "myai" && <MyAISection />}
       {activeSection === "feeds" && isAdmin && <FeedsSection />}
       {activeSection === "reading" && <ReadingSection />}
       {activeSection === "tags" && <TagsSection />}
@@ -764,8 +768,8 @@ function ReaderTypographySettings() {
         >
           <option value={13}>13px — Small</option>
           <option value={14}>14px</option>
-          <option value={15}>15px</option>
-          <option value={16}>16px — Default</option>
+          <option value={15}>15px — Default</option>
+          <option value={16}>16px</option>
           <option value={18}>18px</option>
           <option value={20}>20px — Large</option>
         </select>
@@ -804,9 +808,9 @@ function ReaderTypographySettings() {
           onChange={(e) => setMaxWidth(Number(e.target.value) as ReaderMaxWidth)}
         >
           <option value={600}>Narrow (600px)</option>
-          <option value={720}>Default (720px)</option>
+          <option value={720}>Medium (720px)</option>
           <option value={860}>Wide (860px)</option>
-          <option value={1000}>Extra wide (1000px)</option>
+          <option value={1000}>Extra wide (1000px) — Default</option>
           <option value={0}>Full width</option>
         </select>
       </div>

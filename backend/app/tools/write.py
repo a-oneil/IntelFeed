@@ -1901,11 +1901,17 @@ async def _generate_full_report(
     await db.flush()
 
     # Queue AI generation
+    from app.ai.engine import SiteAllowanceExceeded, UserKeyRequired, derive_caller, preflight_report
+
     try:
+        await preflight_report(db, await derive_caller(db, user_id), report.template_type)
         from app.workers.report_tasks import generate_full_report
 
         generate_full_report.delay(str(report.id), str(user_id))
         ai_status = "queued"
+    except (SiteAllowanceExceeded, UserKeyRequired) as e:
+        # The report row stands; what is refused is today's generation.
+        ai_status = f"refused: {e.message}"
     except Exception:
         ai_status = "not_available"
 
@@ -2001,11 +2007,17 @@ async def _generate_campaign_report(
     db.add(report)
     await db.flush()
 
+    from app.ai.engine import SiteAllowanceExceeded, UserKeyRequired, derive_caller, preflight_report
+
     try:
+        await preflight_report(db, await derive_caller(db, user_id), report.template_type)
         from app.workers.report_tasks import generate_full_report
 
         generate_full_report.delay(str(report.id), str(user_id))
         ai_status = "queued"
+    except (SiteAllowanceExceeded, UserKeyRequired) as e:
+        # The report row stands; what is refused is today's generation.
+        ai_status = f"refused: {e.message}"
     except Exception:
         ai_status = "not_available"
 

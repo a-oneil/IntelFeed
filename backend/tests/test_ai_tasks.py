@@ -242,6 +242,26 @@ async def test_create_custom_task_validation_empty_prompt(client: AsyncClient, a
 
 
 @pytest.mark.asyncio
+async def test_a_task_with_results_cannot_be_deleted(client: AsyncClient, admin_headers: dict, db_session):
+    """Results keep their task through a plain, required FK, so the route refuses rather than failing or orphaning."""
+    from app.models.ai_result import AIResult
+
+    task = AITask(name="custom_with_results", display_name="Custom", default_prompt_template="x", is_system=False)
+    db_session.add(task)
+    await db_session.flush()
+    db_session.add(AIResult(task_id=task.id, is_current=False))
+    await db_session.flush()
+
+    resp = await client.delete(f"/api/ai/tasks/{task.id}", headers=admin_headers)
+    assert resp.status_code == 409 and resp.json()["error"]["code"] == "task_has_results"
+
+    empty = AITask(name="custom_empty", display_name="Empty", default_prompt_template="x", is_system=False)
+    db_session.add(empty)
+    await db_session.flush()
+    assert (await client.delete(f"/api/ai/tasks/{empty.id}", headers=admin_headers)).status_code == 204
+
+
+@pytest.mark.asyncio
 async def test_task_writes_require_admin(
     client: AsyncClient, auth_headers: dict, system_task: AITask, ai_provider: AIProvider
 ):

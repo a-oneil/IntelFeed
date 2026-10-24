@@ -197,7 +197,11 @@ async def onboarding_status(
     autolink = AutolinkStatus(entity_links=links)
 
     provider_rows = (
-        await db.execute(select(AIProvider.provider_type, AIProvider.is_active).order_by(AIProvider.created_at))
+        await db.execute(
+            select(AIProvider.provider_type, AIProvider.is_active)
+            .where(AIProvider.user_id.is_(None))
+            .order_by(AIProvider.created_at)
+        )
     ).all()
     # Startup seeds an active CLI provider for link validation. Prefer a
     # provider the admin chose, even if it was registered after that seed.

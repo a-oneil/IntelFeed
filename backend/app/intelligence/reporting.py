@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.caller import Caller
 from app.models.country import Country, EntryCountry
 from app.models.cve import CVE, EntryCVE
 from app.models.detection_rule import DetectionRule
@@ -519,6 +520,22 @@ def _detections_section(rules: list) -> dict:
     }
 
 
+def narrative_sections(content: dict | None, section_names: list[str] | None = None) -> list[str]:
+    """The sections AI prose is generated for: those without data ``items`` and
+    with an empty ``body``, in template order. The worker generates exactly
+    these, and the pre-flight counts exactly these."""
+    sections = (content or {}).get("sections", {}) or {}
+    names = section_names if section_names is not None else list(sections.keys())
+    out: list[str] = []
+    for name in names:
+        section = sections.get(name, {})
+        if not isinstance(section, dict) or section.get("items"):
+            continue
+        if not section.get("body"):
+            out.append(name)
+    return out
+
+
 async def generate_section_content(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -526,12 +543,13 @@ async def generate_section_content(
     section_name: str,
     focus: str | None = None,
     audience: str | None = None,
+    caller: Caller | None = None,
 ) -> dict:
     """Generate AI prose for a specific section of an intel report.
 
     Returns {"content": "..."} or {"error": "..."}.
     """
-    from app.ai.engine import run_task
+    from app.ai.engine import SiteAllowanceExceeded, UserKeyRequired, run_task
 
     section_title = section_name.replace("_", " ").title()
 
@@ -696,17 +714,7 @@ async def generate_section_content(
     # Prompts); the generic report_section task is the fallback for custom/DB
     # templates and for families whose tailored task has no assignment yet.
     task_name = REPORT_SECTION_TASKS.get(report.template_type, "report_section")
-    result = await run_task(
-        db=db,
-        user_id=user_id,
-        task_name=task_name,
-        variables=variables,
-        target_type="intel_report",
-        target_id=report.id,
-        force=True,
-    )
-    if result is None and task_name != "report_section":
-        task_name = "report_section"
+    try:
         result = await run_task(
             db=db,
             user_id=user_id,
@@ -715,7 +723,26 @@ async def generate_section_content(
             target_type="intel_report",
             target_id=report.id,
             force=True,
+            caller=caller,
         )
+        if result is None and task_name != "report_section":
+            task_name = "report_section"
+            result = await run_task(
+                db=db,
+                user_id=user_id,
+                task_name=task_name,
+                variables=variables,
+                target_type="intel_report",
+                target_id=report.id,
+                force=True,
+                caller=caller,
+            )
+    except (SiteAllowanceExceeded, UserKeyRequired) as e:
+        # The person's allowance ran out, or their key stopped answering,
+        # between the pre-flight and this section. Every later section would
+        # be refused the same way, so the caller stops here rather than
+        # retrying or moving on; what was written stays.
+        return {"error": e.message, "refused": True, "code": e.code, "status_code": e.status_code, "details": e.details}
 
     if result is None:
         return {"error": f"AI task '{task_name}' is not configured. Assign a provider and model in Settings > AI."}

@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -29,10 +30,15 @@ def _check_provider_config(config: dict | None) -> dict | None:
 
 class AIProviderCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
-    provider_type: str = Field(default="claude", pattern=r"^(claude|ollama|openai_compatible)$")
+    # claude_code is accepted by the schema so the route can say why it is
+    # refused (one CLI sign-in for the whole instance) instead of a bare 422.
+    provider_type: str = Field(default="claude", pattern=r"^(claude|claude_code|ollama|openai_compatible)$")
     base_url: str | None = None
     api_key: str | None = None  # plaintext, encrypted before storage
     config: dict = {}
+    # A personal key: owned by the caller, routed only by them. Non-admins
+    # can only create these; an admin picks.
+    personal: bool = False
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -83,10 +89,17 @@ class AIProviderResponse(BaseModel):
     models: list
     is_active: bool
     config: dict
+    # None = the instance's provider. Set = a personal key, the caller's own
+    # unless this came from the admin's user-keys listing.
+    user_id: uuid.UUID | None = None
+    owner_username: str | None = None
     # Whether this provider type can execute tool calls (agent harness).
     supports_tools: bool = False
     paused_until: datetime | None = None
     paused_reason: str | None = None
+    # Outcome of the last connectivity test; error None = it passed.
+    last_tested_at: datetime | None = None
+    last_test_error: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -172,6 +185,10 @@ class AITaskResponse(BaseModel):
     show_in_entry_actions: bool = True
     entry_action_order: int | None = None
     show_in_entity_actions: bool = True
+    # Whether a person's own key may answer this task, and whether the admin
+    # can change that (pipeline tasks are locked to the instance's providers).
+    allows_user_provider: bool = False
+    user_provider_locked: bool = False
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -183,6 +200,8 @@ class AITaskUpdate(BaseModel):
     show_in_entry_actions: bool | None = None
     entry_action_order: int | None = None
     show_in_entity_actions: bool | None = None
+    # Open or close the task to personal keys. 403 on a locked task.
+    allows_user_provider: bool | None = None
     # Regrouping is only offered for custom tasks in the UI; the API enforces it.
     category: str | None = Field(default=None, max_length=50)
     # Custom tasks only: their schema is user-owned and edited in place
@@ -329,6 +348,12 @@ class AIResultResponse(BaseModel):
     tokens_output: int | None
     cost_estimate: Decimal | None
     processing_time_ms: int | None
+    # Who asked and who answered. provider_name survives the provider row;
+    # key_owner_id set = a personal key paid for this result.
+    caller_kind: str | None = None
+    user_id: uuid.UUID | None = None
+    key_owner_id: uuid.UUID | None = None
+    provider_name: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -395,10 +420,171 @@ class AITaskBudgetRow(BaseModel):
     percent_of_budget: float | None = None
 
 
+class AICallerCostRow(BaseModel):
+    """Spend over the trailing 30 days for one principal.
+
+    One row per person (``caller_kind == "user"``), plus one each for the
+    pipeline, automation rules and share links, which never bill a person.
+    Rows written before attribution existed are one ``unattributed`` row.
+    """
+
+    caller_kind: str  # user | system | automation | share | unattributed
+    user_id: uuid.UUID | None = None
+    username: str | None = None
+    requests: int
+    tokens_input: int
+    tokens_output: int
+    # Spend on the instance's own providers (key_owner_id IS NULL) — what the
+    # operator pays — versus on a personal key, which the operator does not.
+    instance_cost: Decimal
+    own_key_cost: Decimal
+    # Calls on a personal key, so a person on an unpriced key (Ollama) still
+    # shows as using one when the dollar figure is zero.
+    own_key_requests: int = 0
+    # Calls today on the instance's own providers: what the per-user daily
+    # allowance (site_ai_user_daily_requests) counts.
+    requests_today: int = 0
+
+
 class AICostBreakdown(BaseModel):
     total_cost_30d: Decimal
     total_requests_30d: int
     total_tokens_30d: dict[str, int]
+    # The headline split: the operator's bill versus spend on users' own keys.
+    instance_cost_30d: Decimal = Decimal("0")
+    user_key_cost_30d: Decimal = Decimal("0")
+    # Requests that came in at $0 (Ollama, unpriced endpoints), so a low
+    # dollar figure isn't mistaken for low usage.
+    unpriced_requests_30d: int = 0
+    # The per-user daily allowance each person's requests_today is measured
+    # against; 0 = unlimited.
+    site_allowance_per_user: int = 0
     by_task: list[AICostBreakdownRow]
     by_model: list[AICostBreakdownRow]
+    by_caller: list[AICallerCostRow] = []
     budgets: list[AITaskBudgetRow]
+
+
+# --- Personal AI (Settings → My AI) ---
+
+
+class UserAIRouteUpsert(BaseModel):
+    """Point one task, or every allowed task (task_id null), at one of my keys.
+
+    A per-task route with ``provider_id`` null sends that task back to the
+    instance's provider even though a default key exists.
+    """
+
+    task_id: uuid.UUID | None = None
+    provider_id: uuid.UUID | None = None
+    model_name: str | None = Field(default=None, min_length=1, max_length=100)
+    config: dict = {}
+
+    # Same shape rules as a provider's config: the two are merged at call time.
+    _config_shape = field_validator("config")(_check_provider_config)
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "task_id": None,
+                "provider_id": "d5b2c8a4-3f1e-4b6a-9c2d-8e7f6a5b4c3d",
+                "model_name": "anthropic/claude-sonnet-4.6",
+                "config": {},
+            }
+        }
+    )
+
+
+class UserAIRouteResponse(BaseModel):
+    id: uuid.UUID
+    task_id: uuid.UUID | None
+    task_name: str | None = None
+    # Both null = this task is routed to the instance's provider by choice.
+    provider_id: uuid.UUID | None
+    provider_name: str | None = None
+    model_name: str | None
+    config: dict
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class UserAIPreferencesUpdate(BaseModel):
+    fallback_to_site: bool | None = None
+    # The person's own monthly cap on their keys' spend; the admin sets none.
+    # Explicit null = no cap. Must be a real cap: zero would read as
+    # "unlimited" too, so it is refused rather than stored.
+    monthly_cap_usd: Decimal | None = Field(default=None, gt=0)
+
+
+class UserAIPolicy(BaseModel):
+    """What the admin allows, as the My AI page needs it."""
+
+    allow_user_ai_providers: bool
+    require_user_ai_provider: bool
+    provider_types: list[str]
+    allow_private_endpoints: bool
+    daily_request_cap: int
+    site_allowance_per_user: int
+
+
+class UserAIPolicyStatus(UserAIPolicy):
+    """The policy plus whether this person has set up any routing.
+
+    What a reader panel needs to decide whether personal keys can touch
+    the tasks it shows, before it pays for the full overview.
+    """
+
+    has_routes: bool
+
+
+class UserAIKeyUsage(BaseModel):
+    provider_id: uuid.UUID
+    provider_name: str
+    provider_type: str
+    month_cost: Decimal
+    month_requests: int
+
+
+class UserAIUsage(BaseModel):
+    """This person's AI spend, split by whose provider answered."""
+
+    month_cost: Decimal
+    monthly_cap_usd: Decimal
+    requests_today: int
+    daily_request_cap: int
+    site_requests_today: int
+    site_allowance_per_user: int
+    month_resets_at: datetime
+    by_key: list[UserAIKeyUsage] = []
+
+
+class UserAITaskRow(BaseModel):
+    """One task a person may route, with where it runs now."""
+
+    task_id: uuid.UUID
+    task_name: str
+    display_name: str
+    category: str | None
+    requires_tools: bool
+    site_provider_name: str | None
+    site_model_name: str | None
+    route: UserAIRouteResponse | None
+    month_cost: Decimal
+    # What a click would do right now, by the same rule as the lookup: the
+    # person's key answers ("user"), the instance's provider does ("site",
+    # with ``blocked_reason`` set when a key of theirs could not), or the
+    # call is refused ("refused": Required policy, or fallback turned off).
+    will_run_on: Literal["user", "site", "refused"] = "site"
+    blocked_reason: str | None = None
+
+
+class UserAIOverview(BaseModel):
+    policy: UserAIPolicy
+    fallback_to_site: bool
+    monthly_cap_usd: Decimal | None
+    usage: UserAIUsage
+    tasks: list[UserAITaskRow]
+    # The person's default key (task_id null), listed on its own because a
+    # task row only carries it when the task has no route of its own.
+    default_route: UserAIRouteResponse | None = None

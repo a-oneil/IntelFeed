@@ -8,7 +8,8 @@ The moving parts:
 
 | Layer | Where | Role |
 |---|---|---|
-| Stream endpoint | `backend/app/api/copilot.py` | `POST /api/ai/copilot/stream` (SSE) + `POST /api/ai/copilot/confirm` |
+| Stream endpoint | `backend/app/api/copilot.py` | `POST /api/ai/copilot/stream` (SSE) + `POST /api/ai/copilot/confirm` + `GET /api/ai/copilot/config` |
+| Provider lookup | `backend/app/ai/engine.py:574` | `resolve_assignment`: the site's copilot assignment, or the person's own key when the admin allows personal keys |
 | CLI worker task | `backend/app/workers/copilot_tasks.py` | Runs the Claude Code CLI on the `ai` queue, relays events over Redis |
 | Provider | `backend/app/ai/providers/claude_code_provider.py` | `stream_agent()` — spawns `claude -p --output-format stream-json` and yields typed events |
 | Auth API + tasks | `backend/app/api/copilot_auth.py`, `backend/app/workers/copilot_auth_tasks.py` | OAuth credential health snapshot + in-app `claude auth login` re-auth flow |
@@ -27,6 +28,7 @@ Request/streaming flow diagram: [diagrams/copilot-stream-flow.md](diagrams/copil
 |---|---|---|
 | `POST /api/ai/copilot/stream` | user | One chat turn, streamed over SSE; persists to `ai_conversations` |
 | `POST /api/ai/copilot/confirm` | user | Execute or cancel a proposed write action |
+| `GET /api/ai/copilot/config` | user | Which provider answers *this person's* copilot: `provider_type`, `provider_name`, `source` (`site` / `user`), `model`, `supports_tools`, `fallback_reason`, `refused` ({reason, message} when the policy would refuse the turn), and the Ollama tool allowlist. A status read: it spends no allowance |
 | `GET/POST /api/ai/conversations`, `GET/PATCH/DELETE /{id}` | user (owner) | Thread CRUD, paginated list filtered by scope |
 | `POST /api/ai/conversations/{id}/share`, `DELETE .../share` | user (owner) | Mint / revoke a public share token |
 | `GET /api/shared/copilot/{token}` | none | Public read-only view of a shared thread |
@@ -46,15 +48,17 @@ The copilot is a normal AI task named `copilot`, seeded on startup like every ot
 - **Assignment config** (`defaults.py:118-126`): `allowed_tools: ["Bash", "Read", "Skill"]` and `timeout_seconds: 240`. When the intelfeed skill isn't mounted where the CLI can load it, these tools simply go unused and the copilot degrades to text-only answers from the prompt + injected context.
 - **Prompt variables**: `question`, `conversation_history`, `ambient_context`. The system template (`defaults.py:1541`) instructs the model to use the intelfeed skill for anything data-dependent, states that write tools are physically blocked, and defines the ` ```intelfeed-action ` proposal fence (see "Proposed writes" below).
 
-Both the provider assignment and the prompt are editable at **Settings → AI Configuration** like any other task (the prompt in the Prompts tab's master–detail `PromptWorkspace`). If the assignment is missing, `/stream` fails with a 422 `not_configured` error (`backend/app/api/copilot.py:539`).
+Both the provider assignment and the prompt are editable at **Settings → AI Configuration** like any other task (the prompt in the Prompts tab's master–detail `PromptWorkspace`). If nothing can answer, `/stream` fails with a 422 `not_configured` error.
+
+**Personal keys.** `copilot` is one of the tasks a person's own key may answer (`allows_user_provider`; the admin can close it on the User keys tab). With `allow_user_ai_providers` on, a person who has routed copilot, or set a default key, at Settings → My AI gets their turns on that key: a personal Ollama key runs the same in-process tool loop against *their* Ollama; a Claude API or `openai_compatible` key has no tool loop, so the turn is text-only and the dock labels it "no tools". The site allowance does not apply to those turns, and their cost counts against the person's monthly cap. A per-task "Instance default" route sends copilot back to the site's provider when, say, the person's default key has no tools. Everything about the lookup, the fallback reasons and the caps is in [automation-ai-enrichment.md](automation-ai-enrichment.md#personal-keys--the-lookup).
 
 ---
 
 ## Request flow: `POST /api/ai/copilot/stream`
 
-`copilot_stream` (`backend/app/api/copilot.py:505`) accepts `{question, conversation_id?, context?}` and returns an `EventSourceResponse`. Per turn:
+`copilot_stream` (`backend/app/api/copilot.py:525`) accepts `{question, conversation_id?, context?}` and returns an `EventSourceResponse`. Per turn:
 
-1. **Resolve the task assignment** — `get_task_assignment(db, user.id, "copilot")`.
+1. **Resolve the provider** — `resolve_assignment(db, Caller.user(user.id), "copilot")`: the site's assignment, or the person's own key. This is where a turn is refused before anything streams: 403 `user_ai_key_required` (Required policy, or the person turned fallback off and their key can't answer; `details.reason` says why) or 429 `ai_allowance_exceeded` (the person has used the day's `site_ai_user_daily_requests` on the instance's providers).
 2. **Load or create the conversation.** A supplied `conversation_id` must belong to the caller (404 otherwise). New conversations get a title from the first ~60 chars of the question and a scope derived from the context (`_scope_from_context`, `copilot.py:322`): `entry` / `entity` (`scope_id = "{entity_type}:{entity_id}"`) / `global`.
 3. **Build ambient context** — `_build_ambient_context` (`copilot.py:267`) renders a short human paragraph from the optional `CopilotContext` (`copilot.py:71`). Every lookup is best-effort; failures degrade to omitting a line rather than erroring the request:
 
@@ -89,7 +93,7 @@ Only the *visible* prose is persisted — the proposed-action fence (below) is s
 
 ### SSE event schema
 
-Each `data:` frame is a JSON object (the schema is in `copilot_stream`'s docstring, `copilot.py:511-517`):
+Each `data:` frame is a JSON object (the schema is in `copilot_stream`'s docstring, `copilot.py:532-537`):
 
 ```
 {"type": "chunk", "text": ...}
@@ -97,17 +101,17 @@ Each `data:` frame is a JSON object (the schema is in `copilot_stream`'s docstri
 {"type": "tool_result", "id", "status", "summary"}
 {"type": "confirm_request", "action_id", "action_type", "description", "proposed"}
 {"type": "error", "message": ...}
-{"type": "done", "conversation_id": <uuid>}
+{"type": "done", "conversation_id": <uuid>, "answered_by": {...}}
 ```
 
-`error` is only emitted when the stream failed *and* no visible text was produced; `done` is always last.
+`error` is only emitted when the stream failed *and* no visible text was produced; `done` is always last. Its `answered_by` is the reply footer: `provider_name`, `provider_type`, `source` (`site` / `user`), `model`, `cost_usd` (when the provider reported usage), `fallback_reason` and `supports_tools`.
 
 ### Non-CLI providers: Ollama tool loop and text-only fallback
 
-If the assigned provider is not a `ClaudeCodeProvider`, two paths exist (`copilot.py:668-698`, `:700`):
+If the assigned provider is not a `ClaudeCodeProvider`, two paths exist (`copilot.py:694-716`, `:759`):
 
 - **Ollama** (`supports_tools` + `stream_agent`) — a native `/api/chat` function-calling loop runs **in-process** in the api (no CLI, no credentials, so `copilot_worker_dispatch` does not apply). Tools are dispatched against the backend tool registry (`app.tools.execute_tool`) via an in-process executor bound to the request's DB session and user; specs come from `ollama_tool_specs(..., read_only=True)`, so only read tools are exposed. The default curated subset is `DEFAULT_COPILOT_OLLAMA_TOOLS` (`backend/app/tools/__init__.py:99`), overridable via the assignment's `ollama_tools` config key (Prompt Workspace → Routing panel). Tool traces stream to the dock exactly as in the CLI path.
-- **Any other non-tool provider** (e.g. the Anthropic API provider) falls back to the base `stream_complete` contract — text-only chunks, no tool trace.
+- **Any other non-tool provider** (the Anthropic API provider, `openai_compatible`, and so every personal key of those types) falls back to the base `stream_complete` contract — text-only chunks, no tool trace. The dock's header chip says "no tools" and the reply footer says "tools unavailable on this key" when it was the person's.
 
 ---
 
@@ -115,10 +119,10 @@ If the assigned provider is not a `ClaudeCodeProvider`, two paths exist (`copilo
 
 The Claude Code CLI needs OAuth credentials at `~/.claude/.credentials.json`. In production only the **`celery-worker-ai`** container mounts that volume (it is the single writer that rotates tokens — concurrent OAuth refresh from a second mount would corrupt it). The api container has neither the CLI, the credentials, nor the skill mount (`docker-compose.prod.yml:165-170`).
 
-`copilot_worker_dispatch` (`backend/app/config.py:389`, default `true`) selects the topology (it only applies to the `claude_code` provider — the Ollama tool loop always runs in-process):
+`copilot_worker_dispatch` (`backend/app/config.py:414`, default `true`) selects the topology (it only applies to the `claude_code` provider — the Ollama tool loop always runs in-process):
 
-- **Worker dispatch (prod default)** — the api enqueues `app.workers.copilot_tasks.run_copilot_stream` on the `ai` queue (`copilot.py:630-655`) with a fresh `run_id`, and drains a Redis list while the worker runs the CLI.
-- **In-process (dev fallback)** — the api calls `provider.stream_agent()` directly (`copilot.py:656-667`). This only works where the api container itself has the CLI + credentials; the dev compose mounts the skill into the api for this reason (`docker-compose.dev.yml:135`).
+- **Worker dispatch (prod default)** — the api enqueues `app.workers.copilot_tasks.run_copilot_stream` on the `ai` queue (`copilot.py:656-681`) with a fresh `run_id`, and drains a Redis list while the worker runs the CLI.
+- **In-process (dev fallback)** — the api calls `provider.stream_agent()` directly (`copilot.py:682-692`). This only works where the api container itself has the CLI + credentials; the dev compose mounts the skill into the api for this reason (`docker-compose.dev.yml:135`).
 
 Either way, the event-handling loop in the endpoint is identical — `_iter_worker_events` deliberately mirrors `stream_agent`'s `{"kind": ...}` output shape.
 
@@ -134,7 +138,7 @@ Either way, the event-handling loop in the endpoint is identical — `_iter_work
 
 `run_copilot_stream` (`backend/app/workers/copilot_tasks.py:112`, `soft_time_limit=300`/`time_limit=360`) is a deliberately thin shim: it owns **no** business logic. It runs `ClaudeCodeProvider.stream_agent` and RPUSHes each raw `{"kind": ...}` event, verbatim, onto `copilot:stream:{run_id}` (`copilot_tasks.py:38`), plus terminal sentinels `__error__` / `__end__`. A **list** (not pub/sub) avoids the subscribe-before-publish race and buffers events if the api briefly falls behind; a 300 s TTL (`copilot_tasks.py:39`) cleans up orphaned runs. Even a task crash pushes an emergency terminator (`copilot_tasks.py:152`) so the api consumer never hangs.
 
-The api drains via BLPOP in `_iter_worker_events` (`copilot.py:430`), with a timeout of `cli_timeout + 60 s` (`copilot.py:654`) — if the worker goes silent past that, the stream errors with "Copilot worker produced no output".
+The api drains via BLPOP in `_iter_worker_events` (`copilot.py:430`), with a timeout of `cli_timeout + 60 s` (`copilot.py:680`) — if the worker goes silent past that, the stream errors with "Copilot worker produced no output".
 
 ### The `ai` queue
 
@@ -168,7 +172,7 @@ The copilot cannot write through its tools, but it can **propose** a small set o
 - `_parse_action_block` (`copilot.py:339`) parses the JSON; only types in `_SUPPORTED_ACTION_TYPES = ("create_campaign", "add_note")` (`copilot.py:62`) with a `params` object are accepted. Parse failure degrades to no proposal — the visible answer is unaffected, and the raw block is never persisted to the conversation.
 - A valid proposal is staged in Redis at `copilot:action:{action_id}` with a **900 s TTL** (`copilot.py:56-58`) and surfaced to the client as a `confirm_request` SSE event *before* `done`.
 
-`POST /api/ai/copilot/confirm` (`copilot.py:889`) then executes or cancels it: ownership-checked against the staging record, optional `edited_params` override, dispatch through `_ACTION_HANDLERS` (`copilot.py:979`) — `_execute_create_campaign` (`copilot.py:895`, TLP:GREEN, status validated) and `_execute_add_note` (`copilot.py:923`, entry `Note` or `EntityNote`). Handlers go through the models layer directly, **never** the skill CLI. On success a `✓ summary` assistant message is appended to the conversation; on an `AppError` the Redis key is kept so the user can retry with edited params.
+`POST /api/ai/copilot/confirm` (`copilot.py:1041`) then executes or cancels it: ownership-checked against the staging record, optional `edited_params` override, dispatch through `_ACTION_HANDLERS` (`backend/app/api/copilot.py:1064`) — `_execute_create_campaign` (`backend/app/api/copilot.py:980`, TLP:GREEN, status validated) and `_execute_add_note` (`backend/app/api/copilot.py:1008`, entry `Note` or `EntityNote`). Handlers go through the models layer directly, **never** the skill CLI. On success a `✓ summary` assistant message is appended to the conversation; on an `AppError` the Redis key is kept so the user can retry with edited params.
 
 ---
 
@@ -197,7 +201,7 @@ Two scope notes: the shared page renders only `role`/`content`, but the API resp
 
 **Ambient context** — `useCopilotContext` (`frontend/src/hooks/useCopilotContext.ts:43`) assembles the request `context` from the current route + stores: selected entry id, entity slug parsed from workbench-style URLs (normalizing `actor` → `threat_actor`), campaign id, the active search query, and the pathname. A seeded (locked) context overrides the route-derived one; the `ContextPill` (`frontend/src/components/ContextPill.tsx`) shows what's pinned and can be dismissed to ask instance-wide questions.
 
-**Streaming** — `streamCopilotChat` (`frontend/src/hooks/useAI.ts:601`) uses SSE-over-fetch (EventSource can't set an Authorization header) and dispatches each frame to callbacks. The dock interleaves, per assistant turn: `ToolTraceChip` chips (pending → success/error as `tool_call`/`tool_result` arrive), streamed Markdown text, and a `ConfirmCard` when a `confirm_request` lands. While a confirm is unresolved, the input is gated ("Resolve the pending action above to continue…"). The confirm resolution POSTs `/ai/copilot/confirm` and, on execute, appends the result summary as a linkified assistant message and invalidates the `campaigns` cache (`CopilotDockPanel.tsx:372`).
+**Streaming** — `streamCopilotChat` (`frontend/src/hooks/useAI.ts:733`) uses SSE-over-fetch (EventSource can't set an Authorization header) and dispatches each frame to callbacks. The dock interleaves, per assistant turn: `ToolTraceChip` chips (pending → success/error as `tool_call`/`tool_result` arrive), streamed Markdown text, and a `ConfirmCard` when a `confirm_request` lands. While a confirm is unresolved, the input is gated ("Resolve the pending action above to continue…"). The confirm resolution POSTs `/ai/copilot/confirm` and, on execute, appends the result summary as a linkified assistant message and invalidates the `campaigns` cache (`CopilotDockPanel.tsx:372`).
 
 **Slash commands** — typing `/` in an empty input opens a preset menu (`frontend/src/components/copilotCommands.ts:24`): `/summarize`, `/pivot`, `/rules`, `/report`, `/campaign`, `/trending`, `/gaps`. Selection fills the input with a prompt template — never auto-sends.
 
@@ -209,6 +213,7 @@ Worth knowing about dock behavior:
 - **In-flight streams abort** on dock unmount, on starting a new thread, on resuming another thread, and when a seed arrives (`AbortController` via `abortRef`).
 - **Input gating**: the textarea and send button are disabled while streaming or while any confirm card is pending/in-flight; the placeholder switches to "Resolve the pending action above to continue…".
 - **Empty state** offers four suggested prompts (`CopilotDockPanel.tsx:42`); a streaming assistant turn with no text or traces yet renders a "Thinking…" indicator.
+- **Who answered.** From `GET /api/ai/copilot/config` (`useCopilotAuth`'s `CopilotConfig`) the header shows a chip — the provider, "· your key" when `source` is `user`, "no tools" when the key has no tool loop — and a banner when the turn would be refused (`refused`, with a link to My AI) or ran on the site after the person's key could not answer (`fallback_reason`). Each reply carries a footer from the `done` frame's `answered_by`: model, cost, "your key" and the fallback sentence when one applies.
 
 ---
 
@@ -216,7 +221,7 @@ Worth knowing about dock behavior:
 
 The CLI authenticates via an OAuth session from a Claude Max subscription — there is no per-token API billing. Two auth methods exist:
 
-- **Prod:** `.credentials.json` in the `claude_cli` named volume, mounted only by `celery-worker-ai` (`docker-compose.prod.yml:285`). `CLAUDE_CODE_OAUTH_TOKEN` is deliberately **not** forwarded to the prod CLI worker — when present it overrides the credentials file and disables the CLI's silent OAuth refresh (`docker-compose.prod.yml:294-298`). The volume must never be deleted (loses copilot auth; see [operations.md](operations.md)).
+- **Prod:** `.credentials.json` in the `claude_cli` named volume, mounted only by `celery-worker-ai` (`docker-compose.prod.yml:301`). `CLAUDE_CODE_OAUTH_TOKEN` is deliberately **not** forwarded to the prod CLI worker — when present it overrides the credentials file and disables the CLI's silent OAuth refresh (`docker-compose.prod.yml:294-298`). The volume must never be deleted (loses copilot auth; see [operations.md](operations.md)).
 - **Dev:** the dev CLI worker forwards `CLAUDE_CODE_OAUTH_TOKEN` from `.env` (`docker-compose.dev.yml:200`), so a long-lived env token can stand in for the credentials file.
 
 The session expires periodically (~monthly in practice), and when it does the copilot fails without an obvious cause — so credential health is monitored and re-auth is possible entirely in-app:
@@ -245,9 +250,11 @@ Session states, published to `copilot:auth:session:{id}` (15 min TTL) and polled
 
 ## Cost tracking
 
-**Settings → AI Configuration → Cost Dashboard** (`frontend/src/components/AISettings.tsx:607`) shows 30-day totals and per-task / per-model breakdowns from `GET /api/ai/cost-breakdown` (`backend/app/api/ai_results.py:228`), which aggregates `AIResult.cost_estimate` — the per-call estimates the AI engine records when it runs tasks (`backend/app/ai/engine.py:574-591`, Prometheus `AI_COST_TOTAL` alongside).
+**Settings → AI Configuration → Cost Dashboard** (`frontend/src/components/AISettings.tsx:607`) shows 30-day totals and per-task / per-model breakdowns from `GET /api/ai/cost-breakdown` (`backend/app/api/ai_results.py:228`), which aggregates `AIResult.cost_estimate` — the per-call estimates the AI engine records when it runs tasks (`backend/app/ai/engine.py:1105`, Prometheus `AI_COST_TOTAL` alongside).
 
-The copilot's relationship to this is important to state precisely: **copilot turns appear in the cost dashboard, but the dollar figures are notional.** The CLI's terminal `result` event carries token usage (`input_tokens`, `output_tokens`, cache creation/read tokens) and a `total_cost_usd`; `ClaudeCodeProvider` parses it (`_extract_usage` in `claude_code_provider.py`) and attaches it to the stream's `done` event — relayed verbatim by the worker topology — and the stream endpoint records one `AIResult` row per turn (`target_type="conversation"`, `target_id=<conversation id>`, `backend/app/api/copilot.py`), with `cost_estimate` set to the CLI-reported `total_cost_usd`. Because the CLI runs under the flat-rate Max-subscription OAuth session, that figure is what the usage *would* cost at API rates, not an actual charge; copilot capacity is still bounded by Max-plan rate limits, surfaced as `QuotaExhaustedError` auto-pauses on the provider health banner. `tokens_input` on the row includes cache creation/read tokens (the full processed context); the raw breakdown is kept in `parsed_result.usage`.
+The copilot's relationship to this is important to state precisely: **copilot turns appear in the cost dashboard, but on the CLI the dollar figures are notional.** The CLI's terminal `result` event carries token usage (`input_tokens`, `output_tokens`, cache creation/read tokens) and a `total_cost_usd`; `ClaudeCodeProvider` parses it (`_extract_usage` in `claude_code_provider.py`) and attaches it to the stream's `done` event — relayed verbatim by the worker topology — and the stream endpoint records one `AIResult` row per turn (`target_type="conversation"`, `target_id=<conversation id>`, `backend/app/api/copilot.py`), with `cost_estimate` set to the CLI-reported `total_cost_usd`. Because the CLI runs under the flat-rate Max-subscription OAuth session, that figure is what the usage *would* cost at API rates, not an actual charge; copilot capacity is still bounded by Max-plan rate limits, surfaced as `QuotaExhaustedError` auto-pauses on the provider health banner. `tokens_input` on the row includes cache creation/read tokens (the full processed context); the raw breakdown is kept in `parsed_result.usage`.
+
+On the other providers the row is priced from what the stream reported: each provider keeps its stream's usage in `last_stream_usage` (the Anthropic SDK's final message, Ollama's `done` chunk, an OpenAI-compatible server's trailing usage chunk when it sends one), and the endpoint ledgers the turn from it, priced from the cost table when there are tokens but no dollar figure. The row is attributed like every other: `caller_kind="user"`, `user_id` the person, and `key_owner_id` set when their own key answered — which is what the person's monthly cap, the site allowance, and the dashboard's By-user table count. A turn that errors or disconnects mid-stream is ledgered too.
 
 ---
 
@@ -255,7 +262,7 @@ The copilot's relationship to this is important to state precisely: **copilot tu
 
 | Symptom | Cause | Behavior / recovery |
 |---|---|---|
-| Stream errors with "Copilot worker produced no output" | CLI worker down, or `ai` queue backed up past the BLPOP window (`copilot.py:654`) | The turn fails; nothing persisted beyond the `(error: …)` message. Check `celery-worker-ai` logs |
+| Stream errors with "Copilot worker produced no output" | CLI worker down, or `ai` queue backed up past the BLPOP window (`copilot.py:680`) | The turn fails; nothing persisted beyond the `(error: …)` message. Check `celery-worker-ai` logs |
 | Empty/failed answers, no obvious error | Expired Claude OAuth session | The dock re-checks auth status after an errored/empty turn and shows the admin re-auth banner (`CopilotDockPanel.tsx:274-276`) |
 | `QuotaExhaustedError` in worker logs | Max-plan usage window hit (stderr sentinel match, `claude_code_provider.py:36-51`) | Propagated to the stream as an error; the shared `claude_code` worker also serializes retries, so pressure self-limits |
 | Confirm returns 404 "expired or does not exist" | Pending action outlived its 900 s Redis TTL, or another user's `action_id` | Ask the copilot to re-propose |
@@ -271,15 +278,17 @@ Historical note: Celery task results share the copilot's Redis; before `result_e
 
 | Knob | Where | Value / effect |
 |---|---|---|
-| `copilot_worker_dispatch` | `backend/app/config.py:389` | `true` (default): dispatch CLI runs to `celery-worker-ai`; `false`: run in-process in the api (claude_code only — Ollama always runs in-process) |
+| `copilot_worker_dispatch` | `backend/app/config.py:414` | `true` (default): dispatch CLI runs to `celery-worker-ai`; `false`: run in-process in the api (claude_code only — Ollama always runs in-process) |
 | `allowed_tools` / `timeout_seconds` | copilot task assignment config (`defaults.py:118-126`, editable in Settings → AI Configuration) | `["Bash","Read","Skill"]`, 240 s CLI ceiling |
 | `ollama_tools` | copilot assignment config (Prompt Workspace → Routing panel) | Curated read-only tool subset for an Ollama-assigned copilot; defaults to `DEFAULT_COPILOT_OLLAMA_TOOLS` (`backend/app/tools/__init__.py:99`) |
 | History replay | `backend/app/api/copilot.py:45` | Last 20 messages injected as `conversation_history` |
 | Pending-action TTL | `copilot.py:58` | 900 s before a proposed write expires |
 | Worker stream buffer TTL | `copilot_tasks.py:39` | 300 s for an undrained `copilot:stream:{run_id}` list |
 | Task time limits | `copilot_tasks.py:109-110` | `soft_time_limit=300`, `time_limit=360` |
-| BLPOP silence window | `copilot.py:654` | CLI timeout + 60 s before the api declares the worker dead |
-| Rate limit | `backend/app/core/rate_limit.py:29` | 20 req/min "ai" bucket on `/api/ai/*` (covers `/stream`, `/confirm`, conversations); `/api/ai/copilot-auth` is exempt (`rate_limit.py:15`) |
+| BLPOP silence window | `copilot.py:680` | CLI timeout + 60 s before the api declares the worker dead |
+| Rate limit | `backend/app/core/rate_limit.py:29` | 20 req/min "ai" bucket on `/api/ai/*` (covers `/stream`, `/confirm`, conversations) and the two unauthenticated share AI routes, keyed on the client behind the proxy; `/api/ai/copilot-auth` is exempt (`rate_limit.py:15`) |
+| `site_ai_user_daily_requests` | Settings → AI Configuration → User keys | Requests one person may make per UTC day on the instance's providers for the tasks they start, copilot turns included; `0` (default) is unlimited. Failed turns count, so a 429 is `ai_allowance_exceeded` |
+| `allow_user_ai_providers`, `require_user_ai_provider`, `user_ai_provider_types`, `user_ai_daily_request_cap` | Settings → AI Configuration → User keys | Whether a person's own key may answer their copilot turns, whether it must, which key types, and the caps on their spend. Off by default. See [automation-ai-enrichment.md](automation-ai-enrichment.md#personal-keys--the-lookup) |
 | Worker concurrency | `docker-compose.prod.yml:310` | `ai` queue at `${CLAUDE_CODE_CONCURRENCY:-1}` — at the default of 1, copilot turns serialize with autonomous CLI tasks |
 | Re-auth beat job | `job_registry.py:251-256` | `refresh_claude_auth_status` every 30 minutes |
 
@@ -287,4 +296,4 @@ Historical note: Celery task results share the copilot's Redis; before `result_e
 
 ## Test coverage
 
-There is no dedicated backend test module for the copilot (`backend/tests/` has no `test_copilot*.py`) — the fence splitter, worker relay, and confirm handlers are exercised only in production. Adjacent coverage exists in `backend/tests/test_ai_providers.py` (provider layer), `test_ai_tasks.py` / `test_ai_prompts.py` (task/prompt seeding, which includes the `copilot` task), and `test_rate_limiter.py` (the `ai` bucket). When adding copilot tests, `_FenceSplitter` (`copilot.py:372`) and `_parse_action_block` (`copilot.py:339`) are self-contained and unit-test without any DB/Redis fixtures.
+There is no dedicated backend test module for the copilot (`backend/tests/` has no `test_copilot*.py`) — the fence splitter, worker relay, and confirm handlers are exercised only in production. Adjacent coverage exists in `backend/tests/test_ai_providers.py` (provider layer), `test_ai_tasks.py` / `test_ai_prompts.py` (task/prompt seeding, which includes the `copilot` task), `test_rate_limiter.py` (the `ai` bucket), `test_ai_allowance.py` (the site allowance gating `/stream`), and `test_user_ai_providers.py` (`/config` reporting whose key answers and the Required refusal; a streamed turn's usage counting toward the person's cap). When adding copilot tests, `_FenceSplitter` (`copilot.py:372`) and `_parse_action_block` (`copilot.py:339`) are self-contained and unit-test without any DB/Redis fixtures.

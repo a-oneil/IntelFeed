@@ -72,6 +72,27 @@ class Settings(BaseSettings):
     ai_use_batches: bool = True
     # Per-request cost estimate used to size a batch against the daily budget.
     ai_est_cost_per_request: float = 0.0024
+    # Interactive AI on the instance's own providers, per person per UTC day.
+    # 0 = unlimited. Background work, automation and share links don't count.
+    site_ai_user_daily_requests: int = 0
+    # AI questions + tasks one share link may run per UTC day. 0 = unlimited.
+    share_ai_daily_requests: int = 20
+    # Personal AI keys. Off = every call runs on the instance's providers, as
+    # before. Optional = a person's key answers the tasks they start, falling
+    # back to the instance's provider when it can't. Required = no fallback:
+    # an interactive task without a working personal key is refused.
+    allow_user_ai_providers: bool = False
+    require_user_ai_provider: bool = False
+    # Comma-separated provider types a person may register (claude_code never).
+    user_ai_provider_types: str = "claude,openai_compatible"
+    # Let a personal key point at a private address (a LAN Ollama). Off on a
+    # public instance: the server calls whatever URL a person enters.
+    user_ai_allow_private_endpoints: bool = False
+    # Cap on one person's own keys, counted on ai_results.key_owner_id as
+    # calls, not dollars: their key is their money, so the only limit the
+    # operator sets is on how hard this server will drive it. 0 = unlimited.
+    # A dollar cap exists too, but it is the person's own to set.
+    user_ai_daily_request_cap: int = 300
 
     # Per-entry pipeline run logging (engine phase 5) — kill switch
     pipeline_run_logging_enabled: bool = True
@@ -374,6 +395,12 @@ class Settings(BaseSettings):
 
     # Webhooks
     webhook_allow_private_networks: bool = True
+    # Header a trusted edge sets to the visitor's address (Cloudflare:
+    # "CF-Connecting-IP"), read only when the direct peer is on a private
+    # network. Set it when the origin accepts traffic from that edge alone;
+    # on an open origin anyone can send the header. Empty = the first
+    # X-Forwarded-For hop, which the proxy in front of the API writes itself.
+    trusted_client_ip_header: str = ""
 
     # Public RSS feed (re-publishes aggregated entries via token-gated URL)
     public_rss_enabled: bool = False

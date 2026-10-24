@@ -12,6 +12,7 @@ from app.core.exceptions import AppError
 from app.core.security import get_admin_user, get_current_user
 from app.database import get_db
 from app.models.ai_provider import AIProvider
+from app.models.ai_result import AIResult
 from app.models.ai_task import AITask
 from app.models.ai_task_assignment import AITaskAssignment
 from app.models.user import User
@@ -149,6 +150,15 @@ async def update_task(
         raise AppError(code="not_found", message="Task not found", status_code=404)
 
     updates = body.model_dump(exclude_unset=True)
+    if updates.get("allows_user_provider") and task.user_provider_locked:
+        raise AppError(
+            code="task_site_only",
+            message=(
+                f"'{task.display_name}' writes results the whole instance reads, "
+                "so it always runs on the instance's providers."
+            ),
+            status_code=400,
+        )
     if "category" in updates and task.is_system:
         raise AppError(
             code="forbidden",
@@ -198,6 +208,16 @@ async def delete_custom_task(
         raise AppError(code="not_found", message="Task not found", status_code=404)
     if task.is_system:
         raise AppError(code="forbidden", message="Cannot delete system tasks", status_code=403)
+    # Every result points at its task through a plain, required foreign
+    # key, so a task that has run stays; deleting it would fail on the
+    # first row or leave results pointing at nothing.
+    has_results = await db.scalar(select(AIResult.id).where(AIResult.task_id == task_id).limit(1))
+    if has_results is not None:
+        raise AppError(
+            code="task_has_results",
+            message="This task has results. Results keep their task, so it can't be deleted; disable it instead.",
+            status_code=409,
+        )
     await db.delete(task)
     await db.flush()
 
@@ -278,8 +298,11 @@ async def upsert_task_assignment(
     if not task:
         raise AppError(code="not_found", message="Task not found", status_code=404)
 
-    # Verify provider exists
-    prov_result = await db.execute(select(AIProvider).where(AIProvider.id == body.provider_id))
+    # Verify provider exists and is the instance's: a personal key answers
+    # its owner's routes, never a site assignment.
+    prov_result = await db.execute(
+        select(AIProvider).where(AIProvider.id == body.provider_id, AIProvider.user_id.is_(None))
+    )
     provider = prov_result.scalar_one_or_none()
     if not provider:
         raise AppError(code="not_found", message="Provider not found", status_code=404)

@@ -84,7 +84,7 @@ async def _ollama_provider_row(db: AsyncSession) -> AIProviderModel | None:
         (
             await db.execute(
                 select(AIProviderModel)
-                .where(AIProviderModel.provider_type == "ollama")
+                .where(AIProviderModel.provider_type == "ollama", AIProviderModel.user_id.is_(None))
                 .order_by(AIProviderModel.created_at)
             )
         )

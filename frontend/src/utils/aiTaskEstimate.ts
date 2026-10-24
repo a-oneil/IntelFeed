@@ -5,6 +5,7 @@
 // to bill anyone. Everything here is a heuristic.
 
 import type { AITaskAssignment, AIProvider } from "@/api/types";
+import { formatUsd } from "@/utils/format";
 
 // Cost per 1M tokens (input, output) in USD.
 // Mirrors the backend COST_TABLE in `backend/app/ai/engine.py`. Keep in sync if
@@ -60,7 +61,7 @@ export interface TaskEstimate {
 
 function formatCost(usd: number): string {
   if (usd < 0.01) return "<$0.01";
-  return `~$${usd.toFixed(2)}`;
+  return `~${formatUsd(usd)}`;
 }
 
 /**
@@ -68,13 +69,15 @@ function formatCost(usd: number): string {
  * client-side and approximate. Returns `unassigned: true` when there's no
  * assignment or the model family isn't recognized (so we don't invent a cost).
  *
- * @param assignment  the task's AITaskAssignment (from useAllTaskAssignments), or undefined
+ * @param assignment  the task's AITaskAssignment (from useAllTaskAssignments), a personal
+ *                    route's {provider_id, model_name} when the click runs on the user's own
+ *                    key, or undefined
  * @param providers   AI providers list (from useAIProviders), used to detect the claude_code CLI
  */
 export function estimateTask(
   category: string | null,
   taskName: string,
-  assignment: AITaskAssignment | undefined,
+  assignment: Pick<AITaskAssignment, "provider_id" | "model_name"> | undefined,
   providers: AIProvider[] | undefined,
 ): TaskEstimate {
   if (!assignment) return { label: null, unassigned: true };

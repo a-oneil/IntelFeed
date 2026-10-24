@@ -14,6 +14,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.caller import Caller
 from app.intelligence.correlation_cache import invalidate_entity_cache
 from app.models.country import Country, EntryCountry
 from app.models.cve import CVE, EntryCVE
@@ -49,6 +50,7 @@ async def generate_entity_assessment(
     entity_type: str,
     entity_id: uuid.UUID,
     only_if_empty: bool = False,
+    caller: Caller | None = None,
 ) -> dict:
     """Generate an AI assessment for an entity and save it to its description.
 
@@ -155,6 +157,7 @@ Recent articles ({len(articles)} most recent):
         # is_current AIResult forever — including a stored parse_error, which
         # would permanently pin an entity to its first failed attempt.
         force=True,
+        caller=caller,
     )
 
     if isinstance(ai_result, dict):

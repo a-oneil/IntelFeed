@@ -303,3 +303,48 @@
     align-items: center;
   }
 }
+
+/* ─── Who answered ───────────────────────────────────── */
+
+.resultCardFallback .resultHeader {
+  border-left-color: var(--warning);
+}
+
+.providerChipWrap {
+  display: inline-flex;
+}
+
+.providerChip {
+  cursor: help;
+}
+
+.answeredBy {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 0;
+  font-size: var(--fs-sm);
+}
+
+.answeredBy dt {
+  color: var(--text-muted);
+}
+
+.answeredBy dd {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.fallbackNote {
+  padding: 6px var(--sp-4);
+  margin: var(--sp-2) var(--sp-4) var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 25%, transparent);
+  border-radius: var(--r-sm);
+}
+
+.fallbackNote a {
+  color: var(--accent);
+}

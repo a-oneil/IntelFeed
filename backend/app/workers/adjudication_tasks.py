@@ -24,6 +24,7 @@ from datetime import UTC, datetime
 import redis
 from celery.exceptions import Retry
 
+from app.ai.caller import Caller
 from app.config import settings
 from app.core.metrics import CELERY_TASK_DURATION_SECONDS, CELERY_TASKS_TOTAL
 from app.workers.celery_app import celery_app
@@ -173,6 +174,7 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
                     target_type=TARGET_TYPE,
                     target_id=entry.id,
                     force=True,
+                    caller=Caller.system(user_id),
                 )
             except QuotaExhaustedError as e:
                 # The provider is paused: park the row like an over-budget

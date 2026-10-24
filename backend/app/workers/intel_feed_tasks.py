@@ -5,6 +5,7 @@ import time
 
 from sqlalchemy.exc import DBAPIError
 
+from app.ai.caller import Caller
 from app.config import settings
 from app.core.metrics import CELERY_TASK_DURATION_SECONDS, CELERY_TASKS_TOTAL
 from app.workers.celery_app import celery_app
@@ -975,9 +976,15 @@ async def _bulk_extract(entry_ids: list[str], extract_types: list[str], user_id:
                 # One consolidated entry_analysis call replaces the old per-task
                 # AI extraction calls (threat_actor_id, malware_id, tool_extraction,
                 # country_id, sector_id, article_metadata — now deprecated seeds).
+                # A person clicked Extract, but the result is shared state and
+                # the run is a batch: pipeline spend, with the clicker kept as
+                # provenance. Derive first so a since-deleted account never
+                # reaches the result's foreign key.
+                from app.ai.engine import derive_caller
                 from app.services.entry_analysis import analyze_entry
 
-                _parsed, counts = await analyze_entry(db, uid, eid, entry_data, force=True)
+                caller = Caller.system((await derive_caller(db, uid)).user_id)
+                _parsed, counts = await analyze_entry(db, uid, eid, entry_data, force=True, caller=caller)
                 stats["ttps"] += counts.get("ttps", 0)
                 stats["actors"] += counts.get("threat_actors", 0)
                 stats["malware"] += counts.get("malware", 0)

@@ -23,6 +23,8 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.caller import Caller
+
 logger = logging.getLogger(__name__)
 
 ECHO_REUSE_MIN_RATIO = 0.7
@@ -253,6 +255,7 @@ async def analyze_entry(
     entry_id: uuid.UUID,
     entry_data: dict,
     force: bool = False,
+    caller: Caller | None = None,
 ) -> tuple[dict | None, dict]:
     """Run the one-pass entry_analysis task inline + fan out. Returns (parsed, counts).
 
@@ -271,6 +274,7 @@ async def analyze_entry(
         target_type="entry",
         target_id=entry_id,
         force=force,
+        caller=caller,
     )
     if not isinstance(result, dict) or result.get("_extraction_status") not in (None, "success"):
         return result, {}
@@ -414,6 +418,7 @@ async def enqueue_entry_analysis(db: AsyncSession, entry_id: uuid.UUID) -> str |
         if dup_id:
             dup_result, _ = await _current_analysis_result(db, uuid.UUID(dup_id))
             if dup_result is not None and isinstance(dup_result.parsed_result, dict):
+                from app.ai.engine import attribution_fields
                 from app.models.ai_result import AIResult
 
                 parsed = dict(dup_result.parsed_result)
@@ -434,6 +439,7 @@ async def enqueue_entry_analysis(db: AsyncSession, entry_id: uuid.UUID) -> str |
                         tokens_output=0,
                         cost_estimate=0,
                         processing_time_ms=0,
+                        **{**attribution_fields(Caller.system(), None), "provider_name": dup_result.provider_name},
                     )
                 )
                 await store_entry_analysis(db, entry_id, parsed)

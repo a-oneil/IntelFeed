@@ -45,7 +45,7 @@ import {
   useResetPrompt,
   usePromptHistory,
   useAICostSummary,
-  useProviderModels,
+  useMyAIPolicy,
 } from "../useAI";
 
 describe("useAI hooks", () => {
@@ -114,8 +114,8 @@ describe("useAI hooks", () => {
     expect(result).toBeDefined();
   });
 
-  it("useProviderModels returns query structure", () => {
-    const result = useProviderModels("test-id");
+  it("useMyAIPolicy returns query structure", () => {
+    const result = useMyAIPolicy();
     expect(result).toBeDefined();
   });
 });

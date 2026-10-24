@@ -40,11 +40,23 @@ class AITask(Base):
     # entity profiles (actors, malware, CVEs, …). Ordering reuses
     # entry_action_order so both panels stay consistent.
     show_in_entity_actions: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    # Whether a person's own AI key may answer this task. True only for tasks
+    # whose result belongs to the person who clicked (see
+    # USER_PROVIDER_ELIGIBLE_TASKS); a task that writes shared state stays
+    # on the instance's providers and the API refuses to flip it.
+    allows_user_provider: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     @property
     def effective_output_schema(self) -> dict | None:
         return self.output_schema_override or self.output_schema
+
+    @property
+    def user_provider_locked(self) -> bool:
+        """Pipeline tasks can't be opened to personal keys; custom tasks can."""
+        from app.ai.capabilities import USER_PROVIDER_ELIGIBLE_TASKS
+
+        return self.is_system and self.name not in USER_PROVIDER_ELIGIBLE_TASKS
 
     @property
     def requires_tools(self) -> bool:

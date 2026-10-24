@@ -1023,10 +1023,17 @@ async def test_entry_runs_endpoint_and_retry(
 
     resp = await client.get(f"/api/engine/entries/{entry.id}/runs", headers=auth_headers)
     assert resp.status_code == 200
-    runs = {r["stage"]: r for r in resp.json()["runs"]}
+    body = resp.json()
+    runs = {r["stage"]: r for r in body["runs"]}
     assert runs["autolink"]["status"] == "success"
     assert runs["extract"]["status"] == "error"
     assert runs["extract"]["retryable"] is True
+    # The whole pipeline is listed in execution order, not just the stages that
+    # wrote a row; translation only appears when it ran.
+    assert [r["stage"] for r in body["runs"]] == [s for s in PROCESSING_STAGE_ORDER_FOR_TEST if s != "translate"]
+    assert runs["score"]["status"] == "not_run"
+    assert runs["analyze"]["status"] == "not_run"
+    assert body["status"] == "errored"
 
     sent = {}
 
@@ -1046,6 +1053,74 @@ async def test_entry_runs_endpoint_and_retry(
 
     resp = await client.post(f"/api/engine/entries/{entry.id}/stages/translate/retry", headers=admin_headers)
     assert resp.status_code == 422
+
+
+PROCESSING_STAGE_ORDER_FOR_TEST = [
+    "translate",
+    "autolink",
+    "observables",
+    "telegram_links",
+    "extract",
+    "cooccurrence",
+    "correlation",
+    "requirements",
+    "score",
+    "analyze",
+    "adjudicate",
+    "automate",
+]
+
+
+@pytest.mark.asyncio
+async def test_entry_runs_endpoint_lists_ai_stages_from_request_row(client, auth_headers, db_session, reliable_feed):
+    """The AI analysis writes no pipeline run, so the popover reads its state
+    from the analysis-request row — and reports a queued review behind it."""
+    from app.api.engine import PROCESSING_STAGE_ORDER
+    from app.models.ai_analysis import AIAnalysisRequest
+    from app.models.entry_pipeline_run import EntryPipelineRun
+
+    assert PROCESSING_STAGE_ORDER == PROCESSING_STAGE_ORDER_FOR_TEST
+
+    entry = await _make_entry(db_session, reliable_feed, title="AI stages entry")
+    for stage in ("autolink", "extract", "score", "automate"):
+        db_session.add(EntryPipelineRun(entry_id=entry.id, stage=stage, status="success", duration_ms=5))
+    db_session.add(AIAnalysisRequest(entry_id=entry.id, status="submitted"))
+    await db_session.commit()
+
+    resp = await client.get(f"/api/engine/entries/{entry.id}/runs", headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    runs = {r["stage"]: r for r in body["runs"]}
+    assert runs["analyze"]["status"] == "queued"
+    assert runs["analyze"]["detail"] == {"waiting_on": "ai_worker"}
+    assert runs["analyze"]["label"] == "AI analysis"
+    assert runs["adjudicate"]["status"] == "queued"
+    assert runs["adjudicate"]["detail"] == {"waiting_on": "analysis"}
+    # Scored, but the AI has not had its say: still in flight for the reader.
+    assert body["status"] == "in_flight"
+
+    req = (
+        await db_session.execute(select(AIAnalysisRequest).where(AIAnalysisRequest.entry_id == entry.id))
+    ).scalar_one()
+    req.status = "completed"
+    req.completed_at = datetime.now(UTC)
+    req.adjudication_status = "skipped_off"
+    await db_session.commit()
+
+    body = (await client.get(f"/api/engine/entries/{entry.id}/runs", headers=auth_headers)).json()
+    runs = {r["stage"]: r for r in body["runs"]}
+    assert runs["analyze"]["status"] == "success"
+    assert runs["adjudicate"]["status"] == "skipped"
+    assert runs["adjudicate"]["detail"] == {"skipped": "off"}
+    assert body["status"] == "complete"
+
+
+@pytest.mark.asyncio
+async def test_entry_runs_endpoint_empty_before_logging(client, auth_headers, db_session, reliable_feed):
+    entry = await _make_entry(db_session, reliable_feed, title="Pre-logging entry")
+    resp = await client.get(f"/api/engine/entries/{entry.id}/runs", headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "unknown", "runs": []}
 
 
 @pytest.mark.asyncio

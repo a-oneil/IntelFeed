@@ -256,7 +256,9 @@ async def test_stream_complete_yields_chunks(monkeypatch):
     lines = [
         json.dumps({"message": {"role": "assistant", "content": "Hel"}, "done": False}),
         json.dumps({"message": {"role": "assistant", "content": "lo"}, "done": False}),
-        json.dumps({"message": {"role": "assistant", "content": ""}, "done": True}),
+        json.dumps(
+            {"message": {"role": "assistant", "content": ""}, "done": True, "prompt_eval_count": 9, "eval_count": 2}
+        ),
     ]
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -267,6 +269,8 @@ async def test_stream_complete_yields_chunks(monkeypatch):
 
     chunks = [c async for c in provider.stream_complete(prompt="hi", model="llama3.1:8b")]
     assert chunks == ["Hel", "lo"]
+    # The final chunk's counts are kept so a streamed turn still counts.
+    assert provider.last_stream_usage == {"tokens_input": 9, "tokens_output": 2, "cost_usd": 0.0}
 
 
 @pytest.mark.asyncio

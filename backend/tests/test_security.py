@@ -367,17 +367,16 @@ class TestGetAdminUser:
         self, client: AsyncClient, auth_headers: dict, test_user: User
     ):
         """A regular user should receive 403 from an admin-gated endpoint."""
-        resp = await client.post(
-            "/api/ai/providers",
-            headers=auth_headers,
-            json={},
-        )
+        # Creating a provider is no longer admin-only (anyone may register a
+        # personal key when the admin allows it); the admin's list of every
+        # personal key is.
+        resp = await client.get("/api/ai/providers/user-keys", headers=auth_headers)
         assert resp.status_code == 403
 
     @pytest.mark.asyncio
     async def test_admin_endpoint_unauthenticated_rejected(self, client: AsyncClient):
         """Unauthenticated requests to admin endpoints should be rejected."""
-        resp = await client.post("/api/ai/providers", json={})
+        resp = await client.get("/api/ai/providers/user-keys")
         assert resp.status_code in (401, 403)
 
 
