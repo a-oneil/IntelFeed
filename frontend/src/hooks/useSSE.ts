@@ -14,12 +14,12 @@ export function useSSE() {
   const token = useAuthStore((s) => s.accessToken);
   const eventSourceRef = useRef<EventSource | null>(null);
   const retriesRef = useRef(0);
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   // Debounce SSE-triggered invalidations to prevent request storms
   // when many feeds are fetched in quick succession
   const pendingInvalidationsRef = useRef(new Set<string>());
-  const invalidationTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const invalidationTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const debouncedInvalidate = useCallback(
     (...queryKeys: string[]) => {

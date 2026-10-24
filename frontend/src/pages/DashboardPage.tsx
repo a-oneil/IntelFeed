@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { Responsive, WidthProvider, type Layout } from "react-grid-layout";
+import { Responsive, WidthProvider, type Layout, type LayoutItem } from "react-grid-layout/legacy";
 import "react-grid-layout/css/styles.css";
 import {
   useDashboards,
@@ -129,7 +129,7 @@ export function DashboardPage() {
   };
 
   // Widget grid layout
-  const layout = useMemo<Layout[]>(() => {
+  const layout = useMemo<LayoutItem[]>(() => {
     if (!dashboard) return [];
     return dashboard.widgets.map((w) => ({
       i: w.id,
@@ -206,7 +206,7 @@ export function DashboardPage() {
   // Persist layout only on intentional user drag/resize — NOT on responsive
   // breakpoint reflows, which would overwrite stored widths with narrow values.
   const handleUserLayoutChange = useCallback(
-    (currentLayout: Layout[]) => {
+    (currentLayout: Layout) => {
       if (!dashboardId || !dashboard || currentLayout.length === 0) return;
       const layoutItems = currentLayout.map((item) => ({
         id: item.i,

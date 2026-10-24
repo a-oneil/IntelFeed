@@ -17,7 +17,7 @@ import { useQuery } from "@tanstack/react-query";
  */
 function useDebouncedFeedsInvalidation(delayMs = 1000) {
   const queryClient = useQueryClient();
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   return useCallback(() => {
     clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
