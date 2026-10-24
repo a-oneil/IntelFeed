@@ -8,6 +8,15 @@ _config_logger = logging.getLogger("app.config")
 
 _INSECURE_DEFAULTS = {"changeme"}
 
+# HS256 signs every JWT with SECRET_KEY, so a guessable one is an admin login.
+_MIN_SECRET_KEY_LENGTH = 32
+
+
+def _is_placeholder(value: str) -> bool:
+    """The defaults here and every placeholder in .env.example
+    (``changeme-generate-a-real-key`` and friends) start with "changeme"."""
+    return value in _INSECURE_DEFAULTS or value.lower().startswith("changeme")
+
 
 class Settings(BaseSettings):
     # Environment
@@ -446,21 +455,26 @@ class Settings(BaseSettings):
     @field_validator("postgres_password", "meili_master_key", "secret_key", "encryption_key")
     @classmethod
     def _reject_insecure_defaults(cls, v: str, info) -> str:
-        if v in _INSECURE_DEFAULTS:
-            env = os.getenv("ENV", "development").lower()
-            if env == "production":
+        production = os.getenv("ENV", "development").lower() == "production"
+        if _is_placeholder(v):
+            if production:
                 raise ValueError(
-                    f"{info.field_name} must not be '{v}' in production. "
+                    f"{info.field_name} must not be a placeholder ('{v}') in production. "
                     "Set a strong secret via environment variable or .env file."
                 )
             _config_logger.warning("Insecure default for %s — do not use in production", info.field_name)
+        elif production and info.field_name == "secret_key" and len(v) < _MIN_SECRET_KEY_LENGTH:
+            raise ValueError(
+                f"secret_key must be at least {_MIN_SECRET_KEY_LENGTH} characters in production. "
+                "Generate one with: openssl rand -hex 32"
+            )
         return v
 
     @field_validator("encryption_key")
     @classmethod
     def _validate_fernet_key(cls, v: str) -> str:
-        if v in _INSECURE_DEFAULTS:
-            return v  # Already warned above; skip Fernet check for dev default
+        if _is_placeholder(v):
+            return v  # Refused in production / warned above; skip the Fernet check
         import base64
 
         try:
