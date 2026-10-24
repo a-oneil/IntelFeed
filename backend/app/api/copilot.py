@@ -2,13 +2,13 @@
 
 Workstream E (P1.0). Reuses the P0 AIConversation persistence and the SSE
 framing from intelligence.py's ask-agent endpoints, but drives the Claude Code
-CLI provider's ``stream_agent()`` method so it can (when the intelfeed skill is
-installed where the CLI can load it) call read-only skill tools mid-answer and
-surface a tool-call trace to the UI.
+CLI provider's ``stream_agent()`` method so it can call IntelFeed's read-only
+tools mid-answer and surface a tool-call trace to the UI.
 
-Read-only: the copilot task is seeded with an ``allowed_tools`` set of
-``["Bash", "Read", "Skill"]`` against the read-only intelfeed skill — no write
-tools, no confirm_request flow.
+Read-only: on the CLI the tools come from the IntelFeed MCP server holding a
+read-only agent token for the asking user (see ClaudeCodeProvider's tool
+policy); on Ollama, from the registry's non-mutating tools. No write tools, no
+confirm_request flow.
 """
 
 from __future__ import annotations
@@ -720,9 +720,9 @@ async def copilot_stream(
         try:
             try:
                 if isinstance(provider, ClaudeCodeProvider):
-                    # Read-only env: physically forbid writes for this invocation.
-                    # The mounted skill CLI reads INTELFEED_READ_ONLY and refuses
-                    # write tools (autonomous maintenance tasks never set it).
+                    # The CLI's IntelFeed tools act for this user, read-only:
+                    # the provider mints an agent token the API refuses for
+                    # any mutating tool.
                     if settings.copilot_worker_dispatch:
                         # Prod topology: run the CLI on the dedicated claude_code
                         # worker (owns the OAuth credentials volume) and relay its
@@ -740,7 +740,7 @@ async def copilot_stream(
                                 "allowed_tools": allowed_tools,
                                 "timeout_seconds": cli_timeout,
                                 "provider_config": config,
-                                "env": {"INTELFEED_READ_ONLY": "1"},
+                                "agent_user_id": str(user.id),
                             },
                             queue="ai",
                         )
@@ -759,14 +759,14 @@ async def copilot_stream(
                             allowed_tools=allowed_tools,
                             timeout_seconds=cli_timeout,
                             heartbeat_label="copilot stream",
-                            env={"INTELFEED_READ_ONLY": "1"},
+                            agent_user_id=user.id,
                         )
                 elif getattr(provider, "supports_tools", False) and hasattr(provider, "stream_agent"):
                     # Ollama native tool loop — runs in-process (no creds needed, so
                     # copilot_worker_dispatch does not apply). Tools are dispatched
                     # against the backend registry via an in-process executor bound
                     # to this request's db session + user; read-only tools only.
-                    from app.tools import execute_tool, ollama_tool_specs
+                    from app.tools import ADMIN_TOOLS, execute_tool, ollama_tool_specs, restrict_to_offered
 
                     async def _tool_executor(name: str, args: dict) -> str:
                         result = await execute_tool(name, args, db, user.id)
@@ -778,7 +778,12 @@ async def copilot_stream(
                             await db.rollback()
                         return result
 
+                    # Read-only, and never an admin tool for a non-admin. The
+                    # executor is bound to exactly this set, so a tool the model
+                    # names without being offered it is refused, not run.
                     tool_specs = ollama_tool_specs(config.get("ollama_tools") or _DEFAULT_OLLAMA_TOOLS, read_only=True)
+                    if user.role != "admin":
+                        tool_specs = [s for s in tool_specs if s["function"]["name"] not in ADMIN_TOOLS]
                     # NB: conversation history is already rendered into the prompt via
                     # the copilot template's ``conversation_history`` variable (same as
                     # the CLI path), so we do NOT also pass it as ``history`` here —
@@ -788,7 +793,7 @@ async def copilot_stream(
                         system=rendered_system,
                         model=model,
                         tools=tool_specs,
-                        tool_executor=_tool_executor,
+                        tool_executor=restrict_to_offered(tool_specs, _tool_executor),
                         timeout_seconds=cli_timeout,
                         heartbeat_label="copilot stream",
                     )
@@ -1113,14 +1118,23 @@ async def copilot_confirm(
         await r.delete(key)
         return {"status": "error", "message": f"Unsupported action type: {action_type}"}
 
+    # One approval runs at a time: a double click or two tabs must not create
+    # the campaign twice. The claim outlives no attempt (released below on
+    # failure, so a retry with edited params works) and expires on its own.
+    claim_key = f"{key}:claim"
+    if not await r.set(claim_key, "1", nx=True, ex=60):
+        raise AppError(code="conflict", message="This action is already being confirmed", status_code=409)
+
     try:
         result = await handler(db, user, params)
     except AppError as e:
         # Keep the key so the user can retry with edited params.
+        await r.delete(claim_key)
         return {"status": "error", "message": e.message}
     except Exception as e:
         logger.error("copilot confirm: %s handler failed: %s", action_type, e)
         await db.rollback()
+        await r.delete(claim_key)
         return {"status": "error", "message": f"Failed to execute action: {e}"}
 
     # Append a success message to the conversation this action came from.
@@ -1150,6 +1164,6 @@ async def copilot_confirm(
             logger.warning("copilot confirm: failed to append conversation message: %s", e)
 
     await db.commit()
-    await r.delete(key)
+    await r.delete(key, claim_key)
 
     return {"status": "executed", "result": result}

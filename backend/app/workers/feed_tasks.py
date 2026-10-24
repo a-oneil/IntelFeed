@@ -19,6 +19,7 @@ from app.core.metrics import (
     FEED_FETCH_DURATION_SECONDS,
     FEED_FETCH_TOTAL,
 )
+from app.core.safe_http import safe_async_client, safe_curl_get
 from app.models.entry import Entry
 from app.models.entry_media import EntryMedia
 from app.models.feed import Feed
@@ -353,7 +354,7 @@ async def _fetch_feed(feed_id: str):
         if feed.last_modified:
             headers["If-Modified-Since"] = feed.last_modified
 
-        async with httpx.AsyncClient(
+        async with safe_async_client(
             follow_redirects=True,
             timeout=30.0,
             headers=headers,
@@ -1471,9 +1472,7 @@ async def _extract_full_text(url: str) -> tuple[str | None, str | None]:
         # Medium (and other Cloudflare-protected sites) require browser
         # impersonation to avoid 403 bot challenges
         if is_medium:
-            from curl_cffi import requests as cffi_requests
-
-            response = cffi_requests.get(url, impersonate="chrome", timeout=15)
+            response = await safe_curl_get(url, impersonate="chrome", timeout=15)
             if response.status_code != 200:
                 return None, None
             content_type = response.headers.get("content-type", "")
@@ -1481,7 +1480,7 @@ async def _extract_full_text(url: str) -> tuple[str | None, str | None]:
                 return None, None
             raw_html = response.text
         else:
-            async with httpx.AsyncClient(
+            async with safe_async_client(
                 follow_redirects=True,
                 timeout=15.0,
                 headers={"User-Agent": str(settings.get("user_agent") or settings.user_agent)},
@@ -1498,9 +1497,7 @@ async def _extract_full_text(url: str) -> tuple[str | None, str | None]:
             # Fallback to curl_cffi if httpx was blocked
             if raw_html is None:
                 try:
-                    from curl_cffi import requests as cffi_requests
-
-                    response = cffi_requests.get(url, impersonate="chrome", timeout=15)
+                    response = await safe_curl_get(url, impersonate="chrome", timeout=15)
                     if response.status_code == 200:
                         content_type = response.headers.get("content-type", "")
                         if "html" in content_type:
@@ -1563,7 +1560,7 @@ async def _fetch_og_image(url: str) -> str | None:
         return None
 
     try:
-        async with httpx.AsyncClient(
+        async with safe_async_client(
             follow_redirects=True,
             timeout=10.0,
             headers={"User-Agent": str(settings.get("user_agent") or settings.user_agent)},
@@ -1611,7 +1608,7 @@ async def _attempt_feed_url_autodiscovery(db: AsyncSession, feed: Feed, headers:
     try:
         # Fresh client: the fetch client carries If-None-Match/If-Modified-Since
         # conditional headers that belong to the dead feed URL.
-        async with httpx.AsyncClient(follow_redirects=True, timeout=30.0, headers=headers) as client:
+        async with safe_async_client(follow_redirects=True, timeout=30.0, headers=headers) as client:
             try:
                 response = await client.get(homepage)
             except httpx.HTTPError as e:

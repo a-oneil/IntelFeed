@@ -56,16 +56,12 @@ LITE_EXCLUDE = {
     "validate_detection_rule",
 }
 
-# Gated in read-only mode even though the registry calls them non-mutating:
-# they invoke AI extraction/tasks that persist new or linked entities as a
-# side effect, so the read-only copilot must not reach them.
-EXTRA_WRITE_TOOLS = {
-    "extract_cves",
-    "extract_malware",
-    "extract_threat_actors",
-    "extract_ttps",
-    "run_ai_task",
-}
+# Gated in read-only mode even though the registry calls them non-mutating.
+# Empty: the AI extraction tools, run_ai_task and generate_detection_rules that
+# used to need this are flagged mutating in the registry itself, so every
+# read-only boundary (agent tokens, the Ollama read-only copilot, this gate)
+# agrees. Add a name here only for a tool the registry cannot flag.
+EXTRA_WRITE_TOOLS: set[str] = set()
 
 TYPE_MAP = {
     "string": "str",

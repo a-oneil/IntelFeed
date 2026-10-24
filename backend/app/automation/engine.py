@@ -117,6 +117,16 @@ async def execute_automation(
 
     Returns the log record (not committed if dry_run=True).
     """
+    from app.automation.actions import _CHAIN_STACK
+
+    token = _CHAIN_STACK.set((*_CHAIN_STACK.get(), rule.id))
+    try:
+        return await _execute_automation(db, entry, rule, dry_run)
+    finally:
+        _CHAIN_STACK.reset(token)
+
+
+async def _execute_automation(db: AsyncSession, entry: Entry, rule: AutomationRule, dry_run: bool) -> AutomationLog:
     log = AutomationLog(
         rule_id=rule.id,
         entry_id=entry.id,

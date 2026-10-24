@@ -1,11 +1,12 @@
-FROM node:26-alpine
+FROM node:26.12.1-alpine3.24
 
 WORKDIR /app
 
-RUN npm i -g pnpm@9
+# Same pnpm and the same strict install as the production Dockerfile.
+RUN npm i -g pnpm@10.31.0
 
-COPY package.json pnpm-lock.yaml* ./
-RUN pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 
 COPY . .
 

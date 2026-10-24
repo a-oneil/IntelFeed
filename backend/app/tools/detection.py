@@ -37,6 +37,8 @@ VALIDATABLE_RULE_TYPES = sorted(re.sub(r"[\^\$\(\)]", "", RULE_TYPE_PATTERN).spl
         },
         "required": ["entry_id", "rule_types"],
     },
+    # Persists (stored links / AI results / draft rules): a write, whatever it reads.
+    mutating=True,
 )
 async def _generate_detection_rules(db: AsyncSession, user_id: uuid.UUID, entry_id: str, rule_types: list[str]) -> dict:
     from app.intelligence.detection import generate_detection_rules
@@ -117,6 +119,8 @@ async def _validate_detection_rule(db: AsyncSession, user_id: uuid.UUID, rule_ty
         },
         "required": ["entry_ids", "rule_formats"],
     },
+    # Runs the detection_engineering_summary AI task and stores its result.
+    mutating=True,
 )
 async def _build_detection_summary(
     db: AsyncSession,

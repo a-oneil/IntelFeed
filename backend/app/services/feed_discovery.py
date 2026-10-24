@@ -5,6 +5,7 @@ import feedparser
 import httpx
 
 from app.config import settings
+from app.core.safe_http import safe_async_client
 from app.schemas.feed import FeedDiscoverResult
 
 FEED_LINK_RE = re.compile(
@@ -52,7 +53,7 @@ YOUTUBE_FEED_TEMPLATE = "https://www.youtube.com/feeds/videos.xml?channel_id={}"
 
 async def discover_feed(url: str) -> FeedDiscoverResult | None:
     """Discover a feed from a URL. Returns the best candidate or None."""
-    async with httpx.AsyncClient(
+    async with safe_async_client(
         follow_redirects=True,
         timeout=15.0,
         headers={"User-Agent": str(settings.get("user_agent") or settings.user_agent)},

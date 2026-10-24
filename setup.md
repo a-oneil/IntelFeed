@@ -112,7 +112,8 @@ That is everything the stack needs to boot. These are optional:
 | --- | --- |
 | `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` | You want Telegram channel ingestion (step 12). Leave `TELEGRAM_API_ID=0` to keep it off. |
 | `PUBLIC_BASE_URL` | You post to Discord or Slack from automation rules and want in-app links in those posts to be absolute. Empty means relative links only. |
-| `INTELFEED_USERNAME`, `INTELFEED_PASSWORD` | You assign tool-using AI tasks (copilot, enrichment research) to the Claude Code CLI provider; its IntelFeed skill CLI signs in with these. Use a dedicated admin account. |
+| `INTELFEED_USERNAME`, `INTELFEED_PASSWORD` | You run the skill CLIs or the MCP server from your own shell against this instance. The containers do not use them. |
+| `OUTBOUND_ALLOW_PRIVATE_NETWORKS` | You add feeds that live on your own LAN. By default every user-supplied URL (feeds, linked articles, transcripts, manual ingest, proxied images) must resolve to a public address; loopback and link-local stay refused either way. |
 | `ANTHROPIC_API_KEY` | Emergency fallback for the Claude Code provider if its OAuth token lapses (step 14). |
 
 Everything else is editable in the web UI and needs no `.env` entry, in the section for the thing it controls:

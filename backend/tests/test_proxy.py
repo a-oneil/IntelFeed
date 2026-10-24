@@ -1,8 +1,8 @@
 from unittest.mock import AsyncMock, patch
 
-import httpx
 import pytest
 
+from app.api.proxy import _FetchFailed
 from app.config import settings
 
 
@@ -48,20 +48,8 @@ async def test_proxy_requires_authentication(client):
 async def test_proxy_valid_url_returns_image(client, auth_headers):
     """A valid image URL should be proxied and returned."""
     fake_image = b"\x89PNG\r\n\x1a\n" + b"\x00" * 200  # minimal PNG-like bytes
-    mock_response = httpx.Response(
-        200,
-        content=fake_image,
-        headers={"content-type": "image/png"},
-        request=httpx.Request("GET", "https://example.com/image.png"),
-    )
 
-    with patch("app.api.proxy.httpx.AsyncClient") as mock_client_cls:
-        mock_client = AsyncMock()
-        mock_client.get.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
-
+    with patch("app.api.proxy._fetch_image", AsyncMock(return_value=(fake_image, "image/png"))):
         original_enabled = settings.image_proxy_enabled
         settings.image_proxy_enabled = True
         try:
@@ -76,6 +64,7 @@ async def test_proxy_valid_url_returns_image(client, auth_headers):
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
     assert response.headers["x-content-type-options"] == "nosniff"
+    assert "sandbox" in response.headers["content-security-policy"]
 
 
 @pytest.mark.asyncio
@@ -98,20 +87,7 @@ async def test_proxy_returns_404_when_disabled(client, auth_headers):
 @pytest.mark.asyncio
 async def test_proxy_rejects_non_image_content_type(client, auth_headers):
     """Non-image content types must be rejected (415)."""
-    mock_response = httpx.Response(
-        200,
-        content=b"<html>not an image</html>",
-        headers={"content-type": "text/html"},
-        request=httpx.Request("GET", "https://example.com/page.html"),
-    )
-
-    with patch("app.api.proxy.httpx.AsyncClient") as mock_client_cls:
-        mock_client = AsyncMock()
-        mock_client.get.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
-
+    with patch("app.api.proxy._fetch_image", AsyncMock(side_effect=_FetchFailed(415))):
         original_enabled = settings.image_proxy_enabled
         settings.image_proxy_enabled = True
         try:

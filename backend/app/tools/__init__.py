@@ -60,6 +60,12 @@ ADMIN_TOOLS: frozenset[str] = frozenset(
         "set_target_sector",
         # A never-capture tombstone silences a value for every door and every user.
         "deny_observable",
+        # Reads whose API equivalents are admin-only (/api/admin/hygiene/*,
+        # /api/engine/extraction/*): curation and adjudication internals.
+        "get_hygiene_feed",
+        "get_hygiene_stats",
+        "get_extraction_stats",
+        "list_extraction_entities",
     }
 )
 
@@ -114,6 +120,7 @@ DEFAULT_COPILOT_OLLAMA_TOOLS: list[str] = [
     "pivot_entity",
     "get_entity_timeline",
     "get_trending_entities",
+    "get_threat_board",
     "get_dashboard_stats",
     "search_documentation",
     "get_documentation_page",
@@ -156,6 +163,25 @@ def ollama_tool_specs(names: list[str] | None = None, *, read_only: bool = True)
     return specs
 
 
+def restrict_to_offered(specs: list[dict], executor):
+    """Wrap a model-facing tool executor so it runs only the tools in ``specs``.
+
+    The spec list is what the model is shown, which is not by itself a
+    permission check: a model can name any registry tool in its reply, whether
+    because article text in its context told it to or because the "model" is a
+    hostile endpoint. Read-only and admin filtering is applied when building
+    ``specs``; this makes the executor honour the same set.
+    """
+    offered = frozenset(s["function"]["name"] for s in specs)
+
+    async def _guarded(name: str, args: dict) -> str:
+        if name not in offered:
+            return json.dumps({"error": f"Tool '{name}' is not available here"})
+        return await executor(name, args)
+
+    return _guarded
+
+
 async def execute_tool(name: str, args: dict, db: AsyncSession, user_id: uuid.UUID) -> str:
     """Execute a tool by name. Returns JSON string result."""
     handler = _TOOL_HANDLERS.get(name)
@@ -176,6 +202,7 @@ async def execute_tool(name: str, args: dict, db: AsyncSession, user_id: uuid.UU
 # ---------------------------------------------------------------------------
 
 from app.tools import (  # noqa: E402
+    boards,  # noqa: F401
     correlation,  # noqa: F401
     curation,  # noqa: F401
     delete,  # noqa: F401

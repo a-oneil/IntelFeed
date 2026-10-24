@@ -119,6 +119,22 @@ def _mask_secrets_in_actions(actions: list[dict]) -> list[dict]:
     return masked
 
 
+def _sees_rule_secrets(rule: AutomationRule, user: User) -> bool:
+    """Rules are visible to everyone; their webhook URLs and auth headers
+    (Slack/Teams incoming-webhook URLs are themselves credentials) only to the
+    owner and admins, the same people who may edit or run the rule."""
+    return user.role == "admin" or rule.created_by == user.id
+
+
+def _rule_response(rule: AutomationRule, user: User) -> AutomationRuleResponse:
+    """A rule as ``user`` may read it. Builds a copy; the ORM row is never
+    modified, so the redaction cannot be flushed back to the database."""
+    response = AutomationRuleResponse.model_validate(rule)
+    if _sees_rule_secrets(rule, user):
+        return response
+    return response.model_copy(update={"actions": _mask_secrets_in_actions(response.actions or [])})
+
+
 def _collect_action_warnings(actions: list[dict]) -> list[str]:
     """Return warnings for actions that reference instance-specific UUIDs."""
     warnings = []
@@ -165,7 +181,7 @@ async def export_rules(
         intelfeed_rule_export=RuleExportMetadata(
             exported_at=datetime.now(UTC),
         ),
-        rules=[_rule_to_export_item(r, include_secrets) for r in rules],
+        rules=[_rule_to_export_item(r, include_secrets and _sees_rule_secrets(r, user)) for r in rules],
     )
 
 
@@ -182,7 +198,7 @@ async def export_single_rule(
         intelfeed_rule_export=RuleExportMetadata(
             exported_at=datetime.now(UTC),
         ),
-        rules=[_rule_to_export_item(rule, include_secrets)],
+        rules=[_rule_to_export_item(rule, include_secrets and _sees_rule_secrets(rule, user))],
     )
 
 
@@ -315,7 +331,7 @@ async def list_rules(
 
     total = (await db.execute(count_q)).scalar() or 0
     result = await db.execute(base.order_by(AutomationRule.created_at.desc()).limit(limit).offset(offset))
-    items = result.scalars().all()
+    items = [_rule_response(rule, user) for rule in result.scalars().all()]
 
     return PaginatedResponse(items=items, total=total, limit=limit, offset=offset, has_more=(offset + limit) < total)
 
@@ -350,8 +366,9 @@ async def get_rule(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Return a single automation rule by ID."""
-    return await _get_rule(db, rule_id)
+    """Return a single automation rule by ID. Webhook URLs and headers are
+    redacted unless the caller owns the rule or is an admin."""
+    return _rule_response(await _get_rule(db, rule_id), user)
 
 
 @router.put("/rules/{rule_id}", response_model=AutomationRuleResponse)

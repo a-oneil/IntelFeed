@@ -248,6 +248,9 @@ Response:
 - IntelFeed validates webhook URLs against SSRF attacks (scheme and host checks)
 - Private networks (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) are **allowed by default** (`webhook_allow_private_networks: true`), since self-hosted deployments commonly target internal endpoints
 - To block private-network webhooks, set `webhook_allow_private_networks: false` in backend config
+- Every webhook connection is pinned to the address the check vetted, so a hostname that re-resolves afterwards (DNS rebinding) cannot move the POST.
+- Feeds, linked articles, podcast transcripts, manual ingest, discovery and the image proxy go through the same guard (`app/core/safe_http.py`) with private ranges refused unless `OUTBOUND_ALLOW_PRIVATE_NETWORKS=true`. Each redirect hop is checked.
+- Loopback (127.0.0.0/8, `::1`, `localhost`, 0.0.0.0) and link-local addresses (169.254.0.0/16, where cloud metadata services answer, plus `fe80::/10` and AWS's `fd00:ec2::254`) are refused whatever that setting says. Scheduled rules go through the same check as per-entry and batch webhooks.
 
 **Variable substitution** in custom payload:
 - `{title}`, `{url}`, `{author}`, `{summary}`, `{ai_summary}`, `{published_at}`, `{feed_name}`
@@ -756,7 +759,7 @@ export INTELFEED_PASSWORD=your_pass
 python intelfeed_cli.py search_entries '{"query": "ransomware", "limit": 5}'
 ```
 
-**Available tools** (180 total):
+**Available tools** (187 total):
 - `search_entries` — Full-text search across entries
 - `search_entities` — Search CVEs, TTPs, threat actors, malware
 - `get_entry` — Fetch single entry by ID

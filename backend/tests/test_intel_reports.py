@@ -327,6 +327,45 @@ async def test_export_pdf(client: AsyncClient, auth_headers: dict, test_report: 
 
 
 @pytest.mark.asyncio
+async def test_report_html_drops_raw_html_from_section_bodies(
+    client: AsyncClient, auth_headers: dict, test_report: IntelReport, db_session
+):
+    """A section body is free text; raw HTML in it must not survive into the
+    rendered report. <link rel="attachment" href="file://..."> is the payload
+    that made WeasyPrint embed local files (the api's environment) in the PDF."""
+    test_report.content = {"sections": {
+        "summary": {
+            "title": "Summary",
+            "body": (
+                'Text <link rel="attachment" href="file:///proc/self/environ">'
+                '<img src="http://169.254.169.254/latest/meta-data/" onerror="alert(1)">'
+                "<script>alert(1)</script>[click](javascript:alert(1)) **kept**"
+            ),
+        }
+    }}  # fmt: skip
+    await db_session.commit()
+
+    resp = await client.get(f"/api/intel-reports/{test_report.id}/export?format=html", headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.text.lower()
+    assert "<link" not in body
+    assert "file://" not in body
+    assert "<script" not in body
+    assert "onerror" not in body
+    assert "javascript:" not in body
+    assert "<strong>kept</strong>" in body
+
+
+def test_pdf_fetcher_refuses_everything_but_data_uris():
+    """The fetcher handed to WeasyPrint must not open file:// or network URLs."""
+    weasyprint = pytest.importorskip("weasyprint")
+    fetcher = weasyprint.URLFetcher(allowed_protocols={"data"})
+    for url in ("file:///etc/passwd", "http://169.254.169.254/", "https://example.com/x.png"):
+        with pytest.raises(ValueError):
+            fetcher.fetch(url)
+
+
+@pytest.mark.asyncio
 async def test_export_pdf_fallback_to_html(client: AsyncClient, auth_headers: dict, test_report: IntelReport):
     """PDF export should fall back to HTML when WeasyPrint is not installed.
 

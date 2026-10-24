@@ -1,4 +1,5 @@
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import bcrypt
@@ -53,6 +54,27 @@ def create_refresh_token(user_id: uuid.UUID) -> str:
     return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
 
 
+# A credential for an AI agent acting for a user: the Claude CLI's IntelFeed MCP
+# server holds one for the length of one run. It is its own token type, so
+# get_current_user (and with it every ordinary route) refuses it; only the tool
+# endpoints accept it, through get_tool_caller, and only for read-only tools.
+AGENT_TOKEN_TYPE = "agent"
+
+
+def create_agent_token(user_id: uuid.UUID, ttl_seconds: float) -> str:
+    """A read-only, short-lived token for one agent run on ``user_id``'s behalf."""
+    now = datetime.now(UTC)
+    payload = {
+        "sub": str(user_id),
+        "exp": now + timedelta(seconds=max(60.0, ttl_seconds)),
+        "iat": now,
+        "type": AGENT_TOKEN_TYPE,
+        "scope": "read",
+        "jti": str(uuid.uuid4()),
+    }
+    return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
+
+
 def decode_token(token: str) -> dict:
     try:
         return jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
@@ -88,7 +110,31 @@ async def get_current_user(
     payload = decode_token(credentials.credentials)
     if payload.get("type") != "access":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
+    return await _user_from_payload(payload, db)
 
+
+@dataclass(frozen=True, slots=True)
+class ToolCaller:
+    """Who is calling the tool endpoints, and whether only read tools may run."""
+
+    user: User
+    read_only: bool
+
+
+async def get_tool_caller(
+    credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> ToolCaller:
+    """get_current_user for /api/tools: also accepts an agent token, as read-only."""
+    payload = decode_token(credentials.credentials)
+    token_type = payload.get("type")
+    if token_type not in ("access", AGENT_TOKEN_TYPE):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
+    user = await _user_from_payload(payload, db)
+    return ToolCaller(user=user, read_only=token_type == AGENT_TOKEN_TYPE)
+
+
+async def _user_from_payload(payload: dict, db: AsyncSession) -> User:
     jti = payload.get("jti")
     if jti and await is_token_blacklisted(jti):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has been revoked")

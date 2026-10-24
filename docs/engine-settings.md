@@ -667,7 +667,7 @@ should not be editable from a web UI.
 
 `postgres_password`, `meili_master_key`, `secret_key` and `encryption_key` are
 validated at startup: the literal `changeme` warns in development and **raises**
-in production (`_reject_insecure_defaults`, `backend/app/config.py:442`). `encryption_key`
+in production (`_reject_insecure_defaults`, `backend/app/config.py:457`). `encryption_key`
 must additionally be a valid 32-byte URL-safe base64 Fernet key.
 
 ---

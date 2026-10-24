@@ -5,6 +5,7 @@ from urllib.robotparser import RobotFileParser
 import httpx
 
 from app.config import settings
+from app.core.safe_http import safe_async_client
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +106,7 @@ async def can_fetch(url: str) -> bool:
     parser = RobotFileParser()
     try:
         user_agent = str(settings.get("user_agent") or settings.user_agent)
-        async with httpx.AsyncClient(timeout=10.0, headers={"User-Agent": user_agent}) as client:
+        async with safe_async_client(timeout=10.0, headers={"User-Agent": user_agent}) as client:
             response = await client.get(robots_url)
             if response.status_code == 200:
                 parser.parse(response.text.splitlines())

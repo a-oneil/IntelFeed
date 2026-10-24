@@ -256,7 +256,7 @@
     "rule_formats"
    ]
   },
-  "mutating": false
+  "mutating": true
  },
  {
   "name": "bulk_entry_action",
@@ -1550,7 +1550,7 @@
     "entry_id"
    ]
   },
-  "mutating": false
+  "mutating": true
  },
  {
   "name": "extract_malware",
@@ -1567,7 +1567,7 @@
     "entry_id"
    ]
   },
-  "mutating": false
+  "mutating": true
  },
  {
   "name": "extract_threat_actors",
@@ -1584,7 +1584,7 @@
     "entry_id"
    ]
   },
-  "mutating": false
+  "mutating": true
  },
  {
   "name": "extract_ttps",
@@ -1605,7 +1605,7 @@
     "entry_id"
    ]
   },
-  "mutating": false
+  "mutating": true
  },
  {
   "name": "fulfill_requirement",
@@ -1705,7 +1705,7 @@
     "rule_types"
    ]
   },
-  "mutating": false
+  "mutating": true
  },
  {
   "name": "generate_full_report",
@@ -1961,6 +1961,44 @@
      "default": false
     }
    }
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_coverage_workspace",
+  "description": "Detection coverage workspace for one threat (actor, malware, CVE or ATT&CK technique) over a window: its recent articles and the behaviours extracted from them, each with the quote it came from, the telemetry channels it needs and whether enabled telemetry can see it. A behaviour flagged below_line has no matching telemetry: a sourcing gap, not a detection gap.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entity_type": {
+     "type": "string",
+     "enum": [
+      "threat_actor",
+      "malware",
+      "cve",
+      "ttp"
+     ]
+    },
+    "entity_key": {
+     "type": "string",
+     "description": "Entity UUID, CVE id or ATT&CK technique id"
+    },
+    "window": {
+     "type": "string",
+     "enum": [
+      "7d",
+      "14d",
+      "30d",
+      "90d",
+      "all"
+     ],
+     "default": "14d"
+    }
+   },
+   "required": [
+    "entity_type",
+    "entity_key"
+   ]
   },
   "mutating": false
  },
@@ -2250,6 +2288,37 @@
   "mutating": false
  },
  {
+  "name": "get_entity_whats_new",
+  "description": "Latest developments for one entity: recent novelty and severity signals (first mention, new technique, new victim sector, exploitation news...) on articles linked to it. scoped=true keeps only signals whose subject is this entity, as the profile page does.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entity_type": {
+     "type": "string",
+     "description": "threat_actor, malware, cve, ttp, tool, ..."
+    },
+    "entity_id": {
+     "type": "string",
+     "description": "Entity UUID"
+    },
+    "days": {
+     "type": "integer",
+     "default": 14,
+     "description": "Look-back window, capped at 90"
+    },
+    "scoped": {
+     "type": "boolean",
+     "default": true
+    }
+   },
+   "required": [
+    "entity_type",
+    "entity_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
   "name": "get_entry",
   "description": "Fetch a single RSS entry by ID with full content and all extracted intelligence: TTPs, CVEs, CWEs, threat actors, malware, tools, vendors, products, countries, and mitigations.",
   "input_schema": {
@@ -2454,6 +2523,23 @@
   "mutating": false
  },
  {
+  "name": "get_intel_profile",
+  "description": "One intel profile with its countries (resolved names), sectors (labels) and other scope fields.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "profile_id": {
+     "type": "string",
+     "description": "Intel profile UUID"
+    }
+   },
+   "required": [
+    "profile_id"
+   ]
+  },
+  "mutating": false
+ },
+ {
   "name": "get_intel_report",
   "description": "Get a single intel report including its full content (all sections, metadata, references).",
   "input_schema": {
@@ -2531,6 +2617,28 @@
      "description": "next_cursor from a previous call, for the next page"
     }
    }
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_profile_threat_surface",
+  "description": "The threat surface for one intel profile: actors and malware active against its regions x verticals, each with why-matched evidence (which region/sector, how many articles).",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "profile_id": {
+     "type": "string",
+     "description": "Intel profile UUID"
+    },
+    "limit": {
+     "type": "integer",
+     "default": 25,
+     "description": "Matched entities per type, 1-100"
+    }
+   },
+   "required": [
+    "profile_id"
+   ]
   },
   "mutating": false
  },
@@ -2871,6 +2979,50 @@
    "required": [
     "actor_id"
    ]
+  },
+  "mutating": false
+ },
+ {
+  "name": "get_threat_board",
+  "description": "The Threats board: actors/malware and exploited CVEs ranked over a recency window by how many distinct stories carried them (not raw article or outlet counts). Each row leads with its lead headline, the cached AI brief when present, source hosts, story/echo counts, the analyst's handled state, prior-rule inventory and, for CVEs, exposure lift (KEV/EPSS/weaponized) and detection posture. Rows with is_story are story threads that resolved to no entity. Use it for 'what is happening right now' and to choose what to research next.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "window": {
+     "type": "string",
+     "enum": [
+      "7d",
+      "14d",
+      "30d"
+     ],
+     "default": "14d"
+    },
+    "facet": {
+     "type": "string",
+     "enum": [
+      "threats",
+      "vulns",
+      "all"
+     ],
+     "default": "threats",
+     "description": "threats = actor/malware rows; vulns = CVE rows; all = both interleaved"
+    },
+    "limit": {
+     "type": "integer",
+     "default": 25,
+     "description": "1-100"
+    },
+    "min_attention": {
+     "type": "integer",
+     "default": 3,
+     "description": "Minimum distinct source domains"
+    },
+    "include_handled": {
+     "type": "boolean",
+     "default": false
+    }
+   },
+   "required": []
   },
   "mutating": false
  },
@@ -3335,6 +3487,26 @@
   "mutating": false
  },
  {
+  "name": "list_intel_profiles",
+  "description": "List the instance's intel profiles (named scopes such as a customer or portfolio: the regions, verticals and technology they care about), alphabetical. Use a profile id with get_profile_threat_surface to see which actors and malware target it.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "limit": {
+     "type": "integer",
+     "default": 50,
+     "description": "1-200"
+    },
+    "offset": {
+     "type": "integer",
+     "default": 0
+    }
+   },
+   "required": []
+  },
+  "mutating": false
+ },
+ {
   "name": "list_intel_reports",
   "description": "List intel reports, newest-updated first, optionally filtered by status (draft, published, archived) or template_type slug. Rows are lightweight — section names only, no section content (use get_intel_report for the full report).",
   "input_schema": {
@@ -3424,6 +3596,16 @@
      "default": 25
     }
    }
+  },
+  "mutating": false
+ },
+ {
+  "name": "list_tags",
+  "description": "List every tag with its entry count, by name. The tag list is shared; the counts are the caller's view (their own assignments of a personal tag, everyone's of a global one).",
+  "input_schema": {
+   "type": "object",
+   "properties": {},
+   "required": []
   },
   "mutating": false
  },
@@ -4141,7 +4323,7 @@
     "entry_id"
    ]
   },
-  "mutating": false
+  "mutating": true
  },
  {
   "name": "run_automation_rule",

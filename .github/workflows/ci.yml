@@ -37,7 +37,7 @@ permissions:
 
 env:
   # The version every container that runs app code ships: backend/Dockerfile is
-  # python:3.14.7, and api / celery-worker / celery-worker-ai / celery-beat /
+  # python:3.14.8, and api / celery-worker / celery-worker-ai / celery-beat /
   # telegram-listener are all built from it. The host venvs are 3.14 too.
   #
   # This used to be a 3.12/3.13/3.14 matrix. Both bugs it caught
@@ -130,9 +130,9 @@ jobs:
           # Deliberately narrower than backend/**: editing a Python module
           # changes what an image *contains*, not how it *builds*, and the
           # backend job already tests that.
-          images='^(backend/(Dockerfile|\.dockerignore|pyproject\.toml|entrypoint\.sh)'
+          images='^(backend/(Dockerfile|\.dockerignore|pyproject\.toml|requirements(-dev)?\.lock|entrypoint\.sh)'
           images="$images"'|frontend/(Dockerfile|\.dockerignore|package\.json|pnpm-lock\.yaml|nginx\.conf)'
-          images="$images"'|db/Dockerfile'
+          images="$images"'|db/Dockerfile|piper/Dockerfile'
           images="$images"'|docker-compose.*\.yml'
           images="$images"'|\.env\.example'
           images="$images$self)"
@@ -142,7 +142,7 @@ jobs:
           # diff, so they are gated on the manifests. Running them per-PR just
           # turns a CSS change red the morning a new advisory lands against
           # lxml; the Monday sweep is what catches those.
-          decide python "^(backend/pyproject\.toml$self)"
+          decide python "^(backend/(pyproject\.toml|requirements(-dev)?\.lock)$self)"
           decide node   "^(frontend/(package\.json|pnpm-lock\.yaml)$self)"
 
           {
@@ -216,11 +216,27 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-          cache-dependency-path: backend/pyproject.toml
+          cache-dependency-path: backend/requirements-dev.lock
+
+      # The lockfiles are what the images install, so a pyproject.toml edit
+      # without a re-lock must not merge. lock.sh keeps every pin that still
+      # fits, so this only differs when pyproject.toml changed. uv's version
+      # is pinned in lock.sh; the one here must match it.
+      # setup-uv publishes exact tags only; there is no floating @v10.
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          version: "0.12.24"
+
+      - name: Lockfiles match pyproject.toml
+        run: |
+          ./lock.sh
+          git diff --exit-code -- requirements.lock requirements-dev.lock \
+            || { echo "::error::backend lockfiles are stale - run ./lock.sh in backend/ and commit the result"; exit 1; }
 
       # Pinned exactly: ruff's formatter changes between releases, and an
       # unpinned install turns `ruff format --check` red on an unrelated PR the
-      # day a new version ships. Bump deliberately, then run `ruff format .`.
+      # day a new version ships. Bump deliberately, together with the dev pin in
+      # backend/pyproject.toml, then re-lock and run `ruff format .`.
       - name: Install ruff
         run: pipx install ruff==0.16.8
 
@@ -239,10 +255,14 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libcairo2
 
+      # The same locked, hash-checked set the development image installs, so
+      # the suite tests exactly what ships. The project itself is not
+      # installed; PYTHONPATH below makes `app` importable from the checkout.
       - name: Install backend
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install --require-hashes --no-deps -r requirements-dev.lock
+          echo "PYTHONPATH=$PWD" >> "$GITHUB_ENV"
 
       # Generated per run rather than committed so nothing key-shaped lives in
       # the repo. Several modules reject the "changeme" defaults outright
@@ -584,49 +604,26 @@ jobs:
       - uses: actions/setup-python@v7
         if: needs.changes.outputs.python == 'true'
         with:
-          # The version the images ship — audit what actually gets deployed.
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
-          cache-dependency-path: backend/pyproject.toml
 
-      # Resolve the dependency tree without building the project: --dry-run
-      # --report gives the exact set pip would install, and pip-audit reads the
-      # pinned list. Far faster than a real install, and it audits the *fresh*
-      # resolution rather than whatever a cached environment happens to hold.
-      - name: Resolve backend dependencies
-        if: needs.changes.outputs.python == 'true'
-        run: |
-          set -euo pipefail
-          python -m pip install --upgrade pip
-          python -m pip install --dry-run --ignore-installed --quiet \
-            --report resolved.json "./backend[dev]"
-          python - <<'PY'
-          import json
-
-          with open("resolved.json") as fh:
-              report = json.load(fh)
-
-          pins = sorted(
-              f"{item['metadata']['name']}=={item['metadata']['version']}"
-              for item in report["install"]
-              if item["metadata"]["name"].lower() != "intelfeed"
-          )
-          with open("resolved.txt", "w") as fh:
-              fh.write("\n".join(pins) + "\n")
-          print(f"resolved {len(pins)} packages")
-          PY
-
+      # Audits the lockfiles: they are exactly what the images install, so
+      # there is nothing to resolve. requirements.lock is what production runs;
+      # the dev lock adds the test toolchain, which never ships but still runs
+      # in CI and on laptops.
+      #
       # --ignore-vuln is for advisories with no upstream fix. Every entry needs
       # a comment naming the package, why it is unfixable, and what pulls it
       # in — otherwise this list silently becomes the place vulnerabilities go
-      # to be forgotten. Anything with a fix version available gets upgraded,
-      # not ignored. The list is empty today: add a flag below the
-      # --progress-spinner line when an entry is needed.
+      # to be forgotten. Anything with a fix version available gets a re-lock
+      # (`./lock.sh --upgrade-package <name>`), not an ignore. The list is
+      # empty today: add a flag below the --progress-spinner line when an
+      # entry is needed.
       - name: Audit backend dependencies
         if: needs.changes.outputs.python == 'true'
+        working-directory: backend
         run: |
           pipx install pip-audit==2.10.1
-          pip-audit -r resolved.txt \
+          pip-audit -r requirements-dev.lock --require-hashes --disable-pip \
             --progress-spinner off
 
       - uses: pnpm/action-setup@v6

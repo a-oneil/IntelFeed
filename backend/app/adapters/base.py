@@ -1,8 +1,31 @@
 """Base adapter for feed source types."""
 
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
+from urllib.parse import urlsplit
+
+# Browsers drop ASCII control characters and spaces around and inside a scheme
+# ("java\tscript:" runs), so the check sees the URL the way a browser would.
+_URL_NOISE = re.compile(r"[\x00-\x20\x7f]")
+
+
+def web_url_or_none(url: str | None) -> str | None:
+    """``url`` when it is safe to store and render as a link, else None.
+
+    A feed's <link> is attacker-controlled and the SPA renders it as "Open
+    original" (and on public share pages), so a javascript: or data: URL there
+    is one click from running script. Absolute URLs must be http(s); relative
+    ones carry no scheme and pass through unchanged.
+    """
+    if url is None:
+        return None
+    try:
+        scheme = urlsplit(_URL_NOISE.sub("", url)).scheme.lower()
+    except ValueError:
+        return None
+    return url if scheme in ("", "http", "https") else None
 
 
 @dataclass
@@ -23,6 +46,9 @@ class ParsedEntry:
     # album of grouped messages collapses into a single entry. Kept as a separate
     # list so existing single-media adapters don't change shape.
     additional_media: list["ParsedMedia"] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self.url = web_url_or_none(self.url)
 
 
 @dataclass
@@ -56,6 +82,9 @@ class ParsedFeedMeta:
     podcast_artwork_url: str | None = None
     # Generic bag for adapter-specific state (e.g. GitHub head SHA)
     extra: dict = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.site_url = web_url_or_none(self.site_url)
 
 
 class BaseAdapter(ABC):

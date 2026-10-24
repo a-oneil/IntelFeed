@@ -1016,11 +1016,15 @@ async def run_task(
     # tool-capable (v1). Only agentic tasks get tools — everything else stays
     # a pure prompt→completion call.
     complete_kwargs: dict = {}
+    if provider_model.provider_type == "claude_code":
+        # Who the CLI's IntelFeed tools act for. The provider turns it into a
+        # read-only agent token for that run; nothing else reaches the agent.
+        complete_kwargs["agent_user_id"] = user_id
     if provider_model.provider_type == "ollama":
         from app.ai.capabilities import task_requires_tools
 
         if task_requires_tools(task_name):
-            from app.tools import ADMIN_TOOLS, TOOL_DEFINITIONS, ollama_tool_specs
+            from app.tools import ADMIN_TOOLS, TOOL_DEFINITIONS, ollama_tool_specs, restrict_to_offered
             from app.tools import execute_tool as _execute_tool
 
             # Read-only by default (safe). A task that must mutate (apply-mode
@@ -1061,8 +1065,12 @@ async def run_task(
                     await db.rollback()
                 return result
 
-            complete_kwargs["tools"] = ollama_tool_specs(tool_names, read_only=read_only)
-            complete_kwargs["tool_executor"] = _tool_executor
+            # The executor runs only what was offered: without this, read_only
+            # and the allowlist shaped the specs but a privileged (system) run
+            # still executed any tool the model named, mutating ones included.
+            specs = ollama_tool_specs(tool_names, read_only=read_only)
+            complete_kwargs["tools"] = specs
+            complete_kwargs["tool_executor"] = restrict_to_offered(specs, _tool_executor)
 
     # Execute
     _t0 = _time.monotonic()

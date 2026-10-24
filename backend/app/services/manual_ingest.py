@@ -102,10 +102,10 @@ async def ingest_url(db: AsyncSession, url: str) -> Entry:
     # If full extraction failed, try a basic fetch for the title at minimum
     title = None
     if not content_html:
-        import httpx
+        from app.core.safe_http import safe_async_client
 
         try:
-            async with httpx.AsyncClient(follow_redirects=True, timeout=15.0) as client:
+            async with safe_async_client(follow_redirects=True, timeout=15.0) as client:
                 resp = await client.get(url)
                 if resp.status_code == 200 and "html" in resp.headers.get("content-type", ""):
                     raw_html = resp.text

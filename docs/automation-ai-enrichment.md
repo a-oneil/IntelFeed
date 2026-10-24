@@ -115,7 +115,7 @@ Rules fire based on four trigger mechanisms (`backend/app/automation/engine.py:1
 Implementation notes:
 - `on_new_entry` and `on_keyword_match` fire immediately during entry ingestion (synchronous)
 - `on_cve_detected` requires prior CVE extraction; uses threshold logic (`backend/app/automation/engine.py:263`)
-- `on_correlation_event` runs asynchronously when correlation events are published (`run_automations_for_correlation_event`, `backend/app/automation/engine.py:402`)
+- `on_correlation_event` runs asynchronously when correlation events are published (`run_automations_for_correlation_event`, `backend/app/automation/engine.py:412`)
 - `on_observable_captured` runs asynchronously (`run_automations_for_observable_capture`) from a Celery task the capturing door queues after its commit (`dispatch_observable_capture_automations`). It fires **once per rule per entry**: the AI door and the article-IOC-table door can both land on one article, and a rule that already logged a run for that entry is skipped. The replay backfill script never fires it.
 
 ### Condition Language
@@ -172,7 +172,7 @@ Implementation: `evaluate_conditions()` at `conditions.py:22-53` recursively eva
 
 ### Actions
 
-Actions execute sequentially and share a mutable context dict. Earlier actions can write outputs that later actions read. Key implementation: `execute_action()` at `backend/app/automation/actions.py:189`.
+Actions execute sequentially and share a mutable context dict. Earlier actions can write outputs that later actions read. Key implementation: `execute_action()` at `backend/app/automation/actions.py:199`.
 
 **Available Actions:**
 
@@ -295,7 +295,7 @@ When running rules against multiple entries (e.g., scheduled digest at 9am), act
    - `use_daily_summary` → reads the day's already-generated briefing instead of prompting again
    - `run_webhook` → one POST with aggregated data
 
-Reference: `backend/app/automation/actions.py:313` (`execute_actions_batch()`).
+Reference: `backend/app/automation/actions.py:323` (`execute_actions_batch()`).
 
 #### One article per story
 
@@ -372,10 +372,10 @@ Webhook URLs can be configured as reusable presets (stored in config or environm
 - **Discord** — Rich embeds, colored fields, `username` override
 - **Custom** — Flat JSON payload with entry metadata
 
-Validation (`_validate_webhook_url`, `actions.py:50-80`) prevents SSRF attacks:
+Validation (`_validate_webhook_url` in `app/automation/actions.py`, built on `app/core/outbound.py`) prevents SSRF attacks, on every webhook path including scheduled rules:
 - Rejects `file://`, `ftp://`, etc.
-- Blocks private IP ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, localhost) unless `webhook_allow_private_networks=true`
-- Optional: hostname resolution could be added
+- Resolves the hostname and blocks private ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10) unless `webhook_allow_private_networks=true` (the default)
+- Always blocks loopback, `localhost`, 0.0.0.0 and link-local addresses (169.254.0.0/16 cloud metadata, `fe80::/10`, `fd00:ec2::254`), whatever that setting says
 
 Example Slack payload:
 ```json

@@ -8,7 +8,7 @@ sequenceDiagram
     participant API as api<br/>POST /api/ai/copilot/stream
     participant Q as Redis
     participant W as celery-worker-ai<br/>(ai queue, concurrency 1)
-    participant CLI as claude CLI<br/>(stream-json, INTELFEED_READ_ONLY=1)
+    participant CLI as claude CLI<br/>(stream-json, IntelFeed MCP, read-only token)
     participant SK as intelfeed skill CLI<br/>(read-only)
 
     UI->>API: fetch POST {question, conversation_id?, context?}<br/>Authorization: Bearer JWT

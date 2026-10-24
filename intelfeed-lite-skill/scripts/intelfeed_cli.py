@@ -5,7 +5,8 @@ Executes one or more read-only tool calls against the running IntelFeed API and
 prints JSON results to stdout. Zero external dependencies — stdlib only.
 
 Environment variables:
-    INTELFEED_API_URL       Base URL of the IntelFeed API (default: https://intelfeed.cc)
+    INTELFEED_API_URL       Base URL of the IntelFeed API (default: https://intelfeed.cc); https://, or http://localhost
+    INTELFEED_ALLOW_INSECURE_HTTP  1 to allow plain http:// to another host (a trusted LAN or compose network)
     INTELFEED_USERNAME      Username for authentication
     INTELFEED_PASSWORD      Password for authentication
 
@@ -42,6 +43,29 @@ API_URL = os.environ.get("INTELFEED_API_URL", "https://intelfeed.cc").rstrip("/"
 WEB_URL = os.environ.get("INTELFEED_WEB_URL", "https://intelfeed.cc").rstrip("/")
 USERNAME = os.environ.get("INTELFEED_USERNAME", "")
 PASSWORD = os.environ.get("INTELFEED_PASSWORD", "")
+
+
+def insecure_url_problem(url: str) -> str | None:
+    """Why the CLI must not send the password to ``url``, or None.
+
+    The login posts the password, so the API must be https://, or plain http://
+    to this machine. INTELFEED_ALLOW_INSECURE_HTTP=1 opts in for a trusted
+    network (a LAN dev box, the compose network). Same rule as intelfeed-mcp.
+    """
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(url)
+    if parts.scheme == "https" and parts.hostname:
+        return None
+    if parts.scheme == "http" and parts.hostname:
+        allow = os.environ.get("INTELFEED_ALLOW_INSECURE_HTTP", "").strip().lower() in ("1", "true", "yes", "on")
+        if parts.hostname in ("localhost", "127.0.0.1", "::1") or allow:
+            return None
+        return (
+            f"INTELFEED_API_URL {url} is plain http:// to another host, which would send the password "
+            "unencrypted. Use https://, or set INTELFEED_ALLOW_INSECURE_HTTP=1 for a trusted network."
+        )
+    return f"INTELFEED_API_URL {url!r} must start with https:// (or http://localhost)."
 
 # ---------------------------------------------------------------------------
 # Tool definitions (read-only: search, get, list, discover, pivot, check)
@@ -297,6 +321,31 @@ TOOLS: dict[str, dict] = {
             },
         },
     },
+    "get_coverage_workspace": {
+        "description": (
+            "Detection coverage workspace for one threat (actor, malware, CVE or ATT&CK technique) "
+            "over a window: its recent articles and the behaviours extracted from them, each with the "
+            "quote it came from, the telemetry channels it needs and whether enabled telemetry can "
+            "see it. A behaviour flagged below_line has no matching telemetry: a sourcing gap, not a "
+            "detection gap."
+        ),
+        "params": {
+            "entity_type": {
+                "type": 'str',
+                "required": True,
+                "enum": ['threat_actor', 'malware', 'cve', 'ttp'],
+            },
+            "entity_key": {
+                "type": 'str',
+                "required": True,
+            },
+            "window": {
+                "type": 'str',
+                "default": '14d',
+                "enum": ['7d', '14d', '30d', '90d', 'all'],
+            },
+        },
+    },
     "get_cve": {
         "description": (
             "Get CVE details including CVSS/EPSS scores, severity, CISA KEV status, GitHub PoC and "
@@ -526,6 +575,31 @@ TOOLS: dict[str, dict] = {
             },
         },
     },
+    "get_entity_whats_new": {
+        "description": (
+            "Latest developments for one entity: recent novelty and severity signals (first mention, "
+            "new technique, new victim sector, exploitation news...) on articles linked to it. "
+            "scoped=true keeps only signals whose subject is this entity, as the profile page does."
+        ),
+        "params": {
+            "entity_type": {
+                "type": 'str',
+                "required": True,
+            },
+            "entity_id": {
+                "type": 'str',
+                "required": True,
+            },
+            "days": {
+                "type": 'int',
+                "default": 14,
+            },
+            "scoped": {
+                "type": 'bool',
+                "default": True,
+            },
+        },
+    },
     "get_entry": {
         "description": (
             "Fetch a single RSS entry by ID with full content and all extracted intelligence: TTPs, "
@@ -677,6 +751,18 @@ TOOLS: dict[str, dict] = {
         ),
         "params": {},
     },
+    "get_intel_profile": {
+        "description": (
+            "One intel profile with its countries (resolved names), sectors (labels) and other scope "
+            "fields."
+        ),
+        "params": {
+            "profile_id": {
+                "type": 'str',
+                "required": True,
+            },
+        },
+    },
     "get_intel_report": {
         "description": 'Get a single intel report including its full content (all sections, metadata, references).',
         "params": {
@@ -741,6 +827,22 @@ TOOLS: dict[str, dict] = {
             "cursor": {
                 "type": 'str',
                 "default": None,
+            },
+        },
+    },
+    "get_profile_threat_surface": {
+        "description": (
+            "The threat surface for one intel profile: actors and malware active against its regions "
+            "x verticals, each with why-matched evidence (which region/sector, how many articles)."
+        ),
+        "params": {
+            "profile_id": {
+                "type": 'str',
+                "required": True,
+            },
+            "limit": {
+                "type": 'int',
+                "default": 25,
             },
         },
     },
@@ -1009,6 +1111,41 @@ TOOLS: dict[str, dict] = {
             "actor_id": {
                 "type": 'str',
                 "required": True,
+            },
+        },
+    },
+    "get_threat_board": {
+        "description": (
+            "The Threats board: actors/malware and exploited CVEs ranked over a recency window by how "
+            "many distinct stories carried them (not raw article or outlet counts). Each row leads "
+            "with its lead headline, the cached AI brief when present, source hosts, story/echo "
+            "counts, the analyst's handled state, prior-rule inventory and, for CVEs, exposure lift "
+            "(KEV/EPSS/weaponized) and detection posture. Rows with is_story are story threads that "
+            "resolved to no entity. Use it for 'what is happening right now' and to choose what to "
+            "research next."
+        ),
+        "params": {
+            "window": {
+                "type": 'str',
+                "default": '14d',
+                "enum": ['7d', '14d', '30d'],
+            },
+            "facet": {
+                "type": 'str',
+                "default": 'threats',
+                "enum": ['threats', 'vulns', 'all'],
+            },
+            "limit": {
+                "type": 'int',
+                "default": 25,
+            },
+            "min_attention": {
+                "type": 'int',
+                "default": 3,
+            },
+            "include_handled": {
+                "type": 'bool',
+                "default": False,
             },
         },
     },
@@ -1292,6 +1429,23 @@ TOOLS: dict[str, dict] = {
             },
         },
     },
+    "list_intel_profiles": {
+        "description": (
+            "List the instance's intel profiles (named scopes such as a customer or portfolio: the "
+            "regions, verticals and technology they care about), alphabetical. Use a profile id with "
+            "get_profile_threat_surface to see which actors and malware target it."
+        ),
+        "params": {
+            "limit": {
+                "type": 'int',
+                "default": 50,
+            },
+            "offset": {
+                "type": 'int',
+                "default": 0,
+            },
+        },
+    },
     "list_intel_reports": {
         "description": (
             "List intel reports, newest-updated first, optionally filtered by status (draft, "
@@ -1368,6 +1522,13 @@ TOOLS: dict[str, dict] = {
                 "default": 25,
             },
         },
+    },
+    "list_tags": {
+        "description": (
+            "List every tag with its entry count, by name. The tag list is shared; the counts are the "
+            "caller's view (their own assignments of a personal tag, everyone's of a global one)."
+        ),
+        "params": {},
     },
     "list_telegram_feeds": {
         "description": (
@@ -1912,6 +2073,10 @@ def main() -> None:
         sys.exit(1)
 
     # Execute
+    problem = insecure_url_problem(API_URL)
+    if problem:
+        print(json.dumps({"error": problem}))
+        sys.exit(1)
     client = IntelFeedClient(API_URL)
     client.login()
 

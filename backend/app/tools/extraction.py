@@ -41,6 +41,8 @@ def _entry_to_dict(entry: Entry) -> dict:
         },
         "required": ["entry_id"],
     },
+    # Persists (stored links / AI results / draft rules): a write, whatever it reads.
+    mutating=True,
 )
 async def _extract_ttps(db: AsyncSession, user_id: uuid.UUID, entry_id: str, use_ai: bool = True) -> dict:
     from app.intelligence.ttp import extract_ttps, store_ttps
@@ -80,6 +82,8 @@ async def _extract_ttps(db: AsyncSession, user_id: uuid.UUID, entry_id: str, use
         "properties": {"entry_id": {"type": "string", "description": "Entry UUID"}},
         "required": ["entry_id"],
     },
+    # Persists (stored links / AI results / draft rules): a write, whatever it reads.
+    mutating=True,
 )
 async def _extract_cves(db: AsyncSession, user_id: uuid.UUID, entry_id: str) -> dict:
     from app.intelligence.cve import extract_and_store_cves
@@ -109,6 +113,8 @@ async def _extract_cves(db: AsyncSession, user_id: uuid.UUID, entry_id: str) -> 
         "properties": {"entry_id": {"type": "string", "description": "Entry UUID"}},
         "required": ["entry_id"],
     },
+    # Persists (stored links / AI results / draft rules): a write, whatever it reads.
+    mutating=True,
 )
 async def _extract_threat_actors(db: AsyncSession, user_id: uuid.UUID, entry_id: str) -> dict:
     from app.intelligence.enrichment import extract_threat_actors
@@ -141,6 +147,8 @@ async def _extract_threat_actors(db: AsyncSession, user_id: uuid.UUID, entry_id:
         "properties": {"entry_id": {"type": "string", "description": "Entry UUID"}},
         "required": ["entry_id"],
     },
+    # Persists (stored links / AI results / draft rules): a write, whatever it reads.
+    mutating=True,
 )
 async def _extract_malware(db: AsyncSession, user_id: uuid.UUID, entry_id: str) -> dict:
     from app.intelligence.enrichment import extract_malware
@@ -185,6 +193,8 @@ async def _extract_malware(db: AsyncSession, user_id: uuid.UUID, entry_id: str) 
         },
         "required": ["task_name", "entry_id"],
     },
+    # Persists (stored links / AI results / draft rules): a write, whatever it reads.
+    mutating=True,
 )
 async def _run_ai_task(
     db: AsyncSession, user_id: uuid.UUID, task_name: str, entry_id: str, force: bool = False

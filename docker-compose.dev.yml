@@ -26,7 +26,7 @@ services:
       retries: 5
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4.11-alpine3.21
     # Same protection prod already has: redis is the broker for the whole stack,
     # so when the Docker VM runs low the global OOM killer picks it and every
     # service degrades silently — tests crawl on connection timeouts and the
@@ -46,7 +46,7 @@ services:
       retries: 5
 
   meilisearch:
-    image: getmeili/meilisearch:v1.6
+    image: getmeili/meilisearch:v1.6.2
     restart: unless-stopped
     ports:
       - "7700:7700"
@@ -130,15 +130,13 @@ services:
       - telegram_data:/data
       - telegram_media:/app/data/telegram_media
       - tts_media:/app/data/tts_media
-      # Interactive copilot runs the `claude` CLI + intelfeed skill in-process,
-      # so the api container needs the skill mounted where the CLI loads skills.
-      - ./intelfeed-skill:/home/appuser/.claude/skills/intelfeed:ro
+      # The in-process copilot path (copilot_worker_dispatch=false) runs the
+      # `claude` CLI here, with the IntelFeed MCP server as its only tools.
+      - ./intelfeed-mcp:/opt/intelfeed-mcp:ro
     env_file:
       - .env
     environment:
       - RUN_MIGRATIONS=true
-      # The copilot's skill CLI calls back into this same container's API.
-      - INTELFEED_API_URL=http://api:8000
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -190,13 +188,10 @@ services:
       - ./backend:/app
       - ./logs:/app/logs
       - claude_cli:/home/appuser/.claude
-      - ./intelfeed-skill:/home/appuser/.claude/skills/intelfeed:ro
+      - ./intelfeed-mcp:/opt/intelfeed-mcp:ro
     env_file:
       - .env
     environment:
-      - INTELFEED_API_URL=http://api:8000
-      - INTELFEED_USERNAME=${INTELFEED_USERNAME:-}
-      - INTELFEED_PASSWORD=${INTELFEED_PASSWORD:-}
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"

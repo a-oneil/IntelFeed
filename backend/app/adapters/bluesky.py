@@ -22,6 +22,7 @@ import httpx
 
 from app.adapters.base import ExtendedAdapter, ParsedEntry, ParsedFeedMeta, ParsedMedia
 from app.core.encryption import decrypt_value
+from app.core.safe_http import safe_async_client
 
 logger = logging.getLogger(__name__)
 
@@ -461,7 +462,8 @@ class BlueskyAdapter(ExtendedAdapter):
 
         pds = (config.get("pds_url") or DEFAULT_PDS).rstrip("/")
         url = f"{pds}/xrpc/com.atproto.server.createSession"
-        async with httpx.AsyncClient(
+        # pds_url is the feed's adapter_config; the app password goes with it.
+        async with safe_async_client(
             timeout=30.0,
             headers={"User-Agent": USER_AGENT, "Content-Type": "application/json"},
         ) as client:

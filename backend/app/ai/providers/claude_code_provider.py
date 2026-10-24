@@ -20,8 +20,12 @@ import logging
 import os
 import re
 import shutil
+import sys
+import tempfile
 import time
+import uuid
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import ClassVar
 
@@ -119,7 +123,100 @@ _KNOWN_OPTIONAL_FLAGS = {
     "max_budget_usd": "--max-budget-usd",
     "disallowed_tools": "--disallowedTools",
     "allowed_tools": "--allowedTools",
+    "tools": "--tools",
+    "mcp_config": "--mcp-config",
+    "strict_mcp_config": "--strict-mcp-config",
+    "permission_mode": "--permission-mode",
+    "setting_sources": "--setting-sources",
 }
+
+# Confinement needs every one of these. A CLI build without them gets the old
+# no-tools invocation, and a task that asked for tools runs without them.
+_CONFINEMENT_FLAGS = (
+    "tools",
+    "mcp_config",
+    "strict_mcp_config",
+    "permission_mode",
+    "allowed_tools",
+    "disallowed_tools",
+    "setting_sources",
+)
+
+
+# ---------------------------------------------------------------- tool policy
+#
+# Prompts that reach this CLI carry text nobody here wrote: article titles and
+# summaries, pinned articles, entity names extracted by an earlier model. So the
+# agent never gets the CLI's own shell, file or fetch tools. Each would turn one
+# planted instruction into code execution or a fetch inside the AI worker, a
+# container holding every secret in .env. What a task can have:
+#
+# * IntelFeed lookups, through intelfeed-mcp/intelfeed_mcp.py run as an MCP
+#   server. It calls the API with a read-only agent token minted for the
+#   caller (see create_agent_token), so the model holds no credential and can
+#   reach no write tool, whatever it is told.
+# * WebSearch, which Anthropic runs server-side; nothing leaves this host.
+#
+# Assignment configs written before this list "Bash"/"Read"/"Skill" (the old
+# skill-over-shell route) — those now mean the IntelFeed tools. WebFetch fetches
+# from this host, so it is dropped rather than translated.
+INTELFEED_TOOL = "IntelFeed"
+# Every built-in the CLI ships that can touch this host, the network, other
+# agents or the session (names taken from the pinned binary). Denied on every
+# confined run; a deny rule wins over any allow, including one in a settings
+# file. --tools additionally hides them where no JSON schema is in play.
+_DENIED_BUILTIN_TOOLS = (
+    "Bash", "BashOutput", "KillShell", "KillBash", "PowerShell", "Monitor",
+    "Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "NotebookRead", "Glob", "Grep", "LS", "LSP",
+    "WebFetch", "WebSearch",
+    "Task", "TaskOutput", "TaskStop", "Agent", "Workflow", "SendMessage", "Skill", "SlashCommand", "ToolSearch",
+    "TodoWrite", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode", "EnterWorktree", "ExitWorktree",
+    "CronCreate", "RemoteTrigger", "ScheduleWakeup", "PushNotification", "SendUserFile", "Artifact",
+    "ListMcpResourcesTool", "ReadMcpResourceTool",
+)  # fmt: skip
+_INTELFEED_ALIASES = frozenset({INTELFEED_TOOL, "Bash", "Read", "Skill", "Glob", "Grep", "*"})
+_SAFE_BUILTIN_TOOLS = frozenset({"WebSearch"})
+_MCP_SERVER_NAME = "intelfeed"
+
+# Environment the CLI subprocess may inherit. Everything else in the worker's
+# environment (SECRET_KEY, ENCRYPTION_KEY, database and Redis passwords, the
+# skill account's password) stays out of reach of the agent.
+_ENV_KEEP = frozenset(
+    {
+        "PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TMPDIR",
+        "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS",
+        "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
+    }
+)  # fmt: skip
+_ENV_KEEP_PREFIXES = ("CLAUDE_", "ANTHROPIC_")
+
+
+def _scrubbed_env(overlay: dict[str, str] | None = None) -> dict[str, str]:
+    env = {k: v for k, v in os.environ.items() if k in _ENV_KEEP or k.startswith(_ENV_KEEP_PREFIXES)}
+    if overlay:
+        env.update(overlay)
+    return env
+
+
+@dataclass(frozen=True, slots=True)
+class _ToolPlan:
+    """What one CLI run may use, already reduced to the safe set."""
+
+    builtin: tuple[str, ...]  # passed to --tools
+    intelfeed: bool  # attach the IntelFeed MCP server
+
+    @property
+    def any(self) -> bool:
+        return bool(self.builtin) or self.intelfeed
+
+
+def _plan_tools(requested: list[str] | None) -> _ToolPlan:
+    names = [str(t).strip() for t in (requested or []) if str(t).strip()]
+    builtin = tuple(sorted({n for n in names if n in _SAFE_BUILTIN_TOOLS}))
+    dropped = sorted({n for n in names if n not in _SAFE_BUILTIN_TOOLS and n not in _INTELFEED_ALIASES})
+    if dropped:
+        logger.warning("claude-code: tools %s are not offered to the agent (shell/file/fetch tools)", dropped)
+    return _ToolPlan(builtin=builtin, intelfeed=any(n in _INTELFEED_ALIASES for n in names))
 
 
 def _normalize_model(model: str) -> str:
@@ -165,6 +262,14 @@ class ClaudeCodeProvider(AIProvider):
         # is omitted. Use ["Bash", "Read", "Skill"] for tasks that invoke the
         # intelfeed skill, or ["*"] for full access (avoid).
         self.allowed_tools: list[str] = list(self.config.get("allowed_tools") or [])
+        # Where the IntelFeed MCP server lives and how it reaches the API.
+        # Compose mounts ./intelfeed-mcp read-only at this path in the AI worker.
+        self.mcp_server_path: str = self.config.get("mcp_server_path") or os.environ.get(
+            "INTELFEED_MCP_SERVER_PATH", "/opt/intelfeed-mcp/intelfeed_mcp.py"
+        )
+        self.agent_api_url: str = self.config.get("agent_api_url") or os.environ.get(
+            "INTELFEED_AGENT_API_URL", "http://api:8000"
+        )
         # Cached at first use — set to a dict of {flag_key: bool}.
         self._supported_flags: dict[str, bool] | None = None
 
@@ -178,6 +283,94 @@ class ClaudeCodeProvider(AIProvider):
                 "Confirm the npm package @anthropic-ai/claude-code is installed in the worker image."
             )
         return path
+
+    def _mcp_config(self, agent_user_id: uuid.UUID | None, ttl_seconds: float) -> str | None:
+        """--mcp-config JSON for the IntelFeed server, or None when it cannot run.
+
+        The token is minted per run, read-only, and lives no longer than the
+        run. It travels in the server's environment, which the agent cannot
+        read: the agent has no shell or file tools.
+        """
+        if agent_user_id is None:
+            logger.warning("claude-code: IntelFeed tools requested without a user to act for; answering without them")
+            return None
+        if not os.path.isfile(self.mcp_server_path):
+            logger.warning(
+                "claude-code: IntelFeed MCP server not found at %s; answering without it", self.mcp_server_path
+            )
+            return None
+        from app.core.security import create_agent_token
+
+        env = {
+            "INTELFEED_API_URL": self.agent_api_url,
+            "INTELFEED_TOKEN": create_agent_token(agent_user_id, ttl_seconds),
+            # Claude reads far more than the small local models the server's
+            # 7k default was sized for.
+            "INTELFEED_MCP_RESULT_CHARS": "20000",
+        }
+        if self.agent_api_url.startswith("http://"):
+            # The api on the compose network; the token never leaves the host.
+            env["INTELFEED_ALLOW_INSECURE_HTTP"] = "1"
+        return json.dumps(
+            {"mcpServers": {_MCP_SERVER_NAME: {"command": sys.executable, "args": [self.mcp_server_path], "env": env}}}
+        )
+
+    @staticmethod
+    def _can_confine(flags: dict) -> bool:
+        return all(flags.get(f) for f in _CONFINEMENT_FLAGS)
+
+    @staticmethod
+    def _effective_plan(requested: list[str] | None, flags: dict) -> _ToolPlan:
+        plan = _plan_tools(requested)
+        if plan.any and not ClaudeCodeProvider._can_confine(flags):
+            logger.warning(
+                "claude-code: this CLI build lacks %s, so tools cannot be confined; running without tools",
+                [f for f in _CONFINEMENT_FLAGS if not flags.get(f)],
+            )
+            return _ToolPlan(builtin=(), intelfeed=False)
+        return plan
+
+    @staticmethod
+    def _confined_argv(plan: _ToolPlan, mcp_config: str | None, use_json_schema: bool) -> list[str]:
+        """Flags for every run on a CLI that supports confinement, tools or not.
+
+        * Settings come only from the (empty, per-run) working directory, so no
+          allow rule from ~/.claude can widen what follows.
+        * MCP servers come only from --mcp-config: the IntelFeed one, or none.
+        * Every built-in is denied except the ones the plan keeps; deny wins.
+        * dontAsk refuses whatever --allowedTools did not pre-approve, and
+          permissions are never skipped.
+        * --tools hides the denied built-ins outright, except when a JSON schema
+          is set: the CLI answers through its StructuredOutput tool then, and
+          the deny list does the work instead.
+        """
+        allowed = list(plan.builtin)
+        argv = ["--setting-sources", "project", "--strict-mcp-config"]
+        if mcp_config:
+            argv += ["--mcp-config", mcp_config]
+            allowed.append(f"mcp__{_MCP_SERVER_NAME}")
+        if use_json_schema:
+            allowed.append("StructuredOutput")
+        else:
+            argv += ["--tools", ",".join(plan.builtin)]
+        denied = [t for t in _DENIED_BUILTIN_TOOLS if t not in plan.builtin]
+        argv += ["--disallowedTools", ",".join(denied)]
+        if allowed:
+            argv += ["--allowedTools", ",".join(allowed)]
+        argv += ["--permission-mode", "dontAsk"]
+        return argv
+
+    @staticmethod
+    def _legacy_no_tools_argv(flags: dict, use_json_schema: bool) -> list[str]:
+        """A CLI too old to confine: no tools, as this provider always did."""
+        argv: list[str] = []
+        if use_json_schema and flags.get("allowed_tools"):
+            argv += ["--allowedTools", "StructuredOutput"]
+        elif flags.get("disallowed_tools") and not use_json_schema:
+            argv += ["--disallowedTools", "*"]
+        if flags.get("dangerously_skip_perms"):
+            argv += [flags.get("dangerously_skip_perms_flag", "--dangerously-skip-permissions")]
+        return argv
 
     async def _probe_flags(self) -> dict[str, bool]:
         if self._supported_flags is not None:
@@ -219,37 +412,21 @@ class ClaudeCodeProvider(AIProvider):
         system_prompt: str | None,
         json_schema: dict | None,
         flags: dict,
+        mcp_config: str | None = None,
     ) -> list[str]:
         argv: list[str] = [cli, "-p", "--output-format", "json", "--model", _normalize_model(model)]
         if system_prompt:
             argv += ["--append-system-prompt", system_prompt]
-        # Tool access. Default-deny: only allow tools when the task assignment
-        # explicitly lists them (e.g. ["Bash", "Read", "Skill"] for autonomous
-        # tasks that invoke the intelfeed skill).
-        #
-        # --json-schema makes the CLI force the model to return its answer via
-        # the built-in `StructuredOutput` tool, so that tool MUST be allowed
-        # whenever a schema is in play. Otherwise the default-deny
-        # `--disallowedTools *` blocks it: the model can never satisfy the
-        # schema, burns the whole timeout retrying the denied call, and finally
-        # emits a plain-text "the tool keeps getting denied" apology that then
-        # fails JSON parsing. Allowlisting exactly StructuredOutput stays true
-        # to the pure prompt-in/json-out intent (it's the only tool needed).
+        # Tool access: see the tool policy at the top of this module. With a
+        # JSON schema the CLI answers through its StructuredOutput tool, which
+        # must therefore stay allowed, or the model burns the whole timeout
+        # retrying a denied call and the result fails JSON parsing.
         use_json_schema = bool(flags.get("json_schema") and json_schema is not None)
-        tool_allowlist = list(self.allowed_tools)
-        if use_json_schema and "StructuredOutput" not in tool_allowlist:
-            tool_allowlist.append("StructuredOutput")
-        if tool_allowlist and flags.get("allowed_tools"):
-            argv += ["--allowedTools", ",".join(tool_allowlist)]
-        elif flags.get("disallowed_tools") and not use_json_schema:
-            # Skip the blanket deny when a schema is set but --allowedTools is
-            # unsupported on this CLI build — a bare `*` deny would block
-            # StructuredOutput and reintroduce the failure. --dangerously-skip-
-            # permissions (added below) then auto-approves the schema tool.
-            argv += ["--disallowedTools", "*"]
-        # Skip permissions when tools are disabled anyway and we run unattended.
-        if flags.get("dangerously_skip_perms"):
-            argv += [flags.get("dangerously_skip_perms_flag", "--dangerously-skip-permissions")]
+        if self._can_confine(flags):
+            plan = self._effective_plan(self.allowed_tools, flags)
+            argv += self._confined_argv(plan, mcp_config if plan.intelfeed else None, use_json_schema)
+        else:
+            argv += self._legacy_no_tools_argv(flags, use_json_schema)
         # --bare is nice for cache-friendliness but it FORCES API key auth
         # ("OAuth and keychain are never read"), which breaks Max-subscription
         # deployments. Only enable when an explicit API key is in play.
@@ -385,19 +562,27 @@ class ClaudeCodeProvider(AIProvider):
         model: str = "sonnet",
         timeout_seconds: float | None = None,
         heartbeat_label: str | None = None,
+        agent_user_id: uuid.UUID | None = None,
     ) -> AIResponse:
+        """``agent_user_id`` is who IntelFeed tool calls act for (the engine
+        passes the task's user); without it a tool-using task runs text-only."""
         # temperature and max_tokens are not exposed by the CLI's -p mode; we
         # accept them for interface compatibility but they have no effect.
         del temperature, max_tokens
         cli = self._resolve_cli()
         flags = await self._probe_flags()
-        argv = self._build_argv(cli, model, system, response_format, flags)
-
-        env = os.environ.copy()
-        # If ANTHROPIC_API_KEY is set we leave it as a fallback for the CLI;
-        # otherwise the OAuth credentials in /home/appuser/.claude are used.
-
         effective_timeout = self._resolve_timeout(model, timeout_seconds)
+        max_attempts = 1 if timeout_seconds is not None else self.cli_retries + 1
+        mcp_config = None
+        if self._effective_plan(self.allowed_tools, flags).intelfeed:
+            mcp_config = self._mcp_config(agent_user_id, effective_timeout * max_attempts + 120)
+        argv = self._build_argv(cli, model, system, response_format, flags, mcp_config=mcp_config)
+
+        # Only what the CLI needs to run and authenticate (OAuth under
+        # /home/appuser/.claude, or ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN).
+        env = _scrubbed_env()
+        workdir = tempfile.TemporaryDirectory(prefix="claude-run-")
+
         label = heartbeat_label or f"claude {model} call"
 
         # Retry-on-timeout loop. Many CLI hangs are transient (bun startup
@@ -408,8 +593,8 @@ class ClaudeCodeProvider(AIProvider):
         # Exception: when the caller passes an explicit per-call `timeout_seconds`
         # it's a HARD wall-clock ceiling (e.g. a synchronous request path bounded
         # by the gunicorn worker timeout). Retrying would double the budget and
-        # blow past that ceiling, so a per-call timeout forces a single attempt.
-        max_attempts = 1 if timeout_seconds is not None else self.cli_retries + 1
+        # blow past that ceiling, so a per-call timeout forces a single attempt
+        # (max_attempts above).
         stdout: bytes | None = None
         stderr: bytes | None = None
         proc: asyncio.subprocess.Process | None = None
@@ -429,6 +614,9 @@ class ClaudeCodeProvider(AIProvider):
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     env=env,
+                    # An empty directory per run: no project CLAUDE.md, settings
+                    # or files for the agent to find.
+                    cwd=workdir.name,
                 )
                 stdout, stderr = await asyncio.wait_for(
                     proc.communicate(input=prompt.encode("utf-8")),
@@ -456,7 +644,9 @@ class ClaudeCodeProvider(AIProvider):
                     pass
         else:
             # Loop exhausted without breaking — every attempt timed out.
+            workdir.cleanup()
             raise last_timeout or TimeoutError(f"claude CLI exceeded {effective_timeout:.0f}s for model={model}")
+        workdir.cleanup()
 
         # Mypy-friendly: success path guarantees stdout / stderr / proc are set.
         assert proc is not None and stdout is not None and stderr is not None
@@ -523,6 +713,7 @@ class ClaudeCodeProvider(AIProvider):
         system_prompt: str | None,
         allowed_tools: list[str] | None,
         flags: dict,
+        mcp_config: str | None = None,
     ) -> list[str]:
         """Argv for a streaming agent turn.
 
@@ -543,18 +734,14 @@ class ClaudeCodeProvider(AIProvider):
         ]
         if system_prompt:
             argv += ["--append-system-prompt", system_prompt]
-        # Per-call tool allowlist overrides the provider default. When empty,
-        # default-deny (no tools) — text-only streaming.
+        # Per-call tool list overrides the provider default; either way it goes
+        # through the same tool policy as complete().
         effective_tools = allowed_tools if allowed_tools is not None else self.allowed_tools
-        if effective_tools and flags.get("allowed_tools"):
-            argv += ["--allowedTools", ",".join(effective_tools)]
-        elif flags.get("disallowed_tools"):
-            argv += ["--disallowedTools", "*"]
-        # Unattended: no interactive permission prompts. Safe here because the
-        # copilot only ever gets read-only tools (Bash/Read/Skill on the lite
-        # read-only skill) and there is no TTY to prompt on.
-        if flags.get("dangerously_skip_perms"):
-            argv += [flags.get("dangerously_skip_perms_flag", "--dangerously-skip-permissions")]
+        if self._can_confine(flags):
+            plan = self._effective_plan(effective_tools, flags)
+            argv += self._confined_argv(plan, mcp_config if plan.intelfeed else None, use_json_schema=False)
+        else:
+            argv += self._legacy_no_tools_argv(flags, use_json_schema=False)
         if flags.get("no_session_persistence"):
             argv += ["--no-session-persistence"]
         argv += self.extra_args
@@ -588,6 +775,7 @@ class ClaudeCodeProvider(AIProvider):
         timeout_seconds: float | None = None,
         heartbeat_label: str | None = None,
         env: dict[str, str] | None = None,
+        agent_user_id: uuid.UUID | None = None,
     ) -> AsyncGenerator[dict, None]:
         """Run one agent turn via the CLI and yield typed streaming events.
 
@@ -607,18 +795,18 @@ class ClaudeCodeProvider(AIProvider):
         """
         cli = self._resolve_cli()
         flags = await self._probe_flags()
-        argv = self._build_stream_argv(cli, model, system, allowed_tools, flags)
-
-        # Start from the process environment, then overlay any per-call env the
-        # caller passed. The copilot endpoint uses this to set
-        # INTELFEED_READ_ONLY=1 so the mounted skill's CLI physically refuses
-        # write tools for this invocation only (autonomous tasks are untouched).
-        subprocess_env = os.environ.copy()
-        if env:
-            subprocess_env.update(env)
         effective_timeout = self._resolve_timeout(model, timeout_seconds)
+        effective_tools = allowed_tools if allowed_tools is not None else self.allowed_tools
+        mcp_config = None
+        if self._effective_plan(effective_tools, flags).intelfeed:
+            mcp_config = self._mcp_config(agent_user_id, effective_timeout + 120)
+        argv = self._build_stream_argv(cli, model, system, allowed_tools, flags, mcp_config=mcp_config)
+
+        # A scrubbed environment plus the caller's overlay; see _scrubbed_env.
+        subprocess_env = _scrubbed_env(env)
         label = heartbeat_label or f"claude {model} stream"
         start = time.monotonic()
+        workdir = tempfile.TemporaryDirectory(prefix="claude-run-")
 
         proc = await asyncio.create_subprocess_exec(
             *argv,
@@ -626,6 +814,7 @@ class ClaudeCodeProvider(AIProvider):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=subprocess_env,
+            cwd=workdir.name,
         )
         assert proc.stdin is not None and proc.stdout is not None
 
@@ -695,6 +884,7 @@ class ClaudeCodeProvider(AIProvider):
                     await proc.wait()
                 except Exception:
                     pass
+            workdir.cleanup()
 
         if not emitted_done:
             yield {"kind": "done"}

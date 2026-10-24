@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 
 import redis.asyncio as aioredis
 
@@ -55,6 +56,7 @@ async def _run_async(
     timeout_seconds: float | None,
     provider_config: dict,
     env: dict[str, str] | None,
+    agent_user_id: str | None = None,
 ) -> int:
     """Run one CLI agent turn and push every event onto the run's Redis list.
 
@@ -88,6 +90,7 @@ async def _run_async(
                 timeout_seconds=timeout_seconds,
                 heartbeat_label=f"copilot worker {run_id[:8]}",
                 env=env,
+                agent_user_id=uuid.UUID(agent_user_id) if agent_user_id else None,
             ):
                 await _push(ev)
                 forwarded += 1
@@ -119,6 +122,7 @@ def run_copilot_stream(
     timeout_seconds: float | None = None,
     provider_config: dict | None = None,
     env: dict[str, str] | None = None,
+    agent_user_id: str | None = None,
 ) -> dict:
     """Entry point invoked on the ``ai`` queue. See module docstring."""
     try:
@@ -132,6 +136,7 @@ def run_copilot_stream(
                 timeout_seconds=timeout_seconds,
                 provider_config=provider_config or {},
                 env=env,
+                agent_user_id=agent_user_id,
             )
         )
         return {"status": "ok", "run_id": run_id, "events": forwarded}

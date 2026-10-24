@@ -81,9 +81,9 @@ user: User = Depends(get_current_user)  # Validates JWT, checks blacklist
 db: AsyncSession = Depends(get_db)      # Database session
 ```
 
-- **`get_current_user`** [`backend/app/core/security.py:84`]: Validates access token, blocks blacklisted tokens
-- **`get_admin_user`** [`backend/app/core/security.py:129`]: Ensures role == "admin"
-- **`get_current_user_from_query`** [`backend/app/core/security.py:109`]: Token via query param (for SSE endpoints)
+- **`get_current_user`** [`backend/app/core/security.py:106`]: Validates access token, blocks blacklisted tokens
+- **`get_admin_user`** [`backend/app/core/security.py:178`]: Ensures role == "admin"
+- **`get_current_user_from_query`** [`backend/app/core/security.py:155`]: Token via query param (for SSE endpoints)
 
 ---
 
