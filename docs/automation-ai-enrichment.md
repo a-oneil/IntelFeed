@@ -372,10 +372,10 @@ Webhook URLs can be configured as reusable presets (stored in config or environm
 - **Discord** — Rich embeds, colored fields, `username` override
 - **Custom** — Flat JSON payload with entry metadata
 
-Validation (`_validate_webhook_url`, `actions.py:50-80`) prevents SSRF attacks:
+Validation (`_validate_webhook_url` in `app/automation/actions.py`, built on `app/core/outbound.py`) prevents SSRF attacks, on every webhook path including scheduled rules:
 - Rejects `file://`, `ftp://`, etc.
-- Blocks private IP ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, localhost) unless `webhook_allow_private_networks=true`
-- Optional: hostname resolution could be added
+- Resolves the hostname and blocks private ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10) unless `webhook_allow_private_networks=true` (the default)
+- Always blocks loopback, `localhost`, 0.0.0.0 and link-local addresses (169.254.0.0/16 cloud metadata, `fe80::/10`, `fd00:ec2::254`), whatever that setting says
 
 Example Slack payload:
 ```json

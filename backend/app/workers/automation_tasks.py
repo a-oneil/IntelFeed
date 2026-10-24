@@ -455,6 +455,14 @@ async def _execute_scheduled_notification(action: dict, rule, now) -> dict:
     if not url:
         return {"type": action_type, "status": "error", "message": "No URL specified"}
 
+    # The same SSRF gate every other webhook path applies: the URL and headers
+    # are whatever the rule's author typed.
+    from app.automation.actions import _validate_webhook_url
+
+    ssrf_err = await _validate_webhook_url(url)
+    if ssrf_err:
+        return {"type": action_type, "status": "error", "message": ssrf_err}
+
     payload = {
         "text": f"IntelFeed Scheduled: {rule.name}",
         "rule": {"id": str(rule.id), "name": rule.name},

@@ -54,6 +54,22 @@ def is_public(addr: Address) -> bool:
     return addr.is_global and not addr.is_multicast
 
 
+#: The AWS IPv6 instance-metadata endpoint. It sits in fc00::/7 (unique local),
+#: so it is "private" rather than link-local and needs naming here.
+_AWS_IMDS_V6 = ipaddress.IPv6Address("fd00:ec2::254")
+
+
+def is_never_reachable(addr: Address) -> bool:
+    """Addresses no switch opens: this host itself (loopback, 0.0.0.0) and the
+    link-local block, which is where cloud metadata services answer
+    (169.254.169.254 hands out instance credentials). A trusted-network setting
+    exists for LAN services such as a homelab's Ollama or n8n box; none of
+    them live here."""
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
+        addr = addr.ipv4_mapped
+    return addr.is_loopback or addr.is_link_local or addr.is_unspecified or addr == _AWS_IMDS_V6
+
+
 async def resolve_host(hostname: str) -> list[Address]:
     """Every address ``hostname`` currently maps to. Empty when it resolves to nothing."""
     now = time.monotonic()
@@ -88,7 +104,7 @@ def _evict(now: float) -> None:
             del _resolved[name]
 
 
-OutboundProblemCode = Literal["invalid", "scheme", "no_host", "private", "unresolved"]
+OutboundProblemCode = Literal["invalid", "scheme", "no_host", "private", "reserved", "unresolved"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,8 +121,9 @@ async def outbound_problem(url: str, *, allow_private: bool = False) -> Outbound
     """Why the server must not call ``url``, or None when it may.
 
     ``allow_private`` is the operator's choice for a trusted network (a
-    homelab pointing at its own Ollama box); it skips the address check but
-    not the scheme and hostname checks.
+    homelab pointing at its own Ollama box); it opens private ranges but not
+    the scheme and hostname checks, and never the addresses
+    ``is_never_reachable`` names (code "reserved").
     """
     try:
         parsed = urlparse(url)
@@ -117,10 +134,19 @@ async def outbound_problem(url: str, *, allow_private: bool = False) -> Outbound
     hostname = parsed.hostname
     if not hostname:
         return OutboundProblem("no_host", "No hostname in URL")
-    if allow_private:
-        return None
     if hostname.lower().rstrip(".") in _LOCAL_NAMES:
-        return OutboundProblem("private", "URL points to localhost")
+        return OutboundProblem("reserved" if allow_private else "private", "URL points to localhost")
+    if allow_private:
+        try:
+            addresses = [ipaddress.ip_address(hostname)]
+        except ValueError:
+            # Unresolvable stays the HTTP client's error to report, as it was
+            # before this mode resolved anything.
+            addresses = await resolve_host(hostname)
+        for addr in addresses:
+            if is_never_reachable(addr):
+                return OutboundProblem("reserved", f"{hostname} points to a loopback or link-local address ({addr})")
+        return None
 
     try:
         literal = ipaddress.ip_address(hostname)

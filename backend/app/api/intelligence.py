@@ -3734,6 +3734,15 @@ async def bulk_delete_detection_rules(
     return {"deleted": deleted}
 
 
+# SIGMA import limits. A rule is a few KB; these leave two orders of magnitude
+# of headroom and stop a small archive that inflates to gigabytes from taking
+# the api container (and every request it serves) down with it.
+_SIGMA_IMPORT_MAX_UPLOAD = 20 * 1024 * 1024
+_SIGMA_IMPORT_MAX_MEMBERS = 5000
+_SIGMA_IMPORT_MAX_MEMBER_BYTES = 1024 * 1024
+_SIGMA_IMPORT_MAX_TOTAL_BYTES = 64 * 1024 * 1024
+
+
 @router.post("/detection-rules/import")
 async def import_detection_rules(
     file: UploadFile = File(..., description="A .yml/.yaml SIGMA rule or a .zip archive of SIGMA YAML files"),
@@ -3748,7 +3757,9 @@ async def import_detection_rules(
 
     from app.intelligence.rule_validation import validate_rule
 
-    contents = await file.read()
+    contents = await file.read(_SIGMA_IMPORT_MAX_UPLOAD + 1)
+    if len(contents) > _SIGMA_IMPORT_MAX_UPLOAD:
+        raise AppError(code="validation_error", message="File is larger than 20 MB", status_code=413)
     filename = file.filename or ""
     imported = 0
     skipped = 0
@@ -3798,11 +3809,27 @@ async def import_detection_rules(
     if filename.endswith(".zip"):
         try:
             zf = zipfile.ZipFile(io.BytesIO(contents))
-            for entry_name in zf.namelist():
-                if entry_name.endswith((".yml", ".yaml")):
-                    await _import_sigma_yaml(entry_name, zf.read(entry_name))
-                else:
-                    skipped += 1
+            members = zf.infolist()
+            # file_size is the header's claim, and zipfile never inflates a
+            # member past it (a lie fails the CRC instead), so checking the
+            # headers bounds what the reads below can allocate.
+            yaml_members = [m for m in members if m.filename.endswith((".yml", ".yaml"))]
+            if (
+                len(members) > _SIGMA_IMPORT_MAX_MEMBERS
+                or any(m.file_size > _SIGMA_IMPORT_MAX_MEMBER_BYTES for m in yaml_members)
+                or sum(m.file_size for m in yaml_members) > _SIGMA_IMPORT_MAX_TOTAL_BYTES
+            ):
+                raise AppError(
+                    code="validation_error",
+                    message=(
+                        f"Archive too large: at most {_SIGMA_IMPORT_MAX_MEMBERS} files, "
+                        f"1 MB per rule and 64 MB uncompressed in total"
+                    ),
+                    status_code=413,
+                )
+            skipped += len(members) - len(yaml_members)
+            for member in yaml_members:
+                await _import_sigma_yaml(member.filename, zf.read(member))
         except zipfile.BadZipFile:
             raise AppError(code="validation_error", message="Invalid ZIP file", status_code=422)
     elif filename.endswith((".yml", ".yaml")):
