@@ -1550,7 +1550,7 @@
     "entry_id"
    ]
   },
-  "mutating": false
+  "mutating": true
  },
  {
   "name": "extract_malware",
@@ -1567,7 +1567,7 @@
     "entry_id"
    ]
   },
-  "mutating": false
+  "mutating": true
  },
  {
   "name": "extract_threat_actors",
@@ -1584,7 +1584,7 @@
     "entry_id"
    ]
   },
-  "mutating": false
+  "mutating": true
  },
  {
   "name": "extract_ttps",
@@ -1605,7 +1605,7 @@
     "entry_id"
    ]
   },
-  "mutating": false
+  "mutating": true
  },
  {
   "name": "fulfill_requirement",
@@ -1705,7 +1705,7 @@
     "rule_types"
    ]
   },
-  "mutating": false
+  "mutating": true
  },
  {
   "name": "generate_full_report",
@@ -4323,7 +4323,7 @@
     "entry_id"
    ]
   },
-  "mutating": false
+  "mutating": true
  },
  {
   "name": "run_automation_rule",

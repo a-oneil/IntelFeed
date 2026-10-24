@@ -239,7 +239,7 @@ python3 intelfeed-skill/scripts/intelfeed_cli.py create_campaign '{"name": "Test
 
 **Semantics:**
 
-- The check runs against a `WRITE_TOOLS` denylist (a frozenset in the CLI script) — **88 tools**: every registry tool flagged `mutating` (83), plus the five AI tools that persist new or linked entities as a side effect despite being registry-read-only (`extract_ttps`, `extract_cves`, `extract_threat_actors`, `extract_malware`, `run_ai_task`).
+- The check runs against a `WRITE_TOOLS` denylist (a frozenset in the CLI script) — **89 tools**: every registry tool flagged `mutating`. That includes the AI tools that persist as a side effect (`extract_ttps`, `extract_cves`, `extract_threat_actors`, `extract_malware`, `run_ai_task`, `generate_detection_rules`): they are flagged in the registry, so the same tools are refused by this gate, by the read-only agent token and by the Ollama read-only copilot.
 - The denylist is **generated, not hand-maintained**: `scripts/dev/sync_skill_clis.py` rewrites it from the registry's `mutating` flags (plus its `EXTRA_WRITE_TOOLS` set), and `backend/tests/test_tool_registry_sync.py` fails if any mutating tool is missing from the CLI's denylist or a denylist entry no longer exists in the registry. Every tool not in the set (`search_*`, `get_*`, `list_*`, `check_*`, `pivot_*`, `export_attack_layer`, `export_campaign`, `validate_detection_rule`, `generate_detection_rules`, `build_detection_summary`, etc.) runs normally.
 - In a **batched invocation**, if *any* requested tool is on the denylist, the **entire batch is refused** — no tool in the batch executes.
 - The refusal is a JSON error printed to **stdout** with **exit code 2** (distinct from exit code 1 usage errors).
@@ -269,7 +269,7 @@ Use **`intelfeed-skill` (full)** when:
 Both CLIs are code-generated from the backend tool registry by `scripts/dev/sync_skill_clis.py`, so the split is rule-based rather than a hand-picked list:
 
 - **Full CLI (187 tools):** every tool in the backend registry (`backend/app/tools/`), read and write.
-- **Lite CLI (94 tools):** every tool the registry does **not** flag as `mutating` (83 write tools are excluded), minus the compute-heavy read-only tools in the script's `LITE_EXCLUDE` set (AI invocation and document export: `extract_ttps`, `extract_cves`, `extract_threat_actors`, `extract_malware`, `run_ai_task`, `generate_detection_rules`, `validate_detection_rule`, `build_detection_summary`, `export_attack_layer`, `export_campaign`).
+- **Lite CLI (94 tools):** every tool the registry does **not** flag as `mutating` (89 write tools are excluded), minus the compute-heavy read-only tools in the script's `LITE_EXCLUDE` set (AI invocation and document export: `extract_ttps`, `extract_cves`, `extract_threat_actors`, `extract_malware`, `run_ai_task`, `generate_detection_rules`, `validate_detection_rule`, `build_detection_summary`, `export_attack_layer`, `export_campaign`).
 
 In practice the lite CLI covers all search/lookup/pivot/analytics/landscape reads (including the newer curation-stats, ransomware-tracker, and reader read tools), while creation, updates, merges, deletes, extraction, automation execution, and report generation are full-CLI only. Run `--list-tools` against either script for the authoritative listing.
 

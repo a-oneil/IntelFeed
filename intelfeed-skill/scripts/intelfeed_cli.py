@@ -108,6 +108,7 @@ WRITE_TOOLS: frozenset[str] = frozenset(
         "extract_ttps",
         "fulfill_requirement",
         "generate_campaign_report",
+        "generate_detection_rules",
         "generate_full_report",
         "ingest_url",
         "link_entities",
