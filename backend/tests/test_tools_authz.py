@@ -80,3 +80,30 @@ async def test_note_tool_respects_authorship(
     assert "error" in json.loads(resp.json()["result"])
     await db_session.refresh(note)
     assert note.content_markdown == "original"
+
+
+@pytest.mark.asyncio
+async def test_model_facing_executor_refuses_tools_it_was_not_offered():
+    """The Ollama tool loops (copilot, agentic engine tasks) show the model a
+    filtered spec list. A model can still name any registry tool in its reply,
+    because article text in its context asked it to or because the endpoint is
+    hostile, so the executor must refuse anything outside the offered set."""
+    from app.tools import ollama_tool_specs, restrict_to_offered
+
+    ran: list[str] = []
+
+    async def executor(name: str, args: dict) -> str:
+        ran.append(name)
+        return "{}"
+
+    specs = ollama_tool_specs(["get_feeds", "delete_feed"], read_only=True)
+    offered = {s["function"]["name"] for s in specs}
+    assert offered == {"get_feeds"}, "read_only must drop the mutating tool from the specs"
+
+    guarded = restrict_to_offered(specs, executor)
+    assert await guarded("get_feeds", {}) == "{}"
+    refused = json.loads(await guarded("delete_feed", {"feed_id": "x", "confirm": True}))
+    assert "error" in refused
+    refused = json.loads(await guarded("merge_threat_actors", {}))
+    assert "error" in refused
+    assert ran == ["get_feeds"]

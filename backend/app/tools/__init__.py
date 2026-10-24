@@ -156,6 +156,25 @@ def ollama_tool_specs(names: list[str] | None = None, *, read_only: bool = True)
     return specs
 
 
+def restrict_to_offered(specs: list[dict], executor):
+    """Wrap a model-facing tool executor so it runs only the tools in ``specs``.
+
+    The spec list is what the model is shown, which is not by itself a
+    permission check: a model can name any registry tool in its reply, whether
+    because article text in its context told it to or because the "model" is a
+    hostile endpoint. Read-only and admin filtering is applied when building
+    ``specs``; this makes the executor honour the same set.
+    """
+    offered = frozenset(s["function"]["name"] for s in specs)
+
+    async def _guarded(name: str, args: dict) -> str:
+        if name not in offered:
+            return json.dumps({"error": f"Tool '{name}' is not available here"})
+        return await executor(name, args)
+
+    return _guarded
+
+
 async def execute_tool(name: str, args: dict, db: AsyncSession, user_id: uuid.UUID) -> str:
     """Execute a tool by name. Returns JSON string result."""
     handler = _TOOL_HANDLERS.get(name)

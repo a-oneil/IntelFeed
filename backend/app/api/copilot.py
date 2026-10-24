@@ -766,7 +766,7 @@ async def copilot_stream(
                     # copilot_worker_dispatch does not apply). Tools are dispatched
                     # against the backend registry via an in-process executor bound
                     # to this request's db session + user; read-only tools only.
-                    from app.tools import execute_tool, ollama_tool_specs
+                    from app.tools import ADMIN_TOOLS, execute_tool, ollama_tool_specs, restrict_to_offered
 
                     async def _tool_executor(name: str, args: dict) -> str:
                         result = await execute_tool(name, args, db, user.id)
@@ -778,7 +778,12 @@ async def copilot_stream(
                             await db.rollback()
                         return result
 
+                    # Read-only, and never an admin tool for a non-admin. The
+                    # executor is bound to exactly this set, so a tool the model
+                    # names without being offered it is refused, not run.
                     tool_specs = ollama_tool_specs(config.get("ollama_tools") or _DEFAULT_OLLAMA_TOOLS, read_only=True)
+                    if user.role != "admin":
+                        tool_specs = [s for s in tool_specs if s["function"]["name"] not in ADMIN_TOOLS]
                     # NB: conversation history is already rendered into the prompt via
                     # the copilot template's ``conversation_history`` variable (same as
                     # the CLI path), so we do NOT also pass it as ``history`` here —
@@ -788,7 +793,7 @@ async def copilot_stream(
                         system=rendered_system,
                         model=model,
                         tools=tool_specs,
-                        tool_executor=_tool_executor,
+                        tool_executor=restrict_to_offered(tool_specs, _tool_executor),
                         timeout_seconds=cli_timeout,
                         heartbeat_label="copilot stream",
                     )
