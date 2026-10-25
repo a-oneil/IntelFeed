@@ -311,6 +311,15 @@ describe("EditFeedModal", () => {
     );
   });
 
+  it("says in the Pipeline pane where an unrated feed's tags stop", async () => {
+    const user = userEvent.setup();
+    render(<EditFeedModal subscription={makeFeed({ reliability_rating: null })} onClose={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Pipeline" }));
+    expect(
+      screen.getByText(/Unrated: catalog-matched tags from this feed top out at medium/)
+    ).toBeInTheDocument();
+  });
+
   it("says nothing about AI cost for a feed that is not muted", () => {
     render(<EditFeedModal subscription={makeFeed()} onClose={vi.fn()} />);
     expect(screen.queryByText(/still analysed/)).not.toBeInTheDocument();
