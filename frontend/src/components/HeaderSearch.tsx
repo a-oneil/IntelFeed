@@ -13,7 +13,7 @@ import { queryFieldColor } from "@/components/search/queryFields";
 import styles from "./HeaderSearch.module.css";
 
 interface Props {
-  inputRef: React.RefObject<HTMLInputElement>;
+  inputRef: React.RefObject<HTMLInputElement | null>;
 }
 
 /**

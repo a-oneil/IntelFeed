@@ -265,8 +265,8 @@ export default function RuleDetailPage() {
 
   const versionDiff = useVersionDiff();
   const editorRef = useRef<HTMLDivElement>(null);
-  const validateTimerRef = useRef<ReturnType<typeof setTimeout>>();
-  const metaTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const validateTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const metaTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const initializedCreate = useRef(false);
 
   // Pre-fill from query params in create mode

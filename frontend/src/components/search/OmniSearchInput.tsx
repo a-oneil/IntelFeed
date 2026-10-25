@@ -46,7 +46,7 @@ export interface OmniSearchInputProps<S extends OmniSuggestion> extends SharedOp
    */
   suggestionSource?: SuggestionSource<S>;
   /** Supply one when the surface needs to focus/blur the input itself. */
-  inputRef?: React.RefObject<HTMLInputElement>;
+  inputRef?: React.RefObject<HTMLInputElement | null>;
   controlRef?: Ref<OmniSearchInputHandle>;
   placeholder?: string;
   "aria-label"?: string;

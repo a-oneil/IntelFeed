@@ -40,9 +40,9 @@ export interface UseOmniSearchInputOptions<S extends OmniSuggestion> {
   /** Called with the next query text — on typing and on accepting a suggestion. */
   onChange: (next: string) => void;
   /** The input element. Supply one if the surface needs to focus/blur it itself. */
-  inputRef: React.RefObject<HTMLInputElement>;
+  inputRef: React.RefObject<HTMLInputElement | null>;
   /** Element that click-outside is measured against. */
-  containerRef: React.RefObject<HTMLElement>;
+  containerRef: React.RefObject<HTMLElement | null>;
   /** See `SuggestionSource` — a hook, stable identity required. */
   suggestionSource?: SuggestionSource<S>;
   /** ArrowDown past the end returns to 0 (and ArrowUp past the top to the end). */
@@ -89,7 +89,7 @@ export interface OmniSearchInputState<S extends OmniSuggestion> {
   registerItem: (index: number) => (el: HTMLElement | null) => void;
   /** Spread onto the `<input>`. */
   inputProps: {
-    ref: React.RefObject<HTMLInputElement>;
+    ref: React.RefObject<HTMLInputElement | null>;
     value: string;
     onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
     onFocus: () => void;
