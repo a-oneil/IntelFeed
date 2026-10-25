@@ -16,6 +16,7 @@ from app.feed_packs import INTELFEED_NS, get_pack, load_packs
 from app.models.category import Category
 from app.models.feed import Feed
 from app.models.user import User
+from app.services.feed_fetch_health import strip_client_keys
 from app.services.feed_visibility import (
     ensure_subscription,
     subscribe_all_users,
@@ -61,7 +62,7 @@ def parse_extension_attrs(outline: ET.Element) -> dict:
         except (ValueError, TypeError):
             config = None
         if isinstance(config, dict):
-            out["adapter_config"] = config
+            out["adapter_config"] = strip_client_keys(config)
 
     if (interval := _as_int(raw.get("interval"))) and interval > 0:
         out["fetch_interval_minutes"] = interval
@@ -210,8 +211,10 @@ def feed_outline_attrs(feed: Feed) -> dict[str, str]:
     ns = "intelfeed:"
     if feed.feed_type not in PORTABLE_FEED_TYPES:
         attrs[f"{ns}feedType"] = feed.feed_type
-    if feed.adapter_config:
-        attrs[f"{ns}config"] = json.dumps(feed.adapter_config, sort_keys=True, separators=(",", ":"))
+    # fetch_health is what this server learned fetching the feed, not config.
+    config = strip_client_keys(feed.adapter_config)
+    if config:
+        attrs[f"{ns}config"] = json.dumps(config, sort_keys=True, separators=(",", ":"))
     if feed.fetch_interval_minutes != 30:
         attrs[f"{ns}interval"] = str(feed.fetch_interval_minutes)
     if feed.intel_extraction_mode != "selective":

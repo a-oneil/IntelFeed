@@ -318,6 +318,8 @@ if response.status_code == 304:
 
 Saves bandwidth and API quota.
 
+**Bot walls.** `_get_feed_response()` makes the GET. When the answer is a 403 (or a 429/503 whose body looks like a challenge page), it retries once through **curl_cffi** impersonating Chrome, with the same `Accept` and conditional headers and the same 30-second timeout; the impersonation supplies its own User-Agent so it matches the TLS fingerprint. Some publishers (CISA) refuse Python's TLS handshake whatever the headers while answering curl. The client that got a 200/304 is remembered in `adapter_config.fetch_health.client`, so later polls go straight to it; if the remembered curl_cffi client errors or is blocked, the fetch falls back to httpx and forgets it once httpx works. Blocks by IP (CloudFront refusing a datacenter range) are not something either client gets past.
+
 #### 4. YouTube Retry Logic (Quirk)
 ```python
 # YouTube feed API returns spurious 404/500s — retry up to 2 times
@@ -578,10 +580,13 @@ Fetch failures feed a breakage-alerting layer on top of the polling loop:
 
 - **`error_count` semantics**: incremented on every failed fetch (HTTP error, non-200, adapter exception, non-feed response), reset to 0 on any success — so it counts *consecutive* failures.
 - **`feed_error` correlation events**: `_maybe_create_feed_error_event()` creates a correlation event (via `app/intelligence/correlation_events.py`) once `error_count >= 3`, surfacing broken feeds in the events stream.
-- **`check_feed_health` beat task** (`backend/app/workers/feed_tasks.py:1690`, every 6 hours): creates `feed_stale` events for active, recently-polled feeds whose newest entry is older than 120 days, and `feed_error` events for feeds with 3+ consecutive errors.
+- **`check_feed_health` beat task** (`backend/app/workers/feed_tasks.py:1813`, every 6 hours): creates `feed_stale` events for active, recently-polled feeds whose newest entry is older than 120 days, and `feed_error` events for feeds with 3+ consecutive errors.
 - **`GET /api/feeds/health/failing`** (`api/feeds.py`): lists active feeds with `error_count >= threshold` (default 5). Feeds rated A/B for reliability are flagged `is_high_value` and sorted first so alerting UIs can highlight them.
 - **`GET /api/feeds/{feed_id}/analytics`**: per-feed source analytics (`app/intelligence/source_analytics.py`) — volume, intel yield, and the analyst-assigned reliability ratings.
 - **404 recovery**: persistent 404s trigger RSS autodiscovery and automatic URL repointing (see the polling loop above).
+- **Failure backoff**: `poll_due_feeds` (`DUE_FEEDS_SQL`) doubles a failing feed's interval for each consecutive failure, up to 64x and at most 24 hours (an interval already longer than that is kept). The first clean fetch resets it. A blocked feed therefore logs a few dozen failures over the auto-pause window, not thousands.
+- **Auto-pause and its reason**: `check_feed_health` pauses a feed whose HTTP 4xx streak has outlasted `feed_auto_pause_days` (see [engine-settings.md](engine-settings.md)) and records why in `adapter_config.fetch_health.paused`: the error, its status, the failure count, when the streak began and which client was in use. `FeedResponse.pause_reason` and the health endpoint carry it, so the feed modal, the sidebar tooltip and the Feeds view say "paused automatically after HTTP 403 for 30 days" where a feed a person switched off just reads "Paused". Resuming (the resume endpoint, or switching the feed back on) clears it.
+- **Reachable but empty**: an rss/atom/podcast fetch that answers 200 but parses to zero items is noted in `adapter_config.fetch_health.empty` (since when, where a redirect ended up, the content type) and cleared by the next fetch that has items. `FeedResponse.health_warning` turns it into a warning at once when the feed URL redirected somewhere else (a feed URL that now lands on a marketing page), or after 3 days of empty answers otherwise. The Feeds view lists these as **Empty**, and the feed modal and sidebar tooltip show the warning. `fetch_health` is server-owned: PUT `/feeds/{id}`, feed creation and OPML import/export drop it.
 
 ---
 
@@ -971,7 +976,7 @@ entry = ParsedEntry(
 
 **Full-Tree Sync**:
 
-The `full_sync_github_feed()` Celery task (`backend/app/workers/feed_tasks.py:1878`) enumerates **every** file in the repo (not just recent changes):
+The `full_sync_github_feed()` Celery task (`backend/app/workers/feed_tasks.py:2001`) enumerates **every** file in the repo (not just recent changes):
 
 ```python
 # Uses Git Trees API to get complete file list

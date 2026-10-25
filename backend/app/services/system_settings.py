@@ -196,8 +196,9 @@ SETTING_METADATA: dict[str, dict] = {
         "description": (
             "Pause a feed once every fetch has answered HTTP 4xx (404 gone, 403 blocked) for this many "
             "days in a row. Only client errors count and the clock is the failure streak, not the last "
-            "post, so a seldom-posting blog is never paused for being quiet. Paused feeds show as dead "
-            "on the Engine Feeds view and resume with one click. 0 disables"
+            "post, so a seldom-posting blog is never paused for being quiet. A failing feed is polled "
+            "less often as the streak grows (up to once a day). Paused feeds show as dead, with the "
+            "reason, on the Engine Feeds view and resume with one click. 0 disables"
         ),
         "group": "feeds",
     },

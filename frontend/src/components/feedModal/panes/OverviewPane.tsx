@@ -6,6 +6,7 @@ import {
   useUpdateFeed,
 } from "@/hooks/useFeeds";
 import { formatDateTime } from "@/utils/formatDate";
+import { describeHealthWarning, describePauseReason } from "@/utils/feedHealth";
 import type { Feed } from "@/api/types";
 import styles from "../fields.module.css";
 
@@ -34,14 +35,14 @@ export function OverviewPane({ feed, isAdmin }: { feed: Feed; isAdmin: boolean }
   const updateFeed = useUpdateFeed();
 
   const v = value.data;
-  const healthy = feed.error_count === 0;
+  const healthy = feed.error_count === 0 && !feed.health_warning;
 
   const verdict = (() => {
     const bits: string[] = [];
-    bits.push(feed.is_active ? "Active" : "Paused");
+    bits.push(feed.is_active ? "Active" : feed.pause_reason ? "Paused by the health check" : "Paused");
     bits.push(`fetched ${ago(feed.last_fetched_at)}`);
     bits.push(
-      healthy
+      feed.error_count === 0
         ? "no errors"
         : `${feed.error_count} recent error${feed.error_count === 1 ? "" : "s"}`
     );
@@ -149,7 +150,28 @@ export function OverviewPane({ feed, isAdmin }: { feed: Feed; isAdmin: boolean }
         )}
       </div>
 
-      {feed.last_error && (
+      {!feed.is_active && feed.pause_reason && (
+        <div className={styles.errorBox}>
+          <span className={styles.errorLabel}>Why it is paused</span>
+          <span className={styles.errorText}>
+            {describePauseReason(feed.pause_reason)}
+            {feed.pause_reason.paused_at && `, on ${formatDateTime(feed.pause_reason.paused_at)}`}.
+            Resuming clears the streak and tries again.
+          </span>
+        </div>
+      )}
+
+      {feed.is_active && feed.health_warning && (
+        <div className={styles.errorBox}>
+          <span className={styles.errorLabel}>Not delivering</span>
+          <span className={styles.errorText}>
+            {describeHealthWarning(feed.health_warning)}. The feed URL has probably
+            moved; check the site for its current feed.
+          </span>
+        </div>
+      )}
+
+      {feed.last_error && !feed.pause_reason && (
         <div className={styles.errorBox}>
           <span className={styles.errorLabel}>Last error</span>
           <span className={styles.errorText}>{feed.last_error}</span>
