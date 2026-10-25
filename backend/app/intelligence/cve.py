@@ -4,10 +4,10 @@ import asyncio
 import logging
 import re
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx
-from sqlalchemy import func, select
+from sqlalchemy import Integer, and_, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +27,34 @@ NVD_BACKOFF_BASE = 2  # seconds
 # NVD rolling window is 5 req/30s unkeyed, 50 req/30s with an API key
 NVD_PACE_UNKEYED = 6.5
 NVD_PACE_KEYED = 0.7
+
+
+# NVD sweeps stop asking about an id after this many misses, spaced at least
+# NVD_RETRY_DAYS apart. A miss is stamped into nvd_data, so a junk id pulled
+# out of prose (a typo, a placeholder like CVE-2024-XXXXX's digits, a reserved
+# id that never publishes) costs three lookups, not one a night forever.
+NVD_MAX_ATTEMPTS = 3
+NVD_RETRY_DAYS = 7
+
+
+def nvd_retry_allowed(now: datetime):
+    """SQL predicate: the CVE has NVD lookups left and none in the last week."""
+    attempts = CVE.nvd_data["_enrich_attempts"].astext.cast(Integer)
+    last_attempt = CVE.nvd_data["_enrich_last_attempt"].astext
+    retry_cutoff = (now - timedelta(days=NVD_RETRY_DAYS)).isoformat()
+    return or_(
+        CVE.nvd_data.is_(None),
+        ~CVE.nvd_data.has_key("_enrich_attempts"),
+        and_(attempts < NVD_MAX_ATTEMPTS, last_attempt < retry_cutoff),
+    )
+
+
+def stamp_nvd_miss(cve: CVE, now: datetime) -> None:
+    """Record that NVD had nothing for this CVE (counts against its retries)."""
+    blob = dict(cve.nvd_data or {})
+    blob["_enrich_attempts"] = int(blob.get("_enrich_attempts") or 0) + 1
+    blob["_enrich_last_attempt"] = now.isoformat()
+    cve.nvd_data = blob
 
 
 class NVDRateLimited(Exception):

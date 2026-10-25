@@ -709,11 +709,13 @@ def run_cve_nvd_backfill():
 
 async def _run_cve_nvd_backfill():
     import asyncio as _asyncio
+    from datetime import UTC, datetime
 
-    from app.intelligence.cve import enrich_from_nvd
+    from app.intelligence.cve import NVDRateLimited, enrich_from_nvd, nvd_retry_allowed, stamp_nvd_miss
     from app.models.cve import CVE
 
-    stats = {"enriched": 0, "failed": 0, "skipped_invalid": 0, "total": 0}
+    stats = {"enriched": 0, "failed": 0, "skipped_invalid": 0, "rate_limited": False, "total": 0}
+    now = datetime.now(UTC)
 
     async with _get_worker_session() as db:
         # Resolve API key from DB (secrets are encrypted, cache may not be warm)
@@ -726,11 +728,16 @@ async def _run_cve_nvd_backfill():
         # Process valid-format CVEs first (4-5 digit suffix), skip obviously bogus ones
         from sqlalchemy import func as sa_func
 
+        # Ids NVD has already missed on are retried on the shared budget (3
+        # lookups, a week apart) — autolink and extraction mint a stub for any
+        # CVE-shaped string, and without the budget every junk id was looked up
+        # again every night.
         result = await db.execute(
             select(CVE)
             .where(
                 CVE.description.is_(None),
                 sa_func.length(sa_func.split_part(CVE.cve_id, "-", 3)) <= 5,
+                nvd_retry_allowed(now),
             )
             .order_by(CVE.cve_id)
         )
@@ -756,7 +763,14 @@ async def _run_cve_nvd_backfill():
         )
 
         for i, cve_obj in enumerate(cves):
-            nvd = await enrich_from_nvd(cve_obj.cve_id)
+            try:
+                nvd = await enrich_from_nvd(cve_obj.cve_id, raise_on_rate_limit=True)
+            except NVDRateLimited:
+                # Throttled even after backoff: stop without charging this CVE
+                # a retry; tomorrow's run picks it back up.
+                logger.warning("CVE NVD backfill aborting at %d/%d: NVD rate limit", i, len(cves))
+                stats["rate_limited"] = True
+                break
             if nvd:
                 cve_obj.cvss_score = nvd.get("cvss_score")
                 cve_obj.severity = nvd.get("severity")
@@ -767,6 +781,7 @@ async def _run_cve_nvd_backfill():
                 db.add(cve_obj)
                 stats["enriched"] += 1
             else:
+                stamp_nvd_miss(cve_obj, now)
                 stats["failed"] += 1
 
             # Commit in batches of 50 to avoid losing progress

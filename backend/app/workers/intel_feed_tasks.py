@@ -196,8 +196,9 @@ def autolink_entry_task(self, entry_id: str):
 
 def _reliability_to_weight(rating: str | None) -> float:
     """Map A-F reliability rating to a confidence weight multiplier."""
-    weights = {"A": 1.0, "B": 0.85, "C": 0.7, "D": 0.5, "E": 0.3, "F": 0.15}
-    return weights.get(rating, 0.5)  # Unrated defaults to 0.5
+    from app.intelligence.autolinker import reliability_to_weight
+
+    return reliability_to_weight(rating)
 
 
 async def _autolink_entry(entry_id: str):

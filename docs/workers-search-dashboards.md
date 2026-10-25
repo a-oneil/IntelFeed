@@ -145,7 +145,7 @@ The `JOB_REGISTRY` is a declarative map of all **70** scheduled tasks, each with
 | `run_misp_galaxy_sync` | Weekly Sunday at 03:30 UTC | Refresh reference alias knowledge (`known_alias_map`) from the MISP Galaxy threat-actor cluster |
 | `run_malpedia_sync` | Weekly Sunday at 03:30 UTC | Sync malware families (aliases pass the junk-alias filter, `filter_aliases()`) |
 | `run_cve_nvd_refresh` | Daily at 12:00 UTC | Re-check NVD for CVSS score changes |
-| `run_cve_nvd_backfill` | Daily at 01:30 UTC | Backfill NVD data (CVSS, description, products, references) for CVEs missing it |
+| `run_cve_nvd_backfill` | Daily at 01:30 UTC | Backfill NVD data (CVSS, description, products, references) for CVEs missing it. An ID NVD has no record of is retried at most three times, a week apart (the retry budget it shares with `reenrich_cve_nvd`) |
 | `run_github_poc_scan` | Daily at 05:00 UTC | Scan GitHub for PoC exploits |
 | `run_wikipedia_bulk_sync` | Weekly Wednesday at 04:00 UTC | Enrich entities with Wikipedia content |
 | `run_metasploit_sync` | Weekly Sunday at 03:45 UTC | Map tracked CVEs to Metasploit modules and escalate weaponized exploit status |
