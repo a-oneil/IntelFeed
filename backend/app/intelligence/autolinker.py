@@ -219,6 +219,7 @@ def reliability_to_weight(rating: str | None) -> float:
     weights = {"A": 1.0, "B": 0.85, "C": 0.7, "D": 0.5, "E": 0.3, "F": 0.15}
     return weights.get(rating, 0.5)  # Unrated defaults to 0.5
 
+
 # Daily Redis counters of dictionary-word matches dropped because the entry's
 # feed never gets AI analysis (so nothing would ever confirm them). Kept a
 # little past the 30-day window the Engine view sums.
