@@ -105,7 +105,7 @@ export const STAGE_COPY: Record<StageId, { label: string; detail: string }> = {
   tools: {
     label: "Create records for new tools",
     detail:
-      "Off, the AI can still mention a tool but will not add it to your catalog. Worth turning off for advisory and rule-repository feeds, which list affected software rather than attacker tooling.",
+      "Off, the AI still tags tools already in your catalog but never adds a new one. Tagging from the catalog keeps running either way. Worth turning off for advisory and rule-repository feeds, which list affected software rather than attacker tooling.",
   },
   regex: {
     label: "Fetch CVE details from NVD",
@@ -162,8 +162,8 @@ export function describeStages(values: FeedFormValues, ctx: Context): StageRow[]
     },
     {
       // Not a stage of its own: `extract_tools` is read only inside
-      // `apply_analysis_results`, so it is a sub-switch of the AI pass and does
-      // nothing at all when that is off.
+      // `store_entry_analysis` (`_tool_mode_for_entry`), so it is a sub-switch
+      // of the AI pass and does nothing at all when that is off.
       id: "tools",
       ...STAGE_COPY.tools,
       on: aiRunning && values.extract_tools,

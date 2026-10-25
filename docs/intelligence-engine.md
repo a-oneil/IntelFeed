@@ -344,6 +344,8 @@ Same-type entity merges survive re-import because the loser's name lands in the 
 
 The resolver adds further gates on top (an `entity_name_denylist` table, normalized/alias-index exact matching, and held-for-review candidate matches), controlled by `entity_creation_gates` (`off` / `shadow` / `on`, default `shadow` — shadow logs the would-block decision to `EntityMaintenanceLog` and still creates). Every resolution decision is written to `EntityMaintenanceLog` (`resolution_*` actions) so it surfaces in the hygiene feed.
 
+Tools carry two more guards that hold for every automated source whatever `entity_creation_gates` says. A concept word in `TOOL_CONCEPT_NAMES` (`intelligence/entity_resolution.py`: hash algorithms, vulnerability classes such as SQL injection, protocols such as WebSocket, and generic words such as payload or debug) is blocked (`generic_name:concept_term`). A name already on file as a product or vendor (canonical name or alias, via `entity_alias_index`) is held as `product_or_vendor_name`, and the entry links to that product or vendor instead; `DUAL_USE_TOOL_NAMES` (AnyDesk, rclone, ngrok and the like) is exempt. A feed with `extract_tools` off calls the resolver with `link_only=True`: every matcher still runs, so known tools link, and a name that would have created a row is blocked as `creation_disabled`. `scripts/maintenance/clean_tool_catalog.py` moves platform and product rows out of the tool catalog and deletes concept rows onto the do-not-recreate list.
+
 See diagram: [Entity creation guards](diagrams/intelligence-engine-entity-creation-guards.md)
 
 **Example scenario:**
@@ -1626,7 +1628,7 @@ Each feed carries a set of switches that decide what the ingest pipeline does wi
 | AI analysis (one pass) | `ai_analysis_enabled` | The one-pass `entry_analysis` call. |
 | Regex enrichment | `auto_extract_on_ingest` | The standalone CVE/NVD, TTP and mitigation pass. |
 | Detection rule extraction | `extract_detection_rules` | Sigma/YARA/SPL/Elastic parsing from article bodies. |
-| ↳ Create tool entities | `extract_tools` | Whether that AI pass may mint Tool rows. Does nothing when the AI is off. |
+| ↳ Create tool entities | `extract_tools` | Whether that AI pass may mint new Tool rows. Off, the AI still links tools already in the catalog, and autolink tags them as usual. Advisory-type articles skip AI tools whatever the switch says. Does nothing when the AI is off. |
 
 The observables ledger scan has no switch of its own, but it is not unconditional either: `_scan_entry_observables` skips any feed whose `intel_extraction_mode` is `none`, so "do not analyse this feed" really does mean nothing is extracted — the curated `ioc_list` door would otherwise keep creating ledger rows from a feed the operator had switched off. That check sits in the task rather than at dispatch, exactly as `_autolink_entry`'s does, which also means a feed set to `none` outranks a pipeline plan that enables the stage. Everything else about it is tuned by the global `observables_*` settings.
 
