@@ -95,7 +95,7 @@ export const STAGE_COPY: Record<StageId, { label: string; detail: string }> = {
   relevance: {
     label: "Skip off-topic articles",
     detail:
-      "Scores each article on security keywords first and leaves the obvious non-security ones untagged. Off, every article gets tagged.",
+      "Scores each article on security keywords, matched as whole words, and skips tagging the ones with no security vocabulary at all: product news, earnings, politics. Off, every article gets tagged. The AI skips those articles either way; the cut-off is the Extraction Junk Gate setting.",
   },
   ai: {
     label: "Let the AI read each article",
