@@ -244,7 +244,7 @@ class GitHubRepoAdapter(ExtendedAdapter):
                         logger.warning("GitHub rate limit low during content fetch, stopping early")
                         break
 
-                content_type = detect_content_type(owner, repo, fp)
+                content_type = detect_content_type(owner, repo, fp, content)
                 title = derive_title(fp, content, content_type)
                 extracted_meta = extract_metadata(content, content_type)
                 content_html = render_content(fp, content, content_type, extracted_meta)
@@ -656,7 +656,7 @@ class GitHubRepoAdapter(ExtendedAdapter):
                         )
                         break
 
-                content_type = detect_content_type(owner, repo, fp)
+                content_type = detect_content_type(owner, repo, fp, content)
                 title = derive_title(fp, content, content_type)
                 extracted_meta = extract_metadata(content, content_type)
                 content_html = render_content(fp, content, content_type, extracted_meta)

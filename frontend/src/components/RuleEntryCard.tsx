@@ -48,6 +48,8 @@ const CONTENT_TYPE_LABELS: Record<string, string> = {
   loldriver_entry: "LOLDriver",
   atomic_test: "ATOMIC",
   nuclei_template: "NUCLEI",
+  kql_query: "KQL",
+  anvilogic_rule: "ANVILOGIC",
 };
 
 /* Raw hexes with no design token behind them — a rule's own severity scale,

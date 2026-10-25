@@ -33,7 +33,13 @@ _RULE_TYPE_MAP: dict[str, str] = {
     "yara_rule": "yara",
     "nuclei_template": "nuclei",
     "panther_rule": "panther",
+    "kql_query": "kql",
 }
+
+# Content types whose rule type is chosen per file from the extracted metadata
+# (`import_rule_type`): an Anvilogic Armory file names its query language in
+# `logic_format`.
+_PER_FILE_RULE_TYPES = {"anvilogic_rule"}
 
 # Content types that get metadata tagging but NOT rule creation
 _METADATA_ONLY_TYPES = {"lolbas_entry", "loobin_entry", "loldriver_entry", "atomic_test"}
@@ -134,6 +140,13 @@ def _is_stable_rule(meta: dict, content_type: str) -> bool:
     return True  # Default: not draft
 
 
+def rule_type_for(content_type: str, meta: dict | None) -> str | None:
+    """The DetectionRule.rule_type a github_repo file imports as, or None."""
+    if content_type in _PER_FILE_RULE_TYPES:
+        return (meta or {}).get("import_rule_type") or None
+    return _RULE_TYPE_MAP.get(content_type)
+
+
 def _extract_technique_ids(meta: dict) -> list[str]:
     """Pull ATT&CK technique IDs from extracted metadata."""
     ids = meta.get("mitre_attack_ids", [])
@@ -169,7 +182,7 @@ async def import_detection_rule(
     repo = (entry.metadata_ or {}).get("repo", "")
     commit_sha = (entry.metadata_ or {}).get("commit_sha", "")
 
-    rule_type = _RULE_TYPE_MAP.get(content_type)
+    rule_type = rule_type_for(content_type, meta)
     if not rule_type:
         return None
 
@@ -392,8 +405,8 @@ async def _import_single_rule(
     """Import a single detection rule (non-YARA or single-rule file)."""
     # Determine rule fields from extracted metadata
     title = (
-        meta.get("rule_title")  # Sigma
-        or meta.get("rule_name")  # Elastic, YARA, Sentinel
+        meta.get("rule_title")  # Sigma, Anvilogic
+        or meta.get("rule_name")  # Elastic, YARA, Sentinel, .kql header
         or meta.get("detection_name")  # Splunk
         or meta.get("template_name")  # Nuclei
         or entry.title
@@ -417,7 +430,7 @@ async def _import_single_rule(
     # For formats with a separate query field, use the query as rule_content
     query_content = (
         meta.get("search_query")  # Splunk SPL
-        or meta.get("rule_query")  # Elastic EQL, Sentinel KQL
+        or meta.get("rule_query")  # Elastic EQL, Sentinel KQL, Anvilogic logic, .kql file
         or ""
     )
     if query_content:
@@ -829,7 +842,7 @@ async def process_github_entry(
     cve_ids = _extract_cve_ids(extracted)
 
     # Step 1: Import detection rule(s) (if applicable)
-    if content_type in _RULE_TYPE_MAP:
+    if rule_type_for(content_type, extracted):
         imported = await import_detection_rule(db, entry, user_id)
         if imported:
             if isinstance(imported, list):

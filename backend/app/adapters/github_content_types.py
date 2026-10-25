@@ -68,6 +68,9 @@ CONTENT_TYPE_RULES: list[tuple[str, str, str]] = [
     ("splunk/security_content", "stories/**/*.yml", "splunk_story"),
     ("LOLBAS-Project/LOLBAS", "yml/**/*.yml", "lolbas_entry"),
     ("infosecB/LOOBins", "LOOBins/**/*.yml", "loobin_entry"),
+    # The project moved orgs; the feed pack follows magicsword-io, older feeds
+    # may still point at the original owner.
+    ("magicsword-io/LOLDrivers", "yaml/**/*.yaml", "loldriver_entry"),
     ("loldrivers-project/loldrivers", "yaml/**/*.yaml", "loldriver_entry"),
     ("redcanaryco/atomic-red-team", "atomics/**/T*.yaml", "atomic_test"),
     ("Neo23x0/signature-base", "yara/**/*.yar", "yara_rule"),
@@ -98,17 +101,111 @@ EXTENSION_MAP: dict[str, str] = {
     ".py": "python_file",
     ".txt": "text_file",
     ".csv": "csv_file",
+    ".kql": "kql_query",
 }
 
 
-def detect_content_type(owner: str, repo: str, file_path: str) -> str:
-    """Detect the content type of a file based on repo and path patterns."""
+def detect_content_type(owner: str, repo: str, file_path: str, content: str | None = None) -> str:
+    """Detect the content type of a file based on repo and path patterns.
+
+    A per-repo pattern wins. Otherwise the extension decides, and a generic
+    YAML or TOML file is then read: a file that is recognisably a rule format
+    the importer supports (Sigma, Sentinel analytics rule, Splunk detection,
+    Anvilogic Armory, Elastic TOML) is typed as that rule, whichever repo it
+    sits in.
+    """
     repo_key = f"{owner}/{repo}"
     for rule_repo, rule_glob, content_type in CONTENT_TYPE_RULES:
         if repo_key.lower() == rule_repo.lower() and _glob_match(file_path, rule_glob):
+            if content_type == "yaml_file" and content:
+                return sniff_rule_format(content, content_type) or content_type
             return content_type
     ext = PurePosixPath(file_path).suffix.lower()
-    return EXTENSION_MAP.get(ext, "unknown")
+    content_type = EXTENSION_MAP.get(ext, "unknown")
+    if content_type in _SNIFFABLE_TYPES and content:
+        return sniff_rule_format(content, content_type) or content_type
+    return content_type
+
+
+# ---------------------------------------------------------------------------
+# Format recognition from content (generic YAML / TOML)
+# ---------------------------------------------------------------------------
+
+_SNIFFABLE_TYPES = {"yaml_file", "toml_file"}
+
+# Anvilogic Armory `logic_format` → DetectionRule.rule_type. Formats with no
+# rule type here (snowflake, …) stay generic YAML.
+ANVILOGIC_LOGIC_FORMATS: dict[str, str] = {
+    "splunk": "splunk_spl",
+    "spl": "splunk_spl",
+    "kql": "kql",
+    "kusto": "kql",
+    "sentinel": "kql",
+}
+
+
+def _sigma_errors_besides_status(content: str) -> list[str]:
+    """validate_sigma's errors, minus a missing ``status``.
+
+    Sigma rules outside SigmaHQ often leave ``status`` out; the rule is still
+    a usable Sigma rule (it imports as a draft), so that one error doesn't
+    count against recognising it.
+    """
+    from app.intelligence.rule_validation import validate_sigma
+
+    result = validate_sigma(content)
+    return [
+        e.message for e in result.errors if e.severity == "error" and e.message != "Required field 'status' missing"
+    ]
+
+
+def _valid(rule_type: str, query: str) -> bool:
+    from app.intelligence.rule_validation import validate_rule
+
+    return validate_rule(rule_type, query).valid
+
+
+def sniff_rule_format(content: str, base_type: str) -> str | None:
+    """Recognise a supported rule format from a generic YAML/TOML file's content.
+
+    Returns the content type, or None when the file isn't a rule the importer
+    supports. Each candidate is checked with the rule validator, so a file that
+    merely shares a key name isn't promoted.
+    """
+    if base_type == "toml_file":
+        data = _safe_toml_load(content)
+        rule = data.get("rule") if data else None
+        if isinstance(rule, dict) and isinstance(rule.get("query"), str) and rule.get("type"):
+            if _valid("elastic_ql", rule["query"]):
+                return "elastic_rule"
+        return None
+
+    data = _safe_yaml_load(content)
+    if not data:
+        return None
+
+    # Sigma: title + logsource + detection
+    if all(k in data for k in ("title", "logsource", "detection")):
+        return "sigma_rule" if not _sigma_errors_besides_status(content) else None
+
+    # Microsoft Sentinel analytics rule: a KQL query plus a schedule (or kind)
+    query = data.get("query")
+    kind = str(data.get("kind") or "").lower()
+    if isinstance(query, str) and query.strip() and ("queryFrequency" in data or kind in ("scheduled", "nrt")):
+        return "sentinel_rule" if _valid("kql", query) else None
+
+    # Splunk security_content detection: name + SPL search
+    search = data.get("search")
+    if data.get("name") and isinstance(search, str) and search.strip() and ("data_source" in data or "tags" in data):
+        return "splunk_detection" if _valid("splunk_spl", search) else None
+
+    # Anvilogic Armory: title + logic + logic_format
+    logic = data.get("logic")
+    fmt = str(data.get("logic_format") or "").strip().lower()
+    if data.get("title") and isinstance(logic, str) and logic.strip() and fmt in ANVILOGIC_LOGIC_FORMATS:
+        return "anvilogic_rule" if _valid(ANVILOGIC_LOGIC_FORMATS[fmt], logic) else None
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -179,7 +276,11 @@ def derive_title(file_path: str, content: str | None, content_type: str) -> str:
         elif content_type == "loldriver_entry":
             data = _safe_yaml_load(content)
             if data:
-                return data.get("Name", data.get("name", fallback))
+                # Files are named by UUID and most carry no Name; the first
+                # tag is the driver's file name.
+                tags = data.get("Tags")
+                first_tag = str(tags[0]) if isinstance(tags, list) and tags and tags[0] else ""
+                return data.get("Name") or data.get("name") or first_tag or fallback
 
         elif content_type == "atomic_test":
             data = _safe_yaml_load(content)
@@ -206,6 +307,14 @@ def derive_title(file_path: str, content: str | None, content_type: str) -> str:
             data = _safe_yaml_load(content)
             if data:
                 return data.get("name", fallback)
+
+        elif content_type == "anvilogic_rule":
+            data = _safe_yaml_load(content)
+            if data:
+                return data.get("title", fallback)
+
+        elif content_type == "kql_query":
+            return _kql_header_title(content) or fallback
 
         elif content_type == "nuclei_template":
             data = _safe_yaml_load(content)
@@ -318,6 +427,10 @@ def extract_metadata(content: str | None, content_type: str) -> dict:
             return _extract_nuclei_metadata(content)
         elif content_type == "panther_rule":
             return _extract_panther_metadata(content)
+        elif content_type == "anvilogic_rule":
+            return _extract_anvilogic_metadata(content)
+        elif content_type == "kql_query":
+            return _extract_kql_metadata(content)
     except Exception:
         logger.debug(f"Metadata extraction failed for content_type={content_type}")
 
@@ -495,13 +608,34 @@ def _extract_loldriver_metadata(content: str) -> dict:
     if not isinstance(tags, list):
         tags = []
 
+    commands = data.get("Commands", {})
+    description = data.get("Description", "")
+    if not description and isinstance(commands, dict):
+        description = commands.get("Description", "")
+
+    # MitreID is a single technique (T1068 for vulnerable drivers); CVE is a
+    # list, often holding an empty-string placeholder.
+    mitre = str(data.get("MitreID") or "").strip().upper()
+    raw_cves = data.get("CVE", [])
+    if not isinstance(raw_cves, list):
+        raw_cves = [raw_cves]
+    cve_ids: list[str] = []
+    for cve in raw_cves:
+        value = str(cve or "").strip().upper()
+        if re.fullmatch(r"CVE-\d{4}-\d{4,}", value) and value not in cve_ids:
+            cve_ids.append(value)
+
     return {
-        "driver_name": data.get("Name", data.get("name", "")),
-        "driver_description": data.get("Description", ""),
+        "driver_name": data.get("Name", data.get("name", "")) or (str(tags[0]) if tags else ""),
+        "driver_description": description,
         "driver_category": data.get("Category", ""),
         "tags": [str(t) for t in tags],
-        "mitre_attack_ids": [],  # LOLDrivers don't always have ATT&CK IDs
+        "mitre_attack_ids": [mitre] if _TECHNIQUE_RE.fullmatch(mitre) else [],
+        "cve_ids": cve_ids,
     }
+
+
+_TECHNIQUE_RE = re.compile(r"\bT\d{4}(?:\.\d{3})?\b")
 
 
 def _extract_atomic_metadata(content: str) -> dict:
@@ -701,6 +835,82 @@ def _extract_panther_metadata(content: str) -> dict:
     }
 
 
+def _extract_anvilogic_metadata(content: str) -> dict:
+    """Anvilogic Armory detection: title, logic + logic_format, technique_id list."""
+    data = _safe_yaml_load(content)
+    if not data:
+        return {}
+
+    fmt = str(data.get("logic_format") or "").strip().lower()
+    technique_ids = data.get("technique_id", [])
+    if not isinstance(technique_ids, list):
+        technique_ids = [technique_ids]
+
+    # `techniques` reads "privilege-escalation:valid accounts"; the tactic is
+    # the part before the colon.
+    tactics: list[str] = []
+    for item in data.get("techniques", []) or []:
+        if isinstance(item, str) and ":" in item:
+            tactic = item.split(":", 1)[0].strip().replace("-", " ").replace("_", " ").title()
+            if tactic and tactic not in tactics:
+                tactics.append(tactic)
+
+    data_category = data.get("data_category", [])
+    if not isinstance(data_category, list):
+        data_category = [data_category]
+    references = data.get("references", [])
+    if not isinstance(references, list):
+        references = [references]
+
+    return {
+        "rule_title": data.get("title", ""),
+        "rule_description": data.get("description", ""),
+        "rule_query": data.get("logic", ""),
+        "logic_format": fmt,
+        "import_rule_type": ANVILOGIC_LOGIC_FORMATS.get(fmt, ""),
+        "mitre_attack_ids": [
+            str(t).strip().upper() for t in technique_ids if _TECHNIQUE_RE.fullmatch(str(t).strip().upper())
+        ],
+        "mitre_tactics": tactics,
+        "data_models": [str(c) for c in data_category if c],
+        "references": [str(r) for r in references if r],
+    }
+
+
+def _kql_comment_lines(content: str) -> list[str]:
+    return [line.strip()[2:].strip() for line in content.splitlines() if line.strip().startswith("//")]
+
+
+def _kql_header_title(content: str) -> str:
+    """The first ``//`` comment that isn't a URL, when it is short enough to be a title."""
+    for text in _kql_comment_lines(content):
+        if not text or text.startswith("http"):
+            continue
+        return text if len(text) <= 200 else ""
+    return ""
+
+
+def _extract_kql_metadata(content: str) -> dict:
+    """A standalone ``.kql`` file: the whole file is the query, and its comments
+    carry the title, reference URLs and any ATT&CK technique ids."""
+    references: list[str] = []
+    technique_ids: list[str] = []
+    for text in _kql_comment_lines(content):
+        for url in re.findall(r"https?://\S+", text):
+            if url not in references:
+                references.append(url)
+        for tid in _TECHNIQUE_RE.findall(text):
+            if tid not in technique_ids:
+                technique_ids.append(tid)
+
+    return {
+        "rule_name": _kql_header_title(content),
+        "rule_query": content,
+        "mitre_attack_ids": technique_ids,
+        "references": references,
+    }
+
+
 def _extract_nuclei_metadata(content: str) -> dict:
     data = _safe_yaml_load(content)
     if not data:
@@ -742,6 +952,7 @@ _LANG_MAP: dict[str, str] = {
     ".yar": "yara",
     ".yara": "yara",
     ".py": "python",
+    ".kql": "kql",
     ".js": "javascript",
     ".ts": "typescript",
 }

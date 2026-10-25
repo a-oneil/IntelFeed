@@ -935,7 +935,10 @@ For each file matched by `paths` patterns:
 
 1. **Detect content type**: YAML rule, Elastic detection, YARA rule, Markdown, etc.
    - Uses `github_content_types.py:detect_content_type()`.
-   - Example: `SigmaHQ/sigma:rules/**/*.yml` → `sigma_rule`.
+   - A per-repo path pattern decides first. Example: `SigmaHQ/sigma:rules/**/*.yml` → `sigma_rule`.
+   - Otherwise the extension decides: `.yar`/`.yara` → `yara_rule`, `.kql` → `kql_query` (imported as a KQL rule), `.yml`/`.yaml` → `yaml_file`, `.toml` → `toml_file`.
+   - A generic YAML or TOML file is then read for a rule format the importer supports, whichever repo it sits in: Sigma (`title` + `logsource` + `detection`), a Sentinel analytics rule (`query` + `queryFrequency`, or `kind: Scheduled`/`NRT`), a Splunk detection (`name` + `search`), an Anvilogic Armory detection (`title` + `logic` + a Splunk or KQL `logic_format`), or an Elastic TOML rule. The candidate's query must pass the rule validator (`rule_validation.py`), or the file stays generic.
+   - `scripts/maintenance/reprocess_github_repo_types.py` re-runs this detection over stored entries typed `yaml_file`, `toml_file` or `unknown`, and imports the rules it finds.
 
 2. **Derive title**: Extracted from file content.
    - SIGMA: `title` field from YAML.
