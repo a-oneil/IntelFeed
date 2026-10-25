@@ -180,7 +180,7 @@ Job: `ai-analysis-batch-submit` (every 30 min) and `ai-analysis-batch-poll`
 |---|---|---|
 | `ai_one_pass_enabled` | bool, `true` | Master switch. Requires an enabled `entry_analysis` AI task assignment — the flag alone does nothing. |
 | `ai_daily_budget_usd` | float, `2.0` | Hard daily spend cap. On reaching it, pending entries wait; the next run takes the highest-priority ones first. |
-| `ai_analysis_relevance_threshold` | float, `0.15` | Junk gate: entries scoring below this on the keyword relevance pass skip AI analysis entirely. The question it answers is "is there anything here to extract", not "is this important". |
+| `ai_analysis_relevance_threshold` | float, `0.15` | Relevance cut-off for two gates: entries scoring below it on the keyword relevance pass skip AI analysis entirely (the junk gate), and on `selective` feeds skip autolinking too. The question it answers is "is there anything here to extract", not "is this important". |
 | `ai_batch_max_requests` | int, `500` | Maximum entries per batch submission. |
 | `ai_analysis_content_max_chars` | int, `12000` | Characters of article body sent per entry. Bodies over the cap are windowed as head + indicator appendix (see `observables_analysis_tail_reserve`) so a long write-up's IOC section is never cut; narrative past the head is. |
 | `ai_use_batches` | bool, `true` | Use the Anthropic Message Batches API (50% discount) when the provider supports it. Otherwise sequential calls with prompt caching. |

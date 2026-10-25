@@ -346,7 +346,7 @@ async def enqueue_entry_analysis(db: AsyncSession, entry_id: uuid.UUID) -> str |
     """
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-    from app.intelligence.relevance_filter import score_relevance
+    from app.intelligence.relevance_filter import get_relevance_threshold, score_relevance
     from app.models.ai_analysis import AIAnalysisRequest
     from app.models.entry import Entry
     from app.models.entry_signal import EntrySignal
@@ -411,7 +411,7 @@ async def enqueue_entry_analysis(db: AsyncSession, entry_id: uuid.UUID) -> str |
     from app.services.sanitizer import entry_text_with_translation
 
     gate_title, gate_text = entry_text_with_translation(entry)
-    threshold = float(await get_setting("ai_analysis_relevance_threshold", db) or 0.15)
+    threshold = await get_relevance_threshold(db)
     relevance = score_relevance(gate_title, entry.summary or "", gate_text)
     if relevance < threshold:
         return await _write_status("skipped_junk")

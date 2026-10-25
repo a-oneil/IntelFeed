@@ -503,8 +503,8 @@ SETTING_METADATA: dict[str, dict] = {
     "ai_analysis_relevance_threshold": {
         "label": "Extraction Junk Gate",
         "description": (
-            "Relevance score below which entries skip AI analysis entirely "
-            "(0-1; gate is 'anything to extract', not importance)."
+            "Relevance score below which entries skip AI analysis entirely, and skip "
+            "autolinking on selective feeds (0-1; gate is 'anything to extract', not importance)."
         ),
         "group": "ai",
     },

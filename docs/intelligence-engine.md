@@ -1668,7 +1668,7 @@ A third optional layer — `extract_detection_rules` — runs `extract_rules_fro
 
 ### `full` — autolink every article
 
-Backend: `mode=full, extract=true`. Every new entry gets the autolinker, regex CVE extraction with NVD enrichment, regex TTP extraction, regex mitigation extraction, and (if `extract_detection_rules=true`) detection rule extraction. The relevance pre-filter is skipped — everything is processed.
+Backend: `mode=full, extract=true`. Every new entry gets the autolinker, regex CVE extraction with NVD enrichment, regex TTP extraction, regex mitigation extraction, and (if `extract_detection_rules=true`) detection rule extraction. The relevance filter is skipped for autolinking — everything is tagged. (The AI junk gate, which uses the same score, still applies.)
 
 Maximum recall, maximum cost. New CVEs referenced in the article spawn stub rows hydrated with NVD metadata; known threat actors, malware, vendors, and products get linked; TTPs and mitigations get pulled out by regex.
 
@@ -1678,23 +1678,23 @@ Cost considerations: NVD API calls are rate-limited (5 req / 30 sec without an A
 
 ### `selective` — autolink security-relevant articles (default)
 
-Backend: `mode=selective, extract=true`. The relevance pre-filter (`backend/app/intelligence/relevance_filter.py`) runs first as the gate. If the score ≥ `DEFAULT_RELEVANCE_THRESHOLD` (0.15), the entry proceeds through the autolinker; below 0.15 autolinking is skipped (the entry itself is still ingested and visible in the reader). The relevance gate covers the autolinker only: regex CVE + NVD, regex TTP, regex mitigations and detection rule extraction run in a parallel stage that never reads the score, so they follow their own flags.
+Backend: `mode=selective, extract=true`. The relevance filter (`backend/app/intelligence/relevance_filter.py`) scores the article — title, summary and content, plus the translation when there is one — before autolinking. Below `ai_analysis_relevance_threshold` (default 0.15, Settings → Engine) the autolinker skips the entry; the entry itself is still ingested and visible in the reader. Only autolinking reads this gate: regex CVE/TTP/mitigation extraction (when `auto_extract_on_ingest` is on), detection rule extraction and the observables stage run whatever the score. The same score and threshold drive the AI junk gate on every mode, so the one setting decides both what gets tagged here and what the AI reads.
 
-The relevance filter is a zero-cost lexical scorer (no AI, no DB, pure string matching). It sums weighted hits across five keyword categories:
+The relevance filter is a cheap lexical scorer (no AI, no DB). Keywords match at the start of a word, so "exploited" counts for "exploit" but "laptop" does not count for "APT" and "percent" does not count for "RCE". Keywords of four letters or fewer must be the whole word, allowing a plural *s* or trailing digits ("APT29", "IOCs"; not "aptly", "pocket" or "Siemens"). It sums weighted hits across five keyword categories:
 
 | Category | Weight | Examples |
 |---|---|---|
 | Vulnerability | 0.30 | "vulnerability", "CVE-", "RCE", "zero-day", "CVSS", "PoC", "advisory" |
-| Malware | 0.30 | "ransomware", "trojan", "Cobalt Strike", "C2 server", "shellcode", "stealer" |
-| Incident | 0.25 | "breach", "compromise", "intrusion", "phishing", "lateral movement", "supply chain" |
+| Malware | 0.30 | "malicious", "ransomware", "trojan", "Cobalt Strike", "C2 server", "shellcode", "stealer" |
+| Incident | 0.25 | "breach", "hacked", "compromise", "intrusion", "phishing", "lateral movement", "supply chain" |
 | Threat actor | 0.35 | "APT", "nation-state", "espionage", "hacktivist", "financially motivated" |
 | Detection | 0.20 | "Sigma", "YARA", "IOC", "MITRE ATT&CK", "Splunk", "SIEM", "threat hunting" |
 
-Per-category contributions use diminishing returns (1 hit = 60% of the weight; each additional hit adds 20% up to the cap). Structured-pattern bonuses are added on top: CVE pattern in text +0.4, TTP pattern (`T1234`) +0.3, IOC-like pattern (IPv4, hash, defanged URL) +0.2, title contains any security keyword +0.15. Final score capped at 1.0. The 0.15 threshold is generous — effectively any single category hit clears it. This is a coarse filter whose job is to skip obviously off-topic content without blocking borderline cases.
+Per-category contributions use diminishing returns (1 hit = 80% of the weight, 2 or more = the full weight). Structured-pattern bonuses are added on top: CVE pattern in text +0.4, TTP pattern (`T1234`) +0.3, IOC-like pattern (IPv4, hash, defanged URL) +0.2, title contains any security keyword +0.15. Final score capped at 1.0. At the default 0.15 a single keyword in any category clears it, so the filter drops articles with no security vocabulary at all — product launches, earnings, release notes, politics — and keeps anything borderline. Raising the threshold tightens autolinking on selective feeds and the AI junk gate together. `scripts/maintenance/measure_relevance_filter.py` prints, per feed, how many recent entries fall under a given threshold, with sample titles.
 
-**Use for:** general security blogs (Krebs, Bleeping Computer, The Record, DarkReading, The Hacker News), social sources where some posts are intel and others aren't, vendor blogs mixing security content with marketing — the default choice for anything you're not sure about. **Avoid for:** non-English feeds unlikely to hit English keywords (use full or known-only — the autolinker handles translations but the relevance filter is English-only) and sources where every entry is intel by definition (use full).
+**Use for:** general security blogs (Krebs, Bleeping Computer, The Record, DarkReading, The Hacker News), social sources where some posts are intel and others aren't, vendor blogs mixing security content with marketing — the default choice for anything you're not sure about. **Avoid for:** non-English feeds unlikely to hit English keywords (the keywords are English: turn on `auto_translate` so the filter scores the translation, or use full) and sources where every entry is intel by definition (use full).
 
-Subtle gotcha: if the relevance filter rejects an entry, only the autolinker skips it. With `auto_extract_on_ingest` on, a borderline article that names `CVE-2024-12345` still gets the CVE through the regex pass. In practice the structured-pattern bonuses (+0.4 for CVE, +0.3 for TTP) make a rejection with an ID in it rare.
+If the relevance filter rejects an entry, it is skipped by the autolinker here and by the AI one-pass analysis (the junk gate, on any mode). A CVE ID alone adds 0.4 and an ATT&CK ID 0.3, so an article that names one always clears the default threshold.
 
 ### `full` with `auto_extract_on_ingest=false` — catalog matching without NVD cost
 
@@ -1733,7 +1733,7 @@ Independent of mode, every autolink junction record gets a confidence value (hig
 | NVD, CISA, vendor PSIRT, top-tier research feeds | `full` |
 | General security news (Krebs, BleepingComputer, etc.) | `selective` (default) |
 | Reddit/Mastodon/Bluesky firehose | `selective`, or `full` with regex enrichment off |
-| Telegram/foreign-language threat actor channel | `full` with regex enrichment off (the relevance filter is English-only) |
+| Telegram/foreign-language threat actor channel | `full` with regex enrichment off, or `selective` with `auto_translate` on (the relevance keywords are English) |
 | High-volume source you want matched but not AI-read | any mode, `ai_analysis_enabled=false` |
 | Conference announcements / industry news | Manual |
 | Untrusted source you read for awareness | Manual |
@@ -1749,7 +1749,7 @@ Independent of mode, every autolink junction record gets a confidence value (hig
 
 ### None of this uses AI
 
-All five modes drive deterministic string matching only: the autolinker is a pure Aho-Corasick dictionary scan (`pyahocorasick` C extension); the relevance filter is frozenset keyword checks plus three regexes (its docstring at `relevance_filter.py:1-6` says "No AI, no DB calls — pure string matching"); CVE/TTP/mitigation extraction is regex; NVD enrichment is a REST lookup (external, but not AI); detection rule extraction is pattern-based parsing per format; confidence weighting is arithmetic on the reliability grade. This is deliberate — the autolinker comment calls it "Layer 0 — free, instant correlation that runs on every entry": cheap, fast, no provider dependency, no rate limits, no hallucinations.
+All five modes drive deterministic string matching only: the autolinker is a pure Aho-Corasick dictionary scan (`pyahocorasick` C extension); the relevance filter is precompiled word-start keyword regexes plus three structured patterns (no AI, no DB calls); CVE/TTP/mitigation extraction is regex; NVD enrichment is a REST lookup (external, but not AI); detection rule extraction is pattern-based parsing per format; confidence weighting is arithmetic on the reliability grade. This is deliberate — the autolinker comment calls it "Layer 0 — free, instant correlation that runs on every entry": cheap, fast, no provider dependency, no rate limits, no hallucinations.
 
 AI is a separate, opt-in layer on top (`backend/app/ai/` provider abstraction): summarization, one-pass `entry_analysis` extraction/adjudication, translation, detection rule drafts — run on demand, via automation rules, or at ingest when `ai_one_pass_enabled` is on. AI-created junction records carry a non-`auto_link` source so the rescan path leaves them alone when re-running the deterministic linker.
 

@@ -244,18 +244,16 @@ async def _autolink_entry(entry_id: str):
 
         # selective: run relevance pre-filter first
         if mode == "selective":
-            from app.intelligence.relevance_filter import (
-                DEFAULT_RELEVANCE_THRESHOLD,
-                score_relevance,
-            )
+            from app.intelligence.relevance_filter import get_relevance_threshold, score_relevance
 
+            threshold = await get_relevance_threshold(db)
             score = score_relevance(title, entry.summary, content_text)
-            if score < DEFAULT_RELEVANCE_THRESHOLD:
+            if score < threshold:
                 logger.debug(
                     "Entry %s below relevance threshold (%.2f < %.2f), skipping autolink",
                     entry_id,
                     score,
-                    DEFAULT_RELEVANCE_THRESHOLD,
+                    threshold,
                 )
                 return []
 
@@ -1261,7 +1259,7 @@ async def _rescan_all_feeds_extraction():
     from app.intelligence.autolinker import autolink_entry
     from app.intelligence.cve import extract_and_store_cves
     from app.intelligence.mitigation import extract_mitigation_ids_regex, store_mitigations
-    from app.intelligence.relevance_filter import DEFAULT_RELEVANCE_THRESHOLD, score_relevance
+    from app.intelligence.relevance_filter import get_relevance_threshold, score_relevance
     from app.intelligence.rule_extraction import extract_rules_from_content, store_extracted_rules
     from app.intelligence.ttp import extract_ttp_ids_regex, store_ttps
     from app.models.entry import Entry
@@ -1294,6 +1292,7 @@ async def _rescan_all_feeds_extraction():
         r.close()
 
     async with _get_worker_session() as db:
+        relevance_threshold = await get_relevance_threshold(db)
         while True:
             result = await db.execute(
                 select(
@@ -1403,7 +1402,7 @@ async def _rescan_all_feeds_extraction():
 
                 if extraction_mode == "selective":
                     score = score_relevance(title or "", summary, content_text)
-                    if score < DEFAULT_RELEVANCE_THRESHOLD:
+                    if score < relevance_threshold:
                         stats["entries_processed"] += 1
                         continue
 
