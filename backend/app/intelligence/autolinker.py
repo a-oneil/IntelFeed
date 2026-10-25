@@ -11,7 +11,7 @@ import logging
 import re
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import ahocorasick
@@ -191,6 +191,37 @@ def pending_tier_enabled() -> bool:
     instant-link behavior (capitalization guard only).
     """
     return bool(settings.get("autolink_pending_tier_enabled")) and bool(settings.get("ai_one_pass_enabled"))
+
+
+# Daily Redis counters of dictionary-word matches dropped because the entry's
+# feed never gets AI analysis (so nothing would ever confirm them). Kept a
+# little past the 30-day window the Engine view sums.
+_DROPPED_AI_OFF_KEY = "autolink:pending_dropped_ai_off:{day}"
+_DROPPED_AI_OFF_TTL = 35 * 86400
+
+
+async def _count_dropped_ai_off(n: int) -> None:
+    if n <= 0:
+        return
+    try:
+        r = await get_redis()
+        key = _DROPPED_AI_OFF_KEY.format(day=datetime.now(UTC).strftime("%Y%m%d"))
+        await r.incrby(key, n)
+        await r.expire(key, _DROPPED_AI_OFF_TTL)
+    except Exception:
+        logger.debug("pending-tier drop counter update failed", exc_info=True)
+
+
+async def dropped_ai_off_count(days: int = 30) -> int:
+    """Dictionary-word matches dropped on AI-off feeds over the last ``days`` days."""
+    today = datetime.now(UTC)
+    keys = [_DROPPED_AI_OFF_KEY.format(day=(today - timedelta(days=i)).strftime("%Y%m%d")) for i in range(days)]
+    try:
+        r = await get_redis()
+        return sum(int(v or 0) for v in await r.mget(keys))
+    except Exception:
+        logger.debug("pending-tier drop counter read failed", exc_info=True)
+        return 0
 
 
 def _is_ambiguous_surface_form(form: str) -> bool:
@@ -649,12 +680,28 @@ async def store_autolink_matches(
     to ``pending_autolink_matches`` instead of becoming junction rows — the AI
     reconciler promotes or rejects them later. ``allow_provisional=True`` is the
     reconciler's promotion path: it commits provisional matches directly.
+
+    On an entry the AI will never read (its feed's AI is off, or its mode is
+    "none") nothing would confirm a held match, so provisional matches are
+    dropped and counted instead of held.
     """
     matches = await _filter_ttp_matches(db, entry_id, matches, context_text)
 
     if not allow_provisional:
         provisional = [m for m in matches if m.get("provisional")]
         matches = [m for m in matches if not m.get("provisional")]
+        if provisional:
+            from app.services.ai_eligibility import entry_will_get_ai_analysis
+
+            if not await entry_will_get_ai_analysis(db, entry_id):
+                logger.info(
+                    "Dropped %d provisional autolink match(es) for entry %s; its feed gets no AI analysis: %s",
+                    len(provisional),
+                    entry_id,
+                    [m.get("canonical_name") for m in provisional],
+                )
+                await _count_dropped_ai_off(len(provisional))
+                provisional = []
         for match in provisional:
             try:
                 await db.execute(

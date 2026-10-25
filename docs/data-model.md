@@ -347,7 +347,7 @@ Leak-site victim tracker (migration `c3d5e7f9a1b3`, behind `ransomware_tracker_e
 
 **`entity_name_denylist`** — names banned from entity creation per type (seeded from the 2026-08 prod cleanup). Unique on `(entity_type, normalized_name)`.
 
-**`pending_autolink_matches`** — dictionary-word autolinker matches ("Royal", "Hive", "Turkey") held for one-pass AI confirmation instead of creating junction rows; promoted or rejected via `resolution`, expired by `prune_engine_tables`. Unique on `(entry_id, entity_type, entity_id)`.
+**`pending_autolink_matches`** — dictionary-word autolinker matches ("Royal", "Hive", "Turkey") held for one-pass AI confirmation instead of creating junction rows; promoted or rejected via `resolution` (`promoted` / `rejected`, or `dropped_ai_off` from `scripts/maintenance/resolve_pending_ai_off.py`), expired by `prune_engine_tables`. Unique on `(entry_id, entity_type, entity_id)`.
 
 #### EntityMaintenanceLog & ActorDescriptionHistory
 

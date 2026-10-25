@@ -100,7 +100,7 @@ export const STAGE_COPY: Record<StageId, { label: string; detail: string }> = {
   ai: {
     label: "Let the AI read each article",
     detail:
-      "Finds TTPs, actors, malware, sectors, indicators and relationships, and double-checks the tags above. This is what turns up things you have never seen before.",
+      "Finds TTPs, actors, malware, sectors, indicators and relationships, and double-checks the tags above. This is what turns up things you have never seen before. With AI off, common-word names aren't tagged.",
   },
   tools: {
     label: "Create records for new tools",

@@ -217,3 +217,200 @@ async def test_reconcile_rejects_unconfirmed_entity(db_session, entry, royal_mal
 async def test_reconcile_noop_without_pending_rows(db_session, entry):
     counts = await reconcile_pending_autolinks(db_session, entry.id, {"malware": [{"name": "Royal"}]})
     assert counts == {"promoted": 0, "rejected": 0}
+
+
+# ── Feed policy: the AI never reads the entry → drop, don't hold ────
+
+
+@pytest.fixture
+def drop_counter(monkeypatch):
+    dropped: list[int] = []
+
+    async def _count(n):
+        dropped.append(n)
+
+    monkeypatch.setattr(autolinker_mod, "_count_dropped_ai_off", _count)
+    return dropped
+
+
+async def _rows(db_session, entry):
+    pending = (
+        (await db_session.execute(select(PendingAutolinkMatch).where(PendingAutolinkMatch.entry_id == entry.id)))
+        .scalars()
+        .all()
+    )
+    junction = (await db_session.execute(select(EntryMalware).where(EntryMalware.entry_id == entry.id))).scalars().all()
+    return pending, junction
+
+
+@pytest.mark.asyncio
+async def test_feed_ai_off_drops_provisional_match(db_session, entry, royal_malware, drop_counter):
+    feed = await db_session.get(Feed, entry.feed_id)
+    feed.ai_analysis_enabled = False
+    await db_session.flush()
+
+    stored = await store_autolink_matches(db_session, entry.id, [_provisional_match(royal_malware)])
+
+    assert stored == []
+    pending, junction = await _rows(db_session, entry)
+    assert pending == [] and junction == []
+    assert drop_counter == [1]
+    await db_session.refresh(royal_malware)
+    assert royal_malware.article_count == 5
+
+
+@pytest.mark.asyncio
+async def test_feed_mode_none_drops_provisional_match(db_session, entry, royal_malware, drop_counter):
+    feed = await db_session.get(Feed, entry.feed_id)
+    feed.intel_extraction_mode = "none"
+    await db_session.flush()
+
+    await store_autolink_matches(db_session, entry.id, [_provisional_match(royal_malware)])
+
+    pending, junction = await _rows(db_session, entry)
+    assert pending == [] and junction == []
+    assert drop_counter == [1]
+
+
+@pytest.mark.asyncio
+async def test_feed_ai_off_keeps_non_provisional_matches(db_session, entry, royal_malware, drop_counter):
+    feed = await db_session.get(Feed, entry.feed_id)
+    feed.ai_analysis_enabled = False
+    await db_session.flush()
+    match = {**_provisional_match(royal_malware), "provisional": False, "surface_form": "Royal Ransomware"}
+
+    stored = await store_autolink_matches(db_session, entry.id, [match])
+
+    assert len(stored) == 1
+    assert drop_counter == []
+
+
+@pytest.mark.asyncio
+async def test_feed_ai_on_holds_provisional_match(db_session, entry, royal_malware, drop_counter):
+    await store_autolink_matches(db_session, entry.id, [_provisional_match(royal_malware)])
+
+    pending, junction = await _rows(db_session, entry)
+    assert len(pending) == 1 and junction == []
+    assert drop_counter == []
+
+
+@pytest.mark.asyncio
+async def test_instance_ai_off_links_instantly(db_session, entry, royal_malware, drop_counter, monkeypatch):
+    """Instance AI off: the pending tier is off as a whole, so dictionary-word
+    names link at once (the legacy behaviour) rather than being dropped."""
+    from app.config import settings as env_settings
+    from app.services.ai_eligibility import entry_will_get_ai_analysis
+
+    monkeypatch.setattr(env_settings, "ai_one_pass_enabled", False)
+    assert not await entry_will_get_ai_analysis(db_session, entry.id)
+
+    vocab_malware = MagicMock(id=royal_malware.id, aliases=[])
+    vocab_malware.name = "Royal"
+    _build_and_activate(malware=[vocab_malware])
+    matches = scan_text("Cyber vulnerability sweep picks up Royal Navy drones.")
+    assert matches and matches[0]["provisional"] is False
+
+    stored = await store_autolink_matches(db_session, entry.id, matches)
+
+    assert len(stored) == 1
+    pending, junction = await _rows(db_session, entry)
+    assert pending == [] and len(junction) == 1
+    assert drop_counter == []
+
+
+@pytest.mark.asyncio
+async def test_ai_eligibility_predicate(db_session, entry, monkeypatch):
+    from app.config import settings as env_settings
+    from app.services.ai_eligibility import entry_will_get_ai_analysis
+
+    feed = await db_session.get(Feed, entry.feed_id)
+    assert await entry_will_get_ai_analysis(db_session, entry.id)
+
+    feed.ai_analysis_enabled = False
+    await db_session.flush()
+    assert not await entry_will_get_ai_analysis(db_session, entry.id)
+
+    feed.ai_analysis_enabled = True
+    feed.intel_extraction_mode = "none"
+    await db_session.flush()
+    assert not await entry_will_get_ai_analysis(db_session, entry.id)
+
+    feed.intel_extraction_mode = "manual"
+    await db_session.flush()
+    assert await entry_will_get_ai_analysis(db_session, entry.id)
+
+    monkeypatch.setattr(env_settings, "ai_one_pass_enabled", False)
+    assert not await entry_will_get_ai_analysis(db_session, entry.id)
+
+
+@pytest.mark.asyncio
+async def test_drop_counter_round_trip(monkeypatch):
+    store: dict[str, int] = {}
+
+    class FakeRedis:
+        async def incrby(self, key, n):
+            store[key] = store.get(key, 0) + n
+            return store[key]
+
+        async def expire(self, key, ttl):
+            return True
+
+        async def mget(self, keys):
+            return [store.get(k) for k in keys]
+
+    async def _get_redis():
+        return FakeRedis()
+
+    monkeypatch.setattr(autolinker_mod, "get_redis", _get_redis)
+    await autolinker_mod._count_dropped_ai_off(3)
+    await autolinker_mod._count_dropped_ai_off(2)
+    assert await autolinker_mod.dropped_ai_off_count(days=30) == 5
+
+
+# ── One-off cleanup script ──────────────────────────────────────────
+
+
+def _resolve_script():
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[2] / "scripts" / "maintenance" / "resolve_pending_ai_off.py"
+    spec = importlib.util.spec_from_file_location("resolve_pending_ai_off", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.asyncio
+async def test_resolve_script_clears_only_ai_off_feeds(db_session, entry, royal_malware):
+    off_feed = Feed(title="NVD", url="https://nvd.example/feed", feed_type="rss", ai_analysis_enabled=False)
+    db_session.add(off_feed)
+    await db_session.flush()
+    off_entry = Entry(
+        feed_id=off_feed.id,
+        title="Advisory",
+        guid=f"guid-{uuid.uuid4()}",
+        url=f"https://example.com/{uuid.uuid4()}",
+        content_text="Royal",
+    )
+    db_session.add(off_entry)
+    await db_session.flush()
+    # Held before the drop rule existed: write the rows directly.
+    for e in (entry, off_entry):
+        db_session.add(
+            PendingAutolinkMatch(
+                entry_id=e.id, entity_type="malware", entity_id=royal_malware.id, canonical_name="Royal"
+            )
+        )
+    await db_session.flush()
+
+    script = _resolve_script()
+    assert await script.resolve(db_session, apply=False) == {"to_resolve": 1, "kept": 1, "resolved": 0}
+
+    on_id, off_id = entry.id, off_entry.id
+    applied = await script.resolve(db_session, apply=True)
+    assert applied["resolved"] == 1
+    db_session.expire_all()
+    rows = {r.entry_id: r.resolution for r in (await db_session.execute(select(PendingAutolinkMatch))).scalars().all()}
+    assert rows == {on_id: None, off_id: "dropped_ai_off"}
+    assert (await script.resolve(db_session, apply=False))["to_resolve"] == 0

@@ -71,4 +71,7 @@ class EntityLinkStats(BaseModel):
     # "unreviewed entities".
     pending: int
     pending_ready: int
+    # Dictionary-word matches dropped in the last 30 days instead of held,
+    # because the entry's feed gets no AI analysis to confirm them.
+    pending_dropped_ai_off: int = 0
     relationships_total: int

@@ -25,6 +25,7 @@ from app.core.exceptions import AppError
 from app.core.pagination import PaginatedResponse
 from app.core.security import get_current_user
 from app.database import get_db
+from app.intelligence.autolinker import dropped_ai_off_count
 from app.models.cve import CVE, EntryCVE
 from app.models.cwe import CWE, EntryCWE
 from app.models.entity_relationship import EntityRelationship
@@ -231,6 +232,7 @@ async def entity_link_stats(
             .where(PendingAutolinkMatch.resolution.is_(None), PendingAutolinkMatch.confidence == "high")
         )
     ).scalar() or 0
+    pending_dropped_ai_off = await dropped_ai_off_count(days=30)
     relationships_total = (
         await db.execute(
             select(func.count()).select_from(EntityRelationship).where(EntityRelationship.source != "analyst_rejected")
@@ -243,6 +245,7 @@ async def entity_link_stats(
         by_type=by_type,
         pending=pending,
         pending_ready=pending_ready,
+        pending_dropped_ai_off=pending_dropped_ai_off,
         relationships_total=relationships_total,
     )
 
