@@ -90,7 +90,7 @@ export const STAGE_COPY: Record<StageId, { label: string; detail: string }> = {
   autolink: {
     label: "Tag articles with entities you already track",
     detail:
-      "Matches names and aliases from your catalog \u2014 actors, malware, CVEs, TTPs, vendors, products, tools. Links what exists; never invents anything new.",
+      "Matches names and aliases from your catalog \u2014 actors, malware, vendors, products, tools \u2014 plus CVE and ATT&CK IDs. Links what exists, with one exception: a CVE ID you don't have yet becomes a new CVE record.",
   },
   relevance: {
     label: "Skip off-topic articles",
@@ -265,7 +265,9 @@ export function summarizeStages(values: FeedFormValues, ctx: Context): string {
   let summary = `Every article is ${joinWords(parts)}.`;
   summary += on("ai")
     ? " The AI can add entities you do not have yet."
-    : " Nothing new is added — only what is already in your catalog gets linked.";
+    : on("autolink")
+      ? " Nothing new is added except CVE records for CVE IDs you don't have yet — everything else must already be in your catalog."
+      : " Nothing new is added — only what is already in your catalog gets linked.";
   if (on("rules")) summary += " Detection rules written out in the text are saved to your library.";
   return summary;
 }

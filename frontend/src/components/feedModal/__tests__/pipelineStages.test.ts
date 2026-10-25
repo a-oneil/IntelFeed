@@ -177,6 +177,12 @@ describe("summarizeStages", () => {
     expect(text).toContain("Nothing new is added");
   });
 
+  it("owns up to autolink creating CVE records", () => {
+    expect(summarizeStages(values(), ctx(false))).toContain("CVE records");
+    expect(stage(values(), "autolink").detail).toContain("becomes a new CVE record");
+    expect(stage(values(), "autolink").detail).not.toContain("never invents");
+  });
+
   it("mentions detection rules only when they are being pulled out", () => {
     expect(summarizeStages(values(), ctx(true))).not.toContain("Detection rules");
     expect(
