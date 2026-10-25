@@ -85,7 +85,7 @@ export const STAGE_COPY: Record<StageId, { label: string; detail: string }> = {
   master: {
     label: "Analyse this feed",
     detail:
-      "Off, articles still arrive and stay searchable \u2014 nothing is pulled out of them. No entities, no scoring.",
+      "Off, articles still arrive, stay searchable, get a priority score, join story threads and run through your automation rules. Nothing is tagged and nothing is created from them \u2014 no entities, CVEs, indicators or detection rules, whatever the switches below say.",
   },
   autolink: {
     label: "Tag articles with entities you already track",
@@ -192,10 +192,12 @@ export function describeStages(values: FeedFormValues, ctx: Context): StageRow[]
   if (!pipeline?.engine_enabled) return rows;
 
   // A plan outranks the Feed booleans, so show its value and stop offering a
-  // checkbox that would write somewhere nothing reads.
+  // checkbox that would write somewhere nothing reads. Mode none outranks the
+  // plan in turn: the autolink and extract tasks both check it themselves, so
+  // a plan that enables them on a feed that is not analysed still runs nothing.
   return rows.map((row) => {
     const scope = planOverride(row.id, ctx);
-    if (!scope) return row;
+    if (!scope || !processing) return row;
     const stage = PLAN_STAGE[row.id]!;
     const planned = pipeline.stages[stage]?.enabled ?? row.on;
     return {
@@ -244,7 +246,7 @@ export function summarizeStages(values: FeedFormValues, ctx: Context): string {
   const on = (id: StageId) => rows.find((r) => r.id === id)?.on ?? false;
 
   if (!on("master")) {
-    return "Articles still arrive, are cleaned up and stay searchable. Nothing is pulled out of them: no tagging, no AI, no indicator matching, and no entity created or linked.";
+    return "Articles still arrive, are cleaned up, stay searchable, get a priority score, join story threads and run through your automation rules. Nothing is pulled out of them: no tagging, no AI, no indicator matching, no CVE lookups or saved rules, and no entity created or linked.";
   }
 
   const parts: string[] = [];

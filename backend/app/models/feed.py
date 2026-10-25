@@ -53,7 +53,7 @@ class Feed(Base):
         Boolean, nullable=False, default=True, server_default="true"
     )  # Run the one-pass AI analysis on this feed's entries at ingest.
     # Until this existed, the only way to stop the AI reading a feed was to set
-    # intel_extraction_mode="none", which also killed autolinking and scoring —
+    # intel_extraction_mode="none", which also kills autolinking and extraction —
     # so a noisy source you still wanted matched against your catalog had no
     # setting that expressed it. Gated globally by `ai_one_pass_enabled` too:
     # both must be on.

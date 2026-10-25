@@ -478,6 +478,7 @@ async def _extract_entry_intel(entry_id: str):
     from app.intelligence.ttp import extract_ttp_ids_regex, store_ttps
     from app.models.entry import Entry
     from app.models.feed import Feed
+    from app.pipeline.plans import feed_analysis_off
 
     stats = {"ttps": 0, "cves": 0, "mitigations": 0, "detection_rules": 0}
     # Entity ids this entry touched, per type — linking bumps article_count and
@@ -491,6 +492,28 @@ async def _extract_entry_intel(entry_id: str):
         if not entry:
             logger.warning("Entry %s not found for auto-extraction", entry_id)
             return stats
+
+        # This task is dispatched when EITHER flag is on
+        # (`auto_extract_on_ingest or extract_detection_rules`), so each half
+        # has to check its own. Without the regex check below, turning off
+        # "look up CVEs in NVD" did nothing at all as long as detection-rule
+        # extraction was on — the regex passes ran regardless, and the setting
+        # was decorative.
+        feed_row = (
+            await db.execute(
+                select(Feed.intel_extraction_mode, Feed.auto_extract_on_ingest, Feed.extract_detection_rules).where(
+                    Feed.id == entry.feed_id
+                )
+            )
+        ).one_or_none()
+        # "Analyse this feed" off (mode none) outranks both flags and the
+        # GitHub import: nothing is tagged or created. Dispatch already skips
+        # the stage for these feeds; this catches plan overlays, forced
+        # dispatches and the Engine's re-run button.
+        if feed_row is not None and feed_analysis_off(feed_row):
+            return stats
+        run_regex = bool(feed_row and feed_row.auto_extract_on_ingest)
+        extract_rules_flag = bool(feed_row and feed_row.extract_detection_rules)
 
         # GitHub repo entries with a known content_type use the dedicated import
         # pipeline which handles rule creation, TTP/CVE linking, and scoring.
@@ -527,20 +550,6 @@ async def _extract_entry_intel(entry_id: str):
         has_raw_content = bool((entry.metadata_ or {}).get("raw_content"))
         if not text.strip() and not has_raw_content:
             return stats
-
-        # This task is dispatched when EITHER flag is on
-        # (`auto_extract_on_ingest or extract_detection_rules`), so each half
-        # has to check its own. Without the first check below, turning off
-        # "look up CVEs in NVD" did nothing at all as long as detection-rule
-        # extraction was on — the regex passes ran regardless, and the setting
-        # was decorative.
-        feed_row = (
-            await db.execute(
-                select(Feed.auto_extract_on_ingest, Feed.extract_detection_rules).where(Feed.id == entry.feed_id)
-            )
-        ).one_or_none()
-        run_regex = bool(feed_row and feed_row.auto_extract_on_ingest)
-        extract_rules_flag = bool(feed_row and feed_row.extract_detection_rules)
 
         if run_regex:
             # Regex-based TTP extraction (MITRE ATT&CK technique IDs)

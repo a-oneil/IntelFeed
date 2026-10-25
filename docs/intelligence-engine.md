@@ -1632,7 +1632,7 @@ The observables ledger scan has no switch of its own, but it is not unconditiona
 
 > **This section used to describe a five-way preset** — "Full", "Selective", "Known entities only", "Manual", "None" — mapped onto `intel_extraction_mode` + `auto_extract_on_ingest`. Three of those labels had stopped being true. The one-pass AI analysis, which does most of the extraction today, gates only on `intel_extraction_mode == "none"` and ignores `auto_extract_on_ingest` entirely, so a feed set to "Known entities only — match against existing database" or "Manual — only when triggered" still had the AI read every article and create entities. The preset is gone; the switches above are what actually exists. See `frontend/src/components/feedModal/pipelineStages.ts`.
 
-**The AI pass is the main extraction path, and it has its own switch.** `enqueue_entry_analysis` (`services/entry_analysis.py`) refuses to queue an entry when the global `ai_one_pass_enabled` is off, when the feed's `intel_extraction_mode` is `none`, or when the feed's `ai_analysis_enabled` is false. That last field exists because turning the AI off for one noisy source used to require `mode=none`, which also killed its autolinking and scoring — there was no setting for "keep matching this against my catalog, just don't let the AI invent entities from it".
+**The AI pass is the main extraction path, and it has its own switch.** `enqueue_entry_analysis` (`services/entry_analysis.py`) refuses to queue an entry when the global `ai_one_pass_enabled` is off, when the feed's `intel_extraction_mode` is `none`, or when the feed's `ai_analysis_enabled` is false. That last field exists because turning the AI off for one noisy source used to require `mode=none`, which also switches off its autolinking and extraction — there was no setting for "keep matching this against my catalog, just don't let the AI invent entities from it".
 
 The sections below describe the **deterministic** layer in detail: what each `intel_extraction_mode` value does to the autolinker and the regex passes. They are accurate about that layer and say nothing about the AI pass, which runs independently of everything except the three gates above.
 
@@ -1649,9 +1649,9 @@ Two distinct extraction pipelines run on each new entry:
 - Mitigation extraction — MITRE M-IDs
 - GitHub rule import — for `github_repo` entries with a `content_type`, runs the dedicated `process_github_entry` pipeline that parses SIGMA/YARA/Splunk/etc. rules
 
-Gated by `auto_extract_on_ingest` (and for GitHub-typed entries, runs regardless when `content_type` is set).
+Dispatched when `auto_extract_on_ingest` or `extract_detection_rules` is on and the feed's mode is not `none`; the CVE/TTP/mitigation passes then check `auto_extract_on_ingest` themselves, and GitHub-typed entries (`content_type` set) take the import pipeline whichever flag dispatched it. Every ingest dispatch reads one gate, `feed_runs_extraction` (`pipeline/plans.py`), and `_extract_entry_intel` re-checks mode `none` itself, so a pipeline plan that enables the stage, a forced dispatch or the Engine's re-run never reaches past it.
 
-A third optional layer — `extract_detection_rules` — runs `extract_rules_from_content` to pull SIGMA/YARA/SPL/Elastic/Snort rules from non-GitHub article bodies. Independent of mode/extract flags.
+A third optional layer — `extract_detection_rules` — runs `extract_rules_from_content` to pull SIGMA/YARA/SPL/Elastic/Snort rules from non-GitHub article bodies. Independent of `auto_extract_on_ingest` and of the autolink modes; off when the mode is `none`.
 
 ### `full` — autolink every article
 
@@ -1665,7 +1665,7 @@ Cost considerations: NVD API calls are rate-limited (5 req / 30 sec without an A
 
 ### `selective` — autolink security-relevant articles (default)
 
-Backend: `mode=selective, extract=true`. The relevance pre-filter (`backend/app/intelligence/relevance_filter.py`) runs first as the gate. If the score ≥ `DEFAULT_RELEVANCE_THRESHOLD` (0.15), the entry proceeds through the autolinker, regex CVE + NVD, regex TTP, and regex mitigations; below 0.15 all extraction is skipped (the entry itself is still ingested and visible in the reader). Detection rule extraction (if enabled) runs independent of the relevance gate.
+Backend: `mode=selective, extract=true`. The relevance pre-filter (`backend/app/intelligence/relevance_filter.py`) runs first as the gate. If the score ≥ `DEFAULT_RELEVANCE_THRESHOLD` (0.15), the entry proceeds through the autolinker; below 0.15 autolinking is skipped (the entry itself is still ingested and visible in the reader). The relevance gate covers the autolinker only: regex CVE + NVD, regex TTP, regex mitigations and detection rule extraction run in a parallel stage that never reads the score, so they follow their own flags.
 
 The relevance filter is a zero-cost lexical scorer (no AI, no DB, pure string matching). It sums weighted hits across five keyword categories:
 
@@ -1681,7 +1681,7 @@ Per-category contributions use diminishing returns (1 hit = 60% of the weight; e
 
 **Use for:** general security blogs (Krebs, Bleeping Computer, The Record, DarkReading, The Hacker News), social sources where some posts are intel and others aren't, vendor blogs mixing security content with marketing — the default choice for anything you're not sure about. **Avoid for:** non-English feeds unlikely to hit English keywords (use full or known-only — the autolinker handles translations but the relevance filter is English-only) and sources where every entry is intel by definition (use full).
 
-Subtle gotcha: if the relevance filter rejects an entry, the heavy enrichment pipeline is skipped too — a borderline article that contains `CVE-2024-12345` but uses none of the keyword vocabulary won't get those entities extracted. In practice the structured-pattern bonuses (+0.4 for CVE, +0.3 for TTP) make this rare.
+Subtle gotcha: if the relevance filter rejects an entry, only the autolinker skips it. With `auto_extract_on_ingest` on, a borderline article that names `CVE-2024-12345` still gets the CVE through the regex pass. In practice the structured-pattern bonuses (+0.4 for CVE, +0.3 for TTP) make a rejection with an ID in it rare.
 
 ### `full` with `auto_extract_on_ingest=false` — catalog matching without NVD cost
 
@@ -1695,15 +1695,17 @@ What you lose vs. selective/full: new CVE references don't trigger NVD lookups (
 
 ### `manual` — no autolinking
 
-Backend: `mode=manual, extract=false`. The autolinker and standalone CVE/TTP/mitigation extraction are skipped. Detection rule extraction still runs if `extract_detection_rules=true` (the rescan path at `intel_feed_tasks.py:1102` gates rule extraction only by the flag, not the mode).
+Backend: `mode=manual`. The autolinker is skipped. The standalone CVE/TTP/mitigation pass still runs if `auto_extract_on_ingest=true`, and detection rule extraction if `extract_detection_rules=true`: both follow their own flags in this mode.
 
-Entries from this feed are ingested normally — sanitized HTML, title/summary/content text, Meilisearch indexing, translation — they simply aren't analyzed for entities. You can still run extraction on demand: the intelligence workspace has actions to autolink a single entry, and bulk rescan tools (scripts + admin endpoints) can target specific entries or feeds regardless of mode. New entities created later won't retroactively link to manual-mode entries unless explicitly triggered (retroactive linking goes through the autolinker, which is gated by mode).
+Entries from this feed are ingested normally — sanitized HTML, title/summary/content text, Meilisearch indexing, translation — they just aren't matched against your catalog at ingest. Manual does not stop the AI: if `ai_analysis_enabled` is on, the one-pass analysis still reads each article, tags it and can create entities, and the observables scan still runs. You can still run extraction on demand: the intelligence workspace has actions to autolink a single entry, and bulk rescan tools (scripts + admin endpoints) can target specific entries or feeds regardless of mode.
 
 **Use for:** noisy feeds you read for situational awareness but don't want polluting the entity graph, untrusted/unrated sources, feeds with persistent false-positive matches, personal feeds. If you genuinely never want anything from a feed, prefer `none`; if you actually want most entries processed, `selective` is the right call.
 
 ### `none` — process nothing
 
-Backend: `mode=none, extract=false`. The only mode that opts out of every extraction pipeline, including detection rule extraction (the bulk rescan loop at `intel_feed_tasks.py:1073` short-circuits on `mode=none` before checking the rule-extraction flag). Entries are still ingested, sanitized, indexed, and translated — they just have zero intel processing applied.
+Backend: `mode=none`, whatever `auto_extract_on_ingest` and `extract_detection_rules` say. The only mode that opts out of every extraction pipeline: no autolinking, no AI analysis, no observables scan, no regex CVE/NVD, TTP or mitigation pass, no detection rule extraction and no GitHub rule import. Dispatch leaves the extract stage out (`feed_runs_extraction`, `pipeline/plans.py`), and `_extract_entry_intel`, `_autolink_entry` and `_scan_entry_observables` each check the mode themselves, so a pipeline plan cannot switch them back on; the bulk rescan skips these feeds too. Nothing is tagged and no entity, CVE, indicator or rule is created from the feed's articles.
+
+What still happens: entries are ingested, sanitized, indexed and translated, get a priority score from the signal engine, are embedded and clustered into story threads (when embeddings are on), are matched against intelligence requirements, and run through automation rules. None of those read the mode.
 
 **Use for:** feeds you want to read but keep entirely out of the intel system (personal blogs, hobby content), test/staging feeds, or temporarily quieting a feed while you fix a noisy entity catalog. Note: if you want detection rules extracted you need at least `manual` mode with `extract_detection_rules=true`, and if you want entries searchable by entity name you need autolinking (use `manual` + on-demand autolink, or another mode).
 

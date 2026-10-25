@@ -78,10 +78,10 @@ The full registry (`registry.py:35-144`):
 
 Resolution lives in `backend/app/pipeline/plans.py`:
 
-1. **Flag gate** — `resolve_feed_plan()` (`backend/app/pipeline/plans.py:116`) returns `None` when `pipeline_engine_enabled` is off; callers then use the legacy `run_extraction` boolean path. This is the instant-rollback lever.
-2. **Base layer** — `synthesize_from_feed()` (`plans.py:28`) produces a plan from the feed's own columns: every stage at its registry default, except `extract`, which is enabled iff `feed.auto_extract_on_ingest` or `feed.extract_detection_rules`, with `{mode, detection_rules}` config from the feed columns. The legacy booleans stay authoritative until a follow-up migration drops them; synthesizing at resolve time (not snapshotting) avoids drift.
-3. **Overlay** — active `PipelinePlan` rows for the feed's scopes are merged in order `global → category → feed` (`plans.py:104-110`); `_merge()` (`plans.py:47`) overrides `enabled` per stage and dict-merges `config`.
-4. **Cache** — resolutions are cached in Redis per feed under `intelfeed:pipeline_plan:{feed_id}:{version}` with a 600s TTL (`plans.py:23-25`). Any plan write bumps `intelfeed:pipeline_plan:version` via `bump_plan_version()` (`plans.py:58`) — the same version-key invalidation pattern as the autolinker vocabulary. Resolution happens once per feed fetch, not per entry.
+1. **Flag gate** — `resolve_feed_plan()` (`backend/app/pipeline/plans.py:137`) returns `None` when `pipeline_engine_enabled` is off; callers then use the legacy `run_extraction` boolean path. This is the instant-rollback lever.
+2. **Base layer** — `synthesize_from_feed()` (`backend/app/pipeline/plans.py:51`) produces a plan from the feed's own columns: every stage at its registry default, except `extract`, which is enabled iff `feed.auto_extract_on_ingest` or `feed.extract_detection_rules`, with `{mode, detection_rules}` config from the feed columns. The legacy booleans stay authoritative until a follow-up migration drops them; synthesizing at resolve time (not snapshotting) avoids drift.
+3. **Overlay** — active `PipelinePlan` rows for the feed's scopes are merged in order `global → category → feed` (`plans.py:104-110`); `_merge()` (`backend/app/pipeline/plans.py:68`) overrides `enabled` per stage and dict-merges `config`.
+4. **Cache** — resolutions are cached in Redis per feed under `intelfeed:pipeline_plan:{feed_id}:{version}` with a 600s TTL (`plans.py:23-25`). Any plan write bumps `intelfeed:pipeline_plan:version` via `bump_plan_version()` (`backend/app/pipeline/plans.py:79`) — the same version-key invalidation pattern as the autolinker vocabulary. Resolution happens once per feed fetch, not per entry.
 
 `resolve_feed_plan` is called at each ingest path in `backend/app/workers/feed_tasks.py` (`:620`, `:1092`, `:1221`, `:2002`) before entries are dispatched.
 

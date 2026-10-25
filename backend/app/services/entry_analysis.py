@@ -369,6 +369,7 @@ async def enqueue_entry_analysis(db: AsyncSession, entry_id: uuid.UUID) -> str |
     from sqlalchemy import func
 
     from app.models.feed import Feed
+    from app.pipeline.plans import feed_analysis_off
 
     async def _write_status(status: str, **extra) -> str:
         # Insert, or overwrite a feed-policy skip (the only re-decided status);
@@ -389,10 +390,10 @@ async def enqueue_entry_analysis(db: AsyncSession, entry_id: uuid.UUID) -> str |
     # while ai_analysis_enabled=False means "keep matching it against the
     # catalog, just don't let the AI read it and invent entities". Before the
     # second one existed, muting a noisy source's AI meant turning off its
-    # autolinking and scoring too.
+    # autolinking and extraction too.
     feed = await db.get(Feed, entry.feed_id)
     if feed is not None:
-        if getattr(feed, "intel_extraction_mode", None) == "none":
+        if feed_analysis_off(feed):
             return existing if existing == SKIPPED_FEED_NONE else await _write_status(SKIPPED_FEED_NONE)
         if not getattr(feed, "ai_analysis_enabled", True):
             return existing if existing == SKIPPED_FEED_AI_OFF else await _write_status(SKIPPED_FEED_AI_OFF)

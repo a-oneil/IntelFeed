@@ -24,6 +24,7 @@ from app.models.entry import Entry
 from app.models.entry_media import EntryMedia
 from app.models.feed import Feed
 from app.models.podcast import Podcast
+from app.pipeline.plans import feed_runs_extraction
 from app.services.dedup import compute_content_hash
 from app.services.sanitizer import extract_first_image, extract_og_image, html_to_text, sanitize_html
 from app.workers.celery_app import celery_app
@@ -666,7 +667,7 @@ async def _fetch_feed(feed_id: str):
                 logger.warning("Failed to dispatch automation tasks for feed %s", feed.id, exc_info=True)
 
             # Dispatch entry processing pipeline (translate? → autolink + extraction → post-processing)
-            run_extraction = bool(feed.auto_extract_on_ingest or feed.extract_detection_rules)
+            run_extraction = feed_runs_extraction(feed)
             try:
                 from app.pipeline.plans import resolve_feed_plan
 
@@ -1135,7 +1136,7 @@ async def _fetch_extended_feed(db: AsyncSession, feed: Feed) -> None:
             logger.warning("Failed to dispatch automation tasks for extended feed %s", feed.id, exc_info=True)
 
         # Dispatch entry processing pipeline (translate? → autolink + extraction → post-processing)
-        run_extraction = bool(feed.auto_extract_on_ingest or feed.extract_detection_rules)
+        run_extraction = feed_runs_extraction(feed)
         try:
             from app.pipeline.plans import resolve_feed_plan
 
@@ -1264,7 +1265,7 @@ async def _probe_telegram_edits_and_deletes(db: AsyncSession, feed: Feed, adapte
         )
 
     # Re-run autolink/extraction for edited entries so derived intel matches new content
-    run_extraction = bool(feed.auto_extract_on_ingest or feed.extract_detection_rules)
+    run_extraction = feed_runs_extraction(feed)
     try:
         from app.pipeline.plans import resolve_feed_plan
 
@@ -2053,7 +2054,7 @@ async def _full_sync_github_feed(feed_id: str, user_id: str | None = None) -> di
 
         # Dispatch entry processing pipeline for new entries
         if new_entry_ids:
-            run_extraction = bool(feed.auto_extract_on_ingest or feed.extract_detection_rules)
+            run_extraction = feed_runs_extraction(feed)
             try:
                 from app.pipeline.plans import resolve_feed_plan
 

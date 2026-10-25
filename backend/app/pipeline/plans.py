@@ -25,11 +25,32 @@ PLAN_VERSION_KEY = "intelfeed:pipeline_plan:version"
 PLAN_CACHE_TTL = 600
 
 
+def feed_analysis_off(feed) -> bool:
+    """True when the feed's "Analyse this feed" switch is off (mode ``none``).
+
+    Mode ``none`` outranks the per-feed extract switches: the CVE/NVD pass,
+    rule extraction and the GitHub repo import all stay off, whatever
+    ``auto_extract_on_ingest`` / ``extract_detection_rules`` say. Works on a
+    Feed or on any row exposing ``intel_extraction_mode``.
+    """
+    return getattr(feed, "intel_extraction_mode", None) == "none"
+
+
+def feed_runs_extraction(feed) -> bool:
+    """Whether new entries from this feed get the extract stage.
+
+    The single gate every ingest dispatch uses; the extract task re-checks
+    ``feed_analysis_off`` itself, so a plan overlay or a forced dispatch can't
+    reach past it.
+    """
+    if feed_analysis_off(feed):
+        return False
+    return bool(getattr(feed, "auto_extract_on_ingest", False) or getattr(feed, "extract_detection_rules", False))
+
+
 def synthesize_from_feed(feed) -> dict[str, dict]:
     """Stage plan equivalent to today's Feed-boolean behavior."""
-    run_extraction = bool(
-        getattr(feed, "auto_extract_on_ingest", False) or getattr(feed, "extract_detection_rules", False)
-    )
+    run_extraction = feed_runs_extraction(feed)
     plan: dict[str, dict] = {}
     for stage in PIPELINE_STAGES.values():
         enabled = stage.default_enabled
