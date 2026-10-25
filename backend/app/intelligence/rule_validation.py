@@ -1,7 +1,8 @@
 """BE-4: Rule validation engine.
 
-Syntax-only validation for 7 detection rule formats:
-SIGMA, Splunk SPL, KQL, Elastic QL, CrowdStrike QL, Snort/Suricata, YARA.
+Syntax-only validation for 9 detection rule formats:
+SIGMA, Splunk SPL, KQL, Elastic QL (EQL / ES|QL), CrowdStrike QL, Snort/Suricata,
+YARA, Nuclei, Panther.
 """
 
 import re
@@ -69,6 +70,61 @@ def _check_balanced_quotes(text: str) -> list[ValidationError]:
             errors.append(
                 ValidationError(line=None, column=None, severity="error", message=f"Unmatched {quote_char} quote")
             )
+    return errors
+
+
+def _strip_comments(text: str) -> str:
+    """Drop ``//`` and ``/* */`` comments (KQL, EQL, ES|QL) outside string literals.
+
+    Published hunting queries open with comment lines ("// processes that
+    don't …"); an apostrophe there is prose, not an unbalanced quote. KQL
+    verbatim strings (``@"C:\\Temp\\"``) take no backslash escapes.
+    """
+    out: list[str] = []
+    i, n = 0, len(text)
+    quote: str | None = None
+    verbatim = False
+    while i < n:
+        ch = text[i]
+        if quote:
+            if ch == "\\" and verbatim:
+                out.append("/")  # a literal backslash, not an escape
+                i += 1
+                continue
+            out.append(ch)
+            if ch == "\\" and i + 1 < n:
+                out.append(text[i + 1])
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+            i += 1
+            continue
+        if ch in "\"'":
+            quote = ch
+            verbatim = i > 0 and text[i - 1] == "@"
+            out.append(ch)
+            i += 1
+            continue
+        if text.startswith("//", i):
+            end = text.find("\n", i)
+            i = n if end == -1 else end
+            continue
+        if text.startswith("/*", i):
+            end = text.find("*/", i + 2)
+            i = n if end == -1 else end + 2
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def _check_balanced_code(text: str) -> list[ValidationError]:
+    """Bracket and quote balance with comments left out."""
+    code = _strip_comments(text)
+    errors = _check_balanced(code, "(", ")")
+    errors.extend(_check_balanced(code, "[", "]"))
+    errors.extend(_check_balanced_quotes(code))
     return errors
 
 
@@ -183,9 +239,7 @@ def validate_kql(rule_content: str) -> ValidationResult:
             valid=False, errors=[ValidationError(line=None, column=None, severity="error", message="Empty KQL query")]
         )
 
-    errors.extend(_check_balanced(content, "(", ")"))
-    errors.extend(_check_balanced(content, "[", "]"))
-    errors.extend(_check_balanced_quotes(content))
+    errors.extend(_check_balanced_code(content))
 
     # KQL should typically start with a table name
     first_token = content.split()[0] if content.split() else ""
@@ -207,14 +261,13 @@ def validate_elastic_ql(rule_content: str) -> ValidationResult:
             valid=False, errors=[ValidationError(line=None, column=None, severity="error", message="Empty EQL query")]
         )
 
-    errors.extend(_check_balanced(content, "(", ")"))
-    errors.extend(_check_balanced(content, "[", "]"))
-    errors.extend(_check_balanced_quotes(content))
+    errors.extend(_check_balanced_code(content))
 
-    # EQL typically starts with event category
+    # EQL typically starts with event category; ES|QL with FROM
     eql_categories = ["process", "file", "network", "registry", "any", "sequence", "join"]
-    first_word = content.split()[0].lower() if content.split() else ""
-    if first_word not in eql_categories and first_word != "where":
+    words = _strip_comments(content).split()
+    first_word = words[0].lower() if words else ""
+    if first_word not in eql_categories and first_word not in ("where", "from"):
         suggestions.append(f"EQL queries typically start with an event category: {', '.join(eql_categories)}")
 
     has_errors = any(e.severity == "error" for e in errors)

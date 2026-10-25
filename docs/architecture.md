@@ -494,9 +494,9 @@ When `feed.extract_detection_rules = True`, entry content is scanned for embedde
 | Format | Detection Method |
 |--------|-----------------|
 | SIGMA | YAML structure with `detection:` key |
-| Splunk SPL | SPL query patterns |
-| CrowdStrike QL | CrowdStrike query syntax |
-| Elastic QL / KQL | Elasticsearch / Kibana query syntax |
+| Splunk SPL | SPL query in a code block, or a text line starting `index=` / `search` / `\| tstats` |
+| KQL | Defender XDR / Sentinel query in a code block (`DeviceProcessEvents \| where …`), or an Elastic TOML rule with `language = "kuery"` |
+| Elastic QL | EQL (`process where …`, `sequence by …`) or ES\|QL (`FROM logs-* \| …`) in a code block, or an Elastic TOML rule |
 | YARA | `rule name { meta: ... strings: ... condition: ... }` |
 | Snort/Suricata | Alert rule patterns (stored as `snort_suricata`) |
 

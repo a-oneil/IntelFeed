@@ -2666,7 +2666,7 @@ async def extract_entry_detection_rules(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Extract detection rules (SIGMA, YARA, Elastic, Snort/Suricata, Splunk) from entry content."""
+    """Extract detection rules (SIGMA, YARA, Elastic EQL/ES|QL/TOML, KQL, Snort/Suricata, Splunk) from entry content."""
     from app.intelligence.rule_extraction import extract_rules_from_content, store_extracted_rules
 
     entry = await _get_entry(db, entry_id)
@@ -2675,7 +2675,9 @@ async def extract_entry_detection_rules(
     if not (entry.metadata_ or {}).get("raw_content") and entry.title:
         text = entry.title + "\n" + text
 
-    extracted = extract_rules_from_content(text, source_url=entry.url)
+    extracted = extract_rules_from_content(
+        text, source_url=entry.url, html=entry.content_html, article_title=entry.title
+    )
     if not extracted:
         return []
 

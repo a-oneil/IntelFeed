@@ -66,20 +66,20 @@ Extraction pipeline (`rule_extraction.py`) scans article content for 6 detection
 | Format | Detection Heuristic | Extractor | Confidence |
 |--------|-------------------|-----------|-----------|
 | **SIGMA** | YAML with `title:`, `detection:`, `logsource:` | `_extract_sigma_rules()` | High |
-| **Splunk SPL** | `index=` or `\|` pipes + SPL commands | `_extract_splunk_spl_rules()` | Medium-High |
-| **Elastic QL** | TOML `[rule]` section with `query` field | `_extract_elastic_toml_rules()` | High |
-| **KQL** | Elastic TOML with `language: kusto/kql` or `type: query/threshold/new_terms` | `_extract_elastic_toml_rules()` with type mapping | Medium |
+| **Splunk SPL** | Code block with `index=` or `\|` pipes + SPL commands; inline lines starting `index=` / `search` / `\| tstats` | `_extract_query_rules()` | Medium-High |
+| **Elastic QL** | Code block with EQL (`process where`, `sequence by`) or ES\|QL (`FROM logs-* \| …`); TOML `[rule]` section with `query` field | `_extract_query_rules()`, `_extract_elastic_toml_rules()` | High |
+| **KQL** | Code block with a Defender XDR / Sentinel table + tabular operators (`\| where`, `\| summarize`, `\| project`); Elastic TOML with `language: kusto/kql` or `type: query/threshold/new_terms` | `_extract_query_rules()`, `_extract_elastic_toml_rules()` | Medium-High |
 | **CrowdStrike QL** | Reserved words like `event_simpleName` | Reserved in validator only; no dedicated extractor | Low |
 | **YARA** | `rule {name}` with `strings:` and `condition:` | `_extract_yara_rules()` | High |
 | **Snort/Suricata** | `alert/log/pass/drop/reject` + protocol + options | `_extract_snort_suricata_rules()` | High |
 
 ### Extraction Algorithm
 
-**Entry point:** `extract_rules_from_content(text: str, source_url: str | None = None) -> list[dict]` (lines 24-56)
+**Entry point:** `extract_rules_from_content(text, source_url=None, *, html=None, article_title=None) -> list[dict]` (lines 32-87). `html` is the entry's sanitized `content_html`, read for `<pre>`/`<code>` blocks (the plain text has them flattened); HTML entities (`&gt;` `&lt;` `&amp;`) are decoded before extraction.
 
 For each format, the extractor:
 
-1. **Scans for code blocks** — Fenced markdown (`\`\`\`sigma`, `\`\`\`yaml`, `\`\`\`spl`)
+1. **Scans for code blocks** — Fenced markdown (`\`\`\`sigma`, `\`\`\`yaml`, `\`\`\`spl`, `\`\`\`kql`) and the article HTML's `<pre>`/`<code>`
 2. **Matches pattern** — Language-specific regex or parser
 3. **Extracts metadata** — Title (from content or fallback), severity, tags, MITRE tactics, log sources
 4. **Returns structured dict** with keys:
@@ -91,11 +91,11 @@ For each format, the extractor:
    - `mitre_tactics` — Extracted from tags or metadata
    - `log_sources` — Dict with category/product/service keys
 
-**Deduplication:** After extraction, rules are validated. Invalid rules (lines 42-56) are logged but filtered out before storage.
+**Deduplication:** After extraction, rules are validated. Repeats are dropped and invalid rules (lines 64-84) are logged but filtered out before storage.
 
 ### Per-Format Details
 
-#### SIGMA (lines 215-279)
+#### SIGMA (lines 299-369)
 
 - **Parser:** `yaml.safe_load_all()` handles multi-document YAML
 - **Required fields:** `title`, `detection`, `logsource`
@@ -106,19 +106,28 @@ For each format, the extractor:
 - **Log sources:** Entire `logsource:` dict (category, product, service, etc.)
 - **Normalization:** Re-serialized to canonical YAML for storage (line 265)
 
-#### Splunk SPL (lines 315-399)
+#### Splunk SPL (lines 405-600)
 
-- **Heuristic detection:** `_is_spl_query()` (lines 315-351) checks for:
+- **Heuristic detection:** `_is_spl_query()` (lines 405-441) checks for:
   - `index=` + pipe operators (strong)
   - `search ` + pipe operators
   - `| tstats` anywhere in text
   - Pipe into known SPL commands (stats, where, eval, table, rex, dedup, etc.)
 - **False positive avoidance:** Requires multiple SPL indicators; won't match raw pipes alone
-- **Code block parsing:** Looks for \`\`\`spl, \`\`\`splunk, or any fenced block + content analysis
-- **Inline extraction:** Multi-line blocks starting with `index=`, `search `, or `| tstats`; fragments under 30 chars skipped (lines 387-397)
-- **Dedup by content:** Tracks seen rules to avoid duplicates (line 357)
+- **Code block parsing:** Any fenced or `<pre>`/`<code>` block + content analysis; a \`\`\`spl / \`\`\`splunk tag is a hint, not proof
+- **Inline extraction:** Multi-line blocks starting with `index=`, `search `, or `| tstats`; fragments under 30 chars skipped
+- **Dedup by content:** Whitespace-blind, so the copy from the `<pre>` block and the copy from the flattened text count once
+- **Title:** `"<article title> — SPL query N"`, numbered in article order
 
-#### Elastic/KQL (lines 125-212)
+#### KQL, EQL and ES|QL in code blocks (`_extract_query_rules()`)
+
+- **Code blocks only** — prose that mentions `where` or a table name never becomes a rule
+- **KQL:** a table followed by a pipe and a tabular operator. The table must be a known Defender XDR / Sentinel table (`DeviceProcessEvents`, `SecurityEvent`, `SigninLogs`…), or the query must use syntax SPL lacks (`| summarize`, `| project`, `ago(`, `=~`, `has`, `==`). Stored as `kql`
+- **EQL:** `<category> where …`, `sequence [by …] [with maxspan=…] [`, `join … [`. Stored as `elastic_ql`
+- **ES|QL:** `FROM <index pattern> | WHERE/STATS/EVAL/KEEP/…`. Stored as `elastic_ql`
+- **Title:** `"<article title> — KQL query N"` / `EQL` / `ES|QL`, numbered per language in article order
+
+#### Elastic/KQL TOML (lines 205-296)
 
 - **Format detection:** TOML files with `[rule]` or `[metadata]` sections
 - **Type mapping:** Query language in TOML determines rule_type:
@@ -130,7 +139,7 @@ For each format, the extractor:
 - **Log sources:** Pulled from `rule.index[]` field
 - **Query extraction:** `rule.query` field contains the actual query
 
-#### YARA (lines 59-122)
+#### YARA (lines 139-202)
 
 - **Pattern:** Regex matches `rule {name}` with balanced braces (lines 63-81)
 - **Validation:** Must contain `condition:` section
@@ -139,14 +148,14 @@ For each format, the extractor:
   - Severity from `severity = "..."` key-value pair
 - **Fallback title:** Rule name if description missing or < 10 chars
 
-#### Snort/Suricata (lines 282-312)
+#### Snort/Suricata (lines 372-402)
 
 - **Pattern:** Single-line rules starting with action (alert/log/pass/drop/reject/sdrop)
 - **Structure:** `action protocol src_addr src_port direction dst_addr dst_port (options)`
 - **Title extraction:** From `msg: "..."` field in options
 - **No severity/log_sources:** Protocol and direction are implicit in rule syntax
 
-### Storage (lines 402-490)
+### Storage (lines 619-718)
 
 **Function:** `store_extracted_rules(db, entry_id, user_id, rules) -> list[DetectionRule]`
 
@@ -154,39 +163,39 @@ For each format, the extractor:
    - All TTPs linked to the entry (via EntryTTP junction)
    - All CVEs linked to the entry (via EntryCVE junction)
 
-2. **Deduplication strategy (scoped to the same `created_by` user):**
-   - Check for exact content match (lines 428-436): Skip if identical rule exists
-   - Check for title+type match from auto-extraction (lines 438-448): Update if found
-   - **Update scenario:** If upstream source changed the rule, merge new content and re-point `entry_id` at the new entry
+2. **Deduplication strategy (on content, not title):**
+   - Same rule body already stored by this user, or auto-extracted by anyone: skip. Processing an article again adds nothing
+   - Same entry + title + type with a new body: the rule was edited upstream, so its content is replaced in place
+   - A title shared across articles never merges two rules
 
-3. **Tag construction (line 450):**
+3. **Tag construction (line 678):**
    - Always include `"auto-extracted"` and `rule_type`
    - Merge in extracted tags (severity, technique IDs, etc.)
    - Deduplicate via set
 
-4. **TTP linkage (lines 452-453):**
+4. **TTP linkage (line 681):**
    - Merge entry-level TTPs with any TTPs parsed from rule metadata
    - Store as array in `source_ttps` JSONB
 
-5. **CVE linkage (lines 455-456):**
+5. **CVE linkage (line 684):**
    - Merge entry-level CVEs with any CVEs mentioned in rule
    - Store as array in `source_cves` JSONB
 
-6. **Create or update (lines 458-485):**
-   - Existing rule: Update `rule_content`, `entry_id`, metadata fields
-   - New rule: Create record with `is_draft = true` (line 478)
+6. **Create or update (lines 686-712):**
+   - Existing rule (same entry + title + type): Update `rule_content` and metadata fields
+   - New rule: Create record with `is_draft = true` (line 705)
 
 ---
 
 ## Rule Validation Engine
 
-**Module:** `backend/app/intelligence/rule_validation.py` (433 lines)
+**Module:** `backend/app/intelligence/rule_validation.py` (486 lines)
 
 Syntax-only validation (no semantic checks) for 9 rule types (7 formats plus `nuclei` and `panther`). Returns `ValidationResult` with optional errors and suggestions.
 
 ### Validation Architecture
 
-**Function:** `validate_rule(rule_type: str, rule_content: str) -> ValidationResult` (lines 405-433)
+**Function:** `validate_rule(rule_type: str, rule_content: str) -> ValidationResult` (lines 458-486)
 
 Routes to format-specific validator via dispatch table:
 
@@ -208,7 +217,7 @@ Each validator returns `ValidationResult(valid: bool, errors: list, suggestions:
 
 ### Per-Format Validators
 
-#### SIGMA Validation (lines 75-149)
+#### SIGMA Validation (lines 131-205)
 
 **Required fields:** `title`, `status`, `logsource`, `detection`
 
@@ -216,15 +225,15 @@ Each validator returns `ValidationResult(valid: bool, errors: list, suggestions:
 - YAML syntax (try `yaml.safe_load()`)
 - Root must be dict
 - `logsource` must have at least one of: `category`, `product`, `service`
-- `detection.condition` required (lines 124-129)
-- At least one named selection (not just condition/timeframe) (lines 130-139)
+- `detection.condition` required (lines 180-185)
+- At least one named selection (not just condition/timeframe) (lines 186-195)
 
 **Suggestions:**
 - Missing `level` → suggest severity levels
 - Missing `falsepositives` → suggest documenting FP scenarios
 - Missing `tags` → suggest ATT&CK mapping
 
-#### Splunk SPL Validation (lines 152-172)
+#### Splunk SPL Validation (lines 208-228)
 
 **Checks:**
 - Non-empty content
@@ -233,22 +242,22 @@ Each validator returns `ValidationResult(valid: bool, errors: list, suggestions:
 **Suggestions:**
 - Missing `index=` specification
 
-#### KQL/Elastic QL/CrowdStrike QL (lines 175-245)
+#### KQL/Elastic QL/CrowdStrike QL (lines 231-298)
 
 **Checks:**
 - Non-empty content
-- Balanced parens, brackets, quotes
+- Balanced parens, brackets, quotes. KQL and Elastic QL leave `//` and `/* */` comments out of the check (`_check_balanced_code()`), so a comment like "// processes that don't …" is not an unbalanced quote; KQL verbatim strings (`@"C:\Temp\"`) take no backslash escapes
 
 **Suggestions (per-format):**
 - KQL: Suggests starting with table name before pipes
-- EQL: Suggests event categories (process, file, network, registry, sequence, join)
+- EQL: Suggests event categories (process, file, network, registry, sequence, join) unless the query is ES|QL (`FROM …`)
 - CrowdStrike: Suggests filtering by event_simpleName or event_platform
 
-#### Snort/Suricata (lines 248-332)
+#### Snort/Suricata (lines 301-385)
 
 **Structure:** `action protocol src_addr src_port direction dst_addr dst_port (options)`
 
-**Checks per line (lines 265-329):**
+**Checks per line (lines 318-382):**
 - Minimum 7 parts (action, protocol, addresses, ports, direction)
 - Valid action from {alert, log, pass, drop, reject, sdrop}
 - Known protocol (tcp, udp, icmp, ip, http, ftp, tls, smb, dns, pkthdr)
@@ -257,19 +266,19 @@ Each validator returns `ValidationResult(valid: bool, errors: list, suggestions:
 - Required `sid:` in options
 - Suggested `msg:` field
 
-#### YARA Validation (lines 335-372)
+#### YARA Validation (lines 388-425)
 
 **Checks:**
 - Non-empty content
 - Balanced braces and parens
-- Regex match for `rule <name>` declaration (line 350)
-- Required `condition:` section (lines 357-362)
+- Regex match for `rule <name>` declaration (line 403)
+- Required `condition:` section (lines 410-415)
 
 **Suggestions:**
 - Missing `strings:` section
 - Missing `meta:` section (author, description, date)
 
-#### Panther Validation (lines 375-402)
+#### Panther Validation (lines 428-455)
 
 Python-based Panther detections: requires a `def rule(event)` function, checks balanced parens/brackets/braces, and suggests a `def title(event)` function. `nuclei` rules reuse the SIGMA YAML validator.
 
@@ -292,7 +301,7 @@ class ValidationResult:
 
 ### Integration Points
 
-- **Backend:** Validation called during extraction (`extract_rules_from_content()`, `rule_extraction.py` lines 42-56), the `POST /detection-rules/validate` endpoint, and the SIGMA import endpoint
+- **Backend:** Validation called during extraction (`extract_rules_from_content()`, `rule_extraction.py` lines 64-84), the `POST /detection-rules/validate` endpoint, and the SIGMA import endpoint
 - **Frontend:** `useValidateRule()` hook (`useDetectionRules.ts` lines 97-113) triggers real-time validation in CodeMirror editor
 
 ---
