@@ -15,6 +15,7 @@ class FeedCreateRequest(BaseModel):
     auto_extract_on_ingest: bool | None = None
     extract_detection_rules: bool | None = None
     extract_tools: bool | None = None
+    ai_analysis_enabled: bool | None = None
     exclude_title_patterns: str | None = None
 
     model_config = ConfigDict(
@@ -183,6 +184,12 @@ class BulkCategoryUpdateRequest(BaseModel):
     auto_extract_on_ingest: bool | None = None
     extract_detection_rules: bool | None = None
     extract_tools: bool | None = None
+    # Change the feeds in the category now (the default). Off, with
+    # save_as_category_default on, edits only the defaults.
+    apply_to_feeds: bool = True
+    # Also store the pipeline fields above as the category's defaults, which
+    # feeds added to it later start with.
+    save_as_category_default: bool = False
 
     model_config = ConfigDict(
         json_schema_extra={

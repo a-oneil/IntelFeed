@@ -439,6 +439,8 @@ async def _create_feed(
     except AppError as e:
         return {"error": e.message}
 
+    from app.services.feed_defaults import new_feed_settings
+
     feed = Feed(
         url=url,
         title=title or url,
@@ -448,6 +450,8 @@ async def _create_feed(
         category_id=category_id,
         is_active=True,
         error_count=0,
+        # Same inheritance as POST /api/feeds: the category's defaults, else global.
+        **await new_feed_settings(db, category_id, {}),
     )
     db.add(feed)
     await db.flush()

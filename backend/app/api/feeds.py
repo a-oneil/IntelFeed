@@ -29,6 +29,7 @@ from app.schemas.feed import (
     TitleFilterPreviewRequest,
     TitleFilterPreviewResponse,
 )
+from app.services.feed_defaults import FEED_DEFAULT_FIELDS, clean_defaults, new_feed_settings
 from app.services.feed_discovery import discover_feed
 from app.services.feed_visibility import (
     ensure_subscription,
@@ -266,6 +267,14 @@ async def create_feed(
             return resp
         raise AppError(code="conflict", message="A feed with this URL already exists", status_code=409)
 
+    # Pipeline settings: what the request names, then the category's defaults,
+    # then the column defaults.
+    pipeline = await new_feed_settings(
+        db,
+        request.category_id,
+        {field: getattr(request, field) for field in FEED_DEFAULT_FIELDS},
+    )
+
     # Extended adapters (github_repo, etc.) skip URL discovery
     if request.feed_type and request.feed_type in _EXTENDED_FEED_TYPES:
         adapter_config = request.adapter_config or {}
@@ -283,10 +292,7 @@ async def create_feed(
             feed_type=request.feed_type,
             fetch_interval_minutes=request.fetch_interval_minutes or default_interval,
             adapter_config=adapter_config,
-            intel_extraction_mode=request.intel_extraction_mode or "selective",
-            auto_extract_on_ingest=request.auto_extract_on_ingest or False,
-            extract_detection_rules=request.extract_detection_rules or False,
-            extract_tools=True if request.extract_tools is None else request.extract_tools,
+            **pipeline,
             category_id=request.category_id,
             custom_title=request.custom_title,
             relevance_rating=default_relevance,
@@ -317,10 +323,7 @@ async def create_feed(
             description=discovered.description,
             fetch_interval_minutes=request.fetch_interval_minutes or 30,
             adapter_config=adapter_config,
-            intel_extraction_mode=request.intel_extraction_mode or "selective",
-            auto_extract_on_ingest=request.auto_extract_on_ingest or False,
-            extract_detection_rules=request.extract_detection_rules or False,
-            extract_tools=True if request.extract_tools is None else request.extract_tools,
+            **pipeline,
             category_id=request.category_id,
             custom_title=request.custom_title,
             exclude_title_patterns=normalize_patterns(request.exclude_title_patterns),
@@ -560,9 +563,29 @@ async def bulk_update_category_feeds(
     user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Bulk update settings on all feeds in a category."""
-    result = await db.execute(select(Feed).where(Feed.category_id == category_id))
-    feeds = result.scalars().all()
+    """Bulk update settings on the feeds in a category now, and optionally
+    save the pipeline settings as the category's defaults for feeds added later.
+
+    ``apply_to_feeds=false`` with ``save_as_category_default=true`` only edits
+    the defaults. Only the five pipeline fields can be defaults; fetch interval,
+    retention and ratings apply to the current feeds alone.
+    """
+    from app.models.category import Category
+
+    category = await db.get(Category, category_id)
+    if category is None:
+        raise AppError(code="not_found", message="Category not found", status_code=404)
+
+    if request.save_as_category_default:
+        merged = dict(category.feed_defaults or {})
+        merged.update(clean_defaults({field: getattr(request, field) for field in FEED_DEFAULT_FIELDS}))
+        category.feed_defaults = merged
+        db.add(category)
+
+    feeds = []
+    if request.apply_to_feeds:
+        result = await db.execute(select(Feed).where(Feed.category_id == category_id))
+        feeds = result.scalars().all()
 
     updated = 0
     for feed in feeds:
@@ -585,6 +608,7 @@ async def bulk_update_category_feeds(
             and feed.extract_detection_rules != request.extract_detection_rules
         ):
             feed.extract_detection_rules = request.extract_detection_rules
+            changed = True
         if request.extract_tools is not None and feed.extract_tools != request.extract_tools:
             feed.extract_tools = request.extract_tools
             changed = True
@@ -615,7 +639,7 @@ async def bulk_update_category_feeds(
             updated += 1
 
     await db.flush()
-    return {"updated": updated}
+    return {"updated": updated, "feed_defaults": clean_defaults(category.feed_defaults)}
 
 
 @router.get("/health")

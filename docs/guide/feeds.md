@@ -75,6 +75,23 @@ those folders.
 Create categories before you bulk-import, not after — re-filing a hundred feeds
 by hand is tedious in a way that filing them once is not.
 
+### Category settings and defaults
+
+**Edit Category…** in a category's right-click menu (admin) changes settings on
+every feed in it at once: fetch interval, retention, ratings, and what runs on
+each new article. Two switches at the bottom say where the change goes:
+
+- **Apply to the feeds here now** — every feed currently in the category.
+- **Save the pipeline settings as this category's default** — a feed added to
+  the category later (by hand, from OPML, or from a starter pack) starts with
+  the analysis mode, AI analysis, tool entities, CVE/ATT&CK lookup and
+  detection-rule settings saved here. Anything the category doesn't set uses
+  the global default, and a value a feed is added with explicitly wins.
+
+The defaults apply once, when a feed is created. Changing them, or moving an
+existing feed into the category, doesn't change feeds that are already there —
+that's what the first switch is for.
+
 ## Importing in bulk
 
 **Settings → Feeds & Import** takes an OPML file, which is what every other

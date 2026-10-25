@@ -837,9 +837,13 @@ Toggle intelligence extraction mode for every feed in a category.
 
 **`PUT /api/feeds/category/{category_id}/bulk-update`**
 
-Bulk-update feed settings (interval, mute, active flag, etc.) for a whole category.
+Change settings on every feed in a category now — fetch interval, retention, the three ratings and the five pipeline settings (`intel_extraction_mode`, `ai_analysis_enabled`, `extract_tools`, `auto_extract_on_ingest`, `extract_detection_rules`). With `save_as_category_default: true` the pipeline settings sent are also merged into the category's `feed_defaults`, which feeds added to it later start with; `apply_to_feeds: false` skips the current feeds and only saves the defaults. Fields left out stay as they are.
 
-**Auth:** Bearer token
+**Auth:** Bearer token (admin)
+**Response:**
+```json
+{ "updated": 12, "feed_defaults": { "ai_analysis_enabled": false, "extract_tools": false } }
+```
 
 ---
 
@@ -3336,7 +3340,7 @@ Notes:
 
 **Saved searches** (`/api/saved-searches`): `GET` (list), `POST` (create, 201), `PUT /{search_id}`, `DELETE /{search_id}`. Saved searches are per-user: the list returns the caller's own, and update/delete require owner or admin.
 
-**Categories** (`/api/categories`): `GET`, `POST` (201), `PUT /{category_id}`, `DELETE /{category_id}` (admin only — the folder tree is shared), `PUT /reorder`.
+**Categories** (`/api/categories`): `GET`, `POST` (201), `PUT /{category_id}`, `DELETE /{category_id}` (admin only — the folder tree is shared), `PUT /reorder`. Each category carries `feed_defaults`: the pipeline settings a feed added to it starts with (`POST /api/feeds`, OPML and starter-pack import, the `create_feed` tool), where a value the caller sends wins and an absent key falls back to the global default. `PUT /{category_id}` with `feed_defaults` replaces the set (admin only; `{}` clears it). Defaults apply once, at creation: editing them or moving a feed into the category does not change existing feeds.
 
 **Tags** (`/api/tags`): `GET`, `POST` (201), `PUT /{tag_id}`, `DELETE /{tag_id}`, `GET/POST /entries/{entry_id}` (entry tags), `DELETE /entries/{entry_id}/{tag_id}`, `POST /entries/bulk-tag`, `POST /entries/bulk-untag`, `POST /merge`. The tag list is shared; assignments are per user — `POST /entries/{entry_id}` and `bulk-tag` create the caller's own assignment, and every read (entry `tags`, `GET /entries/{entry_id}`, `entry_count`, the search `tags` facet) is the caller's view — unless the tag has `is_global: true`, in which case one shared assignment serves everyone. Tag fields: `name` (1–100 chars; may not contain `"` or `\\`), `color`, `display_as_chip`, `description`, `is_global`. `PUT {is_global}` re-homes existing assignments: to global collapses everyone's rows into one shared row per entry; to personal hands the shared row to every human account. `DELETE /entries/{entry_id}/{tag_id}` and `bulk-untag` remove the caller's own assignment (or the shared one of a global tag) and leave other users' alone.
 

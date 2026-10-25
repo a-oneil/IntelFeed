@@ -85,6 +85,17 @@ export interface Category {
   created_at: string;
   children: Category[];
   feed_count: number;
+  /** Pipeline settings a feed added to this category starts with. A key that
+   * is absent falls back to the global default. */
+  feed_defaults?: CategoryFeedDefaults;
+}
+
+export interface CategoryFeedDefaults {
+  intel_extraction_mode?: "full" | "selective" | "manual" | "none";
+  ai_analysis_enabled?: boolean;
+  extract_tools?: boolean;
+  auto_extract_on_ingest?: boolean;
+  extract_detection_rules?: boolean;
 }
 
 export interface EntryMediaBrief {

@@ -1,8 +1,8 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import DateTime, ForeignKey, Integer, String, func, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -20,6 +20,10 @@ class Category(Base):
         UUID(as_uuid=True), ForeignKey("categories.id", ondelete="SET NULL"), index=True
     )
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Pipeline settings a feed added to this category starts with — any of
+    # app.services.feed_defaults.FEED_DEFAULT_FIELDS. Absent keys fall back to
+    # the global default; feeds already here are not changed by editing it.
+    feed_defaults: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships

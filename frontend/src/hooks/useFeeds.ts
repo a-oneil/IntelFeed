@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "@/api/client";
 import type {
   Category,
+  CategoryFeedDefaults,
   Feed,
   FeedPipeline,
   FeedSubscribersResponse,
@@ -294,7 +295,13 @@ export function useCreateCategory() {
 export function useUpdateCategory() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ categoryId, data }: { categoryId: string; data: { name?: string } }) => {
+    mutationFn: async ({
+      categoryId,
+      data,
+    }: {
+      categoryId: string;
+      data: { name?: string; feed_defaults?: CategoryFeedDefaults };
+    }) => {
       const res = await api.put(`/categories/${categoryId}`, data);
       return res.data;
     },
@@ -368,9 +375,11 @@ export function useBulkUpdateCategoryFeeds() {
         auto_extract_on_ingest?: boolean;
         extract_detection_rules?: boolean;
         extract_tools?: boolean;
+        apply_to_feeds?: boolean;
+        save_as_category_default?: boolean;
       };
     }) => {
-      const res = await api.put<{ updated: number }>(
+      const res = await api.put<{ updated: number; feed_defaults: CategoryFeedDefaults }>(
         `/feeds/category/${categoryId}/bulk-update`,
         data
       );
@@ -378,6 +387,7 @@ export function useBulkUpdateCategoryFeeds() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["feeds"] });
+      queryClient.invalidateQueries({ queryKey: ["categories"] });
     },
   });
 }

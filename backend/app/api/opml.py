@@ -16,6 +16,7 @@ from app.feed_packs import INTELFEED_NS, get_pack, load_packs
 from app.models.category import Category
 from app.models.feed import Feed
 from app.models.user import User
+from app.services.feed_defaults import FEED_DEFAULT_FIELDS, new_feed_settings
 from app.services.feed_visibility import (
     ensure_subscription,
     subscribe_all_users,
@@ -355,6 +356,8 @@ async def _import_feed_outline(
         stats["feeds_skipped"] += 1
         return
 
+    # The outline's own tuning wins; the category's defaults fill the rest.
+    pipeline = await new_feed_settings(db, category_id, {f: extras.pop(f, None) for f in FEED_DEFAULT_FIELDS})
     feed = Feed(
         title=title,
         url=xml_url,
@@ -363,6 +366,7 @@ async def _import_feed_outline(
         category_id=category_id,
         custom_title=title if title != xml_url else None,
         **extras,
+        **pipeline,
     )
     db.add(feed)
     await db.flush()
