@@ -187,7 +187,10 @@ async def _fetch_entries(
     stmt = (
         select(Entry, Feed)
         .join(Feed, Feed.id == Entry.feed_id)
-        .where(Feed.is_active.is_(True))
+        # The global mute column, deliberately (see services/feed_visibility.py):
+        # the proxy has no reader, so a feed an admin muted for the instance
+        # stays out of what it re-publishes.
+        .where(Feed.is_active.is_(True), Feed.is_muted.is_(False))
         .order_by(Entry.published_at.desc().nulls_last(), Entry.fetched_at.desc())
         .limit(limit)
     )
@@ -203,7 +206,7 @@ async def public_rss_all(
     token: str = Path(..., description="Unguessable public RSS access token managed under system settings"),
     db: AsyncSession = Depends(get_db),
 ):
-    """Public (unauthenticated) RSS 2.0 feed of the newest entries across all active sources.
+    """Public (unauthenticated) RSS 2.0 feed of the newest entries across all active, unmuted sources.
 
     Access is gated only by the secret token; an invalid or disabled token yields 404.
     Item count and full-content inclusion follow the public_rss_* system settings.

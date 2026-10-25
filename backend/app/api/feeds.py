@@ -21,6 +21,7 @@ from app.schemas.feed import (
     BulkCategoryUpdateRequest,
     BulkExcludeShortsRequest,
     BulkIntelModeRequest,
+    FeedAIUsageResponse,
     FeedCreateRequest,
     FeedDiscoverRequest,
     FeedPushRequest,
@@ -1329,6 +1330,68 @@ async def get_feed_pipeline(
     from app.pipeline.plans import explain_feed_plan
 
     return await explain_feed_plan(db, feed)
+
+
+@router.get("/{feed_id}/ai-usage", response_model=FeedAIUsageResponse)
+async def get_feed_ai_usage(
+    feed_id: uuid.UUID = Path(..., description="UUID of the feed"),
+    days: int = Query(30, ge=1, le=365, description="Window in days."),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """AI calls made on this feed's articles over the last ``days``.
+
+    Muting a feed only hides it from reading views — the pipeline, AI included,
+    runs on every article regardless, and with per-user subscriptions one
+    reader's mute must not switch the AI off for everyone. The feed modal shows
+    this next to a muted feed so the cost is visible, with an admin's
+    "Turn off AI for this feed" beside it.
+
+    ``runs`` counts calls that moved tokens; an analysis reused from a
+    near-duplicate article is ledgered at zero tokens and is not a call.
+    """
+    from datetime import timedelta
+
+    from sqlalchemy import and_, or_
+
+    from app.models.ai_result import AIResult
+
+    feed = await db.get(Feed, feed_id)
+    if not feed:
+        raise AppError(code="not_found", message="Feed not found", status_code=404)
+
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    feed_entries = select(Entry.id).where(Entry.feed_id == feed_id)
+    tokens = func.coalesce(AIResult.tokens_input, 0) + func.coalesce(AIResult.tokens_output, 0)
+    row = (
+        await db.execute(
+            select(
+                func.count(AIResult.id).filter(tokens > 0),
+                func.coalesce(func.sum(AIResult.tokens_input), 0),
+                func.coalesce(func.sum(AIResult.tokens_output), 0),
+                func.max(AIResult.created_at).filter(tokens > 0),
+            ).where(
+                AIResult.created_at >= cutoff,
+                or_(
+                    AIResult.entry_id.in_(feed_entries),
+                    and_(
+                        AIResult.entry_id.is_(None),
+                        AIResult.target_type == "entry",
+                        AIResult.target_id.in_(feed_entries),
+                    ),
+                ),
+            )
+        )
+    ).one()
+    return FeedAIUsageResponse(
+        feed_id=feed_id,
+        days=days,
+        runs=row[0] or 0,
+        tokens_input=int(row[1] or 0),
+        tokens_output=int(row[2] or 0),
+        last_run_at=row[3],
+        ai_analysis_enabled=feed.ai_analysis_enabled,
+    )
 
 
 @router.post("/{feed_id}/title-filter/preview", response_model=TitleFilterPreviewResponse)

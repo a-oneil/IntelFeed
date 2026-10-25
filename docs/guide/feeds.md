@@ -128,7 +128,10 @@ Click a feed to edit it:
   stubs: "ISC Stormcast For" on SANS ISC Diary, "Chromium CVE-" on MSRC.
   Articles already saved stay.
 - **Mute** — stop it appearing in your reading views without deleting it and
-  losing its history.
+  losing its history. Muting does not stop the pipeline: the feed's articles are
+  still tagged, analysed by the AI and scored, and the public RSS proxy leaves
+  muted feeds out. A muted feed's Overview shows its AI runs and tokens over the
+  last 30 days, and an admin can turn its AI off there in one click.
 - **Source assessment** — your own note on how much you trust it.
 
 ## Keeping feeds healthy

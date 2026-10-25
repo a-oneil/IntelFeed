@@ -6,6 +6,8 @@ import type { Feed } from "@/api/types";
 
 const mockUpdateAsync = vi.fn().mockResolvedValue({});
 const mockTitlePreview = vi.fn();
+const mockUpdateMutate = vi.fn();
+let aiUsage: Record<string, unknown> | undefined;
 const mockConfirm = vi.fn();
 let role = "admin";
 
@@ -16,7 +18,8 @@ vi.mock("@/stores/authStore", () => ({
 
 vi.mock("@/hooks/useFeeds", () => ({
   useCategories: () => ({ data: [{ id: "cat-1", name: "News" }] }),
-  useUpdateFeed: () => ({ mutateAsync: mockUpdateAsync, mutate: vi.fn(), isPending: false }),
+  useUpdateFeed: () => ({ mutateAsync: mockUpdateAsync, mutate: mockUpdateMutate, isPending: false }),
+  useFeedAIUsage: (_id: string, enabled: boolean) => ({ data: enabled ? aiUsage : undefined }),
   useDeleteFeed: () => ({ mutate: vi.fn(), isPending: false }),
   useRefreshFeed: () => ({ mutate: vi.fn(), isPending: false }),
   useFullSyncFeed: () => ({ mutate: vi.fn(), isPending: false }),
@@ -118,6 +121,16 @@ beforeEach(() => {
   mockConfirm.mockReset();
   mockConfirm.mockResolvedValue(true);
   mockTitlePreview.mockReset();
+  mockUpdateMutate.mockReset();
+  aiUsage = {
+    feed_id: "feed-1",
+    days: 30,
+    runs: 412,
+    tokens_input: 780_000,
+    tokens_output: 24_000,
+    last_run_at: null,
+    ai_analysis_enabled: true,
+  };
   mockTitlePreview.mockReturnValue({ data: undefined, isError: false });
 });
 
@@ -282,6 +295,32 @@ describe("EditFeedModal", () => {
     await user.type(screen.getByLabelText("Skip articles whose title contains"), "ab");
 
     expect(await screen.findByRole("alert")).toHaveTextContent("too short");
+  });
+
+  it("shows what a muted feed still costs, with an admin switch for its AI", async () => {
+    const user = userEvent.setup();
+    render(<EditFeedModal subscription={makeFeed({ is_muted: true })} onClose={vi.fn()} />);
+
+    expect(
+      screen.getByText(/Muted, but still analysed: 412 AI runs and 804k tokens in the last 30 days/)
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Turn off AI for this feed" }));
+    expect(mockUpdateMutate).toHaveBeenCalledWith(
+      { feedId: "feed-1", data: { ai_analysis_enabled: false } },
+      expect.anything()
+    );
+  });
+
+  it("says nothing about AI cost for a feed that is not muted", () => {
+    render(<EditFeedModal subscription={makeFeed()} onClose={vi.fn()} />);
+    expect(screen.queryByText(/still analysed/)).not.toBeInTheDocument();
+  });
+
+  it("does not offer a non-admin the AI switch", () => {
+    role = "analyst";
+    render(<EditFeedModal subscription={makeFeed({ is_muted: true })} onClose={vi.fn()} />);
+    expect(screen.getByText(/still analysed/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Turn off AI for this feed" })).not.toBeInTheDocument();
   });
 
   it("closes without asking when nothing is dirty", async () => {

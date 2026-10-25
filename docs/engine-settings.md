@@ -584,7 +584,7 @@ they did not exist. The lookup they govern is described in
 
 | Setting | Type / default | What it does |
 |---|---|---|
-| `public_rss_enabled` | bool, `false` | Re-publish aggregated entries over a token-gated RSS URL. |
+| `public_rss_enabled` | bool, `false` | Re-publish aggregated entries over a token-gated RSS URL. Only active feeds that are not muted are included (the instance-wide mute, not a reader's own). |
 | `public_rss_per_feed_limit` | int, `100` | Items per feed in the published output. |
 | `public_rss_full_content` | bool, `true` | Include full article content rather than summaries. |
 

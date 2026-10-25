@@ -2576,6 +2576,18 @@ export interface FeedHealthResponse {
 // Feed Value Scoring
 
 /** Resolved ingest pipeline for one feed, from GET /feeds/{id}/pipeline. */
+/** GET /feeds/{id}/ai-usage */
+export interface FeedAIUsage {
+  feed_id: string;
+  days: number;
+  /** Calls that moved tokens; reuses from near-duplicates are not counted. */
+  runs: number;
+  tokens_input: number;
+  tokens_output: number;
+  last_run_at: string | null;
+  ai_analysis_enabled: boolean;
+}
+
 /** POST /feeds/{id}/title-filter/preview */
 export interface TitleFilterPreview {
   checked: number;

@@ -692,6 +692,18 @@ Which pipeline stages run for this feed, and what decided each one. `decided_by`
 
 ---
 
+**`GET /api/feeds/{feed_id}/ai-usage`**
+
+AI calls made on the feed's articles in the last `days` (1-365, default 30): `runs` counts calls that moved tokens (a reuse from a near-duplicate article is not one), plus input/output token totals, the last call's time and the feed's `ai_analysis_enabled`. Muting a feed does not stop its AI analysis; the feed modal shows this beside a muted feed.
+
+**Auth:** Bearer token
+**Response:**
+```json
+{ "feed_id": "...", "days": 30, "runs": 412, "tokens_input": 780000, "tokens_output": 24000, "last_run_at": "2026-10-24T18:02:11Z", "ai_analysis_enabled": true }
+```
+
+---
+
 **`POST /api/feeds/{feed_id}/title-filter/preview`**
 
 How many of the feed's last 100 titles an exclude-title list would drop, with up to five examples. `exclude_title_patterns` is plain phrases, one per line, matched as case-insensitive substrings. The list is validated as saving it would be: a line under 3 or over 200 characters, or more than 50 lines, returns 422 `invalid_title_filter`. Nothing is stored.

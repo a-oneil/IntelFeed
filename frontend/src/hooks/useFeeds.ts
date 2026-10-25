@@ -4,6 +4,7 @@ import type {
   Category,
   CategoryFeedDefaults,
   Feed,
+  FeedAIUsage,
   FeedPipeline,
   FeedSubscribersResponse,
   FeedValueDetail,
@@ -171,6 +172,19 @@ export function useFeedPipeline(feedId: string | null) {
     },
     enabled: Boolean(feedId),
     staleTime: 60_000,
+  });
+}
+
+/** AI calls on a feed's articles in the last 30 days — shown beside a muted feed. */
+export function useFeedAIUsage(feedId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: ["feed-ai-usage", feedId],
+    queryFn: async () => {
+      const res = await api.get<FeedAIUsage>(`/feeds/${feedId}/ai-usage`);
+      return res.data;
+    },
+    enabled: Boolean(feedId) && enabled,
+    staleTime: 300_000,
   });
 }
 

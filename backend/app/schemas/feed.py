@@ -124,6 +124,16 @@ class FeedResponse(BaseModel):
         return masked
 
 
+class FeedAIUsageResponse(BaseModel):
+    feed_id: uuid.UUID
+    days: int
+    runs: int
+    tokens_input: int
+    tokens_output: int
+    last_run_at: datetime | None = None
+    ai_analysis_enabled: bool
+
+
 class TitleFilterPreviewRequest(BaseModel):
     exclude_title_patterns: str | None = None
 
