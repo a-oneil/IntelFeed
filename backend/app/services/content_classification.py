@@ -17,6 +17,8 @@ RULE_FILE_CONTENT_TYPES = {
     "splunk_story",
     "sentinel_rule",
     "panther_rule",
+    "kql_query",
+    "anvilogic_rule",
     "yara_rule",
     "nuclei_template",
     "atomic_test",
