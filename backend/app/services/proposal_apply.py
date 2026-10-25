@@ -138,7 +138,9 @@ def _progress_key(job_id: str) -> str:
 
 async def apply_link_removal_row(db: AsyncSession, row: EntityLinkValidationLog) -> bool:
     """Promote one shadow_remove row into the junction deletion (+ `removed`
-    audit row). Returns True when the junction was already gone."""
+    audit row, which names the proposal and is what History shows). The
+    proposal itself is deleted — left in place it stayed in the queue as if
+    nothing had happened. Returns True when the junction was already gone."""
     from app.intelligence.link_validation_apply import ENTITY_TYPES
 
     if row.action != "shadow_remove":
@@ -164,6 +166,7 @@ async def apply_link_removal_row(db: AsyncSession, row: EntityLinkValidationLog)
                 ai_result_id=row.ai_result_id,
             )
         )
+        await db.delete(row)
         await db.flush()
         return True
     db.add(
@@ -183,6 +186,7 @@ async def apply_link_removal_row(db: AsyncSession, row: EntityLinkValidationLog)
         )
     )
     await db.delete(junction)
+    await db.delete(row)
     await db.execute(
         sql_update(emodel)
         .where(emodel.id == row.entity_id)

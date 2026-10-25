@@ -22,7 +22,7 @@ from typing import Literal
 from fastapi import APIRouter, Body, Depends, Query
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import delete as sql_delete
-from sqlalchemy import func, or_, select, text, update
+from sqlalchemy import func, literal, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
@@ -92,6 +92,7 @@ class ExtractionEntity(BaseModel):
     first_seen_at: datetime
     status: Status
     duplicate_of: str | None
+    duplicate_of_id: uuid.UUID | None = None
 
 
 class ExtractionListResponse(BaseModel):
@@ -117,14 +118,15 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-async def _duplicate_map(db: AsyncSession, types: list[str]) -> dict[str, str]:
-    """AI-created rows that have a near-duplicate same-type sibling → sibling name.
+async def _duplicate_map(db: AsyncSession, types: list[str]) -> dict[str, tuple[str, str]]:
+    """AI-created rows that have a near-duplicate same-type sibling → (sibling name, sibling id).
 
     Uses pg_trgm: the ``%`` operator hits the trigram index, similarity() ranks.
     Only threat_actor/malware/tool have normalized_name (CVE/TTP are id-keyed and
-    cannot collide), so those are skipped.
+    cannot collide), so those are skipped. Pairs an analyst marked "not a
+    duplicate" are left out, so the next-closest sibling (if any) shows instead.
     """
-    dup: dict[str, tuple[str, float]] = {}
+    dup: dict[str, tuple[str, str, float]] = {}
     for t in types:
         table = AI_TYPES[t].get("trgm_table")
         if not table:
@@ -133,7 +135,7 @@ async def _duplicate_map(db: AsyncSession, types: list[str]) -> dict[str, str]:
             await db.execute(
                 text(
                     f"""
-                    SELECT a.id::text AS id, b.name AS dup_name,
+                    SELECT a.id::text AS id, b.name AS dup_name, b.id::text AS dup_id,
                            similarity(a.normalized_name, b.normalized_name) AS sim
                     FROM {table} a
                     JOIN {table} b
@@ -143,15 +145,21 @@ async def _duplicate_map(db: AsyncSession, types: list[str]) -> dict[str, str]:
                      AND a.normalized_name % b.normalized_name
                     WHERE a.created_via = 'ai_extraction'
                       AND similarity(a.normalized_name, b.normalized_name) >= 0.62
+                      AND NOT EXISTS (
+                        SELECT 1 FROM proposal_dismissals d
+                        WHERE d.kind = 'not_duplicate' AND d.entity_type = :etype
+                          AND ((d.entity_id = a.id AND d.other_key = b.id::text)
+                            OR (d.entity_id = b.id AND d.other_key = a.id::text))
+                      )
                     """
-                )
+                ).bindparams(etype=t)
             )
         ).all()
-        for rid, dup_name, sim in rows:
+        for rid, dup_name, dup_id, sim in rows:
             best = dup.get(rid)
-            if best is None or sim > best[1]:
-                dup[rid] = (dup_name, float(sim))
-    return {k: v[0] for k, v in dup.items()}
+            if best is None or sim > best[2]:
+                dup[rid] = (dup_name, dup_id, float(sim))
+    return {k: (v[0], v[1]) for k, v in dup.items()}
 
 
 async def _fetch_rows(db: AsyncSession, types: list[str], window_start: datetime | None, q: str | None) -> list[dict]:
@@ -160,6 +168,32 @@ async def _fetch_rows(db: AsyncSession, types: list[str], window_start: datetime
     for t in types:
         spec = AI_TYPES[t]
         m = spec["model"]
+        # Only the columns the table shows: loading whole rows dragged in
+        # CVE.nvd_data and friends and made this the slow half of the tab.
+        cols = [
+            m.id.label("id"),
+            getattr(m, spec["name"]).label("name"),
+            m.created_confidence.label("created_confidence"),
+            m.needs_review.label("needs_review"),
+            m.created_from_entry_id.label("created_from_entry_id"),
+            m.first_seen_at.label("first_seen_at"),
+            (m.last_seen_at if hasattr(m, "last_seen_at") else literal(None)).label("last_seen_at"),
+        ]
+        if spec.get("aliases"):
+            cols.append(m.aliases.label("aliases"))
+        elif t == "ttp":
+            cols.append(m.technique_id.label("technique_id"))
+        elif t == "observable":
+            cols += [m.kind.label("kind"), m.label.label("label")]
+        if spec["ac"]:
+            cols.append(m.article_count.label("article_count"))
+        else:
+            # article_count: denormalized column, except CVE (count live links).
+            live = select(EntryCVE.cve_id, func.count().label("n")).group_by(EntryCVE.cve_id).subquery()
+            cols.append(func.coalesce(live.c.n, 0).label("article_count"))
+        stmt = select(*cols)
+        if not spec["ac"]:
+            stmt = stmt.outerjoin(live, live.c.cve_id == m.id)
         if t == "observable":
             # Both AI doors: the iocs array (ai_extraction) and the TTP host
             # artifacts (ttp_observable) come out of the same one-pass payload,
@@ -167,9 +201,9 @@ async def _fetch_rows(db: AsyncSession, types: list[str], window_start: datetime
             # is a tombstone, not a live row — it stays in the ledger so the
             # doors keep refusing the value, but it is done with this table
             # (that is exactly what deleting it here did).
-            stmt = select(m).where(m.created_via.in_(("ai_extraction", "ttp_observable")), m.is_denied.is_(False))
+            stmt = stmt.where(m.created_via.in_(("ai_extraction", "ttp_observable")), m.is_denied.is_(False))
         else:
-            stmt = select(m).where(m.created_via == "ai_extraction")
+            stmt = stmt.where(m.created_via == "ai_extraction")
         if window_start is not None:
             stmt = stmt.where(m.first_seen_at >= window_start)
         if q:
@@ -180,43 +214,30 @@ async def _fetch_rows(db: AsyncSession, types: list[str], window_start: datetime
             if spec.get("second"):
                 conds.append(getattr(m, spec["second"]).ilike(like))
             stmt = stmt.where(or_(*conds))
-        objs = list((await db.execute(stmt)).scalars().all())
 
-        # article_count: denormalized column, except CVE (count live links).
-        counts: dict[uuid.UUID, int] = {}
-        if not spec["ac"] and objs:
-            ids = [o.id for o in objs]
-            counts = dict(
-                (
-                    await db.execute(
-                        select(EntryCVE.cve_id, func.count()).where(EntryCVE.cve_id.in_(ids)).group_by(EntryCVE.cve_id)
-                    )
-                ).all()
-            )
-
-        for o in objs:
+        for o in (await db.execute(stmt)).mappings().all():
             if spec.get("aliases"):
-                aliases = list(o.aliases or [])
+                aliases = list(o["aliases"] or [])
             elif t == "ttp":
-                aliases = [o.technique_id]
+                aliases = [o["technique_id"]]
             elif t == "observable":
                 # No alias list here — the kind (and a script's label) is the
                 # qualifier that makes a bare value readable in the table.
-                aliases = [x for x in (o.kind, o.label) if x]
+                aliases = [x for x in (o["kind"], o["label"]) if x]
             else:
                 aliases = []
             rows.append(
                 {
-                    "id": o.id,
+                    "id": o["id"],
                     "entity_type": t,
-                    "name": getattr(o, spec["name"]),
+                    "name": o["name"],
                     "aliases": aliases,
-                    "article_count": o.article_count if spec["ac"] else counts.get(o.id, 0),
-                    "created_confidence": o.created_confidence,
-                    "needs_review": o.needs_review,
-                    "created_from_entry_id": o.created_from_entry_id,
-                    "first_seen_at": o.first_seen_at,
-                    "last_seen_at": getattr(o, "last_seen_at", None),
+                    "article_count": o["article_count"] or 0,
+                    "created_confidence": o["created_confidence"],
+                    "needs_review": o["needs_review"],
+                    "created_from_entry_id": o["created_from_entry_id"],
+                    "first_seen_at": o["first_seen_at"],
+                    "last_seen_at": o["last_seen_at"],
                 }
             )
     return rows
@@ -348,7 +369,8 @@ async def extraction_entities(
 
     for r in rows:
         r["status"] = _status(r, dup, related, now)
-        r["duplicate_of"] = dup.get(str(r["id"]))
+        sibling = dup.get(str(r["id"]))
+        r["duplicate_of"], r["duplicate_of_id"] = sibling if sibling else (None, None)
 
     if status != "all":
         rows = [r for r in rows if r["status"] == status]
@@ -390,6 +412,7 @@ async def extraction_entities(
             first_seen_at=r["first_seen_at"],
             status=r["status"],
             duplicate_of=r["duplicate_of"],
+            duplicate_of_id=r["duplicate_of_id"],
         )
         for r in page
     ]
@@ -425,6 +448,41 @@ async def extraction_confirm(
     confirmed = len(result.all())
     await db.commit()
     return {"confirmed": confirmed}
+
+
+class NotDuplicateRequest(BaseModel):
+    entity_type: str
+    id: uuid.UUID
+    other_id: uuid.UUID
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "entity_type": "malware",
+                "id": "d5b2c8f0-3e4a-4b6c-9d1e-7f8a9b0c1d2e",
+                "other_id": "8a1f0c3e-2b4d-4e6f-9a0b-1c2d3e4f5a6b",
+            }
+        }
+    )
+
+
+@router.post("/not-duplicate")
+async def extraction_not_duplicate(
+    body: NotDuplicateRequest = Body(...),
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Mark two same-type entities as different things, so the pair stops being
+    flagged as a likely duplicate (KillSecurity 2.0 vs 3.0)."""
+    from app.services.proposal_dismissals import mark_not_duplicate
+
+    if body.entity_type not in AI_TYPES or not AI_TYPES[body.entity_type].get("trgm_table"):
+        raise AppError(code="invalid", message=f"{body.entity_type} has no duplicate detection", status_code=400)
+    if body.id == body.other_id:
+        raise AppError(code="invalid", message="id and other_id are the same entity", status_code=400)
+    await mark_not_duplicate(db, body.entity_type, body.id, body.other_id, user.id)
+    await db.commit()
+    return {"ok": True}
 
 
 async def _delete_observables(db: AsyncSession, ids: list[uuid.UUID], *, deny: bool) -> dict:

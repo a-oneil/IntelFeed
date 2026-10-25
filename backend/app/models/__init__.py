@@ -72,6 +72,7 @@ from app.models.pipeline_plan import PipelinePlan
 from app.models.playback_progress import PlaybackProgress
 from app.models.podcast import Podcast
 from app.models.product import EntryProduct, Product
+from app.models.proposal_dismissal import ProposalDismissal
 from app.models.ransomware import RansomwareVictim, VictimDisclosure
 from app.models.report_template import ReportTemplate
 from app.models.rule_coverage import RuleCoverage
@@ -160,6 +161,7 @@ __all__ = [
     "Tool",
     "EntryTool",
     "PendingAutolinkMatch",
+    "ProposalDismissal",
     "Vendor",
     "EntryVendor",
     "Product",

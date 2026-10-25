@@ -797,8 +797,9 @@ _STALE_FLAGS_PER_TYPE_CAP = 500  # bound one run's log growth
 def prune_engine_tables():
     """Daily: delete engine bookkeeping rows older than 30 days.
 
-    Covers job_runs now; entry_pipeline_runs / ai_analysis_requests /
-    ai_batch_jobs join this list in later engine phases.
+    Covers entry_pipeline_runs, job_runs, ai_analysis_requests, ai_batch_jobs,
+    pending autolink matches, and the retired link validator's unreviewed
+    proposals.
     """
     start = time.monotonic()
     try:
@@ -855,6 +856,10 @@ async def _prune_engine_tables() -> int:
             )
         )
         total += result.rowcount or 0
+        # The retired link validator's proposals: past 30 days nothing re-judges them.
+        from app.services.proposal_dismissals import expire_legacy_link_proposals
+
+        total += await expire_legacy_link_proposals(db)
         await db.commit()
     return total
 

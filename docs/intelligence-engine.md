@@ -303,7 +303,11 @@ linking instantly:
   OpenSubtitles frequency list). Dictionary words ("royal", "inc", "hive", "medusa",
   "turkey") mark the vocab entry `is_provisional`; coined names ("Emotet", "LockBit")
   stay instant. Applies to actor/malware/tool/country only — vendor/product have no AI
-  payload to reconcile against and keep instant linking.
+  payload to reconcile against and keep instant linking. Countries use their own short
+  list instead (`AMBIGUOUS_COUNTRY_WORDS`: Turkey, Jordan, Chad, Georgia, China…), since
+  the subtitle-frequency list also carries proper nouns like "canada" and "germany".
+  Analysts resolve held matches by hand in Engine → Review → Held links
+  (`GET /api/entity-links/pending`, `POST /api/entity-links/pending/resolve`).
 - **Diversion** (`store_autolink_matches`): matches whose surface forms are all
   provisional are written to `pending_autolink_matches` instead of junction tables —
   invisible to correlation, signals, counts, and the UI. A single non-provisional form
@@ -1711,7 +1715,7 @@ Backend: `mode=full, extract=false`. The autolinker runs unconditionally (no rel
 
 The autolinker matches against entities already in your database: threat actors and malware you've created or seeded, countries (seeded automatically), vendors/products, TTPs (the MITRE catalog must already be seeded), and CVEs (auto-created as skeletal stubs — just the ID, no description/CVSS/affected products — then queued for auto-enrichment and picked up by the nightly NVD sweeps `run_cve_nvd_backfill` and `reenrich_cve_nvd`). Both sweeps share one retry budget stamped into `nvd_data` (`_enrich_attempts`, `_enrich_last_attempt`): an ID NVD has no record of is looked up at most three times, a week apart, so junk IDs pulled out of prose stop costing NVD quota.
 
-What you lose vs. selective/full: new CVE references don't trigger NVD lookups (bare CVE detail pages), M-IDs aren't linked, and the standalone TTP pass doesn't run (essentially redundant work being skipped, since the autolinker's own regex picks up TTP IDs). What you keep: full entity correlation against your curated catalog, retroactive backlinking when new entities are created later (`link_entity_to_existing_entries`, `backend/app/intelligence/autolinker.py:1332`), and optional detection rule extraction.
+What you lose vs. selective/full: new CVE references don't trigger NVD lookups (bare CVE detail pages), M-IDs aren't linked, and the standalone TTP pass doesn't run (essentially redundant work being skipped, since the autolinker's own regex picks up TTP IDs). What you keep: full entity correlation against your curated catalog, retroactive backlinking when new entities are created later (`link_entity_to_existing_entries`, `backend/app/intelligence/autolinker.py:1351`), and optional detection rule extraction.
 
 **Use for:** high-volume feeds where you want catalog correlation without per-mention NVD cost (Telegram channels, Bluesky firehoses, r/netsec), "alarm sources" where you only care whether a known entity is mentioned, reliability-D/F sources you don't trust enough to enrich from, and feeds where the relevance filter drops content you care about. **Avoid for:** likely sources of new CVEs (NVD itself, vendor PSIRT) and feeds where you want to discover new TTPs/mitigations — use full or selective.
 
@@ -1733,7 +1737,7 @@ What still happens: entries are ingested, sanitized, indexed and translated, get
 
 ### Confidence weighting and reliability rating
 
-Independent of mode, every autolink junction record gets a confidence value (high/medium/low) computed by `_weighted_confidence` (`backend/app/intelligence/autolinker.py:610`): a canonical name match starts at high (0.9), an alias match at medium (0.5), multiplied by `source_confidence_weight` derived from the feed's reliability rating (A–F), then bucketed (≥0.7 → high, ≥0.4 → medium, else low). An A-grade feed's canonical match for "APT29" stays high; an F-grade feed's alias match for "Cozy Bear" gets downgraded to low. This rolls into correlation scoring downstream — mode and reliability rating work together, so full mode on a graded-F feed still produces useful but appropriately-weighted links.
+Independent of mode, every autolink junction record gets a confidence value (high/medium/low) computed by `_weighted_confidence` (`backend/app/intelligence/autolinker.py:629`): a canonical name match starts at high (0.9), an alias match at medium (0.5), multiplied by `source_confidence_weight` derived from the feed's reliability rating (A–F), then bucketed (≥0.7 → high, ≥0.4 → medium, else low). An A-grade feed's canonical match for "APT29" stays high; an F-grade feed's alias match for "Cozy Bear" gets downgraded to low. This rolls into correlation scoring downstream — mode and reliability rating work together, so full mode on a graded-F feed still produces useful but appropriately-weighted links.
 
 ### Choosing a mode — quick decision guide
 
@@ -1751,8 +1755,8 @@ Independent of mode, every autolink junction record gets a confidence value (hig
 
 ### Operational notes
 
-- Changing mode does not re-process existing entries — switching a feed from manual to full only affects new entries. To backfill, use the bulk rescan path (`autolink_batch` in `backend/app/intelligence/autolinker.py:1091` or the rescan endpoints).
-- Adding a new threat actor or malware family triggers `link_entity_to_existing_entries` (`backend/app/intelligence/autolinker.py:1332`), which retroactively scans existing entries with the same rules as ingest autolinking: entries from manual/none feeds are skipped, the `autolinker_false_positive_names` list (for the types it covers) and `autolinker_blocked_surface_forms` drop terms, an ambiguous short name only counts where it is capitalised, and confidence is the canonical-name "high" / alias "medium" scaled by the feed's reliability rating (unrated = 0.5, so an unrated feed tops out at medium). The pending dictionary-word tier does not apply to it.
+- Changing mode does not re-process existing entries — switching a feed from manual to full only affects new entries. To backfill, use the bulk rescan path (`autolink_batch` in `backend/app/intelligence/autolinker.py:1110` or the rescan endpoints).
+- Adding a new threat actor or malware family triggers `link_entity_to_existing_entries` (`backend/app/intelligence/autolinker.py:1351`), which retroactively scans existing entries with the same rules as ingest autolinking: entries from manual/none feeds are skipped, the `autolinker_false_positive_names` list (for the types it covers) and `autolinker_blocked_surface_forms` drop terms, an ambiguous short name only counts where it is capitalised, and confidence is the canonical-name "high" / alias "medium" scaled by the feed's reliability rating (unrated = 0.5, so an unrated feed tops out at medium). The pending dictionary-word tier does not apply to it.
 - The vocabulary is per-process and version-checked via Redis (`VOCAB_VERSION_KEY`). Creating a new entity bumps the version; all Celery workers rebuild on next scan, so there is no "stale vocab across workers" failure mode in normal operation.
 - Foreign-language entries with translations (e.g., Russian Telegram with auto-translation enabled) get the autolinker run against the original and translated text concatenated (`workers/intel_feed_tasks.py:239-241`, via `entry_text_with_translation`), in any mode that runs the autolinker.
 

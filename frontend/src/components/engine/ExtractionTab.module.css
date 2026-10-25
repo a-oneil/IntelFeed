@@ -280,6 +280,21 @@
 }
 .iact:hover { color: var(--text-primary); border-color: var(--bg-hover); }
 .iactDanger:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+/* Duplicate rows: one-click merge into the sibling, or "different things". */
+.dupAct {
+  height: 27px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  border-radius: var(--r-md);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.dupAct:hover:not(:disabled) { color: var(--text-primary); border-color: var(--bg-hover); }
+.dupAct:disabled { opacity: 0.5; cursor: default; }
 
 /* per-row ⋯ manage menu — fixed-positioned, right-aligned to the button */
 .rowmenu {

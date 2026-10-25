@@ -144,7 +144,12 @@ async def log_reclassification(
     suggested_type: str | None,
     ai_result_id: uuid.UUID | None,
 ) -> None:
-    """Audit-log a RECLASSIFY decision. The junction row is left intact."""
+    """Audit-log a RECLASSIFY decision. The junction row is left intact.
+    Skipped when an analyst dismissed reclassifying this entity."""
+    from app.services.proposal_dismissals import reclassify_dismissed
+
+    if suggested_type == link.entity_type or await reclassify_dismissed(db, link.entity_type, link.entity_id):
+        return
     db.add(
         EntityLinkValidationLog(
             entry_id=entry_id,

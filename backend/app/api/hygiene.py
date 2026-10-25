@@ -29,7 +29,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Body, Depends, Path, Query
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import and_, delete, func, literal, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.entity_merge import (
@@ -91,6 +91,7 @@ from app.services.proposal_apply import (
     read_progress,
     write_progress,
 )
+from app.services.proposal_dismissals import clear_reclassify_proposals, dismiss_reclassify
 
 router = APIRouter()
 
@@ -593,10 +594,9 @@ async def _apply_advisory_rows(
         src_model = src_spec["model"]
         src_entity = (await db.execute(select(src_model).where(src_model.id == src_id))).scalar_one_or_none()
         if not src_entity:
-            # Already gone — clear the now-stale advisories.
-            for r in rows:
-                await db.delete(r)
-                cleared += 1
+            # Already gone (possibly reclassified by an earlier group in this
+            # batch) — clear the now-stale advisories.
+            cleared += await clear_reclassify_proposals(db, src_type, src_id)
             skipped += 1
             continue
 
@@ -621,9 +621,9 @@ async def _apply_advisory_rows(
         try:
             await perform_reclassify(db, req)
             if mode == "apply":
-                for r in rows:
-                    await db.delete(r)
-                    cleared += 1
+                # Every proposal about the entity, not just these rows: the
+                # other suggested types and the other log are moot now.
+                cleared += await clear_reclassify_proposals(db, src_type, src_id)
                 applied += 1
             else:
                 # shadow — leave advisories in place
@@ -1599,7 +1599,8 @@ class HygieneStats(BaseModel):
     adjudication_mode: str  # off | shadow | apply
     adjudication_pending: int  # unapplied verdicts it filed, across both logs
     adjudication_breaker_until: datetime | None = None  # rolling breaker has paused dispatch until then
-    pending_advisories: int  # needs_reclassification rows
+    pending_advisories: int  # entities with a pending reclassify proposal (either log)
+    pending_unlink_entities: int = 0  # entities with a pending remove-link proposal (either log)
     name_normalization_proposed: int  # unapplied normalize_name rows
     applied_24h: int  # actions applied across both logs in last 24h
     applied_7d: int
@@ -1678,14 +1679,10 @@ async def hygiene_stats(
         )
     ).scalar_one()
 
-    # pending_advisories drives the "Apply all proposed reclassifies (N)" bulk button.
-    pending_advisories = (
-        await db.execute(
-            select(func.count())
-            .select_from(EntityLinkValidationLog)
-            .where(EntityLinkValidationLog.action == "needs_reclassification")
-        )
-    ).scalar_one()
+    # Entities with a pending reclassify proposal in either log (the console's
+    # "reclassify proposals" chip). One per entity, not one per article.
+    pending_advisories = len(await _reclassify_group_rows(db))
+    pending_unlink_entities = len({(r[0], r[1]) for r in (await db.execute(text(_UNLINK_GROUPS_SQL))).all()})
 
     name_normalization_proposed = (
         await db.execute(
@@ -1799,6 +1796,7 @@ async def hygiene_stats(
         adjudication_breaker_until=adjudication_breaker_until,
         adjudication_pending=int(adjudication_pending),
         pending_advisories=int(pending_advisories),
+        pending_unlink_entities=pending_unlink_entities,
         name_normalization_proposed=int(name_normalization_proposed),
         applied_24h=int(applied_24h_link) + int(applied_24h_maint),
         applied_7d=int(applied_7d_link) + int(applied_7d_maint),
@@ -3082,14 +3080,21 @@ async def dismiss_feed_row(
         ).scalar_one_or_none()
         if not row:
             raise AppError(code="not_found", message="advisory not found", status_code=404)
-        await db.delete(row)
+        if row.action == "needs_reclassification":
+            # The decision is about the entity: drop every article's copy.
+            await dismiss_reclassify(db, row.entity_type, row.entity_id, user.id)
+        else:
+            await db.delete(row)
     elif source == "entity_maintenance":
         row = (
             await db.execute(select(EntityMaintenanceLog).where(EntityMaintenanceLog.id == row_id))
         ).scalar_one_or_none()
         if not row:
             raise AppError(code="not_found", message="log row not found", status_code=404)
-        await db.delete(row)
+        if row.action == ACTION_RECLASSIFY and row.entity_id and not row.applied:
+            await dismiss_reclassify(db, row.entity_type, row.entity_id, user.id)
+        else:
+            await db.delete(row)
     else:
         raise AppError(code="invalid", message=f"unknown source: {source}", status_code=400)
     await db.flush()
@@ -3336,3 +3341,564 @@ async def get_bulk_apply(
     if progress is None:
         raise AppError(code="not_found", message="No such bulk apply job (or it expired)", status_code=404)
     return BulkApplyProgress(**progress)
+
+
+# ---------------------------------------------------------------------------
+# Reclassify proposals grouped by entity
+# ---------------------------------------------------------------------------
+#
+# A reclassify proposal is filed once per article that mentions the entity, so
+# "Linux Kernel: tool → product" can be hundreds of rows across both logs. The
+# decision is about the entity: these endpoints show one row per entity and
+# apply / dismiss every proposal about it at once.
+
+
+class ReclassifySuggestion(BaseModel):
+    type: str
+    count: int
+
+
+class ReclassifyGroup(BaseModel):
+    entity_type: str
+    entity_id: uuid.UUID
+    name: str
+    exists: bool  # False → the entity is gone; applying just clears the rows
+    suggestions: list[ReclassifySuggestion]  # most-proposed first
+    proposals: int
+    latest_at: datetime
+    reason: str | None
+    sample_entry_id: uuid.UUID | None
+
+
+class ReclassifyGroupsResponse(BaseModel):
+    groups: list[ReclassifyGroup]
+    total: int
+
+
+async def _reclassify_group_rows(db: AsyncSession) -> dict[tuple[str, uuid.UUID], dict]:
+    """Every pending reclassify proposal in both logs, folded per entity."""
+    groups: dict[tuple[str, uuid.UUID], dict] = {}
+    rows = (
+        await db.execute(
+            text(
+                """
+                SELECT entity_type, entity_id, suggested_entity_type, count(*), max(created_at),
+                       max(entity_name_snapshot)
+                FROM entity_link_validation_log
+                WHERE action = 'needs_reclassification'
+                  AND suggested_entity_type IS NOT NULL
+                  AND suggested_entity_type <> entity_type
+                GROUP BY 1, 2, 3
+                UNION ALL
+                SELECT entity_type, entity_id, after->>'suggested_type', count(*), max(created_at),
+                       max(before->'entity'->>'name')
+                FROM entity_maintenance_log
+                WHERE action = 'adjudication_reclassify' AND applied = false
+                  AND entity_id IS NOT NULL
+                  AND after->>'suggested_type' IS NOT NULL
+                  AND after->>'suggested_type' <> entity_type
+                GROUP BY 1, 2, 3
+                """
+            )
+        )
+    ).all()
+    for etype, eid, sug, n, latest, name in rows:
+        g = groups.setdefault(
+            (etype, eid),
+            {
+                "entity_type": etype,
+                "entity_id": eid,
+                "name": name,
+                "suggestions": defaultdict(int),
+                "latest_at": latest,
+            },
+        )
+        g["suggestions"][sug] += n
+        g["name"] = g["name"] or name
+        if latest > g["latest_at"]:
+            g["latest_at"] = latest
+    return groups
+
+
+@router.get("/admin/hygiene/reclassify-groups", response_model=ReclassifyGroupsResponse)
+async def reclassify_groups(
+    q: str | None = Query(None, description="Filter by entity name (substring, case-insensitive)."),
+    entity_type: str | None = Query(None, description="Only proposals about entities of this type."),
+    limit: int = Query(50, ge=1, le=200, description="Groups per page."),
+    offset: int = Query(0, ge=0, description="Groups to skip."),
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> ReclassifyGroupsResponse:
+    """Pending reclassify proposals from both logs, one row per entity, most-proposed first."""
+    groups = list((await _reclassify_group_rows(db)).values())
+
+    # Live names (and whether the entity still exists), per type.
+    by_type: dict[str, list[uuid.UUID]] = defaultdict(list)
+    for g in groups:
+        by_type[g["entity_type"]].append(g["entity_id"])
+    live: dict[tuple[str, uuid.UUID], str] = {}
+    for etype, ids in by_type.items():
+        spec = ENTITY_TYPE_REGISTRY.get(etype)
+        if spec is None:
+            continue
+        model = spec["model"]
+        for eid, name in (await db.execute(select(model.id, model.name).where(model.id.in_(ids)))).all():
+            live[(etype, eid)] = name
+    for g in groups:
+        key = (g["entity_type"], g["entity_id"])
+        g["exists"] = key in live
+        g["name"] = live.get(key) or g["name"] or "(unnamed)"
+        g["proposals"] = sum(g["suggestions"].values())
+
+    if entity_type:
+        groups = [g for g in groups if g["entity_type"] == entity_type]
+    if q:
+        needle = q.strip().lower()
+        groups = [g for g in groups if needle in g["name"].lower()]
+    groups.sort(key=lambda g: (-g["proposals"], g["name"].lower()))
+    total = len(groups)
+    page = groups[offset : offset + limit]
+
+    # The latest reason and an example article, for the visible page only.
+    detail: dict[tuple[str, uuid.UUID], tuple[str | None, uuid.UUID | None, datetime]] = {}
+    if page:
+        ids = [g["entity_id"] for g in page]
+        rows = (
+            await db.execute(
+                text(
+                    """
+                    SELECT entity_type, entity_id, reason, entry_id, created_at
+                    FROM entity_link_validation_log
+                    WHERE action = 'needs_reclassification' AND entity_id = ANY(:ids)
+                    UNION ALL
+                    SELECT entity_type, entity_id, coalesce(after->>'reason', reasoning),
+                           (before->>'entry_id')::uuid, created_at
+                    FROM entity_maintenance_log
+                    WHERE action = 'adjudication_reclassify' AND applied = false AND entity_id = ANY(:ids)
+                    """
+                ).bindparams(ids=ids)
+            )
+        ).all()
+        for etype, eid, reason, entry_id, created in rows:
+            prev = detail.get((etype, eid))
+            if prev is None or created > prev[2]:
+                detail[(etype, eid)] = (reason, entry_id, created)
+
+    out = []
+    for g in page:
+        reason, entry_id, _ = detail.get((g["entity_type"], g["entity_id"]), (None, None, None))
+        out.append(
+            ReclassifyGroup(
+                entity_type=g["entity_type"],
+                entity_id=g["entity_id"],
+                name=g["name"],
+                exists=g["exists"],
+                suggestions=[
+                    ReclassifySuggestion(type=t, count=n)
+                    for t, n in sorted(g["suggestions"].items(), key=lambda kv: -kv[1])
+                ],
+                proposals=g["proposals"],
+                latest_at=g["latest_at"],
+                reason=reason,
+                sample_entry_id=entry_id,
+            )
+        )
+    return ReclassifyGroupsResponse(groups=out, total=total)
+
+
+class ReclassifyGroupItem(BaseModel):
+    entity_type: str
+    entity_id: uuid.UUID
+    target_type: str | None = Field(default=None, description="Apply only: the type to convert the entity to.")
+
+
+class ReclassifyGroupsActionRequest(BaseModel):
+    items: list[ReclassifyGroupItem] = Field(..., max_length=200)
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "items": [
+                    {
+                        "entity_type": "tool",
+                        "entity_id": "d5b2c8f0-3e4a-4b6c-9d1e-7f8a9b0c1d2e",
+                        "target_type": "product",
+                    }
+                ]
+            }
+        }
+    )
+
+
+class ReclassifyGroupsActionResponse(BaseModel):
+    entities: int  # entities handled
+    cleared_rows: int  # proposal rows removed from both logs
+    failed: int
+    errors: list[dict]
+
+
+@router.post("/admin/hygiene/reclassify-groups/apply", response_model=ReclassifyGroupsActionResponse)
+async def apply_reclassify_groups(
+    body: ReclassifyGroupsActionRequest = Body(...),
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> ReclassifyGroupsActionResponse:
+    """Convert each entity to its target type, then clear every reclassify proposal
+    about it (any suggested type, both logs). An entity that's already gone just
+    has its proposals cleared."""
+    from app.services.entry_adjudication import _reclassify_entity
+
+    entities = cleared = failed = 0
+    errors: list[dict] = []
+    for it in body.items:
+        if not it.target_type:
+            failed += 1
+            errors.append({"entity_id": str(it.entity_id), "error": "target_type is required"})
+            continue
+        try:
+            async with db.begin_nested():
+                outcome = await _reclassify_entity(db, it.entity_type, it.entity_id, it.target_type, "")
+                if not outcome.get("applied") and outcome.get("reason") != "entity gone":
+                    raise AppError(code="invalid", message=str(outcome.get("reason")), status_code=400)
+                cleared += await clear_reclassify_proposals(db, it.entity_type, it.entity_id)
+            entities += 1
+        except AppError as e:
+            failed += 1
+            errors.append({"entity_id": str(it.entity_id), "error": e.message})
+        except Exception as e:  # pragma: no cover  (defense-in-depth)
+            failed += 1
+            errors.append({"entity_id": str(it.entity_id), "error": str(e)[:300]})
+    await db.flush()
+    return ReclassifyGroupsActionResponse(entities=entities, cleared_rows=cleared, failed=failed, errors=errors[:50])
+
+
+@router.post("/admin/hygiene/reclassify-groups/dismiss", response_model=ReclassifyGroupsActionResponse)
+async def dismiss_reclassify_groups(
+    body: ReclassifyGroupsActionRequest = Body(...),
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> ReclassifyGroupsActionResponse:
+    """Clear every reclassify proposal about each entity and stop new ones from
+    being filed for it."""
+    cleared = 0
+    for it in body.items:
+        cleared += await dismiss_reclassify(db, it.entity_type, it.entity_id, user.id)
+    await db.flush()
+    return ReclassifyGroupsActionResponse(entities=len(body.items), cleared_rows=cleared, failed=0, errors=[])
+
+
+# ---------------------------------------------------------------------------
+# Remove-link proposals grouped by entity
+# ---------------------------------------------------------------------------
+#
+# The adjudicate stage judges each article's links on their own, so one entity
+# the autolinker over-matches ("Linux", "python3") collects a remove-link
+# proposal per article in one of two logs: the link log's shadow_remove for the
+# linkable types, the maintenance log's adjudication_unlink for the rest. These
+# endpoints show one row per entity and settle its proposals together.
+
+UNLINK_APPLY_BATCH = 400  # rows per apply call; the client repeats while `remaining`
+
+
+class UnlinkGroup(BaseModel):
+    entity_type: str
+    entity_id: uuid.UUID
+    name: str
+    exists: bool
+    proposals: int  # articles the review wants this entity unlinked from
+    linked: int | None  # articles it is linked to now, where the type keeps a count
+    matched_names: list[str]  # the surface forms the proposals were about, most common first
+    reason: str | None
+    latest_at: datetime
+
+
+class UnlinkGroupsResponse(BaseModel):
+    groups: list[UnlinkGroup]
+    total: int
+    proposals: int
+
+
+class UnlinkRow(BaseModel):
+    id: str  # "{source}:{uuid}", the feed's id shape
+    entry_id: uuid.UUID | None
+    entry_title: str | None
+    reason: str | None
+    matched_names: list[str]
+    created_at: datetime
+
+
+_UNLINK_GROUPS_SQL = """
+SELECT entity_type, entity_id, count(*), max(created_at), max(entity_name_snapshot)
+FROM entity_link_validation_log WHERE action = 'shadow_remove'
+GROUP BY 1, 2
+UNION ALL
+SELECT entity_type, entity_id, count(*), max(created_at), NULL
+FROM entity_maintenance_log
+WHERE action = 'adjudication_unlink' AND applied = false AND entity_id IS NOT NULL
+GROUP BY 1, 2
+"""
+
+# One row per proposal for the given entities, newest first, with the forms it
+# matched on. :ids is a uuid[]; maintenance rows keep the junction snapshot in
+# before->'junction'.
+_UNLINK_ROWS_SQL = """
+SELECT 'link_validator' AS source, l.id, l.entity_type, l.entity_id, l.entry_id, l.reason,
+       coalesce(l.original_matched_names, ARRAY[]::text[]) AS forms, l.created_at
+FROM entity_link_validation_log l
+WHERE l.action = 'shadow_remove' AND l.entity_id = ANY(:ids)
+UNION ALL
+SELECT 'entity_maintenance', m.id, m.entity_type, m.entity_id, (m.before->>'entry_id')::uuid,
+       coalesce(m.after->>'reason', m.reasoning),
+       coalesce(ARRAY(SELECT jsonb_array_elements_text(m.before->'junction'->'matched_names')), ARRAY[]::text[]),
+       m.created_at
+FROM entity_maintenance_log m
+WHERE m.action = 'adjudication_unlink' AND m.applied = false AND m.entity_id = ANY(:ids)
+ORDER BY 8 DESC
+"""
+
+
+async def _entity_labels(
+    db: AsyncSession, by_type: dict[str, list[uuid.UUID]]
+) -> dict[tuple[str, uuid.UUID], tuple[str, int | None]]:
+    """Live (display name, article_count) per entity, for any entity type."""
+    from app.services.entry_adjudication import _model_for
+
+    out: dict[tuple[str, uuid.UUID], tuple[str, int | None]] = {}
+    for etype, ids in by_type.items():
+        model = _model_for(etype)
+        if model is None:
+            continue
+        name_col = next(getattr(model, a) for a in ("name", "cve_id", "technique_id", "value") if hasattr(model, a))
+        count_col = model.article_count if hasattr(model, "article_count") else literal(None)
+        for eid, name, n in (await db.execute(select(model.id, name_col, count_col).where(model.id.in_(ids)))).all():
+            out[(etype, eid)] = (str(name), n)
+    return out
+
+
+@router.get("/admin/hygiene/unlink-groups", response_model=UnlinkGroupsResponse)
+async def unlink_groups(
+    q: str | None = Query(None, description="Filter by entity name (substring, case-insensitive)."),
+    entity_type: str | None = Query(None, description="Only proposals about entities of this type."),
+    limit: int = Query(50, ge=1, le=200, description="Groups per page."),
+    offset: int = Query(0, ge=0, description="Groups to skip."),
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> UnlinkGroupsResponse:
+    """Pending remove-link proposals from both logs, one row per entity, most-proposed first."""
+    groups: dict[tuple[str, uuid.UUID], dict] = {}
+    for etype, eid, n, latest, snap in (await db.execute(text(_UNLINK_GROUPS_SQL))).all():
+        g = groups.setdefault((etype, eid), {"proposals": 0, "latest_at": latest, "snap": snap})
+        g["proposals"] += n
+        g["latest_at"] = max(g["latest_at"], latest)
+        g["snap"] = g["snap"] or snap
+    all_proposals = sum(g["proposals"] for g in groups.values())
+
+    by_type: dict[str, list[uuid.UUID]] = defaultdict(list)
+    for etype, eid in groups:
+        by_type[etype].append(eid)
+    labels = await _entity_labels(db, by_type)
+
+    items = []
+    for (etype, eid), g in groups.items():
+        name, linked = labels.get((etype, eid), (g["snap"] or "(deleted)", None))
+        items.append(
+            {"entity_type": etype, "entity_id": eid, "name": name, "linked": linked, "exists": (etype, eid) in labels}
+            | g
+        )
+    if entity_type:
+        items = [g for g in items if g["entity_type"] == entity_type]
+    if q:
+        needle = q.strip().lower()
+        items = [g for g in items if needle in g["name"].lower()]
+    items.sort(key=lambda g: (-g["proposals"], g["name"].lower()))
+    total = len(items)
+    page = items[offset : offset + limit]
+
+    # Matched forms and the latest reason, for the visible page only.
+    forms: dict[tuple[str, uuid.UUID], dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    reasons: dict[tuple[str, uuid.UUID], str | None] = {}
+    if page:
+        rows = (await db.execute(text(_UNLINK_ROWS_SQL).bindparams(ids=[g["entity_id"] for g in page]))).all()
+        for _src, _id, etype, eid, _entry, reason, row_forms, _at in rows:
+            key = (etype, eid)
+            reasons.setdefault(key, reason)  # newest first
+            for f in row_forms or []:
+                forms[key][f] += 1
+
+    return UnlinkGroupsResponse(
+        groups=[
+            UnlinkGroup(
+                entity_type=g["entity_type"],
+                entity_id=g["entity_id"],
+                name=g["name"],
+                exists=g["exists"],
+                proposals=g["proposals"],
+                linked=g["linked"],
+                matched_names=[
+                    f for f, _ in sorted(forms[(g["entity_type"], g["entity_id"])].items(), key=lambda kv: -kv[1])
+                ][:4],
+                reason=reasons.get((g["entity_type"], g["entity_id"])),
+                latest_at=g["latest_at"],
+            )
+            for g in page
+        ],
+        total=total,
+        proposals=all_proposals,
+    )
+
+
+@router.get("/admin/hygiene/unlink-groups/rows", response_model=list[UnlinkRow])
+async def unlink_group_rows(
+    entity_type: str = Query(..., description="Entity type of the group."),
+    entity_id: uuid.UUID = Query(..., description="Entity id of the group."),
+    limit: int = Query(200, ge=1, le=1000, description="Most rows to return, newest first."),
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[UnlinkRow]:
+    """The articles behind one entity's remove-link proposals, newest first."""
+    rows = [
+        r for r in (await db.execute(text(_UNLINK_ROWS_SQL).bindparams(ids=[entity_id]))).all() if r[2] == entity_type
+    ][:limit]
+    entry_ids = [r[4] for r in rows if r[4]]
+    titles = (
+        dict((await db.execute(select(Entry.id, Entry.title).where(Entry.id.in_(entry_ids)))).all())
+        if entry_ids
+        else {}
+    )
+    return [
+        UnlinkRow(
+            id=f"{src}:{rid}",
+            entry_id=entry_id,
+            entry_title=titles.get(entry_id),
+            reason=reason,
+            matched_names=list(row_forms or []),
+            created_at=at,
+        )
+        for src, rid, _t, _e, entry_id, reason, row_forms, at in rows
+    ]
+
+
+class UnlinkGroupsActionRequest(BaseModel):
+    items: list[ReclassifyGroupItem] = Field(
+        default_factory=list, max_length=200, description="Whole groups: every proposal about each entity."
+    )
+    row_ids: list[str] = Field(
+        default_factory=list, max_length=1000, description="Or single proposals, as '{source}:{uuid}' feed ids."
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {"items": [{"entity_type": "tool", "entity_id": "d5b2c8f0-3e4a-4b6c-9d1e-7f8a9b0c1d2e"}]}
+        }
+    )
+
+
+class UnlinkGroupsActionResponse(BaseModel):
+    done: int  # proposals applied (links removed) or cleared (links kept)
+    failed: int
+    remaining: int  # apply only: proposals still pending in the requested groups — call again
+    errors: list[dict]
+
+
+async def _unlink_targets(
+    db: AsyncSession, body: UnlinkGroupsActionRequest, cap: int | None
+) -> tuple[list[EntityLinkValidationLog], list[EntityMaintenanceLog], int]:
+    """The proposal rows an unlink-group action covers, capped; plus how many exist in all."""
+    link_ids: list[uuid.UUID] = []
+    maint_ids: list[uuid.UUID] = []
+    for rid in body.row_ids:
+        src, _, raw = rid.partition(":")
+        try:
+            (link_ids if src == "link_validator" else maint_ids).append(uuid.UUID(raw))
+        except ValueError:
+            raise AppError(code="invalid", message=f"bad row id: {rid}", status_code=400) from None
+    link_q = select(EntityLinkValidationLog).where(EntityLinkValidationLog.action == "shadow_remove")
+    maint_q = select(EntityMaintenanceLog).where(
+        EntityMaintenanceLog.action == ACTION_UNLINK, EntityMaintenanceLog.applied.is_(False)
+    )
+    if body.items:
+        link_q = link_q.where(
+            or_(
+                *(
+                    and_(
+                        EntityLinkValidationLog.entity_type == it.entity_type,
+                        EntityLinkValidationLog.entity_id == it.entity_id,
+                    )
+                    for it in body.items
+                )
+            )
+        )
+        maint_q = maint_q.where(
+            or_(
+                *(
+                    and_(
+                        EntityMaintenanceLog.entity_type == it.entity_type,
+                        EntityMaintenanceLog.entity_id == it.entity_id,
+                    )
+                    for it in body.items
+                )
+            )
+        )
+    elif body.row_ids:
+        link_q = link_q.where(EntityLinkValidationLog.id.in_(link_ids))
+        maint_q = maint_q.where(EntityMaintenanceLog.id.in_(maint_ids))
+    else:
+        raise AppError(code="invalid", message="Pass items or row_ids", status_code=400)
+    total = (await db.execute(select(func.count()).select_from(link_q.subquery()))).scalar_one() + (
+        await db.execute(select(func.count()).select_from(maint_q.subquery()))
+    ).scalar_one()
+    if cap is not None:
+        link_q = link_q.limit(cap)
+        maint_q = maint_q.limit(cap)
+    return list((await db.execute(link_q)).scalars().all()), list((await db.execute(maint_q)).scalars().all()), total
+
+
+@router.post("/admin/hygiene/unlink-groups/apply", response_model=UnlinkGroupsActionResponse)
+async def apply_unlink_groups(
+    body: UnlinkGroupsActionRequest = Body(...),
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> UnlinkGroupsActionResponse:
+    """Remove the links the proposals name — every article for each entity, or the
+    picked rows. Works in batches of a few hundred; `remaining` says to call again.
+    Every removal stays restorable from History."""
+    from app.services.entry_adjudication import apply_adjudication_row
+
+    link_rows, maint_rows, total = await _unlink_targets(db, body, UNLINK_APPLY_BATCH)
+    link_rows = link_rows[:UNLINK_APPLY_BATCH]
+    maint_rows = maint_rows[: max(0, UNLINK_APPLY_BATCH - len(link_rows))]
+    done = failed = 0
+    errors: list[dict] = []
+    for row in [*link_rows, *maint_rows]:
+        try:
+            async with db.begin_nested():
+                if isinstance(row, EntityLinkValidationLog):
+                    await apply_link_removal_row(db, row)
+                else:
+                    outcome = await apply_adjudication_row(db, row)
+                    if not outcome.get("applied"):
+                        # Entry or entity gone: nothing to unlink, the proposal is moot.
+                        await db.delete(row)
+            done += 1
+        except Exception as e:
+            failed += 1
+            errors.append({"id": str(row.id), "error": str(getattr(e, "message", e))[:300]})
+    await db.flush()
+    return UnlinkGroupsActionResponse(
+        done=done, failed=failed, remaining=max(0, total - done - failed), errors=errors[:50]
+    )
+
+
+@router.post("/admin/hygiene/unlink-groups/keep", response_model=UnlinkGroupsActionResponse)
+async def keep_unlink_groups(
+    body: UnlinkGroupsActionRequest = Body(...),
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> UnlinkGroupsActionResponse:
+    """Keep the links: clear the remove-link proposals for each entity (or the
+    picked rows) without touching a junction."""
+    link_rows, maint_rows, _ = await _unlink_targets(db, body, None)
+    for row in [*link_rows, *maint_rows]:
+        await db.delete(row)
+    await db.flush()
+    return UnlinkGroupsActionResponse(done=len(link_rows) + len(maint_rows), failed=0, remaining=0, errors=[])

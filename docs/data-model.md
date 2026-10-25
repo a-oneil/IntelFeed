@@ -347,6 +347,8 @@ Leak-site victim tracker (migration `c3d5e7f9a1b3`, behind `ransomware_tracker_e
 
 **`entity_name_denylist`** — names banned from entity creation per type (seeded from the 2026-08 prod cleanup). Unique on `(entity_type, normalized_name)`.
 
+**`proposal_dismissals`** — analyst decisions that keep a cleanup proposal from coming back: `kind='reclassify'` stops reclassify proposals for `(entity_type, entity_id)` from being filed, `kind='not_duplicate'` drops the pair `(entity_id, other_key)` (smaller id first) from the likely-duplicate check. Unique on `(kind, entity_type, entity_id, other_key)`.
+
 **`pending_autolink_matches`** — dictionary-word autolinker matches ("Royal", "Hive", "Turkey") held for one-pass AI confirmation instead of creating junction rows; promoted or rejected via `resolution` (`promoted` / `rejected`, or `dropped_ai_off` from `scripts/maintenance/resolve_pending_ai_off.py`), expired by `prune_engine_tables`. Unique on `(entry_id, entity_type, entity_id)`.
 
 #### EntityMaintenanceLog & ActorDescriptionHistory

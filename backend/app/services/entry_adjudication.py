@@ -1753,6 +1753,7 @@ async def apply_verdicts(
         log_shadow_removal,
     )
     from app.models.entity_maintenance import EntityMaintenanceLog
+    from app.services.proposal_dismissals import reclassify_dismissed
 
     mode = cfg["mode"]
     ai_result_id = await _adjudication_result_id(db, entry.id)
@@ -1882,7 +1883,7 @@ async def apply_verdicts(
                 # (from the queue) converts the entity, never unlinks it.
                 if item.entity_type in ENTITY_TYPES:
                     await log_reclassification(db, entry.id, link_row, reason, v.suggested_type, ai_result_id)
-                else:
+                elif not await reclassify_dismissed(db, item.entity_type or "", item.entity_id):  # type: ignore[arg-type]
                     _log(
                         ACTION_RECLASSIFY,
                         item,
@@ -2136,6 +2137,12 @@ async def apply_adjudication_row(db: AsyncSession, row) -> dict:
     row.applied = True
     db.add(row)
     await db.flush()
+    if row.action == ACTION_RECLASSIFY:
+        # This row stays as the undo record; the other articles' copies of the
+        # proposal (any suggested type, either log) are settled by it.
+        from app.services.proposal_dismissals import clear_reclassify_proposals
+
+        await clear_reclassify_proposals(db, row.entity_type, row.entity_id)
     return outcome
 
 
