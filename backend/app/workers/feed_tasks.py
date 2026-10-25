@@ -310,6 +310,14 @@ def fetch_feed(self, feed_id: str):
             logger.warning("Failed to release feed_fetch lock for %s", feed_id, exc_info=True)
 
 
+def _title_is_placeholder(feed: Feed) -> bool:
+    """No real name yet: blank, or the URL a feed created without one is titled with.
+
+    The first fetch then names the feed after what the source calls itself.
+    """
+    return not feed.title or feed.title == feed.url
+
+
 def _drop_excluded_titles(feed: Feed, parsed_entries: list) -> list:
     """Remove articles whose title matches the feed's exclude-title list.
 
@@ -647,7 +655,7 @@ async def _fetch_feed(feed_id: str):
         _note_fetch_success(feed)
 
         # Update feed title/description from parsed metadata
-        if feed_meta.title and not feed.title:
+        if feed_meta.title and _title_is_placeholder(feed):
             feed.title = feed_meta.title
         if feed_meta.description and not feed.description:
             feed.description = feed_meta.description
@@ -1084,7 +1092,7 @@ async def _fetch_extended_feed(db: AsyncSession, feed: Feed) -> None:
     feed.last_fetched_at = datetime.now(UTC)
     _note_fetch_success(feed)
 
-    if feed_meta.title and not feed.title:
+    if feed_meta.title and _title_is_placeholder(feed):
         feed.title = feed_meta.title
     if feed_meta.description and not feed.description:
         feed.description = feed_meta.description

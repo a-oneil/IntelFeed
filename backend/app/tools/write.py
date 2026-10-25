@@ -417,7 +417,7 @@ async def _create_feed(
         if cat:
             category_id = cat.id
         else:
-            warning = f"category '{category}' does not exist; feed created without a category"
+            warning = f"category '{category}' does not exist; feed filed with others of its type, if any"
 
     # The same config handling POST /api/feeds applies: Telegram configs are
     # normalized, and a Bluesky app password is encrypted before it is stored
@@ -439,7 +439,10 @@ async def _create_feed(
     except AppError as e:
         return {"error": e.message}
 
-    from app.services.feed_defaults import new_feed_settings
+    from app.services.feed_defaults import category_for_feed_type, new_feed_settings
+
+    if category_id is None:
+        category_id = await category_for_feed_type(db, feed_type)
 
     feed = Feed(
         url=url,

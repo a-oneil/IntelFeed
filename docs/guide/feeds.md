@@ -42,7 +42,9 @@ depend on, and for security advisories from projects in your stack.
 
 For a site with no feed at all. Point it at a page and IntelFeed extracts
 articles from it. Expect this to be less reliable than a real feed — scrapers
-break when sites redesign — so check it a week after adding it.
+break when sites redesign — so check it a week after adding it. The feed is
+named after the page's own title on its first fetch; rename it under Identity
+if that title is unhelpful.
 
 ### Bluesky
 
@@ -60,6 +62,11 @@ see [Telegram setup](#telegram-setup) below.
 Every feed belongs to a category, and categories are the folders in your
 sidebar. This is the single most consequential decision in feed setup, because
 categories are what you filter by for the rest of the instance's life.
+
+The add-feed form asks for one whenever any exist. A feed created without one
+through the API, the `create_feed` tool, or an OPML outline outside any folder
+is filed in the category most feeds of its type already sit in; it stays
+uncategorized only when no feed of that type has a category yet.
 
 Group by **how you'd want to read them**, not by alphabet or by vendor:
 

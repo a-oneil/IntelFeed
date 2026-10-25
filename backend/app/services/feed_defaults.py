@@ -14,9 +14,11 @@ bulk-update is how feeds already there are changed.
 
 import uuid
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.category import Category
+from app.models.feed import Feed
 
 FEED_DEFAULT_FIELDS = (
     "intel_extraction_mode",
@@ -48,6 +50,25 @@ async def category_defaults(db: AsyncSession, category_id: uuid.UUID | None) -> 
         return {}
     category = await db.get(Category, category_id)
     return clean_defaults(category.feed_defaults) if category else {}
+
+
+async def category_for_feed_type(db: AsyncSession, feed_type: str) -> uuid.UUID | None:
+    """The category most feeds of this type are filed under, for a caller that named none.
+
+    A feed left in "Uncategorized" is skipped by every bulk update by category
+    and inherits no defaults, so a create without a category is filed beside
+    its own kind instead. None when no feed of the type has a category yet.
+    """
+    row = (
+        await db.execute(
+            select(Feed.category_id, func.count().label("n"))
+            .where(Feed.feed_type == feed_type, Feed.category_id.is_not(None))
+            .group_by(Feed.category_id)
+            .order_by(func.count().desc(), Feed.category_id)
+            .limit(1)
+        )
+    ).first()
+    return row.category_id if row else None
 
 
 async def new_feed_settings(db: AsyncSession, category_id: uuid.UUID | None, explicit: dict) -> dict:

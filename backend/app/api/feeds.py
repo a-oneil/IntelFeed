@@ -29,7 +29,12 @@ from app.schemas.feed import (
     TitleFilterPreviewRequest,
     TitleFilterPreviewResponse,
 )
-from app.services.feed_defaults import FEED_DEFAULT_FIELDS, clean_defaults, new_feed_settings
+from app.services.feed_defaults import (
+    FEED_DEFAULT_FIELDS,
+    category_for_feed_type,
+    clean_defaults,
+    new_feed_settings,
+)
 from app.services.feed_discovery import discover_feed
 from app.services.feed_visibility import (
     ensure_subscription,
@@ -267,13 +272,13 @@ async def create_feed(
             return resp
         raise AppError(code="conflict", message="A feed with this URL already exists", status_code=409)
 
-    # Pipeline settings: what the request names, then the category's defaults,
-    # then the column defaults.
-    pipeline = await new_feed_settings(
-        db,
-        request.category_id,
-        {field: getattr(request, field) for field in FEED_DEFAULT_FIELDS},
-    )
+    async def placement(feed_type: str) -> tuple[uuid.UUID | None, dict]:
+        """The category (the request's, else the one this feed type usually
+        lives in) and the pipeline settings: what the request names, then that
+        category's defaults, then the column defaults."""
+        category_id = request.category_id or await category_for_feed_type(db, feed_type)
+        explicit = {field: getattr(request, field) for field in FEED_DEFAULT_FIELDS}
+        return category_id, await new_feed_settings(db, category_id, explicit)
 
     # Extended adapters (github_repo, etc.) skip URL discovery
     if request.feed_type and request.feed_type in _EXTENDED_FEED_TYPES:
@@ -283,6 +288,7 @@ async def create_feed(
         if request.feed_type == "bluesky":
             adapter_config = _encrypt_bluesky_app_password(adapter_config)
             await _validate_bluesky_author_entity(adapter_config, db)
+        category_id, pipeline = await placement(request.feed_type)
         defaults = _EXTENDED_FEED_DEFAULTS.get(request.feed_type, {})
         default_interval = defaults.get("interval", 30)
         default_relevance = defaults.get("relevance_rating")
@@ -293,7 +299,7 @@ async def create_feed(
             fetch_interval_minutes=request.fetch_interval_minutes or default_interval,
             adapter_config=adapter_config,
             **pipeline,
-            category_id=request.category_id,
+            category_id=category_id,
             custom_title=request.custom_title,
             relevance_rating=default_relevance,
             exclude_title_patterns=normalize_patterns(request.exclude_title_patterns),
@@ -310,6 +316,7 @@ async def create_feed(
                 status_code=422,
             )
 
+        category_id, pipeline = await placement(discovered.feed_type)
         adapter_config = {}
         # Shorts are noise for an intel feed, so the per-user default is on
         # unless the user switched it off (Settings → Feeds).
@@ -324,7 +331,7 @@ async def create_feed(
             fetch_interval_minutes=request.fetch_interval_minutes or 30,
             adapter_config=adapter_config,
             **pipeline,
-            category_id=request.category_id,
+            category_id=category_id,
             custom_title=request.custom_title,
             exclude_title_patterns=normalize_patterns(request.exclude_title_patterns),
         )

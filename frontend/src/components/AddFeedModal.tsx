@@ -14,6 +14,7 @@ import {
   type TelegramDiscoveredChannel,
 } from "@/hooks/useTelegram";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
+import type { Category } from "@/api/types";
 import styles from "./AddFeedModal.module.css";
 
 type FeedMode = "url" | "github_repo" | "web_scraper" | "bluesky" | "telegram" | "opml";
@@ -75,6 +76,49 @@ function parseOpml(text: string): OpmlPreview | null {
     }
   }
   return preview;
+}
+
+/**
+ * The category picker every add-feed form shares. Required when categories
+ * exist: the placeholder is not a choice, so "Uncategorized" can no longer be
+ * picked by leaving the field alone.
+ */
+function CategoryField({
+  categories,
+  value,
+  onChange,
+}: {
+  categories: Category[] | undefined;
+  value: string;
+  onChange: (id: string) => void;
+}) {
+  const hasAny = (categories?.length ?? 0) > 0;
+  return (
+    <div className={styles.optionRow}>
+      <label htmlFor="add-feed-category">Category</label>
+      <select
+        id="add-feed-category"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={styles.select}
+        required={hasAny}
+        aria-invalid={hasAny && !value}
+      >
+        {hasAny ? (
+          <option value="" disabled>
+            Choose a category…
+          </option>
+        ) : (
+          <option value="">Uncategorized</option>
+        )}
+        {categories?.map((cat) => (
+          <option key={cat.id} value={cat.id}>
+            {cat.name}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
 }
 
 export function AddFeedModal({ onClose }: Props) {
@@ -144,6 +188,11 @@ export function AddFeedModal({ onClose }: Props) {
     bskyAuthorType === "product" ? { limit: 200 } : undefined
   );
 
+  // A feed left in Uncategorized misses every bulk change by category and
+  // inherits no category defaults, so picking one is required whenever there
+  // is one to pick. (With no categories yet, the server files it by type.)
+  const needsCategory = (categories?.length ?? 0) > 0 && !categoryId;
+
   const preview = discover.data;
   const isDiscovering = discover.isPending;
   const isAdding = addFeed.isPending;
@@ -202,16 +251,12 @@ export function AddFeedModal({ onClose }: Props) {
   const handleAddScraper = async () => {
     if (!scraperUrl.trim()) return;
     try {
-      let title: string;
-      try {
-        title = new URL(scraperUrl.trim()).hostname;
-      } catch {
-        title = scraperUrl.trim();
-      }
+      // No custom_title: the first fetch names the feed after the page's own
+      // title. The hostname used to be sent here, and two scrapers of one site
+      // were indistinguishable in the sidebar.
       await addFeed.mutateAsync({
         url: scraperUrl.trim(),
         feed_type: "web_scraper",
-        custom_title: title,
         adapter_config: {
           blog_url: scraperUrl.trim(),
           ...(linkSelector ? { link_selector: linkSelector } : {}),
@@ -443,21 +488,11 @@ export function AddFeedModal({ onClose }: Props) {
                   </div>
 
                   {/* Category picker */}
-                  <div className={styles.optionRow}>
-                    <label>Category</label>
-                    <select
-                      value={categoryId}
-                      onChange={(e) => setCategoryId(e.target.value)}
-                      className={styles.select}
-                    >
-                      <option value="">Uncategorized</option>
-                      {categories?.map((cat) => (
-                        <option key={cat.id} value={cat.id}>
-                          {cat.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  <CategoryField
+                    categories={categories}
+                    value={categoryId}
+                    onChange={setCategoryId}
+                  />
 
                   {/* Custom interval */}
                   <div className={styles.optionRow}>
@@ -478,7 +513,7 @@ export function AddFeedModal({ onClose }: Props) {
 
                   <button
                     onClick={handleAddUrl}
-                    disabled={isAdding}
+                    disabled={isAdding || needsCategory}
                     className={styles.addBtn}
                   >
                     {isAdding ? "Subscribing..." : "Subscribe"}
@@ -587,21 +622,11 @@ export function AddFeedModal({ onClose }: Props) {
                 <span>Include file content</span>
               </label>
 
-              <div className={styles.optionRow}>
-                <label>Category</label>
-                <select
-                  value={categoryId}
-                  onChange={(e) => setCategoryId(e.target.value)}
-                  className={styles.select}
-                >
-                  <option value="">Uncategorized</option>
-                  {categories?.map((cat) => (
-                    <option key={cat.id} value={cat.id}>
-                      {cat.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <CategoryField
+                categories={categories}
+                value={categoryId}
+                onChange={setCategoryId}
+              />
 
               <div className={styles.optionRow}>
                 <label>Poll Interval</label>
@@ -627,7 +652,7 @@ export function AddFeedModal({ onClose }: Props) {
 
               <button
                 onClick={handleAddRepo}
-                disabled={isAdding || !parsedRepo}
+                disabled={isAdding || needsCategory || !parsedRepo}
                 className={styles.addBtn}
               >
                 {isAdding ? "Subscribing..." : "Subscribe to Repository"}
@@ -702,21 +727,11 @@ export function AddFeedModal({ onClose }: Props) {
                 <span>Follow pagination</span>
               </label>
 
-              <div className={styles.optionRow}>
-                <label>Category</label>
-                <select
-                  value={categoryId}
-                  onChange={(e) => setCategoryId(e.target.value)}
-                  className={styles.select}
-                >
-                  <option value="">Uncategorized</option>
-                  {categories?.map((cat) => (
-                    <option key={cat.id} value={cat.id}>
-                      {cat.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <CategoryField
+                categories={categories}
+                value={categoryId}
+                onChange={setCategoryId}
+              />
 
               <div className={styles.optionRow}>
                 <label>Poll Interval</label>
@@ -740,7 +755,7 @@ export function AddFeedModal({ onClose }: Props) {
 
               <button
                 onClick={handleAddScraper}
-                disabled={isAdding || !scraperUrl.trim()}
+                disabled={isAdding || needsCategory || !scraperUrl.trim()}
                 className={styles.addBtn}
               >
                 {isAdding ? "Subscribing..." : "Subscribe"}
@@ -950,21 +965,11 @@ export function AddFeedModal({ onClose }: Props) {
                 )}
               </details>
 
-              <div className={styles.optionRow}>
-                <label>Category</label>
-                <select
-                  value={categoryId}
-                  onChange={(e) => setCategoryId(e.target.value)}
-                  className={styles.select}
-                >
-                  <option value="">Uncategorized</option>
-                  {categories?.map((cat) => (
-                    <option key={cat.id} value={cat.id}>
-                      {cat.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <CategoryField
+                categories={categories}
+                value={categoryId}
+                onChange={setCategoryId}
+              />
 
               <div className={styles.optionRow}>
                 <label>Poll Interval</label>
@@ -990,6 +995,7 @@ export function AddFeedModal({ onClose }: Props) {
                 onClick={handleAddBluesky}
                 disabled={
                   isAdding ||
+                  needsCategory ||
                   (bskyMode === "author" && !bskyHandle.trim()) ||
                   (bskyMode === "feed" && !bskyFeedUri.trim().startsWith("at://")) ||
                   (bskyMode === "search" && !bskyQuery.trim())
@@ -1193,21 +1199,11 @@ export function AddFeedModal({ onClose }: Props) {
                 </div>
               </details>
 
-              <div className={styles.optionRow}>
-                <label>Category</label>
-                <select
-                  value={categoryId}
-                  onChange={(e) => setCategoryId(e.target.value)}
-                  className={styles.select}
-                >
-                  <option value="">Uncategorized</option>
-                  {categories?.map((cat) => (
-                    <option key={cat.id} value={cat.id}>
-                      {cat.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <CategoryField
+                categories={categories}
+                value={categoryId}
+                onChange={setCategoryId}
+              />
 
               <div className={styles.optionRow}>
                 <label>Poll Interval</label>
@@ -1233,7 +1229,7 @@ export function AddFeedModal({ onClose }: Props) {
 
               <button
                 onClick={handleAddTelegram}
-                disabled={isAdding || !tgChannel.trim()}
+                disabled={isAdding || needsCategory || !tgChannel.trim()}
                 className={styles.addBtn}
               >
                 {isAdding ? "Subscribing..." : "Subscribe"}

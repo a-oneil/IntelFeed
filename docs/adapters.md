@@ -1482,6 +1482,8 @@ Accepts the JWT via `Authorization: Bearer` **or** `?token=` query param (so `<i
 
 Discovers and scrapes blog index pages for article links (no RSS feed required).
 
+**Feed name**: `_build_meta()` names the feed after the index page — its `<title>`, then `og:title`, then `og:site_name`, and only then the hostname. A feed created without a `custom_title` is titled with its URL until the first fetch, which replaces that placeholder (`_title_is_placeholder()` in `workers/feed_tasks.py`); a real title is never overwritten.
+
 **Configuration**:
 ```python
 {
