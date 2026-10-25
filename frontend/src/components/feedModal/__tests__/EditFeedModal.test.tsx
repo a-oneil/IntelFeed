@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Feed } from "@/api/types";
 
 const mockUpdateAsync = vi.fn().mockResolvedValue({});
+const mockTitlePreview = vi.fn();
 const mockConfirm = vi.fn();
 let role = "admin";
 
@@ -43,6 +44,7 @@ vi.mock("@/hooks/useFeeds", () => ({
     data: { subscribers: [], non_subscribers: [], muted_count: 0, per_user_active: true },
     isLoading: false,
   }),
+  useTitleFilterPreview: (...a: unknown[]) => mockTitlePreview(...a),
   usePushFeedToUsers: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useRemoveFeedSubscriber: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
@@ -115,6 +117,8 @@ beforeEach(() => {
   mockUpdateAsync.mockClear();
   mockConfirm.mockReset();
   mockConfirm.mockResolvedValue(true);
+  mockTitlePreview.mockReset();
+  mockTitlePreview.mockReturnValue({ data: undefined, isError: false });
 });
 
 describe("EditFeedModal", () => {
@@ -230,6 +234,54 @@ describe("EditFeedModal", () => {
 
     await waitFor(() => expect(mockUpdateAsync).toHaveBeenCalled());
     expect(mockUpdateAsync.mock.calls[0][0].data).toEqual({ retention_days: null });
+  });
+
+  it("previews how many recent titles an exclude list would drop", async () => {
+    const user = userEvent.setup();
+    mockTitlePreview.mockImplementation((_id: string, text: string) =>
+      text.trim()
+        ? {
+            data: { checked: 100, dropped: 2, examples: ["ISC Stormcast For Monday"] },
+            isError: false,
+          }
+        : { data: undefined, isError: false }
+    );
+    render(<EditFeedModal subscription={makeFeed()} onClose={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "Source" }));
+    await user.type(
+      screen.getByLabelText("Skip articles whose title contains"),
+      "ISC Stormcast For"
+    );
+
+    expect(await screen.findByText("2 of the last 100 titles would be dropped.")).toBeInTheDocument();
+    expect(screen.getByText("ISC Stormcast For Monday")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mockUpdateAsync).toHaveBeenCalled());
+    expect(mockUpdateAsync.mock.calls[0][0].data).toEqual({
+      exclude_title_patterns: "ISC Stormcast For",
+    });
+  });
+
+  it("shows a rejected exclude list inline", async () => {
+    const user = userEvent.setup();
+    mockTitlePreview.mockReturnValue({
+      data: undefined,
+      isError: true,
+      error: {
+        response: {
+          status: 422,
+          data: { error: { code: "invalid_title_filter", message: '"ab" is too short to filter on' } },
+        },
+      },
+    });
+    render(<EditFeedModal subscription={makeFeed()} onClose={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "Source" }));
+    await user.type(screen.getByLabelText("Skip articles whose title contains"), "ab");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("too short");
   });
 
   it("closes without asking when nothing is dirty", async () => {

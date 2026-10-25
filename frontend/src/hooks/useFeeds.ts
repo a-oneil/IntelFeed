@@ -9,6 +9,7 @@ import type {
   PaginatedResponse,
   StarterPack,
   StarterPackImportResult,
+  TitleFilterPreview,
 } from "@/api/types";
 
 export function useFeeds() {
@@ -169,6 +170,27 @@ export function useFeedPipeline(feedId: string | null) {
     },
     enabled: Boolean(feedId),
     staleTime: 60_000,
+  });
+}
+
+/**
+ * How many of a feed's last 100 titles an exclude-title list would drop.
+ * Keyed on the text, so callers should pass a debounced value. Silent: a bad
+ * line is a 422 the pane shows inline, not a toast.
+ */
+export function useTitleFilterPreview(feedId: string | null, patterns: string) {
+  return useQuery({
+    queryKey: ["feed-title-filter", feedId, patterns],
+    queryFn: async () => {
+      const res = await api.post<TitleFilterPreview>(`/feeds/${feedId}/title-filter/preview`, {
+        exclude_title_patterns: patterns,
+      });
+      return res.data;
+    },
+    enabled: Boolean(feedId) && patterns.trim() !== "",
+    retry: false,
+    staleTime: 60_000,
+    meta: { silenceToast: true },
   });
 }
 

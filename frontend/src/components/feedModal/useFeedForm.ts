@@ -40,6 +40,8 @@ export interface FeedFormValues {
   auto_extract_on_ingest: boolean;
   extract_detection_rules: boolean;
   extract_tools: boolean;
+  /** One phrase per line; "" = no filter. Sent as null when emptied. */
+  exclude_title_patterns: string;
   reliability_rating: string;
   timeliness_rating: string;
   relevance_rating: string;
@@ -58,6 +60,7 @@ const FIELD_PANE: Record<keyof FeedFormValues, PaneId> = {
   fetch_interval_minutes: "source",
   retention_days: "source",
   adapter: "source",
+  exclude_title_patterns: "source",
   intel_extraction_mode: "pipeline",
   ai_analysis_enabled: "pipeline",
   auto_extract_on_ingest: "pipeline",
@@ -113,6 +116,7 @@ function initialValues(feed: Feed): FeedFormValues {
     auto_extract_on_ingest: feed.auto_extract_on_ingest ?? false,
     extract_detection_rules: feed.extract_detection_rules ?? false,
     extract_tools: feed.extract_tools ?? true,
+    exclude_title_patterns: feed.exclude_title_patterns || "",
     reliability_rating: feed.reliability_rating || "",
     timeliness_rating: feed.timeliness_rating || "",
     relevance_rating: feed.relevance_rating || "",
@@ -209,6 +213,9 @@ export function useFeedForm(feed: Feed): FeedForm {
             break;
           case "url":
             payload.url = values.url.trim();
+            break;
+          case "exclude_title_patterns":
+            payload.exclude_title_patterns = values.exclude_title_patterns.trim() || null;
             break;
           case "adapter":
             payload.adapter_config = buildAdapterConfig(values);

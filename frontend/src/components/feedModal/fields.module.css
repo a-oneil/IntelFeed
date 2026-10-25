@@ -400,6 +400,13 @@
   border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
 }
 
+/* Titles an exclude-title list would drop, under its preview count. */
+.exampleList {
+  margin: var(--sp-1) 0 0;
+  padding-left: var(--sp-4);
+  word-break: break-word;
+}
+
 @media (max-width: 767px) {
   .row,
   .row3,

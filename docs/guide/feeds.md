@@ -96,6 +96,13 @@ Click a feed to edit it:
 - **Retention** — how long entries from this feed are kept before being cleaned
   up. Blank means the instance default. Set a short retention on high-volume,
   low-value sources; that's how you keep the database from being 80% noise.
+- **Skip articles whose title contains** (admin, Source pane) — phrases, one
+  per line, matched anywhere in the title and ignoring case. A matching article
+  is dropped before it is saved, so it never reaches tagging, the AI or
+  scoring. The pane shows how many of the feed's last 100 titles the list would
+  have dropped, with examples, before you save. Use it for a source's recurring
+  stubs: "ISC Stormcast For" on SANS ISC Diary, "Chromium CVE-" on MSRC.
+  Articles already saved stay.
 - **Mute** — stop it appearing in your reading views without deleting it and
   losing its history.
 - **Source assessment** — your own note on how much you trust it.

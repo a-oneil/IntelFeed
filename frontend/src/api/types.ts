@@ -55,6 +55,9 @@ export interface Feed {
   auto_extract_on_ingest: boolean;
   extract_detection_rules: boolean;
   extract_tools: boolean;
+  /** Phrases, one per line; an incoming article whose title contains one is
+   * dropped before it is saved. Null = no filter. */
+  exclude_title_patterns?: string | null;
   reliability_rating: string | null;
   timeliness_rating: string | null;
   relevance_rating: string | null;
@@ -2562,6 +2565,13 @@ export interface FeedHealthResponse {
 // Feed Value Scoring
 
 /** Resolved ingest pipeline for one feed, from GET /feeds/{id}/pipeline. */
+/** POST /feeds/{id}/title-filter/preview */
+export interface TitleFilterPreview {
+  checked: number;
+  dropped: number;
+  examples: string[];
+}
+
 export interface FeedPipeline {
   engine_enabled: boolean;
   stages: Record<string, { enabled: boolean; config?: Record<string, unknown> }>;

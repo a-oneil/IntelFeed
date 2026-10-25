@@ -310,6 +310,20 @@ def fetch_feed(self, feed_id: str):
             logger.warning("Failed to release feed_fetch lock for %s", feed_id, exc_info=True)
 
 
+def _drop_excluded_titles(feed: Feed, parsed_entries: list) -> list:
+    """Remove articles whose title matches the feed's exclude-title list.
+
+    Runs before anything is stored, on every ingest path, so an excluded title
+    never reaches tagging, the AI, scoring or search.
+    """
+    from app.services.title_filter import partition_by_title
+
+    kept, dropped = partition_by_title(parsed_entries, feed.exclude_title_patterns)
+    if dropped:
+        logger.info("Feed %s: title filter dropped %d of %d entries", feed.id, len(dropped), len(parsed_entries))
+    return kept
+
+
 async def _fetch_feed(feed_id: str):
     fetch_start = _time.monotonic()
     async with _get_worker_session() as db:
@@ -469,6 +483,10 @@ async def _fetch_feed(feed_id: str):
 
         new_entries = 0
         new_entry_ids = []
+
+        # The feed's exclude-title list goes first: a dropped title costs no
+        # guid lookup, and is re-dropped the same way on every later fetch.
+        parsed_entries = _drop_excluded_titles(feed, parsed_entries)
 
         # Pre-filter to only new entries (skip existing GUIDs and intra-batch dupes)
         new_parsed_entries = []
@@ -950,6 +968,7 @@ async def _fetch_extended_feed(db: AsyncSession, feed: Feed) -> None:
 
     new_entries = 0
     new_entry_ids = []
+    parsed_entries = _drop_excluded_titles(feed, parsed_entries)
 
     for parsed in parsed_entries:
         existing = await db.execute(select(Entry).where(Entry.feed_id == feed.id, Entry.guid == parsed.guid))
@@ -1981,6 +2000,7 @@ async def _full_sync_github_feed(feed_id: str, user_id: str | None = None) -> di
             logger.warning("Failed to publish sync progress event for feed %s", feed_id, exc_info=True)
 
         new_entry_ids = []
+        parsed_entries = _drop_excluded_titles(feed, parsed_entries)
         for parsed in parsed_entries:
             # Double-check GUID uniqueness (adapter already filtered, but be safe)
             dup = await db.execute(select(Entry.id).where(Entry.feed_id == feed.id, Entry.guid == parsed.guid))

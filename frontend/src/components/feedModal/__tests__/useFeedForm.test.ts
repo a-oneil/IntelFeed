@@ -228,6 +228,24 @@ describe("useFeedForm", () => {
     expect(payload.url).toBe("https://example.com/rss");
   });
 
+  it("sends the exclude-title list trimmed, and null once emptied", () => {
+    const { result } = renderHook(() =>
+      useFeedForm(makeFeed({ exclude_title_patterns: "Chromium CVE-" }))
+    );
+    expect(result.current.values.exclude_title_patterns).toBe("Chromium CVE-");
+
+    act(() => result.current.set("exclude_title_patterns", "  Chromium CVE-\nISC Stormcast For \n"));
+    expect(result.current.dirtyPanes.has("source")).toBe(true);
+    expect(result.current.buildPayload(true, false)).toEqual({
+      exclude_title_patterns: "Chromium CVE-\nISC Stormcast For",
+    });
+    // Ingest plumbing: a non-admin never sends it.
+    expect(result.current.buildPayload(false, false)).toEqual({});
+
+    act(() => result.current.set("exclude_title_patterns", "   "));
+    expect(result.current.buildPayload(true, false)).toEqual({ exclude_title_patterns: null });
+  });
+
   it("reset returns every field to the feed's stored values", () => {
     const { result } = renderHook(() => useFeedForm(makeFeed()));
 

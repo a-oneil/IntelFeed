@@ -23,7 +23,9 @@ flowchart TD
     end
 
     subgraph DEDUP["③ De-duplication & Filtering"]
-        PARSE --> GUID_CHECK{"GUID exists for feed?<br/>(+ intra-batch seen_guids set)"}
+        PARSE --> TITLE_FILTER{"Title contains a phrase from<br/>the feed's exclude_title_patterns?"}
+        TITLE_FILTER -- "Yes" --> SKIP_ENTRY
+        TITLE_FILTER -- "No" --> GUID_CHECK{"GUID exists for feed?<br/>(+ intra-batch seen_guids set)"}
         GUID_CHECK -- "Yes" --> SKIP_ENTRY([Skip entry])
         GUID_CHECK -- "No" --> HASH_CHECK{"Cross-feed duplicate?<br/>content_hash =<br/>SHA-256(normalized title +<br/>first 500 chars)"}
         HASH_CHECK -- "Yes" --> SKIP_ENTRY

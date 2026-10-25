@@ -346,6 +346,8 @@ feed_meta, parsed_entries = adapter.parse_entries(feed.url, response.text)
 
 #### 6. Entry Deduplication
 
+**Exclude-title filter** (per feed, every adapter): `_drop_excluded_titles()` removes any parsed entry whose title contains one of the feed's `exclude_title_patterns` before the GUID check. The list is plain phrases, one per line, matched case-insensitively as substrings (not regular expressions) by `app/services/title_filter.py`. The extended-adapter path and the GitHub full sync call the same helper, so a dropped title never reaches tagging, the AI, scoring or search. The feed modal's Source pane edits it, with a preview of how many of the last 100 titles it would drop (`POST /api/feeds/{id}/title-filter/preview`). Excluded items are never stored, so they are re-checked (and dropped again) on each fetch.
+
 **GUID-based deduplication** (primary):
 ```python
 existing = await db.execute(

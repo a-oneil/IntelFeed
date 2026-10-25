@@ -15,6 +15,7 @@ class FeedCreateRequest(BaseModel):
     auto_extract_on_ingest: bool | None = None
     extract_detection_rules: bool | None = None
     extract_tools: bool | None = None
+    exclude_title_patterns: str | None = None
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -51,6 +52,9 @@ class FeedUpdateRequest(BaseModel):
     auto_extract_on_ingest: bool | None = None
     extract_detection_rules: bool | None = None
     extract_tools: bool | None = None
+    # Plain phrases, one per line; an article whose title contains one is
+    # dropped at ingest. "" or null clears it.
+    exclude_title_patterns: str | None = None
     adapter_config: dict | None = None
 
     model_config = ConfigDict(
@@ -94,6 +98,7 @@ class FeedResponse(BaseModel):
     auto_extract_on_ingest: bool = False
     extract_detection_rules: bool = False
     extract_tools: bool = True
+    exclude_title_patterns: str | None = None
     category_id: uuid.UUID | None = None
     custom_title: str | None = None
     is_muted: bool = False
@@ -116,6 +121,18 @@ class FeedResponse(BaseModel):
         if masked.get("app_password"):
             masked["app_password"] = "••••••••"
         return masked
+
+
+class TitleFilterPreviewRequest(BaseModel):
+    exclude_title_patterns: str | None = None
+
+    model_config = ConfigDict(json_schema_extra={"example": {"exclude_title_patterns": "ISC Stormcast For"}})
+
+
+class TitleFilterPreviewResponse(BaseModel):
+    checked: int
+    dropped: int
+    examples: list[str]
 
 
 class BulkExcludeShortsRequest(BaseModel):

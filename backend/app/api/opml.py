@@ -22,6 +22,7 @@ from app.services.feed_visibility import (
     subscriptions_enabled,
     visible_feed_ids_query,
 )
+from app.services.title_filter import normalize_patterns
 
 router = APIRouter()
 
@@ -78,6 +79,21 @@ def parse_extension_attrs(outline: ET.Element) -> dict:
     ):
         if (flag := _as_bool(raw.get(attr))) is not None:
             out[column] = flag
+
+    # A JSON list of phrases rather than newline-separated text: a newline in
+    # an attribute survives only as a character reference, which hand edits
+    # and other tools tend to lose.
+    if "excludeTitles" in raw:
+        try:
+            phrases = json.loads(raw["excludeTitles"])
+        except (ValueError, TypeError):
+            phrases = None
+        if isinstance(phrases, list) and all(isinstance(p, str) for p in phrases):
+            try:
+                if normalized := normalize_patterns("\n".join(phrases)):
+                    out["exclude_title_patterns"] = normalized
+            except AppError:
+                pass
 
     return out
 
@@ -224,6 +240,8 @@ def feed_outline_attrs(feed: Feed) -> dict[str, str]:
     ):
         if bool(value) is not default:
             attrs[f"{ns}{attr}"] = "true" if value else "false"
+    if phrases := [line for line in (feed.exclude_title_patterns or "").splitlines() if line.strip()]:
+        attrs[f"{ns}excludeTitles"] = json.dumps(phrases, separators=(",", ":"))
     return attrs
 
 

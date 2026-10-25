@@ -26,6 +26,8 @@ from app.schemas.feed import (
     FeedPushRequest,
     FeedResponse,
     FeedUpdateRequest,
+    TitleFilterPreviewRequest,
+    TitleFilterPreviewResponse,
 )
 from app.services.feed_discovery import discover_feed
 from app.services.feed_visibility import (
@@ -37,6 +39,7 @@ from app.services.feed_visibility import (
     subscriptions_enabled,
     visible_feed_ids_query,
 )
+from app.services.title_filter import matching_pattern, normalize_patterns, parse_patterns
 
 # Extended adapter feed types that skip URL discovery. Derived from the adapter
 # registry rather than hand-listed: the update endpoint's own copy of a feed-type
@@ -287,6 +290,7 @@ async def create_feed(
             category_id=request.category_id,
             custom_title=request.custom_title,
             relevance_rating=default_relevance,
+            exclude_title_patterns=normalize_patterns(request.exclude_title_patterns),
         )
         db.add(feed)
         await db.flush()
@@ -319,6 +323,7 @@ async def create_feed(
             extract_tools=True if request.extract_tools is None else request.extract_tools,
             category_id=request.category_id,
             custom_title=request.custom_title,
+            exclude_title_patterns=normalize_patterns(request.exclude_title_patterns),
         )
         db.add(feed)
         await db.flush()
@@ -838,6 +843,7 @@ async def update_feed(
         "auto_extract_on_ingest",
         "extract_detection_rules",
         "extract_tools",
+        "exclude_title_patterns",
     )
     # `model_fields_set` rather than a None check: for the nullable fields below,
     # None is a real value ("uncategorized", "keep forever") and must not be
@@ -977,6 +983,8 @@ async def update_feed(
         feed.extract_detection_rules = request.extract_detection_rules
     if request.extract_tools is not None:
         feed.extract_tools = request.extract_tools
+    if "exclude_title_patterns" in sent:
+        feed.exclude_title_patterns = normalize_patterns(request.exclude_title_patterns)
 
     db.add(feed)
     await db.flush()
@@ -1290,6 +1298,36 @@ async def get_feed_pipeline(
     from app.pipeline.plans import explain_feed_plan
 
     return await explain_feed_plan(db, feed)
+
+
+@router.post("/{feed_id}/title-filter/preview", response_model=TitleFilterPreviewResponse)
+async def preview_title_filter(
+    feed_id: uuid.UUID = Path(..., description="UUID of the feed"),
+    request: TitleFilterPreviewRequest = Body(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """How many of this feed's last 100 titles an exclude-title list would drop.
+
+    Validates the list exactly as saving it would (422 on a bad line), so the
+    modal can show both the error and the count before anything is stored.
+    Nothing is written: articles already saved stay, and the filter only acts
+    on what arrives after it is saved.
+    """
+    feed = await db.get(Feed, feed_id)
+    if not feed:
+        raise AppError(code="not_found", message="Feed not found", status_code=404)
+
+    patterns = parse_patterns(normalize_patterns(request.exclude_title_patterns))
+    rows = await db.execute(
+        select(Entry.title)
+        .where(Entry.feed_id == feed_id)
+        .order_by(Entry.published_at.desc().nulls_last(), Entry.fetched_at.desc())
+        .limit(100)
+    )
+    titles = [t for (t,) in rows.all()]
+    dropped = [t for t in titles if matching_pattern(t, patterns)]
+    return TitleFilterPreviewResponse(checked=len(titles), dropped=len(dropped), examples=dropped[:5])
 
 
 @router.get("/{feed_id}/value")

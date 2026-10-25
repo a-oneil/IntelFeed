@@ -18,6 +18,7 @@ function values(overrides: Partial<FeedFormValues> = {}): FeedFormValues {
     auto_extract_on_ingest: false,
     extract_detection_rules: false,
     extract_tools: true,
+    exclude_title_patterns: "",
     reliability_rating: "",
     timeliness_rating: "",
     relevance_rating: "",

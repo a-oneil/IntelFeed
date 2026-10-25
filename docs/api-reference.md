@@ -619,7 +619,7 @@ Get a single feed's detailed configuration.
 
 **`PUT /api/feeds/{feed_id}`**
 
-Update feed configuration (title, category, interval, adapter config). Infrastructure fields (`url`, `feed_type`, `is_active`, `fetch_interval_minutes`, `retention_days`, `adapter_config`, `exclude_shorts`, `intel_extraction_mode`, `ai_analysis_enabled`, `auto_extract_on_ingest`, `extract_detection_rules`) are admin-only; curation fields (`custom_title`, `category_id`, `is_muted`, ratings, `analyst_notes`) are open to all users. `is_muted` is per-user when per-user subscriptions are enabled.
+Update feed configuration (title, category, interval, adapter config). Infrastructure fields (`url`, `feed_type`, `is_active`, `fetch_interval_minutes`, `retention_days`, `adapter_config`, `exclude_shorts`, `exclude_title_patterns`, `intel_extraction_mode`, `ai_analysis_enabled`, `auto_extract_on_ingest`, `extract_detection_rules`, `extract_tools`) are admin-only; curation fields (`custom_title`, `category_id`, `is_muted`, ratings, `analyst_notes`) are open to all users. `is_muted` is per-user when per-user subscriptions are enabled.
 
 **Auth:** Bearer token (admin for infrastructure fields)  
 **Status:** 200 OK  
@@ -688,6 +688,22 @@ Which pipeline stages run for this feed, and what decided each one. `decided_by`
   },
   "decided_by": { "autolink": "feed", "extract": "legacy" }
 }
+```
+
+---
+
+**`POST /api/feeds/{feed_id}/title-filter/preview`**
+
+How many of the feed's last 100 titles an exclude-title list would drop, with up to five examples. `exclude_title_patterns` is plain phrases, one per line, matched as case-insensitive substrings. The list is validated as saving it would be: a line under 3 or over 200 characters, or more than 50 lines, returns 422 `invalid_title_filter`. Nothing is stored.
+
+**Auth:** Bearer token
+**Request:**
+```json
+{ "exclude_title_patterns": "ISC Stormcast For" }
+```
+**Response:**
+```json
+{ "checked": 100, "dropped": 21, "examples": ["ISC Stormcast For Friday, October 24th, 2025"] }
 ```
 
 ---
