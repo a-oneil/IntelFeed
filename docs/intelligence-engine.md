@@ -315,9 +315,18 @@ linking instantly:
   payload slots are matched jointly since the AI files ransomware brands inconsistently).
   Unconfirmed entities are **rejected** with a `FalsePositiveRecord`
   (`extraction_source="ai_reconcile"`).
-- **Expiry**: entries that never get an AI pass (junk-gated, budget, feed policy) leave
-  rows unresolved; `prune_engine_tables` deletes unresolved rows after 14 days and
-  resolved rows after 30.
+- **Feed policy** (`services/ai_eligibility.py`): AI queueing and the diversion step share
+  one check, `entry_will_get_ai_analysis` — the instance `ai_one_pass_enabled` switch, the
+  feed's `ai_analysis_enabled`, and an extraction mode other than `none`. On an entry that
+  fails it, nothing would ever confirm a held match, so provisional matches are **dropped**:
+  not held, not linked. On a feed with AI off, common-word names aren't tagged. Drops are
+  counted in daily Redis keys (`autolink:pending_dropped_ai_off:<YYYYMMDD>`) and the
+  Autolinking tab of the Engine view shows the 30-day total
+  (`pending_dropped_ai_off` on `GET /api/entity-links/stats`).
+- **Expiry**: entries that never get an AI pass for per-entry reasons (junk-gated, budget)
+  leave rows unresolved; `prune_engine_tables` deletes unresolved rows after 14 days and
+  resolved rows after 30. `scripts/maintenance/resolve_pending_ai_off.py` resolves open
+  rows on entries whose feed fails the feed-policy check (`resolution = 'dropped_ai_off'`).
 
 Gated by `autolink_pending_tier_enabled` (Settings → Engine → autolink stage, default on) — and
 auto-disabled when `ai_one_pass_enabled` is off, since without the reconciler there is
@@ -1636,7 +1645,7 @@ Each feed carries a set of switches that decide what the ingest pipeline does wi
 | Process this feed | `intel_extraction_mode` = `none` or not | Everything below. `none` opts out of all extraction. |
 | Autolink known entities | `intel_extraction_mode` = `manual` (off) vs `selective` / `full` (on) | The deterministic dictionary scan. |
 | ↳ Only security-relevant articles | `selective` (on) vs `full` (off) | Whether autolinking applies a keyword relevance pre-filter. |
-| AI analysis (one pass) | `ai_analysis_enabled` | The one-pass `entry_analysis` call. |
+| AI analysis (one pass) | `ai_analysis_enabled` | The one-pass `entry_analysis` call. With AI off, common-word names aren't tagged: the autolinker drops dictionary-word matches it would otherwise hold for the AI (see [Pending Tier](#pending-tier-dictionary-word-matches)). |
 | Regex enrichment | `auto_extract_on_ingest` | The standalone CVE/NVD, TTP and mitigation pass. |
 | Detection rule extraction | `extract_detection_rules` | Sigma/YARA/SPL/Elastic parsing from article bodies. |
 | ↳ Create tool entities | `extract_tools` | Whether that AI pass may mint new Tool rows. Off, the AI still links tools already in the catalog, and autolink tags them as usual. Advisory-type articles skip AI tools whatever the switch says. Does nothing when the AI is off. |
