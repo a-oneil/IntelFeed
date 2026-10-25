@@ -83,6 +83,14 @@ class FeedResponse(BaseModel):
     error_count: int
     last_error: str | None
     is_active: bool
+    # Start of the current failure streak; None once a fetch succeeds.
+    error_since: datetime | None = None
+    # Set when the health check paused the feed; None when a person did.
+    auto_paused_at: datetime | None = None
+    # Why the health check paused it (error, status, streak, when).
+    pause_reason: dict | None = None
+    # Reachable but no longer delivering items (redirected or empty feed).
+    health_warning: dict | None = None
     adapter_config: dict = {}
     reliability_rating: str | None = None
     timeliness_rating: str | None = None

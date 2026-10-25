@@ -74,6 +74,20 @@ class Feed(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
+    @property
+    def pause_reason(self) -> dict | None:
+        """Why the health check paused this feed (see services/feed_fetch_health)."""
+        from app.services.feed_fetch_health import pause_reason
+
+        return pause_reason(self)
+
+    @property
+    def health_warning(self) -> dict | None:
+        """Reachable but no longer delivering items, or None."""
+        from app.services.feed_fetch_health import health_warning
+
+        return health_warning(self)
+
     # Relationships
     entries = relationship("Entry", back_populates="feed", cascade="all, delete-orphan")
     category = relationship("Category", back_populates="feeds")

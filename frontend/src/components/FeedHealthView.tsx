@@ -5,6 +5,7 @@ import { useFeedHealth, useFeedValueScores } from "@/hooks/useAnalytics";
 import { useUpdateFeed, useDeleteFeed } from "@/hooks/useFeeds";
 import { useUndoableDelete } from "@/hooks/useUndoableDelete";
 import { formatDate } from "@/utils/formatDate";
+import { describeHealthWarning } from "@/utils/feedHealth";
 import type { FeedHealthFeed, FeedValueScore } from "@/api/types";
 import { ReliabilityBadge } from "./ReliabilityBadge";
 import { FeedSubscribersPanel } from "./FeedSubscribersPanel";
@@ -266,6 +267,13 @@ export function FeedHealthView({
                     <span className={styles.summaryCount}>{healthData.summary.dead ?? 0}</span>
                     <span className={styles.summaryLabel}>Dead</span>
                   </div>
+                  <div
+                    className={`${styles.summaryCard} ${styles.stale}`}
+                    title="Answers, but has stopped delivering articles: the feed URL redirects to a page with none, or the feed has been empty for days"
+                  >
+                    <span className={styles.summaryCount}>{healthData.summary.empty ?? 0}</span>
+                    <span className={styles.summaryLabel}>Empty</span>
+                  </div>
                   <div className={`${styles.summaryCard} ${styles.disabled}`}>
                     <span className={styles.summaryCount}>{healthData.summary.disabled}</span>
                     <span className={styles.summaryLabel}>Disabled</span>
@@ -308,7 +316,10 @@ export function FeedHealthView({
                             )}
                           </span>
                           <span className={`${styles.errorMsgCol} ${styles.errorMsg}`}>
-                            {f.last_error ?? "\u2014"}
+                            {f.pause_reason?.last_error ?? f.last_error ?? "\u2014"}
+                            {f.pause_reason?.client === "curl_cffi" && (
+                              <span className={styles.errorAge}> · also with browser impersonation</span>
+                            )}
                             {f.auto_paused_at && (
                               <span className={styles.errorAge}> · paused {formatDate(f.auto_paused_at)}</span>
                             )}
@@ -322,6 +333,60 @@ export function FeedHealthView({
                               title="Re-activate and clear the failure streak"
                             >
                               Resume
+                            </button>
+                            <button
+                              className={`${styles.actionBtn} ${styles.removeBtn}`}
+                              onClick={() => handleRemove(f.id, f.title)}
+                              disabled={deleteFeed.isPending}
+                            >
+                              Remove
+                            </button>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {(healthData.empty_feeds?.length ?? 0) > 0 && (
+                  <section className={styles.section}>
+                    <h2 className={styles.sectionTitle}>
+                      Empty Feeds ({healthData.empty_feeds!.length})
+                    </h2>
+                    <p className={styles.sectionHint}>
+                      These answer without an error but deliver no articles. Usually the feed
+                      moved: the old URL redirects to a landing page. Find the new feed URL and
+                      update it, or remove the feed.
+                    </p>
+                    <div className={styles.list}>
+                      <div className={styles.listHeader}>
+                        <span className={styles.nameCol}>Feed</span>
+                        <span className={styles.errorMsgCol}>What it returns</span>
+                        <span className={styles.reachCol}>Readers</span>
+                        <span className={styles.actionCol}>Actions</span>
+                      </div>
+                      {healthData.empty_feeds!.map((f) => (
+                        <div key={f.id} className={styles.row}>
+                          <span className={styles.nameCol}>
+                            <span className={styles.feedNameRow}>
+                              <span className={styles.feedName}>{f.title}</span>
+                              <ReliabilityBadge rating={f.reliability_rating} />
+                            </span>
+                          </span>
+                          <span className={`${styles.errorMsgCol} ${styles.errorMsg}`}>
+                            {f.health_warning ? describeHealthWarning(f.health_warning) : "\u2014"}
+                            {f.health_warning?.since && (
+                              <span className={styles.errorAge}> · since {formatDate(f.health_warning.since)}</span>
+                            )}
+                          </span>
+                          <ReachCell feed={f} />
+                          <span className={styles.actionCol}>
+                            <button
+                              className={styles.actionBtn}
+                              onClick={() => toggleActive(f.id, f.is_active)}
+                              disabled={updateFeed.isPending}
+                            >
+                              Pause
                             </button>
                             <button
                               className={`${styles.actionBtn} ${styles.removeBtn}`}

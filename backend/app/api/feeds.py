@@ -28,6 +28,7 @@ from app.schemas.feed import (
     FeedUpdateRequest,
 )
 from app.services.feed_discovery import discover_feed
+from app.services.feed_fetch_health import clear_pause, health_warning, pause_reason, strip_client_keys
 from app.services.feed_visibility import (
     ensure_subscription,
     get_subscription,
@@ -265,7 +266,7 @@ async def create_feed(
 
     # Extended adapters (github_repo, etc.) skip URL discovery
     if request.feed_type and request.feed_type in _EXTENDED_FEED_TYPES:
-        adapter_config = request.adapter_config or {}
+        adapter_config = strip_client_keys(request.adapter_config) or {}
         if request.feed_type == "telegram":
             adapter_config = _normalize_telegram_config(adapter_config)
         if request.feed_type == "bluesky":
@@ -642,6 +643,7 @@ async def get_feed_health(
     erroring = []
     disabled = []
     dead = []
+    empty = []
 
     for feed in feeds:
         feed_info = {
@@ -656,6 +658,8 @@ async def get_feed_health(
             "error_since": feed.error_since.isoformat() if feed.error_since else None,
             "failing_for_days": (now - feed.error_since).days if feed.error_since else None,
             "auto_paused_at": feed.auto_paused_at.isoformat() if feed.auto_paused_at else None,
+            "pause_reason": pause_reason(feed),
+            "health_warning": health_warning(feed),
         }
 
         if not feed.is_active:
@@ -664,13 +668,17 @@ async def get_feed_health(
             (dead if feed.auto_paused_at else disabled).append(feed_info)
         elif feed.error_count and feed.error_count >= 3:
             erroring.append(feed_info)
+        elif feed_info["health_warning"]:
+            # Answers 200 but has stopped delivering items (a feed URL that
+            # redirects to a landing page, or an empty channel).
+            empty.append(feed_info)
         elif not feed.last_fetched_at or feed.last_fetched_at < stale_cutoff:
             feed_info["days_since_fetch"] = (now - feed.last_fetched_at).days if feed.last_fetched_at else None
             stale.append(feed_info)
         else:
             healthy.append(feed_info)
 
-    listed = stale + erroring + disabled + dead
+    listed = stale + erroring + disabled + dead + empty
     await _attach_reach(db, listed, user)
 
     return {
@@ -680,12 +688,14 @@ async def get_feed_health(
             "erroring": len(erroring),
             "disabled": len(disabled),
             "dead": len(dead),
+            "empty": len(empty),
             "total": len(feeds),
         },
         "stale_feeds": stale,
         "erroring_feeds": erroring,
         "disabled_feeds": disabled,
         "dead_feeds": dead,
+        "empty_feeds": empty,
     }
 
 
@@ -758,6 +768,7 @@ async def resume_feed(
         raise AppError(code="not_found", message="Feed not found", status_code=404)
     feed.is_active = True
     feed.auto_paused_at = None
+    clear_pause(feed)
     feed.error_count = 0
     feed.last_error = None
     feed.error_since = None
@@ -901,6 +912,10 @@ async def update_feed(
             per_user_paused = not request.is_active
         else:
             feed.is_active = request.is_active
+            if request.is_active:
+                # Turned back on by a person: the health check's pause is over.
+                feed.auto_paused_at = None
+                clear_pause(feed)
     if request.fetch_interval_minutes is not None:
         feed.fetch_interval_minutes = request.fetch_interval_minutes
     if request.exclude_shorts is not None and feed.feed_type == "youtube":
@@ -910,7 +925,9 @@ async def update_feed(
     if request.adapter_config is not None:
         old_config = dict(feed.adapter_config or {})
         config = dict(old_config)
-        config.update(request.adapter_config)
+        # fetch_health is server-owned; a modal echoing back a stale copy
+        # must not overwrite what the fetcher learned since.
+        config.update(strip_client_keys(request.adapter_config))
         if feed.feed_type == "telegram":
             config = _normalize_telegram_config(config)
         # Bluesky: encrypt new plaintext app_password; preserve existing if blank/masked.

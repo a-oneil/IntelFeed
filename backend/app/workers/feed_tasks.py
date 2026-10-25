@@ -26,6 +26,7 @@ from app.models.feed import Feed
 from app.models.podcast import Podcast
 from app.pipeline.plans import feed_runs_extraction
 from app.services.dedup import compute_content_hash
+from app.services.feed_fetch_health import record_auto_pause
 from app.services.sanitizer import extract_first_image, extract_og_image, html_to_text, sanitize_html
 from app.workers.celery_app import celery_app
 from app.workers.db import run_async, worker_session
@@ -45,6 +46,56 @@ FEED_ACCEPT_LANGUAGE = "en-US,en;q=0.9"
 
 # Attempt RSS autodiscovery only after this many consecutive HTTP 404 failures
 FEED_404_AUTODISCOVERY_MIN_FAILURES = 3
+
+# Failure-streak backoff for the poller: each consecutive failure doubles the
+# wait, up to 2**FEED_ERROR_BACKOFF_MAX_DOUBLINGS times the feed's interval and
+# never more than FEED_ERROR_BACKOFF_CAP_MINUTES (unless the interval itself is
+# longer). Without it a blocked feed polled every 7 minutes logs ~5,700 failures
+# before the auto-pause window closes; with it, about 20.
+FEED_ERROR_BACKOFF_MAX_DOUBLINGS = 6
+FEED_ERROR_BACKOFF_CAP_MINUTES = 24 * 60
+
+# Feeds due for a fetch. The interval stretches while a failure streak runs
+# (see the backoff constants above) and snaps back on the first clean fetch.
+DUE_FEEDS_SQL = f"""
+    SELECT id FROM feeds
+    WHERE is_active = TRUE
+    -- With per-user subscriptions on, a feed every reader has paused
+    -- has nobody to deliver to, so stop paying to fetch it. One
+    -- un-paused reader is enough to keep it running for the pool.
+    AND (NOT :per_user OR EXISTS (
+            SELECT 1 FROM user_feed_subscriptions s
+            WHERE s.feed_id = feeds.id AND s.is_paused = FALSE))
+    AND (last_fetched_at IS NULL
+         OR NOW() > last_fetched_at + (
+            CASE WHEN COALESCE(error_count, 0) > 0
+                 THEN GREATEST(
+                        fetch_interval_minutes,
+                        LEAST({FEED_ERROR_BACKOFF_CAP_MINUTES},
+                              fetch_interval_minutes
+                              * (1 << LEAST(error_count, {FEED_ERROR_BACKOFF_MAX_DOUBLINGS}))))
+                 ELSE fetch_interval_minutes
+            END || ' minutes')::interval)
+    ORDER BY last_fetched_at ASC NULLS FIRST
+    LIMIT 50
+"""
+
+# Statuses a bot wall answers with. 403 always triggers the curl_cffi retry;
+# 429/503 only when the body looks like a challenge page, since both are also
+# honest "slow down" / "down for maintenance" answers.
+_BLOCKED_STATUS = 403
+_CHALLENGE_STATUSES = frozenset({429, 503})
+_CHALLENGE_MARKERS = (
+    "just a moment",
+    "cf-chl",
+    "challenge-platform",
+    "attention required",
+    "_incapsula_",
+    "captcha",
+    "access denied",
+    "bot detection",
+)
+FEED_FETCH_TIMEOUT = 30.0
 
 # "HTTP 4xx" as written by the fetchers below. Only client errors count as a
 # dead feed: a 5xx or a timeout is the publisher's bad day, not a moved feed.
@@ -88,6 +139,7 @@ async def _auto_pause_dead_feeds(db: AsyncSession, pause_days: int) -> int:
             continue
         feed.is_active = False
         feed.auto_paused_at = datetime.now(UTC)
+        record_auto_pause(feed)
         db.add(feed)
         paused += 1
         logger.warning(
@@ -114,6 +166,83 @@ async def _resolve_user_agent(db: AsyncSession) -> str:
     except Exception:
         logger.debug("Failed to read user_agent from system settings, using env default", exc_info=True)
     return settings.user_agent
+
+
+def _looks_blocked(response) -> bool:
+    """A bot wall rather than a real answer about the feed."""
+    status = response.status_code
+    if status == _BLOCKED_STATUS:
+        return True
+    if status in _CHALLENGE_STATUSES:
+        try:
+            body = (response.text or "")[:4000].lower()
+        except Exception:
+            return False
+        return any(marker in body for marker in _CHALLENGE_MARKERS)
+    return False
+
+
+async def _curl_get_feed(url: str, headers: dict[str, str]):
+    """GET through curl_cffi impersonating Chrome. The impersonation sets its
+    own User-Agent to match the TLS fingerprint it presents, so ours is
+    dropped; Accept and the conditional headers go through."""
+    curl_headers = {k: v for k, v in headers.items() if k.lower() != "user-agent"}
+    return await safe_curl_get(url, impersonate="chrome", timeout=FEED_FETCH_TIMEOUT, headers=curl_headers)
+
+
+async def _get_feed_response(feed: Feed, client: httpx.AsyncClient, headers: dict[str, str]):
+    """GET the feed with whichever client last worked for it, retrying once
+    with the other when the answer is a bot wall (or, for curl_cffi, an error).
+
+    Some publishers (CISA) refuse Python's TLS handshake whatever the headers
+    while answering curl. The client that got a 200/304 is remembered in
+    adapter_config so later polls go straight to it. Raises httpx.HTTPError
+    when httpx was the last resort and it failed.
+    """
+    from app.services.feed_fetch_health import CLIENT_CURL, CLIENT_HTTPX, preferred_client, remember_client
+
+    first = preferred_client(feed)
+    second = CLIENT_HTTPX if first == CLIENT_CURL else CLIENT_CURL
+
+    async def attempt(name: str):
+        if name == CLIENT_HTTPX:
+            return await client.get(feed.url)
+        return await _curl_get_feed(feed.url, headers)
+
+    if first == CLIENT_HTTPX:
+        response = await attempt(first)  # httpx errors propagate as before
+        if not _looks_blocked(response):
+            return response
+    else:
+        try:
+            response = await attempt(first)
+        except Exception as e:
+            logger.info("Feed %s: curl_cffi fetch failed (%s), trying httpx", feed.id, e)
+            response = await attempt(second)  # last resort: errors propagate
+            if response.status_code in (200, 304):
+                remember_client(feed, second)
+            return response
+        if not _looks_blocked(response):
+            return response
+
+    try:
+        retry = await attempt(second)
+    except Exception as e:
+        logger.info("Feed %s: %s fallback after HTTP %s failed: %s", feed.id, second, response.status_code, e)
+        return response
+    if retry.status_code in (200, 304):
+        logger.info(
+            "Feed %s: %s answered HTTP %s, %s got %s; using %s from now on",
+            feed.id,
+            first,
+            response.status_code,
+            second,
+            retry.status_code,
+            second,
+        )
+        remember_client(feed, second)
+        return retry
+    return response if _looks_blocked(retry) else retry
 
 
 def _feed_request_headers(user_agent: str) -> dict[str, str]:
@@ -243,23 +372,7 @@ async def _poll_due_feeds():
         from app.services.feed_visibility import subscriptions_enabled
 
         per_user = await subscriptions_enabled(db)
-        result = await db.execute(
-            text("""
-                SELECT id FROM feeds
-                WHERE is_active = TRUE
-                -- With per-user subscriptions on, a feed every reader has paused
-                -- has nobody to deliver to, so stop paying to fetch it. One
-                -- un-paused reader is enough to keep it running for the pool.
-                AND (NOT :per_user OR EXISTS (
-                        SELECT 1 FROM user_feed_subscriptions s
-                        WHERE s.feed_id = feeds.id AND s.is_paused = FALSE))
-                AND (last_fetched_at IS NULL
-                     OR NOW() > last_fetched_at + (fetch_interval_minutes || ' minutes')::interval)
-                ORDER BY last_fetched_at ASC NULLS FIRST
-                LIMIT 50
-            """),
-            {"per_user": per_user},
-        )
+        result = await db.execute(text(DUE_FEEDS_SQL), {"per_user": per_user})
         feed_ids = [str(row[0]) for row in result.all()]
 
     # Deduplicate: skip feeds that already have a pending/active fetch
@@ -357,11 +470,11 @@ async def _fetch_feed(feed_id: str):
 
         async with safe_async_client(
             follow_redirects=True,
-            timeout=30.0,
+            timeout=FEED_FETCH_TIMEOUT,
             headers=headers,
         ) as client:
             try:
-                response = await client.get(feed.url)
+                response = await _get_feed_response(feed, client, headers)
             except httpx.HTTPError as e:
                 _note_fetch_error(feed, str(e))
                 db.add(feed)
@@ -442,6 +555,19 @@ async def _fetch_feed(feed_id: str):
 
         adapter = get_adapter(feed.feed_type)
         feed_meta, parsed_entries = adapter.parse_entries(feed.url, response.text)
+
+        # Reachable but empty: a feed URL that now redirects to a landing page,
+        # or a feed that answers 200 with no items, never errors — it just
+        # stops delivering. Note it so the Feeds view can say so.
+        if feed.feed_type in ("rss", "atom", "podcast"):
+            from app.services.feed_fetch_health import note_items
+
+            note_items(
+                feed,
+                len(parsed_entries),
+                final_url=str(getattr(response, "url", "") or ""),
+                content_type=response.headers.get("content-type"),
+            )
 
         # Detect silent failure: rss/atom feed responding with HTML body and no entries.
         # Happens when the feed URL has been deprecated and now serves the site's HTML page.
