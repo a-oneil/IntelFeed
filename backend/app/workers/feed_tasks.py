@@ -25,6 +25,7 @@ from app.models.entry_media import EntryMedia
 from app.models.feed import Feed
 from app.models.podcast import Podcast
 from app.services.dedup import compute_content_hash
+from app.services.js_wall import looks_like_js_wall
 from app.services.sanitizer import extract_first_image, extract_og_image, html_to_text, sanitize_html
 from app.workers.celery_app import celery_app
 from app.workers.db import run_async, worker_session
@@ -527,7 +528,7 @@ async def _fetch_feed(feed_id: str):
                 content_text_plain = html_to_text(content_html) if content_html else ""
                 is_truncated = bool(re.search(r"Continue reading on .+\s*»", content_text_plain))
                 if is_truncated or len(content_text_plain) < 500:
-                    extracted, og_image = await _extract_full_text(parsed.url)
+                    extracted, og_image = await _extract_full_text(parsed.url, feed_id=feed.id)
                     fulltext_extraction_count += 1
                     if extracted:
                         content_html = extracted
@@ -1436,12 +1437,46 @@ def _resolve_google_news_url(url: str) -> str | None:
     return None
 
 
-async def _extract_full_text(url: str) -> tuple[str | None, str | None]:
+def _pick_article_content(raw_html: str, is_medium: bool) -> str | None:
+    """Choose the article body from a fetched page: Medium, readability, CSS selectors."""
+    # Medium-specific extraction (readability misses most of their content)
+    if is_medium:
+        content = _extract_medium_article(raw_html)
+        if content:
+            return content
+
+    # Try readability-lxml first
+    from readability import Document
+
+    doc = Document(raw_html)
+    content = doc.summary()
+
+    # Check plain text length (HTML tags inflate char count)
+    if content:
+        plain_len = len(html_to_text(content))
+        if plain_len > 500:
+            return content
+
+    # Readability failed or too short — try CSS selector-based extraction
+    css_content = _extract_with_css_selectors(raw_html)
+    if css_content:
+        return css_content
+
+    # Return readability content if we got anything at all
+    if content and len(html_to_text(content)) > 100:
+        return content
+
+    return None
+
+
+async def _extract_full_text(url: str, feed_id=None) -> tuple[str | None, str | None]:
     """Extract full article text from a URL.
 
     Uses curl_cffi with browser impersonation for sites with bot protection
     (e.g. Medium/Cloudflare), falling back to httpx for other sites.
     Checks robots.txt before fetching. Returns (content_html, og_image) tuple.
+    A JavaScript-only or bot-challenge page yields no content, so the caller
+    keeps the feed's own description instead of the "enable JavaScript" notice.
     """
     from app.services.rate_limiter import acquire_rate_limit
     from app.services.robots import can_fetch, get_crawl_delay
@@ -1509,35 +1544,15 @@ async def _extract_full_text(url: str) -> tuple[str | None, str | None]:
             return None, None
 
         og_image = extract_og_image(raw_html, base_url=url)
-
-        # Medium-specific extraction (readability misses most of their content)
-        if is_medium:
-            content = _extract_medium_article(raw_html)
-            if content:
-                return content, og_image
-
-        # Try readability-lxml first
-        from readability import Document
-
-        doc = Document(raw_html)
-        content = doc.summary()
-
-        # Check plain text length (HTML tags inflate char count)
-        if content:
-            plain_len = len(html_to_text(content))
-            if plain_len > 500:
-                return content, og_image
-
-        # Readability failed or too short — try CSS selector-based extraction
-        css_content = _extract_with_css_selectors(raw_html)
-        if css_content:
-            return css_content, og_image
-
-        # Return readability content if we got anything at all
-        if content and len(html_to_text(content)) > 100:
-            return content, og_image
-
-        return None, og_image
+        content = _pick_article_content(raw_html, is_medium)
+        if content and looks_like_js_wall(content):
+            logger.debug(
+                "Feed %s: %s is a JavaScript-only or bot-check page; keeping the feed's content",
+                feed_id,
+                url,
+            )
+            return None, og_image
+        return content, og_image
 
     except Exception as e:
         logger.debug(f"Full-text extraction failed for {url}: {e}")

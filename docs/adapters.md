@@ -399,6 +399,7 @@ Extraction strategy (`_extract_full_text()`):
 1. **Google News resolution**: `news.google.com` wrapper URLs are decoded to the real publisher URL first (via `googlenewsdecoder`); `parsed.url` is also rewritten so "Open original" links point at the canonical article.
 2. **Fetch**: httpx, falling back to **curl_cffi** (browser impersonation) on 403/429/503 bot challenges; Medium-hosted domains go straight to curl_cffi. Checks `robots.txt` and rate limits per domain.
 3. **Extract**: Medium gets a dedicated `<article><section>` extractor (readability misses their DOM); everything else tries **readability-lxml**, then a CSS-selector fallback for known article-body patterns (`div.article-body`, `div.entry-content`, etc.).
+4. **Reject wall pages**: when the extracted text is short (under 1,000 characters) and reads as a JavaScript-required notice ("Please enable JavaScript", "You need to enable JavaScript to run this app") or a bot challenge ("Checking your browser", "Just a moment — verifying connection security"), extraction returns nothing and the entry keeps the feed's own description (`app/services/js_wall.py`, logged at debug with the feed id). Single-page sites such as NCSC, Europol and MSRC serve only that notice to a non-browser fetch. `scripts/maintenance/repair_js_wall_entries.py` repairs entries that stored one.
 
 Capped at 25 extractions per cycle to avoid monopolizing workers.
 
