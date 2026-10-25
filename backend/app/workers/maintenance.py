@@ -1035,10 +1035,17 @@ _REENRICH_PENDING_STATUSES = ("Awaiting Analysis", "Undergoing Analysis", "Recei
 async def _reenrich_cve_nvd(batch_size: int | None = None) -> dict:
     import asyncio
 
-    from sqlalchemy import Integer, and_, or_
+    from sqlalchemy import and_, or_
 
     from app.intelligence.cpe_resolver import build_cpe_index
-    from app.intelligence.cve import NVDRateLimited, enrich_from_nvd, nvd_request_pace, sync_cve_affected
+    from app.intelligence.cve import (
+        NVDRateLimited,
+        enrich_from_nvd,
+        nvd_request_pace,
+        nvd_retry_allowed,
+        stamp_nvd_miss,
+        sync_cve_affected,
+    )
     from app.models.cve import CVE
 
     if batch_size is None:
@@ -1050,20 +1057,12 @@ async def _reenrich_cve_nvd(batch_size: int | None = None) -> dict:
             batch_size = 150
 
     now = datetime.now(UTC)
-    retry_cutoff = (now - timedelta(days=7)).isoformat()
     stale_cutoff = (now - timedelta(days=14)).isoformat()
-    attempts = CVE.nvd_data["_enrich_attempts"].astext.cast(Integer)
     last_attempt = CVE.nvd_data["_enrich_last_attempt"].astext
     vuln_status = CVE.nvd_data["vulnStatus"].astext
 
     empty_blob = or_(CVE.nvd_data.is_(None), ~CVE.nvd_data.has_key("id"))
-    never_or_retryable = and_(
-        empty_blob,
-        or_(
-            ~CVE.nvd_data.has_key("_enrich_attempts"),
-            and_(attempts < 3, last_attempt < retry_cutoff),
-        ),
-    )
+    never_or_retryable = and_(empty_blob, nvd_retry_allowed(now))
     # Fetched before, but NVD hadn't analyzed it yet — recheck every 14 days.
     # Staleness uses the blob-internal stamp, NOT CVE.updated_at: article
     # mentions touch updated_at constantly, which would starve hot CVEs.
@@ -1102,10 +1101,7 @@ async def _reenrich_cve_nvd(batch_size: int | None = None) -> dict:
                 logger.warning("reenrich_cve_nvd aborting batch at %s/%s: NVD rate limit", i, len(rows))
                 break
             if not nvd:
-                blob = dict(cve.nvd_data or {})
-                blob["_enrich_attempts"] = int(blob.get("_enrich_attempts") or 0) + 1
-                blob["_enrich_last_attempt"] = now.isoformat()
-                cve.nvd_data = blob
+                stamp_nvd_miss(cve, now)
                 continue
             stats["enriched"] += 1
             if nvd.get("cvss_score") is not None:

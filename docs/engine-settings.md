@@ -99,7 +99,7 @@ dictionary scan in `backend/app/intelligence/autolinker.py`; see
 | `autolinker_ambiguous_max_occurrences` | int, `3` | An ambiguous name appearing more than this many times in one article is skipped for that article. High repetition reads as ordinary English usage, not a named-entity reference. |
 | `autolinker_false_positive_names` | csv, ~150 names | The curated FP vocabulary: generic animal/nature words, malware category words, OS/vendor brand words, Windows built-ins, and known-bad Malpedia aliases. **Only applies to actor / malware / country matching** — vendors, products, tools and mitigations deliberately bypass it, since their real names *are* common brand words (Norton the vendor still matches). Editable as rows via `GET/POST/DELETE /api/engine/autolink/fp-names`. |
 | `autolinker_blocked_surface_forms` | csv, empty | Analyst hard blocks, written by the reader's *Wrong? → never match this word* action. Unlike the list above, these are enforced for **every** entity type — an analyst saying "stop matching this" has to actually stop it. Managed from the reader popover and Engine → Autolink. |
-| `autolink_pending_tier_enabled` | bool, `true` | Actor/malware/tool/country matches whose only surface forms are common English dictionary words are held in `pending_autolink_matches` rather than linked outright; the one-pass AI analysis promotes or rejects them. Unconfirmed matches never become links. Off restores instant linking for dictionary-word names. |
+| `autolink_pending_tier_enabled` | bool, `true` | Actor/malware/tool/country matches whose only surface forms are common English dictionary words are held in `pending_autolink_matches` rather than linked outright; the one-pass AI analysis promotes or rejects them. Unconfirmed matches never become links. On an entry whose feed has AI off (or mode `none`) nothing would confirm them, so they are dropped rather than held. Off restores instant linking for dictionary-word names. |
 
 Vocabulary changes take effect when the autolinker's Redis-versioned vocabulary is
 rebuilt — `refresh-autolinker-vocabulary` runs every 30 minutes, and the API
@@ -180,7 +180,7 @@ Job: `ai-analysis-batch-submit` (every 30 min) and `ai-analysis-batch-poll`
 |---|---|---|
 | `ai_one_pass_enabled` | bool, `true` | Master switch. Requires an enabled `entry_analysis` AI task assignment — the flag alone does nothing. |
 | `ai_daily_budget_usd` | float, `2.0` | Hard daily spend cap. On reaching it, pending entries wait; the next run takes the highest-priority ones first. |
-| `ai_analysis_relevance_threshold` | float, `0.15` | Junk gate: entries scoring below this on the keyword relevance pass skip AI analysis entirely. The question it answers is "is there anything here to extract", not "is this important". |
+| `ai_analysis_relevance_threshold` | float, `0.15` | Relevance cut-off for two gates: entries scoring below it on the keyword relevance pass skip AI analysis entirely (the junk gate), and on `selective` feeds skip autolinking too. The question it answers is "is there anything here to extract", not "is this important". |
 | `ai_batch_max_requests` | int, `500` | Maximum entries per batch submission. |
 | `ai_analysis_content_max_chars` | int, `12000` | Characters of article body sent per entry. Bodies over the cap are windowed as head + indicator appendix (see `observables_analysis_tail_reserve`) so a long write-up's IOC section is never cut; narrative past the head is. |
 | `ai_use_batches` | bool, `true` | Use the Anthropic Message Batches API (50% discount) when the provider supports it. Otherwise sequential calls with prompt caching. |
@@ -356,7 +356,7 @@ Settings → Engine → **Feeds** table view (`feeds`, `rate_limiting`,
 | Setting | Type / default | What it does |
 |---|---|---|
 | `default_feed_fetch_interval` | int, `30` min | Default interval between fetches for a feed that doesn't set its own. |
-| `feed_auto_pause_days` | int, `30` | The `check-feed-health` job pauses an active feed once every fetch has answered **HTTP 4xx** for this many days in a row (`Feed.error_since` marks the streak start; a clean fetch clears it). Only client errors count — a 5xx, a timeout or an HTML page at the feed URL never pauses anything — and the clock is the streak, not the last post, so a seldom-posting blog that still answers 200 is never paused for being quiet. Paused feeds are listed as **Dead** on the Feeds view (`auto_paused_at`), apart from feeds switched off by hand, and `POST /api/feeds/{id}/resume` (admin) re-activates one and clears the streak. `0` disables. |
+| `feed_auto_pause_days` | int, `30` | The `check-feed-health` job pauses an active feed once every fetch has answered **HTTP 4xx** for this many days in a row (`Feed.error_since` marks the streak start; a clean fetch clears it). Only client errors count — a 5xx, a timeout or an HTML page at the feed URL never pauses anything — and the clock is the streak, not the last post, so a seldom-posting blog that still answers 200 is never paused for being quiet. While the streak runs the poller backs off (each failure doubles the interval, capped at 24 hours), so a blocked feed logs a few dozen failures over the window rather than one per poll. Paused feeds are listed as **Dead** on the Feeds view (`auto_paused_at`), apart from feeds switched off by hand, with the reason recorded at pause time (`pause_reason`: error, status, failure count, streak start), and `POST /api/feeds/{id}/resume` (admin) re-activates one and clears the streak. `0` disables. |
 | `user_agent` | str, browser-like | `User-Agent` sent when fetching feeds. The browser-like default exists because many sites (CISA/gov, Cloudflare-fronted blogs) return 403 to obvious bot agents. |
 | `rate_limit_default_interval` | float, `2.0` s | Default seconds between requests to the same domain. Per-domain overrides are env-only (`rate_limit_overrides`). |
 | `per_user_subscriptions_enabled` | bool, `true` | Each analyst manages their own feed list and mutes over the shared pool. Off is a single shared list where a mute affects everyone. While the flag is off, a mute is written to the shared `Feed.is_muted` only, not to anyone's subscription, so a feed muted while the flag is off reappears for everyone when it is turned on. |
@@ -584,7 +584,7 @@ they did not exist. The lookup they govern is described in
 
 | Setting | Type / default | What it does |
 |---|---|---|
-| `public_rss_enabled` | bool, `false` | Re-publish aggregated entries over a token-gated RSS URL. |
+| `public_rss_enabled` | bool, `false` | Re-publish aggregated entries over a token-gated RSS URL. Only active feeds that are not muted are included (the instance-wide mute, not a reader's own). |
 | `public_rss_per_feed_limit` | int, `100` | Items per feed in the published output. |
 | `public_rss_full_content` | bool, `true` | Include full article content rather than summaries. |
 

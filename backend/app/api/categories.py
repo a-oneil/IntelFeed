@@ -16,6 +16,7 @@ from app.schemas.category import (
     CategoryResponse,
     CategoryUpdateRequest,
 )
+from app.services.feed_defaults import clean_defaults
 
 router = APIRouter()
 
@@ -54,6 +55,7 @@ async def list_categories(
                     position=child.position,
                     created_at=child.created_at,
                     feed_count=count_map.get(child.id, 0),
+                    feed_defaults=clean_defaults(child.feed_defaults),
                 )
                 for child in categories
                 if child.parent_id == cat.id
@@ -67,6 +69,7 @@ async def list_categories(
                     created_at=cat.created_at,
                     children=children,
                     feed_count=count_map.get(cat.id, 0),
+                    feed_defaults=clean_defaults(cat.feed_defaults),
                 )
             )
 
@@ -117,6 +120,16 @@ async def update_category(
         category.parent_id = request.parent_id
     if request.position is not None:
         category.position = request.position
+    if request.feed_defaults is not None:
+        # The defaults decide what every future feed in the folder runs —
+        # instance plumbing, like the bulk update that also writes them.
+        if user.role != "admin":
+            raise AppError(
+                code="forbidden",
+                message="Only an admin can change a category's feed defaults",
+                status_code=403,
+            )
+        category.feed_defaults = clean_defaults(request.feed_defaults.model_dump())
 
     db.add(category)
     await db.flush()
@@ -131,6 +144,7 @@ async def update_category(
         position=category.position,
         created_at=category.created_at,
         feed_count=feed_count,
+        feed_defaults=clean_defaults(category.feed_defaults),
     )
 
 

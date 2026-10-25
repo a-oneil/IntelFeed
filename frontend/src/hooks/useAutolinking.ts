@@ -23,6 +23,7 @@ export interface EntityLinkStats {
   by_type: Record<string, number>;
   pending: number;
   pending_ready: number;
+  pending_dropped_ai_off?: number;
   relationships_total: number;
 }
 

@@ -87,7 +87,7 @@ The engine sits at the core of IntelFeed's intelligence operations, providing:
 - **Structured intelligence extraction** (TTPs, CVEs, CWEs, threat actors, malware, tools, mitigations)
 - **An IOC ledger** (observables) where rows come from judgment doors, never from a regex match
 - **Cross-entity correlation** with proximity-aware scoring
-- **Detection rule extraction** from entry content (SIGMA, Elastic TOML, YARA, Snort/Suricata, Splunk SPL)
+- **Detection rule extraction** from entry content (SIGMA, Elastic TOML, YARA, Snort/Suricata, and SPL / KQL / EQL / ES|QL queries in code blocks)
 - **Retention & archival** of read correlation events
 - **Real-time intelligence event generation** for anomalies, coverage gaps, and trending entities
 
@@ -315,9 +315,18 @@ linking instantly:
   payload slots are matched jointly since the AI files ransomware brands inconsistently).
   Unconfirmed entities are **rejected** with a `FalsePositiveRecord`
   (`extraction_source="ai_reconcile"`).
-- **Expiry**: entries that never get an AI pass (junk-gated, budget, feed policy) leave
-  rows unresolved; `prune_engine_tables` deletes unresolved rows after 14 days and
-  resolved rows after 30.
+- **Feed policy** (`services/ai_eligibility.py`): AI queueing and the diversion step share
+  one check, `entry_will_get_ai_analysis` — the instance `ai_one_pass_enabled` switch, the
+  feed's `ai_analysis_enabled`, and an extraction mode other than `none`. On an entry that
+  fails it, nothing would ever confirm a held match, so provisional matches are **dropped**:
+  not held, not linked. On a feed with AI off, common-word names aren't tagged. Drops are
+  counted in daily Redis keys (`autolink:pending_dropped_ai_off:<YYYYMMDD>`) and the
+  Autolinking tab of the Engine view shows the 30-day total
+  (`pending_dropped_ai_off` on `GET /api/entity-links/stats`).
+- **Expiry**: entries that never get an AI pass for per-entry reasons (junk-gated, budget)
+  leave rows unresolved; `prune_engine_tables` deletes unresolved rows after 14 days and
+  resolved rows after 30. `scripts/maintenance/resolve_pending_ai_off.py` resolves open
+  rows on entries whose feed fails the feed-policy check (`resolution = 'dropped_ai_off'`).
 
 Gated by `autolink_pending_tier_enabled` (Settings → Engine → autolink stage, default on) — and
 auto-disabled when `ai_one_pass_enabled` is off, since without the reconciler there is
@@ -343,6 +352,8 @@ Same-type entity merges survive re-import because the loser's name lands in the 
 2. **FP entity-name filter** — `is_fp_entity_name()` (`backend/app/intelligence/autolinker.py:101`) guards the same automated creation paths against spawning junk profiles: it rejects the configurable FP name set plus bare system-binary/LOLBin filenames (`svchost.exe`, `*.dll`, `*.sys`, …). Manual creation is not gated — a human deliberately adding an entity is trusted.
 
 The resolver adds further gates on top (an `entity_name_denylist` table, normalized/alias-index exact matching, and held-for-review candidate matches), controlled by `entity_creation_gates` (`off` / `shadow` / `on`, default `shadow` — shadow logs the would-block decision to `EntityMaintenanceLog` and still creates). Every resolution decision is written to `EntityMaintenanceLog` (`resolution_*` actions) so it surfaces in the hygiene feed.
+
+Tools carry two more guards that hold for every automated source whatever `entity_creation_gates` says. A concept word in `TOOL_CONCEPT_NAMES` (`intelligence/entity_resolution.py`: hash algorithms, vulnerability classes such as SQL injection, protocols such as WebSocket, and generic words such as payload or debug) is blocked (`generic_name:concept_term`). A name already on file as a product or vendor (canonical name or alias, via `entity_alias_index`) is held as `product_or_vendor_name`, and the entry links to that product or vendor instead; `DUAL_USE_TOOL_NAMES` (AnyDesk, rclone, ngrok and the like) is exempt. A feed with `extract_tools` off calls the resolver with `link_only=True`: every matcher still runs, so known tools link, and a name that would have created a row is blocked as `creation_disabled`. `scripts/maintenance/clean_tool_catalog.py` moves platform and product rows out of the tool catalog and deletes concept rows onto the do-not-recreate list.
 
 See diagram: [Entity creation guards](diagrams/intelligence-engine-entity-creation-guards.md)
 
@@ -752,29 +763,29 @@ async def archive_old_events(db, retention_days=90):
 
 ## Detection Rule Extraction
 
-The rule extraction engine parses **5 detection rule formats** from entry content (CrowdStrike QL and other formats are supported for authoring/import in the rule library, but are not detected by the ingest extractor):
+The rule extraction engine stores **6 rule types** (`yara`, `sigma`, `elastic_ql`, `kql`, `snort_suricata`, `splunk_spl`) found in entry content: YARA, Sigma, Elastic TOML rule files, Snort/Suricata, and the query languages SPL, KQL, EQL and ES|QL (EQL and ES|QL are stored as `elastic_ql`). CrowdStrike QL and other formats are supported for authoring/import in the rule library, but are not detected by the ingest extractor.
 
 ```python
-# rule_extraction.py:24-58
-def extract_rules_from_content(text: str, source_url: str | None = None) -> list[dict]:
+# rule_extraction.py:32-87
+def extract_rules_from_content(text, source_url=None, *, html=None, article_title=None) -> list[dict]:
+    text = html.unescape(text)              # &gt; &lt; &amp; -> > < &
+    code_blocks = _code_blocks(text, html)  # fences + <pre>/<code> from the article HTML
     rules = []
     rules.extend(_extract_yara_rules(text))
     rules.extend(_extract_elastic_toml_rules(text))
-    rules.extend(_extract_sigma_rules(text))
+    rules.extend(_extract_sigma_rules(text, code_blocks))
     rules.extend(_extract_snort_suricata_rules(text))
-    rules.extend(_extract_splunk_spl_rules(text))
-    
-    # Validate each rule
-    validated = []
-    for rule in rules:
-        result = validate_rule(rule["rule_type"], rule["rule_content"])
-        if result.valid:
-            validated.append(rule)
-    
+    rules.extend(_extract_query_rules(text, code_blocks))   # SPL, KQL, EQL, ES|QL
+
+    # Drop repeats (whitespace-blind), validate, then title the queries
+    ...
+    _number_query_titles(validated, article_title)
     return validated
 ```
 
-### YARA Rules (`rule_extraction.py:59-124`)
+Callers pass the entry's sanitized `content_html` as `html` and its title as `article_title`. The plain `content_text` has every `<pre>` block flattened into prose, so code blocks are read from the HTML; HTML entities are decoded in both, so a saved query runs as written.
+
+### YARA Rules (`rule_extraction.py:139-202`)
 
 **Extraction logic:**
 1. Regex match `rule <name> { ... }`
@@ -797,7 +808,7 @@ DetectionRule(
 )
 ```
 
-### SIGMA Rules (`rule_extraction.py:215-281`)
+### SIGMA Rules (`rule_extraction.py:299-369`)
 
 **Format:** YAML with required fields: `title`, `detection`, `logsource`
 
@@ -807,7 +818,7 @@ DetectionRule(
 3. Extract MITRE tactics from tags: `attack.execution` → "Execution"
 4. Serialize back to YAML for storage
 
-### Elastic TOML Rules (`rule_extraction.py:125-214`)
+### Elastic TOML Rules (`rule_extraction.py:205-296`)
 
 **Format:** TOML with `[rule]` section
 
@@ -818,22 +829,34 @@ DetectionRule(
 - `threat.tactic.name` → MITRE tactic
 - `threat.technique.id` → MITRE technique
 
-### Splunk SPL (`rule_extraction.py:354-400`)
+### Query languages: SPL, KQL, EQL, ES|QL (`rule_extraction.py:445-616`)
 
-**Detection strategy:** Heuristic-based (no formal parser)
+**Code blocks only.** A query is taken from a Markdown fence or an HTML `<pre>`/`<code>` block, never from prose, so a sentence that says "where" never becomes a rule. A fence tag or `language-*` class (`kql`, `kusto`, `eql`, `esql`, `spl`, `splunk`) is a hint; the block still has to have the language's shape. The one exception is the inline SPL scan: a line of text starting `index=`, `search ` or `| tstats`, at least 30 characters long.
 
-**Indicators of SPL:**
-- Strong: `index=` + `|` (pipe)
-- Medium: `search ` + `|`
-- Weak: `| stats`, `| where`, `| eval` + `index=` or `sourcetype=`
+**Shapes:**
+- **SPL:** `index=` + `|` (pipe); `search ` + `|`; `| tstats`; or `| stats`, `| where`, `| eval`… plus `index=`, `sourcetype=` or `source=`
+- **KQL:** a table name followed by a pipe (`DeviceProcessEvents | where …`) and a tabular operator (`| where`, `| summarize`, `| project`, `| extend`, `| join`…). The table must be a known Defender XDR / Sentinel table, or the query must use syntax SPL never has (`| summarize`, `| project`, `ago(`, `=~`, `has`, `==`). A query that opens with `let` or `union` must name a known table. `index=` / `sourcetype=` rule it out.
+- **EQL:** `<category> where …` (`process`, `file`, `network`, `registry`, `any`…), `sequence [by …] [with maxspan=…] [`, or `join … [` — stored as `elastic_ql`
+- **ES|QL:** `FROM <index pattern>` followed by `| WHERE`, `| STATS`, `| EVAL`, `| KEEP`… — stored as `elastic_ql`
+
+Leading `//` comment lines are dropped from KQL/EQL/ES|QL queries; the validator ignores `//` and `/* */` comments when it checks quote balance.
+
+**Titles.** Queries carry no name of their own. Each is titled from the article: `"<article title> — KQL query 2"`, numbered per language in article order, so titles are distinct within an article and stable when it is processed again.
 
 **Examples:**
-```splunk
-index=main sourcetype=syslog | stats count by host
-index=_audit action=search | where user=admin | table time, action
+```kusto
+DeviceProcessEvents
+| where Timestamp > ago(7d)
+| where FileName =~ "rundll32.exe"
+| summarize count() by DeviceName
+```
+```eql
+sequence by host.id with maxspan=1m
+  [file where event.action == "creation"]
+  [process where process.name == "rundll32.exe"]
 ```
 
-### Snort/Suricata Rules (`rule_extraction.py:282-352`)
+### Snort/Suricata Rules (`rule_extraction.py:372-402`)
 
 **Format:** Single-line rules with `msg` field
 
@@ -847,40 +870,39 @@ index=_audit action=search | where user=admin | table time, action
 msg:"Detect SQL Injection Attempt"
 ```
 
-### Rule Storage (`rule_extraction.py:402-490`)
+### Rule Storage (`rule_extraction.py:619-718`)
 
-Extracted rules are stored with **deduplication and linking:**
+Extracted rules are stored with **deduplication and linking.** Dedup is on the rule body, never on the title alone, so two articles' queries never overwrite each other:
 
 ```python
 async def store_extracted_rules(db, entry_id, user_id, rules):
     for rule_data in rules:
-        # Check for exact duplicate (same content)
-        existing = await db.execute(
-            select(DetectionRule).where(
-                DetectionRule.rule_content == rule_data["rule_content"],
-                DetectionRule.created_by == user_id,
-            )
+        # Same body already stored (by this user, or auto-extracted by anyone) -> skip
+        existing = select(DetectionRule.id).where(
+            DetectionRule.rule_content == rule_data["rule_content"],
+            or_(DetectionRule.created_by == user_id, DetectionRule.tags.contains(["auto-extracted"])),
         )
         if existing:
-            continue  # Skip exact duplicate
-        
-        # Check for same title+type (upstream rule updated)
-        existing_by_title = await db.execute(
-            select(DetectionRule).where(
-                DetectionRule.title == rule_data["title"],
-                DetectionRule.rule_type == rule_data["rule_type"],
-                DetectionRule.tags.contains(["auto-extracted"]),
-            )
+            continue
+
+        # Same entry + title + type, new body: the rule was edited upstream
+        # and the article processed again -> replace the content in place
+        existing_by_title = select(DetectionRule).where(
+            DetectionRule.created_by == user_id,
+            DetectionRule.entry_id == entry_id,
+            DetectionRule.title == rule_data["title"],
+            DetectionRule.rule_type == rule_data["rule_type"],
+            DetectionRule.tags.contains(["auto-extracted"]),
         )
         if existing_by_title:
-            # Update content, re-link to new entry
             existing_by_title.rule_content = rule_data["rule_content"]
-            existing_by_title.entry_id = entry_id
             continue
-        
+
         # New rule
         db.add(DetectionRule(...))
 ```
+
+Processing the same article again stores nothing new.
 
 **Link to source entities:**
 ```python
@@ -1595,7 +1617,7 @@ print(data)  # Should have cvss_score, severity, etc.
 
 - **Autolinker implementation:** `/backend/app/intelligence/autolinker.py` (~1455 lines)
 - **Correlation engine:** `/backend/app/intelligence/correlation.py` (~2435 lines)
-- **Detection rule extraction:** `/backend/app/intelligence/rule_extraction.py` (~490 lines)
+- **Detection rule extraction:** `/backend/app/intelligence/rule_extraction.py` (~720 lines)
 - **Correlation events:** `/backend/app/intelligence/correlation_events.py` (~605 lines)
 - **CVE intelligence:** `/backend/app/intelligence/cve.py` (~430 lines)
 - **TTP extraction:** `/backend/app/intelligence/ttp.py` (~300 lines)
@@ -1623,16 +1645,16 @@ Each feed carries a set of switches that decide what the ingest pipeline does wi
 | Process this feed | `intel_extraction_mode` = `none` or not | Everything below. `none` opts out of all extraction. |
 | Autolink known entities | `intel_extraction_mode` = `manual` (off) vs `selective` / `full` (on) | The deterministic dictionary scan. |
 | ↳ Only security-relevant articles | `selective` (on) vs `full` (off) | Whether autolinking applies a keyword relevance pre-filter. |
-| AI analysis (one pass) | `ai_analysis_enabled` | The one-pass `entry_analysis` call. |
+| AI analysis (one pass) | `ai_analysis_enabled` | The one-pass `entry_analysis` call. With AI off, common-word names aren't tagged: the autolinker drops dictionary-word matches it would otherwise hold for the AI (see [Pending Tier](#pending-tier-dictionary-word-matches)). |
 | Regex enrichment | `auto_extract_on_ingest` | The standalone CVE/NVD, TTP and mitigation pass. |
 | Detection rule extraction | `extract_detection_rules` | Sigma/YARA/SPL/Elastic parsing from article bodies. |
-| ↳ Create tool entities | `extract_tools` | Whether that AI pass may mint Tool rows. Does nothing when the AI is off. |
+| ↳ Create tool entities | `extract_tools` | Whether that AI pass may mint new Tool rows. Off, the AI still links tools already in the catalog, and autolink tags them as usual. Advisory-type articles skip AI tools whatever the switch says. Does nothing when the AI is off. |
 
 The observables ledger scan has no switch of its own, but it is not unconditional either: `_scan_entry_observables` skips any feed whose `intel_extraction_mode` is `none`, so "do not analyse this feed" really does mean nothing is extracted — the curated `ioc_list` door would otherwise keep creating ledger rows from a feed the operator had switched off. That check sits in the task rather than at dispatch, exactly as `_autolink_entry`'s does, which also means a feed set to `none` outranks a pipeline plan that enables the stage. Everything else about it is tuned by the global `observables_*` settings.
 
 > **This section used to describe a five-way preset** — "Full", "Selective", "Known entities only", "Manual", "None" — mapped onto `intel_extraction_mode` + `auto_extract_on_ingest`. Three of those labels had stopped being true. The one-pass AI analysis, which does most of the extraction today, gates only on `intel_extraction_mode == "none"` and ignores `auto_extract_on_ingest` entirely, so a feed set to "Known entities only — match against existing database" or "Manual — only when triggered" still had the AI read every article and create entities. The preset is gone; the switches above are what actually exists. See `frontend/src/components/feedModal/pipelineStages.ts`.
 
-**The AI pass is the main extraction path, and it has its own switch.** `enqueue_entry_analysis` (`services/entry_analysis.py`) refuses to queue an entry when the global `ai_one_pass_enabled` is off, when the feed's `intel_extraction_mode` is `none`, or when the feed's `ai_analysis_enabled` is false. That last field exists because turning the AI off for one noisy source used to require `mode=none`, which also killed its autolinking and scoring — there was no setting for "keep matching this against my catalog, just don't let the AI invent entities from it".
+**The AI pass is the main extraction path, and it has its own switch.** `enqueue_entry_analysis` (`services/entry_analysis.py`) refuses to queue an entry when the global `ai_one_pass_enabled` is off, when the feed's `intel_extraction_mode` is `none`, or when the feed's `ai_analysis_enabled` is false. That last field exists because turning the AI off for one noisy source used to require `mode=none`, which also switches off its autolinking and extraction — there was no setting for "keep matching this against my catalog, just don't let the AI invent entities from it".
 
 The sections below describe the **deterministic** layer in detail: what each `intel_extraction_mode` value does to the autolinker and the regex passes. They are accurate about that layer and say nothing about the AI pass, which runs independently of everything except the three gates above.
 
@@ -1640,7 +1662,7 @@ The sections below describe the **deterministic** layer in detail: what each `in
 
 Two distinct extraction pipelines run on each new entry:
 
-**Pipeline A — the autolinker** (`backend/app/intelligence/autolinker.py`). Dictionary-based entity linking. Loads a vocabulary of every ThreatActor, MalwareFamily, Country, Vendor, Product, Tool, and Mitigation already in the database (canonical names + aliases) into an Aho-Corasick automaton, scans entry title/summary/content paragraph-by-paragraph, and creates `EntryThreatActor`, `EntryMalware`, `EntryCountry`, `EntryVendor`, `EntryProduct`, `EntryTool`, `EntryMitigation` junction rows. As a side effect of the same scan, regex matches for CVE IDs (`CVE-YYYY-NNNN`) and MITRE ATT&CK technique IDs (`T1234[.NNN]`) also create `EntryCVE` and `EntryTTP` links — CVEs auto-create a stub row if not seen before; TTPs only link if the technique is already in the MITRE catalog. Entry point: `_autolink_entry` (`workers/intel_feed_tasks.py:202`). Gated by `intel_extraction_mode`.
+**Pipeline A — the autolinker** (`backend/app/intelligence/autolinker.py`). Dictionary-based entity linking. Loads a vocabulary of every ThreatActor, MalwareFamily, Country, Vendor, Product, Tool, and Mitigation already in the database (canonical names + aliases) into an Aho-Corasick automaton, scans entry title/summary/content paragraph-by-paragraph, and creates `EntryThreatActor`, `EntryMalware`, `EntryCountry`, `EntryVendor`, `EntryProduct`, `EntryTool`, `EntryMitigation` junction rows. As a side effect of the same scan, regex matches for CVE IDs (`CVE-YYYY-NNNN`) and MITRE ATT&CK technique IDs (`T1234[.NNN]`) also create `EntryCVE` and `EntryTTP` links. CVEs are the one entity the autolinker creates rather than only links: a CVE ID not seen before becomes a stub row (`created_via = "auto_link"`, `created_from_entry_id` set) and is queued for enrichment, unless the ID is on the analyst do-not-recreate list (`is_name_denied`, the same check the extract path uses). TTPs only link if the technique is already in the MITRE catalog. Entry point: `_autolink_entry` (`workers/intel_feed_tasks.py:202`). Gated by `intel_extraction_mode`.
 
 **Pipeline B — heavy enrichment** (`_extract_entry_intel`, `backend/app/workers/intel_feed_tasks.py:469`). Standalone regex pass + external lookups:
 
@@ -1649,13 +1671,13 @@ Two distinct extraction pipelines run on each new entry:
 - Mitigation extraction — MITRE M-IDs
 - GitHub rule import — for `github_repo` entries with a `content_type`, runs the dedicated `process_github_entry` pipeline that parses SIGMA/YARA/Splunk/etc. rules
 
-Gated by `auto_extract_on_ingest` (and for GitHub-typed entries, runs regardless when `content_type` is set).
+Dispatched when `auto_extract_on_ingest` or `extract_detection_rules` is on and the feed's mode is not `none`; the CVE/TTP/mitigation passes then check `auto_extract_on_ingest` themselves, and GitHub-typed entries (`content_type` set) take the import pipeline whichever flag dispatched it. Every ingest dispatch reads one gate, `feed_runs_extraction` (`pipeline/plans.py`), and `_extract_entry_intel` re-checks mode `none` itself, so a pipeline plan that enables the stage, a forced dispatch or the Engine's re-run never reaches past it.
 
-A third optional layer — `extract_detection_rules` — runs `extract_rules_from_content` to pull SIGMA/YARA/SPL/Elastic/Snort rules from non-GitHub article bodies. Independent of mode/extract flags.
+A third optional layer — `extract_detection_rules` — runs `extract_rules_from_content` to pull SIGMA/YARA/SPL/Elastic/Snort rules from non-GitHub article bodies. Independent of `auto_extract_on_ingest` and of the autolink modes; off when the mode is `none`.
 
 ### `full` — autolink every article
 
-Backend: `mode=full, extract=true`. Every new entry gets the autolinker, regex CVE extraction with NVD enrichment, regex TTP extraction, regex mitigation extraction, and (if `extract_detection_rules=true`) detection rule extraction. The relevance pre-filter is skipped — everything is processed.
+Backend: `mode=full, extract=true`. Every new entry gets the autolinker, regex CVE extraction with NVD enrichment, regex TTP extraction, regex mitigation extraction, and (if `extract_detection_rules=true`) detection rule extraction. The relevance filter is skipped for autolinking — everything is tagged. (The AI junk gate, which uses the same score, still applies.)
 
 Maximum recall, maximum cost. New CVEs referenced in the article spawn stub rows hydrated with NVD metadata; known threat actors, malware, vendors, and products get linked; TTPs and mitigations get pulled out by regex.
 
@@ -1665,51 +1687,53 @@ Cost considerations: NVD API calls are rate-limited (5 req / 30 sec without an A
 
 ### `selective` — autolink security-relevant articles (default)
 
-Backend: `mode=selective, extract=true`. The relevance pre-filter (`backend/app/intelligence/relevance_filter.py`) runs first as the gate. If the score ≥ `DEFAULT_RELEVANCE_THRESHOLD` (0.15), the entry proceeds through the autolinker, regex CVE + NVD, regex TTP, and regex mitigations; below 0.15 all extraction is skipped (the entry itself is still ingested and visible in the reader). Detection rule extraction (if enabled) runs independent of the relevance gate.
+Backend: `mode=selective, extract=true`. The relevance filter (`backend/app/intelligence/relevance_filter.py`) scores the article — title, summary and content, plus the translation when there is one — before autolinking. Below `ai_analysis_relevance_threshold` (default 0.15, Settings → Engine) the autolinker skips the entry; the entry itself is still ingested and visible in the reader. Only autolinking reads this gate: regex CVE/TTP/mitigation extraction (when `auto_extract_on_ingest` is on), detection rule extraction and the observables stage run whatever the score. The same score and threshold drive the AI junk gate on every mode, so the one setting decides both what gets tagged here and what the AI reads.
 
-The relevance filter is a zero-cost lexical scorer (no AI, no DB, pure string matching). It sums weighted hits across five keyword categories:
+The relevance filter is a cheap lexical scorer (no AI, no DB). Keywords match at the start of a word, so "exploited" counts for "exploit" but "laptop" does not count for "APT" and "percent" does not count for "RCE". Keywords of four letters or fewer must be the whole word, allowing a plural *s* or trailing digits ("APT29", "IOCs"; not "aptly", "pocket" or "Siemens"). It sums weighted hits across five keyword categories:
 
 | Category | Weight | Examples |
 |---|---|---|
 | Vulnerability | 0.30 | "vulnerability", "CVE-", "RCE", "zero-day", "CVSS", "PoC", "advisory" |
-| Malware | 0.30 | "ransomware", "trojan", "Cobalt Strike", "C2 server", "shellcode", "stealer" |
-| Incident | 0.25 | "breach", "compromise", "intrusion", "phishing", "lateral movement", "supply chain" |
+| Malware | 0.30 | "malicious", "ransomware", "trojan", "Cobalt Strike", "C2 server", "shellcode", "stealer" |
+| Incident | 0.25 | "breach", "hacked", "compromise", "intrusion", "phishing", "lateral movement", "supply chain" |
 | Threat actor | 0.35 | "APT", "nation-state", "espionage", "hacktivist", "financially motivated" |
 | Detection | 0.20 | "Sigma", "YARA", "IOC", "MITRE ATT&CK", "Splunk", "SIEM", "threat hunting" |
 
-Per-category contributions use diminishing returns (1 hit = 60% of the weight; each additional hit adds 20% up to the cap). Structured-pattern bonuses are added on top: CVE pattern in text +0.4, TTP pattern (`T1234`) +0.3, IOC-like pattern (IPv4, hash, defanged URL) +0.2, title contains any security keyword +0.15. Final score capped at 1.0. The 0.15 threshold is generous — effectively any single category hit clears it. This is a coarse filter whose job is to skip obviously off-topic content without blocking borderline cases.
+Per-category contributions use diminishing returns (1 hit = 80% of the weight, 2 or more = the full weight). Structured-pattern bonuses are added on top: CVE pattern in text +0.4, TTP pattern (`T1234`) +0.3, IOC-like pattern (IPv4, hash, defanged URL) +0.2, title contains any security keyword +0.15. Final score capped at 1.0. At the default 0.15 a single keyword in any category clears it, so the filter drops articles with no security vocabulary at all — product launches, earnings, release notes, politics — and keeps anything borderline. Raising the threshold tightens autolinking on selective feeds and the AI junk gate together. `scripts/maintenance/measure_relevance_filter.py` prints, per feed, how many recent entries fall under a given threshold, with sample titles.
 
-**Use for:** general security blogs (Krebs, Bleeping Computer, The Record, DarkReading, The Hacker News), social sources where some posts are intel and others aren't, vendor blogs mixing security content with marketing — the default choice for anything you're not sure about. **Avoid for:** non-English feeds unlikely to hit English keywords (use full or known-only — the autolinker handles translations but the relevance filter is English-only) and sources where every entry is intel by definition (use full).
+**Use for:** general security blogs (Krebs, Bleeping Computer, The Record, DarkReading, The Hacker News), social sources where some posts are intel and others aren't, vendor blogs mixing security content with marketing — the default choice for anything you're not sure about. **Avoid for:** non-English feeds unlikely to hit English keywords (the keywords are English: turn on `auto_translate` so the filter scores the translation, or use full) and sources where every entry is intel by definition (use full).
 
-Subtle gotcha: if the relevance filter rejects an entry, the heavy enrichment pipeline is skipped too — a borderline article that contains `CVE-2024-12345` but uses none of the keyword vocabulary won't get those entities extracted. In practice the structured-pattern bonuses (+0.4 for CVE, +0.3 for TTP) make this rare.
+If the relevance filter rejects an entry, it is skipped by the autolinker here and by the AI one-pass analysis (the junk gate, on any mode). A CVE ID alone adds 0.4 and an ATT&CK ID 0.3, so an article that names one always clears the default threshold.
 
 ### `full` with `auto_extract_on_ingest=false` — catalog matching without NVD cost
 
-Backend: `mode=full, extract=false`. The autolinker runs unconditionally (no relevance gate, since mode is `full`); the standalone CVE-with-NVD, TTP, and mitigation passes are skipped (gated by `auto_extract`); detection rule extraction (if enabled) still runs. Note: the autolinker's internal CVE/TTP regex still fires as part of `scan_text`, so CVE stubs get created and existing TTPs get linked — but without NVD hydration.
+Backend: `mode=full, extract=false`. The autolinker runs unconditionally (no relevance gate, since mode is `full`); the standalone CVE-with-NVD, TTP, and mitigation passes are skipped (gated by `auto_extract`); detection rule extraction (if enabled) still runs. Note: the autolinker's internal CVE/TTP regex still fires as part of `scan_text`, so CVE stubs get created (outside the do-not-recreate list) and existing TTPs get linked — but without inline NVD hydration.
 
-The autolinker matches against entities already in your database: threat actors and malware you've created or seeded, countries (seeded automatically), vendors/products, TTPs (the MITRE catalog must already be seeded), and CVEs (auto-created as skeletal stubs — just the ID, no description/CVSS/affected products — enriched later only if NVD enrichment runs as a separate pass).
+The autolinker matches against entities already in your database: threat actors and malware you've created or seeded, countries (seeded automatically), vendors/products, TTPs (the MITRE catalog must already be seeded), and CVEs (auto-created as skeletal stubs — just the ID, no description/CVSS/affected products — then queued for auto-enrichment and picked up by the nightly NVD sweeps `run_cve_nvd_backfill` and `reenrich_cve_nvd`). Both sweeps share one retry budget stamped into `nvd_data` (`_enrich_attempts`, `_enrich_last_attempt`): an ID NVD has no record of is looked up at most three times, a week apart, so junk IDs pulled out of prose stop costing NVD quota.
 
-What you lose vs. selective/full: new CVE references don't trigger NVD lookups (bare CVE detail pages), M-IDs aren't linked, and the standalone TTP pass doesn't run (essentially redundant work being skipped, since the autolinker's own regex picks up TTP IDs). What you keep: full entity correlation against your curated catalog, retroactive backlinking when new entities are created later (`link_entity_to_existing_entries`, `backend/app/intelligence/autolinker.py:1234`), and optional detection rule extraction.
+What you lose vs. selective/full: new CVE references don't trigger NVD lookups (bare CVE detail pages), M-IDs aren't linked, and the standalone TTP pass doesn't run (essentially redundant work being skipped, since the autolinker's own regex picks up TTP IDs). What you keep: full entity correlation against your curated catalog, retroactive backlinking when new entities are created later (`link_entity_to_existing_entries`, `backend/app/intelligence/autolinker.py:1332`), and optional detection rule extraction.
 
 **Use for:** high-volume feeds where you want catalog correlation without per-mention NVD cost (Telegram channels, Bluesky firehoses, r/netsec), "alarm sources" where you only care whether a known entity is mentioned, reliability-D/F sources you don't trust enough to enrich from, and feeds where the relevance filter drops content you care about. **Avoid for:** likely sources of new CVEs (NVD itself, vendor PSIRT) and feeds where you want to discover new TTPs/mitigations — use full or selective.
 
 ### `manual` — no autolinking
 
-Backend: `mode=manual, extract=false`. The autolinker and standalone CVE/TTP/mitigation extraction are skipped. Detection rule extraction still runs if `extract_detection_rules=true` (the rescan path at `intel_feed_tasks.py:1102` gates rule extraction only by the flag, not the mode).
+Backend: `mode=manual`. The autolinker is skipped. The standalone CVE/TTP/mitigation pass still runs if `auto_extract_on_ingest=true`, and detection rule extraction if `extract_detection_rules=true`: both follow their own flags in this mode.
 
-Entries from this feed are ingested normally — sanitized HTML, title/summary/content text, Meilisearch indexing, translation — they simply aren't analyzed for entities. You can still run extraction on demand: the intelligence workspace has actions to autolink a single entry, and bulk rescan tools (scripts + admin endpoints) can target specific entries or feeds regardless of mode. New entities created later won't retroactively link to manual-mode entries unless explicitly triggered (retroactive linking goes through the autolinker, which is gated by mode).
+Entries from this feed are ingested normally — sanitized HTML, title/summary/content text, Meilisearch indexing, translation — they just aren't matched against your catalog at ingest. Manual does not stop the AI: if `ai_analysis_enabled` is on, the one-pass analysis still reads each article, tags it and can create entities, and the observables scan still runs. You can still run extraction on demand: the intelligence workspace has actions to autolink a single entry, and bulk rescan tools (scripts + admin endpoints) can target specific entries or feeds regardless of mode. New entities and aliases added later don't retroactively link to manual-mode entries: the retroactive backlink skips feeds set to manual or none.
 
 **Use for:** noisy feeds you read for situational awareness but don't want polluting the entity graph, untrusted/unrated sources, feeds with persistent false-positive matches, personal feeds. If you genuinely never want anything from a feed, prefer `none`; if you actually want most entries processed, `selective` is the right call.
 
 ### `none` — process nothing
 
-Backend: `mode=none, extract=false`. The only mode that opts out of every extraction pipeline, including detection rule extraction (the bulk rescan loop at `intel_feed_tasks.py:1073` short-circuits on `mode=none` before checking the rule-extraction flag). Entries are still ingested, sanitized, indexed, and translated — they just have zero intel processing applied.
+Backend: `mode=none`, whatever `auto_extract_on_ingest` and `extract_detection_rules` say. The only mode that opts out of every extraction pipeline: no autolinking, no AI analysis, no observables scan, no regex CVE/NVD, TTP or mitigation pass, no detection rule extraction and no GitHub rule import. Dispatch leaves the extract stage out (`feed_runs_extraction`, `pipeline/plans.py`), and `_extract_entry_intel`, `_autolink_entry` and `_scan_entry_observables` each check the mode themselves, so a pipeline plan cannot switch them back on; the bulk rescan skips these feeds too. Nothing is tagged and no entity, CVE, indicator or rule is created from the feed's articles.
+
+What still happens: entries are ingested, sanitized, indexed and translated, get a priority score from the signal engine, are embedded and clustered into story threads (when embeddings are on), are matched against intelligence requirements, and run through automation rules. None of those read the mode.
 
 **Use for:** feeds you want to read but keep entirely out of the intel system (personal blogs, hobby content), test/staging feeds, or temporarily quieting a feed while you fix a noisy entity catalog. Note: if you want detection rules extracted you need at least `manual` mode with `extract_detection_rules=true`, and if you want entries searchable by entity name you need autolinking (use `manual` + on-demand autolink, or another mode).
 
 ### Confidence weighting and reliability rating
 
-Independent of mode, every autolink junction record gets a confidence value (high/medium/low) computed by `_weighted_confidence` (`backend/app/intelligence/autolinker.py:566`): a canonical name match starts at high (0.9), an alias match at medium (0.5), multiplied by `source_confidence_weight` derived from the feed's reliability rating (A–F), then bucketed (≥0.7 → high, ≥0.4 → medium, else low). An A-grade feed's canonical match for "APT29" stays high; an F-grade feed's alias match for "Cozy Bear" gets downgraded to low. This rolls into correlation scoring downstream — mode and reliability rating work together, so full mode on a graded-F feed still produces useful but appropriately-weighted links.
+Independent of mode, every autolink junction record gets a confidence value (high/medium/low) computed by `_weighted_confidence` (`backend/app/intelligence/autolinker.py:610`): a canonical name match starts at high (0.9), an alias match at medium (0.5), multiplied by `source_confidence_weight` derived from the feed's reliability rating (A–F), then bucketed (≥0.7 → high, ≥0.4 → medium, else low). An A-grade feed's canonical match for "APT29" stays high; an F-grade feed's alias match for "Cozy Bear" gets downgraded to low. This rolls into correlation scoring downstream — mode and reliability rating work together, so full mode on a graded-F feed still produces useful but appropriately-weighted links.
 
 ### Choosing a mode — quick decision guide
 
@@ -1718,7 +1742,7 @@ Independent of mode, every autolink junction record gets a confidence value (hig
 | NVD, CISA, vendor PSIRT, top-tier research feeds | `full` |
 | General security news (Krebs, BleepingComputer, etc.) | `selective` (default) |
 | Reddit/Mastodon/Bluesky firehose | `selective`, or `full` with regex enrichment off |
-| Telegram/foreign-language threat actor channel | `full` with regex enrichment off (the relevance filter is English-only) |
+| Telegram/foreign-language threat actor channel | `full` with regex enrichment off, or `selective` with `auto_translate` on (the relevance keywords are English) |
 | High-volume source you want matched but not AI-read | any mode, `ai_analysis_enabled=false` |
 | Conference announcements / industry news | Manual |
 | Untrusted source you read for awareness | Manual |
@@ -1727,14 +1751,14 @@ Independent of mode, every autolink junction record gets a confidence value (hig
 
 ### Operational notes
 
-- Changing mode does not re-process existing entries — switching a feed from manual to full only affects new entries. To backfill, use the bulk rescan path (`autolink_batch` in `backend/app/intelligence/autolinker.py:1010` or the rescan endpoints).
-- Adding a new threat actor or malware family triggers `link_entity_to_existing_entries` (`backend/app/intelligence/autolinker.py:1234`), which retroactively scans existing entries — but only entries from feeds whose mode allows autolinking. Manual/none feeds stay untouched.
+- Changing mode does not re-process existing entries — switching a feed from manual to full only affects new entries. To backfill, use the bulk rescan path (`autolink_batch` in `backend/app/intelligence/autolinker.py:1091` or the rescan endpoints).
+- Adding a new threat actor or malware family triggers `link_entity_to_existing_entries` (`backend/app/intelligence/autolinker.py:1332`), which retroactively scans existing entries with the same rules as ingest autolinking: entries from manual/none feeds are skipped, the `autolinker_false_positive_names` list (for the types it covers) and `autolinker_blocked_surface_forms` drop terms, an ambiguous short name only counts where it is capitalised, and confidence is the canonical-name "high" / alias "medium" scaled by the feed's reliability rating (unrated = 0.5, so an unrated feed tops out at medium). The pending dictionary-word tier does not apply to it.
 - The vocabulary is per-process and version-checked via Redis (`VOCAB_VERSION_KEY`). Creating a new entity bumps the version; all Celery workers rebuild on next scan, so there is no "stale vocab across workers" failure mode in normal operation.
 - Foreign-language entries with translations (e.g., Russian Telegram with auto-translation enabled) get the autolinker run against the original and translated text concatenated (`workers/intel_feed_tasks.py:239-241`, via `entry_text_with_translation`), in any mode that runs the autolinker.
 
 ### None of this uses AI
 
-All five modes drive deterministic string matching only: the autolinker is a pure Aho-Corasick dictionary scan (`pyahocorasick` C extension); the relevance filter is frozenset keyword checks plus three regexes (its docstring at `relevance_filter.py:1-6` says "No AI, no DB calls — pure string matching"); CVE/TTP/mitigation extraction is regex; NVD enrichment is a REST lookup (external, but not AI); detection rule extraction is pattern-based parsing per format; confidence weighting is arithmetic on the reliability grade. This is deliberate — the autolinker comment calls it "Layer 0 — free, instant correlation that runs on every entry": cheap, fast, no provider dependency, no rate limits, no hallucinations.
+All five modes drive deterministic string matching only: the autolinker is a pure Aho-Corasick dictionary scan (`pyahocorasick` C extension); the relevance filter is precompiled word-start keyword regexes plus three structured patterns (no AI, no DB calls); CVE/TTP/mitigation extraction is regex; NVD enrichment is a REST lookup (external, but not AI); detection rule extraction is pattern-based parsing per format; confidence weighting is arithmetic on the reliability grade. This is deliberate — the autolinker comment calls it "Layer 0 — free, instant correlation that runs on every entry": cheap, fast, no provider dependency, no rate limits, no hallucinations.
 
 AI is a separate, opt-in layer on top (`backend/app/ai/` provider abstraction): summarization, one-pass `entry_analysis` extraction/adjudication, translation, detection rule drafts — run on demand, via automation rules, or at ingest when `ai_one_pass_enabled` is on. AI-created junction records carry a non-`auto_link` source so the rescan path leaves them alone when re-running the deterministic linker.
 

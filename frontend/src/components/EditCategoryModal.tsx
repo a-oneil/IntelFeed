@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { useBulkUpdateCategoryFeeds } from "@/hooks/useFeeds";
+import { useBulkUpdateCategoryFeeds, useUpdateCategory } from "@/hooks/useFeeds";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
 import { confirmDialog } from "@/utils/dialog";
 import { STAGE_COPY } from "./feedModal/pipelineStages";
-import type { Category, Feed } from "@/api/types";
+import type { Category, CategoryFeedDefaults, Feed } from "@/api/types";
 import shell from "./feedModal/modalShell.module.css";
 import styles from "./feedModal/fields.module.css";
 
@@ -68,7 +68,29 @@ const ON_OFF = [
 ];
 
 /**
- * Apply one setting to every feed in a category at once.
+ * The category's saved defaults as one sentence, in the same words the
+ * controls use. Exported for the test.
+ */
+export function describeDefaults(defaults: CategoryFeedDefaults | undefined): string | null {
+  const d = defaults ?? {};
+  const parts: string[] = [];
+  if (d.intel_extraction_mode) {
+    const mode = PROCESSING.find((p) => p.value === d.intel_extraction_mode)?.label;
+    if (mode) parts.push(mode.toLowerCase());
+  }
+  const flag = (label: string, v: boolean | undefined) => {
+    if (v !== undefined) parts.push(`${label.toLowerCase()} ${v ? "on" : "off"}`);
+  };
+  flag(STAGE_COPY.ai.label, d.ai_analysis_enabled);
+  flag(STAGE_COPY.tools.label, d.extract_tools);
+  flag(STAGE_COPY.regex.label, d.auto_extract_on_ingest);
+  flag(STAGE_COPY.rules.label, d.extract_detection_rules);
+  return parts.length ? parts.join("; ") : null;
+}
+
+/**
+ * Apply one setting to every feed in a category at once, and optionally keep
+ * the pipeline settings as the category's defaults for feeds added later.
  *
  * No analyst-notes field, deliberately: a single textarea here would replace
  * whatever every feed in the category already had, with nothing to undo it.
@@ -96,31 +118,39 @@ export function EditCategoryModal({ category, feeds, onClose }: Props) {
   const [detectionRules, setDetectionRules] = useState(KEEP);
   const [toolEntities, setToolEntities] = useState(KEEP);
 
+  // Where the changes go: the feeds here now, and/or the category's defaults
+  // for feeds added later. Only the five pipeline settings can be defaults.
+  const [applyNow, setApplyNow] = useState(true);
+  const [saveDefault, setSaveDefault] = useState(false);
+
   const bulkUpdate = useBulkUpdateCategoryFeeds();
+  const updateCategory = useUpdateCategory();
   const trapRef = useFocusTrap<HTMLDivElement>();
 
-  const pending = [
-    interval,
-    retentionDays,
-    reliability,
-    timeliness,
-    relevance,
-    processing,
-    aiAnalysis,
-    cveLookup,
-    detectionRules,
-    toolEntities,
-  ].filter((v) => v !== "").length;
+  const pipelineCount = [processing, aiAnalysis, cveLookup, detectionRules, toolEntities].filter(
+    (v) => v !== ""
+  ).length;
+  const feedOnlyCount = [interval, retentionDays, reliability, timeliness, relevance].filter(
+    (v) => v !== ""
+  ).length;
+  const pending = pipelineCount + feedOnlyCount;
+  const actionable = (applyNow ? pending : 0) + (saveDefault && !applyNow ? pipelineCount : 0);
+  const savedDefaults = describeDefaults(category.feed_defaults);
 
   const handleSave = async () => {
-    const data: Record<string, unknown> = {};
+    const data: Record<string, unknown> = {
+      apply_to_feeds: applyNow,
+      save_as_category_default: saveDefault,
+    };
 
-    if (interval !== KEEP) data.fetch_interval_minutes = parseInt(interval, 10);
-    if (retentionDays === "clear") data.clear_retention = true;
-    else if (retentionDays !== KEEP) data.retention_days = parseInt(retentionDays, 10);
-    if (reliability !== KEEP) data.reliability_rating = reliability;
-    if (timeliness !== KEEP) data.timeliness_rating = timeliness;
-    if (relevance !== KEEP) data.relevance_rating = relevance;
+    if (applyNow) {
+      if (interval !== KEEP) data.fetch_interval_minutes = parseInt(interval, 10);
+      if (retentionDays === "clear") data.clear_retention = true;
+      else if (retentionDays !== KEEP) data.retention_days = parseInt(retentionDays, 10);
+      if (reliability !== KEEP) data.reliability_rating = reliability;
+      if (timeliness !== KEEP) data.timeliness_rating = timeliness;
+      if (relevance !== KEEP) data.relevance_rating = relevance;
+    }
     // One field per stage, not a preset: the old five-way control mapped onto
     // two columns and three of its labels described a pipeline that no longer
     // exists. See frontend/src/components/feedModal/pipelineStages.ts.
@@ -131,12 +161,14 @@ export function EditCategoryModal({ category, feeds, onClose }: Props) {
     if (toolEntities !== KEEP) data.extract_tools = toolEntities === "on";
 
     // A bulk write over N feeds is not something to do on a stray click.
-    const ok = await confirmDialog({
-      message: `Apply ${pending} ${pending === 1 ? "change" : "changes"} to all ${feeds.length} ${
-        feeds.length === 1 ? "feed" : "feeds"
-      } in ${category.name}?`,
-      confirmLabel: "Apply",
-    });
+    const feedsWord = `${feeds.length} ${feeds.length === 1 ? "feed" : "feeds"}`;
+    const asDefault = saveDefault && pipelineCount > 0;
+    const message = applyNow
+      ? `Apply ${pending} ${pending === 1 ? "change" : "changes"} to all ${feedsWord} in ${
+          category.name
+        }${asDefault ? ", and save the pipeline settings as its default for feeds added later" : ""}?`
+      : `Save these pipeline settings as the default for feeds added to ${category.name} later? The ${feedsWord} already there stay as they are.`;
+    const ok = await confirmDialog({ message, confirmLabel: applyNow ? "Apply" : "Save default" });
     if (!ok) return;
 
     try {
@@ -144,6 +176,19 @@ export function EditCategoryModal({ category, feeds, onClose }: Props) {
       onClose();
     } catch {
       // The mutation cache raises a toast; stay open so nothing is lost.
+    }
+  };
+
+  const clearDefaults = async () => {
+    const ok = await confirmDialog({
+      message: `Clear ${category.name}'s defaults? Feeds added later start with the global defaults. Feeds already there stay as they are.`,
+      confirmLabel: "Clear",
+    });
+    if (!ok) return;
+    try {
+      await updateCategory.mutateAsync({ categoryId: category.id, data: { feed_defaults: {} } });
+    } catch {
+      // The mutation cache raises a toast.
     }
   };
 
@@ -259,8 +304,9 @@ export function EditCategoryModal({ category, feeds, onClose }: Props) {
               <h2 className={shell.title}>{category.name}</h2>
             </div>
             <span className={shell.headerUrl}>
-              Changes apply to all {feeds.length} {feeds.length === 1 ? "feed" : "feeds"} in
-              this category
+              Changes apply to the {feeds.length} {feeds.length === 1 ? "feed" : "feeds"} in
+              this category now. Pipeline settings can also be saved as the default for
+              feeds added later.
             </span>
           </div>
           <button
@@ -309,6 +355,23 @@ export function EditCategoryModal({ category, feeds, onClose }: Props) {
               </div>
 
               <span className={styles.sectionLabel}>What runs on each new article</span>
+              <p className={styles.note}>
+                {savedDefaults ? (
+                  <>
+                    Feeds added here later start with: {savedDefaults}.{" "}
+                    <button
+                      type="button"
+                      className={styles.linkBtn}
+                      onClick={clearDefaults}
+                      disabled={updateCategory.isPending}
+                    >
+                      Clear
+                    </button>
+                  </>
+                ) : (
+                  "Feeds added here later start with the global defaults."
+                )}
+              </p>
               {field(
                 "cat-processing",
                 STAGE_COPY.master.label,
@@ -387,14 +450,46 @@ export function EditCategoryModal({ category, feeds, onClose }: Props) {
                 last assessed.
               </p>
 
+              <span className={styles.sectionLabel}>Where the changes go</span>
+              <label className={styles.checkRow}>
+                <input
+                  type="checkbox"
+                  checked={applyNow}
+                  onChange={(e) => setApplyNow(e.target.checked)}
+                />
+                <span className={styles.checkText}>
+                  <span className={styles.checkLabel}>
+                    Apply to the {feeds.length} {feeds.length === 1 ? "feed" : "feeds"} here now
+                  </span>
+                  <span className={styles.hint}>Every setting above, on every feed in this category.</span>
+                </span>
+              </label>
+              <label className={styles.checkRow}>
+                <input
+                  type="checkbox"
+                  checked={saveDefault}
+                  onChange={(e) => setSaveDefault(e.target.checked)}
+                />
+                <span className={styles.checkText}>
+                  <span className={styles.checkLabel}>
+                    Save the pipeline settings as this category&rsquo;s default
+                  </span>
+                  <span className={styles.hint}>
+                    A feed added here later, by hand, OPML or a starter pack, starts with the
+                    five settings under &ldquo;What runs on each new article&rdquo;. Interval,
+                    retention and ratings are never defaults.
+                  </span>
+                </span>
+              </label>
+
             </div>
           </div>
         </div>
 
         <div className={shell.footer}>
           <span className={shell.footerSpacer} />
-          <span className={pending ? shell.dirtyNote : shell.cleanNote}>
-            {pending ? `${pending} to apply` : "No changes"}
+          <span className={actionable ? shell.dirtyNote : shell.cleanNote}>
+            {actionable ? `${actionable} to apply` : "No changes"}
           </span>
           <button type="button" onClick={requestClose} className={shell.cancelBtn}>
             Cancel
@@ -402,10 +497,14 @@ export function EditCategoryModal({ category, feeds, onClose }: Props) {
           <button
             type="button"
             onClick={handleSave}
-            disabled={bulkUpdate.isPending || pending === 0}
+            disabled={bulkUpdate.isPending || actionable === 0}
             className={shell.saveBtn}
           >
-            {bulkUpdate.isPending ? "Applying…" : `Apply to ${feeds.length}`}
+            {bulkUpdate.isPending
+              ? "Applying…"
+              : applyNow
+                ? `Apply to ${feeds.length}`
+                : "Save default"}
           </button>
         </div>
       </div>

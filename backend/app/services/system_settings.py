@@ -196,8 +196,9 @@ SETTING_METADATA: dict[str, dict] = {
         "description": (
             "Pause a feed once every fetch has answered HTTP 4xx (404 gone, 403 blocked) for this many "
             "days in a row. Only client errors count and the clock is the failure streak, not the last "
-            "post, so a seldom-posting blog is never paused for being quiet. Paused feeds show as dead "
-            "on the Engine Feeds view and resume with one click. 0 disables"
+            "post, so a seldom-posting blog is never paused for being quiet. A failing feed is polled "
+            "less often as the streak grows (up to once a day). Paused feeds show as dead, with the "
+            "reason, on the Engine Feeds view and resume with one click. 0 disables"
         ),
         "group": "feeds",
     },
@@ -503,8 +504,8 @@ SETTING_METADATA: dict[str, dict] = {
     "ai_analysis_relevance_threshold": {
         "label": "Extraction Junk Gate",
         "description": (
-            "Relevance score below which entries skip AI analysis entirely "
-            "(0-1; gate is 'anything to extract', not importance)."
+            "Relevance score below which entries skip AI analysis entirely, and skip "
+            "autolinking on selective feeds (0-1; gate is 'anything to extract', not importance)."
         ),
         "group": "ai",
     },

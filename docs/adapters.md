@@ -318,6 +318,8 @@ if response.status_code == 304:
 
 Saves bandwidth and API quota.
 
+**Bot walls.** `_get_feed_response()` makes the GET. When the answer is a 403 (or a 429/503 whose body looks like a challenge page), it retries once through **curl_cffi** impersonating Chrome, with the same `Accept` and conditional headers and the same 30-second timeout; the impersonation supplies its own User-Agent so it matches the TLS fingerprint. Some publishers (CISA) refuse Python's TLS handshake whatever the headers while answering curl. The client that got a 200/304 is remembered in `adapter_config.fetch_health.client`, so later polls go straight to it; if the remembered curl_cffi client errors or is blocked, the fetch falls back to httpx and forgets it once httpx works. Blocks by IP (CloudFront refusing a datacenter range) are not something either client gets past.
+
 #### 4. YouTube Retry Logic (Quirk)
 ```python
 # YouTube feed API returns spurious 404/500s — retry up to 2 times
@@ -346,6 +348,8 @@ feed_meta, parsed_entries = adapter.parse_entries(feed.url, response.text)
 
 #### 6. Entry Deduplication
 
+**Exclude-title filter** (per feed, every adapter): `_drop_excluded_titles()` removes any parsed entry whose title contains one of the feed's `exclude_title_patterns` before the GUID check. The list is plain phrases, one per line, matched case-insensitively as substrings (not regular expressions) by `app/services/title_filter.py`. The extended-adapter path and the GitHub full sync call the same helper, so a dropped title never reaches tagging, the AI, scoring or search. The feed modal's Source pane edits it, with a preview of how many of the last 100 titles it would drop (`POST /api/feeds/{id}/title-filter/preview`). Excluded items are never stored, so they are re-checked (and dropped again) on each fetch.
+
 **GUID-based deduplication** (primary):
 ```python
 existing = await db.execute(
@@ -354,6 +358,8 @@ existing = await db.execute(
 if existing.scalar_one_or_none():
     continue  # Skip; GUID already seen
 ```
+
+**Same-feed URL deduplication** (catches guid churn): a guid miss whose item key — normalised link, normalised title, enclosure path (`item_key()` in `app/services/dedup.py`) — matches a row this feed already has is the same article under a new guid, so it is skipped. Link normalisation drops the fragment and tracking parameters (`utm_*`, `mc_*`, `fbclid`, `gclid` …) and keeps every other parameter, so a `?p=123` link stays distinct. The title and enclosure keep apart distinct items that point at one page, such as podcast episodes sharing a show-notes URL. When the re-listed copy carries a substantive body (500+ characters, not a "Continue reading" stub) that differs from the stored one, the stored row is updated in place and re-indexed. The lookup is one ILIKE query per fetch over this feed's rows (`ix_entries_feed_id`), run only when the fetch has guid misses. CrowdStrike's RSS is the case it exists for: its `<guid isPermaLink="false">` is a fresh random `?p=` on every fetch while `<link>` stays put. `scripts/maintenance/merge_same_url_entries.py` collapses copies already stored.
 
 **Content-hash deduplication** (cross-feed, catches republishes):
 ```python
@@ -399,6 +405,7 @@ Extraction strategy (`_extract_full_text()`):
 1. **Google News resolution**: `news.google.com` wrapper URLs are decoded to the real publisher URL first (via `googlenewsdecoder`); `parsed.url` is also rewritten so "Open original" links point at the canonical article.
 2. **Fetch**: httpx, falling back to **curl_cffi** (browser impersonation) on 403/429/503 bot challenges; Medium-hosted domains go straight to curl_cffi. Checks `robots.txt` and rate limits per domain.
 3. **Extract**: Medium gets a dedicated `<article><section>` extractor (readability misses their DOM); everything else tries **readability-lxml**, then a CSS-selector fallback for known article-body patterns (`div.article-body`, `div.entry-content`, etc.).
+4. **Reject wall pages**: when the extracted text is short (under 1,000 characters) and reads as a JavaScript-required notice ("Please enable JavaScript", "You need to enable JavaScript to run this app") or a bot challenge ("Checking your browser", "Just a moment — verifying connection security"), extraction returns nothing and the entry keeps the feed's own description (`app/services/js_wall.py`, logged at debug with the feed id). Single-page sites such as NCSC, Europol and MSRC serve only that notice to a non-browser fetch. `scripts/maintenance/repair_js_wall_entries.py` repairs entries that stored one.
 
 Capped at 25 extractions per cycle to avoid monopolizing workers.
 
@@ -531,6 +538,8 @@ existing = await db.execute(
 
 Fastest check; catches feed re-publishes of the same ID.
 
+**Link + title** (per feed, RSS-path feeds): catches a feed that changes an item's guid between fetches; see [Entry Deduplication](#6-entry-deduplication) above.
+
 **Content Hash** (global):
 ```python
 content_hash = compute_content_hash(parsed.title, content_text)
@@ -578,10 +587,13 @@ Fetch failures feed a breakage-alerting layer on top of the polling loop:
 
 - **`error_count` semantics**: incremented on every failed fetch (HTTP error, non-200, adapter exception, non-feed response), reset to 0 on any success — so it counts *consecutive* failures.
 - **`feed_error` correlation events**: `_maybe_create_feed_error_event()` creates a correlation event (via `app/intelligence/correlation_events.py`) once `error_count >= 3`, surfacing broken feeds in the events stream.
-- **`check_feed_health` beat task** (`backend/app/workers/feed_tasks.py:1690`, every 6 hours): creates `feed_stale` events for active, recently-polled feeds whose newest entry is older than 120 days, and `feed_error` events for feeds with 3+ consecutive errors.
+- **`check_feed_health` beat task** (`backend/app/workers/feed_tasks.py:1970`, every 6 hours): creates `feed_stale` events for active, recently-polled feeds whose newest entry is older than 120 days, and `feed_error` events for feeds with 3+ consecutive errors.
 - **`GET /api/feeds/health/failing`** (`api/feeds.py`): lists active feeds with `error_count >= threshold` (default 5). Feeds rated A/B for reliability are flagged `is_high_value` and sorted first so alerting UIs can highlight them.
 - **`GET /api/feeds/{feed_id}/analytics`**: per-feed source analytics (`app/intelligence/source_analytics.py`) — volume, intel yield, and the analyst-assigned reliability ratings.
 - **404 recovery**: persistent 404s trigger RSS autodiscovery and automatic URL repointing (see the polling loop above).
+- **Failure backoff**: `poll_due_feeds` (`DUE_FEEDS_SQL`) doubles a failing feed's interval for each consecutive failure, up to 64x and at most 24 hours (an interval already longer than that is kept). The first clean fetch resets it. A blocked feed therefore logs a few dozen failures over the auto-pause window, not thousands.
+- **Auto-pause and its reason**: `check_feed_health` pauses a feed whose HTTP 4xx streak has outlasted `feed_auto_pause_days` (see [engine-settings.md](engine-settings.md)) and records why in `adapter_config.fetch_health.paused`: the error, its status, the failure count, when the streak began and which client was in use. `FeedResponse.pause_reason` and the health endpoint carry it, so the feed modal, the sidebar tooltip and the Feeds view say "paused automatically after HTTP 403 for 30 days" where a feed a person switched off just reads "Paused". Resuming (the resume endpoint, or switching the feed back on) clears it.
+- **Reachable but empty**: an rss/atom/podcast fetch that answers 200 but parses to zero items is noted in `adapter_config.fetch_health.empty` (since when, where a redirect ended up, the content type) and cleared by the next fetch that has items. `FeedResponse.health_warning` turns it into a warning at once when the feed URL redirected somewhere else (a feed URL that now lands on a marketing page), or after 3 days of empty answers otherwise. The Feeds view lists these as **Empty**, and the feed modal and sidebar tooltip show the warning. `fetch_health` is server-owned: PUT `/feeds/{id}`, feed creation and OPML import/export drop it.
 
 ---
 
@@ -935,7 +947,10 @@ For each file matched by `paths` patterns:
 
 1. **Detect content type**: YAML rule, Elastic detection, YARA rule, Markdown, etc.
    - Uses `github_content_types.py:detect_content_type()`.
-   - Example: `SigmaHQ/sigma:rules/**/*.yml` → `sigma_rule`.
+   - A per-repo path pattern decides first. Example: `SigmaHQ/sigma:rules/**/*.yml` → `sigma_rule`.
+   - Otherwise the extension decides: `.yar`/`.yara` → `yara_rule`, `.kql` → `kql_query` (imported as a KQL rule), `.yml`/`.yaml` → `yaml_file`, `.toml` → `toml_file`.
+   - A generic YAML or TOML file is then read for a rule format the importer supports, whichever repo it sits in: Sigma (`title` + `logsource` + `detection`), a Sentinel analytics rule (`query` + `queryFrequency`, or `kind: Scheduled`/`NRT`), a Splunk detection (`name` + `search`), an Anvilogic Armory detection (`title` + `logic` + a Splunk or KQL `logic_format`), or an Elastic TOML rule. The candidate's query must pass the rule validator (`rule_validation.py`), or the file stays generic.
+   - `scripts/maintenance/reprocess_github_repo_types.py` re-runs this detection over stored entries typed `yaml_file`, `toml_file` or `unknown`, and imports the rules it finds.
 
 2. **Derive title**: Extracted from file content.
    - SIGMA: `title` field from YAML.
@@ -971,7 +986,7 @@ entry = ParsedEntry(
 
 **Full-Tree Sync**:
 
-The `full_sync_github_feed()` Celery task (`backend/app/workers/feed_tasks.py:1878`) enumerates **every** file in the repo (not just recent changes):
+The `full_sync_github_feed()` Celery task (`backend/app/workers/feed_tasks.py:2158`) enumerates **every** file in the repo (not just recent changes):
 
 ```python
 # Uses Git Trees API to get complete file list
@@ -1479,6 +1494,8 @@ Accepts the JWT via `Authorization: Bearer` **or** `?token=` query param (so `<i
 **File**: `backend/app/adapters/web_scraper.py`
 
 Discovers and scrapes blog index pages for article links (no RSS feed required).
+
+**Feed name**: `_build_meta()` names the feed after the index page — its `<title>`, then `og:title`, then `og:site_name`, and only then the hostname. A feed created without a `custom_title` is titled with its URL until the first fetch, which replaces that placeholder (`_title_is_placeholder()` in `workers/feed_tasks.py`); a real title is never overwritten.
 
 **Configuration**:
 ```python

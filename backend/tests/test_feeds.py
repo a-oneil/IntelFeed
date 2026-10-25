@@ -540,7 +540,9 @@ async def _worker_session_on(db: AsyncSession):
     yield db
 
 
-async def _run_extract(db_session: AsyncSession, monkeypatch, feed: Feed, text: str) -> dict:
+async def _run_extract(
+    db_session: AsyncSession, monkeypatch, feed: Feed, text: str, metadata: dict | None = None
+) -> dict:
     from app.models.entry import Entry
     from app.workers import intel_feed_tasks
 
@@ -552,6 +554,7 @@ async def _run_extract(db_session: AsyncSession, monkeypatch, feed: Feed, text: 
         url=f"https://{uuid.uuid4().hex}.example.com/a",
         guid=uuid.uuid4().hex,
         content_text=text,
+        metadata_=metadata or {},
     )
     db_session.add(entry)
     await db_session.flush()
@@ -600,6 +603,128 @@ async def test_regex_pass_runs_when_its_own_flag_is_on(db_session: AsyncSession,
     )
     stats = await _run_extract(db_session, monkeypatch, feed, "Patch CVE-2026-10102 now. See also T1059.")
     assert stats["ttps"] >= 1
+
+
+_YARA_RULE = """Detection:
+
+rule Mode_None_Probe
+{
+    strings:
+        $a = "mode-none-probe-string"
+    condition:
+        $a
+}
+"""
+
+
+def _extract_feed(mode: str) -> Feed:
+    return Feed(
+        title=f"Extract {mode}",
+        url=f"https://extract-{mode}-{uuid.uuid4().hex[:8]}.example.com/rss",
+        feed_type="rss",
+        intel_extraction_mode=mode,
+        auto_extract_on_ingest=True,
+        extract_detection_rules=True,
+    )
+
+
+async def _extracted_records(db_session: AsyncSession, cve_id: str) -> tuple[int, int]:
+    from sqlalchemy import func, select
+
+    from app.models.cve import CVE
+    from app.models.detection_rule import DetectionRule
+
+    cves = (await db_session.execute(select(func.count()).select_from(CVE).where(CVE.cve_id == cve_id))).scalar()
+    rules = (
+        await db_session.execute(
+            select(func.count()).select_from(DetectionRule).where(DetectionRule.title == "Mode_None_Probe")
+        )
+    ).scalar()
+    return cves, rules
+
+
+@pytest.mark.asyncio
+async def test_mode_none_feed_extracts_nothing_even_with_both_switches_on(
+    db_session: AsyncSession, monkeypatch, test_user
+):
+    """ "Analyse this feed" off has to stop the CVE/NVD pass and rule saving too.
+
+    The extract task used to read only the two per-feed switches, so a feed set
+    to mode none kept minting CVE records and saving rules while the feed
+    modal showed both rows greyed out.
+    """
+    stats = await _run_extract(
+        db_session, monkeypatch, _extract_feed("none"), "Patch CVE-2026-10301 now.\n" + _YARA_RULE
+    )
+    assert stats == {"ttps": 0, "cves": 0, "mitigations": 0, "detection_rules": 0}
+    assert await _extracted_records(db_session, "CVE-2026-10301") == (0, 0)
+
+
+@pytest.mark.asyncio
+async def test_full_mode_feed_still_extracts_cves_and_rules(db_session: AsyncSession, monkeypatch, test_user):
+    """The companion: same text, same switches, mode full — records appear.
+
+    `test_user` matters in both: rules are attributed to the system user, and
+    with no user at all the rule half would skip for the wrong reason.
+    """
+    stats = await _run_extract(
+        db_session, monkeypatch, _extract_feed("full"), "Patch CVE-2026-10302 now.\n" + _YARA_RULE
+    )
+    assert stats["cves"] == 1
+    assert stats["detection_rules"] == 1
+    assert await _extracted_records(db_session, "CVE-2026-10302") == (1, 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("mode", "expected_calls"), [("none", 0), ("full", 1)])
+async def test_github_import_respects_mode_none(db_session: AsyncSession, monkeypatch, test_user, mode, expected_calls):
+    """GitHub repo entries take the import branch before the regex passes, so
+    the mode check has to sit ahead of it."""
+    from app.services import github_rule_import
+
+    calls = []
+
+    async def fake_import(db, entry, user_id):
+        calls.append(entry.id)
+        return {"rule_count": 1}
+
+    monkeypatch.setattr(github_rule_import, "process_github_entry", fake_import)
+    stats = await _run_extract(
+        db_session,
+        monkeypatch,
+        _extract_feed(mode),
+        "title: Probe\nlogsource: {}\ndetection: {}",
+        metadata={"content_type": "sigma", "raw_content": "title: Probe"},
+    )
+    assert len(calls) == expected_calls
+    assert stats["detection_rules"] == expected_calls
+
+
+@pytest.mark.parametrize(
+    ("mode", "auto", "rules", "expected"),
+    [
+        ("none", True, True, False),
+        ("none", True, False, False),
+        ("full", False, False, False),
+        ("full", True, False, True),
+        ("manual", False, True, True),
+        ("selective", True, True, True),
+    ],
+)
+def test_ingest_dispatch_skips_extract_stage_for_mode_none(mode, auto, rules, expected):
+    """Every ingest dispatch and the synthesized plan read one gate."""
+    from app.pipeline.plans import feed_runs_extraction, synthesize_from_feed
+
+    feed = Feed(
+        title="Gate",
+        url="https://gate.example.com/rss",
+        feed_type="rss",
+        intel_extraction_mode=mode,
+        auto_extract_on_ingest=auto,
+        extract_detection_rules=rules,
+    )
+    assert feed_runs_extraction(feed) is expected
+    assert synthesize_from_feed(feed)["extract"]["enabled"] is expected
 
 
 @pytest.mark.asyncio

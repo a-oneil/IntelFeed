@@ -6,17 +6,17 @@
   <body>
     <outline text="Detection Engineering" title="Detection Engineering">
       <outline text="Curated Intelligence" title="Curated Intelligence" type="atom" xmlUrl="https://www.curatedintel.org/feeds/posts/default" htmlUrl="https://www.curatedintel.org/" intelfeed:interval="60" intelfeed:autoExtract="true" />
-      <outline text="Detect FYI" title="Detect FYI" type="rss" xmlUrl="https://detect.fyi/feed" htmlUrl="https://detect.fyi/?source=rss----d5fd8f494f6a---4" intelfeed:interval="60" intelfeed:autoExtract="true" />
-      <outline text="Detection at Scale" title="Detection at Scale" type="podcast" xmlUrl="https://www.detectionatscale.com/feed" htmlUrl="https://www.detectionatscale.com/" intelfeed:interval="60" intelfeed:autoExtract="true" />
-      <outline text="Detection Engineering" title="Detection Engineering" type="rss" xmlUrl="https://www.detectionengineering.net/feed" htmlUrl="https://www.detectionengineering.net/" intelfeed:interval="60" intelfeed:extractionMode="full" />
+      <outline text="Detect FYI" title="Detect FYI" type="rss" xmlUrl="https://detect.fyi/feed" htmlUrl="https://detect.fyi/?source=rss----d5fd8f494f6a---4" intelfeed:interval="60" intelfeed:extractTools="false" intelfeed:extractRules="true" intelfeed:autoExtract="true" />
+      <outline text="Detection at Scale" title="Detection at Scale" type="podcast" xmlUrl="https://www.detectionatscale.com/feed" htmlUrl="https://www.detectionatscale.com/" intelfeed:interval="60" intelfeed:aiAnalysis="false" intelfeed:extractTools="false" />
+      <outline text="Detection Engineering" title="Detection Engineering" type="rss" xmlUrl="https://www.detectionengineering.net/feed" htmlUrl="https://www.detectionengineering.net/" intelfeed:interval="60" intelfeed:extractionMode="full" intelfeed:extractTools="false" />
       <outline text="MITRE ATT&amp;CK Updates" title="MITRE ATT&amp;CK Updates" type="rss" xmlUrl="https://medium.com/feed/mitre-attack" htmlUrl="https://medium.com/mitre-attack?source=rss----6da19bd08fba---4" intelfeed:interval="60" intelfeed:extractionMode="full" intelfeed:autoExtract="true" />
-      <outline text="NVISO Labs" title="NVISO Labs" type="rss" xmlUrl="https://blog.nviso.eu/feed/" htmlUrl="https://blog.nviso.eu" intelfeed:interval="60" intelfeed:autoExtract="true" />
+      <outline text="NVISO Labs" title="NVISO Labs" type="rss" xmlUrl="https://blog.nviso.eu/feed/" htmlUrl="https://blog.nviso.eu" intelfeed:interval="60" intelfeed:extractRules="true" intelfeed:autoExtract="true" />
       <outline text="Pulsedive Blog" title="Pulsedive Blog" type="rss" xmlUrl="https://blog.pulsedive.com/rss/" htmlUrl="https://blog.pulsedive.com/" intelfeed:interval="60" intelfeed:autoExtract="true" />
-      <outline text="SOC Prime Blog" title="SOC Prime Blog" type="rss" xmlUrl="https://socprime.com/blog/feed/" intelfeed:interval="60" intelfeed:extractionMode="full" intelfeed:autoExtract="true" />
-      <outline text="Spamhaus Project" title="Spamhaus Project" type="rss" xmlUrl="https://www.spamhaus.org/rss.xml" htmlUrl="https://www.spamhaus.org/" intelfeed:interval="60" intelfeed:autoExtract="true" />
-      <outline text="Tracebit Blog" title="Tracebit Blog" type="rss" xmlUrl="https://tracebit.com/feed.xml" htmlUrl="https://tracebit.com" intelfeed:interval="60" intelfeed:autoExtract="true" />
-      <outline text="TrustedSec" title="TrustedSec" type="rss" xmlUrl="https://trustedsec.com/feed.rss" htmlUrl="https://trustedsec.com/" intelfeed:interval="60" intelfeed:autoExtract="true" />
-      <outline text="Virus Bulletin" title="Virus Bulletin" type="rss" xmlUrl="https://www.virusbulletin.com/rss" htmlUrl="https://www.virusbulletin.com/rss" intelfeed:interval="60" intelfeed:autoExtract="true" />
+      <outline text="SOC Prime Blog" title="SOC Prime Blog" type="rss" xmlUrl="https://socprime.com/blog/feed/" intelfeed:interval="60" intelfeed:extractionMode="full" intelfeed:aiAnalysis="false" intelfeed:extractTools="false" intelfeed:autoExtract="true" />
+      <outline text="Spamhaus Project" title="Spamhaus Project" type="rss" xmlUrl="https://www.spamhaus.org/rss.xml" htmlUrl="https://www.spamhaus.org/" intelfeed:interval="60" />
+      <outline text="Tracebit Blog" title="Tracebit Blog" type="rss" xmlUrl="https://tracebit.com/feed.xml" htmlUrl="https://tracebit.com" intelfeed:interval="60" intelfeed:aiAnalysis="false" intelfeed:extractTools="false" />
+      <outline text="TrustedSec" title="TrustedSec" type="rss" xmlUrl="https://trustedsec.com/feed.rss" htmlUrl="https://trustedsec.com/" intelfeed:interval="60" intelfeed:aiAnalysis="false" intelfeed:extractTools="false" intelfeed:autoExtract="true" />
+      <outline text="Virus Bulletin" title="Virus Bulletin" type="rss" xmlUrl="https://www.virusbulletin.com/rss" htmlUrl="https://www.virusbulletin.com/rss" intelfeed:interval="60" intelfeed:aiAnalysis="false" intelfeed:extractTools="false" />
     </outline>
   </body>
 </opml>

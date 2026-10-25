@@ -1000,3 +1000,122 @@ async def test_manual_create_malware_by_alias_on_already_linked_entry(db_session
         )
     ).scalar()
     assert links == 1
+
+
+# ---------------------------------------------------------------------------
+# Tool guards: concepts and names that belong to products/vendors (feed audit 5)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", ["SHA-256", "sha256", "SQL injection", "debug", "Payload", "spi", "WebSocket"])
+async def test_concept_tool_names_blocked_with_gates_off(db_session, monkeypatch, name):
+    """Enforced for automated sources whatever the gate mode."""
+    monkeypatch.setattr(settings, "entity_creation_gates", "off")
+    decision = await resolve_entity_creation(db_session, "tool", name, source="ai")
+    assert decision.action == "blocked"
+    assert decision.reason == "generic_name:concept_term"
+
+
+async def test_concept_tool_name_manual_creation_is_overridable(db_session, gates_on):
+    decision = await resolve_entity_creation(db_session, "tool", "SQL injection", source="manual")
+    assert decision.action == "blocked" and decision.reason == "generic_name:concept_term"
+    decision = await resolve_entity_creation(db_session, "tool", "SQL injection", source="manual", override=True)
+    assert decision.action == "create"
+
+
+@pytest.mark.parametrize("mode", ["off", "shadow", "on"])
+async def test_tool_named_like_a_product_is_held_onto_the_product(db_session, monkeypatch, mode):
+    from app.models.product import Product
+    from app.models.vendor import Vendor
+
+    monkeypatch.setattr(settings, "entity_creation_gates", mode)
+    product = Product(name="Kubernetes", aliases=["k8s"])
+    vendor = Vendor(name="NVIDIA", aliases=[])
+    db_session.add_all([product, vendor])
+    await db_session.flush()
+
+    decision = await resolve_entity_creation(db_session, "tool", "kubernetes", source="ai")
+    assert decision.action == "held"
+    assert decision.reason == "product_or_vendor_name"
+    assert decision.link_target == ("product", product.id)
+
+    # An alias counts as being on file.
+    decision = await resolve_entity_creation(db_session, "tool", "K8s", source="ai")
+    assert decision.link_target == ("product", product.id)
+
+    decision = await resolve_entity_creation(db_session, "tool", "Nvidia", source="ai")
+    assert decision.action == "held"
+    assert decision.link_target == ("vendor", vendor.id)
+
+
+async def test_dual_use_tool_is_not_held_on_a_product_name(db_session, monkeypatch):
+    from app.models.product import Product
+
+    monkeypatch.setattr(settings, "entity_creation_gates", "off")
+    db_session.add(Product(name="AnyDesk", aliases=[]))
+    await db_session.flush()
+    decision = await resolve_entity_creation(db_session, "tool", "AnyDesk", source="ai")
+    assert decision.action == "create"
+
+
+async def test_store_tools_links_the_product_instead_of_minting_a_tool(db_session, test_entry):
+    from app.intelligence.tool import store_tools
+    from app.models.product import EntryProduct, Product
+
+    product = Product(name="Linux Kernel", aliases=[])
+    db_session.add(product)
+    await db_session.flush()
+
+    stored = await store_tools(
+        db_session,
+        test_entry.id,
+        [{"name": "Linux Kernel", "wielded_by": "APT29", "evidence": "APT29 loaded a module into the Linux kernel."}],
+    )
+    assert stored == []
+    assert (await db_session.execute(select(func.count()).select_from(Tool))).scalar_one() == 0
+    linked = (
+        await db_session.execute(select(EntryProduct.product_id).where(EntryProduct.entry_id == test_entry.id))
+    ).scalars()
+    assert list(linked) == [product.id]
+
+
+# ---------------------------------------------------------------------------
+# link_only: the feed's "create records for new tools" switch off
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("mode", ["off", "shadow", "on"])
+async def test_link_only_matches_existing_but_never_creates(db_session, monkeypatch, mode):
+    monkeypatch.setattr(settings, "entity_creation_gates", mode)
+    tool = Tool(name="Cobalt Strike", aliases=["CS beacon"])
+    db_session.add(tool)
+    await db_session.flush()
+
+    decision = await resolve_entity_creation(db_session, "tool", "cobalt-strike", source="ai", link_only=True)
+    assert decision.action == "matched" and decision.entity.id == tool.id
+
+    decision = await resolve_entity_creation(db_session, "tool", "BrandNewLoaderKit", source="ai", link_only=True)
+    assert decision.action == "blocked"
+    assert decision.reason == "creation_disabled"
+
+
+async def test_store_tools_allow_create_false_links_existing_only(db_session, test_entry):
+    from app.intelligence.tool import store_tools
+    from app.models.tool import EntryTool
+
+    existing = Tool(name="Rubeus", aliases=[], article_count=1)
+    db_session.add(existing)
+    await db_session.flush()
+
+    evidence = {"wielded_by": "APT29", "evidence": "APT29 ran it on the domain controller."}
+    stored = await store_tools(
+        db_session,
+        test_entry.id,
+        [{"name": "Rubeus", **evidence}, {"name": "NeverSeenBeforeKit", **evidence}],
+        allow_create=False,
+    )
+    assert [(t.name, is_new) for t, is_new in stored] == [("Rubeus", False)]
+    names = (await db_session.execute(select(Tool.name))).scalars().all()
+    assert names == ["Rubeus"]
+    link = (await db_session.execute(select(EntryTool).where(EntryTool.entry_id == test_entry.id))).scalar_one()
+    assert link.tool_id == existing.id and link.source == "ai"

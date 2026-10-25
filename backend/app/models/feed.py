@@ -53,7 +53,7 @@ class Feed(Base):
         Boolean, nullable=False, default=True, server_default="true"
     )  # Run the one-pass AI analysis on this feed's entries at ingest.
     # Until this existed, the only way to stop the AI reading a feed was to set
-    # intel_extraction_mode="none", which also killed autolinking and scoring —
+    # intel_extraction_mode="none", which also kills autolinking and extraction —
     # so a noisy source you still wanted matched against your catalog had no
     # setting that expressed it. Gated globally by `ai_one_pass_enabled` too:
     # both must be on.
@@ -62,6 +62,10 @@ class Feed(Base):
     )  # Allow AI extraction to create tool entities from this feed's entries.
     # Off for advisory and detection-content feeds (NVD, distro bulletins, rule
     # repos): they name affected or referenced software, not wielded tooling.
+    exclude_title_patterns: Mapped[str | None] = mapped_column(Text)
+    # Plain phrases, one per line. An incoming article whose title contains one
+    # (case-insensitive) is dropped before it is saved — see
+    # app/services/title_filter.py. Applies to every adapter.
     # Subscription-level settings (shared across all users)
     category_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("categories.id", ondelete="SET NULL"), index=True
@@ -73,6 +77,20 @@ class Feed(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+    @property
+    def pause_reason(self) -> dict | None:
+        """Why the health check paused this feed (see services/feed_fetch_health)."""
+        from app.services.feed_fetch_health import pause_reason
+
+        return pause_reason(self)
+
+    @property
+    def health_warning(self) -> dict | None:
+        """Reachable but no longer delivering items, or None."""
+        from app.services.feed_fetch_health import health_warning
+
+        return health_warning(self)
 
     # Relationships
     entries = relationship("Entry", back_populates="feed", cascade="all, delete-orphan")

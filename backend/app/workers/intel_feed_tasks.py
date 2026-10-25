@@ -196,8 +196,9 @@ def autolink_entry_task(self, entry_id: str):
 
 def _reliability_to_weight(rating: str | None) -> float:
     """Map A-F reliability rating to a confidence weight multiplier."""
-    weights = {"A": 1.0, "B": 0.85, "C": 0.7, "D": 0.5, "E": 0.3, "F": 0.15}
-    return weights.get(rating, 0.5)  # Unrated defaults to 0.5
+    from app.intelligence.autolinker import reliability_to_weight
+
+    return reliability_to_weight(rating)
 
 
 async def _autolink_entry(entry_id: str):
@@ -243,18 +244,16 @@ async def _autolink_entry(entry_id: str):
 
         # selective: run relevance pre-filter first
         if mode == "selective":
-            from app.intelligence.relevance_filter import (
-                DEFAULT_RELEVANCE_THRESHOLD,
-                score_relevance,
-            )
+            from app.intelligence.relevance_filter import get_relevance_threshold, score_relevance
 
+            threshold = await get_relevance_threshold(db)
             score = score_relevance(title, entry.summary, content_text)
-            if score < DEFAULT_RELEVANCE_THRESHOLD:
+            if score < threshold:
                 logger.debug(
                     "Entry %s below relevance threshold (%.2f < %.2f), skipping autolink",
                     entry_id,
                     score,
-                    DEFAULT_RELEVANCE_THRESHOLD,
+                    threshold,
                 )
                 return []
 
@@ -478,6 +477,7 @@ async def _extract_entry_intel(entry_id: str):
     from app.intelligence.ttp import extract_ttp_ids_regex, store_ttps
     from app.models.entry import Entry
     from app.models.feed import Feed
+    from app.pipeline.plans import feed_analysis_off
 
     stats = {"ttps": 0, "cves": 0, "mitigations": 0, "detection_rules": 0}
     # Entity ids this entry touched, per type — linking bumps article_count and
@@ -491,6 +491,28 @@ async def _extract_entry_intel(entry_id: str):
         if not entry:
             logger.warning("Entry %s not found for auto-extraction", entry_id)
             return stats
+
+        # This task is dispatched when EITHER flag is on
+        # (`auto_extract_on_ingest or extract_detection_rules`), so each half
+        # has to check its own. Without the regex check below, turning off
+        # "look up CVEs in NVD" did nothing at all as long as detection-rule
+        # extraction was on — the regex passes ran regardless, and the setting
+        # was decorative.
+        feed_row = (
+            await db.execute(
+                select(Feed.intel_extraction_mode, Feed.auto_extract_on_ingest, Feed.extract_detection_rules).where(
+                    Feed.id == entry.feed_id
+                )
+            )
+        ).one_or_none()
+        # "Analyse this feed" off (mode none) outranks both flags and the
+        # GitHub import: nothing is tagged or created. Dispatch already skips
+        # the stage for these feeds; this catches plan overlays, forced
+        # dispatches and the Engine's re-run button.
+        if feed_row is not None and feed_analysis_off(feed_row):
+            return stats
+        run_regex = bool(feed_row and feed_row.auto_extract_on_ingest)
+        extract_rules_flag = bool(feed_row and feed_row.extract_detection_rules)
 
         # GitHub repo entries with a known content_type use the dedicated import
         # pipeline which handles rule creation, TTP/CVE linking, and scoring.
@@ -528,20 +550,6 @@ async def _extract_entry_intel(entry_id: str):
         if not text.strip() and not has_raw_content:
             return stats
 
-        # This task is dispatched when EITHER flag is on
-        # (`auto_extract_on_ingest or extract_detection_rules`), so each half
-        # has to check its own. Without the first check below, turning off
-        # "look up CVEs in NVD" did nothing at all as long as detection-rule
-        # extraction was on — the regex passes ran regardless, and the setting
-        # was decorative.
-        feed_row = (
-            await db.execute(
-                select(Feed.auto_extract_on_ingest, Feed.extract_detection_rules).where(Feed.id == entry.feed_id)
-            )
-        ).one_or_none()
-        run_regex = bool(feed_row and feed_row.auto_extract_on_ingest)
-        extract_rules_flag = bool(feed_row and feed_row.extract_detection_rules)
-
         if run_regex:
             # Regex-based TTP extraction (MITRE ATT&CK technique IDs)
             ttp_results = extract_ttp_ids_regex(text)
@@ -566,7 +574,9 @@ async def _extract_entry_intel(entry_id: str):
         if extract_rules_flag:
             # Prefer raw_content from metadata (github_repo entries store file content there)
             rule_text = (entry.metadata_ or {}).get("raw_content") or text
-            extracted = extract_rules_from_content(rule_text, source_url=entry.url)
+            extracted = extract_rules_from_content(
+                rule_text, source_url=entry.url, html=entry.content_html, article_title=entry.title
+            )
             if extracted:
                 # Attribute auto-extracted rules to the system user
                 from app.services.system_user import get_system_user_id
@@ -1007,7 +1017,9 @@ async def _bulk_extract(entry_ids: list[str], extract_types: list[str], user_id:
                 elif feed_extract_rules:
                     # Regex extraction for non-GitHub entries
                     rule_text = (entry.metadata_ or {}).get("raw_content") or extract_text
-                    rules = extract_rules_from_content(rule_text, source_url=entry.url)
+                    rules = extract_rules_from_content(
+                        rule_text, source_url=entry.url, html=entry.content_html, article_title=entry.title
+                    )
                     if rules:
                         stored = await store_extracted_rules(db, eid, uid, rules)
                         stats["detection_rules"] += len(stored)
@@ -1247,7 +1259,7 @@ async def _rescan_all_feeds_extraction():
     from app.intelligence.autolinker import autolink_entry
     from app.intelligence.cve import extract_and_store_cves
     from app.intelligence.mitigation import extract_mitigation_ids_regex, store_mitigations
-    from app.intelligence.relevance_filter import DEFAULT_RELEVANCE_THRESHOLD, score_relevance
+    from app.intelligence.relevance_filter import get_relevance_threshold, score_relevance
     from app.intelligence.rule_extraction import extract_rules_from_content, store_extracted_rules
     from app.intelligence.ttp import extract_ttp_ids_regex, store_ttps
     from app.models.entry import Entry
@@ -1280,6 +1292,7 @@ async def _rescan_all_feeds_extraction():
         r.close()
 
     async with _get_worker_session() as db:
+        relevance_threshold = await get_relevance_threshold(db)
         while True:
             result = await db.execute(
                 select(
@@ -1287,6 +1300,7 @@ async def _rescan_all_feeds_extraction():
                     Entry.title,
                     Entry.summary,
                     Entry.content_text,
+                    Entry.content_html,
                     Entry.url,
                     Entry.feed_id,
                     Entry.metadata_,
@@ -1309,6 +1323,7 @@ async def _rescan_all_feeds_extraction():
                 title,
                 summary,
                 content_text,
+                content_html,
                 entry_url,
                 feed_id,
                 entry_metadata,
@@ -1368,7 +1383,9 @@ async def _rescan_all_feeds_extraction():
                 elif extract_rules:
                     # Non-GitHub entries: regex extraction
                     rule_text = (entry_metadata or {}).get("raw_content") or text
-                    extracted = extract_rules_from_content(rule_text, source_url=entry_url)
+                    extracted = extract_rules_from_content(
+                        rule_text, source_url=entry_url, html=content_html, article_title=title
+                    )
                     if extracted:
                         from app.services.system_user import get_system_user_id
 
@@ -1385,7 +1402,7 @@ async def _rescan_all_feeds_extraction():
 
                 if extraction_mode == "selective":
                     score = score_relevance(title or "", summary, content_text)
-                    if score < DEFAULT_RELEVANCE_THRESHOLD:
+                    if score < relevance_threshold:
                         stats["entries_processed"] += 1
                         continue
 

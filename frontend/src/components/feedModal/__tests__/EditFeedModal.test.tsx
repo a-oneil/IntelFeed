@@ -5,6 +5,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Feed } from "@/api/types";
 
 const mockUpdateAsync = vi.fn().mockResolvedValue({});
+const mockTitlePreview = vi.fn();
+const mockUpdateMutate = vi.fn();
+let aiUsage: Record<string, unknown> | undefined;
 const mockConfirm = vi.fn();
 let role = "admin";
 
@@ -15,7 +18,8 @@ vi.mock("@/stores/authStore", () => ({
 
 vi.mock("@/hooks/useFeeds", () => ({
   useCategories: () => ({ data: [{ id: "cat-1", name: "News" }] }),
-  useUpdateFeed: () => ({ mutateAsync: mockUpdateAsync, mutate: vi.fn(), isPending: false }),
+  useUpdateFeed: () => ({ mutateAsync: mockUpdateAsync, mutate: mockUpdateMutate, isPending: false }),
+  useFeedAIUsage: (_id: string, enabled: boolean) => ({ data: enabled ? aiUsage : undefined }),
   useDeleteFeed: () => ({ mutate: vi.fn(), isPending: false }),
   useRefreshFeed: () => ({ mutate: vi.fn(), isPending: false }),
   useFullSyncFeed: () => ({ mutate: vi.fn(), isPending: false }),
@@ -43,6 +47,7 @@ vi.mock("@/hooks/useFeeds", () => ({
     data: { subscribers: [], non_subscribers: [], muted_count: 0, per_user_active: true },
     isLoading: false,
   }),
+  useTitleFilterPreview: (...a: unknown[]) => mockTitlePreview(...a),
   usePushFeedToUsers: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useRemoveFeedSubscriber: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
@@ -115,6 +120,18 @@ beforeEach(() => {
   mockUpdateAsync.mockClear();
   mockConfirm.mockReset();
   mockConfirm.mockResolvedValue(true);
+  mockTitlePreview.mockReset();
+  mockUpdateMutate.mockReset();
+  aiUsage = {
+    feed_id: "feed-1",
+    days: 30,
+    runs: 412,
+    tokens_input: 780_000,
+    tokens_output: 24_000,
+    last_run_at: null,
+    ai_analysis_enabled: true,
+  };
+  mockTitlePreview.mockReturnValue({ data: undefined, isError: false });
 });
 
 describe("EditFeedModal", () => {
@@ -230,6 +247,89 @@ describe("EditFeedModal", () => {
 
     await waitFor(() => expect(mockUpdateAsync).toHaveBeenCalled());
     expect(mockUpdateAsync.mock.calls[0][0].data).toEqual({ retention_days: null });
+  });
+
+  it("previews how many recent titles an exclude list would drop", async () => {
+    const user = userEvent.setup();
+    mockTitlePreview.mockImplementation((_id: string, text: string) =>
+      text.trim()
+        ? {
+            data: { checked: 100, dropped: 2, examples: ["ISC Stormcast For Monday"] },
+            isError: false,
+          }
+        : { data: undefined, isError: false }
+    );
+    render(<EditFeedModal subscription={makeFeed()} onClose={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "Source" }));
+    await user.type(
+      screen.getByLabelText("Skip articles whose title contains"),
+      "ISC Stormcast For"
+    );
+
+    expect(await screen.findByText("2 of the last 100 titles would be dropped.")).toBeInTheDocument();
+    expect(screen.getByText("ISC Stormcast For Monday")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mockUpdateAsync).toHaveBeenCalled());
+    expect(mockUpdateAsync.mock.calls[0][0].data).toEqual({
+      exclude_title_patterns: "ISC Stormcast For",
+    });
+  });
+
+  it("shows a rejected exclude list inline", async () => {
+    const user = userEvent.setup();
+    mockTitlePreview.mockReturnValue({
+      data: undefined,
+      isError: true,
+      error: {
+        response: {
+          status: 422,
+          data: { error: { code: "invalid_title_filter", message: '"ab" is too short to filter on' } },
+        },
+      },
+    });
+    render(<EditFeedModal subscription={makeFeed()} onClose={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "Source" }));
+    await user.type(screen.getByLabelText("Skip articles whose title contains"), "ab");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("too short");
+  });
+
+  it("shows what a muted feed still costs, with an admin switch for its AI", async () => {
+    const user = userEvent.setup();
+    render(<EditFeedModal subscription={makeFeed({ is_muted: true })} onClose={vi.fn()} />);
+
+    expect(
+      screen.getByText(/Muted, but still analysed: 412 AI runs and 804k tokens in the last 30 days/)
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Turn off AI for this feed" }));
+    expect(mockUpdateMutate).toHaveBeenCalledWith(
+      { feedId: "feed-1", data: { ai_analysis_enabled: false } },
+      expect.anything()
+    );
+  });
+
+  it("says in the Pipeline pane where an unrated feed's tags stop", async () => {
+    const user = userEvent.setup();
+    render(<EditFeedModal subscription={makeFeed({ reliability_rating: null })} onClose={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Pipeline" }));
+    expect(
+      screen.getByText(/Unrated: catalog-matched tags from this feed top out at medium/)
+    ).toBeInTheDocument();
+  });
+
+  it("says nothing about AI cost for a feed that is not muted", () => {
+    render(<EditFeedModal subscription={makeFeed()} onClose={vi.fn()} />);
+    expect(screen.queryByText(/still analysed/)).not.toBeInTheDocument();
+  });
+
+  it("does not offer a non-admin the AI switch", () => {
+    role = "analyst";
+    render(<EditFeedModal subscription={makeFeed({ is_muted: true })} onClose={vi.fn()} />);
+    expect(screen.getByText(/still analysed/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Turn off AI for this feed" })).not.toBeInTheDocument();
   });
 
   it("closes without asking when nothing is dirty", async () => {

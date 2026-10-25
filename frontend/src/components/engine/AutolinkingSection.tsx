@@ -494,15 +494,22 @@ export function AutolinkingSection({
       </div>
 
       {/* pending callout (links view only) */}
-      {view === "links" && (stats?.pending ?? 0) > 0 && (
+      {view === "links" && ((stats?.pending ?? 0) > 0 || (stats?.pending_dropped_ai_off ?? 0) > 0) && (
         <div className={styles.pending}>
           <div>
-            <h3>{stats?.pending?.toLocaleString()} matches held for confirmation</h3>
+            <h3>{(stats?.pending ?? 0).toLocaleString()} matches held for confirmation</h3>
             <p>
               Dictionary-word hits (like <span className={styles.surf}>Royal</span>{" "}
               <span className={styles.surf}>Hive</span> <span className={styles.surf}>Turkey</span>) are parked in the
               pending tier and won&apos;t become real links until AI or an analyst confirms them.{" "}
               <b>{stats?.pending_ready ?? 0}</b> are ready to auto-promote at high confidence.
+              {(stats?.pending_dropped_ai_off ?? 0) > 0 && (
+                <>
+                  {" "}
+                  <b>{stats?.pending_dropped_ai_off?.toLocaleString()}</b> were dropped in the last 30 days because
+                  their feed has AI off, so nothing would ever confirm them.
+                </>
+              )}
             </p>
           </div>
         </div>

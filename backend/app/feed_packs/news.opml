@@ -5,22 +5,23 @@
   </head>
   <body>
     <outline text="Government / CERT" title="Government / CERT">
-      <outline text="AusCERT Security Bulletins" title="AusCERT Security Bulletins" type="rss" xmlUrl="https://portal.auscert.org.au/rss/bulletins/" htmlUrl="http://portal.auscert.org.au/bulletins/" intelfeed:interval="60" intelfeed:extractionMode="full" intelfeed:extractTools="false" intelfeed:autoExtract="true" />
-      <outline text="CERT Polska" title="CERT Polska" type="atom" xmlUrl="https://cert.pl/en/atom.xml" htmlUrl="https://cert.pl/en/" intelfeed:interval="60" intelfeed:extractionMode="full" intelfeed:autoExtract="true" />
+      <outline text="AusCERT Security Bulletins" title="AusCERT Security Bulletins" type="rss" xmlUrl="https://portal.auscert.org.au/rss/bulletins/" htmlUrl="http://portal.auscert.org.au/bulletins/" intelfeed:interval="60" intelfeed:extractionMode="full" intelfeed:aiAnalysis="false" intelfeed:extractTools="false" intelfeed:autoExtract="true" />
+      <outline text="CERT Polska" title="CERT Polska" type="atom" xmlUrl="https://cert.pl/en/atom.xml" htmlUrl="https://cert.pl/en/" intelfeed:interval="60" intelfeed:extractionMode="full" intelfeed:extractTools="false" intelfeed:autoExtract="true" />
       <outline text="CERT-FR" title="CERT-FR" type="rss" xmlUrl="https://www.cert.ssi.gouv.fr/cti/feed/" htmlUrl="https://www.cert.ssi.gouv.fr/feed/" intelfeed:config="{&quot;auto_translate&quot;:true}" intelfeed:interval="60" intelfeed:extractionMode="full" intelfeed:autoExtract="true" />
-      <outline text="JPCERT/CC English Blog" title="JPCERT/CC English Blog" type="atom" xmlUrl="https://blogs.jpcert.or.jp/en/atom.xml" htmlUrl="https://blogs.jpcert.or.jp/en/" intelfeed:interval="60" intelfeed:extractionMode="none" />
+      <outline text="JPCERT/CC English Blog" title="JPCERT/CC English Blog" type="atom" xmlUrl="https://blogs.jpcert.or.jp/en/atom.xml" htmlUrl="https://blogs.jpcert.or.jp/en/" intelfeed:interval="60" intelfeed:extractionMode="full" intelfeed:autoExtract="true" />
     </outline>
     <outline text="Security News" title="Security News">
       <outline text="Ars Technica — Security" title="Ars Technica — Security" type="rss" xmlUrl="https://arstechnica.com/tag/security/feed/" htmlUrl="https://arstechnica.com" intelfeed:interval="60" intelfeed:autoExtract="true" />
-      <outline text="Cyber News Group" title="Cyber News Group" type="rss" xmlUrl="https://www.cybernewsgroup.co.uk/feed/" htmlUrl="https://cybernewsgroup.co.uk" intelfeed:interval="60" intelfeed:extractionMode="full" />
+      <outline text="Cyber News Group" title="Cyber News Group" type="rss" xmlUrl="https://www.cybernewsgroup.co.uk/feed/" htmlUrl="https://cybernewsgroup.co.uk" intelfeed:interval="60" intelfeed:extractionMode="full" intelfeed:extractTools="false" />
       <outline text="Cyber Security News" title="Cyber Security News" type="rss" xmlUrl="https://cybersecuritynews.com/feed/" htmlUrl="https://cybersecuritynews.com/" intelfeed:interval="60" intelfeed:autoExtract="true" />
-      <outline text="Darknet" title="Darknet" type="rss" xmlUrl="https://www.darknet.org.uk/feed/" htmlUrl="https://www.darknet.org.uk/" intelfeed:interval="60" intelfeed:autoExtract="true" />
-      <outline text="GRAHAM CLULEY" title="GRAHAM CLULEY" type="rss" xmlUrl="https://www.grahamcluley.com/feed/" htmlUrl="https://grahamcluley.com" intelfeed:interval="60" intelfeed:autoExtract="true" />
+      <outline text="Darknet" title="Darknet" type="rss" xmlUrl="https://www.darknet.org.uk/feed/" htmlUrl="https://www.darknet.org.uk/" intelfeed:interval="60" intelfeed:extractTools="false" />
+      <outline text="GRAHAM CLULEY" title="GRAHAM CLULEY" type="rss" xmlUrl="https://www.grahamcluley.com/feed/" htmlUrl="https://grahamcluley.com" intelfeed:interval="60" />
       <outline text="HACKMAGEDDON" title="HACKMAGEDDON" type="rss" xmlUrl="https://www.hackmageddon.com/feed/" htmlUrl="https://www.hackmageddon.com" intelfeed:interval="60" intelfeed:autoExtract="true" />
-      <outline text="Hackread" title="Hackread" type="rss" xmlUrl="https://www.hackread.com/feed/" htmlUrl="https://hackread.com" intelfeed:interval="60" intelfeed:autoExtract="true" />
-      <outline text="Have I Been Pwned — Latest Breaches" title="Have I Been Pwned — Latest Breaches" type="rss" xmlUrl="https://feeds.feedburner.com/HaveIBeenPwnedLatestBreaches" htmlUrl="https://haveibeenpwned.com/" intelfeed:interval="60" intelfeed:extractionMode="full" />
-      <outline text="Nextgov/FCW — Cybersecurity" title="Nextgov/FCW — Cybersecurity" type="rss" xmlUrl="https://www.nextgov.com/rss/cybersecurity/" htmlUrl="https://www.nextgov.com/cybersecurity/" intelfeed:interval="60" intelfeed:autoExtract="true" />
-      <outline text="Ransomware.live" title="Ransomware.live" type="rss" xmlUrl="https://www.ransomware.live/rss" htmlUrl="https://www.ransomware.live/rss.xml" intelfeed:interval="60" intelfeed:extractionMode="full" />
+      <outline text="Hackread" title="Hackread" type="rss" xmlUrl="https://www.hackread.com/feed/" htmlUrl="https://hackread.com" intelfeed:interval="60" intelfeed:extractTools="false" intelfeed:autoExtract="true" />
+      <outline text="Have I Been Pwned — Latest Breaches" title="Have I Been Pwned — Latest Breaches" type="rss" xmlUrl="https://feeds.feedburner.com/HaveIBeenPwnedLatestBreaches" htmlUrl="https://haveibeenpwned.com/" intelfeed:interval="60" intelfeed:extractionMode="full" intelfeed:extractTools="false" />
+      <outline text="Nextgov/FCW — Cybersecurity" title="Nextgov/FCW — Cybersecurity" type="rss" xmlUrl="https://www.nextgov.com/rss/cybersecurity/" htmlUrl="https://www.nextgov.com/cybersecurity/" intelfeed:interval="60" intelfeed:aiAnalysis="false" />
+      <outline text="Ransomware.live" title="Ransomware.live" type="rss" xmlUrl="https://www.ransomware.live/rss" htmlUrl="https://www.ransomware.live/rss.xml" intelfeed:interval="60" intelfeed:extractionMode="full" intelfeed:extractTools="false" />
+      <outline text="Risky Business News" title="Risky Business News" type="rss" xmlUrl="https://news.risky.biz/rss/" htmlUrl="https://news.risky.biz/" intelfeed:interval="60" intelfeed:autoExtract="true" />
       <outline text="The Cyber Express" title="The Cyber Express" type="rss" xmlUrl="https://thecyberexpress.com/feed/" htmlUrl="https://thecyberexpress.com" intelfeed:interval="60" intelfeed:autoExtract="true" />
       <outline text="The Register — Security" title="The Register — Security" type="rss" xmlUrl="https://www.theregister.com/security/headlines.atom" htmlUrl="https://www.theregister.com" intelfeed:interval="60" intelfeed:autoExtract="true" />
     </outline>

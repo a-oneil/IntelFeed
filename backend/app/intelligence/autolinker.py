@@ -11,7 +11,7 @@ import logging
 import re
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import ahocorasick
@@ -193,6 +193,64 @@ def pending_tier_enabled() -> bool:
     return bool(settings.get("autolink_pending_tier_enabled")) and bool(settings.get("ai_one_pass_enabled"))
 
 
+# The FP list was built to filter ambiguous actor/malware codenames ("Storm",
+# "Agent") and common-OS/brand words that overlapped with malware aliases. Those
+# same words ARE the canonical names of vendor/product entities (Microsoft,
+# Windows, Chrome, …), so these types bypass it. The is_ambiguous +
+# uppercase-first check at match time still prevents lowercase prose matches.
+_FP_LIST_EXEMPT_TYPES = frozenset({"vendor", "product", "tool", "mitigation"})
+
+
+def _surface_form_filtered(entity_type: str, form: str) -> bool:
+    """True when the FP list or an analyst hard block rules ``form`` out as a match.
+
+    Shared by the vocabulary build (ingest autolink) and the retroactive
+    backlink, so a form that never links at ingest never links after the fact.
+    """
+    key = form.lower()
+    if entity_type not in _FP_LIST_EXEMPT_TYPES and key in _get_fp_names():
+        return True
+    # Analyst hard blocks bind for every type — including the FP-exempt ones.
+    return key in _get_blocked_forms()
+
+
+def reliability_to_weight(rating: str | None) -> float:
+    """Map a feed's A-F reliability rating to an autolink confidence multiplier."""
+    weights = {"A": 1.0, "B": 0.85, "C": 0.7, "D": 0.5, "E": 0.3, "F": 0.15}
+    return weights.get(rating, 0.5)  # Unrated defaults to 0.5
+
+
+# Daily Redis counters of dictionary-word matches dropped because the entry's
+# feed never gets AI analysis (so nothing would ever confirm them). Kept a
+# little past the 30-day window the Engine view sums.
+_DROPPED_AI_OFF_KEY = "autolink:pending_dropped_ai_off:{day}"
+_DROPPED_AI_OFF_TTL = 35 * 86400
+
+
+async def _count_dropped_ai_off(n: int) -> None:
+    if n <= 0:
+        return
+    try:
+        r = await get_redis()
+        key = _DROPPED_AI_OFF_KEY.format(day=datetime.now(UTC).strftime("%Y%m%d"))
+        await r.incrby(key, n)
+        await r.expire(key, _DROPPED_AI_OFF_TTL)
+    except Exception:
+        logger.debug("pending-tier drop counter update failed", exc_info=True)
+
+
+async def dropped_ai_off_count(days: int = 30) -> int:
+    """Dictionary-word matches dropped on AI-off feeds over the last ``days`` days."""
+    today = datetime.now(UTC)
+    keys = [_DROPPED_AI_OFF_KEY.format(day=(today - timedelta(days=i)).strftime("%Y%m%d")) for i in range(days)]
+    try:
+        r = await get_redis()
+        return sum(int(v or 0) for v in await r.mget(keys))
+    except Exception:
+        logger.debug("pending-tier drop counter read failed", exc_info=True)
+        return 0
+
+
 def _is_ambiguous_surface_form(form: str) -> bool:
     """Return True for single short alpha-only tokens that could be common English words.
 
@@ -346,15 +404,6 @@ class EntityVocabulary:
         count = 0
         all_forms = [(name, False)] + [(alias, True) for alias in aliases]
 
-        # The FP list was built to filter ambiguous actor/malware codenames
-        # ("Storm", "Agent") and common-OS/brand words that overlapped with
-        # malware aliases. Those same words ARE the canonical names of
-        # vendor/product entities (Microsoft, Windows, Chrome, …), so applying
-        # the filter here would silently drop them. The is_ambiguous +
-        # uppercase-first check in scan_text already prevents lowercase prose
-        # matches.
-        skip_fp_filter = entity_type in ("vendor", "product", "tool", "mitigation")
-
         # Post-merge entities often carry aliases that duplicate their own
         # canonical name (case variants folded in by merge). Each surface form
         # only needs to map to this entity's canonical id once — skip repeats
@@ -364,11 +413,7 @@ class EntityVocabulary:
         for surface_form, is_alias in all_forms:
             if not surface_form or len(surface_form) < _get_min_name_length():
                 continue
-            if not skip_fp_filter and surface_form.lower() in _get_fp_names():
-                continue
-            # Analyst hard blocks bind for every type — including the ones that
-            # skip the curated FP list above.
-            if surface_form.lower() in _get_blocked_forms():
+            if _surface_form_filtered(entity_type, surface_form):
                 continue
 
             key = surface_form.lower()
@@ -649,12 +694,28 @@ async def store_autolink_matches(
     to ``pending_autolink_matches`` instead of becoming junction rows — the AI
     reconciler promotes or rejects them later. ``allow_provisional=True`` is the
     reconciler's promotion path: it commits provisional matches directly.
+
+    On an entry the AI will never read (its feed's AI is off, or its mode is
+    "none") nothing would confirm a held match, so provisional matches are
+    dropped and counted instead of held.
     """
     matches = await _filter_ttp_matches(db, entry_id, matches, context_text)
 
     if not allow_provisional:
         provisional = [m for m in matches if m.get("provisional")]
         matches = [m for m in matches if not m.get("provisional")]
+        if provisional:
+            from app.services.ai_eligibility import entry_will_get_ai_analysis
+
+            if not await entry_will_get_ai_analysis(db, entry_id):
+                logger.info(
+                    "Dropped %d provisional autolink match(es) for entry %s; its feed gets no AI analysis: %s",
+                    len(provisional),
+                    entry_id,
+                    [m.get("canonical_name") for m in provisional],
+                )
+                await _count_dropped_ai_off(len(provisional))
+                provisional = []
         for match in provisional:
             try:
                 await db.execute(
@@ -857,24 +918,36 @@ async def store_autolink_matches(
                 lookup_key = match.get("lookup_key")
                 if not lookup_key:
                     continue
-                # Upsert the CVE stub — concurrent workers may race on the same id,
-                # and a raw INSERT would IntegrityError and poison the txn.
-                upsert_result = await db.execute(
-                    pg_insert(CVE)
-                    .values(cve_id=lookup_key)
-                    .on_conflict_do_nothing(index_elements=["cve_id"])
-                    .returning(CVE.id)
-                )
-                cve_uuid = upsert_result.scalar_one_or_none()
+                cve_uuid = (await db.execute(select(CVE.id).where(CVE.cve_id == lookup_key))).scalar_one_or_none()
+                is_new_stub = False
                 if cve_uuid is None:
-                    existing = await db.execute(select(CVE.id).where(CVE.cve_id == lookup_key))
-                    cve_uuid = existing.scalar_one()
+                    # The one entity autolink creates rather than only links: a
+                    # CVE id is specific enough to stand on its own. It honours
+                    # the same do-not-recreate list as the extract path, and
+                    # created_via marks the stub so curation can find it.
+                    from app.intelligence.entity_resolution import is_name_denied
+
+                    if await is_name_denied(db, "cve", lookup_key):
+                        continue
+                    # Upsert — concurrent workers may race on the same id, and a
+                    # raw INSERT would IntegrityError and poison the txn.
+                    upsert_result = await db.execute(
+                        pg_insert(CVE)
+                        .values(cve_id=lookup_key, created_via="auto_link", created_from_entry_id=entry_id)
+                        .on_conflict_do_nothing(index_elements=["cve_id"])
+                        .returning(CVE.id)
+                    )
+                    cve_uuid = upsert_result.scalar_one_or_none()
+                    is_new_stub = cve_uuid is not None
+                    if cve_uuid is None:
+                        existing = await db.execute(select(CVE.id).where(CVE.cve_id == lookup_key))
+                        cve_uuid = existing.scalar_one()
                 await db.execute(
                     pg_insert(EntryCVE)
                     .values(entry_id=entry_id, cve_id=cve_uuid, paragraph_indices=para_indices)
                     .on_conflict_do_nothing()
                 )
-                stored.append({**match, "entity_id": str(cve_uuid)})
+                stored.append({**match, "entity_id": str(cve_uuid), "is_new_stub": is_new_stub})
 
             elif entity_type == "cwe":
                 lookup_key = match.get("lookup_key")
@@ -989,22 +1062,31 @@ async def autolink_entry(
             if match.get("entity_id"):
                 await invalidate_entity_cache(match["entity_type"], match["entity_id"])
 
-    # Dispatch enrichment for newly created TTP stubs so MITRE fills in name/tactic.
-    new_ttp_stubs = [m for m in stored if m.get("entity_type") == "ttp" and m.get("is_new_stub")]
-    if new_ttp_stubs:
-        try:
-            from app.workers.enrichment_tasks import auto_enrich_entity
-
-            for m in new_ttp_stubs:
-                auto_enrich_entity.delay(
-                    entity_type="ttp",
-                    entity_id=m["entity_id"],
-                    entity_value=m["lookup_key"],
-                )
-        except Exception:
-            logger.exception("Failed to dispatch TTP stub enrichment")
-
+    _dispatch_stub_enrichment(stored)
     return stored
+
+
+def _dispatch_stub_enrichment(stored: list[dict]) -> None:
+    """Queue enrichment for CVE/TTP stubs this autolink pass created.
+
+    A stub is just an id; enrichment fills in the rest (MITRE name/tactic for a
+    TTP, NVD/EPSS/KEV for a CVE), the same as the extract path does for the
+    stubs it mints.
+    """
+    new_stubs = [m for m in stored if m.get("entity_type") in ("ttp", "cve") and m.get("is_new_stub")]
+    if not new_stubs:
+        return
+    try:
+        from app.workers.enrichment_tasks import auto_enrich_entity
+
+        for m in new_stubs:
+            auto_enrich_entity.delay(
+                entity_type=m["entity_type"],
+                entity_id=m["entity_id"],
+                entity_value=m["lookup_key"],
+            )
+    except Exception:
+        logger.exception("Failed to dispatch autolink stub enrichment")
 
 
 async def autolink_batch(
@@ -1076,6 +1158,7 @@ async def autolink_batch(
         if matches:
             stored = await store_autolink_matches(db, row.id, matches, context_text=" ".join(t for _, t in paragraphs))
             stats["linked"] += len(stored)
+            _dispatch_stub_enrichment(stored)
 
         stats["scanned"] += 1
 
@@ -1231,16 +1314,34 @@ async def backfill_paragraph_indices(db: AsyncSession) -> dict:
     return stats
 
 
+# Feed modes that switch ingest autolink off; the retroactive backlink skips
+# their entries too.
+_NO_AUTOLINK_MODES = ("manual", "none")
+
+
+def _accepted_mention(term: str, pattern: re.Pattern, text: str) -> bool:
+    """Word-boundary match of ``term`` in ``text``, with ingest's capital-letter rule.
+
+    An ambiguous form (a short single word like "Play" or "Hive") only counts
+    where the text spells it with a capital first letter, as scan_text requires.
+    """
+    if not _is_ambiguous_surface_form(term):
+        return pattern.search(text) is not None
+    return any(text[m.start()].isupper() for m in pattern.finditer(text))
+
+
 async def link_entity_to_existing_entries(
     db: AsyncSession,
     entity_type: str,
     entity_id: uuid.UUID,
     batch_size: int = 500,
 ) -> dict:
-    """Search ALL existing entries for mentions of a specific entity and create links.
+    """Search existing entries for mentions of a specific entity and create links.
 
     Called after a new entity is manually created so it gets retroactively linked
-    to entries that already mention it.
+    to entries that already mention it. Applies ingest autolink's rules: entries
+    from feeds set to manual or none are skipped, the FP list / hard blocks and
+    the capital-letter check apply, and confidence scales by feed reliability.
 
     Supports all entity types:
     - threat_actor, malware, country: name + aliases text search
@@ -1285,6 +1386,7 @@ async def _link_entity_to_existing_entries_inner(
     from sqlalchemy import or_
 
     from app.models.entry import Entry
+    from app.models.feed import Feed
 
     # ── Load entity and build search terms ──────────────────────────
     search_terms: list[str] = []
@@ -1347,11 +1449,14 @@ async def _link_entity_to_existing_entries_inner(
     else:
         return {**stats, "error": f"unsupported_entity_type: {entity_type}"}
 
-    # Filter out empty/short terms
+    # Same surface-form rules as the ingest vocabulary: drop short terms, the
+    # FP list (for the types it covers) and analyst hard blocks.
+    canonical_term = search_terms[0] if search_terms else None
     min_len = _get_min_name_length()
-    search_terms = [t for t in search_terms if t and len(t) >= min_len]
+    search_terms = [t for t in search_terms if t and len(t) >= min_len and not _surface_form_filtered(entity_type, t)]
     if not search_terms:
         return stats
+    term_patterns = [(t, re.compile(r"(?<!\w)" + re.escape(t) + r"(?!\w)", re.IGNORECASE)) for t in search_terms]
 
     # ── Find entries mentioning any search term ─────────────────────
     text_conditions = []
@@ -1362,12 +1467,14 @@ async def _link_entity_to_existing_entries_inner(
         text_conditions.append(Entry.summary.ilike(pattern))
         text_conditions.append(Entry.content_text.ilike(pattern))
 
-    # Paginate through matching entries
+    # Paginate through matching entries. Feeds set to manual or none get no
+    # autolinks at ingest, so they get none after the fact either.
     offset = 0
     while True:
         result = await db.execute(
-            select(Entry.id, Entry.title, Entry.summary, Entry.content_text)
-            .where(or_(*text_conditions))
+            select(Entry.id, Entry.title, Entry.summary, Entry.content_text, Feed.reliability_rating)
+            .join(Feed, Feed.id == Entry.feed_id)
+            .where(or_(*text_conditions), Feed.intel_extraction_mode.notin_(_NO_AUTOLINK_MODES))
             .order_by(Entry.id)
             .offset(offset)
             .limit(batch_size)
@@ -1385,27 +1492,25 @@ async def _link_entity_to_existing_entries_inner(
             if not combined:
                 continue
 
-            # Collect every term that has a word-boundary match in the combined text
-            matched_terms: list[str] = []
-            for term in search_terms:
-                pat = re.compile(r"(?<!\w)" + re.escape(term) + r"(?!\w)", re.IGNORECASE)
-                if pat.search(combined):
-                    matched_terms.append(term)
+            # Collect every term that has an accepted match in the combined text
+            matched_terms = [t for t, pat in term_patterns if _accepted_mention(t, pat, combined)]
             if not matched_terms:
                 continue
             matched_term = matched_terms[0]
+            # Canonical name "high", alias-only "medium", then scaled by the
+            # feed's reliability — the same confidence ingest autolink writes.
+            raw_confidence = "high" if canonical_term in matched_terms else "medium"
+            confidence = _weighted_confidence(raw_confidence, reliability_to_weight(entry_row.reliability_rating))
 
             # Find paragraph indices for the match
             paragraphs = split_into_paragraphs(
                 entry_row.title or "", entry_row.summary or "", entry_row.content_text or ""
             )
-            para_indices = []
-            for para_idx, para_text in paragraphs:
-                for term in search_terms:
-                    pat = re.compile(r"(?<!\w)" + re.escape(term) + r"(?!\w)", re.IGNORECASE)
-                    if pat.search(para_text):
-                        para_indices.append(para_idx)
-                        break
+            para_indices = [
+                para_idx
+                for para_idx, para_text in paragraphs
+                if any(_accepted_mention(t, pat, para_text) for t, pat in term_patterns)
+            ]
 
             # ── Insert junction record ──────────────────────────────
             try:
@@ -1416,7 +1521,7 @@ async def _link_entity_to_existing_entries_inner(
                         .values(
                             entry_id=eid,
                             threat_actor_id=entity_id,
-                            confidence="high",
+                            confidence=confidence,
                             source="auto_link",
                             matched_names=matched_terms or None,
                             paragraph_indices=para_indices or None,
@@ -1431,7 +1536,7 @@ async def _link_entity_to_existing_entries_inner(
                         .values(
                             entry_id=eid,
                             malware_family_id=entity_id,
-                            confidence="high",
+                            confidence=confidence,
                             source="auto_link",
                             matched_names=matched_terms or None,
                             paragraph_indices=para_indices or None,
@@ -1446,7 +1551,7 @@ async def _link_entity_to_existing_entries_inner(
                         .values(
                             entry_id=eid,
                             country_id=entity_id,
-                            confidence="high",
+                            confidence=confidence,
                             source="auto_link",
                             role="mentioned",
                             matched_names=matched_terms or None,
@@ -1474,7 +1579,7 @@ async def _link_entity_to_existing_entries_inner(
                         .values(
                             entry_id=eid,
                             cwe_id=entity_id,
-                            confidence="high",
+                            confidence=confidence,
                             source="auto_link",
                             paragraph_indices=para_indices or None,
                         )
@@ -1488,7 +1593,7 @@ async def _link_entity_to_existing_entries_inner(
                         .values(
                             entry_id=eid,
                             ttp_id=entity_id,
-                            confidence="high",
+                            confidence=confidence,
                             source_text=f"auto_link:{matched_term}",
                             paragraph_indices=para_indices or None,
                         )
@@ -1502,7 +1607,7 @@ async def _link_entity_to_existing_entries_inner(
                         .values(
                             entry_id=eid,
                             tool_id=entity_id,
-                            confidence="high",
+                            confidence=confidence,
                             source="auto_link",
                             matched_names=matched_terms or None,
                             paragraph_indices=para_indices or None,
@@ -1517,7 +1622,7 @@ async def _link_entity_to_existing_entries_inner(
                         .values(
                             entry_id=eid,
                             vendor_id=entity_id,
-                            confidence="high",
+                            confidence=confidence,
                             source="auto_link",
                             matched_names=matched_terms or None,
                             paragraph_indices=para_indices or None,
@@ -1532,7 +1637,7 @@ async def _link_entity_to_existing_entries_inner(
                         .values(
                             entry_id=eid,
                             product_id=entity_id,
-                            confidence="high",
+                            confidence=confidence,
                             source="auto_link",
                             matched_names=matched_terms or None,
                             paragraph_indices=para_indices or None,
@@ -1547,7 +1652,7 @@ async def _link_entity_to_existing_entries_inner(
                         .values(
                             entry_id=eid,
                             mitigation_id=entity_id,
-                            confidence="high",
+                            confidence=confidence,
                             source="auto_link",
                             paragraph_indices=para_indices or None,
                         )

@@ -16,12 +16,15 @@ from app.feed_packs import INTELFEED_NS, get_pack, load_packs
 from app.models.category import Category
 from app.models.feed import Feed
 from app.models.user import User
+from app.services.feed_defaults import FEED_DEFAULT_FIELDS, category_for_feed_type, new_feed_settings
+from app.services.feed_fetch_health import strip_client_keys
 from app.services.feed_visibility import (
     ensure_subscription,
     subscribe_all_users,
     subscriptions_enabled,
     visible_feed_ids_query,
 )
+from app.services.title_filter import normalize_patterns
 
 router = APIRouter()
 
@@ -61,7 +64,7 @@ def parse_extension_attrs(outline: ET.Element) -> dict:
         except (ValueError, TypeError):
             config = None
         if isinstance(config, dict):
-            out["adapter_config"] = config
+            out["adapter_config"] = strip_client_keys(config)
 
     if (interval := _as_int(raw.get("interval"))) and interval > 0:
         out["fetch_interval_minutes"] = interval
@@ -78,6 +81,21 @@ def parse_extension_attrs(outline: ET.Element) -> dict:
     ):
         if (flag := _as_bool(raw.get(attr))) is not None:
             out[column] = flag
+
+    # A JSON list of phrases rather than newline-separated text: a newline in
+    # an attribute survives only as a character reference, which hand edits
+    # and other tools tend to lose.
+    if "excludeTitles" in raw:
+        try:
+            phrases = json.loads(raw["excludeTitles"])
+        except (ValueError, TypeError):
+            phrases = None
+        if isinstance(phrases, list) and all(isinstance(p, str) for p in phrases):
+            try:
+                if normalized := normalize_patterns("\n".join(phrases)):
+                    out["exclude_title_patterns"] = normalized
+            except AppError:
+                pass
 
     return out
 
@@ -210,8 +228,10 @@ def feed_outline_attrs(feed: Feed) -> dict[str, str]:
     ns = "intelfeed:"
     if feed.feed_type not in PORTABLE_FEED_TYPES:
         attrs[f"{ns}feedType"] = feed.feed_type
-    if feed.adapter_config:
-        attrs[f"{ns}config"] = json.dumps(feed.adapter_config, sort_keys=True, separators=(",", ":"))
+    # fetch_health is what this server learned fetching the feed, not config.
+    config = strip_client_keys(feed.adapter_config)
+    if config:
+        attrs[f"{ns}config"] = json.dumps(config, sort_keys=True, separators=(",", ":"))
     if feed.fetch_interval_minutes != 30:
         attrs[f"{ns}interval"] = str(feed.fetch_interval_minutes)
     if feed.intel_extraction_mode != "selective":
@@ -224,6 +244,8 @@ def feed_outline_attrs(feed: Feed) -> dict[str, str]:
     ):
         if bool(value) is not default:
             attrs[f"{ns}{attr}"] = "true" if value else "false"
+    if phrases := [line for line in (feed.exclude_title_patterns or "").splitlines() if line.strip()]:
+        attrs[f"{ns}excludeTitles"] = json.dumps(phrases, separators=(",", ":"))
     return attrs
 
 
@@ -337,6 +359,11 @@ async def _import_feed_outline(
         stats["feeds_skipped"] += 1
         return
 
+    # A top-level outline has no folder: file it where feeds of its type live.
+    if category_id is None:
+        category_id = await category_for_feed_type(db, feed_type)
+    # The outline's own tuning wins; the category's defaults fill the rest.
+    pipeline = await new_feed_settings(db, category_id, {f: extras.pop(f, None) for f in FEED_DEFAULT_FIELDS})
     feed = Feed(
         title=title,
         url=xml_url,
@@ -345,6 +372,7 @@ async def _import_feed_outline(
         category_id=category_id,
         custom_title=title if title != xml_url else None,
         **extras,
+        **pipeline,
     )
     db.add(feed)
     await db.flush()

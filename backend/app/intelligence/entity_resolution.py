@@ -402,6 +402,86 @@ _SCRIPT_TOOL_ALLOWLIST = frozenset(
 )
 
 
+# Concepts the model hands back as "tools": hash algorithms, vulnerability
+# classes, protocols and generic words. None names software anyone wields,
+# and once one is a tool row the autolinker tags it on every article that
+# uses the word (SHA-256 and "Payload" sat on thousands of advisory entries).
+# Never a tool for an automated source; the manual UI warns and can override.
+TOOL_CONCEPT_NAMES = (
+    # hashes, ciphers, encodings
+    "SHA-1",
+    "SHA-256",
+    "SHA-512",
+    "MD5",
+    "AES",
+    "Base64",
+    # vulnerability and attack classes
+    "SQL injection",
+    "SQLi",
+    "XSS",
+    "Cross-site scripting",
+    "CSRF",
+    "SSRF",
+    "RCE",
+    "Remote code execution",
+    "Command injection",
+    "Buffer overflow",
+    "Path traversal",
+    "Directory traversal",
+    "Use-after-free",
+    "Deserialization",
+    "Privilege escalation",
+    # protocols, formats, interfaces
+    "WebSocket",
+    "HTTP",
+    "HTTPS",
+    "JSON",
+    "XML",
+    "API",
+    "SPI",
+    "DNS",
+    "TLS",
+    "SSL",
+    # generic words
+    "debug",
+    "debugger",
+    "payload",
+    "payloads",
+    "exploit",
+    "shellcode",
+    "backdoor",
+    "script",
+)
+_TOOL_CONCEPT_NORMS = frozenset(normalize_entity_name(n, "tool").norm_exact for n in TOOL_CONCEPT_NAMES)
+
+# Software that is legitimately both a product and a tool an intruder wields
+# (remote-access, tunnelling and archive utilities). The product/vendor-name
+# guard below lets these become tools; everything else already on file as a
+# product or vendor stays one. Lowercased compare.
+DUAL_USE_TOOL_NAMES = frozenset(
+    {
+        "metasploit",
+        "anydesk",
+        "autoit",
+        "winrar",
+        "wireguard",
+        "openvpn",
+        "fortigate",
+        "forest druid",
+        "ansible",
+        "ngrok",
+        "rclone",
+        "tailscale",
+        "netsupport manager",
+    }
+)
+
+
+def is_tool_concept_name(name: str) -> bool:
+    """True when ``name`` is a concept word that must never be a tool."""
+    return normalize_entity_name(name or "", "tool").norm_exact in _TOOL_CONCEPT_NORMS
+
+
 def _shared_junk_reason(name: str, norm: NormalizedName) -> str | None:
     if len(norm.norm_exact) < 3:
         return "too_short"
@@ -457,6 +537,8 @@ def _tool_junk_reason(name: str) -> str | None:
         return "mitre_technique"
     if _PHYSICAL_OBJECT_RE.search(stripped):
         return "physical_object"
+    if is_tool_concept_name(stripped):
+        return "concept_term"
 
     # --- Semantic gates (2026-09). File shapes first: the extension checks
     # must win before the dotted-symbol rules, which would otherwise claim
@@ -941,12 +1023,19 @@ async def resolve_entity_creation(
     source: str = "ai",
     entry_id: uuid.UUID | None = None,
     override: bool = False,
+    link_only: bool = False,
 ) -> ResolutionDecision:
     """Resolve an incoming entity name before creation. See ResolutionDecision.
 
     ``override=True`` is reserved for the manual UI's logged "create anyway" —
     it bypasses enforced gates (never the matchers) and writes a
     ``creation_override`` log row. Automated sources must not pass it.
+
+    ``link_only=True`` runs every matcher (exact, normalized, known alias,
+    tombstone, cross-type survivor) but never answers ``create``: where the
+    name would have minted a new entity the decision is ``blocked`` with
+    reason ``creation_disabled``. Used by a feed whose "create records for
+    new tools" switch is off — existing tools still link.
     """
     model = RESOLVED_MODELS.get(entity_type)
     if model is None:
@@ -1124,6 +1213,60 @@ async def resolve_entity_creation(
         )
         return ResolutionDecision(action="blocked", reason="generic_name:cve_id")
 
+    # --- 3e. Tool names that belong to another catalog --------------------
+    # A concept word (SHA-256, SQL injection, payload) is never a tool, and a
+    # name already on file as a product or vendor (Linux, Chrome, Kubernetes)
+    # is that product or vendor: advisory text names it as affected software,
+    # and a tool row holding the same string makes the autolinker tag it twice
+    # on every article. Enforced for automated sources whatever the gate mode;
+    # the manual UI goes through the gates below (concept_term /
+    # cross_type_hit), where an analyst can override.
+    if source != "manual" and entity_type == "tool":
+        if is_tool_concept_name(name):
+            _log(
+                db,
+                entity_type=entity_type,
+                action="resolution_blocked",
+                mode="apply",
+                applied=True,
+                before=ctx,
+                after={"reason": "generic_name:concept_term"},
+                reasoning=f"blocked creation of tool '{name}': a concept, not software anyone wields",
+            )
+            return ResolutionDecision(action="blocked", reason="generic_name:concept_term")
+        if name.lower() not in DUAL_USE_TOOL_NAMES and len(norm.norm_exact) >= 3:
+            owners = (
+                await db.execute(
+                    select(EntityAliasIndex.entity_type, EntityAliasIndex.entity_id)
+                    .where(
+                        EntityAliasIndex.entity_type.in_(("product", "vendor")),
+                        EntityAliasIndex.normalized == norm.norm_exact,
+                    )
+                    .distinct()
+                )
+            ).all()
+            if owners:
+                # Products first: "Chrome" as both a product and a vendor alias
+                # is the product.
+                owners.sort(key=lambda o: o.entity_type != "product")
+                survivor = (owners[0].entity_type, owners[0].entity_id)
+                _log(
+                    db,
+                    entity_type=entity_type,
+                    action="resolution_held",
+                    mode="apply",
+                    applied=True,
+                    before=ctx,
+                    after={
+                        "reason": "product_or_vendor_name",
+                        "owners": [{"entity_type": o.entity_type, "entity_id": str(o.entity_id)} for o in owners],
+                    },
+                    reasoning=(
+                        f"held creation of tool '{name}': already on file as a {survivor[0]}; linking to it instead"
+                    ),
+                )
+                return ResolutionDecision(action="held", reason="product_or_vendor_name", link_target=survivor)
+
     # --- 4. Creation gates (Phase 2) ---------------------------------------
     mode = gates_mode()
     gate_reason: str | None = None
@@ -1181,6 +1324,22 @@ async def resolve_entity_creation(
             gate_reason = candidates[0]["kind"]
             gate_detail = {"candidates": candidates}
             gate_action = "held"
+
+    # --- 4b. Link-only callers stop here ----------------------------------
+    # An enforced hold with a survivor still links; anything that would have
+    # gone on to create (clear, or a shadow-mode gate) does not.
+    if link_only and (gate_reason is None or mode == "shadow"):
+        _log(
+            db,
+            entity_type=entity_type,
+            action="resolution_blocked",
+            mode="apply",
+            applied=True,
+            before=ctx,
+            after={"reason": "creation_disabled"},
+            reasoning=f"'{name}' matched no existing {entity_type}, and creating one is switched off for this source",
+        )
+        return ResolutionDecision(action="blocked", reason="creation_disabled")
 
     if gate_reason is not None:
         if override:

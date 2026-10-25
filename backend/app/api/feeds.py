@@ -21,13 +21,23 @@ from app.schemas.feed import (
     BulkCategoryUpdateRequest,
     BulkExcludeShortsRequest,
     BulkIntelModeRequest,
+    FeedAIUsageResponse,
     FeedCreateRequest,
     FeedDiscoverRequest,
     FeedPushRequest,
     FeedResponse,
     FeedUpdateRequest,
+    TitleFilterPreviewRequest,
+    TitleFilterPreviewResponse,
+)
+from app.services.feed_defaults import (
+    FEED_DEFAULT_FIELDS,
+    category_for_feed_type,
+    clean_defaults,
+    new_feed_settings,
 )
 from app.services.feed_discovery import discover_feed
+from app.services.feed_fetch_health import clear_pause, health_warning, pause_reason, strip_client_keys
 from app.services.feed_visibility import (
     ensure_subscription,
     get_subscription,
@@ -37,6 +47,7 @@ from app.services.feed_visibility import (
     subscriptions_enabled,
     visible_feed_ids_query,
 )
+from app.services.title_filter import matching_pattern, normalize_patterns, parse_patterns
 
 # Extended adapter feed types that skip URL discovery. Derived from the adapter
 # registry rather than hand-listed: the update endpoint's own copy of a feed-type
@@ -263,14 +274,23 @@ async def create_feed(
             return resp
         raise AppError(code="conflict", message="A feed with this URL already exists", status_code=409)
 
+    async def placement(feed_type: str) -> tuple[uuid.UUID | None, dict]:
+        """The category (the request's, else the one this feed type usually
+        lives in) and the pipeline settings: what the request names, then that
+        category's defaults, then the column defaults."""
+        category_id = request.category_id or await category_for_feed_type(db, feed_type)
+        explicit = {field: getattr(request, field) for field in FEED_DEFAULT_FIELDS}
+        return category_id, await new_feed_settings(db, category_id, explicit)
+
     # Extended adapters (github_repo, etc.) skip URL discovery
     if request.feed_type and request.feed_type in _EXTENDED_FEED_TYPES:
-        adapter_config = request.adapter_config or {}
+        adapter_config = strip_client_keys(request.adapter_config) or {}
         if request.feed_type == "telegram":
             adapter_config = _normalize_telegram_config(adapter_config)
         if request.feed_type == "bluesky":
             adapter_config = _encrypt_bluesky_app_password(adapter_config)
             await _validate_bluesky_author_entity(adapter_config, db)
+        category_id, pipeline = await placement(request.feed_type)
         defaults = _EXTENDED_FEED_DEFAULTS.get(request.feed_type, {})
         default_interval = defaults.get("interval", 30)
         default_relevance = defaults.get("relevance_rating")
@@ -280,13 +300,11 @@ async def create_feed(
             feed_type=request.feed_type,
             fetch_interval_minutes=request.fetch_interval_minutes or default_interval,
             adapter_config=adapter_config,
-            intel_extraction_mode=request.intel_extraction_mode or "selective",
-            auto_extract_on_ingest=request.auto_extract_on_ingest or False,
-            extract_detection_rules=request.extract_detection_rules or False,
-            extract_tools=True if request.extract_tools is None else request.extract_tools,
-            category_id=request.category_id,
+            **pipeline,
+            category_id=category_id,
             custom_title=request.custom_title,
             relevance_rating=default_relevance,
+            exclude_title_patterns=normalize_patterns(request.exclude_title_patterns),
         )
         db.add(feed)
         await db.flush()
@@ -300,6 +318,7 @@ async def create_feed(
                 status_code=422,
             )
 
+        category_id, pipeline = await placement(discovered.feed_type)
         adapter_config = {}
         # Shorts are noise for an intel feed, so the per-user default is on
         # unless the user switched it off (Settings → Feeds).
@@ -313,12 +332,10 @@ async def create_feed(
             description=discovered.description,
             fetch_interval_minutes=request.fetch_interval_minutes or 30,
             adapter_config=adapter_config,
-            intel_extraction_mode=request.intel_extraction_mode or "selective",
-            auto_extract_on_ingest=request.auto_extract_on_ingest or False,
-            extract_detection_rules=request.extract_detection_rules or False,
-            extract_tools=True if request.extract_tools is None else request.extract_tools,
-            category_id=request.category_id,
+            **pipeline,
+            category_id=category_id,
             custom_title=request.custom_title,
+            exclude_title_patterns=normalize_patterns(request.exclude_title_patterns),
         )
         db.add(feed)
         await db.flush()
@@ -555,9 +572,29 @@ async def bulk_update_category_feeds(
     user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Bulk update settings on all feeds in a category."""
-    result = await db.execute(select(Feed).where(Feed.category_id == category_id))
-    feeds = result.scalars().all()
+    """Bulk update settings on the feeds in a category now, and optionally
+    save the pipeline settings as the category's defaults for feeds added later.
+
+    ``apply_to_feeds=false`` with ``save_as_category_default=true`` only edits
+    the defaults. Only the five pipeline fields can be defaults; fetch interval,
+    retention and ratings apply to the current feeds alone.
+    """
+    from app.models.category import Category
+
+    category = await db.get(Category, category_id)
+    if category is None:
+        raise AppError(code="not_found", message="Category not found", status_code=404)
+
+    if request.save_as_category_default:
+        merged = dict(category.feed_defaults or {})
+        merged.update(clean_defaults({field: getattr(request, field) for field in FEED_DEFAULT_FIELDS}))
+        category.feed_defaults = merged
+        db.add(category)
+
+    feeds = []
+    if request.apply_to_feeds:
+        result = await db.execute(select(Feed).where(Feed.category_id == category_id))
+        feeds = result.scalars().all()
 
     updated = 0
     for feed in feeds:
@@ -580,6 +617,7 @@ async def bulk_update_category_feeds(
             and feed.extract_detection_rules != request.extract_detection_rules
         ):
             feed.extract_detection_rules = request.extract_detection_rules
+            changed = True
         if request.extract_tools is not None and feed.extract_tools != request.extract_tools:
             feed.extract_tools = request.extract_tools
             changed = True
@@ -610,7 +648,7 @@ async def bulk_update_category_feeds(
             updated += 1
 
     await db.flush()
-    return {"updated": updated}
+    return {"updated": updated, "feed_defaults": clean_defaults(category.feed_defaults)}
 
 
 @router.get("/health")
@@ -642,6 +680,7 @@ async def get_feed_health(
     erroring = []
     disabled = []
     dead = []
+    empty = []
 
     for feed in feeds:
         feed_info = {
@@ -656,6 +695,8 @@ async def get_feed_health(
             "error_since": feed.error_since.isoformat() if feed.error_since else None,
             "failing_for_days": (now - feed.error_since).days if feed.error_since else None,
             "auto_paused_at": feed.auto_paused_at.isoformat() if feed.auto_paused_at else None,
+            "pause_reason": pause_reason(feed),
+            "health_warning": health_warning(feed),
         }
 
         if not feed.is_active:
@@ -664,13 +705,17 @@ async def get_feed_health(
             (dead if feed.auto_paused_at else disabled).append(feed_info)
         elif feed.error_count and feed.error_count >= 3:
             erroring.append(feed_info)
+        elif feed_info["health_warning"]:
+            # Answers 200 but has stopped delivering items (a feed URL that
+            # redirects to a landing page, or an empty channel).
+            empty.append(feed_info)
         elif not feed.last_fetched_at or feed.last_fetched_at < stale_cutoff:
             feed_info["days_since_fetch"] = (now - feed.last_fetched_at).days if feed.last_fetched_at else None
             stale.append(feed_info)
         else:
             healthy.append(feed_info)
 
-    listed = stale + erroring + disabled + dead
+    listed = stale + erroring + disabled + dead + empty
     await _attach_reach(db, listed, user)
 
     return {
@@ -680,12 +725,14 @@ async def get_feed_health(
             "erroring": len(erroring),
             "disabled": len(disabled),
             "dead": len(dead),
+            "empty": len(empty),
             "total": len(feeds),
         },
         "stale_feeds": stale,
         "erroring_feeds": erroring,
         "disabled_feeds": disabled,
         "dead_feeds": dead,
+        "empty_feeds": empty,
     }
 
 
@@ -758,6 +805,7 @@ async def resume_feed(
         raise AppError(code="not_found", message="Feed not found", status_code=404)
     feed.is_active = True
     feed.auto_paused_at = None
+    clear_pause(feed)
     feed.error_count = 0
     feed.last_error = None
     feed.error_since = None
@@ -838,6 +886,7 @@ async def update_feed(
         "auto_extract_on_ingest",
         "extract_detection_rules",
         "extract_tools",
+        "exclude_title_patterns",
     )
     # `model_fields_set` rather than a None check: for the nullable fields below,
     # None is a real value ("uncategorized", "keep forever") and must not be
@@ -901,6 +950,10 @@ async def update_feed(
             per_user_paused = not request.is_active
         else:
             feed.is_active = request.is_active
+            if request.is_active:
+                # Turned back on by a person: the health check's pause is over.
+                feed.auto_paused_at = None
+                clear_pause(feed)
     if request.fetch_interval_minutes is not None:
         feed.fetch_interval_minutes = request.fetch_interval_minutes
     if request.exclude_shorts is not None and feed.feed_type == "youtube":
@@ -910,7 +963,9 @@ async def update_feed(
     if request.adapter_config is not None:
         old_config = dict(feed.adapter_config or {})
         config = dict(old_config)
-        config.update(request.adapter_config)
+        # fetch_health is server-owned; a modal echoing back a stale copy
+        # must not overwrite what the fetcher learned since.
+        config.update(strip_client_keys(request.adapter_config))
         if feed.feed_type == "telegram":
             config = _normalize_telegram_config(config)
         # Bluesky: encrypt new plaintext app_password; preserve existing if blank/masked.
@@ -977,6 +1032,8 @@ async def update_feed(
         feed.extract_detection_rules = request.extract_detection_rules
     if request.extract_tools is not None:
         feed.extract_tools = request.extract_tools
+    if "exclude_title_patterns" in sent:
+        feed.exclude_title_patterns = normalize_patterns(request.exclude_title_patterns)
 
     db.add(feed)
     await db.flush()
@@ -1290,6 +1347,98 @@ async def get_feed_pipeline(
     from app.pipeline.plans import explain_feed_plan
 
     return await explain_feed_plan(db, feed)
+
+
+@router.get("/{feed_id}/ai-usage", response_model=FeedAIUsageResponse)
+async def get_feed_ai_usage(
+    feed_id: uuid.UUID = Path(..., description="UUID of the feed"),
+    days: int = Query(30, ge=1, le=365, description="Window in days."),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """AI calls made on this feed's articles over the last ``days``.
+
+    Muting a feed only hides it from reading views — the pipeline, AI included,
+    runs on every article regardless, and with per-user subscriptions one
+    reader's mute must not switch the AI off for everyone. The feed modal shows
+    this next to a muted feed so the cost is visible, with an admin's
+    "Turn off AI for this feed" beside it.
+
+    ``runs`` counts calls that moved tokens; an analysis reused from a
+    near-duplicate article is ledgered at zero tokens and is not a call.
+    """
+    from datetime import timedelta
+
+    from sqlalchemy import and_, or_
+
+    from app.models.ai_result import AIResult
+
+    feed = await db.get(Feed, feed_id)
+    if not feed:
+        raise AppError(code="not_found", message="Feed not found", status_code=404)
+
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    feed_entries = select(Entry.id).where(Entry.feed_id == feed_id)
+    tokens = func.coalesce(AIResult.tokens_input, 0) + func.coalesce(AIResult.tokens_output, 0)
+    row = (
+        await db.execute(
+            select(
+                func.count(AIResult.id).filter(tokens > 0),
+                func.coalesce(func.sum(AIResult.tokens_input), 0),
+                func.coalesce(func.sum(AIResult.tokens_output), 0),
+                func.max(AIResult.created_at).filter(tokens > 0),
+            ).where(
+                AIResult.created_at >= cutoff,
+                or_(
+                    AIResult.entry_id.in_(feed_entries),
+                    and_(
+                        AIResult.entry_id.is_(None),
+                        AIResult.target_type == "entry",
+                        AIResult.target_id.in_(feed_entries),
+                    ),
+                ),
+            )
+        )
+    ).one()
+    return FeedAIUsageResponse(
+        feed_id=feed_id,
+        days=days,
+        runs=row[0] or 0,
+        tokens_input=int(row[1] or 0),
+        tokens_output=int(row[2] or 0),
+        last_run_at=row[3],
+        ai_analysis_enabled=feed.ai_analysis_enabled,
+    )
+
+
+@router.post("/{feed_id}/title-filter/preview", response_model=TitleFilterPreviewResponse)
+async def preview_title_filter(
+    feed_id: uuid.UUID = Path(..., description="UUID of the feed"),
+    request: TitleFilterPreviewRequest = Body(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """How many of this feed's last 100 titles an exclude-title list would drop.
+
+    Validates the list exactly as saving it would (422 on a bad line), so the
+    modal can show both the error and the count before anything is stored.
+    Nothing is written: articles already saved stay, and the filter only acts
+    on what arrives after it is saved.
+    """
+    feed = await db.get(Feed, feed_id)
+    if not feed:
+        raise AppError(code="not_found", message="Feed not found", status_code=404)
+
+    patterns = parse_patterns(normalize_patterns(request.exclude_title_patterns))
+    rows = await db.execute(
+        select(Entry.title)
+        .where(Entry.feed_id == feed_id)
+        .order_by(Entry.published_at.desc().nulls_last(), Entry.fetched_at.desc())
+        .limit(100)
+    )
+    titles = [t for (t,) in rows.all()]
+    dropped = [t for t in titles if matching_pattern(t, patterns)]
+    return TitleFilterPreviewResponse(checked=len(titles), dropped=len(dropped), examples=dropped[:5])
 
 
 @router.get("/{feed_id}/value")

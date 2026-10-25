@@ -24,6 +24,7 @@ import type { Category, Feed, SidebarSectionId } from "@/api/types";
 import { BrandButton } from "./BrandButton";
 import styles from "./Sidebar.module.css";
 import { promptDialog } from "@/utils/dialog";
+import { describeHealthWarning, describePauseReason } from "@/utils/feedHealth";
 
 /** Where the footer link points. Hard-coded upstream — a fork edits one line. */
 const REPO_URL = "https://github.com/a-oneil/IntelFeed";
@@ -1200,7 +1201,11 @@ function FeedItem({
       lines.push(`Every ${m < 60 ? `${m}m` : m % 60 === 0 ? `${m / 60}h` : `${Math.round((m / 60) * 10) / 10}h`}`);
     }
     if (subscription.language) lines.push(`Language: ${subscription.language}`);
-    if (!subscription.is_active) lines.push("Paused");
+    if (!subscription.is_active) {
+      lines.push(subscription.pause_reason ? describePauseReason(subscription.pause_reason) : "Paused");
+    } else if (subscription.health_warning) {
+      lines.push(describeHealthWarning(subscription.health_warning));
+    }
     if (subscription.is_muted) lines.push("Muted");
     if (subscription.error_count > 0) {
       lines.push(`${subscription.error_count} recent error${subscription.error_count !== 1 ? "s" : ""}`);

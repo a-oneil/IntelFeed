@@ -24,7 +24,10 @@ from app.models.entry import Entry
 from app.models.entry_media import EntryMedia
 from app.models.feed import Feed
 from app.models.podcast import Podcast
-from app.services.dedup import compute_content_hash
+from app.pipeline.plans import feed_runs_extraction
+from app.services.dedup import compute_content_hash, item_key, url_lookup_pattern
+from app.services.feed_fetch_health import record_auto_pause
+from app.services.js_wall import looks_like_js_wall
 from app.services.sanitizer import extract_first_image, extract_og_image, html_to_text, sanitize_html
 from app.workers.celery_app import celery_app
 from app.workers.db import run_async, worker_session
@@ -44,6 +47,56 @@ FEED_ACCEPT_LANGUAGE = "en-US,en;q=0.9"
 
 # Attempt RSS autodiscovery only after this many consecutive HTTP 404 failures
 FEED_404_AUTODISCOVERY_MIN_FAILURES = 3
+
+# Failure-streak backoff for the poller: each consecutive failure doubles the
+# wait, up to 2**FEED_ERROR_BACKOFF_MAX_DOUBLINGS times the feed's interval and
+# never more than FEED_ERROR_BACKOFF_CAP_MINUTES (unless the interval itself is
+# longer). Without it a blocked feed polled every 7 minutes logs ~5,700 failures
+# before the auto-pause window closes; with it, about 20.
+FEED_ERROR_BACKOFF_MAX_DOUBLINGS = 6
+FEED_ERROR_BACKOFF_CAP_MINUTES = 24 * 60
+
+# Feeds due for a fetch. The interval stretches while a failure streak runs
+# (see the backoff constants above) and snaps back on the first clean fetch.
+DUE_FEEDS_SQL = f"""
+    SELECT id FROM feeds
+    WHERE is_active = TRUE
+    -- With per-user subscriptions on, a feed every reader has paused
+    -- has nobody to deliver to, so stop paying to fetch it. One
+    -- un-paused reader is enough to keep it running for the pool.
+    AND (NOT :per_user OR EXISTS (
+            SELECT 1 FROM user_feed_subscriptions s
+            WHERE s.feed_id = feeds.id AND s.is_paused = FALSE))
+    AND (last_fetched_at IS NULL
+         OR NOW() > last_fetched_at + (
+            CASE WHEN COALESCE(error_count, 0) > 0
+                 THEN GREATEST(
+                        fetch_interval_minutes,
+                        LEAST({FEED_ERROR_BACKOFF_CAP_MINUTES},
+                              fetch_interval_minutes
+                              * (1 << LEAST(error_count, {FEED_ERROR_BACKOFF_MAX_DOUBLINGS}))))
+                 ELSE fetch_interval_minutes
+            END || ' minutes')::interval)
+    ORDER BY last_fetched_at ASC NULLS FIRST
+    LIMIT 50
+"""
+
+# Statuses a bot wall answers with. 403 always triggers the curl_cffi retry;
+# 429/503 only when the body looks like a challenge page, since both are also
+# honest "slow down" / "down for maintenance" answers.
+_BLOCKED_STATUS = 403
+_CHALLENGE_STATUSES = frozenset({429, 503})
+_CHALLENGE_MARKERS = (
+    "just a moment",
+    "cf-chl",
+    "challenge-platform",
+    "attention required",
+    "_incapsula_",
+    "captcha",
+    "access denied",
+    "bot detection",
+)
+FEED_FETCH_TIMEOUT = 30.0
 
 # "HTTP 4xx" as written by the fetchers below. Only client errors count as a
 # dead feed: a 5xx or a timeout is the publisher's bad day, not a moved feed.
@@ -87,6 +140,7 @@ async def _auto_pause_dead_feeds(db: AsyncSession, pause_days: int) -> int:
             continue
         feed.is_active = False
         feed.auto_paused_at = datetime.now(UTC)
+        record_auto_pause(feed)
         db.add(feed)
         paused += 1
         logger.warning(
@@ -113,6 +167,83 @@ async def _resolve_user_agent(db: AsyncSession) -> str:
     except Exception:
         logger.debug("Failed to read user_agent from system settings, using env default", exc_info=True)
     return settings.user_agent
+
+
+def _looks_blocked(response) -> bool:
+    """A bot wall rather than a real answer about the feed."""
+    status = response.status_code
+    if status == _BLOCKED_STATUS:
+        return True
+    if status in _CHALLENGE_STATUSES:
+        try:
+            body = (response.text or "")[:4000].lower()
+        except Exception:
+            return False
+        return any(marker in body for marker in _CHALLENGE_MARKERS)
+    return False
+
+
+async def _curl_get_feed(url: str, headers: dict[str, str]):
+    """GET through curl_cffi impersonating Chrome. The impersonation sets its
+    own User-Agent to match the TLS fingerprint it presents, so ours is
+    dropped; Accept and the conditional headers go through."""
+    curl_headers = {k: v for k, v in headers.items() if k.lower() != "user-agent"}
+    return await safe_curl_get(url, impersonate="chrome", timeout=FEED_FETCH_TIMEOUT, headers=curl_headers)
+
+
+async def _get_feed_response(feed: Feed, client: httpx.AsyncClient, headers: dict[str, str]):
+    """GET the feed with whichever client last worked for it, retrying once
+    with the other when the answer is a bot wall (or, for curl_cffi, an error).
+
+    Some publishers (CISA) refuse Python's TLS handshake whatever the headers
+    while answering curl. The client that got a 200/304 is remembered in
+    adapter_config so later polls go straight to it. Raises httpx.HTTPError
+    when httpx was the last resort and it failed.
+    """
+    from app.services.feed_fetch_health import CLIENT_CURL, CLIENT_HTTPX, preferred_client, remember_client
+
+    first = preferred_client(feed)
+    second = CLIENT_HTTPX if first == CLIENT_CURL else CLIENT_CURL
+
+    async def attempt(name: str):
+        if name == CLIENT_HTTPX:
+            return await client.get(feed.url)
+        return await _curl_get_feed(feed.url, headers)
+
+    if first == CLIENT_HTTPX:
+        response = await attempt(first)  # httpx errors propagate as before
+        if not _looks_blocked(response):
+            return response
+    else:
+        try:
+            response = await attempt(first)
+        except Exception as e:
+            logger.info("Feed %s: curl_cffi fetch failed (%s), trying httpx", feed.id, e)
+            response = await attempt(second)  # last resort: errors propagate
+            if response.status_code in (200, 304):
+                remember_client(feed, second)
+            return response
+        if not _looks_blocked(response):
+            return response
+
+    try:
+        retry = await attempt(second)
+    except Exception as e:
+        logger.info("Feed %s: %s fallback after HTTP %s failed: %s", feed.id, second, response.status_code, e)
+        return response
+    if retry.status_code in (200, 304):
+        logger.info(
+            "Feed %s: %s answered HTTP %s, %s got %s; using %s from now on",
+            feed.id,
+            first,
+            response.status_code,
+            second,
+            retry.status_code,
+            second,
+        )
+        remember_client(feed, second)
+        return retry
+    return response if _looks_blocked(retry) else retry
 
 
 def _feed_request_headers(user_agent: str) -> dict[str, str]:
@@ -242,23 +373,7 @@ async def _poll_due_feeds():
         from app.services.feed_visibility import subscriptions_enabled
 
         per_user = await subscriptions_enabled(db)
-        result = await db.execute(
-            text("""
-                SELECT id FROM feeds
-                WHERE is_active = TRUE
-                -- With per-user subscriptions on, a feed every reader has paused
-                -- has nobody to deliver to, so stop paying to fetch it. One
-                -- un-paused reader is enough to keep it running for the pool.
-                AND (NOT :per_user OR EXISTS (
-                        SELECT 1 FROM user_feed_subscriptions s
-                        WHERE s.feed_id = feeds.id AND s.is_paused = FALSE))
-                AND (last_fetched_at IS NULL
-                     OR NOW() > last_fetched_at + (fetch_interval_minutes || ' minutes')::interval)
-                ORDER BY last_fetched_at ASC NULLS FIRST
-                LIMIT 50
-            """),
-            {"per_user": per_user},
-        )
+        result = await db.execute(text(DUE_FEEDS_SQL), {"per_user": per_user})
         feed_ids = [str(row[0]) for row in result.all()]
 
     # Deduplicate: skip feeds that already have a pending/active fetch
@@ -310,6 +425,28 @@ def fetch_feed(self, feed_id: str):
             logger.warning("Failed to release feed_fetch lock for %s", feed_id, exc_info=True)
 
 
+def _title_is_placeholder(feed: Feed) -> bool:
+    """No real name yet: blank, or the URL a feed created without one is titled with.
+
+    The first fetch then names the feed after what the source calls itself.
+    """
+    return not feed.title or feed.title == feed.url
+
+
+def _drop_excluded_titles(feed: Feed, parsed_entries: list) -> list:
+    """Remove articles whose title matches the feed's exclude-title list.
+
+    Runs before anything is stored, on every ingest path, so an excluded title
+    never reaches tagging, the AI, scoring or search.
+    """
+    from app.services.title_filter import partition_by_title
+
+    kept, dropped = partition_by_title(parsed_entries, feed.exclude_title_patterns)
+    if dropped:
+        logger.info("Feed %s: title filter dropped %d of %d entries", feed.id, len(dropped), len(parsed_entries))
+    return kept
+
+
 async def _fetch_feed(feed_id: str):
     fetch_start = _time.monotonic()
     async with _get_worker_session() as db:
@@ -356,11 +493,11 @@ async def _fetch_feed(feed_id: str):
 
         async with safe_async_client(
             follow_redirects=True,
-            timeout=30.0,
+            timeout=FEED_FETCH_TIMEOUT,
             headers=headers,
         ) as client:
             try:
-                response = await client.get(feed.url)
+                response = await _get_feed_response(feed, client, headers)
             except httpx.HTTPError as e:
                 _note_fetch_error(feed, str(e))
                 db.add(feed)
@@ -442,6 +579,19 @@ async def _fetch_feed(feed_id: str):
         adapter = get_adapter(feed.feed_type)
         feed_meta, parsed_entries = adapter.parse_entries(feed.url, response.text)
 
+        # Reachable but empty: a feed URL that now redirects to a landing page,
+        # or a feed that answers 200 with no items, never errors — it just
+        # stops delivering. Note it so the Feeds view can say so.
+        if feed.feed_type in ("rss", "atom", "podcast"):
+            from app.services.feed_fetch_health import note_items
+
+            note_items(
+                feed,
+                len(parsed_entries),
+                final_url=str(getattr(response, "url", "") or ""),
+                content_type=response.headers.get("content-type"),
+            )
+
         # Detect silent failure: rss/atom feed responding with HTML body and no entries.
         # Happens when the feed URL has been deprecated and now serves the site's HTML page.
         if feed.feed_type in ("rss", "atom") and not parsed_entries:
@@ -470,8 +620,12 @@ async def _fetch_feed(feed_id: str):
         new_entries = 0
         new_entry_ids = []
 
+        # The feed's exclude-title list goes first: a dropped title costs no
+        # guid lookup, and is re-dropped the same way on every later fetch.
+        parsed_entries = _drop_excluded_titles(feed, parsed_entries)
+
         # Pre-filter to only new entries (skip existing GUIDs and intra-batch dupes)
-        new_parsed_entries = []
+        guid_misses = []
         seen_guids = set()
         for parsed in parsed_entries:
             if parsed.guid in seen_guids:
@@ -480,7 +634,29 @@ async def _fetch_feed(feed_id: str):
             existing = await db.execute(select(Entry).where(Entry.feed_id == feed.id, Entry.guid == parsed.guid))
             if existing.scalar_one_or_none():
                 continue
+            guid_misses.append(parsed)
+
+        # Same-feed URL dedup: a guid miss whose link, title and enclosure match a
+        # row this feed already has is that article under a churned guid. Skip it,
+        # refreshing the stored row if the feed's text for it changed.
+        new_parsed_entries = []
+        refreshed_entries = 0
+        existing_by_key = await _existing_entries_by_item_key(db, feed.id, guid_misses)
+        seen_item_keys = set()
+        for parsed in guid_misses:
+            key = _parsed_item_key(parsed)
+            if key is not None:
+                if key in seen_item_keys:
+                    continue
+                seen_item_keys.add(key)
+                existing_id = existing_by_key.get(key)
+                if existing_id is not None:
+                    if await _refresh_same_url_entry(db, feed, existing_id, parsed):
+                        refreshed_entries += 1
+                    continue
             new_parsed_entries.append(parsed)
+        if refreshed_entries:
+            logger.info("Feed %s: refreshed %d same-URL entries in place", feed.id, refreshed_entries)
 
         # Filter out YouTube Shorts from new entries only
         if feed.feed_type == "youtube" and feed.adapter_config.get("exclude_shorts") and new_parsed_entries:
@@ -527,7 +703,7 @@ async def _fetch_feed(feed_id: str):
                 content_text_plain = html_to_text(content_html) if content_html else ""
                 is_truncated = bool(re.search(r"Continue reading on .+\s*»", content_text_plain))
                 if is_truncated or len(content_text_plain) < 500:
-                    extracted, og_image = await _extract_full_text(parsed.url)
+                    extracted, og_image = await _extract_full_text(parsed.url, feed_id=feed.id)
                     fulltext_extraction_count += 1
                     if extracted:
                         content_html = extracted
@@ -629,7 +805,7 @@ async def _fetch_feed(feed_id: str):
         _note_fetch_success(feed)
 
         # Update feed title/description from parsed metadata
-        if feed_meta.title and not feed.title:
+        if feed_meta.title and _title_is_placeholder(feed):
             feed.title = feed_meta.title
         if feed_meta.description and not feed.description:
             feed.description = feed_meta.description
@@ -666,7 +842,7 @@ async def _fetch_feed(feed_id: str):
                 logger.warning("Failed to dispatch automation tasks for feed %s", feed.id, exc_info=True)
 
             # Dispatch entry processing pipeline (translate? → autolink + extraction → post-processing)
-            run_extraction = bool(feed.auto_extract_on_ingest or feed.extract_detection_rules)
+            run_extraction = feed_runs_extraction(feed)
             try:
                 from app.pipeline.plans import resolve_feed_plan
 
@@ -681,6 +857,98 @@ async def _fetch_feed(feed_id: str):
                     )
             except Exception:
                 logger.warning("Failed to dispatch entry pipeline for feed %s", feed.id, exc_info=True)
+
+
+def _parsed_item_key(parsed) -> tuple | None:
+    return item_key(parsed.url, parsed.title, parsed.media.url if parsed.media else None)
+
+
+async def _existing_entries_by_item_key(db: AsyncSession, feed_id, parsed_items: list) -> dict[tuple, object]:
+    """Map item key -> id of this feed's earliest stored entry with that key.
+
+    One query per fetch, and only when the fetch has guid misses. There is no
+    index on entries.url; the planner uses ix_entries_feed_id, so the ILIKE
+    filter runs over this feed's rows only (a few thousand at most), never the
+    whole table. Each hit is re-normalised in Python and compared exactly.
+    """
+    patterns = sorted({url_lookup_pattern(key[0]) for p in parsed_items if (key := _parsed_item_key(p))})
+    if not patterns:
+        return {}
+    from sqlalchemy import or_
+
+    rows = []
+    for i in range(0, len(patterns), 100):
+        chunk = patterns[i : i + 100]
+        result = await db.execute(
+            select(Entry.id, Entry.url, Entry.title, Entry.created_at).where(
+                Entry.feed_id == feed_id,
+                or_(*[Entry.url.ilike(p, escape="\\") for p in chunk]),
+            )
+        )
+        rows.extend(result.all())
+    if not rows:
+        return {}
+    media_rows = await db.execute(
+        select(EntryMedia.entry_id, EntryMedia.url).where(EntryMedia.entry_id.in_([r.id for r in rows]))
+    )
+    enclosures: dict = {}
+    for entry_id, media_url in media_rows.all():
+        enclosures.setdefault(entry_id, []).append(media_url)
+
+    found: dict[tuple, object] = {}
+    for row in sorted(rows, key=lambda r: (r.created_at, str(r.id))):
+        for enclosure in enclosures.get(row.id) or [None]:
+            key = item_key(row.url, row.title, enclosure)
+            if key is not None:
+                found.setdefault(key, row.id)
+    return found
+
+
+async def _refresh_same_url_entry(db: AsyncSession, feed: Feed, entry_id, parsed) -> bool:
+    """Update a stored entry from a re-listed copy of it, if the feed's text changed.
+
+    Only a substantive feed body replaces the stored one: a stub (under 500
+    characters, or "Continue reading on …") is what triggers full-text
+    extraction at insert, so the stored row may hold the full article and must
+    not be overwritten with the teaser.
+    """
+    content_html = parsed.content_html or ""
+    content_text = html_to_text(content_html) if content_html else ""
+    if len(content_text) < 500 or re.search(r"Continue reading on .+\s*»", content_text):
+        return False
+    content_hash = compute_content_hash(parsed.title, content_text)
+    entry = await db.get(Entry, entry_id)
+    if entry is None or entry.content_hash == content_hash:
+        return False
+
+    entry.title = parsed.title
+    entry.content_html = sanitize_html(content_html)
+    entry.content_text = content_text
+    entry.summary = parsed.summary
+    entry.word_count = len(content_text.split())
+    entry.content_hash = content_hash
+    await db.flush()
+
+    from app.services.meilisearch_client import index_entry
+
+    try:
+        index_entry(
+            entry_id=entry.id,
+            feed_id=feed.id,
+            title=entry.title,
+            content_text=entry.content_text,
+            summary=entry.summary,
+            author=entry.author,
+            published_at=entry.published_at.isoformat() if entry.published_at else None,
+            feed_type=feed.feed_type,
+            feed_title=feed.title,
+            url=entry.url,
+            language=entry.language,
+            word_count=entry.word_count,
+        )
+    except Exception:
+        logger.warning("Meilisearch re-index failed for refreshed entry %s", entry.id, exc_info=True)
+    return True
 
 
 async def _create_entry_media(db: AsyncSession, feed: Feed, entry: Entry, parsed) -> None:
@@ -950,6 +1218,7 @@ async def _fetch_extended_feed(db: AsyncSession, feed: Feed) -> None:
 
     new_entries = 0
     new_entry_ids = []
+    parsed_entries = _drop_excluded_titles(feed, parsed_entries)
 
     for parsed in parsed_entries:
         existing = await db.execute(select(Entry).where(Entry.feed_id == feed.id, Entry.guid == parsed.guid))
@@ -1065,7 +1334,7 @@ async def _fetch_extended_feed(db: AsyncSession, feed: Feed) -> None:
     feed.last_fetched_at = datetime.now(UTC)
     _note_fetch_success(feed)
 
-    if feed_meta.title and not feed.title:
+    if feed_meta.title and _title_is_placeholder(feed):
         feed.title = feed_meta.title
     if feed_meta.description and not feed.description:
         feed.description = feed_meta.description
@@ -1135,7 +1404,7 @@ async def _fetch_extended_feed(db: AsyncSession, feed: Feed) -> None:
             logger.warning("Failed to dispatch automation tasks for extended feed %s", feed.id, exc_info=True)
 
         # Dispatch entry processing pipeline (translate? → autolink + extraction → post-processing)
-        run_extraction = bool(feed.auto_extract_on_ingest or feed.extract_detection_rules)
+        run_extraction = feed_runs_extraction(feed)
         try:
             from app.pipeline.plans import resolve_feed_plan
 
@@ -1264,7 +1533,7 @@ async def _probe_telegram_edits_and_deletes(db: AsyncSession, feed: Feed, adapte
         )
 
     # Re-run autolink/extraction for edited entries so derived intel matches new content
-    run_extraction = bool(feed.auto_extract_on_ingest or feed.extract_detection_rules)
+    run_extraction = feed_runs_extraction(feed)
     try:
         from app.pipeline.plans import resolve_feed_plan
 
@@ -1436,12 +1705,46 @@ def _resolve_google_news_url(url: str) -> str | None:
     return None
 
 
-async def _extract_full_text(url: str) -> tuple[str | None, str | None]:
+def _pick_article_content(raw_html: str, is_medium: bool) -> str | None:
+    """Choose the article body from a fetched page: Medium, readability, CSS selectors."""
+    # Medium-specific extraction (readability misses most of their content)
+    if is_medium:
+        content = _extract_medium_article(raw_html)
+        if content:
+            return content
+
+    # Try readability-lxml first
+    from readability import Document
+
+    doc = Document(raw_html)
+    content = doc.summary()
+
+    # Check plain text length (HTML tags inflate char count)
+    if content:
+        plain_len = len(html_to_text(content))
+        if plain_len > 500:
+            return content
+
+    # Readability failed or too short — try CSS selector-based extraction
+    css_content = _extract_with_css_selectors(raw_html)
+    if css_content:
+        return css_content
+
+    # Return readability content if we got anything at all
+    if content and len(html_to_text(content)) > 100:
+        return content
+
+    return None
+
+
+async def _extract_full_text(url: str, feed_id=None) -> tuple[str | None, str | None]:
     """Extract full article text from a URL.
 
     Uses curl_cffi with browser impersonation for sites with bot protection
     (e.g. Medium/Cloudflare), falling back to httpx for other sites.
     Checks robots.txt before fetching. Returns (content_html, og_image) tuple.
+    A JavaScript-only or bot-challenge page yields no content, so the caller
+    keeps the feed's own description instead of the "enable JavaScript" notice.
     """
     from app.services.rate_limiter import acquire_rate_limit
     from app.services.robots import can_fetch, get_crawl_delay
@@ -1509,35 +1812,15 @@ async def _extract_full_text(url: str) -> tuple[str | None, str | None]:
             return None, None
 
         og_image = extract_og_image(raw_html, base_url=url)
-
-        # Medium-specific extraction (readability misses most of their content)
-        if is_medium:
-            content = _extract_medium_article(raw_html)
-            if content:
-                return content, og_image
-
-        # Try readability-lxml first
-        from readability import Document
-
-        doc = Document(raw_html)
-        content = doc.summary()
-
-        # Check plain text length (HTML tags inflate char count)
-        if content:
-            plain_len = len(html_to_text(content))
-            if plain_len > 500:
-                return content, og_image
-
-        # Readability failed or too short — try CSS selector-based extraction
-        css_content = _extract_with_css_selectors(raw_html)
-        if css_content:
-            return css_content, og_image
-
-        # Return readability content if we got anything at all
-        if content and len(html_to_text(content)) > 100:
-            return content, og_image
-
-        return None, og_image
+        content = _pick_article_content(raw_html, is_medium)
+        if content and looks_like_js_wall(content):
+            logger.debug(
+                "Feed %s: %s is a JavaScript-only or bot-check page; keeping the feed's content",
+                feed_id,
+                url,
+            )
+            return None, og_image
+        return content, og_image
 
     except Exception as e:
         logger.debug(f"Full-text extraction failed for {url}: {e}")
@@ -1981,6 +2264,7 @@ async def _full_sync_github_feed(feed_id: str, user_id: str | None = None) -> di
             logger.warning("Failed to publish sync progress event for feed %s", feed_id, exc_info=True)
 
         new_entry_ids = []
+        parsed_entries = _drop_excluded_titles(feed, parsed_entries)
         for parsed in parsed_entries:
             # Double-check GUID uniqueness (adapter already filtered, but be safe)
             dup = await db.execute(select(Entry.id).where(Entry.feed_id == feed.id, Entry.guid == parsed.guid))
@@ -2053,7 +2337,7 @@ async def _full_sync_github_feed(feed_id: str, user_id: str | None = None) -> di
 
         # Dispatch entry processing pipeline for new entries
         if new_entry_ids:
-            run_extraction = bool(feed.auto_extract_on_ingest or feed.extract_detection_rules)
+            run_extraction = feed_runs_extraction(feed)
             try:
                 from app.pipeline.plans import resolve_feed_plan
 

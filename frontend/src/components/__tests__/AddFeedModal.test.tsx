@@ -6,9 +6,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mockMutateAsync = vi.fn();
 const mockDiscoverMutate = vi.fn();
 const mockImportOpml = vi.fn();
+let mockCategories: { id: string; name: string }[] = [];
 
 vi.mock("@/hooks/useFeeds", () => ({
-  useCategories: () => ({ data: [] }),
+  useCategories: () => ({ data: mockCategories }),
   useAddFeed: () => ({
     mutateAsync: mockMutateAsync,
     isPending: false,
@@ -74,6 +75,7 @@ describe("AddFeedModal", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCategories = [];
   });
 
   it("renders the add feed modal with URL input", () => {
@@ -214,5 +216,50 @@ describe("AddFeedModal", () => {
         }),
       })
     );
+  });
+
+  it("requires a category when there are categories to choose from", async () => {
+    const user = userEvent.setup();
+    mockCategories = [{ id: "cat-tg", name: "Telegram" }];
+    mockMutateAsync.mockResolvedValueOnce({});
+    render(<AddFeedModal onClose={onClose} />);
+    await user.click(screen.getByText("Telegram"));
+    await user.type(screen.getByPlaceholderText("@channelname or t.me/channel"), "@chan");
+
+    const subscribeButtons = screen.getAllByText("Subscribe");
+    const subscribe = subscribeButtons[subscribeButtons.length - 1];
+    expect(subscribe).toBeDisabled();
+    expect(screen.queryByRole("option", { name: "Uncategorized" })).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("Category"), "cat-tg");
+    expect(subscribe).toBeEnabled();
+    await user.click(subscribe);
+    expect(mockMutateAsync).toHaveBeenCalledWith(expect.objectContaining({ category_id: "cat-tg" }));
+  });
+
+  it("lets a fresh install with no categories add a feed", async () => {
+    const user = userEvent.setup();
+    render(<AddFeedModal onClose={onClose} />);
+    await user.click(screen.getByText("Telegram"));
+    await user.type(screen.getByPlaceholderText("@channelname or t.me/channel"), "@chan");
+    const subscribeButtons = screen.getAllByText("Subscribe");
+    expect(subscribeButtons[subscribeButtons.length - 1]).toBeEnabled();
+  });
+
+  it("leaves a scraper's name to the page rather than its hostname", async () => {
+    const user = userEvent.setup();
+    mockMutateAsync.mockResolvedValueOnce({});
+    render(<AddFeedModal onClose={onClose} />);
+    await user.click(screen.getByText("Web Scraper"));
+    await user.type(
+      screen.getByPlaceholderText("https://example.com/blog"),
+      "https://www.cisa.gov/known-exploited-vulnerabilities-catalog"
+    );
+    const subscribeButtons = screen.getAllByText("Subscribe");
+    await user.click(subscribeButtons[subscribeButtons.length - 1]);
+    expect(mockMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ feed_type: "web_scraper" })
+    );
+    expect(mockMutateAsync.mock.calls[0][0]).not.toHaveProperty("custom_title");
   });
 });

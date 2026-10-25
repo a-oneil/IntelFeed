@@ -85,27 +85,27 @@ export const STAGE_COPY: Record<StageId, { label: string; detail: string }> = {
   master: {
     label: "Analyse this feed",
     detail:
-      "Off, articles still arrive and stay searchable \u2014 nothing is pulled out of them. No entities, no scoring.",
+      "Off, articles still arrive, stay searchable, get a priority score, join story threads and run through your automation rules. Nothing is tagged and nothing is created from them \u2014 no entities, CVEs, indicators or detection rules, whatever the switches below say.",
   },
   autolink: {
     label: "Tag articles with entities you already track",
     detail:
-      "Matches names and aliases from your catalog \u2014 actors, malware, CVEs, TTPs, vendors, products, tools. Links what exists; never invents anything new.",
+      "Matches names and aliases from your catalog \u2014 actors, malware, vendors, products, tools \u2014 plus CVE and ATT&CK IDs. Links what exists, with one exception: a CVE ID you don't have yet becomes a new CVE record.",
   },
   relevance: {
     label: "Skip off-topic articles",
     detail:
-      "Scores each article on security keywords first and leaves the obvious non-security ones untagged. Off, every article gets tagged.",
+      "Scores each article on security keywords, matched as whole words, and skips tagging the ones with no security vocabulary at all: product news, earnings, politics. Off, every article gets tagged. The AI skips those articles either way; the cut-off is the Extraction Junk Gate setting.",
   },
   ai: {
     label: "Let the AI read each article",
     detail:
-      "Finds TTPs, actors, malware, sectors, indicators and relationships, and double-checks the tags above. This is what turns up things you have never seen before.",
+      "Finds TTPs, actors, malware, sectors, indicators and relationships, and double-checks the tags above. This is what turns up things you have never seen before. With AI off, common-word names aren't tagged.",
   },
   tools: {
     label: "Create records for new tools",
     detail:
-      "Off, the AI can still mention a tool but will not add it to your catalog. Worth turning off for advisory and rule-repository feeds, which list affected software rather than attacker tooling.",
+      "Off, the AI still tags tools already in your catalog but never adds a new one. Tagging from the catalog keeps running either way. Worth turning off for advisory and rule-repository feeds, which list affected software rather than attacker tooling.",
   },
   regex: {
     label: "Fetch CVE details from NVD",
@@ -115,7 +115,7 @@ export const STAGE_COPY: Record<StageId, { label: string; detail: string }> = {
   rules: {
     label: "Save detection rules found in the text",
     detail:
-      "Sigma, YARA, Splunk SPL, Elastic and KQL rules written out in an article become rules in your library.",
+      "Sigma, YARA, Snort/Suricata and Elastic rule files, and SPL, KQL, EQL and ES|QL queries in an article's code blocks, become rules in your library, named after the article.",
   },
 };
 
@@ -162,8 +162,8 @@ export function describeStages(values: FeedFormValues, ctx: Context): StageRow[]
     },
     {
       // Not a stage of its own: `extract_tools` is read only inside
-      // `apply_analysis_results`, so it is a sub-switch of the AI pass and does
-      // nothing at all when that is off.
+      // `store_entry_analysis` (`_tool_mode_for_entry`), so it is a sub-switch
+      // of the AI pass and does nothing at all when that is off.
       id: "tools",
       ...STAGE_COPY.tools,
       on: aiRunning && values.extract_tools,
@@ -192,10 +192,12 @@ export function describeStages(values: FeedFormValues, ctx: Context): StageRow[]
   if (!pipeline?.engine_enabled) return rows;
 
   // A plan outranks the Feed booleans, so show its value and stop offering a
-  // checkbox that would write somewhere nothing reads.
+  // checkbox that would write somewhere nothing reads. Mode none outranks the
+  // plan in turn: the autolink and extract tasks both check it themselves, so
+  // a plan that enables them on a feed that is not analysed still runs nothing.
   return rows.map((row) => {
     const scope = planOverride(row.id, ctx);
-    if (!scope) return row;
+    if (!scope || !processing) return row;
     const stage = PLAN_STAGE[row.id]!;
     const planned = pipeline.stages[stage]?.enabled ?? row.on;
     return {
@@ -244,7 +246,7 @@ export function summarizeStages(values: FeedFormValues, ctx: Context): string {
   const on = (id: StageId) => rows.find((r) => r.id === id)?.on ?? false;
 
   if (!on("master")) {
-    return "Articles still arrive, are cleaned up and stay searchable. Nothing is pulled out of them: no tagging, no AI, no indicator matching, and no entity created or linked.";
+    return "Articles still arrive, are cleaned up, stay searchable, get a priority score, join story threads and run through your automation rules. Nothing is pulled out of them: no tagging, no AI, no indicator matching, no CVE lookups or saved rules, and no entity created or linked.";
   }
 
   const parts: string[] = [];
@@ -265,7 +267,9 @@ export function summarizeStages(values: FeedFormValues, ctx: Context): string {
   let summary = `Every article is ${joinWords(parts)}.`;
   summary += on("ai")
     ? " The AI can add entities you do not have yet."
-    : " Nothing new is added — only what is already in your catalog gets linked.";
+    : on("autolink")
+      ? " Nothing new is added except CVE records for CVE IDs you don't have yet — everything else must already be in your catalog."
+      : " Nothing new is added — only what is already in your catalog gets linked.";
   if (on("rules")) summary += " Detection rules written out in the text are saved to your library.";
   return summary;
 }

@@ -18,6 +18,7 @@ function values(overrides: Partial<FeedFormValues> = {}): FeedFormValues {
     auto_extract_on_ingest: false,
     extract_detection_rules: false,
     extract_tools: true,
+    exclude_title_patterns: "",
     reliability_rating: "",
     timeliness_rating: "",
     relevance_rating: "",
@@ -50,7 +51,7 @@ describe("describeStages", () => {
 
   it("turns the AI off for one feed without disturbing autolinking", () => {
     // The gap this closes: mode="none" was the only lever, and it killed
-    // autolinking and scoring too.
+    // autolinking and extraction too.
     const vals = values({ ai_analysis_enabled: false });
     expect(stage(vals, "ai").on).toBe(false);
     expect(stage(vals, "autolink").on).toBe(true);
@@ -166,6 +167,16 @@ describe("summarizeStages", () => {
     // The ledger scan follows the master switch now, so the sentence must not
     // promise it is still happening.
     expect(text).toContain("no indicator matching");
+    expect(text).toContain("no CVE lookups or saved rules");
+  });
+
+  it("says what still happens to an article the feed does not analyse", () => {
+    // Scoring, story threads and automations ignore the mode; the sentence
+    // used to say "no scoring".
+    const text = summarizeStages(values({ intel_extraction_mode: "none" }), ctx(true));
+    expect(text).toContain("get a priority score");
+    expect(text).toContain("story threads");
+    expect(text).toContain("automation rules");
   });
 
   it("warns that the AI may create new entities", () => {
@@ -175,6 +186,12 @@ describe("summarizeStages", () => {
   it("promises nothing new when the AI is off engine-wide", () => {
     const text = summarizeStages(values(), ctx(false));
     expect(text).toContain("Nothing new is added");
+  });
+
+  it("owns up to autolink creating CVE records", () => {
+    expect(summarizeStages(values(), ctx(false))).toContain("CVE records");
+    expect(stage(values(), "autolink").detail).toContain("becomes a new CVE record");
+    expect(stage(values(), "autolink").detail).not.toContain("never invents");
   });
 
   it("mentions detection rules only when they are being pulled out", () => {
@@ -211,6 +228,21 @@ describe("pipeline plans", () => {
     expect(regex.scope).toBe("feed");
     expect(regex.disabled).toBe(false);
     expect(regex.on).toBe(true);
+  });
+
+  it("keeps extraction off on an unanalysed feed even when a plan enables it", () => {
+    // The extract task checks mode none itself, so the plan's "enabled" never
+    // reaches it.
+    const p = plan({ extract: { enabled: true } }, { autolink: "legacy", extract: "global" });
+    const rows = describeStages(
+      values({ intel_extraction_mode: "none", auto_extract_on_ingest: true, extract_detection_rules: true }),
+      ctx(true, p)
+    );
+    for (const id of ["regex", "rules"]) {
+      const row = rows.find((r) => r.id === id)!;
+      expect(row.on, `${id} should be off`).toBe(false);
+      expect(row.disabled).toBe(true);
+    }
   });
 
   it("the summary follows the plan, not the feed's own setting", () => {
