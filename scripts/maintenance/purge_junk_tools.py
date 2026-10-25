@@ -77,6 +77,7 @@ from app.api.entity_merge import ReclassifyRequest, perform_reclassify
 from app.database import async_session
 from app.intelligence.correlation_cache import invalidate_entity_cache
 from app.intelligence.entity_resolution import (
+    DUAL_USE_TOOL_NAMES,
     deniable_names,
     deny_entity_names,
     normalize_entity_name,
@@ -91,25 +92,8 @@ from app.services.entity_indexer import delete_entity_document
 SEED_CUTOFF = "2026-04-01"
 
 # Names that collide with a product or vendor but are genuinely tools an
-# operator wields. Lowercased compare. Everything else in that collision set
-# is a vendor or a product wearing a tool row.
-DUAL_USE = frozenset(
-    {
-        "metasploit",
-        "anydesk",
-        "autoit",
-        "winrar",
-        "wireguard",
-        "openvpn",
-        "fortigate",
-        "forest druid",
-        "ansible",
-        "ngrok",
-        "rclone",
-        "tailscale",
-        "netsupport manager",
-    }
-)
+# operator wields — shared with the resolver's product/vendor-name guard.
+DUAL_USE = DUAL_USE_TOOL_NAMES
 
 OFFENSIVE_TYPES = frozenset(
     {

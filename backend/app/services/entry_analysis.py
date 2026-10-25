@@ -82,27 +82,32 @@ async def build_analysis_variables(db: AsyncSession, entry) -> dict:
     }
 
 
-async def _tools_allowed_for_entry(db: AsyncSession, entry_id: uuid.UUID, parsed: dict) -> bool:
-    """Whether this entry may create tool entities.
+async def _tool_mode_for_entry(db: AsyncSession, entry_id: uuid.UUID, parsed: dict) -> str:
+    """How this entry's AI tool names are stored: ``create``, ``link`` or ``skip``.
 
     Vulnerability advisories name software that is BROKEN, not software being
     wielded — on an NVD or distro-advisory entry the affected package is often
     the only software mentioned, so the model hands it back as a tool. NVD
     alone minted 230 tools in eleven weeks, 224 of them with no adversary link
-    at all. Both doors close that off: the per-feed switch is the operator's
-    control, the report_type check catches advisories arriving on mixed feeds.
-    Only tool creation is suppressed — CVEs, vendors and products still store.
+    at all. An advisory report_type therefore skips tools outright (it catches
+    advisories arriving on mixed feeds).
+
+    The per-feed ``extract_tools`` switch is the operator's control over the
+    catalog, not over tagging: off means ``link`` — names that resolve to an
+    existing tool still link, and nothing new is created.
     """
     from app.models.entry import Entry
     from app.models.feed import Feed
 
     if (parsed.get("report_type") or "").strip().lower() == "advisory":
-        return False
+        return "skip"
     entry = await db.get(Entry, entry_id)
     if entry is None:
-        return True
+        return "create"
     feed = await db.get(Feed, entry.feed_id)
-    return bool(getattr(feed, "extract_tools", True)) if feed is not None else True
+    if feed is not None and not getattr(feed, "extract_tools", True):
+        return "link"
+    return "create"
 
 
 async def apply_ai_observables(
@@ -206,8 +211,11 @@ async def store_entry_analysis(db: AsyncSession, entry_id: uuid.UUID, parsed: di
         counts["threat_actors"] = len(await store_threat_actors(db, entry_id, parsed["threat_actors"]))
     if parsed.get("malware"):
         counts["malware"] = len(await store_malware(db, entry_id, parsed["malware"]))
-    if parsed.get("tools") and await _tools_allowed_for_entry(db, entry_id, parsed):
-        counts["tools"] = len(await store_tools(db, entry_id, parsed["tools"]))
+    if parsed.get("tools"):
+        tool_mode = await _tool_mode_for_entry(db, entry_id, parsed)
+        if tool_mode != "skip":
+            stored = await store_tools(db, entry_id, parsed["tools"], allow_create=tool_mode == "create")
+            counts["tools"] = len(stored)
     if parsed.get("countries"):
         counts["countries"] = len(await store_countries(db, entry_id, parsed["countries"]))
     if parsed.get("sectors"):

@@ -59,8 +59,15 @@ async def store_tools(
     db: AsyncSession,
     entry_id: uuid.UUID,
     tools_data: list[dict],
+    *,
+    allow_create: bool = True,
 ) -> list[tuple[Tool, bool]]:
-    """Persist AI-extracted offensive tools + entry links (shared with entry_analysis)."""
+    """Persist AI-extracted offensive tools + entry links (shared with entry_analysis).
+
+    ``allow_create=False`` is link-only: names that resolve to an existing tool
+    (or to a cross-type survivor) are linked as usual, but no new tool row is
+    minted. The feed's "create records for new tools" switch drives it.
+    """
     stored: list[tuple[Tool, bool]] = []
 
     # Evidence door (2026-09): a tool is software WIELDED during an intrusion,
@@ -88,7 +95,7 @@ async def store_tools(
         # creation gates — F13 code-artifact/technique/physical-object names
         # never become tools (planning/entity-creation-guardrails.md).
         decision = await resolve_entity_creation(
-            db, "tool", name, tool_data.get("aliases"), source="ai", entry_id=entry_id
+            db, "tool", name, tool_data.get("aliases"), source="ai", entry_id=entry_id, link_only=not allow_create
         )
         if decision.action == "tombstone":
             tombstone = decision.tombstone

@@ -323,11 +323,41 @@ async def test_advisory_report_type_suppresses_tools(db_session, test_entry):
     assert await _tool_names(db_session, test_entry.id) == set()
 
 
-async def test_feed_extract_tools_false_suppresses_tools(db_session, test_entry):
+async def test_feed_extract_tools_false_blocks_new_tools(db_session, test_entry):
+    from app.models.tool import Tool
+
     feed = await db_session.get(Feed, test_entry.feed_id)
     feed.extract_tools = False
     await db_session.flush()
     await store_entry_analysis(db_session, test_entry.id, {"tools": [_WIELDED_TOOL], "report_type": "incident_report"})
+    assert await _tool_names(db_session, test_entry.id) == set()
+    assert (await db_session.execute(select(Tool.id))).first() is None
+
+
+async def test_feed_extract_tools_false_still_links_existing_tools(db_session, test_entry):
+    """The switch governs the catalog, not tagging: a tool already on file links."""
+    from app.models.tool import Tool
+
+    db_session.add(Tool(name="SweepScan", aliases=[]))
+    feed = await db_session.get(Feed, test_entry.feed_id)
+    feed.extract_tools = False
+    await db_session.flush()
+    counts = await store_entry_analysis(
+        db_session,
+        test_entry.id,
+        {"tools": [_WIELDED_TOOL, {**_WIELDED_TOOL, "name": "FreshKit"}], "report_type": "incident_report"},
+    )
+    assert await _tool_names(db_session, test_entry.id) == {"SweepScan"}
+    assert counts["tools"] == 1
+    assert (await db_session.execute(select(Tool.name))).scalars().all() == ["SweepScan"]
+
+
+async def test_advisory_skips_even_existing_tools(db_session, test_entry):
+    from app.models.tool import Tool
+
+    db_session.add(Tool(name="SweepScan", aliases=[]))
+    await db_session.flush()
+    await store_entry_analysis(db_session, test_entry.id, {"tools": [_WIELDED_TOOL], "report_type": "advisory"})
     assert await _tool_names(db_session, test_entry.id) == set()
 
 
