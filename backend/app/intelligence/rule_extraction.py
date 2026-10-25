@@ -1,16 +1,22 @@
 """Detection rule extraction from feed content.
 
-Extracts YARA, Elastic TOML, SIGMA, Snort/Suricata, and Splunk SPL rules
-from article text using regex + parsers. No AI required.
+Extracts YARA, Elastic TOML, SIGMA, Snort/Suricata, Splunk SPL, KQL, EQL and
+ES|QL rules from article text using regex + parsers. No AI required.
+
+Query languages (SPL, KQL, EQL, ES|QL) come from code blocks — Markdown
+fences or the article HTML's ``<pre>``/``<code>`` — so a sentence that says
+"where" never becomes a rule. The one exception is the older inline SPL scan
+(a line starting ``index=``/``search``/``| tstats``).
 """
 
+import html as html_module
 import logging
 import re
 import tomllib
 import uuid
 
 import yaml
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.intelligence.rule_validation import validate_rule
@@ -23,29 +29,51 @@ from app.services.entity_indexer import index_rules
 logger = logging.getLogger(__name__)
 
 
-def extract_rules_from_content(text: str, source_url: str | None = None) -> list[dict]:
+def extract_rules_from_content(
+    text: str,
+    source_url: str | None = None,
+    *,
+    html: str | None = None,
+    article_title: str | None = None,
+) -> list[dict]:
     """Extract detection rules from article content.
+
+    ``text`` is the article's plain text (or a raw file). ``html`` is the
+    sanitized article HTML when there is one: the plain text has its ``<pre>``
+    blocks flattened into prose, so code blocks are read from the HTML.
+    ``article_title`` names the query rules, which carry no title of their own
+    ("<article title> — KQL query 2").
 
     Returns list of dicts with: rule_type, title, rule_content, severity,
     tags, mitre_tactics, log_sources.
     """
-    if not text or not text.strip():
+    # Text stripped from HTML keeps its entities (&gt; &lt; &amp;); a rule
+    # saved that way doesn't run as written.
+    text = html_module.unescape(text or "")
+    if not text.strip() and not html:
         return []
+
+    code_blocks = _code_blocks(text, html)
 
     rules: list[dict] = []
 
     # Run all extractors
     rules.extend(_extract_yara_rules(text))
     rules.extend(_extract_elastic_toml_rules(text))
-    rules.extend(_extract_sigma_rules(text))
+    rules.extend(_extract_sigma_rules(text, [block for _, block in code_blocks]))
     rules.extend(_extract_snort_suricata_rules(text))
-    rules.extend(_extract_splunk_spl_rules(text))
+    rules.extend(_extract_query_rules(text, code_blocks))
 
     # Validate each rule and filter out invalid ones
     validated = []
+    seen: set[tuple[str, str]] = set()
     for rule in rules:
+        key = (rule["rule_type"], _content_key(rule["rule_content"]))
+        if key in seen:
+            continue
         result = validate_rule(rule["rule_type"], rule["rule_content"])
         if result.valid:
+            seen.add(key)
             validated.append(rule)
         else:
             logger.debug(
@@ -55,7 +83,57 @@ def extract_rules_from_content(text: str, source_url: str | None = None) -> list
                 [e.message for e in result.errors],
             )
 
+    _number_query_titles(validated, article_title)
     return validated
+
+
+def _content_key(content: str) -> str:
+    """Whitespace-blind identity of a rule body.
+
+    The same query can reach the extractors twice — from its code block and
+    from the flattened article text — with different line breaks.
+    """
+    return re.sub(r"\s+", "", content)
+
+
+# ── Code blocks ──────────────────────────────────────────────────────────
+
+_FENCE_RE = re.compile(r"```([\w|+-]*)[ \t]*\n(.*?)```", re.DOTALL)
+_PRE_RE = re.compile(r"<pre\b[^>]*>(.*?)</pre>", re.DOTALL | re.IGNORECASE)
+_CODE_RE = re.compile(r"<code\b([^>]*)>(.*?)</code>", re.DOTALL | re.IGNORECASE)
+_LANG_CLASS_RE = re.compile(r'class="[^"]*?\blang(?:uage)?-([\w|+-]+)', re.IGNORECASE)
+_BR_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
+_LINE_END_RE = re.compile(r"</(?:p|div|li|tr)>", re.IGNORECASE)
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _html_block_text(fragment: str) -> str:
+    """Code block HTML -> the code as written (line breaks kept, entities decoded)."""
+    fragment = _BR_RE.sub("\n", fragment)
+    fragment = _LINE_END_RE.sub("\n", fragment)
+    return html_module.unescape(_TAG_RE.sub("", fragment)).strip()
+
+
+def _code_blocks(text: str, html: str | None) -> list[tuple[str, str]]:
+    """Every code block in the article as (language hint, code).
+
+    The hint is the fence tag (```kql) or a ``language-kql`` class, lowercased,
+    or "" when the author gave none.
+    """
+    blocks: list[tuple[str, str]] = []
+    for m in _FENCE_RE.finditer(text):
+        blocks.append((m.group(1).lower(), m.group(2).strip()))
+    if html:
+        for m in _PRE_RE.finditer(html):
+            # The class sits on <pre> or on the <code> just inside it.
+            lang = _LANG_CLASS_RE.search(m.group(0)[:300])
+            blocks.append((lang.group(1).lower() if lang else "", _html_block_text(m.group(1))))
+        # <code> outside <pre> is inline code. It only counts when a whole
+        # query sits in it; the shape checks reject a bare table name.
+        for m in _CODE_RE.finditer(_PRE_RE.sub("", html)):
+            lang = _LANG_CLASS_RE.search(m.group(1))
+            blocks.append((lang.group(1).lower() if lang else "", _html_block_text(m.group(2))))
+    return [(lang, code) for lang, code in blocks if code]
 
 
 def _extract_yara_rules(text: str) -> list[dict]:
@@ -218,7 +296,7 @@ def _extract_elastic_toml_rules(text: str) -> list[dict]:
     return rules
 
 
-def _extract_sigma_rules(text: str) -> list[dict]:
+def _extract_sigma_rules(text: str, code_blocks: list[str] | None = None) -> list[dict]:
     """Extract SIGMA rules from YAML content."""
     rules = []
 
@@ -236,6 +314,11 @@ def _extract_sigma_rules(text: str) -> list[dict]:
         # Check for SIGMA markers
         if "title:" in text and "detection:" in text and "logsource:" in text:
             yaml_blocks.append(text)
+
+    # <pre> blocks from the article HTML (fenced ones are already listed)
+    for block in code_blocks or []:
+        if "detection:" in block and "logsource:" in block and block not in yaml_blocks:
+            yaml_blocks.append(block)
 
     for block in yaml_blocks:
         # Handle multi-document YAML
@@ -358,41 +441,152 @@ def _is_spl_query(text: str) -> bool:
     return False
 
 
-def _extract_splunk_spl_rules(text: str) -> list[dict]:
-    """Extract Splunk SPL queries from code blocks and plain text."""
+# ── Query languages in code blocks: KQL, EQL, ES|QL ──────────────────────
+
+# Fence tags / language-* classes authors use for each query language.
+_LANG_HINTS = {
+    "spl": "splunk_spl",
+    "splunk": "splunk_spl",
+    "kql": "kql",
+    "kusto": "kql",
+    "eql": "eql",
+    "esql": "esql",
+    "es|ql": "esql",
+}
+
+# Microsoft Defender XDR advanced hunting and Sentinel / Log Analytics tables.
+_KQL_TABLES = frozenset(
+    """
+    DeviceProcessEvents DeviceNetworkEvents DeviceFileEvents DeviceRegistryEvents
+    DeviceImageLoadEvents DeviceLogonEvents DeviceEvents DeviceInfo DeviceNetworkInfo
+    DeviceFileCertificateInfo DeviceTvmSoftwareInventory DeviceTvmSoftwareVulnerabilities
+    EmailEvents EmailAttachmentInfo EmailUrlInfo EmailPostDeliveryEvents UrlClickEvents
+    IdentityLogonEvents IdentityQueryEvents IdentityDirectoryEvents IdentityInfo
+    CloudAppEvents AlertInfo AlertEvidence BehaviorAnalytics BehaviorInfo BehaviorEntities
+    ExposureGraphNodes ExposureGraphEdges
+    SecurityEvent SecurityAlert SecurityIncident SigninLogs AADNonInteractiveUserSignInLogs
+    AADServicePrincipalSignInLogs AADManagedIdentitySignInLogs AADSignInEventsBeta
+    AuditLogs OfficeActivity AzureActivity AzureDiagnostics CommonSecurityLog Syslog
+    Event WindowsEvent DnsEvents W3CIISLog ThreatIntelligenceIndicator ThreatIntelIndicators
+    Heartbeat AWSCloudTrail GCPAuditLogs MicrosoftGraphActivityLogs IntuneDevices
+    IntuneAuditLogs StorageBlobLogs SentinelHealth Anomalies
+    ASimProcessEventLogs ASimNetworkSessionLogs ASimDnsActivityLogs
+    imProcessCreate imNetworkSession imDns imAuthentication imFileEvent imRegistry
+    """.split()
+)
+_KQL_OPERATOR_RE = re.compile(
+    r"\|\s*(?:where|project(?:-\w+)?|summarize|extend|join|distinct|take|top|order\s+by|sort\s+by|"
+    r"parse(?:-\w+)?|mv-expand|make-series|count|invoke|lookup|evaluate|union|limit)\b"
+)
+# Syntax SPL never uses — tells a KQL query on an unlisted table from SPL.
+_KQL_ONLY_RE = re.compile(
+    r"\|\s*(?:project|summarize|extend|mv-expand|make-series)\b|\bago\(|=~|\bin~|!has\b|\bhas_(?:any|all)\b|\bhas\b|=="
+)
+_KQL_START_RE = re.compile(r"(?:let\s+\w+\s*=|union\b|([A-Za-z_]\w*)\s*\|)")
+
+_EQL_CATEGORIES = (
+    "any|process|file|network|registry|library|driver|dns|authentication|iam|"
+    "configuration|intrusion_detection|api|package|session|host|web"
+)
+_EQL_RE = re.compile(
+    rf"(?:(?:{_EQL_CATEGORIES})\s+where\s+\S"
+    r"|sequence(?:\s+by\s+[\w.]+(?:\s*,\s*[\w.]+)*)?(?:\s+with\s+maxspan\s*=\s*\w+)?\s*\["
+    r"|join(?:\s+by\s+[\w.]+(?:\s*,\s*[\w.]+)*)?\s*\[)",
+    re.IGNORECASE,
+)
+_ESQL_RE = re.compile(
+    r"from\s+[\w.*:,\- ]+?(?:\s+metadata\s+[\w, ]+?)?\s*\|\s*"
+    r"(?:where|stats|eval|keep|limit|sort|dissect|grok|enrich|rename|drop|mv_expand|lookup)\b",
+    re.IGNORECASE,
+)
+
+_QUERY_LABELS = {"splunk_spl": "SPL", "kql": "KQL", "eql": "EQL", "esql": "ES|QL"}
+
+
+def _strip_leading_comments(block: str) -> str:
+    """The query without the comment lines authors put above it."""
+    lines = block.strip().splitlines()
+    while lines and (not lines[0].strip() or lines[0].lstrip().startswith(("//", "/*", "#", "--"))):
+        lines.pop(0)
+    return "\n".join(lines).strip()
+
+
+def _is_kql_query(block: str) -> bool:
+    body = _strip_leading_comments(block)
+    lower = body.lower()
+    if "index=" in lower or "sourcetype=" in lower:
+        return False
+    start = _KQL_START_RE.match(body)
+    if not start or not _KQL_OPERATOR_RE.search(body):
+        return False
+    if start.group(1) in _KQL_TABLES:
+        return True
+    # A table we don't list, or a query opening with let/union: it has to name
+    # a listed table somewhere or use syntax only KQL has.
+    return bool(set(re.findall(r"\b[A-Za-z_]\w+\b", body)) & _KQL_TABLES) or bool(_KQL_ONLY_RE.search(body))
+
+
+def _is_eql_query(block: str) -> bool:
+    return bool(_EQL_RE.match(_strip_leading_comments(block)))
+
+
+def _is_esql_query(block: str) -> bool:
+    return bool(_ESQL_RE.match(_strip_leading_comments(block)))
+
+
+_QUERY_CHECKS = {
+    "splunk_spl": _is_spl_query,
+    "kql": _is_kql_query,
+    "eql": _is_eql_query,
+    "esql": _is_esql_query,
+}
+
+
+def _classify_query_block(lang: str, block: str) -> str | None:
+    """Which query language a code block holds, or None for anything else."""
+    # A tag is a hint, not proof: a ```kql fence holding prose is still prose.
+    hinted = _LANG_HINTS.get(lang)
+    if hinted and _QUERY_CHECKS[hinted](block):
+        return hinted
+    for kind in ("eql", "esql", "kql", "splunk_spl"):
+        if _QUERY_CHECKS[kind](block):
+            return kind
+    return None
+
+
+def _extract_query_rules(text: str, code_blocks: list[tuple[str, str]]) -> list[dict]:
+    """SPL, KQL, EQL and ES|QL queries from code blocks, plus inline SPL."""
     rules = []
     seen: set[str] = set()
 
-    def _add_spl(content: str) -> None:
-        content = content.strip()
-        if not content or content in seen:
+    def _add(kind: str, content: str) -> None:
+        content = content.strip() if kind == "splunk_spl" else _strip_leading_comments(content)
+        key = _content_key(content)
+        if not content or key in seen:
             return
-        if _is_spl_query(content):
-            seen.add(content)
-            rules.append(
-                {
-                    "rule_type": "splunk_spl",
-                    "title": "Splunk SPL Query",
-                    "rule_content": content,
-                    "severity": None,
-                    "tags": [],
-                    "mitre_tactics": [],
-                    "log_sources": None,
-                }
-            )
+        seen.add(key)
+        rules.append(
+            {
+                # EQL and ES|QL are both Elastic query languages: one stored type.
+                "rule_type": "elastic_ql" if kind in ("eql", "esql") else kind,
+                "title": "",  # numbered from the article title once validated
+                "rule_content": content,
+                "severity": None,
+                "tags": [],
+                "mitre_tactics": [],
+                "log_sources": None,
+                "_query_label": _QUERY_LABELS[kind],
+            }
+        )
 
-    # 1. Explicitly tagged code blocks (```spl or ```splunk)
-    tagged_pattern = re.compile(r"```(?:spl|splunk)\s*\n(.*?)```", re.DOTALL)
-    for m in tagged_pattern.finditer(text):
-        _add_spl(m.group(1))
+    for lang, block in code_blocks:
+        kind = _classify_query_block(lang, block)
+        if kind:
+            _add(kind, block)
 
-    # 2. Any fenced code block (untagged or other languages like ```text, ```bash)
-    any_block_pattern = re.compile(r"```(?:\w*)\s*\n(.*?)```", re.DOTALL)
-    for m in any_block_pattern.finditer(text):
-        _add_spl(m.group(1))
-
-    # 3. Inline SPL in plain text — look for multi-line blocks starting with
-    #    index=, "search ", or "| tstats" followed by continuation lines
+    # Inline SPL in plain text — multi-line blocks starting with index=,
+    # "search ", or "| tstats" followed by continuation lines. Covers text
+    # with no code blocks to read (Markdown without fences, flattened HTML).
     inline_pattern = re.compile(
         r"(?:^|\n)((?:index\s*=|search\s+|\|\s*tstats\s)\S.*(?:\n(?:[ \t].*|\|.*))*)",
         re.MULTILINE | re.IGNORECASE,
@@ -400,10 +594,26 @@ def _extract_splunk_spl_rules(text: str) -> list[dict]:
     for m in inline_pattern.finditer(text):
         candidate = m.group(1).strip()
         # Skip very short fragments (likely just a mention, not a full query)
-        if len(candidate) >= 30:
-            _add_spl(candidate)
+        if len(candidate) >= 30 and _is_spl_query(candidate):
+            _add("splunk_spl", candidate)
 
     return rules
+
+
+def _number_query_titles(rules: list[dict], article_title: str | None) -> None:
+    """Title query rules "<article title> — KQL query 2", numbered per language.
+
+    Queries carry no name of their own. Numbering them in article order keeps
+    titles distinct within an article and stable when it is processed again.
+    """
+    base = re.sub(r"\s+", " ", article_title or "").strip()[:440]
+    counters: dict[str, int] = {}
+    for rule in rules:
+        label = rule.pop("_query_label", None)
+        if not label:
+            continue
+        counters[label] = counters.get(label, 0) + 1
+        rule["title"] = f"{base} — {label} query {counters[label]}" if base else f"{label} query {counters[label]}"
 
 
 async def store_extracted_rules(
@@ -412,7 +622,7 @@ async def store_extracted_rules(
     user_id: uuid.UUID,
     rules: list[dict],
 ) -> list[DetectionRule]:
-    """Store extracted rules, deduplicating by content or updating by title+type."""
+    """Store extracted rules: skip a body already stored, update a same-titled rule from the same entry."""
     stored = []
 
     # Fetch TTPs linked to this entry so we can associate them with extracted rules
@@ -432,25 +642,36 @@ async def store_extracted_rules(
         title = rule_data["title"][:500]
         rule_type = rule_data["rule_type"]
 
-        # Check for existing rule with same content (exact duplicate)
+        # Dedup is on the rule body, never the title: query titles repeat
+        # across articles, and a title match used to let each new SPL query
+        # overwrite the last one. Any auto-extracted copy counts, whoever ran
+        # the extraction, so a pipeline run and a manual one don't fork it.
         existing = await db.execute(
-            select(DetectionRule).where(
-                DetectionRule.created_by == user_id,
+            select(DetectionRule.id)
+            .where(
                 DetectionRule.rule_content == content,
+                or_(
+                    DetectionRule.created_by == user_id,
+                    DetectionRule.tags.contains(["auto-extracted"]),
+                ),
             )
+            .limit(1)
         )
         if existing.scalar_one_or_none():
             continue
 
-        # Check for existing rule with same title+type from auto-extraction
-        # (rule was updated upstream — replace content, link to new entry)
+        # Same entry, same title, new body: the rule was edited upstream and
+        # the article processed again — replace the content in place.
         existing_by_title = await db.execute(
-            select(DetectionRule).where(
+            select(DetectionRule)
+            .where(
                 DetectionRule.created_by == user_id,
+                DetectionRule.entry_id == entry_id,
                 DetectionRule.title == title,
                 DetectionRule.rule_type == rule_type,
                 DetectionRule.tags.contains(["auto-extracted"]),
             )
+            .limit(1)
         )
         existing_rule = existing_by_title.scalar_one_or_none()
 
@@ -465,7 +686,6 @@ async def store_extracted_rules(
         if existing_rule:
             # Update existing rule with new content from updated source
             existing_rule.rule_content = content
-            existing_rule.entry_id = entry_id
             existing_rule.severity = rule_data.get("severity")
             existing_rule.tags = tags
             existing_rule.mitre_tactics = rule_data.get("mitre_tactics") or []

@@ -566,7 +566,9 @@ async def _extract_entry_intel(entry_id: str):
         if extract_rules_flag:
             # Prefer raw_content from metadata (github_repo entries store file content there)
             rule_text = (entry.metadata_ or {}).get("raw_content") or text
-            extracted = extract_rules_from_content(rule_text, source_url=entry.url)
+            extracted = extract_rules_from_content(
+                rule_text, source_url=entry.url, html=entry.content_html, article_title=entry.title
+            )
             if extracted:
                 # Attribute auto-extracted rules to the system user
                 from app.services.system_user import get_system_user_id
@@ -1007,7 +1009,9 @@ async def _bulk_extract(entry_ids: list[str], extract_types: list[str], user_id:
                 elif feed_extract_rules:
                     # Regex extraction for non-GitHub entries
                     rule_text = (entry.metadata_ or {}).get("raw_content") or extract_text
-                    rules = extract_rules_from_content(rule_text, source_url=entry.url)
+                    rules = extract_rules_from_content(
+                        rule_text, source_url=entry.url, html=entry.content_html, article_title=entry.title
+                    )
                     if rules:
                         stored = await store_extracted_rules(db, eid, uid, rules)
                         stats["detection_rules"] += len(stored)
@@ -1287,6 +1291,7 @@ async def _rescan_all_feeds_extraction():
                     Entry.title,
                     Entry.summary,
                     Entry.content_text,
+                    Entry.content_html,
                     Entry.url,
                     Entry.feed_id,
                     Entry.metadata_,
@@ -1309,6 +1314,7 @@ async def _rescan_all_feeds_extraction():
                 title,
                 summary,
                 content_text,
+                content_html,
                 entry_url,
                 feed_id,
                 entry_metadata,
@@ -1368,7 +1374,9 @@ async def _rescan_all_feeds_extraction():
                 elif extract_rules:
                     # Non-GitHub entries: regex extraction
                     rule_text = (entry_metadata or {}).get("raw_content") or text
-                    extracted = extract_rules_from_content(rule_text, source_url=entry_url)
+                    extracted = extract_rules_from_content(
+                        rule_text, source_url=entry_url, html=content_html, article_title=title
+                    )
                     if extracted:
                         from app.services.system_user import get_system_user_id
 

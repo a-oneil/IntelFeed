@@ -115,7 +115,7 @@ export const STAGE_COPY: Record<StageId, { label: string; detail: string }> = {
   rules: {
     label: "Save detection rules found in the text",
     detail:
-      "Sigma, YARA, Splunk SPL, Elastic and KQL rules written out in an article become rules in your library.",
+      "Sigma, YARA, Snort/Suricata and Elastic rule files, and SPL, KQL, EQL and ES|QL queries in an article's code blocks, become rules in your library, named after the article.",
   },
 };
 

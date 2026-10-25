@@ -87,7 +87,7 @@ The engine sits at the core of IntelFeed's intelligence operations, providing:
 - **Structured intelligence extraction** (TTPs, CVEs, CWEs, threat actors, malware, tools, mitigations)
 - **An IOC ledger** (observables) where rows come from judgment doors, never from a regex match
 - **Cross-entity correlation** with proximity-aware scoring
-- **Detection rule extraction** from entry content (SIGMA, Elastic TOML, YARA, Snort/Suricata, Splunk SPL)
+- **Detection rule extraction** from entry content (SIGMA, Elastic TOML, YARA, Snort/Suricata, and SPL / KQL / EQL / ES|QL queries in code blocks)
 - **Retention & archival** of read correlation events
 - **Real-time intelligence event generation** for anomalies, coverage gaps, and trending entities
 
@@ -752,29 +752,29 @@ async def archive_old_events(db, retention_days=90):
 
 ## Detection Rule Extraction
 
-The rule extraction engine parses **5 detection rule formats** from entry content (CrowdStrike QL and other formats are supported for authoring/import in the rule library, but are not detected by the ingest extractor):
+The rule extraction engine stores **6 rule types** (`yara`, `sigma`, `elastic_ql`, `kql`, `snort_suricata`, `splunk_spl`) found in entry content: YARA, Sigma, Elastic TOML rule files, Snort/Suricata, and the query languages SPL, KQL, EQL and ES|QL (EQL and ES|QL are stored as `elastic_ql`). CrowdStrike QL and other formats are supported for authoring/import in the rule library, but are not detected by the ingest extractor.
 
 ```python
-# rule_extraction.py:24-58
-def extract_rules_from_content(text: str, source_url: str | None = None) -> list[dict]:
+# rule_extraction.py:32-87
+def extract_rules_from_content(text, source_url=None, *, html=None, article_title=None) -> list[dict]:
+    text = html.unescape(text)              # &gt; &lt; &amp; -> > < &
+    code_blocks = _code_blocks(text, html)  # fences + <pre>/<code> from the article HTML
     rules = []
     rules.extend(_extract_yara_rules(text))
     rules.extend(_extract_elastic_toml_rules(text))
-    rules.extend(_extract_sigma_rules(text))
+    rules.extend(_extract_sigma_rules(text, code_blocks))
     rules.extend(_extract_snort_suricata_rules(text))
-    rules.extend(_extract_splunk_spl_rules(text))
-    
-    # Validate each rule
-    validated = []
-    for rule in rules:
-        result = validate_rule(rule["rule_type"], rule["rule_content"])
-        if result.valid:
-            validated.append(rule)
-    
+    rules.extend(_extract_query_rules(text, code_blocks))   # SPL, KQL, EQL, ES|QL
+
+    # Drop repeats (whitespace-blind), validate, then title the queries
+    ...
+    _number_query_titles(validated, article_title)
     return validated
 ```
 
-### YARA Rules (`rule_extraction.py:59-124`)
+Callers pass the entry's sanitized `content_html` as `html` and its title as `article_title`. The plain `content_text` has every `<pre>` block flattened into prose, so code blocks are read from the HTML; HTML entities are decoded in both, so a saved query runs as written.
+
+### YARA Rules (`rule_extraction.py:139-202`)
 
 **Extraction logic:**
 1. Regex match `rule <name> { ... }`
@@ -797,7 +797,7 @@ DetectionRule(
 )
 ```
 
-### SIGMA Rules (`rule_extraction.py:215-281`)
+### SIGMA Rules (`rule_extraction.py:299-369`)
 
 **Format:** YAML with required fields: `title`, `detection`, `logsource`
 
@@ -807,7 +807,7 @@ DetectionRule(
 3. Extract MITRE tactics from tags: `attack.execution` → "Execution"
 4. Serialize back to YAML for storage
 
-### Elastic TOML Rules (`rule_extraction.py:125-214`)
+### Elastic TOML Rules (`rule_extraction.py:205-296`)
 
 **Format:** TOML with `[rule]` section
 
@@ -818,22 +818,34 @@ DetectionRule(
 - `threat.tactic.name` → MITRE tactic
 - `threat.technique.id` → MITRE technique
 
-### Splunk SPL (`rule_extraction.py:354-400`)
+### Query languages: SPL, KQL, EQL, ES|QL (`rule_extraction.py:445-616`)
 
-**Detection strategy:** Heuristic-based (no formal parser)
+**Code blocks only.** A query is taken from a Markdown fence or an HTML `<pre>`/`<code>` block, never from prose, so a sentence that says "where" never becomes a rule. A fence tag or `language-*` class (`kql`, `kusto`, `eql`, `esql`, `spl`, `splunk`) is a hint; the block still has to have the language's shape. The one exception is the inline SPL scan: a line of text starting `index=`, `search ` or `| tstats`, at least 30 characters long.
 
-**Indicators of SPL:**
-- Strong: `index=` + `|` (pipe)
-- Medium: `search ` + `|`
-- Weak: `| stats`, `| where`, `| eval` + `index=` or `sourcetype=`
+**Shapes:**
+- **SPL:** `index=` + `|` (pipe); `search ` + `|`; `| tstats`; or `| stats`, `| where`, `| eval`… plus `index=`, `sourcetype=` or `source=`
+- **KQL:** a table name followed by a pipe (`DeviceProcessEvents | where …`) and a tabular operator (`| where`, `| summarize`, `| project`, `| extend`, `| join`…). The table must be a known Defender XDR / Sentinel table, or the query must use syntax SPL never has (`| summarize`, `| project`, `ago(`, `=~`, `has`, `==`). A query that opens with `let` or `union` must name a known table. `index=` / `sourcetype=` rule it out.
+- **EQL:** `<category> where …` (`process`, `file`, `network`, `registry`, `any`…), `sequence [by …] [with maxspan=…] [`, or `join … [` — stored as `elastic_ql`
+- **ES|QL:** `FROM <index pattern>` followed by `| WHERE`, `| STATS`, `| EVAL`, `| KEEP`… — stored as `elastic_ql`
+
+Leading `//` comment lines are dropped from KQL/EQL/ES|QL queries; the validator ignores `//` and `/* */` comments when it checks quote balance.
+
+**Titles.** Queries carry no name of their own. Each is titled from the article: `"<article title> — KQL query 2"`, numbered per language in article order, so titles are distinct within an article and stable when it is processed again.
 
 **Examples:**
-```splunk
-index=main sourcetype=syslog | stats count by host
-index=_audit action=search | where user=admin | table time, action
+```kusto
+DeviceProcessEvents
+| where Timestamp > ago(7d)
+| where FileName =~ "rundll32.exe"
+| summarize count() by DeviceName
+```
+```eql
+sequence by host.id with maxspan=1m
+  [file where event.action == "creation"]
+  [process where process.name == "rundll32.exe"]
 ```
 
-### Snort/Suricata Rules (`rule_extraction.py:282-352`)
+### Snort/Suricata Rules (`rule_extraction.py:372-402`)
 
 **Format:** Single-line rules with `msg` field
 
@@ -847,40 +859,39 @@ index=_audit action=search | where user=admin | table time, action
 msg:"Detect SQL Injection Attempt"
 ```
 
-### Rule Storage (`rule_extraction.py:402-490`)
+### Rule Storage (`rule_extraction.py:619-718`)
 
-Extracted rules are stored with **deduplication and linking:**
+Extracted rules are stored with **deduplication and linking.** Dedup is on the rule body, never on the title alone, so two articles' queries never overwrite each other:
 
 ```python
 async def store_extracted_rules(db, entry_id, user_id, rules):
     for rule_data in rules:
-        # Check for exact duplicate (same content)
-        existing = await db.execute(
-            select(DetectionRule).where(
-                DetectionRule.rule_content == rule_data["rule_content"],
-                DetectionRule.created_by == user_id,
-            )
+        # Same body already stored (by this user, or auto-extracted by anyone) -> skip
+        existing = select(DetectionRule.id).where(
+            DetectionRule.rule_content == rule_data["rule_content"],
+            or_(DetectionRule.created_by == user_id, DetectionRule.tags.contains(["auto-extracted"])),
         )
         if existing:
-            continue  # Skip exact duplicate
-        
-        # Check for same title+type (upstream rule updated)
-        existing_by_title = await db.execute(
-            select(DetectionRule).where(
-                DetectionRule.title == rule_data["title"],
-                DetectionRule.rule_type == rule_data["rule_type"],
-                DetectionRule.tags.contains(["auto-extracted"]),
-            )
+            continue
+
+        # Same entry + title + type, new body: the rule was edited upstream
+        # and the article processed again -> replace the content in place
+        existing_by_title = select(DetectionRule).where(
+            DetectionRule.created_by == user_id,
+            DetectionRule.entry_id == entry_id,
+            DetectionRule.title == rule_data["title"],
+            DetectionRule.rule_type == rule_data["rule_type"],
+            DetectionRule.tags.contains(["auto-extracted"]),
         )
         if existing_by_title:
-            # Update content, re-link to new entry
             existing_by_title.rule_content = rule_data["rule_content"]
-            existing_by_title.entry_id = entry_id
             continue
-        
+
         # New rule
         db.add(DetectionRule(...))
 ```
+
+Processing the same article again stores nothing new.
 
 **Link to source entities:**
 ```python
@@ -1595,7 +1606,7 @@ print(data)  # Should have cvss_score, severity, etc.
 
 - **Autolinker implementation:** `/backend/app/intelligence/autolinker.py` (~1455 lines)
 - **Correlation engine:** `/backend/app/intelligence/correlation.py` (~2435 lines)
-- **Detection rule extraction:** `/backend/app/intelligence/rule_extraction.py` (~490 lines)
+- **Detection rule extraction:** `/backend/app/intelligence/rule_extraction.py` (~720 lines)
 - **Correlation events:** `/backend/app/intelligence/correlation_events.py` (~605 lines)
 - **CVE intelligence:** `/backend/app/intelligence/cve.py` (~430 lines)
 - **TTP extraction:** `/backend/app/intelligence/ttp.py` (~300 lines)
