@@ -111,6 +111,44 @@ def test_no_telegram_feeds_ship():
     assert "bluesky" not in shipped, "bluesky feeds carry an app password"
 
 
+def test_no_feed_ships_with_analysis_off():
+    """A feed worth nothing to the engine isn't worth a slot in a starter pack.
+    Mode `none` still fetches, scores and stores every item, so shipping one
+    hands every new install a cost with no tags to show for it."""
+    off = [
+        f"{pack_id}: {outline.get('text')}"
+        for pack_id, outline in all_outlines()
+        if outline.get(f"{{{INTELFEED_NS}}}extractionMode") == "none"
+    ]
+    assert not off, off
+
+
+# Sources the feed audit retired: dead, moved, blocked from datacenter IPs, or
+# off-topic. Matched as URL substrings so a re-added variant still trips.
+RETIRED_SOURCES = {
+    "helpnetsecurity.com": "CloudFront blocks datacenter IPs",
+    "blog.erratasec.com": "removed: off-topic essays, dead since 2024",
+    "magnetforensics.com": "removed: product marketing",
+    "europol.europa.eu": "mostly non-cyber; bodies are a JavaScript shell",
+    "blog.google/threat-analysis-group": "dead; TAG publishes on the Google Threat Intelligence blog",
+    "mandiant.com/resources/blog": "redirects to a page with no feed",
+    "riskybiznews.substack.com": "moved to news.risky.biz",
+    "ncsc.gov.uk/api/1/services/v1/report-rss-feed": "stale since 2025; the news feed is the live one",
+    "developer.apple.com/news/releases": "Apple's SDK release feed, not security updates",
+    "t.me/": "Telegram needs an interactive login",
+}
+
+
+def test_no_retired_source_ships():
+    shipped = [
+        f"{pack_id}: {outline.get('text')} ({why})"
+        for pack_id, outline in all_outlines()
+        for marker, why in RETIRED_SOURCES.items()
+        if marker in outline.get("xmlUrl", "")
+    ]
+    assert not shipped, shipped
+
+
 def test_extended_feeds_carry_the_config_their_adapter_needs():
     """An extended feed without its adapter_config is inert: the reddit adapter
     reads the subreddit from config, not from the URL."""
