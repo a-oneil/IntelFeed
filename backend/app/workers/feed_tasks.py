@@ -25,7 +25,7 @@ from app.models.entry_media import EntryMedia
 from app.models.feed import Feed
 from app.models.podcast import Podcast
 from app.pipeline.plans import feed_runs_extraction
-from app.services.dedup import compute_content_hash
+from app.services.dedup import compute_content_hash, item_key, url_lookup_pattern
 from app.services.feed_fetch_health import record_auto_pause
 from app.services.js_wall import looks_like_js_wall
 from app.services.sanitizer import extract_first_image, extract_og_image, html_to_text, sanitize_html
@@ -599,7 +599,7 @@ async def _fetch_feed(feed_id: str):
         new_entry_ids = []
 
         # Pre-filter to only new entries (skip existing GUIDs and intra-batch dupes)
-        new_parsed_entries = []
+        guid_misses = []
         seen_guids = set()
         for parsed in parsed_entries:
             if parsed.guid in seen_guids:
@@ -608,7 +608,29 @@ async def _fetch_feed(feed_id: str):
             existing = await db.execute(select(Entry).where(Entry.feed_id == feed.id, Entry.guid == parsed.guid))
             if existing.scalar_one_or_none():
                 continue
+            guid_misses.append(parsed)
+
+        # Same-feed URL dedup: a guid miss whose link, title and enclosure match a
+        # row this feed already has is that article under a churned guid. Skip it,
+        # refreshing the stored row if the feed's text for it changed.
+        new_parsed_entries = []
+        refreshed_entries = 0
+        existing_by_key = await _existing_entries_by_item_key(db, feed.id, guid_misses)
+        seen_item_keys = set()
+        for parsed in guid_misses:
+            key = _parsed_item_key(parsed)
+            if key is not None:
+                if key in seen_item_keys:
+                    continue
+                seen_item_keys.add(key)
+                existing_id = existing_by_key.get(key)
+                if existing_id is not None:
+                    if await _refresh_same_url_entry(db, feed, existing_id, parsed):
+                        refreshed_entries += 1
+                    continue
             new_parsed_entries.append(parsed)
+        if refreshed_entries:
+            logger.info("Feed %s: refreshed %d same-URL entries in place", feed.id, refreshed_entries)
 
         # Filter out YouTube Shorts from new entries only
         if feed.feed_type == "youtube" and feed.adapter_config.get("exclude_shorts") and new_parsed_entries:
@@ -809,6 +831,98 @@ async def _fetch_feed(feed_id: str):
                     )
             except Exception:
                 logger.warning("Failed to dispatch entry pipeline for feed %s", feed.id, exc_info=True)
+
+
+def _parsed_item_key(parsed) -> tuple | None:
+    return item_key(parsed.url, parsed.title, parsed.media.url if parsed.media else None)
+
+
+async def _existing_entries_by_item_key(db: AsyncSession, feed_id, parsed_items: list) -> dict[tuple, object]:
+    """Map item key -> id of this feed's earliest stored entry with that key.
+
+    One query per fetch, and only when the fetch has guid misses. There is no
+    index on entries.url; the planner uses ix_entries_feed_id, so the ILIKE
+    filter runs over this feed's rows only (a few thousand at most), never the
+    whole table. Each hit is re-normalised in Python and compared exactly.
+    """
+    patterns = sorted({url_lookup_pattern(key[0]) for p in parsed_items if (key := _parsed_item_key(p))})
+    if not patterns:
+        return {}
+    from sqlalchemy import or_
+
+    rows = []
+    for i in range(0, len(patterns), 100):
+        chunk = patterns[i : i + 100]
+        result = await db.execute(
+            select(Entry.id, Entry.url, Entry.title, Entry.created_at).where(
+                Entry.feed_id == feed_id,
+                or_(*[Entry.url.ilike(p, escape="\\") for p in chunk]),
+            )
+        )
+        rows.extend(result.all())
+    if not rows:
+        return {}
+    media_rows = await db.execute(
+        select(EntryMedia.entry_id, EntryMedia.url).where(EntryMedia.entry_id.in_([r.id for r in rows]))
+    )
+    enclosures: dict = {}
+    for entry_id, media_url in media_rows.all():
+        enclosures.setdefault(entry_id, []).append(media_url)
+
+    found: dict[tuple, object] = {}
+    for row in sorted(rows, key=lambda r: (r.created_at, str(r.id))):
+        for enclosure in enclosures.get(row.id) or [None]:
+            key = item_key(row.url, row.title, enclosure)
+            if key is not None:
+                found.setdefault(key, row.id)
+    return found
+
+
+async def _refresh_same_url_entry(db: AsyncSession, feed: Feed, entry_id, parsed) -> bool:
+    """Update a stored entry from a re-listed copy of it, if the feed's text changed.
+
+    Only a substantive feed body replaces the stored one: a stub (under 500
+    characters, or "Continue reading on …") is what triggers full-text
+    extraction at insert, so the stored row may hold the full article and must
+    not be overwritten with the teaser.
+    """
+    content_html = parsed.content_html or ""
+    content_text = html_to_text(content_html) if content_html else ""
+    if len(content_text) < 500 or re.search(r"Continue reading on .+\s*»", content_text):
+        return False
+    content_hash = compute_content_hash(parsed.title, content_text)
+    entry = await db.get(Entry, entry_id)
+    if entry is None or entry.content_hash == content_hash:
+        return False
+
+    entry.title = parsed.title
+    entry.content_html = sanitize_html(content_html)
+    entry.content_text = content_text
+    entry.summary = parsed.summary
+    entry.word_count = len(content_text.split())
+    entry.content_hash = content_hash
+    await db.flush()
+
+    from app.services.meilisearch_client import index_entry
+
+    try:
+        index_entry(
+            entry_id=entry.id,
+            feed_id=feed.id,
+            title=entry.title,
+            content_text=entry.content_text,
+            summary=entry.summary,
+            author=entry.author,
+            published_at=entry.published_at.isoformat() if entry.published_at else None,
+            feed_type=feed.feed_type,
+            feed_title=feed.title,
+            url=entry.url,
+            language=entry.language,
+            word_count=entry.word_count,
+        )
+    except Exception:
+        logger.warning("Meilisearch re-index failed for refreshed entry %s", entry.id, exc_info=True)
+    return True
 
 
 async def _create_entry_media(db: AsyncSession, feed: Feed, entry: Entry, parsed) -> None:

@@ -357,6 +357,8 @@ if existing.scalar_one_or_none():
     continue  # Skip; GUID already seen
 ```
 
+**Same-feed URL deduplication** (catches guid churn): a guid miss whose item key — normalised link, normalised title, enclosure path (`item_key()` in `app/services/dedup.py`) — matches a row this feed already has is the same article under a new guid, so it is skipped. Link normalisation drops the fragment and tracking parameters (`utm_*`, `mc_*`, `fbclid`, `gclid` …) and keeps every other parameter, so a `?p=123` link stays distinct. The title and enclosure keep apart distinct items that point at one page, such as podcast episodes sharing a show-notes URL. When the re-listed copy carries a substantive body (500+ characters, not a "Continue reading" stub) that differs from the stored one, the stored row is updated in place and re-indexed. The lookup is one ILIKE query per fetch over this feed's rows (`ix_entries_feed_id`), run only when the fetch has guid misses. CrowdStrike's RSS is the case it exists for: its `<guid isPermaLink="false">` is a fresh random `?p=` on every fetch while `<link>` stays put. `scripts/maintenance/merge_same_url_entries.py` collapses copies already stored.
+
 **Content-hash deduplication** (cross-feed, catches republishes):
 ```python
 content_hash = compute_content_hash(parsed.title, content_text)
@@ -533,6 +535,8 @@ existing = await db.execute(
 ```
 
 Fastest check; catches feed re-publishes of the same ID.
+
+**Link + title** (per feed, RSS-path feeds): catches a feed that changes an item's guid between fetches; see [Entry Deduplication](#6-entry-deduplication) above.
 
 **Content Hash** (global):
 ```python
