@@ -96,9 +96,10 @@ HTTP responses are handled as:
 
 Each parsed entry is checked against the database:
 
-1. **GUID check** — `(feed_id, guid)` unique constraint. If the entry's GUID already exists for this feed, skip it.
-2. **YouTube Shorts filter** — If the feed has `exclude_shorts` enabled and the entry is a YouTube Short, skip it.
-3. **Content hash** — SHA-256 of `content_text` is computed for cross-feed deduplication.
+1. **Exclude-title filter** — If the entry's title contains one of the feed's `exclude_title_patterns` (plain phrases, case-insensitive), it is dropped before anything is stored. Applies to every adapter.
+2. **GUID check** — `(feed_id, guid)` unique constraint. If the entry's GUID already exists for this feed, skip it.
+3. **YouTube Shorts filter** — If the feed has `exclude_shorts` enabled and the entry is a YouTube Short, skip it.
+4. **Content hash** — SHA-256 of `content_text` is computed for cross-feed deduplication.
 
 ### Stage 4: Content Processing
 

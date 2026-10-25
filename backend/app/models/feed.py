@@ -62,6 +62,10 @@ class Feed(Base):
     )  # Allow AI extraction to create tool entities from this feed's entries.
     # Off for advisory and detection-content feeds (NVD, distro bulletins, rule
     # repos): they name affected or referenced software, not wielded tooling.
+    exclude_title_patterns: Mapped[str | None] = mapped_column(Text)
+    # Plain phrases, one per line. An incoming article whose title contains one
+    # (case-insensitive) is dropped before it is saved — see
+    # app/services/title_filter.py. Applies to every adapter.
     # Subscription-level settings (shared across all users)
     category_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("categories.id", ondelete="SET NULL"), index=True

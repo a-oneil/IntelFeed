@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CategoryCreateRequest(BaseModel):
@@ -14,12 +14,32 @@ class CategoryCreateRequest(BaseModel):
     )
 
 
+class CategoryFeedDefaults(BaseModel):
+    """Pipeline settings a feed added to the category starts with; null = global default."""
+
+    intel_extraction_mode: str | None = Field(default=None, pattern=r"^(full|selective|manual|none)$")
+    ai_analysis_enabled: bool | None = None
+    extract_tools: bool | None = None
+    auto_extract_on_ingest: bool | None = None
+    extract_detection_rules: bool | None = None
+
+
 class CategoryUpdateRequest(BaseModel):
     name: str | None = None
     parent_id: uuid.UUID | None = None
     position: int | None = None
+    # Replaces the whole set (admin only); {} clears it.
+    feed_defaults: CategoryFeedDefaults | None = None
 
-    model_config = ConfigDict(json_schema_extra={"example": {"name": "Vendor Blogs", "position": 2}})
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "name": "Vendor Blogs",
+                "position": 2,
+                "feed_defaults": {"ai_analysis_enabled": False, "extract_tools": False},
+            }
+        }
+    )
 
 
 class CategoryResponse(BaseModel):
@@ -30,6 +50,7 @@ class CategoryResponse(BaseModel):
     created_at: datetime
     children: list["CategoryResponse"] = []
     feed_count: int = 0
+    feed_defaults: dict = {}
 
     model_config = {"from_attributes": True}
 

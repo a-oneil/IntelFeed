@@ -79,6 +79,30 @@ _INDEX_LINK_SELECTORS = [
 _DEFAULT_PAGINATION_SELECTORS = "a[rel='next'], a.next, a.pagination-next, a.page-next, li.next a"
 
 
+_OG_SITE_NAME_RE = re.compile(r'<meta[^>]+property=["\']og:site_name["\'][^>]+content=["\']([^"\']+)["\']', re.I)
+_TITLE_TAG_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.DOTALL)
+
+
+def _page_title(page_html: str | None) -> str | None:
+    """A page's own name, whitespace collapsed.
+
+    <title> first, because it names this page ("Known Exploited Vulnerabilities
+    Catalog | CISA"); og:site_name names the whole site, so two scrapers of one
+    site would share it, and is the last resort.
+    """
+    if not page_html:
+        return None
+    import html as _html
+
+    for pattern in (_TITLE_TAG_RE, _OG_TITLE_RE, _OG_TITLE_RE_ALT, _OG_SITE_NAME_RE):
+        match = pattern.search(page_html)
+        if match:
+            text = re.sub(r"\s+", " ", _html.unescape(match.group(1))).strip()
+            if text:
+                return text[:500]
+    return None
+
+
 class WebScraperAdapter(ExtendedAdapter):
     """Scrapes blog index pages to discover and ingest articles."""
 
@@ -103,6 +127,7 @@ class WebScraperAdapter(ExtendedAdapter):
         all_links: list[str] = []
         visited_pages: set[str] = set()
         pages_to_visit = [blog_url]
+        index_html: str | None = None
 
         for page_num in range(max_pages if follow_pagination else 1):
             if not pages_to_visit:
@@ -118,6 +143,8 @@ class WebScraperAdapter(ExtendedAdapter):
                 if page_num == 0:
                     raise RuntimeError(f"Failed to fetch index page: {blog_url}")
                 break
+            if page_num == 0:
+                index_html = page_html
 
             links = self._discover_links(page_html, page_url, base_domain, link_selector, url_pattern)
             all_links.extend(link for link in links if link not in set(all_links))
@@ -133,7 +160,7 @@ class WebScraperAdapter(ExtendedAdapter):
 
         if not all_links:
             logger.debug(f"No article links discovered on {blog_url}")
-            meta = self._build_meta(config)
+            meta = self._build_meta(config, index_html)
             return meta, []
 
         # Fetch and extract articles concurrently with rate limiting
@@ -153,20 +180,26 @@ class WebScraperAdapter(ExtendedAdapter):
             elif isinstance(result, Exception):
                 logger.debug(f"Article extraction failed: {result}")
 
-        meta = self._build_meta(config)
+        meta = self._build_meta(config, index_html)
         return meta, entries
 
     def get_feed_meta(self, config: dict) -> ParsedFeedMeta:
         return self._build_meta(config)
 
-    def _build_meta(self, config: dict) -> ParsedFeedMeta:
+    def _build_meta(self, config: dict, index_html: str | None = None) -> ParsedFeedMeta:
+        """Feed metadata named after the page itself.
+
+        The title is the index page's own name (see _page_title), and only
+        then the hostname — a sidebar of "www.cisa.gov" rows says nothing
+        about which page each one scrapes.
+        """
         blog_url = config.get("blog_url", "")
         try:
             domain = urlparse(blog_url).netloc
         except Exception:
             domain = blog_url
         return ParsedFeedMeta(
-            title=f"{domain} (scraped)",
+            title=_page_title(index_html) or domain,
             description=f"Articles scraped from {blog_url}",
             site_url=blog_url,
         )

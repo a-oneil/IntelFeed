@@ -4,6 +4,7 @@ import { useBulkExtract, useBulkTranslate } from "@/hooks/useIntelligence";
 import { useFeedPipeline } from "@/hooks/useFeeds";
 import { useSystemSettings } from "@/hooks/useSystemSettings";
 import { describeStages, summarizeStages, toggleStage } from "../pipelineStages";
+import { reliabilityNote } from "../reliability";
 import type { FeedForm } from "../useFeedForm";
 import styles from "../fields.module.css";
 
@@ -92,6 +93,10 @@ export function PipelinePane({ feedId, form }: { feedId: string; form: FeedForm 
           );
         })}
       </div>
+
+      {/* The rating is set under Assessment but acts here, on the confidence
+          of every catalog match — say so where the tags are made. */}
+      <p className={styles.note}>{reliabilityNote(form.values.reliability_rating)}</p>
 
       {/* Changing a switch only affects what arrives next. These two reach back
           over what is already here — the question you have the moment you turn

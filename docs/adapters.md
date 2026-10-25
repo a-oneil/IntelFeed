@@ -348,6 +348,8 @@ feed_meta, parsed_entries = adapter.parse_entries(feed.url, response.text)
 
 #### 6. Entry Deduplication
 
+**Exclude-title filter** (per feed, every adapter): `_drop_excluded_titles()` removes any parsed entry whose title contains one of the feed's `exclude_title_patterns` before the GUID check. The list is plain phrases, one per line, matched case-insensitively as substrings (not regular expressions) by `app/services/title_filter.py`. The extended-adapter path and the GitHub full sync call the same helper, so a dropped title never reaches tagging, the AI, scoring or search. The feed modal's Source pane edits it, with a preview of how many of the last 100 titles it would drop (`POST /api/feeds/{id}/title-filter/preview`). Excluded items are never stored, so they are re-checked (and dropped again) on each fetch.
+
 **GUID-based deduplication** (primary):
 ```python
 existing = await db.execute(
@@ -1492,6 +1494,8 @@ Accepts the JWT via `Authorization: Bearer` **or** `?token=` query param (so `<i
 **File**: `backend/app/adapters/web_scraper.py`
 
 Discovers and scrapes blog index pages for article links (no RSS feed required).
+
+**Feed name**: `_build_meta()` names the feed after the index page — its `<title>`, then `og:title`, then `og:site_name`, and only then the hostname. A feed created without a `custom_title` is titled with its URL until the first fetch, which replaces that placeholder (`_title_is_placeholder()` in `workers/feed_tasks.py`); a real title is never overwritten.
 
 **Configuration**:
 ```python

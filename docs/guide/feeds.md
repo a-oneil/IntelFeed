@@ -42,7 +42,9 @@ depend on, and for security advisories from projects in your stack.
 
 For a site with no feed at all. Point it at a page and IntelFeed extracts
 articles from it. Expect this to be less reliable than a real feed — scrapers
-break when sites redesign — so check it a week after adding it.
+break when sites redesign — so check it a week after adding it. The feed is
+named after the page's own title on its first fetch; rename it under Identity
+if that title is unhelpful.
 
 ### Bluesky
 
@@ -61,6 +63,11 @@ Every feed belongs to a category, and categories are the folders in your
 sidebar. This is the single most consequential decision in feed setup, because
 categories are what you filter by for the rest of the instance's life.
 
+The add-feed form asks for one whenever any exist. A feed created without one
+through the API, the `create_feed` tool, or an OPML outline outside any folder
+is filed in the category most feeds of its type already sit in; it stays
+uncategorized only when no feed of that type has a category yet.
+
 Group by **how you'd want to read them**, not by alphabet or by vendor:
 
 - *Government advisories* — CISA, NCSC, national CERTs
@@ -74,6 +81,23 @@ those folders.
 
 Create categories before you bulk-import, not after — re-filing a hundred feeds
 by hand is tedious in a way that filing them once is not.
+
+### Category settings and defaults
+
+**Edit Category…** in a category's right-click menu (admin) changes settings on
+every feed in it at once: fetch interval, retention, ratings, and what runs on
+each new article. Two switches at the bottom say where the change goes:
+
+- **Apply to the feeds here now** — every feed currently in the category.
+- **Save the pipeline settings as this category's default** — a feed added to
+  the category later (by hand, from OPML, or from a starter pack) starts with
+  the analysis mode, AI analysis, tool entities, CVE/ATT&CK lookup and
+  detection-rule settings saved here. Anything the category doesn't set uses
+  the global default, and a value a feed is added with explicitly wins.
+
+The defaults apply once, when a feed is created. Changing them, or moving an
+existing feed into the category, doesn't change feeds that are already there —
+that's what the first switch is for.
 
 ## Importing in bulk
 
@@ -96,8 +120,18 @@ Click a feed to edit it:
 - **Retention** — how long entries from this feed are kept before being cleaned
   up. Blank means the instance default. Set a short retention on high-volume,
   low-value sources; that's how you keep the database from being 80% noise.
+- **Skip articles whose title contains** (admin, Source pane) — phrases, one
+  per line, matched anywhere in the title and ignoring case. A matching article
+  is dropped before it is saved, so it never reaches tagging, the AI or
+  scoring. The pane shows how many of the feed's last 100 titles the list would
+  have dropped, with examples, before you save. Use it for a source's recurring
+  stubs: "ISC Stormcast For" on SANS ISC Diary, "Chromium CVE-" on MSRC.
+  Articles already saved stay.
 - **Mute** — stop it appearing in your reading views without deleting it and
-  losing its history.
+  losing its history. Muting does not stop the pipeline: the feed's articles are
+  still tagged, analysed by the AI and scored, and the public RSS proxy leaves
+  muted feeds out. A muted feed's Overview shows its AI runs and tokens over the
+  last 30 days, and an admin can turn its AI off there in one click.
 - **Source assessment** — your own note on how much you trust it.
 
 ## Keeping feeds healthy

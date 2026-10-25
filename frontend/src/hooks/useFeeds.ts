@@ -2,13 +2,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "@/api/client";
 import type {
   Category,
+  CategoryFeedDefaults,
   Feed,
+  FeedAIUsage,
   FeedPipeline,
   FeedSubscribersResponse,
   FeedValueDetail,
   PaginatedResponse,
   StarterPack,
   StarterPackImportResult,
+  TitleFilterPreview,
 } from "@/api/types";
 
 export function useFeeds() {
@@ -172,6 +175,40 @@ export function useFeedPipeline(feedId: string | null) {
   });
 }
 
+/** AI calls on a feed's articles in the last 30 days — shown beside a muted feed. */
+export function useFeedAIUsage(feedId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: ["feed-ai-usage", feedId],
+    queryFn: async () => {
+      const res = await api.get<FeedAIUsage>(`/feeds/${feedId}/ai-usage`);
+      return res.data;
+    },
+    enabled: Boolean(feedId) && enabled,
+    staleTime: 300_000,
+  });
+}
+
+/**
+ * How many of a feed's last 100 titles an exclude-title list would drop.
+ * Keyed on the text, so callers should pass a debounced value. Silent: a bad
+ * line is a 422 the pane shows inline, not a toast.
+ */
+export function useTitleFilterPreview(feedId: string | null, patterns: string) {
+  return useQuery({
+    queryKey: ["feed-title-filter", feedId, patterns],
+    queryFn: async () => {
+      const res = await api.post<TitleFilterPreview>(`/feeds/${feedId}/title-filter/preview`, {
+        exclude_title_patterns: patterns,
+      });
+      return res.data;
+    },
+    enabled: Boolean(feedId) && patterns.trim() !== "",
+    retry: false,
+    staleTime: 60_000,
+    meta: { silenceToast: true },
+  });
+}
+
 export function useDiscoverFeed() {
   return useMutation({
     mutationFn: async (url: string) => {
@@ -272,7 +309,13 @@ export function useCreateCategory() {
 export function useUpdateCategory() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ categoryId, data }: { categoryId: string; data: { name?: string } }) => {
+    mutationFn: async ({
+      categoryId,
+      data,
+    }: {
+      categoryId: string;
+      data: { name?: string; feed_defaults?: CategoryFeedDefaults };
+    }) => {
       const res = await api.put(`/categories/${categoryId}`, data);
       return res.data;
     },
@@ -346,9 +389,11 @@ export function useBulkUpdateCategoryFeeds() {
         auto_extract_on_ingest?: boolean;
         extract_detection_rules?: boolean;
         extract_tools?: boolean;
+        apply_to_feeds?: boolean;
+        save_as_category_default?: boolean;
       };
     }) => {
-      const res = await api.put<{ updated: number }>(
+      const res = await api.put<{ updated: number; feed_defaults: CategoryFeedDefaults }>(
         `/feeds/category/${categoryId}/bulk-update`,
         data
       );
@@ -356,6 +401,7 @@ export function useBulkUpdateCategoryFeeds() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["feeds"] });
+      queryClient.invalidateQueries({ queryKey: ["categories"] });
     },
   });
 }

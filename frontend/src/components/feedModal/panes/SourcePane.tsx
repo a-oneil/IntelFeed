@@ -1,5 +1,6 @@
 import type { FeedForm } from "../useFeedForm";
 import { AdapterFields, hasAdapterFields } from "./adapterFields";
+import { TitleFilterField } from "./TitleFilterField";
 import styles from "../fields.module.css";
 
 /**
@@ -132,6 +133,8 @@ export function SourcePane({ feedId, form }: { feedId: string; form: FeedForm })
           </span>
         </div>
       </div>
+
+      <TitleFilterField feedId={feedId} form={form} />
 
       <label className={styles.checkRow}>
         <input

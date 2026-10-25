@@ -82,6 +82,9 @@ export interface Feed {
   auto_extract_on_ingest: boolean;
   extract_detection_rules: boolean;
   extract_tools: boolean;
+  /** Phrases, one per line; an incoming article whose title contains one is
+   * dropped before it is saved. Null = no filter. */
+  exclude_title_patterns?: string | null;
   reliability_rating: string | null;
   timeliness_rating: string | null;
   relevance_rating: string | null;
@@ -109,6 +112,17 @@ export interface Category {
   created_at: string;
   children: Category[];
   feed_count: number;
+  /** Pipeline settings a feed added to this category starts with. A key that
+   * is absent falls back to the global default. */
+  feed_defaults?: CategoryFeedDefaults;
+}
+
+export interface CategoryFeedDefaults {
+  intel_extraction_mode?: "full" | "selective" | "manual" | "none";
+  ai_analysis_enabled?: boolean;
+  extract_tools?: boolean;
+  auto_extract_on_ingest?: boolean;
+  extract_detection_rules?: boolean;
 }
 
 export interface EntryMediaBrief {
@@ -2594,6 +2608,25 @@ export interface FeedHealthResponse {
 // Feed Value Scoring
 
 /** Resolved ingest pipeline for one feed, from GET /feeds/{id}/pipeline. */
+/** GET /feeds/{id}/ai-usage */
+export interface FeedAIUsage {
+  feed_id: string;
+  days: number;
+  /** Calls that moved tokens; reuses from near-duplicates are not counted. */
+  runs: number;
+  tokens_input: number;
+  tokens_output: number;
+  last_run_at: string | null;
+  ai_analysis_enabled: boolean;
+}
+
+/** POST /feeds/{id}/title-filter/preview */
+export interface TitleFilterPreview {
+  checked: number;
+  dropped: number;
+  examples: string[];
+}
+
 export interface FeedPipeline {
   engine_enabled: boolean;
   stages: Record<string, { enabled: boolean; config?: Record<string, unknown> }>;

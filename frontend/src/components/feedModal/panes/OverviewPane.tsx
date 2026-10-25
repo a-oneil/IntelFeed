@@ -8,6 +8,7 @@ import {
 import { formatDateTime } from "@/utils/formatDate";
 import { describeHealthWarning, describePauseReason } from "@/utils/feedHealth";
 import type { Feed } from "@/api/types";
+import { MutedAIUsage } from "./MutedAIUsage";
 import styles from "../fields.module.css";
 
 /** "6m ago" / "3h ago" / "2d ago" — the sidebar tooltip's phrasing. */
@@ -80,6 +81,8 @@ export function OverviewPane({ feed, isAdmin }: { feed: Feed; isAdmin: boolean }
         />
         {verdict}
       </p>
+
+      <MutedAIUsage feed={feed} isAdmin={isAdmin} />
 
       {value.isLoading && <p className={styles.note}>Working out what this feed has produced…</p>}
 

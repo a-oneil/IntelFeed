@@ -15,6 +15,8 @@ class FeedCreateRequest(BaseModel):
     auto_extract_on_ingest: bool | None = None
     extract_detection_rules: bool | None = None
     extract_tools: bool | None = None
+    ai_analysis_enabled: bool | None = None
+    exclude_title_patterns: str | None = None
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -51,6 +53,9 @@ class FeedUpdateRequest(BaseModel):
     auto_extract_on_ingest: bool | None = None
     extract_detection_rules: bool | None = None
     extract_tools: bool | None = None
+    # Plain phrases, one per line; an article whose title contains one is
+    # dropped at ingest. "" or null clears it.
+    exclude_title_patterns: str | None = None
     adapter_config: dict | None = None
 
     model_config = ConfigDict(
@@ -102,6 +107,7 @@ class FeedResponse(BaseModel):
     auto_extract_on_ingest: bool = False
     extract_detection_rules: bool = False
     extract_tools: bool = True
+    exclude_title_patterns: str | None = None
     category_id: uuid.UUID | None = None
     custom_title: str | None = None
     is_muted: bool = False
@@ -124,6 +130,28 @@ class FeedResponse(BaseModel):
         if masked.get("app_password"):
             masked["app_password"] = "••••••••"
         return masked
+
+
+class FeedAIUsageResponse(BaseModel):
+    feed_id: uuid.UUID
+    days: int
+    runs: int
+    tokens_input: int
+    tokens_output: int
+    last_run_at: datetime | None = None
+    ai_analysis_enabled: bool
+
+
+class TitleFilterPreviewRequest(BaseModel):
+    exclude_title_patterns: str | None = None
+
+    model_config = ConfigDict(json_schema_extra={"example": {"exclude_title_patterns": "ISC Stormcast For"}})
+
+
+class TitleFilterPreviewResponse(BaseModel):
+    checked: int
+    dropped: int
+    examples: list[str]
 
 
 class BulkExcludeShortsRequest(BaseModel):
@@ -174,6 +202,12 @@ class BulkCategoryUpdateRequest(BaseModel):
     auto_extract_on_ingest: bool | None = None
     extract_detection_rules: bool | None = None
     extract_tools: bool | None = None
+    # Change the feeds in the category now (the default). Off, with
+    # save_as_category_default on, edits only the defaults.
+    apply_to_feeds: bool = True
+    # Also store the pipeline fields above as the category's defaults, which
+    # feeds added to it later start with.
+    save_as_category_default: bool = False
 
     model_config = ConfigDict(
         json_schema_extra={
