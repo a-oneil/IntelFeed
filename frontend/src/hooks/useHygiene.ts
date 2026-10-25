@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "@/api/client";
 
 export interface HygieneStats {
@@ -8,6 +8,8 @@ export interface HygieneStats {
   /** Set while the rolling circuit breaker has paused dispatch (ISO time it lifts). */
   adjudication_breaker_until: string | null;
   pending_advisories: number;
+  /** Entities with a pending remove-link proposal, either log. */
+  pending_unlink_entities: number;
   name_normalization_proposed: number;
   applied_24h: number;
   applied_7d: number;
@@ -310,6 +312,149 @@ export function useApplyAdvisories() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: HYGIENE_KEYS });
+    },
+  });
+}
+
+export interface ReclassifyGroup {
+  entity_type: string;
+  entity_id: string;
+  name: string;
+  /** False when the entity is already gone — applying just clears the proposals. */
+  exists: boolean;
+  /** Most-proposed target type first. */
+  suggestions: { type: string; count: number }[];
+  proposals: number;
+  latest_at: string;
+  reason: string | null;
+  sample_entry_id: string | null;
+}
+
+export interface ReclassifyGroupsActionResult {
+  entities: number;
+  cleared_rows: number;
+  failed: number;
+  errors: { entity_id: string; error: string }[];
+}
+
+/** Pending reclassify proposals from both logs, one row per entity. */
+export function useReclassifyGroups(params: { q?: string; entity_type?: string; limit?: number; offset?: number }) {
+  return useQuery({
+    queryKey: ["hygiene", "reclassify-groups", params],
+    queryFn: async () => {
+      const { data } = await api.get<{ groups: ReclassifyGroup[]; total: number }>("/admin/hygiene/reclassify-groups", {
+        params,
+      });
+      return data;
+    },
+    placeholderData: keepPreviousData,
+  });
+}
+
+type ReclassifyItem = { entity_type: string; entity_id: string; target_type?: string };
+
+function useReclassifyGroupsAction(action: "apply" | "dismiss") {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (items: ReclassifyItem[]) => {
+      const { data } = await api.post<ReclassifyGroupsActionResult>(`/admin/hygiene/reclassify-groups/${action}`, {
+        items,
+      });
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: HYGIENE_KEYS });
+      if (action === "apply") {
+        qc.invalidateQueries({ queryKey: ["extraction"] });
+        qc.invalidateQueries({ queryKey: ["entity-links"] });
+      }
+    },
+  });
+}
+
+/** Convert each entity to its target type and clear every proposal about it. */
+export const useApplyReclassifyGroups = () => useReclassifyGroupsAction("apply");
+/** Clear every proposal about each entity and stop new ones being filed. */
+export const useDismissReclassifyGroups = () => useReclassifyGroupsAction("dismiss");
+
+export interface UnlinkGroup {
+  entity_type: string;
+  entity_id: string;
+  name: string;
+  exists: boolean;
+  /** Articles the review wants this entity unlinked from. */
+  proposals: number;
+  /** Articles it is linked to now (null where the type keeps no count). */
+  linked: number | null;
+  matched_names: string[];
+  reason: string | null;
+  latest_at: string;
+}
+
+export interface UnlinkRow {
+  id: string;
+  entry_id: string | null;
+  entry_title: string | null;
+  reason: string | null;
+  matched_names: string[];
+  created_at: string;
+}
+
+export interface UnlinkActionResult {
+  done: number;
+  failed: number;
+  remaining: number;
+  errors: { id: string; error: string }[];
+}
+
+/** Pending remove-link proposals from both logs, one row per entity. */
+export function useUnlinkGroups(params: { q?: string; entity_type?: string; limit?: number; offset?: number }) {
+  return useQuery({
+    queryKey: ["hygiene", "unlink-groups", params],
+    queryFn: async () => {
+      const { data } = await api.get<{ groups: UnlinkGroup[]; total: number; proposals: number }>(
+        "/admin/hygiene/unlink-groups",
+        { params },
+      );
+      return data;
+    },
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** The articles behind one entity's remove-link proposals. */
+export function useUnlinkRows(group: { entity_type: string; entity_id: string } | null) {
+  return useQuery({
+    queryKey: ["hygiene", "unlink-rows", group?.entity_type, group?.entity_id],
+    queryFn: async () => {
+      const { data } = await api.get<UnlinkRow[]>("/admin/hygiene/unlink-groups/rows", { params: group! });
+      return data;
+    },
+    enabled: !!group,
+  });
+}
+
+type UnlinkTarget = { items?: { entity_type: string; entity_id: string }[]; row_ids?: string[] };
+
+/** Remove the links (apply) or keep them (clear the proposals). Apply runs in
+ *  server batches; this repeats until the groups are drained or a batch stalls. */
+export function useUnlinkAction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ action, target }: { action: "apply" | "keep"; target: UnlinkTarget }) => {
+      const total: UnlinkActionResult = { done: 0, failed: 0, remaining: 0, errors: [] };
+      for (;;) {
+        const { data } = await api.post<UnlinkActionResult>(`/admin/hygiene/unlink-groups/${action}`, target);
+        total.done += data.done;
+        total.failed += data.failed;
+        total.remaining = data.remaining;
+        total.errors.push(...data.errors);
+        if (action === "keep" || data.remaining === 0 || data.done === 0) return total;
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: HYGIENE_KEYS });
+      qc.invalidateQueries({ queryKey: ["entity-links"] });
     },
   });
 }

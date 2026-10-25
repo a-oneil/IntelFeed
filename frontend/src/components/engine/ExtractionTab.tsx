@@ -17,6 +17,7 @@ import {
   useExtractionStats,
   useInvalidateExtraction,
   useMergeExtractionEntities,
+  useNotDuplicate,
   useUpdateExtractionEntity,
   type ExtractionEntity,
   type ExtractionParams,
@@ -55,7 +56,9 @@ export function ExtractionTab({
   embedded?: boolean;
 }) {
   const navigate = useNavigate();
-  const [timeWindow, setTimeWindow] = useState<ExtractionParams["window"]>("7d");
+  // The console's chips count across all time, so a chip that lands on a
+  // status filter opens on "all" — the list then matches the number clicked.
+  const [timeWindow, setTimeWindow] = useState<ExtractionParams["window"]>(initialStatus === "all" ? "7d" : "all");
   const [status, setStatus] = useState<"all" | "review" | "orphan" | "dupe" | "stale">(initialStatus);
   const [types, setTypes] = useState<Set<ExtractionType>>(new Set());
   const [searchInput, setSearchInput] = useState("");
@@ -93,6 +96,7 @@ export function ExtractionTab({
   const confirmMut = useConfirmExtraction();
   const deleteMut = useDeleteExtractionEntities();
   const mergeMut = useMergeExtractionEntities();
+  const notDupMut = useNotDuplicate();
   const updateMut = useUpdateExtractionEntity();
   const convertMut = useConvertExtractionEntity();
   const invalidateExtraction = useInvalidateExtraction();
@@ -243,6 +247,34 @@ export function ExtractionTab({
     selectedItems.length >= 2 &&
     selectedItems.every((i) => i.entity_type === selectedItems[0].entity_type) &&
     MERGEABLE_TYPES.has(selectedItems[0].entity_type);
+
+  async function doMergeIntoSibling(e: ExtractionEntity) {
+    if (!e.duplicate_of_id) return;
+    if (
+      !(await confirmDialog({
+        title: "Merge duplicate",
+        message: `Merge "${e.name}" into "${e.duplicate_of}"? Its aliases and article links fold into "${e.duplicate_of}".`,
+        confirmLabel: "Merge",
+      }))
+    )
+      return;
+    try {
+      await mergeMut.mutateAsync({ entityType: e.entity_type, keeperId: e.duplicate_of_id, mergeIds: [e.id] });
+      toast.success(`Merged "${e.name}" into "${e.duplicate_of}"`);
+    } catch (err) {
+      toast.error(`Merge failed: ${(err as Error).message}`);
+    }
+  }
+
+  async function doNotDuplicate(e: ExtractionEntity) {
+    if (!e.duplicate_of_id) return;
+    try {
+      await notDupMut.mutateAsync({ entityType: e.entity_type, id: e.id, otherId: e.duplicate_of_id });
+      toast.success(`"${e.name}" and "${e.duplicate_of}" won't be flagged again`);
+    } catch (err) {
+      toast.error(`Failed: ${(err as Error).message}`);
+    }
+  }
 
   async function doMerge() {
     if (!mergeReady) return;
@@ -530,6 +562,26 @@ export function ExtractionTab({
                       <button className={styles.iact} title="Pivot to profile" onClick={() => pivot(e)}>
                         ↗
                       </button>
+                      {e.status === "dupe" && e.duplicate_of_id && (
+                        <>
+                          <button
+                            className={styles.dupAct}
+                            title={`Fold ${e.name} into ${e.duplicate_of} — aliases and article links move over`}
+                            disabled={mergeMut.isPending}
+                            onClick={() => doMergeIntoSibling(e)}
+                          >
+                            Merge
+                          </button>
+                          <button
+                            className={styles.dupAct}
+                            title={`${e.name} and ${e.duplicate_of} are different things — stop flagging the pair`}
+                            disabled={notDupMut.isPending}
+                            onClick={() => doNotDuplicate(e)}
+                          >
+                            Not a dupe
+                          </button>
+                        </>
+                      )}
                       {e.needs_review && (
                         <button className={styles.iact} title="Confirm" onClick={() => doConfirm([e])}>
                           ✓

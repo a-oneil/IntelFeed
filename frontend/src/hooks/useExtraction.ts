@@ -18,6 +18,8 @@ export interface ExtractionEntity {
   first_seen_at: string;
   status: ExtractionStatus;
   duplicate_of: string | null;
+  /** The sibling it most resembles — the merge target for one-click Merge. */
+  duplicate_of_id: string | null;
 }
 
 export interface ExtractionListResponse {
@@ -143,6 +145,17 @@ export function useConfirmExtraction() {
         ids,
       });
       return data;
+    },
+    onSuccess: invalidate,
+  });
+}
+
+/** "These two are different things" — the pair stops counting as a likely duplicate. */
+export function useNotDuplicate() {
+  const invalidate = useInvalidateExtraction();
+  return useMutation({
+    mutationFn: async ({ entityType, id, otherId }: { entityType: ExtractionType; id: string; otherId: string }) => {
+      await api.post("/engine/extraction/not-duplicate", { entity_type: entityType, id, other_id: otherId });
     },
     onSuccess: invalidate,
   });

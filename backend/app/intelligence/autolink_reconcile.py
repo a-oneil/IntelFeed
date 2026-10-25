@@ -160,3 +160,55 @@ async def _system_user_id(db: AsyncSession) -> uuid.UUID | None:
     from app.services.system_user import get_system_user_id
 
     return await get_system_user_id(db)
+
+
+async def resolve_pending_manually(db: AsyncSession, rows: list, promote: bool, user_id: uuid.UUID | None) -> dict:
+    """An analyst's verdict on held matches: promote creates the junction rows
+    through the same path the AI reconciler uses; reject marks them rejected
+    and records the false positive against each article."""
+    from app.intelligence.autolinker import store_autolink_matches
+    from app.models.false_positive_record import FalsePositiveRecord
+
+    now = datetime.now(UTC)
+    counts = {"promoted": 0, "rejected": 0}
+    for row in rows:
+        if row.resolved_at is not None:
+            continue
+        if promote:
+            match = {
+                "entity_type": row.entity_type,
+                "entity_id": str(row.entity_id),
+                "canonical_name": row.canonical_name,
+                "surface_form": (row.matched_names or [row.canonical_name])[0],
+                "surface_forms": list(row.matched_names or []),
+                "confidence": row.confidence or "medium",
+                "source": "auto_link",
+                "paragraph_indices": list(row.paragraph_indices or []),
+            }
+            await store_autolink_matches(
+                db,
+                row.entry_id,
+                [match],
+                source_confidence_weight=row.source_weight or 1.0,
+                allow_provisional=True,
+            )
+            row.resolution = "promoted"
+            counts["promoted"] += 1
+        else:
+            row.resolution = "rejected"
+            counts["rejected"] += 1
+            if user_id:
+                db.add(
+                    FalsePositiveRecord(
+                        entity_type=row.entity_type,
+                        entity_id=row.entity_id,
+                        entity_value=row.canonical_name,
+                        source_entry_id=row.entry_id,
+                        reason="Analyst rejected a held autolink match",
+                        marked_by=user_id,
+                        extraction_source="analyst",
+                    )
+                )
+        row.resolved_at = now
+    await db.flush()
+    return counts

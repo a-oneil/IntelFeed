@@ -9,7 +9,7 @@ the link (edge-to-entry) half.
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class EntityLinkResponse(BaseModel):
@@ -75,3 +75,48 @@ class EntityLinkStats(BaseModel):
     # because the entry's feed gets no AI analysis to confirm them.
     pending_dropped_ai_off: int = 0
     relationships_total: int
+
+
+class PendingMatchEntry(BaseModel):
+    id: uuid.UUID  # pending_autolink_matches row id
+    entry_id: uuid.UUID
+    entry_title: str
+    published_at: datetime | None
+    matched_names: list[str]
+    confidence: str | None
+
+
+class PendingMatchGroup(BaseModel):
+    entity_type: str
+    entity_id: uuid.UUID
+    name: str
+    count: int
+    high: int  # how many of them the autolinker rated high confidence
+    entries: list[PendingMatchEntry]  # newest first, capped at 50
+
+
+class PendingMatchesResponse(BaseModel):
+    groups: list[PendingMatchGroup]
+    total_matches: int
+
+
+class ResolvePendingRequest(BaseModel):
+    resolution: str = Field(..., pattern="^(promote|reject)$", description="promote = link it; reject = not a match.")
+    entity_type: str | None = Field(None, description="With entity_id: resolve every held match for this entity.")
+    entity_id: uuid.UUID | None = None
+    ids: list[uuid.UUID] = Field(default_factory=list, max_length=500, description="Or: these pending rows only.")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "resolution": "promote",
+                "entity_type": "threat_actor",
+                "entity_id": "d5b2c8f0-3e4a-4b6c-9d1e-7f8a9b0c1d2e",
+            }
+        }
+    )
+
+
+class ResolvePendingResponse(BaseModel):
+    promoted: int
+    rejected: int

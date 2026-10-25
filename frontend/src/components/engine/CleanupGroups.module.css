@@ -1,0 +1,103 @@
+/* Additions to ProposalsQueue.module.css for the per-entity cleanup queues. */
+
+.search {
+  font: inherit;
+  font-size: var(--fs-base);
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  min-width: 200px;
+}
+
+.chk {
+  width: 28px;
+  text-align: center;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* A proposed target type: clicking it converts the entity. */
+.target {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: var(--r-md);
+  border: 1px solid color-mix(in srgb, var(--success) 45%, var(--border));
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.target:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--success) 12%, var(--bg-secondary));
+}
+.target:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.cnt {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border-radius: var(--r-sm);
+  padding: 0 5px;
+  margin-left: 4px;
+}
+
+.gone {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 0 4px;
+  margin-left: 6px;
+}
+
+.meta {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
+.expand {
+  appearance: none;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: var(--fs-base);
+  color: var(--text-primary);
+  cursor: pointer;
+  padding: 0;
+  white-space: nowrap;
+}
+
+.subRow td {
+  background: var(--bg-tertiary);
+  font-size: var(--fs-sm);
+}
+
+.article {
+  color: var(--text-primary);
+  text-decoration: none;
+}
+.article:hover {
+  text-decoration: underline;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}

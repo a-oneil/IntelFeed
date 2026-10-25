@@ -23,7 +23,7 @@ from sqlalchemy.orm import InstrumentedAttribute
 
 from app.core.exceptions import AppError
 from app.core.pagination import PaginatedResponse
-from app.core.security import get_current_user
+from app.core.security import get_admin_user, get_current_user
 from app.database import get_db
 from app.intelligence.autolinker import dropped_ai_off_count
 from app.models.cve import CVE, EntryCVE
@@ -44,6 +44,11 @@ from app.schemas.entity_link import (
     EntityLinkResponse,
     EntityLinkStats,
     LinkRef,
+    PendingMatchEntry,
+    PendingMatchesResponse,
+    PendingMatchGroup,
+    ResolvePendingRequest,
+    ResolvePendingResponse,
 )
 
 router = APIRouter()
@@ -248,6 +253,79 @@ async def entity_link_stats(
         pending_dropped_ai_off=pending_dropped_ai_off,
         relationships_total=relationships_total,
     )
+
+
+@router.get("/pending", response_model=PendingMatchesResponse)
+async def list_pending_matches(
+    search: str | None = Query(None, description="Filter by entity name or article title."),
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Held autolink matches (a name that's also an ordinary word) waiting for
+    AI or an analyst to confirm them, grouped by entity, biggest group first."""
+    q = (
+        select(PendingAutolinkMatch, Entry.title, Entry.published_at)
+        .join(Entry, Entry.id == PendingAutolinkMatch.entry_id)
+        .where(PendingAutolinkMatch.resolution.is_(None))
+        .order_by(PendingAutolinkMatch.created_at.desc())
+    )
+    if search:
+        term = f"%{search}%"
+        q = q.where(or_(PendingAutolinkMatch.canonical_name.ilike(term), Entry.title.ilike(term)))
+    groups: dict[tuple[str, uuid.UUID], PendingMatchGroup] = {}
+    total = 0
+    for row, title, published in (await db.execute(q)).all():
+        total += 1
+        g = groups.get((row.entity_type, row.entity_id))
+        if g is None:
+            g = groups[(row.entity_type, row.entity_id)] = PendingMatchGroup(
+                entity_type=row.entity_type,
+                entity_id=row.entity_id,
+                name=row.canonical_name,
+                count=0,
+                high=0,
+                entries=[],
+            )
+        g.count += 1
+        g.high += row.confidence == "high"
+        if len(g.entries) < 50:
+            g.entries.append(
+                PendingMatchEntry(
+                    id=row.id,
+                    entry_id=row.entry_id,
+                    entry_title=title,
+                    published_at=published,
+                    matched_names=list(row.matched_names or []),
+                    confidence=row.confidence,
+                )
+            )
+    ordered = sorted(groups.values(), key=lambda g: (-g.count, g.name.lower()))
+    return PendingMatchesResponse(groups=ordered, total_matches=total)
+
+
+@router.post("/pending/resolve", response_model=ResolvePendingResponse)
+async def resolve_pending_matches(
+    body: ResolvePendingRequest = Body(...),
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Confirm (create the links) or reject held autolink matches — every match
+    for one entity, or a hand-picked set of rows."""
+    from app.intelligence.autolink_reconcile import resolve_pending_manually
+
+    q = select(PendingAutolinkMatch).where(PendingAutolinkMatch.resolution.is_(None))
+    if body.ids:
+        q = q.where(PendingAutolinkMatch.id.in_(body.ids))
+    elif body.entity_type and body.entity_id:
+        q = q.where(
+            PendingAutolinkMatch.entity_type == body.entity_type,
+            PendingAutolinkMatch.entity_id == body.entity_id,
+        )
+    else:
+        raise AppError(code="invalid", message="Pass ids, or entity_type + entity_id", status_code=400)
+    rows = list((await db.execute(q)).scalars().all())
+    counts = await resolve_pending_manually(db, rows, body.resolution == "promote", user.id)
+    return ResolvePendingResponse(**counts)
 
 
 async def _delete_link(db: AsyncSession, ref: LinkRef) -> bool:

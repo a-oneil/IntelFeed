@@ -182,6 +182,24 @@ def is_common_english_word(form: str) -> bool:
     return bool(_ALPHA_WORD_RE.match(form)) and form in _get_common_words()
 
 
+# Country names that are also ordinary words. The common-words list is built
+# from subtitle frequencies, so it carries proper nouns too ("canada",
+# "germany", "australia") — holding those held most country links for no
+# reason. A country match is provisional only when its surface form is here.
+AMBIGUOUS_COUNTRY_WORDS = frozenset(
+    {"chad", "china", "georgia", "guinea", "jersey", "jordan", "niger", "panama", "turkey", "chile", "cuba"}
+)
+
+
+def is_provisional_form(entity_type: str, form: str) -> bool:
+    """True when a match on ``form`` is held for AI confirmation instead of linking."""
+    if entity_type not in PENDING_TIER_TYPES:
+        return False
+    if entity_type == "country":
+        return (form or "").strip().lower() in AMBIGUOUS_COUNTRY_WORDS
+    return is_common_english_word(form)
+
+
 def pending_tier_enabled() -> bool:
     """Pending tier requires its own flag AND the one-pass AI analysis.
 
@@ -427,7 +445,7 @@ class EntityVocabulary:
                 surface_form=surface_form,
                 is_alias=is_alias,
                 is_ambiguous=_is_ambiguous_surface_form(surface_form),
-                is_provisional=entity_type in PENDING_TIER_TYPES and is_common_english_word(surface_form),
+                is_provisional=is_provisional_form(entity_type, surface_form),
             )
 
             # Multiple entities can share a surface form

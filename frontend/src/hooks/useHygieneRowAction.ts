@@ -3,10 +3,10 @@ import { toast } from "sonner";
 
 import api from "@/api/client";
 import {
-  useApplyAdvisories,
   useApplyAliasCollision,
   useApplyIdHygiene,
   useApplyNormalizeName,
+  useApplyReclassifyGroups,
   useApplyVendorAutolink,
   useDismissFeedRow,
   type FeedRow,
@@ -29,7 +29,7 @@ export function useHygieneRowAction() {
   const applyAliasCollision = useApplyAliasCollision();
   const applyVendorAutolink = useApplyVendorAutolink();
   const applyIdHygiene = useApplyIdHygiene();
-  const applyAdvisories = useApplyAdvisories();
+  const applyReclassify = useApplyReclassifyGroups();
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["hygiene"] });
 
@@ -57,7 +57,9 @@ export function useHygieneRowAction() {
     if (action === "dismiss") {
       try {
         await dismissRow.mutateAsync({ source: row.source, id: extractLogId(row) });
-        toast.success("Dismissed");
+        const reclassify = row.action === "needs_reclassification" || row.action === "adjudication_reclassify";
+        // The backend settles a reclassify per entity: every article's copy goes, and it won't be re-proposed.
+        toast.success(reclassify ? `Dismissed — ${row.entity_name ?? "this entity"} won't be proposed again` : "Dismissed");
       } catch (e) {
         toast.error(`Dismiss failed: ${(e as Error).message}`);
       }
@@ -129,9 +131,18 @@ export function useHygieneRowAction() {
         toast.error("Missing entity type on advisory");
         return;
       }
+      const target = row.payload?.suggested_entity_type as string | undefined;
+      if (!row.entity_id || !target) {
+        toast.error("Missing entity or suggested type on advisory");
+        return;
+      }
       try {
-        const result = await applyAdvisories.mutateAsync({ mode: "apply", entity_type: row.entity_type, limit: 50 });
-        toast.success(`Applied ${result.applied} reclassifications for ${row.entity_type}`);
+        // This entity only — every article's copy of the proposal clears with it.
+        const result = await applyReclassify.mutateAsync([
+          { entity_type: row.entity_type, entity_id: row.entity_id, target_type: target },
+        ]);
+        if (result.failed) toast.error(`Apply failed: ${result.errors[0]?.error ?? "unknown error"}`);
+        else toast.success(`Reclassified ${row.entity_name ?? "entity"} → ${target.replace(/_/g, " ")}`);
       } catch (e) {
         toast.error(`Apply failed: ${(e as Error).message}`);
       }
