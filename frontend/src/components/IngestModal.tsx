@@ -271,7 +271,7 @@ export function IngestModal({ onClose }: Props) {
                   disabled={busy}
                 />
                 <p className={styles.fieldHint}>
-                  A GitHub repository link is fetched once and becomes one entry per file. No feed is created.
+                  A GitHub repository link is fetched once and becomes one entry per file.
                 </p>
               </div>
               <button onClick={handleUrls} disabled={busy || !urlsText.trim()} className={styles.submitBtn}>
