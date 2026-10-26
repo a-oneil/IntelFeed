@@ -4,6 +4,7 @@ import api from "@/api/client";
 import { annotateGlossaryHTML, type GlossaryTermHighlight } from "@/utils/highlightText";
 import { UNTRUSTED_CONTENT_ATTR, isExternalWebUrl } from "@/utils/externalLinks";
 import { useReadingPrefs } from "@/hooks/useReadingPrefs";
+import { isVisitorNow } from "@/stores/authStore";
 
 interface SafeHTMLProps {
   html: string;
@@ -112,6 +113,12 @@ export function SafeHTML({ html, className, style, glossaryTerms }: SafeHTMLProp
     );
 
     el.querySelectorAll<HTMLImageElement>("img").forEach((img) => {
+      // Telegram media is login-only; a visitor (public read-only mode) would
+      // only get a broken image, so the post shows as text.
+      if (isVisitorNow() && (img.getAttribute("src") || "").startsWith("/api/telegram-media/")) {
+        img.remove();
+        return;
+      }
       // Support re-mount (React StrictMode): check data-proxy-src first
       const proxySrc = img.dataset.proxySrc;
       const src = proxySrc || img.getAttribute("src");

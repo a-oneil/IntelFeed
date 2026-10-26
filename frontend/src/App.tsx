@@ -1,7 +1,8 @@
 import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { Toaster } from "sonner";
-import { useAuthStore } from "@/stores/authStore";
+import { useAuthStore, useIsVisitor } from "@/stores/authStore";
+import { useRegistrationStatus } from "@/hooks/useAuth";
 import { useAutoTheme } from "@/hooks/useThemes";
 import { useIsMobile } from "@/hooks/useMediaQuery";
 import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
@@ -16,6 +17,7 @@ import { SendToReportModal } from "@/components/SendToReportModal";
 import { GlobalModals } from "@/components/GlobalModals";
 import { CopilotDockPanel } from "@/components/CopilotDockPanel";
 import { RouteFallback } from "@/components/RouteFallback";
+import { NotAvailable } from "@/components/NotAvailable";
 
 // Eager — always needed for the main feed view
 import { MainLayout } from "@/pages/MainLayout";
@@ -70,11 +72,6 @@ const ExposureBuilderPage = lazy(() =>
 const DashboardPage = lazy(() =>
   import("@/pages/DashboardPage").then((m) => ({
     default: m.DashboardPage,
-  }))
-);
-const RegionsPage = lazy(() =>
-  import("@/pages/RegionsPage").then((m) => ({
-    default: m.RegionsPage,
   }))
 );
 const SharedEntryPage = lazy(() =>
@@ -156,7 +153,16 @@ function HomeRedirect() {
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuth = useAuthStore((s) => s.isAuthenticated());
   const user = useAuthStore((s) => s.user);
-  if (!isAuth) return <Navigate to="/login" replace />;
+  const publicReadOnly = useAuthStore((s) => s.publicReadOnly);
+  const publicReadOnlyKnown = useAuthStore((s) => s.publicReadOnlyKnown);
+  const location = useLocation();
+  if (!isAuth) {
+    // Public read-only mode: a visitor browses the app as is, no wizard.
+    if (publicReadOnly) return <>{children}</>;
+    // Don't bounce to /login before the server has said whether visitors may browse.
+    if (!publicReadOnlyKnown) return <RouteFallback />;
+    return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
+  }
   // Auto-open until they finish it — but a close counts too, otherwise every
   // hard refresh reopens the tour over a user who already dismissed it. Both
   // keys are cleared from Settings → Account.
@@ -173,9 +179,17 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** A page that isn't part of the public read-only view. */
+function SignedInOnly({ children }: { children: React.ReactNode }) {
+  const isVisitor = useIsVisitor();
+  return isVisitor ? <NotAvailable /> : <>{children}</>;
+}
+
 export default function App() {
   useAutoTheme();
   useGlobalShortcuts();
+  // Tells the app, before any login, whether visitors may browse read-only.
+  useRegistrationStatus();
   // One live-events connection per session, not per layout mount. It used to
   // live in MainLayout, so every trip between the feed reader and a
   // SidebarLayout route (search, settings, workbench) tore down the connection
@@ -204,8 +218,9 @@ export default function App() {
       />
 
       <AudioPlayer />
-      <ReportWizardModal />
-      <SendToReportModal />
+      {/* Reports are signed-in work; their modals (and their queries) aren't mounted for visitors. */}
+      {isAuthenticated && <ReportWizardModal />}
+      {isAuthenticated && <SendToReportModal />}
       {/* Add-feed and the shortcut cheatsheet live here, not in a layout: the
           command palette opens them from anywhere, and add-feed used to render
           inside the sidebar, which hides it whenever the sidebar is collapsed. */}
@@ -231,16 +246,16 @@ export default function App() {
               </ProtectedRoute>
             }
           >
-            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/settings" element={<SignedInOnly><SettingsPage /></SignedInOnly>} />
             {/* Search is a route, not a panel: it carries its own facet rail
                 and has to be reachable from the workbench and settings without
                 displacing the feed reader. */}
-            <Route path="/search" element={<SearchPage />} />
-            <Route path="/automation" element={<AutomationPage />} />
+            <Route path="/search" element={<SignedInOnly><SearchPage /></SignedInOnly>} />
+            <Route path="/automation" element={<SignedInOnly><AutomationPage /></SignedInOnly>} />
             <Route path="/dashboards" element={<Navigate to="/workbench/dashboard" replace />} />
             <Route path="/intelligence" element={<Navigate to="/workbench/explore" replace />} />
             <Route path="/detection-workbench" element={<Navigate to="/workbench/explore" replace />} />
-            <Route path="/campaigns" element={<CampaignsPage />} />
+            <Route path="/campaigns" element={<SignedInOnly><CampaignsPage /></SignedInOnly>} />
             <Route path="/intelligence/threat_actor/:id" element={<LegacyProfileRedirect type="threat_actor" />} />
             {/* Pre-2026-08 vocabulary; kept so existing links and bookmarks resolve. */}
             <Route path="/intelligence/actor/:id" element={<LegacyActorRedirect base="/workbench" />} />
@@ -252,7 +267,7 @@ export default function App() {
               <Route path="dashboard" element={<DashboardPage />} />
               <Route path="engine" element={<EngineRedirect />} />
               <Route path="explore" element={<WorkbenchPage />} />
-              <Route path="threats" element={<ThreatsPage />} />
+              <Route path="threats" element={<SignedInOnly><ThreatsPage /></SignedInOnly>} />
               {/* Vendor Watch retired into the Threats page's Vulnerabilities tab. */}
               <Route path="exposure" element={<Navigate to="/workbench/threats?tab=vulns" replace />} />
               <Route path="triage" element={<Navigate to="/workbench/dashboard" replace />} />
@@ -266,15 +281,15 @@ export default function App() {
               <Route path="sector/:id" element={<EntityProfilePage slug="sector" />} />
               <Route path="tool/:id" element={<EntityProfilePage slug="tool" />} />
               <Route path="mitigation/:id" element={<EntityProfilePage slug="mitigation" />} />
-              <Route path="observable/:id" element={<EntityProfilePage slug="observable" />} />
+              <Route path="observable/:id" element={<SignedInOnly><EntityProfilePage slug="observable" /></SignedInOnly>} />
               <Route path="vendor/:id" element={<EntityProfilePage slug="vendor" />} />
               <Route path="product/:id" element={<EntityProfilePage slug="product" />} />
-              <Route path="campaign/:id" element={<EntityProfilePage slug="campaign" />} />
+              <Route path="campaign/:id" element={<SignedInOnly><EntityProfilePage slug="campaign" /></SignedInOnly>} />
               <Route path="rules" element={<Navigate to="/workbench/explore?section=rules" replace />} />
-              <Route path="rule/:id" element={<RuleDetailPage />} />
-              <Route path="report/exposure" element={<ExposureBuilderPage />} />
-              <Route path="report/new" element={<ReportBuilderPage />} />
-              <Route path="report/:id" element={<ReportBuilderPage />} />
+              <Route path="rule/:id" element={<SignedInOnly><RuleDetailPage /></SignedInOnly>} />
+              <Route path="report/exposure" element={<SignedInOnly><ExposureBuilderPage /></SignedInOnly>} />
+              <Route path="report/new" element={<SignedInOnly><ReportBuilderPage /></SignedInOnly>} />
+              <Route path="report/:id" element={<SignedInOnly><ReportBuilderPage /></SignedInOnly>} />
             </Route>
             <Route path="/triage" element={<TriageRedirect />} />
             <Route path="/atlas" element={<Navigate to="/workbench/dashboard" replace />} />
@@ -283,8 +298,6 @@ export default function App() {
                 any slug after it is a docs/ page. */}
             <Route path="/documentation/*" element={<DocumentationPage />} />
             <Route path="/handbook/*" element={<HandbookRedirect />} />
-            <Route path="/regions" element={<RegionsPage />} />
-            <Route path="/regions/:name" element={<Navigate to="/regions" replace />} />
             <Route path="/glossary" element={<Navigate to="/workbench/explore?section=glossary" replace />} />
             <Route path="/feed-health" element={<Navigate to="/settings?section=engine&tab=pipeline&stage=feeds" replace />} />
           </Route>

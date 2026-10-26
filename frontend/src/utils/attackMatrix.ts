@@ -32,7 +32,8 @@ export interface AttackMatrixData {
   generated_at: string;
   technique_count: number;
   max_article_count: number;
-  coverage_summary: {
+  /** Left out of a visitor's response, like each technique's coverage fields. */
+  coverage_summary?: {
     total: number;
     covered: number;
     library_only: number;

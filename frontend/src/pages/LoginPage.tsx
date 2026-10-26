@@ -1,5 +1,5 @@
 import { FormEvent, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useLogin, useRegistrationStatus } from "@/hooks/useAuth";
 import { IntelFeedLogo } from "@/components/IntelFeedLogo";
 import { AuthGraphBackground } from "@/components/AuthGraphBackground";
@@ -9,14 +9,17 @@ export function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const navigate = useNavigate();
+  const location = useLocation();
   const login = useLogin();
+  // Signing in from the public view lands back on the page being read.
+  const from = (location.state as { from?: string } | null)?.from;
   const { data: regStatus } = useRegistrationStatus();
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     try {
       await login.mutateAsync({ username, password });
-      navigate("/");
+      navigate(from && from.startsWith("/") && !from.startsWith("//") ? from : "/");
     } catch {
       // error handled by mutation
     }
@@ -73,6 +76,13 @@ export function LoginPage() {
         {regStatus?.registration_enabled && (
           <p className={styles.link}>
             Don't have an account? <Link to="/register">Register</Link>
+          </p>
+        )}
+        {regStatus?.public_read_only_enabled && (
+          <p className={styles.link}>
+            <Link to={from && from.startsWith("/") && !from.startsWith("//") ? from : "/"}>
+              <span aria-hidden="true">←</span> Keep browsing read-only
+            </Link>
           </p>
         )}
       </div>

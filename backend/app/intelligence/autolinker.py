@@ -1207,7 +1207,28 @@ async def _ensure_vocabulary(db: AsyncSession) -> None:
 
 
 async def refresh_vocabulary(db: AsyncSession) -> int:
-    """Rebuild vocabulary from database and update Redis version."""
+    """Rebuild vocabulary from database and update Redis version.
+
+    Always from the whole instance: a visitor's request can trigger this, and
+    a vocabulary built under the visitor filter would drop every entity known
+    only from a hidden feed, for every worker that loads it.
+    """
+    from app.core.public_access import instance_view, viewer_is_anonymous
+
+    for_visitor = viewer_is_anonymous()
+    with instance_view():
+        count, loaded = await _rebuild_vocabulary(db)
+    if for_visitor:
+        # Those rows were read without the visitor filter; left in the
+        # session's identity map, a later session.get() in this request would
+        # hand one to the visitor.
+        for obj in loaded:
+            if obj in db:
+                db.expunge(obj)
+    return count
+
+
+async def _rebuild_vocabulary(db: AsyncSession) -> tuple[int, list]:
     global _vocabulary, _vocab_version
 
     # Warm the process-local settings cache first. The build filters read
@@ -1244,6 +1265,7 @@ async def refresh_vocabulary(db: AsyncSession) -> int:
 
     vocab = EntityVocabulary()
     count = vocab.build_from_entities(actors, malware_families, countries, vendors, products, tools, mitigations)
+    loaded = [*actors, *malware_families, *countries, *vendors, *products, *tools, *mitigations]
 
     _vocabulary = vocab
     _vocab_version = vocab.version
@@ -1255,7 +1277,7 @@ async def refresh_vocabulary(db: AsyncSession) -> int:
     except Exception:
         logger.debug("Failed to publish vocabulary version to Redis")
 
-    return count
+    return count, loaded
 
 
 async def backfill_paragraph_indices(db: AsyncSession) -> dict:

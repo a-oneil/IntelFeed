@@ -17,7 +17,7 @@ import {
 import { EntityMergeIntoModal } from "./EntityMergeIntoModal";
 import { useDenyObservable, useUnlinkEntity } from "@/hooks/useIntelligence";
 import { convertTargetsFor, runEntityConvert } from "@/utils/entityConvert";
-import { useAuthStore } from "@/stores/authStore";
+import { useAuthStore, useIsVisitor } from "@/stores/authStore";
 import { useUIStore } from "@/stores/uiStore";
 import { formatDate } from "@/utils/formatDate";
 import styles from "./EntityPopover.module.css";
@@ -98,6 +98,9 @@ export function EntityPopover({
   readOnly,
   entryId,
 }: EntityPopoverProps) {
+  // Public read-only mode: Profile and Copy only — Search is hidden for
+  // visitors, and Enrich / Wrong? write.
+  const isVisitor = useIsVisitor();
   const ref = useRef<HTMLDivElement>(null);
   const pos = useClampPosition(ref, x, y);
   const navigate = useNavigate();
@@ -112,7 +115,7 @@ export function EntityPopover({
   const [enrichStatus, setEnrichStatus] = useState<string | null>(null);
   const enrichEntity = useEnrichEntity();
   // Skip the authenticated sources fetch on public shared pages (no JWT → 401).
-  const { data: enrichSources } = useEnrichmentSources(!readOnly);
+  const { data: enrichSources } = useEnrichmentSources(!readOnly && !isVisitor);
   const reportFalsePositive = useReportFalsePositive();
   const convertEntity = useConvertEntity();
   const unlinkAll = useUnlinkAllEntries();
@@ -522,12 +525,15 @@ export function EntityPopover({
           <button className={styles.actionBtn} onClick={onNavigate}>
             Profile
           </button>
+          {!isVisitor && (
           <button className={styles.actionBtn} onClick={handleSearch} title="Search the feed for this entity">
             Search
           </button>
+          )}
           <button className={styles.actionBtn} onClick={handleCopy}>
             Copy
           </button>
+          {!isVisitor && (<>
           <button
             className={styles.actionBtn}
             onClick={() => toggleMenu("enrich")}
@@ -543,13 +549,14 @@ export function EntityPopover({
           >
             {reportFalsePositive.isPending ? "..." : "Wrong?"}
           </button>
+          </>)}
         </div>
       )}
 
       {/* Observables get their own two-rung ladder: unlink the sighting here,
           or tombstone the value globally (admin). The autolinker FP path below
           can't touch ledger rows. */}
-      {!readOnly && showFpMenu && entity.type === "observable" && (
+      {!readOnly && !isVisitor && showFpMenu && entity.type === "observable" && (
         <div className={`${styles.enrichMenu} ${menuUp ? styles.menuUp : ""}`}>
           {entryId && (
             <button
@@ -578,7 +585,7 @@ export function EntityPopover({
 
       {/* Wrong-match menu, narrowest fix first: this article → this name →
           this entity (type/duplicate) → this word everywhere. */}
-      {!readOnly && showFpMenu && entity.type !== "observable" && (
+      {!readOnly && !isVisitor && showFpMenu && entity.type !== "observable" && (
         <div className={`${styles.enrichMenu} ${menuUp ? styles.menuUp : ""}`}>
           {entryId && (
             <button className={styles.enrichMenuItem} onClick={() => handleReportFalsePositive("entry")}>
@@ -652,7 +659,7 @@ export function EntityPopover({
         )}
 
       {/* Quick Enrich dropdown */}
-      {!readOnly && showEnrichMenu && (() => {
+      {!readOnly && !isVisitor && showEnrichMenu && (() => {
         // Map entity type to adapter type for matching
         const adapterType = entity.type;
 
@@ -711,7 +718,7 @@ export function EntityPopover({
       </div>
 
       {/* Enrich status flash */}
-      {!readOnly && enrichStatus && (
+      {!readOnly && !isVisitor && enrichStatus && (
         <div className={styles.enrichFlash}>
           {enrichStatus === "Done" ? "Enriched" : enrichStatus}
         </div>

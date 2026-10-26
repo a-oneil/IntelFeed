@@ -74,6 +74,8 @@ class FeedUpdateRequest(BaseModel):
     # dropped at ingest. "" or null clears it.
     exclude_title_patterns: str | None = None
     adapter_config: dict | None = None
+    # Admin only: whether public read-only mode shows this feed.
+    visible_to_visitors: bool | None = None
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -128,6 +130,7 @@ class FeedResponse(BaseModel):
     category_id: uuid.UUID | None = None
     custom_title: str | None = None
     is_muted: bool = False
+    visible_to_visitors: bool = False
     retention_days: int | None = None
     unread_count: int = 0
     # True when per-user subscriptions are on: is_muted is the caller's own

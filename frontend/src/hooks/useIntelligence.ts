@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import api from "@/api/client";
+import { useIsVisitor } from "@/stores/authStore";
 import type {
   PaginatedResponse,
   ExtractionResponse,
@@ -783,7 +784,7 @@ export function useDetectionRules(params?: {
   sort_order?: string;
   limit?: number;
   offset?: number;
-}) {
+}, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ["detection-rules", params],
     queryFn: async () => {
@@ -793,6 +794,7 @@ export function useDetectionRules(params?: {
       );
       return data;
     },
+    enabled: options?.enabled ?? true,
   });
 }
 
@@ -930,6 +932,8 @@ export function useEntryCWEs(entryId: string | undefined) {
 }
 
 export function useEntryObservables(entryId: string | undefined) {
+  // Observables are signed-in only; the route answers 401 to a visitor.
+  const isVisitor = useIsVisitor();
   return useQuery({
     // Key matches ENTITY_QUERY_KEY["observable"] so useUnlinkEntity invalidates it.
     queryKey: ["entry-observables", entryId],
@@ -937,7 +941,7 @@ export function useEntryObservables(entryId: string | undefined) {
       const { data } = await api.get<ObservableEntryPayload>(`/entries/${entryId}/observables`);
       return data;
     },
-    enabled: !!entryId,
+    enabled: !!entryId && !isVisitor,
   });
 }
 

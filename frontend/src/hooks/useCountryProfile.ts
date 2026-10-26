@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import api from "@/api/client";
-import type { CountryProfile, RegionSummary } from "@/api/types";
+import type { CountryProfile } from "@/api/types";
 
 export function useCountryProfile(countryId: string | undefined) {
   return useQuery({
@@ -12,17 +12,5 @@ export function useCountryProfile(countryId: string | undefined) {
       return data;
     },
     enabled: !!countryId,
-  });
-}
-
-export function useRegions() {
-  return useQuery({
-    queryKey: ["regions"],
-    queryFn: async () => {
-      const { data } = await api.get<{ regions: RegionSummary[] }>(
-        "/regions"
-      );
-      return data.regions;
-    },
   });
 }

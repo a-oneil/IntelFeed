@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import type { EntryTag } from "@/api/types";
 import { Chip } from "@/components/primitives/Chip";
 import { useRemoveTagFromEntry } from "@/hooks/useTags";
+import { useIsVisitor } from "@/stores/authStore";
 import { useUIStore } from "@/stores/uiStore";
 import styles from "./TagChips.module.css";
 
@@ -28,7 +29,8 @@ const UNTINTED = "#6B7280";
 interface ChipItemProps {
   tag: EntryTag;
   entryId?: string;
-  onPivot: (name: string) => void;
+  /** Absent for a visitor: the pivot opens Search, which is signed-in only. */
+  onPivot?: (name: string) => void;
 }
 
 /**
@@ -51,7 +53,7 @@ function TagChipItem({ tag, entryId, onPivot }: ChipItemProps) {
         size="sm"
         className={styles.chip}
         title={chipTitle(tag)}
-        onClick={() => onPivot(tag.name)}
+        onClick={onPivot ? () => onPivot(tag.name) : undefined}
       >
         <span className={styles.label}>{tag.name}</span>
       </Chip>
@@ -97,6 +99,8 @@ export function TagChips({ tags, entryId }: TagChipsProps) {
   const [pos, setPos] = useState({ top: 0, left: 0 });
   const setHeaderSearchQuery = useUIStore((s) => s.setHeaderSearchQuery);
   const navigate = useNavigate();
+  // A visitor's chips are labels: no pivot into Search, no × to untag.
+  const isVisitor = useIsVisitor();
 
   const pivot = useCallback(
     (name: string) => {
@@ -106,6 +110,7 @@ export function TagChips({ tags, entryId }: TagChipsProps) {
     },
     [setHeaderSearchQuery, navigate],
   );
+  const chipProps = isVisitor ? { entryId: undefined, onPivot: undefined } : { entryId, onPivot: pivot };
 
   useEffect(() => {
     if (!open) return;
@@ -140,7 +145,7 @@ export function TagChips({ tags, entryId }: TagChipsProps) {
     // Clicks inside the chip group must not also open the entry card.
     <span className={styles.group} onClick={(e) => e.stopPropagation()}>
       {shown.map((tag) => (
-        <TagChipItem key={tag.id ?? tag.name} tag={tag} entryId={entryId} onPivot={pivot} />
+        <TagChipItem key={tag.id ?? tag.name} tag={tag} {...chipProps} />
       ))}
       {rest.length > 0 && (
         <button
@@ -164,7 +169,7 @@ export function TagChips({ tags, entryId }: TagChipsProps) {
             onClick={(e) => e.stopPropagation()}
           >
             {rest.map((tag) => (
-              <TagChipItem key={tag.id ?? tag.name} tag={tag} entryId={entryId} onPivot={pivot} />
+              <TagChipItem key={tag.id ?? tag.name} tag={tag} {...chipProps} />
             ))}
           </div>,
           document.body,

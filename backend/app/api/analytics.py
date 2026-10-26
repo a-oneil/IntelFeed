@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Path, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import get_current_user
+from app.core.security import get_current_user, get_viewer
 from app.database import get_db
 from app.intelligence.analytics import (
     analytics_overview,
@@ -35,7 +35,7 @@ async def get_trending(
     entity_type: str = Path(..., description="Entity type to rank: threat_actor, malware, cve, or ttp."),
     days: int = Query(30, ge=1, le=36500, description="Look-back window in days."),
     limit: int = Query(20, ge=1, le=500, description="Maximum number of entities to return."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Top entities by mention count over the time window."""
@@ -63,7 +63,7 @@ async def get_detection_coverage(
 @router.get("/velocity")
 async def get_velocity(
     days: int = Query(30, ge=1, le=36500, description="Look-back window in days."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Entity creation velocity — new entities per day."""
@@ -76,7 +76,7 @@ async def get_velocity(
 
 @router.get("/overview")
 async def get_overview(
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Combined analytics summary for dashboard."""

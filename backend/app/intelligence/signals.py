@@ -278,7 +278,12 @@ async def get_scale_cutoffs(db: AsyncSession | None = None) -> list[float]:
         if cuts:
             return cuts
         if db is not None:
-            cuts = await compute_scale_cutoffs(db)
+            from app.core.public_access import instance_view
+
+            # Shared by every reader: never computed from a visitor's
+            # filtered view of the articles.
+            with instance_view():
+                cuts = await compute_scale_cutoffs(db)
             if cuts:
                 await r.set(SCALE_CUTOFFS_REDIS_KEY, json.dumps(cuts), ex=SCALE_CUTOFFS_MISS_TTL)
                 return cuts

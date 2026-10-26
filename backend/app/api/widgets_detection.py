@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.widgets import _parse_date_range
 from app.core.exceptions import AppError
-from app.core.security import get_current_user
+from app.core.security import get_current_user, get_viewer
 from app.database import get_db
 from app.models.cve import CVE, EntryCVE
 from app.models.detection_rule import DetectionRule
@@ -100,7 +100,7 @@ async def kev_matches(
     date_from: str | None = Query(None, description="Start of window (ISO 8601); default 30 days before date_to."),
     date_to: str | None = Query(None, description="End of window (ISO 8601); default now (UTC)."),
     limit: int = Query(15, ge=1, le=200, description="Maximum number of CVEs to return."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """CVEs mentioned in the window that are marked as actively exploited, ranked by mention count."""

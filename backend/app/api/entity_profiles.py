@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import entity_types
 from app.core.exceptions import AppError
-from app.core.security import get_admin_user, get_current_user
+from app.core.security import get_admin_user, get_current_user, get_viewer
 from app.database import get_db
 from app.intelligence.correlation_cache import invalidate_entity_cache
 from app.intelligence.entity_dedup import find_entity_by_name_or_alias
@@ -1220,7 +1220,7 @@ async def _load_target_entity(db: AsyncSession, entity_type: str, entity_id: uui
 async def list_entity_target_sectors(
     entity_type: str = Path(..., description="threat_actor or malware."),
     entity_id: uuid.UUID = Path(..., description="Entity UUID."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """The sectors this actor or family is asserted to target, with the source of each claim
@@ -2271,7 +2271,7 @@ async def delete_mitigation(
 async def get_entity_field_provenance(
     entity_type: str = Path(..., description="Entity type slug, e.g. threat_actor."),
     entity_id: uuid.UUID = Path(..., description="Entity UUID."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Who asserted each fact on this profile, and whether they still agree with it.
@@ -2436,7 +2436,7 @@ async def get_entity_story_threads(
     status: str = Query(
         "open", description="Thread status filter: open, dormant, closed, any, or past (dormant + closed)."
     ),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Story threads whose member articles link to this entity, most recently
@@ -2449,17 +2449,24 @@ async def get_entity_story_threads(
     # A campaign reaches its stories through membership rather than extraction;
     # the join column is the only thing that differs.
     if entity_type == "campaign":
+        if user.is_anonymous:
+            return {"items": []}
         junction, fk_col = CampaignEntry, CampaignEntry.campaign_id
     elif entity_type in ENTITY_CONFIG:
         _, junction, fk_col = ENTITY_CONFIG[entity_type]
     else:
         raise AppError(code="bad_request", message=f"Unsupported entity type: {entity_type}", status_code=400)
 
+    from app.services.public_view import visible_entries_only
+
     rows = (
         await db.execute(
-            select(StoryThread, func.count(func.distinct(StoryThreadEntry.entry_id)).label("entity_entries"))
-            .join(StoryThreadEntry, StoryThreadEntry.thread_id == StoryThread.id)
-            .join(junction, junction.entry_id == StoryThreadEntry.entry_id)
+            visible_entries_only(
+                select(StoryThread, func.count(func.distinct(StoryThreadEntry.entry_id)).label("entity_entries"))
+                .join(StoryThreadEntry, StoryThreadEntry.thread_id == StoryThread.id)
+                .join(junction, junction.entry_id == StoryThreadEntry.entry_id),
+                StoryThreadEntry.entry_id,
+            )
             .where(
                 fk_col == entity_id,
                 *(
@@ -2477,6 +2484,8 @@ async def get_entity_story_threads(
     ).all()
 
     thread_ids = [row[0].id for row in rows]
+    if user.is_anonymous:
+        return {"items": await _visitor_story_cards(db, rows)}
     latest_beats: dict[uuid.UUID, StoryThreadBeat] = {}
     if thread_ids:
         beat_rows = (
@@ -2517,11 +2526,53 @@ async def get_entity_story_threads(
     }
 
 
+async def _visitor_story_cards(db: AsyncSession, rows) -> list[dict]:
+    """The Active Story cards a visitor sees: each thread rebuilt from its
+    visible members (story_threads.visitor_thread_rows), its latest beat the
+    last day-grouped one over them. Stored titles, AI summaries and beats can
+    come from hidden articles."""
+    from app.intelligence.story_threads import thread_title, visitor_slug
+    from app.services.public_view import visitor_thread_view
+    from app.services.thread_narrative import collect_members, heuristic_beats
+
+    view = await visitor_thread_view(db, [t.id for t, _ in rows])
+    cards = []
+    for t, entity_entries in rows:
+        seen = view.get(t.id)
+        if seen is None:
+            continue
+        shown = set(seen["entry_ids"])
+        beats = heuristic_beats([m for m in await collect_members(db, t.id) if m["entry_id"] in shown])
+        latest = beats[-1] if beats else None
+        cards.append(
+            {
+                "slug": visitor_slug(t.id),
+                "title": thread_title(seen["first_title"]),
+                "summary": None,
+                "status": t.status,
+                "entry_count": len(shown),
+                "source_count": seen["source_count"],
+                "first_seen": seen["first_seen"].isoformat() if seen["first_seen"] else None,
+                "last_seen": seen["last_seen"].isoformat() if seen["last_seen"] else None,
+                "entity_entry_count": entity_entries,
+                "latest_beat": (
+                    {
+                        "headline": latest["headline"],
+                        "occurred_at": latest["occurred_at"].isoformat() if latest["occurred_at"] else None,
+                    }
+                    if latest
+                    else None
+                ),
+            }
+        )
+    return cards
+
+
 @router.get("/{entity_type}/{entity_id}/attack-techniques")
 async def get_entity_attack_techniques(
     entity_type: str = Path(..., description="threat_actor or malware — the only types with TTP-bearing entries."),
     entity_id: uuid.UUID = Path(..., description="UUID of the entity."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Techniques referenced by this entity's articles, ranked by evidence —
@@ -2569,7 +2620,7 @@ async def get_entity_attack_techniques(
 async def get_entity_attack_layer(
     entity_type: str = Path(..., description="threat_actor or malware — the only types with TTP-bearing entries."),
     entity_id: uuid.UUID = Path(..., description="UUID of the entity to build the Navigator layer for."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Generate ATT&CK Navigator JSON for this entity's referenced techniques."""
@@ -2635,7 +2686,7 @@ async def get_entity_mentions_timeseries(
     window: str = Query(
         "90d", description="Time window: 24h (hourly buckets), 7d/30d/60d/90d (daily), or all (weekly)."
     ),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Mention counts for this entity, bucketed to fit the requested window —
@@ -2777,7 +2828,7 @@ async def get_entity_entries_window(
     start: str = Query(..., description="Bucket start as an ISO datetime (inclusive)."),
     end: str = Query(..., description="Bucket end as an ISO datetime (exclusive)."),
     limit: int = Query(50, description="Maximum entries to return (clamped to 1-100)."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Articles mentioning this entity inside one timeline bucket — powers
@@ -2830,7 +2881,7 @@ async def get_entity_top_entries(
     entity_id: uuid.UUID = Path(..., description="UUID of the mentioned entity."),
     days: int = Query(30, description="Look-back window in days (clamped to 1-365)."),
     limit: int = Query(3, description="Maximum entries to return (clamped to 1-10)."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Highest-signal articles mentioning this entity in the window — the

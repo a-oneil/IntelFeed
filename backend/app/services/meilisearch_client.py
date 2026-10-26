@@ -431,8 +431,11 @@ def find_similar_entries(
     content_text: str | None = None,
     exclude_ids: list[str] | None = None,
     limit: int = 10,
+    filter: str | None = None,
 ) -> dict:
     """Find entries similar to a given entry using keyword extraction + BM25.
+
+    ``filter`` is a Meilisearch filter on the candidates (a visitor's feeds).
 
     Extracts significant terms from the entry's title and summary, then queries
     Meilisearch. Excludes the source entry and any duplicates.
@@ -595,6 +598,8 @@ def find_similar_entries(
             ],
         }
 
+        if filter:
+            params["filter"] = filter
         result = index.search(query, params)
 
         # Filter out excluded entries client-side

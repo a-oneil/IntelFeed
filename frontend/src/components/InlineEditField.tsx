@@ -3,6 +3,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { remarkSoftBreaks } from "@/utils/remarkSoftBreaks";
 import { EntityLinkedMarkdown } from "./EntityLinkedMarkdown";
+import { useIsVisitor } from "@/stores/authStore";
 import styles from "./InlineEditField.module.css";
 
 interface InlineEditFieldProps {
@@ -22,7 +23,10 @@ interface InlineEditFieldProps {
 }
 
 export function InlineEditField({ value, displayValue, onSave, multiline, placeholder, renderMarkdown, linkEntities, excludeEntityId }: InlineEditFieldProps) {
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditingState] = useState(false);
+  // Public read-only mode: every inline field in the app displays, none edits.
+  const isVisitor = useIsVisitor();
+  const setEditing = (on: boolean) => setEditingState(on && !isVisitor);
   const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
@@ -96,6 +100,23 @@ export function InlineEditField({ value, displayValue, onSave, multiline, placeh
         placeholder={placeholder}
       />
     );
+  }
+
+  // A visitor reads the value: no pencil, no "click to edit", no "Set …"
+  // placeholder inviting an edit they can't make.
+  if (isVisitor) {
+    if (renderMarkdown && value) {
+      return (
+        <div className={styles.markdownDisplay}>
+          {linkEntities ? (
+            <EntityLinkedMarkdown text={value} excludeEntityId={excludeEntityId} enabled />
+          ) : (
+            <Markdown remarkPlugins={[remarkGfm, remarkSoftBreaks]}>{value}</Markdown>
+          )}
+        </div>
+      );
+    }
+    return <span>{displayValue || value || <span style={{ color: "var(--text-muted)" }}>—</span>}</span>;
   }
 
   if (renderMarkdown && value) {

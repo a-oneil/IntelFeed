@@ -46,6 +46,8 @@ export interface FeedFormValues {
   timeliness_rating: string;
   relevance_rating: string;
   analyst_notes: string;
+  /** Admin only: whether public read-only mode shows this feed. */
+  visible_to_visitors: boolean;
   adapter: Record<string, unknown>;
 }
 
@@ -55,6 +57,7 @@ const FIELD_PANE: Record<keyof FeedFormValues, PaneId> = {
   category_id: "identity",
   is_muted: "identity",
   is_active: "identity",
+  visible_to_visitors: "identity",
   url: "source",
   feed_type: "source",
   fetch_interval_minutes: "source",
@@ -122,6 +125,7 @@ function initialValues(feed: Feed): FeedFormValues {
     timeliness_rating: feed.timeliness_rating || "",
     relevance_rating: feed.relevance_rating || "",
     analyst_notes: feed.analyst_notes || "",
+    visible_to_visitors: feed.visible_to_visitors ?? false,
     adapter,
   };
 }

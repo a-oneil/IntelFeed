@@ -15,6 +15,8 @@ interface Props {
   onReorder: (ids: string[]) => void;
   /** Layout lock — while locked, tabs can't be renamed, reordered, or deleted. */
   locked?: boolean;
+  /** No "+ New dashboard" button (public read-only mode: the boards are fixed). */
+  readOnly?: boolean;
 }
 
 export default function DashboardTabs({
@@ -26,6 +28,7 @@ export default function DashboardTabs({
   onDelete,
   onReorder,
   locked = false,
+  readOnly = false,
 }: Props) {
   const [creating, setCreating] = useState(false);
   const [draftName, setDraftName] = useState("");
@@ -223,7 +226,7 @@ export default function DashboardTabs({
             }
           }}
         />
-      ) : (
+      ) : readOnly ? null : (
         <button className={styles.newTab} title="New dashboard" onClick={() => setCreating(true)}>
           +
         </button>

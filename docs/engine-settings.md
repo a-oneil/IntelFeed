@@ -65,8 +65,8 @@ environment's own Settings UI.
 | Structure | File | Role |
 |---|---|---|
 | `CONFIGURABLE_KEYS` | `system_settings.py:19` | Which keys are DB-overridable, and the type each value is coerced to |
-| `SETTING_METADATA` | `system_settings.py:186` | Label, description and group shown in the UI |
-| `_ENGINE_SECTION_GROUPS` | `backend/app/services/system_settings.py:1223` | Re-groups engine-owned keys onto Engine console sections, overwriting the `group` above |
+| `SETTING_METADATA` | `backend/app/services/system_settings.py:194` | Label, description and group shown in the UI |
+| `_ENGINE_SECTION_GROUPS` | `backend/app/services/system_settings.py:1261` | Re-groups engine-owned keys onto Engine console sections, overwriting the `group` above |
 | `SECRET_KEYS` | `system_settings.py:14` | Encrypted at rest, masked on read |
 | `GROUP_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:26` | Group → which console surface renders it; powers the Engine settings search |
 | `KEY_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:68` | Key-level exceptions to `GROUP_DEST` |
@@ -679,7 +679,7 @@ should not be editable from a web UI.
 
 `postgres_password`, `meili_master_key`, `secret_key` and `encryption_key` are
 validated at startup: the literal `changeme` warns in development and **raises**
-in production (`_reject_insecure_defaults`, `backend/app/config.py:457`). `encryption_key`
+in production (`_reject_insecure_defaults`, `backend/app/config.py:472`). `encryption_key`
 must additionally be a valid 32-byte URL-safe base64 Fernet key.
 
 ---

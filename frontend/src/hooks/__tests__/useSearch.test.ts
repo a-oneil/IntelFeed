@@ -14,6 +14,7 @@ vi.mock("@/stores/authStore", () => ({
   useAuthStore: {
     getState: () => ({ accessToken: "test-token", refreshToken: "test-refresh" }),
   },
+  useIsVisitor: () => false,
 }));
 
 vi.mock("@tanstack/react-query", () => ({

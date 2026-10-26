@@ -21,6 +21,7 @@ import type { EntityProvenance } from "@/hooks/useEntityProvenance";
 import { IdentityMetaFields } from "./IdentityFields";
 import { entityDisplayName, type EntityProfileConfig } from "./entityProfileConfig";
 import styles from "./entityProfile.module.css";
+import { useIsVisitor } from "@/stores/authStore";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -75,6 +76,8 @@ export function ProfileHeader({
   const openCopilotWith = useUIStore((s) => s.openCopilotWith);
   const status = activityStatus(entity.last_seen_at);
   const [editingAliases, setEditingAliases] = useState(false);
+  // Public read-only mode: the dossier reads, but nothing on it edits.
+  const isVisitor = useIsVisitor();
   const aliases = entity.aliases ?? [];
   // Catalog-keyed types (ttp, cwe) lead with the id in mono, then the name.
   // Which field holds the id is config, not a branch per type here.
@@ -107,7 +110,7 @@ export function ProfileHeader({
             </Chip>
           </div>
 
-          {config.nameEditable && !monoId ? (
+          {config.nameEditable && !monoId && !isVisitor ? (
             <InlineEditableName name={displayName} onSave={(next) => onUpdateField("name", next)} />
           ) : (
             <h1 className={styles.heroName}>
@@ -123,7 +126,16 @@ export function ProfileHeader({
             </h1>
           )}
 
-          {config.hasAliases &&
+          {config.hasAliases && isVisitor && aliases.length > 0 && (
+            <span className={styles.akaLine}>
+              aka{" "}
+              <span className={styles.akaNames}>
+                {aliases.slice(0, 4).join(" · ")}
+                {aliases.length > 4 ? ` +${aliases.length - 4}` : ""}
+              </span>
+            </span>
+          )}
+          {config.hasAliases && !isVisitor &&
             (editingAliases ? (
               <div className={styles.akaEdit}>
                 <InlineEditAliases aliases={aliases} onSave={(next) => onUpdateField("aliases", next)} />
@@ -151,7 +163,8 @@ export function ProfileHeader({
               entity={entity}
               relatedCountries={relatedCountries}
               provenance={provenance}
-              onUpdateField={onUpdateField}
+              // Without it the badges are read-only and empty ones don't show.
+              onUpdateField={isVisitor ? undefined : onUpdateField}
               onOpenEntity={onOpenEntity}
               onOpenArticle={onOpenArticle}
             />
@@ -167,6 +180,7 @@ export function ProfileHeader({
             </Chip>
           </div>
 
+          {!isVisitor && (
           <div className={styles.heroActions}>
             <button
               className={styles.primaryBtn}
@@ -191,6 +205,7 @@ export function ProfileHeader({
               onNavigateAway={onNavigateAway}
             />
           </div>
+          )}
         </div>
 
         {entity.wikipedia_image_url && (

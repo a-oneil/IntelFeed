@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import api from "@/api/client";
 import type { User } from "@/api/types";
 import type { TimeRange } from "@/components/TimeRangeSelector";
-import { useAuthStore } from "@/stores/authStore";
+import { isVisitorNow, useAuthStore } from "@/stores/authStore";
 import { useTriageViewStore } from "@/stores/triageViewStore";
 import {
   buildDefaultView,
@@ -105,6 +105,9 @@ export function useTriageView(convergenceDefaults: ConvergenceDefaults = { windo
 
   useEffect(() => {
     if (!storeView) return;
+    // A visitor's view changes live in the store only: there is no account to
+    // save them to, and the refused write would toast and retry forever.
+    if (isVisitorNow()) return;
     // Never auto-save a view that belongs to a different account (pre-takeover
     // render on a shared browser) — that would write their config onto this
     // user's profile.

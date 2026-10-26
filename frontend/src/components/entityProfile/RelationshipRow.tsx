@@ -12,6 +12,7 @@ import { getEntityColor, getEntityLabel } from "@/utils/entityTheme";
 import { formatDate } from "@/utils/formatDate";
 import { structurePhrase, timeAgo, trustOf, verbChipLabel, verbSentence, type RelRow } from "@/utils/relationshipBrowser";
 import styles from "./entityProfile.module.css";
+import { useIsVisitor } from "@/stores/authStore";
 
 function Spark({ trend }: { trend: number[] }) {
   const max = Math.max(...trend, 1);
@@ -60,7 +61,9 @@ export function RelationshipRow({
   const s = item.strength;
   const trust = trustOf(item);
   const evidence = item.proximity_entries ?? [];
-  const canModerate = !!item.relationship_id && trust?.tier !== "corroborated";
+  // Public read-only mode: the evidence reads, nothing on the row edits.
+  const isVisitor = useIsVisitor();
+  const canModerate = !isVisitor && !!item.relationship_id && trust?.tier !== "corroborated";
 
   const hasEvidence = evidence.length > 0;
   const articleCount = s?.articles ?? item.relationship_evidence_count ?? 0;
@@ -170,7 +173,7 @@ export function RelationshipRow({
               ✕
             </button>
           )}
-          {onUnlink && (item.co_occurrence_count ?? 0) > 0 && (
+          {onUnlink && !isVisitor && (item.co_occurrence_count ?? 0) > 0 && (
             <button className={styles.rowActionBtn} title="Unlink from shared articles" onClick={() => onUnlink(row)}>
               unlink
             </button>

@@ -9,6 +9,7 @@ import {
   type MatrixTechnique,
 } from "@/utils/attackMatrix";
 import { PageHeader, Segmented } from "@/components/primitives";
+import { useIsVisitor } from "@/stores/authStore";
 import styles from "./AttackMatrixSection.module.css";
 
 const DOMAINS: Array<{ value: AttackDomain; label: string }> = [
@@ -55,7 +56,11 @@ export function AttackMatrixSection() {
   const navigate = useNavigate();
   const [domain, setDomain] = useState<AttackDomain>("enterprise");
   const [days, setDays] = useState<number | null>(30);
-  const [mode, setMode] = useState<MatrixLayerMode>("combined");
+  const [chosenMode, setMode] = useState<MatrixLayerMode>("combined");
+  // Detection coverage is signed-in only (the server leaves it out of a
+  // visitor's response), so a visitor sees article heat alone.
+  const isVisitor = useIsVisitor();
+  const mode: MatrixLayerMode = isVisitor ? "heat" : chosenMode;
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
 
@@ -173,9 +178,11 @@ export function AttackMatrixSection() {
             >
               {allExpanded ? "Collapse subs" : "Expand subs"}
             </button>
-            <button className={styles.actionBtn} onClick={handleExport} disabled={!data}>
-              Export Navigator JSON
-            </button>
+            {!isVisitor && (
+              <button className={styles.actionBtn} onClick={handleExport} disabled={!data}>
+                Export Navigator JSON
+              </button>
+            )}
           </>
         }
         controls={
@@ -193,31 +200,37 @@ export function AttackMatrixSection() {
               onChange={(v) => setDays(WINDOWS.find((w) => w.value === v)?.days ?? null)}
               options={WINDOWS}
             />
-            <Segmented<MatrixLayerMode>
-              label="Layer mode"
-              size="sm"
-              value={mode}
-              onChange={setMode}
-              options={MODES}
-            />
+            {!isVisitor && (
+              <Segmented<MatrixLayerMode>
+                label="Layer mode"
+                size="sm"
+                value={mode}
+                onChange={setMode}
+                options={MODES}
+              />
+            )}
           </>
         }
       />
 
       {data && (
         <div className={styles.summaryBar}>
-          <span className={styles.summaryItem}>
-            <span className={styles.legendSwatch} style={{ background: "var(--success)" }} />
-            {data.coverage_summary.covered} covered
-          </span>
-          <span className={styles.summaryItem}>
-            <span className={styles.legendSwatch} style={{ background: "var(--warning)" }} />
-            {data.coverage_summary.library_only} missing telemetry
-          </span>
-          <span className={styles.summaryItem}>
-            <span className={styles.legendSwatch} style={{ background: "var(--danger)" }} />
-            {data.coverage_summary.no_rule} no rule
-          </span>
+          {!isVisitor && data.coverage_summary && (
+            <>
+              <span className={styles.summaryItem}>
+                <span className={styles.legendSwatch} style={{ background: "var(--success)" }} />
+                {data.coverage_summary.covered} covered
+              </span>
+              <span className={styles.summaryItem}>
+                <span className={styles.legendSwatch} style={{ background: "var(--warning)" }} />
+                {data.coverage_summary.library_only} missing telemetry
+              </span>
+              <span className={styles.summaryItem}>
+                <span className={styles.legendSwatch} style={{ background: "var(--danger)" }} />
+                {data.coverage_summary.no_rule} no rule
+              </span>
+            </>
+          )}
           <span className={styles.summaryMeta}>
             {data.technique_count} techniques · heat = articles seen {windowLabel}
           </span>
@@ -257,13 +270,15 @@ export function AttackMatrixSection() {
               tooltip.tech.rollup_article_count !== tooltip.tech.article_count &&
               ` (${tooltip.tech.rollup_article_count} incl. sub-techniques)`}
           </div>
-          <div className={styles.tooltipRow}>
-            Rules: {tooltip.tech.rule_count} —{" "}
-            <span style={{ color: COVERAGE_VARS[tooltip.tech.coverage] }}>
-              {COVERAGE_LABELS[tooltip.tech.coverage]}
-            </span>
-          </div>
-          {tooltip.tech.coverage === "library_only" && tooltip.tech.missing_data_sources.length > 0 && (
+          {tooltip.tech.coverage && (
+            <div className={styles.tooltipRow}>
+              Rules: {tooltip.tech.rule_count} —{" "}
+              <span style={{ color: COVERAGE_VARS[tooltip.tech.coverage] }}>
+                {COVERAGE_LABELS[tooltip.tech.coverage]}
+              </span>
+            </div>
+          )}
+          {tooltip.tech.coverage === "library_only" && (tooltip.tech.missing_data_sources?.length ?? 0) > 0 && (
             <div className={styles.tooltipRow}>
               Missing telemetry: {tooltip.tech.missing_data_sources.slice(0, 4).join(", ")}
               {tooltip.tech.missing_data_sources.length > 4 && "…"}

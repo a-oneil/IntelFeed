@@ -193,7 +193,11 @@ async def test_first_admin_gates_registration_with_an_invite_code(client: AsyncC
     invalidate_cache()
 
     status_before = (await client.get("/api/auth/registration-status")).json()
-    assert status_before == {"registration_enabled": True, "invite_code_required": False}
+    assert status_before == {
+        "registration_enabled": True,
+        "invite_code_required": False,
+        "public_read_only_enabled": False,
+    }
 
     first = await client.post("/api/auth/register", json={"username": "founder", "password": "strongpassword"})
     assert first.status_code == 201

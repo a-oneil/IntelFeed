@@ -5204,6 +5204,10 @@
     "extract_tools": {
      "type": "boolean"
     },
+    "visible_to_visitors": {
+     "type": "boolean",
+     "description": "Show this feed and its articles in public read-only mode (never Manual Uploads)"
+    },
     "adapter_config": {
      "type": "object",
      "description": "Adapter-specific config keys to merge into the existing config"

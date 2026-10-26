@@ -3,6 +3,7 @@ import { useIntelStore, type WorkspaceSection } from "@/stores/intelStore";
 import { getEntityCssVar } from "@/utils/entityTheme";
 import { Hint } from "./primitives";
 import styles from "./WorkbenchNav.module.css";
+import { useIsVisitor } from "@/stores/authStore";
 
 // Maps a workspace nav section to its canonical entity type, so the nav icon
 // can be tinted with the same color used in entity profiles / intel panels.
@@ -152,6 +153,23 @@ export const SECTION_KEYS = new Set<string>(
 );
 
 /**
+ * Workbench areas that aren't part of the public read-only view: detection
+ * work, intel work products, observables, and anything personal.
+ */
+export const VISITOR_HIDDEN_SECTIONS = new Set<string>([
+  "reports",
+  "rules",
+  "telemetry",
+  "campaigns",
+  "observables",
+  "ransomware",
+  "requirements",
+  "telegram_mentions",
+  "watchlist",
+  "/workbench/threats",
+]);
+
+/**
  * The workbench's section nav.
  *
  * It used to be an `aside` inside WorkbenchLayout, which meant the workbench
@@ -165,6 +183,7 @@ export function WorkbenchNav({ onNavigate }: { onNavigate?: () => void }) {
   const activeSection = useIntelStore((s) => s.activeSection);
   const setActiveSection = useIntelStore((s) => s.setActiveSection);
   const clearSelectedEntity = useIntelStore((s) => s.clearSelectedEntity);
+  const isVisitor = useIsVisitor();
 
   const sectionCollapsed: Record<string, boolean> = {
     ENTITIES: useIntelStore((s) => s.entitiesSectionCollapsed),
@@ -210,7 +229,9 @@ export function WorkbenchNav({ onNavigate }: { onNavigate?: () => void }) {
             </Hint>
           )}
           {(!section.group || !sectionCollapsed[section.group]) &&
-            section.items.map((item) => {
+            section.items
+              .filter((item) => !isVisitor || !VISITOR_HIDDEN_SECTIONS.has(item.key ?? item.path ?? ""))
+              .map((item) => {
               const entityType = item.key ? SECTION_ENTITY_TYPE[item.key] : undefined;
               const iconColor = entityType ? getEntityCssVar(entityType) : item.swatch;
               const isActive = item.path

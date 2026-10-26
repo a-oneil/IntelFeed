@@ -23,6 +23,7 @@ function values(overrides: Partial<FeedFormValues> = {}): FeedFormValues {
     timeliness_rating: "",
     relevance_rating: "",
     analyst_notes: "",
+    visible_to_visitors: false,
     adapter: {},
     ...overrides,
   };

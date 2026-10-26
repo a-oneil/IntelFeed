@@ -1,15 +1,22 @@
 import hashlib
+import html
 import logging
+import re
+import uuid
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.safe_http import OutboundBlocked, safe_async_client, safe_curl_get
-from app.core.security import get_current_user
+from app.core.security import get_viewer
+from app.database import get_db
+from app.models.entry import Entry
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -108,11 +115,49 @@ def _write_cache(url: str, content: bytes, content_type: str) -> None:
         logger.debug("Failed to write image cache for %s", url, exc_info=True)
 
 
+_VISITOR_WIDTHS = (200, 400, 800, 1200)
+
+_IMG_SOURCES = re.compile(r"<img\b[^>]*?\b(?:src|srcset|data-src)\s*=\s*([\"'])(.*?)\1", re.IGNORECASE | re.DOTALL)
+
+
+def _article_images(content: str) -> set[str]:
+    """Every image URL an article's HTML shows: each img src, data-src and
+    srcset candidate, with entities decoded (``&amp;`` in a stored URL)."""
+    urls: set[str] = set()
+    for _quote, value in _IMG_SOURCES.findall(content):
+        for candidate in html.unescape(value).split(","):
+            if part := candidate.strip().split(" ")[0]:
+                # Stored articles carry sanitizer-rewritten sources
+                # (/api/proxy/image?url=<original>): the image is the original.
+                if part.startswith("/api/proxy/image"):
+                    part = parse_qs(urlparse(part).query).get("url", [""])[0]
+                if part:
+                    urls.add(part)
+    return urls
+
+
+async def _entry_shows_image(db: AsyncSession, entry_id: uuid.UUID | None, url: str) -> bool:
+    """Whether ``url`` is the lead image of an entry the viewer can see, or an
+    image its stored article shows. The lookup goes through the visitor
+    filter, so an article from a hidden feed shows nothing."""
+    if entry_id is None:
+        return False
+    row = (await db.execute(select(Entry.image_url, Entry.content_html).where(Entry.id == entry_id))).one_or_none()
+    if row is None:
+        return False
+    image_url, content = row
+    return url == image_url or (bool(content) and url in _article_images(content))
+
+
 @router.get("/image")
 async def proxy_image(
     url: str = Query(..., description="Absolute http(s) URL of the external image to fetch"),
     w: int | None = Query(None, ge=1, le=2000, description="Target width in pixels; larger images are downscaled"),
-    user: User = Depends(get_current_user),
+    entry: uuid.UUID | None = Query(
+        None, description="The entry whose article shows this image; lets a visitor load it before it is cached"
+    ),
+    user: User = Depends(get_viewer),
+    db: AsyncSession = Depends(get_db),
 ):
     """Proxy and optionally resize an external image."""
     if not settings.get("image_proxy_enabled"):
@@ -123,8 +168,19 @@ async def proxy_image(
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         return Response(status_code=400)
 
+    # A visitor's width snaps to a few sizes: each width is its own cache
+    # entry and resize, so any 1–2000 would let one image cost thousands.
+    if w and user.is_anonymous:
+        w = next((size for size in _VISITOR_WIDTHS if w <= size), _VISITOR_WIDTHS[-1])
+
     # Build a cache key that includes the resize width
     cache_url = f"{url}?w={w}" if w else url
+
+    # A visitor may only load an image an article they can see shows: from the
+    # cache (or it would confirm images only hidden articles carry) or, failing
+    # that, fetched, since anything else makes this an anonymous download relay.
+    if user.is_anonymous and not await _entry_shows_image(db, entry, url):
+        return Response(status_code=404)
 
     # Check disk cache
     cached = _read_cache(cache_url)

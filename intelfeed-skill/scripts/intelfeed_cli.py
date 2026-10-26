@@ -4295,6 +4295,10 @@ TOOLS: dict[str, dict] = {
                 "type": 'bool',
                 "default": None,
             },
+            "visible_to_visitors": {
+                "type": 'bool',
+                "default": None,
+            },
             "adapter_config": {
                 "type": 'dict',
                 "default": None,

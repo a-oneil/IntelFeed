@@ -15,6 +15,7 @@ import { useAuthStore } from "@/stores/authStore";
 import { headingIdsByLine, nodeText, slugify } from "@/utils/headingAnchors";
 import type { DocumentationPageSummary } from "@/hooks/useDocumentation";
 import styles from "./DocumentationPage.module.css";
+import { useIsVisitor } from "@/stores/authStore";
 
 /** The docs landing page — `/documentation` with no slug after it. */
 const LANDING = "";
@@ -128,6 +129,9 @@ function groupBySection(pages: DocumentationPageSummary[]) {
 function DocsLanding({ index }: { index: { pages: DocumentationPageSummary[] } | undefined }) {
   const guide = (index?.pages ?? []).filter((p) => p.section === GUIDE_SECTION);
   const lastDocSlug = useUIStore((s) => s.docsChat.lastDocSlug);
+  // Visitors (public read-only mode) get the pages, not the API references
+  // (login-only) or the docs copilot (AI).
+  const isVisitor = useIsVisitor();
 
   return (
     <div className={styles.landing}>
@@ -139,6 +143,7 @@ function DocsLanding({ index }: { index: { pages: DocumentationPageSummary[] } |
         </p>
       </header>
 
+      {!isVisitor && (<>
       <div className={styles.apiRow}>
         <a href="/docs" target="_blank" rel="noopener noreferrer" className={styles.apiCard}>
           <svg className={styles.apiIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
@@ -171,6 +176,7 @@ function DocsLanding({ index }: { index: { pages: DocumentationPageSummary[] } |
       </div>
 
       <DocsCopilot docSlug={lastDocSlug ?? undefined} />
+      </>)}
 
       {guide.length > 0 && (
         <section className={styles.guide}>
@@ -202,6 +208,7 @@ export default function DocumentationPage() {
   const { data: page, isLoading: pageLoading, isError } = useDocumentationPage(slug);
   const rail = useRailWidth("docs-nav", { default: 260, min: 190, max: 480 });
   const navCollapsed = useUIStore((s) => s.docsNavCollapsed);
+  const isVisitorPage = useIsVisitor();
   const toggleDocsNav = useUIStore((s) => s.toggleDocsNav);
   // Docs carry their own contents rail; the app sidebar folds away beside it,
   // the same bargain Settings makes.
@@ -337,6 +344,7 @@ export default function DocumentationPage() {
           </div>
         ))}
       </nav>
+      {!isVisitorPage && (
       <div className={styles.sidebarFooter}>
         <Link to="/settings" className={styles.footerLink}>
           <svg className={styles.footerIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
@@ -346,6 +354,7 @@ export default function DocumentationPage() {
           <span>Settings</span>
         </Link>
       </div>
+      )}
     </>
   );
 

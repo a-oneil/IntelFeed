@@ -11,10 +11,12 @@ from app.config import settings
 from app.core.exceptions import AppError, app_error_handler, http_error_handler, validation_error_handler
 from app.core.logging import AuditLoggingMiddleware, RequestLoggingMiddleware, setup_logging
 from app.core.metrics import PrometheusMiddleware
+from app.core.public_access import AnonymousWriteLockMiddleware
 from app.core.rate_limit import RateLimitMiddleware
 from app.core.security import get_current_user
 from app.core.security_headers import SecurityHeadersMiddleware
 from app.models.user import User
+from app.services import public_view  # noqa: F401  (registers the visitor data filter)
 
 logger = logging.getLogger(__name__)
 
@@ -708,8 +710,13 @@ async def custom_redoc() -> HTMLResponse:
 app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(AuditLoggingMiddleware)
 app.add_middleware(PrometheusMiddleware)
-app.add_middleware(SecurityHeadersMiddleware)
+# Starlette runs the last-added middleware outermost. The write lock sits
+# inside the rate limiter (its refusals count against the caller's budget) and
+# both sit inside the security headers, so every reply — a 401, 413 or 429
+# included — carries Cache-Control: private, no-store and X-Robots-Tag.
+app.add_middleware(AnonymousWriteLockMiddleware)
 app.add_middleware(RateLimitMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,

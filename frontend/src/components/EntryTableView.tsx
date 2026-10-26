@@ -1,5 +1,6 @@
 import { useCallback, useMemo } from "react";
 import { formatDate } from "@/utils/formatDate";
+import { useIsVisitor } from "@/stores/authStore";
 import { useUIStore, type SortOrder } from "@/stores/uiStore";
 import type { Entry, PriorityQueueRow, StoryThread } from "@/api/types";
 import type { EntryIntelCounts } from "@/hooks/useEntryIntelBadges";
@@ -446,6 +447,11 @@ const COLUMNS: DataTableColumn<TableRow>[] = [
   },
 ];
 
+/** Columns a visitor's rows never fill: read/star/bookmark state, and the
+ *  PIR, rule, AI, opportunity and note counts the server strips for them. */
+const VISITOR_HIDDEN_COLUMNS = new Set(["status", "pir", "rules", "ai", "opportunity", "notes"]);
+const VISITOR_COLUMNS = COLUMNS.filter((c) => !VISITOR_HIDDEN_COLUMNS.has(c.key));
+
 const rowClass = (r: TableRow) =>
   (r.kind === "thread"
     ? [styles.threadRow, r.thread.unread_count === 0 ? table.rowMuted : ""]
@@ -496,6 +502,8 @@ export function EntryTableView({
   const setSelectedThread = useUIStore((s) => s.setSelectedThread);
   const selectedEntryIds = useUIStore((s) => s.selectedEntryIds);
   const setEntrySelection = useUIStore((s) => s.setEntrySelection);
+  // A visitor has no bulk actions, so no row checkboxes either.
+  const isVisitor = useIsVisitor();
 
   // Defensive dedupe: a duplicate row id would collide as a React key and as a
   // virtualizer position-cache key, rendering stacked ghost rows.
@@ -588,7 +596,7 @@ export function EntryTableView({
     <DataTable<TableRow>
       key={tableId}
       tableId={tableId}
-      columns={COLUMNS}
+      columns={isVisitor ? VISITOR_COLUMNS : COLUMNS}
       rows={rows}
       getRowId={(r) => (r.kind === "thread" ? threadRowId(r.thread.slug) : r.entry.id)}
       rowClass={rowClass}
@@ -598,7 +606,7 @@ export function EntryTableView({
       onRowClick={(r) =>
         r.kind === "thread" ? setSelectedThread(r.thread.slug) : setSelectedEntry(r.entry.id)
       }
-      selectable
+      selectable={!isVisitor}
       selectedIds={tableSelection}
       onSelectionChange={handleSelectionChange}
       sort={sort}

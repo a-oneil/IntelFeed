@@ -6,8 +6,9 @@ from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
-from app.core.security import get_current_user
+from app.core.security import get_current_user, get_entry_viewer, get_viewer
 from app.database import get_db
+from app.models.entry import Entry
 from app.models.tag import EntryTag, Tag
 from app.models.user import User
 from app.schemas.tag import (
@@ -66,7 +67,7 @@ async def _visible_entry_count(db: AsyncSession, tag_id: uuid.UUID, user_id: uui
 
 @router.get("", response_model=list[TagResponse])
 async def list_tags(
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List all tags with their per-tag entry counts, ordered by name.
@@ -74,6 +75,19 @@ async def list_tags(
     The tag list is shared; the counts are the caller's view (their own
     assignments of a personal tag, everyone's of a global one).
     """
+    if user.is_anonymous:
+        # A visitor sees global tags only (a personal tag's name is someone's
+        # own), counted over visible articles, and none that tags nothing
+        # they can read.
+        result = await db.execute(
+            select(Tag, func.count(func.distinct(EntryTag.entry_id)).label("entry_count"))
+            .join(EntryTag, and_(EntryTag.tag_id == Tag.id, visible_to(None)))
+            .join(Entry, Entry.id == EntryTag.entry_id)
+            .where(Tag.is_global.is_(True))
+            .group_by(Tag.id)
+            .order_by(Tag.name)
+        )
+        return [_tag_response(tag, count) for tag, count in result.all()]
     result = await db.execute(
         select(
             Tag,
@@ -271,7 +285,7 @@ async def bulk_untag_entries(
 @router.get("/entries/{entry_id}", response_model=list[TagResponse])
 async def get_entry_tags(
     entry_id: uuid.UUID = Path(..., description="Entry UUID"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_entry_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List the tags attached to one entry as the caller sees them, ordered by name."""

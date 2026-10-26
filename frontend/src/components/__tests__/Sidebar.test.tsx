@@ -97,6 +97,8 @@ vi.mock("@/stores/authStore", () => ({
       logout: vi.fn(),
     })
   ),
+  useIsVisitor: () => false,
+  logoutDestination: () => "/login",
 }));
 
 const mockSidebarUIState: Record<string, unknown> = {

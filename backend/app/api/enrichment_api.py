@@ -8,7 +8,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
-from app.core.security import get_admin_user, get_current_user
+from app.core.security import get_admin_user, get_current_user, get_viewer
 from app.database import get_db
 from app.models.enrichment import EnrichmentResult, EnrichmentSource, UserEnrichmentOverride
 from app.models.user import User
@@ -374,10 +374,19 @@ async def enrich_entity(
 async def get_enrichment_results(
     entity_type: str = Query(..., description="Entity type the results belong to (cve, threat_actor, malware, ttp)"),
     entity_id: uuid.UUID = Query(..., description="Entity UUID"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Stored enrichment results for one entity, newest first."""
+    if user.is_anonymous:
+        # Results are keyed by type and id, outside the visitor filter: answer
+        # only for an entity the visitor can see.
+        from app.services.public_view import entities_shown
+
+        if entity_type in ("campaign", "observable") or (entity_type, entity_id) not in await entities_shown(
+            db, {(entity_type, entity_id)}
+        ):
+            return []
     result = await db.execute(
         select(EnrichmentResult)
         .where(

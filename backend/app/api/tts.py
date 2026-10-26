@@ -17,7 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.exceptions import AppError
-from app.core.security import decode_token, get_current_user
+from app.core.public_access import bearer_credential
+from app.core.security import AnonymousViewer, decode_token, get_current_user, get_viewer, public_read_only_enabled
 from app.database import get_db
 from app.models.entry import Entry
 from app.models.user import User
@@ -132,15 +133,19 @@ async def prepare_tts(
     return TTSStatusResponse(**result)
 
 
-async def _resolve_user_from_token(request: Request, token: str | None, db: AsyncSession) -> User:
-    """Accept a JWT via Authorization header (fetch) or ?token= (bare <audio>)."""
-    raw = None
-    auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
-    if auth_header and auth_header.lower().startswith("bearer "):
-        raw = auth_header.split(" ", 1)[1].strip()
-    elif token:
-        raw = token
+async def _resolve_user_from_token(request: Request, token: str | None, db: AsyncSession) -> User | AnonymousViewer:
+    """Accept a JWT via Authorization header (fetch) or ?token= (bare <audio>).
+
+    With no token at all the caller is a visitor while public read-only mode
+    is on: existing audio may be played, nothing is made or recorded.
+    """
+    auth_header = request.headers.get("authorization", "").strip()
+    raw = bearer_credential(auth_header) if auth_header else token
+    if auth_header and not raw:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authorization header")
     if not raw:
+        if public_read_only_enabled():
+            return AnonymousViewer()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token")
     payload = decode_token(raw)
     if payload.get("type") != "access":
@@ -183,7 +188,39 @@ async def get_tts_file(
     db: AsyncSession = Depends(get_db),
 ) -> FileResponse:
     """Stream a generated MP3. Auth via Authorization header or ?token= query."""
-    await _resolve_user_from_token(request, token, db)
+    user = await _resolve_user_from_token(request, token, db)
     response = _serve_audio_file(cache_key)
-    await tts.touch(db, cache_key)
+    if not user.is_anonymous:
+        # A visitor's playback must not count as use: the stamp drives eviction.
+        await tts.touch(db, cache_key)
     return response
+
+
+@router.get("/existing", response_model=TTSStatusResponse)
+async def existing_tts(
+    source: str = Query(..., description='"entry" or "entity"'),
+    id: str = Query(..., description="Entry id, or entity id for source=entity"),
+    entity_type: str | None = Query(None, description="For source=entity: the workbench entity type"),
+    user: User | AnonymousViewer = Depends(get_viewer),
+    db: AsyncSession = Depends(get_db),
+):
+    """Whether read-aloud audio already exists for an entry or entity, without making any.
+
+    This is what a visitor's player asks: POST /prepare would synthesize on a
+    miss, which visitors may not cause. 404 when no audio has been made.
+    """
+    if not settings.tts_enabled:
+        raise AppError(code="tts_disabled", message="Server-side read-aloud is disabled.", status_code=503)
+    if source == "entry":
+        _, text = await _entry_speech_text(db, id)
+        ref_id = id
+    elif source == "entity":
+        text = await _entity_speech_text(db, entity_type, id)
+        ref_id = f"{entity_type}:{id}"
+    else:
+        raise AppError(code="invalid_source", message="Unknown TTS source.", status_code=400)
+    cache_key = tts.compute_cache_key(source, ref_id, text, settings.piper_voice)
+    status_row = await tts.get_status(db, cache_key)
+    if status_row is None or status_row["status"] != "ready" or not tts.audio_path(cache_key).is_file():
+        raise AppError(code="tts_not_found", message="No audio for this item yet.", status_code=404)
+    return TTSStatusResponse(**status_row)

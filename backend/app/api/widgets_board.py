@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.widgets import _parse_date_range
 from app.api.widgets_strategic import _trend_pct
 from app.core.exceptions import AppError
-from app.core.security import get_current_user
+from app.core.security import get_current_user, get_viewer
 from app.database import get_db
 from app.models.ai_result import AIResult
 from app.models.ai_task import AITask
@@ -94,7 +94,7 @@ async def board_overview(
     date_from: str | None = Query(None),
     date_to: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
 ):
     """Headline strip + per-entity-type new counts with prior-window trends."""
     try:
@@ -573,7 +573,7 @@ async def targeting_grid(
 async def kev_deadlines(
     limit: int = Query(10, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
 ):
     """KEV-listed CVEs with CISA remediation due dates, soonest first."""
     try:
@@ -630,7 +630,7 @@ async def kev_deadlines(
 async def triage_flow(
     days: int = Query(14, ge=1, le=365),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
 ):
     """Entries arriving vs entries the user read, per day, plus the backlog."""
     try:
@@ -780,7 +780,7 @@ async def under_reported(
     date_from: str | None = Query(None),
     date_to: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
 ):
     """Entries whose persisted under_reported signal fired in the window."""
     try:

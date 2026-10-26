@@ -8,7 +8,7 @@ from sqlalchemy import Date, case, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
-from app.core.security import get_current_user
+from app.core.security import get_current_user, get_viewer
 from app.database import get_db
 from app.models.automation_log import AutomationLog
 from app.models.automation_rule import AutomationRule
@@ -19,6 +19,7 @@ from app.models.entry import Entry
 from app.models.threat_actor import EntryThreatActor, ThreatActor
 from app.models.ttp import TTP, EntryTTP
 from app.models.user import User
+from app.services.public_view import entities_shown, visitor_events_only
 from app.services.read_state import unread_by_user
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,7 @@ def _parse_date_range(date_from: str | None, date_to: str | None, default_days: 
 async def feed_activity(
     date_from: str | None = Query(None, description="Start of window (ISO 8601); default 30 days before date_to."),
     date_to: str | None = Query(None, description="End of window (ISO 8601); default now (UTC)."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Daily entry counts across active feeds within the window, for the feed activity chart."""
@@ -80,7 +81,7 @@ async def feed_activity(
 async def cve_severity(
     date_from: str | None = Query(None, description="Start of window (ISO 8601); default 30 days before date_to."),
     date_to: str | None = Query(None, description="End of window (ISO 8601); default now (UTC)."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Counts of CVEs first seen in the window, bucketed by CVSS severity (critical/high/medium/low)."""
@@ -111,7 +112,7 @@ async def cve_severity(
 async def threat_timeline(
     date_from: str | None = Query(None, description="Start of window (ISO 8601); default 30 days before date_to."),
     date_to: str | None = Query(None, description="End of window (ISO 8601); default now (UTC)."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Per-actor daily entry mention counts (links extracted in the window) for the threat timeline chart."""
@@ -143,7 +144,7 @@ async def trending_cves(
     date_from: str | None = Query(None, description="Start of window (ISO 8601); default 7 days before date_to."),
     date_to: str | None = Query(None, description="End of window (ISO 8601); default now (UTC)."),
     limit: int = Query(10, ge=1, le=500, description="Maximum number of CVEs to return."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """CVEs ranked by number of entry mentions extracted in the window (default last 7 days)."""
@@ -186,7 +187,7 @@ async def trending_cves(
 async def new_cves(
     days: int = Query(7, ge=1, le=36500, description="Look-back window in days over CVE first-seen date."),
     limit: int = Query(20, ge=1, le=200, description="Maximum number of CVEs to return."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """CVEs first seen in the last N days, newest first, with total entry mention counts."""
@@ -232,7 +233,7 @@ async def new_cves(
 async def attack_heatmap(
     date_from: str | None = Query(None, description="Start of window (ISO 8601); default 30 days before date_to."),
     date_to: str | None = Query(None, description="End of window (ISO 8601); default now (UTC)."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Entry mention counts per ATT&CK technique (links extracted in the window) for the heatmap."""
@@ -272,7 +273,7 @@ async def attack_heatmap(
 async def widget_stats(
     date_from: str | None = Query(None, description="Start of window (ISO 8601); default 7 days before date_to."),
     date_to: str | None = Query(None, description="End of window (ISO 8601); default now (UTC)."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Entry, new-CVE, and unread counts for the window, with percent trend vs the preceding equal-length window."""
@@ -341,7 +342,7 @@ async def widget_stats(
 @router.get("/new-actors")
 async def new_actors(
     days: int = Query(7, ge=1, le=36500, description="Look-back window in days."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Threat actors first seen in the last N days."""
@@ -403,10 +404,22 @@ async def detection_coverage(
         ) from exc
 
 
+async def _drop_events_naming_hidden(db: AsyncSession, rows):
+    """Events whose source or related entity a visitor can't see go."""
+    refs = {(e.source_entity_type, e.source_entity_id) for e, _ in rows}
+    refs |= {(e.related_entity_type, e.related_entity_id) for e, _ in rows}
+    shown = await entities_shown(db, refs)
+    return [
+        (e, title)
+        for e, title in rows
+        if (e.source_entity_type, e.source_entity_id) in shown and (e.related_entity_type, e.related_entity_id) in shown
+    ]
+
+
 @router.get("/correlation-events")
 async def recent_correlation_events(
     limit: int = Query(10, ge=1, le=500, description="Maximum number of events to return."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Recent correlation events for widget display."""
@@ -415,13 +428,19 @@ async def recent_correlation_events(
         # Exclude feed-health events (feed_error, feed_stale) — they have no entry_id
         # and aren't true correlation events.
         excluded_types = ("feed_error", "feed_stale")
+        query = visitor_events_only(
+            select(CorrelationEventRecord, Entry.title).join(
+                Entry, Entry.id == CorrelationEventRecord.entry_id, isouter=True
+            )
+        )
         result = await db.execute(
-            select(CorrelationEventRecord, Entry.title)
-            .join(Entry, Entry.id == CorrelationEventRecord.entry_id, isouter=True)
-            .where(CorrelationEventRecord.event_type.notin_(excluded_types))
+            query.where(CorrelationEventRecord.event_type.notin_(excluded_types))
             .order_by(CorrelationEventRecord.created_at.desc())
             .limit(limit)
         )
+        rows = result.all()
+        if user.is_anonymous:
+            rows = await _drop_events_naming_hidden(db, rows)
         return [
             {
                 "id": str(e.id),
@@ -432,7 +451,7 @@ async def recent_correlation_events(
                 "entry_id": str(e.entry_id) if e.entry_id else None,
                 "entry_title": title,
             }
-            for e, title in result.all()
+            for e, title in rows
         ]
     except Exception as exc:
         logger.exception("Error in correlation_events widget")

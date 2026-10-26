@@ -9,6 +9,11 @@ interface AuthState {
   accessToken: string | null;
   refreshToken: string | null;
   user: User | null;
+  /** Public read-only mode is on (from /auth/registration-status). Not persisted. */
+  publicReadOnly: boolean;
+  /** registration-status has answered at least once this page load. */
+  publicReadOnlyKnown: boolean;
+  setPublicReadOnly: (on: boolean) => void;
   setTokens: (access: string, refresh: string) => void;
   setUser: (user: User) => void;
   logout: () => void;
@@ -21,6 +26,9 @@ export const useAuthStore = create<AuthState>()(
       accessToken: null,
       refreshToken: null,
       user: null,
+      publicReadOnly: false,
+      publicReadOnlyKnown: false,
+      setPublicReadOnly: (on) => set({ publicReadOnly: on, publicReadOnlyKnown: true }),
       setTokens: (access, refresh) => set({ accessToken: access, refreshToken: refresh }),
       setUser: (user) => set({ user }),
       logout: () => {
@@ -52,3 +60,21 @@ export const useAuthStore = create<AuthState>()(
     }
   )
 );
+
+type AuthSnapshot = Pick<AuthState, "accessToken" | "refreshToken" | "user" | "publicReadOnly">;
+
+/** A visitor: nobody signed in, and the instance lets visitors browse read-only. */
+export const selectIsVisitor = (s: AuthSnapshot) => !s.accessToken && !s.refreshToken && s.publicReadOnly;
+export const selectIsAdmin = (s: AuthSnapshot) => s.user?.role === "admin";
+/** Signed in: may see and use controls that change something. */
+export const selectCanWrite = (s: AuthSnapshot) => !!(s.accessToken || s.refreshToken);
+
+export const useIsVisitor = () => useAuthStore(selectIsVisitor);
+export const useIsAdmin = () => useAuthStore(selectIsAdmin);
+export const useCanWrite = () => useAuthStore(selectCanWrite);
+
+/** Where logging out lands: the public view when visitors may browse, else the login page. */
+export const logoutDestination = () => (useAuthStore.getState().publicReadOnly ? "/" : "/login");
+
+/** Outside React: is this browser a visitor right now? (Personal-state writes no-op for one.) */
+export const isVisitorNow = () => selectIsVisitor(useAuthStore.getState());

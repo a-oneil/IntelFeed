@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
-from app.core.security import get_admin_user, get_current_user
+from app.core.security import get_admin_user, get_current_user, get_viewer
 from app.database import get_db
 from app.models.theme import Theme
 from app.models.user import User
@@ -207,7 +207,7 @@ COLOR_SCHEMA = ColorSchemaResponse(
 
 @router.get("", response_model=list[ThemeResponse])
 async def list_themes(
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List all themes."""
@@ -301,7 +301,7 @@ async def get_default_theme_css(db: AsyncSession = Depends(get_db)):
 @router.get("/{theme_id}", response_model=ThemeResponse)
 async def get_theme(
     theme_id: uuid.UUID = Path(..., description="UUID of the theme"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Fetch a single theme by id, flagging whether it is the instance default."""

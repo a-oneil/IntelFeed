@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "@/api/client";
 import type { StoryThread, StoryThreadDetail, ThreadListResponse } from "@/api/types";
+import { isVisitorNow } from "@/stores/authStore";
 
 /**
  * Open story threads — one unfolding story instead of the twenty-three articles
@@ -58,9 +59,12 @@ export function useOpenThreadMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (threadId: string) => {
+      // Visitors have no "opened" state to record.
+      if (isVisitorNow()) return;
       await api.post(`/threads/${threadId}/open`);
     },
     onSuccess: () => {
+      if (isVisitorNow()) return;
       queryClient.invalidateQueries({ queryKey: ["threads"] });
     },
   });

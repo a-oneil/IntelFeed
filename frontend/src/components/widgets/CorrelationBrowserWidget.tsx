@@ -19,6 +19,7 @@ import {
   getCorrArticleNav,
 } from "@/components/triage/corrEventCards";
 import styles from "@/components/triage/corrEvents.module.css";
+import { useIsVisitor } from "@/stores/authStore";
 
 interface Props {
   config: Record<string, unknown>;
@@ -34,7 +35,11 @@ export default function CorrelationBrowserWidget({ config }: Props) {
   const limit = (config.limit as number) || 50;
 
   const { view, setWidget } = useTriageView();
-  const corrFilter = view.widgets.correlations.filter;
+  // Event read state is shared and a visitor can't change it, so they see
+  // every event: no "smart" or "unread" filter, nothing to mark read.
+  const isVisitor = useIsVisitor();
+  const savedFilter = view.widgets.correlations.filter;
+  const corrFilter = isVisitor ? "all" : savedFilter;
   const corrEventTypes = view.widgets.correlations.event_types;
   const corrSeverity = view.widgets.correlations.severity;
   const corrEntityType = view.widgets.correlations.entity_type;
@@ -142,7 +147,7 @@ export default function CorrelationBrowserWidget({ config }: Props) {
   }, [corrGroups]);
 
   const handleCorrEventClick = (event: CorrelationEvent) => {
-    if (!event.is_read) corrMarkRead.mutate(event.id);
+    if (!event.is_read && !isVisitor) corrMarkRead.mutate(event.id);
     navigate(getCorrEntityNav(event));
   };
 
@@ -170,6 +175,8 @@ export default function CorrelationBrowserWidget({ config }: Props) {
 
         {/* Filter mode */}
         <div className={styles.corrFilterRow}>
+          {!isVisitor && (
+          <>
           <button
             className={`${styles.corrFilterBtn} ${corrFilter === "smart" ? styles.corrFilterActive : ""}`}
             onClick={() => { setCorrFilter("smart"); setCorrSeverity(""); }}
@@ -183,6 +190,8 @@ export default function CorrelationBrowserWidget({ config }: Props) {
           >
             Unread{corrUnread > 0 ? ` (${corrUnread})` : ""}
           </button>
+          </>
+          )}
           <button
             className={`${styles.corrFilterBtn} ${corrFilter === "all" ? styles.corrFilterActive : ""}`}
             onClick={() => { setCorrFilter("all"); setCorrSeverity(""); }}
@@ -232,7 +241,7 @@ export default function CorrelationBrowserWidget({ config }: Props) {
           </button>
         )}
 
-        {corrUnread > 0 && (
+        {corrUnread > 0 && !isVisitor && (
           <button className={styles.corrMarkAllBtn} onClick={() => corrMarkAllRead.mutate()}>
             Mark all read
           </button>
@@ -324,7 +333,7 @@ export default function CorrelationBrowserWidget({ config }: Props) {
             <CorrArticleGroup
               key={group.entry_id ?? `system-${idx}`}
               group={group}
-              onDismiss={(id) => corrMarkRead.mutate(id)}
+              onDismiss={isVisitor ? undefined : (id) => corrMarkRead.mutate(id)}
               onEventClick={handleCorrEventClick}
               onArticleClick={handleCorrArticleClick}
             />

@@ -1,7 +1,8 @@
 import { useInfiniteQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { currentReadingPrefs } from "@/hooks/useReadingPrefs";
-import { useRef, useCallback, useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import api from "@/api/client";
+import { isVisitorNow, useIsVisitor } from "@/stores/authStore";
 import type {
   CursorPaginatedResponse,
   Entry,
@@ -12,15 +13,26 @@ import type {
 import { useQuery } from "@tanstack/react-query";
 
 /**
- * Debounced feeds invalidation — mark-read/unread mutations fire rapidly
- * (especially with markReadOnScroll), so we coalesce feeds refetches.
+ * Debounced read-state reconcile. Mark-read/unread fires on every article
+ * opened (and on scroll with markReadOnScroll), and the optimistic update has
+ * already put the new state on screen, so the refetch that reconciles with
+ * the server waits until the clicking stops. Otherwise each click refetches
+ * every loaded list page, the sidebar's six counts and the feeds, and a quick
+ * run through a dozen articles queues hundreds of requests on the API.
+ *
+ * The timer is module-level: every component that marks entries read shares
+ * one reconcile.
  */
-function useDebouncedFeedsInvalidation(delayMs = 1000) {
+let reconcileTimer: ReturnType<typeof setTimeout> | undefined;
+
+function useDebouncedReadReconcile(delayMs = 1500) {
   const queryClient = useQueryClient();
-  const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   return useCallback(() => {
-    clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
+    clearTimeout(reconcileTimer);
+    reconcileTimer = setTimeout(() => {
+      queryClient.invalidateQueries({ queryKey: ["entries"] });
+      queryClient.invalidateQueries({ queryKey: ["entries-count"] });
+      queryClient.invalidateQueries({ queryKey: ["entry"] });
       queryClient.invalidateQueries({ queryKey: ["feeds"] });
     }, delayMs);
   }, [queryClient, delayMs]);
@@ -109,9 +121,10 @@ export function usePriorityQueue(
   });
 }
 
-export function useEntriesCount(filters: EntryFilters) {
+export function useEntriesCount(filters: EntryFilters, enabled = true) {
   return useQuery({
     queryKey: ["entries-count", filters],
+    enabled,
     queryFn: async () => {
       const { sort: _sort, ...rest } = filters;
       const res = await api.get<{ total: number }>("/entries/count", { params: rest });
@@ -139,9 +152,11 @@ export function useVirtualFolderCounts() {
   const sinceWeek = useMemo(() => new Date(hourStart - 7 * 24 * 60 * 60 * 1000).toISOString(), [hourStart]);
   const last24h = useEntriesCount({ is_read: false, since: since24h, dedup: true });
   const thisWeek = useEntriesCount({ is_read: false, since: sinceWeek, dedup: true });
-  const watched = useEntriesCount({ is_read: false, watched: true, dedup: true });
-  const bookmarked = useEntriesCount({ is_read: false, is_bookmarked: true, dedup: true });
-  const starred = useEntriesCount({ is_read: false, is_starred: true, dedup: true });
+  // Watched, bookmarked and starred are a person's own; a visitor has none.
+  const personal = !useIsVisitor();
+  const watched = useEntriesCount({ is_read: false, watched: true, dedup: true }, personal);
+  const bookmarked = useEntriesCount({ is_read: false, is_bookmarked: true, dedup: true }, personal);
+  const starred = useEntriesCount({ is_read: false, is_starred: true, dedup: true }, personal);
   return useMemo<Record<string, number | undefined>>(
     () => ({
       last_24h: last24h.data,
@@ -159,8 +174,11 @@ export function useVirtualFolderCounts() {
  * Returns 0 when signal surfacing is disabled (backend short-circuits).
  */
 export function usePriorityUnreadCount() {
+  // The sidebar shows a visitor an arrow, not a count.
+  const isVisitor = useIsVisitor();
   return useQuery({
     queryKey: ["priority-unread-count"],
+    enabled: !isVisitor,
     queryFn: async () => {
       const res = await api.get<{ unread_count: number }>("/entries/priority-unread-count");
       return res.data.unread_count;
@@ -207,12 +225,16 @@ export function useEntry(entryId: string | null) {
  */
 function useReadStateMutation(read: boolean) {
   const queryClient = useQueryClient();
-  const debouncedFeedsInvalidate = useDebouncedFeedsInvalidation();
+  const reconcile = useDebouncedReadReconcile();
   return useMutation({
     mutationFn: async (entryId: string) => {
+      // A visitor has no read state: opening and scrolling articles must not
+      // try to record one (the server would refuse it anyway).
+      if (isVisitorNow()) return;
       await api.put(`/entries/${entryId}/${read ? "read" : "unread"}`);
     },
     onMutate: async (entryId: string) => {
+      if (isVisitorNow()) return undefined;
       // Stop in-flight refetches from clobbering the optimistic write.
       await queryClient.cancelQueries({ queryKey: ["entries"] });
       await queryClient.cancelQueries({ queryKey: ["entry", entryId] });
@@ -265,11 +287,11 @@ function useReadStateMutation(read: boolean) {
       }
       queryClient.setQueryData(["entry", ctx.entryId], ctx.prevDetail);
     },
-    onSettled: (_data, _err, entryId) => {
-      queryClient.invalidateQueries({ queryKey: ["entries"] });
-      queryClient.invalidateQueries({ queryKey: ["entries-count"] });
-      queryClient.invalidateQueries({ queryKey: ["entry", entryId] });
-      debouncedFeedsInvalidate();
+    onSettled: () => {
+      // Nothing changed for a visitor, and refetching would only spend their
+      // rate-limit budget.
+      if (isVisitorNow()) return;
+      reconcile();
     },
   });
 }
@@ -286,10 +308,12 @@ export function useToggleStar() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (entryId: string) => {
+      if (isVisitorNow()) return null;
       const res = await api.put(`/entries/${entryId}/star`);
       return res.data;
     },
     onSuccess: (_data, entryId) => {
+      if (isVisitorNow()) return;
       queryClient.invalidateQueries({ queryKey: ["entries"] });
       queryClient.invalidateQueries({ queryKey: ["entries-count"] });
       queryClient.invalidateQueries({ queryKey: ["entry", entryId] });
@@ -301,10 +325,12 @@ export function useToggleBookmark() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (entryId: string) => {
+      if (isVisitorNow()) return null;
       const res = await api.put(`/entries/${entryId}/bookmark`);
       return res.data;
     },
     onSuccess: (_data, entryId) => {
+      if (isVisitorNow()) return;
       queryClient.invalidateQueries({ queryKey: ["entries"] });
       queryClient.invalidateQueries({ queryKey: ["entries-count"] });
       queryClient.invalidateQueries({ queryKey: ["entry", entryId] });
@@ -337,10 +363,14 @@ export function useBulkAction() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (data: { entry_ids: string[]; action: string }) => {
+      // Bulk actions are read state, stars, tags and the like: a visitor has
+      // none of them (Shift+M and a thread's "mark read" land here too).
+      if (isVisitorNow()) return null;
       const res = await api.post("/entries/bulk-action", data);
       return res.data;
     },
     onSuccess: () => {
+      if (isVisitorNow()) return;
       queryClient.invalidateQueries({ queryKey: ["entries"] });
       queryClient.invalidateQueries({ queryKey: ["entries-count"] });
       queryClient.invalidateQueries({ queryKey: ["feeds"] });

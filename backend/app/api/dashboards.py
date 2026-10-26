@@ -9,7 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import AppError
 from app.core.pagination import PaginatedResponse
-from app.core.security import get_current_user
+from app.core.security import get_current_user, get_viewer
 from app.dashboard_defaults import DEFAULT_BOARDS
 from app.database import get_db
 from app.models.dashboard import Dashboard, DashboardWidget
@@ -23,6 +23,7 @@ from app.schemas.dashboard import (
     WidgetResponse,
     WidgetUpdate,
 )
+from app.services.public_view import visitor_dashboards
 
 router = APIRouter()
 
@@ -31,10 +32,13 @@ router = APIRouter()
 async def list_dashboards(
     limit: int = Query(50, ge=1, le=500, description="Maximum number of dashboards to return."),
     offset: int = Query(0, ge=0, description="Number of dashboards to skip for pagination."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List the caller's dashboards with their widgets, ordered by sort order then creation time."""
+    if user.is_anonymous:
+        boards = visitor_dashboards()
+        return PaginatedResponse(items=boards, total=len(boards), limit=limit, offset=0, has_more=False)
     base = select(Dashboard).where(Dashboard.created_by == user.id)
     total = (
         await db.execute(select(func.count()).select_from(Dashboard).where(Dashboard.created_by == user.id))
@@ -152,10 +156,15 @@ async def reorder_dashboards(
 @router.get("/{dashboard_id}", response_model=DashboardResponse)
 async def get_dashboard(
     dashboard_id: uuid.UUID = Path(..., description="Dashboard UUID."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Fetch a single dashboard with its widgets. Returns 404 if not found."""
+    if user.is_anonymous:
+        for board in visitor_dashboards():
+            if board.id == dashboard_id:
+                return board
+        raise AppError(code="not_found", message="Dashboard not found", status_code=404)
     dashboard = await _get_dashboard(db, dashboard_id, user.id)
     return DashboardResponse.model_validate(dashboard)
 

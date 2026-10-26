@@ -5,7 +5,7 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.core.security import get_current_user
+from app.core.security import get_current_user, get_viewer
 from app.database import get_db
 from app.models.user import User
 
@@ -180,7 +180,7 @@ async def entity_whats_new(
             "that merely co-occur in its articles."
         ),
     ),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db=Depends(get_db),
 ):
     """Recent novelty/severity signals on entries linked to this entity (workbench strip)."""

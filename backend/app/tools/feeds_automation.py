@@ -109,6 +109,10 @@ def _parse_date(value: str, label: str) -> tuple[date | None, dict | None]:
             "auto_extract_on_ingest": {"type": "boolean"},
             "extract_detection_rules": {"type": "boolean"},
             "extract_tools": {"type": "boolean"},
+            "visible_to_visitors": {
+                "type": "boolean",
+                "description": "Show this feed and its articles in public read-only mode (never Manual Uploads)",
+            },
             "adapter_config": {
                 "type": "object",
                 "description": "Adapter-specific config keys to merge into the existing config",
@@ -140,6 +144,7 @@ async def _update_feed(
     auto_extract_on_ingest: bool | None = None,
     extract_detection_rules: bool | None = None,
     extract_tools: bool | None = None,
+    visible_to_visitors: bool | None = None,
     adapter_config: dict | None = None,
 ) -> dict:
     fid, err = _parse_uuid(feed_id, "feed_id")
@@ -273,6 +278,10 @@ async def _update_feed(
     if extract_tools is not None:
         feed.extract_tools = extract_tools
         updated.append("extract_tools")
+
+    if visible_to_visitors is not None:
+        feed.visible_to_visitors = visible_to_visitors
+        updated.append("visible_to_visitors")
 
     if not updated:
         return {"id": str(feed.id), "updated": [], "message": "no fields provided — nothing changed"}

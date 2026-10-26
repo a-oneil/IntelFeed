@@ -16,6 +16,7 @@ import { AppHeader } from "@/components/AppHeader";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { RailToggle } from "@/components/primitives";
 import styles from "./MainLayout.module.css";
+import { isVisitorNow, useIsVisitor } from "@/stores/authStore";
 
 interface MainLayoutProps {
   // Priority Queue mode: renders the same list + reader shell, but pins the
@@ -61,6 +62,8 @@ export function MainLayout({ priorityMode = false }: MainLayoutProps = {}) {
   const isMobile = useIsMobile();
   const [searchParams, setSearchParams] = useSearchParams();
   const commandPaletteOpen = useUIStore((s) => s.commandPaletteOpen);
+  // No command palette in public read-only mode: most of what it does writes.
+  const isVisitor = useIsVisitor();
 
   // On mobile, ensure sidebar starts collapsed and stays collapsed on navigation
   useEffect(() => {
@@ -93,8 +96,11 @@ export function MainLayout({ priorityMode = false }: MainLayoutProps = {}) {
   // Global keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // A visitor has no palette, AI, notes, tags or export: those keys do
+      // nothing for them (the help lists only what works).
+      const visitor = isVisitorNow();
       // Cmd+K / Ctrl+K — command palette (Shift is reserved for the copilot)
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "k") {
+      if (!visitor && (e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "k") {
         e.preventDefault();
         useUIStore.getState().toggleCommandPalette();
         return;
@@ -120,6 +126,8 @@ export function MainLayout({ priorityMode = false }: MainLayoutProps = {}) {
         if (e.key === "w") {
           e.preventDefault();
           useUIStore.getState().setActiveReaderPanel(currentPanel === "intel" ? null : "intel");
+        } else if (visitor) {
+          // The panels below are signed-in only.
         } else if (e.key === "a") {
           e.preventDefault();
           useUIStore.getState().setActiveReaderPanel(currentPanel === "ai" ? null : "ai");
@@ -240,7 +248,7 @@ export function MainLayout({ priorityMode = false }: MainLayoutProps = {}) {
       </div>
       <div aria-live="polite" aria-atomic="true" className={styles.srOnly} />
       <CommandPalette
-        open={commandPaletteOpen}
+        open={commandPaletteOpen && !isVisitor}
         onClose={useUIStore.getState().closeCommandPalette}
       />
     </div>

@@ -258,8 +258,16 @@ async def get_entity_claims(
     if user_ids:
         usernames = dict((await db.execute(select(User.id, User.username).where(User.id.in_(user_ids)))).all())
 
+    from app.core.public_access import viewer_is_anonymous
+
+    visitor = viewer_is_anonymous()
     fields: dict[str, dict] = {}
     for row in rows:
+        # The article lookup above went through the visitor filter: a claim
+        # drawn from an article they can't see (its quote is that article's
+        # text) is left out rather than shown without its source.
+        if visitor and row.entry_id and row.entry_id not in entries:
+            continue
         bucket = fields.setdefault(row.field, {"current_value": None, "claims": []})
         bucket["claims"].append(
             {

@@ -1,8 +1,9 @@
 import { useCallback, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
 import { toast } from "sonner";
 import api from "@/api/client";
-import { useAuthStore } from "@/stores/authStore";
+import { selectIsVisitor, useAuthStore } from "@/stores/authStore";
 import { usePlayerStore, type QueueItem } from "@/stores/playerStore";
 
 /**
@@ -76,10 +77,17 @@ export function useTts(opts?: { shareToken?: string }) {
         // server-side and the box can be briefly loaded — 15s (client default)
         // is too tight and surfaces as a spurious "timeout exceeded".
         const cfg = { timeout: 45_000 };
+        // A visitor (public read-only mode) only plays audio that already
+        // exists: GET /tts/existing never synthesizes, and 404s on a miss.
+        const visitor = !shareToken && selectIsVisitor(useAuthStore.getState());
         const post = () =>
-          (shareToken
-            ? publicApi.post<PrepareResponse>(url, body, cfg)
-            : api.post<PrepareResponse>(url, body, cfg)
+          (visitor
+            ? api.get<PrepareResponse>("/tts/existing", {
+                params: { source: args.source, id: args.id, entity_type: args.entityType },
+              })
+            : shareToken
+              ? publicApi.post<PrepareResponse>(url, body, cfg)
+              : api.post<PrepareResponse>(url, body, cfg)
           ).then((r) => r.data);
 
         let resp = await post();
@@ -132,4 +140,20 @@ export function useTts(opts?: { shareToken?: string }) {
   }, []);
 
   return { start, cancel, isPreparing };
+}
+
+/**
+ * Whether read-aloud audio already exists for an entry (visitors only: they
+ * can play what was made, never make new). Signed-in readers don't ask.
+ */
+export function useExistingTts(entryId: string | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: ["tts-existing", "entry", entryId],
+    queryFn: async () =>
+      (await api.get<PrepareResponse>("/tts/existing", { params: { source: "entry", id: entryId } })).data,
+    enabled: enabled && !!entryId,
+    retry: false,
+    staleTime: 5 * 60_000,
+    meta: { silenceToast: true },
+  });
 }

@@ -57,6 +57,17 @@ describe("useFeedForm", () => {
     expect(result.current.buildPayload(true, false)).toEqual({ custom_title: "Bleeping" });
   });
 
+  it("only an admin sends visible_to_visitors", () => {
+    const { result } = renderHook(() => useFeedForm(makeFeed()));
+    expect(result.current.values.visible_to_visitors).toBe(false);
+
+    act(() => result.current.set("visible_to_visitors", true));
+
+    expect(result.current.dirtyPanes.has("identity")).toBe(true);
+    expect(result.current.buildPayload(true, false)).toEqual({ visible_to_visitors: true });
+    expect(result.current.buildPayload(false, true)).toEqual({});
+  });
+
   it("attributes a changed field to its pane so the rail can mark it", () => {
     const { result } = renderHook(() => useFeedForm(makeFeed()));
 

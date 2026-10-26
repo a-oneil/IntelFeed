@@ -5,12 +5,26 @@ import { apiErrorInfo, hasErrorEnvelope } from "@/api/errors";
 /** The toast text: the same reading of the error envelope the inline errors use. */
 function extractErrorMessage(error: unknown): string {
   if (hasErrorEnvelope(error)) return apiErrorInfo(error).message;
-  if (error && typeof error === "object" && "response" in error) {
-    const status = (error as { response?: { status?: number } }).response?.status;
-    if (status === 429) return "Rate limited. Please try again shortly.";
-  }
   if (error instanceof Error) return error.message;
   return "An unexpected error occurred";
+}
+
+function isRateLimited(error: unknown): boolean {
+  return (
+    !!error &&
+    typeof error === "object" &&
+    "response" in error &&
+    (error as { response?: { status?: number } }).response?.status === 429
+  );
+}
+
+/** One page fans out into many requests, so a 429 is one toast, not one per query. */
+function toastError(error: unknown): void {
+  if (isRateLimited(error)) {
+    toast.error("Too many requests. Wait a minute and try again.", { id: "rate-limited" });
+    return;
+  }
+  toast.error(extractErrorMessage(error));
 }
 
 /** Queries that report state on a timer opt out of the global toast via `meta`. */
@@ -19,6 +33,8 @@ function silenced(meta: Record<string, unknown> | undefined): boolean {
 }
 
 function shouldShowToast(error: unknown): boolean {
+  // A visitor's refused write (api/client.ts) has already said so once.
+  if (error instanceof Error && error.name === "ReadOnlyViewError") return false;
   if (error && typeof error === "object" && "response" in error) {
     const axiosErr = error as { response?: { data?: { error?: { code?: string } }; status?: number } };
     const code = axiosErr.response?.data?.error?.code;
@@ -32,14 +48,14 @@ export const queryClient = new QueryClient({
   queryCache: new QueryCache({
     onError: (error, query) => {
       if (!silenced(query.meta) && shouldShowToast(error)) {
-        toast.error(extractErrorMessage(error));
+        toastError(error);
       }
     },
   }),
   mutationCache: new MutationCache({
     onError: (error) => {
       if (shouldShowToast(error)) {
-        toast.error(extractErrorMessage(error));
+        toastError(error);
       }
     },
   }),

@@ -1,7 +1,7 @@
 # Using IntelFeed
 
 This is the user guide — how to actually work in IntelFeed. It assumes nothing
-about the code underneath. If you want to know how a feature is *built*, the
+about the code underneath. If you want to know how a feature is built, the
 rest of the documentation covers that; this section covers how to use it.
 
 Read the first two pages in order if you're new. After that, pages stand alone. If you're after the phone app, that's [IntelFeed for Android](../android-app.md).

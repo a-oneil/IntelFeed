@@ -4,6 +4,7 @@ import { Chip } from "@/components/primitives";
 import styles from "./widgets.module.css";
 import { contrastText } from "@/utils/contrast";
 import { useOpenSavedSearch } from "@/hooks/useOpenSavedSearch";
+import { useIsVisitor } from "@/stores/authStore";
 
 interface Props {
   config: Record<string, unknown>;
@@ -20,6 +21,7 @@ export default function TopTagsWidget({ config }: Props) {
     ...(date_to ? { date_to } : {}),
   };
   const { data, isLoading } = useTopTags(params);
+  const isVisitor = useIsVisitor();
 
   if (isLoading) return <WidgetListSkeleton />;
   if (!data || data.length === 0) return <div className={styles.noData}>No tagged entries</div>;
@@ -55,7 +57,8 @@ export default function TopTagsWidget({ config }: Props) {
             } as React.CSSProperties
           }
           className={styles.tagPill}
-          onClick={() => handleTagClick(t.name)}
+          // Opening a tag is a saved search, which a visitor doesn't have.
+          onClick={isVisitor ? undefined : () => handleTagClick(t.name)}
           title={`${t.name}: ${t.entry_count} entries`}
         >
           <span>{t.name}</span>

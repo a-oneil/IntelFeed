@@ -26,6 +26,7 @@ import { useUIStore } from "@/stores/uiStore";
 import { scalePx } from "@/utils/uiScale";
 import { PageHeader } from "@/components/primitives";
 import styles from "./DashboardPage.module.css";
+import { useIsVisitor } from "@/stores/authStore";
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
 const ROW_HEIGHT = scalePx(80);
@@ -43,7 +44,10 @@ export function DashboardPage() {
 
   // Layout lock: keeps a stray touch on mobile from dragging or resizing
   // widgets. Persisted per device via uiStore.
-  const dashboardLocked = useUIStore((s) => s.dashboardLocked);
+  const dashboardLockedPref = useUIStore((s) => s.dashboardLocked);
+  // Public read-only mode: a visitor gets the built-in boards, locked in place.
+  const isVisitor = useIsVisitor();
+  const dashboardLocked = dashboardLockedPref || isVisitor;
   const toggleDashboardLocked = useUIStore((s) => s.toggleDashboardLocked);
 
   // ── Triage view (global range shared with the correlation browser widget) ──
@@ -101,11 +105,11 @@ export function DashboardPage() {
   const autoCreateRef = useRef(false);
   useEffect(() => {
     if (!dashboardsData) return;
-    if (dashboardsData.items.length > 0) return;
+    if (dashboardsData.items.length > 0 || isVisitor) return;
     if (autoCreateRef.current) return;
     autoCreateRef.current = true;
     seedDefaults.mutate();
-  }, [dashboardsData, seedDefaults]);
+  }, [dashboardsData, seedDefaults, isVisitor]);
 
   const handleCreateBoard = async (name: string) => {
     const created = await createDashboard.mutateAsync({ name: `${TRIAGE_PREFIX}${name}` });
@@ -230,7 +234,7 @@ export function DashboardPage() {
         flush
         className={styles.pageHead}
         actions={
-          dashboardId ? (
+          dashboardId && !isVisitor ? (
             <TriageActions
               onAddWidget={() => setShowPicker(true)}
               onShowTemplates={() => setShowTemplates(true)}
@@ -254,6 +258,7 @@ export function DashboardPage() {
                   onDelete={handleDeleteBoard}
                   onReorder={handleReorderBoards}
                   locked={dashboardLocked}
+                  readOnly={isVisitor}
                 />
               ) : undefined
             }
@@ -300,7 +305,7 @@ export function DashboardPage() {
                       </div>
                       {/* Settings + remove sit OUTSIDE the drag handle, or
                           react-grid-layout swallows the click as a drag. */}
-                      {configFields && configFields.length > 0 && (
+                      {!isVisitor && configFields && configFields.length > 0 && (
                         <button
                           onClick={() =>
                             setSettingsWidgetId((id) => (id === widget.id ? null : widget.id))
@@ -312,7 +317,7 @@ export function DashboardPage() {
                           ⚙
                         </button>
                       )}
-                      <button onClick={() => handleRemoveWidget(widget.id)} className={styles.removeBtn} title="Remove widget">x</button>
+                      {!isVisitor && <button onClick={() => handleRemoveWidget(widget.id)} className={styles.removeBtn} title="Remove widget">x</button>}
                       {settingsWidgetId === widget.id && configFields && (
                         <WidgetSettingsPopover
                           fields={configFields}

@@ -55,6 +55,7 @@ import { useUndoableDelete } from "@/hooks/useUndoableDelete";
 import api from "@/api/client";
 import { useOpenEntry } from "@/utils/openEntry";
 import styles from "./WorkbenchPanel.module.css";
+import { useIsVisitor } from "@/stores/authStore";
 
 /**
  * Severity chip colours come from the shared `severityChipColors` helper — the
@@ -110,6 +111,10 @@ export default function WorkbenchPanel({
 
   // In readOnly mode, pass empty entryId to hooks so they don't fire (enabled: !!entryId)
   const fetchId = readOnly ? "" : entryId;
+  // Public read-only mode: the extracted intel reads like the share page's —
+  // no extraction, rules, campaigns or observables, nothing that edits.
+  const isVisitor = useIsVisitor();
+  const editLocked = readOnly || isVisitor;
 
   const { data: entryUrls } = useEntryURLs(fetchId);
   const { data: hookTTPs, isLoading: ttpsLoading } = useEntryTTPs(fetchId);
@@ -122,9 +127,11 @@ export default function WorkbenchPanel({
   const { data: hookTools, isLoading: toolsLoading } = useEntryTools(fetchId);
   const { data: hookVendors, isLoading: vendorsLoading } = useEntryVendors(fetchId);
   const { data: hookProducts, isLoading: productsLoading } = useEntryProducts(fetchId);
-  const { data: hookObservables, isLoading: observablesLoading } = useEntryObservables(fetchId);
+  const { data: hookObservables, isLoading: observablesLoading } = useEntryObservables(isVisitor ? "" : fetchId);
+  // Rules are signed-in only: a visitor's (or a share page's) panel doesn't ask.
   const { data: rulesData, isLoading: rulesLoading } = useDetectionRules(
-    readOnly ? { entry_id: "" } : { entry_id: entryId },
+    { entry_id: entryId },
+    { enabled: !editLocked && !!entryId },
   );
   // Observables stay off the map unless asked for — ledger atoms as nodes is
   // the graph bloat the design guards against.
@@ -269,8 +276,8 @@ export default function WorkbenchPanel({
 
   return (
     <div className={styles.panel}>
-      {/* Action bar — hidden in readOnly mode */}
-      {!readOnly && (
+      {/* Action bar — hidden in readOnly mode and for visitors */}
+      {!editLocked && (
         <div className={styles.actionBarPrimary}>
           <button
             className={styles.actionBtnPrimary}
@@ -321,7 +328,7 @@ export default function WorkbenchPanel({
           onToggle={() => toggleSection("cves")}
           accentClass={cveCount > 0 ? styles.sectionAccentCVE : undefined}
         >
-          <CVEList cves={cves || []} entryId={entryId} hasExtracted={hasExtracted} readOnly={readOnly} />
+          <CVEList cves={cves || []} entryId={entryId} hasExtracted={hasExtracted} readOnly={editLocked} />
         </AccordionSection>
         <AccordionSection
           title="Countries"
@@ -331,7 +338,7 @@ export default function WorkbenchPanel({
           onToggle={() => toggleSection("countries")}
           accentClass={countryCount > 0 ? styles.sectionAccentCountry : undefined}
         >
-          <CountryList countries={countries || []} entryId={entryId} hasExtracted={hasExtracted} readOnly={readOnly} />
+          <CountryList countries={countries || []} entryId={entryId} hasExtracted={hasExtracted} readOnly={editLocked} />
         </AccordionSection>
         <AccordionSection
           title="Sectors"
@@ -341,8 +348,9 @@ export default function WorkbenchPanel({
           onToggle={() => toggleSection("sectors")}
           accentClass={sectorCount > 0 ? styles.sectionAccentSector : undefined}
         >
-          <SectorList sectors={sectors || []} entryId={entryId} hasExtracted={hasExtracted} readOnly={readOnly} />
+          <SectorList sectors={sectors || []} entryId={entryId} hasExtracted={hasExtracted} readOnly={editLocked} />
         </AccordionSection>
+        {!isVisitor && (
         <AccordionSection
           title="Detection Rules"
           count={ruleCount}
@@ -351,8 +359,9 @@ export default function WorkbenchPanel({
           onToggle={() => toggleSection("rules")}
           accentClass={ruleCount > 0 ? styles.sectionAccentRule : undefined}
         >
-          <RuleList rules={rules} hasExtracted={hasExtracted} hasEntities={!!(ttpCount || cveCount)} readOnly={readOnly} />
+          <RuleList rules={rules} hasExtracted={hasExtracted} hasEntities={!!(ttpCount || cveCount)} readOnly={editLocked} />
         </AccordionSection>
+        )}
         {/* Entity Graph — hidden in readOnly (requires auth endpoint) */}
         {!readOnly && graphData && graphData.nodes.length >= 2 && (
           <div className={styles.section}>
@@ -421,7 +430,7 @@ export default function WorkbenchPanel({
           </AccordionSection>
         )}
         {/* Intelligence Insights (PIR matches live in their own section) */}
-        {!readOnly && (
+        {!editLocked && (
           <InsightsSection entryId={entryId} expanded={expandedSections.has("insights")} onToggle={() => toggleSection("insights")} />
         )}
         <AccordionSection
@@ -432,7 +441,7 @@ export default function WorkbenchPanel({
           onToggle={() => toggleSection("malware")}
           accentClass={malwareCount > 0 ? styles.sectionAccentMalware : undefined}
         >
-          <MalwareList malware={malware || []} entryId={entryId} hasExtracted={hasExtracted} readOnly={readOnly} />
+          <MalwareList malware={malware || []} entryId={entryId} hasExtracted={hasExtracted} readOnly={editLocked} />
         </AccordionSection>
         <AccordionSection
           title="Mitigations"
@@ -442,7 +451,7 @@ export default function WorkbenchPanel({
           onToggle={() => toggleSection("mitigations")}
           accentClass={mitigationCount > 0 ? styles.sectionAccentMitigation : undefined}
         >
-          <MitigationList mitigations={mitigations || []} entryId={entryId} hasExtracted={hasExtracted} readOnly={readOnly} />
+          <MitigationList mitigations={mitigations || []} entryId={entryId} hasExtracted={hasExtracted} readOnly={editLocked} />
         </AccordionSection>
         {(observablePayload.items.length > 0 || observablePayload.candidates.length > 0) && (
           <AccordionSection
@@ -453,7 +462,7 @@ export default function WorkbenchPanel({
             onToggle={() => toggleSection("observables")}
             accentClass={styles.sectionAccentObservable}
           >
-            <ObservableList payload={observablePayload} entryId={entryId} readOnly={readOnly} />
+            <ObservableList payload={observablePayload} entryId={entryId} readOnly={editLocked} />
           </AccordionSection>
         )}
         <AccordionSection
@@ -464,9 +473,9 @@ export default function WorkbenchPanel({
           onToggle={() => toggleSection("tools")}
           accentClass={toolCount > 0 ? styles.sectionAccentTool : undefined}
         >
-          <ToolList tools={tools || []} entryId={entryId} hasExtracted={hasExtracted} readOnly={readOnly} />
+          <ToolList tools={tools || []} entryId={entryId} hasExtracted={hasExtracted} readOnly={editLocked} />
         </AccordionSection>
-        {!readOnly && (
+        {!editLocked && (
           <PIRSection entryId={entryId} expanded={expandedSections.has("pir")} onToggle={() => toggleSection("pir")} />
         )}
         <AccordionSection
@@ -477,7 +486,7 @@ export default function WorkbenchPanel({
           onToggle={() => toggleSection("products")}
           accentClass={productCount > 0 ? styles.sectionAccentProduct : undefined}
         >
-          <ProductList products={products || []} entryId={entryId} hasExtracted={hasExtracted} readOnly={readOnly} />
+          <ProductList products={products || []} entryId={entryId} hasExtracted={hasExtracted} readOnly={editLocked} />
         </AccordionSection>
         {(actualUrls?.length ?? 0) > 0 && (
           <AccordionSection
@@ -499,7 +508,7 @@ export default function WorkbenchPanel({
           onToggle={() => toggleSection("actors")}
           accentClass={actorCount > 0 ? styles.sectionAccentActor : undefined}
         >
-          <ActorList actors={actors || []} entryId={entryId} hasExtracted={hasExtracted} readOnly={readOnly} />
+          <ActorList actors={actors || []} entryId={entryId} hasExtracted={hasExtracted} readOnly={editLocked} />
         </AccordionSection>
         <AccordionSection
           title="TTPs (MITRE ATT&CK)"
@@ -509,7 +518,7 @@ export default function WorkbenchPanel({
           onToggle={() => toggleSection("ttps")}
           accentClass={ttpCount > 0 ? styles.sectionAccentTTP : undefined}
         >
-          <TTPList ttps={ttps || []} entryId={entryId} hasExtracted={hasExtracted} readOnly={readOnly} />
+          <TTPList ttps={ttps || []} entryId={entryId} hasExtracted={hasExtracted} readOnly={editLocked} />
         </AccordionSection>
         <AccordionSection
           title="Vendors"
@@ -519,7 +528,7 @@ export default function WorkbenchPanel({
           onToggle={() => toggleSection("vendors")}
           accentClass={vendorCount > 0 ? styles.sectionAccentVendor : undefined}
         >
-          <VendorList vendors={vendors || []} entryId={entryId} hasExtracted={hasExtracted} readOnly={readOnly} />
+          <VendorList vendors={vendors || []} entryId={entryId} hasExtracted={hasExtracted} readOnly={editLocked} />
         </AccordionSection>
       </div>
     </div>

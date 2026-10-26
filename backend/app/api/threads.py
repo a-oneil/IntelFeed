@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
-from app.core.security import get_current_user
+from app.core.security import get_current_user, get_viewer
 from app.database import get_db
 from app.intelligence import story_threads
 from app.models.story_thread import StoryThread
@@ -26,6 +26,7 @@ from app.schemas.thread import (
     ThreadSummary,
     ThreadYield,
 )
+from app.services.thread_narrative import collect_members, heuristic_beats
 
 router = APIRouter()
 
@@ -46,7 +47,7 @@ async def list_threads(
     status: str = Query("open", description="open, dormant, closed, or 'any'"),
     limit: int = Query(40, ge=1, le=200, description="Maximum threads returned"),
     q: str | None = Query(None, max_length=200, description="Substring match on the thread title"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     rows = await story_threads.list_threads(db, user.id, status=status, limit=limit, q=q)
@@ -65,18 +66,42 @@ async def list_threads(
 )
 async def get_thread(
     slug: str = Path(..., description="Thread slug", examples=["shai-hulud-npm-supply-chain-worm"]),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     row = await story_threads.get_thread(db, slug, user.id)
+    if row is not None and user.is_anonymous:
+        shaped = await story_threads.visitor_thread_rows(db, [row])
+        row = shaped[0] if shaped else None
     if row is None:
         raise AppError("not_found", f"No story thread with slug '{slug}'", status_code=404)
 
     thread_id = row["id"]
     members = await story_threads.thread_members(db, thread_id, user.id)
-    beats = await story_threads.thread_beats(db, thread_id)
-    yields = await story_threads.thread_yield(db, thread_id)
-    nearest = await story_threads.nearest_threads(db, thread_id)
+    if user.is_anonymous:
+        # The thread tables are raw SQL, outside the ORM filter: a visitor's
+        # thread is rebuilt from its visible members alone. The stored spine
+        # (beats drawn from every member, or written by AI) gives way to the
+        # day-grouping one over those members, computed here and not stored;
+        # the yield counts them only; the nearest threads, titled from members
+        # of their own, are left out.
+        shown = set(row["entry_ids"])
+        members = [
+            {**m, "duplicate_of_entry_id": m["duplicate_of_entry_id"] if m["duplicate_of_entry_id"] in shown else None}
+            for m in members
+            if m["entry_id"] in shown
+        ]
+        spine_members = [m for m in await collect_members(db, thread_id) if m["entry_id"] in shown]
+        beats = [
+            {**beat, "id": uuid.uuid5(thread_id, f"visitor-beat:{beat['position']}")}
+            for beat in heuristic_beats(spine_members)
+        ]
+        yields = await story_threads.thread_yield(db, thread_id, entry_ids=list(shown))
+        nearest = []
+    else:
+        beats = await story_threads.thread_beats(db, thread_id)
+        yields = await story_threads.thread_yield(db, thread_id)
+        nearest = await story_threads.nearest_threads(db, thread_id)
 
     unread = [m for m in members if not m["is_read"]]
     # Members arrive in publication order; the thread's rank is its best unread
@@ -91,9 +116,9 @@ async def get_thread(
         {
             **row,
             "unread_count": len(unread),
-            "new_since_opened": sum(
-                1 for m in members if last_opened is None or (m["added_at"] and m["added_at"] > last_opened)
-            ),
+            "new_since_opened": 0
+            if user.is_anonymous
+            else sum(1 for m in members if last_opened is None or (m["added_at"] and m["added_at"] > last_opened)),
             "top_score": (best_unread["priority_score"] or 0) if best_unread else None,
             "top_entry_id": best_unread["entry_id"] if best_unread else None,
             "entry_ids": [m["entry_id"] for m in members],

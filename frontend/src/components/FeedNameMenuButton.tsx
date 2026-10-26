@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProp
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { useFeeds } from "@/hooks/useFeeds";
+import { useIsVisitor } from "@/stores/authStore";
 import { useUIStore } from "@/stores/uiStore";
 import { EditFeedModal } from "@/components/feedModal/EditFeedModal";
 import styles from "./FeedNameMenuButton.module.css";
@@ -14,6 +15,8 @@ interface FeedNameMenuButtonProps {
 
 export function FeedNameMenuButton({ feedId, className, children }: FeedNameMenuButtonProps) {
   const [open, setOpen] = useState(false);
+  // A visitor can filter by the feed but not open its settings.
+  const isVisitor = useIsVisitor();
   const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
   const [showEdit, setShowEdit] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -115,26 +118,28 @@ export function FeedNameMenuButton({ feedId, className, children }: FeedNameMenu
             </svg>
             Show only this feed's entries
           </button>
-          <button
-            type="button"
-            className={styles.item}
-            role="menuitem"
-            onClick={(e) => {
-              e.stopPropagation();
-              setOpen(false);
-              setShowEdit(true);
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-            </svg>
-            Edit feed
-          </button>
+          {!isVisitor && (
+            <button
+              type="button"
+              className={styles.item}
+              role="menuitem"
+              onClick={(e) => {
+                e.stopPropagation();
+                setOpen(false);
+                setShowEdit(true);
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+              </svg>
+              Edit feed
+            </button>
+          )}
         </div>,
         document.body,
       )}
-      {showEdit && subscription && (
+      {showEdit && subscription && !isVisitor && (
         <EditFeedModal subscription={subscription} onClose={() => setShowEdit(false)} />
       )}
     </>
