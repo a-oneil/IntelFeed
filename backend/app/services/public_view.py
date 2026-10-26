@@ -4,7 +4,8 @@ Two things are hidden from visitors at the data layer rather than route by
 route, because they would otherwise leak through every entry list in the app
 — profiles, timelines, pivots, threads, widgets, similar-entries:
 
-* the Manual Uploads feed and every entry in it (an analyst's own documents),
+* every feed an admin has not marked ``visible_to_visitors``, with its
+  entries, and the Manual Uploads feed (an analyst's own documents) always,
 * feed internals: URL, errors, health, pause reasons, adapter config, notes.
 
 AI output is a third: no ``AIResult`` row loads during a visitor's request,
@@ -15,6 +16,11 @@ The first is a SQLAlchemy global filter: while the request's viewer is
 anonymous (core/public_access.py), every ORM select of ``Feed`` or ``Entry``
 gets the hidden-feed criterion added, subqueries and relationship loads
 included. The second is a response shaping step the feed routes call.
+
+The filter runs on SQL the ORM emits, so ``session.get()`` answered from the
+identity map skips it. That is safe because a request's session starts empty
+and everything a visitor's request loads passed the filter; code must not
+hand a visitor's request a session that already holds other rows.
 """
 
 import uuid
@@ -31,14 +37,18 @@ from app.models.feed import Feed
 from app.schemas.dashboard import DashboardResponse, WidgetResponse
 from app.schemas.feed import FeedResponse
 
-#: Feed types a visitor never sees, with their entries.
+#: Feed types a visitor never sees, with their entries, whatever the flag says.
 HIDDEN_FEED_TYPES: frozenset[str] = frozenset({"manual"})
 
 
-def _hidden_feed_ids():
+def _feed_shown_to_visitors():
+    return Feed.visible_to_visitors.is_(True) & Feed.feed_type.not_in(HIDDEN_FEED_TYPES)
+
+
+def _shown_feed_ids():
     from sqlalchemy import select
 
-    return select(Feed.id).where(Feed.feed_type.in_(HIDDEN_FEED_TYPES))
+    return select(Feed.id).where(_feed_shown_to_visitors())
 
 
 @event.listens_for(Session, "do_orm_execute")
@@ -46,8 +56,8 @@ def _hide_from_visitors(state) -> None:
     if not state.is_select or not viewer_is_anonymous():
         return
     state.statement = state.statement.options(
-        with_loader_criteria(Feed, Feed.feed_type.not_in(HIDDEN_FEED_TYPES), include_aliases=True),
-        with_loader_criteria(Entry, Entry.feed_id.not_in(_hidden_feed_ids()), include_aliases=True),
+        with_loader_criteria(Feed, _feed_shown_to_visitors(), include_aliases=True),
+        with_loader_criteria(Entry, Entry.feed_id.in_(_shown_feed_ids()), include_aliases=True),
         with_loader_criteria(AIResult, false(), include_aliases=True),
     )
 
@@ -184,6 +194,7 @@ HIDDEN_ENTITY_TYPES = frozenset(
     {"campaign", "campaigns", "observable", "observables", "detection_rule", "rule", "ioc", "requirement"}
 )
 _REMOVED = object()
+_EMPTY_LIKE: dict[type, Any] = {list: list, int: int, float: float, bool: bool}
 
 
 def _hidden_key(key: str) -> bool:
@@ -201,6 +212,13 @@ def _scrub(value: Any, removed_ids: set[str]) -> Any:
         out = {}
         for key, item in value.items():
             if _hidden_key(key):
+                # Keep the shape the page expects: a hidden list reads as
+                # empty and a hidden count as zero, since dropping them made
+                # pages that read campaigns.length crash for visitors. A
+                # hidden object is dropped: pages test for its presence
+                # (headline.detections && ...), which an empty one would pass.
+                if (empty := _EMPTY_LIKE.get(type(item))) is not None:
+                    out[key] = empty()
                 continue
             item = _scrub(item, removed_ids)
             if item is not _REMOVED:

@@ -93,6 +93,8 @@ export interface Feed {
   category_id: string | null;
   custom_title: string | null;
   is_muted: boolean;
+  /** Shown in public read-only mode. Only an admin can change it. */
+  visible_to_visitors?: boolean;
   retention_days: number | null;
   unread_count: number;
   /** True when per-user subscriptions are on: is_muted is your own state and
@@ -1086,12 +1088,6 @@ export interface SectorProfile {
   intel_profiles: Array<{ id: string; name: string }>;
   recent_entries: Array<{ id: string; title: string; published_at: string | null; confidence: string | null }>;
   articles_monthly: MonthCount[];
-}
-
-export interface RegionSummary {
-  region: string;
-  country_count: number;
-  total_articles: number;
 }
 
 export interface DetectionRule {

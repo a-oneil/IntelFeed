@@ -10,6 +10,7 @@ import re
 import uuid
 
 import pytest
+import pytest_asyncio
 from fastapi.routing import APIRoute
 from httpx import AsyncClient
 from sqlalchemy import event
@@ -235,6 +236,26 @@ def public_mode(monkeypatch):
     monkeypatch.setattr(settings, "public_read_only_enabled", True)
 
 
+@pytest_asyncio.fixture
+async def fresh_rate_limits():
+    """Rate-limit windows live in Redis for up to an hour and the test client
+    addresses repeat from run to run, so start the anonymous buckets empty."""
+    from app.services.redis_client import get_redis_bytes
+
+    r = await get_redis_bytes()
+    keys = [k async for k in r.scan_iter(match="ratelimit:anon*")]
+    if keys:
+        await r.delete(*keys)
+
+
+@pytest_asyncio.fixture
+async def shown_entry(db_session: AsyncSession, test_entry: Entry, test_feed: Feed) -> Entry:
+    """The test entry, in a feed an admin has marked visible to visitors."""
+    test_feed.visible_to_visitors = True
+    await db_session.flush()
+    return test_entry
+
+
 # ── Classification ───────────────────────────────────────────────────
 
 
@@ -321,7 +342,7 @@ async def test_switch_off_every_visitor_route_still_needs_a_login(client: AsyncC
 
 @pytest.mark.asyncio
 async def test_switch_on_visitor_routes_answer_without_writes_or_background_work(
-    client: AsyncClient, db_session: AsyncSession, public_mode, monkeypatch, test_entry, no_rate_limit
+    client: AsyncClient, db_session: AsyncSession, public_mode, monkeypatch, shown_entry, no_rate_limit
 ):
     dispatched = []
     from celery.app.task import Task
@@ -335,7 +356,7 @@ async def test_switch_on_visitor_routes_answer_without_writes_or_background_work
 
     event.listen(db_session.sync_session, "before_flush", _no_writes)
     try:
-        statuses = await _walk(client, entry_id=str(test_entry.id))
+        statuses = await _walk(client, entry_id=str(shown_entry.id))
     finally:
         event.remove(db_session.sync_session, "before_flush", _no_writes)
 
@@ -411,6 +432,7 @@ async def test_visitor_sees_feed_names_only(client: AsyncClient, public_mode, db
         last_error="401 from upstream",
         error_count=3,
         analyst_notes="internal",
+        visible_to_visitors=True,
     )
     db_session.add(feed)
     await db_session.flush()
@@ -428,7 +450,8 @@ async def test_visitor_sees_feed_names_only(client: AsyncClient, public_mode, db
 async def test_manual_uploads_are_invisible_to_visitors(
     client: AsyncClient, public_mode, db_session: AsyncSession, auth_headers
 ):
-    manual = Feed(title="Manual Uploads", url="manual://uploads", feed_type="manual")
+    # Hidden even if someone flags it.
+    manual = Feed(title="Manual Uploads", url="manual://uploads", feed_type="manual", visible_to_visitors=True)
     db_session.add(manual)
     await db_session.flush()
     doc = Entry(feed_id=manual.id, title="Private upload", guid="up-1", url="https://x.example/up")
@@ -443,8 +466,8 @@ async def test_manual_uploads_are_invisible_to_visitors(
 
 
 @pytest.mark.asyncio
-async def test_visitor_entry_has_no_personal_state(client: AsyncClient, public_mode, test_entry):
-    data = (await client.get(f"/api/entries/{test_entry.id}")).json()
+async def test_visitor_entry_has_no_personal_state(client: AsyncClient, public_mode, shown_entry):
+    data = (await client.get(f"/api/entries/{shown_entry.id}")).json()
     assert data["is_read"] is False and data["is_starred"] is False and data["is_bookmarked"] is False
     assert data.get("exposure") is None
 
@@ -483,6 +506,8 @@ def test_scrub_drops_users_and_hidden_areas():
         "notes": 2,
         "detection_opportunity": "actionable_gap",
         "source_campaigns": ["c1"],
+        "coverage_summary": {"covered": 3},
+        "has_rules": True,
         "graph": {
             "nodes": [{"id": "a", "type": "threat_actor"}, {"id": "c", "type": "campaign"}],
             "edges": [{"source": "a", "target": "c"}, {"source": "a", "target": "a"}],
@@ -491,8 +516,12 @@ def test_scrub_drops_users_and_hidden_areas():
     out = scrub_for_visitor(payload)
     assert out["author"] == "Article byline"
     assert out["claims"] == [{"value": "Russia"}]
-    assert "rule_count" not in out and "source_campaigns" not in out
-    assert "pir_matches" not in out and "notes" not in out and "detection_opportunity" not in out
+    # Hidden lists and counts keep their shape, emptied, so a page reading
+    # campaigns.length still renders; hidden objects are dropped.
+    assert out["rule_count"] == 0 and out["source_campaigns"] == [] and out["pir_matches"] == []
+    assert out["notes"] == 0 and out["has_rules"] is False
+    assert "coverage_summary" not in out
+    assert "detection_opportunity" not in out
     assert out["graph"]["nodes"] == [{"id": "a", "type": "threat_actor"}]
     assert out["graph"]["edges"] == [{"source": "a", "target": "a"}]
 
@@ -528,12 +557,12 @@ def test_anonymous_buckets():
 
 @pytest.mark.asyncio
 async def test_anonymous_article_budget_refuses_then_recovers(
-    client: AsyncClient, public_mode, test_entry, auth_headers, monkeypatch
+    client: AsyncClient, public_mode, shown_entry, auth_headers, monkeypatch, fresh_rate_limits
 ):
     from app.core import rate_limit
 
     monkeypatch.setitem(rate_limit._BUCKET_WINDOWS, "anon_article", ((2, 60), (3, 3600)))
-    url = f"/api/entries/{test_entry.id}"
+    url = f"/api/entries/{shown_entry.id}"
 
     first = await client.get(url)
     assert first.status_code == 200
@@ -554,13 +583,59 @@ async def test_anonymous_article_budget_refuses_then_recovers(
 
 
 @pytest.mark.asyncio
-async def test_anonymous_hourly_cap_outlasts_the_minute(client: AsyncClient, public_mode, test_entry, monkeypatch):
+async def test_anonymous_hourly_cap_outlasts_the_minute(
+    client: AsyncClient, public_mode, shown_entry, monkeypatch, fresh_rate_limits
+):
     from app.core import rate_limit
 
     monkeypatch.setitem(rate_limit._BUCKET_WINDOWS, "anon_article", ((50, 60), (2, 3600)))
-    url = f"/api/entries/{test_entry.id}"
+    url = f"/api/entries/{shown_entry.id}"
     assert (await client.get(url)).status_code == 200
     assert (await client.get(url)).status_code == 200
     refused = await client.get(url)
     assert refused.status_code == 429
     assert int(refused.headers["Retry-After"]) > 3000
+
+
+# --- Which feeds visitors see ------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_feeds_are_hidden_from_visitors_until_an_admin_shows_them(
+    client: AsyncClient, public_mode, db_session: AsyncSession, test_entry: Entry, test_feed: Feed, auth_headers
+):
+    entry_id, feed_id = test_entry.id, test_feed.id
+    url = f"/api/entries/{entry_id}"
+    # A request starts with an empty session; the tests share one, so clear
+    # it or db.get() answers from the fixtures already loaded in it.
+    db_session.expunge_all()
+    assert (await client.get(url)).status_code == 404
+    assert str(entry_id) not in (await client.get("/api/entries")).text
+    assert str(feed_id) not in (await client.get("/api/feeds")).text
+    assert (await client.get(f"/api/feeds/{feed_id}")).status_code == 404
+    # Signed in, nothing changes.
+    assert (await client.get(url, headers=auth_headers)).status_code == 200
+
+    feed = await db_session.get(Feed, feed_id)
+    feed.visible_to_visitors = True
+    await db_session.flush()
+    db_session.expunge_all()
+    assert (await client.get(url)).status_code == 200
+    assert str(feed_id) in (await client.get("/api/feeds")).text
+
+
+@pytest.mark.asyncio
+async def test_only_an_admin_can_show_a_feed_to_visitors(
+    client: AsyncClient, test_feed: Feed, auth_headers, admin_headers
+):
+    url = f"/api/feeds/{test_feed.id}"
+    refused = await client.put(url, json={"visible_to_visitors": True}, headers=auth_headers)
+    assert refused.status_code == 403
+    assert "visible_to_visitors" in refused.json()["error"]["message"]
+
+    ok = await client.put(url, json={"visible_to_visitors": True}, headers=admin_headers)
+    assert ok.status_code == 200
+    assert ok.json()["visible_to_visitors"] is True
+    # Other edits leave it alone.
+    again = await client.put(url, json={"custom_title": "Renamed"}, headers=admin_headers)
+    assert again.json()["visible_to_visitors"] is True

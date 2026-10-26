@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "@/api/client";
+import { useIsVisitor } from "@/stores/authStore";
 import type {
   EnrichmentSource,
   EnrichmentBudgetSummary,
@@ -11,6 +12,8 @@ import type {
 // --- Sources ---
 
 export function useEnrichmentSources(enabled = true) {
+  // Signed-in only; the route answers 401 to a visitor.
+  const isVisitor = useIsVisitor();
   return useQuery({
     queryKey: ["enrichment-sources"],
     queryFn: async () => {
@@ -19,7 +22,7 @@ export function useEnrichmentSources(enabled = true) {
       );
       return data;
     },
-    enabled,
+    enabled: enabled && !isVisitor,
   });
 }
 

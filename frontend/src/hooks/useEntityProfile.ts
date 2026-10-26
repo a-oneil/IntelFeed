@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "@/api/client";
+import { useIsVisitor } from "@/stores/authStore";
 import { useDeleteCampaign } from "@/hooks/useCampaigns";
 import { useDeleteObservable } from "@/hooks/useIntelligence";
 import { useIntelStore } from "@/stores/intelStore";
@@ -711,13 +712,15 @@ export function useEntityAttackLayer(entityType: string | undefined, entityId: s
 }
 
 export function useEntityDetectionGaps(entityType: string | undefined, entityId: string | undefined) {
+  // Signed-in only; the route answers 401 to a visitor.
+  const isVisitor = useIsVisitor();
   return useQuery({
     queryKey: ["entity-detection-gaps", entityType, entityId],
     queryFn: async () => {
       const { data } = await api.get<CampaignDetectionGaps>(`/entities/${entityType}/${entityId}/detection-gaps`);
       return data;
     },
-    enabled: !!entityType && !!entityId,
+    enabled: !!entityType && !!entityId && !isVisitor,
   });
 }
 
@@ -730,13 +733,15 @@ export interface EntityCampaignRef {
 
 /** Campaigns this entity belongs to — the Snapshot's Campaigns row. */
 export function useEntityCampaigns(entityType: string | undefined, entityId: string | undefined) {
+  // Signed-in only; the route answers 401 to a visitor.
+  const isVisitor = useIsVisitor();
   return useQuery({
     queryKey: ["entity-campaigns", entityType, entityId],
     queryFn: async () => {
       const { data } = await api.get<EntityCampaignRef[]>(`/campaigns/by-entity/${entityType}/${entityId}`);
       return data;
     },
-    enabled: !!entityType && !!entityId,
+    enabled: !!entityType && !!entityId && !isVisitor,
     staleTime: 5 * 60 * 1000,
   });
 }
@@ -779,6 +784,8 @@ export interface ActorVictimRow {
 /** Leak-site victims for a ransomware actor — the Overview's victims strip.
  * 404s (tracker disabled / not a group) resolve to an empty list. */
 export function useActorVictims(entityId: string | undefined, enabled: boolean) {
+  // Signed-in only; the route answers 401 to a visitor.
+  const isVisitor = useIsVisitor();
   return useQuery({
     queryKey: ["actor-victims", entityId],
     queryFn: async () => {
@@ -792,7 +799,7 @@ export function useActorVictims(entityId: string | undefined, enabled: boolean) 
         return { items: [], total: 0 };
       }
     },
-    enabled: enabled && !!entityId,
+    enabled: enabled && !!entityId && !isVisitor,
     staleTime: 5 * 60 * 1000,
     retry: false,
   });
@@ -807,6 +814,8 @@ export interface ActorVictimStats {
 /** Windowed victim counts for the Snapshot's "Leak-site victims · 30d" row.
  * Same 404 tolerance as useActorVictims — null means "no tracker data". */
 export function useActorVictimStats(entityId: string | undefined, enabled: boolean) {
+  // Signed-in only; the route answers 401 to a visitor.
+  const isVisitor = useIsVisitor();
   return useQuery({
     queryKey: ["actor-victim-stats", entityId],
     queryFn: async (): Promise<ActorVictimStats | null> => {
@@ -817,7 +826,7 @@ export function useActorVictimStats(entityId: string | undefined, enabled: boole
         return null;
       }
     },
-    enabled: enabled && !!entityId,
+    enabled: enabled && !!entityId && !isVisitor,
     staleTime: 5 * 60 * 1000,
     retry: false,
   });

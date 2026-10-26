@@ -10,6 +10,8 @@ The switch is **off by default**. With it off, every API route except the existi
 
 The login page learns whether the mode is on from the unauthenticated `GET /api/auth/registration-status`, which carries `public_read_only_enabled` alongside the registration flags.
 
+**Then pick the feeds.** Every feed starts hidden from visitors, so turning the mode on publishes nothing by itself. An admin opens a feed's settings and checks **Visible to visitors** (Identity pane), stored as `feeds.visible_to_visitors`. Only an admin can change it; the API refuses it from anyone else. Manual Uploads never shows, whatever the flag says.
+
 Behind Cloudflare, set `TRUSTED_CLIENT_IP_HEADER=CF-Connecting-IP` in the API's environment, or every visitor shares the edge's address and one rate-limit bucket (see [operations.md](operations.md#rate-limiting)).
 
 ## What visitors see
@@ -19,7 +21,7 @@ There is no banner and no badge. The header's search box, ⌘K, Copilot, Setting
 | Area | Visitors get | Removed for visitors |
 | --- | --- | --- |
 | Feed reader | Every article, filters, sort, view, text size, Find in article, Open original; read-aloud for articles that already have audio | Read/unread, star, bookmark, tags, notes, the AI tab and summaries, share, export, translate, bulk actions, day summaries, Telegram images |
-| Sidebar | Articles in the last 24 hours, Last 24h / This Week / Priority Queue, the feed tree by name | Unread counts, Watched / Bookmarked / Starred, Automation, Notes, saved searches, add feed, ingest, new category, right-click menus |
+| Sidebar | Articles in the last 24 hours, Last 24h / This Week / Priority Queue, the feeds marked visible, by name | Unread counts, Watched / Bookmarked / Starred, Automation, Notes, saved searches, add feed, ingest, new category, right-click menus |
 | Entity profiles (every type) | Overview, relationships, graph, timeline, linked articles, saved assessments (analyst-written or AI-drafted), sources | Detection and Detection Gaps tabs, editing, aliases, Watch, the ⋯ menu, Ask Copilot, AI analysis, notes, the next-actions rail, enrichment, the Wikipedia search, ransomware victims, relationship pin/reject/unlink |
 | Entity pop-ups | The card, Profile, Copy | Search, Enrich, Wrong? |
 | Intel panel | Extracted entities, the entity graph, glossary, referenced URLs | Extract, Gen Rules, campaigns, Navigator, detection rules, observables, insights, PIR matches |
@@ -40,10 +42,10 @@ Search, settings, automation, campaigns, the threat board, rule pages and report
 
 **The data layer hides what no visitor gets** (`backend/app/services/public_view.py`):
 
-- **Manual Uploads.** While the request's viewer is anonymous, every ORM select of `Feed` or `Entry` drops the Manual Uploads feed and its entries, subqueries and relationship loads included. Story-thread members, which come from raw SQL, are filtered against the same rule.
+- **Feeds not marked visible, and Manual Uploads.** While the request's viewer is anonymous, every ORM select of `Feed` or `Entry` keeps only feeds with `visible_to_visitors` set (never the Manual Uploads feed) and their entries, subqueries and relationship loads included. An article from a hidden feed is a 404 to a visitor, wherever it is linked from. Story-thread members, which come from raw SQL, are filtered against the same rule. The filter runs on queries the ORM emits, so a request's session must start empty: `session.get()` answers from the identity map without a query.
 - **Saved AI output.** No `AIResult` row loads during a visitor's request. Entity assessments live on the entity row and stay visible.
 - **Feed internals.** Feed responses keep the name and category only. The URL, errors, health, pause reasons, adapter config, title filters and analyst notes are cleared.
-- **Response scrubbing.** A visitor's JSON loses usernames (`username`, `analyst` and similar) and any key about rules, coverage, detection gaps, campaigns, observables, requirements and PIR matches, IOCs or translations. It also loses note, comment and AI-result counts and the `unread` figure. Any object whose `type` is a campaign, observable or rule is removed from its list, along with graph edges left pointing at it. Article bylines (`author`) are untouched.
+- **Response scrubbing.** A visitor's JSON loses usernames (`username`, `analyst` and similar) and any key about rules, coverage, detection gaps, campaigns, observables, requirements and PIR matches, IOCs or translations. It also loses note, comment and AI-result counts and the `unread` figure. A hidden list comes back empty and a hidden count or flag as zero or false, so pages keep their shape; a hidden object or string is removed. Any object whose `type` is a campaign, observable or rule is removed from its list, along with graph edges left pointing at it. Article bylines (`author`) are untouched.
 
 **Reads stay reads.** Read-aloud serves audio that already exists (`GET /api/tts/existing`, then the file) and never synthesizes for a visitor, and a visitor's playback skips the last-played stamp. The image proxy fetches for a visitor only an image a stored article shows, or one already cached. Otherwise the browser falls back to loading the original URL directly. No visitor route starts Celery work or makes an outbound request.
 

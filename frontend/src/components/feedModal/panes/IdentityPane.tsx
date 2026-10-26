@@ -106,6 +106,25 @@ export function IdentityPane({
           </span>
         </span>
       </label>
+
+      {/* Manual Uploads holds people's own documents and is never shown. */}
+      {isAdmin && feed.feed_type !== "manual" && (
+        <label className={styles.checkRow}>
+          <input
+            type="checkbox"
+            checked={values.visible_to_visitors}
+            onChange={(e) => set("visible_to_visitors", e.target.checked)}
+          />
+          <span className={styles.checkText}>
+            <span className={styles.checkLabel}>Visible to visitors</span>
+            <span className={styles.hint}>
+              When public read-only mode is on, people who aren&apos;t signed in
+              can see this feed and read its articles. Off, the feed and its
+              articles are hidden from them everywhere.
+            </span>
+          </span>
+        </label>
+      )}
     </div>
   );
 }

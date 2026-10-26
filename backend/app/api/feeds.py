@@ -177,7 +177,9 @@ async def list_feeds(
     feed_ids = [feed.id for feed in feeds]
     full_list = category_id is None and offset == 0 and len(feeds) >= total
     unread_map: dict[uuid.UUID, int] = {}
-    if feed_ids:
+    # A visitor has no read state, so every entry would count as unread, and
+    # the counts are blanked for them anyway.
+    if feed_ids and not user.is_anonymous:
         cache_key = f"feed_unreads:{user.id}"
         try:
             from app.services.redis_client import get_redis
@@ -893,6 +895,8 @@ async def update_feed(
         "extract_detection_rules",
         "extract_tools",
         "exclude_title_patterns",
+        # What anyone on the internet may read in public read-only mode.
+        "visible_to_visitors",
     )
     # `model_fields_set` rather than a None check: for the nullable fields below,
     # None is a real value ("uncategorized", "keep forever") and must not be
@@ -1040,6 +1044,8 @@ async def update_feed(
         feed.extract_tools = request.extract_tools
     if "exclude_title_patterns" in sent:
         feed.exclude_title_patterns = normalize_patterns(request.exclude_title_patterns)
+    if request.visible_to_visitors is not None:
+        feed.visible_to_visitors = request.visible_to_visitors
 
     db.add(feed)
     await db.flush()

@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import api from "@/api/client";
+import { useIsVisitor } from "@/stores/authStore";
 import type { EntityType } from "@/stores/intelStore";
 
 /** One observable behind an entity, as the infrastructure endpoint returns it. */
@@ -55,6 +56,8 @@ export const INFRASTRUCTURE_TYPES: readonly EntityType[] = ["threat_actor", "mal
 /** Claimed + reported-alongside observables for an actor/family/campaign/tool.
  *  Disabled (no request) for every other entity type. */
 export function useEntityInfrastructure(entityType: EntityType | undefined, entityId: string | undefined) {
+  // Signed-in only; the route answers 401 to a visitor.
+  const isVisitor = useIsVisitor();
   const enabled = !!entityId && !!entityType && INFRASTRUCTURE_TYPES.includes(entityType);
   return useQuery({
     queryKey: ["entity-infrastructure", entityType, entityId],
@@ -62,7 +65,7 @@ export function useEntityInfrastructure(entityType: EntityType | undefined, enti
       const { data } = await api.get<EntityInfrastructure>(`/entities/${entityType}/${entityId}/infrastructure`);
       return data;
     },
-    enabled,
+    enabled: enabled && !isVisitor,
     staleTime: 5 * 60 * 1000,
   });
 }
