@@ -86,7 +86,7 @@ function formatViewCount(count: number): string {
 }
 
 export function EntryReader({ entryId }: EntryReaderProps) {
-  const { data: entry, isLoading } = useEntry(entryId);
+  const { data: entry, isLoading, error: entryError } = useEntry(entryId);
   const toggleStar = useToggleStar();
   const toggleBookmark = useToggleBookmark();
   const markRead = useMarkRead();
@@ -437,7 +437,12 @@ export function EntryReader({ entryId }: EntryReaderProps) {
   }
 
   if (!entry) {
-    return <div className={styles.loading}>Entry not found</div>;
+    const rateLimited = (entryError as { response?: { status?: number } } | null)?.response?.status === 429;
+    return (
+      <div className={styles.loading}>
+        {rateLimited ? "Too many articles opened in a short time. Wait a minute and try again." : "Entry not found"}
+      </div>
+    );
   }
 
   const readTime = entry.word_count ? Math.ceil(entry.word_count / 200) : null;

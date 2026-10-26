@@ -51,7 +51,15 @@ Search, settings, automation, campaigns, the threat board, rule pages and report
 
 ## Limits and caching
 
-Anonymous `/api/*` traffic is rate-limited per client IP: 240 requests a minute in general, and 30 a minute for graph, pivot, timeline, analytics, map, calendar, priority-queue, relationship and autolink-scan routes. Signed-in traffic is not limited, as before.
+Anonymous `/api/*` traffic is rate-limited per client IP, over a minute and over an hour, so a visitor can click around quickly but nobody can copy the site wholesale:
+
+| What | Per minute | Per hour |
+| --- | --- | --- |
+| Opening an article (`GET /api/entries/{id}`, the only route that returns full article text) | 20 | 150 |
+| Graph, pivot, timeline, analytics, map, calendar, priority-queue, relationship and autolink-scan routes | 20 | 200 |
+| Everything else | 180 | 1,500 |
+
+Opening one article in the reader is about 15 requests (the article, its entity lists, glossary terms, counts) but only one of them is the article itself, so the article budget is what stops a scraper, and the general budget only has to fit a person's pace. A refused request is not counted. The browser shows one "Too many requests" toast per burst, and the 429's `Retry-After` says how long to wait. Signed-in traffic is not limited, and TAXII and the published indicator files keep their own per-minute budget (see [operations.md](operations.md#rate-limiting)).
 
 Every API response carries `Cache-Control: private, no-store` (routes that serve the same bytes to everyone, like proxied images and audio files, set their own), plus `X-Robots-Tag: noindex, nofollow`. The SPA carries a `noindex` meta tag and serves a disallow-all `robots.txt`.
 

@@ -271,6 +271,9 @@ function useReadStateMutation(read: boolean) {
       queryClient.setQueryData(["entry", ctx.entryId], ctx.prevDetail);
     },
     onSettled: (_data, _err, entryId) => {
+      // Nothing changed for a visitor, and refetching the list, counts and
+      // feeds on every article opened would spend their rate-limit budget.
+      if (isVisitorNow()) return;
       queryClient.invalidateQueries({ queryKey: ["entries"] });
       queryClient.invalidateQueries({ queryKey: ["entries-count"] });
       queryClient.invalidateQueries({ queryKey: ["entry", entryId] });
@@ -296,6 +299,7 @@ export function useToggleStar() {
       return res.data;
     },
     onSuccess: (_data, entryId) => {
+      if (isVisitorNow()) return;
       queryClient.invalidateQueries({ queryKey: ["entries"] });
       queryClient.invalidateQueries({ queryKey: ["entries-count"] });
       queryClient.invalidateQueries({ queryKey: ["entry", entryId] });
@@ -312,6 +316,7 @@ export function useToggleBookmark() {
       return res.data;
     },
     onSuccess: (_data, entryId) => {
+      if (isVisitorNow()) return;
       queryClient.invalidateQueries({ queryKey: ["entries"] });
       queryClient.invalidateQueries({ queryKey: ["entries-count"] });
       queryClient.invalidateQueries({ queryKey: ["entry", entryId] });

@@ -324,13 +324,15 @@ Limits are bucketed by path, not a global per-IP cap — general authenticated A
 | `auth` | `/api/auth/login`, `/api/auth/register`, `/api/auth/refresh` | 10 req / 5 min (brute-force protection) |
 | `chat` | `POST /api/chat` | 10 req / min (protects API credits) |
 | `ai` | `/api/ai/*` inference calls (config/read prefixes like `/api/ai/tasks`, `/api/ai/providers`, `/api/ai/prompts` are exempt) | 20 req / min |
-| `anon_heavy` | Requests with no valid token to graph, pivot, timeline, analytics, map/calendar, priority-queue, relationship and autolink-scan routes | 30 req / min per IP |
-| `anon` | Every other `/api/*` request with no valid token ([public read-only mode](public-read-only-mode.md), share pages, TAXII/EDL consumers) | 240 req / min per IP |
+| `anon_article` | `GET /api/entries/{id}` with no valid token: the full text of one article | 20 req / min and 150 req / hour per IP |
+| `anon_heavy` | Requests with no valid token to graph, pivot, timeline, analytics, map/calendar, priority-queue, relationship and autolink-scan routes | 20 req / min and 200 req / hour per IP |
+| `anon` | Every other `/api/*` request with no valid token ([public read-only mode](public-read-only-mode.md), share pages) | 180 req / min and 1,500 req / hour per IP |
+| `indicator_feeds` | `/api/taxii2/*` and `/api/publish/*` with no valid token (firewalls and SIEMs pulling with a publish token) | 240 req / min per IP |
 | everything else | signed-in traffic | not limited |
 
 **Exempt:** `/api/health`, `/metrics` (the metrics endpoint has its own IP allowlist), and all `OPTIONS` requests.
 
-**Mechanics:** Redis sliding-window (sorted set per identity). Identity is the `sub` of a JWT whose signature verifies, else the client IP: the first `X-Forwarded-For` hop when the direct peer is on a private network (Caddy strips the incoming header and writes its own peer there, so it can't be forged), or the header named in `TRUSTED_CLIENT_IP_HEADER` first (an unverified bearer falls back to the IP). This trusts whatever a private-network peer forwards, so the API port must only be reachable through the proxy, as the prod compose file arranges; a port 8000 published to the LAN would let a caller forge the header and the bucket. If Redis is down the limiter fails open (allows the request, logs a warning). Responses carry `X-RateLimit-Limit` / `X-RateLimit-Remaining`; a 429 includes `Retry-After`.
+**Mechanics:** Redis sliding-window (sorted set per identity). Identity is the `sub` of a JWT whose signature verifies, else the client IP: the first `X-Forwarded-For` hop when the direct peer is on a private network (Caddy strips the incoming header and writes its own peer there, so it can't be forged), or the header named in `TRUSTED_CLIENT_IP_HEADER` first (an unverified bearer falls back to the IP). This trusts whatever a private-network peer forwards, so the API port must only be reachable through the proxy, as the prod compose file arranges; a port 8000 published to the LAN would let a caller forge the header and the bucket. A bucket with two windows must fit both, and a refused request is not counted, so a visitor who hits the minute window is back as soon as their earlier requests age out. If Redis is down the limiter fails open (allows the request, logs a warning). Responses carry `X-RateLimit-Limit` / `X-RateLimit-Remaining` for the tightest window; a 429 includes `Retry-After`, the seconds until the oldest counted request leaves the full window.
 
 File: `backend/app/core/rate_limit.py`
 

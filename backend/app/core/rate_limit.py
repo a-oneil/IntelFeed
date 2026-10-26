@@ -1,5 +1,6 @@
 import ipaddress
 import re
+import secrets
 import time
 
 import redis.exceptions
@@ -30,12 +31,18 @@ AUTH_LIMIT = (10, 300)  # 10 req/5 min — prevents brute force
 CHAT_LIMIT = (10, 60)  # 10 req/min — protects API credits
 AI_LIMIT = (20, 60)  # 20 req/min
 
-# Anonymous API traffic (public read-only mode, share pages, TAXII/EDL
-# consumers) is budgeted per client IP: a page of the app is a few dozen
-# requests, so the general bucket is generous, and the reads that cost real
-# database time — graphs, pivots, timelines, analytics — get a tighter one.
-ANON_LIMIT = (240, 60)
-ANON_HEAVY_LIMIT = (30, 60)
+# Anonymous API traffic (public read-only mode, share pages) is budgeted per
+# client IP, over a minute and over an hour. One article open in the reader
+# is about 15 requests (the article, its entity lists, glossary, counts), so
+# the minute window lets a person skim quickly and the hour window stops a
+# steady crawl. Full article text costs a scraper one request per article
+# but a person one in fifteen, so it has its own, much tighter budget. Reads
+# that cost real database time (graphs, pivots, timelines, analytics) get
+# a tighter one too.
+ANON_LIMITS = ((180, 60), (1500, 3600))
+ANON_ARTICLE_LIMITS = ((20, 60), (150, 3600))
+ANON_HEAVY_LIMITS = ((20, 60), (200, 3600))
+ANON_ARTICLE_PATH = re.compile(r"^/api/entries/[0-9a-fA-F-]{36}$")
 ANON_HEAVY_PREFIXES = (
     "/api/intelligence/graph/",
     "/api/intelligence/pivot/",
@@ -49,12 +56,39 @@ ANON_HEAVY_PREFIXES = (
     "/api/entity-relationships",
     "/api/autolink/scan",
 )
+# TAXII and the EDL/lookup files are pulled by firewalls and SIEMs with
+# their own publish token, not by people: they keep a plain per-minute
+# budget so a visitor-sized hourly cap can't stall a sync.
+INDICATOR_FEED_PREFIXES = ("/api/taxii2/", "/api/publish/")
+INDICATOR_FEED_LIMIT = (240, 60)
+
+# Buckets with more than one window; the rest enforce their single limit.
+_BUCKET_WINDOWS = {
+    "anon": ANON_LIMITS,
+    "anon_article": ANON_ARTICLE_LIMITS,
+    "anon_heavy": ANON_HEAVY_LIMITS,
+}
 
 _PROVIDER_TEST = re.compile(r"^/api/ai/providers/[0-9a-fA-F-]{36}/test$")
 
 
+Windows = tuple[tuple[int, int], ...]
+
+
+def _get_limits(path: str, method: str = "GET", *, anonymous: bool = False) -> tuple[str, Windows] | None:
+    """Return (bucket_name, every (max_requests, window_seconds) window), or None to skip."""
+    limit = _get_limit(path, method, anonymous=anonymous)
+    if limit is None:
+        return None
+    return limit[2], _BUCKET_WINDOWS.get(limit[2], (limit[:2],))
+
+
 def _get_limit(path: str, method: str = "GET", *, anonymous: bool = False) -> tuple[int, int, str] | None:
-    """Return (max_requests, window_seconds, bucket_name), or None to skip rate limiting."""
+    """Return (max_requests, window_seconds, bucket_name), or None to skip rate limiting.
+
+    The anonymous buckets also have an hourly window; ``_BUCKET_WINDOWS``
+    lists every window a bucket enforces, and this returns the first.
+    """
     if path in AUTH_PATHS:
         return (*AUTH_LIMIT, "auth")
     if method == "POST" and path == CHAT_POST_PATH:
@@ -72,9 +106,13 @@ def _get_limit(path: str, method: str = "GET", *, anonymous: bool = False) -> tu
     if method == "POST" and path.startswith("/api/shared/") and path.endswith(("/ask-agent", "/run-ai-task")):
         return (*AI_LIMIT, "ai")
     if anonymous and path.startswith("/api/"):
+        if path.startswith(INDICATOR_FEED_PREFIXES):
+            return (*INDICATOR_FEED_LIMIT, "indicator_feeds")
+        if method == "GET" and ANON_ARTICLE_PATH.match(path):
+            return (*ANON_ARTICLE_LIMITS[0], "anon_article")
         if path.startswith(ANON_HEAVY_PREFIXES):
-            return (*ANON_HEAVY_LIMIT, "anon_heavy")
-        return (*ANON_LIMIT, "anon")
+            return (*ANON_HEAVY_LIMITS[0], "anon_heavy")
+        return (*ANON_LIMITS[0], "anon")
     # Authenticated read-only API traffic is not rate limited.
     # This is a self-hosted, single-user app — the default 600 req/min
     # limit was too low for normal operation with 200+ feeds triggering
@@ -149,40 +187,64 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         identity = _get_identity(request)
-        limit = _get_limit(path, request.method, anonymous=identity.startswith("ip:"))
-        if limit is None:
+        limits = _get_limits(path, request.method, anonymous=identity.startswith("ip:"))
+        if limits is None:
             return await call_next(request)
 
-        max_requests, window, bucket = limit
-        key = f"ratelimit:{bucket}:{identity}:{window}"
-
+        bucket, windows = limits
         try:
             from app.services.redis_client import get_redis_bytes
 
             r = await get_redis_bytes()
             now = time.time()
             pipe = r.pipeline()
-            # Sliding window: remove expired entries, add current, count
-            pipe.zremrangebyscore(key, 0, now - window)
-            pipe.zadd(key, {str(now): now})
-            pipe.zcard(key)
-            pipe.expire(key, window)
+            # Sliding windows: drop expired entries, then count what is left
+            for _, window in windows:
+                key = f"ratelimit:{bucket}:{identity}:{window}"
+                pipe.zremrangebyscore(key, 0, now - window)
+                pipe.zcard(key)
+                pipe.zrange(key, 0, 0, withscores=True)
             results = await pipe.execute()
-            count = results[2]
         except (TimeoutError, redis.exceptions.RedisError, ConnectionError, OSError, RuntimeError):
             # If Redis is down, allow the request but log
             logger.warning("Rate limiter Redis unavailable, allowing request", path=path)
             return await call_next(request)
 
-        if count > max_requests:
-            logger.warning("rate_limited", identity=identity, path=path, count=count)
+        # A refused request is not counted, so someone who hits the minute
+        # limit is back as soon as their own earlier requests age out.
+        retry_after = 0
+        remaining = None
+        for i, (max_requests, window) in enumerate(windows):
+            count, oldest = results[i * 3 + 1], results[i * 3 + 2]
+            if count >= max_requests:
+                first = oldest[0][1] if oldest else now
+                retry_after = max(retry_after, int(first + window - now) + 1)
+            left = max_requests - count - 1
+            if remaining is None or left < remaining[1]:
+                remaining = (max_requests, left)
+
+        if retry_after:
+            logger.warning("rate_limited", identity=identity, path=path, bucket=bucket)
             return JSONResponse(
                 status_code=429,
                 content={"error": {"code": "rate_limited", "message": "Too many requests", "details": []}},
-                headers={"Retry-After": str(window)},
+                headers={"Retry-After": str(retry_after)},
             )
 
+        # Parallel requests can share a timestamp; the suffix keeps each one.
+        member = f"{now}:{secrets.token_hex(4)}"
+        try:
+            pipe = r.pipeline()
+            for _, window in windows:
+                key = f"ratelimit:{bucket}:{identity}:{window}"
+                pipe.zadd(key, {member: now})
+                pipe.expire(key, window)
+            await pipe.execute()
+        except (TimeoutError, redis.exceptions.RedisError, ConnectionError, OSError, RuntimeError):
+            logger.warning("Rate limiter Redis unavailable, allowing request", path=path)
+
+        max_requests, left = remaining
         response = await call_next(request)
         response.headers["X-RateLimit-Limit"] = str(max_requests)
-        response.headers["X-RateLimit-Remaining"] = str(max(0, max_requests - count))
+        response.headers["X-RateLimit-Remaining"] = str(max(0, left))
         return response

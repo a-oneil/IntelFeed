@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "@/api/client";
-import { useAuthStore } from "@/stores/authStore";
+import { useAuthStore, useIsVisitor } from "@/stores/authStore";
 import type {
   AIProvider,
   AIProviderCommissionResult,
@@ -566,13 +566,15 @@ export function useRunAIOnText() {
 // --- Polymorphic AI Results ---
 
 export function useAIResults(targetType: string | undefined, targetId: string | undefined) {
+  // Saved AI output is never shown to a visitor; the route answers 401.
+  const isVisitor = useIsVisitor();
   return useQuery({
     queryKey: ["ai-results", targetType, targetId],
     queryFn: async () => {
       const { data } = await api.get<AIResult[]>(`/ai/results/${targetType}/${targetId}`);
       return data;
     },
-    enabled: !!targetType && !!targetId,
+    enabled: !!targetType && !!targetId && !isVisitor,
     staleTime: 30_000,
   });
 }

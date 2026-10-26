@@ -288,6 +288,14 @@ def _fill(path: str, overrides: dict[str, str]) -> str:
     return re.sub(r"\{([^}]+)\}", value, path)
 
 
+@pytest.fixture
+def no_rate_limit(monkeypatch):
+    """The walks send ~140 requests from one address; they test access, not the budget."""
+    from app.core import rate_limit
+
+    monkeypatch.setattr(rate_limit, "_get_limits", lambda *a, **kw: None)
+
+
 async def _walk(client: AsyncClient, **overrides: str) -> dict[str, int]:
     statuses = {}
     for key in sorted(VISITOR_ROUTES):
@@ -306,14 +314,14 @@ async def _walk(client: AsyncClient, **overrides: str) -> dict[str, int]:
 
 
 @pytest.mark.asyncio
-async def test_switch_off_every_visitor_route_still_needs_a_login(client: AsyncClient):
+async def test_switch_off_every_visitor_route_still_needs_a_login(client: AsyncClient, no_rate_limit):
     statuses = await _walk(client)
     assert {k: s for k, s in statuses.items() if s != 401} == {}
 
 
 @pytest.mark.asyncio
 async def test_switch_on_visitor_routes_answer_without_writes_or_background_work(
-    client: AsyncClient, db_session: AsyncSession, public_mode, monkeypatch, test_entry
+    client: AsyncClient, db_session: AsyncSession, public_mode, monkeypatch, test_entry, no_rate_limit
 ):
     dispatched = []
     from celery.app.task import Task
@@ -331,7 +339,7 @@ async def test_switch_on_visitor_routes_answer_without_writes_or_background_work
     finally:
         event.remove(db_session.sync_session, "before_flush", _no_writes)
 
-    assert {k: s for k, s in statuses.items() if s in (401, 403) or s >= 500} == {}
+    assert {k: s for k, s in statuses.items() if s in (401, 403, 429) or s >= 500} == {}
     assert dispatched == []
     assert writes == []
 
@@ -487,3 +495,72 @@ def test_scrub_drops_users_and_hidden_areas():
     assert "pir_matches" not in out and "notes" not in out and "detection_opportunity" not in out
     assert out["graph"]["nodes"] == [{"id": "a", "type": "threat_actor"}]
     assert out["graph"]["edges"] == [{"source": "a", "target": "a"}]
+
+
+# --- Anonymous rate limits ---------------------------------------------------
+
+
+def test_anonymous_buckets():
+    from app.core.rate_limit import (
+        ANON_ARTICLE_LIMITS,
+        ANON_HEAVY_LIMITS,
+        ANON_LIMITS,
+        INDICATOR_FEED_LIMIT,
+        _get_limits,
+    )
+
+    entry = f"/api/entries/{uuid.uuid4()}"
+    assert _get_limits(entry, anonymous=True) == ("anon_article", ANON_ARTICLE_LIMITS)
+    assert _get_limits(f"{entry}/ttps", anonymous=True) == ("anon", ANON_LIMITS)
+    assert _get_limits("/api/entries", anonymous=True) == ("anon", ANON_LIMITS)
+    assert _get_limits("/api/intelligence/graph/x", anonymous=True) == ("anon_heavy", ANON_HEAVY_LIMITS)
+    assert _get_limits("/api/taxii2/api/collections/", anonymous=True) == (
+        "indicator_feeds",
+        (INDICATOR_FEED_LIMIT,),
+    )
+    assert _get_limits("/api/publish/edl/x.txt", anonymous=True)[0] == "indicator_feeds"
+    # Signed-in reads stay unlimited.
+    assert _get_limits(entry, anonymous=False) is None
+    # Every anonymous bucket has a burst window and an hourly cap.
+    for windows in (ANON_LIMITS, ANON_ARTICLE_LIMITS, ANON_HEAVY_LIMITS):
+        assert [w for _, w in windows] == [60, 3600]
+
+
+@pytest.mark.asyncio
+async def test_anonymous_article_budget_refuses_then_recovers(
+    client: AsyncClient, public_mode, test_entry, auth_headers, monkeypatch
+):
+    from app.core import rate_limit
+
+    monkeypatch.setitem(rate_limit._BUCKET_WINDOWS, "anon_article", ((2, 60), (3, 3600)))
+    url = f"/api/entries/{test_entry.id}"
+
+    first = await client.get(url)
+    assert first.status_code == 200
+    assert first.headers["X-RateLimit-Remaining"] == "1"
+    assert (await client.get(url)).status_code == 200
+
+    refused = await client.get(url)
+    assert refused.status_code == 429
+    assert refused.json()["error"]["code"] == "rate_limited"
+    assert 1 <= int(refused.headers["Retry-After"]) <= 61
+
+    # The rest of the app is a separate budget, and a refused request isn't
+    # counted against the next one.
+    assert (await client.get(f"{url}/ttps")).status_code == 200
+    assert (await client.get(url)).status_code == 429
+    # Signed in, the same address is not limited.
+    assert (await client.get(url, headers=auth_headers)).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_anonymous_hourly_cap_outlasts_the_minute(client: AsyncClient, public_mode, test_entry, monkeypatch):
+    from app.core import rate_limit
+
+    monkeypatch.setitem(rate_limit._BUCKET_WINDOWS, "anon_article", ((50, 60), (2, 3600)))
+    url = f"/api/entries/{test_entry.id}"
+    assert (await client.get(url)).status_code == 200
+    assert (await client.get(url)).status_code == 200
+    refused = await client.get(url)
+    assert refused.status_code == 429
+    assert int(refused.headers["Retry-After"]) > 3000

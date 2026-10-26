@@ -64,6 +64,7 @@ export function useOpenThreadMutation() {
       await api.post(`/threads/${threadId}/open`);
     },
     onSuccess: () => {
+      if (isVisitorNow()) return;
       queryClient.invalidateQueries({ queryKey: ["threads"] });
     },
   });
