@@ -208,6 +208,7 @@ export default function DocumentationPage() {
   const { data: page, isLoading: pageLoading, isError } = useDocumentationPage(slug);
   const rail = useRailWidth("docs-nav", { default: 260, min: 190, max: 480 });
   const navCollapsed = useUIStore((s) => s.docsNavCollapsed);
+  const isVisitorPage = useIsVisitor();
   const toggleDocsNav = useUIStore((s) => s.toggleDocsNav);
   // Docs carry their own contents rail; the app sidebar folds away beside it,
   // the same bargain Settings makes.
@@ -343,6 +344,7 @@ export default function DocumentationPage() {
           </div>
         ))}
       </nav>
+      {!isVisitorPage && (
       <div className={styles.sidebarFooter}>
         <Link to="/settings" className={styles.footerLink}>
           <svg className={styles.footerIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
@@ -352,6 +354,7 @@ export default function DocumentationPage() {
           <span>Settings</span>
         </Link>
       </div>
+      )}
     </>
   );
 

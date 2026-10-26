@@ -261,6 +261,12 @@ def _compute_relationship_strength(
 _corpus_count_cache: dict[bool, tuple[float, int]] = {}
 
 
+def _visitor() -> bool:
+    from app.core.public_access import viewer_is_anonymous
+
+    return viewer_is_anonymous()
+
+
 async def _corpus_entry_count(db: AsyncSession) -> int:
     """Total entries, memoized for 5 minutes per process.
 
@@ -788,7 +794,12 @@ def _serialize_entity(entity_type: str, entity) -> dict:
             {
                 "name": getattr(entity, "name", None),
                 "aliases": getattr(entity, "aliases", None) or [],
-                "vendor_id": str(entity.vendor_id) if getattr(entity, "vendor_id", None) else None,
+                # A vendor hidden from a visitor loads as None: drop its id too.
+                "vendor_id": (
+                    str(entity.vendor_id)
+                    if getattr(entity, "vendor_id", None) and (vendor_name is not None or not _visitor())
+                    else None
+                ),
                 "vendor_name": vendor_name,
                 "product_type": getattr(entity, "product_type", None),
                 "website": getattr(entity, "website", None),

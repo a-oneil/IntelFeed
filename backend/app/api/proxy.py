@@ -115,6 +115,8 @@ def _write_cache(url: str, content: bytes, content_type: str) -> None:
         logger.debug("Failed to write image cache for %s", url, exc_info=True)
 
 
+_VISITOR_WIDTHS = (200, 400, 800, 1200)
+
 _IMG_SOURCES = re.compile(r"<img\b[^>]*?\b(?:src|srcset|data-src)\s*=\s*([\"'])(.*?)\1", re.IGNORECASE | re.DOTALL)
 
 
@@ -165,6 +167,11 @@ async def proxy_image(
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         return Response(status_code=400)
+
+    # A visitor's width snaps to a few sizes: each width is its own cache
+    # entry and resize, so any 1–2000 would let one image cost thousands.
+    if w and user.is_anonymous:
+        w = next((size for size in _VISITOR_WIDTHS if w <= size), _VISITOR_WIDTHS[-1])
 
     # Build a cache key that includes the resize width
     cache_url = f"{url}?w={w}" if w else url

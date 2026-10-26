@@ -55,6 +55,9 @@ ANON_HEAVY_PREFIXES = (
     "/api/entries/priority-queue",
     "/api/entity-relationships",
     "/api/autolink/scan",
+    # A count over every link table, and the whole CWE catalog's rollup.
+    "/api/entity-links",
+    "/api/cwes",
 )
 # TAXII and the EDL/lookup files are pulled by firewalls and SIEMs with
 # their own publish token, not by people: they keep a plain per-minute
@@ -239,7 +242,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             from app.services.redis_client import get_redis_bytes
 
             r = await get_redis_bytes()
-            allowed, retry_after, max_requests, left = await r.eval(_SLIDING_WINDOWS, len(keys), *keys, *args)
+            # register_script runs EVALSHA, falling back to EVAL once per server.
+            script = r.register_script(_SLIDING_WINDOWS)
+            allowed, retry_after, max_requests, left = await script(keys=keys, args=args)
         except (TimeoutError, redis.exceptions.RedisError, ConnectionError, OSError, RuntimeError):
             # If Redis is down, allow the request but log
             logger.warning("Rate limiter Redis unavailable, allowing request", path=path)

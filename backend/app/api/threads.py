@@ -86,7 +86,11 @@ async def get_thread(
         # the yield counts them only; the nearest threads, titled from members
         # of their own, are left out.
         shown = set(row["entry_ids"])
-        members = [m for m in members if m["entry_id"] in shown]
+        members = [
+            {**m, "duplicate_of_entry_id": m["duplicate_of_entry_id"] if m["duplicate_of_entry_id"] in shown else None}
+            for m in members
+            if m["entry_id"] in shown
+        ]
         spine_members = [m for m in await collect_members(db, thread_id) if m["entry_id"] in shown]
         beats = [
             {**beat, "id": uuid.uuid5(thread_id, f"visitor-beat:{beat['position']}")}
@@ -112,9 +116,9 @@ async def get_thread(
         {
             **row,
             "unread_count": len(unread),
-            "new_since_opened": sum(
-                1 for m in members if last_opened is None or (m["added_at"] and m["added_at"] > last_opened)
-            ),
+            "new_since_opened": 0
+            if user.is_anonymous
+            else sum(1 for m in members if last_opened is None or (m["added_at"] and m["added_at"] > last_opened)),
             "top_score": (best_unread["priority_score"] or 0) if best_unread else None,
             "top_entry_id": best_unread["entry_id"] if best_unread else None,
             "entry_ids": [m["entry_id"] for m in members],

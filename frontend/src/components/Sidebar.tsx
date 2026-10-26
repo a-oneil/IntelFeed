@@ -296,7 +296,7 @@ export function Sidebar() {
 
   // Section drag-and-drop
   const handleSectionDrop = (targetId: SidebarSectionId) => {
-    if (!draggedSectionId || draggedSectionId === targetId) return;
+    if (isVisitor || !draggedSectionId || draggedSectionId === targetId) return;
     const oldIndex = sectionOrder.indexOf(draggedSectionId);
     const newIndex = sectionOrder.indexOf(targetId);
     if (oldIndex === -1 || newIndex === -1) return;
@@ -335,7 +335,11 @@ export function Sidebar() {
               {QUICK_VIEWS.filter((qv) => !isVisitor || !PERSONAL_QUICK_VIEWS.has(qv.folder)).map(renderQuickChip)}
               <Hint
                 title="Priority Queue"
-                body="The unread pile re-ordered by signal score instead of by time."
+                body={
+                  isVisitor
+                    ? "The newest articles re-ordered by signal score instead of by time."
+                    : "The unread pile re-ordered by signal score instead of by time."
+                }
                 aside={
                   isVisitor
                     ? "Scored on source reliability and entity heat."
@@ -883,11 +887,13 @@ function SectionDragWrapper({
   children: ReactNode;
 }) {
   const [dragOver, setDragOver] = useState(false);
+  // Section order is saved to the account; a visitor has none.
+  const isVisitor = useIsVisitor();
 
   return (
     <div
       className={`${styles.draggableSection} ${isDragging ? styles.dragging : ""} ${dragOver ? styles.dragOver : ""}`}
-      draggable
+      draggable={!isVisitor}
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = "move";
         e.dataTransfer.setData("text/x-sidebar-section", sectionId);

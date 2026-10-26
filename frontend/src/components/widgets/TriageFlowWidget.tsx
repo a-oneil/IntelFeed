@@ -107,7 +107,11 @@ export default function TriageFlowWidget({ config }: Props) {
         className={styles.stackChart}
         viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
         role="img"
-        aria-label="Entries arriving above the line versus entries you read below it, per day"
+        aria-label={
+          isVisitor
+            ? "Entries arriving per day"
+            : "Entries arriving above the line versus entries you read below it, per day"
+        }
       >
         {ticks.map((t) => {
           const dy = (half * t) / max;
@@ -146,7 +150,11 @@ export default function TriageFlowWidget({ config }: Props) {
           const hDown = Math.min(half, (half * day.read) / max);
           return (
             <g key={day.date}>
-              <title>{`${axisDate(day.date)} — ${day.arrived} arrived, ${day.read} read`}</title>
+              <title>
+                {isVisitor
+                  ? `${axisDate(day.date)} — ${day.arrived} arrived`
+                  : `${axisDate(day.date)} — ${day.arrived} arrived, ${day.read} read`}
+              </title>
               {day.arrived > 0 && (
                 <rect
                   x={x}

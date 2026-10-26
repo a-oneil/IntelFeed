@@ -16,6 +16,7 @@ route's ``get_viewer``.
 import re
 from contextlib import contextmanager
 from contextvars import ContextVar
+from urllib.parse import parse_qsl, urlencode
 
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
@@ -141,6 +142,8 @@ class AnonymousWriteLockMiddleware(BaseHTTPMiddleware):
             length = request.headers.get("content-length", "")
             if not length.isdigit() or int(length) > limit:
                 return _error(413, "payload_too_large", "Request body too large")
+        if method == "GET":
+            _cap_page_size(request, path)
         response = await call_next(request)
         if _scrubbed_path(path) and response.headers.get("content-type", "").startswith("application/json"):
             from app.core.security import public_read_only_enabled
@@ -148,6 +151,34 @@ class AnonymousWriteLockMiddleware(BaseHTTPMiddleware):
             if public_read_only_enabled():
                 return await _scrubbed(response)
         return response
+
+
+# Lists that carry article text (summaries, often the whole article for RSS)
+# or bulk links: a visitor's page is at most what the app itself asks for, so
+# the per-minute request budget also bounds how much one can pull.
+_PAGE_CAPPED = (
+    re.compile(r"^/api/entries$"),
+    re.compile(r"^/api/entries/priority-queue$"),
+    re.compile(r"^/api/feeds/[^/]+/entries$"),
+    re.compile(r"^/api/glossary/[^/]+/entries$"),
+    re.compile(r"^/api/entity-links$"),
+)
+VISITOR_PAGE_CAP = 50
+
+
+def _cap_page_size(request: Request, path: str) -> None:
+    """Clamp ``limit`` on a page-capped list for an anonymous caller, by
+    rewriting the query string the route will parse."""
+    if not any(p.match(path) for p in _PAGE_CAPPED):
+        return
+    params = parse_qsl(request.scope.get("query_string", b"").decode("latin-1"), keep_blank_values=True)
+    capped, changed = [], False
+    for key, value in params:
+        if key == "limit" and (not value.isdigit() or int(value) > VISITOR_PAGE_CAP):
+            value, changed = str(VISITOR_PAGE_CAP), True
+        capped.append((key, value))
+    if changed:
+        request.scope["query_string"] = urlencode(capped).encode("latin-1")
 
 
 # Anonymous routes that have their own audience and must reach it unchanged.

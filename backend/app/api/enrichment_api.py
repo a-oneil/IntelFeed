@@ -378,6 +378,15 @@ async def get_enrichment_results(
     db: AsyncSession = Depends(get_db),
 ):
     """Stored enrichment results for one entity, newest first."""
+    if user.is_anonymous:
+        # Results are keyed by type and id, outside the visitor filter: answer
+        # only for an entity the visitor can see.
+        from app.services.public_view import entities_shown
+
+        if entity_type in ("campaign", "observable") or (entity_type, entity_id) not in await entities_shown(
+            db, {(entity_type, entity_id)}
+        ):
+            return []
     result = await db.execute(
         select(EnrichmentResult)
         .where(

@@ -447,8 +447,10 @@ const COLUMNS: DataTableColumn<TableRow>[] = [
   },
 ];
 
-/** A visitor has no read, star or bookmark state, so no State column. */
-const VISITOR_COLUMNS = COLUMNS.filter((c) => c.key !== "status");
+/** Columns a visitor's rows never fill: read/star/bookmark state, and the
+ *  PIR, rule, AI, opportunity and note counts the server strips for them. */
+const VISITOR_HIDDEN_COLUMNS = new Set(["status", "pir", "rules", "ai", "opportunity", "notes"]);
+const VISITOR_COLUMNS = COLUMNS.filter((c) => !VISITOR_HIDDEN_COLUMNS.has(c.key));
 
 const rowClass = (r: TableRow) =>
   (r.kind === "thread"

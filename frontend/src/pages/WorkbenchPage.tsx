@@ -279,12 +279,14 @@ export function WorkbenchPage() {
   useEffect(() => {
     const section = searchParams.get("section");
     if (section && SECTION_KEYS.has(section)) {
-      setActiveSection(section as WorkspaceSection);
+      // A link into a section a visitor can't open is consumed, not followed:
+      // saving it as their section would leave every later visit "Not available".
+      if (!(isVisitor && VISITOR_HIDDEN_SECTIONS.has(section))) setActiveSection(section as WorkspaceSection);
       const next = new URLSearchParams(searchParams);
       next.delete("section");
       setSearchParams(next, { replace: true });
     }
-  }, [searchParams, setSearchParams, setActiveSection]);
+  }, [searchParams, setSearchParams, setActiveSection, isVisitor]);
 
   const routedSlug =
     selectedEntityType && ROUTED_PROFILE_TYPES.has(selectedEntityType)

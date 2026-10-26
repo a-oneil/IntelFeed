@@ -24,6 +24,7 @@ from app import entity_types
 from app.ai.caller import Caller
 from app.core.exceptions import AppError
 from app.core.pagination import PaginatedResponse
+from app.core.public_access import viewer_is_anonymous
 from app.core.security import get_admin_user, get_current_user, get_entry_viewer, get_viewer
 from app.database import get_db
 from app.intelligence.cve import extract_and_store_cves
@@ -817,6 +818,8 @@ async def get_entry_article_metadata(
     or null if none has been extracted.
     """
     entry = await _get_entry(db, entry_id)
+    if user.is_anonymous:
+        return None  # AI output, which visitors don't get
     return (entry.metadata_ or {}).get("article_intel")
 
 
@@ -6350,10 +6353,14 @@ async def get_vendor_products(
 
 
 def _product_to_response(p: Product, entry_link: EntryProduct | None = None) -> ProductResponse:
+    vendor_name = p.vendor.name if p.vendor_id and hasattr(p, "vendor") and p.vendor else None
+    # A visitor's vendor load goes through the visitor filter: a vendor they
+    # can't see comes back empty, and its id must not stand in for it.
+    vendor_id = p.vendor_id if vendor_name is not None or not viewer_is_anonymous() else None
     return ProductResponse(
         id=p.id,
-        vendor_id=p.vendor_id,
-        vendor_name=p.vendor.name if p.vendor_id and hasattr(p, "vendor") and p.vendor else None,
+        vendor_id=vendor_id,
+        vendor_name=vendor_name,
         name=p.name,
         aliases=p.aliases or [],
         description=p.description,

@@ -86,13 +86,22 @@ VISITOR_EVENT_TYPES: frozenset[str] = frozenset(
 
 def visitor_events_only(stmt):
     """A correlation-event query cut to what a visitor may see: allowed types,
-    about an article they can see. No-op for a signed-in viewer."""
+    about an article they can see or about none (CVE score, exploit and KEV
+    events carry no article). No-op for a signed-in viewer."""
+    from sqlalchemy import or_, select
+
     from app.models.correlation_event import CorrelationEventRecord
 
     if not viewer_is_anonymous():
         return stmt
-    stmt = stmt.where(CorrelationEventRecord.event_type.in_(VISITOR_EVENT_TYPES))
-    return visible_entries_only(stmt, CorrelationEventRecord.entry_id)
+    return stmt.where(
+        CorrelationEventRecord.event_type.in_(VISITOR_EVENT_TYPES),
+        or_(
+            CorrelationEventRecord.entry_id.is_(None),
+            # Through the visitor filter: visible articles only.
+            CorrelationEventRecord.entry_id.in_(select(Entry.id)),
+        ),
+    )
 
 
 async def entities_shown(db, refs) -> set[tuple[str, Any]]:
@@ -149,8 +158,9 @@ async def visitor_thread_view(db, thread_ids) -> dict:
     Thread rows, beats and titles are raw SQL built from every member, so a
     thread can carry a hidden feed's headline or an AI spine written from
     hidden articles. Per thread id this returns its visible member ids
-    (publication order), the earliest visible member's title, and the
-    highest-ranked visible member. A thread with no visible member is absent:
+    (publication order), the earliest visible member's title, the
+    highest-ranked visible member and its scores, and the counts and dates
+    over visible members. A thread with no visible member is absent:
     a visitor never sees it.
     """
     from sqlalchemy import text
@@ -165,7 +175,13 @@ async def visitor_thread_view(db, thread_ids) -> dict:
                    ARRAY_AGG(e.id ORDER BY e.published_at ASC NULLS LAST) AS entry_ids,
                    (ARRAY_AGG(e.title ORDER BY e.published_at ASC NULLS LAST))[1] AS first_title,
                    (ARRAY_AGG(e.id ORDER BY e.priority_raw DESC NULLS LAST)
-                       FILTER (WHERE ste.role <> 'echo'))[1] AS top_entry_id
+                       FILTER (WHERE ste.role <> 'echo'))[1] AS top_entry_id,
+                   MAX(e.priority_score) FILTER (WHERE ste.role <> 'echo') AS top_score,
+                   MAX(e.priority_raw) FILTER (WHERE ste.role <> 'echo') AS top_raw,
+                   COUNT(DISTINCT e.feed_id) AS source_count,
+                   COUNT(*) FILTER (WHERE ste.role = 'echo') AS echo_count,
+                   MIN(e.published_at) AS first_seen,
+                   MAX(e.published_at) AS last_seen
             FROM story_thread_entries ste
             JOIN entries e ON e.id = ste.entry_id
             JOIN feeds f ON f.id = e.feed_id
@@ -220,7 +236,12 @@ def _entity_shown_to_visitors(model, junction, fk_col):
         )
         return or_(~linked, shown)
 
-    return with_loader_criteria(model, criteria, include_aliases=True, track_closure_variables=False)
+    # track_closure_variables=True: SQLAlchemy caches a lambda criteria by
+    # its code object, and all five entity types share this one. Without
+    # tracking, every type reused the first one's SQL (threat actors'
+    # junction), and the rule never applied to malware, tools, vendors or
+    # products.
+    return with_loader_criteria(model, criteria, include_aliases=True, track_closure_variables=True)
 
 
 def _junction_shown_to_visitors(junction):
@@ -249,6 +270,43 @@ def _junction_shown_to_visitors(junction):
     )
 
 
+def _private_models() -> list:
+    """Tables no visitor reads a row of: analysts' work products (campaigns,
+    observables, detection rules, intelligence requirements, intel profiles),
+    their notes and comments, and the ransomware victim tracker. Hiding them at the data layer, not route by
+    route, means a campaign id or an observable passed as a parameter (to a
+    pivot, a list filter, a timeline) finds nothing."""
+    from app.models.campaign import Campaign, CampaignEntity, CampaignEntry, CampaignSavedSearch, CampaignSource
+    from app.models.comment import Comment
+    from app.models.detection_rule import DetectionRule
+    from app.models.entity_note import EntityNote
+    from app.models.intel_profile import IntelProfile
+    from app.models.intelligence_requirement import IntelligenceRequirement, RequirementMatch
+    from app.models.note import Note
+    from app.models.observable import EntryObservable, Observable
+    from app.models.ransomware import RansomwareVictim, VictimDisclosure
+
+    return [
+        Campaign,
+        CampaignEntity,
+        CampaignEntry,
+        CampaignSavedSearch,
+        CampaignSource,
+        Comment,
+        DetectionRule,
+        EntityNote,
+        IntelProfile,
+        IntelligenceRequirement,
+        Note,
+        RequirementMatch,
+        EntryObservable,
+        Observable,
+        # Leak-site victims: the ransomware area is signed-in only.
+        RansomwareVictim,
+        VictimDisclosure,
+    ]
+
+
 _entity_options: list | None = None
 
 
@@ -261,6 +319,7 @@ def _entity_criteria() -> list:
         _entity_options = [_entity_shown_to_visitors(*ENTITY_CONFIG[t]) for t in ARTICLE_DERIVED_TYPES]
         junctions = {junction for _model, junction, _fk in ENTITY_CONFIG.values()} | {StoryThreadEntry}
         _entity_options += [_junction_shown_to_visitors(j) for j in sorted(junctions, key=lambda j: j.__name__)]
+        _entity_options += [with_loader_criteria(m, false(), include_aliases=True) for m in _private_models()]
     return _entity_options
 
 
@@ -438,6 +497,10 @@ _USER_KEYS = frozenset(
 #: (rules, coverage, gap hints), intel work products, IOCs, translations.
 _HIDDEN_KEY_PARTS = (
     "rule",
+    # Intel profiles are analysts' customer or portfolio scopes.
+    "intel_profile",
+    # AI-written article metadata (entry.metadata.article_intel).
+    "article_intel",
     "campaign",
     "observable",
     "requirement",
@@ -467,6 +530,15 @@ _TYPE_KEYS = (
     "related_entity_type",
     "other_type",
 )
+#: Priority signals whose stored explanation names private work (a PIR's
+#: title, the campaign or requirement behind a correlation, rule counts). A
+#: visitor keeps the signal and its score, so the ranking still adds up, with
+#: a generic explanation.
+_SIGNAL_TEXT_FOR_VISITORS = {
+    "pir_match": "Matches an intelligence requirement",
+    "correlation_event": "Linked to related intelligence",
+    "detection_content": "Contains detection content",
+}
 _REMOVED = object()
 _EMPTY_LIKE: dict[type, Any] = {list: list, int: int, float: float, bool: bool}
 
@@ -478,6 +550,8 @@ def _hidden_key(key: str) -> bool:
 
 def _scrub(value: Any, removed_ids: set[str]) -> Any:
     if isinstance(value, dict):
+        if "explanation" in value and (generic := _SIGNAL_TEXT_FOR_VISITORS.get(value.get("type"))):
+            value = {**value, "explanation": generic}
         kinds = (value.get(k) for k in _TYPE_KEYS)
         if any(isinstance(kind, str) and kind.lower() in HIDDEN_ENTITY_TYPES for kind in kinds):
             if "id" in value:

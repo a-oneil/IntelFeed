@@ -237,16 +237,21 @@ def public_mode(monkeypatch):
     monkeypatch.setattr(settings, "public_read_only_enabled", True)
 
 
-@pytest_asyncio.fixture
-async def fresh_rate_limits():
-    """Rate-limit windows live in Redis for up to an hour and the test client
-    addresses repeat from run to run, so start the anonymous buckets empty."""
-    from app.services.redis_client import get_redis_bytes
+@pytest.fixture
+def fresh_rate_limits(monkeypatch):
+    """Give this test's anonymous requests a client identity of their own.
 
-    r = await get_redis_bytes()
-    keys = [k async for k in r.scan_iter(match="ratelimit:anon*")]
-    if keys:
-        await r.delete(*keys)
+    Rate-limit windows live in the shared dev Redis for up to an hour, and the
+    test client's addresses repeat across runs and across parallel workers;
+    a fresh identity starts every bucket empty without touching anyone else's.
+    """
+    from app.core import rate_limit
+
+    own = f"ip:test-{uuid.uuid4()}"
+    original = rate_limit._get_identity
+    monkeypatch.setattr(
+        rate_limit, "_get_identity", lambda request: own if (ident := original(request)).startswith("ip:") else ident
+    )
 
 
 @pytest_asyncio.fixture
@@ -789,13 +794,17 @@ _CANARY = "CANARYZQX"
 
 @pytest_asyncio.fixture
 async def canary(db_session: AsyncSession):
-    from datetime import UTC, datetime
+    from datetime import UTC, datetime, timedelta
 
     from app.models.correlation_event import CorrelationEventRecord
     from app.models.entity_field_claim import EntityFieldClaim
     from app.models.entity_relationship import EntityRelationship
+    from app.models.malware_family import EntryMalware, MalwareFamily
+    from app.models.product import EntryProduct, Product
     from app.models.story_thread import StoryThread, StoryThreadBeat, StoryThreadEntry
     from app.models.threat_actor import EntryThreatActor, ThreatActor
+    from app.models.tool import EntryTool, Tool
+    from app.models.vendor import EntryVendor, Vendor
 
     shown_feed = Feed(title="Shown feed", url="https://shown.example/feed", feed_type="rss", visible_to_visitors=True)
     hidden_feed = Feed(title=f"{_CANARY} feed", url=f"https://{_CANARY.lower()}.example/feed", feed_type="rss")
@@ -819,7 +828,16 @@ async def canary(db_session: AsyncSession):
         summary=f"{_CANARY} summary",
         published_at=now,
     )
-    db_session.add_all([shown, hidden])
+    # A second hidden article: the seed of a thread that also has a visible member.
+    hidden_seed = Entry(
+        feed_id=hidden_feed.id,
+        title=f"{_CANARY} seed headline",
+        guid="hidden-2",
+        url=f"https://{_CANARY.lower()}.example/b",
+        content_text=f"{_CANARY} seed text",
+        published_at=now - timedelta(hours=1),
+    )
+    db_session.add_all([shown, hidden, hidden_seed])
     await db_session.flush()
 
     shared = ThreatActor(name="Shared Actor", first_seen_at=now, last_seen_at=now)
@@ -833,12 +851,48 @@ async def canary(db_session: AsyncSession):
             EntryThreatActor(entry_id=hidden.id, threat_actor_id=ghost.id, matched_names=[f"{_CANARY} Ghost"]),
         ]
     )
+    # Every article-derived type gets a ghost known only from the hidden article.
+    ghost_malware = MalwareFamily(name=f"{_CANARY} Ghostware", first_seen_at=now, last_seen_at=now)
+    ghost_tool = Tool(name=f"{_CANARY} Ghosttool", first_seen_at=now, last_seen_at=now)
+    ghost_vendor = Vendor(name=f"{_CANARY} Ghostvendor", first_seen_at=now, last_seen_at=now)
+    db_session.add_all([ghost_malware, ghost_tool, ghost_vendor])
+    await db_session.flush()
+    ghost_product = Product(
+        name=f"{_CANARY} Ghostproduct", vendor_id=ghost_vendor.id, first_seen_at=now, last_seen_at=now
+    )
+    # A product visitors may see (mentioned in the visible article) whose vendor they may not.
+    shown_product = Product(name="Shown Product", vendor_id=ghost_vendor.id, first_seen_at=now, last_seen_at=now)
+    db_session.add_all([ghost_product, shown_product])
+    await db_session.flush()
+    db_session.add_all(
+        [
+            EntryMalware(entry_id=hidden.id, malware_family_id=ghost_malware.id),
+            EntryTool(entry_id=hidden.id, tool_id=ghost_tool.id),
+            EntryVendor(entry_id=hidden.id, vendor_id=ghost_vendor.id),
+            EntryProduct(entry_id=hidden.id, product_id=ghost_product.id),
+            EntryProduct(entry_id=shown.id, product_id=shown_product.id),
+        ]
+    )
     thread = StoryThread(slug="canary-thread", title=f"{_CANARY} thread", summary=f"{_CANARY} spine", entry_count=1)
+    # A thread with a visible and a hidden member: its stored title, summary
+    # and entity chips come from the hidden one.
+    mixed = StoryThread(
+        slug="canary-mixed",
+        title=f"{_CANARY} mixed",
+        summary=f"{_CANARY} mixed spine",
+        entry_count=2,
+        key_entities=[
+            {"entity_type": "threat_actor", "entity_id": str(ghost.id), "label": f"{_CANARY} Ghost", "count": 1}
+        ],
+    )
+    db_session.add(mixed)
     db_session.add(thread)
     await db_session.flush()
     db_session.add_all(
         [
             StoryThreadEntry(thread_id=thread.id, entry_id=hidden.id, role="origin"),
+            StoryThreadEntry(thread_id=mixed.id, entry_id=hidden_seed.id, role="origin"),
+            StoryThreadEntry(thread_id=mixed.id, entry_id=shown.id, role="beat"),
             StoryThreadBeat(
                 thread_id=thread.id,
                 headline=f"{_CANARY} beat",
@@ -894,13 +948,38 @@ async def canary(db_session: AsyncSession):
     )
     await db_session.flush()
     db_session.expunge_all()
-    return {"shown": shown.id, "hidden": hidden.id, "shared": shared.id, "ghost": ghost.id, "slug": thread.slug}
+    return {
+        "shown": shown.id,
+        "hidden": hidden.id,
+        "hidden_seed": hidden_seed.id,
+        "hidden_feed": hidden_feed.id,
+        "shared": shared.id,
+        "ghost": ghost.id,
+        "ghost_malware": ghost_malware.id,
+        "ghost_tool": ghost_tool.id,
+        "ghost_vendor": ghost_vendor.id,
+        "ghost_product": ghost_product.id,
+        "shown_product": shown_product.id,
+        "slug": mixed.slug,
+    }
+
+
+_CANARY_IDS = (
+    "hidden",
+    "hidden_seed",
+    "hidden_feed",
+    "ghost",
+    "ghost_malware",
+    "ghost_tool",
+    "ghost_vendor",
+    "ghost_product",
+)
 
 
 def _leaks(body: str, c: dict, url: str) -> list[str]:
     found = [m for m in (_CANARY, _CANARY.lower()) if m in body]
     # An id the visitor put in the URL may come back; any other may not.
-    found += [k for k in ("hidden", "ghost") if str(c[k]) in body and str(c[k]) not in url]
+    found += [k for k in _CANARY_IDS if str(c[k]) in body and str(c[k]) not in url]
     return found
 
 
@@ -924,24 +1003,37 @@ async def _canary_walk(client: AsyncClient, overrides: dict, headers: dict | Non
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("focus", ["shared", "ghost"])
+@pytest.mark.parametrize(
+    "focus,entity_type",
+    [
+        ("shared", "threat_actor"),
+        ("ghost", "threat_actor"),
+        ("ghost_malware", "malware"),
+        ("ghost_tool", "tool"),
+        ("ghost_vendor", "vendor"),
+        ("ghost_product", "product"),
+        ("shown_product", "product"),
+    ],
+)
 async def test_nothing_from_a_hidden_feed_reaches_a_visitor(
-    client: AsyncClient, public_mode, canary, auth_headers, no_rate_limit, focus
+    client: AsyncClient, public_mode, canary, auth_headers, no_rate_limit, focus, entity_type
 ):
     from app.services.redis_client import get_redis
 
     r = await get_redis()
     # Tests share the dev Redis: clear only this run's entities' pivots and graphs.
-    for entity in ("shared", "ghost"):
+    for entity in ("shared", *_CANARY_IDS[3:], "shown_product"):
         keys = [k async for k in r.scan_iter(match=f"intelfeed:corr:*:{canary[entity]}*")]
         if keys:
             await r.delete(*keys)
 
+    focus_id = str(canary[focus])
     overrides = {
-        "entity_type": "threat_actor",
-        "entity_id": str(canary[focus]),
-        "actor_id": str(canary[focus]),
-        "id": str(canary[focus]),
+        "entity_type": entity_type,
+        "entity_id": focus_id,
+        "id": focus_id,
+        f"{ {'threat_actor': 'actor', 'malware': 'malware'}.get(entity_type, entity_type) }_id": focus_id,
+        "feed_id": str(canary["hidden_feed"]),
         "entry_id": str(canary["hidden"]),
         "slug": canary["slug"],
         "_canary": canary,
@@ -1067,3 +1159,100 @@ async def test_refused_visitor_writes_carry_the_private_and_noindex_headers(clie
     assert resp.status_code == 401
     assert resp.headers["cache-control"] == "private, no-store"
     assert "noindex" in resp.headers["x-robots-tag"]
+
+
+@pytest.mark.asyncio
+async def test_private_work_named_in_article_fields_never_reaches_a_visitor(
+    client: AsyncClient, public_mode, canary, db_session: AsyncSession, test_user, no_rate_limit
+):
+    """Signal explanations, AI article metadata and campaign membership name
+    private work in values the key scrubber can't see."""
+    from app.models.campaign import Campaign, CampaignEntry
+    from app.models.entry_signal import EntrySignal
+
+    shown = await db_session.get(Entry, canary["shown"])
+    shown.priority_score, shown.priority_raw = 9.5, 5.0
+    shown.metadata_ = {"article_intel": {"report_type": f"{_CANARY} report", "victims": [f"{_CANARY} victim"]}}
+    campaign = Campaign(name=f"{_CANARY} campaign", created_by=test_user.id)
+    db_session.add(campaign)
+    await db_session.flush()
+    db_session.add_all(
+        [
+            EntrySignal(entry_id=shown.id, signal_type="pir_match", score=0.9, explanation=f"Matches '{_CANARY} PIR'"),
+            EntrySignal(entry_id=shown.id, signal_type="critical_cvss", score=0.8, explanation="CVSS 9.8"),
+            CampaignEntry(campaign_id=campaign.id, entry_id=shown.id),
+        ]
+    )
+    await db_session.flush()
+    db_session.expunge_all()
+
+    detail = await client.get(f"/api/entries/{shown.id}")
+    assert detail.status_code == 200 and _CANARY not in detail.text
+    signals = detail.json().get("priority_signals") or []
+    assert all(s["explanation"] != f"Matches '{_CANARY} PIR'" for s in signals)
+    assert (await client.get(f"/api/entries/{shown.id}/article-metadata")).json() is None
+    listing = await client.get("/api/entries", params={"limit": 50})
+    assert _CANARY not in listing.text
+    # A campaign id finds nothing: membership is private.
+    by_campaign = await client.get("/api/entries", params={"campaign_id": str(campaign.id)})
+    assert by_campaign.json()["items"] == []
+    # A campaign as a pivot source is empty: its articles and name stay private.
+    pivot = await client.get(f"/api/intelligence/pivot/campaign/{campaign.id}")
+    assert _CANARY not in pivot.text and str(shown.id) not in pivot.text
+
+
+@pytest.mark.asyncio
+async def test_thread_search_does_not_match_a_hidden_headline(client: AsyncClient, public_mode, canary):
+    # The mixed thread's stored title is the hidden seed's; a visitor sees and
+    # searches the visible member's.
+    assert (await client.get("/api/threads", params={"q": _CANARY})).json()["threads"] == []
+    hits = (await client.get("/api/threads", params={"q": "public article"})).json()["threads"]
+    assert [t["slug"] for t in hits] and all(t["slug"].startswith("t-") for t in hits)
+    # The alias opens the thread.
+    assert (await client.get(f"/api/threads/{hits[0]['slug']}")).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_article_less_correlation_events_reach_visitors(
+    client: AsyncClient, public_mode, db_session: AsyncSession, no_rate_limit
+):
+    from app.models.correlation_event import CorrelationEventRecord
+    from app.models.cve import CVE
+
+    cve = CVE(cve_id="CVE-2099-0001")
+    db_session.add(cve)
+    await db_session.flush()
+    db_session.add(
+        CorrelationEventRecord(
+            event_type="kev_addition",
+            entry_id=None,
+            source_entity_type="cve",
+            source_entity_id=cve.id,
+            source_entity_label="CVE-2099-0001",
+            related_entity_type="cve",
+            related_entity_id=cve.id,
+            related_entity_label="CVE-2099-0001",
+            context="CVE-2099-0001 added to KEV",
+        )
+    )
+    await db_session.flush()
+    assert "CVE-2099-0001 added to KEV" in (await client.get("/api/widgets/correlation-events")).text
+
+
+def test_visitor_pages_are_capped():
+    from starlette.requests import Request
+
+    from app.core.public_access import VISITOR_PAGE_CAP, _cap_page_size
+
+    def capped(path: str, query: str) -> str:
+        request = Request(
+            {"type": "http", "method": "GET", "path": path, "query_string": query.encode(), "headers": []}
+        )
+        _cap_page_size(request, path)
+        return request.scope["query_string"].decode()
+
+    assert capped("/api/entries", "limit=500&feed_id=x") == f"limit={VISITOR_PAGE_CAP}&feed_id=x"
+    assert capped("/api/entries", "limit=20") == "limit=20"
+    assert capped("/api/feeds/abc/entries", "limit=999") == f"limit={VISITOR_PAGE_CAP}"
+    # The sidebar's feed list is names only and keeps its page.
+    assert capped("/api/feeds", "limit=1000") == "limit=1000"

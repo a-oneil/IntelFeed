@@ -1015,6 +1015,14 @@ async def list_threads(
     ``q`` filters on title, for the pickers that need to *find* a named story
     rather than read the most recent ones — following one onto a campaign, say.
     """
+    from app.core.public_access import viewer_is_anonymous
+
+    visitor = viewer_is_anonymous()
+    needle = q.strip().lower() if visitor and q and q.strip() else None
+    if visitor:
+        # Filtering drops threads, so read past the page; the title match
+        # happens after the rebuild.
+        q, limit, page = None, max(limit * 3, 120), limit
     rows = await db.execute(
         text(
             """
@@ -1064,58 +1072,102 @@ async def list_threads(
         },
     )
     out = [dict(r) for r in rows.mappings().all()]
-    from app.core.public_access import viewer_is_anonymous
-
-    if viewer_is_anonymous():
+    if visitor:
         out = await visitor_thread_rows(db, out)
+        if needle:
+            # The stored title may be a hidden article's headline: a visitor's
+            # search matches the title they are shown instead.
+            out = [r for r in out if needle in (r["title"] or "").lower()]
+        out = out[:page]
     return out
+
+
+def visitor_slug(thread_id: uuid.UUID) -> str:
+    """The name a visitor knows a thread by. A stored slug is made from its
+    seed article's headline, which can be a hidden feed's."""
+    return f"t-{thread_id.hex}"
+
+
+_VISITOR_SLUG = re.compile(r"^t-([0-9a-f]{32})$")
 
 
 async def visitor_thread_rows(db: AsyncSession, rows: list[dict]) -> list[dict]:
     """Thread rows as a visitor may see them (see public_view.visitor_thread_view).
 
     A thread with no visible member is dropped. The rest are rebuilt from
-    their visible members: the title is the earliest one's, the stored title
-    and AI summary are not shown (either may come from a hidden article), and
-    the counts and ids cover visible members only. A visitor has read
-    nothing, so every visible member counts as unread and new, which keeps the
-    priority queue folding threads for them as it always has.
+    their visible members: everything stored on the thread row was built from
+    every member, so the title is the earliest visible one's, the slug an
+    alias, the AI summary is not shown, the counts, dates and ranking cover
+    visible members only, and the entity chips keep only entities the visitor
+    can see. A visitor has read nothing, so every visible member counts as
+    unread (which keeps the priority queue folding threads for them), and
+    nothing is "new since opened" for someone who never opens one.
     """
-    from app.services.public_view import visitor_thread_view
+    from app.services.public_view import entities_shown, visitor_thread_view
 
     view = await visitor_thread_view(db, [r["id"] for r in rows])
+    chips = [
+        (chip, (chip.get("entity_type"), _as_uuid(chip.get("entity_id"))))
+        for r in rows
+        if r["id"] in view
+        for chip in (r.get("key_entities") or [])
+    ]
+    shown = await entities_shown(db, {ref for _chip, ref in chips if ref[1] is not None})
     shaped = []
     for row in rows:
         seen = view.get(row["id"])
         if seen is None:
             continue
+        visible = len(seen["entry_ids"])
         shaped.append(
             {
                 **row,
+                "slug": visitor_slug(row["id"]),
                 "title": thread_title(seen["first_title"]),
                 "summary": None,
                 "narrated_at": None,
-                "entry_count": len(seen["entry_ids"]),
+                "entry_count": visible,
                 "entry_ids": seen["entry_ids"],
                 "top_entry_id": seen["top_entry_id"] or seen["entry_ids"][0],
-                "unread_count": len(seen["entry_ids"]),
-                "new_since_opened": len(seen["entry_ids"]),
+                "top_score": seen["top_score"],
+                "top_raw": seen["top_raw"],
+                "source_count": seen["source_count"],
+                "echo_count": seen["echo_count"],
+                "first_seen": seen["first_seen"],
+                "last_seen": seen["last_seen"],
+                "peak_at": None,
+                "key_entities": [
+                    chip
+                    for chip in (row.get("key_entities") or [])
+                    if (chip.get("entity_type"), _as_uuid(chip.get("entity_id"))) in shown
+                ],
+                "unread_count": visible,
+                "new_since_opened": 0,
             }
         )
     return shaped
 
 
+def _as_uuid(value) -> uuid.UUID | None:
+    try:
+        return uuid.UUID(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
 async def get_thread(db: AsyncSession, slug: str, user_id: uuid.UUID) -> dict | None:
+    """One thread by its slug, or by the alias visitors see (``t-<id hex>``)."""
+    alias = _VISITOR_SLUG.match(slug)
     rows = await db.execute(
         text(
             """
             SELECT t.*, uts.last_opened_at
             FROM story_threads t
             LEFT JOIN user_thread_states uts ON uts.thread_id = t.id AND uts.user_id = :user_id
-            WHERE t.slug = :slug
+            WHERE t.slug = :slug OR t.id = CAST(:thread_id AS uuid)
             """
         ),
-        {"slug": slug, "user_id": user_id},
+        {"slug": slug, "user_id": user_id, "thread_id": str(uuid.UUID(alias.group(1))) if alias else None},
     )
     row = rows.mappings().first()
     return dict(row) if row else None
@@ -1237,9 +1289,15 @@ async def similar_entries(
     content-hash duplicates: the same article syndicated twice is a 1.0 match
     and tells the reader nothing.
     """
+    from app.core.public_access import viewer_is_anonymous
+    from app.services.public_view import VISIBLE_FEED_SQL
+
+    # Raw SQL, outside the visitor filter: a visitor's neighbours come from
+    # the feeds they can see.
+    visible = f"AND {VISIBLE_FEED_SQL}" if viewer_is_anonymous() else ""
     rows = await db.execute(
         text(
-            """
+            f"""
             WITH anchor AS (SELECT embedding FROM entry_embeddings WHERE entry_id = :entry_id)
             SELECT e.id AS entry_id, e.title, e.url, e.published_at, e.priority_score,
                    COALESCE(f.title, '') AS feed_title,
@@ -1250,7 +1308,7 @@ async def similar_entries(
             LEFT JOIN feeds f ON f.id = e.feed_id
             LEFT JOIN story_thread_entries ste ON ste.entry_id = e.id
             CROSS JOIN anchor
-            WHERE e.id <> ALL(:exclude)
+            WHERE e.id <> ALL(:exclude) {visible}
             ORDER BY ee.embedding <=> anchor.embedding
             LIMIT :limit
             """

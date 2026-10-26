@@ -93,9 +93,12 @@ export function useRegistrationStatus() {
         useAuthStore.getState().setPublicReadOnly(!!res.data.public_read_only_enabled);
         return res.data;
       } catch (err) {
-        // Unanswered, treat the instance as private: a signed-out user gets the
-        // login page rather than a spinner that waits on this forever.
-        useAuthStore.getState().setPublicReadOnly(false);
+        // Unanswered on the first try, treat the instance as private: a
+        // signed-out user gets the login page rather than a spinner that waits
+        // on this forever. A later failure (a background refetch, a blip on
+        // reconnect) keeps the answer already known, so a browsing visitor
+        // isn't sent to the login page by one dropped request.
+        if (!useAuthStore.getState().publicReadOnlyKnown) useAuthStore.getState().setPublicReadOnly(false);
         throw err;
       }
     },

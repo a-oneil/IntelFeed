@@ -1,5 +1,6 @@
 import { useUnlinkEntity } from "@/hooks/useIntelligence";
 import { useUndoableDelete } from "@/hooks/useUndoableDelete";
+import { useIsVisitor } from "@/stores/authStore";
 import styles from "./UnlinkArticleButton.module.css";
 
 type EntityType =
@@ -29,6 +30,9 @@ export function UnlinkArticleButton({
 }: UnlinkArticleButtonProps) {
   const unlink = useUnlinkEntity();
   const undoableDelete = useUndoableDelete();
+  // Unlinking curates the instance's data; a visitor only reads it.
+  const isVisitor = useIsVisitor();
+  if (isVisitor) return null;
 
   return (
     <button

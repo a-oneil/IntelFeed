@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "@/api/client";
 import type { User } from "@/api/types";
 import { useCurrentUser } from "@/hooks/useAuth";
-import { useAuthStore } from "@/stores/authStore";
+import { isVisitorNow, useAuthStore } from "@/stores/authStore";
 import { useUIStore } from "@/stores/uiStore";
 import {
   TABLE_LAYOUTS_SETTINGS_KEY,
@@ -12,6 +12,9 @@ import {
   toTableLayoutMap,
 } from "@/types/tableLayout";
 import type { TableLayoutMap } from "@/types/tableLayout";
+
+/** tablesOwnerId for layouts changed while browsing without an account. */
+const VISITOR_OWNER = "visitor";
 
 const AUTOSAVE_DEBOUNCE_MS = 800;
 const AUTOSAVE_MAX_BACKOFF_MS = 30_000;
@@ -52,7 +55,13 @@ export function useTableLayoutSync() {
   const failureCountRef = useRef(0);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      // A visitor's column changes are theirs: tag them, so whoever signs in
+      // next takes the account's layouts over them instead of merging the
+      // visitor's in and uploading them.
+      if (isVisitorNow() && !tablesOwnerId) useUIStore.setState({ tablesOwnerId: VISITOR_OWNER });
+      return;
+    }
     if (tablesOwnerId && tablesOwnerId !== user.id) {
       // Someone else was signed in on this browser: take their layouts off the
       // screen rather than merging them — and, worse, uploading them onto this

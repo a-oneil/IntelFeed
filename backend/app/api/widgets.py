@@ -428,13 +428,11 @@ async def recent_correlation_events(
         # Exclude feed-health events (feed_error, feed_stale) — they have no entry_id
         # and aren't true correlation events.
         excluded_types = ("feed_error", "feed_stale")
-        query = select(CorrelationEventRecord, Entry.title)
-        if user.is_anonymous:
-            # Inner join through the visitor filter: allowed types about
-            # visible articles only.
-            query = visitor_events_only(query)
-        else:
-            query = query.join(Entry, Entry.id == CorrelationEventRecord.entry_id, isouter=True)
+        query = visitor_events_only(
+            select(CorrelationEventRecord, Entry.title).join(
+                Entry, Entry.id == CorrelationEventRecord.entry_id, isouter=True
+            )
+        )
         result = await db.execute(
             query.where(CorrelationEventRecord.event_type.notin_(excluded_types))
             .order_by(CorrelationEventRecord.created_at.desc())

@@ -128,8 +128,10 @@ export default function WorkbenchPanel({
   const { data: hookVendors, isLoading: vendorsLoading } = useEntryVendors(fetchId);
   const { data: hookProducts, isLoading: productsLoading } = useEntryProducts(fetchId);
   const { data: hookObservables, isLoading: observablesLoading } = useEntryObservables(isVisitor ? "" : fetchId);
+  // Rules are signed-in only: a visitor's (or a share page's) panel doesn't ask.
   const { data: rulesData, isLoading: rulesLoading } = useDetectionRules(
-    editLocked ? { entry_id: "" } : { entry_id: entryId },
+    { entry_id: entryId },
+    { enabled: !editLocked && !!entryId },
   );
   // Observables stay off the map unless asked for — ledger atoms as nodes is
   // the graph bloat the design guards against.

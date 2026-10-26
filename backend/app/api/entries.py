@@ -2808,6 +2808,15 @@ async def get_similar_entries(
                 select(StoryThread.id, StoryThread.slug, StoryThread.title).where(StoryThread.id.in_(thread_ids))
             )
             thread_slugs = {r.id: (r.slug, r.title) for r in rows.all()}
+            if user.is_anonymous:
+                # Stored slugs and titles may come from hidden articles.
+                from app.intelligence.story_threads import thread_title, visitor_slug
+                from app.services.public_view import visitor_thread_view
+
+                view = await visitor_thread_view(db, thread_ids)
+                thread_slugs = {
+                    tid: (visitor_slug(tid), thread_title(seen["first_title"])) for tid, seen in view.items()
+                }
         return {
             "items": [
                 {

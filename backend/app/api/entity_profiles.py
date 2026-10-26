@@ -2531,7 +2531,7 @@ async def _visitor_story_cards(db: AsyncSession, rows) -> list[dict]:
     visible members (story_threads.visitor_thread_rows), its latest beat the
     last day-grouped one over them. Stored titles, AI summaries and beats can
     come from hidden articles."""
-    from app.intelligence.story_threads import thread_title
+    from app.intelligence.story_threads import thread_title, visitor_slug
     from app.services.public_view import visitor_thread_view
     from app.services.thread_narrative import collect_members, heuristic_beats
 
@@ -2546,14 +2546,14 @@ async def _visitor_story_cards(db: AsyncSession, rows) -> list[dict]:
         latest = beats[-1] if beats else None
         cards.append(
             {
-                "slug": t.slug,
+                "slug": visitor_slug(t.id),
                 "title": thread_title(seen["first_title"]),
                 "summary": None,
                 "status": t.status,
                 "entry_count": len(shown),
-                "source_count": t.source_count,
-                "first_seen": t.first_seen.isoformat() if t.first_seen else None,
-                "last_seen": t.last_seen.isoformat() if t.last_seen else None,
+                "source_count": seen["source_count"],
+                "first_seen": seen["first_seen"].isoformat() if seen["first_seen"] else None,
+                "last_seen": seen["last_seen"].isoformat() if seen["last_seen"] else None,
                 "entity_entry_count": entity_entries,
                 "latest_beat": (
                     {

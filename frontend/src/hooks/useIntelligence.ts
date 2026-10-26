@@ -784,7 +784,7 @@ export function useDetectionRules(params?: {
   sort_order?: string;
   limit?: number;
   offset?: number;
-}) {
+}, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ["detection-rules", params],
     queryFn: async () => {
@@ -794,6 +794,7 @@ export function useDetectionRules(params?: {
       );
       return data;
     },
+    enabled: options?.enabled ?? true,
   });
 }
 
