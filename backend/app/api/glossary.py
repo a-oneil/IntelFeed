@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
-from app.core.security import get_current_user
+from app.core.security import get_current_user, get_viewer
 from app.database import get_db
 from app.models.entry import Entry
 from app.models.glossary_term import GlossaryTerm
@@ -51,7 +51,7 @@ async def list_glossary_terms(
     is_system: bool | None = Query(
         default=None, description="true = built-in terms only, false = user-created terms only."
     ),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List glossary terms alphabetically, with optional category, name-search, and system/user filters."""
@@ -170,7 +170,7 @@ async def delete_glossary_term(
 
 @router.get("/categories", response_model=list[GlossaryCategoryResponse])
 async def list_glossary_categories(
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List distinct glossary categories with their NIST CSF flag and display color."""
@@ -189,7 +189,7 @@ async def list_glossary_categories(
 
 @router.get("/counts")
 async def get_glossary_counts(
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Return approximate article counts for all visible glossary terms."""
@@ -240,7 +240,7 @@ async def get_term_entries(
     term_id: uuid.UUID = Path(..., description="Glossary term UUID."),
     limit: int = Query(20, ge=1, le=500, description="Maximum number of entries to return."),
     offset: int = Query(0, ge=0, description="Number of entries to skip for pagination."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Find entries that contain this glossary term (exact word-boundary match)."""
@@ -293,7 +293,7 @@ async def get_term_entries(
 @router.post("/detect", response_model=list[GlossaryMatchResponse])
 async def detect_glossary_terms(
     body: DetectRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Detect glossary terms in an entry's text via word-boundary matching, returned with per-term match counts."""

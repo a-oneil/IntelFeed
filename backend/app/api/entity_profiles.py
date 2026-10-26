@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import entity_types
 from app.core.exceptions import AppError
-from app.core.security import get_admin_user, get_current_user
+from app.core.security import get_admin_user, get_current_user, get_viewer
 from app.database import get_db
 from app.intelligence.correlation_cache import invalidate_entity_cache
 from app.intelligence.entity_dedup import find_entity_by_name_or_alias
@@ -1220,7 +1220,7 @@ async def _load_target_entity(db: AsyncSession, entity_type: str, entity_id: uui
 async def list_entity_target_sectors(
     entity_type: str = Path(..., description="threat_actor or malware."),
     entity_id: uuid.UUID = Path(..., description="Entity UUID."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """The sectors this actor or family is asserted to target, with the source of each claim
@@ -2271,7 +2271,7 @@ async def delete_mitigation(
 async def get_entity_field_provenance(
     entity_type: str = Path(..., description="Entity type slug, e.g. threat_actor."),
     entity_id: uuid.UUID = Path(..., description="Entity UUID."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Who asserted each fact on this profile, and whether they still agree with it.
@@ -2436,7 +2436,7 @@ async def get_entity_story_threads(
     status: str = Query(
         "open", description="Thread status filter: open, dormant, closed, any, or past (dormant + closed)."
     ),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Story threads whose member articles link to this entity, most recently
@@ -2521,7 +2521,7 @@ async def get_entity_story_threads(
 async def get_entity_attack_techniques(
     entity_type: str = Path(..., description="threat_actor or malware — the only types with TTP-bearing entries."),
     entity_id: uuid.UUID = Path(..., description="UUID of the entity."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Techniques referenced by this entity's articles, ranked by evidence —
@@ -2569,7 +2569,7 @@ async def get_entity_attack_techniques(
 async def get_entity_attack_layer(
     entity_type: str = Path(..., description="threat_actor or malware — the only types with TTP-bearing entries."),
     entity_id: uuid.UUID = Path(..., description="UUID of the entity to build the Navigator layer for."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Generate ATT&CK Navigator JSON for this entity's referenced techniques."""
@@ -2635,7 +2635,7 @@ async def get_entity_mentions_timeseries(
     window: str = Query(
         "90d", description="Time window: 24h (hourly buckets), 7d/30d/60d/90d (daily), or all (weekly)."
     ),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Mention counts for this entity, bucketed to fit the requested window —
@@ -2777,7 +2777,7 @@ async def get_entity_entries_window(
     start: str = Query(..., description="Bucket start as an ISO datetime (inclusive)."),
     end: str = Query(..., description="Bucket end as an ISO datetime (exclusive)."),
     limit: int = Query(50, description="Maximum entries to return (clamped to 1-100)."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Articles mentioning this entity inside one timeline bucket — powers
@@ -2830,7 +2830,7 @@ async def get_entity_top_entries(
     entity_id: uuid.UUID = Path(..., description="UUID of the mentioned entity."),
     days: int = Query(30, description="Look-back window in days (clamped to 1-365)."),
     limit: int = Query(3, description="Maximum entries to return (clamped to 1-10)."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Highest-signal articles mentioning this entity in the window — the

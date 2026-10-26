@@ -24,7 +24,7 @@ from app import entity_types
 from app.ai.caller import Caller
 from app.core.exceptions import AppError
 from app.core.pagination import PaginatedResponse
-from app.core.security import get_admin_user, get_current_user
+from app.core.security import get_admin_user, get_current_user, get_viewer
 from app.database import get_db
 from app.intelligence.cve import extract_and_store_cves
 from app.intelligence.detection import (
@@ -159,7 +159,7 @@ async def extract_entry_ttps(
 @router.get("/entries/{entry_id}/ttps", response_model=list[TTPResponse])
 async def get_entry_ttps(
     entry_id: uuid.UUID = Path(..., description="UUID of the entry"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List the MITRE ATT&CK techniques linked to an entry, with per-entry confidence and matched source text."""
@@ -181,7 +181,7 @@ async def get_entry_ttps(
 @router.get("/entries/{entry_id}/kill-chain")
 async def get_entry_kill_chain(
     entry_id: uuid.UUID = Path(..., description="UUID of the entry"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Entry TTPs ordered as an attack chain (kill-chain phases) — plan item 3.9.4.
@@ -209,7 +209,7 @@ async def get_entry_kill_chain(
 @router.get("/entries/{entry_id}/ttps/navigator")
 async def get_navigator_layer(
     entry_id: uuid.UUID = Path(..., description="UUID of the entry"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Build a MITRE ATT&CK Navigator layer JSON from the entry's linked techniques, titled after the entry."""
@@ -268,7 +268,7 @@ async def list_ttps(
     sort_order: str = Query("desc", pattern="^(asc|desc)$", description="Sort direction"),
     limit: int = Query(50, ge=1, le=500, description="Page size"),
     offset: int = Query(0, ge=0, description="Number of rows to skip"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Paginated catalog of known MITRE ATT&CK techniques with search, tactic filter, and sorting."""
@@ -301,7 +301,7 @@ async def list_ttps(
 @router.get("/ttps/by-technique/{technique_id}", response_model=TTPResponse)
 async def get_ttp_by_technique_id(
     technique_id: str = Path(..., description="ATT&CK technique ID, e.g. T1566.001 (case-insensitive)"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Look up a single TTP by its MITRE ATT&CK technique ID. Returns 404 if the technique is not in the catalog."""
@@ -315,7 +315,7 @@ async def get_ttp_by_technique_id(
 @router.get("/ttps/{ttp_id}/mitigations", response_model=list[MitigationResponse])
 async def get_ttp_mitigations(
     ttp_id: uuid.UUID = Path(..., description="UUID of the TTP"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Get mitigations linked to a TTP via the ttp_mitigations junction table."""
@@ -331,7 +331,7 @@ async def get_ttp_mitigations(
 @router.get("/ttps/{ttp_id}/related-techniques", response_model=TTPRelatedTechniquesResponse)
 async def get_ttp_related_techniques(
     ttp_id: uuid.UUID = Path(..., description="UUID of the TTP"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Parent technique, sub-techniques, and (for revoked entries) the replacement."""
@@ -396,7 +396,7 @@ async def extract_entry_cves(
 @router.get("/entries/{entry_id}/cves", response_model=list[CVEResponse])
 async def get_entry_cves(
     entry_id: uuid.UUID = Path(..., description="UUID of the entry"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List the CVEs linked to an entry, ordered by CVSS score descending."""
@@ -429,7 +429,7 @@ async def list_cves(
     sort_order: str = Query("desc", pattern="^(asc|desc)$", description="Sort direction"),
     limit: int = Query(50, ge=1, le=500, description="Page size"),
     offset: int = Query(0, ge=0, description="Number of rows to skip"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Paginated CVE list with search, severity and KEV filters, and sorting including EPSS/risk-tier columns."""
@@ -487,7 +487,7 @@ async def list_cves(
 @router.get("/cves/trending", response_model=list[CVEResponse])
 async def trending_cves(
     limit: int = Query(10, ge=1, le=500, description="Maximum number of CVEs to return"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Most-mentioned CVEs ranked by the number of entries linking to them."""
@@ -505,7 +505,7 @@ async def trending_cves(
 @router.get("/cves/{cve_id}", response_model=CVEResponse)
 async def get_cve(
     cve_id: str = Path(..., description="CVE UUID or CVE identifier string (e.g. CVE-2024-3400)"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single CVE by internal UUID or by CVE identifier string, including its linked-article count."""
@@ -529,7 +529,7 @@ async def get_cve(
 @router.get("/entries/{entry_id}/threat-actors", response_model=list[ThreatActorResponse])
 async def get_entry_threat_actors(
     entry_id: uuid.UUID = Path(..., description="UUID of the entry"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List the threat actors linked to an entry, including the surface forms matched in the text."""
@@ -576,7 +576,7 @@ async def list_threat_actors(
     sort_order: str = Query("desc", pattern="^(asc|desc)$", description="Sort direction"),
     limit: int = Query(50, ge=1, le=500, description="Page size"),
     offset: int = Query(0, ge=0, description="Number of rows to skip"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Paginated threat-actor list with name/alias search and sorting."""
@@ -606,7 +606,7 @@ async def list_threat_actors(
 @router.get("/threat-actors/{actor_id}", response_model=ThreatActorResponse)
 async def get_threat_actor(
     actor_id: uuid.UUID = Path(..., description="UUID of the threat actor"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single threat actor by UUID."""
@@ -623,7 +623,7 @@ async def get_threat_actor(
 @router.get("/entries/{entry_id}/malware", response_model=list[MalwareFamilyResponse])
 async def get_entry_malware(
     entry_id: uuid.UUID = Path(..., description="UUID of the entry"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List the malware families linked to an entry, including the surface forms matched in the text."""
@@ -672,7 +672,7 @@ async def list_malware(
     sort_order: str = Query("desc", pattern="^(asc|desc)$", description="Sort direction"),
     limit: int = Query(50, ge=1, le=500, description="Page size"),
     offset: int = Query(0, ge=0, description="Number of rows to skip"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Paginated malware-family list with name/alias search, type filter, and sorting."""
@@ -706,7 +706,7 @@ async def list_malware(
 @router.get("/malware/{malware_id}", response_model=MalwareFamilyResponse)
 async def get_malware(
     malware_id: uuid.UUID = Path(..., description="UUID of the malware family"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single malware family by UUID."""
@@ -723,7 +723,7 @@ async def get_malware(
 @router.get("/entries/{entry_id}/countries", response_model=list[EntryCountryResponse])
 async def get_entry_countries(
     entry_id: uuid.UUID = Path(..., description="UUID of the entry"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List the countries linked to an entry with junction metadata (role, confidence, source, matched names)."""
@@ -781,7 +781,7 @@ async def extract_entry_countries(
 @router.get("/entries/{entry_id}/sectors", response_model=list[EntrySectorResponse])
 async def get_entry_sectors(
     entry_id: uuid.UUID = Path(..., description="UUID of the entry"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List the victim sectors an entry describes as targeted, with the sector entity id for linking."""
@@ -808,7 +808,7 @@ async def get_entry_sectors(
 @router.get("/entries/{entry_id}/article-metadata")
 async def get_entry_article_metadata(
     entry_id: uuid.UUID = Path(..., description="UUID of the entry"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Report type, victim orgs, timeline anchors, and patch availability — plan items 3.9.6–3.9.9.
@@ -849,7 +849,7 @@ async def list_countries(
     sort_order: str = Query("desc", pattern="^(asc|desc)$", description="Sort direction"),
     limit: int = Query(50, ge=1, le=500, description="Page size"),
     offset: int = Query(0, ge=0, description="Number of rows to skip"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Paginated country list with search, region filter, sorting, and per-country targeting-actor counts."""
@@ -897,7 +897,7 @@ async def list_countries(
 @router.get("/countries/{country_id}", response_model=CountryResponse)
 async def get_country(
     country_id: uuid.UUID = Path(..., description="UUID of the country"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single country by UUID."""
@@ -911,7 +911,7 @@ async def get_country(
 @router.get("/countries/{country_id}/profile")
 async def get_country_profile(
     country_id: uuid.UUID = Path(..., description="UUID of the country"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a rich country threat profile with associated actors, campaigns, entries, and stats."""
@@ -1038,7 +1038,7 @@ async def get_country_profile(
 
 @router.get("/regions")
 async def list_regions(
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List all regions with country counts and threat activity stats."""
@@ -1138,7 +1138,7 @@ async def list_sectors(
     sort_order: str = Query("desc", pattern="^(asc|desc)$", description="Sort direction"),
     limit: int = Query(50, ge=1, le=500, description="Page size"),
     offset: int = Query(0, ge=0, description="Number of rows to skip"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Paginated list of the victim-sector vocabulary with per-sector targeting and victim counts."""
@@ -1188,7 +1188,7 @@ async def list_sectors(
 @router.get("/sectors/{sector_ref}", response_model=SectorResponse)
 async def get_sector(
     sector_ref: str = Path(..., description="Sector UUID or canonical slug (e.g. healthcare)"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single sector by UUID or slug, with its targeting and 90-day victim counts."""
@@ -1201,7 +1201,7 @@ async def get_sector(
 async def get_sector_profile(
     sector_ref: str = Path(..., description="Sector UUID or canonical slug (e.g. healthcare)"),
     window_days: int = Query(90, ge=7, le=730, description="Window for victim and country activity"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """The sector's victimology: who targets it (reported vs asserted), leak-site victims,
@@ -4442,7 +4442,7 @@ async def batch_entry_intel_counts(
         description="1-100 entry UUIDs",
         json_schema_extra={"example": ["d5b2f1a0-3c4e-4b6d-9a8f-1e2d3c4b5a69", "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"]},
     ),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Return entity counts for a batch of entries (for inline badges)."""
@@ -4878,7 +4878,7 @@ async def extract_entry_mitigations(
 @router.get("/entries/{entry_id}/mitigations", response_model=list[MitigationResponse])
 async def get_entry_mitigations(
     entry_id: uuid.UUID = Path(..., description="UUID of the entry"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List the mitigations linked to an entry, with per-entry confidence and source."""
@@ -4895,7 +4895,7 @@ async def get_entry_mitigations(
 @router.get("/entries/{entry_id}/cwes", response_model=list[CWEResponse])
 async def get_entry_cwes(
     entry_id: uuid.UUID = Path(..., description="UUID of the entry"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List the weaknesses linked to an entry, with per-entry confidence and source."""
@@ -5559,7 +5559,7 @@ async def list_mitigations(
     sort_order: str = Query("desc", pattern="^(asc|desc)$", description="Sort direction"),
     limit: int = Query(50, ge=1, le=500, description="Page size"),
     offset: int = Query(0, ge=0, description="Number of rows to skip"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Paginated mitigation list with search and sorting."""
@@ -5582,7 +5582,7 @@ async def list_mitigations(
 @router.get("/mitigations/{mitigation_id}", response_model=MitigationResponse)
 async def get_mitigation(
     mitigation_id: uuid.UUID = Path(..., description="UUID of the mitigation"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single mitigation by UUID."""
@@ -5735,7 +5735,7 @@ async def list_cwes(
     sort_order: str = Query("desc", pattern="^(asc|desc)$", description="Sort direction"),
     limit: int = Query(50, ge=1, le=500, description="Page size"),
     offset: int = Query(0, ge=0, description="Number of rows to skip"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Paginated weakness catalog with corpus counts, search, filters and sorting."""
@@ -5813,7 +5813,7 @@ async def list_cwes(
 async def cwe_rollup(
     abstraction: str = Query("Pillar", description="Ladder level to roll up to: Pillar, Class, Base, Variant"),
     limit: int = Query(25, ge=1, le=200, description="Maximum rows"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Every CVE in the corpus folded up to the given abstraction level.
@@ -5861,7 +5861,7 @@ async def _load_cwe(db: AsyncSession, cwe_id: str) -> CWE:
 @router.get("/cwes/{cwe_id}", response_model=CWEResponse)
 async def get_cwe(
     cwe_id: str = Path(..., description="CWE UUID or catalog id (e.g. CWE-416)"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single weakness by UUID or catalog id, with direct and rolled CVE counts."""
@@ -5890,7 +5890,7 @@ async def get_cwe(
 @router.get("/cwes/{cwe_id}/family", response_model=CWEFamilyResponse)
 async def get_cwe_family(
     cwe_id: str = Path(..., description="CWE UUID or catalog id (e.g. CWE-416)"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Where a weakness sits on the ladder: lineage to the pillar, children, siblings.
@@ -5948,7 +5948,7 @@ async def get_cwe_family(
 async def get_cwe_vendors(
     cwe_id: str = Path(..., description="CWE UUID or catalog id (e.g. CWE-416)"),
     limit: int = Query(8, ge=1, le=50, description="Maximum rows"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Vendors shipping the most CVEs with this weakness — who keeps writing this bug.
@@ -5984,7 +5984,7 @@ async def get_cwe_vendors(
 @router.get("/cves/{cve_id}/weaknesses", response_model=list[CVEWeaknessRow])
 async def get_cve_weaknesses(
     cve_id: str = Path(..., description="CVE UUID or CVE identifier string (e.g. CVE-2024-3400)"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Every NVD weakness assignment on a CVE — feeds the profile's Weaknesses panel.
@@ -6083,7 +6083,7 @@ async def _entity_weakness_profile(db: AsyncSession, join_col, entity_id: uuid.U
 async def get_vendor_weaknesses(
     vendor_id: uuid.UUID = Path(..., description="UUID of the vendor"),
     limit: int = Query(10, ge=1, le=50, description="Maximum rows"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """A vendor's weakness mix — what this vendor keeps getting wrong.
@@ -6099,7 +6099,7 @@ async def get_vendor_weaknesses(
 async def get_product_weaknesses(
     product_id: uuid.UUID = Path(..., description="UUID of the product"),
     limit: int = Query(10, ge=1, le=50, description="Maximum rows"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """A product's weakness mix, derived the same way as the vendor view."""
@@ -6156,7 +6156,7 @@ async def extract_entry_tools(
 @router.get("/entries/{entry_id}/tools", response_model=list[ToolResponse])
 async def get_entry_tools(
     entry_id: uuid.UUID = Path(..., description="UUID of the entry"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List the tools linked to an entry, with per-entry confidence and matched names."""
@@ -6182,7 +6182,7 @@ async def list_tools(
     sort_order: str = Query("asc", pattern="^(asc|desc)$", description="Sort direction"),
     limit: int = Query(50, ge=1, le=500, description="Page size"),
     offset: int = Query(0, ge=0, description="Number of rows to skip"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Paginated tool list with name/alias search, type filter, and sorting."""
@@ -6216,7 +6216,7 @@ async def list_tools(
 @router.get("/tools/{tool_id:uuid}", response_model=ToolResponse)
 async def get_tool(
     tool_id: uuid.UUID = Path(..., description="UUID of the tool"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single tool by UUID."""
@@ -6252,7 +6252,7 @@ def _vendor_to_response(v: Vendor, entry_link: EntryVendor | None = None) -> Ven
 @router.get("/entries/{entry_id}/vendors", response_model=list[VendorResponse])
 async def get_entry_vendors(
     entry_id: uuid.UUID = Path(..., description="UUID of the entry"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List the vendors linked to an entry, with per-entry confidence, source, and matched names."""
@@ -6278,7 +6278,7 @@ async def list_vendors(
     sort_order: str = Query("asc", pattern="^(asc|desc)$", description="Sort direction"),
     limit: int = Query(50, ge=1, le=500, description="Page size"),
     offset: int = Query(0, ge=0, description="Number of rows to skip"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Paginated vendor list with name/alias search, type filter, and sorting."""
@@ -6310,7 +6310,7 @@ async def list_vendors(
 @router.get("/vendors/{vendor_id}", response_model=VendorResponse)
 async def get_vendor(
     vendor_id: uuid.UUID = Path(..., description="UUID of the vendor"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single vendor by UUID."""
@@ -6324,7 +6324,7 @@ async def get_vendor(
 @router.get("/vendors/{vendor_id}/products", response_model=list[ProductResponse])
 async def get_vendor_products(
     vendor_id: uuid.UUID = Path(..., description="UUID of the vendor"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List all products belonging to a vendor, sorted by name."""
@@ -6366,7 +6366,7 @@ def _product_to_response(p: Product, entry_link: EntryProduct | None = None) -> 
 @router.get("/entries/{entry_id}/products", response_model=list[ProductResponse])
 async def get_entry_products(
     entry_id: uuid.UUID = Path(..., description="UUID of the entry"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List the products linked to an entry, with per-entry confidence, source, and matched names."""
@@ -6394,7 +6394,7 @@ async def list_products(
     sort_order: str = Query("asc", pattern="^(asc|desc)$", description="Sort direction"),
     limit: int = Query(50, ge=1, le=500, description="Page size"),
     offset: int = Query(0, ge=0, description="Number of rows to skip"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Paginated product list with name/alias search, type and vendor filters, and sorting."""
@@ -6430,7 +6430,7 @@ async def list_products(
 @router.get("/products/{product_id}", response_model=ProductResponse)
 async def get_product(
     product_id: uuid.UUID = Path(..., description="UUID of the product"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single product by UUID, including its vendor name."""
@@ -6522,7 +6522,7 @@ async def get_product_affected_cves(
     sort: str = Query("cvss", pattern="^(cvss|epss|recent)$", description="Sort by CVSS, EPSS, or published date"),
     limit: int = Query(50, ge=1, le=200, description="Page size"),
     offset: int = Query(0, ge=0, description="Number of rows to skip"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """CVEs affecting a product per authoritative NVD CPE links, with version ranges and severity/KEV counts."""
@@ -6585,7 +6585,7 @@ async def get_cwe_affected_cves(
     sort: str = Query("cvss", pattern="^(cvss|epss|recent)$", description="Sort by CVSS, EPSS, or published date"),
     limit: int = Query(50, ge=1, le=200, description="Page size"),
     offset: int = Query(0, ge=0, description="Number of rows to skip"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """CVEs carrying this weakness per the NVD weakness block, with severity/KEV counts.
@@ -6685,7 +6685,7 @@ async def get_vendor_affected_cves(
     sort: str = Query("cvss", pattern="^(cvss|epss|recent)$", description="Sort by CVSS, EPSS, or published date"),
     limit: int = Query(50, ge=1, le=200, description="Page size"),
     offset: int = Query(0, ge=0, description="Number of rows to skip"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Vendor rollup: CVEs affecting the vendor directly plus any of its products."""
@@ -6760,7 +6760,7 @@ async def get_vendor_affected_cves(
 @router.get("/cves/{cve_id}/affected", response_model=list[CVEAffectedEntityRow])
 async def get_cve_affected(
     cve_id: str = Path(..., description="CVE UUID or CVE identifier string (e.g. CVE-2024-3400)"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Parsed CPE pairs for a CVE with entity resolution — feeds the profile's Affected panel."""
@@ -6816,7 +6816,7 @@ class ResolveEntityNamesRequest(BaseModel):
 @router.post("/intelligence/resolve-names")
 async def resolve_entity_names(
     body: ResolveEntityNamesRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Resolve entity UUIDs to {id, name} for display in reports."""

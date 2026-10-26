@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
 from app.core.pagination import PaginatedResponse
-from app.core.security import get_current_user
+from app.core.security import get_current_user, get_viewer
 from app.database import get_db
 from app.intelligence.relationship_matrix import (
     allowed_verbs_for_pair,
@@ -106,7 +106,7 @@ async def list_entity_relationships(
     ),
     limit: int = Query(50, ge=1, le=500, description="Maximum relationships per page."),
     offset: int = Query(0, ge=0, description="Number of relationships to skip for pagination."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Paginated entity↔entity relationships, newest first, with endpoint display names resolved.
@@ -233,7 +233,7 @@ async def get_entity_relationships(
     entity_id: uuid.UUID = Path(..., description="UUID of the pivot entity."),
     relationship_type: str | None = Query(None, description="Filter by verb (e.g. uses, targets, attributed_to)."),
     include_rejected: bool = Query(False, description="Include analyst-rejected relationships (hidden by default)."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Get all relationships for a specific entity (as source or target)."""

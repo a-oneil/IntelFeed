@@ -42,14 +42,17 @@ router = APIRouter()
 
 @router.get("/registration-status")
 async def registration_status(db: AsyncSession = Depends(get_db)):
-    """Public registration configuration: whether self-registration is enabled and if an invite code is required."""
+    """Public pre-login configuration: whether self-registration is enabled, if an invite code is required,
+    and whether anonymous visitors may browse read-only (public read-only mode)."""
     from app.services.system_settings import get_setting
 
     enabled = await get_setting("registration_enabled", db)
     invite_code = await get_setting("registration_invite_code", db)
+    public_read_only = await get_setting("public_read_only_enabled", db)
     return {
         "registration_enabled": enabled is not False,
         "invite_code_required": bool(invite_code),
+        "public_read_only_enabled": bool(public_read_only),
     }
 
 

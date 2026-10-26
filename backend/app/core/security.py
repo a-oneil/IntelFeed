@@ -1,5 +1,5 @@
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 import bcrypt
@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.core.public_access import set_viewer_anonymous
 from app.database import get_db
 from app.models.user import User
 
@@ -110,7 +111,75 @@ async def get_current_user(
     payload = decode_token(credentials.credentials)
     if payload.get("type") != "access":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
+    set_viewer_anonymous(False)
     return await _user_from_payload(payload, db)
+
+
+# ── Public read-only mode ─────────────────────────────────────────────
+#
+# With the admin switch on, a request with no token is a *visitor*: it may
+# read the routes that deliberately take ``get_viewer`` instead of
+# ``get_current_user`` and nothing else. Every other route keeps the login
+# check it has today, so anything new or overlooked stays locked. A visitor
+# never gets a token, so the write lock (core/public_access.py) refuses every
+# mutating request from one before the route runs.
+
+ANONYMOUS_ROLE = "anonymous"
+
+
+@dataclass(frozen=True, slots=True)
+class AnonymousViewer:
+    """The read-only visitor a ``get_viewer`` route sees when nobody is signed in.
+
+    It walks like a ``User`` for the attributes read routes touch, with
+    ``id`` ``None``: every per-user filter (``UserEntryState.user_id == user.id``,
+    watches, stacks, personal weights, tag visibility) then matches no row,
+    which is exactly the "no user" answer — and a route that tried to *write*
+    a user-keyed row would fail on the NOT NULL column rather than store
+    anything. Routes that must branch (hide feed URLs, skip a stamp) check
+    ``user.is_anonymous``.
+    """
+
+    id: None = None
+    username: None = None
+    role: str = ANONYMOUS_ROLE
+    is_active: bool = True
+    is_anonymous: bool = True
+    settings: dict = field(default_factory=dict)
+    theme_id: None = None
+    custom_css: None = None
+
+
+def public_read_only_enabled() -> bool:
+    """Whether anonymous visitors may browse (Settings → Users → Security)."""
+    return bool(settings.get("public_read_only_enabled"))
+
+
+_optional_bearer = HTTPBearer(auto_error=False)
+
+
+async def get_viewer(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_optional_bearer),
+    db: AsyncSession = Depends(get_db),
+) -> User | AnonymousViewer:
+    """``get_current_user`` for routes a visitor may read.
+
+    A token is checked exactly as ``get_current_user`` checks it. With no
+    token the result is the anonymous viewer while public read-only mode is
+    on, and the same 401 as today while it is off.
+    """
+    if credentials is not None:
+        payload = decode_token(credentials.credentials)
+        if payload.get("type") != "access":
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
+        set_viewer_anonymous(False)
+        return await _user_from_payload(payload, db)
+    if public_read_only_enabled():
+        set_viewer_anonymous(True)
+        return AnonymousViewer()
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated", headers={"WWW-Authenticate": "Bearer"}
+    )
 
 
 @dataclass(frozen=True, slots=True)

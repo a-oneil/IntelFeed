@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 120
     refresh_token_expire_days: int = 7
     registration_enabled: bool = True
+    # Anonymous visitors may browse read-only (see docs/public-read-only-mode.md)
+    public_read_only_enabled: bool = False
 
     # Signal engine (see planning/engine-plan.md)
     signal_engine_shadow: bool = True

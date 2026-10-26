@@ -12,9 +12,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
-from app.core.security import get_current_user
+from app.core.security import get_current_user, get_viewer
 from app.database import get_db
 from app.intelligence import story_threads
+from app.models.entry import Entry
 from app.models.story_thread import StoryThread
 from app.models.user import User
 from app.schemas.thread import (
@@ -46,7 +47,7 @@ async def list_threads(
     status: str = Query("open", description="open, dormant, closed, or 'any'"),
     limit: int = Query(40, ge=1, le=200, description="Maximum threads returned"),
     q: str | None = Query(None, max_length=200, description="Substring match on the thread title"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     rows = await story_threads.list_threads(db, user.id, status=status, limit=limit, q=q)
@@ -65,7 +66,7 @@ async def list_threads(
 )
 async def get_thread(
     slug: str = Path(..., description="Thread slug", examples=["shai-hulud-npm-supply-chain-worm"]),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     row = await story_threads.get_thread(db, slug, user.id)
@@ -74,6 +75,13 @@ async def get_thread(
 
     thread_id = row["id"]
     members = await story_threads.thread_members(db, thread_id, user.id)
+    if user.is_anonymous and members:
+        # The thread tables are raw SQL, outside the ORM filter that hides the
+        # Manual Uploads feed from visitors: keep only the members it lets through.
+        visible = set(
+            (await db.execute(select(Entry.id).where(Entry.id.in_([m["entry_id"] for m in members])))).scalars()
+        )
+        members = [m for m in members if m["entry_id"] in visible]
     beats = await story_threads.thread_beats(db, thread_id)
     yields = await story_threads.thread_yield(db, thread_id)
     nearest = await story_threads.nearest_threads(db, thread_id)

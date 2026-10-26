@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import entity_types
 from app.core.exceptions import AppError
 from app.core.pagination import CursorPaginatedResponse
-from app.core.security import get_current_user
+from app.core.security import get_current_user, get_viewer
 from app.database import get_db
 from app.intelligence import story_threads
 from app.intelligence.sectors import sector_label
@@ -239,7 +239,7 @@ async def calendar_buckets(
         False, description="Attach each day's 10 most-mentioned entities (range limited to 92 days)"
     ),
     tz: str | None = Query(None, description="Accepted for API symmetry; currently unused — days bucket by UTC date"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Per-day entry counts over a date range for the Atlas calendar view.
@@ -343,7 +343,7 @@ async def map_buckets(
     min_confidence: str | None = Query(
         None, description="Count only entry–country links at or above this confidence (low, medium, high)"
     ),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Per-country entry counts over a date range for the Atlas map view.
@@ -481,7 +481,7 @@ async def list_entries(
     dedup: bool = Query(True, description="Collapse same-content duplicates to the earliest-ingested copy"),
     limit: int = Query(50, ge=1, le=500, description="Page size"),
     cursor: str | None = Query(None, description="Opaque pagination cursor from the previous page's next_cursor"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Cursor-paginated entry list for the reader.
@@ -1128,7 +1128,7 @@ async def count_entries(
     entity_id: uuid.UUID | None = Query(None, description="With entity_type: the entity to filter by"),
     sector: str | None = Query(None, description="Only entries whose targeted sector matches this slug"),
     dedup: bool = Query(True, description="Collapse same-content duplicates to the earliest-ingested copy"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, int]:
     """Count entries matching the same filters as the list endpoint (no pagination).
@@ -1414,7 +1414,7 @@ async def priority_queue(
     ),
     limit: int = Query(50, ge=1, le=200, description="Entries per page; thread rows are additional"),
     cursor: str | None = Query(None, description="Opaque pagination cursor from the previous page's next_cursor"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     return await build_priority_queue(
@@ -1885,7 +1885,7 @@ async def day_intel(
     before: datetime = Query(..., description="End of day window (inclusive)"),
     feed_id: uuid.UUID | None = Query(None, description="Restrict to entries from this feed"),
     category_id: uuid.UUID | None = Query(None, description="Restrict to feeds in this category"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Top entities + urgency signals for the given day window.
@@ -2074,7 +2074,7 @@ async def day_entities(
     before: datetime = Query(..., description="End of day window (inclusive)"),
     feed_id: uuid.UUID | None = Query(None, description="Restrict to entries from this feed"),
     category_id: uuid.UUID | None = Query(None, description="Restrict to feeds in this category"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Distinct entities mentioned by all entries in the day window.
@@ -2428,7 +2428,7 @@ async def generate_daily_summary(
 @router.get("/{entry_id}", response_model=EntryDetailResponse)
 async def get_entry(
     entry_id: uuid.UUID = Path(..., description="Entry UUID"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Full detail for one entry: content, translation fields, per-user state,
@@ -2767,7 +2767,7 @@ async def translate_entry(
 async def get_similar_entries(
     entry_id: uuid.UUID = Path(..., description="Entry UUID"),
     limit: int = Query(10, ge=1, le=30, description="Maximum similar entries to return"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Find entries similar to the given entry.
@@ -2865,7 +2865,7 @@ async def get_entry_media(
 @router.get("/{entry_id}/urls")
 async def get_entry_urls(
     entry_id: uuid.UUID = Path(..., description="Entry UUID"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Extract referenced URLs from entry HTML content."""
@@ -3216,7 +3216,7 @@ class ResolveNamesRequest(BaseModel):
 @router.post("/resolve-names")
 async def resolve_entry_names(
     body: ResolveNamesRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Resolve entry UUIDs to {id, title, feed_title} for display."""

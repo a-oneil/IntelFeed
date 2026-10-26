@@ -11,10 +11,12 @@ from app.config import settings
 from app.core.exceptions import AppError, app_error_handler, http_error_handler, validation_error_handler
 from app.core.logging import AuditLoggingMiddleware, RequestLoggingMiddleware, setup_logging
 from app.core.metrics import PrometheusMiddleware
+from app.core.public_access import AnonymousWriteLockMiddleware
 from app.core.rate_limit import RateLimitMiddleware
 from app.core.security import get_current_user
 from app.core.security_headers import SecurityHeadersMiddleware
 from app.models.user import User
+from app.services import public_view  # noqa: F401  (registers the visitor data filter)
 
 logger = logging.getLogger(__name__)
 
@@ -710,6 +712,7 @@ app.add_middleware(AuditLoggingMiddleware)
 app.add_middleware(PrometheusMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RateLimitMiddleware)
+app.add_middleware(AnonymousWriteLockMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,

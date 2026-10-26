@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.widgets import _parse_date_range
 from app.core.exceptions import AppError
-from app.core.security import get_current_user
+from app.core.security import get_viewer
 from app.database import get_db
 from app.models.cve import CVE, EntryCVE
 from app.models.detection_rule import DetectionRule
@@ -37,7 +37,7 @@ def _trend_pct(current: int, previous: int) -> float:
 async def weekly_recap(
     date_from: str | None = Query(None, description="Start of window (ISO 8601); default 7 days before date_to."),
     date_to: str | None = Query(None, description="End of window (ISO 8601); default now (UTC)."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Recap counts (entries, new CVEs, new actors, detection rules) for the window vs the preceding one."""
@@ -134,7 +134,7 @@ async def actor_activity(
     date_to: str | None = Query(None, description="End of window (ISO 8601); default now (UTC)."),
     limit: int = Query(5, ge=1, le=25, description="Maximum number of top actors when actor_ids is not set."),
     actor_ids: str | None = Query(None, description="Comma-separated actor UUIDs to chart instead of the top N."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Daily entry-mention sparklines for the top (or explicitly selected) threat actors in the window."""
@@ -240,7 +240,7 @@ async def hot_correlations(
     date_from: str | None = Query(None, description="Start of window (ISO 8601); default 7 days before date_to."),
     date_to: str | None = Query(None, description="End of window (ISO 8601); default now (UTC)."),
     limit: int = Query(15, ge=1, le=100, description="Maximum number of entity pairs to return."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Actor–malware pairs (topped up with actor–CVE pairs) co-occurring in entries published in the window."""

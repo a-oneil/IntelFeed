@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.widgets import _parse_date_range
 from app.core.exceptions import AppError
-from app.core.security import get_current_user
+from app.core.security import get_current_user, get_viewer
 from app.database import get_db
 from app.models.entry import Entry
 from app.models.entry_state import UserEntryState
@@ -27,7 +27,7 @@ router = APIRouter()
 
 @router.get("/triage-queue-stats")
 async def triage_queue_stats(
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Unread, starred, and total entry counts for the current user across active, unmuted feeds."""
@@ -128,7 +128,7 @@ async def top_tags(
     date_from: str | None = Query(None, description="Start of window (ISO 8601); default 30 days before date_to."),
     date_to: str | None = Query(None, description="End of window (ISO 8601); default now (UTC)."),
     limit: int = Query(15, ge=1, le=100, description="Maximum number of tags to return."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Tags ranked by distinct tagged entries published in the window."""

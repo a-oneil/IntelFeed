@@ -9,7 +9,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
-from app.core.security import get_admin_user, get_current_user
+from app.core.security import get_admin_user, get_current_user, get_viewer
 from app.database import get_db
 from app.intelligence.correlation import (
     ENTITY_CONFIG,
@@ -393,7 +393,7 @@ async def get_temporal_clusters(
     ),
     min_shared: int = Query(2, ge=1, le=10, description="Minimum number of entities entries must share to cluster."),
     limit: int = Query(20, ge=1, le=500, description="Maximum number of clusters to return."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Find temporal clusters: entries from different feeds within N-hour windows sharing entities."""
@@ -476,7 +476,7 @@ async def pivot_entity(
         pattern="^(strength|recent|articles)$",
         description="Ranking for related lists: strength score, most recent co-occurrence, or shared article count.",
     ),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Pivot from one entity to all related entities via shared entries.
@@ -520,7 +520,7 @@ async def get_entity_graph(
     include_observables: bool = Query(
         False, description="Include IOC-ledger observables as graph nodes (off by default to keep maps readable)."
     ),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a relationship graph for visualization (nodes + edges)."""
@@ -542,7 +542,7 @@ async def get_entry_graph(
     include_observables: bool = Query(
         False, description="Include IOC-ledger observables as graph nodes (off by default to keep maps readable)."
     ),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a relationship graph of all entities linked to an entry."""
@@ -579,7 +579,7 @@ async def get_entity_timeline(
         ...,
         description="Entity UUID, or a human-readable id: technique id (T1566.001) or CVE id (CVE-2024-3400).",
     ),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Get temporal activity for an entity based on linked entry dates."""

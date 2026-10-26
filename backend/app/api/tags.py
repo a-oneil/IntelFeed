@@ -6,7 +6,7 @@ from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
-from app.core.security import get_current_user
+from app.core.security import get_current_user, get_viewer
 from app.database import get_db
 from app.models.tag import EntryTag, Tag
 from app.models.user import User
@@ -66,7 +66,7 @@ async def _visible_entry_count(db: AsyncSession, tag_id: uuid.UUID, user_id: uui
 
 @router.get("", response_model=list[TagResponse])
 async def list_tags(
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List all tags with their per-tag entry counts, ordered by name.
@@ -271,7 +271,7 @@ async def bulk_untag_entries(
 @router.get("/entries/{entry_id}", response_model=list[TagResponse])
 async def get_entry_tags(
     entry_id: uuid.UUID = Path(..., description="Entry UUID"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List the tags attached to one entry as the caller sees them, ordered by name."""

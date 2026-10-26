@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.widgets import _parse_date_range
 from app.core.exceptions import AppError
-from app.core.security import get_current_user
+from app.core.security import get_current_user, get_viewer
 from app.database import get_db
 from app.models.campaign import Campaign, CampaignEntry
 from app.models.country import Country, EntryCountry
@@ -26,7 +26,7 @@ async def trending_vendors(
     date_from: str | None = Query(None, description="Start of window (ISO 8601); default 30 days before date_to."),
     date_to: str | None = Query(None, description="End of window (ISO 8601); default now (UTC)."),
     limit: int = Query(10, ge=1, le=500, description="Maximum number of vendors to return."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Vendors ranked by distinct entries mentioning them in the window."""
@@ -68,7 +68,7 @@ async def trending_products(
     date_from: str | None = Query(None, description="Start of window (ISO 8601); default 30 days before date_to."),
     date_to: str | None = Query(None, description="End of window (ISO 8601); default now (UTC)."),
     limit: int = Query(10, ge=1, le=500, description="Maximum number of products to return."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Products (with their vendor) ranked by distinct entries mentioning them in the window."""
@@ -113,7 +113,7 @@ async def targeted_countries(
     date_from: str | None = Query(None, description="Start of window (ISO 8601); default 30 days before date_to."),
     date_to: str | None = Query(None, description="End of window (ISO 8601); default now (UTC)."),
     limit: int = Query(10, ge=1, le=500, description="Maximum number of countries to return."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Countries linked to entries in a "target" role, ranked by distinct entry count in the window."""

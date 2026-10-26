@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.adapters import _EXTENDED_ADAPTERS
 from app.core.exceptions import AppError
 from app.core.pagination import CursorPaginatedResponse, PaginatedResponse
-from app.core.security import get_admin_user, get_current_user
+from app.core.security import get_admin_user, get_current_user, get_viewer
 from app.database import get_db
 from app.models.entry import Entry
 from app.models.entry_state import UserEntryState
@@ -48,6 +48,7 @@ from app.services.feed_visibility import (
     subscriptions_enabled,
     visible_feed_ids_query,
 )
+from app.services.public_view import strip_feed_for_visitor
 from app.services.title_filter import matching_pattern, normalize_patterns, parse_patterns
 
 # Extended adapter feed types that skip URL discovery. Derived from the adapter
@@ -150,7 +151,7 @@ async def list_feeds(
     category_id: uuid.UUID | None = Query(None, description="Only return feeds in this category"),
     limit: int = Query(50, ge=1, le=1000, description="Maximum number of feeds to return"),
     offset: int = Query(0, ge=0, description="Number of feeds to skip for pagination"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List subscribed feeds with per-feed unread counts for the current user.
@@ -227,6 +228,8 @@ async def list_feeds(
             # Reads as paused if the instance switched it off OR this reader did.
             resp.is_active = feed.is_active and not pause_map.get(feed.id, False)
             resp.per_user = True
+        if user.is_anonymous:
+            strip_feed_for_visitor(resp)
         items.append(resp)
 
     return PaginatedResponse(items=items, total=total, limit=limit, offset=offset, has_more=offset + limit < total)
@@ -838,7 +841,7 @@ async def get_feed_analytics(
 @router.get("/{feed_id}", response_model=FeedResponse)
 async def get_feed(
     feed_id: uuid.UUID = Path(..., description="UUID of the feed"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a single feed by id. Returns 404 if the feed does not exist."""
@@ -851,6 +854,8 @@ async def get_feed(
         if sub:
             resp.is_muted = sub.is_muted
         resp.per_user = True
+    if user.is_anonymous:
+        strip_feed_for_visitor(resp)
     return resp
 
 
@@ -1060,7 +1065,7 @@ async def list_feed_entries(
     sort: str = Query("newest", description="Sort order: 'newest' or 'oldest' by published date"),
     limit: int = Query(50, ge=1, le=500, description="Maximum number of entries per page"),
     cursor: str | None = Query(None, description="Opaque cursor from a previous page for pagination"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List entries for a specific feed."""

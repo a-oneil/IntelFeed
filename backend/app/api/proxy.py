@@ -1,15 +1,20 @@
 import hashlib
 import logging
+import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.safe_http import OutboundBlocked, safe_async_client, safe_curl_get
-from app.core.security import get_current_user
+from app.core.security import get_viewer
+from app.database import get_db
+from app.models.entry import Entry
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -108,11 +113,26 @@ def _write_cache(url: str, content: bytes, content_type: str) -> None:
         logger.debug("Failed to write image cache for %s", url, exc_info=True)
 
 
+async def _entry_shows_image(db: AsyncSession, entry_id: uuid.UUID | None, url: str) -> bool:
+    """Whether ``url`` is the entry's lead image or appears in its stored content."""
+    if entry_id is None:
+        return False
+    row = (await db.execute(select(Entry.image_url, Entry.content).where(Entry.id == entry_id))).one_or_none()
+    if row is None:
+        return False
+    image_url, content = row
+    return url == image_url or (bool(content) and url in content)
+
+
 @router.get("/image")
 async def proxy_image(
     url: str = Query(..., description="Absolute http(s) URL of the external image to fetch"),
     w: int | None = Query(None, ge=1, le=2000, description="Target width in pixels; larger images are downscaled"),
-    user: User = Depends(get_current_user),
+    entry: uuid.UUID | None = Query(
+        None, description="The entry whose article shows this image; lets a visitor load it before it is cached"
+    ),
+    user: User = Depends(get_viewer),
+    db: AsyncSession = Depends(get_db),
 ):
     """Proxy and optionally resize an external image."""
     if not settings.get("image_proxy_enabled"):
@@ -138,6 +158,11 @@ async def proxy_image(
                 **_IMAGE_HEADERS,
             },
         )
+
+    # A visitor may only make the server fetch an image that a stored article
+    # actually shows; anything else would make this an anonymous download relay.
+    if user.is_anonymous and not await _entry_shows_image(db, entry, url):
+        return Response(status_code=404)
 
     referer = f"{parsed.scheme}://{parsed.netloc}/"
 

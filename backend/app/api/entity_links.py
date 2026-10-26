@@ -23,7 +23,7 @@ from sqlalchemy.orm import InstrumentedAttribute
 
 from app.core.exceptions import AppError
 from app.core.pagination import PaginatedResponse
-from app.core.security import get_admin_user, get_current_user
+from app.core.security import get_admin_user, get_current_user, get_viewer
 from app.database import get_db
 from app.intelligence.autolinker import dropped_ai_off_count
 from app.models.cve import CVE, EntryCVE
@@ -158,7 +158,7 @@ async def list_entity_links(
     days: int | None = Query(None, ge=1, le=3650, description="Only links extracted within the last N days"),
     limit: int = Query(50, ge=1, le=500, description="Maximum links per page."),
     offset: int = Query(0, ge=0, description="Number of links to skip for pagination."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Paginated entry→entity autolinks, unioned across all junction tables and

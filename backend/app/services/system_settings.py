@@ -172,6 +172,7 @@ CONFIGURABLE_KEYS: dict[str, type] = {
     "pipeline_run_logging_enabled": bool,
     "pipeline_engine_enabled": bool,
     # Security
+    "public_read_only_enabled": bool,
     "registration_enabled": bool,
     "registration_invite_code": str,
     # Rate Limiting
@@ -892,6 +893,15 @@ SETTING_METADATA: dict[str, dict] = {
             "scoring, and opportunity badges."
         ),
         "group": "intelligence",
+    },
+    "public_read_only_enabled": {
+        "label": "Public read-only mode",
+        "description": (
+            "Let anyone open IntelFeed without an account. Visitors can browse articles, entity profiles, story "
+            "threads and the default dashboards, but can't change anything, run AI, or see private pages. "
+            "Off by default."
+        ),
+        "group": "security",
     },
     "registration_enabled": {
         "label": "Account Registration",

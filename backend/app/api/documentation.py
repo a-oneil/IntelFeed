@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
-from app.core.security import decode_token, get_current_user
+from app.core.security import decode_token, get_viewer
 from app.database import get_db
 from app.models.user import User
 from app.schemas.documentation import (
@@ -39,7 +39,7 @@ router = APIRouter()
         "appears without a code change or an API restart."
     ),
 )
-async def list_pages(_user: User = Depends(get_current_user)) -> DocumentationIndexResponse:
+async def list_pages(_user: User = Depends(get_viewer)) -> DocumentationIndexResponse:
     pages = [
         DocumentationPageSummary(slug=p.slug, title=p.title, section=p.section, summary=p.summary)
         for p in docs_service.index()
@@ -149,7 +149,7 @@ async def get_asset(
 )
 async def get_page(
     slug: str = PathParam(description="Page slug, e.g. `architecture`.", examples=["architecture"]),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(get_viewer),
 ) -> DocumentationPageResponse:
     page = docs_service.read_page(slug)
     if page is None:

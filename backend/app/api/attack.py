@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import get_current_user
+from app.core.security import get_viewer
 from app.database import get_db
 from app.intelligence.tactics import TACTIC_ORDER, tactic_label
 from app.models.entry import Entry
@@ -34,7 +34,7 @@ async def get_attack_matrix(
     domain: str = Query("enterprise", pattern="^(enterprise|mobile|ics)$", description="ATT&CK matrix domain."),
     days: int | None = Query(None, ge=1, le=3650, description="Feed-frequency window; omit for all-time"),
     include_deprecated: bool = Query(False, description="Include techniques deprecated/revoked in the ATT&CK catalog."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Navigator-style matrix data: tactics in kill-chain order, techniques with
@@ -171,7 +171,7 @@ async def generate_layer(
     date_to: str | None = Query(
         None, description="ISO date/datetime upper bound on TTP extraction time (default: now)."
     ),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Generate an ATT&CK Navigator layer JSON from extracted TTPs, scored and color-graded by article frequency."""
@@ -254,7 +254,7 @@ async def list_techniques(
         None, description="ISO date/datetime upper bound on TTP extraction time (default: now)."
     ),
     limit: int = Query(50, ge=1, le=500, description="Maximum number of techniques to return."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List techniques extracted in the window, ranked by article count, with each technique's latest sighting date."""

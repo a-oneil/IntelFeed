@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
-from app.core.security import get_admin_user, get_current_user
+from app.core.security import get_admin_user, get_current_user, get_viewer
 from app.database import get_db
 from app.models.category import Category
 from app.models.feed import Feed
@@ -23,7 +23,7 @@ router = APIRouter()
 
 @router.get("", response_model=list[CategoryResponse])
 async def list_categories(
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List categories as a tree (top-level categories with nested children), each

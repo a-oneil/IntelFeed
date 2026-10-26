@@ -30,10 +30,29 @@ AUTH_LIMIT = (10, 300)  # 10 req/5 min — prevents brute force
 CHAT_LIMIT = (10, 60)  # 10 req/min — protects API credits
 AI_LIMIT = (20, 60)  # 20 req/min
 
+# Anonymous API traffic (public read-only mode, share pages, TAXII/EDL
+# consumers) is budgeted per client IP: a page of the app is a few dozen
+# requests, so the general bucket is generous, and the reads that cost real
+# database time — graphs, pivots, timelines, analytics — get a tighter one.
+ANON_LIMIT = (240, 60)
+ANON_HEAVY_LIMIT = (30, 60)
+ANON_HEAVY_PREFIXES = (
+    "/api/intelligence/graph/",
+    "/api/intelligence/pivot/",
+    "/api/intelligence/timeline/",
+    "/api/intelligence/entry-graph/",
+    "/api/intelligence/temporal-clusters",
+    "/api/analytics/",
+    "/api/entries/map",
+    "/api/entries/calendar",
+    "/api/entries/priority-queue",
+    "/api/entity-relationships",
+)
+
 _PROVIDER_TEST = re.compile(r"^/api/ai/providers/[0-9a-fA-F-]{36}/test$")
 
 
-def _get_limit(path: str, method: str = "GET") -> tuple[int, int, str] | None:
+def _get_limit(path: str, method: str = "GET", *, anonymous: bool = False) -> tuple[int, int, str] | None:
     """Return (max_requests, window_seconds, bucket_name), or None to skip rate limiting."""
     if path in AUTH_PATHS:
         return (*AUTH_LIMIT, "auth")
@@ -51,6 +70,10 @@ def _get_limit(path: str, method: str = "GET") -> tuple[int, int, str] | None:
     # routes. The per-link daily limit is enforced in the route itself.
     if method == "POST" and path.startswith("/api/shared/") and path.endswith(("/ask-agent", "/run-ai-task")):
         return (*AI_LIMIT, "ai")
+    if anonymous and path.startswith("/api/"):
+        if path.startswith(ANON_HEAVY_PREFIXES):
+            return (*ANON_HEAVY_LIMIT, "anon_heavy")
+        return (*ANON_LIMIT, "anon")
     # Authenticated read-only API traffic is not rate limited.
     # This is a self-hosted, single-user app — the default 600 req/min
     # limit was too low for normal operation with 200+ feeds triggering
@@ -124,12 +147,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if path in EXEMPT_PATHS or request.method == "OPTIONS":
             return await call_next(request)
 
-        limit = _get_limit(path, request.method)
+        identity = _get_identity(request)
+        limit = _get_limit(path, request.method, anonymous=identity.startswith("ip:"))
         if limit is None:
             return await call_next(request)
 
         max_requests, window, bucket = limit
-        identity = _get_identity(request)
         key = f"ratelimit:{bucket}:{identity}:{window}"
 
         try:
