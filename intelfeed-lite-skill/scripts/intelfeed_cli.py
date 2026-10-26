@@ -751,6 +751,20 @@ TOOLS: dict[str, dict] = {
         ),
         "params": {},
     },
+    "get_ingest_batch": {
+        "description": (
+            "Status of one ingest batch: per-item status (queued / parsing / created / expanded / "
+            "duplicate / no_text / unsupported / too_large / failed), the entry id each item "
+            "produced, and a summary. Poll until summary.status is 'complete'. Created entries still "
+            "go on to the pipeline and the one-pass AI analysis afterwards, like any polled entry."
+        ),
+        "params": {
+            "batch_id": {
+                "type": 'str',
+                "required": True,
+            },
+        },
+    },
     "get_intel_profile": {
         "description": (
             "One intel profile with its countries (resolved names), sectors (labels) and other scope "

@@ -182,6 +182,14 @@ class Settings(BaseSettings):
     telegram_max_media_size_mb: int = 25  # Skip media larger than this
     telegram_media_dir: str = "/app/data/telegram_media"  # Where downloaded media is stored
     telegram_media_ttl_days: int = 30  # Evict downloaded media files older than this (entries/text are kept)
+
+    # Bulk ingest (Manual Uploads). Originals live on a dir shared by api + celery-worker:
+    # prod bind-mounts ./ingest_files; dev gets it for free under the ./backend bind mount.
+    ingest_files_dir: str = "/app/data/ingest_files"
+    ingest_files_ttl_days: int = 180  # Evict stored originals older than this; 0 keeps them forever. Entries are kept.
+    ingest_max_file_mb: int = 50  # Per-file cap for uploads and zip members
+    ingest_max_batch_items: int = 200  # Items one batch may hold, zip members and repo files included
+    ingest_zip_max_members: int = 100  # Files expanded out of one .zip
     telegram_flood_sleep_threshold: int = 30  # Telethon auto-sleeps below this; we retry above
     telegram_ocr_enabled: bool = False  # Run OCR on downloaded images (requires tesseract binary)
     telegram_ocr_min_chars: int = 30  # Skip OCR results shorter than this — usually noise

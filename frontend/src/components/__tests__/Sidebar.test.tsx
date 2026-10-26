@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
@@ -295,6 +295,45 @@ describe("Sidebar", () => {
     expect(screen.getByText("THN")).toBeInTheDocument();
     // Krebs on Security is inside collapsed category, not rendered
     expect(screen.queryByText("Krebs on Security")).not.toBeInTheDocument();
+  });
+
+  it("pins Manual Uploads above the tree, outside Uncategorized, and never as paused", () => {
+    const manual = {
+      ...mockFeeds[1],
+      id: "feed-manual",
+      title: "Manual Uploads",
+      custom_title: null,
+      url: "manual://uploads",
+      feed_type: "manual",
+      category_id: null,
+      is_active: false,
+      unread_count: 3,
+    } as Feed;
+    setupMocks([...mockFeeds, manual]);
+    renderSidebar();
+    const row = screen.getByTestId("manual-uploads-row");
+    expect(within(row).getByText("Manual Uploads")).toBeInTheDocument();
+    expect(within(row).queryByText("||")).not.toBeInTheDocument();
+    // THN is still uncategorized, so the label stays for it — but Manual Uploads is not under it.
+    const label = screen.getByText("Uncategorized");
+    expect(label.parentElement).not.toContainElement(row);
+    expect(label.parentElement).toHaveTextContent("THN");
+  });
+
+  it("drops the Uncategorized label when Manual Uploads was the only feed without a category", () => {
+    const manual = {
+      ...mockFeeds[1],
+      id: "feed-manual",
+      title: "Manual Uploads",
+      custom_title: null,
+      feed_type: "manual",
+      category_id: null,
+      is_active: false,
+    } as Feed;
+    setupMocks([mockFeeds[0], manual]);
+    renderSidebar();
+    expect(screen.getByTestId("manual-uploads-row")).toBeInTheDocument();
+    expect(screen.queryByText("Uncategorized")).not.toBeInTheDocument();
   });
 
   it("shows unread counts", () => {

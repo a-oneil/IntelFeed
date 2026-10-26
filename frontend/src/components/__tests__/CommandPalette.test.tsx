@@ -380,7 +380,7 @@ describe("CommandPalette selection routing", () => {
   it.each([
     ["Ask Copilot", () => useUIStore.getState().copilotOpen],
     ["Add feed", () => useUIStore.getState().addFeedOpen],
-    ["Ingest a URL or PDF", () => useUIStore.getState().ingestOpen],
+    ["Ingest files, URLs or text", () => useUIStore.getState().ingestOpen],
     ["Keyboard shortcuts", () => useUIStore.getState().shortcutsHelpOpen],
   ])("opens %s as a modal instead of navigating", (label, isOpen) => {
     renderPalette();

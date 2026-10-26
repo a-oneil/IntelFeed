@@ -1167,25 +1167,59 @@ AI briefing for a day (`day_key: YYYY-MM-DD` plus the standard entry filters). `
 
 #### Ingest & Processing
 
+Manual ingest has two synchronous one-item doors and a batch API. See [adapters.md](adapters.md#manual-ingest) for the model behind it.
+
 **`POST /api/entries/ingest/url`**
 
-Ingest a web page/article URL as a manual entry. Dispatches the full intelligence pipeline and indexes in Meilisearch.
+Ingest a web page/article URL as a manual entry, in the request. Dispatches the full intelligence pipeline and indexes in Meilisearch.
 
 **Auth:** Bearer token  
 **Request:**
 ```json
 { "url": "https://example.com/report" }
 ```
-**Response:** `{ "id": "...", "title": "...", "url": "...", "word_count": 1234, "feed_id": "...", "content_hash": "...", "message": "Entry created" }`
+**Response:** `{ "id": "...", "title": "...", "url": "...", "word_count": 1234, "feed_id": "...", "content_hash": "...", "message": "Entry created" }`  
+**Errors:** `409 duplicate`, `422 extraction_failed`, `400 invalid_url`
 
 ---
 
 **`POST /api/entries/ingest/pdf`**
 
-Ingest a PDF file as a manual entry.
+Ingest one PDF as a manual entry, in the request. Runs as a one-item batch so the original is kept and downloadable, but answers with the entry.
 
 **Auth:** Bearer token  
-**Request:** Multipart form with `file` (PDF) and optional `title`
+**Request:** Multipart form with `file` (PDF) and optional `title`  
+**Errors:** `409 duplicate`, `422 extraction_failed` (scanned), `413 file_too_large`, `400 invalid_file`
+
+---
+
+**`GET /api/entries/ingest/capabilities`** — Accepted extensions and the current caps (`max_file_mb`, `max_batch_items`, `zip_max_members`).
+
+**`POST /api/entries/ingest/batches`** — Open a batch (`{ "label": "optional" }`). Returns the batch with an empty item list. There is no submit step: every item is queued the moment it is added.
+
+**`POST /api/entries/ingest/batches/{id}/files`** — Add one file (multipart `file`, optional `title`, `is_ioc_list`). One request per file. Returns the item (`201`); an oversize file returns a `too_large` item rather than an error.
+
+**`POST /api/entries/ingest/batches/{id}/urls`** — Add URLs (`{ "urls": [...], "is_ioc_list": false }`), one item each. A `github.com/owner/repo[/tree/<branch>/<path>]` link becomes a `github_repo` item that expands into one `github_file` item per file; a non-http line becomes a `failed` item rather than a `400`.
+
+**`POST /api/entries/ingest/batches/{id}/text`** — Add pasted text (`{ "text", "title"?, "source_url"?, "is_ioc_list" }`). One paste is one entry; the paste is kept as a `.txt` original.
+
+**`GET /api/entries/ingest/batches/{id}`** — The batch with every item: `status` (`queued`, `parsing`, `created`, `expanded`, `duplicate`, `no_text`, `unsupported`, `too_large`, `failed`, `cancelled`), `phase` for created items (`analyzing` until the one-pass AI analysis lands, then `done`), `entry_id`, `entry_title`, `error`, `retryable`, `file` (`download_url`, `retained`), and a `summary` (`total`, `active`, `created`, `duplicate`, `failed`, `status`). The `ingest_item_updated` SSE event fires on every change.
+
+**`GET /api/entries/ingest/batches`** — Recent batches with summaries (`limit`, `mine`).
+
+**`POST /api/entries/ingest/batches/{id}/items/{item_id}/retry`** — Re-queue a `failed` / `no_text` / `unsupported` / `cancelled` item; files re-run from the stored original (`409 original_not_kept` once evicted).
+
+**`DELETE /api/entries/ingest/batches/{id}/items/{item_id}`** — Remove an item and its stored file. The entry it produced, if any, stays.
+
+Batches are owned: adding, retrying and deleting require the creator or an admin (`403 forbidden`).
+
+**Auth:** Bearer token
+
+---
+
+**`GET /api/ingest-files/{file_id}`**
+
+The original bytes of a manual upload. JWT in the `Authorization` header or as `?token=` (for plain links); `?inline=true` opens in the browser instead of downloading. `404 ingest_file_not_found` when never stored, `404 ingest_file_evicted` once the retention sweep has removed it — the entry's text is unaffected.
 
 ---
 

@@ -90,6 +90,11 @@ CONFIGURABLE_KEYS: dict[str, type] = {
     "tts_cache_ttl_days": int,
     "tts_cache_max_bytes": int,
     "telegram_media_ttl_days": int,
+    "ingest_files_ttl_days": int,
+    # Bulk ingest caps
+    "ingest_max_file_mb": int,
+    "ingest_max_batch_items": int,
+    "ingest_zip_max_members": int,
     # Translation
     "translation_default_target": str,
     # Embeddings & Story Threads
@@ -1046,6 +1051,35 @@ SETTING_METADATA: dict[str, dict] = {
         "label": "Telegram Media TTL",
         "description": "Delete downloaded Telegram media files older than this. Entries and extracted intel are kept",
         "group": "retention",
+    },
+    "ingest_files_ttl_days": {
+        "label": "Manual Upload Originals TTL",
+        "description": (
+            "Delete the original files behind manual uploads older than this many days (0 keeps them forever). "
+            "Entries and extracted intel are kept; the reader then says the original was not kept"
+        ),
+        "group": "retention",
+    },
+    "ingest_max_file_mb": {
+        "label": "Manual Upload Max File Size",
+        "description": (
+            "Per-file cap in MB for files dropped on the ingest modal, including members of a .zip. "
+            "Larger files land as a too-large row in the batch"
+        ),
+        "group": "feeds",
+    },
+    "ingest_max_batch_items": {
+        "label": "Manual Upload Batch Cap",
+        "description": "Most items one ingest batch may hold, counting files expanded out of a .zip or a GitHub repo",
+        "group": "feeds",
+    },
+    "ingest_zip_max_members": {
+        "label": "Manual Upload Zip Member Cap",
+        "description": (
+            "Most files expanded out of one .zip; an archive over the cap is refused as unsupported "
+            "rather than partly imported"
+        ),
+        "group": "feeds",
     },
     "translation_default_target": {
         "label": "Default Translation Target",

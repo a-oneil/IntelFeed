@@ -170,6 +170,7 @@ READ_ONLY_TOOLS = frozenset(
         "get_feed_value",
         "get_feeds",
         "get_hygiene_feed",
+        "get_ingest_batch",
         "get_hygiene_stats",
         "get_intel_profile",
         "get_intel_report",

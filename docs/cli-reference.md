@@ -2197,8 +2197,8 @@ The 2026-08 registry expansion added 78 tools in five backend modules; Story Thr
 **Landscape (`landscape.py`, 12 tools)** — watchlist, ransomware victim tracker, stack exposure, glossary:
 `list_watches`, `watch_entity`, `unwatch_entity`, `get_ransomware_disclosures`, `get_ransomware_stats`, `get_ransomware_victim`, `get_ransomware_group_victims`, `get_stack_exposure`, `list_glossary_terms`, `create_glossary_term`, `delete_glossary_term`, `detect_glossary_terms`
 
-**Reader Operations (`reader_ops.py`, 16 tools)** — entry state, similar/story views, translation, daily summary, URL ingest, share links, saved searches:
-`mark_entry_read`, `star_entry`, `bookmark_entry`, `bulk_entry_action`, `mark_all_read`, `get_similar_entries` (embedding-backed, keyword fallback), `get_entry_story`, `translate_entry`, `get_daily_summary`, `ingest_url`, `create_share_link`, `get_share_link`, `revoke_share_link`, `list_saved_searches`, `create_saved_search`, `delete_saved_search`
+**Reader Operations (`reader_ops.py`, 20 tools)** — entry state, similar/story views, translation, daily summary, manual ingest, share links, saved searches:
+`mark_entry_read`, `star_entry`, `bookmark_entry`, `bulk_entry_action`, `mark_all_read`, `get_similar_entries` (embedding-backed, keyword fallback), `get_entry_story`, `translate_entry`, `get_daily_summary`, `ingest_url`, `ingest_text`, `ingest_file` (base64), `ingest_batch` (URLs and texts; GitHub repo links expand), `get_ingest_batch`, `create_share_link`, `get_share_link`, `revoke_share_link`, `list_saved_searches`, `create_saved_search`, `delete_saved_search`
 
 **Workspace (`workspace.py`, 16 tools)** — detection rule lifecycle/versions, intel report management, requirement matches:
 `get_detection_rule`, `update_detection_rule`, `delete_detection_rule`, `set_detection_rule_status`, `convert_detection_rule`, `get_detection_rule_versions`, `rollback_detection_rule`, `list_intel_reports`, `get_intel_report`, `update_intel_report`, `delete_intel_report`, `archive_intel_report`, `delete_requirement`, `fulfill_requirement`, `add_requirement_match`, `remove_requirement_match`

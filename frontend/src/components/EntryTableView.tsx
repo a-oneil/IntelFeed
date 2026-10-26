@@ -8,6 +8,8 @@ import { DataTable, type DataTableColumn, type SortDir } from "@/components/tabl
 import table from "@/components/table/DataTable.module.css";
 import { threadSummaryLine } from "@/utils/threads";
 import { SignalChip } from "./SignalChip";
+import { Chip } from "@/components/primitives";
+import { fileTypeLabel, formatBytes, ingestFileUrl, originalState, uploadMeta } from "@/utils/ingest";
 import styles from "./EntryTableView.module.css";
 
 /**
@@ -375,6 +377,73 @@ const COLUMNS: DataTableColumn<TableRow>[] = [
       ? <span className={table.dateCell}>{Math.ceil(r.entry.word_count / 200)} min</span>
       : ZERO_CELL,
   },
+  /*
+   * Manual Uploads only. Hidden everywhere else by default; the uploads feed
+   * registers under its own table id (see `uploadsFeed`), whose default layout
+   * turns them on, so a feed of files reads as a file table without a page of
+   * its own.
+   */
+  {
+    key: "file", label: "File", width: 240, minWidth: 120, hideable: true, defaultHidden: true,
+    textValue: (r) => (r.kind === "entry" ? uploadMeta(r.entry.metadata)?.filename ?? "" : ""),
+    sortValue: (r) => (r.kind === "entry" ? uploadMeta(r.entry.metadata)?.filename ?? "￿" : "￿").toLowerCase(),
+    render: (r) => {
+      const m = r.kind === "entry" ? uploadMeta(r.entry.metadata) : null;
+      if (!m) return ZERO_CELL;
+      if (!m.filename) {
+        return <span className={table.dateCell}>{m.source === "url_ingest" ? "web page" : m.source === "github_repo" ? "repo file" : "·"}</span>;
+      }
+      return (
+        <span className={styles.sourceCell} title={m.filename}>
+          <Chip size="sm" tone="toned" tint="var(--accent-intel)">{fileTypeLabel(m.file_content_type, m.filename)}</Chip>
+          <span className={table.ellipsis}>{m.filename}</span>
+        </span>
+      );
+    },
+  },
+  {
+    key: "size", label: "Size", width: 80, minWidth: 60, hideable: true, defaultHidden: true,
+    numValue: (r) => (r.kind === "entry" ? uploadMeta(r.entry.metadata)?.size_bytes ?? 0 : 0),
+    render: (r) => {
+      const n = r.kind === "entry" ? uploadMeta(r.entry.metadata)?.size_bytes : null;
+      return n != null ? <span className={table.dateCell}>{formatBytes(n)}</span> : ZERO_CELL;
+    },
+  },
+  {
+    key: "original", label: "Original", width: 110, minWidth: 80, hideable: true, defaultHidden: true,
+    textValue: (r) => (r.kind === "entry" ? originalState(uploadMeta(r.entry.metadata)).replace("_", " ") : ""),
+    choices: [
+      { value: "all", label: "All" },
+      { value: "available", label: "Downloadable" },
+      { value: "gone", label: "Not kept" },
+    ],
+    choiceMatch: (r, v) => {
+      if (r.kind !== "entry") return v === "all";
+      const s = originalState(uploadMeta(r.entry.metadata));
+      return v === "available" ? s === "available" : v === "gone" ? s === "evicted" || s === "not_kept" : true;
+    },
+    render: (r) => {
+      const m = r.kind === "entry" ? uploadMeta(r.entry.metadata) : null;
+      const s = originalState(m);
+      if (s === "available" && m?.ingest_file_id) {
+        return (
+          <a
+            className={styles.downloadLink}
+            href={ingestFileUrl(m.ingest_file_id)}
+            download={m.filename ?? true}
+            onClick={(e) => e.stopPropagation()}
+            title={`Download ${m.filename ?? "original"}`}
+          >
+            Download
+          </a>
+        );
+      }
+      if (s === "evicted") return <span className={table.dateCell}>removed</span>;
+      if (s === "not_kept") return <span className={table.dateCell}>not kept</span>;
+      if (m && !m.ingest_file_id) return <span className={table.dateCell}>{m.source === "url_ingest" ? "link" : "text only"}</span>;
+      return ZERO_CELL;
+    },
+  },
 ];
 
 const rowClass = (r: TableRow) =>
@@ -399,6 +468,12 @@ interface EntryTableViewProps {
   isFetchingNextPage: boolean;
   fetchNextPage: () => void;
   isLoading: boolean;
+  /**
+   * The Manual Uploads feed is selected. The table registers under a second
+   * id so its layout (File / Size / Original on, Source off) is remembered
+   * apart from the ordinary entries table.
+   */
+  uploadsFeed?: boolean;
 }
 
 export function EntryTableView({
@@ -410,7 +485,9 @@ export function EntryTableView({
   isFetchingNextPage,
   fetchNextPage,
   isLoading,
+  uploadsFeed = false,
 }: EntryTableViewProps) {
+  const tableId = uploadsFeed ? "entries-uploads" : "entries";
   const sortOrder = useUIStore((s) => s.sortOrder);
   const setSortOrder = useUIStore((s) => s.setSortOrder);
   const selectedEntryId = useUIStore((s) => s.selectedEntryId);
@@ -509,7 +586,8 @@ export function EntryTableView({
 
   return (
     <DataTable<TableRow>
-      tableId="entries"
+      key={tableId}
+      tableId={tableId}
       columns={COLUMNS}
       rows={rows}
       getRowId={(r) => (r.kind === "thread" ? threadRowId(r.thread.slug) : r.entry.id)}

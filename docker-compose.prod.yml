@@ -185,6 +185,7 @@ services:
       - ./telegram_data:/data
       - ./telegram_media:/app/data/telegram_media
       - ./tts_media:/app/data/tts_media
+      - ./ingest_files:/app/data/ingest_files
       # Global copilot (/api/ai/copilot/stream): the api does NOT run the `claude`
       # CLI. With copilot_worker_dispatch=true (default) it enqueues the CLI turn
       # on the `ai` queue — celery-worker-ai owns the OAuth credentials
@@ -264,6 +265,7 @@ services:
       - ./telegram_data:/data
       - ./telegram_media:/app/data/telegram_media
       - ./tts_media:/app/data/tts_media
+      - ./ingest_files:/app/data/ingest_files
     env_file:
       - .env
     environment:

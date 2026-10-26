@@ -231,7 +231,13 @@ export function Sidebar() {
   // Group feeds by category
   const sortByTitle = (a: Feed, b: Feed) =>
     (a.custom_title || a.title).localeCompare(b.custom_title || b.title, undefined, { sensitivity: "base" });
-  const uncategorized = feeds.filter((s) => !s.category_id && !s.is_muted).sort(sortByTitle);
+  // Manual Uploads is a system feed, not a subscription: it has no category by
+  // design and sits above the tree as its own row rather than under an
+  // "Uncategorized" label. Filing it in a category moves it into that node.
+  const manualFeed = feeds.find((s) => s.feed_type === "manual" && !s.is_muted && !s.category_id) ?? null;
+  const uncategorized = feeds
+    .filter((s) => !s.category_id && !s.is_muted && s.id !== manualFeed?.id)
+    .sort(sortByTitle);
   const categorizedFeeds = (catId: string) => feeds.filter((s) => s.category_id === catId && !s.is_muted).sort(sortByTitle);
   // Feeds "by unread": categories rank by active (non-muted) unread total, muted
   // feeds are pulled out of the tree into the bottom fold, and each header gets a
@@ -513,13 +519,14 @@ export function Sidebar() {
             </button>
             <Hint
               title="Ingest"
-              body="Paste a URL or drop a PDF and it gets pulled in, cleaned up and read by the pipeline like any feed article."
+              body="Drop a pile of files, paste links or text, or point at a GitHub repo. Each item becomes an entry under Manual Uploads and runs through the pipeline like any feed article."
+              aside="Originals are kept and downloadable from the entry."
               align="end"
             >
               <button
                 className={styles.addBtn}
                 onClick={() => setShowIngestModal(true)}
-                aria-label="Ingest a URL or PDF"
+                aria-label="Ingest files, URLs or text"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -619,6 +626,17 @@ export function Sidebar() {
                 >
                   Cancel
                 </button>
+              </div>
+            )}
+
+            {manualFeed && (
+              <div className={styles.pinnedFeed} data-testid="manual-uploads-row">
+                <FeedItem
+                  subscription={manualFeed}
+                  categories={categories || []}
+                  isSelected={location.pathname === "/" && selectedFeedId === manualFeed.id}
+                  onSelect={() => { setSelectedFeed(manualFeed.id); goHome(); closeSidebarIfMobile(); }}
+                />
               </div>
             )}
 
@@ -1179,6 +1197,10 @@ function FeedItem({
 
   const title = subscription.custom_title || subscription.title;
   const feedType = subscription.feed_type?.toLowerCase() || "rss";
+  // The Manual Uploads pseudo-feed is created inactive so the poller skips it;
+  // that is its nature, not a pause, so it gets neither the dimming nor the badge.
+  const isManual = feedType === "manual";
+  const isPaused = !subscription.is_active && !isManual;
 
   const tooltipContent = (() => {
     const lines: string[] = [];
@@ -1187,7 +1209,9 @@ function FeedItem({
       lines.push(`${subscription.unread_count} unread`);
     }
     lines.push(`${feedType.toUpperCase()} feed`);
-    if (subscription.last_fetched_at) {
+    if (isManual) {
+      lines.push("Files, links and pasted text you ingest by hand");
+    } else if (subscription.last_fetched_at) {
       const ago = Math.round((Date.now() - new Date(subscription.last_fetched_at).getTime()) / 60000);
       if (ago < 1) lines.push("Fetched just now");
       else if (ago < 60) lines.push(`Fetched ${ago}m ago`);
@@ -1196,14 +1220,14 @@ function FeedItem({
     } else {
       lines.push("Never fetched");
     }
-    if (subscription.fetch_interval_minutes) {
+    if (subscription.fetch_interval_minutes && !isManual) {
       const m = subscription.fetch_interval_minutes;
       lines.push(`Every ${m < 60 ? `${m}m` : m % 60 === 0 ? `${m / 60}h` : `${Math.round((m / 60) * 10) / 10}h`}`);
     }
     if (subscription.language) lines.push(`Language: ${subscription.language}`);
-    if (!subscription.is_active) {
+    if (isPaused) {
       lines.push(subscription.pause_reason ? describePauseReason(subscription.pause_reason) : "Paused");
-    } else if (subscription.health_warning) {
+    } else if (subscription.health_warning && !isManual) {
       lines.push(describeHealthWarning(subscription.health_warning));
     }
     if (subscription.is_muted) lines.push("Muted");
@@ -1217,7 +1241,7 @@ function FeedItem({
   return (
     <>
       <button
-        className={`${styles.feedItem} ${isSelected ? styles.active : ""} ${subscription.is_muted ? styles.muted : ""} ${!subscription.is_active ? styles.paused : ""}`}
+        className={`${styles.feedItem} ${isSelected ? styles.active : ""} ${subscription.is_muted ? styles.muted : ""} ${isPaused ? styles.paused : ""}`}
         onClick={onSelect}
         {...feedLongPressHandlers}
       >
@@ -1253,7 +1277,7 @@ function FeedItem({
           <span className={styles.feedTitle}>{title}</span>
         </Tooltip>
         {categoryLabel && <span className={styles.feedSearchCategory}>{categoryLabel}</span>}
-        {!subscription.is_active && <span className={styles.pausedBadge}>||</span>}
+        {isPaused && <span className={styles.pausedBadge}>||</span>}
         {subscription.error_count > 0 && <span className={styles.errorBadge}>!</span>}
         {subscription.unread_count > 0 && (
           <span className={styles.feedCount}>{formatCount(subscription.unread_count)}</span>

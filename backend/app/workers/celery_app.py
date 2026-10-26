@@ -34,6 +34,7 @@ celery_app = Celery(
         "app.workers.ai_batch_tasks",
         "app.workers.adjudication_tasks",
         "app.workers.tts_tasks",
+        "app.workers.ingest_tasks",
         "app.workers.embedding_tasks",
         "app.workers.thread_tasks",
         "app.workers.proposal_apply_tasks",

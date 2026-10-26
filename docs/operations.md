@@ -592,6 +592,7 @@ File: [scripts/ops/restore.sh](../scripts/ops/restore.sh)
 **Docs:** `./docs/` mounted read-only into the API container at `/app/docs` — serves the in-app documentation (`app/api/documentation.py`); if the mount is missing the docs page degrades to an empty index
 **Telegram:** Session file and media mounted from host `./telegram_data/` and `./telegram_media/` (media grows unbounded — monitor disk)
 **TTS audio:** Generated read-aloud MP3s mounted from host `./tts_media/` — written by uid 1000 inside the containers, so the dir must be owned by 1000 (`update.sh` chowns it idempotently)
+**Manual upload originals:** The files behind bulk ingest mounted from host `./ingest_files/` (api writes, celery-worker reads and evicts past `ingest_files_ttl_days`) — same uid-1000 ownership rule, same idempotent chown in `update.sh`
 
 ---
 
@@ -874,7 +875,7 @@ grep "entry_ingested" logs/app.log | grep "$(date +%Y-%m-%d)" | wc -l
 2. Checks if commits exist (skip if up-to-date)
 3. Pulls latest code
 4. Classifies what changed since the last deploy, and does the least that works (see below)
-5. For an image change: ensures `./tts_media/` exists and is owned by uid 1000 (chowns if not — Piper audio is written by the in-container appuser), then rebuilds images and `up -d`
+5. For an image change: ensures `./tts_media/` and `./ingest_files/` exist and are owned by uid 1000 (chowns if not — Piper audio and manual-upload originals are written by the in-container appuser), then rebuilds images and `up -d`
 6. Logs all activity to `logs/update.log`
 
 **It only rebuilds when a rebuild would change something.** Most commits here touch

@@ -57,6 +57,7 @@ from app.models.feed import Feed
 
 # Glossary
 from app.models.glossary_term import GlossaryTerm
+from app.models.ingest_batch import IngestBatch, IngestBatchItem, IngestFile
 from app.models.intel_profile import IntelProfile
 from app.models.intel_report import IntelReport, IntelReportVersion
 from app.models.intelligence_requirement import IntelligenceRequirement, RequirementMatch
@@ -230,6 +231,9 @@ __all__ = [
     # Pipeline plans
     "PipelinePlan",
     # Job observability
+    "IngestBatch",
+    "IngestBatchItem",
+    "IngestFile",
     "JobRun",
     # Entity watchlist
     "UserEntityWatch",
