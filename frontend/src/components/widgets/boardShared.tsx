@@ -6,37 +6,7 @@
  * checked against the card surface (#161b22); the raw --rgroup-* theme hues
  * fail adjacent-pair colorblind separation when stacked.
  */
-import { useCallback, useLayoutEffect, useState } from "react";
 import styles from "./widgets.module.css";
-
-/**
- * Pixel width of the element the ref lands on, for an inline-SVG chart.
- *
- * A chart drawn on a fixed viewBox and stretched to `width: 100%` scales its
- * text and height with the card: on a wide board a 10px label renders at 35px
- * and the plot runs taller than the card. Drawing the viewBox at the measured
- * width keeps one SVG unit to one pixel. `fallback` covers the first paint and
- * environments without ResizeObserver.
- */
-export function useChartWidth<T extends Element>(fallback: number) {
-  const [el, setEl] = useState<T | null>(null);
-  const [width, setWidth] = useState(fallback);
-  // A callback ref, not useRef: the chart mounts only once data has loaded,
-  // after the skeleton, so the element must be able to arrive late.
-  const ref = useCallback((node: T | null) => setEl(node), []);
-  useLayoutEffect(() => {
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const measure = () => {
-      const w = Math.round(el.getBoundingClientRect().width);
-      if (w > 0) setWidth(w);
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [el]);
-  return [ref, width] as const;
-}
 
 /** Categorical series slots, validated for adjacent-pair CVD separation. */
 export const SERIES_COLORS = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181"];

@@ -1,6 +1,6 @@
 import { useTriageFlow } from "@/hooks/useWidgetBoardData";
 import { WidgetChartSkeleton } from "@/components/Skeleton";
-import { clampDays, useChartWidth } from "./boardShared";
+import { clampDays } from "./boardShared";
 import { useIsVisitor } from "@/stores/authStore";
 import styles from "./widgets.module.css";
 
@@ -8,7 +8,7 @@ interface Props {
   config: Record<string, unknown>;
 }
 
-const FALLBACK_W = 560;
+const VIEW_W = 560;
 const VIEW_H = 180;
 const PAD = { left: 38, right: 10, top: 12, bottom: 20 };
 const ARRIVED_COLOR = "#3987e5";
@@ -61,14 +61,9 @@ function compact(n: number): string {
 export default function TriageFlowWidget({ config }: Props) {
   const { data, isLoading } = useTriageFlow(clampDays(config.days, 1, 365));
   const isVisitor = useIsVisitor();
-  const [chartRef, VIEW_W] = useChartWidth<HTMLDivElement>(FALLBACK_W);
 
   if (isLoading) return <WidgetChartSkeleton />;
-  // All-zero days (a visitor with no visible feeds, a paused instance) would
-  // draw an empty axis scaled to 5.
-  if (!data || !data.days.some((d) => d.arrived > 0 || d.read > 0)) {
-    return <div className={styles.noData}>No triage activity</div>;
-  }
+  if (!data || data.days.length === 0) return <div className={styles.noData}>No triage activity</div>;
 
   const plotW = VIEW_W - PAD.left - PAD.right;
   const plotH = VIEW_H - PAD.top - PAD.bottom;
@@ -107,7 +102,7 @@ export default function TriageFlowWidget({ config }: Props) {
   };
 
   return (
-    <div ref={chartRef}>
+    <div>
       <svg
         className={styles.stackChart}
         viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}

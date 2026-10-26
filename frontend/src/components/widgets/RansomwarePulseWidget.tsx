@@ -2,14 +2,14 @@ import { useNavigate } from "react-router-dom";
 import { useRansomwarePulse } from "@/hooks/useWidgetBoardData";
 import { useIntelStore } from "@/stores/intelStore";
 import { WidgetChartSkeleton } from "@/components/Skeleton";
-import { DeltaText, SERIES_OTHER, seriesColor, useChartWidth } from "./boardShared";
+import { DeltaText, SERIES_OTHER, seriesColor } from "./boardShared";
 import styles from "./widgets.module.css";
 
 interface Props {
   config: Record<string, unknown>;
 }
 
-const FALLBACK_W = 640;
+const VIEW_W = 640;
 const VIEW_H = 190;
 const PAD = { left: 34, right: 6, top: 14, bottom: 22 };
 
@@ -22,7 +22,6 @@ export default function RansomwarePulseWidget({ config }: Props) {
   const date_from = config.date_from as string | undefined;
   const date_to = config.date_to as string | undefined;
   const { data, isLoading } = useRansomwarePulse({ date_from, date_to });
-  const [chartRef, VIEW_W] = useChartWidth<HTMLDivElement>(FALLBACK_W);
   const navigate = useNavigate();
   const setActiveSection = useIntelStore((s) => s.setActiveSection);
   const openTracker = () => {
@@ -46,7 +45,7 @@ export default function RansomwarePulseWidget({ config }: Props) {
   const stackOrder = data.groups;
 
   return (
-    <div ref={chartRef}>
+    <div>
       <svg
         className={styles.stackChart}
         viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
