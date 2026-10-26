@@ -70,7 +70,6 @@ frontend/
 │   │   ├── SettingsPage.tsx             # Settings sections (account → system)
 │   │   ├── CampaignsPage.tsx            # Campaign management
 │   │   ├── CampaignProfilePage.tsx      # Campaign detail
-│   │   ├── RegionsPage.tsx              # Region/sub-region aggregation
 │   │   ├── ReportBuilderPage.tsx        # Intelligence report composition
 │   │   ├── LoginPage.tsx / RegisterPage.tsx
 │   │   ├── SharedEntryPage.tsx          # Public entry sharing (no auth)
@@ -125,7 +124,7 @@ Keyboard shortcuts registered in `MainLayout.tsx`:
 List navigation (`j`/`k`, `m`, `s`, `b`, `o`, etc.) is handled inside `EntryList`/`EntryReader`; the full list lives in `KeyboardShortcutsHelp.tsx`.
 
 ### SidebarLayout Route Tree
-**Paths:** `/settings`, `/automation`, `/campaigns`, `/workbench/*`, `/regions`, etc.
+**Paths:** `/settings`, `/automation`, `/campaigns`, `/workbench/*`, etc.
 
 Renders **app header + sidebar + content area**, used for tools and admin pages.
 
@@ -134,7 +133,6 @@ Renders **app header + sidebar + content area**, used for tools and admin pages.
 - `/automation` → AutomationPage
 - `/campaigns` → CampaignsPage
 - `/documentation/*` → DocumentationPage (in-app docs; splat slug is a docs/ path, `/documentation` redirects to `/documentation/README`; `/handbook/*` also redirects here)
-- `/regions` → RegionsPage (`/regions/:name` redirects back to `/regions`)
 - `/workbench` → WorkbenchLayout with nested routes:
   - index → redirects to `dashboard`
   - `dashboard` → DashboardPage (correlation browser + widget grid — the workbench landing page)
@@ -527,7 +525,6 @@ interface Widget {
 - **SettingsPage.tsx** (lazy) — Section-based settings (Account, AI Configuration, Appearance, My AI, Claude Code Skill, Engine, Telegram Setup, Feeds & Import, Logs, Reading, Tags, System, Users). Engine is the admin-only pipeline console section (`?section=engine`, hosting `engine/EngineSection`); legacy `?section=schedules|enrichment|feed-health|workbench` deep links resolve onto it.
 - **CampaignsPage.tsx** (lazy) — Campaign management & correlation
 - **CampaignProfilePage.tsx** (lazy) — Campaign detail with related entities
-- **RegionsPage.tsx** (lazy) — Region/sub-region aggregation
 - **ReportBuilderPage.tsx** (lazy) — Intelligence report composition
 - **LoginPage.tsx** (lazy) → Auth guard redirects here
 - **RegisterPage.tsx** (lazy) → Self-service registration

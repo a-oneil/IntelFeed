@@ -74,11 +74,6 @@ const DashboardPage = lazy(() =>
     default: m.DashboardPage,
   }))
 );
-const RegionsPage = lazy(() =>
-  import("@/pages/RegionsPage").then((m) => ({
-    default: m.RegionsPage,
-  }))
-);
 const SharedEntryPage = lazy(() =>
   import("@/pages/SharedEntryPage").then((m) => ({
     default: m.SharedEntryPage,
@@ -303,8 +298,6 @@ export default function App() {
                 any slug after it is a docs/ page. */}
             <Route path="/documentation/*" element={<DocumentationPage />} />
             <Route path="/handbook/*" element={<HandbookRedirect />} />
-            <Route path="/regions" element={<RegionsPage />} />
-            <Route path="/regions/:name" element={<Navigate to="/regions" replace />} />
             <Route path="/glossary" element={<Navigate to="/workbench/explore?section=glossary" replace />} />
             <Route path="/feed-health" element={<Navigate to="/settings?section=engine&tab=pipeline&stage=feeds" replace />} />
           </Route>

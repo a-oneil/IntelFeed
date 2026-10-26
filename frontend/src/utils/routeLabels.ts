@@ -16,7 +16,6 @@ const EXACT: Record<string, string> = {
   "/automation": "Automation Rules",
   "/boards": "Dashboards",
   "/campaigns": "Campaigns",
-  "/regions": "Regions & Countries",
   "/documentation": "Documentation",
   "/login": "Sign In",
   "/register": "Register",

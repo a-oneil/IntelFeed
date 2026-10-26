@@ -83,7 +83,6 @@ export const QUICK_ACTIONS: QuickAction[] = [
   { label: "Intelligence workbench", icon: "🔬", path: "/workbench/explore", category: "navigate", keywords: ["intel", "intelligence", "analysis", "entities", "workbench"] },
   { label: "Campaigns", icon: "📁", path: "/campaigns", category: "navigate", keywords: ["campaign", "tracking", "operation"] },
   { label: "Automation rules", icon: "⚡", path: "/automation", category: "navigate", keywords: ["automation", "rules", "schedule", "trigger", "action"] },
-  { label: "Regions & countries", icon: "🌐", path: "/regions", category: "navigate", keywords: ["country", "region", "geo", "geography", "map"] },
   { label: "Documentation", icon: "📚", path: "/documentation", category: "navigate", keywords: ["docs", "documentation", "handbook", "guide", "manual", "readme"] },
   { label: "Settings", icon: "⚙", path: "/settings", category: "navigate", keywords: ["config", "configure", "preferences", "options"] },
   { label: "Engine console", icon: "🛠", path: "/settings?section=engine", category: "navigate", adminOnly: true, keywords: ["engine", "pipeline", "ingest", "stages", "console", "processing"] },
