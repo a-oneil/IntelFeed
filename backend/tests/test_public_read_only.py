@@ -482,6 +482,31 @@ async def test_visitor_gets_the_trimmed_builtin_dashboards(client: AsyncClient, 
     assert one["name"] == "__triage__/Intel"
 
 
+def test_visitor_boards_have_no_holes():
+    """Hidden widgets leave no empty columns: nothing overlaps, every widget
+    starts at the left edge or right after a neighbour, and none sits beside
+    free space it could have widened into."""
+    from app.services.public_view import _GRID_COLS, visitor_dashboards
+
+    for board in visitor_dashboards():
+        cells: dict[tuple[int, int], str] = {}
+        for w in board.widgets:
+            assert w.position_x + w.width <= _GRID_COLS
+            for x in range(w.position_x, w.position_x + w.width):
+                for y in range(w.position_y, w.position_y + w.height):
+                    assert (x, y) not in cells, (board.name, w.widget_type, cells.get((x, y)))
+                    cells[(x, y)] = w.widget_type
+        for w in board.widgets:
+            if w.position_x > 0:
+                assert (w.position_x - 1, w.position_y) in cells, (board.name, w.widget_type)
+            right = w.position_x + w.width
+            if right < _GRID_COLS:
+                assert any((right, y) in cells for y in range(w.position_y, w.position_y + w.height)), (
+                    board.name,
+                    w.widget_type,
+                )
+
+
 @pytest.mark.asyncio
 async def test_api_responses_are_private_and_unindexed(client: AsyncClient, public_mode):
     resp = await client.get("/api/feeds")

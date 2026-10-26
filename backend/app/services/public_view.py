@@ -119,6 +119,41 @@ def _stable_id(*parts: Any) -> uuid.UUID:
     return uuid.uuid5(_VISITOR_NS, "/".join(str(p) for p in parts))
 
 
+_GRID_COLS = 12  # DashboardPage's react-grid-layout width
+
+
+def _repack(widgets: list[dict]) -> list[dict]:
+    """Close the holes the hidden widgets leave.
+
+    The grid compacts upward but never sideways, so a removed left-hand
+    widget leaves an empty column beside its neighbours. Each remaining
+    widget, in reading order, takes the first spot its size fits, then
+    widens into any free columns to its right.
+    """
+    taken: set[tuple[int, int]] = set()
+
+    def free(x: int, y: int, w: int, h: int) -> bool:
+        return all((cx, cy) not in taken for cx in range(x, x + w) for cy in range(y, y + h))
+
+    placed = []
+    for w in sorted(widgets, key=lambda w: (w["position_y"], w["position_x"])):
+        width, height = min(w["width"], _GRID_COLS), w["height"]
+        y = 0
+        while True:
+            x = next((x for x in range(_GRID_COLS - width + 1) if free(x, y, width, height)), None)
+            if x is not None:
+                break
+            y += 1
+        taken.update((cx, cy) for cx in range(x, x + width) for cy in range(y, y + height))
+        placed.append({**w, "position_x": x, "position_y": y, "width": width})
+    for w in sorted(placed, key=lambda w: -w["position_x"]):
+        x, y, height = w["position_x"], w["position_y"], w["height"]
+        while x + w["width"] < _GRID_COLS and free(x + w["width"], y, 1, height):
+            taken.update((x + w["width"], cy) for cy in range(y, y + height))
+            w["width"] += 1
+    return placed
+
+
 def visitor_dashboards() -> list[DashboardResponse]:
     """The read-only boards served to a visitor, with stable synthetic ids."""
     from datetime import UTC, datetime
@@ -129,9 +164,12 @@ def visitor_dashboards() -> list[DashboardResponse]:
         if board["name"] not in VISITOR_BOARDS:
             continue
         board_id = _stable_id("board", board["name"])
+        shown = _repack(
+            [{**w, "index": i} for i, w in enumerate(board["widgets"]) if w["widget_type"] not in HIDDEN_WIDGET_TYPES]
+        )
         widgets = [
             WidgetResponse(
-                id=_stable_id("widget", board["name"], i, w["widget_type"]),
+                id=_stable_id("widget", board["name"], w["index"], w["widget_type"]),
                 dashboard_id=board_id,
                 widget_type=w["widget_type"],
                 title=w["title"],
@@ -141,8 +179,7 @@ def visitor_dashboards() -> list[DashboardResponse]:
                 width=w["width"],
                 height=w["height"],
             )
-            for i, w in enumerate(board["widgets"])
-            if w["widget_type"] not in HIDDEN_WIDGET_TYPES
+            for w in sorted(shown, key=lambda w: w["index"])
         ]
         boards.append(
             DashboardResponse(

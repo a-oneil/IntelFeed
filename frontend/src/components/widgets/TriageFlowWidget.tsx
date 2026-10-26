@@ -1,6 +1,7 @@
 import { useTriageFlow } from "@/hooks/useWidgetBoardData";
 import { WidgetChartSkeleton } from "@/components/Skeleton";
 import { clampDays } from "./boardShared";
+import { useIsVisitor } from "@/stores/authStore";
 import styles from "./widgets.module.css";
 
 interface Props {
@@ -59,6 +60,7 @@ function compact(n: number): string {
 
 export default function TriageFlowWidget({ config }: Props) {
   const { data, isLoading } = useTriageFlow(clampDays(config.days, 1, 365));
+  const isVisitor = useIsVisitor();
 
   if (isLoading) return <WidgetChartSkeleton />;
   if (!data || data.days.length === 0) return <div className={styles.noData}>No triage activity</div>;
@@ -184,19 +186,25 @@ export default function TriageFlowWidget({ config }: Props) {
           <span className={styles.chartLegendSwatch} style={{ background: ARRIVED_COLOR }} />
           arrived
         </span>
-        <span className={styles.chartLegendItem}>
-          <span className={styles.chartLegendSwatch} style={{ background: READ_COLOR }} />
-          read by you
-        </span>
+        {/* A visitor has no reads, so the lower arm is empty and the backlog
+            would count every article. */}
+        {!isVisitor && (
+          <span className={styles.chartLegendItem}>
+            <span className={styles.chartLegendSwatch} style={{ background: READ_COLOR }} />
+            read by you
+          </span>
+        )}
         {clipped.length > 0 && (
           <span className={styles.chartLegendItem}>
             {clipped.length === 1 ? "1 day" : `${clipped.length} days`} off-scale · peak{" "}
             {compact(Math.max(...clipped))}
           </span>
         )}
-        <span className={styles.chartLegendItem} style={{ marginLeft: "auto" }}>
-          backlog {data.backlog.toLocaleString()}
-        </span>
+        {!isVisitor && (
+          <span className={styles.chartLegendItem} style={{ marginLeft: "auto" }}>
+            backlog {data.backlog.toLocaleString()}
+          </span>
+        )}
       </div>
     </div>
   );
