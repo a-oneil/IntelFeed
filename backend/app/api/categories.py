@@ -43,6 +43,18 @@ async def list_categories(
     )
     count_map = {row.category_id: row.cnt for row in count_result.all()}
 
+    # A visitor sees a folder only if it holds a feed they can see (the count
+    # above already went through the visitor filter), or a child folder that
+    # does; the names of the rest say what an instance follows. Pipeline
+    # defaults are an admin's ingest settings, not theirs to read.
+    if user.is_anonymous:
+        shown = {cid for cid, n in count_map.items() if n}
+        shown |= {cat.parent_id for cat in categories if cat.id in shown and cat.parent_id}
+        categories = [cat for cat in categories if cat.id in shown]
+
+    def defaults(cat: Category):
+        return {} if user.is_anonymous else clean_defaults(cat.feed_defaults)
+
     # Build tree structure
     items = []
     for cat in categories:
@@ -55,7 +67,7 @@ async def list_categories(
                     position=child.position,
                     created_at=child.created_at,
                     feed_count=count_map.get(child.id, 0),
-                    feed_defaults=clean_defaults(child.feed_defaults),
+                    feed_defaults=defaults(child),
                 )
                 for child in categories
                 if child.parent_id == cat.id
@@ -69,7 +81,7 @@ async def list_categories(
                     created_at=cat.created_at,
                     children=children,
                     feed_count=count_map.get(cat.id, 0),
-                    feed_defaults=clean_defaults(cat.feed_defaults),
+                    feed_defaults=defaults(cat),
                 )
             )
 

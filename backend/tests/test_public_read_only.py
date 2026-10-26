@@ -664,3 +664,47 @@ async def test_only_an_admin_can_show_a_feed_to_visitors(
     # Other edits leave it alone.
     again = await client.put(url, json={"custom_title": "Renamed"}, headers=admin_headers)
     assert again.json()["visible_to_visitors"] is True
+
+
+@pytest.mark.asyncio
+async def test_visitors_see_only_folders_holding_a_visible_feed(
+    client: AsyncClient, public_mode, db_session: AsyncSession, test_user, auth_headers
+):
+    from app.models.category import Category
+
+    parent = Category(created_by=test_user.id, name="Research", position=0)
+    empty = Category(created_by=test_user.id, name="Empty folder", position=1)
+    private = Category(created_by=test_user.id, name="Private folder", position=2)
+    db_session.add_all([parent, empty, private])
+    await db_session.flush()
+    child = Category(
+        created_by=test_user.id,
+        name="Vendors",
+        parent_id=parent.id,
+        position=0,
+        feed_defaults={"ai_analysis_enabled": False},
+    )
+    db_session.add(child)
+    await db_session.flush()
+    db_session.add_all(
+        [
+            Feed(
+                title="Shown",
+                url="https://a.example/feed",
+                feed_type="rss",
+                category_id=child.id,
+                visible_to_visitors=True,
+            ),
+            Feed(title="Hidden", url="https://b.example/feed", feed_type="rss", category_id=private.id),
+        ]
+    )
+    await db_session.flush()
+
+    tree = (await client.get("/api/categories")).json()
+    assert [c["name"] for c in tree] == ["Research"]
+    assert [c["name"] for c in tree[0]["children"]] == ["Vendors"]
+    assert tree[0]["children"][0]["feed_count"] == 1
+    assert tree[0]["children"][0]["feed_defaults"] == {}
+
+    signed_in = (await client.get("/api/categories", headers=auth_headers)).json()
+    assert {c["name"] for c in signed_in} >= {"Research", "Empty folder", "Private folder"}
