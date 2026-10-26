@@ -355,7 +355,11 @@ _OPENAPI_TAG_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
             ("saved-searches", "Persisted search queries."),
             ("notes", "Free-form notes attached to entries."),
             ("comments", "Per-entry comment threads."),
-            ("ingest", "Manual URL ingestion into the entry pipeline."),
+            (
+                "ingest",
+                "Manual ingest: single URL/PDF doors and batches of files, URLs, pastes and one-time GitHub repos.",
+            ),
+            ("ingest-files", "Auth-gated downloads of the original files behind manual uploads."),
             ("onboarding", "First-run readiness: is this instance seeded, polling and linking?"),
             ("opml", "OPML import/export of feed subscriptions."),
             ("podcasts", "Podcast episode listing and metadata."),
@@ -767,6 +771,7 @@ from app.api.glossary import router as glossary_router
 from app.api.health import router as health_router
 from app.api.hygiene import router as hygiene_router
 from app.api.ingest import router as ingest_router
+from app.api.ingest_files import router as ingest_files_router
 from app.api.intel_feed import router as intel_feed_router
 from app.api.intel_profiles import router as intel_profiles_router
 from app.api.intel_reports import router as intel_reports_router
@@ -887,6 +892,7 @@ app.include_router(extraction_router, prefix="/api/engine/extraction", tags=["ex
 app.include_router(ingest_router, prefix="/api/entries", tags=["ingest"])
 app.include_router(logs_router, prefix="/api", tags=["logs"])
 app.include_router(telegram_media_router, prefix="/api/telegram-media", tags=["telegram-media"])
+app.include_router(ingest_files_router, prefix="/api/ingest-files", tags=["ingest-files"])
 app.include_router(tts_router, prefix="/api/tts", tags=["tts"])
 app.include_router(telegram_router, prefix="/api/telegram", tags=["telegram"])
 app.include_router(public_rss_router, prefix="/api/public/rss", tags=["public-rss"])

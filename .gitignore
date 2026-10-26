@@ -34,6 +34,8 @@ backend/data/
 # Image-proxy cache (IMAGE_PROXY_CACHE_DIR) and generated read-aloud audio.
 data/
 tts_media/
+# Original files behind manual uploads (INGEST_FILES_DIR bind-mount in prod)
+ingest_files/
 backend/backups/
 logs/
 

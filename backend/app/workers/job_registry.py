@@ -285,6 +285,13 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
         "category": "maintenance",
         "default_schedule": {"type": "crontab", "minute": "25", "hour": "4"},
     },
+    "evict-old-ingest-files": {
+        "settings_keys": ["ingest_files_ttl_days"],
+        "task": "app.workers.maintenance.evict_old_ingest_files",
+        "description": "Delete manual-upload originals past the configured TTL (entries and intel are kept)",
+        "category": "maintenance",
+        "default_schedule": {"type": "crontab", "minute": "35", "hour": "4"},
+    },
     "backup-database": {
         "settings_keys": ["backup_retention_days"],
         "task": "app.workers.maintenance.backup_database",

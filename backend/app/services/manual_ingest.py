@@ -1,3 +1,13 @@
+"""The Manual Uploads feed and the single-item ingest paths.
+
+Bulk ingest (services/ingest_batches.py) builds on the same three pieces this
+module owns: the singleton ``manual://uploads`` feed, ``fetch_url_document``
+(fetch + readability + sanitize, no database), and ``create_manual_entry``
+(dedup by GUID, then one ordinary Entry row). ``ingest_url`` / ``ingest_pdf``
+remain as the synchronous one-item doors the Android client and the
+``ingest_url`` registry tool call.
+"""
+
 import hashlib
 import logging
 import re
@@ -11,9 +21,12 @@ from app.core.exceptions import AppError
 from app.models.entry import Entry
 from app.models.feed import Feed
 from app.services.dedup import compute_content_hash
+from app.services.ingest_parsers import (
+    ParsedDocument,
+    extract_pdf_content,  # noqa: F401 — re-exported; the PDF extractor lives in ingest_parsers now
+    sanitize_pdf_html,
+)
 from app.services.sanitizer import (
-    ALLOWED_ATTRIBUTES,
-    ALLOWED_TAGS,
     extract_first_image,
     extract_og_image,
     html_to_text,
@@ -23,10 +36,21 @@ from app.services.sanitizer import (
 logger = logging.getLogger(__name__)
 
 MANUAL_FEED_URL = "manual://uploads"
-MAX_PDF_SIZE = 50 * 1024 * 1024  # 50 MB
+MAX_PDF_SIZE = 50 * 1024 * 1024  # 50 MB — the legacy single-PDF cap; batches read ingest_max_file_mb
 
 _REL_SRC_RE = re.compile(r'(<(?:img|source|video|audio)\s[^>]*?)src="([^"]+)"', re.IGNORECASE)
 _REL_HREF_RE = re.compile(r'(<a\s[^>]*?)href="([^"]+)"', re.IGNORECASE)
+
+# Kept under the old private name: callers outside this module imported it.
+_sanitize_pdf_html = sanitize_pdf_html
+
+
+class DuplicateEntry(Exception):
+    """The manual feed already holds this GUID. ``entry_id`` is the existing row."""
+
+    def __init__(self, entry_id):
+        super().__init__("already ingested")
+        self.entry_id = entry_id
 
 
 def _resolve_relative_urls(html: str, base_url: str) -> str:
@@ -66,7 +90,7 @@ async def get_or_create_manual_feed(db: AsyncSession) -> Feed:
         intel_extraction_mode="full",
         auto_extract_on_ingest=True,
         extract_detection_rules=True,
-        description="Manually ingested articles and PDFs",
+        description="Manually ingested articles, files and pasted text",
     )
     db.add(feed)
     await db.flush()
@@ -79,27 +103,37 @@ async def get_or_create_manual_feed(db: AsyncSession) -> Feed:
     return feed
 
 
-async def ingest_url(db: AsyncSession, url: str) -> Entry:
-    """Fetch a URL and create an entry from its content."""
-    # Validate URL
+def url_guid(url: str) -> str:
+    return f"manual:url:{hashlib.sha256(url.encode()).hexdigest()}"
+
+
+def bytes_guid(data: bytes, *, kind: str = "file") -> str:
+    """``manual:pdf:<sha256>`` for PDFs (the historical form, so re-uploading a
+    PDF ingested before batches existed still reads as a duplicate),
+    ``manual:file:<sha256>`` for everything else."""
+    return f"manual:{kind}:{hashlib.sha256(data).hexdigest()}"
+
+
+def validate_http_url(url: str) -> None:
     parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https"):
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
         raise AppError(code="invalid_url", message="URL must use http or https", status_code=400)
 
-    feed = await get_or_create_manual_feed(db)
 
-    # Check for duplicate
-    guid = f"manual:url:{hashlib.sha256(url.encode()).hexdigest()}"
-    existing = await db.execute(select(Entry).where(Entry.feed_id == feed.id, Entry.guid == guid))
-    if existing.scalar_one_or_none():
-        raise AppError(code="duplicate", message="This URL has already been ingested", status_code=409)
+async def fetch_url_document(url: str) -> ParsedDocument:
+    """Fetch a page and reduce it to sanitized HTML + text. No database.
 
-    # Extract full text using the existing extraction pipeline
+    Reuses the poller's readability extraction (bot-protection impersonation,
+    robots.txt, Google News unwrapping), then falls back to a plain fetch for a
+    title and og:image. Both paths go through the SSRF-vetted client.
+    """
+    validate_http_url(url)
+    parsed = urlparse(url)
+
     from app.workers.feed_tasks import _extract_full_text
 
     content_html, og_image = await _extract_full_text(url)
 
-    # If full extraction failed, try a basic fetch for the title at minimum
     title = None
     if not content_html:
         from app.core.safe_http import safe_async_client
@@ -112,7 +146,6 @@ async def ingest_url(db: AsyncSession, url: str) -> Entry:
                     content_html = raw_html
                     if not og_image:
                         og_image = extract_og_image(raw_html)
-                    # Try to extract title from <title> tag
                     title_match = re.search(r"<title[^>]*>([^<]+)</title>", raw_html, re.IGNORECASE)
                     if title_match:
                         title = title_match.group(1).strip()
@@ -126,49 +159,85 @@ async def ingest_url(db: AsyncSession, url: str) -> Entry:
             status_code=422,
         )
 
-    # Resolve relative URLs to absolute before sanitizing/proxying
     content_html = _resolve_relative_urls(content_html, url)
-
-    # Sanitize and process
     sanitized_html = sanitize_html(content_html)
     content_text = html_to_text(sanitized_html)
-    word_count = len(content_text.split()) if content_text else 0
 
-    # Extract title from content if we don't have one yet
     if not title:
-        # Try <h1> in the extracted content
         h1_match = re.search(r"<h1[^>]*>([^<]+)</h1>", content_html, re.IGNORECASE)
-        if h1_match:
-            title = h1_match.group(1).strip()
-        else:
-            # Fallback: use domain + path
-            title = f"{parsed.netloc}{parsed.path}"
+        title = h1_match.group(1).strip() if h1_match else f"{parsed.netloc}{parsed.path}"
 
-    # Extract lead image
     image_url = extract_first_image(sanitized_html) if sanitized_html else None
     if not image_url:
         image_url = og_image
 
-    content_hash = compute_content_hash(title, content_text)
-    now = datetime.now(UTC)
+    return ParsedDocument(text=content_text, html=sanitized_html, title=title, meta={"image_url": image_url})
 
+
+async def create_manual_entry(
+    db: AsyncSession,
+    *,
+    guid: str,
+    title: str,
+    html: str | None,
+    text: str | None,
+    url: str | None = None,
+    image_url: str | None = None,
+    metadata: dict | None = None,
+    author: str | None = None,
+    published_at: datetime | None = None,
+) -> Entry:
+    """One ordinary entry on the manual feed. Raises DuplicateEntry on a known GUID."""
+    feed = await get_or_create_manual_feed(db)
+    existing = await db.execute(select(Entry.id).where(Entry.feed_id == feed.id, Entry.guid == guid))
+    existing_id = existing.scalar_one_or_none()
+    if existing_id:
+        raise DuplicateEntry(existing_id)
+
+    now = datetime.now(UTC)
+    word_count = len(text.split()) if text else 0
     entry = Entry(
         feed_id=feed.id,
         guid=guid,
         url=url,
-        title=title[:2000],
-        content_html=sanitized_html,
-        content_text=content_text,
-        published_at=now,
+        title=(title or "Untitled")[:2000],
+        author=author,
+        content_html=html,
+        content_text=text,
+        published_at=published_at or now,
         fetched_at=now,
         word_count=word_count,
-        content_hash=content_hash,
+        content_hash=compute_content_hash(title, text),
         image_url=image_url,
-        metadata_={"source": "url_ingest"},
+        metadata_=metadata or {},
     )
     db.add(entry)
     await db.flush()
     return entry
+
+
+async def ingest_url(db: AsyncSession, url: str) -> Entry:
+    """Fetch a URL and create an entry from its content (the one-item door)."""
+    guid = url_guid(url)
+    feed = await get_or_create_manual_feed(db)
+    existing = await db.execute(select(Entry).where(Entry.feed_id == feed.id, Entry.guid == guid))
+    if existing.scalar_one_or_none():
+        raise AppError(code="duplicate", message="This URL has already been ingested", status_code=409)
+
+    doc = await fetch_url_document(url)
+    try:
+        return await create_manual_entry(
+            db,
+            guid=guid,
+            title=doc.title or url,
+            html=doc.html,
+            text=doc.text,
+            url=url,
+            image_url=doc.meta.get("image_url"),
+            metadata={"source": "url_ingest"},
+        )
+    except DuplicateEntry:
+        raise AppError(code="duplicate", message="This URL has already been ingested", status_code=409) from None
 
 
 async def ingest_pdf(
@@ -177,7 +246,7 @@ async def ingest_pdf(
     filename: str,
     title: str | None = None,
 ) -> Entry:
-    """Extract text from a PDF and create an entry."""
+    """Extract text from a PDF and create an entry (the one-item door; no file retained)."""
     if len(file_content) > MAX_PDF_SIZE:
         raise AppError(
             code="file_too_large",
@@ -185,15 +254,7 @@ async def ingest_pdf(
             status_code=413,
         )
 
-    feed = await get_or_create_manual_feed(db)
-
-    # Check for duplicate
-    guid = f"manual:pdf:{hashlib.sha256(file_content).hexdigest()}"
-    existing = await db.execute(select(Entry).where(Entry.feed_id == feed.id, Entry.guid == guid))
-    if existing.scalar_one_or_none():
-        raise AppError(code="duplicate", message="This PDF has already been ingested", status_code=409)
-
-    # Extract text and HTML (with images as base64 data URIs)
+    guid = bytes_guid(file_content, kind="pdf")
     content_text, raw_html = extract_pdf_content(file_content)
     if not content_text or not content_text.strip():
         raise AppError(
@@ -202,79 +263,17 @@ async def ingest_pdf(
             status_code=422,
         )
 
-    # Use filename as title if not provided
     if not title:
         title = re.sub(r"\.pdf$", "", filename, flags=re.IGNORECASE).strip() or "Untitled PDF"
 
-    # Sanitize HTML, allowing data: URIs for embedded PDF images
-    content_html = _sanitize_pdf_html(raw_html)
-
-    word_count = len(content_text.split())
-    content_hash = compute_content_hash(title, content_text)
-    now = datetime.now(UTC)
-
-    entry = Entry(
-        feed_id=feed.id,
-        guid=guid,
-        title=title[:2000],
-        content_html=content_html,
-        content_text=content_text,
-        published_at=now,
-        fetched_at=now,
-        word_count=word_count,
-        content_hash=content_hash,
-        metadata_={"source": "pdf_upload", "filename": filename},
-    )
-    db.add(entry)
-    await db.flush()
-    return entry
-
-
-def extract_pdf_content(content: bytes) -> tuple[str, str]:
-    """Extract text and HTML (with embedded images) from PDF bytes.
-
-    Returns (plain_text, html_with_images) tuple.
-    """
-    import fitz  # pymupdf
-
-    text_pages = []
-    html_pages = []
-    with fitz.open(stream=content, filetype="pdf") as doc:
-        for page in doc:
-            text = page.get_text()
-            if text.strip():
-                text_pages.append(text.strip())
-            # get_text("html") returns HTML with images as base64 data URIs
-            page_html = page.get_text("html")
-            if page_html.strip():
-                html_pages.append(page_html)
-
-    plain_text = "\n\n".join(text_pages)
-    # If HTML extraction produced content with images, use it; otherwise fall back to
-    # wrapping plain text in paragraphs
-    if html_pages:
-        combined_html = "\n".join(html_pages)
-    else:
-        paragraphs = plain_text.split("\n\n")
-        combined_html = "".join(f"<p>{p.strip()}</p>" for p in paragraphs if p.strip())
-
-    return plain_text, combined_html
-
-
-def _sanitize_pdf_html(raw_html: str) -> str:
-    """Sanitize PDF-extracted HTML, allowing data: URIs for embedded images."""
-    import nh3
-
-    return nh3.clean(
-        raw_html,
-        tags=ALLOWED_TAGS | {"span", "div", "img"},
-        attributes={
-            **ALLOWED_ATTRIBUTES,
-            "img": {"src", "alt", "width", "height", "loading", "style"},
-            "span": {"style"},
-            "div": {"style"},
-            "p": {"style"},
-        },
-        link_rel="noopener noreferrer nofollow",
-        url_schemes={"http", "https", "data"},
-    )
+    try:
+        return await create_manual_entry(
+            db,
+            guid=guid,
+            title=title,
+            html=sanitize_pdf_html(raw_html),
+            text=content_text,
+            metadata={"source": "pdf_upload", "filename": filename},
+        )
+    except DuplicateEntry:
+        raise AppError(code="duplicate", message="This PDF has already been ingested", status_code=409) from None

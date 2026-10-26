@@ -213,6 +213,64 @@ def evict_old_telegram_media():
 
     CELERY_TASKS_TOTAL.labels(task_name="evict_old_telegram_media", status="success").inc()
     CELERY_TASK_DURATION_SECONDS.labels(task_name="evict_old_telegram_media").observe(time.monotonic() - start)
+
+
+@celery_app.task(name="app.workers.maintenance.evict_old_ingest_files", soft_time_limit=600, time_limit=660)
+def evict_old_ingest_files():
+    """Delete the original files behind manual uploads older than ingest_files_ttl_days.
+
+    Driven by the ingest_files rows, not directory mtimes: each evicted row
+    keeps its metadata and gets ``evicted_at`` stamped, and the entry's
+    ``metadata.original_retained`` flips to false, so the reader can say
+    "original not kept" instead of offering a dead download. The entry and
+    its extracted intel are never touched. A TTL of 0 keeps files forever.
+    """
+    start = time.monotonic()
+    ttl_days = run_async(_setting("ingest_files_ttl_days", 180))
+    if ttl_days <= 0:
+        CELERY_TASKS_TOTAL.labels(task_name="evict_old_ingest_files", status="success").inc()
+        return {"evicted": 0, "skipped": "ttl disabled"}
+    result = run_async(_evict_old_ingest_files(ttl_days))
+    CELERY_TASKS_TOTAL.labels(task_name="evict_old_ingest_files", status="success").inc()
+    CELERY_TASK_DURATION_SECONDS.labels(task_name="evict_old_ingest_files").observe(time.monotonic() - start)
+    return result
+
+
+async def _evict_old_ingest_files(ttl_days: int) -> dict:
+    from sqlalchemy.orm.attributes import flag_modified
+
+    from app.models.ingest_batch import IngestFile
+    from app.services import ingest_files as store
+
+    cutoff = datetime.now(UTC) - timedelta(days=ttl_days)
+    evicted = 0
+    async with _get_worker_session() as db:
+        rows = (
+            (
+                await db.execute(
+                    select(IngestFile)
+                    .where(IngestFile.evicted_at.is_(None), IngestFile.created_at < cutoff)
+                    .limit(5000)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for row in rows:
+            store.remove(row.path)
+            row.evicted_at = datetime.now(UTC)
+            evicted += 1
+            if row.entry_id:
+                entry = (await db.execute(select(Entry).where(Entry.id == row.entry_id))).scalar_one_or_none()
+                if entry is not None:
+                    meta = dict(entry.metadata_ or {})
+                    meta["original_retained"] = False
+                    entry.metadata_ = meta
+                    flag_modified(entry, "metadata_")
+        await db.commit()
+    if evicted:
+        logger.info("Evicted %d manual-upload originals older than %d days", evicted, ttl_days)
+    return {"evicted": evicted}
     if evicted:
         TELEGRAM_MEDIA_EVICTED_TOTAL.inc(evicted)
         logger.info("Evicted %d Telegram media files past %dd TTL", evicted, ttl_days)

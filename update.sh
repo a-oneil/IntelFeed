@@ -132,6 +132,11 @@ if [ "$needs_build" = true ]; then
     if [ "$(stat -c %u "$REPO_DIR/tts_media" 2>/dev/null)" != "1000" ]; then
         sudo chown -R 1000:1000 "$REPO_DIR/tts_media" || log "WARN: could not chown tts_media" "warning"
     fi
+    # Same for the originals behind manual uploads (api writes, celery-worker reads).
+    mkdir -p "$REPO_DIR/ingest_files"
+    if [ "$(stat -c %u "$REPO_DIR/ingest_files" 2>/dev/null)" != "1000" ]; then
+        sudo chown -R 1000:1000 "$REPO_DIR/ingest_files" || log "WARN: could not chown ingest_files" "warning"
+    fi
 
     # Build before touching anything that is running. The db image is built from
     # ./db (postgres + pgvector), so a build failure here has to mean "no update

@@ -768,6 +768,225 @@ async def _ingest_url(db: AsyncSession, user_id: uuid.UUID, url: str, title: str
 
 
 # ---------------------------------------------------------------------------
+# Bulk ingest (batches of pasted text, files, URLs and one-time GitHub repos)
+# ---------------------------------------------------------------------------
+
+
+def _ingest_item_dict(item) -> dict:
+    return {
+        "id": str(item.id),
+        "kind": item.kind,
+        "status": item.status,
+        "filename": item.filename,
+        "source_url": item.source_url,
+        "entry_id": str(item.entry_id) if item.entry_id else None,
+        "error": item.error,
+    }
+
+
+def _ingest_batch_dict(batch, items) -> dict:
+    from app.services.ingest_batches import summarize_items
+
+    return {
+        "batch_id": str(batch.id),
+        "label": batch.label,
+        "created_at": batch.created_at.isoformat() if batch.created_at else None,
+        "summary": summarize_items(items),
+        "items": [_ingest_item_dict(i) for i in items],
+    }
+
+
+@_tool(
+    name="ingest_text",
+    description=(
+        "Ingest pasted text (a report body, an advisory, a chat log, an indicator dump) as one manual entry: "
+        "stores the paste as a .txt original under Manual Uploads, queues it on the worker, and returns the "
+        "batch id to poll with get_ingest_batch. Set is_ioc_list when the text is one indicator per line so "
+        "it goes through the curated indicator-list door instead of candidate staging. One paste = one entry."
+    ),
+    input_schema={
+        "properties": {
+            "text": {"type": "string", "description": "The text to ingest"},
+            "title": {"type": "string", "description": "Optional entry title"},
+            "source_url": {"type": "string", "description": "Optional http(s) URL the text came from"},
+            "is_ioc_list": {"type": "boolean", "description": "Treat the body as a curated indicator list"},
+        },
+        "required": ["text"],
+    },
+    mutating=True,
+)
+async def _ingest_text(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    text: str,
+    title: str | None = None,
+    source_url: str | None = None,
+    is_ioc_list: bool = False,
+) -> dict:
+    from app.services import ingest_batches as batches
+
+    try:
+        batch = await batches.create_batch(db, user_id, label=title, source="tool")
+        item = await batches.add_text_item(
+            db, batch, text=text, title=title, source_url=source_url, is_ioc_list=bool(is_ioc_list)
+        )
+    except AppError as exc:
+        return {"error": exc.message}
+    await db.commit()
+    batches.dispatch_item(item)
+    return _ingest_batch_dict(batch, [item])
+
+
+@_tool(
+    name="ingest_file",
+    description=(
+        "Ingest one file (PDF, DOCX, TXT, MD, HTML, CSV, EML, ZIP, ...) given as base64 as a manual entry: "
+        "stores the original under Manual Uploads, queues it, returns the batch id to poll with "
+        "get_ingest_batch. A .zip expands into one entry per member. Keep files under the configured per-file "
+        "cap (default 50 MB); the base64 payload must fit in one tool call."
+    ),
+    input_schema={
+        "properties": {
+            "filename": {"type": "string", "description": "Original filename, extension included"},
+            "content_base64": {"type": "string", "description": "The file bytes, base64-encoded"},
+            "title": {"type": "string", "description": "Optional entry title override"},
+            "is_ioc_list": {"type": "boolean", "description": "Treat the body as a curated indicator list"},
+        },
+        "required": ["filename", "content_base64"],
+    },
+    mutating=True,
+)
+async def _ingest_file(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    filename: str,
+    content_base64: str,
+    title: str | None = None,
+    is_ioc_list: bool = False,
+) -> dict:
+    import base64
+    import binascii
+
+    from app.services import ingest_batches as batches
+
+    try:
+        data = base64.b64decode(content_base64, validate=True)
+    except (binascii.Error, ValueError):
+        return {"error": "content_base64 is not valid base64"}
+    if not data:
+        return {"error": "The file is empty"}
+    try:
+        batch = await batches.create_batch(db, user_id, label=filename, source="tool")
+        item = await batches.add_file_item(
+            db, batch, data=data, filename=filename, content_type=None, title=title, is_ioc_list=bool(is_ioc_list)
+        )
+    except AppError as exc:
+        return {"error": exc.message}
+    await db.commit()
+    batches.dispatch_item(item)
+    return _ingest_batch_dict(batch, [item])
+
+
+@_tool(
+    name="ingest_batch",
+    description=(
+        "Ingest many URLs and/or text blobs in one batch under Manual Uploads. Each URL becomes one entry; a "
+        "github.com/owner/repo link (optionally /tree/<branch>/<path>) is fetched once and becomes one entry per "
+        "file with no feed created. Each text becomes one entry. Returns the batch id; poll get_ingest_batch "
+        "for per-item status (created / duplicate / no_text / unsupported / failed)."
+    ),
+    input_schema={
+        "properties": {
+            "urls": {"type": "array", "items": {"type": "string"}, "description": "http(s) URLs or GitHub repo links"},
+            "texts": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string"},
+                        "title": {"type": "string"},
+                        "source_url": {"type": "string"},
+                    },
+                    "required": ["text"],
+                },
+                "description": "Text blobs, one entry each",
+            },
+            "label": {"type": "string", "description": "Optional batch label"},
+            "is_ioc_list": {"type": "boolean", "description": "Treat every item as a curated indicator list"},
+        },
+    },
+    mutating=True,
+)
+async def _ingest_batch(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    urls: list[str] | None = None,
+    texts: list[dict] | None = None,
+    label: str | None = None,
+    is_ioc_list: bool = False,
+) -> dict:
+    from app.services import ingest_batches as batches
+
+    urls = [u for u in (urls or []) if isinstance(u, str) and u.strip()]
+    texts = [t for t in (texts or []) if isinstance(t, dict) and str(t.get("text") or "").strip()]
+    if not urls and not texts:
+        return {"error": "Give at least one URL or one text"}
+    items = []
+    try:
+        batch = await batches.create_batch(db, user_id, label=label, source="tool")
+        if urls:
+            items.extend(await batches.add_url_items(db, batch, urls, is_ioc_list=bool(is_ioc_list)))
+        for t in texts:
+            items.append(
+                await batches.add_text_item(
+                    db,
+                    batch,
+                    text=str(t["text"]),
+                    title=t.get("title"),
+                    source_url=t.get("source_url"),
+                    is_ioc_list=bool(is_ioc_list),
+                )
+            )
+    except AppError as exc:
+        return {"error": exc.message}
+    await db.commit()
+    batches.dispatch_items(items)
+    return _ingest_batch_dict(batch, items)
+
+
+@_tool(
+    name="get_ingest_batch",
+    description=(
+        "Status of one ingest batch: per-item status (queued / parsing / created / expanded / duplicate / "
+        "no_text / unsupported / too_large / failed), the entry id each item produced, and a summary. "
+        "Poll until summary.status is 'complete'. Created entries still go on to the pipeline and the "
+        "one-pass AI analysis afterwards, like any polled entry."
+    ),
+    input_schema={
+        "properties": {
+            "batch_id": {"type": "string", "description": "Batch id from ingest_text / ingest_file / ingest_batch"}
+        },
+        "required": ["batch_id"],
+    },
+    mutating=False,
+)
+async def _get_ingest_batch(db: AsyncSession, user_id: uuid.UUID, batch_id: str) -> dict:
+    from app.services import ingest_batches as batches
+
+    try:
+        bid = uuid.UUID(str(batch_id))
+    except ValueError:
+        return {"error": "batch_id is not a UUID"}
+    batch = await batches.get_batch(db, bid)
+    if batch is None:
+        return {"error": "Batch not found"}
+    items = list(batch.items)
+    if await batches.mark_stale_parsing(db, items):
+        await db.commit()
+    return _ingest_batch_dict(batch, items)
+
+
+# ---------------------------------------------------------------------------
 # Public share links
 # ---------------------------------------------------------------------------
 
