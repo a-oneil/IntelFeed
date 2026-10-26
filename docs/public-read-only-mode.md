@@ -101,4 +101,4 @@ To open another route to visitors: switch it to `get_viewer` (or `get_entry_view
 
 ## Live updates
 
-Visitors do not get the live-updates stream (it needs a per-user ticket). Lists refresh on their normal query intervals.
+Visitors do not get the live-updates stream. It needs a per-user ticket, and its broadcast channel carries unfiltered payloads (feed and entry ids from every feed, correlation-event text). A visitor's article list refreshes when they navigate, reload, or return to a view after its 30-second cache expires; widgets and thread views that poll on their own interval keep doing so.
