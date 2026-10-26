@@ -9,7 +9,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
-from app.core.security import get_admin_user, get_current_user, get_viewer
+from app.core.security import get_admin_user, get_current_user, get_entry_viewer, get_viewer
 from app.database import get_db
 from app.intelligence.correlation import (
     ENTITY_CONFIG,
@@ -43,6 +43,7 @@ from app.schemas.intelligence import (
     PivotResponse,
     TimelineResponse,
 )
+from app.services.public_view import entities_shown, visitor_events_only
 
 router = APIRouter()
 
@@ -234,7 +235,7 @@ async def list_grouped_correlation_events(
         filters.append(CorrelationEventRecord.is_read == is_read)
 
     # Fetch events (up to limit * 10 to have enough for grouping)
-    q = (
+    q = visitor_events_only(
         select(CorrelationEventRecord)
         .where(*filters)
         .order_by(CorrelationEventRecord.created_at.desc())
@@ -242,6 +243,16 @@ async def list_grouped_correlation_events(
     )
     result = await db.execute(q)
     all_events = result.scalars().all()
+    if user.is_anonymous:
+        refs = {(e.source_entity_type, e.source_entity_id) for e in all_events}
+        refs |= {(e.related_entity_type, e.related_entity_id) for e in all_events}
+        shown = await entities_shown(db, refs)
+        all_events = [
+            e
+            for e in all_events
+            if (e.source_entity_type, e.source_entity_id) in shown
+            and (e.related_entity_type, e.related_entity_id) in shown
+        ]
 
     # Category counts (across all events, ignoring category filter)
     count_q = select(
@@ -251,7 +262,7 @@ async def list_grouped_correlation_events(
     ).group_by(CorrelationEventRecord.event_type)
     if time_filters:
         count_q = count_q.where(*time_filters)
-    count_result = await db.execute(count_q)
+    count_result = await db.execute(visitor_events_only(count_q))
     type_counts = count_result.all()
 
     # Determine excluded types for consistent counting
@@ -542,7 +553,7 @@ async def get_entry_graph(
     include_observables: bool = Query(
         False, description="Include IOC-ledger observables as graph nodes (off by default to keep maps readable)."
     ),
-    user: User = Depends(get_viewer),
+    user: User = Depends(get_entry_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a relationship graph of all entities linked to an entry."""

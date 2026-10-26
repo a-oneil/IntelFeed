@@ -19,6 +19,7 @@ from app.models.entry import Entry
 from app.models.threat_actor import EntryThreatActor, ThreatActor
 from app.models.ttp import TTP, EntryTTP
 from app.models.user import User
+from app.services.public_view import entities_shown, visitor_events_only
 from app.services.read_state import unread_by_user
 
 logger = logging.getLogger(__name__)
@@ -403,6 +404,18 @@ async def detection_coverage(
         ) from exc
 
 
+async def _drop_events_naming_hidden(db: AsyncSession, rows):
+    """Events whose source or related entity a visitor can't see go."""
+    refs = {(e.source_entity_type, e.source_entity_id) for e, _ in rows}
+    refs |= {(e.related_entity_type, e.related_entity_id) for e, _ in rows}
+    shown = await entities_shown(db, refs)
+    return [
+        (e, title)
+        for e, title in rows
+        if (e.source_entity_type, e.source_entity_id) in shown and (e.related_entity_type, e.related_entity_id) in shown
+    ]
+
+
 @router.get("/correlation-events")
 async def recent_correlation_events(
     limit: int = Query(10, ge=1, le=500, description="Maximum number of events to return."),
@@ -415,13 +428,21 @@ async def recent_correlation_events(
         # Exclude feed-health events (feed_error, feed_stale) — they have no entry_id
         # and aren't true correlation events.
         excluded_types = ("feed_error", "feed_stale")
+        query = select(CorrelationEventRecord, Entry.title)
+        if user.is_anonymous:
+            # Inner join through the visitor filter: allowed types about
+            # visible articles only.
+            query = visitor_events_only(query)
+        else:
+            query = query.join(Entry, Entry.id == CorrelationEventRecord.entry_id, isouter=True)
         result = await db.execute(
-            select(CorrelationEventRecord, Entry.title)
-            .join(Entry, Entry.id == CorrelationEventRecord.entry_id, isouter=True)
-            .where(CorrelationEventRecord.event_type.notin_(excluded_types))
+            query.where(CorrelationEventRecord.event_type.notin_(excluded_types))
             .order_by(CorrelationEventRecord.created_at.desc())
             .limit(limit)
         )
+        rows = result.all()
+        if user.is_anonymous:
+            rows = await _drop_events_naming_hidden(db, rows)
         return [
             {
                 "id": str(e.id),
@@ -432,7 +453,7 @@ async def recent_correlation_events(
                 "entry_id": str(e.entry_id) if e.entry_id else None,
                 "entry_title": title,
             }
-            for e, title in result.all()
+            for e, title in rows
         ]
     except Exception as exc:
         logger.exception("Error in correlation_events widget")

@@ -63,6 +63,7 @@ VISITOR_ROUTES = frozenset(
     GET /api/entity-links
     GET /api/entity-relationships
     GET /api/entity-relationships/by-entity/{entity_type}/{entity_id}
+    POST /api/entity-relationships/signals/{entity_type}
     GET /api/entries
     GET /api/entries/calendar
     GET /api/entries/count
@@ -277,11 +278,34 @@ def test_every_open_route_is_classified():
     }
 
 
+def test_visitor_routes_about_one_article_check_it_is_visible():
+    """A route keyed by an entry id reads junction rows the visitor filter
+    never sees; get_entry_viewer 404s an entry from a hidden feed first."""
+    unguarded = sorted(
+        key
+        for key, _route, deps in _routes()
+        if key in VISITOR_ROUTES and "{entry_id}" in key and "get_entry_viewer" not in deps
+    )
+    assert unguarded == []
+
+
 def test_visitor_routes_are_reads_or_reviewed_posts():
-    from app.core.public_access import ANONYMOUS_READ_POSTS
+    from app.core.public_access import ANONYMOUS_READ_POST_TEMPLATES, ANONYMOUS_READ_POSTS
 
     writes = {k for k in VISITOR_ROUTES if not k.startswith("GET ")}
-    assert writes == {f"POST {p}" for p in ANONYMOUS_READ_POSTS}
+    assert writes == {f"POST {p}" for p in ANONYMOUS_READ_POSTS | set(ANONYMOUS_READ_POST_TEMPLATES)}
+
+
+@pytest.mark.asyncio
+async def test_relationship_signals_open_to_visitors_with_a_larger_cap(client: AsyncClient, public_mode):
+    url = "/api/entity-relationships/signals/threat_actor"
+    page = [str(uuid.uuid4()) for _ in range(300)]
+    assert (await client.post(url, json={"ids": page})).status_code == 200
+    # Past the 1000 ids the route reads, the body is refused before it is parsed.
+    too_many = [str(uuid.uuid4()) for _ in range(1400)]
+    assert (await client.post(url, json={"ids": too_many})).status_code == 413
+    # Any other path under it is still a write and still locked.
+    assert (await client.post(url + "/extra", json={"ids": page})).status_code == 401
 
 
 def test_openapi_keeps_the_real_login_check():
@@ -708,3 +732,338 @@ async def test_visitors_see_only_folders_holding_a_visible_feed(
 
     signed_in = (await client.get("/api/categories", headers=auth_headers)).json()
     assert {c["name"] for c in signed_in} >= {"Research", "Empty folder", "Private folder"}
+
+
+# --- Authorization headers that carry no token ------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("header", ["Bearer ", "Bearer", "bearer  ", "Basic abc", "Token x"])
+async def test_a_header_without_a_token_is_refused_not_treated_as_a_visitor(
+    client: AsyncClient, public_mode, header, no_rate_limit
+):
+    """A header the bearer parse can't read must not skip the write lock and
+    scrubbing as a signed-in caller would, then reach the route as a visitor."""
+    for url in ("/api/widgets/overview?days=7", "/api/feeds", "/api/ttps?limit=3"):
+        resp = await client.get(url, headers={"Authorization": header})
+        assert resp.status_code == 401, (header, url, resp.status_code)
+    resp = await client.post("/api/autolink/scan", json={"text": "x" * 20_000}, headers={"Authorization": header})
+    assert resp.status_code in (401, 413), (header, resp.status_code)
+
+
+@pytest.mark.asyncio
+async def test_a_lowercase_bearer_scheme_is_a_signed_in_caller(client: AsyncClient, public_mode, auth_headers):
+    token = auth_headers["Authorization"].split(" ", 1)[1]
+    resp = await client.get("/api/widgets/overview?days=7", headers={"Authorization": f"bearer {token}"})
+    assert resp.status_code == 200
+    assert "X-RateLimit-Limit" not in resp.headers  # signed-in reads are not limited
+
+
+@pytest.mark.asyncio
+async def test_parallel_requests_cannot_overrun_the_window(
+    client: AsyncClient, public_mode, shown_entry, monkeypatch, fresh_rate_limits
+):
+    import asyncio
+
+    from app.core import rate_limit
+
+    monkeypatch.setitem(rate_limit._BUCKET_WINDOWS, "anon_article", ((3, 60), (100, 3600)))
+    url = f"/api/entries/{shown_entry.id}"
+    statuses = [r.status_code for r in await asyncio.gather(*(client.get(url) for _ in range(12)))]
+    assert statuses.count(200) == 3, statuses
+    assert statuses.count(429) == 9
+
+
+# --- Canary: nothing from a hidden feed reaches a visitor ---------------------
+#
+# The ORM filter only sees ORM queries that name Entry. Raw SQL, junction-only
+# queries, Redis caches and the search index all sit outside it, and every one
+# of those has leaked before. This seeds one article in a hidden feed, marked
+# everywhere it can be (title, URL, text, an actor known only from it, a
+# thread built from it, a beat, an event, a claim quote) and walks every
+# visitor route, first signed in so caches fill, then as a visitor. No visitor
+# response may carry a marker or the hidden ids.
+
+_CANARY = "CANARYZQX"
+
+
+@pytest_asyncio.fixture
+async def canary(db_session: AsyncSession):
+    from datetime import UTC, datetime
+
+    from app.models.correlation_event import CorrelationEventRecord
+    from app.models.entity_field_claim import EntityFieldClaim
+    from app.models.entity_relationship import EntityRelationship
+    from app.models.story_thread import StoryThread, StoryThreadBeat, StoryThreadEntry
+    from app.models.threat_actor import EntryThreatActor, ThreatActor
+
+    shown_feed = Feed(title="Shown feed", url="https://shown.example/feed", feed_type="rss", visible_to_visitors=True)
+    hidden_feed = Feed(title=f"{_CANARY} feed", url=f"https://{_CANARY.lower()}.example/feed", feed_type="rss")
+    db_session.add_all([shown_feed, hidden_feed])
+    await db_session.flush()
+    now = datetime.now(UTC)
+    shown = Entry(
+        feed_id=shown_feed.id,
+        title="A public article about Shared Actor",
+        guid="shown-1",
+        url="https://shown.example/a",
+        content_text="Shared Actor did something.",
+        published_at=now,
+    )
+    hidden = Entry(
+        feed_id=hidden_feed.id,
+        title=f"{_CANARY} title",
+        guid="hidden-1",
+        url=f"https://{_CANARY.lower()}.example/a",
+        content_text=f"{_CANARY} text about Shared Actor and {_CANARY} Ghost.",
+        summary=f"{_CANARY} summary",
+        published_at=now,
+    )
+    db_session.add_all([shown, hidden])
+    await db_session.flush()
+
+    shared = ThreatActor(name="Shared Actor", first_seen_at=now, last_seen_at=now)
+    ghost = ThreatActor(name=f"{_CANARY} Ghost", first_seen_at=now, last_seen_at=now)
+    db_session.add_all([shared, ghost])
+    await db_session.flush()
+    db_session.add_all(
+        [
+            EntryThreatActor(entry_id=shown.id, threat_actor_id=shared.id, matched_names=["Shared Actor"]),
+            EntryThreatActor(entry_id=hidden.id, threat_actor_id=shared.id, matched_names=[f"{_CANARY} alias"]),
+            EntryThreatActor(entry_id=hidden.id, threat_actor_id=ghost.id, matched_names=[f"{_CANARY} Ghost"]),
+        ]
+    )
+    thread = StoryThread(slug="canary-thread", title=f"{_CANARY} thread", summary=f"{_CANARY} spine", entry_count=1)
+    db_session.add(thread)
+    await db_session.flush()
+    db_session.add_all(
+        [
+            StoryThreadEntry(thread_id=thread.id, entry_id=hidden.id, role="origin"),
+            StoryThreadBeat(
+                thread_id=thread.id,
+                headline=f"{_CANARY} beat",
+                body=f"{_CANARY} beat body",
+                lead_entry_id=hidden.id,
+                entry_ids=[str(hidden.id)],
+            ),
+            EntityRelationship(
+                source_type="threat_actor",
+                source_id=shared.id,
+                target_type="threat_actor",
+                target_id=ghost.id,
+                relationship_type="related-to",
+                confidence="likely",
+                source="ai_extracted",
+                description=f"{_CANARY} relationship",
+                evidence_entry_ids=[hidden.id],
+            ),
+            CorrelationEventRecord(
+                event_type="co_occurrence",
+                entry_id=hidden.id,
+                source_entity_type="threat_actor",
+                source_entity_id=shared.id,
+                source_entity_label="Shared Actor",
+                related_entity_type="threat_actor",
+                related_entity_id=ghost.id,
+                related_entity_label=f"{_CANARY} Ghost",
+                context=f"{_CANARY} event",
+            ),
+            # An allowed type on a visible article, naming the hidden-only actor.
+            CorrelationEventRecord(
+                event_type="actor_malware_cooccurrence",
+                entry_id=shown.id,
+                source_entity_type="threat_actor",
+                source_entity_id=shared.id,
+                source_entity_label="Shared Actor",
+                related_entity_type="threat_actor",
+                related_entity_id=ghost.id,
+                related_entity_label=f"{_CANARY} Ghost",
+                context=f"{_CANARY} event on a visible article",
+            ),
+            EntityFieldClaim(
+                entity_type="threat_actor",
+                entity_id=shared.id,
+                field="aliases",
+                value_text=f"{_CANARY} claim",
+                source_kind="article",
+                entry_id=hidden.id,
+                quote=f"{_CANARY} quote",
+                claim_key=f"{_CANARY}-claim",
+            ),
+        ]
+    )
+    await db_session.flush()
+    db_session.expunge_all()
+    return {"shown": shown.id, "hidden": hidden.id, "shared": shared.id, "ghost": ghost.id, "slug": thread.slug}
+
+
+def _leaks(body: str, c: dict, url: str) -> list[str]:
+    found = [m for m in (_CANARY, _CANARY.lower()) if m in body]
+    # An id the visitor put in the URL may come back; any other may not.
+    found += [k for k in ("hidden", "ghost") if str(c[k]) in body and str(c[k]) not in url]
+    return found
+
+
+async def _canary_walk(client: AsyncClient, overrides: dict, headers: dict | None = None) -> dict[str, list[str]]:
+    leaks = {}
+    for key in sorted(VISITOR_ROUTES):
+        method, path = key.split(" ", 1)
+        url = _fill(path, overrides)
+        if path == "/api/proxy/image":
+            url += f"?url=https://{_CANARY.lower()}.example/x.png"
+        if path == "/api/tts/existing":
+            url += f"?source=entry&id={overrides.get('entry_id')}"
+        if method == "GET":
+            resp = await client.get(url, headers=headers)
+        else:
+            body = {"entry_ids": [overrides.get("entry_id")], "ids": [overrides.get("entity_id")], "names": []}
+            resp = await client.post(url, json={**body, "text": "Shared Actor"}, headers=headers)
+        if headers is None and (found := _leaks(resp.text, overrides["_canary"], url)):
+            leaks[f"{key} -> {url}"] = found
+    return leaks
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("focus", ["shared", "ghost"])
+async def test_nothing_from_a_hidden_feed_reaches_a_visitor(
+    client: AsyncClient, public_mode, canary, auth_headers, no_rate_limit, focus
+):
+    from app.services.redis_client import get_redis
+
+    r = await get_redis()
+    # Tests share the dev Redis: clear only this run's entities' pivots and graphs.
+    for entity in ("shared", "ghost"):
+        keys = [k async for k in r.scan_iter(match=f"intelfeed:corr:*:{canary[entity]}*")]
+        if keys:
+            await r.delete(*keys)
+
+    overrides = {
+        "entity_type": "threat_actor",
+        "entity_id": str(canary[focus]),
+        "actor_id": str(canary[focus]),
+        "id": str(canary[focus]),
+        "entry_id": str(canary["hidden"]),
+        "slug": canary["slug"],
+        "_canary": canary,
+    }
+    await _canary_walk(client, overrides, headers=auth_headers)  # fills caches the way an analyst would
+    leaks = await _canary_walk(client, overrides)
+    # The article and entity routes are also walked from the visible article,
+    # whose neighbours, threads and counts include the hidden one.
+    leaks |= await _canary_walk(client, {**overrides, "entry_id": str(canary["shown"])})
+    assert leaks == {}, "\n".join(f"{k}: {v}" for k, v in sorted(leaks.items()))
+
+
+# --- Paths the canary walk can't see -------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_image_proxy_serves_a_visitor_only_what_a_visible_article_shows(
+    client: AsyncClient, public_mode, canary, db_session: AsyncSession, monkeypatch
+):
+    from app.api import proxy
+    from app.services.sanitizer import sanitize_html
+
+    monkeypatch.setattr(settings, "image_proxy_enabled", True)
+    shown_img, hidden_img = "https://shown.example/pic.png?a=1&b=2", f"https://{_CANARY.lower()}.example/pic.png"
+    link = "https://shown.example/page"
+    shown = await db_session.get(Entry, canary["shown"])
+    shown.content_html = sanitize_html(f'<p><img src="{shown_img}"><a href="{link}">x</a></p>')
+    hidden = await db_session.get(Entry, canary["hidden"])
+    hidden.content_html = sanitize_html(f'<p><img src="{hidden_img}"></p>')
+    await db_session.flush()
+    db_session.expunge_all()
+
+    # Both already cached (an analyst read both articles), and fetching is stubbed.
+    monkeypatch.setattr(proxy, "_read_cache", lambda url: (b"\x89PNG" + b"0" * 200, "image/png"))
+    get = client.get
+    assert (await get("/api/proxy/image", params={"url": shown_img, "entry": str(canary["shown"])})).status_code == 200
+    # The cache does not answer for an image only a hidden article shows...
+    resp = await get("/api/proxy/image", params={"url": hidden_img, "entry": str(canary["hidden"])})
+    assert resp.status_code == 404
+    # ...nor without an article, nor for a link that isn't an image.
+    assert (await get("/api/proxy/image", params={"url": shown_img})).status_code == 404
+    assert (await get("/api/proxy/image", params={"url": link, "entry": str(canary["shown"])})).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_visitors_see_only_global_tags_on_visible_articles(
+    client: AsyncClient, public_mode, canary, db_session: AsyncSession, test_user
+):
+    from app.models.tag import EntryTag, Tag
+
+    public = Tag(name="public-tag", is_global=True, created_by=test_user.id)
+    hidden_only = Tag(name=f"{_CANARY}-tag", is_global=True, created_by=test_user.id)
+    personal = Tag(name="my-private-tag", is_global=False, created_by=test_user.id)
+    db_session.add_all([public, hidden_only, personal])
+    await db_session.flush()
+    db_session.add_all(
+        [
+            EntryTag(entry_id=canary["shown"], tag_id=public.id),
+            EntryTag(entry_id=canary["hidden"], tag_id=hidden_only.id),
+            EntryTag(entry_id=canary["shown"], tag_id=personal.id, user_id=test_user.id),
+        ]
+    )
+    await db_session.flush()
+    tags = (await client.get("/api/tags")).json()
+    assert [(t["name"], t["entry_count"]) for t in tags] == [("public-tag", 1)]
+
+
+@pytest.mark.asyncio
+async def test_autolink_scan_never_names_a_hidden_entity_or_shrinks_the_vocabulary(
+    client: AsyncClient, public_mode, canary
+):
+    from app.intelligence import autolinker
+
+    autolinker._vocabulary = None  # force the rebuild inside the visitor's request
+    resp = await client.post("/api/autolink/scan", json={"text": f"Shared Actor met {_CANARY} Ghost."})
+    assert resp.status_code == 200
+    names = {m["canonical_name"] for m in resp.json()["matches"]}
+    assert "Shared Actor" in names
+    assert not any(_CANARY in n for n in names)
+    # The rebuild the visitor triggered is the shared one: it still knows the ghost.
+    assert any(_CANARY in m["canonical_name"] for m in autolinker.scan_text(f"{_CANARY} Ghost"))
+
+
+@pytest.mark.asyncio
+async def test_attack_matrix_counts_and_cache_are_per_viewer(
+    client: AsyncClient, public_mode, canary, db_session: AsyncSession, auth_headers
+):
+    from app.models.ttp import TTP, EntryTTP
+    from app.services.redis_client import get_redis
+
+    ttp = TTP(
+        technique_id="T9999",
+        technique_name="Canary technique",
+        tactic="execution",
+        tactics=["execution"],
+        matrix_domain="enterprise",
+    )
+    db_session.add(ttp)
+    await db_session.flush()
+    ttp.article_count = 2
+    db_session.add_all(
+        [EntryTTP(entry_id=canary["shown"], ttp_id=ttp.id), EntryTTP(entry_id=canary["hidden"], ttp_id=ttp.id)]
+    )
+    await db_session.flush()
+    r = await get_redis()
+    keys = [k async for k in r.scan_iter(match="intelfeed:attack:matrix*")]
+    if keys:
+        await r.delete(*keys)
+
+    def count(body: dict) -> int:
+        cells = [t for col in body["tactics"] for t in col["techniques"] if t["technique_id"] == "T9999"]
+        return cells[0]["article_count"] if cells else -1
+
+    analyst = (await client.get("/api/attack/matrix", headers=auth_headers)).json()
+    visitor = (await client.get("/api/attack/matrix")).json()
+    assert count(analyst) == 2  # the stored rollup, every feed
+    assert count(visitor) == 1  # visible articles only, not served the analyst's cached copy
+
+
+@pytest.mark.asyncio
+async def test_refused_visitor_writes_carry_the_private_and_noindex_headers(client: AsyncClient, public_mode):
+    resp = await client.post("/api/feeds", json={"url": "https://x.example/feed"})
+    assert resp.status_code == 401
+    assert resp.headers["cache-control"] == "private, no-store"
+    assert "noindex" in resp.headers["x-robots-tag"]

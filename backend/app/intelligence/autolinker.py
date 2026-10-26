@@ -1207,7 +1207,19 @@ async def _ensure_vocabulary(db: AsyncSession) -> None:
 
 
 async def refresh_vocabulary(db: AsyncSession) -> int:
-    """Rebuild vocabulary from database and update Redis version."""
+    """Rebuild vocabulary from database and update Redis version.
+
+    Always from the whole instance: a visitor's request can trigger this, and
+    a vocabulary built under the visitor filter would drop every entity known
+    only from a hidden feed, for every worker that loads it.
+    """
+    from app.core.public_access import instance_view
+
+    with instance_view():
+        return await _rebuild_vocabulary(db)
+
+
+async def _rebuild_vocabulary(db: AsyncSession) -> int:
     global _vocabulary, _vocab_version
 
     # Warm the process-local settings cache first. The build filters read

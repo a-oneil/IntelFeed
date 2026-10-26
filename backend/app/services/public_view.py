@@ -51,6 +51,219 @@ def _shown_feed_ids():
     return select(Feed.id).where(_feed_shown_to_visitors())
 
 
+def visible_entries_only(stmt, entry_id_column):
+    """``stmt`` restricted to entries a visitor may see, when the viewer is one.
+
+    A query over a junction table (EntryCVE, EntryThreatActor, ...) that never
+    names ``Entry`` slips past the ORM filter: its rows, counts and entry ids
+    include hidden feeds. Joining ``Entry`` brings the filter in. An inner
+    join, deliberately: on an outer join the criteria land in the ON clause and
+    the row survives with NULL entry columns.
+    """
+    if not viewer_is_anonymous():
+        return stmt
+    return stmt.join(Entry, Entry.id == entry_id_column)
+
+
+#: Correlation event types a visitor may see: an allowlist, so a new type
+#: stays hidden until someone reads what its context text says. Left out:
+#: coverage gaps and rule events (detection), campaign and requirement
+#: matches (their context names the campaign or PIR), feed health.
+VISITOR_EVENT_TYPES: frozenset[str] = frozenset(
+    {
+        "new_ttp_for_known_actor",
+        "new_ttp_for_known_malware",
+        "new_malware_for_known_actor",
+        "actor_malware_cooccurrence",
+        "exploit_status_change",
+        "cve_score_change",
+        "new_exploit_discovered",
+        "kev_addition",
+        "trending_entity",
+    }
+)
+
+
+def visitor_events_only(stmt):
+    """A correlation-event query cut to what a visitor may see: allowed types,
+    about an article they can see. No-op for a signed-in viewer."""
+    from app.models.correlation_event import CorrelationEventRecord
+
+    if not viewer_is_anonymous():
+        return stmt
+    stmt = stmt.where(CorrelationEventRecord.event_type.in_(VISITOR_EVENT_TYPES))
+    return visible_entries_only(stmt, CorrelationEventRecord.entry_id)
+
+
+async def entities_shown(db, refs) -> set[tuple[str, Any]]:
+    """Which ``(entity_type, id)`` pairs a visitor sees. Types the visitor
+    filter doesn't cover pass; article-derived ones are looked up through it."""
+    from sqlalchemy import select
+
+    from app.intelligence.correlation import ENTITY_CONFIG
+
+    refs = set(refs)
+    shown = {(t, i) for t, i in refs if t not in ARTICLE_DERIVED_TYPES}
+    by_type: dict[str, set] = {}
+    for t, i in refs:
+        if t in ARTICLE_DERIVED_TYPES:
+            by_type.setdefault(t, set()).add(i)
+    for t, ids in by_type.items():
+        model = ENTITY_CONFIG[t][0]
+        found = (await db.execute(select(model.id).where(model.id.in_(ids)))).scalars()
+        shown |= {(t, i) for i in found}
+    return shown
+
+
+async def visitor_feed_ids(db) -> list[str] | None:
+    """The feeds a visitor may read, as search-index ``feed_id`` values; None
+    for a signed-in viewer. The search index sits outside the visitor filter,
+    so every search a visitor reaches must be limited to these."""
+    from sqlalchemy import select
+
+    if not viewer_is_anonymous():
+        return None
+    return [str(i) for i in (await db.execute(select(Feed.id))).scalars()]
+
+
+def meili_feed_filter(feed_ids: list[str] | None) -> str | None:
+    """``feed_ids`` as a Meilisearch filter. No feeds matches nothing."""
+    if feed_ids is None:
+        return None
+    if not feed_ids:
+        return 'feed_id = "00000000-0000-0000-0000-000000000000"'
+    return "feed_id IN [" + ", ".join(f'"{i}"' for i in feed_ids) + "]"
+
+
+#: The same rule as _feed_shown_to_visitors, for raw SQL with ``feeds`` joined
+#: as ``f``. Raw SQL never passes through the ORM filter, so every raw query a
+#: visitor reaches has to state it.
+VISIBLE_FEED_SQL = "(f.visible_to_visitors AND f.feed_type NOT IN ({}))".format(
+    ", ".join(f"'{t}'" for t in sorted(HIDDEN_FEED_TYPES))
+)
+
+
+async def visitor_thread_view(db, thread_ids) -> dict:
+    """What a visitor may see of each story thread: the visible members only.
+
+    Thread rows, beats and titles are raw SQL built from every member, so a
+    thread can carry a hidden feed's headline or an AI spine written from
+    hidden articles. Per thread id this returns its visible member ids
+    (publication order), the earliest visible member's title, and the
+    highest-ranked visible member. A thread with no visible member is absent:
+    a visitor never sees it.
+    """
+    from sqlalchemy import text
+
+    ids = list({tid for tid in thread_ids if tid})
+    if not ids:
+        return {}
+    rows = await db.execute(
+        text(
+            f"""
+            SELECT ste.thread_id,
+                   ARRAY_AGG(e.id ORDER BY e.published_at ASC NULLS LAST) AS entry_ids,
+                   (ARRAY_AGG(e.title ORDER BY e.published_at ASC NULLS LAST))[1] AS first_title,
+                   (ARRAY_AGG(e.id ORDER BY e.priority_raw DESC NULLS LAST)
+                       FILTER (WHERE ste.role <> 'echo'))[1] AS top_entry_id
+            FROM story_thread_entries ste
+            JOIN entries e ON e.id = ste.entry_id
+            JOIN feeds f ON f.id = e.feed_id
+            WHERE ste.thread_id = ANY(:ids) AND {VISIBLE_FEED_SQL}
+            GROUP BY ste.thread_id
+            """
+        ),
+        {"ids": ids},
+    )
+    return {row.thread_id: dict(row._mapping) for row in rows}
+
+
+#: Entity types a visitor sees only through visible articles. Each is
+#: extracted from articles, so one known only from a hidden feed (a Manual
+#: Upload's actor, say) would otherwise name that feed's content. The
+#: reference catalogs (CVE, TTP, CWE, mitigation, country, sector) are public
+#: whatever mentions them; observables and campaigns are hidden outright.
+ARTICLE_DERIVED_TYPES: tuple[str, ...] = ("threat_actor", "malware", "tool", "vendor", "product")
+
+
+def _entity_shown_to_visitors(model, junction, fk_col):
+    """Visible with no article link at all (a catalog import), or with at
+    least one link into a visible article.
+
+    The subqueries use aliases of their own: an outer query that already
+    joins the junction or ``entries`` would otherwise auto-correlate them
+    away and leave a subquery with no FROM.
+    """
+    from sqlalchemy import exists, or_, select
+    from sqlalchemy.orm import aliased, join
+
+    any_link = aliased(junction)
+    shown_link = aliased(junction)
+    entries = Entry.__table__.alias()
+    feeds = Feed.__table__.alias()
+    hidden_types = tuple(HIDDEN_FEED_TYPES)
+
+    def criteria(cls):
+        linked = exists(select(1).select_from(any_link).where(getattr(any_link, fk_col.key) == cls.id))
+        shown = exists(
+            select(1)
+            .select_from(
+                join(shown_link, entries, entries.c.id == shown_link.entry_id).join(
+                    feeds, feeds.c.id == entries.c.feed_id
+                )
+            )
+            .where(
+                getattr(shown_link, fk_col.key) == cls.id,
+                feeds.c.visible_to_visitors.is_(True),
+                feeds.c.feed_type.not_in(hidden_types),
+            )
+        )
+        return or_(~linked, shown)
+
+    return with_loader_criteria(model, criteria, include_aliases=True, track_closure_variables=False)
+
+
+def _junction_shown_to_visitors(junction):
+    """Rows of an article-link table (EntryTTP, EntryCVE, StoryThreadEntry...)
+    about visible articles only. The counts, trends, heatmaps and per-article
+    lists read these tables without loading Entry, so without this they
+    count and list hidden feeds. Not applied to aliases: the entity rule
+    above needs an unfiltered alias to tell "no links at all" from "no
+    visible links"."""
+    from sqlalchemy import select
+
+    entries = Entry.__table__.alias()
+    feeds = Feed.__table__.alias()
+    # An explicit Join in select_from: Select.join() re-derives its left side
+    # when embedded, and fails once the outer statement also joins the junction.
+    shown_entries = (
+        select(entries.c.id)
+        .select_from(entries.join(feeds, feeds.c.id == entries.c.feed_id))
+        .where(feeds.c.visible_to_visitors.is_(True), feeds.c.feed_type.not_in(tuple(HIDDEN_FEED_TYPES)))
+    )
+    # A lambda, so the criteria attach to the junction wherever the statement
+    # puts it (a join's ON clause included); a bare column expression made the
+    # table an extra FROM and broke select(TTP, EntryTTP.x).join(EntryTTP).
+    return with_loader_criteria(
+        junction, lambda cls: cls.entry_id.in_(shown_entries), include_aliases=False, track_closure_variables=False
+    )
+
+
+_entity_options: list | None = None
+
+
+def _entity_criteria() -> list:
+    global _entity_options
+    if _entity_options is None:
+        from app.intelligence.correlation import ENTITY_CONFIG
+        from app.models.story_thread import StoryThreadEntry
+
+        _entity_options = [_entity_shown_to_visitors(*ENTITY_CONFIG[t]) for t in ARTICLE_DERIVED_TYPES]
+        junctions = {junction for _model, junction, _fk in ENTITY_CONFIG.values()} | {StoryThreadEntry}
+        _entity_options += [_junction_shown_to_visitors(j) for j in sorted(junctions, key=lambda j: j.__name__)]
+    return _entity_options
+
+
 @event.listens_for(Session, "do_orm_execute")
 def _hide_from_visitors(state) -> None:
     if not state.is_select or not viewer_is_anonymous():
@@ -59,6 +272,7 @@ def _hide_from_visitors(state) -> None:
         with_loader_criteria(Feed, _feed_shown_to_visitors(), include_aliases=True),
         with_loader_criteria(Entry, Entry.feed_id.in_(_shown_feed_ids()), include_aliases=True),
         with_loader_criteria(AIResult, false(), include_aliases=True),
+        *_entity_criteria(),
     )
 
 
@@ -207,7 +421,18 @@ def visitor_dashboards() -> list[DashboardResponse]:
 
 #: Keys naming a person on this instance.
 _USER_KEYS = frozenset(
-    {"username", "analyst", "owner_username", "creator_username", "created_by_username", "updated_by_username"}
+    {
+        "username",
+        "analyst",
+        "owner_username",
+        "creator_username",
+        "created_by_username",
+        "updated_by_username",
+        # User ids: they name a person on this instance as surely as a username.
+        "created_by",
+        "changed_by",
+        "updated_by",
+    }
 )
 #: A key containing one of these is about an area visitors don't get: detection
 #: (rules, coverage, gap hints), intel work products, IOCs, translations.
@@ -230,6 +455,18 @@ _HIDDEN_KEYS = frozenset(
 HIDDEN_ENTITY_TYPES = frozenset(
     {"campaign", "campaigns", "observable", "observables", "detection_rule", "rule", "ioc", "requirement"}
 )
+#: Keys that say what an object is, or what it points at: a relationship to a
+#: campaign, a timeline event about a rule, a correlation naming an observable.
+_TYPE_KEYS = (
+    "type",
+    "entity_type",
+    "event_type",
+    "source_type",
+    "target_type",
+    "source_entity_type",
+    "related_entity_type",
+    "other_type",
+)
 _REMOVED = object()
 _EMPTY_LIKE: dict[type, Any] = {list: list, int: int, float: float, bool: bool}
 
@@ -241,8 +478,8 @@ def _hidden_key(key: str) -> bool:
 
 def _scrub(value: Any, removed_ids: set[str]) -> Any:
     if isinstance(value, dict):
-        kind = value.get("type", value.get("entity_type"))
-        if isinstance(kind, str) and kind.lower() in HIDDEN_ENTITY_TYPES:
+        kinds = (value.get(k) for k in _TYPE_KEYS)
+        if any(isinstance(kind, str) and kind.lower() in HIDDEN_ENTITY_TYPES for kind in kinds):
             if "id" in value:
                 removed_ids.add(str(value["id"]))
             return _REMOVED

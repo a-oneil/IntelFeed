@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.exceptions import AppError
+from app.core.public_access import bearer_credential
 from app.core.security import AnonymousViewer, decode_token, get_current_user, get_viewer, public_read_only_enabled
 from app.database import get_db
 from app.models.entry import Entry
@@ -138,12 +139,10 @@ async def _resolve_user_from_token(request: Request, token: str | None, db: Asyn
     With no token at all the caller is a visitor while public read-only mode
     is on: existing audio may be played, nothing is made or recorded.
     """
-    raw = None
-    auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
-    if auth_header and auth_header.lower().startswith("bearer "):
-        raw = auth_header.split(" ", 1)[1].strip()
-    elif token:
-        raw = token
+    auth_header = request.headers.get("authorization", "").strip()
+    raw = bearer_credential(auth_header) if auth_header else token
+    if auth_header and not raw:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authorization header")
     if not raw:
         if public_read_only_enabled():
             return AnonymousViewer()

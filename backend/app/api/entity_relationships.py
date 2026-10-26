@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
 from app.core.pagination import PaginatedResponse
+from app.core.public_access import viewer_is_anonymous
 from app.core.security import get_current_user, get_viewer
 from app.database import get_db
 from app.intelligence.relationship_matrix import (
@@ -15,6 +16,7 @@ from app.intelligence.relationship_matrix import (
     orient_relationship,
 )
 from app.models.entity_relationship import EntityRelationship
+from app.models.entry import Entry
 from app.models.user import User
 from app.schemas.entity_relationship import (
     EntityRelationshipCreate,
@@ -77,11 +79,34 @@ async def _enrich_names(db: AsyncSession, relationships: list[EntityRelationship
         for row in result.all():
             name_map[(etype, row[0])] = row[1]
 
+    visitor = viewer_is_anonymous()
+    shown_evidence: set[uuid.UUID] = set()
+    if visitor:
+        # The name lookups above went through the visitor filter, so an
+        # endpoint the visitor can't see has no name; evidence likewise.
+        evidence = {eid for rel in relationships for eid in (rel.evidence_entry_ids or [])}
+        if evidence:
+            shown_evidence = set((await db.execute(select(Entry.id).where(Entry.id.in_(evidence)))).scalars())
+
     items = []
     for rel in relationships:
         resp = EntityRelationshipResponse.model_validate(rel)
         resp.source_name = name_map.get((rel.source_type, rel.source_id))
         resp.target_name = name_map.get((rel.target_type, rel.target_id))
+        if visitor:
+            # Both ends must be entities a visitor sees, and an edge drawn
+            # only from hidden articles goes with them. Descriptions are
+            # analyst or AI text; the creator is a person on this instance.
+            if any(t not in _configs or t == "campaign" for t in (rel.source_type, rel.target_type)):
+                continue
+            if resp.source_name is None or resp.target_name is None:
+                continue
+            kept = [eid for eid in (rel.evidence_entry_ids or []) if eid in shown_evidence]
+            if rel.evidence_entry_ids and not kept:
+                continue
+            resp.evidence_entry_ids = kept
+            resp.description = None
+            resp.created_by = None
         items.append(resp)
     return items
 
@@ -152,6 +177,11 @@ async def list_entity_relationships(
     relationships = result.scalars().all()
 
     items = await _enrich_names(db, list(relationships))
+    if user.is_anonymous:
+        # The count above includes edges the visitor filter just dropped.
+        has_more = len(relationships) == limit
+        total = offset + len(items) + (1 if has_more else 0)
+        return PaginatedResponse(items=items, total=total, limit=limit, offset=offset, has_more=has_more)
     return PaginatedResponse(items=items, total=total, limit=limit, offset=offset, has_more=(offset + limit) < total)
 
 
@@ -164,7 +194,7 @@ async def relationship_signals(
         description="Entity IDs (max 1000)",
         examples=[["d5b2c8f0-3e4a-4b6c-9d1e-7f8a9b0c1d2e", "3f9d2a1b-8c7e-4f6a-b5d4-0e1c2a3b4d5f"]],
     ),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Batched relationship signals for table columns.
@@ -196,6 +226,11 @@ async def relationship_signals(
     result = await db.execute(signals_query)
     rels = list(result.scalars().all())
     enriched = await _enrich_names(db, rels)
+    if user.is_anonymous:
+        # The visitor filter may drop edges; pair the survivors by id.
+        by_id = {resp.id: resp for resp in enriched}
+        rels = [rel for rel in rels if rel.id in by_id]
+        enriched = [by_id[rel.id] for rel in rels]
 
     conf_rank = {"confirmed": 2, "probable": 1, "possible": 0}
     per_entity: dict[str, list[tuple[EntityRelationship, EntityRelationshipResponse, bool]]] = {}

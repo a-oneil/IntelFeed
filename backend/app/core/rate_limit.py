@@ -127,15 +127,17 @@ def _get_identity(request: Request) -> str:
     AI routes take no login, so an unverified bearer would let a caller
     mint a fresh bucket per request and never meet the per-minute limit.
     """
-    auth = request.headers.get("authorization", "")
-    if auth.startswith("Bearer "):
+    from app.core.public_access import bearer_credential
+
+    token = bearer_credential(request.headers.get("authorization"))
+    if token:
         import jwt
 
         from app.config import settings
         from app.core.security import ALGORITHM
 
         try:
-            payload = jwt.decode(auth[7:], settings.secret_key, algorithms=[ALGORITHM])
+            payload = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
             sub = payload.get("sub")
             if sub:
                 return f"user:{sub}"
@@ -179,6 +181,40 @@ def client_ip(request: Request) -> str:
     return host or "unknown"
 
 
+# Every window a request must fit, checked and recorded in one atomic step:
+# counting in one round trip and adding in a second let a burst of parallel
+# requests all read the same count and all pass. Expired entries are trimmed
+# first; if any window is full the request is refused and not recorded (so
+# a visitor who hits the minute window is back as soon as their own earlier
+# requests age out), and Retry-After is when enough entries leave that window
+# for one more to fit. Otherwise the request is added to every window.
+# KEYS: one sorted set per window. ARGV: now, member, then max, window pairs.
+# Returns {allowed, retry_after, max of the tightest window, remaining}.
+_SLIDING_WINDOWS = """
+local now = tonumber(ARGV[1])
+local retry, tight_max, tight_left = 0, 0, nil
+for i, key in ipairs(KEYS) do
+  local max = tonumber(ARGV[1 + 2 * i])
+  local window = tonumber(ARGV[2 + 2 * i])
+  redis.call('ZREMRANGEBYSCORE', key, 0, now - window)
+  local count = redis.call('ZCARD', key)
+  if count >= max then
+    local entry = redis.call('ZRANGE', key, count - max, count - max, 'WITHSCORES')
+    local wait = math.floor((tonumber(entry[2]) or now) + window - now) + 1
+    if wait > retry then retry = wait end
+  end
+  local left = max - count - 1
+  if tight_left == nil or left < tight_left then tight_max, tight_left = max, left end
+end
+if retry > 0 then return {0, retry, tight_max, 0} end
+for i, key in ipairs(KEYS) do
+  redis.call('ZADD', key, now, ARGV[2])
+  redis.call('EXPIRE', key, tonumber(ARGV[2 + 2 * i]))
+end
+return {1, 0, tight_max, tight_left}
+"""
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         path = request.url.path
@@ -192,38 +228,24 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         bucket, windows = limits
+        keys = [f"ratelimit:{bucket}:{identity}:{window}" for _, window in windows]
+        now = time.time()
+        # Parallel requests can share a timestamp; the suffix keeps each one.
+        member = f"{now}:{secrets.token_hex(4)}"
+        args: list = [now, member]
+        for max_requests, window in windows:
+            args += [max_requests, window]
         try:
             from app.services.redis_client import get_redis_bytes
 
             r = await get_redis_bytes()
-            now = time.time()
-            pipe = r.pipeline()
-            # Sliding windows: drop expired entries, then count what is left
-            for _, window in windows:
-                key = f"ratelimit:{bucket}:{identity}:{window}"
-                pipe.zremrangebyscore(key, 0, now - window)
-                pipe.zcard(key)
-                pipe.zrange(key, 0, 0, withscores=True)
-            results = await pipe.execute()
+            allowed, retry_after, max_requests, left = await r.eval(_SLIDING_WINDOWS, len(keys), *keys, *args)
         except (TimeoutError, redis.exceptions.RedisError, ConnectionError, OSError, RuntimeError):
             # If Redis is down, allow the request but log
             logger.warning("Rate limiter Redis unavailable, allowing request", path=path)
             return await call_next(request)
 
-        # A refused request is not counted, so someone who hits the minute
-        # limit is back as soon as their own earlier requests age out.
-        retry_after = 0
-        remaining = None
-        for i, (max_requests, window) in enumerate(windows):
-            count, oldest = results[i * 3 + 1], results[i * 3 + 2]
-            if count >= max_requests:
-                first = oldest[0][1] if oldest else now
-                retry_after = max(retry_after, int(first + window - now) + 1)
-            left = max_requests - count - 1
-            if remaining is None or left < remaining[1]:
-                remaining = (max_requests, left)
-
-        if retry_after:
+        if not allowed:
             logger.warning("rate_limited", identity=identity, path=path, bucket=bucket)
             return JSONResponse(
                 status_code=429,
@@ -231,19 +253,6 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 headers={"Retry-After": str(retry_after)},
             )
 
-        # Parallel requests can share a timestamp; the suffix keeps each one.
-        member = f"{now}:{secrets.token_hex(4)}"
-        try:
-            pipe = r.pipeline()
-            for _, window in windows:
-                key = f"ratelimit:{bucket}:{identity}:{window}"
-                pipe.zadd(key, {member: now})
-                pipe.expire(key, window)
-            await pipe.execute()
-        except (TimeoutError, redis.exceptions.RedisError, ConnectionError, OSError, RuntimeError):
-            logger.warning("Rate limiter Redis unavailable, allowing request", path=path)
-
-        max_requests, left = remaining
         response = await call_next(request)
         response.headers["X-RateLimit-Limit"] = str(max_requests)
         response.headers["X-RateLimit-Remaining"] = str(max(0, left))

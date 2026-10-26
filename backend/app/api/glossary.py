@@ -209,11 +209,18 @@ async def get_glossary_counts(
     except Exception:
         return {"counts": {}}
 
+    from app.services.public_view import meili_feed_filter, visitor_feed_ids
+
+    # The index holds every feed: a visitor's counts cover the ones they see.
+    params: dict = {"limit": 0}
+    if feed_filter := meili_feed_filter(await visitor_feed_ids(db)):
+        params["filter"] = feed_filter
+
     def _search_count(names: list[str]) -> int:
         total = 0
         for name in names:
             try:
-                res = index.search(f'"{name}"', {"limit": 0})
+                res = index.search(f'"{name}"', params)
                 total += res.get("estimatedTotalHits", 0)
             except Exception:
                 pass
@@ -261,10 +268,16 @@ async def get_term_entries(
     )
 
     # Get candidates from Meilisearch for each name
+    from app.services.public_view import visitor_feed_ids
+
+    # The index holds every feed; a visitor searches the ones they see.
+    shown_feeds = await visitor_feed_ids(db)
+    if shown_feeds == []:
+        return {"entries": [], "total": 0}
     seen_ids: set[str] = set()
     all_candidates: list[dict] = []
     for name in all_names:
-        candidates = meilisearch_client.search_entries(query=f'"{name}"', limit=200, sort="newest")
+        candidates = meilisearch_client.search_entries(query=f'"{name}"', feed_id=shown_feeds, limit=200, sort="newest")
         for hit in candidates.get("hits", []):
             if hit["id"] not in seen_ids:
                 seen_ids.add(hit["id"])

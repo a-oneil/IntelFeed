@@ -24,7 +24,7 @@ from app import entity_types
 from app.ai.caller import Caller
 from app.core.exceptions import AppError
 from app.core.pagination import PaginatedResponse
-from app.core.security import get_admin_user, get_current_user, get_viewer
+from app.core.security import get_admin_user, get_current_user, get_entry_viewer, get_viewer
 from app.database import get_db
 from app.intelligence.cve import extract_and_store_cves
 from app.intelligence.detection import (
@@ -159,7 +159,7 @@ async def extract_entry_ttps(
 @router.get("/entries/{entry_id}/ttps", response_model=list[TTPResponse])
 async def get_entry_ttps(
     entry_id: uuid.UUID = Path(..., description="UUID of the entry"),
-    user: User = Depends(get_viewer),
+    user: User = Depends(get_entry_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List the MITRE ATT&CK techniques linked to an entry, with per-entry confidence and matched source text."""
@@ -181,7 +181,7 @@ async def get_entry_ttps(
 @router.get("/entries/{entry_id}/kill-chain")
 async def get_entry_kill_chain(
     entry_id: uuid.UUID = Path(..., description="UUID of the entry"),
-    user: User = Depends(get_viewer),
+    user: User = Depends(get_entry_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Entry TTPs ordered as an attack chain (kill-chain phases) — plan item 3.9.4.
@@ -209,7 +209,7 @@ async def get_entry_kill_chain(
 @router.get("/entries/{entry_id}/ttps/navigator")
 async def get_navigator_layer(
     entry_id: uuid.UUID = Path(..., description="UUID of the entry"),
-    user: User = Depends(get_viewer),
+    user: User = Depends(get_entry_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Build a MITRE ATT&CK Navigator layer JSON from the entry's linked techniques, titled after the entry."""
@@ -396,7 +396,7 @@ async def extract_entry_cves(
 @router.get("/entries/{entry_id}/cves", response_model=list[CVEResponse])
 async def get_entry_cves(
     entry_id: uuid.UUID = Path(..., description="UUID of the entry"),
-    user: User = Depends(get_viewer),
+    user: User = Depends(get_entry_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List the CVEs linked to an entry, ordered by CVSS score descending."""
@@ -529,7 +529,7 @@ async def get_cve(
 @router.get("/entries/{entry_id}/threat-actors", response_model=list[ThreatActorResponse])
 async def get_entry_threat_actors(
     entry_id: uuid.UUID = Path(..., description="UUID of the entry"),
-    user: User = Depends(get_viewer),
+    user: User = Depends(get_entry_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List the threat actors linked to an entry, including the surface forms matched in the text."""
@@ -623,7 +623,7 @@ async def get_threat_actor(
 @router.get("/entries/{entry_id}/malware", response_model=list[MalwareFamilyResponse])
 async def get_entry_malware(
     entry_id: uuid.UUID = Path(..., description="UUID of the entry"),
-    user: User = Depends(get_viewer),
+    user: User = Depends(get_entry_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List the malware families linked to an entry, including the surface forms matched in the text."""
@@ -723,7 +723,7 @@ async def get_malware(
 @router.get("/entries/{entry_id}/countries", response_model=list[EntryCountryResponse])
 async def get_entry_countries(
     entry_id: uuid.UUID = Path(..., description="UUID of the entry"),
-    user: User = Depends(get_viewer),
+    user: User = Depends(get_entry_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List the countries linked to an entry with junction metadata (role, confidence, source, matched names)."""
@@ -781,7 +781,7 @@ async def extract_entry_countries(
 @router.get("/entries/{entry_id}/sectors", response_model=list[EntrySectorResponse])
 async def get_entry_sectors(
     entry_id: uuid.UUID = Path(..., description="UUID of the entry"),
-    user: User = Depends(get_viewer),
+    user: User = Depends(get_entry_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List the victim sectors an entry describes as targeted, with the sector entity id for linking."""
@@ -808,7 +808,7 @@ async def get_entry_sectors(
 @router.get("/entries/{entry_id}/article-metadata")
 async def get_entry_article_metadata(
     entry_id: uuid.UUID = Path(..., description="UUID of the entry"),
-    user: User = Depends(get_viewer),
+    user: User = Depends(get_entry_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Report type, victim orgs, timeline anchors, and patch availability — plan items 3.9.6–3.9.9.
@@ -4364,6 +4364,13 @@ async def autolink_scan(
                 "surface_forms": m.get("surface_forms") or [m["surface_form"]],
             }
         )
+    if user.is_anonymous and out:
+        # The vocabulary holds every entity: a visitor's scan must not name
+        # (or confirm the existence of) one they can't see.
+        from app.services.public_view import entities_shown
+
+        shown = await entities_shown(db, {(m["entity_type"], uuid.UUID(m["entity_id"])) for m in out})
+        out = [m for m in out if (m["entity_type"], uuid.UUID(m["entity_id"])) in shown]
 
     # Attach each match's full entity payload (the same response shape the
     # entry-entity endpoints return) so popovers over scanned text — entity
@@ -4878,7 +4885,7 @@ async def extract_entry_mitigations(
 @router.get("/entries/{entry_id}/mitigations", response_model=list[MitigationResponse])
 async def get_entry_mitigations(
     entry_id: uuid.UUID = Path(..., description="UUID of the entry"),
-    user: User = Depends(get_viewer),
+    user: User = Depends(get_entry_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List the mitigations linked to an entry, with per-entry confidence and source."""
@@ -4895,7 +4902,7 @@ async def get_entry_mitigations(
 @router.get("/entries/{entry_id}/cwes", response_model=list[CWEResponse])
 async def get_entry_cwes(
     entry_id: uuid.UUID = Path(..., description="UUID of the entry"),
-    user: User = Depends(get_viewer),
+    user: User = Depends(get_entry_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List the weaknesses linked to an entry, with per-entry confidence and source."""
@@ -6156,7 +6163,7 @@ async def extract_entry_tools(
 @router.get("/entries/{entry_id}/tools", response_model=list[ToolResponse])
 async def get_entry_tools(
     entry_id: uuid.UUID = Path(..., description="UUID of the entry"),
-    user: User = Depends(get_viewer),
+    user: User = Depends(get_entry_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List the tools linked to an entry, with per-entry confidence and matched names."""
@@ -6252,7 +6259,7 @@ def _vendor_to_response(v: Vendor, entry_link: EntryVendor | None = None) -> Ven
 @router.get("/entries/{entry_id}/vendors", response_model=list[VendorResponse])
 async def get_entry_vendors(
     entry_id: uuid.UUID = Path(..., description="UUID of the entry"),
-    user: User = Depends(get_viewer),
+    user: User = Depends(get_entry_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List the vendors linked to an entry, with per-entry confidence, source, and matched names."""
@@ -6366,7 +6373,7 @@ def _product_to_response(p: Product, entry_link: EntryProduct | None = None) -> 
 @router.get("/entries/{entry_id}/products", response_model=list[ProductResponse])
 async def get_entry_products(
     entry_id: uuid.UUID = Path(..., description="UUID of the entry"),
-    user: User = Depends(get_viewer),
+    user: User = Depends(get_entry_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List the products linked to an entry, with per-entry confidence, source, and matched names."""

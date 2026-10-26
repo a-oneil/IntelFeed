@@ -710,9 +710,13 @@ async def custom_redoc() -> HTMLResponse:
 app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(AuditLoggingMiddleware)
 app.add_middleware(PrometheusMiddleware)
-app.add_middleware(SecurityHeadersMiddleware)
-app.add_middleware(RateLimitMiddleware)
+# Starlette runs the last-added middleware outermost. The write lock sits
+# inside the rate limiter (its refusals count against the caller's budget) and
+# both sit inside the security headers, so every reply — a 401, 413 or 429
+# included — carries Cache-Control: private, no-store and X-Robots-Tag.
 app.add_middleware(AnonymousWriteLockMiddleware)
+app.add_middleware(RateLimitMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,

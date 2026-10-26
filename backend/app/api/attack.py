@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.public_access import viewer_is_anonymous
 from app.core.security import get_viewer
 from app.database import get_db
 from app.intelligence.tactics import TACTIC_ORDER, tactic_label
@@ -52,7 +53,9 @@ async def get_attack_matrix(
         summarize,
     )
 
-    cache_key = f"{_MATRIX_CACHE_PREFIX}:{domain}:{days or 0}:{int(include_deprecated)}"
+    # A visitor's counts cover visible feeds only, so they cache apart.
+    visitor = viewer_is_anonymous()
+    cache_key = f"{_MATRIX_CACHE_PREFIX}:{domain}:{days or 0}:{int(include_deprecated)}{':visitor' if visitor else ''}"
     try:
         from app.services.redis_client import get_redis
 
@@ -67,14 +70,16 @@ async def get_attack_matrix(
         query = query.where(TTP.is_deprecated.is_(False))
     techniques = (await db.execute(query)).scalars().all()
 
-    # Feed frequency: windowed EntryTTP link counts, or the all-time rollup
-    if days is not None:
-        cutoff = datetime.now(UTC) - timedelta(days=days)
+    # Feed frequency: windowed EntryTTP link counts, or the all-time rollup.
+    # The rollup counts every feed, so a visitor always gets the live count
+    # (joined to Entry, through the visitor filter).
+    if days is not None or visitor:
+        window = [Entry.published_at >= datetime.now(UTC) - timedelta(days=days)] if days is not None else []
         agg = await db.execute(
             select(EntryTTP.ttp_id, func.count(EntryTTP.entry_id).label("count"))
             .join(Entry, Entry.id == EntryTTP.entry_id)
             .join(TTP, TTP.id == EntryTTP.ttp_id)
-            .where(TTP.matrix_domain == domain, Entry.published_at >= cutoff)
+            .where(TTP.matrix_domain == domain, *window)
             .group_by(EntryTTP.ttp_id)
         )
         counts: dict[uuid.UUID, int] = {row.ttp_id: row.count for row in agg.all()}

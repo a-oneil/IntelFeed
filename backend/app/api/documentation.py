@@ -16,7 +16,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
-from app.core.security import decode_token, get_viewer
+from app.core.public_access import bearer_credential
+from app.core.security import decode_token, get_viewer, public_read_only_enabled
 from app.database import get_db
 from app.models.user import User
 from app.schemas.documentation import (
@@ -56,19 +57,21 @@ async def list_pages(_user: User = Depends(get_viewer)) -> DocumentationIndexRes
 _ASSET_TYPES = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"}
 
 
-async def _resolve_user(request: Request, token: str | None, db: AsyncSession) -> User:
+async def _resolve_user(request: Request, token: str | None, db: AsyncSession) -> User | None:
     """Accept the JWT via Authorization header, or `?token=` for <img> tags.
 
-    Mirrors app.api.telegram_media: an <img src> cannot set a header, and these
-    screenshots show real collection data, so the route stays auth-gated.
+    Mirrors app.api.telegram_media: an <img src> cannot set a header. The
+    images are the docs' own screenshots from docs/assets/, so while public
+    read-only mode is on a visitor (no token, None here) may load them as
+    they may read the pages.
     """
-    raw_token: str | None = None
-    auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
-    if auth_header and auth_header.lower().startswith("bearer "):
-        raw_token = auth_header.split(" ", 1)[1].strip()
-    elif token:
-        raw_token = token
+    auth_header = request.headers.get("authorization", "").strip()
+    raw_token = bearer_credential(auth_header) if auth_header else token
+    if auth_header and not raw_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authorization header")
     if not raw_token:
+        if public_read_only_enabled():
+            return None
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token")
     payload = decode_token(raw_token)
     if payload.get("type") != "access":
@@ -88,8 +91,9 @@ async def _resolve_user(request: Request, token: str | None, db: AsyncSession) -
     summary="Get a documentation image",
     description=(
         "Serves an image referenced by the documentation markdown, from `docs/assets/`. "
-        "Auth is required; pass the access token in the `Authorization` header or, for an "
-        "`<img>` tag that cannot set one, as the `token` query parameter."
+        "Pass the access token in the `Authorization` header or, for an `<img>` tag that "
+        "cannot set one, as the `token` query parameter. In public read-only mode no token "
+        "is needed."
     ),
     responses={200: {"content": {"image/png": {}}, "description": "The image bytes."}},
 )

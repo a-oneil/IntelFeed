@@ -2449,17 +2449,24 @@ async def get_entity_story_threads(
     # A campaign reaches its stories through membership rather than extraction;
     # the join column is the only thing that differs.
     if entity_type == "campaign":
+        if user.is_anonymous:
+            return {"items": []}
         junction, fk_col = CampaignEntry, CampaignEntry.campaign_id
     elif entity_type in ENTITY_CONFIG:
         _, junction, fk_col = ENTITY_CONFIG[entity_type]
     else:
         raise AppError(code="bad_request", message=f"Unsupported entity type: {entity_type}", status_code=400)
 
+    from app.services.public_view import visible_entries_only
+
     rows = (
         await db.execute(
-            select(StoryThread, func.count(func.distinct(StoryThreadEntry.entry_id)).label("entity_entries"))
-            .join(StoryThreadEntry, StoryThreadEntry.thread_id == StoryThread.id)
-            .join(junction, junction.entry_id == StoryThreadEntry.entry_id)
+            visible_entries_only(
+                select(StoryThread, func.count(func.distinct(StoryThreadEntry.entry_id)).label("entity_entries"))
+                .join(StoryThreadEntry, StoryThreadEntry.thread_id == StoryThread.id)
+                .join(junction, junction.entry_id == StoryThreadEntry.entry_id),
+                StoryThreadEntry.entry_id,
+            )
             .where(
                 fk_col == entity_id,
                 *(
@@ -2477,6 +2484,8 @@ async def get_entity_story_threads(
     ).all()
 
     thread_ids = [row[0].id for row in rows]
+    if user.is_anonymous:
+        return {"items": await _visitor_story_cards(db, rows)}
     latest_beats: dict[uuid.UUID, StoryThreadBeat] = {}
     if thread_ids:
         beat_rows = (
@@ -2515,6 +2524,48 @@ async def get_entity_story_threads(
             for t, entity_entries in rows
         ]
     }
+
+
+async def _visitor_story_cards(db: AsyncSession, rows) -> list[dict]:
+    """The Active Story cards a visitor sees: each thread rebuilt from its
+    visible members (story_threads.visitor_thread_rows), its latest beat the
+    last day-grouped one over them. Stored titles, AI summaries and beats can
+    come from hidden articles."""
+    from app.intelligence.story_threads import thread_title
+    from app.services.public_view import visitor_thread_view
+    from app.services.thread_narrative import collect_members, heuristic_beats
+
+    view = await visitor_thread_view(db, [t.id for t, _ in rows])
+    cards = []
+    for t, entity_entries in rows:
+        seen = view.get(t.id)
+        if seen is None:
+            continue
+        shown = set(seen["entry_ids"])
+        beats = heuristic_beats([m for m in await collect_members(db, t.id) if m["entry_id"] in shown])
+        latest = beats[-1] if beats else None
+        cards.append(
+            {
+                "slug": t.slug,
+                "title": thread_title(seen["first_title"]),
+                "summary": None,
+                "status": t.status,
+                "entry_count": len(shown),
+                "source_count": t.source_count,
+                "first_seen": t.first_seen.isoformat() if t.first_seen else None,
+                "last_seen": t.last_seen.isoformat() if t.last_seen else None,
+                "entity_entry_count": entity_entries,
+                "latest_beat": (
+                    {
+                        "headline": latest["headline"],
+                        "occurred_at": latest["occurred_at"].isoformat() if latest["occurred_at"] else None,
+                    }
+                    if latest
+                    else None
+                ),
+            }
+        )
+    return cards
 
 
 @router.get("/{entity_type}/{entity_id}/attack-techniques")

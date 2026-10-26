@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import entity_types
 from app.core.exceptions import AppError
 from app.core.pagination import CursorPaginatedResponse
-from app.core.security import get_current_user, get_viewer
+from app.core.security import get_current_user, get_entry_viewer, get_viewer
 from app.database import get_db
 from app.intelligence import story_threads
 from app.intelligence.sectors import sector_label
@@ -2428,7 +2428,7 @@ async def generate_daily_summary(
 @router.get("/{entry_id}", response_model=EntryDetailResponse)
 async def get_entry(
     entry_id: uuid.UUID = Path(..., description="Entry UUID"),
-    user: User = Depends(get_viewer),
+    user: User = Depends(get_entry_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Full detail for one entry: content, translation fields, per-user state,
@@ -2767,7 +2767,7 @@ async def translate_entry(
 async def get_similar_entries(
     entry_id: uuid.UUID = Path(..., description="Entry UUID"),
     limit: int = Query(10, ge=1, le=30, description="Maximum similar entries to return"),
-    user: User = Depends(get_viewer),
+    user: User = Depends(get_entry_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Find entries similar to the given entry.
@@ -2829,6 +2829,8 @@ async def get_similar_entries(
 
     exclude_ids = [str(entry_id), *(str(d) for d in duplicate_ids)]
 
+    from app.services.public_view import meili_feed_filter, visitor_feed_ids
+
     search_result = meilisearch_client.find_similar_entries(
         entry_id=str(entry_id),
         title=entry.title or "",
@@ -2836,6 +2838,7 @@ async def get_similar_entries(
         content_text=entry.content_text,
         exclude_ids=exclude_ids,
         limit=limit,
+        filter=meili_feed_filter(await visitor_feed_ids(db)),
     )
 
     return {
@@ -2865,7 +2868,7 @@ async def get_entry_media(
 @router.get("/{entry_id}/urls")
 async def get_entry_urls(
     entry_id: uuid.UUID = Path(..., description="Entry UUID"),
-    user: User = Depends(get_viewer),
+    user: User = Depends(get_entry_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Extract referenced URLs from entry HTML content."""

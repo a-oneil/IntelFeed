@@ -14,6 +14,7 @@ route's ``get_viewer``.
 """
 
 import re
+from contextlib import contextmanager
 from contextvars import ContextVar
 
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
@@ -37,6 +38,22 @@ def viewer_is_anonymous() -> bool:
 
 def set_viewer_anonymous(flag: bool) -> None:
     _viewer_is_anonymous.set(flag)
+
+
+@contextmanager
+def instance_view():
+    """Lift the visitor filter for work that builds shared state.
+
+    A visitor's request can trigger a rebuild of something every user shares
+    (the autolinker vocabulary). Built under the visitor filter it would leave
+    out hidden-feed entities for everyone; inside this block it sees the whole
+    instance, and nothing built here may be returned to the visitor as is.
+    """
+    token = _viewer_is_anonymous.set(False)
+    try:
+        yield
+    finally:
+        _viewer_is_anonymous.reset(token)
 
 
 # Anonymous non-GET routes that exist regardless of public mode.
@@ -67,12 +84,40 @@ ANONYMOUS_READ_POSTS = frozenset(
 # A visitor's read-only POST body: enough for a page of ids, not a document.
 ANONYMOUS_READ_POST_MAX_BYTES = 16 * 1024
 
+# Read-only POSTs with a path parameter, by route template, with their body
+# cap. Relationship signals: the entity tables post every loaded row's id
+# (up to 1000 UUIDs, ~40 KB) and get counts and top relationships back, the
+# same relationships a visitor sees on a profile.
+ANONYMOUS_READ_POST_TEMPLATES: dict[str, int] = {
+    "/api/entity-relationships/signals/{entity_type}": 48 * 1024,
+}
+_READ_POST_PATTERNS = tuple(
+    (re.compile("^" + re.sub(r"\{[^}]+\}", "[^/]+", template) + "$"), limit)
+    for template, limit in ANONYMOUS_READ_POST_TEMPLATES.items()
+)
+
+
+def read_post_limit(path: str) -> int | None:
+    """The body cap of a reviewed read-only POST, or None if ``path`` isn't one."""
+    if path in ANONYMOUS_READ_POSTS:
+        return ANONYMOUS_READ_POST_MAX_BYTES
+    return next((limit for pattern, limit in _READ_POST_PATTERNS if pattern.match(path)), None)
+
+
+def bearer_credential(authorization: str | None) -> str | None:
+    """The token in an ``Authorization`` header, parsed as FastAPI's HTTPBearer
+    parses it: scheme in any case, credential stripped. None unless both are
+    there, so ``Bearer`` with nothing after it is no token at all."""
+    scheme, _, credential = (authorization or "").strip().partition(" ")
+    credential = credential.strip()
+    return credential if scheme.lower() == "bearer" and credential else None
+
 
 def anonymous_write_allowed(method: str, path: str) -> bool:
     """Whether an anonymous ``method`` request to ``path`` may reach its route."""
     if method in SAFE_METHODS or not path.startswith("/api/"):
         return True
-    if path in ANONYMOUS_WRITE_PATHS or path in ANONYMOUS_READ_POSTS:
+    if path in ANONYMOUS_WRITE_PATHS or read_post_limit(path) is not None:
         return True
     return bool(_SHARED_POST.match(path))
 
@@ -84,15 +129,17 @@ def _error(status_code: int, code: str, message: str) -> JSONResponse:
 class AnonymousWriteLockMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         set_viewer_anonymous(False)
-        if request.headers.get("authorization", "").startswith("Bearer "):
-            # Signed in (or claiming to be): the route's own dependency judges the token.
+        if bearer_credential(request.headers.get("authorization")):
+            # Signed in (or claiming to be): the route's own dependency judges
+            # the token. Anything less than a parseable token is treated as
+            # anonymous here, and get_viewer refuses a malformed header.
             return await call_next(request)
         method, path = request.method, request.url.path
         if not anonymous_write_allowed(method, path):
             return _error(401, "unauthorized", "Sign in to make changes")
-        if path in ANONYMOUS_READ_POSTS:
+        if method not in SAFE_METHODS and (limit := read_post_limit(path)) is not None:
             length = request.headers.get("content-length", "")
-            if not length.isdigit() or int(length) > ANONYMOUS_READ_POST_MAX_BYTES:
+            if not length.isdigit() or int(length) > limit:
                 return _error(413, "payload_too_large", "Request body too large")
         response = await call_next(request)
         if _scrubbed_path(path) and response.headers.get("content-type", "").startswith("application/json"):

@@ -1063,7 +1063,46 @@ async def list_threads(
             "q": f"%{q.strip()}%" if q and q.strip() else None,
         },
     )
-    return [dict(r) for r in rows.mappings().all()]
+    out = [dict(r) for r in rows.mappings().all()]
+    from app.core.public_access import viewer_is_anonymous
+
+    if viewer_is_anonymous():
+        out = await visitor_thread_rows(db, out)
+    return out
+
+
+async def visitor_thread_rows(db: AsyncSession, rows: list[dict]) -> list[dict]:
+    """Thread rows as a visitor may see them (see public_view.visitor_thread_view).
+
+    A thread with no visible member is dropped. The rest are rebuilt from
+    their visible members: the title is the earliest one's, the stored title
+    and AI summary are not shown (either may come from a hidden article), and
+    the counts and ids cover visible members only. A visitor has read
+    nothing, so every visible member counts as unread and new, which keeps the
+    priority queue folding threads for them as it always has.
+    """
+    from app.services.public_view import visitor_thread_view
+
+    view = await visitor_thread_view(db, [r["id"] for r in rows])
+    shaped = []
+    for row in rows:
+        seen = view.get(row["id"])
+        if seen is None:
+            continue
+        shaped.append(
+            {
+                **row,
+                "title": thread_title(seen["first_title"]),
+                "summary": None,
+                "narrated_at": None,
+                "entry_count": len(seen["entry_ids"]),
+                "entry_ids": seen["entry_ids"],
+                "top_entry_id": seen["top_entry_id"] or seen["entry_ids"][0],
+                "unread_count": len(seen["entry_ids"]),
+                "new_since_opened": len(seen["entry_ids"]),
+            }
+        )
+    return shaped
 
 
 async def get_thread(db: AsyncSession, slug: str, user_id: uuid.UUID) -> dict | None:
@@ -1120,11 +1159,12 @@ async def thread_beats(db: AsyncSession, thread_id: uuid.UUID) -> list[dict]:
     return [dict(r) for r in rows.mappings().all()]
 
 
-async def thread_yield(db: AsyncSession, thread_id: uuid.UUID) -> dict:
+async def thread_yield(db: AsyncSession, thread_id: uuid.UUID, entry_ids: list[uuid.UUID] | None = None) -> dict:
     """What the thread has produced: techniques, CVEs, products, rules, echoes folded.
 
     The counts a reader uses to decide whether the story is worth working —
     every one of them from junction rows the platform already writes.
+    ``entry_ids`` limits them to those members (a visitor's visible ones).
     """
     row = (
         (
@@ -1132,7 +1172,8 @@ async def thread_yield(db: AsyncSession, thread_id: uuid.UUID) -> dict:
                 text(
                     """
                 WITH members AS (
-                    SELECT entry_id, role FROM story_thread_entries WHERE thread_id = :t
+                    SELECT entry_id, role FROM story_thread_entries
+                    WHERE thread_id = :t AND (CAST(:only AS uuid[]) IS NULL OR entry_id = ANY(:only))
                 )
                 SELECT
                     (SELECT COUNT(DISTINCT ttp_id) FROM entry_ttps WHERE entry_id IN (SELECT entry_id FROM members))
@@ -1146,7 +1187,7 @@ async def thread_yield(db: AsyncSession, thread_id: uuid.UUID) -> dict:
                     (SELECT COUNT(*) FROM members WHERE role = 'echo') AS echoes_folded
                 """
                 ),
-                {"t": thread_id},
+                {"t": thread_id, "only": entry_ids},
             )
         )
         .mappings()

@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import bcrypt
 import jwt
-from fastapi import Depends, HTTPException, Query, status
+from fastapi import Depends, HTTPException, Query, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -159,6 +159,7 @@ _optional_bearer = HTTPBearer(auto_error=False)
 
 
 async def get_viewer(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(_optional_bearer),
     db: AsyncSession = Depends(get_db),
 ) -> User | AnonymousViewer:
@@ -166,8 +167,16 @@ async def get_viewer(
 
     A token is checked exactly as ``get_current_user`` checks it. With no
     token the result is the anonymous viewer while public read-only mode is
-    on, and the same 401 as today while it is off.
+    on, and a 401 while it is off. An ``Authorization`` header that carries
+    no usable token (``Bearer`` alone, another scheme) is a 401, never a
+    visitor: the write lock and response scrubbing key off the same parse.
     """
+    if credentials is None and request.headers.get("authorization", "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authorization header",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     if credentials is not None:
         payload = decode_token(credentials.credentials)
         if payload.get("type") != "access":
@@ -180,6 +189,27 @@ async def get_viewer(
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated", headers={"WWW-Authenticate": "Bearer"}
     )
+
+
+async def get_entry_viewer(
+    entry_id: uuid.UUID,
+    user: User | AnonymousViewer = Depends(get_viewer),
+    db: AsyncSession = Depends(get_db),
+) -> User | AnonymousViewer:
+    """``get_viewer`` for routes about one article (``{entry_id}`` in the path).
+
+    Their queries read junction tables keyed by the entry id and never load
+    the Entry, so the visitor filter can't stop them: a visitor asking about
+    an article from a hidden feed gets a 404 here instead.
+    """
+    if user.is_anonymous:
+        from sqlalchemy import select
+
+        from app.models.entry import Entry
+
+        if (await db.execute(select(Entry.id).where(Entry.id == entry_id))).scalar_one_or_none() is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Entry not found")
+    return user
 
 
 @dataclass(frozen=True, slots=True)

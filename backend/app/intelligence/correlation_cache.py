@@ -73,6 +73,12 @@ def confidence_cache_variant() -> str:
         from app.intelligence.evidence_structure import story_threshold
 
         parts.append(f"es{story_threshold()}")
+    # A visitor's pivots and graphs are built from visible feeds only: they
+    # get keys of their own, so neither payload is ever served to the other.
+    from app.core.public_access import viewer_is_anonymous
+
+    if viewer_is_anonymous():
+        parts.append("visitor")
     return (":" + ":".join(parts)) if parts else ""
 
 

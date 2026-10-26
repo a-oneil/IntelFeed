@@ -151,15 +151,25 @@ async def get_entity(db: AsyncSession, entity_type: str, entity_id: uuid.UUID):
 
 
 async def _get_entry_ids_for_entity(db: AsyncSession, entity_type: str, entity_id: uuid.UUID) -> list[uuid.UUID]:
-    """Get all entry IDs linked to an entity via its junction table."""
+    """Get all entry IDs linked to an entity via its junction table.
+
+    For a visitor, only entries in feeds shown to visitors, and no campaign's:
+    every pivot, graph and relationship count is built from this list.
+    """
+    from app.core.public_access import viewer_is_anonymous
+    from app.services.public_view import visible_entries_only
+
     if entity_type == "campaign":
+        if viewer_is_anonymous():
+            return []
         from app.models.campaign import CampaignEntry
 
         result = await db.execute(select(CampaignEntry.entry_id).where(CampaignEntry.campaign_id == entity_id))
         return [row[0] for row in result.all()]
 
     _, junction, fk_col = ENTITY_CONFIG[entity_type]
-    result = await db.execute(select(junction.entry_id).where(fk_col == entity_id))
+    stmt = visible_entries_only(select(junction.entry_id).where(fk_col == entity_id), junction.entry_id)
+    result = await db.execute(stmt)
     return [row[0] for row in result.all()]
 
 
@@ -246,7 +256,9 @@ def _compute_relationship_strength(
     return w_corr * corroboration + w_close * closeness + w_rec * recency, closeness
 
 
-_corpus_count_cache: tuple[float, int] = (0.0, 0)
+# Keyed by whether the viewer is a visitor: their count covers visible feeds
+# only, and neither total may stand in for the other.
+_corpus_count_cache: dict[bool, tuple[float, int]] = {}
 
 
 async def _corpus_entry_count(db: AsyncSession) -> int:
@@ -258,13 +270,15 @@ async def _corpus_entry_count(db: AsyncSession) -> int:
     """
     import time as _time
 
-    global _corpus_count_cache
-    ts, cached = _corpus_count_cache
+    from app.core.public_access import viewer_is_anonymous
+
+    visitor = viewer_is_anonymous()
+    ts, cached = _corpus_count_cache.get(visitor, (0.0, 0))
     now = _time.monotonic()
     if cached and now - ts < 300:
         return cached
     total = (await db.execute(select(func.count(Entry.id)))).scalar() or 0
-    _corpus_count_cache = (now, total)
+    _corpus_count_cache[visitor] = (now, total)
     return total
 
 
@@ -2268,6 +2282,10 @@ async def entity_timeline(db: AsyncSession, entity_type: str, entity_id: uuid.UU
     # A campaign's articles come from its membership table rather than an
     # extraction junction; everything downstream is the same.
     if entity_type == "campaign":
+        from app.core.public_access import viewer_is_anonymous
+
+        if viewer_is_anonymous():
+            return []
         from app.models.campaign import CampaignEntry
 
         linked_ids_subq = (select(CampaignEntry.entry_id).where(CampaignEntry.campaign_id == entity_id)).subquery()
@@ -2584,9 +2602,53 @@ async def entity_timeline(db: AsyncSession, entity_type: str, entity_id: uuid.UU
             }
         )
 
+    from app.core.public_access import viewer_is_anonymous
+
+    if viewer_is_anonymous():
+        events = await _visitor_timeline(db, events)
+
     # Sort all events by date descending
     events.sort(key=lambda e: e.get("date") or "", reverse=True)
     return events
+
+
+async def _visitor_timeline(db: AsyncSession, events: list[dict]) -> list[dict]:
+    """The timeline a visitor sees. Rule and campaign events name private work;
+    correlation events keep the visitor allowlist (their text names what was
+    matched); and anything about an article or an entity the visitor can't
+    see goes. Articles in section 1 already went through the visitor filter."""
+    from app.services.public_view import VISITOR_EVENT_TYPES, entities_shown
+
+    entry_ids = {uuid.UUID(e["entry_id"]) for e in events if e.get("entry_id")}
+    shown_entries = (
+        {str(i) for i in (await db.execute(select(Entry.id).where(Entry.id.in_(entry_ids)))).scalars()}
+        if entry_ids
+        else set()
+    )
+    refs = {
+        (e["nav_context"]["entity_type"], uuid.UUID(e["nav_context"]["entity_id"]))
+        for e in events
+        if (e.get("nav_context") or {}).get("entity_id")
+    }
+    shown_entities = await entities_shown(db, refs)
+
+    kept = []
+    for e in events:
+        kind = e.get("event_type")
+        if kind in ("detection_rule", "campaign"):
+            continue
+        if kind == "correlation" and e.get("event_subtype") not in VISITOR_EVENT_TYPES:
+            continue
+        if e.get("entry_id") and e["entry_id"] not in shown_entries:
+            continue
+        nav = e.get("nav_context") or {}
+        if nav.get("entity_id"):
+            if nav["entity_type"] in ("campaign", "observable"):
+                continue
+            if (nav["entity_type"], uuid.UUID(nav["entity_id"])) not in shown_entities:
+                continue
+        kept.append(e)
+    return kept
 
 
 # ---------------------------------------------------------------------------
