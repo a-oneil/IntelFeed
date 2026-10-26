@@ -84,13 +84,13 @@ async def test_edit_with_a_new_token_replaces_it(client: AsyncClient, admin_head
 
     response = await client.put(
         f"/api/feeds/{feed.id}",
-        json={"adapter_config": {"token": "ghp_rotated456"}},
+        json={"adapter_config": {"token": "rotated-value"}},
         headers=admin_headers,
     )
 
     assert response.status_code == 200
     await db_session.refresh(feed)
-    assert feed.adapter_config["token"] == "ghp_rotated456"
+    assert feed.adapter_config["token"] == "rotated-value"
 
 
 @pytest.mark.asyncio
