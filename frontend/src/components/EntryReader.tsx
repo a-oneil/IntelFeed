@@ -52,6 +52,7 @@ import { useOpenEntry, useOpenThread } from "@/utils/openEntry";
 import styles from "./EntryReader.module.css";
 import { AsyncStateLoading } from "@/components/AsyncState";
 import { Hint } from "@/components/primitives";
+import { UploadByline, UploadDownloadItem } from "@/components/EntryUploadInfo";
 
 interface EntryReaderProps {
   entryId: string;
@@ -702,6 +703,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
                   newTab={openLinksNewTab}
                 />
               )}
+              <UploadDownloadItem metadata={entry.metadata} />
             </ToolbarDropdown>
           </div>
         </div>
@@ -750,6 +752,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
           <div className={styles.byline}>
             {entry.author && <span>By {entry.author}</span>}
             {readTime && !isYouTube && !isPodcast && <span>{readTime} min read</span>}
+            <UploadByline metadata={entry.metadata} feedId={entry.feed_id} />
             {isYouTube && !!entry.metadata?.view_count && (
               <span>{formatViewCount(Number(entry.metadata.view_count))}</span>
             )}

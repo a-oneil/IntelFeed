@@ -1462,6 +1462,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
           isFetchingNextPage={isFetchingNextPage}
           fetchNextPage={fetchNextPage}
           isLoading={isLoading}
+          uploadsFeed={selectedFeed?.feed_type === "manual"}
         />
       ) : effectiveViewMode === "magazine" ? (
         /* Magazine / card grid view */

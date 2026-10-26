@@ -68,7 +68,7 @@ export const QUICK_ACTIONS: QuickAction[] = [
 
   // --- Create --------------------------------------------------------------
   { label: "Add feed", icon: "✚", path: "", category: "create", special: "open-add-feed", keywords: ["new", "feed", "rss", "subscribe", "youtube", "reddit", "github", "telegram", "bluesky", "mastodon", "scraper"] },
-  { label: "Ingest a URL or PDF", icon: "✚", path: "", category: "create", special: "open-ingest", keywords: ["ingest", "url", "pdf", "upload", "import", "article", "one-off", "paste"] },
+  { label: "Ingest files, URLs or text", icon: "✚", path: "", category: "create", special: "open-ingest", keywords: ["ingest", "url", "pdf", "upload", "import", "article", "one-off", "paste", "files", "drop", "batch", "docx", "zip", "github", "repo", "manual uploads"] },
   { label: "Create detection rule", icon: "✚", path: "/workbench/rule/new", category: "create", keywords: ["new", "rule", "sigma", "spl", "kql", "yara", "detection", "add"] },
   { label: "Create campaign", icon: "✚", path: "/campaigns?create=true", category: "create", keywords: ["new", "campaign", "track", "add"] },
   { label: "Create automation rule", icon: "✚", path: "/automation?create=true", category: "create", keywords: ["new", "automation", "automate", "trigger", "add"] },

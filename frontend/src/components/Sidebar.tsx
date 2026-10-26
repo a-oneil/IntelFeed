@@ -513,13 +513,14 @@ export function Sidebar() {
             </button>
             <Hint
               title="Ingest"
-              body="Paste a URL or drop a PDF and it gets pulled in, cleaned up and read by the pipeline like any feed article."
+              body="Drop a pile of files, paste links or text, or point at a GitHub repo. Each item becomes an entry under Manual Uploads and runs through the pipeline like any feed article."
+              aside="Originals are kept and downloadable from the entry."
               align="end"
             >
               <button
                 className={styles.addBtn}
                 onClick={() => setShowIngestModal(true)}
-                aria-label="Ingest a URL or PDF"
+                aria-label="Ingest files, URLs or text"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />

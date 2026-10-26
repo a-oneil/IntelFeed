@@ -114,3 +114,13 @@
   margin-right: 3px;
   vertical-align: middle;
 }
+
+.downloadLink {
+  color: var(--accent-intel);
+  text-decoration: none;
+  font-size: var(--fs-sm);
+}
+
+.downloadLink:hover {
+  text-decoration: underline;
+}

@@ -143,6 +143,21 @@ export function useSSE() {
       debouncedInvalidate("entries");
     };
 
+    const onIngestItemUpdated = (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data);
+        // The modal's queue list reads this query; refetch it on every change.
+        queryClient.invalidateQueries({ queryKey: ["ingest-batch", data.batch_id] });
+        if (data.status === "created") {
+          // A new entry on the Manual Uploads feed — and, the first time ever,
+          // the feed itself.
+          debouncedInvalidate("entries", "entries-count", "feeds");
+        }
+      } catch {
+        // Malformed SSE data — ignore
+      }
+    };
+
     const onRansomwareDisclosure = (e: MessageEvent) => {
       try {
         const data = JSON.parse(e.data);
@@ -158,6 +173,7 @@ export function useSSE() {
     };
 
     es.addEventListener("entry_scored", onEntryScored);
+    es.addEventListener("ingest_item_updated", onIngestItemUpdated);
     es.addEventListener("ransomware_disclosure", onRansomwareDisclosure);
     es.addEventListener("feed_fetched", onFeedFetched);
     es.addEventListener("entry_new", onEntryNew);
@@ -172,6 +188,8 @@ export function useSSE() {
     };
 
     es.onerror = () => {
+      es.removeEventListener("entry_scored", onEntryScored);
+      es.removeEventListener("ingest_item_updated", onIngestItemUpdated);
       es.removeEventListener("feed_fetched", onFeedFetched);
       es.removeEventListener("entry_new", onEntryNew);
       es.removeEventListener("ransomware_disclosure", onRansomwareDisclosure);

@@ -30,6 +30,65 @@ export interface DefaultTableLayout {
 
 /** Keyed by DataTable `tableId` ("entries", "entity:threat_actor", ...). */
 export const DEFAULT_TABLE_LAYOUTS: Record<string, DefaultTableLayout> = {
+  // The Manual Uploads feed in table view: a feed of files reads as a file
+  // table. Same columns as "entries" plus File / Size / Original, with Source
+  // off (every row is the same feed) and Summary off (the filename says more).
+  "entries-uploads": {
+    visibility: {
+      "status": true,
+      "source": false,
+      "date": true,
+      "title": true,
+      "file": true,
+      "size": true,
+      "original": true,
+      "summary": false,
+      "signal": true,
+      "subject": true,
+      "ttps": true,
+      "cves": true,
+      "rules": false,
+      "ai": false,
+      "opportunity": false,
+      "notes": false,
+      "tags": false,
+      "type": false,
+      "domain": false,
+      "author": false,
+      "words": false,
+    },
+    widths: {
+      "title": 320,
+      "file": 240,
+      "size": 80,
+      "original": 110,
+      "date": 153,
+    },
+    order: [
+      "status",
+      "date",
+      "title",
+      "file",
+      "size",
+      "original",
+      "signal",
+      "subject",
+      "ttps",
+      "cves",
+      "pir",
+      "rules",
+      "ai",
+      "opportunity",
+      "notes",
+      "tags",
+      "source",
+      "summary",
+      "type",
+      "domain",
+      "author",
+      "words",
+    ],
+  },
   "entries": {
     visibility: {
       "opportunity": true,

@@ -1,0 +1,30 @@
+.original {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3em;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.filename {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 28ch;
+  white-space: nowrap;
+}
+
+.link {
+  color: var(--accent-intel);
+  text-decoration: none;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+.dim {
+  color: var(--text-muted);
+}
