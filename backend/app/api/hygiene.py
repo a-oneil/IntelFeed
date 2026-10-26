@@ -3714,10 +3714,10 @@ async def unlink_groups(
     gone = [k for k in groups if k not in labels and _model_for(k[0]) is not None]
     for etype, eid in gone:
         for model, action in ((EntityLinkValidationLog, "shadow_remove"), (EntityMaintenanceLog, ACTION_UNLINK)):
-            q = delete(model).where(model.action == action, model.entity_type == etype, model.entity_id == eid)
+            stmt = delete(model).where(model.action == action, model.entity_type == etype, model.entity_id == eid)
             if model is EntityMaintenanceLog:
-                q = q.where(model.applied.is_(False))
-            await db.execute(q)
+                stmt = stmt.where(model.applied.is_(False))
+            await db.execute(stmt)
         all_proposals -= groups.pop((etype, eid))["proposals"]
 
     items = []
