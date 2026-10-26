@@ -279,7 +279,7 @@ async def list_telegram_mentions(
     that I haven't yet wired up as sources." Joins against existing telegram feeds so
     is_subscribed reflects current state even if the cached feed_id is stale.
     """
-    # Refresh feed_id cache for any rows where it might be stale
+    # Which mentioned channels are already ingested, keyed by handle
     feed_rows = await db.execute(select(Feed).where(Feed.feed_type == "telegram"))
     handle_to_feed: dict[str, str] = {}
     for f in feed_rows.scalars().all():
@@ -291,8 +291,8 @@ async def list_telegram_mentions(
     q = select(TelegramChannelMention)
     if only_active:
         q = q.where(TelegramChannelMention.dismissed_at.is_(None))
-    if only_unsubscribed:
-        q = q.where(TelegramChannelMention.feed_id.is_(None))
+    if only_unsubscribed and handle_to_feed:
+        q = q.where(TelegramChannelMention.handle.not_in(handle_to_feed))
     if link_type:
         q = q.where(TelegramChannelMention.primary_link_type == link_type)
 
@@ -312,15 +312,9 @@ async def list_telegram_mentions(
 
     items = []
     for ch in rows:
-        # Reconcile cached feed_id with reality
+        # Subscription comes from the live feed list, not the cached feed_id:
+        # this is a read, so it must not write the reconciled value back.
         live_feed_id = handle_to_feed.get(ch.handle)
-        if live_feed_id and ch.feed_id is None:
-            ch.feed_id = uuid.UUID(live_feed_id)
-            db.add(ch)
-        elif not live_feed_id and ch.feed_id is not None:
-            ch.feed_id = None
-            db.add(ch)
-
         items.append(
             {
                 "id": str(ch.id),
@@ -332,14 +326,13 @@ async def list_telegram_mentions(
                 "last_seen_at": ch.last_seen_at.isoformat() if ch.last_seen_at else None,
                 "mention_count": ch.mention_count,
                 "distinct_feed_count": ch.distinct_feed_count,
-                "is_subscribed": ch.feed_id is not None,
-                "feed_id": str(ch.feed_id) if ch.feed_id else None,
+                "is_subscribed": live_feed_id is not None,
+                "feed_id": live_feed_id,
                 "is_dismissed": ch.dismissed_at is not None,
                 "dismissed_at": ch.dismissed_at.isoformat() if ch.dismissed_at else None,
                 "notes": ch.notes,
             }
         )
-    await db.commit()
 
     return {"items": items, "total": int(total), "limit": limit, "offset": offset}
 

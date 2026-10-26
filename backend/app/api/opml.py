@@ -16,6 +16,7 @@ from app.feed_packs import INTELFEED_NS, get_pack, load_packs
 from app.models.category import Category
 from app.models.feed import Feed
 from app.models.user import User
+from app.schemas.feed import SECRET_ADAPTER_KEYS
 from app.services.feed_defaults import FEED_DEFAULT_FIELDS, category_for_feed_type, new_feed_settings
 from app.services.feed_fetch_health import strip_client_keys
 from app.services.feed_visibility import (
@@ -229,7 +230,8 @@ def feed_outline_attrs(feed: Feed) -> dict[str, str]:
     if feed.feed_type not in PORTABLE_FEED_TYPES:
         attrs[f"{ns}feedType"] = feed.feed_type
     # fetch_health is what this server learned fetching the feed, not config.
-    config = strip_client_keys(feed.adapter_config)
+    # Credentials stay on this server: an export is a file people share.
+    config = {k: v for k, v in (strip_client_keys(feed.adapter_config) or {}).items() if k not in SECRET_ADAPTER_KEYS}
     if config:
         attrs[f"{ns}config"] = json.dumps(config, sort_keys=True, separators=(",", ":"))
     if feed.fetch_interval_minutes != 30:

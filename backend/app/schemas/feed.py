@@ -3,6 +3,23 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+# adapter_config keys that hold a credential: the Bluesky app password
+# (encrypted at rest), a GitHub token, an NVD API key. They never leave the
+# server — responses mask them, OPML exports drop them.
+SECRET_ADAPTER_KEYS = frozenset({"app_password", "token", "api_key"})
+MASKED_SECRET = "••••••••"
+
+
+def is_masked_secret(value: object) -> bool:
+    """True for the placeholder a client echoes back for a secret it never saw."""
+    return isinstance(value, str) and bool(value) and set(value) == {"•"}
+
+
+def keep_stored_secrets(incoming: dict) -> dict:
+    """Drop secret keys a client sent back masked, so an update merges the
+    stored value instead of overwriting it with the placeholder."""
+    return {k: v for k, v in incoming.items() if not (k in SECRET_ADAPTER_KEYS and is_masked_secret(v))}
+
 
 class FeedCreateRequest(BaseModel):
     url: str
@@ -123,13 +140,10 @@ class FeedResponse(BaseModel):
     @field_validator("adapter_config", mode="before")
     @classmethod
     def _mask_secrets(cls, v):
-        """Mask credential fields so ciphertext never reaches the client."""
+        """Mask credential fields so neither a token nor ciphertext reaches the client."""
         if not isinstance(v, dict):
             return v
-        masked = dict(v)
-        if masked.get("app_password"):
-            masked["app_password"] = "••••••••"
-        return masked
+        return {k: (MASKED_SECRET if k in SECRET_ADAPTER_KEYS and val else val) for k, val in v.items()}
 
 
 class FeedAIUsageResponse(BaseModel):

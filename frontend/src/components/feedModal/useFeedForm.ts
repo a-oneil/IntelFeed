@@ -94,13 +94,14 @@ const CURATION_FIELDS = [
 
 const CURATION = new Set<string>(CURATION_FIELDS);
 
-/** The response masks an existing Bluesky app password; never echo it back. */
+/** The response masks stored credentials (Bluesky app password, GitHub token,
+ *  NVD API key); never echo the placeholder back. */
 const MASKED = /^•+$/;
 
 function initialValues(feed: Feed): FeedFormValues {
   const adapter: Record<string, unknown> = { ...(feed.adapter_config || {}) };
-  if (typeof adapter.app_password === "string" && MASKED.test(adapter.app_password)) {
-    delete adapter.app_password;
+  for (const [key, value] of Object.entries(adapter)) {
+    if (typeof value === "string" && MASKED.test(value)) delete adapter[key];
   }
   return {
     custom_title: feed.custom_title || "",
