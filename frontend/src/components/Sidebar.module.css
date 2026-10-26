@@ -1458,3 +1458,15 @@
     font-size: var(--fs-md);
   }
 }
+
+/* Manual Uploads: a system feed shown as its own row above the category tree,
+   at category weight, with no "Uncategorized" label over it. */
+.pinnedFeed {
+  margin-bottom: 0.125rem;
+}
+
+.pinnedFeed .feedItem {
+  padding-left: 1rem;
+  font-weight: 600;
+  font-size: var(--fs-md);
+}
