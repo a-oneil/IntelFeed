@@ -6,7 +6,7 @@
  */
 import { useEffect, useRef, useState, useMemo } from "react";
 import api from "@/api/client";
-import { useAuthStore } from "@/stores/authStore";
+import { useAuthStore, useIsVisitor } from "@/stores/authStore";
 import { Link } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -139,6 +139,8 @@ export function OverviewTab({
   /** Deep-link target (?tab=notes): scroll the notes module into view on mount. */
   anchor?: "notes" | null;
 }) {
+  // Public read-only mode: saved assessments show; AI, notes, the action rail and edits do not.
+  const isVisitor = useIsVisitor();
   const activityRef = useRef<HTMLDivElement>(null);
   const notesRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -873,14 +875,14 @@ export function OverviewTab({
               entityType={entityType}
               entityId={entityId}
               entity={entity}
-              editable={entityType !== "mitigation"}
+              editable={entityType !== "mitigation" && !isVisitor}
               whatsNew={whatsNew ?? []}
               onUpdateField={onUpdateField}
               onOpenArticle={onOpenArticle}
             />
           )}
-          <AIAnalysisModule entityType={entityType} entityId={entityId} />
-          {entityType === "threat_actor" && <VictimsStrip entityId={entityId} />}
+          {!isVisitor && <AIAnalysisModule entityType={entityType} entityId={entityId} />}
+          {entityType === "threat_actor" && !isVisitor && <VictimsStrip entityId={entityId} />}
           <EssentialReading entityType={entityType} entityId={entityId} onOpenArticle={onOpenArticle} />
 
           {/* Wikipedia renders only when an article is attached — collapsed to
@@ -894,6 +896,7 @@ export function OverviewTab({
                     View article ↗
                   </a>
                 )}
+                {!isVisitor && (
                 <button
                   className={styles.wikiSearchBtn}
                   onClick={() => {
@@ -903,6 +906,7 @@ export function OverviewTab({
                 >
                   Wrong article?
                 </button>
+                )}
               </div>
               {wikiOpen ? (
                 <div className={styles.wikiContent}>
@@ -923,9 +927,11 @@ export function OverviewTab({
           )}
 
           {/* Analyst notes — folded in from the old Notes tab; ?tab=notes lands here. */}
+          {!isVisitor && (
           <div ref={notesRef} className={styles.notesModule}>
             <EntityNotesSection entityType={entityType} entityId={entityId} />
           </div>
+          )}
 
           <div ref={activityRef}>
             <ActiveStoryCard entityType={entityType} entityId={entityId} />
@@ -1058,7 +1064,7 @@ export function OverviewTab({
             </button>
           </div>
         )}
-          {related && onShowRelationships && (
+          {related && onShowRelationships && !isVisitor && (
             <NextActionsRail
               entityType={entityType}
               entityId={entityId}

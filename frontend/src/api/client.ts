@@ -1,5 +1,6 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from "axios";
-import { useAuthStore } from "@/stores/authStore";
+import { toast } from "sonner";
+import { selectIsVisitor, useAuthStore } from "@/stores/authStore";
 
 export interface ApiError {
   error: {
@@ -50,7 +51,14 @@ async function refreshAccessToken(): Promise<string | null> {
     // Transient network errors should not wipe the session.
     const status = (err as { response?: { status?: number } })?.response?.status;
     if (status === 401 || status === 403) {
+      const publicReadOnly = useAuthStore.getState().publicReadOnly;
       useAuthStore.getState().logout();
+      if (publicReadOnly) {
+        // The instance is browsable without an account: drop back to the
+        // public view, not a login wall.
+        window.location.assign("/");
+        return null;
+      }
       // Hard navigation, not a router push: logout() clears the persisted
       // per-account keys, but the in-memory Zustand stores still hold the old
       // account's workspace state and would write those keys straight back on
@@ -75,8 +83,47 @@ const PUBLIC_AUTH_PATHS = [
   "/auth/invite-code",
 ];
 
+// The read-only POSTs a visitor may send (the server allows the same list,
+// core/public_access.py ANONYMOUS_READ_POSTS).
+const VISITOR_READ_POSTS = [
+  "/entries/intel-counts",
+  "/entries/resolve-names",
+  "/intelligence/resolve-names",
+  "/glossary/detect",
+  "/autolink/scan",
+];
+
+export class ReadOnlyViewError extends Error {
+  constructor() {
+    super("This view is read-only.");
+    this.name = "ReadOnlyViewError";
+  }
+}
+
+let lastReadOnlyToast = 0;
+
+/** A visitor's write never leaves the browser: the server would refuse it anyway. */
+function refuseVisitorWrite(config: InternalAxiosRequestConfig): boolean {
+  const method = (config.method || "get").toLowerCase();
+  if (method === "get" || method === "head" || method === "options") return false;
+  if (!selectIsVisitor(useAuthStore.getState())) return false;
+  if (PUBLIC_AUTH_PATHS.some((p) => config.url?.includes(p))) return false;
+  if (VISITOR_READ_POSTS.some((p) => config.url?.startsWith(p))) return false;
+  return true;
+}
+
 // Add auth token to requests — proactively refresh if expired or expiring soon
 api.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
+  if (refuseVisitorWrite(config)) {
+    console.debug("Read-only view: refused", config.method?.toUpperCase(), config.url);
+    // Controls that write are hidden for visitors, so this is a slip: say so
+    // once, quietly, instead of a stack of error toasts.
+    if (Date.now() - lastReadOnlyToast > 10_000) {
+      lastReadOnlyToast = Date.now();
+      toast("This view is read-only.");
+    }
+    throw new ReadOnlyViewError();
+  }
   if (PUBLIC_AUTH_PATHS.some((p) => config.url?.includes(p))) return config;
 
   const { accessToken, refreshToken } = useAuthStore.getState();

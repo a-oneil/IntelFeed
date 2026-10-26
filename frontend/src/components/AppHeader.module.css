@@ -142,3 +142,27 @@
   }
 }
 
+
+/* Visitors (public read-only mode) have no search box: keep the actions right-aligned. */
+.visitorSpacer {
+  flex: 1;
+}
+
+.signInBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  line-height: 1;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+  cursor: pointer;
+  border-radius: var(--r-md);
+}
+
+.signInBtn:hover {
+  filter: brightness(1.08);
+}

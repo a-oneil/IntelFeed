@@ -281,7 +281,10 @@ Referrer-Policy: strict-origin-when-cross-origin
 Strict-Transport-Security: max-age=63072000; includeSubDomains
 Content-Security-Policy: default-src 'self'; script-src 'self'; img-src 'self' data: blob: https:; ...
 Permissions-Policy: camera=(), microphone=(), geolocation=()
+X-Robots-Tag: noindex, nofollow
 ```
+
+Every `/api/*` response (and `/openapi.json`) also carries `Cache-Control: private, no-store` unless the route sets its own, so no shared cache (Cloudflare, a corporate proxy) serves one caller's response to another. The image proxy and audio files set their own. The SPA adds `<meta name="robots" content="noindex, nofollow">` and serves a disallow-all `robots.txt`.
 
 - **CSP:** No external scripts, styles from CDN (except for `/docs`), image proxying allowed
 - **HSTS:** 730 days cache (enforce HTTPS)
@@ -321,7 +324,9 @@ Limits are bucketed by path, not a global per-IP cap — general authenticated A
 | `auth` | `/api/auth/login`, `/api/auth/register`, `/api/auth/refresh` | 10 req / 5 min (brute-force protection) |
 | `chat` | `POST /api/chat` | 10 req / min (protects API credits) |
 | `ai` | `/api/ai/*` inference calls (config/read prefixes like `/api/ai/tasks`, `/api/ai/providers`, `/api/ai/prompts` are exempt) | 20 req / min |
-| everything else | — | not limited |
+| `anon_heavy` | Requests with no valid token to graph, pivot, timeline, analytics, map/calendar, priority-queue, relationship and autolink-scan routes | 30 req / min per IP |
+| `anon` | Every other `/api/*` request with no valid token ([public read-only mode](public-read-only-mode.md), share pages, TAXII/EDL consumers) | 240 req / min per IP |
+| everything else | signed-in traffic | not limited |
 
 **Exempt:** `/api/health`, `/metrics` (the metrics endpoint has its own IP allowlist), and all `OPTIONS` requests.
 

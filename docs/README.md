@@ -19,6 +19,7 @@ For a top-level project overview and quickstart, see [`../readme.md`](../readme.
 ## For operators
 
 - **[operations.md](operations.md)** — Deployment (dev vs prod Docker Compose, Caddy auto-TLS), security posture, observability, backup/restore, scaling, troubleshooting.
+- **[public-read-only-mode.md](public-read-only-mode.md)** — The admin switch that lets anyone browse IntelFeed without an account: what visitors see, what stays private, how the server enforces it, and the request limits.
 - **[integrations.md](integrations.md)** — Copy-paste recipes for hooking IntelFeed into Slack, Discord, Teams, SIEMs (Splunk/Elastic/Sentinel), MISP, GitHub, and configuring AI providers / enrichment sources.
 
 ## For contributors

@@ -52,6 +52,7 @@ import { DEFAULT_TABLE_LAYOUTS } from "@/components/table/defaultLayouts";
 import { adjacentEntryId } from "@/utils/entryNavigation";
 import { openExternalUrl } from "@/utils/openExternal";
 import { isExternalWebUrl } from "@/utils/externalLinks";
+import { useIsVisitor } from "@/stores/authStore";
 
 function stripHtml(html: string): string {
   const doc = new DOMParser().parseFromString(html, "text/html");
@@ -366,6 +367,7 @@ export const EntryRow = memo(function EntryRow({
    */
   metaColumns?: string[];
 }) {
+  const isVisitor = useIsVisitor();
   // Settings → Reading → "Show entry previews".
   const showPreview = useReadingPrefs().show_entry_preview;
   const metaFields = useMemo(() => {
@@ -384,8 +386,8 @@ export const EntryRow = memo(function EntryRow({
 
   return (
     <div
-      className={`${styles.entryItem} ${entry.is_read ? styles.read : ""} ${
-        undimRead ? styles.undimRead : ""
+      className={`${styles.entryItem} ${entry.is_read || isVisitor ? styles.read : ""} ${
+        undimRead || isVisitor ? styles.undimRead : ""
       } ${isSelected ? styles.selected : ""} ${isChecked ? styles.checked : ""} ${
         styles[viewMode]
       } ${bulkMode ? styles.bulkMode : ""}`}
@@ -491,6 +493,7 @@ const MagazineCard = memo(function MagazineCard({
   onCheck: (e: React.MouseEvent) => void;
   intelCounts?: EntryIntelCounts;
 }) {
+  const isVisitor = useIsVisitor();
   const plainSummary = entry.summary ? previewSnippet(stripHtml(entry.summary), 160) : "";
   const readTime = entry.word_count && entry.feed_type !== "youtube" && entry.feed_type !== "podcast"
     ? `${Math.ceil(entry.word_count / 200)} min`
@@ -501,7 +504,7 @@ const MagazineCard = memo(function MagazineCard({
 
   return (
     <div
-      className={`${styles.magazineCard} ${entry.is_read ? styles.magazineCardRead : ""} ${isSelected ? styles.magazineCardSelected : ""} ${isChecked ? styles.magazineCardChecked : ""} ${bulkMode ? styles.magazineBulkMode : ""}`}
+      className={`${styles.magazineCard} ${entry.is_read ? styles.magazineCardRead : ""} ${isVisitor ? styles.magazineCardVisitor : ""} ${isSelected ? styles.magazineCardSelected : ""} ${isChecked ? styles.magazineCardChecked : ""} ${bulkMode ? styles.magazineBulkMode : ""}`}
       onClick={onClick}
     >
       <div
@@ -568,6 +571,8 @@ interface EntryListProps {
 }
 
 export function EntryList({ sortOverride, withThreads = false, priorityMode = false }: EntryListProps = {}) {
+  // Public read-only mode: no read state, no bulk actions, no AI day summaries.
+  const isVisitor = useIsVisitor();
   const selectedFeedId = useUIStore((s) => s.selectedFeedId);
   const selectedCategoryId = useUIStore((s) => s.selectedCategoryId);
   const showUnreadOnly = useUIStore((s) => s.showUnreadOnly);
@@ -1028,6 +1033,8 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
   }, [setSelectedEntry]);
 
   const handleCheckboxClick = useCallback((index: number, entryId: string, e: React.MouseEvent) => {
+    // Bulk actions all write; a visitor never enters bulk mode.
+    if (isVisitor) return;
     if (e.shiftKey && lastSelectedIndex !== null) {
       // Range select
       const start = Math.min(lastSelectedIndex, index);
@@ -1040,7 +1047,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
       toggleEntrySelection(entryId);
     }
     setLastSelectedIndex(index);
-  }, [entries, lastSelectedIndex, selectedEntryIds, toggleEntrySelection, setEntrySelection, setLastSelectedIndex]);
+  }, [isVisitor, entries, lastSelectedIndex, selectedEntryIds, toggleEntrySelection, setEntrySelection, setLastSelectedIndex]);
 
   const handleSelectAll = useCallback(() => {
     if (selectedEntryIds.size === entries.length) {
@@ -1196,7 +1203,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
       ) : (
         <div className={styles.toolbar}>
           <div className={styles.toolbarLeft}>
-            <MarkReadSplitButton
+            {!isVisitor && <MarkReadSplitButton
               onMarkAll={() => markAllRead.mutate(
                 sortOverride === "radar"
                   ? { radar_only: true }
@@ -1207,7 +1214,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
               )}
               onMarkAbove={handleMarkAboveAsRead}
               canMarkAbove={canMarkAbove}
-            />
+            />}
             {!isNarrowPane && !isTableView && showDividers && allDayKeys.length > 0 && (
               <button
                 className={styles.toolbarBtn}
@@ -1241,7 +1248,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
                     onClick={toggleAllDays}
                   />
                 )}
-                {!isTableView && (
+                {!isTableView && !isVisitor && (
                   <DropdownItem
                     label={
                       caughtUpFallback
@@ -1253,10 +1260,12 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
                     onClick={toggleHideRead}
                   />
                 )}
+                {!isVisitor && (
                 <DropdownItem
                   label={markReadOnScroll ? "Auto-read: on" : "Auto-read: off"}
                   onClick={toggleMarkReadOnScroll}
                 />
+                )}
                 <div className={styles.toolbarMenuField}>
                   <label htmlFor="entrylist-sort-narrow">Sort</label>
                   <select
@@ -1298,7 +1307,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
               <>
             {/* Hide Read stays hidden in table view — the table's State column
                 filter owns read/unread there. Auto-read applies everywhere. */}
-            {!isTableView && (
+            {!isTableView && !isVisitor && (
               <button
                 className={`${styles.toolbarBtn} ${effectiveShowUnreadOnly ? styles.toolbarBtnActive : ""} ${caughtUpFallback ? styles.toolbarBtnPaused : ""}`}
                 onClick={toggleHideRead}
@@ -1311,6 +1320,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
                 Hide Read{caughtUpFallback ? " (paused)" : ""}
               </button>
             )}
+            {!isVisitor && (
             <Hint
               title="Auto-read"
               body="Marks articles read as they scroll past you."
@@ -1323,6 +1333,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
                 Auto-read
               </button>
             </Hint>
+            )}
             <Hint
               title="Sort"
               body="How the list is ordered. Newest first by default."
@@ -1516,6 +1527,8 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
                         </span>
                       </>
                     )}
+                    {/* Visitors: no read state to mark, no AI summary. */}
+                    {!isVisitor && (<>
                     <MarkDayReadButton
                       dayKey={item.dayKey}
                       dayCount={item.dayCount}
@@ -1528,6 +1541,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
                       filters={summaryFilters}
                       label={item.label}
                     />
+                    </>)}
                     <DayIntelChips
                       dayKey={item.dayKey}
                       filters={summaryFilters}
@@ -1643,6 +1657,8 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
                               </span>
                             </>
                           )}
+                          {/* Visitors: no read state to mark, no AI summary. */}
+                          {!isVisitor && (<>
                           <MarkDayReadButton
                             dayKey={item.dayKey}
                             dayCount={item.dayCount}
@@ -1655,6 +1671,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
                             filters={summaryFilters}
                             label={item.label}
                           />
+                          </>)}
                           <DayIntelChips
                             dayKey={item.dayKey}
                             filters={summaryFilters}

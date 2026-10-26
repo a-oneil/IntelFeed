@@ -11,6 +11,7 @@ import { ResizeHandle } from "@/components/ResizeHandle";
 import { RailToggle } from "@/components/primitives";
 import { RouteFallback } from "@/components/RouteFallback";
 import styles from "./SidebarLayout.module.css";
+import { useIsVisitor } from "@/stores/authStore";
 
 export function SidebarLayout() {
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed);
@@ -20,6 +21,8 @@ export function SidebarLayout() {
   const hasActiveTrack = usePlayerStore((s) => !!s.currentTrack || (s.mode === "speech" && !!s.speechTrack && s.isPlaying));
   const isMobile = useIsMobile();
   const commandPaletteOpen = useUIStore((s) => s.commandPaletteOpen);
+  // No command palette in public read-only mode: most of what it does writes.
+  const isVisitor = useIsVisitor();
 
   const sidebarSwipeRef = useSwipe<HTMLDivElement>({
     onSwipeLeft: () => useUIStore.getState().setSidebarCollapsed(true),
@@ -75,7 +78,7 @@ export function SidebarLayout() {
         </div>
       </div>
       <CommandPalette
-        open={commandPaletteOpen}
+        open={commandPaletteOpen && !isVisitor}
         onClose={useUIStore.getState().closeCommandPalette}
       />
     </div>

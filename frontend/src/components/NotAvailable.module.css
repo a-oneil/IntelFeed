@@ -1,0 +1,29 @@
+.wrap {
+  display: grid;
+  place-items: center;
+  min-height: 60vh;
+  padding: 24px;
+  text-align: center;
+}
+
+.title {
+  margin: 0;
+  font-size: 18px;
+}
+
+.text {
+  color: var(--text-secondary);
+  margin: 8px 0 16px;
+}
+
+.signIn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: var(--radius-md, 6px);
+  background: var(--accent);
+  color: var(--accent-text, #fff);
+  font-weight: 600;
+  text-decoration: none;
+}

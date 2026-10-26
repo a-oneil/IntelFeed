@@ -2,6 +2,7 @@ import { useInfiniteQuery, useMutation, useQueryClient, keepPreviousData } from 
 import { currentReadingPrefs } from "@/hooks/useReadingPrefs";
 import { useRef, useCallback, useMemo } from "react";
 import api from "@/api/client";
+import { isVisitorNow } from "@/stores/authStore";
 import type {
   CursorPaginatedResponse,
   Entry,
@@ -210,9 +211,13 @@ function useReadStateMutation(read: boolean) {
   const debouncedFeedsInvalidate = useDebouncedFeedsInvalidation();
   return useMutation({
     mutationFn: async (entryId: string) => {
+      // A visitor has no read state: opening and scrolling articles must not
+      // try to record one (the server would refuse it anyway).
+      if (isVisitorNow()) return;
       await api.put(`/entries/${entryId}/${read ? "read" : "unread"}`);
     },
     onMutate: async (entryId: string) => {
+      if (isVisitorNow()) return undefined;
       // Stop in-flight refetches from clobbering the optimistic write.
       await queryClient.cancelQueries({ queryKey: ["entries"] });
       await queryClient.cancelQueries({ queryKey: ["entry", entryId] });
@@ -286,6 +291,7 @@ export function useToggleStar() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (entryId: string) => {
+      if (isVisitorNow()) return null;
       const res = await api.put(`/entries/${entryId}/star`);
       return res.data;
     },
@@ -301,6 +307,7 @@ export function useToggleBookmark() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (entryId: string) => {
+      if (isVisitorNow()) return null;
       const res = await api.put(`/entries/${entryId}/bookmark`);
       return res.data;
     },

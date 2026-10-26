@@ -69,6 +69,7 @@ VISITOR_ROUTES = frozenset(
     GET /api/entries/day-intel
     GET /api/entries/map
     GET /api/entries/priority-queue
+    GET /api/entries/priority-unread-count
     GET /api/entries/{entry_id}
     GET /api/entries/{entry_id}/article-metadata
     GET /api/entries/{entry_id}/countries
@@ -94,6 +95,7 @@ VISITOR_ROUTES = frozenset(
     GET /api/glossary/counts
     GET /api/glossary/{term_id}/entries
     GET /api/intelligence/entry-graph/{entry_id}
+    GET /api/intelligence/events/grouped
     GET /api/intelligence/graph/{entity_type}/{entity_id}
     GET /api/intelligence/pivot/{entity_type}/{entity_id}
     GET /api/intelligence/temporal-clusters
@@ -153,6 +155,7 @@ VISITOR_ROUTES = frozenset(
     GET /api/widgets/under-reported
     GET /api/widgets/weekly-recap
     POST /api/entries/intel-counts
+    POST /api/autolink/scan
     POST /api/entries/resolve-names
     POST /api/glossary/detect
     POST /api/intelligence/resolve-names
@@ -468,6 +471,9 @@ def test_scrub_drops_users_and_hidden_areas():
         "author": "Article byline",
         "claims": [{"value": "Russia", "analyst": "alice"}],
         "rule_count": 4,
+        "pir_matches": [{"id": "p1"}],
+        "notes": 2,
+        "detection_opportunity": "actionable_gap",
         "source_campaigns": ["c1"],
         "graph": {
             "nodes": [{"id": "a", "type": "threat_actor"}, {"id": "c", "type": "campaign"}],
@@ -478,5 +484,6 @@ def test_scrub_drops_users_and_hidden_areas():
     assert out["author"] == "Article byline"
     assert out["claims"] == [{"value": "Russia"}]
     assert "rule_count" not in out and "source_campaigns" not in out
+    assert "pir_matches" not in out and "notes" not in out and "detection_opportunity" not in out
     assert out["graph"]["nodes"] == [{"id": "a", "type": "threat_actor"}]
     assert out["graph"]["edges"] == [{"source": "a", "target": "a"}]

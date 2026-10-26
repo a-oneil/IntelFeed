@@ -39,6 +39,10 @@ import { GeographyTab } from "@/components/entityProfile/tabs/GeographyTab";
 import { VictimologyTab } from "@/components/entityProfile/tabs/VictimologyTab";
 import { DetectionGapsTab } from "@/components/entityProfile/tabs/DetectionGapsTab";
 import styles from "@/components/entityProfile/entityProfile.module.css";
+import { useIsVisitor } from "@/stores/authStore";
+
+/** Profile tabs about rules and coverage — not part of the public read-only view. */
+const VISITOR_HIDDEN_TABS = new Set<TabKey>(["detection", "detection_gaps"]);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const RESOLVE_ENDPOINTS: Record<string, (id: string) => string> = {
@@ -51,6 +55,7 @@ const RESOLVE_ENDPOINTS: Record<string, (id: string) => string> = {
 };
 
 export function EntityProfilePage({ slug }: { slug: string }) {
+  const isVisitor = useIsVisitor();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const entityType = slug as EntityType;
@@ -156,7 +161,7 @@ export function EntityProfilePage({ slug }: { slug: string }) {
       setSearchParams(next, { replace: true });
       return;
     }
-    if (requested && config?.tabs.includes(requested as TabKey)) {
+    if (requested && config?.tabs.includes(requested as TabKey) && !(isVisitor && VISITOR_HIDDEN_TABS.has(requested as TabKey))) {
       setActiveTab(requested as TabKey);
       const next = new URLSearchParams(searchParams);
       next.delete("tab");
@@ -289,7 +294,13 @@ export function EntityProfilePage({ slug }: { slug: string }) {
       {/* detection_gaps is in no config — it appends itself while active so
           the rail's "Review gaps" jump gets a highlighted tab and a way back. */}
       <ProfileTabs
-        tabs={activeTab === "detection_gaps" ? [...config.tabs, "detection_gaps"] : config.tabs}
+        tabs={
+          isVisitor
+            ? config.tabs.filter((t) => !VISITOR_HIDDEN_TABS.has(t))
+            : activeTab === "detection_gaps"
+              ? [...config.tabs, "detection_gaps"]
+              : config.tabs
+        }
         active={activeTab}
         counts={counts}
         onChange={setActiveTab}
@@ -338,7 +349,7 @@ export function EntityProfilePage({ slug }: { slug: string }) {
             onOpenEntry={openArticle}
           />
         )}
-        {activeTab === "detection" && (
+        {activeTab === "detection" && !isVisitor && (
           <DetectionTab
             entityType={entityType}
             entityId={entityId}
@@ -348,7 +359,7 @@ export function EntityProfilePage({ slug }: { slug: string }) {
           />
         )}
         {activeTab === "geography" && <GeographyTab entityId={entityId} entityLabel={displayName} onOpenEntity={openEntity} />}
-        {activeTab === "detection_gaps" && (
+        {activeTab === "detection_gaps" && !isVisitor && (
           <DetectionGapsTab entityType={entityType} entityId={entityId} onOpenEntity={openEntity} />
         )}
       </div>

@@ -47,6 +47,7 @@ ANON_HEAVY_PREFIXES = (
     "/api/entries/calendar",
     "/api/entries/priority-queue",
     "/api/entity-relationships",
+    "/api/autolink/scan",
 )
 
 _PROVIDER_TEST = re.compile(r"^/api/ai/providers/[0-9a-fA-F-]{36}/test$")

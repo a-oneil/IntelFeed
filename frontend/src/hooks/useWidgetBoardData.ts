@@ -35,13 +35,15 @@ export interface BoardOverviewData {
   headline: {
     entries: OverviewMetric;
     radar: OverviewMetric;
-    unread: OverviewMetric;
-    detections: OverviewMetric;
+    /** Absent for a visitor (public read-only mode). */
+    unread?: OverviewMetric;
+    /** Absent for a visitor (public read-only mode). */
+    detections?: OverviewMetric;
   };
   entities: OverviewEntityCount[];
   series: {
     entries: OverviewSeriesPoint[];
-    detections: OverviewSeriesPoint[];
+    detections?: OverviewSeriesPoint[];
   };
 }
 

@@ -16,6 +16,7 @@ import { AppHeader } from "@/components/AppHeader";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { RailToggle } from "@/components/primitives";
 import styles from "./MainLayout.module.css";
+import { useIsVisitor } from "@/stores/authStore";
 
 interface MainLayoutProps {
   // Priority Queue mode: renders the same list + reader shell, but pins the
@@ -61,6 +62,8 @@ export function MainLayout({ priorityMode = false }: MainLayoutProps = {}) {
   const isMobile = useIsMobile();
   const [searchParams, setSearchParams] = useSearchParams();
   const commandPaletteOpen = useUIStore((s) => s.commandPaletteOpen);
+  // No command palette in public read-only mode: most of what it does writes.
+  const isVisitor = useIsVisitor();
 
   // On mobile, ensure sidebar starts collapsed and stays collapsed on navigation
   useEffect(() => {
@@ -240,7 +243,7 @@ export function MainLayout({ priorityMode = false }: MainLayoutProps = {}) {
       </div>
       <div aria-live="polite" aria-atomic="true" className={styles.srOnly} />
       <CommandPalette
-        open={commandPaletteOpen}
+        open={commandPaletteOpen && !isVisitor}
         onClose={useUIStore.getState().closeCommandPalette}
       />
     </div>

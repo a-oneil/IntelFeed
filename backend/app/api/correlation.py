@@ -191,7 +191,7 @@ async def list_grouped_correlation_events(
     is_read: bool | None = Query(None, description="Filter by read state (true = read only, false = unread only)."),
     limit: int = Query(default=50, ge=1, le=200, description="Maximum number of article groups to return."),
     offset: int = Query(default=0, ge=0, description="Number of article groups to skip for pagination."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """List correlation events grouped by source article, with category counts."""

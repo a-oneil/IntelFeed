@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "@/api/client";
 import type { PlaybackInProgressItem, PlaybackProgress, PodcastShow } from "@/api/types";
+import { isVisitorNow } from "@/stores/authStore";
 
 export function usePodcasts() {
   return useQuery({
@@ -30,7 +31,7 @@ export function usePlaybackProgress(mediaId: string | null) {
       const res = await api.get<PlaybackProgress | null>(`/playback/${mediaId}/progress`);
       return res.data;
     },
-    enabled: !!mediaId,
+    enabled: !!mediaId && !isVisitorNow(),
   });
 }
 
@@ -38,6 +39,8 @@ export function useUpdatePlayback() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ mediaId, position }: { mediaId: string; position: number }) => {
+      // Playback progress is personal; a visitor has none to save.
+      if (isVisitorNow()) return null;
       const res = await api.put<PlaybackProgress>(`/playback/${mediaId}/progress`, {
         position_seconds: position,
       });
@@ -53,6 +56,7 @@ export function useMarkPlaybackComplete() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (mediaId: string) => {
+      if (isVisitorNow()) return null;
       const res = await api.put<PlaybackProgress>(`/playback/${mediaId}/complete`);
       return res.data;
     },

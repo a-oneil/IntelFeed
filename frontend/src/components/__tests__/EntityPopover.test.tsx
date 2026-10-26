@@ -48,7 +48,7 @@ const authState = { user: { id: "u1", role: "admin" } };
 vi.mock("@/stores/authStore", () => {
   const useAuthStore = (selector: (s: typeof authState) => unknown) => selector(authState);
   useAuthStore.getState = () => authState;
-  return { useAuthStore };
+  return { useAuthStore, useIsVisitor: () => false };
 });
 
 // The app's own confirm replaced window.confirm here, so the stub moves with

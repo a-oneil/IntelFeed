@@ -3,6 +3,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { remarkSoftBreaks } from "@/utils/remarkSoftBreaks";
 import { EntityLinkedMarkdown } from "./EntityLinkedMarkdown";
+import { useIsVisitor } from "@/stores/authStore";
 import styles from "./InlineEditField.module.css";
 
 interface InlineEditFieldProps {
@@ -22,7 +23,10 @@ interface InlineEditFieldProps {
 }
 
 export function InlineEditField({ value, displayValue, onSave, multiline, placeholder, renderMarkdown, linkEntities, excludeEntityId }: InlineEditFieldProps) {
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditingState] = useState(false);
+  // Public read-only mode: every inline field in the app displays, none edits.
+  const isVisitor = useIsVisitor();
+  const setEditing = (on: boolean) => setEditingState(on && !isVisitor);
   const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
@@ -100,7 +104,7 @@ export function InlineEditField({ value, displayValue, onSave, multiline, placeh
 
   if (renderMarkdown && value) {
     return (
-      <div className={styles.markdownDisplay} onClick={() => setEditing(true)} title="Click to edit">
+      <div className={styles.markdownDisplay} onClick={() => setEditing(true)} title={isVisitor ? undefined : "Click to edit"}>
         {linkEntities ? (
           <EntityLinkedMarkdown text={value} excludeEntityId={excludeEntityId} enabled={!editing} />
         ) : (
@@ -115,7 +119,7 @@ export function InlineEditField({ value, displayValue, onSave, multiline, placeh
   }
 
   return (
-    <span className={styles.display} onClick={() => setEditing(true)} title="Click to edit">
+    <span className={styles.display} onClick={() => setEditing(true)} title={isVisitor ? undefined : "Click to edit"}>
       {displayValue || value || <span style={{ color: "var(--text-muted)" }}>{placeholder || "Click to edit"}</span>}
       <svg className={styles.pencil} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />

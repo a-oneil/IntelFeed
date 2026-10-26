@@ -18,6 +18,7 @@ import { EnrichmentSection, useEnrichmentSupported } from "./EnrichmentSection";
 import type { EntityProfileConfig } from "./entityProfileConfig";
 import { groupReferences, refDomain, type RefLink } from "./cveRefs";
 import styles from "./entityProfile.module.css";
+import { useIsVisitor } from "@/stores/authStore";
 
 /** Per-group render cap when collapsed. */
 const REFS_CAP = 12;
@@ -39,6 +40,7 @@ export function SourcesCard({
   /** Opens the Wikipedia search flow; offered only when no article is attached. */
   onFindWikipedia?: () => void;
 }) {
+  const isVisitor = useIsVisitor();
   const [refsExpanded, setRefsExpanded] = useState(false);
   const enrichable = useEnrichmentSupported(entityType);
   const chips: Array<{ label: string; url: string }> = [];
@@ -93,12 +95,13 @@ export function SourcesCard({
           show fewer <span className="caret-glyph">▴</span>
         </button>
       )}
-      {!entity.wikipedia_content && onFindWikipedia && (
+      {!entity.wikipedia_content && onFindWikipedia && !isVisitor && (
         <button className={styles.sourcesFindWiki} onClick={onFindWikipedia}>
           Find Wikipedia article…
         </button>
       )}
-      <EnrichmentSection entityType={entityType} entityId={entityId} />
+      {/* Enrichment runs outside lookups; the Wikipedia search is one too. */}
+      {!isVisitor && <EnrichmentSection entityType={entityType} entityId={entityId} />}
     </div>
   );
 }

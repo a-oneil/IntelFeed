@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "@/api/client";
 import type { SearchResponse, SavedSearch } from "@/api/types";
+import { useIsVisitor } from "@/stores/authStore";
 
 export interface SearchFilters {
   q?: string;
@@ -62,12 +63,15 @@ export function useSearchFacets(q = "") {
 }
 
 export function useSavedSearches() {
+  const isVisitor = useIsVisitor();
   return useQuery({
     queryKey: ["saved-searches"],
     queryFn: async () => {
       const res = await api.get<SavedSearch[]>("/saved-searches");
       return res.data;
     },
+    // Saved searches are personal; a visitor has none.
+    enabled: !isVisitor,
     refetchInterval: 300_000,
   });
 }

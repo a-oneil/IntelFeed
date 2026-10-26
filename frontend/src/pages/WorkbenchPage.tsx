@@ -55,7 +55,7 @@ import { CreateEntityPanel, isCreatableEntityType } from "@/components/CreateEnt
 import { useUndoableDelete } from "@/hooks/useUndoableDelete";
 import { useRailWidth } from "@/hooks/useRailWidth";
 import { ResizeHandle } from "@/components/ResizeHandle";
-import { SECTION_KEYS } from "@/components/WorkbenchNav";
+import { SECTION_KEYS, VISITOR_HIDDEN_SECTIONS } from "@/components/WorkbenchNav";
 import styles from "./WorkbenchPage.module.css";
 import lib from "./RuleLibrary.module.css";
 import { Chip, FacetSection, PageHeader, RailToggle, Segmented } from "@/components/primitives";
@@ -73,6 +73,8 @@ const DockedEntryReader = lazy(() =>
 );
 import { RouteFallback } from "@/components/RouteFallback";
 import { alertDialog, confirmDialog } from "@/utils/dialog";
+import { useIsVisitor } from "@/stores/authStore";
+import { NotAvailable } from "@/components/NotAvailable";
 
 type SortOrder = "asc" | "desc";
 type SortState = { field: string; order: SortOrder };
@@ -267,6 +269,7 @@ export function WorkbenchPage() {
   const selectedEntityType = useIntelStore((s) => s.selectedEntityType);
   const selectedEntityId = useIntelStore((s) => s.selectedEntityId);
   const clearSelectedEntity = useIntelStore((s) => s.clearSelectedEntity);
+  const isVisitor = useIsVisitor();
   const activeSection = useIntelStore((s) => s.activeSection);
   const setActiveSection = useIntelStore((s) => s.setActiveSection);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -300,6 +303,7 @@ export function WorkbenchPage() {
   // Redirecting a selected migrated entity to its full-width page — render nothing this frame.
   if (routedSlug && selectedEntityId) return null;
 
+  if (isVisitor && VISITOR_HIDDEN_SECTIONS.has(activeSection)) return <NotAvailable />;
   return <SectionContent section={activeSection} />;
 }
 

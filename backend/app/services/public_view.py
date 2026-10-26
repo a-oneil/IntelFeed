@@ -162,8 +162,23 @@ def visitor_dashboards() -> list[DashboardResponse]:
 _USER_KEYS = frozenset(
     {"username", "analyst", "owner_username", "creator_username", "created_by_username", "updated_by_username"}
 )
-#: A key containing one of these is about an area visitors don't get.
-_HIDDEN_KEY_PARTS = ("rule", "campaign", "observable", "requirement", "coverage_gap", "ioc", "translat")
+#: A key containing one of these is about an area visitors don't get: detection
+#: (rules, coverage, gap hints), intel work products, IOCs, translations.
+_HIDDEN_KEY_PARTS = (
+    "rule",
+    "campaign",
+    "observable",
+    "requirement",
+    "pir_",
+    "coverage",
+    "detection",
+    "ioc",
+    "translat",
+)
+#: Exact keys: counts of private analyst work and of saved AI output.
+_HIDDEN_KEYS = frozenset(
+    {"notes", "note_count", "ai_results", "ai_result_count", "comments", "comment_count", "unread"}
+)
 #: An object whose type is one of these is removed outright.
 HIDDEN_ENTITY_TYPES = frozenset(
     {"campaign", "campaigns", "observable", "observables", "detection_rule", "rule", "ioc", "requirement"}
@@ -173,7 +188,7 @@ _REMOVED = object()
 
 def _hidden_key(key: str) -> bool:
     k = key.lower()
-    return k in _USER_KEYS or any(part in k for part in _HIDDEN_KEY_PARTS)
+    return k in _USER_KEYS or k in _HIDDEN_KEYS or any(part in k for part in _HIDDEN_KEY_PARTS)
 
 
 def _scrub(value: Any, removed_ids: set[str]) -> Any:

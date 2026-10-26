@@ -1064,3 +1064,8 @@
 .columnMetaSep {
   opacity: 0.6;
 }
+
+/* Public read-only mode: a visitor has no read state, so no unread dot. */
+.magazineCard.magazineCardVisitor .magazineTitle::before {
+  display: none;
+}

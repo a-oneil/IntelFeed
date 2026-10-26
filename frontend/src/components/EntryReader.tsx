@@ -8,8 +8,8 @@ import { useUIStore } from "@/stores/uiStore";
 import { adjacentEntryId } from "@/utils/entryNavigation";
 import { useOpenSavedSearch } from "@/hooks/useOpenSavedSearch";
 import { usePlayerStore } from "@/stores/playerStore";
-import { useTts } from "@/hooks/useTts";
-import { useAuthStore } from "@/stores/authStore";
+import { useExistingTts, useTts } from "@/hooks/useTts";
+import { useAuthStore, useIsVisitor } from "@/stores/authStore";
 import { useReadingPrefs } from "@/hooks/useReadingPrefs";
 import { useIsMobile } from "@/hooks/useMediaQuery";
 import { useSwipe } from "@/hooks/useSwipe";
@@ -152,6 +152,16 @@ export function EntryReader({ entryId }: EntryReaderProps) {
   const stopAudio = usePlayerStore((s) => s.stop);
   const readAloudEngine = useUIStore((s) => s.readAloudEngine);
   const tts = useTts();
+  // Public read-only mode: a visitor reads, nothing more. No personal state,
+  // no AI, nothing that writes or makes the server do work.
+  const isVisitor = useIsVisitor();
+  const existingAudio = useExistingTts(entryId, isVisitor);
+  // The Intel panel is the only one a visitor gets (AI, notes, tags and the
+  // entity tools all write or show private work); a shortcut or a persisted
+  // choice from a signed-in session must not open another.
+  useEffect(() => {
+    if (isVisitor && activeReaderPanel && activeReaderPanel !== "intel") setActiveReaderPanel(null);
+  }, [isVisitor, activeReaderPanel, setActiveReaderPanel]);
   const isTtsForThisEntry =
     playerMode === "audio" && currentTrack?.kind === "tts" && currentTrack?.entryId === entryId;
   const isReadingThisEntry = isSpeechForThisEntry || isTtsForThisEntry;
@@ -506,6 +516,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
             </button>
           </div>
           <div className={styles.topBarActions}>
+            {!isVisitor && (<>
             <button
               className={`${styles.labelBtn} ${entry.is_starred ? styles.labelBtnActive : ""}`}
               onClick={() => toggleStar.mutate(entryId)}
@@ -528,6 +539,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
               {entry.is_bookmarked ? "Unbookmark" : "Bookmark"}
             </button>
             <div className={styles.topBarDivider} />
+            </>)}
             <Hint
               title="Extracted intel"
               body="Every entity, technique, CVE and indicator this article mentions. Click one to open its dossier."
@@ -540,6 +552,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
                 Intel
               </button>
             </Hint>
+            {!isVisitor && (<>
             <button
               className={`${styles.labelBtn} ${activeReaderPanel === "ai" ? styles.labelBtnActive : ""}`}
               onClick={() => togglePanel("ai")}
@@ -575,6 +588,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
             >
               Ask Copilot
             </button>
+            </>)}
             <div className={styles.topBarDivider} />
             <ReaderTypography />
             <ToolbarDropdown
@@ -587,6 +601,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
                 </svg>
               }
             >
+              {!isVisitor && (<>
               <DropdownItem
                 icon={
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -609,6 +624,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
                 label="Share"
                 onClick={handleShare}
               />
+              </>)}
               <DropdownItem
                 icon={
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -621,7 +637,9 @@ export function EntryReader({ entryId }: EntryReaderProps) {
                 active={showFind}
                 onClick={() => setShowFind((v) => !v)}
               />
-              {(readAloudEngine === "piper" || "speechSynthesis" in window) && (
+              {(isVisitor
+                ? existingAudio.data?.status === "ready"
+                : readAloudEngine === "piper" || "speechSynthesis" in window) && (
                 <DropdownItem
                   icon={
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -645,7 +663,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
                         feedTitle: entry.feed_title || "",
                         paragraphs: getArticleParagraphs(),
                       });
-                    if (readAloudEngine === "piper") {
+                    if (readAloudEngine === "piper" || isVisitor) {
                       const ok = await tts.start({
                         source: "entry",
                         id: entry.id,
@@ -656,7 +674,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
                           thumbnailUrl: entry.image_url ?? null,
                         },
                       });
-                      if (ok) return;
+                      if (ok || isVisitor) return;
                       // Piper unavailable/failed — fall back to the browser voice.
                       if ("speechSynthesis" in window) speakViaBrowser();
                       else toast.error("Read-aloud audio is unavailable right now.");
@@ -666,6 +684,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
                   }}
                 />
               )}
+              {!isVisitor && (
               <DropdownItem
                 icon={
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -689,6 +708,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
                 active={showTranslated}
                 onClick={handleTranslate}
               />
+              )}
               {entry.url && (
                 <DropdownItem
                   icon={
@@ -826,7 +846,9 @@ export function EntryReader({ entryId }: EntryReaderProps) {
             // already play via the iframe above, so drop them from the gallery.
             if (m.media_type === "video") return !/(?:youtube\.com|youtu\.be)/i.test(m.url);
             return false;
-          }) ?? [];
+          })
+            // Telegram media is login-only: a visitor gets the post text, not a broken image.
+            .filter((m) => !isVisitor || !m.url.startsWith("/api/telegram-media/")) ?? [];
           if (visualMedia.length === 0) return null;
           // /api/telegram-media is auth-gated; img/video tags can't pass the bearer
           // header, so encode the access token in the query string for media URLs.
@@ -962,7 +984,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
             headerRef={articleHeaderRef}
             contentRef={articleContentRef}
           />
-          <SelectionContextMenu
+          {!isVisitor && <SelectionContextMenu
             containerRef={[articleContentRef, articleHeaderRef]}
             entryId={entryId}
             onCreateEntity={(text) => {
@@ -985,7 +1007,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
               setLinkEntityKey((k) => k + 1);
               setActiveReaderPanel("link_entity");
             }}
-          />
+          />}
         </div>
 
         <div className={styles.similarSection}>
@@ -1068,7 +1090,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
             <div className={styles.sidePanelHeader}>
               {activeReaderPanel === "intel" || activeReaderPanel === "ai" || activeReaderPanel === "notes" ? (
                 <div className={styles.sidePanelTabs} role="tablist">
-                  {(["intel", "ai", "notes"] as const).map((tab) => (
+                  {(isVisitor ? (["intel"] as const) : (["intel", "ai", "notes"] as const)).map((tab) => (
                     <button
                       key={tab}
                       role="tab"

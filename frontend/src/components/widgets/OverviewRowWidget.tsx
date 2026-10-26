@@ -33,12 +33,23 @@ export default function OverviewRowWidget({ config }: Props) {
   if (!data) return <div className={styles.noData}>No overview data</div>;
 
   const entrySeries = data.series.entries.map((p) => p.count);
-  const detectionSeries = data.series.detections.map((p) => p.count);
+  // A visitor (public read-only mode) gets no detection or unread figures —
+  // the server leaves them out — so those tiles drop rather than break.
+  const detectionSeries = (data.series.detections ?? []).map((p) => p.count);
   const sortedEntities = [...data.entities].sort((a, b) =>
     entityLabel(a.type).localeCompare(entityLabel(b.type)),
   );
 
-  const tiles = [
+  const tiles: {
+    key: string;
+    label: string;
+    value: number;
+    trend: number | undefined;
+    suffix: string;
+    series: number[];
+    goodWhenDown: boolean;
+    onClick: () => void;
+  }[] = [
     {
       key: "entries",
       label: "New entries",
@@ -59,7 +70,7 @@ export default function OverviewRowWidget({ config }: Props) {
       goodWhenDown: false,
       onClick: () => navigate("/priority-queue"),
     },
-    {
+    ...(data.headline.unread ? [{
       key: "unread",
       label: "Unread",
       value: data.headline.unread.count,
@@ -68,8 +79,8 @@ export default function OverviewRowWidget({ config }: Props) {
       series: [],
       goodWhenDown: true,
       onClick: () => navigate("/"),
-    },
-    {
+    }] : []),
+    ...(data.headline.detections ? [{
       key: "detections",
       label: "New detections",
       value: data.headline.detections.count,
@@ -78,7 +89,7 @@ export default function OverviewRowWidget({ config }: Props) {
       series: detectionSeries,
       goodWhenDown: false,
       onClick: () => navigate("/workbench/explore?section=rules"),
-    },
+    }] : []),
   ];
 
   return (

@@ -64,11 +64,19 @@ export function useChangePassword() {
   });
 }
 
+export interface RegistrationStatus {
+  registration_enabled: boolean;
+  invite_code_required: boolean;
+  public_read_only_enabled: boolean;
+}
+
 export function useRegistrationStatus() {
   return useQuery({
     queryKey: ["registrationStatus"],
     queryFn: async () => {
-      const res = await api.get<{ registration_enabled: boolean; invite_code_required: boolean }>("/auth/registration-status");
+      const res = await api.get<RegistrationStatus>("/auth/registration-status");
+      // Whether a visitor may browse is decided here, before any login.
+      useAuthStore.getState().setPublicReadOnly(!!res.data.public_read_only_enabled);
       return res.data;
     },
     staleTime: 60_000,

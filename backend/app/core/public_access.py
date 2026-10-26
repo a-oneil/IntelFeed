@@ -59,6 +59,9 @@ ANONYMOUS_READ_POSTS = frozenset(
         "/api/entries/resolve-names",
         "/api/intelligence/resolve-names",
         "/api/glossary/detect",
+        # Entity links in an assessment's text: Aho-Corasick over the posted
+        # text, CPU only (rate-limited as a heavy read in core/rate_limit.py).
+        "/api/autolink/scan",
     }
 )
 # A visitor's read-only POST body: enough for a page of ids, not a document.

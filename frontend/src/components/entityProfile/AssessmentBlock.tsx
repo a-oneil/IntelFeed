@@ -17,6 +17,7 @@ import type { EntitySearchResult } from "@/api/types";
 import { entityProfilePath } from "./entityProfileConfig";
 import { FieldProvenance } from "./FieldProvenance";
 import styles from "./entityProfile.module.css";
+import { useIsVisitor } from "@/stores/authStore";
 
 const DEVELOPMENTS_LIMIT = 4;
 
@@ -49,6 +50,8 @@ export function AssessmentBlock({
   onUpdateField: (field: string, value: string | string[]) => void;
   onOpenArticle: (entryId: string) => void;
 }) {
+  // Visitors read the saved assessment; read-aloud for it would have to make new audio.
+  const isVisitor = useIsVisitor();
   const runAI = useGenerateEntitySummary();
   const { start: startTts, isPreparing: ttsPreparing } = useTts();
   // Shares the profile header's request — TanStack dedupes on the query key.
@@ -93,7 +96,7 @@ export function AssessmentBlock({
             onOpenArticle={onOpenArticle}
           />
         )}
-        {entity.description && (
+        {entity.description && !isVisitor && (
           <button
             className={styles.assessmentListen}
             onClick={listen}

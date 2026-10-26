@@ -197,7 +197,7 @@ The `JOB_REGISTRY` is a declarative map of all **70** scheduled tasks, each with
 
 ### Beat Schedule and Runtime Overrides
 
-**File:** `backend/app/workers/job_registry.py:709` (`build_beat_schedule`)
+**File:** `backend/app/workers/job_registry.py:719` (`build_beat_schedule`)
 
 The beat schedule is built at worker startup via `build_beat_schedule()`, which applies any overrides from Redis:
 

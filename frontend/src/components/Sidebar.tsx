@@ -4,7 +4,7 @@ import { useCategories, useFeeds, useDeleteFeed, useRefreshFeed, useUpdateFeed, 
 import { useMarkAllRead, usePriorityQueueCount, useVirtualFolderCounts } from "@/hooks/useEntries";
 import { useBulkExtract, useBulkTranslate } from "@/hooks/useIntelligence";
 import { useSavedSearches, useDeleteSavedSearch, useUpdateSavedSearch } from "@/hooks/useSearch";
-import { useAuthStore } from "@/stores/authStore";
+import { logoutDestination, useAuthStore, useIsVisitor } from "@/stores/authStore";
 import { useUIStore } from "@/stores/uiStore";
 import { useOpenSavedSearch } from "@/hooks/useOpenSavedSearch";
 import { useIsMobile } from "@/hooks/useMediaQuery";
@@ -88,6 +88,9 @@ function formatClock(ts: number): string {
   return `${h12}:${m}${ap}`;
 }
 
+/** Quick views that are about one person (follows, bookmarks, stars) — not shown to visitors. */
+const PERSONAL_QUICK_VIEWS = new Set(["watched", "bookmarked", "starred"]);
+
 /** Articles quick-view chips — the virtual folders, rendered in the uniform filter grid under the hero. */
 const QUICK_VIEWS: { folder: "last_24h" | "this_week" | "watched" | "bookmarked" | "starred"; label: string }[] = [
   { folder: "last_24h", label: "Last 24h" },
@@ -103,6 +106,8 @@ export function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const logout = useAuthStore((s) => s.logout);
+  // Public read-only mode: no personal views, no tools, nothing that writes.
+  const isVisitor = useIsVisitor();
 
   // Navigate to main feed view if not already there
   const goHome = useCallback(() => {
@@ -315,17 +320,18 @@ export function Sidebar() {
               onClick={() => { setSelectedFeed(null); setSelectedCategory(null); setVirtualFolder(null); markArticlesSeen(totalUnread); goHome(); closeSidebarIfMobile(); }}
             >
               <span className={styles.heroTop}>
-                <span className={styles.heroCount}>{formatCount(totalUnread)}</span>
-                {delta > 0 && articlesSeenAt != null && (
+                {/* A visitor has read nothing, so "unread" would be everything. */}
+                <span className={styles.heroCount}>{formatCount(isVisitor ? folderCounts.last_24h ?? 0 : totalUnread)}</span>
+                {!isVisitor && delta > 0 && articlesSeenAt != null && (
                   <span className={styles.heroDelta}>
                     <span className={styles.heroDeltaPlus}>+{formatCount(delta)}</span> since {formatClock(articlesSeenAt)}
                   </span>
                 )}
               </span>
-              <span className={styles.heroLabel}>Unread articles</span>
+              <span className={styles.heroLabel}>{isVisitor ? "Articles · last 24h" : "Unread articles"}</span>
             </button>
             <div className={styles.quickGrid} role="group" aria-label="Article filters">
-              {QUICK_VIEWS.map(renderQuickChip)}
+              {QUICK_VIEWS.filter((qv) => !isVisitor || !PERSONAL_QUICK_VIEWS.has(qv.folder)).map(renderQuickChip)}
               <Hint
                 title="Priority Queue"
                 body="The unread pile re-ordered by signal score instead of by time."
@@ -335,13 +341,15 @@ export function Sidebar() {
                   className={`${styles.quickChip} ${location.pathname === "/priority-queue" ? styles.active : ""}`}
                   onClick={() => { navigate("/priority-queue"); closeSidebarIfMobile(); }}
                 >
-                  <span className={`${styles.quickChipCount} ${priorityUnread ? "" : styles.quickChipCountZero}`}>{formatCount(priorityUnread ?? 0)}</span>
+                  {/* An unread count means nothing to a visitor, who has read nothing. */}
+                  <span className={`${styles.quickChipCount} ${priorityUnread && !isVisitor ? "" : styles.quickChipCountZero}`}>{isVisitor ? "→" : formatCount(priorityUnread ?? 0)}</span>
                   <span className={styles.quickChipLabel}>Priority Queue</span>
                 </button>
               </Hint>
             </div>
             </>);
             })()}
+            {!isVisitor && (
             <div className={`${styles.toolStrip} ${styles.toolStripPair}`} role="group" aria-label="Tools">
               <Hint
                 title="Automation"
@@ -372,12 +380,13 @@ export function Sidebar() {
                 <span className={styles.toolLabel}>Notes</span>
               </button>
             </div>
+            )}
         </>
       </div>
     ),
 
     saved_searches: () => {
-      if (!savedSearches || savedSearches.length === 0) return null;
+      if (isVisitor || !savedSearches || savedSearches.length === 0) return null;
       return (
         <div className={styles.section}>
           <div className={styles.sectionHeader}>
@@ -476,6 +485,7 @@ export function Sidebar() {
             Feeds
           </span>
           <div className={styles.sectionActions}>
+            {!isVisitor && (
             <button
               className={`${styles.collapseToggleBtn} ${feedSearchActive ? styles.searchActiveBtn : ""}`}
               onClick={() => {
@@ -491,6 +501,7 @@ export function Sidebar() {
                 <line x1="21" y1="21" x2="16.65" y2="16.65" />
               </svg>
             </button>
+            )}
             <button
               className={styles.collapseToggleBtn}
               onClick={allCollapsed ? expandAll : collapseAll}
@@ -506,6 +517,7 @@ export function Sidebar() {
                 </svg>
               )}
             </button>
+            {!isVisitor && (<>
             <button
               className={styles.collapseToggleBtn}
               onClick={() => setShowNewCategory((v) => !v)}
@@ -538,6 +550,7 @@ export function Sidebar() {
             {/* Accent-tinted on purpose: the row's one "bring content in" primary
                 action shouldn't disappear into the grey icon strip. */}
             <button className={styles.newFeedBtn} onClick={openAddFeed} title="Add feed">+</button>
+            </>)}
           </div>
         </div>
 
@@ -706,12 +719,14 @@ export function Sidebar() {
           <button onClick={() => { navigate("/documentation"); closeSidebarIfMobile(); }} className={styles.iconBtn} title="Documentation">
             Docs
           </button>
+          {!isVisitor && (<>
           <button onClick={() => { navigate("/settings"); closeSidebarIfMobile(); }} className={styles.iconBtn} title="Settings">
             Settings
           </button>
-          <button onClick={() => { logout(); window.location.assign("/login"); }} className={styles.iconBtn} title="Logout">
+          <button onClick={() => { const destination = logoutDestination(); logout(); window.location.assign(destination); }} className={styles.iconBtn} title="Logout">
             Logout
           </button>
+          </>)}
         </div>
       </div>
 
@@ -929,9 +944,11 @@ function CategoryNode({
   const isAdmin = useAuthStore((s) => s.user?.role === "admin");
   const totalUnread = feeds.reduce((sum, s) => s.is_muted ? sum : sum + s.unread_count, 0);
 
+  const isVisitor = useIsVisitor();
   const longPressHandlers = useLongPress({
-    onLongPress: (pos) => setContextMenu(pos),
+    onLongPress: (pos) => { if (!isVisitor) setContextMenu(pos); },
     onContextMenu: (e) => {
+      if (isVisitor) return;
       e.preventDefault();
       setContextMenu({ x: e.clientX, y: e.clientY });
     },
@@ -1187,9 +1204,11 @@ function FeedItem({
   const bulkExtract = useBulkExtract();
   const bulkTranslate = useBulkTranslate();
 
+  const isVisitor = useIsVisitor();
   const feedLongPressHandlers = useLongPress({
-    onLongPress: (pos) => setContextMenu(pos),
+    onLongPress: (pos) => { if (!isVisitor) setContextMenu(pos); },
     onContextMenu: (e) => {
+      if (isVisitor) return;
       e.preventDefault();
       setContextMenu({ x: e.clientX, y: e.clientY });
     },

@@ -1269,7 +1269,7 @@ async def count_entries(
 
 @router.get("/priority-unread-count")
 async def priority_unread_count(
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, int]:
     """Unread, radar-surfaced entries — the Priority Queue badge count.

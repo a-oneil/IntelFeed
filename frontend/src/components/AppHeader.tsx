@@ -1,7 +1,7 @@
 import { useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useUIStore } from "@/stores/uiStore";
-import { useAuthStore } from "@/stores/authStore";
+import { logoutDestination, useAuthStore, useIsVisitor } from "@/stores/authStore";
 import { useIsMobile } from "@/hooks/useMediaQuery";
 import { HeaderSearch } from "./HeaderSearch";
 import { BrandButton } from "./BrandButton";
@@ -25,6 +25,8 @@ export function AppHeader({ onShowShortcuts }: AppHeaderProps) {
   const isMac = typeof navigator !== "undefined" && /Mac|iP(hone|ad|od)/.test(navigator.platform);
   const logout = useAuthStore((s) => s.logout);
   const navigate = useNavigate();
+  const location = useLocation();
+  const isVisitor = useIsVisitor();
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Desktop: once open, this button only expands/collapses the panel — it
@@ -61,9 +63,9 @@ export function AppHeader({ onShowShortcuts }: AppHeaderProps) {
           mobile workbench used to suppress it in favour of its own full-screen
           overlay, which ran a second, weaker search engine — that overlay is
           gone. */}
-      <HeaderSearch inputRef={searchInputRef} />
+      {isVisitor ? <div className={styles.visitorSpacer} /> : <HeaderSearch inputRef={searchInputRef} />}
       <div className={styles.actions}>
-        {!isMobile && (
+        {!isMobile && !isVisitor && (
           <Hint
             title="Jump to anything"
             body="Find any article, entity, feed or rule by name — and run actions like Add feed or New report."
@@ -80,6 +82,7 @@ export function AppHeader({ onShowShortcuts }: AppHeaderProps) {
             </button>
           </Hint>
         )}
+        {!isVisitor && (
         <Hint
           title="Copilot"
           body="Ask about whatever is on screen. It can search your feeds, pivot between entities and draft detection rules."
@@ -95,8 +98,10 @@ export function AppHeader({ onShowShortcuts }: AppHeaderProps) {
             {!isMobile && <span className={styles.copilotLabel}>Copilot</span>}
           </button>
         </Hint>
+        )}
         {!isMobile && (
           <>
+            {!isVisitor && (
             <button
               className={styles.iconBtn}
               onClick={() => navigate("/settings")}
@@ -108,6 +113,7 @@ export function AppHeader({ onShowShortcuts }: AppHeaderProps) {
                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
               </svg>
             </button>
+            )}
             <Hint
               title="Documentation"
               body="Guides for every part of IntelFeed, with a copilot that answers out of them."
@@ -150,7 +156,20 @@ export function AppHeader({ onShowShortcuts }: AppHeaderProps) {
         )}
         {/* Last icon in the bar, on purpose: logout is destructive and sits
             furthest from the controls people click all day. */}
-        {!isMobile && (
+        {isVisitor && (
+          <button
+            className={styles.signInBtn}
+            onClick={() => navigate("/login", { state: { from: location.pathname + location.search } })}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+              <polyline points="10 17 15 12 10 7" />
+              <line x1="15" y1="12" x2="3" y2="12" />
+            </svg>
+            Sign in
+          </button>
+        )}
+        {!isMobile && !isVisitor && (
           <button
             className={styles.iconBtn}
             onClick={async () => {
@@ -165,8 +184,9 @@ export function AppHeader({ onShowShortcuts }: AppHeaderProps) {
                 }))
               )
                 return;
+              const destination = logoutDestination();
               logout();
-              window.location.assign("/login");
+              window.location.assign(destination);
             }}
             aria-label="Logout"
             title="Logout"

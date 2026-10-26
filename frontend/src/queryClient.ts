@@ -19,6 +19,8 @@ function silenced(meta: Record<string, unknown> | undefined): boolean {
 }
 
 function shouldShowToast(error: unknown): boolean {
+  // A visitor's refused write (api/client.ts) has already said so once.
+  if (error instanceof Error && error.name === "ReadOnlyViewError") return false;
   if (error && typeof error === "object" && "response" in error) {
     const axiosErr = error as { response?: { data?: { error?: { code?: string } }; status?: number } };
     const code = axiosErr.response?.data?.error?.code;

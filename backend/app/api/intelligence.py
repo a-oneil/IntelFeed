@@ -4313,7 +4313,7 @@ class ScanTextRequest(BaseModel):
 @router.post("/autolink/scan")
 async def autolink_scan(
     payload: ScanTextRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_viewer),
     db: AsyncSession = Depends(get_db),
 ):
     """Scan caller-supplied text for known intelligence entities.
