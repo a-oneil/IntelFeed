@@ -1,4 +1,5 @@
 import { useFocusTrap } from "@/hooks/useFocusTrap";
+import { useIsVisitor } from "@/stores/authStore";
 import styles from "./KeyboardShortcutsHelp.module.css";
 
 interface KeyboardShortcutsHelpProps {
@@ -36,7 +37,17 @@ const SHORTCUTS = [
   ]},
 ];
 
+/** What a visitor's keys do: moving through articles and the intel panel.
+ *  Read state, stars, tags, export, AI, notes, search and the palette are
+ *  signed-in only. */
+const VISITOR_KEYS = new Set(["j / \u2193", "k / \u2191", "o / Enter", "w", "Escape", "?"]);
+const VISITOR_SHORTCUTS = SHORTCUTS.map((section) => ({
+  ...section,
+  items: section.items.filter((item) => VISITOR_KEYS.has(item.key)),
+})).filter((section) => section.items.length > 0);
+
 export function KeyboardShortcutsHelp({ onClose }: KeyboardShortcutsHelpProps) {
+  const shortcuts = useIsVisitor() ? VISITOR_SHORTCUTS : SHORTCUTS;
   const trapRef = useFocusTrap<HTMLDivElement>();
 
   return (
@@ -47,7 +58,7 @@ export function KeyboardShortcutsHelp({ onClose }: KeyboardShortcutsHelpProps) {
           <button className={styles.closeBtn} onClick={onClose} aria-label="Close">&times;</button>
         </div>
         <div className={styles.body}>
-          {SHORTCUTS.map((section) => (
+          {shortcuts.map((section) => (
             <div key={section.section} className={styles.section}>
               <h3 className={styles.sectionTitle}>{section.section}</h3>
               <div className={styles.shortcutList}>

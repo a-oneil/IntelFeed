@@ -1177,10 +1177,10 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
         e.preventDefault();
         if (selectedEntryId) markRead.mutate(selectedEntryId);
       } else if (e.key === "x") {
-        // Toggle checkbox for current entry
+        // Toggle checkbox for current entry (a visitor has no bulk actions)
         e.preventDefault();
         const current = navEntries[currentIndex];
-        if (current) {
+        if (current && !isVisitor) {
           toggleEntrySelection(current.id);
           setLastSelectedIndex(currentIndex);
         }
@@ -1382,7 +1382,7 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
         </div>
       )}
 
-      {caughtUpFallback && (
+      {caughtUpFallback && !isVisitor && (
         <div className={styles.caughtUpBanner}>
           <svg className={styles.caughtUpIcon} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M20 6 9 17l-5-5" />
@@ -1696,11 +1696,15 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
                       }}
                       onOpenThread={() => setSelectedThread(item.thread.slug)}
                       onEntryClick={(id) => setSelectedEntry(id)}
-                      onMarkRead={() => {
-                        const ids = item.thread.entry_ids;
-                        if (ids.length) bulkAction.mutate({ entry_ids: ids, action: "read" });
-                        dismissThread(item.thread.id);
-                      }}
+                      onMarkRead={
+                        isVisitor
+                          ? undefined
+                          : () => {
+                              const ids = item.thread.entry_ids;
+                              if (ids.length) bulkAction.mutate({ entry_ids: ids, action: "read" });
+                              dismissThread(item.thread.id);
+                            }
+                      }
                       isMarking={bulkAction.isPending}
                       selectedEntryId={selectedEntryId}
                     />
@@ -1725,17 +1729,19 @@ export function EntryList({ sortOverride, withThreads = false, priorityMode = fa
                         setExpandedGroups((prev) => new Set(prev).add(item.flatIndex));
                       }}
                       onCheckboxClick={handleCheckboxClick}
-                      onMarkRead={() => {
-                        const ids = item.entries
-                          .filter((e) => !e.is_read)
-                          .map((e) => e.id);
-                        if (ids.length) bulkAction.mutate({ entry_ids: ids, action: "read" });
-                      }}
+                      onMarkRead={
+                        isVisitor
+                          ? undefined
+                          : () => {
+                              const ids = item.entries.filter((e) => !e.is_read).map((e) => e.id);
+                              if (ids.length) bulkAction.mutate({ entry_ids: ids, action: "read" });
+                            }
+                      }
                       isMarking={bulkAction.isPending}
                       intelBadges={intelBadges}
                       feedIntelMap={feedIntelMap}
                     />
-                  ) : isMobile ? (
+                  ) : isMobile && !isVisitor ? (
                     <SwipeableEntryRow
                       onStar={() => toggleStar.mutate(item.entry.id)}
                       onBookmark={() => toggleBookmark.mutate(item.entry.id)}

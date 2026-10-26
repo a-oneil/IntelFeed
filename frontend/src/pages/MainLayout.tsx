@@ -16,7 +16,7 @@ import { AppHeader } from "@/components/AppHeader";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { RailToggle } from "@/components/primitives";
 import styles from "./MainLayout.module.css";
-import { useIsVisitor } from "@/stores/authStore";
+import { isVisitorNow, useIsVisitor } from "@/stores/authStore";
 
 interface MainLayoutProps {
   // Priority Queue mode: renders the same list + reader shell, but pins the
@@ -96,8 +96,11 @@ export function MainLayout({ priorityMode = false }: MainLayoutProps = {}) {
   // Global keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // A visitor has no palette, AI, notes, tags or export: those keys do
+      // nothing for them (the help lists only what works).
+      const visitor = isVisitorNow();
       // Cmd+K / Ctrl+K — command palette (Shift is reserved for the copilot)
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "k") {
+      if (!visitor && (e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "k") {
         e.preventDefault();
         useUIStore.getState().toggleCommandPalette();
         return;
@@ -123,6 +126,8 @@ export function MainLayout({ priorityMode = false }: MainLayoutProps = {}) {
         if (e.key === "w") {
           e.preventDefault();
           useUIStore.getState().setActiveReaderPanel(currentPanel === "intel" ? null : "intel");
+        } else if (visitor) {
+          // The panels below are signed-in only.
         } else if (e.key === "a") {
           e.preventDefault();
           useUIStore.getState().setActiveReaderPanel(currentPanel === "ai" ? null : "ai");

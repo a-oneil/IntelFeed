@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { isVisitorNow } from "@/stores/authStore";
 import { useUIStore } from "@/stores/uiStore";
 
 /**
@@ -14,7 +15,9 @@ export function useGlobalShortcuts() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "k") {
+      // A visitor has no copilot; toggling it would only leave it open for
+      // whoever signs in next in this tab.
+      if (!isVisitorNow() && (e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "k") {
         e.preventDefault();
         toggleCopilotPanel();
       }

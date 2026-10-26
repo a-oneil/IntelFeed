@@ -163,7 +163,8 @@ export function ProfileHeader({
               entity={entity}
               relatedCountries={relatedCountries}
               provenance={provenance}
-              onUpdateField={onUpdateField}
+              // Without it the badges are read-only and empty ones don't show.
+              onUpdateField={isVisitor ? undefined : onUpdateField}
               onOpenEntity={onOpenEntity}
               onOpenArticle={onOpenArticle}
             />

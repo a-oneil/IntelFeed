@@ -102,9 +102,26 @@ export function InlineEditField({ value, displayValue, onSave, multiline, placeh
     );
   }
 
+  // A visitor reads the value: no pencil, no "click to edit", no "Set …"
+  // placeholder inviting an edit they can't make.
+  if (isVisitor) {
+    if (renderMarkdown && value) {
+      return (
+        <div className={styles.markdownDisplay}>
+          {linkEntities ? (
+            <EntityLinkedMarkdown text={value} excludeEntityId={excludeEntityId} enabled />
+          ) : (
+            <Markdown remarkPlugins={[remarkGfm, remarkSoftBreaks]}>{value}</Markdown>
+          )}
+        </div>
+      );
+    }
+    return <span>{displayValue || value || <span style={{ color: "var(--text-muted)" }}>—</span>}</span>;
+  }
+
   if (renderMarkdown && value) {
     return (
-      <div className={styles.markdownDisplay} onClick={() => setEditing(true)} title={isVisitor ? undefined : "Click to edit"}>
+      <div className={styles.markdownDisplay} onClick={() => setEditing(true)} title="Click to edit">
         {linkEntities ? (
           <EntityLinkedMarkdown text={value} excludeEntityId={excludeEntityId} enabled={!editing} />
         ) : (
@@ -119,7 +136,7 @@ export function InlineEditField({ value, displayValue, onSave, multiline, placeh
   }
 
   return (
-    <span className={styles.display} onClick={() => setEditing(true)} title={isVisitor ? undefined : "Click to edit"}>
+    <span className={styles.display} onClick={() => setEditing(true)} title="Click to edit">
       {displayValue || value || <span style={{ color: "var(--text-muted)" }}>{placeholder || "Click to edit"}</span>}
       <svg className={styles.pencil} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />

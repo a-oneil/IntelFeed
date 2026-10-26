@@ -3,6 +3,7 @@ import { useIsMobile } from "@/hooks/useMediaQuery";
 import { Link } from "react-router-dom";
 import { useBulkAction } from "@/hooks/useEntries";
 import { useOpenThreadMutation, useThread } from "@/hooks/useThreads";
+import { useIsVisitor } from "@/stores/authStore";
 import { useIntelStore } from "@/stores/intelStore";
 import { useUIStore } from "@/stores/uiStore";
 import { useOpenEntry, useOpenThread } from "@/utils/openEntry";
@@ -43,6 +44,7 @@ export function ThreadReader({ slug }: ThreadReaderProps) {
   const isMobile = useIsMobile();
   const markOpened = useOpenThreadMutation();
   const bulkAction = useBulkAction();
+  const isVisitor = useIsVisitor();
   const dismissThread = useUIStore((s) => s.dismissThread);
 
   // Same clear the thread's row in the queue offers, kept here so finishing a
@@ -86,7 +88,7 @@ export function ThreadReader({ slug }: ThreadReaderProps) {
           "Close"
         )}
       </button>
-      {thread && (
+      {thread && !isVisitor && (
         <div className={styles.barActions}>
           <button
             type="button"

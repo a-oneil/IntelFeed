@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useIntelStore, type EntityType } from "@/stores/intelStore";
-import { useAuthStore } from "@/stores/authStore";
+import { useAuthStore, useIsVisitor } from "@/stores/authStore";
 import api from "@/api/client";
 import type { EntitySearchResult, PaginatedResponse } from "@/api/types";
 import { bulkExportEntityProfiles } from "@/hooks/useExport";
@@ -155,6 +155,9 @@ export function EntityTableSection<T>({
   // Merging folds N profiles into one, so it needs two or more checked rows of a
   // type the merge engine supports — and merge is an admin-only endpoint.
   const isAdmin = useAuthStore((s) => s.user?.role === "admin");
+  // A visitor browses: no create/export/delete, no selection, and no rule
+  // coverage (detection is signed-in only).
+  const isVisitor = useIsVisitor();
   const canMergeSelection =
     isAdmin &&
     MERGEABLE_ENTITY_TYPES.includes(entityType as (typeof MERGEABLE_ENTITY_TYPES)[number]) &&
@@ -260,10 +263,10 @@ export function EntityTableSection<T>({
   // disabled — the hook must still be called unconditionally.
   const techniqueIds = useMemo(
     () =>
-      entityType === "ttp"
+      entityType === "ttp" && !isVisitor
         ? items.map((i) => (i as { technique_id?: string }).technique_id ?? "").filter(Boolean)
         : [],
-    [entityType, items]
+    [entityType, items, isVisitor]
   );
   const { data: coverage } = useTechniqueCoverage(techniqueIds);
   const coverageOf = useCallback(
@@ -276,7 +279,7 @@ export function EntityTableSection<T>({
   const allColumns = useMemo<DataTableColumn<T>[]>(
     () => [
       ...columns,
-      ...(entityType === "ttp"
+      ...(entityType === "ttp" && !isVisitor
         ? ([
             {
               key: "coverage",
@@ -392,7 +395,7 @@ export function EntityTableSection<T>({
         ),
       },
     ],
-    [columns, signals, rowId, entityType, coverageOf]
+    [columns, signals, rowId, entityType, coverageOf, isVisitor]
   );
 
   const onSelectionChange = useCallback((next: string[]) => setSelectedIds(new Set(next)), []);
@@ -451,7 +454,7 @@ export function EntityTableSection<T>({
         title={title}
         count={selectedIds.size > 0 ? `${selectedIds.size} selected` : undefined}
         actions={
-          isMobile ? (
+          isVisitor ? undefined : isMobile ? (
             <>
               <button
                 className={styles.headerActionsBtn}
@@ -592,7 +595,7 @@ export function EntityTableSection<T>({
         rows={items}
         getRowId={rowId}
         onRowClick={onRowClick}
-        selectable
+        selectable={!isVisitor}
         selectedIds={selectedIds}
         onSelectionChange={onSelectionChange}
         sort={sort}

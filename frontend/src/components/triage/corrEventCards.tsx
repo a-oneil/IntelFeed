@@ -147,7 +147,8 @@ export function CorrEventCard({
   event: CorrelationEvent;
   nested?: boolean;
   showTime?: boolean;
-  onDismiss: (eventId: string) => void;
+  /** Absent for a visitor, who can't change an event's read state. */
+  onDismiss?: (eventId: string) => void;
   onEventClick: (event: CorrelationEvent) => void;
   onArticleClick: (event: CorrelationEvent) => void;
 }) {
@@ -173,7 +174,7 @@ export function CorrEventCard({
           {getEntityLabel(event.source_entity_type)}
         </Chip>
         <div className={styles.corrActions}>
-          {!event.is_read && (
+          {!event.is_read && onDismiss && (
             <button className={styles.corrDismissBtn} onClick={() => onDismiss(event.id)}>Dismiss</button>
           )}
           {getCorrArticleNav(event) && (
@@ -193,7 +194,8 @@ export function CorrArticleGroup({
   onArticleClick,
 }: {
   group: GroupedCorrelationEventsEntry;
-  onDismiss: (eventId: string) => void;
+  /** Absent for a visitor, who can't change an event's read state. */
+  onDismiss?: (eventId: string) => void;
   onEventClick: (event: CorrelationEvent) => void;
   onArticleClick: (event: CorrelationEvent) => void;
 }) {

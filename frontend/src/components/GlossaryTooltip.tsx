@@ -137,15 +137,17 @@ export function GlossaryTooltip({ containerRef, matches, onOpenPanel, onSearchAr
         >
           View in panel
         </button>
-        <button
-          className={styles.actionBtn}
-          onClick={() => {
-            setTooltip(null);
-            onSearchArticles?.(tooltip.match.term);
-          }}
-        >
-          Search articles
-        </button>
+        {onSearchArticles && (
+          <button
+            className={styles.actionBtn}
+            onClick={() => {
+              setTooltip(null);
+              onSearchArticles(tooltip.match.term);
+            }}
+          >
+            Search articles
+          </button>
+        )}
       </div>
     </div>,
     document.body,

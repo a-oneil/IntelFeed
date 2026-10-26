@@ -819,7 +819,9 @@ export function EntryReader({ entryId }: EntryReaderProps) {
               signals={entry.priority_signals ?? []}
               exposure={entry.exposure}
               personal={entry.personal}
-              entryId={entryId}
+              // Without it the card has no votes: a visitor's ranking is the
+              // system score alone.
+              entryId={isVisitor ? undefined : entryId}
             />
           )}
         </header>
@@ -974,7 +976,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
                 setActiveReaderPanel("intel");
                 setGlossaryExpandSignal((s) => s + 1);
               }}
-              onSearchArticles={handleGlossarySearch}
+              onSearchArticles={isVisitor ? undefined : handleGlossarySearch}
             />
           )}
           <InlineEntityHighlighter
@@ -1148,7 +1150,7 @@ export function EntryReader({ entryId }: EntryReaderProps) {
                 <WorkbenchPanel
                   entryId={entryId}
                   entryTitle={entry.title}
-                  onGlossarySearch={handleGlossarySearch}
+                  onGlossarySearch={isVisitor ? undefined : handleGlossarySearch}
                   expandGlossarySignal={glossaryExpandSignal}
                 />
               )}

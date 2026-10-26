@@ -2,7 +2,7 @@ import { useInfiniteQuery, useMutation, useQueryClient, keepPreviousData } from 
 import { currentReadingPrefs } from "@/hooks/useReadingPrefs";
 import { useCallback, useMemo } from "react";
 import api from "@/api/client";
-import { isVisitorNow } from "@/stores/authStore";
+import { isVisitorNow, useIsVisitor } from "@/stores/authStore";
 import type {
   CursorPaginatedResponse,
   Entry,
@@ -121,9 +121,10 @@ export function usePriorityQueue(
   });
 }
 
-export function useEntriesCount(filters: EntryFilters) {
+export function useEntriesCount(filters: EntryFilters, enabled = true) {
   return useQuery({
     queryKey: ["entries-count", filters],
+    enabled,
     queryFn: async () => {
       const { sort: _sort, ...rest } = filters;
       const res = await api.get<{ total: number }>("/entries/count", { params: rest });
@@ -151,9 +152,11 @@ export function useVirtualFolderCounts() {
   const sinceWeek = useMemo(() => new Date(hourStart - 7 * 24 * 60 * 60 * 1000).toISOString(), [hourStart]);
   const last24h = useEntriesCount({ is_read: false, since: since24h, dedup: true });
   const thisWeek = useEntriesCount({ is_read: false, since: sinceWeek, dedup: true });
-  const watched = useEntriesCount({ is_read: false, watched: true, dedup: true });
-  const bookmarked = useEntriesCount({ is_read: false, is_bookmarked: true, dedup: true });
-  const starred = useEntriesCount({ is_read: false, is_starred: true, dedup: true });
+  // Watched, bookmarked and starred are a person's own; a visitor has none.
+  const personal = !useIsVisitor();
+  const watched = useEntriesCount({ is_read: false, watched: true, dedup: true }, personal);
+  const bookmarked = useEntriesCount({ is_read: false, is_bookmarked: true, dedup: true }, personal);
+  const starred = useEntriesCount({ is_read: false, is_starred: true, dedup: true }, personal);
   return useMemo<Record<string, number | undefined>>(
     () => ({
       last_24h: last24h.data,
@@ -171,8 +174,11 @@ export function useVirtualFolderCounts() {
  * Returns 0 when signal surfacing is disabled (backend short-circuits).
  */
 export function usePriorityUnreadCount() {
+  // The sidebar shows a visitor an arrow, not a count.
+  const isVisitor = useIsVisitor();
   return useQuery({
     queryKey: ["priority-unread-count"],
+    enabled: !isVisitor,
     queryFn: async () => {
       const res = await api.get<{ unread_count: number }>("/entries/priority-unread-count");
       return res.data.unread_count;
@@ -357,10 +363,14 @@ export function useBulkAction() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (data: { entry_ids: string[]; action: string }) => {
+      // Bulk actions are read state, stars, tags and the like: a visitor has
+      // none of them (Shift+M and a thread's "mark read" land here too).
+      if (isVisitorNow()) return null;
       const res = await api.post("/entries/bulk-action", data);
       return res.data;
     },
     onSuccess: () => {
+      if (isVisitorNow()) return;
       queryClient.invalidateQueries({ queryKey: ["entries"] });
       queryClient.invalidateQueries({ queryKey: ["entries-count"] });
       queryClient.invalidateQueries({ queryKey: ["feeds"] });

@@ -10,6 +10,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
+import { useIsVisitor } from "@/stores/authStore";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import api from "@/api/client";
@@ -113,6 +114,8 @@ export function RelationshipsTab({
   onOpenEntry: (entryId: string) => void;
 }) {
   const navigate = useNavigate();
+  // A visitor browses the graph: no Shift+drag links, no Engine review link.
+  const isVisitor = useIsVisitor();
   const openThread = useOpenThread();
   const [graphCollapsed, setGraphCollapsed] = useState(false);
   const [storyFilter, setStoryFilter] = useState<{ title: string; keys: Set<string> } | null>(null);
@@ -616,9 +619,11 @@ export function RelationshipsTab({
               .join(", ") +
               (implausible.length > 3 ? ` + ${implausible.length - 3} more` : "") +
               " · likely extraction junk",
-            <button className={styles.metaLink} onClick={() => navigate("/settings?section=engine&view=entities")}>
-              review in Engine →
-            </button>,
+            isVisitor ? null : (
+              <button className={styles.metaLink} onClick={() => navigate("/settings?section=engine&view=entities")}>
+                review in Engine →
+              </button>
+            ),
             implausible,
           )}
       </div>
@@ -795,15 +800,18 @@ export function RelationshipsTab({
                 if (!NAV_TYPES.has(nodeType)) return;
                 onOpenEntity(nodeType as EntityType, nodeId.replace(`${nodeType}-`, ""), "");
               }}
-              onEdgeCreate={(sourceId, sourceType, targetId, targetType) =>
-                setPendingEdge({
-                  sourceId,
-                  sourceType,
-                  targetId,
-                  targetType,
-                  verb: allowedVerbsForPair(sourceType, targetType)[0] ?? "related_to",
-                  confidence: "probable",
-                })
+              onEdgeCreate={
+                isVisitor
+                  ? undefined
+                  : (sourceId, sourceType, targetId, targetType) =>
+                      setPendingEdge({
+                        sourceId,
+                        sourceType,
+                        targetId,
+                        targetType,
+                        verb: allowedVerbsForPair(sourceType, targetType)[0] ?? "related_to",
+                        confidence: "probable",
+                      })
               }
               onEntryClick={onOpenEntry}
             />

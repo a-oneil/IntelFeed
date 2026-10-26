@@ -124,7 +124,7 @@ export function WhyRankedCard({ score, raw, signals, exposure, personal, entryId
       <div className={styles.headerRow}>
         <Hint
           title="Why this ranked"
-          body="The signals that pushed this article up your queue."
+          body={entryId ? "The signals that pushed this article up your queue." : "The signals that pushed this article up the queue."}
           aside={
             entryId
               ? "▲ / ▼ tunes your weights only — it doesn't move anyone else's queue."

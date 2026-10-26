@@ -1,11 +1,21 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "@/api/client";
 import { useAuthStore } from "@/stores/authStore";
 import type { TokenResponse, User } from "@/api/types";
 
+/**
+ * Drop every cached query except the instance's registration status. Signing
+ * in from the public view would otherwise show the visitor's responses — the
+ * stand-in dashboards, counts with hidden areas zeroed — until each refetched.
+ */
+function dropCachedQueries(queryClient: ReturnType<typeof useQueryClient>) {
+  queryClient.removeQueries({ predicate: (q) => q.queryKey[0] !== "registrationStatus" });
+}
+
 export function useLogin() {
   const setTokens = useAuthStore((s) => s.setTokens);
   const setUser = useAuthStore((s) => s.setUser);
+  const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async (data: { username: string; password: string }) => {
@@ -13,6 +23,7 @@ export function useLogin() {
       return res.data;
     },
     onSuccess: async (data) => {
+      dropCachedQueries(queryClient);
       setTokens(data.access_token, data.refresh_token);
       const res = await api.get<User>("/auth/me", {
         headers: { Authorization: `Bearer ${data.access_token}` },
@@ -25,6 +36,7 @@ export function useLogin() {
 export function useRegister() {
   const setTokens = useAuthStore((s) => s.setTokens);
   const setUser = useAuthStore((s) => s.setUser);
+  const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async (data: { username: string; password: string; invite_code?: string }) => {
@@ -32,6 +44,7 @@ export function useRegister() {
       return res.data;
     },
     onSuccess: async (data) => {
+      dropCachedQueries(queryClient);
       setTokens(data.access_token, data.refresh_token);
       const res = await api.get<User>("/auth/me", {
         headers: { Authorization: `Bearer ${data.access_token}` },
@@ -74,10 +87,17 @@ export function useRegistrationStatus() {
   return useQuery({
     queryKey: ["registrationStatus"],
     queryFn: async () => {
-      const res = await api.get<RegistrationStatus>("/auth/registration-status");
-      // Whether a visitor may browse is decided here, before any login.
-      useAuthStore.getState().setPublicReadOnly(!!res.data.public_read_only_enabled);
-      return res.data;
+      try {
+        const res = await api.get<RegistrationStatus>("/auth/registration-status");
+        // Whether a visitor may browse is decided here, before any login.
+        useAuthStore.getState().setPublicReadOnly(!!res.data.public_read_only_enabled);
+        return res.data;
+      } catch (err) {
+        // Unanswered, treat the instance as private: a signed-out user gets the
+        // login page rather than a spinner that waits on this forever.
+        useAuthStore.getState().setPublicReadOnly(false);
+        throw err;
+      }
     },
     staleTime: 60_000,
   });

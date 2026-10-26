@@ -93,16 +93,18 @@ function TermCard({
     <div className={styles.termCard} onClick={() => setExpanded(!expanded)}>
       <div className={styles.termHeader}>
         <span className={styles.termName}>{match.term.name}</span>
-        <button
-          className={styles.searchBtn}
-          onClick={handleSearch}
-          title="Search articles with this term"
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="11" cy="11" r="8" />
-            <line x1="21" y1="21" x2="16.65" y2="16.65" />
-          </svg>
-        </button>
+        {onSearchArticles && (
+          <button
+            className={styles.searchBtn}
+            onClick={handleSearch}
+            title="Search articles with this term"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+          </button>
+        )}
         <button
           className={styles.searchBtn}
           onClick={handleViewInGlossary}

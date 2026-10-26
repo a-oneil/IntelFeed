@@ -37,6 +37,27 @@ function doRefresh(): Promise<string | null> {
   return refreshPromise;
 }
 
+/**
+ * Whether the instance is browsable without an account. Asked of the server
+ * when the answer isn't known yet (a cold load whose refresh failed before
+ * registration-status came back) or when `recheck` is set: a 401 with no
+ * tokens may mean an admin just switched the mode off.
+ */
+let lastModeCheck = 0;
+async function publicModeNow(recheck = false): Promise<boolean> {
+  const store = useAuthStore.getState();
+  if (store.publicReadOnlyKnown && !recheck) return store.publicReadOnly;
+  if (recheck && Date.now() - lastModeCheck < 30_000) return store.publicReadOnly;
+  lastModeCheck = Date.now();
+  try {
+    const { data } = await axios.get("/api/auth/registration-status");
+    store.setPublicReadOnly(!!data.public_read_only_enabled);
+    return !!data.public_read_only_enabled;
+  } catch {
+    return store.publicReadOnly;
+  }
+}
+
 async function refreshAccessToken(): Promise<string | null> {
   const refreshToken = useAuthStore.getState().refreshToken;
   if (!refreshToken) return null;
@@ -51,7 +72,7 @@ async function refreshAccessToken(): Promise<string | null> {
     // Transient network errors should not wipe the session.
     const status = (err as { response?: { status?: number } })?.response?.status;
     if (status === 401 || status === 403) {
-      const publicReadOnly = useAuthStore.getState().publicReadOnly;
+      const publicReadOnly = await publicModeNow();
       useAuthStore.getState().logout();
       if (publicReadOnly) {
         // The instance is browsable without an account: drop back to the
@@ -91,6 +112,8 @@ const VISITOR_READ_POSTS = [
   "/intelligence/resolve-names",
   "/glossary/detect",
   "/autolink/scan",
+  // Relationship counts for the entity tables (POST only for the long id list).
+  "/entity-relationships/signals/",
 ];
 
 export class ReadOnlyViewError extends Error {
@@ -161,6 +184,11 @@ api.interceptors.response.use(
         original.headers.Authorization = `Bearer ${newToken}`;
         return api(original);
       }
+      // A visitor refused: the mode may just have been switched off. If so,
+      // the store flips and the route guard sends them to the login page
+      // instead of leaving a half-loaded app.
+      const store = useAuthStore.getState();
+      if (!store.accessToken && store.publicReadOnly) void publicModeNow(true);
     }
     return Promise.reject(error);
   }

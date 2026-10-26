@@ -11,7 +11,7 @@ import { ResizeHandle } from "@/components/ResizeHandle";
 import { RailToggle } from "@/components/primitives";
 import { RouteFallback } from "@/components/RouteFallback";
 import styles from "./SidebarLayout.module.css";
-import { useIsVisitor } from "@/stores/authStore";
+import { isVisitorNow, useIsVisitor } from "@/stores/authStore";
 
 export function SidebarLayout() {
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed);
@@ -32,7 +32,7 @@ export function SidebarLayout() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "k") {
+      if (!isVisitorNow() && (e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "k") {
         e.preventDefault();
         useUIStore.getState().toggleCommandPalette();
       }

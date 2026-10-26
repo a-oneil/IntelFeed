@@ -12,7 +12,8 @@ interface ThreadRowProps {
   onToggle: () => void;
   onOpenThread: () => void;
   onEntryClick: (entryId: string) => void;
-  onMarkRead: () => void;
+  /** Absent for a visitor, who has no read state to change. */
+  onMarkRead?: () => void;
   isMarking?: boolean;
   selectedEntryId: string | null;
 }
@@ -84,33 +85,35 @@ export function ThreadRow({
           <span className={styles.count}>{threadSummaryLine(thread)}</span>
         </button>
         </Hint>
-        <button
-          type="button"
-          className={styles.clearBtn}
-          disabled={isMarking}
-          onClick={(e) => {
-            e.stopPropagation();
-            onMarkRead();
-          }}
-          title={isMarking ? "Marking…" : "Mark every article in this thread read"}
-          aria-label={isMarking ? "Marking…" : "Mark every article in this thread read"}
-        >
-          {isMarking ? (
-            <span className={styles.spinner} aria-hidden />
-          ) : (
-            <svg
-              viewBox="0 0 16 16"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
-            >
-              <path d="M3 8.5l3 3 7-7" />
-            </svg>
-          )}
-        </button>
+        {onMarkRead && (
+          <button
+            type="button"
+            className={styles.clearBtn}
+            disabled={isMarking}
+            onClick={(e) => {
+              e.stopPropagation();
+              onMarkRead?.();
+            }}
+            title={isMarking ? "Marking…" : "Mark every article in this thread read"}
+            aria-label={isMarking ? "Marking…" : "Mark every article in this thread read"}
+          >
+            {isMarking ? (
+              <span className={styles.spinner} aria-hidden />
+            ) : (
+              <svg
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <path d="M3 8.5l3 3 7-7" />
+              </svg>
+            )}
+          </button>
+        )}
       </div>
 
       {expanded && (

@@ -18,6 +18,7 @@ import { ResizeHandle } from "@/components/ResizeHandle";
 import { useRailWidth } from "@/hooks/useRailWidth";
 import styles from "./GlossaryPage.module.css";
 import { useOpenSavedSearch } from "@/hooks/useOpenSavedSearch";
+import { useIsVisitor } from "@/stores/authStore";
 
 /** Outlined maturity badges. Deliberately literal, not --danger/--warning/
  *  --success: maturity is not a severity, and aliasing it onto the state ramp
@@ -41,6 +42,7 @@ const MATURITY_ORDER: Record<string, number> = { emerging: 0, trending: 1, matur
 
 export function GlossaryPage() {
   const [searchParams] = useSearchParams();
+  const isVisitor = useIsVisitor();
   const [search, setSearch] = useState(searchParams.get("search") || "");
   const [editingTerm, setEditingTerm] = useState<GlossaryTerm | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -154,9 +156,10 @@ export function GlossaryPage() {
       textValue: (t) => (t.search_terms ?? []).join(", "),
       render: (t) => <MetaCell value={(t.search_terms ?? []).join(", ") || null} />,
     },
-    {
-      key: "actions", label: "", width: 150, minWidth: 150, sticky: "right",
-      render: (t) => (
+    // Search, edit and delete are all signed-in actions.
+    ...(isVisitor ? [] : [{
+      key: "actions", label: "", width: 150, minWidth: 150, sticky: "right" as const,
+      render: (t: GlossaryTerm) => (
         <ActionsCell>
           <RowActionButton onClick={() => handleSearch(t)} title="Search articles">Search</RowActionButton>
           <RowActionButton onClick={() => setEditingTerm(t)} title="Edit term">Edit</RowActionButton>
@@ -165,9 +168,9 @@ export function GlossaryPage() {
           )}
         </ActionsCell>
       ),
-    },
+    }]),
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [categories, articleCounts]);
+  ], [categories, articleCounts, isVisitor]);
 
   const handleSearch = (term: GlossaryTerm) => {
     const allNames = [term.name, ...(term.search_terms || [])];
@@ -195,9 +198,11 @@ export function GlossaryPage() {
             : `${filteredTerms.length} of ${terms?.length ?? 0}`
         }
         actions={
+          isVisitor ? undefined : (
           <button className={styles.addBtn} onClick={() => setShowAddModal(true)}>
             + Add Term
           </button>
+          )
         }
         controls={
           <input
@@ -303,6 +308,7 @@ export function GlossaryPage() {
                 </div>
               </div>
             )}
+            {!isVisitor && (
             <div className={styles.detailActions}>
               <RowActionButton onClick={() => handleSearch(selectedTerm)} title="Search articles">
                 Search articles
@@ -314,6 +320,7 @@ export function GlossaryPage() {
                 </RowActionButton>
               )}
             </div>
+            )}
           </aside>
         )}
       </div>

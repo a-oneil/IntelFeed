@@ -277,7 +277,8 @@ export function Sidebar() {
   const allCollapsed = categories ? categories.length > 0 && collapsed.size >= categories.length : false;
 
   const handleCategoryDrop = (targetCatId: string) => {
-    if (!draggedCatId || draggedCatId === targetCatId || !categories) return;
+    // Category order is the instance's; a visitor can't save one.
+    if (isVisitor || !draggedCatId || draggedCatId === targetCatId || !categories) return;
     const oldIndex = categories.findIndex((c) => c.id === draggedCatId);
     const newIndex = categories.findIndex((c) => c.id === targetCatId);
     if (oldIndex === -1 || newIndex === -1) return;
@@ -335,7 +336,11 @@ export function Sidebar() {
               <Hint
                 title="Priority Queue"
                 body="The unread pile re-ordered by signal score instead of by time."
-                aside="Scored on source reliability, entity heat and what you've read before."
+                aside={
+                  isVisitor
+                    ? "Scored on source reliability and entity heat."
+                    : "Scored on source reliability, entity heat and what you've read before."
+                }
               >
                 <button
                   className={`${styles.quickChip} ${location.pathname === "/priority-queue" ? styles.active : ""}`}
@@ -747,7 +752,11 @@ export function Sidebar() {
           </button>
           <div className={styles.modeHint} role="tooltip" id="mode-hint-reading">
             <strong>Reading</strong>
-            <span>Triage the news: your feeds, filters, saved searches and the priority queue.</span>
+            <span>
+              {isVisitor
+                ? "Read the news: feeds, filters and the priority queue."
+                : "Triage the news: your feeds, filters, saved searches and the priority queue."}
+            </span>
           </div>
         </div>
         <div className={styles.modeCell}>
@@ -764,8 +773,14 @@ export function Sidebar() {
           </button>
           <div className={styles.modeHint} role="tooltip" id="mode-hint-workbench">
             <strong>Workbench</strong>
-            <span>Investigate what you&rsquo;ve read: threat dossiers, CVEs, ATT&amp;CK coverage and your detection rule library.</span>
-            <em>Intelligence extracted while reading lands here.</em>
+            {isVisitor ? (
+              <span>Explore what has been reported: threat dossiers, CVEs and the ATT&amp;CK matrix.</span>
+            ) : (
+              <>
+                <span>Investigate what you&rsquo;ve read: threat dossiers, CVEs, ATT&amp;CK coverage and your detection rule library.</span>
+                <em>Intelligence extracted while reading lands here.</em>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -989,7 +1004,7 @@ function CategoryNode({
   return (
     <div
       className={`${styles.category} ${isDragging ? styles.dragging : ""} ${dragOver ? styles.dragOver : ""}`}
-      draggable
+      draggable={!isVisitor}
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = "move";
         onDragStart();

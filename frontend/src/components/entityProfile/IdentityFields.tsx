@@ -9,6 +9,7 @@ import type { EntityProvenance } from "@/hooks/useEntityProvenance";
 import { InlineEditField } from "@/components/InlineEditField";
 import { FieldProvenance } from "./FieldProvenance";
 import { VendorPicker } from "./VendorPicker";
+import { useIsVisitor } from "@/stores/authStore";
 import type { EntityProfileConfig } from "./entityProfileConfig";
 import styles from "./entityProfile.module.css";
 
@@ -27,6 +28,7 @@ export function IdentityMetaFields({
   onOpenEntity: (type: EntityType, id: string, label?: string) => void;
   onOpenArticle?: (entryId: string) => void;
 }) {
+  const isVisitor = useIsVisitor();
   const get = (key: string) => (entity as unknown as Record<string, unknown>)[key];
 
   /** The "who says so" marker for one field, or nothing when it isn't tracked. */
@@ -52,12 +54,27 @@ export function IdentityMetaFields({
             return (
               <span key={field.key} className={styles.metaItem}>
                 <span className={styles.metaLabel}>{field.label}</span>
-                <VendorPicker
-                  currentVendorId={entity.vendor_id ?? null}
-                  currentVendorName={entity.vendor_name ?? null}
-                  onSelect={(id) => onUpdateField("vendor_id", id)}
-                  onOpenVendor={(id) => onOpenEntity("vendor", id)}
-                />
+                {isVisitor ? (
+                  // A visitor follows the vendor; picking one is an edit.
+                  entity.vendor_id && entity.vendor_name ? (
+                    <button
+                      type="button"
+                      className={styles.metaLink}
+                      onClick={() => onOpenEntity("vendor", entity.vendor_id as string)}
+                    >
+                      {entity.vendor_name}
+                    </button>
+                  ) : (
+                    <span style={{ color: "var(--text-muted)" }}>—</span>
+                  )
+                ) : (
+                  <VendorPicker
+                    currentVendorId={entity.vendor_id ?? null}
+                    currentVendorName={entity.vendor_name ?? null}
+                    onSelect={(id) => onUpdateField("vendor_id", id)}
+                    onOpenVendor={(id) => onOpenEntity("vendor", id)}
+                  />
+                )}
                 {sources(field.key, field.label)}
               </span>
             );
