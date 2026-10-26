@@ -5,12 +5,12 @@ import { useFocusTrap } from "@/hooks/useFocusTrap";
 import { useUndoableDelete } from "@/hooks/useUndoableDelete";
 import { useAuthStore } from "@/stores/authStore";
 import { confirmDialog } from "@/utils/dialog";
-import { FeedSubscribersPanel } from "@/components/FeedSubscribersPanel";
 import { FeedTypeIcon } from "@/components/FeedTypeIcon";
 import type { Feed } from "@/api/types";
 import { useFeedForm, type PaneId } from "./useFeedForm";
 import { AssessmentPane } from "./panes/AssessmentPane";
 import { IdentityPane } from "./panes/IdentityPane";
+import { ReadersPane } from "./panes/ReadersPane";
 import { OverviewPane } from "./panes/OverviewPane";
 import { PipelinePane } from "./panes/PipelinePane";
 import { SourcePane } from "./panes/SourcePane";
@@ -207,10 +207,7 @@ export function EditFeedModal({ subscription, onClose }: Props) {
             )}
             {pane === "assessment" && <AssessmentPane form={form} />}
             {pane === "readers" && isAdmin && (
-              <FeedSubscribersPanel
-                feedId={subscription.id}
-                feedTitle={subscription.title}
-              />
+              <ReadersPane feed={subscription} form={form} />
             )}
           </div>
         </div>

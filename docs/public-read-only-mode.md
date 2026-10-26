@@ -10,7 +10,7 @@ The switch is **off by default**. While it is off, every API route except the lo
 
 The login page learns whether the mode is on from the unauthenticated `GET /api/auth/registration-status`, which carries `public_read_only_enabled` alongside the registration flags.
 
-**Then pick the feeds.** Every feed starts hidden from visitors, so turning the mode on publishes nothing by itself. An admin opens a feed's settings and checks **Visible to visitors** (Identity pane), stored as `feeds.visible_to_visitors`; the `update_feed` tool sets the same flag. Only an admin can change it; the API refuses it from anyone else. Manual Uploads never shows, whatever the flag says.
+**Then pick the feeds.** Every feed starts hidden from visitors, so turning the mode on publishes nothing by itself. An admin opens a feed's settings and checks **Visible to visitors** (Readers pane), stored as `feeds.visible_to_visitors`; the `update_feed` tool sets the same flag. Only an admin can change it; the API refuses it from anyone else. Manual Uploads never shows, whatever the flag says.
 
 **Behind Cloudflare,** set `TRUSTED_CLIENT_IP_HEADER=CF-Connecting-IP` in the API's environment before turning the mode on. Without it every visitor arriving through one Cloudflare edge shares that edge's address and one rate-limit bucket, so one busy visitor locks out a region. The header is only trustworthy while the origin accepts Cloudflare's ranges alone (`scripts/ops/cf-origin-lockdown.sh`, see [operations.md](operations.md#rate-limiting)).
 
