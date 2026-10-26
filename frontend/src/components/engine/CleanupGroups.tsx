@@ -261,23 +261,19 @@ export function ReclassifyQueue() {
                   <td className={styles.muted}>{getEntityLabel(g.entity_type)}</td>
                   <td>
                     <div className={cg.chips}>
-                      {g.exists ? (
-                        g.suggestions.map((s) => (
-                          <button
-                            key={s.type}
-                            className={cg.target}
-                            disabled={busy === k || working}
-                            onClick={() => applyOne(g, s.type)}
-                            title={`Convert ${g.name} to a ${getEntityLabel(s.type).toLowerCase()} — proposed by ${s.count} article${s.count === 1 ? "" : "s"}`}
-                          >
-                            <span className={styles.entDot} style={{ background: getEntityCssVar(s.type) }} />
-                            {getEntityLabel(s.type)}
-                            <span className={cg.cnt}>{s.count.toLocaleString()}</span>
-                          </button>
-                        ))
-                      ) : (
-                        <span className={styles.muted}>entity is gone</span>
-                      )}
+                      {g.suggestions.map((s) => (
+                        <button
+                          key={s.type}
+                          className={cg.target}
+                          disabled={busy === k || working}
+                          onClick={() => applyOne(g, s.type)}
+                          title={`Convert ${g.name} to a ${getEntityLabel(s.type).toLowerCase()} — proposed by ${s.count} article${s.count === 1 ? "" : "s"}`}
+                        >
+                          <span className={styles.entDot} style={{ background: getEntityCssVar(s.type) }} />
+                          {getEntityLabel(s.type)}
+                          <span className={cg.cnt}>{s.count.toLocaleString()}</span>
+                        </button>
+                      ))}
                     </div>
                   </td>
                   <td className={styles.detail}>
@@ -297,12 +293,12 @@ export function ReclassifyQueue() {
                   <td>
                     <div className={styles.acts}>
                       <button
-                        className={`${styles.rowBtn} ${g.exists ? styles.bGhost : styles.bGood}`}
+                        className={`${styles.rowBtn} ${styles.bGhost}`}
                         disabled={busy === k || working}
                         onClick={() => dismissOne(g)}
-                        title={g.exists ? "Keep it as it is — clear every proposal and stop new ones" : "Clear the leftover proposals"}
+                        title="Keep it as it is — clear every proposal and stop new ones"
                       >
-                        {g.exists ? "Dismiss" : "Clear"}
+                        Dismiss
                       </button>
                     </div>
                   </td>

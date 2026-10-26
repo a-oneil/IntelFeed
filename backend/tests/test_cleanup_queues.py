@@ -12,7 +12,7 @@
 import uuid
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
 from app.intelligence.link_validation_apply import LinkRow, log_reclassification
 from app.models.entity_link_validation_log import EntityLinkValidationLog
@@ -110,6 +110,21 @@ async def test_reclassify_groups_fold_per_entity(client, admin_headers, db_sessi
 
     stats = (await client.get("/api/admin/hygiene/stats", headers=admin_headers)).json()
     assert stats["pending_advisories"] == 1
+
+
+async def test_reclassify_groups_drop_deleted_entities(client, admin_headers, db_session, test_feed):
+    malware = MalwareFamily(name="Everest")
+    db_session.add(malware)
+    await db_session.flush()
+    await _seed_reclassify(db_session, test_feed, malware)
+    mid = malware.id
+    await db_session.delete(malware)
+    await db_session.commit()
+
+    resp = await client.get("/api/admin/hygiene/reclassify-groups", headers=admin_headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["total"] == 0
+    assert await _pending_reclassify_rows(db_session, mid) == 0
 
 
 async def test_dismiss_one_row_clears_every_copy_and_sticks(client, admin_headers, db_session, test_feed):
@@ -281,6 +296,21 @@ async def _seed_unlinks(db_session, feed):
 
 async def _count(db_session, model, *where) -> int:
     return (await db_session.execute(select(func.count()).select_from(model).where(*where))).scalar_one()
+
+
+async def test_unlink_groups_drop_deleted_entities(client, admin_headers, db_session, test_feed):
+    malware, tool, _entries_ = await _seed_unlinks(db_session, test_feed)
+    mid, tid = malware.id, tool.id
+    await db_session.execute(delete(EntryMalware).where(EntryMalware.malware_family_id == mid))
+    await db_session.execute(delete(EntryTool).where(EntryTool.tool_id == tid))
+    await db_session.delete(malware)
+    await db_session.delete(tool)
+    await db_session.commit()
+
+    body = (await client.get("/api/admin/hygiene/unlink-groups", headers=admin_headers)).json()
+    assert body["total"] == 0 and body["proposals"] == 0
+    assert await _count(db_session, EntityLinkValidationLog, EntityLinkValidationLog.entity_id == mid) == 0
+    assert await _count(db_session, EntityMaintenanceLog, EntityMaintenanceLog.entity_id == tid) == 0
 
 
 async def test_unlink_groups_list_apply_and_keep(client, admin_headers, db_session, test_feed):
