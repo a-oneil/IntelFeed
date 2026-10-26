@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement } from "react";
@@ -93,6 +93,35 @@ describe("useEntries", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(mockedApi.put).toHaveBeenCalledWith("/entries/entry-1/read");
+  });
+
+  it("rapid mark-reads share one reconcile once the clicking stops", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mockedApi.put.mockResolvedValue({ data: undefined });
+      const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+      const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+      const wrapper = ({ children }: { children: ReactNode }) =>
+        createElement(QueryClientProvider, { client: queryClient }, children);
+      const { result } = renderHook(() => useMarkRead(), { wrapper });
+
+      for (const id of ["a", "b", "c", "d"]) {
+        await act(async () => {
+          await result.current.mutateAsync(id);
+          vi.advanceTimersByTime(300);
+        });
+      }
+      expect(mockedApi.put).toHaveBeenCalledTimes(4);
+      expect(invalidate).not.toHaveBeenCalled();
+
+      await act(async () => {
+        vi.advanceTimersByTime(1500);
+      });
+      const keys = invalidate.mock.calls.map(([f]) => (f as { queryKey: unknown[] }).queryKey[0]);
+      expect(keys.sort()).toEqual(["entries", "entries-count", "entry", "feeds"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("useToggleStar calls the correct API endpoint", async () => {

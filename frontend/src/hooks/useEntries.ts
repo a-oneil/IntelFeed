@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { currentReadingPrefs } from "@/hooks/useReadingPrefs";
-import { useRef, useCallback, useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import api from "@/api/client";
 import { isVisitorNow } from "@/stores/authStore";
 import type {
@@ -13,15 +13,26 @@ import type {
 import { useQuery } from "@tanstack/react-query";
 
 /**
- * Debounced feeds invalidation — mark-read/unread mutations fire rapidly
- * (especially with markReadOnScroll), so we coalesce feeds refetches.
+ * Debounced read-state reconcile. Mark-read/unread fires on every article
+ * opened (and on scroll with markReadOnScroll), and the optimistic update has
+ * already put the new state on screen, so the refetch that reconciles with
+ * the server waits until the clicking stops. Otherwise each click refetches
+ * every loaded list page, the sidebar's six counts and the feeds, and a quick
+ * run through a dozen articles queues hundreds of requests on the API.
+ *
+ * The timer is module-level: every component that marks entries read shares
+ * one reconcile.
  */
-function useDebouncedFeedsInvalidation(delayMs = 1000) {
+let reconcileTimer: ReturnType<typeof setTimeout> | undefined;
+
+function useDebouncedReadReconcile(delayMs = 1500) {
   const queryClient = useQueryClient();
-  const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   return useCallback(() => {
-    clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
+    clearTimeout(reconcileTimer);
+    reconcileTimer = setTimeout(() => {
+      queryClient.invalidateQueries({ queryKey: ["entries"] });
+      queryClient.invalidateQueries({ queryKey: ["entries-count"] });
+      queryClient.invalidateQueries({ queryKey: ["entry"] });
       queryClient.invalidateQueries({ queryKey: ["feeds"] });
     }, delayMs);
   }, [queryClient, delayMs]);
@@ -208,7 +219,7 @@ export function useEntry(entryId: string | null) {
  */
 function useReadStateMutation(read: boolean) {
   const queryClient = useQueryClient();
-  const debouncedFeedsInvalidate = useDebouncedFeedsInvalidation();
+  const reconcile = useDebouncedReadReconcile();
   return useMutation({
     mutationFn: async (entryId: string) => {
       // A visitor has no read state: opening and scrolling articles must not
@@ -270,14 +281,11 @@ function useReadStateMutation(read: boolean) {
       }
       queryClient.setQueryData(["entry", ctx.entryId], ctx.prevDetail);
     },
-    onSettled: (_data, _err, entryId) => {
-      // Nothing changed for a visitor, and refetching the list, counts and
-      // feeds on every article opened would spend their rate-limit budget.
+    onSettled: () => {
+      // Nothing changed for a visitor, and refetching would only spend their
+      // rate-limit budget.
       if (isVisitorNow()) return;
-      queryClient.invalidateQueries({ queryKey: ["entries"] });
-      queryClient.invalidateQueries({ queryKey: ["entries-count"] });
-      queryClient.invalidateQueries({ queryKey: ["entry", entryId] });
-      debouncedFeedsInvalidate();
+      reconcile();
     },
   });
 }
