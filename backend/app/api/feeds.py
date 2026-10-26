@@ -29,6 +29,7 @@ from app.schemas.feed import (
     FeedUpdateRequest,
     TitleFilterPreviewRequest,
     TitleFilterPreviewResponse,
+    keep_stored_secrets,
 )
 from app.services.feed_defaults import (
     FEED_DEFAULT_FIELDS,
@@ -965,7 +966,7 @@ async def update_feed(
         config = dict(old_config)
         # fetch_health is server-owned; a modal echoing back a stale copy
         # must not overwrite what the fetcher learned since.
-        config.update(strip_client_keys(request.adapter_config))
+        config.update(keep_stored_secrets(strip_client_keys(request.adapter_config)))
         if feed.feed_type == "telegram":
             config = _normalize_telegram_config(config)
         # Bluesky: encrypt new plaintext app_password; preserve existing if blank/masked.

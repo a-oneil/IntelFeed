@@ -21,6 +21,7 @@ from app.models.feed import Feed
 from app.models.note import Note
 from app.models.webhook_preset import WebhookPreset
 from app.schemas.automation import VALID_ACTION_TYPES, VALID_TRIGGER_TYPES
+from app.schemas.feed import keep_stored_secrets
 from app.schemas.tlp import TLP_VALUES, normalize_tlp
 from app.tools import _tool
 from app.tools.delete import _make_token, _verify_token
@@ -200,7 +201,7 @@ async def _update_feed(
 
         old_config = dict(feed.adapter_config or {})
         config = dict(old_config)
-        config.update(adapter_config)
+        config.update(keep_stored_secrets(adapter_config))
         if feed.feed_type == "telegram":
             config = _normalize_telegram_config(config)
         if feed.feed_type == "bluesky":
