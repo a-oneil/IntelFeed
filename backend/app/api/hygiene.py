@@ -3450,6 +3450,14 @@ async def reclassify_groups(
         g["name"] = live.get(key) or g["name"] or "(unnamed)"
         g["proposals"] = sum(g["suggestions"].values())
 
+    # A deleted entity has nothing left to reclassify: drop its proposals here
+    # rather than list a row whose only action is "clear". Unregistered types
+    # can't be looked up, so they're never assumed gone.
+    for g in groups:
+        if not g["exists"] and g["entity_type"] in ENTITY_TYPE_REGISTRY:
+            await clear_reclassify_proposals(db, g["entity_type"], g["entity_id"])
+    groups = [g for g in groups if g["exists"] or g["entity_type"] not in ENTITY_TYPE_REGISTRY]
+
     if entity_type:
         groups = [g for g in groups if g["entity_type"] == entity_type]
     if q:
@@ -3697,6 +3705,20 @@ async def unlink_groups(
     for etype, eid in groups:
         by_type[etype].append(eid)
     labels = await _entity_labels(db, by_type)
+
+    # A deleted entity has no links left to remove: drop its proposals here
+    # rather than list a row whose only action is "clear". Types with no model
+    # can't be looked up, so they're never assumed gone.
+    from app.services.entry_adjudication import _model_for
+
+    gone = [k for k in groups if k not in labels and _model_for(k[0]) is not None]
+    for etype, eid in gone:
+        for model, action in ((EntityLinkValidationLog, "shadow_remove"), (EntityMaintenanceLog, ACTION_UNLINK)):
+            stmt = delete(model).where(model.action == action, model.entity_type == etype, model.entity_id == eid)
+            if model is EntityMaintenanceLog:
+                stmt = stmt.where(model.applied.is_(False))
+            await db.execute(stmt)
+        all_proposals -= groups.pop((etype, eid))["proposals"]
 
     items = []
     for (etype, eid), g in groups.items():
