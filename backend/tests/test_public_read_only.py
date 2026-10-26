@@ -222,9 +222,17 @@ def _dep_names(dependant, acc: set[str]) -> set[str]:
 
 
 def _routes() -> list[tuple[str, APIRoute, set[str]]]:
+    # FastAPI 0.153+ keeps each included router as one nested entry in
+    # app.routes; iter_route_contexts flattens them with their full paths.
+    try:
+        from fastapi.routing import iter_route_contexts
+    except ImportError:  # older FastAPI: app.routes is already flat
+        contexts = app.routes
+    else:
+        contexts = list(iter_route_contexts(app.routes))
     out = []
-    for r in app.routes:
-        if isinstance(r, APIRoute):
+    for r in contexts:
+        if isinstance(getattr(r, "original_route", r), APIRoute):
             deps = _dep_names(r.dependant, set())
             for m in sorted(r.methods - {"HEAD", "OPTIONS"}):
                 out.append((f"{m} {r.path}", r, deps))
