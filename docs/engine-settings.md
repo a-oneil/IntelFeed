@@ -531,12 +531,23 @@ Weekly AI rewrite of the most-active threat actor profiles. Job
 |---|---|---|
 | `rule_attack_backfill_limit` | int, `1500` | Detection rules re-fetched per ATT&CK-mapping backfill run. Job `backfill-rule-attack-mappings`, Sundays 05:30 UTC. |
 
+### Manual uploads
+
+| Setting | Type / default | What it does |
+|---|---|---|
+| `ingest_max_file_mb` | int, `50` | Per-file cap for files dropped on the ingest modal, members of a `.zip` included. A larger file lands as a `too_large` row in the batch, not an error. |
+| `ingest_max_batch_items` | int, `200` | Most items one batch may hold, counting files expanded out of a `.zip` or a GitHub repository. |
+| `ingest_zip_max_members` | int, `100` | Most files expanded out of one `.zip`; an archive over the cap is refused as `unsupported` rather than partly imported. |
+
+`ingest_files_dir` (default `/app/data/ingest_files`) is env-only: the bind-mount shared by api and celery-worker where originals live.
+
 ### Retention
 
 | Setting | Type / default | What it does |
 |---|---|---|
 | `engine_run_retention_days` | int, `30` | Days of engine bookkeeping kept: `job_runs`, `entry_pipeline_runs`, non-pending `ai_analysis_requests`, `ai_batch_jobs`, resolved `pending_autolink_matches`. `entry_signals` is **not** pruned — signals live as long as their entry. Job `prune-engine-tables`, daily 02:40 UTC. |
 | `telegram_media_ttl_days` | int, `30` | Delete downloaded Telegram media files older than this. Entries and extracted intel are kept. Job `evict-old-telegram-media`, daily 04:25 UTC. |
+| `ingest_files_ttl_days` | int, `180` | Delete the original files behind manual uploads older than this; `0` keeps them forever. Entries and extracted intel are kept, and the reader then reads "removed by retention". Job `evict-old-ingest-files`, daily 04:35 UTC. |
 | `tts_cache_ttl_days` | int, `30` | Evict cached Piper audio not played within this window (per-row TTLs, e.g. the 24h share pre-gen, still win). |
 | `tts_cache_max_bytes` | int, `2 GB` | LRU size cap for cached read-aloud audio; oldest-played files are evicted first. Disk is the binding constraint, not the TTL. Job `evict-tts-cache`, daily 04:15 UTC. |
 
@@ -636,6 +647,7 @@ settings.
 | `evict-image-cache` | 04:10 | `image_proxy_cache_ttl_days`, `image_proxy_max_size_bytes` |
 | `evict-tts-cache` | 04:15 | `tts_cache_ttl_days`, `tts_cache_max_bytes` |
 | `evict-old-telegram-media` | 04:25 | `telegram_media_ttl_days` |
+| `evict-old-ingest-files` | 04:35 | `ingest_files_ttl_days` |
 | `prune-engine-tables` | 02:40 | `engine_run_retention_days` |
 | `backup-database` | 02:00 | `backup_retention_days` |
 

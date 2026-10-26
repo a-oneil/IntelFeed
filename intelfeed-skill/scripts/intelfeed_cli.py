@@ -135,6 +135,9 @@ WRITE_TOOLS: frozenset[str] = frozenset(
         "generate_campaign_report",
         "generate_detection_rules",
         "generate_full_report",
+        "ingest_batch",
+        "ingest_file",
+        "ingest_text",
         "ingest_url",
         "link_entities",
         "mark_all_read",
@@ -2093,6 +2096,20 @@ TOOLS: dict[str, dict] = {
         ),
         "params": {},
     },
+    "get_ingest_batch": {
+        "description": (
+            "Status of one ingest batch: per-item status (queued / parsing / created / expanded / "
+            "duplicate / no_text / unsupported / too_large / failed), the entry id each item "
+            "produced, and a summary. Poll until summary.status is 'complete'. Created entries still "
+            "go on to the pipeline and the one-pass AI analysis afterwards, like any polled entry."
+        ),
+        "params": {
+            "batch_id": {
+                "type": 'str',
+                "required": True,
+            },
+        },
+    },
     "get_intel_profile": {
         "description": (
             "One intel profile with its countries (resolved names), sectors (labels) and other scope "
@@ -2535,6 +2552,87 @@ TOOLS: dict[str, dict] = {
             "ttp_id": {
                 "type": 'str',
                 "required": True,
+            },
+        },
+    },
+    "ingest_batch": {
+        "description": (
+            "Ingest many URLs and/or text blobs in one batch under Manual Uploads. Each URL becomes "
+            "one entry; a github.com/owner/repo link (optionally /tree/<branch>/<path>) is fetched "
+            "once and becomes one entry per file with no feed created. Each text becomes one entry. "
+            "Returns the batch id; poll get_ingest_batch for per-item status (created / duplicate / "
+            "no_text / unsupported / failed)."
+        ),
+        "params": {
+            "urls": {
+                "type": 'list[str]',
+                "default": None,
+            },
+            "texts": {
+                "type": 'list[dict]',
+                "default": None,
+            },
+            "label": {
+                "type": 'str',
+                "default": None,
+            },
+            "is_ioc_list": {
+                "type": 'bool',
+                "default": None,
+            },
+        },
+    },
+    "ingest_file": {
+        "description": (
+            "Ingest one file (PDF, DOCX, TXT, MD, HTML, CSV, EML, ZIP, ...) given as base64 as a "
+            "manual entry: stores the original under Manual Uploads, queues it, returns the batch id "
+            "to poll with get_ingest_batch. A .zip expands into one entry per member. Keep files "
+            "under the configured per-file cap (default 50 MB); the base64 payload must fit in one "
+            "tool call."
+        ),
+        "params": {
+            "filename": {
+                "type": 'str',
+                "required": True,
+            },
+            "content_base64": {
+                "type": 'str',
+                "required": True,
+            },
+            "title": {
+                "type": 'str',
+                "default": None,
+            },
+            "is_ioc_list": {
+                "type": 'bool',
+                "default": None,
+            },
+        },
+    },
+    "ingest_text": {
+        "description": (
+            "Ingest pasted text (a report body, an advisory, a chat log, an indicator dump) as one "
+            "manual entry: stores the paste as a .txt original under Manual Uploads, queues it on the "
+            "worker, and returns the batch id to poll with get_ingest_batch. Set is_ioc_list when the "
+            "text is one indicator per line so it goes through the curated indicator-list door "
+            "instead of candidate staging. One paste = one entry."
+        ),
+        "params": {
+            "text": {
+                "type": 'str',
+                "required": True,
+            },
+            "title": {
+                "type": 'str',
+                "default": None,
+            },
+            "source_url": {
+                "type": 'str',
+                "default": None,
+            },
+            "is_ioc_list": {
+                "type": 'bool',
+                "default": None,
             },
         },
     },
