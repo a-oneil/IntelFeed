@@ -176,8 +176,9 @@ AUTOMATION_TEMPLATES: list[dict] = [
             {
                 "type": "send_notification",
                 "config": {
-                    "platform": "in_app",
-                    "message": "CVE alert for your vendor stack: {title}",
+                    "platform": "custom",
+                    "webhook_url": "",
+                    "message_template": "CVE alert for your vendor stack: {title}\n{app_url}",
                 },
             },
         ],
@@ -204,8 +205,9 @@ AUTOMATION_TEMPLATES: list[dict] = [
             {
                 "type": "send_notification",
                 "config": {
-                    "platform": "in_app",
-                    "message": "Watched actor mention: {title}",
+                    "platform": "custom",
+                    "webhook_url": "",
+                    "message_template": "Watched actor mention: {title}\n{app_url}",
                 },
             },
         ],
@@ -232,8 +234,9 @@ AUTOMATION_TEMPLATES: list[dict] = [
             {
                 "type": "send_notification",
                 "config": {
-                    "platform": "in_app",
-                    "message": "High severity: {title}",
+                    "platform": "custom",
+                    "webhook_url": "",
+                    "message_template": "High severity: {title}\n{app_url}",
                 },
             },
         ],
@@ -292,29 +295,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "trigger_config": {},
         "conditions": {},
         "actions": [
-            {"type": "run_ai_task", "config": {"task": "summarize"}},
-        ],
-    },
-    {
-        "id": "ai-summarize-notify",
-        "name": "AI Summarize & Notify",
-        "description": (
-            "Summarize entries with AI, then send a notification with the summary included. Useful for daily digests."
-        ),
-        "category": "ai",
-        "tags": ["ai", "summarization", "notification"],
-        "trigger_type": "on_schedule",
-        "trigger_config": {"cron": "0 9 * * *"},
-        "conditions": {},
-        "actions": [
-            {"type": "run_ai_task", "config": {"task": "summarize"}},
-            {
-                "type": "send_notification",
-                "config": {
-                    "platform": "in_app",
-                    "message": "Daily AI digest: {ai_summary}",
-                },
-            },
+            {"type": "run_ai_task", "config": {"task_id": "article_summary"}},
         ],
     },
     # --- Correlation & Reporting ---
@@ -335,8 +316,9 @@ AUTOMATION_TEMPLATES: list[dict] = [
             {
                 "type": "send_notification",
                 "config": {
-                    "platform": "in_app",
-                    "message": "Correlation detected — intel report generated: {title}",
+                    "platform": "custom",
+                    "webhook_url": "",
+                    "message_template": "Correlation detected — intel report generated: {title}\n{app_url}",
                 },
             },
         ],
@@ -371,8 +353,9 @@ AUTOMATION_TEMPLATES: list[dict] = [
             {
                 "type": "send_notification",
                 "config": {
-                    "platform": "in_app",
-                    "message": "Full intel pipeline completed: {title}",
+                    "platform": "custom",
+                    "webhook_url": "",
+                    "message_template": "Full intel pipeline completed: {title}\n{app_url}",
                 },
             },
         ],
@@ -676,8 +659,8 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "name": "Weekly Threat Landscape Report",
         "description": (
             "Every Monday morning, run an AI summary across the last 7 days of entries and push a "
-            "single landscape digest to your channel. Point the AI task at your briefing/summary "
-            "prompt and set the webhook."
+            "single landscape digest to your channel, written by the Intelligence Briefing task. "
+            "Set the webhook."
         ),
         "category": "reporting",
         "tags": ["reporting", "ai", "weekly", "digest"],
@@ -690,7 +673,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
         },
         "conditions": {},
         "actions": [
-            {"type": "run_ai_task", "config": {"task_id": "summarize"}},
+            {"type": "run_ai_task", "config": {"task_id": "intelligence_briefing"}},
             {
                 "type": "send_notification",
                 "config": {
@@ -1167,8 +1150,8 @@ AUTOMATION_TEMPLATES: list[dict] = [
         "name": "Daily Intel Digest",
         "description": (
             "Every morning at 07:00, run an AI summary across the last 24 hours of entries and push a "
-            "single digest to your channel — the whole day in one message. Point the AI task at your "
-            "briefing/summary prompt and set the webhook. (Scheduled rules digest the whole time "
+            "single digest to your channel — the whole day in one message, written by the "
+            "Intelligence Briefing task. Set the webhook. (Scheduled rules digest the whole time "
             "window; use the score-based alert templates for priority-only pings.)"
         ),
         "category": "reporting",
@@ -1182,7 +1165,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
         },
         "conditions": {},
         "actions": [
-            {"type": "run_ai_task", "config": {"task_id": "summarize"}},
+            {"type": "run_ai_task", "config": {"task_id": "intelligence_briefing"}},
             {
                 "type": "send_notification",
                 "config": {
@@ -1215,7 +1198,7 @@ AUTOMATION_TEMPLATES: list[dict] = [
         },
         "conditions": {},
         "actions": [
-            {"type": "run_ai_task", "config": {"task_id": "summarize"}},
+            {"type": "run_ai_task", "config": {"task_id": "intelligence_briefing"}},
             {
                 "type": "send_notification",
                 "config": {
