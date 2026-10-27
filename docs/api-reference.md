@@ -1,23 +1,13 @@
 # REST API Reference
 
-For developers and integrators who want to script IntelFeed or build against its REST API: every router, its endpoints, request and response shapes, and the auth model. For ready-made recipes see [integrations.md](integrations.md); for the same operations as a command-line tool see [cli-reference.md](cli-reference.md).
-
-**Version:** 0.1.0  
-**Base URL:** `/api`  
-**Protocol:** HTTPS (self-hosted)  
+For developers who want to script IntelFeed or build on its REST API. After reading this you will know how to sign in, how errors, paging and rate limits work, and which endpoint does what. For ready-made recipes see [integrations.md](integrations.md). For the same operations as a command-line tool see [cli-reference.md](cli-reference.md).
 
 ## Overview
 
-IntelFeed's FastAPI backend provides a comprehensive REST API for threat intelligence ingestion, enrichment, analysis, and dissemination. The API is designed for self-hosted deployments with a single authenticated user or small teams. See [`backend/app/main.py:756-835`] for router mounting and prefix definitions — 77 routers in all. The interactive OpenAPI docs at `/docs` (and `/redoc`) are generated from the same source and are always current; this page is the narrative companion, not a replacement.
-
-This documentation covers:
-- **Authentication & Authorization:** JWT-based with access/refresh tokens
-- **Error Handling:** Consistent `AppError` envelopes with structured details
-- **Pagination:** Offset/limit (standard) or cursor-based (for large result sets)
-- **Rate Limiting:** Per-endpoint strategies to protect against abuse
-- **Security:** CORS, security headers, token blacklisting, audit logging
-
-For architectural context, see [`docs/architecture.md`].
+- **Base URL:** `/api` on your IntelFeed host (in the dev stack, `http://localhost:8000`).
+- **Format:** JSON in, JSON out, unless an endpoint says otherwise (file downloads, SSE streams, RSS, CSV).
+- **Full schemas:** the interactive docs at `/docs` (Swagger) and `/redoc` list every parameter and response field. They are built from the code, so they are always current. The pages themselves load for anyone, but the spec behind them (`/openapi.json`) needs a signed-in user: the docs page reads your token from the web app's local storage, so sign in to IntelFeed in the same browser first.
+- **This page** is the map: how the API behaves, plus every endpoint with its access level and a one-line purpose. The routers are mounted in `backend/app/main.py:824-905`.
 
 ---
 
@@ -34,15 +24,19 @@ For architectural context, see [`docs/architecture.md`].
    - [Entries & Article Management](#entries--article-management)
    - [Story Threads](#story-threads)
    - [Intelligence Extraction](#intelligence-extraction)
+   - [Observables (IOC Ledger)](#observables-ioc-ledger)
    - [Entity Management](#entity-management)
    - [Intelligence Requirements (PIRs)](#intelligence-requirements-pirs)
    - [Automation & Rules](#automation--rules)
    - [Dashboards & Widgets](#dashboards--widgets)
    - [Detection Rules & Tools](#detection-rules--tools)
    - [AI & Enrichment](#ai--enrichment)
+   - [Reports, Profiles & Exposure](#reports-profiles--exposure)
+   - [Search](#search)
    - [Sharing & Public Endpoints](#sharing--public-endpoints)
    - [System & Operations](#system--operations)
    - [Other Routers](#other-routers)
+7. [Common Query Patterns](#common-query-patterns)
 
 ---
 
@@ -50,40 +44,52 @@ For architectural context, see [`docs/architecture.md`].
 
 ### JWT Token Flow
 
-IntelFeed uses **JWT (HS256)** for stateless authentication with access + refresh token rotation.
+IntelFeed signs you in with JWTs (JSON Web Tokens, signed with HS256). You get two tokens:
 
-**Token Types:**
-- **Access Token:** Short-lived (default 15 minutes), required for all protected endpoints
-- **Refresh Token:** Long-lived (default 7 days), used to obtain new access tokens
-- **Token Blacklist:** Redis-backed, tokens are blacklisted on logout or refresh for revocation
+- **Access token:** sent on every request as `Authorization: Bearer <token>`. Lasts 120 minutes by default (`ACCESS_TOKEN_EXPIRE_MINUTES`).
+- **Refresh token:** trades in for a new pair at `POST /api/auth/refresh`. Lasts 7 days by default (`REFRESH_TOKEN_EXPIRE_DAYS`).
 
-See [`backend/app/core/security.py:29-54`] for token generation and [`backend/app/core/security.py:84-107`] for validation.
+Logging out, or refreshing, revokes the old token: its ID (`jti`) goes on a Redis blacklist until the token would have expired anyway. Every protected route checks that list. Tokens are made by `create_access_token()` (`backend/app/core/security.py:31`) and revoked by `blacklist_token()` (`backend/app/core/security.py:89`).
+
+Sign in from the host:
+
+```bash
+curl -s -X POST http://localhost:8000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"analyst1","password":"hunter2secure"}'
+# {"access_token":"eyJ...","refresh_token":"eyJ...","token_type":"bearer"}
+```
 
 #### JWT Claims
 
 ```json
 {
-  "sub": "<user_id_uuid>",
-  "role": "admin|user",
-  "username": "optional",
-  "type": "access|refresh",
-  "jti": "<token_unique_id>",
-  "exp": 1234567890,
-  "iat": 1234567800
+  "sub": "<user id>",
+  "role": "admin | user",
+  "username": "analyst1",
+  "type": "access | refresh",
+  "jti": "<unique token id>",
+  "exp": 1234567890
 }
 ```
 
+Refresh tokens carry only `sub`, `type`, `jti` and `exp`.
+
 #### Common Dependencies
 
-All protected endpoints use:
-```python
-user: User = Depends(get_current_user)  # Validates JWT, checks blacklist
-db: AsyncSession = Depends(get_db)      # Database session
-```
+Each endpoint below lists one of these access levels:
 
-- **`get_current_user`** [`backend/app/core/security.py:106`]: Validates access token, blocks blacklisted tokens
-- **`get_admin_user`** [`backend/app/core/security.py:277`]: Ensures role == "admin"
-- **`get_current_user_from_query`** [`backend/app/core/security.py:254`]: Token via query param (for SSE endpoints)
+| Level | Who may call it | Dependency |
+| --- | --- | --- |
+| **Public** | Anyone, no token. Some of these check their own token instead (share links, publish feeds, RSS). | none |
+| **Visitor** | A signed-in user. With [public read-only mode](public-read-only-mode.md) on, also an anonymous visitor (read only, with some fields removed). | `get_viewer()` (`backend/app/core/security.py:161`), or `get_entry_viewer()` (`backend/app/core/security.py:194`) for one-article routes |
+| **User** | Any signed-in user. | `get_current_user()` (`backend/app/core/security.py:107`) |
+| **Admin** | Users with the `admin` role. Everyone else gets 403. | `get_admin_user()` (`backend/app/core/security.py:277`) |
+| **Owner** | A signed-in user, but only the row's creator or an admin may change or delete it (403 otherwise). | checked inside the route |
+
+"User (admin for …)" means the route is open to users, but some fields or options are admin-only.
+
+The first account registered on a fresh install becomes the admin. Right after that, registration needs an invite code, which the admin sees under Settings > Users.
 
 ---
 
@@ -91,15 +97,27 @@ db: AsyncSession = Depends(get_db)      # Database session
 
 ### Error Response Format
 
-All errors follow a consistent envelope (see [`backend/app/core/exceptions.py`]):
+Every error uses the same envelope (`AppError` in `backend/app/core/exceptions.py:7`):
 
 ```json
 {
   "error": {
-    "code": "error_code_string",
-    "message": "Human-readable message",
+    "code": "not_found",
+    "message": "Feed not found",
+    "details": []
+  }
+}
+```
+
+A request that fails validation returns 400 with one entry in `details` per bad field:
+
+```json
+{
+  "error": {
+    "code": "validation_error",
+    "message": "Request validation failed",
     "details": [
-      { "field": "fieldname", "message": "...", "code": "validation_code" }
+      { "field": "password", "message": "String should have at least 6 characters", "code": "string_too_short" }
     ]
   }
 }
@@ -109,24 +127,16 @@ All errors follow a consistent envelope (see [`backend/app/core/exceptions.py`])
 
 | Code | Status | Meaning |
 |------|--------|---------|
-| `unauthorized` | 401 | Missing/invalid/expired token |
-| `forbidden` | 403 | Insufficient permissions (not admin) |
-| `not_found` | 404 | Resource does not exist |
-| `conflict` | 409 | Resource already exists (duplicate) |
-| `validation_error` | 400 | Request body validation failed |
-| `rate_limited` | 429 | Rate limit exceeded |
-| `bad_request` | 400 | Invalid query parameters or business logic error |
-| `internal_error` | 500 | Unhandled exception |
+| `bad_request` | 400 | The request makes no sense for this resource |
+| `validation_error` | 400 | The body or query failed validation |
+| `unauthorized` | 401 | Missing, invalid, expired or revoked token |
+| `forbidden` | 403 | Signed in, but not allowed (not admin, not the owner) |
+| `not_found` | 404 | No such resource |
+| `conflict` | 409 | It already exists (for example a taken username) |
+| `rate_limited` | 429 | Too many requests; wait `Retry-After` seconds |
+| `internal_error` | 500 | Unhandled server error |
 
-**Example Error:**
-```bash
-curl -X POST http://localhost:8000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"user","password":"wrong"}'
-
-# Response:
-# {"error":{"code":"unauthorized","message":"Invalid username or password","details":[]}}
-```
+Many routes use their own, more specific codes (`invalid_title_filter`, `task_has_results`, `rule_search_unavailable` and so on). Check `error.code`, not only the status.
 
 ---
 
@@ -134,75 +144,44 @@ curl -X POST http://localhost:8000/api/auth/login \
 
 ### Offset-Limit Pagination (Standard)
 
-Used for most list endpoints:
+Most list endpoints take `limit` and `offset` and return:
 
 ```json
-{
-  "items": [ ... ],
-  "total": 1000,
-  "limit": 50,
-  "offset": 0,
-  "has_more": true
-}
+{ "items": [], "total": 1000, "limit": 50, "offset": 0, "has_more": true }
 ```
 
-**Query Parameters:**
-- `limit`: Max items per page (default 50, max 500)
-- `offset`: Page offset (default 0)
-
-**Example:**
-```bash
-curl http://localhost:8000/api/feeds?limit=20&offset=40
-```
+Defaults and maximums differ per endpoint (`GET /api/feeds` allows up to 1000). Some lists return a plain array instead; `/docs` shows which.
 
 ### Cursor Pagination (for Large Datasets)
 
-Used by `/api/entries` and other high-cardinality endpoints to avoid deep offset scanning:
+The entry lists (`GET /api/entries`, `GET /api/feeds/{feed_id}/entries`, `GET /api/entries/priority-queue`) page with a cursor so deep pages stay fast:
 
 ```json
-{
-  "items": [ ... ],
-  "next_cursor": "base64_encoded_cursor_token",
-  "has_more": true
-}
+{ "items": [], "next_cursor": "eyJpZCI6...", "has_more": true }
 ```
 
-**Query Parameters:**
-- `limit`: Max items per page (default 50, max 500)
-- `cursor`: Opaque token for next page
-
-**Example:**
-```bash
-# First page
-curl http://localhost:8000/api/entries?limit=50
-
-# Next page (use next_cursor from previous response)
-curl "http://localhost:8000/api/entries?limit=50&cursor=<next_cursor>"
-```
-
-**Note:** When using cursor pagination, `total` count is not available; use `has_more` to detect remaining items.
+Pass `next_cursor` back as `cursor` to get the next page. There is no `total`; use `has_more`, or `GET /api/entries/count` with the same filters.
 
 ---
 
 ## Rate Limiting
 
-Rate limiting is implemented via middleware (see [`backend/app/core/rate_limit.py`]).
+Limits are counted in Redis by `_get_limit()` (`backend/app/core/rate_limit.py:89`). Signed-in reads and most writes are not limited.
 
-**Limits by Path:**
+| Requests | Limit |
+| --- | --- |
+| `POST /api/auth/login`, `/register`, `/refresh` | 10 per 5 minutes |
+| Everything under `/api/ai/` except `/tasks`, `/providers`, `/prompts` and `/copilot-auth`; also creating or testing a provider | 20 per minute |
+| `POST /api/shared/{token}/run-ai-task` and `/ask-agent` | 20 per minute (plus a per-link daily cap, `share_ai_daily_requests`) |
+| Anonymous visitors (public read-only mode), most routes | 180 per minute and 1500 per hour |
+| Anonymous: one full article (`GET /api/entries/{id}`) | 20 per minute and 150 per hour |
+| Anonymous: heavy reads (graphs, pivots, timelines, analytics, map, calendar, priority queue, relationships, entity links, CWEs) | 20 per minute and 200 per hour |
+| `/api/taxii2/` and `/api/publish/` pulls | 240 per minute |
+| `/api/health`, `/metrics` | never limited |
 
-| Path Pattern | Limit | Window | Reason |
-|--------------|-------|--------|--------|
-| `/api/auth/login`, `/api/auth/register`, `/api/auth/refresh` | 10 req/5 min | Per identity (user or IP) | Brute-force protection |
-| `/api/ai/...` (inference only) | 20 req/min | Per user | Protect API credits |
-| `/api/chat` (POST) | 10 req/min | Per user | Protect streaming costs |
-| All others | Unlimited | — | Self-hosted, small trusted user base |
+Limited responses carry `X-RateLimit-Limit` and `X-RateLimit-Remaining`. A 429 carries `Retry-After`.
 
-**Headers:**
-- `X-RateLimit-Limit`: Max requests in window
-- `X-RateLimit-Remaining`: Requests left in window
-- `Retry-After`: Seconds to wait (on 429)
-
-**Identity:** The `sub` of a JWT whose signature verifies; otherwise the client IP: the first `X-Forwarded-For` hop when the direct peer is on a private network (the proxy writes that header itself), or the header named in `TRUSTED_CLIENT_IP_HEADER` first when an edge such as Cloudflare fronts a locked-down origin. An unverified bearer never names a bucket, so the login-free share routes can't mint one per request.
+**Who is counted:** the user in a token whose signature checks out; otherwise the client IP. Behind a proxy on a private network, the IP is the first `X-Forwarded-For` hop. If an edge such as Cloudflare fronts the server, set `TRUSTED_CLIENT_IP_HEADER` (for example `CF-Connecting-IP`) and that header is read first.
 
 ---
 
@@ -210,773 +189,157 @@ Rate limiting is implemented via middleware (see [`backend/app/core/rate_limit.p
 
 ### Middleware Stack (applied bottom-up)
 
-1. **CORS Middleware:** Allow configured origins, credentials, standard methods
-2. **RateLimitMiddleware** [`backend/app/core/rate_limit.py`]: Sliding-window rate limiting via Redis
-3. **SecurityHeadersMiddleware** [`backend/app/core/security_headers.py`]: Inject CSP, X-Frame-Options, HSTS, etc.
-4. **PrometheusMiddleware** [`backend/app/core/metrics.py`]: Observe HTTP metrics
-5. **AuditLoggingMiddleware** [`backend/app/core/logging.py`]: Log auth/data changes
-6. **RequestLoggingMiddleware** [`backend/app/core/logging.py`]: Structured request/response logs
+A request passes through these in order (outermost first):
+
+1. **CORS:** allows the origins in `CORS_ORIGINS`.
+2. **Security headers** (`backend/app/core/security_headers.py`): adds the headers below to every reply.
+3. **Rate limit** (`backend/app/core/rate_limit.py`): see above.
+4. **Anonymous write lock** (`backend/app/core/public_access.py`): a request with no token may only read. Any other write returns 401 "Sign in to make changes". It also caps anonymous page sizes on the article lists at 50, and strips private fields from anonymous replies.
+5. **Prometheus metrics** (`backend/app/core/metrics.py`).
+6. **Audit log** (`backend/app/core/logging.py`): writes every `/api/` request with method, path, status, user and client IP to `audit.log`.
+7. **Request log** (`backend/app/core/logging.py`): structured request logs.
 
 ### Security Headers
 
-**Production Headers:**
-- `Strict-Transport-Security: max-age=63072000; includeSubDomains`
-- `X-Content-Type-Options: nosniff`
-- `X-Frame-Options: DENY`
-- `Content-Security-Policy: default-src 'self'; ...`
-- `Permissions-Policy: camera=(), microphone=(), geolocation=()`
+Every reply gets `Strict-Transport-Security: max-age=63072000; includeSubDomains`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`, `X-Robots-Tag: noindex, nofollow` and a strict `Content-Security-Policy`. `/api/` replies also get `Cache-Control: private, no-store` (unless the route sets its own), so no shared cache serves one person's data to another.
 
-**Docs Endpoints** (`/docs`, `/openapi.json`, `/redoc`): Relaxed CSP to allow CDN JS/CSS from unpkg, jsdelivr.
+`/docs`, `/redoc` and `/openapi.json` get a looser CSP so the Swagger and ReDoc bundles can load from `cdn.jsdelivr.net` and `unpkg.com`.
 
 ### Token Blacklisting
 
-On logout or token refresh, the previous token's JTI is added to a Redis set with a TTL equal to remaining token lifetime. All protected endpoints check the blacklist (see [`backend/app/core/security.py:66`], `blacklist_token`).
+See [JWT Token Flow](#jwt-token-flow). Logout revokes the access token and, if you send it, the refresh token.
 
 ---
 
 ## API Endpoints by Domain
 
+All paths below start with `/api` unless shown otherwise. `{id}`-style names are path parameters.
+
 ### Auth & Users
 
-Base path: `/api/auth`, `/api/admin/users`
-
-#### Registration & Login
-
-**`GET /api/auth/registration-status`**
-
-Check if registration is open and whether an invite code is required.
-
-**Auth:** None  
-**Response:**
-```json
-{
-  "registration_enabled": true,
-  "invite_code_required": false
-}
-```
-
----
-
-**`POST /api/auth/register`**
-
-Create a new user account. Registration may be disabled or require an invite code. The first account registered on a fresh install automatically becomes the admin.
-
-**Auth:** None  
-**Status:** 201 Created  
-**Request:**
-```json
-{
-  "username": "alice",
-  "password": "securepass123",
-  "invite_code": "optional-code"
-}
-```
-**Response:**
-```json
-{
-  "access_token": "eyJhbGc...",
-  "refresh_token": "eyJhbGc..."
-}
-```
-
-See [`backend/app/schemas/auth.py`] for schema details.
-
----
-
-**`POST /api/auth/login`**
-
-Authenticate with username/password. Tracks `last_login`.
-
-**Auth:** None  
-**Status:** 200 OK  
-**Request:**
-```json
-{
-  "username": "alice",
-  "password": "securepass123"
-}
-```
-**Response:**
-```json
-{
-  "access_token": "eyJhbGc...",
-  "refresh_token": "eyJhbGc..."
-}
-```
-
-**Rate Limit:** 10 req/5 min (brute-force protection)
-
----
-
-**`POST /api/auth/refresh`**
-
-Issue new access+refresh tokens by rotating refresh token. The old refresh token is blacklisted.
-
-**Auth:** None  
-**Status:** 200 OK  
-**Request:**
-```json
-{
-  "refresh_token": "eyJhbGc..."
-}
-```
-**Response:**
-```json
-{
-  "access_token": "eyJhbGc...",
-  "refresh_token": "eyJhbGc..."
-}
-```
-
-**Rate Limit:** 10 req/5 min
-
----
-
-**`POST /api/auth/logout`**
-
-Revoke the current access token and optional refresh token by blacklisting their JTIs.
-
-**Auth:** Bearer token required  
-**Status:** 200 OK  
-**Request:**
-```json
-{
-  "refresh_token": "eyJhbGc..."
-}
-```
-**Response:**
-```json
-{
-  "message": "Logged out successfully"
-}
-```
-
----
-
-**`GET /api/auth/me`**
-
-Get the current authenticated user's profile.
-
-**Auth:** Bearer token required  
-**Response:**
-```json
-{
-  "id": "550e8400-e29b-41d4-a716-446655440000",
-  "username": "alice",
-  "role": "admin",
-  "is_active": true,
-  "settings": {},
-  "created_at": "2024-01-15T10:30:00Z",
-  "last_login": "2024-01-20T14:22:00Z"
-}
-```
-
----
-
-**`PUT /api/auth/me`**
-
-Update the current user's settings (user preferences, UI config, etc.).
-
-**Auth:** Bearer token required  
-**Status:** 200 OK  
-**Request:**
-```json
-{
-  "settings": {
-    "theme": "dark",
-    "items_per_page": 25,
-    "default_dashboard": "summary"
-  }
-}
-```
-
----
-
-**`PATCH /api/auth/me/settings`**
-
-Shallow-merge top-level keys into the current user's settings blob, leaving every key not named in the request untouched. Prefer this over `PUT /api/auth/me` whenever a client writes one slice of the blob (triage view, table layouts) — a full replace built from a stale snapshot silently drops the other slices.
-
-**Auth:** Bearer token required  
-**Status:** 200 OK — returns the full updated user  
-**Request:**
-```json
-{
-  "settings": {
-    "table_layouts": {
-      "entries": {
-        "columnVisibility": { "feed": false },
-        "columnWidths": { "title": 420 },
-        "columnOrder": ["title", "published_at"],
-        "updatedAt": 1756500000000
-      }
-    }
-  }
-}
-```
-
----
-
-**`PUT /api/auth/me/password`**
-
-Change the current user's password.
-
-**Auth:** Bearer token required  
-**Status:** 200 OK  
-**Request:**
-```json
-{
-  "current_password": "oldpass123",
-  "new_password": "newpass456"
-}
-```
-
----
-
-**`GET /api/auth/invite-code`** (Admin only)
-
-Retrieve the current registration invite code (if set).
-
-**Auth:** Bearer token + admin role  
-**Response:**
-```json
-{
-  "invite_code": "ABC-DEF-123" or null
-}
-```
-
----
-
-**`GET /api/admin/users`**
-
-List all users. Admin only. Returns a plain array (not paginated).
-
-**Auth:** Bearer token + admin role  
-**Response:**
-```json
-[
-  { "id": "550e8400-...", "username": "alice", "role": "admin", "is_active": true, ... }
-]
-```
-
----
-
-**`GET /api/admin/users/{user_id}`**
-
-Get a single user. Admin only.
-
-**Auth:** Bearer token + admin role
-
----
-
-**`PATCH /api/admin/users/{user_id}`**
-
-Update a user's role, active flag, or password. Admin only.
-
-**Auth:** Bearer token + admin role  
-**Status:** 200 OK
-
----
-
-**`DELETE /api/admin/users/{user_id}`**
-
-Delete a user. Admin only.
-
-**Auth:** Bearer token + admin role  
-**Status:** 204 No Content
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/auth/registration-status` | Public | `registration_enabled`, `invite_code_required`, `public_read_only_enabled` |
+| POST | `/api/auth/register` | Public | Create an account (`username`, `password` of 6+ characters, `invite_code`). Returns a token pair (201). 403 when closed or the code is wrong, 409 when the name is taken |
+| POST | `/api/auth/login` | Public | Username and password in, token pair out. Updates `last_login` |
+| POST | `/api/auth/refresh` | Public | `{"refresh_token"}` in, new pair out. The old refresh token is revoked |
+| POST | `/api/auth/logout` | Bearer token | Revoke the current access token and the `refresh_token` in the body |
+| GET | `/api/auth/me` | User | Your profile: id, username, role, settings, theme, feed counts |
+| PUT | `/api/auth/me` | User | Replace your `settings` object |
+| PATCH | `/api/auth/me/settings` | User | Merge top-level keys into `settings`, leaving the rest alone. Use this when you change one part (say `table_layouts`): a full `PUT` built from a stale copy drops the other parts |
+| PUT | `/api/auth/me/password` | User | Change password (`current_password`, `new_password`) |
+| GET | `/api/auth/invite-code` | Admin | The current invite code, or null |
+| GET | `/api/admin/users` | Admin | All accounts, oldest first (plain array) |
+| GET | `/api/admin/users/{user_id}` | Admin | One account |
+| PATCH | `/api/admin/users/{user_id}` | Admin | Change username, role, active flag or password. You can't demote or deactivate yourself |
+| DELETE | `/api/admin/users/{user_id}` | Admin | Delete an account (not your own) |
 
 ---
 
 ### Feeds & Content Ingestion
 
-Base paths: `/api/feeds`, `/api/opml`, `/api/entries` (ingest)
-
 #### Feed Management
 
-**`GET /api/feeds`**
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/feeds` | Visitor | Your feeds with unread counts. `category_id`, `limit` (max 1000), `offset` |
+| POST | `/api/feeds` | User | Add a feed. The category's `feed_defaults` fill any pipeline settings you leave out |
+| POST | `/api/feeds/discover` | User | Find the feed behind a web page URL, without adding it |
+| GET | `/api/feeds/{feed_id}` | Visitor | One feed |
+| PUT | `/api/feeds/{feed_id}` | User (admin for infrastructure fields) | Change the fields you send. See below |
+| DELETE | `/api/feeds/{feed_id}` | User (admin to delete) | See below |
+| GET | `/api/feeds/{feed_id}/entries` | Visitor | The feed's articles, cursor-paged like `GET /api/entries` |
+| POST | `/api/feeds/{feed_id}/refresh` | User | Fetch the feed now (queued) |
+| POST | `/api/feeds/{feed_id}/resume` | Admin | Turn back on a feed the health check paused, and clear its failure count |
+| GET | `/api/feeds/health` | User | Counts of healthy, stale, erroring and disabled feeds |
+| GET | `/api/feeds/health/failing` | User | Feeds failing `threshold` times in a row (default 5). High-value feeds (rated A/B) come first |
+| GET | `/api/feeds/{feed_id}/analytics` | User | Source reliability numbers for one feed |
+| GET | `/api/feeds/{feed_id}/value` | User | The feed's value score and its rank among all scored feeds. `days` 7-365, default 90 |
+| GET | `/api/feeds/{feed_id}/pipeline` | User | Which pipeline stages run for this feed and what decided each one |
+| GET | `/api/feeds/{feed_id}/ai-usage` | User | AI calls and tokens spent on the feed's articles. `days` 1-365, default 30 |
+| POST | `/api/feeds/{feed_id}/title-filter/preview` | User | How many of the last 100 titles an exclude list would drop, with up to five examples. Saves nothing |
+| GET | `/api/feeds/{feed_id}/subscribers` | Admin | Who reads this feed and who doesn't |
+| POST | `/api/feeds/{feed_id}/subscribers` | Admin | Subscribe users on their behalf |
+| DELETE | `/api/feeds/{feed_id}/subscribers/{user_id}` | Admin | Unsubscribe a user on their behalf |
+| POST | `/api/feeds/{feed_id}/full-sync` | User | Full tree sync of a GitHub repo feed |
+| GET | `/api/feeds/{feed_id}/full-sync/progress` | User | Progress of that sync |
 
-List configured feeds with unread counts and sync status.
+**Editing a feed.** Anyone may change curation fields: `custom_title`, `category_id`, `is_muted`, the ratings and `analyst_notes`. Only an admin may change the shared settings: `url`, `feed_type`, `fetch_interval_minutes`, `retention_days`, `adapter_config`, `exclude_shorts`, `intel_extraction_mode`, `ai_analysis_enabled`, `auto_extract_on_ingest`, `extract_detection_rules`, `extract_tools`, `exclude_title_patterns` and `visible_to_visitors`. `is_active` is admin-only too, unless per-user subscriptions are on (then pausing is personal).
 
-**Auth:** Bearer token  
-**Query Params:**
-- `limit`, `offset`: Pagination
-- `search`: Filter by feed title
-- `feed_type`: Filter by type (e.g., "rss", "atom", "github_repo")
-- `category_id`: Filter by category
-- `include_stats`: Include analytics (hit count, publishing rate)
+**Deleting a feed.** With the `per_user_subscriptions_enabled` setting off, only an admin may delete, and the feed's articles go with it. With it on, `DELETE` unsubscribes the caller and leaves the feed for everyone else. A feed nobody subscribes to stops fetching. An admin passes `?purge=true` to really delete it.
 
-**Response:**
-```json
-{
-  "items": [
-    {
-      "id": "550e8400-...",
-      "title": "Example Security Feed",
-      "url": "https://example.com/feed.xml",
-      "feed_type": "rss",
-      "category_id": "550e8401-...",
-      "unread_count": 42,
-      "is_muted": false,
-      "is_active": true,
-      "interval": 60,
-      "last_sync_at": "2024-01-20T14:22:00Z",
-      "adapter_config": {},
-      "custom_title": "Custom Title"
-    }
-  ],
-  "total": 100,
-  "limit": 50,
-  "offset": 0,
-  "has_more": true
-}
-```
+**Exclude-title lists** are plain phrases, one per line, matched anywhere in the title, ignoring case. A line under 3 or over 200 characters, or more than 50 lines, returns 422 `invalid_title_filter`.
 
----
+**Pipeline answer.** `decided_by` per stage is `legacy` (the feed's own columns decide, as they do while `pipeline_engine_enabled` is off) or the plan scope that decided it: `global`, `category` or `feed`.
 
-**`POST /api/feeds`**
-
-Add a new feed. Auto-detects feed type and interval based on URL.
-
-**Auth:** Bearer token  
-**Status:** 201 Created  
-**Request:**
-```json
-{
-  "url": "https://example.com/feed.xml",
-  "category_id": "550e8401-...",
-  "custom_title": "Optional custom name",
-  "is_muted": false,
-  "adapter_config": {}
-}
-```
-**Response:** Same as `GET /api/feeds` item
-
----
-
-**`GET /api/feeds/health`**
-
-Get feed sync health dashboard: total feeds, sync status distribution, last sync time.
-
-**Auth:** Bearer token  
-**Response:**
-```json
-{
-  "total_feeds": 200,
-  "syncing": 5,
-  "idle": 190,
-  "error": 5,
-  "last_sync_at": "2024-01-20T14:22:00Z"
-}
-```
-
----
-
-**`GET /api/feeds/health/failing`**
-
-Breakage alerts: active feeds with `error_count >= threshold` consecutive fetch failures. High-value feeds (reliability rating A/B) are flagged `is_high_value` and sorted first.
-
-**Auth:** Bearer token  
-**Query Params:**
-- `threshold`: Consecutive-failure cutoff (default 5, max 100)
-
-**Response:**
-```json
-{
-  "threshold": 5,
-  "total": 3,
-  "high_value_count": 1,
-  "feeds": [
-    { "id": "...", "title": "...", "error_count": 12, "last_error": "...", "is_high_value": true }
-  ]
-}
-```
-
----
-
-**`GET /api/feeds/{feed_id}/analytics`**
-
-Per-feed source reliability analytics (publishing cadence, intel yield, reliability rating).
-
-**Auth:** Bearer token
-
----
-
-**`GET /api/feeds/{feed_id}/entries`**
-
-List a single feed's entries (cursor-paginated, same shape as `GET /api/entries`).
-
-**Auth:** Bearer token
-
----
-
-**`GET /api/feeds/{feed_id}`**
-
-Get a single feed's detailed configuration.
-
-**Auth:** Bearer token  
-**Response:** Feed object (see POST response)
-
----
-
-**`PUT /api/feeds/{feed_id}`**
-
-Update feed configuration (title, category, interval, adapter config). Infrastructure fields (`url`, `feed_type`, `is_active`, `fetch_interval_minutes`, `retention_days`, `adapter_config`, `exclude_shorts`, `exclude_title_patterns`, `intel_extraction_mode`, `ai_analysis_enabled`, `auto_extract_on_ingest`, `extract_detection_rules`, `extract_tools`) are admin-only; curation fields (`custom_title`, `category_id`, `is_muted`, ratings, `analyst_notes`) are open to all users. `is_muted` is per-user when per-user subscriptions are enabled.
-
-**Auth:** Bearer token (admin for infrastructure fields)  
-**Status:** 200 OK  
-**Request:**
-```json
-{
-  "custom_title": "New title",
-  "category_id": "550e8401-...",
-  "interval": 120,
-  "adapter_config": { ... }
-}
-```
-
----
-
-**`DELETE /api/feeds/{feed_id}`**
-
-Delete a feed (admin only) — removes the feed record and cascades its entries. With the `per_user_subscriptions_enabled` system setting on, this endpoint instead unsubscribes the caller (any user): the feed and its entries stay for everyone else, and a feed with zero subscribers stops fetching. Admins pass `?purge=true` for a physical delete in that mode.
-
-**Auth:** Bearer token (admin for physical delete; any user to unsubscribe when per-user subscriptions are enabled)  
-**Status:** 204 No Content
-
----
-
-**`GET /api/feeds/{feed_id}/value`**
-
-One feed's intelligence value score plus its rank among the scored set. Scoring runs over every active feed rather than this one alone — "entity introductions" means *first seen anywhere*, so a single-feed computation would count every entity the feed ever mentioned — but the response is a single row. Backs the Edit Feed modal's Overview pane.
-
-**Auth:** Bearer token
-**Query:** `days` (7-365, default 90)
-**Status:** 200 OK, 404 if the feed does not exist
-**Response:**
-```json
-{
-  "feed_id": "d5b2c8a1-4f3e-4b7a-9c6d-2e8f1a0b3c4d",
-  "scored": true,
-  "score": 48.2,
-  "tier": "B",
-  "articles": 142,
-  "unique_entities": 87,
-  "entity_introductions": 11,
-  "correlation_events": 3,
-  "detection_rules": 0,
-  "pir_matches": 2,
-  "rank": 4,
-  "of": 37,
-  "days": 90
-}
-```
-
----
-
-**`GET /api/feeds/{feed_id}/pipeline`**
-
-Which pipeline stages run for this feed, and what decided each one. `decided_by` is `"legacy"` when the value still comes from the Feed columns (the case while `pipeline_engine_enabled` is off), otherwise the plan scope that overrode it — `global`, `category` or `feed`. The Edit Feed modal's Pipeline pane reads this so it can stop presenting its own checkbox as authoritative for a stage a plan controls.
-
-**Auth:** Bearer token
-**Status:** 200 OK, 404 if the feed does not exist
-**Response:**
 ```json
 {
   "engine_enabled": true,
-  "stages": {
-    "autolink": { "enabled": true, "config": {} },
-    "extract": { "enabled": false, "config": { "mode": "selective", "detection_rules": false } }
-  },
-  "decided_by": { "autolink": "feed", "extract": "legacy" }
+  "stages": { "extract": { "enabled": false, "config": { "mode": "selective" } } },
+  "decided_by": { "extract": "legacy" }
 }
 ```
-
----
-
-**`GET /api/feeds/{feed_id}/ai-usage`**
-
-AI calls made on the feed's articles in the last `days` (1-365, default 30): `runs` counts calls that moved tokens (a reuse from a near-duplicate article is not one), plus input/output token totals, the last call's time and the feed's `ai_analysis_enabled`. Muting a feed does not stop its AI analysis; the feed modal shows this beside a muted feed.
-
-**Auth:** Bearer token
-**Response:**
-```json
-{ "feed_id": "...", "days": 30, "runs": 412, "tokens_input": 780000, "tokens_output": 24000, "last_run_at": "2026-10-24T18:02:11Z", "ai_analysis_enabled": true }
-```
-
----
-
-**`POST /api/feeds/{feed_id}/title-filter/preview`**
-
-How many of the feed's last 100 titles an exclude-title list would drop, with up to five examples. `exclude_title_patterns` is plain phrases, one per line, matched as case-insensitive substrings. The list is validated as saving it would be: a line under 3 or over 200 characters, or more than 50 lines, returns 422 `invalid_title_filter`. Nothing is stored.
-
-**Auth:** Bearer token
-**Request:**
-```json
-{ "exclude_title_patterns": "ISC Stormcast For" }
-```
-**Response:**
-```json
-{ "checked": 100, "dropped": 21, "examples": ["ISC Stormcast For Friday, October 24th, 2025"] }
-```
-
----
-
-**`POST /api/feeds/{feed_id}/refresh`**
-
-Trigger an immediate sync of a single feed (background job).
-
-**Auth:** Bearer token  
-**Status:** 200 OK  
-**Response:**
-```json
-{
-  "feed_id": "550e8400-...",
-  "status": "queued",
-  "message": "Sync job enqueued"
-}
-```
-
----
-
-**`POST /api/feeds/{feed_id}/full-sync`**
-
-Perform a full resync: clear the feed's cursor/since token and reindex all available articles.
-
-**Auth:** Bearer token  
-**Status:** 200 OK  
-**Response:**
-```json
-{
-  "status": "in_progress",
-  "message": "Full sync initiated",
-  "job_id": "..."
-}
-```
-
----
-
-**`GET /api/feeds/{feed_id}/full-sync/progress`**
-
-Poll the status of a running full-sync job.
-
-**Auth:** Bearer token  
-**Response:**
-```json
-{
-  "status": "in_progress",
-  "fetched": 250,
-  "stored": 180,
-  "errors": 5,
-  "elapsed_seconds": 32
-}
-```
-
----
-
-**`POST /api/feeds/discover`**
-
-Discover a feed URL from a website. Returns possible feed URLs found via link tags.
-
-**Auth:** Bearer token  
-**Status:** 200 OK  
-**Request:**
-```json
-{
-  "url": "https://example.com"
-}
-```
-**Response:**
-```json
-{
-  "feeds": [
-    { "url": "https://example.com/feed.xml", "title": "Main Feed", "type": "rss" },
-    { "url": "https://example.com/blog/feed", "title": "Blog", "type": "atom" }
-  ]
-}
-```
-
----
 
 #### Extended Feed Types
 
-**`POST /api/feeds/github-repo/bulk-setup`**
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/feeds/github-repo/templates` | User | The built-in list of detection-rule GitHub repos |
+| POST | `/api/feeds/github-repo/bulk-setup` | User | Add a feed for each repo in that list |
+| POST | `/api/feeds/bluesky/resolve-feed-url` | User | Turn a `bsky.app` custom feed URL into its `at://` URI |
+| PUT | `/api/feeds/youtube/exclude-shorts` | Admin | Set `exclude_shorts` on every YouTube feed |
+| PUT | `/api/feeds/category/{category_id}/intel-mode` | Admin | Set `intel_extraction_mode` on every feed in a category |
+| PUT | `/api/feeds/category/{category_id}/bulk-update` | Admin | Change settings on every feed in a category. `save_as_category_default: true` also saves the pipeline settings as the category's `feed_defaults`; `apply_to_feeds: false` saves only the defaults |
 
-Create multiple GitHub repository feeds from a CSV or list.
+#### Categories
 
-**Auth:** Bearer token  
-**Request:**
-```json
-{
-  "repos": [
-    { "owner": "torvalds", "repo": "linux", "content_type": "releases" }
-  ],
-  "category_id": "550e8401-..."
-}
-```
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/categories` | Visitor | The category tree with feed counts |
+| POST | `/api/categories` | User | Create a category (201) |
+| PUT | `/api/categories/{category_id}` | User (admin for `feed_defaults`) | Rename, move or reorder. `feed_defaults` replaces the category's defaults (`{}` clears them) |
+| PUT | `/api/categories/reorder` | User | Save a new order and parent for many categories |
+| DELETE | `/api/categories/{category_id}` | Admin | Delete a category. Its feeds move to uncategorized |
 
----
-
-**`GET /api/feeds/github-repo/templates`**
-
-List template configurations for GitHub feed types (releases, issues, advisories, etc.).
-
-**Auth:** Bearer token
-
----
-
-**`POST /api/feeds/bluesky/resolve-feed-url`**
-
-Resolve a Bluesky feed URL from a handle or feed name.
-
-**Auth:** Bearer token
-
----
-
-**`PUT /api/feeds/youtube/exclude-shorts`**
-
-Bulk filter YouTube shorts from a category.
-
-**Auth:** Bearer token
-
----
-
-**`PUT /api/feeds/category/{category_id}/intel-mode`**
-
-Toggle intelligence extraction mode for every feed in a category.
-
-**Auth:** Bearer token
-
----
-
-**`PUT /api/feeds/category/{category_id}/bulk-update`**
-
-Change settings on every feed in a category now — fetch interval, retention, the three ratings and the five pipeline settings (`intel_extraction_mode`, `ai_analysis_enabled`, `extract_tools`, `auto_extract_on_ingest`, `extract_detection_rules`). With `save_as_category_default: true` the pipeline settings sent are also merged into the category's `feed_defaults`, which feeds added to it later start with; `apply_to_feeds: false` skips the current feeds and only saves the defaults. Fields left out stay as they are.
-
-**Auth:** Bearer token (admin)
-**Response:**
-```json
-{ "updated": 12, "feed_defaults": { "ai_analysis_enabled": false, "extract_tools": false } }
-```
-
----
+`feed_defaults` are the pipeline settings a new feed in the category starts with. They apply once, when the feed is created. Changing them later, or moving a feed into the category, does not change existing feeds.
 
 #### OPML Import/Export
 
-**`POST /api/opml/import`**
-
-Import feeds from an OPML file (bulk add from another reader). Admin-only unless the `per_user_subscriptions_enabled` system setting is on, in which case any user may import (imported feeds subscribe the importer).
-
-**Auth:** Bearer token (admin unless per-user subscriptions are enabled)  
-**Status:** 200 OK  
-**Request:** Multipart form with `opml_file`  
-**Response:**
-```json
-{
-  "imported": 45,
-  "skipped": 3,
-  "errors": [ { "line": 5, "message": "Invalid URL" } ]
-}
-```
-
----
-
-**`GET /api/opml/export`**
-
-Export all feeds as OPML (XML).
-
-**Auth:** Bearer token  
-**Response:** `Content-Type: application/xml`
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| POST | `/api/opml/import` | User (admin unless per-user subscriptions are on) | Import an OPML file (multipart field `file`, max 10 MB). Returns `feeds_added`, `feeds_skipped`, `categories_created`, `errors` |
+| GET | `/api/opml/export` | User | All feeds as OPML XML |
+| GET | `/api/opml/starter-packs` | User | The curated starter feed packs |
+| POST | `/api/opml/starter-packs/import` | User (admin unless per-user subscriptions are on) | Import starter packs by id |
+| GET | `/api/onboarding/status` | User | Whether this install is seeded, fetching feeds and linking entities |
 
 ---
 
 ### Entries & Article Management
 
-Base path: `/api/entries`
+An entry is one article (or post, video, file) pulled from a feed.
 
 #### Listing & Filtering
 
-**`GET /api/entries`**
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/entries` | Visitor | The reader's article list, cursor-paged. Filters below |
+| GET | `/api/entries/count` | Visitor | How many entries match the same filters |
+| GET | `/api/entries/{entry_id}` | Visitor | One article: content, translation, your read/star state, duplicates from other feeds |
+| GET | `/api/entries/priority-queue` | Visitor | The ranked reading queue. See below |
+| GET | `/api/entries/priority-unread-count` | Visitor | The Priority Queue badge count |
+| GET | `/api/entries/triage` | User | Triage queue scored by recency, engagement and requirement matches |
+| POST | `/api/entries/resolve-names` | Visitor | Entry ids in, `{id, title, feed_title}` out |
 
-List articles with advanced filtering, cursor pagination, and deduplication.
+`GET /api/entries` filters: `feed_id`, `category_id`, `is_read`, `is_starred`, `is_bookmarked`, `content_type`, `change_type`, `since`, `before`, `country_id` + `country_role` (`origin`, `target`, `infrastructure`, `mentioned`), `campaign_id`, `exploited_cves`, `entity_type` + `entity_id`, `sector`, `watched`, `sort` (`newest`, `oldest`, `title_asc`, `title_desc`, `shortest`, `longest`, `radar`), `dedup` (default true: show one copy of the same article from several feeds), `limit` (default 50, max 500), `cursor`. Muted feeds are left out of the all-feeds view, but included when you pass `feed_id` or `category_id`.
 
-**Auth:** Bearer token  
-**Query Params:**
-- `feed_id`: Filter by feed
-- `category_id`: Filter by category
-- `is_read`: true|false|null (unread only)
-- `is_starred`: true|false
-- `is_bookmarked`: true|false
-- `content_type`: e.g., "github_repo", "mastodon" (for extended feeds)
-- `since`: ISO date, only after this timestamp
-- `before`: ISO date, only before this timestamp
-- `country_id`, `country_role`: Filter by country (origin, target, mentioned, infrastructure)
-- `campaign_id`: Filter by campaign
-- `sort`: "newest" | "oldest" | "most_relevant"
-- `dedup`: true (default, merge near-duplicates from multiple feeds)
-- `limit`: Max items (default 50, max 500)
-- `cursor`: Pagination cursor
+**Priority Queue.** Unread articles above the radar threshold, ranked by their 0-10 priority score. Open story threads are folded in as single rows: a thread ranks by its best unread article, and its members don't also appear on their own. Parameters: `unread_only` (default true), `with_threads` (default true), `exclude_thread_ids` (repeatable; those threads' members come back as normal rows), `limit` (default 50, max 200; thread rows come on top), `cursor`.
 
-**Response:**
 ```json
 {
   "items": [
-    {
-      "id": "550e8400-...",
-      "title": "Article Title",
-      "summary": "Brief excerpt",
-      "url": "https://example.com/article",
-      "published_at": "2024-01-20T10:00:00Z",
-      "feed_id": "550e8401-...",
-      "feed_title": "Example Feed",
-      "author": "John Doe",
-      "content_type": "article",
-      "is_read": false,
-      "is_starred": true,
-      "is_bookmarked": false,
-      "created_at": "2024-01-20T11:00:00Z"
-    }
-  ],
-  "next_cursor": "eyJvZmZzZXQiOiA1MCwgInRpbWVzdGFtcCI6ICIyMDI0LTAxLTIwVDEwOjAwOjAwWiJ9",
-  "has_more": true
-}
-```
-
----
-
-**`GET /api/entries/priority-queue`**
-
-The ranked reading queue, assembled as the Priority Queue page renders it: unread
-entries clearing the radar threshold, ordered by their 0–10 priority score, with
-open story threads folded in as single rows. A thread ranks by the score of its
-best unread beat, and its members
-are withheld from the queue as standalone entries — the thread row stands for
-them. Threads with nothing unread never appear.
-
-**Auth:** Bearer token
-**Query Params:**
-- `unread_only`: true (default) — false also returns entries already read
-- `with_threads`: true (default) — false returns entries only, unfolded
-- `exclude_thread_ids`: repeatable; drops a thread row and releases its members
-- `limit`: entries per page (default 50, max 200); thread rows are additional
-- `cursor`: pagination cursor from the previous page
-
-**Response:**
-```json
-{
-  "items": [
-    {
-      "kind": "thread",
-      "score": 9.6,
-      "entry": null,
-      "thread": { "slug": "gitlab-path-traversal-exploited", "source_count": 14, "unread_count": 9, "...": "..." },
-      "absorbed_entry_ids": ["550e8400-..."]
-    },
-    {
-      "kind": "entry",
-      "score": 8.7,
-      "entry": { "id": "550e8401-...", "title": "Article Title", "...": "..." },
-      "thread": null,
-      "absorbed_entry_ids": []
-    }
+    { "kind": "thread", "score": 9.6, "entry": null, "thread": { "slug": "gitlab-path-traversal-exploited" }, "absorbed_entry_ids": ["..."] },
+    { "kind": "entry", "score": 8.7, "entry": { "id": "...", "title": "..." }, "thread": null, "absorbed_entry_ids": [] }
   ],
   "next_cursor": "eyJlbnRyeSI6...",
   "has_more": true,
@@ -984,2563 +347,1193 @@ them. Threads with nothing unread never appear.
 }
 ```
 
-`radar_threshold` is null when the signal engine is not surfacing, in which case
-the queue is every unread entry ranked by score rather than a filtered set.
-
----
-
-**`GET /api/entries/triage`**
-
-High-priority triage queue: scores entries by recency, engagement (reads/stars), and matching intelligence requirements.
-
-**Auth:** Bearer token  
-**Query Params:**
-- `days`: Look-ahead window (default 7, max 30)
-- `limit`, `offset`: Pagination
-- `user`: Populated from JWT claims
-
-**Response:**
-```json
-{
-  "items": [
-    {
-      "id": "550e8400-...",
-      "title": "Critical Vulnerability Disclosure",
-      "triage_score": 0.92,
-      "reason": "CVE extraction pending, matches 3 requirements",
-      "feed_title": "SecurityAffairs",
-      "published_at": "2024-01-20T08:00:00Z"
-    }
-  ],
-  "total": 23,
-  "limit": 50,
-  "offset": 0,
-  "has_more": false
-}
-```
-
----
-
-**`GET /api/entries/{entry_id}`**
-
-Fetch a single article with full content and metadata.
-
-**Auth:** Bearer token  
-**Response:**
-```json
-{
-  "id": "550e8400-...",
-  "title": "...",
-  "content_html": "<p>Full HTML content</p>",
-  "content_text": "Full plain text",
-  "media": [
-    {
-      "id": "550e8402-...",
-      "url": "https://example.com/image.jpg",
-      "media_type": "image",
-      "title": "Screenshot"
-    }
-  ],
-  "countries": [
-    { "id": "550e8403-...", "name": "CN", "role": "origin" }
-  ],
-  "threat_actors": [ ... ],
-  "malware": [ ... ],
-  "ttps": [ ... ],
-  "cves": [ ... ],
-  "tags": [ { "id": "...", "name": "vulnerability", "color": "#FF0000", "display_as_chip": false, "description": null, "is_global": false, "personal": true } ],
-  "comments_count": 5,
-  "notes_count": 2
-}
-```
-
----
+`radar_threshold` is null when the signal engine isn't surfacing; then the queue is every unread entry ranked by score.
 
 #### Entry State & Bulk Actions
 
-**`PUT /api/entries/{entry_id}/read`** / **`PUT /api/entries/{entry_id}/unread`**  
-**`PUT /api/entries/{entry_id}/star`** / **`PUT /api/entries/{entry_id}/bookmark`**
-
-Toggle per-entry user state (star and bookmark endpoints toggle; read/unread set explicitly).
-
-**Auth:** Bearer token  
-**Status:** 200 OK
-
----
-
-**`POST /api/entries/bulk-action`**
-
-Perform one bulk state change across many entries.
-
-**Auth:** Bearer token  
-**Status:** 200 OK  
-**Request:**
-```json
-{
-  "entry_ids": [ "550e8400-...", "550e8401-..." ],
-  "action": "read"
-}
-```
-`action` is one of `read`, `unread`, `star`, `unstar`, `bookmark`, `unbookmark`, `hide`. Returns `{ "updated": <count> }`.
-
----
-
-**`POST /api/entries/mark-all-read`**
-
-Mark all unread entries (optionally in a feed/category, optionally before a timestamp) as read.
-
-**Auth:** Bearer token  
-**Status:** 200 OK  
-**Request:**
-```json
-{
-  "feed_id": "550e8400-..." ,
-  "category_id": "550e8401-...",
-  "before": "2024-01-20T10:00:00Z"
-}
-```
-
----
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| PUT | `/api/entries/{entry_id}/read` | User | Mark read |
+| PUT | `/api/entries/{entry_id}/unread` | User | Mark unread |
+| PUT | `/api/entries/{entry_id}/star` | User | Toggle star; returns the new value |
+| PUT | `/api/entries/{entry_id}/bookmark` | User | Toggle bookmark; returns the new value |
+| POST | `/api/entries/bulk-action` | User | `{"entry_ids": [...], "action": "read"}`. Actions: `read`, `unread`, `star`, `unstar`, `bookmark`, `unbookmark`, `hide` |
+| POST | `/api/entries/mark-all-read` | User | Mark read by feed or category and an optional `since`/`before` window. `radar_only` limits it to Priority Queue entries |
 
 #### Views & Aggregates
 
-**`GET /api/entries/calendar`**
-
-Per-day entry counts for the calendar view (respects entry filters).
-
-**Auth:** Bearer token
-
----
-
-**`GET /api/entries/map`**
-
-Country-bucketed entry counts for the map view.
-
-**Auth:** Bearer token
-
----
-
-**`GET /api/entries/count`**
-
-Count entries matching the standard entry filters (no items returned).
-
-**Auth:** Bearer token
-
----
-
-**`GET /api/entries/day-intel`**
-
-Top entities + urgency signals for a day window (`since`/`before`, optional `feed_id`/`category_id`). Powers the day-divider strip: top actor/malware/CVE/TTP/sector/product/country, an exploited-first CVE pick, actively-exploited count, newly-tracked entities.
-
-**Auth:** Bearer token
-
----
-
-**`GET /api/entries/day-entities`**
-
-Distinct entities mentioned by all entries in a day window (`since`/`before`, optional `feed_id`/`category_id`). Includes the autolinker's aggregated `matched_names` surface forms — used for inline entity linking on the day's AI summary.
-
-**Auth:** Bearer token
-
----
-
-**`GET /api/entries/daily-summary`** / **`POST /api/entries/daily-summary`**
-
-AI briefing for a day (`day_key: YYYY-MM-DD` plus the standard entry filters). `GET` returns the cached summary or `null` — it never generates; `POST` generates (or returns cache unless `force: true`). Summaries for the default unfiltered view are cached as a **shared** row visible to all users; filtered summaries stay per-user.
-
-**Auth:** Bearer token  
-**Response:** `{ "summary": "...", "cached": true, "generated_at": "..." }`
-
----
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/entries/calendar` | Visitor | Articles per day, for the calendar view |
+| GET | `/api/entries/map` | Visitor | Articles per country, for the map view |
+| GET | `/api/entries/day-intel` | Visitor | Top entities and urgent signals for one day (`since`/`before`, optional `feed_id`/`category_id`) |
+| GET | `/api/entries/day-entities` | Visitor | Every entity mentioned that day, with the names matched in the text |
+| GET | `/api/entries/daily-summary` | User | The saved AI summary for a day, or null. Never generates one |
+| POST | `/api/entries/daily-summary` | User | Generate the day's AI summary (`day_key: YYYY-MM-DD` plus filters; `force: true` regenerates). The unfiltered summary is shared by everyone; filtered ones are per user |
 
 #### Per-Entry Extras
 
-**`POST /api/entries/{entry_id}/translate`** — Translate an entry via the configured AI provider.  
-**`GET /api/entries/{entry_id}/similar`** — Near-duplicate / related entries. Answers from the embedding index (cosine nearest neighbours, `similarity` and `thread_slug` per item, `method: "embedding"`), falling back to Meilisearch term overlap for entries that have not been embedded (`method: "keyword"`).  
-**`GET /api/entries/{entry_id}/media`** — Attached media items.  
-**`GET /api/entries/{entry_id}/urls`** — URLs referenced by the entry content.  
-**`POST /api/entries/resolve-names`** — Resolve entry IDs to titles (batch helper).
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| POST | `/api/entries/{entry_id}/translate` | User | Translate the article through the LibreTranslate service |
+| GET | `/api/entries/{entry_id}/similar` | Visitor | Related articles. Uses embeddings when the article has one (`method: "embedding"`), else keyword overlap in Meilisearch (`method: "keyword"`) |
+| GET | `/api/entries/{entry_id}/media` | User | Attached images, audio and video |
+| GET | `/api/entries/{entry_id}/urls` | Visitor | Links found in the article |
+| GET | `/api/entries/{entry_id}/article-metadata` | Visitor | Report type, victim organisations, timeline dates, patch availability |
+| POST | `/api/entries/{entry_id}/run-ai-task` | User | Run any AI task (for example `article_summary`) on the article |
+| POST | `/api/entries/bulk-summarize` | User | One AI briefing over several articles |
+| POST | `/api/entries/intel-counts` | Visitor | Entity counts for a batch of entries (for list badges) |
 
-**Auth:** Bearer token
+#### Notes, Tags & Comments
 
----
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/notes` | User | Every user's notes, pinned first |
+| POST | `/api/notes` | User | Create a note not tied to an article |
+| GET | `/api/notes/{note_id}` | User | One note |
+| PUT | `/api/notes/{note_id}` | Owner | Change a note |
+| DELETE | `/api/notes/{note_id}` | Owner | Delete a note |
+| GET | `/api/notes/entry/{entry_id}` | User | Notes on an article |
+| POST | `/api/notes/entry/{entry_id}` | User | Add a note to an article |
+| GET | `/api/tags` | Visitor | All tags with entry counts |
+| POST | `/api/tags` | User | Create a tag (409 if the name exists) |
+| PUT | `/api/tags/{tag_id}` | User | Rename, recolour, describe, show as a chip, or switch `is_global` |
+| DELETE | `/api/tags/{tag_id}` | User | Delete a tag everywhere |
+| POST | `/api/tags/merge` | User | Fold `source_ids` into `target_id` |
+| GET | `/api/tags/entries/{entry_id}` | Visitor | An article's tags as you see them |
+| POST | `/api/tags/entries/{entry_id}` | User | Tag an article |
+| DELETE | `/api/tags/entries/{entry_id}/{tag_id}` | User | Untag an article |
+| POST | `/api/tags/entries/bulk-tag` | User | Tag many articles |
+| POST | `/api/tags/entries/bulk-untag` | User | Untag many articles |
+| GET | `/api/comments` | User | Comments on one object, oldest first |
+| POST | `/api/comments` | User | Comment, or reply with `parent_id`. `@username` mentions are picked up |
+| PATCH | `/api/comments/{comment_id}` | Owner | Edit a comment |
+| DELETE | `/api/comments/{comment_id}` | Owner | Delete a comment |
+| GET | `/api/comments/mentions` | User | Comments that mention you |
+
+**Tags are shared, assignments are personal.** Everyone sees the same tag list, but tagging an article only tags it for you, and every read (entry `tags`, counts, the search `tags` facet) shows your own view. A tag with `is_global: true` has one shared assignment for everyone instead. Switching a tag to global merges everyone's assignments into one; switching it back gives the shared assignment to every user. Tag names are 1-100 characters and can't contain `"` or `\`.
+
+#### Export
+
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/export/entries/{entry_id}` | User | One article as Markdown, with its tags and notes |
+| GET | `/api/export/notes/{note_id}` | User | One note as Markdown |
+| POST | `/api/export/bulk` | User | Many articles and notes as a ZIP of Markdown files |
+| POST | `/api/export/research-bundle` | User | Selected articles as a research bundle ZIP |
+| GET | `/api/export/campaigns/{campaign_id}/bundle` | User | Every article in a campaign as a research bundle ZIP |
+| GET | `/api/export/entities/{entity_type}/{entity_id}` | User | One entity profile as Markdown |
+| POST | `/api/export/entities/bulk` | User | Many profiles of one type as a ZIP. Send `entity_ids`, or `all: true` (capped, most-mentioned first) |
 
 #### Ingest & Processing
 
-Manual ingest has two synchronous one-item doors and a batch API. See [adapters.md](adapters.md#manual-ingest) for the model behind it.
+Manual ingest adds articles by hand. See [adapters.md](adapters.md#manual-ingest) for how it works.
 
-**`POST /api/entries/ingest/url`**
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| POST | `/api/entries/ingest/url` | User | Add one web page now (`{"url"}`). Errors: 409 `duplicate`, 422 `extraction_failed`, 400 `invalid_url` |
+| POST | `/api/entries/ingest/pdf` | User | Add one PDF now (multipart `file`, optional `title`). The original is kept for download |
+| GET | `/api/entries/ingest/capabilities` | User | Accepted file types and limits (`max_file_mb`, `max_batch_items`, `zip_max_members`) |
+| POST | `/api/entries/ingest/batches` | User | Open a batch (`{"label"}`). Items start processing the moment you add them; there is no submit step |
+| GET | `/api/entries/ingest/batches` | User | Recent batches (`limit`, `mine`) |
+| GET | `/api/entries/ingest/batches/{batch_id}` | User | A batch and the status of each item |
+| POST | `/api/entries/ingest/batches/{batch_id}/files` | Owner | Add one file (multipart `file`, optional `title`, `is_ioc_list`). One request per file |
+| POST | `/api/entries/ingest/batches/{batch_id}/urls` | Owner | Add URLs. A `github.com/owner/repo[/tree/<branch>/<path>]` link expands into one item per file |
+| POST | `/api/entries/ingest/batches/{batch_id}/text` | Owner | Add pasted text (`text`, optional `title`, `source_url`, `is_ioc_list`). One paste is one article |
+| POST | `/api/entries/ingest/batches/{batch_id}/items/{item_id}/retry` | Owner | Retry a failed item. 409 `original_not_kept` once the stored file is gone |
+| DELETE | `/api/entries/ingest/batches/{batch_id}/items/{item_id}` | Owner | Remove an item and its file. The article it made stays |
+| GET | `/api/ingest-files/{file_id}` | Token in header or `?token=` | Download an upload's original file. `?inline=true` opens it in the browser. 404 `ingest_file_evicted` once retention has removed it |
 
-Ingest a web page/article URL as a manual entry, in the request. Dispatches the full intelligence pipeline and indexes in Meilisearch.
-
-**Auth:** Bearer token  
-**Request:**
-```json
-{ "url": "https://example.com/report" }
-```
-**Response:** `{ "id": "...", "title": "...", "url": "...", "word_count": 1234, "feed_id": "...", "content_hash": "...", "message": "Entry created" }`  
-**Errors:** `409 duplicate`, `422 extraction_failed`, `400 invalid_url`
-
----
-
-**`POST /api/entries/ingest/pdf`**
-
-Ingest one PDF as a manual entry, in the request. Runs as a one-item batch so the original is kept and downloadable, but answers with the entry.
-
-**Auth:** Bearer token  
-**Request:** Multipart form with `file` (PDF) and optional `title`  
-**Errors:** `409 duplicate`, `422 extraction_failed` (scanned), `413 file_too_large`, `400 invalid_file`
-
----
-
-**`GET /api/entries/ingest/capabilities`** — Accepted extensions and the current caps (`max_file_mb`, `max_batch_items`, `zip_max_members`).
-
-**`POST /api/entries/ingest/batches`** — Open a batch (`{ "label": "optional" }`). Returns the batch with an empty item list. There is no submit step: every item is queued the moment it is added.
-
-**`POST /api/entries/ingest/batches/{id}/files`** — Add one file (multipart `file`, optional `title`, `is_ioc_list`). One request per file. Returns the item (`201`); an oversize file returns a `too_large` item rather than an error.
-
-**`POST /api/entries/ingest/batches/{id}/urls`** — Add URLs (`{ "urls": [...], "is_ioc_list": false }`), one item each. A `github.com/owner/repo[/tree/<branch>/<path>]` link becomes a `github_repo` item that expands into one `github_file` item per file; a non-http line becomes a `failed` item rather than a `400`.
-
-**`POST /api/entries/ingest/batches/{id}/text`** — Add pasted text (`{ "text", "title"?, "source_url"?, "is_ioc_list" }`). One paste is one entry; the paste is kept as a `.txt` original.
-
-**`GET /api/entries/ingest/batches/{id}`** — The batch with every item: `status` (`queued`, `parsing`, `created`, `expanded`, `duplicate`, `no_text`, `unsupported`, `too_large`, `failed`, `cancelled`), `phase` for created items (`analyzing` until the one-pass AI analysis lands, then `done`), `entry_id`, `entry_title`, `error`, `retryable`, `file` (`download_url`, `retained`), and a `summary` (`total`, `active`, `created`, `duplicate`, `failed`, `status`). The `ingest_item_updated` SSE event fires on every change.
-
-**`GET /api/entries/ingest/batches`** — Recent batches with summaries (`limit`, `mine`).
-
-**`POST /api/entries/ingest/batches/{id}/items/{item_id}/retry`** — Re-queue a `failed` / `no_text` / `unsupported` / `cancelled` item; files re-run from the stored original (`409 original_not_kept` once evicted).
-
-**`DELETE /api/entries/ingest/batches/{id}/items/{item_id}`** — Remove an item and its stored file. The entry it produced, if any, stays.
-
-Batches are owned: adding, retrying and deleting require the creator or an admin (`403 forbidden`).
-
-**Auth:** Bearer token
-
----
-
-**`GET /api/ingest-files/{file_id}`**
-
-The original bytes of a manual upload. JWT in the `Authorization` header or as `?token=` (for plain links); `?inline=true` opens in the browser instead of downloading. `404 ingest_file_not_found` when never stored, `404 ingest_file_evicted` once the retention sweep has removed it — the entry's text is unaffected.
+Item `status` is one of `queued`, `parsing`, `created`, `expanded`, `duplicate`, `no_text`, `unsupported`, `too_large`, `failed`, `cancelled`. Created items also have a `phase`: `analyzing` until the AI analysis lands, then `done`. The `ingest_item_updated` event on the SSE stream fires on each change.
 
 ---
 
 ### Story Threads
 
-One unfolding story instead of the twenty-three articles that reported it. See
-[story-threads.md](story-threads.md) for how threads are built.
+A story thread is one unfolding story, instead of the twenty articles that reported it. See [story-threads.md](story-threads.md) for how threads are built.
 
-**`GET /api/threads`** — Open threads, most recently active first.
-Query: `status` (`open` default, `dormant`, `closed`, `any`), `limit` (1-200).
-Each row carries `entry_count`, `source_count` (outlets, not feed rows), `echo_count`,
-`unread_count`, `new_since_opened`, `top_score` (the best unread non-echo member's priority
-score — the rank the row takes in the queue), `key_entities`, and every member `entry_ids`
-so a list view can absorb them into the thread row.
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/threads` | Visitor | Threads, most recently active first. `status` (`open` default, `dormant`, `closed`, `any`), `q` (title search), `limit` (default 40, max 200) |
+| GET | `/api/threads/{slug}` | Visitor | One thread: its `beats` (the timeline), `members` (each an `origin`, `beat` or `echo`), what it produced, and the `nearest` similar threads |
+| POST | `/api/threads/{thread_id}/open` | User | Mark the thread as seen. `new_since_opened` counts from here |
 
-**`GET /api/threads/{slug}`** — One thread: `beats` (the spine, `is_ai` false when it came
-from the day-grouping fallback), `members` (with `role` = `origin` | `beat` | `echo` and
-`duplicate_of_entry_id` for echoes), `thread_yield` (techniques / CVEs / products / rules /
-echoes folded), and `nearest` threads by centroid.
-
-**`POST /api/threads/{thread_id}/open`** — Stamp the thread as seen; `new_since_opened` is
-measured from this.
-
-**Auth:** Bearer token
+Each list row has `entry_count`, `source_count` (outlets, not feeds), `echo_count`, `unread_count`, `new_since_opened`, `top_score` (its best unread article's priority score), `key_entities` and the member `entry_ids`.
 
 ---
 
 ### Intelligence Extraction
 
-Base path: `/api` (mixed prefixes)
+These endpoints pull structured threat data out of articles and serve the entity catalogs. An *entity* is a tracked thing: a threat actor, malware family, CVE (a published vulnerability), TTP (a MITRE ATT&CK technique), tool, vendor, product, country, sector, mitigation or CWE (a weakness type).
 
-Intelligence endpoints extract structured threat data (TTPs, CVEs, threat actors, malware, mitigations) from articles using AI or regex patterns.
+#### Extract and List per Article
 
-#### TTP (Tactics & Techniques)
+`POST /api/entries/{entry_id}/extract-<type>` runs extraction on one article and saves the links. `GET /api/entries/{entry_id}/<type>` lists what is linked. `DELETE /api/entries/{entry_id}/<type>/{id}` removes one link (the entity itself stays).
 
-**`POST /api/entries/{entry_id}/extract-ttps`**
+| Type | Extract (User) | List (Visitor) | Unlink (User) | How it extracts |
+| --- | --- | --- | --- | --- |
+| TTPs | `extract-ttps` | `ttps` | `ttps/{ttp_id}` | Patterns plus AI; `use_ai=false` for patterns only |
+| CVEs | `extract-cves` | `cves` | `cves/{cve_id}` | Patterns; `enrich=true` (default) pulls NVD data for new CVEs. Returns a plain list |
+| Threat actors | `extract-threat-actors` | `threat-actors` | `threat-actors/{actor_id}` | AI |
+| Malware | `extract-malware` | `malware` | `malware/{malware_id}` | AI |
+| Countries | `extract-countries` | `countries` | `countries/{country_id}` | AI |
+| Sectors | `extract-sectors` | `sectors` | `sectors/{sector_id}` | AI |
+| Mitigations | `extract-mitigations` | `mitigations` | `mitigations/{mitigation_id}` | Patterns plus AI |
+| Tools | `extract-tools` | `tools` | `tools/{tool_id}` | AI |
+| Detection rules | `extract-detection-rules` | | | Code blocks in the article. Returns a plain list |
+| Vendors | | `vendors` | `vendors/{vendor_id}` | Autolinker only |
+| Products | | `products` | `products/{product_id}` | Autolinker only |
+| CWEs | | `cwes` | `cwes/{cwe_id}` | Autolinker only |
 
-Extract MITRE ATT&CK techniques from an article. Uses AI by default, regex as fallback.
+Most extract calls return `{"items": [...], "status": "success", "error_message": null}`. `status` can also be `ai_not_configured`, `provider_error` or `parse_error`.
 
-**Auth:** Bearer token  
-**Query Params:**
-- `use_ai`: true (default, calls configured LLM) or false (regex only)
+Other per-article routes:
 
-**Status:** 200 OK  
-**Response:**
-```json
-{
-  "items": [
-    {
-      "technique_id": "T1566.002",
-      "technique_name": "Phishing: Spearphishing Link",
-      "tactic": "Initial Access",
-      "confidence": "high",
-      "source_text": "The attacker used spear phishing emails..."
-    }
-  ],
-  "status": "success",
-  "error_message": null
-}
-```
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| POST | `/api/entries/{entry_id}/link-entity` | User | Link an existing entity of any type |
+| GET | `/api/entries/{entry_id}/kill-chain` | Visitor | The article's TTPs in attack-chain order |
+| GET | `/api/entries/{entry_id}/ttps/navigator` | Visitor | The article's TTPs as an ATT&CK Navigator layer |
+| POST | `/api/entries/{entry_id}/generate-rules` | User | AI-written detection rules. Body `{"rule_types": ["sigma", "splunk_spl"]}`. Returns the saved rules |
+| POST | `/api/entries/{entry_id}/autolink` | User | Re-run the autolinker on this article |
 
----
+#### Entity Catalogs
 
-**`GET /api/entries/{entry_id}/ttps`**
+All Visitor. The lists are paginated and take `search` and sort parameters.
 
-List TTPs already extracted for an entry.
+| Type | List | One | More |
+| --- | --- | --- | --- |
+| TTPs | `GET /api/ttps` | `GET /api/ttps/by-technique/{technique_id}` | `/api/ttps/{ttp_id}/mitigations`, `/api/ttps/{ttp_id}/related-techniques` |
+| CVEs | `GET /api/cves` | `GET /api/cves/{cve_id}` (UUID or `CVE-2024-1234`) | `/api/cves/trending`, `/api/cves/{cve_id}/affected`, `/api/cves/{cve_id}/weaknesses` |
+| Threat actors | `GET /api/threat-actors` | `GET /api/threat-actors/{actor_id}` | |
+| Malware | `GET /api/malware` | `GET /api/malware/{malware_id}` | |
+| Countries | `GET /api/countries` | `GET /api/countries/{country_id}` | `/api/countries/{country_id}/profile`, `GET /api/regions` |
+| Sectors | `GET /api/sectors` | `GET /api/sectors/{sector_ref}` | `/api/sectors/{sector_ref}/profile` |
+| Mitigations | `GET /api/mitigations` | `GET /api/mitigations/{mitigation_id}` | |
+| Tools | `GET /api/tools` | `GET /api/tools/{tool_id}` | |
+| Vendors | `GET /api/vendors` | `GET /api/vendors/{vendor_id}` | `/products`, `/affected-cves`, `/weaknesses` |
+| Products | `GET /api/products` | `GET /api/products/{product_id}` | `/affected-cves`, `/weaknesses` |
+| CWEs | `GET /api/cwes` | `GET /api/cwes/{cwe_id}` | `/api/cwes/rollup`, `/family`, `/affected-cves`, `/vendors` |
 
-**Auth:** Bearer token
+`POST /api/intelligence/resolve-names` (Visitor) turns entity ids into names.
 
----
+**CVEs** carry NVD, CISA KEV (the list of vulnerabilities known to be exploited) and EPSS (a score for how likely exploitation is) fields: `epss_score`, `epss_percentile`, `is_kev`, `kev_date_added`, `kev_due_date`. They also get a risk tier: `critical` if in KEV, `high` if EPSS is over the threshold or a Metasploit module exists, `medium` for a public proof of concept or CVSS 9+ / critical / high severity, else `low`.
 
-**`GET /api/entries/{entry_id}/ttps/navigator`**
-
-Export TTPs as MITRE ATT&CK Navigator JSON layer.
-
-**Auth:** Bearer token  
-**Response:** Navigator layer JSON (importable to https://attack.mitre.org/navigator)
-
----
-
-**`GET /api/ttps`**
-
-List all TTPs in the database, with article count and dates.
-
-**Auth:** Bearer token  
-**Query Params:**
-- `search`: Filter by technique ID or name
-- `tactic`: Filter by tactic (e.g., "Initial Access")
-- `sort_by`: "technique_id" | "article_count" | "last_seen_at"
-- `sort_order`: "asc" | "desc"
-- `limit`, `offset`: Pagination
-
-**Response:**
-```json
-{
-  "items": [
-    {
-      "technique_id": "T1566.002",
-      "technique_name": "Phishing: Spearphishing Link",
-      "tactic": "Initial Access",
-      "article_count": 542,
-      "first_seen_at": "2023-06-01T00:00:00Z",
-      "last_seen_at": "2024-01-20T12:00:00Z"
-    }
-  ],
-  "total": 1240,
-  "limit": 50,
-  "offset": 0,
-  "has_more": true
-}
-```
-
----
-
-**`GET /api/ttps/by-technique/{technique_id}`**
-
-Get a single TTP by MITRE technique ID.
-
-**Auth:** Bearer token
-
----
-
-**`GET /api/ttps/{ttp_id}/mitigations`** — MITRE mitigations for a technique.  
-**`GET /api/ttps/{ttp_id}/related-techniques`** — Related techniques (same tactic / sub-technique family).  
-**`GET /api/entries/{entry_id}/kill-chain`** — Entry's TTPs grouped in kill-chain order.
-
-**Auth:** Bearer token
-
----
+**Sectors** are a fixed list of 21 victim industries. Every sector route accepts a UUID, slug (`healthcare`), display name or alias. The sector profile (`window_days`) shows who targets it, leak-site victims, countries, campaigns, intel profiles and recent articles. Only the AI analysis writes article-sector links.
 
 #### ATT&CK Catalog & Matrix
 
-Base path: `/api/attack` (full MITRE ATT&CK catalog, seeded via `scripts/seed/seed_mitre_attack.py`)
-
-**`GET /api/attack/matrix`**
-
-Navigator-style matrix: tactics in kill-chain order, techniques with feed frequency (article counts) and telemetry-aware detection coverage, nested sub-techniques. Heavy aggregate, cached in Redis.
-
-**Auth:** Bearer token  
-**Query Params:**
-- `domain`: "enterprise" | "mobile" | "ics" (default enterprise)
-- `days`: Feed-frequency window (omit for all-time)
-- `include_deprecated`: Include deprecated techniques
-
----
-
-**`GET /api/attack/layer`** — ATT&CK Navigator layer JSON (optionally scoped by `entry_id` or `date_from`/`date_to`).  
-**`GET /api/attack/techniques`** — Techniques observed in a date range, ranked by article count.
-
-**Auth:** Bearer token
-
----
-
-#### CVE (Common Vulnerabilities & Exposures)
-
-**`POST /api/entries/{entry_id}/extract-cves`**
-
-Extract CVE IDs from an article. Uses regex pattern matching.
-
-**Auth:** Bearer token  
-**Status:** 200 OK  
-**Response:**
-```json
-{
-  "items": [
-    {
-      "cve_id": "CVE-2024-1234",
-      "title": "Buffer overflow in Example Software",
-      "severity": "high",
-      "cvss_v3_score": 8.6,
-      "published_at": "2024-01-15T00:00:00Z"
-    }
-  ],
-  "status": "success",
-  "error_message": null
-}
-```
-
----
-
-**`GET /api/entries/{entry_id}/cves`**
-
-List CVEs already extracted for an entry.
-
-**Auth:** Bearer token
-
----
-
-**`GET /api/cves`**
-
-List all CVEs in the database.
-
-**Auth:** Bearer token  
-**Query Params:**
-- `search`: Filter by CVE ID
-- `severity`: "low" | "medium" | "high" | "critical"
-- `sort_by`: "cve_id" | "severity" | "article_count"
-- `limit`, `offset`: Pagination
-
-CVE responses carry NVD/KEV/EPSS enrichment fields: `epss_score`, `epss_percentile`, `is_kev`, `kev_date_added`, `kev_due_date`, plus a computed priority/risk tier (critical = KEV, high = EPSS/Metasploit, medium = PoC/CVSS, low). See [`backend/app/schemas/intelligence.py`].
-
----
-
-**`GET /api/cves/trending`** — CVEs trending across recent entries.  
-**`GET /api/cves/{cve_id}`** — Single CVE by ID (e.g. `CVE-2024-1234`) with enrichment.  
-**`POST /api/sync/cve-backfill`** — Backfill NVD/KEV/EPSS enrichment for stored CVEs.  
-**`POST /api/sync/mitre-attack`** — Refresh the MITRE ATT&CK catalog.
-
-**Auth:** Bearer token
-
----
-
-#### Threat Actors
-
-**`POST /api/entries/{entry_id}/extract-threat-actors`**
-
-Extract threat actor references (APT groups, campaigns, individuals).
-
-**Auth:** Bearer token  
-**Status:** 200 OK  
-**Response:**
-```json
-{
-  "items": [
-    {
-      "id": "550e8400-...",
-      "name": "APT29",
-      "aliases": [ "Cozy Bear", "The Dukes" ],
-      "countries": [ "RU" ],
-      "category": "nation-state",
-      "confidence": "high"
-    }
-  ],
-  "status": "success",
-  "error_message": null
-}
-```
-
----
-
-**`GET /api/entries/{entry_id}/threat-actors`**
-
-List threat actors extracted for an entry.
-
-**Auth:** Bearer token
-
----
-
-#### Malware
-
-**`POST /api/entries/{entry_id}/extract-malware`**
-
-Extract malware family names and samples.
-
-**Auth:** Bearer token  
-**Status:** 200 OK
-
----
-
-**`GET /api/entries/{entry_id}/malware`**
-
-List malware extracted for an entry.
-
-**Auth:** Bearer token
-
----
-
-#### Countries
-
-**`POST /api/entries/{entry_id}/extract-countries`**
-
-Extract country references (origin, target, mentioned, infrastructure).
-
-**Auth:** Bearer token  
-**Status:** 200 OK  
-**Response:**
-```json
-{
-  "items": [
-    {
-      "id": "550e8400-...",
-      "iso_code": "CN",
-      "name": "China",
-      "role": "origin",
-      "confidence": "high"
-    }
-  ],
-  "status": "success",
-  "error_message": null
-}
-```
-
-Related catalog endpoints: `GET /api/countries`, `GET /api/countries/{country_id}`, `GET /api/countries/{country_id}/profile`, `GET /api/regions`.
-
----
-
-#### Sectors
-
-A closed, seeded vocabulary of 21 victim industries, promoted to an entity. Every route accepts a sector by UUID, canonical slug (`healthcare`), display name or alias.
-
-- **`GET /api/sectors`** — paginated list; `search`, `sort_by` in `name|article_count|last_seen_at|linked_count|targeting_actor_count|victim_count`. Items carry `targeting_actor_count`, `targeting_malware_count` and `victim_count` (leak-site disclosures, last 90 days).
-- **`GET /api/sectors/{ref}`**, **`GET /api/sectors/{ref}/profile`** (`window_days`) — the victimology profile: `reported_actors`/`reported_malware` (ranked by articles describing both the entity and the sector being hit), `asserted_actors`/`asserted_malware` (target-sector claims with `source` and `article_count`), `campaigns`, `victims` (totals, 12-month series, top groups, recent disclosures), `countries` (article and victim counts), `intel_profiles`, `recent_entries`, `articles_monthly`.
-- **`GET /api/entries/{entry_id}/sectors`** / **`DELETE /api/entries/{entry_id}/sectors/{sector_id}`** — the sectors an article describes as targeted (written only by the one-pass AI analysis; `POST /api/entries/{entry_id}/extract-sectors` runs it). The response carries `id`/`slug`/`name` and the legacy `sector`/`label` spellings.
-- **`PUT /api/entities/sectors/{sector_id}`** — `aliases`, `description`. Name and slug are the vocabulary itself; there is no create, delete, merge or convert.
-- **`GET/POST /api/entities/{threat_actor|malware}/{id}/target-sectors`**, **`DELETE .../target-sectors/{ref}`** — the asserted targets-sector claims on an actor or family. `POST` records an analyst claim (upgrading a rolled-up or enriched row); the `targeted_sectors` label array on the entity is a cache rebuilt from these rows.
-- **`GET/POST /api/campaigns/{id}/sectors`**, **`DELETE .../sectors/{ref}`**, **`GET .../sectors/suggested`** — a campaign's victim verticals; suggestions come from its own articles' sectors.
-
-Sectors are also watchable (`entity_type: "sector"` on the watchlist) — a watch boosts the sector's articles in the Priority Queue — and pivot/graph/timeline through the generic correlation routes.
-
----
-
-#### Mitigations & Offensive Tools
-
-Same extract/list pattern as the entity types above:
-
-- **`POST /api/entries/{entry_id}/extract-mitigations`** / **`GET /api/entries/{entry_id}/mitigations`** — catalog at `GET /api/mitigations`, `GET /api/mitigations/{mitigation_id}`
-- **`POST /api/entries/{entry_id}/extract-tools`** / **`GET /api/entries/{entry_id}/tools`** — catalog at `GET /api/tools` (paginated), `GET /api/tools/{tool_id}`
-
-**Auth:** Bearer token
-
----
-
-#### Vendors & Products
-
-Vendors/products are autolinked (not AI-extracted):
-
-- **`GET /api/entries/{entry_id}/vendors`** / **`GET /api/entries/{entry_id}/products`** — entities linked to an entry
-- **`GET /api/vendors`**, **`GET /api/vendors/{vendor_id}`**, **`GET /api/vendors/{vendor_id}/products`** — vendor catalog
-- **`GET /api/products`**, **`GET /api/products/{product_id}`** — product catalog
-
-**Auth:** Bearer token
-
----
-
-#### Manual Entity Linking & Unlinking
-
-**`POST /api/entries/{entry_id}/link-entity`**
-
-Manually link an existing entity (any type) to an entry.
-
-**Auth:** Bearer token  
-**Status:** 201 Created
-
----
-
-**`DELETE /api/entries/{entry_id}/{collection}/{entity_id}`**
-
-Unlink an entity from an entry. Supported collections: `ttps`, `cves`, `threat-actors`, `malware`, `countries`, `mitigations`, `tools`, `vendors`, `products`.
-
-**Auth:** Bearer token  
-**Status:** 204 No Content
-
----
+The full MITRE ATT&CK catalog, loaded by `scripts/seed/seed_mitre_attack.py`. All Visitor.
+
+| Method | Path | What it does |
+| --- | --- | --- |
+| GET | `/api/attack/matrix` | Tactics in order, techniques with article counts and detection coverage. `domain` (`enterprise`, `mobile`, `ics`), `days`, `include_deprecated`. Cached in Redis |
+| GET | `/api/attack/layer` | An ATT&CK Navigator layer from extracted TTPs |
+| GET | `/api/attack/techniques` | Techniques seen in a window, by article count |
 
 #### Autolinker
 
-- **`POST /api/entries/{entry_id}/autolink`** — Re-run the autolinker on one entry
-- **`POST /api/autolink/scan`** / **`POST /api/autolink/rescan`** / **`POST /api/autolink/revalidate`** — Bulk scans (background jobs)
-- **`GET /api/autolink/status`** — Progress of a running scan
-- **`GET /api/proximity-settings`** — Correlation proximity-scoring settings
+The autolinker scans article text for names of known entities.
 
-**Auth:** Bearer token
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| POST | `/api/autolink/scan` | Visitor | Find known entities in text you send |
+| GET | `/api/autolink/status` | User | The autolinker's vocabulary status |
+| POST | `/api/autolink/rescan` | Admin | Re-scan recent articles |
+| POST | `/api/autolink/revalidate` | Admin | Remove links that no longer pass the matching rules |
+| GET | `/api/proximity-settings` | User | The proximity-scoring settings used by pivots |
+
+#### Bulk and Maintenance
+
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| POST | `/api/intelligence/bulk-extract` | Admin | Queue extraction over many articles |
+| POST | `/api/intelligence/bulk-translate` | Admin | Queue translation by feed, category, tag or ids |
+| POST | `/api/intelligence/rescan-all-extraction` | Admin | Re-run pattern extraction (TTP, CVE, mitigation) on every article |
+| POST | `/api/intelligence/reset-correlation` | Admin | Unlink every entity from every article and clear relationships |
+| POST | `/api/sync/mitre-attack` | Admin | Refresh the ATT&CK catalog now |
+| POST | `/api/sync/cve-backfill` | Admin | Fill in missing NVD data on stored CVEs |
 
 ---
 
-#### Detection Rules
+### Observables (IOC Ledger)
 
-**`POST /api/entries/{entry_id}/generate-rules`**
+Observables are IOCs (indicators of compromise: hashes, IPs, domains, URLs and so on), stored once per kind and value. Pattern matching never creates a row on its own. It only suggests candidates, which an analyst or the AI confirms. See [observables.md](observables.md).
 
-Generate detection rules (Sigma, YARA, Splunk SPL) from article content using AI.
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/observables` | User | The ledger. `search`, `kind`, `role`, `status`, `created_via` (how it was captured), `infra_tag`, `min_confidence`, or `linked_entity=<type>:<uuid>`; sort by `report_count` or `feed_source_count` |
+| GET | `/api/observables/rollup` | User | Counts by kind and state |
+| GET | `/api/observables/candidates` | User | Suggested values nobody has confirmed yet |
+| GET | `/api/observables/{observable_id}` | User | One observable |
+| PATCH | `/api/observables/{observable_id}` | User (admin to change the never-capture flag) | Edit label, role, description, confidence |
+| DELETE | `/api/observables/{observable_id}` | User | Delete the row, its sightings and relationships. The value can be captured again later |
+| POST | `/api/observables/{observable_id}/deny` | Admin | Never capture or export this value again. Keeps the row as a marker |
+| POST | `/api/observables/never-capture` | Admin | Ban a value from the candidates queue for good |
+| GET | `/api/observables/{observable_id}/backlinks` | User | Who claims it, and what it was reported alongside |
+| GET | `/api/observables/{observable_id}/sightings.csv` | User | Every sighting as CSV |
+| GET | `/api/entries/{entry_id}/observables` | User | An article's confirmed observables and its candidates |
+| POST | `/api/entries/{entry_id}/observables/promote` | User | Confirm a candidate (`role`, `evidence`, `label`) |
+| POST | `/api/entries/{entry_id}/observables/dismiss` | User | Drop a candidate from this article |
+| DELETE | `/api/entries/{entry_id}/observables/{observable_id}` | User | Remove one sighting (the observable stays) |
+| GET | `/api/entities/{entity_type}/{entity_id}/infrastructure` | User | Observables behind an actor, malware, campaign or tool: `{claimed, reported_alongside, counts}`. `?format=csv` for a flat file |
 
-**Auth:** Bearer token  
-**Status:** 200 OK  
-**Request:**
-```json
-{
-  "rule_types": [ "sigma", "yara" ],
-  "template_id": "550e8400-...",
-  "use_ai": true
-}
-```
-**Response:**
-```json
-{
-  "rules": [
-    {
-      "rule_type": "sigma",
-      "content": "title: ...\nlogsource:\n  product: ...\ndetection:\n  ...",
-      "source_text": "Based on: malware C2 communication pattern..."
-    }
-  ],
-  "status": "success"
-}
-```
+To share observables with firewalls and SIEMs, see [Sharing & Public Endpoints](#sharing--public-endpoints).
 
 ---
 
 ### Entity Management
 
-Base paths: `/api/entities`, `/api/campaigns`, `/api/entity-relationships`, etc.
-
 #### Entity Profiles (Threat Actors, Malware, Vendors, Products, Tools, ...)
 
-There is no generic `/api/entities` CRUD. **Reading** entities uses the type-specific list/detail endpoints in the Intelligence section (`GET /api/threat-actors`, `/api/malware`, `/api/cves`, `/api/ttps`, `/api/countries`, `/api/mitigations`, `/api/tools`, `/api/vendors`, `/api/products` — all paginated with `search`/sort params, e.g. `GET /api/threat-actors/{actor_id}` for detail). **Managing** profiles uses the per-type endpoints under `/api/entities`:
+Reading entities uses the catalogs above. Creating and editing uses `/api/entities/<type>`.
 
-**`POST /api/entities/{type}`** — Create an entity. Types: `threat-actors`, `malware`, `cves`, `ttps`, `countries`, `mitigations`, `tools`, `vendors`, `products`.
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| POST | `/api/entities/{threat-actors, malware, cves, ttps, countries, mitigations, tools, vendors, products}` | User | Create an entity, and optionally link it to an article |
+| PUT | `/api/entities/{threat-actors, malware, cves, ttps, countries, sectors, tools, vendors, products}/{id}` | User | Edit an entity. Removing an alias unlinks articles matched only by it |
+| DELETE | `/api/entities/{threat-actors, malware, cves, ttps, countries, mitigations, tools, vendors, products}/{id}` | User | Delete an entity with its links and relationships |
+| GET | `/api/entities/{entity_type}/{entity_id}/cascade-preview` | User | What a delete would remove (links, campaigns, rules, relationships) |
+| DELETE | `/api/entities/{entity_type}/{entity_id}/unlink-all` | Admin | Unlink every article, keep the entity |
+| POST | `/api/entities/{entity_type}/{entity_id}/deny-name` | User | Add its name and aliases to the do-not-recreate list |
+| POST | `/api/entities/{entity_type}/{entity_id}/rescan` | User | Re-scan all articles for this entity |
+| POST | `/api/entities/convert` | Admin | Change an entity's type (for example malware to tool), moving its links, relationships, notes and campaigns |
+| GET | `/api/entities/{entity_type}/{entity_id}/provenance` | Visitor | Who stated each fact on the profile, and whether they still agree |
+| GET | `/api/entities/{entity_type}/{entity_id}/detection-gaps` | User | Detection coverage for the entity's techniques |
+| GET | `/api/entities/{entity_type}/{entity_id}/story-threads` | Visitor | Story threads that mention the entity |
+| GET | `/api/entities/{entity_type}/{entity_id}/attack-techniques` | Visitor | Techniques from its articles, by evidence |
+| GET | `/api/entities/{entity_type}/{entity_id}/attack-layer` | Visitor | Those techniques as a Navigator layer |
+| GET | `/api/entities/{entity_type}/{entity_id}/mentions-timeseries` | Visitor | Mention counts over time |
+| GET | `/api/entities/{entity_type}/{entity_id}/entries-window` | Visitor | Articles inside one chart bucket |
+| GET | `/api/entities/{entity_type}/{entity_id}/top-entries` | Visitor | The most important articles about it |
+| POST | `/api/entities/{entity_type}/{entity_id}/ai-summary` | User | Write an AI summary and save it as the description |
+| GET | `/api/entities/{entity_type}/{entity_id}/wikipedia/search` | User | Find candidate Wikipedia articles |
+| POST | `/api/entities/{entity_type}/{entity_id}/wikipedia` | User | Attach a Wikipedia article |
+| DELETE | `/api/entities/{entity_type}/{entity_id}/wikipedia` | User | Remove it and stop auto-attaching |
+| GET | `/api/entities/{entity_type}/{entity_id}/target-sectors` | Visitor | Sectors an actor or malware is said to target, with the source of each claim |
+| POST | `/api/entities/{entity_type}/{entity_id}/target-sectors` | User | Record an analyst claim that it targets a sector |
+| DELETE | `/api/entities/{entity_type}/{entity_id}/target-sectors/{sector_ref}` | User | Withdraw a claim. The nightly rollup adds it back if its articles still say so |
 
-**`PUT /api/entities/{type}/{id}`** — Update an entity (name, aliases, description, metadata).
-
-**`DELETE /api/entities/{type}/{id}`** — Delete an entity.
-
-**Auth:** Bearer token
-
----
-
-**`DELETE /api/entities/{entity_type}/{entity_id}/unlink-all`**
-
-Remove all entry links for an entity (keeps the entity itself).
-
-**Auth:** Bearer token
-
----
-
-**`POST /api/entities/{entity_type}/{entity_id}/ai-summary`** — Generate an AI profile summary.  
-**`GET /api/entities/{entity_type}/{entity_id}/wikipedia/search`** / **`POST .../wikipedia`** / **`DELETE .../wikipedia`** — Attach/detach a Wikipedia description.  
-**`POST /api/entities/convert`** — Convert an entity to another type (e.g. malware → tool), migrating entry links, relationships, notes, and campaign memberships.
-
-**Auth:** Bearer token
-
----
+`PUT /api/entities/sectors/{sector_id}` changes only `aliases` and `description`. Sectors can't be created, deleted, merged or converted.
 
 #### Entity Merge & Deduplication
 
-**`POST /api/entities/{entity_type}/merge`**
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| POST | `/api/entities/{entity_type}/merge` | Admin | Merge `merge_ids` into `keeper_id`: moves links and relationships, keeps old names as aliases, deletes the rest |
+| POST | `/api/{threat-actors, malware, vendors, products, tools, offensive-tools}/{target_id}/merge` | Admin | Merge one `source_id` into the target. `mode: "shadow"` logs what would happen without doing it. Also takes `extra_aliases`, `new_description`. Logged |
+| POST | `/api/entity-maintenance/reclassify` | Admin | Move an entity to another type, merging into an existing one or creating it |
+| GET | `/api/entities/{entity_type}/duplicates` | User | Possible duplicates by name and alias |
+| GET | `/api/entities/{entity_type}/merge-suggestions` | User | Ranked duplicate pairs with reasons |
+| POST | `/api/entities/merge-suggestions/dismiss` | User | Never suggest this pair again |
 
-Merge duplicate entities into a keeper: reassigns entry links and relationships, merges aliases (each merged entity's name becomes an alias), sums article counts, deletes the merged entities.
-
-**Auth:** Bearer token  
-**Request:**
-```json
-{
-  "keeper_id": "550e8400-...",
-  "merge_ids": [ "550e8401-...", "550e8402-..." ]
-}
-```
-
----
-
-**`GET /api/entities/{entity_type}/duplicates`** — Heuristic duplicate-pair listing.  
-**`GET /api/entities/{entity_type}/merge-suggestions`** — Ranked duplicate-pair suggestions (name/alias similarity, shared relationships, co-mentions) with human-readable reasons; cross-type tool-vs-malware collisions flagged `cross_type`.  
-**`POST /api/entities/merge-suggestions/dismiss`** — Persistently dismiss a suggested pair.
-
-**Auth:** Bearer token
-
----
-
-**`POST /api/{type}/{target_id}/merge`** (Admin)
-
-Merge-into for a single pair: merges `source_id` **into** `{target_id}` and deletes the source. Available for `threat-actors`, `malware`, `vendors`, `products`, `offensive-tools`. Every merge is recorded in the entity-maintenance log.
-
-**Auth:** Bearer token + admin role  
-**Request:**
-```json
-{
-  "source_id": "550e8401-...",
-  "mode": "apply",
-  "extra_aliases": [],
-  "new_description": null
-}
-```
-`mode: "shadow"` logs what would happen without changing anything.
-
-Related maintenance endpoints (admin): `POST /api/entity-maintenance/reclassify`, `GET /api/entity-maintenance/log`, `DELETE /api/entity-maintenance/log/{log_id}`. Proposals in the log are applied, dismissed and restored through the hygiene queue (`/api/admin/hygiene/adjudication/...`, `/api/admin/hygiene/feed`).
-
----
+`/api/offensive-tools/{target_id}/merge` is an older name for the tools merge and does the same thing.
 
 #### Entity Profile Export (Markdown)
 
-**`GET /api/export/entities/{entity_type}/{entity_id}`**
-
-Export a single entity profile as a Markdown document (`text/markdown` download).
-
-**Auth:** Bearer token
-
----
-
-**`POST /api/export/entities/bulk`**
-
-Export many entity profiles of one type as a ZIP of Markdown files. Pass explicit `entity_ids`, or `all: true` for every entity of the type (capped, most-referenced first).
-
-**Auth:** Bearer token  
-**Request:**
-```json
-{ "entity_type": "threat_actor", "entity_ids": [], "all": true }
-```
-
-Entry/note exports live alongside: `GET /api/export/entries/{entry_id}`, `GET /api/export/notes/{note_id}`, `POST /api/export/bulk`.
-
----
+See [Export](#export): `GET /api/export/entities/{entity_type}/{entity_id}` and `POST /api/export/entities/bulk`.
 
 #### Campaigns
 
-**`GET /api/campaigns`**
+A campaign groups the articles and entities about one operation.
 
-List campaigns with related threat actors, malware, and article count.
-
-**Auth:** Bearer token  
-**Query Params:**
-- `search`: Filter by campaign name
-- `threat_actor_id`: Filter by threat actor
-- `limit`, `offset`: Pagination
-
-**Response:**
-```json
-{
-  "items": [
-    {
-      "id": "550e8400-...",
-      "name": "Operation Stealth",
-      "description": "...",
-      "threat_actors": [ { "id": "...", "name": "APT29" } ],
-      "malware": [ { "id": "...", "name": "Cozybot" } ],
-      "start_date": "2023-01-01",
-      "end_date": null,
-      "article_count": 125,
-      "created_at": "2024-01-01T00:00:00Z"
-    }
-  ],
-  "total": 50,
-  "limit": 50,
-  "offset": 0,
-  "has_more": false
-}
-```
-
----
-
-**`POST /api/campaigns`**
-
-Create a new campaign.
-
-**Auth:** Bearer token  
-**Status:** 201 Created  
-**Request:**
-```json
-{
-  "name": "Operation Sunrise",
-  "description": "...",
-  "threat_actor_ids": [ "550e8400-..." ],
-  "start_date": "2024-01-01"
-}
-```
-
----
-
-**`GET /api/campaigns/{campaign_id}`**
-
-Get campaign details with members and related intelligence.
-
-**Auth:** Bearer token
-
----
-
-**`PUT /api/campaigns/{campaign_id}`**
-
-Update campaign details.
-
-**Auth:** Bearer token  
-**Status:** 200 OK
-
----
-
-**`DELETE /api/campaigns/{campaign_id}`**
-
-Delete a campaign.
-
-**Auth:** Bearer token  
-**Status:** 204 No Content
-
----
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/campaigns` | User | Campaigns, most recently updated first, with counts |
+| POST | `/api/campaigns` | User | Create one. Can start with `entry_ids` and a main entity |
+| GET | `/api/campaigns/{campaign_id}` | User | One campaign |
+| PUT, PATCH | `/api/campaigns/{campaign_id}` | User | Change the fields you send (both methods do the same) |
+| DELETE | `/api/campaigns/{campaign_id}` | User | Delete it. Articles and entities stay |
+| GET | `/api/campaigns/by-entry/{entry_id}` | User | Campaigns holding an article |
+| GET | `/api/campaigns/by-entity/{entity_type}/{entity_id}` | User | Campaigns an entity belongs to |
+| POST | `/api/campaigns/auto-detect` | User | Suggest new campaigns from story threads and entity clusters |
+| GET | `/api/campaigns/source-options` | User | Which source kinds exist and which entity types can be followed |
 
 #### Campaign Sub-Resources
 
-- **`POST /api/campaigns/{id}/entries`** / **`DELETE /api/campaigns/{id}/entries/{entry_id}`** — Attach/detach entries
-- **`GET/POST /api/campaigns/{id}/entities`** / **`DELETE /api/campaigns/{id}/entities/{entity_id}`** — Campaign entity membership
-- **`GET/POST /api/campaigns/{id}/countries`** / **`DELETE .../countries/{country_id}`**, **`GET .../countries/suggested`** — Targeted/attributed countries
-- **`GET/POST /api/campaigns/{id}/sectors`** / **`DELETE .../sectors/{ref}`**, **`GET .../sectors/suggested`** — Victim verticals (sector by UUID, slug or name)
-- **`GET /api/campaigns/{id}/timeline`**, **`GET .../stats`**, **`GET .../attack-layer`**, **`GET .../detection-gaps`**, **`GET .../export`**, **`GET .../suggest`** — Analysis views
-- **`GET/POST /api/campaigns/{id}/saved-searches`**, **`PATCH/DELETE .../saved-searches/{css_id}`**, **`POST .../saved-searches/{css_id}/sync`** — Links to an analyst's own saved searches. Prefer a `query` source below: it belongs to the campaign instead of to one person.
-- **`GET/POST /api/campaigns/{id}/sources`**, **`PATCH/DELETE .../sources/{source_id}`**, **`POST .../sources/{source_id}/sync`** — Standing intake the campaign owns (see below)
-- **`GET /api/campaigns/{id}/sources/suggested`** — What it could follow, drawn from what it already holds
-- **`POST /api/campaigns/{id}/sources/preview`** — Dry run: what a source *would* add, before it exists
-- **`GET /api/campaigns/source-options`** — Which source kinds exist and which entity types can be followed
-- **`POST /api/campaigns/auto-detect`** — Suggest new campaigns from entry clustering
-- **`GET /api/campaigns/by-entry/{entry_id}`** — Campaigns containing an entry
+All User.
 
-**Auth:** Bearer token
+| Method | Path | What it does |
+| --- | --- | --- |
+| POST | `/api/campaigns/{campaign_id}/entries` | Add an article (409 if already in) |
+| POST | `/api/campaigns/{campaign_id}/entries/bulk` | Add several articles |
+| DELETE | `/api/campaigns/{campaign_id}/entries/{entry_id}` | Remove an article |
+| GET, POST | `/api/campaigns/{campaign_id}/entities` | List or link entities, with a role |
+| DELETE | `/api/campaigns/{campaign_id}/entities/{entity_id}` | Unlink an entity |
+| GET, POST | `/api/campaigns/{campaign_id}/countries` | List or link countries (`origin` or `target`) |
+| GET | `/api/campaigns/{campaign_id}/countries/suggested` | Countries its articles mention |
+| DELETE | `/api/campaigns/{campaign_id}/countries/{country_id}` | Unlink a country |
+| GET, POST | `/api/campaigns/{campaign_id}/sectors` | List or add victim sectors |
+| GET | `/api/campaigns/{campaign_id}/sectors/suggested` | Sectors its articles name |
+| DELETE | `/api/campaigns/{campaign_id}/sectors/{sector_ref}` | Remove a sector |
+| GET | `/api/campaigns/{campaign_id}/timeline` | Articles in date order |
+| GET | `/api/campaigns/{campaign_id}/stats` | Summary numbers |
+| GET | `/api/campaigns/{campaign_id}/attack-layer` | Its TTPs as a Navigator layer |
+| GET | `/api/campaigns/{campaign_id}/detection-gaps` | Detection coverage for its techniques |
+| GET | `/api/campaigns/{campaign_id}/export` | Everything as one JSON bundle |
+| GET | `/api/campaigns/{campaign_id}/suggest` | Articles worth adding |
+| GET, POST | `/api/campaigns/{campaign_id}/saved-searches` | List or link a saved search |
+| PATCH, DELETE | `/api/campaigns/{campaign_id}/saved-searches/{css_id}` | Change or unlink it |
+| POST | `/api/campaigns/{campaign_id}/saved-searches/{css_id}/sync` | Run it now |
+| GET, POST | `/api/campaigns/{campaign_id}/sources` | List or add sources (below) |
+| GET | `/api/campaigns/{campaign_id}/sources/suggested` | Sources it could follow |
+| POST | `/api/campaigns/{campaign_id}/sources/preview` | What a source would add, without creating it |
+| PATCH, DELETE | `/api/campaigns/{campaign_id}/sources/{source_id}` | Pause, change or stop a source. Articles already added stay |
+| POST | `/api/campaigns/{campaign_id}/sources/{source_id}/sync` | Run one source now |
 
----
+A linked saved search belongs to one analyst. Prefer a `query` source, which belongs to the campaign.
 
 #### Campaign Sources
 
-Standing intake owned by the campaign rather than by one analyst. Three kinds:
+A source keeps pulling matching articles into the campaign. There are three kinds:
 
-| `kind` | Body | Claims |
+| `kind` | You send | It adds |
 | --- | --- | --- |
 | `entity` | `entity_type` + `ref_id` | Every article linked to that entity |
-| `story` | `ref_id` (thread UUID) | Every member of that story thread |
-| `query` | `query` (query-language string) | Everything the query matches — see [query-language.md](query-language.md) |
+| `story` | `ref_id` (a thread id) | Every article in that story thread |
+| `query` | `query` (see [query-language.md](query-language.md)) | Every article the query matches |
 
-Each recomputes its full claimed set on every run and inserts only what the
-campaign does not already hold, so an article that joins a story, gains an
-entity link or starts matching the query later still arrives. The
-`sync_campaign_sources` beat job runs every 15 minutes; `auto_sync: false`
-pauses a source without losing the row or what it has added.
+Each run works out the full set again and adds only what the campaign doesn't have yet, so articles that start matching later still arrive. The `sync-campaign-sources` job runs every 15 minutes. `auto_sync: false` pauses a source.
 
-**`POST /api/campaigns/{id}/sources/preview`**
+Preview request and answer:
 
-A dry run. Creates nothing, so it is safe to call as an analyst types.
+```json
+{ "kind": "query", "query": "malware:\"Akira\" AND date:>30d" }
+```
 
-**Request:** `{"kind": "query", "query": "malware:\"Akira\" AND date:>30d"}`
-
-**Response:**
 ```json
 {
-  "kind": "query",
-  "entity_type": null,
-  "ref_id": null,
-  "query": "malware:\"Akira\" AND date:>30d",
-  "label": "malware:\"Akira\" AND date:>30d",
-  "would_add": 47,
-  "already_held": 3,
+  "kind": "query", "entity_type": null, "ref_id": null,
+  "query": "malware:\"Akira\" AND date:>30d", "label": "malware:\"Akira\" AND date:>30d",
+  "would_add": 47, "already_held": 3,
   "preview": [{ "entry_id": "...", "title": "...", "published_at": "..." }],
-  "error": null,
-  "unknown_fields": []
+  "error": null, "unknown_fields": []
 }
 ```
 
-`error` is a parse failure (reported in the body, not as a 4xx, because the UI
-previews mid-typing). `unknown_fields` names fields the query language does not
-have — `actor:` instead of `threat_actor:`, say — which are not fatal (they
-become text terms) but on a standing source answer plausibly forever.
-
-**Refusals on `POST .../sources`:** an unparseable query, a `query` source with a
-`ref_id` (or any other kind without one), and an `entity_type` that owns no
-articles — `GET /api/campaigns/source-options` lists the ones that do.
-
----
+A query that doesn't parse comes back in `error` (not as a 4xx), because the UI previews as you type. `unknown_fields` lists field names the query language doesn't know (say `actor:` instead of `threat_actor:`); they become plain text search terms. Creating a source refuses a query that doesn't parse, a `query` source with a `ref_id`, any other kind without one, and an `entity_type` that has no articles.
 
 #### Entity Relationships
 
-Typed, directed relationships between entities (e.g., "APT29 *uses* Cozybot") with a strength model:
+Typed, directed links between entities, such as "APT29 *uses* Cozybot". Each has:
 
-- **`relationship_type`** (verb): `uses` | `exploits` | `targets` | `attributed_to` | `variant_of` | `communicates_with` | `delivers` | `drops` | `hosts` | `related_to`
-- **`confidence`** (strength tier): `confirmed` | `probable` | `possible`
-- **`source`** (provenance/lifecycle): auto-extracted vs `analyst_created` / `analyst_confirmed` / `analyst_rejected`. Rejected relationships are kept as tombstones (hidden from pivot/graph/list surfaces) so re-ingestion can't resurrect them.
-- **`evidence_entry_ids`**: entries backing the claim; responses include resolved `source_name` / `target_name`
+- **`relationship_type`:** `uses`, `exploits`, `targets`, `attributed_to`, `variant_of`, `communicates_with`, `delivers`, `drops`, `hosts`, `related_to`. Only sensible pairs are allowed (`backend/app/intelligence/relationship_matrix.py`).
+- **`confidence`:** `confirmed`, `probable` or `possible`.
+- **`source`:** where it came from: `co_occurrence`, `auto_extracted`, `external_feed`, `analyst_created`, `analyst_confirmed` or `analyst_rejected`. Rejected ones are kept but hidden, so new articles can't bring them back.
+- **`evidence_entry_ids`:** the articles that back it.
 
-Entity types: `ttp`, `cve`, `threat_actor`, `malware`, `campaign`, `country`, `mitigation`, `tool`, `vendor`, `product`. Lifecycle diagram: [`docs/diagrams/entity-relationship-lifecycle.md`](diagrams/entity-relationship-lifecycle.md).
+Entity types: `ttp`, `cve`, `threat_actor`, `malware`, `campaign`, `country`, `tool`, `vendor`, `product`, `mitigation`. Lifecycle diagram: [entity-relationship-lifecycle.md](diagrams/entity-relationship-lifecycle.md).
 
-**`GET /api/entity-relationships`**
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/entity-relationships` | Visitor | Paginated list. `entity_type` + `entity_id`, `relationship_type`, `include_rejected` |
+| GET | `/api/entity-relationships/by-entity/{entity_type}/{entity_id}` | Visitor | Every relationship for one entity |
+| POST | `/api/entity-relationships/signals/{entity_type}` | Visitor | Body `{"ids": [...]}`: per id, the count and top 3 relationships. A POST because the id list is too long for a URL |
+| POST | `/api/entity-relationships` | User | Create one. Creating an existing one merges the evidence (200 instead of 201); re-creating a rejected one restores it |
+| PUT | `/api/entity-relationships/{relationship_id}` | User | Change verb, confidence, description or evidence |
+| POST | `/api/entity-relationships/{relationship_id}/confirm` | User | Mark it analyst-confirmed |
+| POST | `/api/entity-relationships/{relationship_id}/reject` | User | Mark it rejected (hidden, not deleted) |
+| DELETE | `/api/entity-relationships/{relationship_id}` | User | Delete it. Prefer reject: after a delete, new articles can create it again |
 
-List relationships (paginated). Rejected ones are excluded unless `include_rejected=true`.
+#### Entity Links
 
-**Auth:** Bearer token  
-**Query Params:**
-- `entity_type` + `entity_id`: Match either endpoint of the relationship
-- `relationship_type`: Filter by verb
-- `include_rejected`: Include analyst-rejected rows (default false)
-- `limit`, `offset`: Pagination
+The links between articles and entities that the autolinker and extraction create.
 
-**Response:**
-```json
-{
-  "items": [
-    {
-      "id": "550e8400-...",
-      "source_type": "threat_actor", "source_id": "...", "source_name": "APT29",
-      "target_type": "malware", "target_id": "...", "target_name": "Cozybot",
-      "relationship_type": "uses",
-      "confidence": "probable",
-      "source": "auto_extracted",
-      "description": null,
-      "evidence_entry_ids": [ "550e8401-..." ],
-      "created_at": "2024-01-20T12:00:00Z",
-      "updated_at": "2024-01-20T12:00:00Z"
-    }
-  ],
-  "total": 1000, "limit": 50, "offset": 0, "has_more": true
-}
-```
-
----
-
-**`GET /api/entity-relationships/by-entity/{entity_type}/{entity_id}`**
-
-All relationships for one entity (as source or target), unpaginated.
-
-**Auth:** Bearer token
-
----
-
-**`POST /api/entity-relationships/signals/{entity_type}`**
-
-Batched relationship signals for table columns. **POST with a body, not a query string** — the table sends every loaded row's ID, which overflowed the request line as a GET. Per entity ID: count of non-rejected typed relationships and the top 3 by confidence + evidence volume (verb, direction, counterpart).
-
-**Auth:** Bearer token  
-**Request:**
-```json
-{ "ids": [ "550e8400-...", "550e8401-..." ] }
-```
-**Response:** `{ "<entity_id>": { "count": 7, "top": [ { "verb": "uses", "direction": "outbound", "other_type": "malware", "other_label": "Cozybot", "confidence": "confirmed" } ] } }`
-
----
-
-**`POST /api/entity-relationships`**
-
-Create a relationship. Upserts on (source, target, verb): re-creating an existing relationship merges evidence (returns 200 instead of 201), and explicitly re-creating a rejected one resurrects it.
-
-**Auth:** Bearer token  
-**Status:** 201 Created (200 on upsert-merge)  
-**Request:**
-```json
-{
-  "source_type": "threat_actor",
-  "source_id": "550e8400-...",
-  "target_type": "malware",
-  "target_id": "550e8401-...",
-  "relationship_type": "uses",
-  "confidence": "probable",
-  "description": null,
-  "evidence_entry_ids": []
-}
-```
-
----
-
-**`PUT /api/entity-relationships/{relationship_id}`** — Update verb, confidence, description, or evidence.  
-**`POST /api/entity-relationships/{relationship_id}/confirm`** — Upgrade to `analyst_confirmed` + `confidence: confirmed`.  
-**`POST /api/entity-relationships/{relationship_id}/reject`** — Tombstone as `analyst_rejected` (hidden, not deleted).  
-**`DELETE /api/entity-relationships/{relationship_id}`** — Hard-delete (prefer reject: deletion lets re-ingestion recreate the pair).
-
-**Auth:** Bearer token
-
----
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/entity-links` | Visitor | Every link, newest first |
+| GET | `/api/entity-links/stats` | User | Totals by type and source, and the held-match queue size |
+| GET | `/api/entity-links/pending` | Admin | Held matches (a name that is also an ordinary word) waiting for confirmation |
+| POST | `/api/entity-links/pending/resolve` | Admin | Confirm or reject held matches |
+| DELETE | `/api/entity-links/{entity_type}/{entity_id}/{entry_id}` | User | Remove one link |
+| POST | `/api/entity-links/bulk-unlink` | User | Remove up to 500 links |
+| POST | `/api/false-positives` | User | Report a wrong match (this article, this alias, this entity or this word) |
 
 #### Correlation, Pivot & Graph
 
-Base path: `/api/intelligence` (correlation router)
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/intelligence/pivot/{entity_type}/{entity_id}` | Visitor | Related entities through shared articles, scored by how close they appear |
+| GET | `/api/intelligence/graph/{entity_type}/{entity_id}` | Visitor | Graph of nodes and edges |
+| GET | `/api/intelligence/entry-graph/{entry_id}` | Visitor | Graph of every entity in one article |
+| GET | `/api/intelligence/timeline/{entity_type}/{entity_id}` | Visitor | Activity over time |
+| DELETE | `/api/intelligence/timeline/{entity_type}/{entity_id}` | Admin | Clear the entity's correlation events |
+| DELETE | `/api/intelligence/related/{entity_type}/{entity_id}/{other_type}/{other_id}` | User | Unlink `other` from every article it shares with `entity` |
+| GET | `/api/intelligence/search` | User | Name search across all entity types |
+| GET | `/api/intelligence/temporal-clusters` | Visitor | Articles from different feeds close in time that share entities |
+| GET | `/api/intelligence/events` | User | Correlation events (new cross-source matches) |
+| GET | `/api/intelligence/events/grouped` | Visitor | Events grouped by article |
+| GET | `/api/intelligence/events/unread-count` | User | Unread event count |
+| PUT | `/api/intelligence/events/{event_id}/read` | User | Mark one read |
+| PUT | `/api/intelligence/events/read-all` | User | Mark all read |
+| POST | `/api/intelligence/detection-summary` | User | AI detection summary for some articles |
+| GET, POST | `/api/intelligence/detection-summaries` | User | List or create saved summaries |
+| GET | `/api/intelligence/detection-summaries/{summary_id}` | User | One saved summary |
+| DELETE | `/api/intelligence/detection-summaries/{summary_id}` | Owner | Delete one |
+| GET | `/api/intelligence/watchlist` | User | Your watched, muted and stack entities |
+| PUT | `/api/intelligence/watchlist` | User | Add or change a watch |
+| DELETE | `/api/intelligence/watchlist/{entity_type}/{entity_id}` | User | Remove a watch |
+| GET | `/api/intelligence/feed` | User or `X-API-Key` | Paginated feed of CVEs, TTPs, actors and malware for outside tools |
 
-- **`GET /api/intelligence/pivot/{entity_type}/{entity_id}`** — Pivot across entity types via shared entries (proximity-scored)
-- **`GET /api/intelligence/graph/{entity_type}/{entity_id}`** — Typed entity graph: nodes + edges carrying relationship verb/confidence/provenance
-- **`GET /api/intelligence/entry-graph/{entry_id}`** — Graph of all entities in one entry
-- **`GET /api/intelligence/timeline/{entity_type}/{entity_id}`** / **`DELETE ...`** — Entity activity timeline (+ cache reset)
-- **`GET /api/intelligence/search`** — Cross-type entity name search
-- **`DELETE /api/intelligence/related/{entity_type}/{entity_id}/{other_type}/{other_id}`** — Suppress a co-occurrence pairing
-- **`GET /api/intelligence/events`**, **`/events/grouped`**, **`/events/unread-count`**, **`PUT /events/{event_id}/read`**, **`PUT /events/read-all`** — Correlation event stream (new cross-source matches)
-- **`GET /api/intelligence/temporal-clusters`** — Bursts of related activity
-- **`POST /api/intelligence/detection-summary`** + **`GET/POST/DELETE /api/intelligence/detection-summaries[/{id}]`** — Ad-hoc and saved detection summaries for an entity set
-
-**Auth:** Bearer token
-
----
+A watch on a sector or entity boosts its articles in the Priority Queue.
 
 #### Entity Notes
 
-**`GET /api/entity-notes`**
+Notes on an entity (article notes are under [Notes, Tags & Comments](#notes-tags--comments)).
 
-List analyst notes for one entity (not article-specific notes).
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/entity-notes` | User | Notes on one entity (`entity_type`, `entity_id`), newest first |
+| GET | `/api/entity-notes/search` | User | Search all entity notes by text, tag, type or entity type |
+| POST | `/api/entity-notes` | User | Add a note (`entity_type`, `entity_id`, `title`, `content`, `note_type`, `tags`) |
+| PUT | `/api/entity-notes/{note_id}` | Owner | Edit a note |
+| DELETE | `/api/entity-notes/{note_id}` | Owner | Delete a note |
 
-**Auth:** Bearer token  
-**Query Params:**
-- `entity_type` (required), `entity_id` (required)
-- `note_type`: "annotation" | "analysis" | "action_taken" | "false_positive" | "context"
-- `limit`, `offset`: Pagination
+#### Cleanup Queues (Admin)
 
----
+Proposed fixes to entity data wait in review queues. Every route here is Admin. See [engine.md](engine.md) for the adjudicate stage that files most proposals.
 
-**`GET /api/entity-notes/search`**
+| Method | Path | What it does |
+| --- | --- | --- |
+| GET | `/api/admin/hygiene/feed` | Every proposal from both logs, newest first |
+| GET | `/api/admin/hygiene/stats` | Queue counts and the adjudicate stage's mode |
+| DELETE | `/api/admin/hygiene/feed/{source}/{row_id}` | Delete one proposal row |
+| POST | `/api/admin/hygiene/dismiss-proposals` | Discard pending proposals without applying them |
+| POST | `/api/admin/hygiene/adjudication/{log_id}/apply` | Apply one adjudicate-stage proposal |
+| POST | `/api/admin/hygiene/adjudication/{log_id}/restore` | Undo an applied one |
+| POST | `/api/admin/hygiene/adjudication/apply-all` | Apply up to `limit` pending proposals now |
+| POST | `/api/admin/hygiene/bulk-apply` | Apply a whole queue in the background |
+| GET | `/api/admin/hygiene/bulk-apply/{job_id}` | Progress of that job |
+| GET | `/api/admin/hygiene/reclassify-groups` | Pending type changes, one row per entity |
+| POST | `/api/admin/hygiene/reclassify-groups/apply` | Convert each entity to its proposed type |
+| POST | `/api/admin/hygiene/reclassify-groups/dismiss` | Drop those proposals and stop new ones |
+| POST | `/api/admin/hygiene/apply-reclassify-advisories` | Turn advisory type changes into real proposals |
+| GET | `/api/admin/hygiene/unlink-groups` | Pending link removals, one row per entity |
+| GET | `/api/admin/hygiene/unlink-groups/rows` | The articles behind one entity's removals |
+| POST | `/api/admin/hygiene/unlink-groups/apply` | Remove those links |
+| POST | `/api/admin/hygiene/unlink-groups/keep` | Keep the links and clear the proposals |
+| POST | `/api/admin/hygiene/link-log/{log_id}/restore` | Put back a removed link |
+| POST | `/api/admin/hygiene/link-log/{log_id}/apply-removal` | Carry out a proposed link removal |
+| GET | `/api/admin/hygiene/orphans` | Entities with no articles |
+| POST | `/api/admin/hygiene/orphans/prune` | Delete them |
+| GET | `/api/admin/hygiene/enrichment-gaps` | Empty fields by entity type |
+| POST | `/api/admin/hygiene/enrichment-gaps/enrich` | Have the AI research and fill one field |
+| POST | `/api/admin/hygiene/run-name-normalization` | Start the AI name check |
+| POST | `/api/admin/hygiene/normalize-name/{log_id}/apply` | Apply one rename or merge |
+| POST | `/api/admin/hygiene/scan-alias-hygiene` | Find duplicate aliases |
+| POST | `/api/admin/hygiene/alias-collision/{log_id}/apply` | Remove the clashing alias |
+| POST | `/api/admin/hygiene/scan-vendor-autolink` | Propose vendors for products with none |
+| POST | `/api/admin/hygiene/vendor-autolink/{log_id}/apply` | Set the proposed vendor |
+| POST | `/api/admin/hygiene/scan-id-hygiene` | Find malformed TTP and CVE ids and withdrawn CVEs |
+| POST | `/api/admin/hygiene/id-hygiene/{log_id}/apply` | Apply one id fix |
 
-Search entity notes across all entities (paginated).
+#### AI-Created Entities (Admin)
 
-**Auth:** Bearer token
-
----
-
-**`POST /api/entity-notes`**
-
-Create a note on an entity for internal documentation.
-
-**Auth:** Bearer token  
-**Status:** 201 Created  
-**Request:**
-```json
-{
-  "entity_type": "threat_actor",
-  "entity_id": "550e8400-...",
-  "title": null,
-  "content": "Observed new variant in the wild...",
-  "note_type": "analysis",
-  "tags": []
-}
-```
-
----
-
-**`PUT /api/entity-notes/{note_id}`** — Update a note.  
-**`DELETE /api/entity-notes/{note_id}`** — Delete a note (204).
-
-**Auth:** Bearer token
+| Method | Path | What it does |
+| --- | --- | --- |
+| GET | `/api/engine/extraction/stats` | Totals for entities the AI created: by type, needing review, orphaned, likely duplicates |
+| GET | `/api/engine/extraction/entities` | List them with a status (linked, review, orphan, dupe) |
+| POST | `/api/engine/extraction/confirm` | Sign off on them |
+| POST | `/api/engine/extraction/not-duplicate` | Mark two entities as different things |
+| POST | `/api/engine/extraction/delete` | Delete them and, unless `deny=false`, ban their names |
+| GET, POST | `/api/engine/extraction/denylist` | List or add banned names (`entity_type: "any"` bans for every type) |
+| DELETE | `/api/engine/extraction/denylist/{row_id}` | Lift a ban |
 
 ---
 
 ### Intelligence Requirements (PIRs)
 
-Base path: `/api/requirements`
+Priority Intelligence Requirements are standing questions. New articles are matched against their keywords, feeds and entities. All User.
 
-Priority Intelligence Requirements: standing questions that incoming entries are matched against.
-
-**`GET /api/requirements`** — List requirements (paginated).  
-**`POST /api/requirements`** — Create a requirement (201).  
-**`GET /api/requirements/{id}`** / **`PATCH /api/requirements/{id}`** / **`DELETE /api/requirements/{id}`** — CRUD.  
-**`GET /api/requirements/coverage`** — Coverage summary across all requirements.  
-**`GET /api/requirements/{id}/matches`** — Entries matched to a requirement (paginated).  
-**`POST /api/requirements/{id}/match`** — Manually match an entry (201).  
-**`DELETE /api/requirements/{id}/matches/{entry_id}`** — Remove a match (204).  
-**`POST /api/requirements/{id}/fulfill`** — Mark a requirement fulfilled.  
-**`GET /api/requirements/{id}/entities`** — Entities extracted from the requirement's matched entries (PIR entity matching: pivots a requirement into the actors/malware/CVEs it has surfaced).
-
-**Auth:** Bearer token
+| Method | Path | What it does |
+| --- | --- | --- |
+| GET | `/api/requirements` | List, most recently updated first |
+| POST | `/api/requirements` | Create one |
+| GET | `/api/requirements/coverage` | Counts by status, priority, category and staleness |
+| GET | `/api/requirements/{requirement_id}` | One requirement |
+| PATCH | `/api/requirements/{requirement_id}` | Change it. Removing a keyword or entity also removes its matches |
+| DELETE | `/api/requirements/{requirement_id}` | Delete it and its matches |
+| GET | `/api/requirements/{requirement_id}/matches` | Matched articles |
+| POST | `/api/requirements/{requirement_id}/match` | Match an article by hand |
+| DELETE | `/api/requirements/{requirement_id}/matches/{entry_id}` | Remove a match |
+| POST | `/api/requirements/{requirement_id}/fulfill` | Mark fulfilled, optionally with the report that answered it |
+| GET | `/api/requirements/{requirement_id}/entities` | Entities found in the matched articles |
 
 ---
 
 ### Automation & Rules
 
-Base path: `/api/automation`, `/api/job-schedules`
-
-Webhook management lives in the Automations area of the UI.
-
 #### Automation Rules
 
-Rules trigger automated actions on incoming entries (apply tags, send alerts, update entities, run enrichment).
+A rule runs actions (tag, alert, run AI, call a webhook) when its trigger fires. See [automation-ai-enrichment.md](automation-ai-enrichment.md).
 
-**`GET /api/automation/rules`**
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/automation/rules` | User | List rules, newest first (`label` filter) |
+| POST | `/api/automation/rules` | User | Create a rule |
+| GET | `/api/automation/rules/{rule_id}` | User | One rule. Webhook URLs and headers are hidden unless you own it or are admin |
+| PUT | `/api/automation/rules/{rule_id}` | Owner | Change the fields you send |
+| DELETE | `/api/automation/rules/{rule_id}` | Owner | Delete a rule |
+| POST | `/api/automation/rules/{rule_id}/toggle` | Owner | Turn it on or off |
+| POST | `/api/automation/rules/{rule_id}/test` | Owner | Dry run against one article (`?entry_id=`). Saves nothing |
+| POST | `/api/automation/rules/{rule_id}/run` | Owner | Run it now against recent articles |
+| GET | `/api/automation/rules/{rule_id}/logs` | User | That rule's run history |
+| GET | `/api/automation/logs` | User | All run history |
+| DELETE | `/api/automation/logs` | Admin | Clear all run history |
+| GET | `/api/automation/rules/export` | User | All rules as portable JSON |
+| GET | `/api/automation/rules/export/{rule_id}` | User | One rule as portable JSON |
+| POST | `/api/automation/rules/import` | User | Import exported rules. A rule with the same name is overwritten only if it is yours (an admin overwrites any) |
+| GET | `/api/automation/templates` | Public | Ready-made rule templates |
+| GET | `/api/automation/variable-contexts` | Public | Template variables each action provides |
 
-List automation rules with execution stats.
+Create request:
 
-**Auth:** Bearer token  
-**Query Params:**
-- `limit`, `offset`: Pagination
-
-**Response:**
 ```json
 {
-  "items": [
-    {
-      "id": "550e8400-...",
-      "name": "Tag CVE articles",
-      "description": "Auto-tag articles containing CVEs",
-      "match_logic": {
-        "conditions": [
-          {
-            "field": "contains_cves",
-            "operator": "is_true"
-          }
-        ],
-        "combinator": "all"
-      },
-      "actions": [
-        {
-          "type": "add_tags",
-          "config": { "tags": [ "cve-watch" ] }
-        }
-      ],
-      "is_enabled": true,
-      "execution_count": 1523,
-      "last_executed_at": "2024-01-20T14:22:00Z",
-      "created_at": "2024-01-01T00:00:00Z"
-    }
-  ],
-  "total": 15,
-  "limit": 50,
-  "offset": 0,
-  "has_more": false
-}
-```
-
----
-
-**`POST /api/automation/rules`**
-
-Create a new automation rule.
-
-**Auth:** Bearer token  
-**Status:** 201 Created  
-**Request:**
-```json
-{
-  "name": "Alert on APT29",
-  "description": "Send webhook on new APT29 articles",
-  "match_logic": {
-    "conditions": [
-      {
-        "field": "threat_actors",
-        "operator": "includes",
-        "value": "550e8400-..." // APT29 entity ID
-      }
-    ],
-    "combinator": "any"
-  },
+  "name": "Flag LockBit coverage",
+  "trigger_type": "on_keyword_match",
+  "trigger_config": { "keywords": ["LockBit"], "match_fields": ["title", "content"] },
+  "conditions": {},
   "actions": [
-    {
-      "type": "send_webhook",
-      "params": {
-        "preset_id": "550e8401-..."
-      }
-    },
-    {
-      "type": "add_tags",
-      "config": { "tags": [ "cve-watch", { "name": "customer-a", "color": "#DC2626", "chip": true } ] }
-    }
+    { "type": "add_tags", "config": { "tags": ["ransomware"] } },
+    { "type": "mark_priority", "config": {} }
   ],
+  "labels": ["ransomware"],
   "is_enabled": true
 }
 ```
 
----
-
-**`GET /api/automation/rules/{rule_id}`**
-
-Get a single rule's configuration.
-
-**Auth:** Bearer token
-
----
-
-**`PUT /api/automation/rules/{rule_id}`**
-
-Update rule configuration.
-
-**Auth:** Bearer token  
-**Status:** 200 OK
-
----
-
-**`DELETE /api/automation/rules/{rule_id}`**
-
-Delete a rule.
-
-**Auth:** Bearer token  
-**Status:** 204 No Content
-
----
-
-**`POST /api/automation/rules/{rule_id}/toggle`**
-
-Enable or disable a rule without deleting it.
-
-**Auth:** Bearer token  
-**Status:** 200 OK
-
----
-
-**`POST /api/automation/rules/{rule_id}/test`**
-
-Test a rule against recent entries (dry-run).
-
-**Auth:** Bearer token  
-**Status:** 200 OK  
-**Response:**
-```json
-{
-  "matched_entries": 5,
-  "would_apply_tags": [ "tag1", "tag2" ],
-  "would_send_webhooks": 2
-}
-```
-
----
-
-**`POST /api/automation/rules/{rule_id}/run`**
-
-Run a rule now (for real, not a dry-run). Batch rules run once over the matched set; per-entry rules execute per matching entry.
-
-**Auth:** Bearer token  
-**Status:** 200 OK
-
----
-
-**`GET /api/automation/templates`** — Prebuilt rule templates.  
-**`GET /api/automation/variable-contexts`** — Variables available to action templates per trigger type.  
-**`GET /api/automation/rules/export`** / **`GET /api/automation/rules/export/{rule_id}`** — Export rules as a portable JSON payload.  
-**`POST /api/automation/rules/import`** — Import a previously exported payload.
-
-**Auth:** Bearer token
-
----
-
-**`GET /api/automation/rules/{rule_id}/logs`**
-
-Execution logs for a specific rule.
-
-**Auth:** Bearer token  
-**Query Params:**
-- `limit`, `offset`: Pagination
-
----
-
-**`GET /api/automation/logs`**
-
-All automation execution logs across rules.
-
-**Auth:** Bearer token  
-**Query Params:**
-- `limit`, `offset`: Pagination
-
----
-
-**`DELETE /api/automation/logs`**
-
-Clear automation logs.
-
-**Auth:** Bearer token  
-**Status:** 204 No Content
-
----
+`trigger_type` is one of `on_new_entry`, `on_schedule`, `on_keyword_match`, `on_cve_detected`, `on_manual`, `on_correlation_event`, `on_entry_scored`, `on_observable_captured`.
 
 #### Webhook Presets
 
-**`GET /api/webhook-presets`**
+A preset is a saved URL, payload and headers that rule actions can reuse.
 
-List configured webhook endpoints.
-
-**Auth:** Bearer token
-
-**Response:**
-```json
-{
-  "items": [
-    {
-      "id": "550e8400-...",
-      "name": "Slack #threats",
-      "url": "https://hooks.slack.com/...",
-      "headers": { "Authorization": "Bearer ..." },
-      "is_active": true,
-      "test_payload": { "text": "Test message" }
-    }
-  ]
-}
-```
-
----
-
-**`POST /api/webhook-presets`**
-
-Create a webhook preset.
-
-**Auth:** Bearer token  
-**Status:** 201 Created
-
----
-
-**`PUT /api/webhook-presets/{preset_id}`**
-
-Update a webhook preset.
-
-**Auth:** Bearer token  
-**Status:** 200 OK
-
----
-
-**`DELETE /api/webhook-presets/{preset_id}`**
-
-Delete a preset.
-
-**Auth:** Bearer token  
-**Status:** 204 No Content
-
----
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/webhook-presets` | User | List presets (optional type filter) |
+| POST | `/api/webhook-presets` | User | Create one |
+| GET | `/api/webhook-presets/{preset_id}` | User | One preset |
+| PUT | `/api/webhook-presets/{preset_id}` | Owner | Change it |
+| DELETE | `/api/webhook-presets/{preset_id}` | Owner | Delete it |
 
 #### Job Schedules
 
-Override the default schedules for background jobs (feed sync, enrichment, etc.).
+Background jobs (feed fetching, enrichment, cleanup) and their schedules. All Admin.
 
-**`GET /api/job-schedules`**
-
-List job schedule configuration.
-
-**Auth:** Bearer token
-
----
-
-**`PATCH /api/job-schedules/{job_name}`**
-
-Override the schedule for a job.
-
-**Auth:** Bearer token  
-**Status:** 200 OK
-
----
-
-**`DELETE /api/job-schedules/{job_name}`** — Remove the override (revert to default schedule).  
-**`POST /api/job-schedules/{job_name}/run`** — Trigger the job immediately.
-
-**Auth:** Bearer token
+| Method | Path | What it does |
+| --- | --- | --- |
+| GET | `/api/job-schedules` | Every job and its schedule |
+| PATCH | `/api/job-schedules/{job_name}` | Change a job's schedule or turn it off |
+| DELETE | `/api/job-schedules/{job_name}` | Go back to the default schedule |
+| POST | `/api/job-schedules/{job_name}/run` | Run it now |
 
 ---
 
 ### Dashboards & Widgets
 
-Base paths: `/api/dashboards`, `/api/widgets`
-
 #### Dashboards
 
-**`GET /api/dashboards`**
+Dashboards are private. Another user's board is invisible and returns 404.
 
-List the caller's dashboards. Boards are private to the user who created them —
-another user's board is invisible here and 404s on every other endpoint below.
-
-**Auth:** Bearer token  
-**Query Params:**
-- `limit`, `offset`: Pagination
-
-**Response:**
-```json
-{
-  "items": [
-    {
-      "id": "550e8400-...",
-      "name": "Executive Summary",
-      "description": "High-level metrics and alerts",
-      "layout": "grid",
-      "is_default": true,
-      "widgets": [ ... ],
-      "created_at": "2024-01-01T00:00:00Z",
-      "updated_at": "2024-01-20T14:22:00Z"
-    }
-  ],
-  "total": 5,
-  "limit": 50,
-  "offset": 0,
-  "has_more": false
-}
-```
-
----
-
-**`POST /api/dashboards`**
-
-Create a new dashboard.
-
-**Auth:** Bearer token  
-**Status:** 201 Created  
-**Request:**
-```json
-{
-  "name": "Incident Response",
-  "description": "Real-time incident tracking",
-  "layout": "grid",
-  "is_default": false
-}
-```
-
----
-
-**`POST /api/dashboards/seed-defaults`**
-
-Give a user who owns no dashboards the instance's default board set (five
-`__triage__/`-prefixed tabs defined in `backend/app/dashboard_defaults.py`).
-Idempotent and non-destructive: a user who already owns any board gets that back
-untouched. The dashboard page calls this once for a user with no boards.
-
-**Auth:** Bearer token
-**Response:** same shape as `GET /api/dashboards`
-
----
-
-**`GET /api/dashboards/{dashboard_id}`**
-
-Get dashboard with all widgets.
-
-**Auth:** Bearer token
-
----
-
-**`PUT /api/dashboards/{dashboard_id}`**
-
-Update dashboard metadata.
-
-**Auth:** Bearer token  
-**Status:** 200 OK
-
----
-
-**`DELETE /api/dashboards/{dashboard_id}`**
-
-Delete a dashboard.
-
-**Auth:** Bearer token  
-**Status:** 204 No Content
-
----
-
-**`PUT /api/dashboards/reorder`**
-
-Reorder dashboard tabs.
-
-**Auth:** Bearer token  
-**Status:** 200 OK  
-**Request:**
-```json
-{
-  "dashboard_ids": [ "550e8400-...", "550e8401-...", "550e8402-..." ]
-}
-```
-
----
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/dashboards` | Visitor | Your dashboards with their widgets |
+| POST | `/api/dashboards` | User | Create one. `is_default: true` unsets your other default |
+| POST | `/api/dashboards/seed-defaults` | User | Give a user with no boards the default set (from `backend/app/dashboard_defaults.py`). Does nothing if you already have a board |
+| PUT | `/api/dashboards/reorder` | User | Save the tab order |
+| GET | `/api/dashboards/{dashboard_id}` | Visitor | One dashboard |
+| PUT | `/api/dashboards/{dashboard_id}` | User | Rename it or make it the default |
+| DELETE | `/api/dashboards/{dashboard_id}` | User | Delete it and its widgets |
 
 #### Widgets
 
-**`POST /api/dashboards/{dashboard_id}/widgets`**
-
-Add a widget to a dashboard.
-
-**Auth:** Bearer token  
-**Status:** 201 Created  
-**Request:**
-```json
-{
-  "type": "entry_feed",
-  "title": "Critical Articles",
-  "config": {
-    "feed_ids": [ "550e8400-..." ],
-    "filters": { "is_starred": true },
-    "limit": 10
-  },
-  "position": { "x": 0, "y": 0, "w": 6, "h": 4 }
-}
-```
-
-Widget `type` corresponds to one of the widget data endpoints below.
-
----
-
-**`PUT /api/dashboards/{dashboard_id}/widgets/{widget_id}`**
-
-Update widget config or position.
-
-**Auth:** Bearer token  
-**Status:** 200 OK
-
----
-
-**`DELETE /api/dashboards/{dashboard_id}/widgets/{widget_id}`**
-
-Remove widget from dashboard.
-
-**Auth:** Bearer token  
-**Status:** 204 No Content
-
----
-
-**`PUT /api/dashboards/{dashboard_id}/layout`**
-
-Update entire dashboard layout (grid positions).
-
-**Auth:** Bearer token  
-**Status:** 200 OK  
-**Request:**
-```json
-{
-  "widgets": [
-    { "id": "550e8400-...", "position": { "x": 0, "y": 0, "w": 6, "h": 4 } }
-  ]
-}
-```
-
----
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| POST | `/api/dashboards/{dashboard_id}/widgets` | User | Add a widget at a grid position |
+| PUT | `/api/dashboards/{dashboard_id}/widgets/{widget_id}` | User | Change title, config, position or size |
+| DELETE | `/api/dashboards/{dashboard_id}/widgets/{widget_id}` | User | Remove a widget |
+| PUT | `/api/dashboards/{dashboard_id}/layout` | User | Save every widget's position and size at once |
 
 #### Widget Data Endpoints
 
-All `GET /api/widgets/{name}`, Bearer token, read-only aggregates consumed by dashboard widgets:
+Each widget reads one `GET /api/widgets/<name>` endpoint. All are read-only.
 
-- **Core:** `feed-activity`, `cve-severity`, `threat-timeline`, `trending-cves`, `new-cves`, `attack-heatmap`, `stats`, `new-actors`, `detection-coverage`, `correlation-events`, `new-detections`, `automation-logs`
-- **Detection:** `detection-format-breakdown`, `attack-coverage-gap`, `kev-matches` (stored CVEs present in CISA KEV)
-- **Entities:** `trending-vendors`, `trending-products`, `targeted-countries`, `active-campaigns`
-- **Ops:** `feed-health`, `worker-queue`, `ai-usage`
-- **Strategic:** `weekly-recap`, `actor-activity`, `hot-correlations`
-- **Triage:** `triage-queue-stats`, `saved-search-hits`, `top-tags`, `telegram-mentions`
+- **Visitor:** `feed-activity`, `cve-severity`, `threat-timeline`, `trending-cves`, `new-cves`, `attack-heatmap`, `stats`, `new-actors`, `correlation-events`, `overview`, `kev-deadlines`, `triage-flow`, `under-reported`, `kev-matches`, `trending-vendors`, `trending-products`, `targeted-countries`, `weekly-recap`, `actor-activity`, `hot-correlations`, `triage-queue-stats`, `top-tags`
+- **User:** `detection-coverage`, `new-detections`, `automation-logs`, `watchlist-pulse`, `ransomware-pulse`, `rules-attention`, `targeting-grid`, `campaign-momentum`, `morning-briefing`, `relationship-inbox`, `playbook-drift`, `detection-format-breakdown`, `attack-coverage-gap`, `active-campaigns`, `feed-health`, `worker-queue`, `ai-usage`, `saved-search-hits`, `telegram-mentions`
 
 ---
 
 ### Detection Rules & Tools
 
-Base paths: `/api/tools`, `/api/intelligence` (overlap)
-
 #### Detection Rule Management
 
-**`POST /api/entries/{entry_id}/generate-rules`**
+All User unless marked. See [detection-engineering.md](detection-engineering.md).
 
-(See Intelligence section above)
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/detection-rules` | User | Paginated rule list (no rule bodies) |
+| GET | `/api/detection-rules/search` | User | The rule library: search plus facet counts in one call. See below |
+| GET | `/api/detection-rules/facets` | User | Facet counts for the library rail |
+| GET | `/api/detection-rules/telemetry-vocabulary` | User | Telemetry values split into `collected` and `missing` by your telemetry inventory |
+| GET | `/api/detection-rules/coverage-board` | User | Trending entities and how many rules cover each |
+| GET | `/api/detection-rules/needing-review` | User | Rules whose techniques have new intel |
+| POST | `/api/detection-rules` | User | Create a rule. Metadata is read from the rule text where you leave it blank |
+| GET | `/api/detection-rules/{rule_id}` | User | One rule with its content |
+| PUT | `/api/detection-rules/{rule_id}` | User | Change the fields you send |
+| DELETE | `/api/detection-rules/{rule_id}` | User | Delete a rule and its versions |
+| PATCH | `/api/detection-rules/{rule_id}/status` | User | Set `is_draft` |
+| POST | `/api/detection-rules/validate` | User | Check syntax without saving |
+| POST | `/api/detection-rules/extract-metadata` | User | Read title, log source and ATT&CK ids from rule text |
+| POST | `/api/detection-rules/{rule_id}/convert` | User | AI-convert to another rule language |
+| GET | `/api/detection-rules/{rule_id}/conversions` | User | Rules converted from this one |
+| POST | `/api/detection-rules/{rule_id}/extend` | User | Make a draft copy to build on |
+| POST | `/api/detection-rules/chat` | User | Streaming AI help with a rule |
+| GET | `/api/detection-rules/{rule_id}/versions` | User | Saved versions, newest first |
+| GET | `/api/detection-rules/{rule_id}/versions/{version_id}` | User | One version |
+| POST | `/api/detection-rules/{rule_id}/versions/{version_id}/rollback` | User | Restore a version (the current text is saved first) |
+| GET | `/api/detection-rules/{rule_id}/diff` | User | Diff two versions, or a version and now |
+| GET | `/api/detection-rules/{rule_id}/provenance` | User | The intel chain behind the rule |
+| GET | `/api/detection-rules/{rule_id}/fresh-intel` | User | Articles on its CVEs and techniques since it was last edited |
+| GET | `/api/detection-rules/{rule_id}/related` | User | Rules sharing a CVE or technique, other formats, near-copies |
+| GET | `/api/detection-rules/{rule_id}/commits` | User | Commit history for a rule from a GitHub repo |
+| POST | `/api/detection-rules/bulk-update` | User | Set draft status or add and remove tags on many rules |
+| POST | `/api/detection-rules/bulk-delete` | Admin | Delete many rules |
+| DELETE | `/api/intelligence/detection-rules` | Admin | Delete every rule |
+| POST | `/api/detection-rules/import` | User | Import Sigma rules from YAML or a ZIP |
+| GET | `/api/detection-rules/export` | User | Export rules as YAML or ZIP |
+| POST | `/api/intelligence/entities/{entity_type}/{entity_id}/generate-rules` | User | AI-written rules for an actor, malware, CVE or TTP |
 
----
+Rule formats (`rule_type`): `sigma`, `splunk_spl`, `crowdstrike_ql`, `elastic_ql`, `kql`, `snort_suricata`, `yara`, `nuclei`, `panther`.
 
-**`GET /api/detection-rules`**
-
-List all stored detection rules.
-
-**Auth:** Bearer token  
-**Query Params:**
-- `rule_type`: "sigma" | "splunk_spl" | "crowdstrike_ql" | "elastic_ql" | "kql" | "snort_suricata" | "yara" | "nuclei" | "panther"
-- `status`: Rule lifecycle status filter
-- `search`: Filter by title
-- `limit`, `offset`: Pagination
-
-**Response:**
-```json
-{
-  "items": [
-    {
-      "id": "550e8400-...",
-      "title": "Detect Cozybot C2 Communication",
-      "rule_type": "sigma",
-      "status": "active",
-      "content": "title: ...\nlogsource:\n  product: windows\ndetection:\n  ...",
-      "version": 3,
-      "created_at": "2024-01-01T00:00:00Z",
-      "updated_at": "2024-01-20T14:22:00Z"
-    }
-  ],
-  "total": 250,
-  "limit": 50,
-  "offset": 0,
-  "has_more": true
-}
-```
-
----
-
-**`GET /api/detection-rules/telemetry-vocabulary`**
-
-The library's Telemetry facet values split into `{collected, missing}` by whether the enabled Telemetry Sources inventory answers them — what the "My telemetry" / "Gaps" one-click selections tick. Server-side because the match is tiered (ticked product name → canonical behaviour id → category with a ticked source), so comparing the two lists client-side under-counts badly.
-
-**Auth:** Bearer token
-
----
-
-**`GET /api/detection-rules/search`**
-
-The Rule Library's list *and* its facet counts, in one Meilisearch round trip. Unlike `GET /api/detection-rules` (PostgreSQL, `ILIKE` substring matching), this ranks by relevance with typo tolerance and returns a facet distribution scoped to the active filters, so the rail narrows as you click.
-
-**Auth:** Bearer token  
-**Query Params:**
+**Rule library search** (`GET /api/detection-rules/search`) ranks by relevance, tolerates typos and returns facet counts for the current filters.
 
 | Param | Repeatable | Notes |
 |-------|-----------|-------|
-| `q` | | Full-text over title/description/tags/tactics/products/linked entities; empty matches all |
-| `rule_type`, `severity`, `license`, `tag` | ✓ | Rule's own columns |
-| `source_repo`, `source_author` | ✓ | Upstream provenance |
-| `tactic`, `technique` | ✓ | ATT&CK tactics, technique IDs |
-| `data_source` | ✓ | Values of the rule's own `data_sources` column |
-| `telemetry_token` | ✓ | Required telemetry across every rule format — what the library's Telemetry rail faces. Wider than `data_source`: falls back to the Sigma `log_source` triple and the per-format defaults |
-| `actor`, `malware`, `tool`, `vendor`, `product` | ✓ | Entities borrowed from the rule's source entry |
-| `is_draft`, `authored_local` | | Booleans. `authored_local=true` means no upstream repo |
-| `telemetry` | | `covered` (every required source is collected) \| `missing` (at least one isn't), judged against the enabled Telemetry Sources inventory at request time. Rules declaring no telemetry need match neither. Stricter than `telemetry_token`, which ORs and so also admits partially covered rules |
+| `q` | | Text to search; empty matches all |
+| `scope` | | What `q` searches: `metadata`, `content` or `both` (default) |
+| `rule_type`, `severity`, `license`, `tag` | yes | The rule's own fields |
+| `source_repo`, `source_author` | yes | Where it came from upstream |
+| `tactic`, `technique` | yes | ATT&CK tactics and technique ids |
+| `data_source` | yes | The rule's `data_sources` values |
+| `telemetry_token` | yes | Telemetry the rule needs, across every format |
+| `actor`, `malware`, `tool`, `vendor`, `product` | yes | Entities from the rule's source article |
+| `is_draft`, `authored_local` | | `authored_local=true` means written here, not imported |
+| `telemetry` | | `covered` (you collect everything it needs) or `missing` (you lack at least one source) |
 | `created_after` | | ISO timestamp |
-| `sort_by` | | `relevance` \| `title` \| `rule_type` \| `severity` \| `is_draft` \| `created_at` \| `updated_at` \| `upstream_updated_at` |
-| `sort_order` | | `asc` \| `desc` |
-| `limit` (default 100, max 500), `offset` | | |
+| `sort_by` | | `relevance`, `title`, `rule_type`, `severity`, `is_draft`, `created_at` (default), `updated_at`, `upstream_updated_at` |
+| `sort_order` | | `asc` or `desc` (default) |
+| `limit`, `offset` | | `limit` default 100, max 500 |
 
-Values **within** a repeatable param are ORed; different params AND together — ticking two rule formats widens the result set rather than emptying it.
-
-**Response:**
-```json
-{
-  "items": [ { "id": "550e8400-...", "title": "...", "rule_type": "sigma", "telemetry": { ... } } ],
-  "total": 4820,
-  "limit": 100,
-  "offset": 0,
-  "has_more": true,
-  "facets": {
-    "rule_type": [ { "value": "sigma", "count": 3910 }, { "value": "yara", "count": 512 } ],
-    "mitre_tactics": [ { "value": "persistence", "count": 811 } ],
-    "actors": [ { "value": "APT29", "count": 14 } ]
-  }
-}
-```
-
-Notes:
-- Facet counts are **disjunctive** — each facet is counted with every other filter applied but not its own, so selecting "sigma" still shows the other formats. Meilisearch's native distribution is conjunctive, which would collapse a facet to the single value you just picked and leave no way to switch. Each active facet costs one extra query, batched into a single multi-search request.
-- `total` is exact (`page`/`hitsPerPage`, not `estimatedTotalHits`).
-- Rows are hydrated from PostgreSQL by id **in Meilisearch's order**: the index carries only what is searched, filtered or sorted on, while derived fields (telemetry coverage against the live inventory, linked entry counts) stay computed off the authoritative row. A doc whose row was deleted is skipped rather than surfacing as a hole.
-- Returns **503 `rule_search_unavailable`** if Meilisearch is down — the whole library is served from this, so a silent `[]` would read as "you have no rules".
-- Facet groups returned: `rule_type`, `actors`, `malware`, `tools`, `vendors`, `products`, `techniques`, `source_repo`, `source_author`, `mitre_tactics`, `data_sources`, `severity`, `license`, `tags`.
-
----
-
-**`POST /api/detection-rules`**
-
-Create a rule manually or from template.
-
-**Auth:** Bearer token  
-**Status:** 201 Created  
-**Request:**
-```json
-{
-  "title": "New Malware Signature",
-  "rule_type": "yara",
-  "content": "rule MalwareX { ... }",
-  "description": "...",
-  "tags": [ "malware", "apt29" ]
-}
-```
-
----
-
-**`GET /api/detection-rules/{rule_id}`**
-
-Get a rule and its version history.
-
-**Auth:** Bearer token
-
----
-
-**`PUT /api/detection-rules/{rule_id}`**
-
-Update a rule (creates new version).
-
-**Auth:** Bearer token  
-**Status:** 200 OK
-
----
-
-**`DELETE /api/detection-rules/{rule_id}`**
-
-Delete a rule and all versions.
-
-**Auth:** Bearer token  
-**Status:** 204 No Content
-
----
-
-**`POST /api/detection-rules/validate`**
-
-Validate rule syntax without saving.
-
-**Auth:** Bearer token  
-**Request:**
-```json
-{
-  "rule_type": "sigma",
-  "content": "title: Test\nlogsource: ..."
-}
-```
-**Response:**
-```json
-{
-  "is_valid": true,
-  "errors": []
-}
-```
-
----
-
-#### Rule Workbench & Lifecycle
-
-- **`PATCH /api/detection-rules/{rule_id}/status`** — Move a rule through its lifecycle
-- **`POST /api/detection-rules/{rule_id}/convert`** — Convert between rule formats
-- **`POST /api/detection-rules/chat`** — AI-assisted rule editing chat
-- **`GET /api/detection-rules/{rule_id}/diff`** — Diff between rule versions
-- **`GET /api/detection-rules/{rule_id}/provenance`** / **`GET .../commits`** — Source-entry provenance and change history
-- **`POST /api/detection-rules/extract-metadata`** — Parse title/logsource/ATT&CK refs out of raw rule text
-- **`POST /api/detection-rules/bulk-update`** / **`POST .../bulk-delete`** — Bulk operations
-- **`POST /api/detection-rules/import`** / **`GET /api/detection-rules/export`** — Import/export rule sets
-- **`GET /api/detection-rules/needing-review`** — Rules flagged for review
-- **`POST /api/entries/{entry_id}/extract-detection-rules`** — Extract rules embedded in an article
-
-**Auth:** Bearer token
-
----
+Values within one parameter are ORed; different parameters are ANDed. Each facet is counted with every filter except its own, so ticking "sigma" still shows the other formats. `total` is exact. Returns 503 `rule_search_unavailable` if Meilisearch is down.
 
 #### Detection Coverage
 
-**`POST /api/intelligence/detection-coverage`**
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| POST | `/api/intelligence/detection-coverage` | User | Sort techniques into `covered` (a rule exists and your telemetry can feed it), `library_only` (a rule exists but you lack the telemetry) or `no_rule` |
+| GET | `/api/analytics/detection-coverage` | User | Observed TTPs versus rules |
+| GET | `/api/telemetry-sources` | User | Your telemetry inventory (the log sources you collect) |
+| POST | `/api/telemetry-sources` | User | Add a source |
+| PUT | `/api/telemetry-sources/{source_id}` | User | Change a source |
+| DELETE | `/api/telemetry-sources/{source_id}` | User | Remove a source |
+| POST | `/api/telemetry-sources/check-feasibility` | User | Which data sources your inventory covers |
+| GET | `/api/telemetry-sources/telemetry-gaps` | User | Rules that need sources you don't have |
+| GET | `/api/telemetry-sources/taxonomy` | User | The older data-source list for the picker |
+| GET | `/api/telemetry-sources/catalog` | User | The ready-made data-source catalog |
+| POST | `/api/telemetry-sources/sync` | Admin | Save catalog selections as sources |
 
-Classify a set of ATT&CK techniques as `covered` (a referencing rule's data sources are all satisfiable by enabled telemetry), `library_only` (rule exists but telemetry can't satisfy it), or `no_rule`.
+#### Threats Board & Coverage Workspace
 
-**Auth:** Bearer token
+All User.
 
-See also `GET /api/analytics/detection-coverage` and the `attack-coverage-gap` widget. Telemetry source management lives at `/api/telemetry-sources` (CRUD, `check-feasibility`, `telemetry-gaps`, `taxonomy`, `catalog`, `sync`).
-
----
+| Method | Path | What it does |
+| --- | --- | --- |
+| GET | `/api/threat-board` | Threats and vulnerabilities ranked over a window |
+| GET | `/api/threat-board/windows` | The windows the board offers |
+| GET | `/api/threat-board/precedent` | Past stories shaped like this one |
+| GET | `/api/threat-board/{entity_type}/{entity_key}/rules` | Rules that match a board row |
+| PUT | `/api/threat-board/{entity_type}/{entity_key}/state` | Mark a row `open`, `handled` or `muted` |
+| GET | `/api/coverage-workspace/{entity_type}/{entity_key}` | Articles and behaviours for one threat |
+| GET | `/api/coverage-workspace/{entity_type}/{entity_key}/behaviours/{technique_id}/rules` | Rules for one behaviour |
+| GET, POST | `/api/coverage-workspace/{entity_type}/{entity_key}/sets` | List or save rule sets for the threat |
+| POST | `/api/coverage-workspace/sets/{summary_id}/export` | Export a set |
+| GET | `/api/coverage-workspace/sets/{summary_id}/export.zip` | A set as a ZIP, one file per rule |
+| GET | `/api/coverage-workspace/windows` | The windows the workspace offers |
 
 #### Tools (Registry Execution)
 
-**`POST /api/tools/execute`**
+The tool registry behind the skill CLIs and the MCP server.
 
-Execute a registered agent tool by name (the registry behind the skill CLIs). Tools in the registry's `ADMIN_TOOLS` set (entity merges, feed pool changes, automation-rule writes, extraction curation) require an admin caller — the registry is not a side door around the API layer's gates.
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| POST | `/api/tools/execute` | User or agent token (admin for `ADMIN_TOOLS`) | Run a tool: `{"tool_name": "search_entries", "args": {"query": "LockBit", "limit": 5}}`. Returns `{"result": "<JSON string>"}` |
+| GET | `/api/tools/tools` | User or agent token | Every tool's name, description and argument schema |
 
-**Auth:** Bearer token (admin for `ADMIN_TOOLS` tools)  
-**Request:**
-```json
-{
-  "tool_name": "search_entries",
-  "args": { "query": "LockBit", "limit": 5 }
-}
-```
-**Response:**
-```json
-{
-  "result": "<JSON result string>"
-}
-```
-
----
-
-**`GET /api/tools/tools`**
-
-List all registered tool definitions (name, description, schema).
-
-**Auth:** Bearer token
+Tools in `ADMIN_TOOLS` (`backend/app/tools/__init__.py`) need an admin, the same as their API routes. An agent token may only run read tools.
 
 ---
 
 ### AI & Enrichment
 
-Base paths: `/api/ai/*`, `/api/enrichment`
-
 #### AI Providers
 
-**`GET /api/ai/providers`**
+A provider is a connection to an AI service (Ollama, Claude, an OpenAI-compatible server). A provider does nothing until a task is assigned to it.
 
-List the instance's AI providers plus the caller's own personal keys (`user_id` set). Other people's keys are never listed here.
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/ai/providers` | User | The instance's providers plus your own personal keys |
+| POST | `/api/ai/providers` | User (admin for instance providers) | Add a provider. `?test=true` checks it first and saves only if it answers (400 `provider_unreachable` otherwise) |
+| PUT | `/api/ai/providers/{provider_id}` | User | Change an instance provider (admin) or your own key. On someone else's key an admin may only set `is_active` |
+| DELETE | `/api/ai/providers/{provider_id}` | User | Delete your own key; an admin may delete any |
+| POST | `/api/ai/providers/{provider_id}/test` | User | Health check and model list. Another person's key returns 404, even for an admin |
+| POST | `/api/ai/providers/{provider_id}/resume` | User | Clear an automatic pause (after quota errors) |
+| POST | `/api/ai/providers/{provider_id}/commission` | Admin | Test a provider and point the AI tasks at it in one step |
+| GET | `/api/ai/providers/user-keys` | Admin | Every personal key with its owner (keys themselves are never returned) |
 
-**Auth:** Bearer token  
-**Response:**
-```json
-{
-  "items": [
-    {
-      "id": "550e8400-...",
-      "name": "OpenAI",
-      "provider_type": "openai",
-      "is_active": true,
-      "models": [ "gpt-4", "gpt-3.5-turbo" ],
-      "config": { "api_key_set": true },
-      "created_at": "2024-01-01T00:00:00Z"
-    }
-  ]
-}
-```
-
----
-
-**`POST /api/ai/providers`**
-
-Add an AI provider. An admin registers the instance's providers; anyone may register a personal key (`"personal": true`, implied for non-admins) when the admin has turned personal keys on — the type must be one the admin allows, never `claude_code`, and the endpoint may not resolve to a private address unless the admin allows those. `?test=true` contacts the provider first and saves only if it answers (400 `provider_unreachable` otherwise, nothing written).
-
-**Auth:** Bearer token  
-**Status:** 201 Created  
-**Request:**
-```json
-{
-  "name": "Claude",
-  "provider_type": "anthropic",
-  "config": {
-    "api_key": "sk-ant-...",
-    "default_model": "claude-3-5-sonnet-20241022"
-  }
-}
-```
-
----
-
-**`PUT /api/ai/providers/{provider_id}`**
-
-Update provider configuration: the instance's (admin), or the caller's own key. On someone else's personal key the admin may set `is_active` only; any other field is 403.
-
-**Auth:** Bearer token  
-**Status:** 200 OK
-
----
-
-**`DELETE /api/ai/providers/{provider_id}`**
-
-Remove a provider.
-
-**Auth:** Bearer token  
-**Status:** 204 No Content
-
----
-
-**`POST /api/ai/providers/{provider_id}/test`** — Run a connectivity/inference test.  
-**`POST /api/ai/providers/{provider_id}/resume`** — Resume a provider that was auto-paused (e.g. after auth/billing errors).  
-**`GET /api/ai/providers/user-keys`** — Every personal key on the instance with its owner's username (admin only; the User keys tab's list).
-
-**Auth:** Bearer token. The instance's providers are the admin's (403 for anyone else). A personal key is its owner's; the admin may update, resume or delete anyone's key, but `test` and `models` contact the provider, so for those another person's key is a 404 for everyone.
-
----
+Non-admins may add a personal key only when the admin has turned on `allow_user_ai_providers`. The type must be one the admin allows, never `claude_code`, and it may not point at a private address unless the admin allows that.
 
 #### Personal AI (`/api/ai/me`)
 
-What Settings → My AI reads and writes. Only meaningful while the admin has `allow_user_ai_providers` on; the overview reports the policy either way.
+What Settings > My AI reads and writes. All User.
 
-**`GET /api/ai/me/policy`** — The admin's personal-key policy plus `has_routes`: the cheap read a reader panel makes before fetching the overview.  
-**`GET /api/ai/me/overview`** — The admin's policy, my fallback setting and cap, this month's spend (split by whose provider answered, and per key), today's requests against both caps, and every prompt I may route with my route for it and what a click would do right now (`will_run_on`: `user` / `site` / `refused`, with `blocked_reason` when a key of mine can't answer).  
-**`PATCH /api/ai/me/preferences`** — `fallback_to_site` (let the instance's provider answer when my key can't) and `monthly_cap_usd` (my own cap on my keys' spend; the admin sets no ceiling; null removes it).  
-**`GET /api/ai/me/routes`** — My default key (`task_id` null) first, then per-prompt routes.  
-**`PUT /api/ai/me/routes`** — `{task_id, provider_id, model_name, config}`: point one prompt, or every allowed prompt (`task_id` null), at one of my keys. Same target again replaces. A per-prompt row with `provider_id` null sends that prompt back to the instance's provider despite a default key. Someone else's key or a site provider is a 404; a prompt closed to personal keys is 400 `task_site_only`.  
-**`DELETE /api/ai/me/routes/{route_id}`** — Remove a route.
-
-**Auth:** Bearer token
-
----
+| Method | Path | What it does |
+| --- | --- | --- |
+| GET | `/api/ai/me/policy` | The admin's personal-key policy and whether you have any routes |
+| GET | `/api/ai/me/overview` | Policy, your fallback and cap, your spend this month and today, and where each task would run right now (`will_run_on`: `user`, `site` or `refused`) |
+| PATCH | `/api/ai/me/preferences` | `fallback_to_site` (let the instance answer when your key can't) and `monthly_cap_usd` (null removes it) |
+| GET | `/api/ai/me/routes` | Your default key first, then per-task routes |
+| PUT | `/api/ai/me/routes` | `{task_id, provider_id, model_name, config}`. `task_id: null` sets your default key. 400 `task_site_only` for a task closed to personal keys |
+| DELETE | `/api/ai/me/routes/{route_id}` | Remove a route |
 
 #### AI Tasks
 
-**`GET /api/ai/tasks`**
+A task is one AI job (summarise an article, extract entities, write a report section).
 
-List AI tasks (intelligence extraction, content summarization, etc.).
-
-**Auth:** Bearer token  
-**Response:**
-```json
-{
-  "items": [
-    {
-      "id": "550e8400-...",
-      "name": "extract_ttps",
-      "display_name": "Extract MITRE ATT&CK Techniques",
-      "description": "Extract TTPs from article content",
-      "category": "intelligence",
-      "is_system": true,
-      "default_prompt_template": "Extract MITRE techniques from: {content}",
-      "variables": [ "content", "article_title" ],
-      "created_at": "2024-01-01T00:00:00Z"
-    }
-  ]
-}
-```
-
----
-
-**`POST /api/ai/tasks`**
-
-Create a custom AI task (template for a specific enrichment workflow).
-
-**Auth:** Bearer token  
-**Status:** 201 Created
-
----
-
-**`DELETE /api/ai/tasks/{task_id}`**
-
-Delete a custom AI task. A task that has results stays: every result points at its task through a plain, required foreign key, so the route answers 409 `task_has_results` rather than failing on the first row.
-
-**Auth:** Bearer token (admin)  
-**Status:** 204 No Content · 403 for a system task · 409 `task_has_results`
-
----
-
-**`GET /api/ai/tasks/assignments/all`** — Provider/model assignment for every task.  
-**`GET /api/ai/tasks/{task_id}/assignments`** / **`PUT /api/ai/tasks/{task_id}/assignments`** — Read/set which provider+model runs a task.
-
-**Auth:** Bearer token
-
----
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/ai/tasks` | User | All tasks. Old tasks hidden unless `include_deprecated` |
+| POST | `/api/ai/tasks` | Admin | Create a custom task (409 if the name exists) |
+| PATCH | `/api/ai/tasks/{task_id}` | Admin | Change how it shows in the reader and its output schema |
+| DELETE | `/api/ai/tasks/{task_id}` | Admin | Delete a custom task. 403 for a built-in task, 409 `task_has_results` if it has results |
+| GET | `/api/ai/tasks/assignments/all` | User | Every task's provider and model |
+| GET | `/api/ai/tasks/{task_id}/assignments` | User | One task's provider and model, or null |
+| PUT | `/api/ai/tasks/{task_id}/assignments` | Admin | Set which provider and model run a task |
 
 #### AI Prompts
 
-Prompt templates are editable per task in the UI at Settings → AI Configuration.
+Prompts can also be edited at Settings > AI Configuration.
 
-**`GET /api/ai/prompts`** — List prompt templates for all tasks.  
-**`GET /api/ai/prompts/{task_id}`** — Get the template for one task.  
-**`PUT /api/ai/prompts/{task_id}`** — Update the template (creates a history version).  
-**`POST /api/ai/prompts/{task_id}/reset`** — Reset to the built-in default.  
-**`POST /api/ai/prompts/{task_id}/preview`** — Render the template against sample data without running inference.  
-**`GET /api/ai/prompts/{task_id}/history`** — Prior versions.
-
-**Auth:** Bearer token
-
----
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/ai/prompts` | User | Every saved prompt override |
+| GET | `/api/ai/prompts/{task_id}` | User | The prompt in use for a task |
+| PUT | `/api/ai/prompts/{task_id}` | Admin | Save a new version |
+| POST | `/api/ai/prompts/{task_id}/reset` | Admin | Go back to the built-in prompt (history is kept) |
+| POST | `/api/ai/prompts/{task_id}/preview` | User | Fill the template with sample data, without running it |
+| GET | `/api/ai/prompts/{task_id}/history` | User | Every saved version |
 
 #### AI Results & Cost Dashboard
 
-AI results are cached per target (`target_type` is e.g. `entry`, `daily_summary`, an entity type):
+AI results are saved per target. `target_type` is, for example, `entry`, `daily_summary` or an entity type.
 
-**`GET /api/ai/results/{target_type}/{target_id}`** — All current results for a target.  
-**`GET /api/ai/results/{target_type}/{target_id}/{task_name}`** — Current result for one task.  
-**`GET /api/ai/results/{target_type}/{target_id}/{task_name}/history`** — Prior runs.  
-**`POST /api/ai/results/{target_type}/{target_id}/run`** — Run (or re-run) a task against a target.
-
-**Auth:** Bearer token
-
----
-
-**`GET /api/ai/cost-breakdown`**
-
-Cost dashboard: 30-day token/cost usage by task and by model, the split between the instance's spend and spend on people's own keys, the count of unpriced ($0) requests, per-task budgets, and `by_caller` — one row per person plus one each for the pipeline, automation rules and share links, with instance versus own-key cost, own-key requests, and today's requests against the per-user site allowance.
-
-**Auth:** Bearer token (admin)
-
----
-
-**`GET /api/ai/cost-summary`** — Compact cost totals (used by the ops widgets).  
-**`POST /api/ai/run-text`** — Run an ad-hoc AI task over raw text (no target persistence).
-
-**Auth:** Bearer token
-
----
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/ai/results/{target_type}/{target_id}` | User | All current results for a target |
+| GET | `/api/ai/results/{target_type}/{target_id}/{task_name}` | User | The current result for one task |
+| GET | `/api/ai/results/{target_type}/{target_id}/{task_name}/history` | User | Every run, current and old |
+| POST | `/api/ai/results/{target_type}/{target_id}/run` | User | Run a task on the target |
+| POST | `/api/ai/run-text` | User | Run a task on text you send (nothing is saved to a target) |
+| GET | `/api/ai/cost-breakdown` | Admin | Last 30 days of spend by task, by model and by who asked, with budgets |
+| GET | `/api/ai/cost-summary` | Admin | Last 30 days in total: cost, requests, tokens |
 
 #### AI Copilot (Global)
 
-Base paths: `/api/ai/copilot`, `/api/ai/copilot-auth`, `/api/ai/conversations`
+The copilot is the chat assistant that can look up platform data. See [copilot.md](copilot.md).
 
-**`GET /api/ai/copilot/config`** — Which provider answers this person's copilot turns: `provider_type`, `provider_name`, `source` (`site` / `user`), `model`, `supports_tools`, `fallback_reason`, and `refused` ({reason, message}) when the policy would refuse the turn.
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/ai/copilot/config` | User | Which provider would answer you, and why a turn would be refused |
+| POST | `/api/ai/copilot/stream` | User | Stream an answer over SSE. Each turn is saved to a conversation |
+| POST | `/api/ai/copilot/confirm` | User | Carry out or cancel an action the copilot proposed (`create_campaign` or `add_note` only) |
+| GET | `/api/ai/conversations/` | User | Your conversations (no message bodies) |
+| POST | `/api/ai/conversations/` | User | Start one |
+| GET | `/api/ai/conversations/{conversation_id}` | User | One conversation with its messages |
+| PATCH | `/api/ai/conversations/{conversation_id}` | User | Rename it or add messages |
+| DELETE | `/api/ai/conversations/{conversation_id}` | User | Delete it |
+| POST | `/api/ai/conversations/{conversation_id}/share` | User | Make a read-only public link (read at `GET /api/shared/copilot/{token}`) |
+| DELETE | `/api/ai/conversations/{conversation_id}/share` | User | Revoke the link |
 
-**`POST /api/ai/copilot/stream`**
-
-Stream a copilot answer over SSE. The copilot has tool access to platform data; each turn is persisted to an `AIConversation`.
-
-**Auth:** Bearer token  
-**Response:** SSE stream (`data:` lines of JSON events)
-
----
-
-**`POST /api/ai/copilot/confirm`**
-
-Confirm or deny a pending action the copilot proposed via an `intelfeed-action` fenced block (only `create_campaign` and `add_note` are supported; nothing is written until confirmed).
-
-**Auth:** Bearer token
-
----
-
-**Copilot provider auth** (`/api/ai/copilot-auth`): `GET /status`, `POST /refresh`, `POST /start`, `GET /session/{session_id}`, `POST /session/{session_id}/code`, `POST /session/{session_id}/cancel` — in-app OAuth login flow for the copilot's Claude session.
-
-**Conversations** (`/api/ai/conversations`): `GET` (paginated), `POST`, `GET/PATCH/DELETE /{conversation_id}`, plus `POST /{conversation_id}/share` / `DELETE .../share` to mint or revoke a public share token (readable at `GET /api/shared/copilot/{token}`).
-
-**Auth:** Bearer token
-
----
+The copilot's Claude sign-in, for the `claude_code` provider (all Admin): `GET /api/ai/copilot-auth/status`, `POST /api/ai/copilot-auth/refresh`, `POST /api/ai/copilot-auth/start`, `GET /api/ai/copilot-auth/session/{session_id}`, `POST /api/ai/copilot-auth/session/{session_id}/code`, `POST /api/ai/copilot-auth/session/{session_id}/cancel`.
 
 #### Enrichment
 
-**`GET /api/enrichment/sources`**
+Enrichment fills in entity details from outside sources (NVD, EPSS, CISA KEV, Malpedia and others).
 
-List enrichment data sources (NVD, EPSS, CISA KEV, Malpedia, Wikipedia, etc.) and their status.
-
-**Auth:** Bearer token  
-**Response:**
-```json
-{
-  "items": [
-    {
-      "id": "550e8400-...",
-      "source_type": "vulncheck",
-      "display_name": "VulnCheck",
-      "is_enabled": true,
-      "trigger_mode": "manual",
-      "health_status": "healthy",
-      "rate_limit_config": { "requests_per_day": 1000 },
-      "config": { "api_key_set": true }
-    }
-  ]
-}
-```
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/enrichment/sources` | User | Every source with what it needs and what it covers |
+| PUT | `/api/enrichment/sources/{source_id}` | Admin | Turn a source on or off; change its trigger, key, rate limits, budget or schedule |
+| POST | `/api/enrichment/sources/{source_id}/test` | Admin | Test its key and connection |
+| GET | `/api/enrichment/sources/{source_id}/health` | User | Its current health |
+| GET | `/api/enrichment/budget-summary` | User | Today's budget use per source |
+| GET | `/api/enrichment/user-overrides` | User | Your own API keys for sources |
+| PUT | `/api/enrichment/user-overrides/{source_id}` | User | Set your own key for a source |
+| DELETE | `/api/enrichment/user-overrides/{source_id}` | User | Go back to the instance key |
+| POST | `/api/enrichment/enrich` | User | Enrich one entity now (`entity_type`, `entity_id`, optional `source_types`) |
+| GET | `/api/enrichment/results` | Visitor | Saved results for one entity |
+| GET | `/api/enrichment/status` | User | Overall enrichment status |
 
 ---
 
-**`PUT /api/enrichment/sources/{source_id}`**
+### Reports, Profiles & Exposure
 
-Enable/disable a source or update its config.
-
-**Auth:** Bearer token  
-**Status:** 200 OK  
-**Request:**
-```json
-{
-  "is_enabled": true,
-  "trigger_mode": "auto",
-  "config": { "api_key": "..." }
-}
-```
-
----
-
-**`POST /api/enrichment/sources/{source_id}/test`** — Test a source's connectivity/credentials.  
-**`GET /api/enrichment/sources/{source_id}/health`** — Source health history.  
-**`GET /api/enrichment/budget-summary`** — Per-source API budget consumption.  
-**`GET /api/enrichment/user-overrides`** / **`PUT|DELETE /api/enrichment/user-overrides/{source_id}`** — Per-user source enable/disable overrides.
-
-**Auth:** Bearer token
-
----
-
-**`POST /api/enrichment/enrich`**
-
-On-demand enrichment for a specific entity (cached + rate-limited pipeline).
-
-**Auth:** Bearer token  
-**Status:** 200 OK  
-**Request:**
-```json
-{
-  "entity_type": "cve",
-  "entity_id": "550e8400-...",
-  "source_types": null
-}
-```
-`entity_type` is one of `cve`, `threat_actor`, `malware`, `ttp`.
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/intel-profiles` | User | Intel profiles (named scopes of regions, sectors and a time window), shared across the install |
+| POST | `/api/intel-profiles` | User | Create one |
+| GET | `/api/intel-profiles/sector-vocabulary` | User | The sector list for pickers |
+| GET | `/api/intel-profiles/{profile_id}` | User | One profile |
+| PUT | `/api/intel-profiles/{profile_id}` | Owner | Change it |
+| DELETE | `/api/intel-profiles/{profile_id}` | Owner | Delete it. Reports built from it keep their copy |
+| GET | `/api/intel-profiles/{profile_id}/surface` | User | Actors and malware active against its regions and sectors, with the evidence |
+| POST | `/api/intel-profiles/surface-preview` | User | The same for a scope you haven't saved |
+| GET | `/api/intel-reports` | User | Reports, filtered by status and template |
+| POST | `/api/intel-reports` | User | Create a report |
+| GET | `/api/intel-reports/{report_id}` | User | One report |
+| PUT | `/api/intel-reports/{report_id}` | User | Change it. A content change saves the old content as a version |
+| DELETE | `/api/intel-reports/{report_id}` | Owner | Delete a draft. Published and archived reports can't be deleted |
+| GET | `/api/intel-reports/{report_id}/versions` | User | Version history |
+| GET | `/api/intel-reports/{report_id}/export` | User | Export in a chosen format |
+| POST | `/api/intel-reports/{report_id}/publish` | User | Publish (bumps the version) |
+| POST | `/api/intel-reports/{report_id}/archive` | User | Archive |
+| POST | `/api/intel-reports/{report_id}/clone` | User | Copy with a different template |
+| POST | `/api/intel-reports/{report_id}/attach` | User | Add articles and entities to a draft |
+| POST | `/api/intel-reports/{report_id}/regenerate` | User | Rewrite all AI sections |
+| POST | `/api/intel-reports/{report_id}/sections/{section_name}/generate` | User | Write one section with AI |
+| POST | `/api/intel-reports/generate` | User | New report filled from a template and entities |
+| POST | `/api/intel-reports/generate-full` | User | Full AI report from source material |
+| POST | `/api/intel-reports/generate-from-campaign` | User | Full AI report from a campaign |
+| POST | `/api/intel-reports/generate-exposure` | User | Threat Exposure Report from an intel profile |
+| GET, POST | `/api/intel-reports/templates` | User | List or create templates |
+| PUT, DELETE | `/api/intel-reports/templates/{template_id}` | Owner | Change or delete a custom template (built-in ones are fixed) |
+| POST | `/api/intel-reports/templates/{template_id}/clone` | User | Copy a template |
+| GET | `/api/intelligence/exposure` | User | CVEs affecting your vendor and product stack, ranked, with detection status |
+| GET | `/api/ransomware/disclosures` | User | Newest ransomware leak-site victim posts |
+| GET | `/api/ransomware/stats` | User | Totals for the ransomware dashboard |
+| GET | `/api/ransomware/victims/{victim_id}` | User | One victim's posts and details |
+| GET | `/api/ransomware/groups/{actor_id}/victims` | User | Victims listed by one group |
+| GET | `/api/ransomware/groups/{actor_id}/victims/stats` | User | That group's victim counts and trend |
 
 ---
 
-**`GET /api/enrichment/results`** — Stored enrichment results for an entity.  
-**`GET /api/enrichment/status`** — Overall enrichment pipeline status.
-
-**Auth:** Bearer token
-
----
-
-### Sharing & Public Endpoints
-
-Base paths: `/api/entries/{id}/share`, `/api/shared`, `/api/public/rss`
-
-**`POST /api/entries/{entry_id}/share`** — Create (or return the existing) public share link for an entry: `{ "token": "...", "url": "/shared/<token>", ... }`. The caller's existing active link is returned as it is, whatever its `expires_at`; this endpoint never sets an expiry.  
-**`GET /api/entries/{entry_id}/share`** — Current share link or `null`.  
-**`DELETE /api/entries/{entry_id}/share`** — Revoke the link.
-
-**Auth:** Bearer token
-
----
-
-**`GET /api/shared/{token}`** (public)
-
-Read a shared entry: content plus its extracted intelligence (TTPs, CVEs, actors, malware, detection rules, glossary matches, cached AI results).
-
-**Auth:** None
-
----
-
-**`POST /api/shared/{token}/run-ai-task`** / **`POST /api/shared/{token}/ask-agent`** (public)
-
-Run a whitelisted AI task or ask the agent about a shared entry without authentication (detection-engineering and rule-generation tasks are excluded).
-
-**Auth:** None
-
----
-
-**`GET /api/shared/copilot/{token}`** (public) — Read a shared copilot conversation.
-
----
-
-**Public RSS** (`/api/public/rss`, token-gated by the system public-RSS token): `GET /{token}.xml`, `GET /{token}/category/{slug}.xml`, `GET /{token}/categories`. Token management: `GET /api/system-settings/public-rss/token`, `POST /api/system-settings/public-rss/regenerate-token` (admin).
-
----
-
-### System & Operations
-
-Base paths: `/api/system-settings`, `/api/analytics`, `/api/backup`, `/api/logs`, health endpoints
-
-#### System Settings
-
-**`GET /api/system-settings`**
-
-Get all system settings with current effective values (env default vs DB override), grouped for the settings UIs — the `group` on each key decides which surface renders it (Settings → Engine's stage panels and browse screens, or a Settings section).
-
-**Auth:** Bearer token + admin  
-**Response:**
-```json
-{
-  "settings": { "registration_enabled": { "value": true, ... }, ... },
-  "groups": { ... }
-}
-```
-
----
-
-**`PATCH /api/system-settings`**
-
-Update one or more settings. Set a value to `null` to reset it to its default.
-
-**Auth:** Bearer token + admin  
-**Status:** 200 OK  
-**Request:**
-```json
-{
-  "settings": { "registration_enabled": false }
-}
-```
-
----
-
-**`DELETE /api/system-settings/{key}`**
-
-Reset a single setting back to its env/default value.
-
-**Auth:** Bearer token + admin
-
----
-
-#### Analytics
-
-**`GET /api/analytics/overview`**
-
-Dashboard metrics: article count, extraction status, top entities, trend graphs.
-
-**Auth:** Bearer token  
-**Query Params:**
-- `days`: Time window (default 7)
-
-**Response:**
-```json
-{
-  "total_articles": 5000,
-  "articles_this_week": 1250,
-  "feeds_synced": 200,
-  "last_sync": "2024-01-20T14:22:00Z",
-  "top_entities": [
-    { "type": "threat_actor", "name": "APT29", "count": 120 },
-    { "type": "malware", "name": "Cozybot", "count": 85 }
-  ],
-  "coverage": {
-    "cves_extracted": 450,
-    "ttps_extracted": 320,
-    "actors_extracted": 180
-  }
-}
-```
-
----
-
-**`GET /api/analytics/trending/{entity_type}`** — Trending entities of a type over a window.  
-**`GET /api/analytics/velocity`** — Publishing/ingest velocity over time.  
-**`GET /api/analytics/source-overlap`** — Which feeds report the same stories.  
-**`GET /api/analytics/detection-coverage`** — ATT&CK coverage rollup (covered / library-only / no-rule counts).  
-**`GET /api/analytics/entries/{entry_id}/insights`** — Per-entry analytics (novelty, overlap, entity density).
-
-**Auth:** Bearer token
-
----
-
-#### Feed Reliability
-
-**`GET /api/analytics/source-reliability`**
-
-Reliability scoring for every feed: cadence, intel yield, error history — feeds are graded (A–F) and the rating feeds the high-value flag on breakage alerts.
-
-**Auth:** Bearer token
-
----
-
-**`GET /api/analytics/feed-value`**
-
-Feed value ranking: which sources actually contribute unique, intel-bearing entries.
-
-**Auth:** Bearer token
-
----
-
-#### Backup & Export
-
-**`GET /api/backup/export`**
-
-Export platform data as a JSON download (feeds, categories, settings, entities, rules).
-
-**Auth:** Bearer token (admin)  
-**Response:** JSON file download
-
----
-
-**`POST /api/backup/import`**
-
-Restore from backup file.
-
-**Auth:** Bearer token (admin)  
-**Status:** 200 OK  
-**Request:** Multipart form with `backup_file`
-
----
-
-#### Logs
-
-Application **log files** (structured audit events land in `audit.log`; there is no queryable audit-log API).
-
-**`GET /api/logs`**
-
-List available log files (app.log, http.log, tasks.log, audit.log, update.log) with size and modified time.
-
-**Auth:** Bearer token + admin  
-**Response:** `{ "files": [ { "name": "app.log", "size": 123456, "modified": "..." } ] }`
-
----
-
-**`GET /api/logs/{filename}`** — Download/tail a log file.  
-**`DELETE /api/logs/{filename}`** — Truncate a log file.
-
-**Auth:** Bearer token + admin
-
----
-
-#### Health & Metrics
-
-**`GET /api/health`**
-
-Health check: database (critical), Redis, and Meilisearch component status.
-
-**Auth:** None (public)  
-**Response:**
-```json
-{
-  "status": "healthy",
-  "version": "0.1.0",
-  "components": {
-    "database": { "status": "ok" },
-    "redis": { "status": "ok" },
-    "meilisearch": { "status": "ok" }
-  }
-}
-```
-
----
-
-**`GET /metrics`**
-
-Prometheus metrics: HTTP request counts, latencies, feed sync times, etc.
-
-**Auth:** None (can be rate-limited in reverse proxy)  
-**Response:** Prometheus text format
-
----
-
-#### Additional Operations
-
-**Themes** (`/api/themes`): `GET` (list), `GET/PUT/DELETE /{theme_id}`, `POST` (create), `POST /{theme_id}/duplicate`, `PUT /api/themes/user/preferences` (apply a theme for the current user).
-
-**Auth:** Bearer token
-
----
-
-#### Search
-
-**`GET /api/search`**
-
-Full-text search across articles using Meilisearch.
-
-**Auth:** Bearer token  
-**Query Params:**
-- `q`: Search query
-- `feed_id`, `category_id`, `feed_type`, `tags`: Repeatable filters
-- `date_from`, `date_to`: ISO timestamps
-- `is_read`, `is_starred`, `is_bookmarked`, `has_notes`, `media_type`
-- `sort`: "relevance" (default) or date sorts
-- `limit` (default 20, max 500), `offset`
-
-**Response:**
-```json
-{
-  "hits": [ { "id": "550e8400-...", "title": "...", "_formatted": { ... } } ],
-  "query": "ransomware",
-  "processingTimeMs": 12,
-  "estimatedTotalHits": 250,
-  "facetDistribution": { ... },
-  "searchUnavailable": false
-}
-```
-
----
-
-**`POST /api/search/advanced`** — Structured query-language search (see [`docs/query-language.md`]).
-
----
-
-**`POST /api/search/unified`**
-
-The one search endpoint the `/search` page and the header input use. Runs the full query language: text terms and indexed filters against Meilisearch, `category:`/`signal:`/`url:`/`feed.*:`/`is:muted|translated|image` against PostgreSQL, entity filters against the entity tables — then intersects the three.
-
-**Auth:** Bearer token  
-**Body:**
+### Search
+
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| POST | `/api/search/unified` | User | The main search: articles and entities in one call. See below |
+| GET | `/api/search` | User | Article search in Meilisearch |
+| POST | `/api/search/advanced` | User | Same as `GET /api/search`, with a JSON body |
+| GET | `/api/search/facets` | User | Facet counts for a query |
+| GET | `/api/search/autocomplete` | User | Suggestions for the search box |
+| GET | `/api/search/entities` | User | Entity search in Meilisearch |
+| POST | `/api/search/entities/sync` | Admin | Rebuild the entity index |
+| POST | `/api/search/rebuild` | Admin | Rebuild the article index |
+| GET | `/api/saved-searches` | User | Your saved searches with unread and total counts (cached 10 minutes) |
+| POST | `/api/saved-searches` | User | Save a search |
+| PUT | `/api/saved-searches/{search_id}` | Owner | Change it |
+| DELETE | `/api/saved-searches/{search_id}` | Owner | Delete it |
+
+`GET /api/search` takes `q`, `feed_id`, `category_id`, `feed_type`, `tags` (all repeatable), `date_from`, `date_to`, `is_read`, `is_starred`, `is_bookmarked`, `has_notes`, `media_type`, `sort` (`relevance`, `newest`, `oldest`, `title_asc`, `title_desc`), `limit` (default 20, max 500), `offset`.
+
+**Unified search** (`POST /api/search/unified`) runs the full [query language](query-language.md). Text and indexed filters go to Meilisearch, some filters go to PostgreSQL, and entity filters go to the entity tables; the results are combined.
 
 | Field | Default | Max | Purpose |
 |-------|---------|-----|---------|
-| `q` | `""` | — | The query string |
-| `limit` | 20 | 500 | Entry page size |
-| `offset` | 0 | — | Entry pagination offset |
-| `entity_limit` | 200 | 500 | How many entities the intelligence half may match in total |
-| `entity_group_limit` | 25 | 500 | Rows carried per entity type. Applied **after** `counts` is computed, so per-type totals stay honest while the payload stays small |
+| `q` | `""` | | The query |
+| `limit` | 20 | 500 | Articles per page |
+| `offset` | 0 | | Article offset |
+| `entity_limit` | 200 | 500 | Total entities to match |
+| `entity_group_limit` | 25 | 500 | Entities returned per type (counted before trimming) |
 
-```json
-{
-  "q": "threat_actor:APT29 cve.severity:critical date:>2026-01-01",
-  "limit": 20,
-  "offset": 0,
-  "entity_limit": 200,
-  "entity_group_limit": 25
-}
-```
-
-**Response:**
 ```json
 {
   "entries": {
-    "hits": [ { "id": "550e8400-...", "title": "...", "_formatted": { ... } } ],
+    "hits": [{ "id": "...", "title": "...", "_formatted": {} }],
     "estimatedTotalHits": 261,
-    "facetDistribution": {
-      "feed_type": { "rss": 210, "youtube": 12 },
-      "feed_title": { "Dark Reading": 44 },
-      "tags": { "ransomware": 87 },
-      "media_type": { "image": 190 },
-      "language": { "en": 255 }
-    }
+    "facetDistribution": { "feed_type": { "rss": 210 }, "tags": { "ransomware": 87 } }
   },
   "entities": {
-    "items": [ { "id": "...", "type": "threat_actor", "name": "APT29", "match_kind": "direct" } ],
+    "items": [{ "id": "...", "type": "threat_actor", "name": "APT29", "match_kind": "direct" }],
     "counts": { "threat_actor": 57, "malware": 12, "cve": 3 }
   },
   "query": "threat_actor:APT29 ...",
-  "parsed_filters": [ { "field": "threat_actor", "value": "APT29", "exact": false, "negated": false, "raw": "threat_actor:APT29" } ],
+  "parsed_filters": [{ "field": "threat_actor", "value": "APT29", "exact": false, "negated": false, "raw": "threat_actor:APT29" }],
   "did_you_mean": null,
   "processingTimeMs": 38
 }
 ```
 
-Notes:
-- `entities.counts` is the **untrimmed** per-type total; `entities.items` is trimmed to `entity_group_limit` per type. The facet rail reads the former, the list renders the latter.
-- Each entity item carries `match_kind`: `direct` (the query hit its name, alias, or catalogued identifier) or `mention` (it hit a description, tag, tactic, or rule body). Results from an explicit field filter are always `direct`.
-- `entities.items` includes analyst **notes** under `"type": "note"` on free-text queries. Both note tables come back as one type, discriminated by `note_source`:
-
-  ```json
-  {
-    "id": "…", "type": "note", "note_source": "note",
-    "title": "Fortibleed",
-    "description": "…centred on the match, markdown and HTML flattened…",
-    "entry_id": "db491933-…", "entry_title": "DEW #147 — Flying Blind with your Logs",
-    "is_pinned": false, "tags": [], "match_field": "title", "match_kind": "direct"
-  }
-  {
-    "id": "…", "type": "note", "note_source": "entity_note",
-    "title": "Note on CVE-2026-20262",
-    "description": "…", "note_type": "context",
-    "entity_type": "cve", "entity_id": "…", "entity_name": "CVE-2026-20262",
-    "tags": [], "match_field": "content", "match_kind": "mention"
-  }
-  ```
-
-  `note_source: "note"` is a note on an article (`entry_id` set) or a standalone one (both `entry_id` and `entry_title` null). `note_source: "entity_note"` hangs off an entity; `entity_name` is the resolved subject, and the title falls back to `"Note on {subject}"` when the author left it blank. Subjects resolve for `threat_actor`, `malware`, `cve`, `ttp`, `campaign`, `vendor` and `product`.
-
-  Notes arrive from two directions: the free-text cross-entity sweep, and the `note:` field grammar (`note:`, `note.tag:`, `note.type:`, `note.about:`, `note.pinned:` — see [`query-language.md`]). A `note:` query whose matches hang off articles also contributes those articles as linked entries, exactly as any other entity filter does. `match_kind` is set on the free-text path but not the `note:` field path.
-
-  Notes are **not scoped to the requesting user** — search returns every note on the instance, matching `GET /api/notes`.
-- `estimatedTotalHits` is exact, not estimated, whenever the query takes the PostgreSQL path — `sort:radar`, an entity-only query, or a constraint above 800 entry IDs. On that path `facetDistribution` is **absent**, since facets come from Meilisearch.
-- `parsed_filters` echoes what the parser extracted; the UI renders it as removable chips.
-- `did_you_mean` is a corrected query string, or `null`. A value ends at the first space, so `country:North Korea` filters on `country:North` and full-text searches `Korea` — a plausible wrong answer rather than an error. The field is only set when the extended value is a real value for that field (the same lookup autocomplete uses), so it stays `null` on a deliberate filter-plus-search-term like `threat_actor:APT29 ransomware`. Longer extensions win: `country:North Korea attacks` returns `country:"North Korea" attacks`.
+- `entities.counts` is the full count per type; `entities.items` is trimmed to `entity_group_limit` per type.
+- `match_kind` is `direct` (the name, alias or id matched) or `mention` (a description, tag or rule body matched).
+- Free-text queries also return notes as `"type": "note"`. `note_source` tells them apart: `note` (on an article, or standalone) or `entity_note` (on an entity, with `entity_name`). Notes are not limited to your own: search returns every note, like `GET /api/notes`. The `note:` filters (`note:`, `note.tag:`, `note.type:`, `note.about:`, `note.pinned:`) are in [query-language.md](query-language.md).
+- When the query runs in PostgreSQL (`sort:radar`, an entity-only query, or more than 800 matching article ids), `estimatedTotalHits` is exact and `facetDistribution` is missing.
+- `parsed_filters` is what the parser understood; the UI shows them as chips.
+- `did_you_mean` suggests a fix when a filter value was cut at a space. `country:North Korea` filters on `country:North` and searches the text `Korea`; the suggestion is `country:"North Korea"`. It is only set when the longer value really exists.
 
 ---
 
-**`GET /api/search/facets`** — Facet counts for the current filter set.  
-**`GET /api/search/autocomplete`** — Field and value completions for the search input. Suggestion categories: `entity`, `entry`, `meta`.  
-**`GET /api/search/entities`** / **`POST /api/search/entities/sync`** — Entity index query and reindex.  
-**`POST /api/search/rebuild`** — Rebuild the Meilisearch index.
+### Sharing & Public Endpoints
 
-**Auth:** Bearer token
+#### Share Links
+
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| POST | `/api/entries/{entry_id}/share` | User | Make a public link to an article, or return yours if it exists. It never sets an expiry. With read-aloud on, the audio is prepared in advance |
+| GET | `/api/entries/{entry_id}/share` | User | Your link for this article, or null |
+| DELETE | `/api/entries/{entry_id}/share` | User | Turn your link off |
+| GET | `/api/shared/{token}` | Share token | The shared article and its intel (TTPs, CVEs, actors, malware, rules, glossary terms, saved AI results) |
+| GET | `/api/shared/{token}/og` | Share token | An HTML page with link-preview (Open Graph) tags for the shared article |
+| POST | `/api/shared/{token}/run-ai-task` | Share token | Run an allowed AI task on the shared article (each task once per article). Detection and report tasks are not allowed |
+| POST | `/api/shared/{token}/ask-agent` | Share token | Ask the AI a question about the shared article |
+| POST | `/api/shared/{token}/tts/prepare` | Share token | Prepare read-aloud audio |
+| GET | `/api/shared/{token}/tts/file/{cache_key}.mp3` | Share token | The audio file |
+| GET | `/api/shared/copilot/{token}` | Share token | A shared copilot conversation |
+
+#### Public RSS
+
+Admin-managed token in the URL. Turn it on and get the token under Settings.
+
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/public/rss/{token}.xml` | RSS token | RSS of the newest articles across all active, unmuted feeds |
+| GET | `/api/public/rss/{token}/category/{slug}.xml` | RSS token | RSS for one category |
+| GET | `/api/public/rss/{token}/categories` | RSS token | The category slugs you can use |
+| GET | `/api/system-settings/public-rss/token` | Admin | Get (or create) the token |
+| POST | `/api/system-settings/public-rss/regenerate-token` | Admin | New token; old URLs stop working |
+
+#### Observable Feeds (Outbound)
+
+For firewalls, SIEMs and threat-intel platforms to pull observables. Everything returns 404 until `observables_publish_enabled` is on and a token is set in `observables_publish_token`. Send the token as a bearer header, or `?token=` for devices that can't set headers.
+
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/publish/edl/{filename}` | Publish token | Plain-text blocklist (EDL), one value per line |
+| GET | `/api/publish/lookup/{filename}` | Publish token | SIEM lookup CSV: kind, value, label, role, confidence, last_seen |
+| GET | `/api/taxii2/`, `/api/taxii2/api/`, `/api/taxii2/api/collections/`, `.../collections/{collection_id}/`, `.../collections/{collection_id}/objects/` | Publish token | TAXII 2.1 server (a standard protocol for sharing threat data) |
+| GET | `/api/publish/status` | User | Whether publishing is on and what it serves |
 
 ---
 
-**Saved searches** (`/api/saved-searches`): `GET` (list), `POST` (create, 201), `PUT /{search_id}`, `DELETE /{search_id}`. Saved searches are per-user: the list returns the caller's own, and update/delete require owner or admin.
+### System & Operations
 
-**Categories** (`/api/categories`): `GET`, `POST` (201), `PUT /{category_id}`, `DELETE /{category_id}` (admin only — the folder tree is shared), `PUT /reorder`. Each category carries `feed_defaults`: the pipeline settings a feed added to it starts with (`POST /api/feeds`, OPML and starter-pack import, the `create_feed` tool), where a value the caller sends wins and an absent key falls back to the global default. `PUT /{category_id}` with `feed_defaults` replaces the set (admin only; `{}` clears it). Defaults apply once, at creation: editing them or moving a feed into the category does not change existing feeds.
+#### System Settings
 
-**Tags** (`/api/tags`): `GET`, `POST` (201), `PUT /{tag_id}`, `DELETE /{tag_id}`, `GET/POST /entries/{entry_id}` (entry tags), `DELETE /entries/{entry_id}/{tag_id}`, `POST /entries/bulk-tag`, `POST /entries/bulk-untag`, `POST /merge`. The tag list is shared; assignments are per user — `POST /entries/{entry_id}` and `bulk-tag` create the caller's own assignment, and every read (entry `tags`, `GET /entries/{entry_id}`, `entry_count`, the search `tags` facet) is the caller's view — unless the tag has `is_global: true`, in which case one shared assignment serves everyone. Tag fields: `name` (1–100 chars; may not contain `"` or `\\`), `color`, `display_as_chip`, `description`, `is_global`. `PUT {is_global}` re-homes existing assignments: to global collapses everyone's rows into one shared row per entry; to personal hands the shared row to every human account. `DELETE /entries/{entry_id}/{tag_id}` and `bulk-untag` remove the caller's own assignment (or the shared one of a global tag) and leave other users' alone.
+Instance settings, stored in the database and falling back to `.env`. All Admin.
 
-**Auth:** Bearer token
+| Method | Path | What it does |
+| --- | --- | --- |
+| GET | `/api/system-settings` | Every setting with its current value, grouped for the settings screens |
+| PATCH | `/api/system-settings` | `{"settings": {"registration_enabled": false}}`. A `null` value resets that key |
+| DELETE | `/api/system-settings/{key}` | Reset one key to its default |
+
+#### Signal Engine & Pipeline
+
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/engine/pipeline` | User | Pipeline stages, 24-hour activity and engine flags |
+| GET | `/api/engine/pipeline/stages/{stage}/runs` | User | Recent runs of one stage |
+| GET | `/api/engine/processing` | Admin | Per-article stage grid and window stats |
+| GET | `/api/engine/entries/{entry_id}/runs` | User | Every stage run for one article |
+| GET | `/api/engine/entries/{entry_id}/adjudication` | User | What the adjudicate stage decided for one article |
+| POST | `/api/engine/entries/{entry_id}/stages/{stage}/retry` | Admin | Re-run one stage for one article |
+| GET | `/api/engine/extraction/status` | User | AI extraction health: queue, today's spend, last batch |
+| GET | `/api/engine/plans` | User | Pipeline plans (global, per category, per feed) |
+| PUT | `/api/engine/plans` | Admin | Create or change one plan |
+| DELETE | `/api/engine/plans/{plan_id}` | Admin | Delete a category or feed plan (not the global one) |
+| GET | `/api/engine/job-runs` | User | Recent scheduled job runs |
+| GET | `/api/engine/signals/stats` | User | Signal firing rates, weights and the radar threshold |
+| PUT | `/api/engine/signals/settings` | Admin | Change signal weights or the radar threshold, then rescore |
+| GET | `/api/engine/entities/{entity_type}/{entity_id}/whats-new` | Visitor | Recent signals on an entity's articles |
+| PUT | `/api/engine/radar-feedback` | User | Vote on a radar item (1 useful, -1 noise, 0 clears) |
+| GET | `/api/engine/my-radar` | User | Your learned signal weights and the votes behind them |
+| PUT | `/api/engine/my-radar` | User | Turn your learned weights on or off |
+| DELETE | `/api/engine/my-radar` | User | Throw away your learned weights |
+| GET, POST, DELETE | `/api/engine/autolink/fp-names` | Admin | Names the autolinker must not match |
+| GET, POST, DELETE | `/api/engine/autolink/blocked-names` | Admin | Words blocked for every entity type |
+
+See [engine.md](engine.md) and [engine-settings.md](engine-settings.md).
+
+#### Analytics
+
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/analytics/overview` | Visitor | Summary numbers for dashboards |
+| GET | `/api/analytics/trending/{entity_type}` | Visitor | Most-mentioned entities of a type in a window |
+| GET | `/api/analytics/velocity` | Visitor | New entities per day |
+| GET | `/api/analytics/source-overlap` | User | Feeds that cover the same topics |
+| GET | `/api/analytics/entries/{entry_id}/insights` | User | Insights about one article's entities |
+
+#### Feed Reliability
+
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/analytics/source-reliability` | User | Feeds ranked by articles and entities they contribute |
+| GET | `/api/analytics/feed-value` | User | Feeds ranked by useful intel output |
+
+#### Backup & Export
+
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/backup/export` | Admin | Download the configuration as JSON |
+| POST | `/api/backup/import` | Admin | Import a backup (JSON body). Merges; deletes nothing |
+
+For a full database backup use `scripts/ops/backup.sh` instead (see [operations.md](operations.md)).
+
+#### Logs
+
+Log files on the server. All Admin.
+
+| Method | Path | What it does |
+| --- | --- | --- |
+| GET | `/api/logs` | The log files with size and change time |
+| GET | `/api/logs/{filename}` | The last `lines` lines (default 500, max 10000) as text |
+| DELETE | `/api/logs/{filename}` | Empty a log file |
+
+Files: `app.log`, `error.log`, `http.log`, `tasks.log`, `audit.log`, `update.log`. There is no audit-log query API; audit events are in `audit.log`.
+
+#### Health & Metrics
+
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/health` | Public | Checks PostgreSQL, Redis and Meilisearch |
+| GET | `/api/version` | Public | Build `version`, `git_sha` and `built_at`. An unstamped build reports `dev` |
+| GET | `/metrics` | Private networks only | Prometheus metrics. Returns 403 to any address outside loopback and private ranges |
+
+```json
+{
+  "status": "healthy",
+  "version": "dev",
+  "git_sha": null,
+  "built_at": null,
+  "components": {
+    "database": { "status": "ok", "latency_ms": 1.2 },
+    "redis": { "status": "ok", "latency_ms": 0.4 },
+    "meilisearch": { "status": "ok", "latency_ms": 3.1 }
+  }
+}
+```
+
+`status` is `healthy` when all three are ok, `degraded` when only the database is ok, and `unhealthy` when the database is down.
+
+#### Additional Operations
+
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/themes` | Visitor | All themes |
+| GET | `/api/themes/{theme_id}` | Visitor | One theme |
+| GET | `/api/themes/schema` | Public | Colour names and default theme values |
+| GET | `/api/themes/default` | Public | The instance default theme (styles the sign-in page) |
+| GET | `/api/themes/default.css` | Public | The same as a stylesheet |
+| POST | `/api/themes` | User | Create a theme |
+| PUT | `/api/themes/{theme_id}` | Owner | Change a custom theme (built-in themes are fixed) |
+| DELETE | `/api/themes/{theme_id}` | Owner | Delete a custom theme |
+| POST | `/api/themes/{theme_id}/duplicate` | User | Copy a theme as your own |
+| PUT | `/api/themes/user/preferences` | User | Choose your theme |
+| PUT | `/api/themes/{theme_id}/default` | Admin | Make it the instance default |
+| DELETE | `/api/themes/{theme_id}/default` | Admin | Clear the instance default |
+| POST | `/api/events/ticket` | User | Get a 30-second, single-use ticket for the event stream |
+| GET | `/api/events` | Ticket | The server-sent event (SSE) stream: `?ticket=` from the call above |
+| GET | `/api/documentation` | Visitor | The in-app docs index (built from `docs/`) |
+| GET | `/api/documentation/{slug}` | Visitor | One docs page as Markdown |
+| GET | `/api/documentation/assets/{path}` | Public | An image used by the docs |
 
 ---
 
 ### Other Routers
 
-Concise index of the remaining routers (all Bearer-token unless noted; see the router files in [`backend/app/api/`] for details):
-
-| Router | Base path | Purpose |
-|--------|-----------|---------|
-| Signal engine | `/api/engine` | Pipeline/extraction status, per-entry stage runs and retries, signal stats/settings, plans, job runs, radar feedback |
-| Extraction management | `/api/engine/extraction` | AI-created entity provenance: `GET /stats`, `GET /entities` (filter/sort AI-extracted entities), `POST /confirm` |
-| Entity links | `/api/entity-links` | Entry↔entity link (edge) management: `GET` (list, unified across junctions), `GET /stats`, `DELETE /{entity_type}/{entity_id}/{entry_id}`, `POST /bulk-unlink` |
-| Ransomware tracker | `/api/ransomware` | Leak-site victim disclosures: `GET /disclosures`, `GET /stats`, `GET /victims/{victim_id}`, `GET /groups/{actor_id}/victims` (behind `ransomware_tracker_enabled`) |
-| Stack exposure | `/api/intelligence/exposure` | CVEs affecting the user's vendor/product stack, ranked by exposure lift with detection posture (`GET`) |
-| Documentation | `/api/documentation` | In-app docs: `GET` (page index from `docs/`), `GET /{slug}` (raw markdown for one page) |
-| Hygiene (admin) | `/api/admin/hygiene`, `/api/entities/.../cascade-preview` | Orphan pruning, alias/vendor/ID hygiene scans, enrichment gaps, name normalization, the proposals feed/stats (`origin`, `orphaned`), adjudicator row apply/restore/apply-all, link-log restore/apply-removal, dismiss-proposals |
-| Intel reports | `/api/intel-reports` | Report CRUD, templates, AI generation (full / per-section / from-campaign), versions, export, publish/archive |
-| Intel feed | `/api/intelligence/feed` | Aggregated intelligence activity feed |
-| Watchlist | `/api/intelligence/watchlist` | Per-user entity watch list (`GET`, `PUT`, `DELETE /{entity_type}/{entity_id}`) |
-| Notes | `/api/notes` | Per-entry analyst notes CRUD + export |
-| Comments | `/api/comments` | Entry comments with @mentions |
-| Glossary | `/api/glossary` | Term CRUD, categories, counts, per-term entries, in-text detection |
-| Podcasts & playback | `/api/podcasts`, `/api/playback` | Podcast feeds/episodes; playback progress per media item |
-| Telegram | `/api/telegram`, `/api/telegram-media` | Channel discovery, listener status, keyword mentions (dismiss/subscribe), media file serving |
-| Events | `/api/events` | SSE stream of server events (`GET`, token via query param) + `POST /ticket` |
-| Proxy | `/api/proxy/image` | Image proxy for entry content |
-| Observables (IOC ledger) | `/api/observables` | `GET` (list/filter by kind, role, status, capture door, `infra_tag`, `min_confidence`, `linked_entity=<type>:<uuid>` — the profile pivot to one actor's/family's/campaign's/tool's claimed + reported-alongside observables; sortable by `report_count` / `feed_source_count`), `GET /{id}/backlinks` (who claims it, who it is reported with), `GET /rollup`, `GET /candidates` (the promote queue), `GET /{id}`, `PATCH /{id}`, `DELETE /{id}` (drops the row, its sightings and its relationship claims — no tombstone, so the value can be captured again), `POST /{id}/deny` (admin; keeps the row as the never-capture tombstone), `POST /never-capture`, `GET /{id}/sightings.csv`. Per-entry: `GET/POST /entries/{entry_id}/observables`, `/promote` (accepts `role`, `evidence`, `label`), `/dismiss` |
-| Entity infrastructure | `/api/entities/{threat_actor\|malware\|campaign\|tool}/{id}/infrastructure` | `GET` → `{claimed, reported_alongside, counts}` (`counts.staged_candidate_articles` feeds the profile's empty state; cached in the pivot key space so unlink/relationship writes invalidate it); `?format=csv` for the flat export |
-| Publishing (outbound) | `/api/publish`, `/api/taxii2` | Token-authed observable feeds for external pullers — `GET /publish/edl/{filename}` (EDL blocklists), `GET /publish/lookup/{filename}` (SIEM lookup CSVs), the TAXII 2.1 collection under `/taxii2/`, and `GET /publish/status` (normal user auth). Mounted **without** the app auth dependency; 404s entirely unless `observables_publish_enabled` |
-| CWE | `/api/cwes` | MITRE weakness catalog: `GET` (list), `GET /rollup`, `GET /{cwe_id}`, `/family` (lineage), `/affected-cves`, `/vendors`. CVE side: `GET /cves/{cve_id}/weaknesses` |
-| Intel profiles | `/api/intel-profiles` | Named report scopes (regions × verticals × window): CRUD, `GET /{id}/surface` (matched threat surface with why-matched evidence), `POST /surface-preview` (unsaved scope), `GET /sector-vocabulary` |
-| Threat board | `/api/threat-board` | The Threats board: `GET` (ranked rows), `GET /windows`, `GET /precedent`, `GET /{entity_type}/{entity_key}/rules`, `PUT /{entity_type}/{entity_key}/state` (open / handled / muted) |
-| Coverage workspace | `/api/coverage-workspace` | Per-entity detection coverage: `GET /{entity_type}/{entity_key}`, `/behaviours/{technique_id}/rules`, `/sets`, `GET /windows`, and set export (`/sets/{summary_id}/export`, `.zip`) |
-| False positives | `/api/false-positives` | Analyst FP reports on entity links, feeding the autolinker denylists |
-| Read-aloud (TTS) | `/api/tts`, `/api/shared/{token}/tts` | `POST /prepare` (enqueue Piper synthesis), `GET /file/{cache_key}.mp3`. The shared variant serves the pre-generated audio on a share link |
-| Backup | `/api/backup` | See above |
+| Method | Path | Access | What it does |
+| --- | --- | --- | --- |
+| GET | `/api/glossary` | Visitor | Glossary terms (category, name search, system or user) |
+| POST | `/api/glossary` | User | Add a term (409 if it exists) |
+| PUT | `/api/glossary/{term_id}` | User | Change a term |
+| DELETE | `/api/glossary/{term_id}` | User | Delete a user term (built-in terms can't be deleted) |
+| GET | `/api/glossary/categories` | Visitor | Term categories |
+| GET | `/api/glossary/counts` | Visitor | Article counts per term |
+| GET | `/api/glossary/{term_id}/entries` | Visitor | Articles that use the term |
+| POST | `/api/glossary/detect` | Visitor | Find glossary terms in an article's text |
+| GET | `/api/podcasts` | User | Podcasts |
+| GET | `/api/podcasts/{feed_id}` | User | One podcast |
+| GET | `/api/podcasts/{feed_id}/episodes` | User | Its episodes with your progress |
+| GET | `/api/playback/in-progress` | User | Media you started but didn't finish |
+| GET, PUT | `/api/playback/{media_id}/progress` | User | Read or save your position |
+| PUT | `/api/playback/{media_id}/complete` | User | Mark finished |
+| POST | `/api/tts/prepare` | User | Make (or find) read-aloud audio; then fetch the file |
+| GET | `/api/tts/file/{cache_key}.mp3` | Token in header or `?token=` | The audio file |
+| GET | `/api/tts/existing` | Visitor | Whether audio already exists for an article or entity |
+| GET | `/api/proxy/image` | Visitor | Fetch and optionally resize an outside image |
+| GET | `/api/telegram/discover` | User | Channels the Telegram account has joined |
+| GET | `/api/telegram/feeds/{feed_id}/health` | User | Health of one Telegram feed |
+| GET | `/api/telegram/listener/status` | User | Whether the live listener has checked in |
+| GET | `/api/telegram/mentions` | User | Telegram channels mentioned in articles |
+| GET | `/api/telegram/mentions/{mention_id}` | User | One mention with sample articles |
+| POST | `/api/telegram/mentions/{mention_id}/dismiss` | User | Hide a mention |
+| POST | `/api/telegram/mentions/{mention_id}/undismiss` | User | Show it again |
+| POST | `/api/telegram/mentions/{mention_id}/subscribe` | User | Add a feed for that channel |
+| GET | `/api/telegram-media/{channel_id}/{filename}` | Token in header or `?token=` | A downloaded Telegram media file |
 
 ---
 
 ## Common Query Patterns
 
+All of these run on the host against the dev stack. Set `TOKEN` to an access token from `POST /api/auth/login` first.
+
 ### Filter Entries by Multiple Criteria
 
 ```bash
-# Articles about APT29 from last 7 days, unread
-curl -X GET "http://localhost:8000/api/entries?since=2024-01-13T00:00:00Z&is_read=false" \
-  -H "Authorization: Bearer <token>"
+# Unread articles from the last 7 days that mention a known-exploited CVE
+curl -s "http://localhost:8000/api/entries?since=2026-10-20T00:00:00Z&is_read=false&exploited_cves=true" \
+  -H "Authorization: Bearer $TOKEN"
 
-# All starred or bookmarked articles
-curl -X GET "http://localhost:8000/api/entries?is_starred=true&limit=100" \
-  -H "Authorization: Bearer <token>"
+# Articles linked to one threat actor
+curl -s "http://localhost:8000/api/entries?entity_type=threat_actor&entity_id=<actor uuid>" \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ### Pagination Through Large Result Sets
 
 ```bash
-# Fetch first 50 entries
-curl "http://localhost:8000/api/entries?limit=50" \
-  -H "Authorization: Bearer <token>"
+# First page
+curl -s "http://localhost:8000/api/entries?limit=50" -H "Authorization: Bearer $TOKEN"
 
-# Examine `next_cursor` in response, then fetch next page
-curl "http://localhost:8000/api/entries?limit=50&cursor=<next_cursor>" \
-  -H "Authorization: Bearer <token>"
+# Next page: pass next_cursor from the previous answer
+curl -s "http://localhost:8000/api/entries?limit=50&cursor=<next_cursor>" -H "Authorization: Bearer $TOKEN"
 ```
 
 ### Extract Intelligence from an Entry
 
 ```bash
-# Extract TTPs, CVEs, threat actors in one flow
-curl -X POST "http://localhost:8000/api/entries/550e8400-/extract-ttps" \
-  -H "Authorization: Bearer <token>"
-
-curl -X POST "http://localhost:8000/api/entries/550e8400-/extract-cves" \
-  -H "Authorization: Bearer <token>"
-
-curl -X POST "http://localhost:8000/api/entries/550e8400-/extract-threat-actors" \
-  -H "Authorization: Bearer <token>"
+curl -s -X POST "http://localhost:8000/api/entries/<entry uuid>/extract-ttps" -H "Authorization: Bearer $TOKEN"
+curl -s -X POST "http://localhost:8000/api/entries/<entry uuid>/extract-cves" -H "Authorization: Bearer $TOKEN"
+curl -s -X POST "http://localhost:8000/api/entries/<entry uuid>/extract-threat-actors" -H "Authorization: Bearer $TOKEN"
 ```
 
 ### Trigger Automation Rule
 
 ```bash
-curl -X POST "http://localhost:8000/api/automation/rules/550e8400-/run" \
-  -H "Authorization: Bearer <token>"
+# Dry run against one article
+curl -s -X POST "http://localhost:8000/api/automation/rules/<rule uuid>/test?entry_id=<entry uuid>" \
+  -H "Authorization: Bearer $TOKEN"
 
-# Test rule before running (dry-run)
-curl -X POST "http://localhost:8000/api/automation/rules/550e8400-/test" \
-  -H "Authorization: Bearer <token>"
+# Run it for real
+curl -s -X POST "http://localhost:8000/api/automation/rules/<rule uuid>/run" -H "Authorization: Bearer $TOKEN"
 ```
-
----
-
-## Error Examples
-
-**401 Unauthorized (Invalid Token):**
-```json
-{
-  "error": {
-    "code": "unauthorized",
-    "message": "Invalid or expired token",
-    "details": []
-  }
-}
-```
-
-**429 Rate Limited (Auth endpoint):**
-```json
-{
-  "error": {
-    "code": "rate_limited",
-    "message": "Too many requests",
-    "details": []
-  }
-}
-```
-Header: `Retry-After: 300`
-
-**400 Validation Error:**
-```json
-{
-  "error": {
-    "code": "validation_error",
-    "message": "Request validation failed",
-    "details": [
-      { "field": "username", "message": "ensure this value has at least 3 characters", "code": "string_too_short" },
-      { "field": "email", "message": "invalid email format", "code": "value_error.email.invalid" }
-    ]
-  }
-}
-```
-
----
-
-## Implementation Notes
-
-- **Database:** PostgreSQL with async SQLAlchemy ORM; see [`backend/app/database.py`]
-- **Caching:** Redis for token blacklist, rate limiting, and optional result caching
-- **Indexing:** Meilisearch for full-text entry search
-- **Async:** All endpoints use `async def` with `await` for database operations
-- **Logging:** Structured logs via `structlog`; audit trail in database
-- **Monitoring:** Prometheus metrics exported at `/metrics`
 
 ---
 
 ## Further Reading
 
-- **Architecture:** [`docs/architecture.md`]
-- **Database Models:** [`backend/app/models/`]
-- **Pydantic Schemas:** [`backend/app/schemas/`]
-- **Core Security:** [`backend/app/core/security.py`]
-- **Rate Limiting:** [`backend/app/core/rate_limit.py`]
-- **Main App Setup:** [`backend/app/main.py`]
-
+- [architecture.md](architecture.md): how the pieces fit together
+- [data-model.md](data-model.md): the database tables
+- [public-read-only-mode.md](public-read-only-mode.md): what anonymous visitors can see
+- `backend/app/api/`: the routers; `backend/app/schemas/`: request and response models

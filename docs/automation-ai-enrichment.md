@@ -1,6 +1,6 @@
 # Automation, AI Providers, and Enrichment
 
-For contributors and operators working on the three subsystems that act on intelligence automatically: automation rules, AI providers and tasks, and entity enrichment.
+For contributors and operators. After reading this you will know how automation rules fire and what they can do, how IntelFeed decides which AI model answers a task, and how entities get extra data from outside sources.
 
 **Contents**
 
@@ -10,8 +10,10 @@ For contributors and operators working on the three subsystems that act on intel
   - [Trigger Types](#trigger-types)
   - [Condition Language](#condition-language)
   - [Actions](#actions)
+  - [Template Variables](#template-variables)
   - [Branch Actions](#branch-actions)
   - [Execution Flow](#execution-flow)
+  - [One article per story](#one-article-per-story)
   - [Logging & Audit](#logging--audit)
   - [Webhook Presets](#webhook-presets)
 - [Part 2: AI Provider System](#part-2-ai-provider-system)
@@ -19,6 +21,7 @@ For contributors and operators working on the three subsystems that act on intel
   - [Model Configuration](#model-configuration)
   - [AI Tasks](#ai-tasks)
   - [Task Assignment & Routing](#task-assignment--routing)
+  - [The `ai` queue](#the-ai-queue)
   - [Callers: Who Is Asking](#callers-who-is-asking)
   - [Personal Keys & The Lookup](#personal-keys--the-lookup)
   - [Allowances & Caps](#allowances--caps)
@@ -26,11 +29,11 @@ For contributors and operators working on the three subsystems that act on intel
   - [Task Execution & Results](#task-execution--results)
   - [Error Handling & Retries](#error-handling--retries)
   - [Streaming](#streaming)
+  - [One-Pass Entry Analysis](#one-pass-entry-analysis-engine-phase-4)
 - [Part 3: Enrichment Pipeline](#part-3-enrichment-pipeline)
   - [Architecture Overview](#architecture-overview)
   - [Data Models](#data-models)
   - [Adapter Registry](#adapter-registry)
-  - [Adapter Base Class](#adapter-base-class)
   - [Trigger Modes](#trigger-modes)
   - [Pipeline Flow](#pipeline-flow)
   - [API Key Resolution](#api-key-resolution)
@@ -39,35 +42,16 @@ For contributors and operators working on the three subsystems that act on intel
   - [Rate Limiting](#rate-limiting)
   - [Daily Budgets](#daily-budgets)
   - [Scheduled Enrichment](#scheduled-enrichment)
-- [Integration: How Three Systems Work Together](#integration-how-three-systems-work-together)
-  - [Automation Triggering Enrichment](#automation-triggering-enrichment)
-  - [AI Task Extracting Intelligence for Detection Rules](#ai-task-extracting-intelligence-for-detection-rules)
-  - [Automation Sending Enriched Data via Webhook](#automation-sending-enriched-data-via-webhook)
-- [Execution Diagrams](#execution-diagrams)
-  - [Automation Rule Trigger → Action Execution](#automation-rule-trigger--action-execution)
-  - [AI Task Execution Pipeline](#ai-task-execution-pipeline)
-  - [Enrichment Job → Merge](#enrichment-job--merge)
 - [Configuration and Extensibility](#configuration-and-extensibility)
-  - [Adding a New Enrichment Adapter](#adding-a-new-enrichment-adapter)
-  - [Adding a New AI Task](#adding-a-new-ai-task)
-  - [Adding a New Automation Action](#adding-a-new-automation-action)
 - [Testing & Debugging](#testing--debugging)
-  - [Dry-Run Automation Rules](#dry-run-automation-rules)
-  - [AI Task Cost Estimation](#ai-task-cost-estimation)
-  - [Enrichment Budget Tracking](#enrichment-budget-tracking)
-- [Summary](#summary)
-- [One-Pass Entry Analysis (engine phase 4)](#one-pass-entry-analysis-engine-phase-4)
-  - [Signal-engine automation (engine phase 7)](#signal-engine-automation-engine-phase-7)
 
 ## Overview
 
-IntelFeed's backend integrates three closely-related subsystems that work together to automate intelligence workflows, leverage AI for content analysis, and augment entity data with external threat intelligence:
+Three backend subsystems act on intelligence without a person clicking:
 
-1. **Automation Engine** — User-defined rules that trigger actions when entries match conditions
-2. **AI Provider System** — Pluggable LLM abstraction supporting multiple providers (Anthropic Claude API, Claude Code CLI, Ollama, custom HTTP)
-3. **Enrichment Pipeline** — Pulls additional context from 10 external threat intel sources and merges results into entity profiles
-
-All three share configuration patterns, use JSONB for flexible configs, and integrate with the async task queue (Celery) and caching layer (Redis).
+1. **Automation engine** (`backend/app/automation/`): rules you write. When an entry matches, the rule runs a list of actions (tag it, notify Slack, run an AI task, and so on).
+2. **AI provider system** (`backend/app/ai/`): one interface over several model backends. A *task* (for example "summarize an article") is assigned to a *provider* (for example your Ollama server). A provider does nothing until a task is assigned to it.
+3. **Enrichment pipeline** (`backend/app/enrichment/`): pulls extra facts about entities (CVEs, actors, malware, IP addresses) from 13 outside sources and stores the results.
 
 ---
 
@@ -75,330 +59,223 @@ All three share configuration patterns, use JSONB for flexible configs, and inte
 
 ### Data Model
 
-The automation engine is rooted in the `AutomationRule` model (`backend/app/models/automation_rule.py:11-31`), which defines executable intelligence workflows:
+A rule is one row in `automation_rules` (`backend/app/models/automation_rule.py`):
 
-```python
-class AutomationRule(Base):
-    id: UUID                        # Primary key
-    created_by: UUID | None         # User who created this rule
-    name: str                        # Display name
-    description: str | None         # Long description
-    is_enabled: bool = True         # Enable/disable toggle
-    trigger_type: str               # on_new_entry, on_keyword_match, on_cve_detected, on_correlation_event
-    trigger_config: dict            # Trigger-specific params (pattern, min_severity, etc.)
-    conditions: dict                # Nested AND/OR logic tree
-    actions: list[dict]             # Sequential actions to execute
-    labels: list                    # Custom tags for organization
-    last_triggered_at: datetime     # Stats: last execution time
-    run_count: int = 0              # Total executions
-    created_at, updated_at: datetime # Audit fields
-```
+| Field | What it holds |
+|---|---|
+| `created_by` | The rule's owner. A rule with no owner never fires. |
+| `name`, `description`, `labels` | Display and grouping |
+| `is_enabled` | On/off switch |
+| `trigger_type`, `trigger_config` | When the rule fires (see below) |
+| `conditions` | Optional AND/OR filter tree (JSONB) |
+| `actions` | Ordered list of actions (JSONB) |
+| `last_triggered_at`, `run_count` | Run stats |
 
-Key design:
-- **Flexible JSONB storage** — Conditions and actions are unversioned, allowing evolution without migrations
-- **Per-rule execution stats** — Track when rules fire and how often
-- **Creator tracking** — Linked to user via foreign key for multi-tenant scenarios
+Conditions and actions are plain JSON, so adding a new condition or action type needs no migration.
+
+Rules run as their owner. Per-user state (read, starred, watchlist, personal tags) is the owner's.
 
 ### Trigger Types
 
-Rules fire based on four trigger mechanisms (`backend/app/automation/engine.py:180-254`):
+The API accepts eight trigger types (`backend/app/schemas/automation.py`):
 
-| Trigger Type | Fires When | Entry Context | Example |
-|------|---|---|---|
-| `on_new_entry` | Entry ingested from any feed | Always available | "Tag all RSS entries as read" |
-| `on_keyword_match` | Title/content matches regex or substring | Checks entry text | "Alert when 'zero-day' appears" |
-| `on_cve_detected` | Entry contains CVEs above CVSS threshold | Requires CVE extraction | "Notify on critical CVEs (CVSS>9)" |
-| `on_correlation_event` | Correlation engine detects event | Event payload provided | "Block rules when new TTP detected for APT29" |
-| `on_entry_scored` | Signal engine finished scoring the entry | Priority score and signals populated | "Notify on KEV adds" |
-| `on_observable_captured` | A judgment door wrote observables for the entry (one-pass AI, article IOC table, analyst promote — never the indicator-feed door) | `trigger_config` = `{kinds, roles, min_confidence, exclude_infra_tagged, sources}`, same shape as `has_observable` | "Notify on new C2 infrastructure" |
+| Trigger | Fires when | `trigger_config` |
+|---|---|---|
+| `on_new_entry` | An entry is ingested | — |
+| `on_keyword_match` | Title, content or summary matches a pattern | `pattern`, `is_regex` (default `true`, case-insensitive) |
+| `on_cve_detected` | The entry has linked CVEs | `min_severity`: `low` / `medium` / `high` / `critical` (CVSS ≥ 0.1 / 4.0 / 7.0 / 9.0). Empty = any linked CVE |
+| `on_entry_scored` | The signal engine has scored the entry | — |
+| `on_observable_captured` | A judgment door (one-pass AI, a publisher's IOC table, an analyst promote) wrote observables for the entry. The indicator-feed door never fires it | Same shape as the `has_observable` condition: `kinds`, `roles`, `min_confidence`, `exclude_infra_tagged`, `sources` |
+| `on_correlation_event` | The correlation engine records an event | `event_types`, `entity_filters` (`threat_actor_names`, `malware_names`) |
+| `on_schedule` | A cron time arrives | `cron` (5 fields, UTC), `entry_filter`, `max_entries` (default 200), `execution_mode` |
+| `on_manual` | Only when someone presses **Run now** | Same as `on_schedule`, minus `cron` |
 
-Implementation notes:
-- `on_new_entry` and `on_keyword_match` fire immediately during entry ingestion (synchronous)
-- `on_cve_detected` requires prior CVE extraction; uses threshold logic (`backend/app/automation/engine.py:263`)
-- `on_correlation_event` runs asynchronously when correlation events are published (`run_automations_for_correlation_event`, `backend/app/automation/engine.py:412`)
-- `on_observable_captured` runs asynchronously (`run_automations_for_observable_capture`) from a Celery task the capturing door queues after its commit (`dispatch_observable_capture_automations`). It fires **once per rule per entry**: the AI door and the article-IOC-table door can both land on one article, and a rule that already logged a run for that entry is skipped. The replay backfill script never fires it.
+How each one is dispatched:
+
+- **`on_new_entry`, `on_keyword_match`, `on_cve_detected`**: the fetch loop queues `run_entry_automations` for each new entry. That calls `run_automations_for_entry` (`backend/app/automation/engine.py:242`). This runs alongside the rest of the pipeline, so CVE links and the priority score may not exist yet.
+- **`on_entry_scored`**: `score_entry_task` queues `run_scored_entry_automations` after it saves the score, so `priority_score_above` and `has_signal` see real values. It fires on the first scoring only, never on rescores or backfills.
+- **`on_observable_captured`**: the door that captured observables queues `dispatch_observable_capture_automations` after its commit. It fires **once per rule per entry**: a rule that already has a non-skipped log for the entry is skipped (`run_automations_for_observable_capture`, `backend/app/automation/engine.py:322`). The replay backfill script never fires it.
+- **`on_correlation_event`**: runs from `run_correlation_automations` (`run_automations_for_correlation_event`, `backend/app/automation/engine.py:412`). An event with no entry is logged as `skipped`.
+- **`on_schedule`**: the `run-scheduled-automations` beat job checks every 60 seconds. A rule fires once for the latest cron slot it has not run yet, looking back up to 48 hours, so a late worker catches up once instead of skipping. A brand-new rule fires only if its slot was within the last 10 minutes. The slot is claimed before the actions run, so two workers never fire the same slot, and a failed run does not retry.
 
 ### Condition Language
 
-Conditions evaluate entry properties using a nested AND/OR algebra (`backend/app/automation/conditions.py`). The evaluator supports:
+Conditions filter entries after the trigger matches (`evaluate_conditions`, `backend/app/automation/conditions.py:23`). A condition is either one check, `{"type": ..., "config": {...}}`, or a group, `{"operator": "AND" | "OR", "conditions": [...]}`. Groups nest. An empty block always passes.
 
-**Operators:**
-- `AND` — All sub-conditions must be true
-- `OR` — At least one sub-condition must be true
-- Nesting — Groups compose recursively
-
-**Available Conditions:**
-
-| Condition Type | Config | Matches When |
+| Condition | Config | True when |
 |---|---|---|
-| `feed_matches` | `feed_ids[]`, `category_ids[]` | Entry's feed is in the list |
-| `content_contains` | `pattern: str`, `is_regex: bool` | Title/content/summary contains text |
-| `severity_above` | `min_cvss: float` | Linked CVE exceeds CVSS threshold |
-| `author_matches` | `authors: list[str]` | Entry author is in the list |
-| `tag_matches` | `tags: list[str]` | Entry has at least one of the tags |
-| `feed_type_matches` | `types: list[str]` | Feed type (rss, youtube, nvd, etc.) |
-| `is_read` | — | Entry marked read by user |
-| `is_starred` | — | Entry starred by user |
-| `is_bookmarked` | — | Entry bookmarked by user |
-| `has_note` | — | Entry has any user notes |
+| `feed_matches` | `feed_ids[]`, `category_ids[]` | The entry's feed is listed, or is in a listed category |
+| `content_contains` | `pattern`, `is_regex` (default `false`) | Title, content or summary contains the text (case-insensitive) |
+| `severity_above` | `min_cvss` | A linked CVE has CVSS ≥ `min_cvss` |
+| `author_matches` | `authors[]` | The author contains one of the names |
+| `tag_matches` | `tags[]` | The entry has one of the tags (as the owner sees them) |
+| `feed_type_matches` | `types[]` | The feed type is listed (`rss`, `youtube`, `nvd`, ...) |
+| `is_read`, `is_starred`, `is_bookmarked`, `has_note` | — | The owner has read / starred / bookmarked / noted the entry |
+| `priority_score_above` | `min` (default 1.0) | The 0–10 priority score is ≥ `min` |
+| `has_signal` | `types[]` (empty = any) | The entry carries one of these signals (`kev_added`, `novel_entity`, `under_reported`, ...) |
+| `entity_watchlisted` | — | The entry links an entity the owner watches |
+| `has_observable` | `kinds`, `roles`, `min_confidence`, `exclude_infra_tagged` (default `true`), `sources` | The entry has a matching captured observable. `sources` defaults to every door except the indicator feed, so "new C2" means reporting, not a blocklist mirror |
 
-**Example condition (JSON):**
+An unknown condition type, or one that raises an error, evaluates to `false`.
+
 ```json
 {
   "operator": "AND",
   "conditions": [
-    {
-      "type": "feed_type_matches",
-      "config": { "types": ["rss"] }
-    },
+    { "type": "feed_type_matches", "config": { "types": ["rss"] } },
     {
       "operator": "OR",
       "conditions": [
-        {
-          "type": "content_contains",
-          "config": { "pattern": "ransomware", "is_regex": false }
-        },
-        {
-          "type": "severity_above",
-          "config": { "min_cvss": 8.0 }
-        }
+        { "type": "content_contains", "config": { "pattern": "ransomware" } },
+        { "type": "severity_above", "config": { "min_cvss": 8.0 } }
       ]
     }
   ]
 }
 ```
 
-Implementation: `evaluate_conditions()` at `conditions.py:22-53` recursively evaluates nested logic. Each condition type delegates to a handler function (`_eval_*`) which queries the DB as needed (e.g., tag_matches joins EntryTag/Tag tables).
-
 ### Actions
 
-Actions execute sequentially and share a mutable context dict. Earlier actions can write outputs that later actions read. Key implementation: `execute_action()` at `backend/app/automation/actions.py:199`.
+Actions run in order (`execute_action`, `backend/app/automation/actions.py:200`). They share a `context` dict, so a later action can use what an earlier one produced. A failed action records `status: "error"` and the next action still runs.
 
-**Available Actions:**
-
-| Action | Config | Effect |
+| Action | Config | What it does |
 |---|---|---|
-| `run_ai_task` | `task_id: str` | Execute AI task; store result in context |
-| `use_daily_summary` | `day: yesterday\|today = yesterday`, `on_missing: generate\|skip = generate` | Reuse the shared day-divider briefing as `{ai_summary}` instead of generating a second one (batch only) |
-| `add_tags` | `tags: list[str \| {name, color, description, chip, global}]` | Add tags to entry. The object form sets a new tag's colour, tooltip, chip promotion and scope — on create only; an existing tag keeps its own look and scope. Each assignment belongs to the rule's owner (only they see it) unless the tag is global, in which case it is shared. A rule with no owner skips personal tags |
-| `remove_tags` | `tags: list[str]` | Remove the rule owner's own assignment, or the shared one for a global tag; other users' assignments of a personal tag stay |
-| `send_notification` | `platform, webhook_url, channel, message_template, include_embeds` | POST to Slack/Discord/custom webhook |
-| `run_webhook` | `url: str, headers: dict, payload: str` | POST custom JSON to URL |
-| `mark_priority` | `level: str` | Add the `priority-{level}` tag via `add_tags`, so it follows that tag's scope: personal to the rule owner unless `priority-{level}` has been made global in Tag Manager |
-| `mark_read` | — | Mark as read for creator user |
-| `star_entry` | — | Star entry |
-| `bookmark_entry` | — | Bookmark entry |
-| `hide_entry` | — | Hide from user's view |
-| `create_note` | `title, content` | Create analyst note (supports {template_vars}) |
-| `extract_ttps` | `use_ai: bool = true` | Run TTP extraction; store in context |
-| `extract_cves` | — | Extract CVE references |
-| `extract_threat_actors` | — | AI-identify threat actors |
-| `extract_malware` | — | AI-identify malware families |
-| `generate_detection_rules` | `rule_types: list[str]` | Generate SIGMA/Splunk/KQL rules from TTPs |
-| `add_to_campaign` | `campaign_id: UUID, notes: str` | Link entry to campaign |
-| `create_intel_report` | `title, template_type, tlp_marking, summary` | Generate intelligence report |
-| `chain_rule` | `rule_id: UUID` | Trigger another rule on the same entry |
-| `branch` | `condition, then_actions, else_actions` | Conditional branching (see below) |
+| `run_ai_task` | `task_id` (a task name), `fold_threads` (batch only, default `true`) | Runs an AI task and stores the parsed result in `context["ai_results"][task]` |
+| `use_daily_summary` | `day`: `yesterday` (default) / `today`; `on_missing`: `generate` (default) / `skip`; `links`: `original` (default) / `app` | Reuses the shared day-divider briefing as `{ai_summary}` instead of paying for a second one. Batch mode only. `links: original` rewrites in-app links to the articles' own URLs |
+| `add_tags` | `tags`: names, or `{name, color, description, chip, global}` objects | Adds tags. The object form styles a tag only when it is created. The assignment belongs to the rule owner unless the tag is global. A rule with no owner skips personal tags |
+| `remove_tags` | `tags[]` | Removes the owner's assignment (or the shared one for a global tag) |
+| `mark_priority` | `level` (default `medium`) | Adds the tag `priority-{level}` through `add_tags` |
+| `mark_read`, `star_entry`, `bookmark_entry`, `hide_entry` | — | Sets that state for the owner |
+| `create_note` | `title` (default `Auto-note: {title}`), `content` (default `{summary}`) | Writes a note. Both fields take template variables |
+| `send_notification` | `platform` (`discord` default, `slack`, `custom`), `webhook_url`, `channel`, `username`, `message_template`, `include_embeds` | Posts to a chat webhook |
+| `run_webhook` | `url`, `headers`, `payload` (JSON string with template variables) | Posts JSON to any URL |
+| `extract_ttps` | `use_ai` (default `true`) | Extracts ATT&CK techniques; stores them in `context["extraction_results"]["ttps"]` |
+| `extract_cves` | — | Extracts CVE IDs and links them |
+| `extract_threat_actors`, `extract_malware` | — | AI extraction, routed through the one-pass `entry_analysis` task |
+| `generate_detection_rules` | `rule_types` (default `["sigma"]`) | Builds rules from the TTPs in context, or the entry's stored TTPs |
+| `add_to_campaign` | `campaign_id`, `notes`, `link_observables`, `observable_kinds`, `observable_roles` | Links the entry to a campaign. With `link_observables`, also attaches the entry's reporting-door observables (dual-use infrastructure excluded) |
+| `create_intel_report` | `title`, `template_type` (default `flash_alert`), `tlp_marking` (default `TLP:GREEN`), `summary` | Creates a report from the entry and the context |
+| `track_on_threat_board` | — | Pins the entry's linked actors and malware onto the Threats board as tracked. It never overrides a threat a person already handled or muted |
+| `chain_rule` | `rule_id` | Runs another rule on the same entry. The other rule must have the same owner (or the owner is an admin). Loops are refused and chains stop at 5 deep (`MAX_CHAIN_DEPTH`, `backend/app/automation/actions.py:1363`) |
+| `branch` | `condition`, `then_actions`, `else_actions` | See [Branch Actions](#branch-actions) |
 
-**Context Flow Example:**
-```python
-# Action 1: Run AI summary task
-{
-  "type": "run_ai_task",
-  "config": { "task_id": "article_summary" }
-  # Stores context["ai_summary"] = "AI-generated text..."
-  # Stores context["ai_results"]["article_summary"] = {...parsed output...}
-}
+AI-calling actions always run as an `automation` caller, so they never spend the owner's personal AI key ([Callers](#callers-who-is-asking)).
 
-# Action 2: Send notification using AI summary from Action 1
-{
-  "type": "send_notification",
-  "config": {
-    "platform": "slack",
-    "webhook_url": "...",
-    "message_template": "New Intel: {title}\n{ai_summary}"
-    # {ai_summary} is replaced from context
+**What `{ai_summary}` holds.** `run_ai_task` fills it with the result's main text (the first non-empty of `summary`, `text`, `briefing`, `report`, `raw`, `markdown`, `content`, `output`, `body`), in both per-entry and batch mode. The full result is also in `ai_results`.
+
+```json
+[
+  { "type": "use_daily_summary", "config": { "day": "yesterday" } },
+  {
+    "type": "send_notification",
+    "config": {
+      "platform": "slack",
+      "webhook_url": "https://hooks.slack.com/services/...",
+      "message_template": "Daily briefing\n{ai_summary}"
+    }
   }
-}
+]
 ```
+
+### Template Variables
+
+There are two separate variable systems. `backend/app/automation/variables.py` defines both, and the rule builder reads them from `GET /api/automation/variable-contexts`.
+
+**Message templates** use single braces: `{title}`. They work in `send_notification`, `run_webhook`, `create_note` and `create_intel_report`:
+
+`{title}`, `{url}`, `{app_url}` (the article's IntelFeed link), `{author}`, `{summary}` (the AI summary if one exists, else the first 500 characters of the entry summary), `{published_at}`, `{ai_summary}`, `{feed_name}`, `{observables_count}`, `{observables}` (the entry's reporting-door observables, defanged, one per line as `kind value (role)`).
+
+**AI prompt templates** use Jinja2 double braces: `{{ entry.title }}`. They are used by `run_ai_task`:
+
+- Per-entry mode: `entry.id`, `entry.title`, `entry.content_text`, `entry.content_html`, `entry.summary`, `entry.author`, `entry.url`, `entry.app_url`, `entry.published_at`.
+- Batch mode: `entries` (a list with the fields above plus `feed_title`, `thread_title`, `outlet_count`, `also_reported_by`), `entry_count` (after folding), `article_count` (before folding), and `entry` (the first item).
 
 ### Branch Actions
 
-Branch actions enable conditional routing within a rule (handled in `_execute_action_chain`, `engine.py:27`; batch mode at `actions.py:297`):
+A `branch` action checks a condition and runs one of two action lists (`_execute_action_chain`, `backend/app/automation/engine.py:27`). The condition uses the same language as the rule's conditions. Both lists share the rule's context.
 
 ```json
 {
   "type": "branch",
   "config": {
     "condition": { "type": "severity_above", "config": { "min_cvss": 9.0 } },
-    "then_actions": [
-      { "type": "add_tags", "config": { "tags": ["critical"] } }
-    ],
-    "else_actions": [
-      { "type": "add_tags", "config": { "tags": ["medium"] } }
-    ]
+    "then_actions": [{ "type": "add_tags", "config": { "tags": ["critical"] } }],
+    "else_actions": [{ "type": "add_tags", "config": { "tags": ["medium"] } }]
   }
 }
 ```
 
-Both the branch condition and sub-action chains share the context, so outputs flow through whichever branch is taken.
+In a dry run, both branches are listed and neither runs.
 
 ### Execution Flow
 
-**New Entry Workflow:**
+**One entry** (event triggers):
 
-```
-Feed Poll → Entry Created → run_automations_for_entry()
-  ↓ (async)
-  Query AutomationRule where trigger_type IN ('on_new_entry', 'on_keyword_match', 'on_cve_detected')
-  ↓
-  For each enabled rule:
-    1. Check trigger-specific condition:
-       - on_new_entry: always true
-       - on_keyword_match: _check_keyword_trigger(entry, rule.trigger_config)
-       - on_cve_detected: _check_cve_trigger(db, entry, rule.trigger_config)
-    2. If trigger matches:
-       a. evaluate_conditions(db, entry, rule.conditions)
-       b. If conditions pass:
-          - _execute_action_chain(db, entry, rule.actions)
-          - Store AutomationLog(status="success", actions_executed=[...])
-       c. Else:
-          - Store AutomationLog(status="skipped")
-    3. Update rule.last_triggered_at, rule.run_count
-  ↓
-  All logs committed to DB
-```
+1. The trigger check passes (keyword, CVE severity, observable filter, ...).
+2. `execute_automation` skips the rule if it has no owner.
+3. The conditions are evaluated. If they fail, an `AutomationLog` with `status: "skipped"` is written.
+4. The context is seeded with `observables_count` / `observables`, then the actions run in order.
+5. The log is written with `status: "success"` and the per-action results; `last_triggered_at` and `run_count` are updated. An unexpected exception writes `status: "error"`.
 
-Code reference: `engine.py:213-253` implements `run_automations_for_entry()`.
+**Many entries** (`on_schedule`, `on_manual`, and Run now): the rule picks entries first.
 
-**Dry-Run Mode:**
+- **Scheduled runs** select entries with `trigger_config.entry_filter`: `since` (for example `"-24h"`), `since_field` (`fetched_at` default, or `published_at`), `feed_ids`, `category_ids`, capped by `max_entries`. Scheduled runs do **not** evaluate the rule's conditions; the entry filter is the only filter. With no `entry_filter`, only `send_notification` and `run_webhook` run, with no entry.
+- **Run now** (`POST /api/automation/rules/{id}/run?hours=24&limit=50`) looks back over recent entries (the rule's `entry_filter.since` and `max_entries` apply when the query parameters are left at their defaults), applies the trigger check and the conditions, then runs the actions.
 
-Rules can be tested without committing changes:
-```python
-log = await execute_automation(db, entry, rule, dry_run=True)
-# log is created but NOT added to session; actions_executed show what would run
-# Useful for rule preview in UI
-```
+`execution_mode` in `trigger_config` decides how the actions run over those entries:
 
-**Batch Mode (Scheduled/Manual Runs):**
+- `per_entry` (default): every entry runs the whole action list.
+- `batch` (`execute_actions_batch`, `backend/app/automation/actions.py:324`): `send_notification`, `run_webhook`, `run_ai_task` and `use_daily_summary` run **once** over all entries (one digest message, one AI prompt). Every other action still runs on each entry.
 
-When running rules against multiple entries (e.g., scheduled digest at 9am), actions split into phases:
+**Dry run**: `POST /api/automation/rules/{id}/test?entry_id=...` runs the rule against one entry without saving anything. Conditions are evaluated; actions are listed as `dry_run` and not executed.
 
-1. **Per-entry actions** — Execute on each entry individually:
-   - `add_tags`, `extract_ttps`, `extract_cves`, etc.
-   - Called inside a loop over `entries`
+### One article per story
 
-2. **Batch actions** — Execute once with all entries:
-   - `send_notification` → single digest email with all entries
-   - `run_ai_task` → single AI prompt covering 30 articles (e.g., morning briefing).
-     **The batch is folded to one article per story first** — see below.
-   - `use_daily_summary` → reads the day's already-generated briefing instead of prompting again
-   - `run_webhook` → one POST with aggregated data
+A morning briefing over 30 articles where 8 cover the same story would spend most of the model's attention, and the reader's, on that one story. So both briefing paths fold their input through [story threads](story-threads.md) first (`fold_by_thread`, `backend/app/intelligence/story_threads.py:926`): one article per story, keeping the **strongest** one, and dropping the rest.
 
-Reference: `backend/app/automation/actions.py:323` (`execute_actions_batch()`).
+- **`run_ai_task` in batch mode** folds the matched entries. Set `fold_threads: false` in the action config to send every article.
+- **The daily briefing** (`_fetch_day_entries`, `backend/app/api/entries.py:1644`) folds the day's articles. This is what `use_daily_summary` and the in-app day-divider summaries read.
 
-#### One article per story
-
-A morning briefing over 30 articles where 8 are the same PaperCut story spends
-most of the model's attention — and most of the reader's — saying that story
-eight times. The model cannot know they are one event; it sees eight titles.
-
-So both briefing paths fold their input through [story
-threads](story-threads.md) before building the prompt (`fold_by_thread`,
-`intelligence/story_threads.py`): one article per story, the **strongest** one (a
-folded re-report never represents the story it re-reports), and the rest dropped.
-
-- **`run_ai_task` in batch mode** — folds the matched entries. Opt out per rule
-  with `fold_threads: false`.
-- **The daily briefing** (`_fetch_day_entries`) — folds the day's articles, which
-  is what `use_daily_summary` rules and the in-app day-divider summaries read.
-  This is the path the shipped *Weekday Morning Briefing* rule actually runs
-  through; it reads the cached briefing rather than prompting again.
-
-Each surviving item carries what was folded away:
+Each kept item carries what was folded into it:
 
 | Field | Meaning |
 |---|---|
-| `entry.thread_title` | The name of the unfolding story (empty when no thread holds it) |
-| `entry.outlet_count` | Independent outlets covering that story |
+| `entry.thread_title` | The story's name (empty when no thread holds the article) |
+| `entry.outlet_count` | Independent outlets covering the story |
 | `entry.also_reported_by` | Articles in this batch folded into this one |
-| `article_count` | What the batch held before folding, alongside the post-fold `entry_count` (batch actions only) |
+| `article_count` | How many articles the batch had before folding (next to the post-fold `entry_count`) |
 
-The daily-briefing payload carries the same coverage as `entry.outlet_count` and
-`entry.also_reported_by`, and its prompt renders the first as a **Corroboration**
-line.
+The daily-briefing prompt shows `outlet_count` as a **Corroboration** line. The action result reports `stories` and `folded` next to `entries_processed`, so the automation log shows how much was collapsed.
 
-The action result reports `stories` and `folded` next to `entries_processed`, so
-a run that collapsed 30 articles into 12 says so in the automation log. Set
-`fold_threads: false` in the action config to send every article as before.
-
-Folding only reaches what the sweeper can thread: an article under
-`thread_min_body_chars` — a Reddit link post, an NVD stub — is never threaded and
-so never folds, even when it points at a story already in the batch. Expect the
-fold rate to track how much of the window is threaded.
+Folding only reaches articles the thread sweeper can place. An article shorter than `thread_min_body_chars` (default 400), such as a Reddit link post or an NVD stub, is never threaded, so it never folds.
 
 ### Logging & Audit
 
-Execution logs are stored in `AutomationLog` (`models/automation_log.py:11-25`):
+Every run writes an `AutomationLog` (`backend/app/models/automation_log.py`): `rule_id`, `entry_id` (null when there is no entry), `trigger_type`, `status` (`success` / `error` / `skipped`), `actions_executed` (one result dict per action), `error_message`, `executed_at`.
 
-```python
-class AutomationLog(Base):
-    id: UUID
-    rule_id: UUID                    # Which rule fired
-    entry_id: UUID | None           # Which entry (null for correlation events)
-    trigger_type: str               # on_new_entry, on_keyword_match, etc.
-    status: str                     # success, error, skipped
-    actions_executed: list[dict]    # Detailed results for each action
-    error_message: str | None       # If status=error
-    executed_at: datetime           # When it ran
-```
-
-Fields `actions_executed` is a list of dictionaries capturing the outcome of each action:
 ```json
-{
-  "type": "run_ai_task",
-  "status": "success",
-  "task": "article_summary"
-}
+{ "type": "run_ai_task", "status": "success", "task": "article_summary" }
 ```
 
-This enables audit trails and debugging.
+Read logs with `GET /api/automation/rules/{id}/logs` or `GET /api/automation/logs`.
 
 ### Webhook Presets
 
-Webhook URLs can be configured as reusable presets (stored in config or environment). The `send_notification` action supports three platform types:
+Saved webhook destinations (URL, payload, headers) live in the `webhook_presets` table, managed at `/api/webhook-presets`. Only the owner or an admin may edit or delete one. The rule builder uses them to fill in a webhook action.
 
-- **Slack** — Block Kit formatting, `#channel` support, `mrkdwn` text
-- **Discord** — Rich embeds, colored fields, `username` override
-- **Custom** — Flat JSON payload with entry metadata
+`send_notification` formats for three platforms:
 
-Validation (`_validate_webhook_url` in `app/automation/actions.py`, built on `app/core/outbound.py`) prevents SSRF attacks, on every webhook path including scheduled rules:
-- Rejects `file://`, `ftp://`, etc.
-- Resolves the hostname and blocks private ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10) unless `webhook_allow_private_networks=true` (the default)
-- Always blocks loopback, `localhost`, 0.0.0.0 and link-local addresses (169.254.0.0/16 cloud metadata, `fe80::/10`, `fd00:ec2::254`), whatever that setting says
+- **Slack**: Block Kit blocks, `mrkdwn` text, optional `#channel`.
+- **Discord**: embeds (long text is split across several), `username` override.
+- **Custom**: flat JSON with the entry's fields.
 
-Example Slack payload:
-```json
-{
-  "text": "New Intel: Article Title",
-  "username": "IntelFeed",
-  "icon_emoji": ":shield:",
-  "channel": "#threat-intel",
-  "blocks": [
-    {
-      "type": "section",
-      "text": {
-        "type": "mrkdwn",
-        "text": "*<url|Article Title>*"
-      }
-    },
-    {
-      "type": "section",
-      "text": { "type": "mrkdwn", "text": "AI summary here..." }
-    }
-  ]
-}
-```
+Every webhook URL is checked before the call, including from scheduled rules (`_validate_webhook_url` in `backend/app/automation/actions.py`, built on `backend/app/core/outbound.py`). The hostname is resolved and every address it maps to is checked:
+
+- Only `http` and `https` are allowed.
+- Private and shared ranges (10/8, 172.16/12, 192.168/16, 100.64/10 and other non-public ranges) are allowed only while `webhook_allow_private_networks` is `true`, which is the default.
+- Loopback, `localhost`, `0.0.0.0`, link-local (169.254/16, where cloud metadata lives; `fe80::/10`) and `fd00:ec2::254` are always blocked.
+
+The HTTP client enforces the same rule on the connection itself and does not follow redirects, so a hostname that changes after the check cannot redirect the request.
 
 ---
 
@@ -406,240 +283,164 @@ Example Slack payload:
 
 ### Provider Abstraction
 
-IntelFeed uses a pluggable provider interface (`backend/app/ai/providers/base.py`) allowing swappable LLM backends:
+Every backend implements `AIProvider` (`backend/app/ai/providers/base.py`): `complete()` (one prompt in, one `AIResponse` out with text, token counts, latency and an optional provider-reported cost), `stream_complete()` (text chunks; the default calls `complete()` once), `check_health()`, `list_models()`, and the optional `embed()`.
 
-```python
-class AIProvider(ABC):
-    async def complete(
-        prompt: str,
-        system: str | None = None,
-        temperature: float = 0.0,
-        max_tokens: int = 4096,
-        response_format: dict | None = None,
-    ) -> AIResponse:
-        """Execute a completion request; return structured response."""
+There are four provider types (`backend/app/ai/providers/`):
 
-    async def stream_complete(...):
-        """Yield text chunks (default: falls back to complete())."""
+| `provider_type` | Class | What it talks to | Tools? |
+|---|---|---|---|
+| `claude` | `ClaudeProvider` | The Anthropic API (API key) | No |
+| `claude_code` | `ClaudeCodeProvider` | The Claude Code CLI under an OAuth sign-in, run in `celery-worker-ai` (see [copilot.md](copilot.md)) | Yes, through the IntelFeed MCP server |
+| `ollama` | `OllamaProvider` | An Ollama server (`base_url`, default `http://localhost:11434`) | Yes, a native `/api/chat` tool loop over the backend tool registry |
+| `openai_compatible` | `OpenAICompatibleProvider` | Any `/v1/chat/completions` server: OpenAI, LM Studio, vLLM, llama.cpp, LiteLLM, OpenRouter, Groq. `base_url` is required | No |
 
-    async def check_health() -> bool:
-        """Verify provider is reachable and credentials valid."""
+Some tasks only work with tools. `TOOL_REQUIRED_TASKS` (`copilot`, `entity_enrichment_research`) and `TOOL_CAPABLE_PROVIDER_TYPES` (`claude_code`, `ollama`) in `backend/app/ai/capabilities.py:34` stop you from assigning those tasks to a provider that cannot run tools.
 
-    async def list_models() -> list[str]:
-        """List available models from this provider."""
-```
+Useful `config` keys by type (provider row, overridable per assignment):
 
-Four providers are implemented (`backend/app/ai/providers/`): `ClaudeProvider` (Anthropic API), `ClaudeCodeProvider` (the Claude Code CLI under an OAuth session — see [copilot.md](copilot.md)), `OllamaProvider` (real Ollama support with a native `/api/chat` function-calling loop against the backend tool registry in `app/tools/`), and `OpenAICompatibleProvider` (the `/v1/chat/completions` dialect shared by OpenAI, LM Studio, vLLM, llama.cpp, LiteLLM, OpenRouter and Groq — one `base_url`-configurable provider type, no tool-calling support yet).
-
-Tool capability is gated centrally in `backend/app/ai/capabilities.py`: `TOOL_CAPABLE_PROVIDER_TYPES = {"claude_code", "ollama"}` and `TOOL_REQUIRED_TASKS` (copilot, entity_enrichment_research) together prevent assigning an agentic task to a provider that can't execute tools. `openai_compatible` is deliberately excluded for now — see the provider's module docstring.
-
-The same module holds the two sets behind personal keys (see [Personal Keys & The Lookup](#personal-keys--the-lookup)): `PERSONAL_PROVIDER_TYPES` (`backend/app/ai/capabilities.py:74`) is what a person may register as their own — `claude`, `ollama`, `openai_compatible`; never `claude_code`, which is one CLI sign-in shared by the whole instance — and `USER_PROVIDER_ELIGIBLE_TASKS` (`capabilities.py:53`) is the fourteen tasks a personal key may answer.
+- All: `timeout_seconds`.
+- `claude_code`: `cli_path`, `cli_retries`, `allowed_tools`, `max_budget_usd`, `extra_args`, `mcp_server_path`, `agent_api_url`.
+- `ollama`: `default_model`, `keep_alive`, `model_overrides`; per assignment, `ollama_tools` and `ollama_tools_read_only` (default `true`).
+- `openai_compatible`: `default_model`, `model_overrides`, `model_filter`, `extra_headers`, `embedding_dimensions`, `pricing` (`input_per_mtok`, `output_per_mtok`).
 
 ### Model Configuration
 
-The `AIProvider` database model (`models/ai_provider.py:11-27`) stores provider definitions:
+Providers are rows in `ai_providers` (`backend/app/models/ai_provider.py`):
 
-```python
-class AIProvider(Base):
-    id: UUID
-    name: str                       # "My Claude Instance"
-    provider_type: str              # "claude", "claude_code", "ollama", "openai_compatible"
-    base_url: str | None            # API endpoint (for ollama/custom)
-    api_key_encrypted: str | None   # AES-256 encrypted secret
-    models: list[dict]              # Available models
-    is_active: bool = True
-    config: dict                    # {temperature, max_tokens, etc.}
-    user_id: UUID | None            # NULL = the instance's provider; set = one person's own key
-    paused_until: datetime | None   # auto-pause after a quota/rate-limit response
-    paused_reason: str | None
-    last_tested_at: datetime | None  # the last connectivity test; error None = it passed
-    last_test_error: str | None
-    created_at, updated_at: datetime
-```
+| Field | Meaning |
+|---|---|
+| `name`, `provider_type`, `base_url` | Identity and address |
+| `api_key_encrypted` | Secret, encrypted with the instance's `ENCRYPTION_KEY` |
+| `models`, `config` | Available models and provider settings |
+| `is_active` | Off = never used |
+| `user_id` | NULL = an instance provider. Set = one person's own key (`is_personal`) |
+| `paused_until`, `paused_reason` | Set automatically when the provider reports a quota or rate limit |
+| `last_tested_at`, `last_test_error` | Last connection test (`last_test_error` empty = passed) |
 
-`user_id` divides the table in two. A row with no owner is one of the instance's providers: the admin registers it, the site's task assignments point at it, the startup seeder, onboarding, embeddings and backup read it. A row with an owner is a **personal key** (`AIProvider.is_personal`): its owner's routes point at it and nothing else does. The providers API lists the instance's rows plus the caller's own; another person's key is a 404 to everyone for anything that would use it (test, model listing, a site assignment), while the admin may disable, resume or delete any key from the User keys tab, but not rename or repoint it: a `PUT` on someone else's key accepts `is_active` only and answers 403 to any other field (`_owned`, `backend/app/api/ai_providers.py:59`). The secret is encrypted with the instance's `ENCRYPTION_KEY` either way.
+An **instance provider** is registered by an admin and is the only kind a site task assignment, the startup seeder, onboarding, embeddings and backup use. A **personal key** belongs to one person and only their own routes use it.
 
-Example:
+The providers API lists the instance's providers plus your own keys. Someone else's key is a 404 for anything that would use it (test, model list, assignment). The admin may disable, resume or delete any key from the User keys tab, but not rename or repoint it: a `PUT` on someone else's key accepts only `is_active` and answers 403 to any other field (`_owned`, `backend/app/api/ai_providers.py:59`).
+
 ```json
 {
   "name": "Claude Production",
   "provider_type": "claude",
-  "api_key_encrypted": "encrypted_secret...",
-  "models": [
-    "claude-opus-4-6",
-    "claude-sonnet-4-6",
-    "claude-haiku-4-5-20251001"
-  ],
-  "config": {
-    "temperature": 0.0,
-    "max_tokens": 4096
-  }
+  "models": ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"],
+  "config": { "timeout_seconds": 120 }
 }
 ```
 
 ### AI Tasks
 
-Built-in tasks are defined in the `AITask` model (`models/ai_task.py:11-28`):
+A task is a named job with a prompt and an optional JSON output schema, stored in `ai_tasks` (`backend/app/models/ai_task.py`). Key fields: `name` (unique), `display_name`, `category`, `default_system_template` and `default_prompt_template` (Jinja2), `output_schema` (plus an admin `output_schema_override`), `variables` (a hint for the prompt editor only), `is_system`, `is_deprecated`, `allows_user_provider`, and the menu flags `show_in_entry_actions` / `show_in_entity_actions`.
 
-```python
-class AITask(Base):
-    id: UUID
-    name: str                       # "article_summary", "ttp_mapping", etc. (UNIQUE)
-    display_name: str               # "Entry Summarization"
-    description: str | None
-    category: str | None            # "extraction", "analysis", "generation", "custom"
-    default_prompt_template: str    # Jinja2 template
-    output_schema: dict | None      # JSON schema for structured output
-    variables: list[str]            # {{entry.title}}, {{entry.content_text}}, etc.
-    is_system: bool = True
-    is_deprecated: bool = False     # superseded seeds, kept for result history
-    allows_user_provider: bool      # may a person's own key answer this task?
-    created_at: datetime
-```
+Built-in tasks are seeded at startup from `backend/app/ai/prompts/defaults.py`:
 
-**Built-in Tasks (seeded from `backend/app/ai/prompts/defaults.py`):**
+| Task | Category | What it does |
+|---|---|---|
+| `entry_analysis` | extraction | One-pass analysis of each new article (see [below](#one-pass-entry-analysis-engine-phase-4)). Default `max_tokens` 10000 |
+| `entry_adjudication` | extraction | Reviews what `entry_analysis` wrote (links, new entities, relationships, observables) and returns only the verdicts it would change. Runs as the `adjudicate` pipeline stage, no tools, `max_tokens` 4096 |
+| `ttp_mapping` | extraction | Maps text to MITRE ATT&CK techniques |
+| `article_summary` | analysis | Summary of one entry |
+| `threat_assessment` | analysis | Quick assessment and recommended actions |
+| `daily_summary`, `intelligence_briefing`, `detection_engineering_summary` | analysis | Briefings over many entries |
+| `threat_brief`, `cve_brief` | analysis | The two-sentence story lines on the Threats board |
+| `story_thread_spine` | analysis | The narrative spine of a story thread ([story-threads.md](story-threads.md)) |
+| `video_transcript_summary`, `reddit_digest` | analysis | Source-specific summaries |
+| `entry_qa` | analysis | The per-entry "Ask Agent" chat |
+| `copilot` | analysis | The global copilot ([copilot.md](copilot.md)) |
+| `detection_rules` | generation | Detection rules from an entry and its TTPs |
+| `report_section` and `report_section_{exposure, flash_alert, actor_profile, campaign_tracker, landscape, detection}` | generation | Report sections, one task per report family |
+| `actor_profile_refresh`, `entity_name_normalization`, `entity_enrichment_research` | maintenance | Entity maintenance (`backend/app/workers/entity_maintenance_tasks.py`). Seeded for the `claude_code` provider; `entity_enrichment_research` needs a tool-capable provider |
 
-| Task Name | Category | Input | Purpose |
-|---|---|---|---|
-| `article_summary` | analysis | Entry content | Per-entry summary |
-| `ttp_mapping` | extraction | Entry text | MITRE ATT&CK technique extraction |
-| `detection_rules` | generation | Entry + TTPs | Detection rule generation |
-| `entry_analysis` | extraction | Entry content | One-pass consolidated extraction (see below) |
-| `entry_adjudication` | extraction | Article + manifest of what `entry_analysis` wrote | Post-analysis review of the links, minted entities, relationship claims and observables the analysis wrote; returns verdicts only for what it would change (the `adjudicate` pipeline stage; max_tokens 4096, no tools) |
-| `daily_summary` / `intelligence_briefing` / `threat_assessment` | analysis | Multiple entries | Batch briefings |
-| `detection_engineering_summary` | analysis | Multiple entries | Detection-focused briefing with coverage gaps |
-| `video_transcript_summary` / `reddit_digest` / `report_section` | analysis / generation | Source-specific | Adapter/report helpers |
-| `entry_qa` | analysis | User question + article | Per-entry "Ask Agent" chat |
-| `copilot` | analysis | Question + ambient context | Global streaming copilot ([copilot.md](copilot.md)) |
-| `actor_profile_refresh`, `entity_name_normalization`, `entity_enrichment_research` | maintenance | Entities | Maintenance tasks (`workers/entity_maintenance_tasks.py`); `entity_enrichment_research` needs a tool-capable provider (CLI or Ollama tool loop) |
+Eight older per-type extraction tasks (`threat_actor_id`, `malware_id`, `tool_extraction`, `country_id`, `sector_id`, `article_metadata`, `mitigation_extraction`, `cve_extraction`) are marked deprecated. They stay in the database so their old results remain readable, they are hidden from run pickers, and the seeder keeps their assignments disabled.
 
-The legacy per-entry extraction tasks (`threat_actor_id`, `malware_id`, `tool_extraction`, `country_id`, `sector_id`, `article_metadata`, `mitigation_extraction`, `cve_extraction`) still exist but are flagged `deprecated` — see "One-Pass Entry Analysis" below.
-
-Tasks are invoked via `run_task()` in `backend/app/ai/engine.py:900`.
+Default models when the seeder creates an assignment: extraction tasks use Haiku, analysis tasks Sonnet, `detection_rules` and `entry_qa` Opus (`DEFAULT_MODEL_ASSIGNMENTS`).
 
 ### Task Assignment & Routing
 
-The `AITaskAssignment` model (`models/ai_task_assignment.py:10-27`) binds tasks to providers:
+An assignment links one task to one provider and model (`ai_task_assignments`, `backend/app/models/ai_task_assignment.py`): `task_id`, `provider_id`, `model_name`, `is_enabled`, `execution_mode` (`api` or `agent`), and `config` (merged over the provider's config, for example `max_tokens` or `allowed_tools`). A unique constraint on `task_id` means each task has at most one site provider. An assignment may only point at an instance provider; the API refuses a personal key.
 
-```python
-class AITaskAssignment(Base):
-    id: UUID
-    created_by: UUID | None         # User (not used for filtering, only audit)
-    task_id: UUID                   # Foreign key to AITask
-    provider_id: UUID               # Foreign key to AIProvider
-    model_name: str                 # Specific model (e.g., "claude-opus-4-6")
-    is_enabled: bool = True
-    execution_mode: str = "api"     # "api" or "agent" (agent = managed agent pool)
-    config: dict                    # Override {temperature, max_tokens, etc.}
+Two functions decide who answers:
 
-    __table_args__ = (UniqueConstraint("task_id"),)  # One provider per task
-```
+- `get_task_assignment()` (`backend/app/ai/engine.py:821`) returns the site's enabled assignment whose provider is active and not paused. Background work uses this.
+- `resolve_assignment(db, caller, task_name)` (`backend/app/ai/engine.py:609`) is what everything else calls. It returns a `Resolved` (task, provider, model, merged config, and `source`: `"site"` or `"user"`), or `None` when nothing can answer. For any caller that is not a signed-in person, or while personal keys are off, it is just the site assignment. For a person with personal keys on, it adds their own key on top ([Personal Keys](#personal-keys--the-lookup)).
 
-**Key design:** One-to-one task→provider mapping (enforced by unique constraint on `task_id`). This means "Run article_summary on Claude" but "Run entry_analysis on Ollama" are configured at the assignment level. An assignment may only name one of the instance's providers; the per-task `PUT` and the commission action refuse a personal key.
+`run_task()` resolves first, then checks for a cached answer, then calls the provider. Code that streams (copilot, rule chat) or calls a provider directly (the shared Ask Agent, rule conversion, the workspace tool) resolves the same way. Report generation runs the lookup when the report is queued (`preflight_report`, `backend/app/ai/engine.py:727`), so a refusal comes back as the request's error before anything is written.
 
-The site's assignment is read by `get_task_assignment()` (`backend/app/ai/engine.py:821`), which joins the enabled assignment to an active, unpaused provider. It is the lookup the batch poller uses directly, and the base case of the lookup everything else uses:
+### The `ai` queue
 
-`resolve_assignment(db, caller, task_name)` (`backend/app/ai/engine.py:574`) returns a `Resolved` — the task, the provider, the model, the merged config, and `source` (`"site"` or `"user"`) — or `None` when nothing can answer. For every caller that is not a signed-in person, and for every call while personal keys are off, it is the site's assignment and nothing more. For a person while personal keys are on it layers their own key on top; the next three sections say how.
+Every Celery task that calls an AI provider is routed to the `ai` queue (`task_routes` in `backend/app/workers/celery_app.py`): entry analysis, adjudication and its backfill, actor profile refresh, name normalization, AI gap enrichment, thread spines, copilot turns, and the two Claude sign-in tasks. Only the `celery-worker-ai` service reads that queue, at concurrency 1 (`CLAUDE_CODE_CONCURRENCY`). This keeps AI calls one at a time, which paces a single Ollama GPU and protects the Claude CLI's OAuth session. It is also the only container that mounts the CLI credentials.
 
-`run_task()` resolves first, then dedups, then calls `_get_provider_instance()` and `provider.complete()` on whichever provider answered. Direct callers that stream (copilot, rule chat) or that run outside `run_task` (the shared Ask Agent, rule conversion, the workspace tool) resolve the same way and ledger their own rows (see [Task Execution & Results](#task-execution--results)). Work that runs in a worker — report generation — runs the same lookup at enqueue (`preflight_report`, `backend/app/ai/engine.py:727`) before the report row is written or its sections cleared, so a refusal arrives as the request's error with nothing changed, rather than part-way through the worker.
+**A new task that calls a provider must be added to `task_routes`.** Left on the default queue, a slow AI call can fill the default worker and stop feed polling.
 
 ### Callers: Who Is Asking
 
-Every AI call runs for a `Caller` (`backend/app/ai/caller.py:41`): a *kind* plus the user it is attributed to.
+Every AI call runs for a `Caller` (`backend/app/ai/caller.py:41`): a *kind* plus the user it is charged to.
 
-| Kind | Built by | `user_id` means | Personal key? | Site allowance? |
+| Kind | Used by | `user_id` means | Personal key? | Site allowance? |
 |---|---|---|---|---|
-| `user` | an API route a signed-in person called | the person | yes | yes, when the site's provider answers |
-| `system` | pipeline stages, maintenance jobs, shared output (daily summary, thread spines, briefs) | the `system` account, or nothing | no | no |
-| `automation` | the automation dispatcher | the rule's author | no | no |
-| `share` | the public share routes | the sharer | no | no (the link has its own limit) |
+| `user` | An API route a signed-in person called | That person | Yes | Yes, when the site's provider answers |
+| `system` | Pipeline stages, maintenance jobs, shared output (daily summary, thread spines, briefs) | The `system` account, or nothing | No | No |
+| `automation` | The automation engine | The rule's owner | No | No |
+| `share` | The public share routes | The person who shared | No | No (the link has its own limit) |
 
-`run_task` takes `caller=` and, when none is given, reads the context default set by `caller_scope()` (`caller.py:97`) or derives one from the bare `user_id` (`derive_caller`, `engine.py:385`): a real person's id is a `user` caller, the `system` service account and an id that matches no users row (the all-zero sentinel some workers pass, a deleted account) are `system`. The automation dispatcher wraps every action in `caller_scope(Caller.automation(rule.created_by))`, so a new action cannot bill its author's key by forgetting a keyword argument. Share routes pass `Caller.share(share.created_by)` explicitly.
+When `run_task` gets no `caller=`, it uses the one set by `caller_scope()` (`backend/app/ai/caller.py:97`), or derives one from `user_id` (`derive_caller`, `backend/app/ai/engine.py:388`): a real person is a `user`; the `system` account, the all-zero id some workers pass, and a deleted account are `system`. The automation engine wraps every action in `caller_scope(Caller.automation(owner))`, so a new action cannot spend its owner's key by mistake.
 
-The kind is written to `ai_results.caller_kind` with `user_id`, and the cost dashboard's By-user table groups on it (one row per person, one each for the pipeline, automation and share links, one `unattributed` row for results with no recorded kind).
+The kind is saved in `ai_results.caller_kind`. The cost dashboard's By-user table groups on it.
 
 ### Personal Keys & The Lookup
 
-Behind an admin switch, a person may register their own provider key and have the tasks *they* start run on it. Eight settings in the `ai` group (Settings → AI Configuration → User keys; `backend/app/config.py:77-95`, metadata in `backend/app/services/system_settings.py:525`) govern it:
+An admin can let people register their own AI keys and have the tasks *they* start run on them. Seven settings in the `ai` group control this (Settings → AI Configuration → User keys; defaults in `backend/app/config.py:88-106`):
 
 | Setting | Default | What it does |
 |---|---|---|
-| `allow_user_ai_providers` | `false` | The switch. Off means every call resolves to the site's assignment alone; keys and routes already saved stay in the database and are not consulted. |
-| `require_user_ai_provider` | `false` | With the switch on: refuse an interactive task instead of falling back to the instance's providers. Ignored while the switch is off. |
-| `user_ai_provider_types` | `claude,openai_compatible` | Types a person may register; `ollama` may be added. `claude_code` never qualifies. |
-| `user_ai_allow_private_endpoints` | `false` | Let a personal key point at a private address (a LAN Ollama). The server calls whatever URL people enter, so this stays off on a public instance. |
-| `user_ai_daily_request_cap` | `300` | Daily request cap on one person's keys. Counts calls, because Ollama and unpriced models report $0. 0 = unlimited. |
-| `site_ai_user_daily_requests` | `0` | Daily requests one person may make on the *instance's* providers for tasks they start. See [Allowances & Caps](#allowances--caps). |
-| `share_ai_daily_requests` | `20` | Daily AI calls one share link may make, across both share routes. On the User keys tab beside the allowance, since it caps people's use of the instance's providers too. |
+| `allow_user_ai_providers` | `false` | The main switch. Off = every call uses the site assignment. Saved keys and routes stay but are ignored |
+| `require_user_ai_provider` | `false` | With the switch on: refuse an interactive task instead of falling back to the instance's providers |
+| `user_ai_provider_types` | `claude,openai_compatible` | Key types a person may register. `ollama` may be added. `claude_code` is never allowed (`PERSONAL_PROVIDER_TYPES`, `backend/app/ai/capabilities.py:74`) |
+| `user_ai_allow_private_endpoints` | `false` | Let a personal key point at a private address (a LAN Ollama). Keep it off on a public instance: the server calls whatever URL people enter |
+| `user_ai_daily_request_cap` | `300` | Daily call limit on one person's keys. It counts calls, not dollars, because Ollama and unpriced models report $0. `0` = unlimited |
+| `site_ai_user_daily_requests` | `0` | Daily requests one person may make on the *instance's* providers. `0` = unlimited. See [Allowances & Caps](#allowances--caps) |
+| `share_ai_daily_requests` | `20` | Daily AI calls one share link may make |
 
 A person's routing lives in two tables (`backend/app/models/user_ai_route.py`):
 
-- `user_ai_routes` — one row per `(user, task)` plus at most one default row with `task_id` NULL. A route names one of the person's own keys and a model (`provider_id`, `model_name`) and an optional config merged over the provider's. A per-task row with `provider_id` NULL is the opposite: that task goes back to the instance's provider even though a default key exists (the picker calls it "Instance default").
-- `user_ai_preferences` — `fallback_to_site` (default true) and `monthly_cap_usd` (the person's own; NULL = no cap).
+- `user_ai_routes`: one row per `(user, task)`, plus at most one default row (`task_id` NULL). A route names one of the person's own keys, a model, and optional config. A per-task row with no provider sends that task back to the instance's provider even when a default key exists (the picker calls it "Instance default").
+- `user_ai_preferences`: `fallback_to_site` (default `true`) and `monthly_cap_usd` (the person's own dollar cap; NULL = none).
 
-Which tasks a key may answer is per task: `ai_tasks.allows_user_provider`. One test decides membership — does the result belong to the person who clicked? Copilot turns, rule drafts, summaries and report sections do; entity links, adjudication verdicts, briefs and story spines are read by everyone and stay on the instance's providers whoever started them. `USER_PROVIDER_ELIGIBLE_TASKS` seeds the flag, the startup seeder applies it to tasks it creates, and the admin may turn it off per task, or on for a custom task, but cannot open a task outside the set (`PATCH /api/ai/tasks/{id}` refuses with 400 `task_site_only`; the task API reports the lock as `user_provider_locked`).
+**Which tasks may use a personal key** is a per-task flag, `ai_tasks.allows_user_provider`. The rule: does the result belong to the person who clicked? Copilot turns, rule drafts, summaries and report sections do. Entity links, adjudication verdicts, briefs and thread spines are read by everyone, so they always use the instance's providers. `USER_PROVIDER_ELIGIBLE_TASKS` (`backend/app/ai/capabilities.py:53`) lists the 14 tasks that may use one. The admin can turn the flag off for any of them, or on for a custom task, but not on for a task outside that set (`PATCH /api/ai/tasks/{id}` answers 400 `task_site_only`; the task API shows the lock as `user_provider_locked`).
 
-The lookup, for a `user` caller with the switch on (`resolve_assignment`, `backend/app/ai/engine.py:616`):
+**The lookup**, for a `user` caller with the switch on (`resolve_assignment`, `backend/app/ai/engine.py:609`):
 
-1. Read the site's assignment. If the task does not allow personal keys, that is the answer.
-2. Find the person's route: the per-task row, else the default row (`_user_route`, `backend/app/ai/engine.py:560`). An opt-out row, a row pointing at a key that is not theirs, or no row at all means no key.
-3. Check the key can answer right now (`_route_blocked`, `backend/app/ai/engine.py:582`), in this order: `key_disabled`, `key_paused`, `type_not_allowed`, `endpoint_blocked` (the base URL is resolved on every call, not only on save — an `ollama`/`openai_compatible` key with no address is blocked too, since the empty default would be the server's own localhost Ollama), `monthly_cap`, `daily_cap`.
-4. A usable key answers: `source="user"`, no site allowance, and `key_owner_id` goes on the result.
-5. Otherwise, if the policy is Required, or the person has a key and has turned fallback off, raise `UserKeyRequired` — HTTP 403, code `user_ai_key_required`, `details.reason` one of the codes above or `no_key`, with the sentence from `FALLBACK_REASONS` as the message. Under Optional with no key there is nothing to fall back *from*, so the site answers silently.
-6. Otherwise the site's provider answers with `fallback_reason` set when the person *had* a key that could not answer — most people have no key, and that is not a warning. The site allowance applies. When the site has no provider for the task and the person's key is blocked, the refusal names the reason rather than reporting the task as unassigned.
+1. Read the site assignment. If the task does not allow personal keys, that is the answer.
+2. Find the person's route: the per-task row, else the default row (`_user_route`, `backend/app/ai/engine.py:549`). An opt-out row, a row pointing at a key that is not theirs, or no row means no key.
+3. Check the key can answer now (`_route_blocked`, `backend/app/ai/engine.py:571`), in this order: `key_disabled`, `key_paused`, `type_not_allowed`, `endpoint_blocked`, `monthly_cap`, `daily_cap`. The base URL is resolved on every call. An `ollama` or `openai_compatible` key with no address is blocked too, because the empty default would be the server's own localhost.
+4. A usable key answers: `source = "user"`, no site allowance, and the result records `key_owner_id`.
+5. Otherwise, if the policy is Required, or the person has a key and turned fallback off, raise `UserKeyRequired`: HTTP 403, code `user_ai_key_required`, `details.reason` set to one of the codes above or `no_key`, and a message from `FALLBACK_REASONS`. Under the Optional policy with no key, the site answers silently.
+6. Otherwise the site's provider answers. `fallback_reason` is set only when the person *had* a key that could not answer. The site allowance applies. If the site has no provider for the task and the person's key is blocked, the refusal names the reason instead of saying the task is unassigned.
 
-The caps are checked before the call, not reserved, so a burst of concurrent requests can overshoot by a few; that is accepted for v1.
+Caps are checked before the call, not reserved, so a burst of parallel requests can go a little over.
 
-The person-facing API is `/api/ai/me` (`backend/app/api/user_ai.py`): `GET /overview` (the policy, their fallback and cap, this month's spend split by whose provider answered and by key, and every routable task with where it runs now), `PATCH /preferences`, `GET/PUT /routes` and `DELETE /routes/{id}`. The providers API accepts a personal key from anyone when the switch is on (`POST /api/ai/providers`, `personal` implied for non-admins; `?test=true` contacts the provider first and saves only if it answers) and lists everyone's keys with their owners to the admin at `GET /api/ai/providers/user-keys`. The Settings → My AI page and the User keys tab are the two UIs over these ([frontend.md](frontend.md)).
+The person-facing API is `/api/ai/me` (`backend/app/api/user_ai.py`): `GET /policy`, `GET /overview` (policy, fallback, cap, this month's spend by source and key, and where each task runs), `PATCH /preferences`, `GET`/`PUT /routes`, `DELETE /routes/{id}`. With the switch on, anyone may add a personal key with `POST /api/ai/providers` (personal is implied for non-admins; `?test=true` tests the provider first and saves only if it answers). Admins list everyone's keys at `GET /api/ai/providers/user-keys`. The UIs are Settings → My AI and the User keys tab ([frontend.md](frontend.md)).
 
 ### Allowances & Caps
 
-Three limits, three different things being counted, all read from `ai_results` so there is no second ledger:
+Three limits, each counting something different. All read from `ai_results`, so there is no second ledger. Days reset at midnight UTC.
 
-- **The site allowance** (`site_ai_user_daily_requests`; `enforce_site_allowance`, `backend/app/ai/engine.py:365`) caps what one *person* may ask of the *instance's* providers per UTC day: rows with `caller_kind = user` and no `key_owner_id`. Failed calls count — they were requests — so a broken provider cannot be retried for free; a dedup hit costs nothing, which is why `run_task` resolves with `allowance=False` and enforces after its dedup guard, while every direct caller leaves it on. Exceeding it is HTTP 429 `ai_allowance_exceeded`. A report's pre-flight asks for the template's whole section count, so a report that could not finish today is refused before it is written; should the allowance still run out between sections (another tab spent it), the worker stops at that section with the earlier ones kept and reports why, rather than crashing or carrying on into refusals. The pipeline, automation rules and share links are the operator's own spend and are never capped here; a person's own key is not the instance's either.
-- **The personal caps** (a person's own `monthly_cap_usd`, which the admin sets no ceiling on because the key is the person's money, and the operator's `user_ai_daily_request_cap`, which bounds how hard this server will drive a personal key) count rows with `key_owner_id = the person`: dollars since the first of the month, calls since midnight UTC. A capped key falls back or refuses as above. The dollar figure is whatever the key's provider reports or its own `config.pricing` says, and an OpenAI-compatible key's pricing is its owner's to set, so the request cap is the one limit a person can't price away.
-- **The share limit** (`share_ai_daily_requests`) is one budget per link per day across `POST /api/shared/{token}/run-ai-task` and `.../ask-agent`; both report `remaining_today`, and both are under the per-minute `ai` rate-limit bucket keyed on the client behind the proxy (the first `X-Forwarded-For` hop, or the edge header named in `TRUSTED_CLIENT_IP_HEADER` when one fronts a locked-down origin; a bearer token only names a bucket when its signature verifies). Share traffic always runs on the instance's providers, never the sharer's key.
+- **Site allowance** (`site_ai_user_daily_requests`; `enforce_site_allowance`, `backend/app/ai/engine.py:366`): how many requests one *person* may make per day on the *instance's* providers. It counts rows with `caller_kind = user` and no `key_owner_id`. Failed calls count, so a broken provider cannot be retried for free. A cached answer costs nothing: `run_task` enforces the allowance after its cache check. Over the limit is HTTP 429 `ai_allowance_exceeded`. A report checks its whole section count up front; if the allowance still runs out between sections, the worker stops at that section, keeps the earlier ones, and says why. The pipeline, automation and share links are never counted here, and neither is a person's own key.
+- **Personal caps**: the person's own `monthly_cap_usd` (the admin sets no ceiling, since it is the person's money) and the operator's `user_ai_daily_request_cap` (how hard this server will drive a personal key). Both count rows with `key_owner_id = that person`. A capped key falls back or refuses as above. The dollar figure is whatever the provider reports or its `config.pricing` says. Because a person sets their own OpenAI-compatible pricing, the request cap is the one limit they cannot price away.
+- **Share limit** (`share_ai_daily_requests`): one budget per share link per day, across `POST /api/shared/{token}/run-ai-task` and `.../ask-agent`. Both report `remaining_today`. Both also sit under the per-minute `ai` rate-limit bucket, keyed on the client IP behind the proxy (the first `X-Forwarded-For` hop, or the header named in `TRUSTED_CLIENT_IP_HEADER` when an edge such as Cloudflare fronts the origin). Share traffic always uses the instance's providers.
 
-Prompts run on a personal key are still the instance's templates, which admins edit; the result records `_prompt_version` so the Who-answered card can say which.
+Prompts run on a personal key are still the instance's templates. The result records `_prompt_version` so the "Who answered" card can say which version ran.
 
 ### Prompt Templates
 
-The `AIPromptTemplate` model (`models/ai_prompt_template.py:11-26`) supports versioning and user customization:
+Admins edit prompts at Settings → AI Configuration → Prompts. Overrides are rows in `ai_prompt_templates` (`backend/app/models/ai_prompt_template.py`): `task_id`, `created_by`, `name`, `system_text`, `template_text`, `variables`, `is_active`, `version`.
 
-```python
-class AIPromptTemplate(Base):
-    id: UUID
-    task_id: UUID
-    created_by: UUID | None         # NULL = system default; UUID = user override
-    name: str                        # Template name
-    template_text: str              # Jinja2 template
-    variables: list                 # Metadata: {{entry.title}}, {{entries}}, etc.
-    is_active: bool = True
-    version: int = 1
-    created_at: datetime
-```
+**Which prompt runs** (`get_active_prompt_versioned`, `backend/app/ai/engine.py:862`): the newest active override for the task (highest `version`) wins for everyone, workers included, whoever saved it. With no active override, the task's `default_system_template` and `default_prompt_template` are used. The system half may be empty.
 
-**Prompt Resolution** (`get_active_prompt`, `backend/app/ai/engine.py:853`):
-1. User-specific template (highest priority): where `created_by == user_id` AND `is_active` AND highest `version`
-2. System default template: where `created_by IS NULL` AND `is_active` AND highest `version`
-3. Task's `default_prompt_template` field (fallback)
+Prompts are Jinja2, rendered in a sandbox (`render_prompt`, `backend/app/ai/engine.py:815`). Per-entry prompts see `entry`; batch prompts see `entries`:
 
-Example prompt (Jinja2):
-```jinja2
-You are a cybersecurity analyst. Summarize the following article in 100 words.
-
-Title: {{ entry.title }}
-Content: {{ entry.content_text }}
-
-Provide output as JSON:
-{
-  "summary": "...",
-  "key_points": ["...", "..."],
-  "threat_level": "high|medium|low"
-}
-```
-
-For batch AI tasks (e.g., morning briefing), the `entries` variable is a list:
 ```jinja2
 Summarize these {{ entry_count }} articles into a threat briefing.
 
@@ -648,117 +449,86 @@ Summarize these {{ entry_count }} articles into a threat briefing.
 Title: {{ entry.title }}
 Summary: {{ entry.summary }}
 {% endfor %}
-
-Produce a single JSON object with overall briefing and coverage gaps.
 ```
 
-Rendering uses Jinja2 at `render_prompt`, `backend/app/ai/engine.py:815`.
+A task's `variables` list only feeds the editor's sidebar. Rendering never checks it.
 
 ### Task Execution & Results
 
-When `run_task()` executes:
+`run_task()` (`backend/app/ai/engine.py:900`) takes `user_id`, `task_name`, `variables`, and optionally `entry_id` (shorthand for target `entry`), `target_type`/`target_id`, `force`, `timeout_seconds` and `caller`. It:
+
+1. Resolves the provider for the caller. Returns `None` when nothing can answer.
+2. Returns the current result for the same target and task, if there is one (unless `force`). A stored provider error does not count as an answer, so a retry after an outage really retries.
+3. Enforces the site allowance when the site's provider answers a person.
+4. With `force`, marks older results for the target as not current.
+5. Picks the prompt and renders it.
+6. Calls the provider. `max_tokens` comes from the assignment config, else 16384 for `entry_analysis` and 8192 for everything else. For Ollama, tool-required tasks get the tool registry (read-only by default; non-admin users never get admin tools).
+7. Parses the JSON (`parse_ai_json`, `backend/app/ai/engine.py:161`). It recovers JSON from a code fence, repairs illegal backslash escapes, and salvages the complete part of a cut-off response (marked `_truncated: true`).
+8. Saves an `AIResult` and publishes an `ai_task_complete` event to the user over SSE.
+9. Returns the parsed dict.
+
+Results live in `ai_results` (`backend/app/models/ai_result.py`):
+
+| Field | Meaning |
+|---|---|
+| `entry_id`, `target_type`, `target_id` | What the result is about. `(target, task, is_current)` is indexed |
+| `is_current` | Only the newest result for a target and task is current |
+| `task_id`, `provider_id` (SET NULL on delete), `provider_name`, `model_name` | Who answered. `provider_name` survives a deleted provider |
+| `prompt_used`, `raw_response`, `parsed_result` | What was sent and what came back |
+| `tokens_input`, `tokens_output`, `cost_estimate`, `processing_time_ms` | Usage |
+| `caller_kind`, `user_id`, `key_owner_id` | Who asked, and whose key paid (`key_owner_id` set = a personal key) |
+
+`attribution_fields()` (`backend/app/ai/engine.py:72`) fills the last group on every row, error rows included. Calls made outside `run_task` (copilot, rule chat, rule conversion, the shared Ask Agent, the workspace tool) write their own ledger row; most use `record_direct_result()` (`backend/app/ai/engine.py:266`), which writes a spend record that is never current and never served as a cached answer. Two keys may ride in `parsed_result`: `_fallback_reason` (the person's key could not answer and the site did) and `_prompt_version` (an override ran).
+
+**Cost.** When the provider reports a dollar figure (the Claude Code CLI's `total_cost_usd`, an OpenAI-compatible `pricing` block), that is saved. Otherwise the cost comes from `COST_TABLE` (`backend/app/ai/engine.py:36`), dollars per million tokens:
 
 ```python
-async def run_task(
-    db: AsyncSession,
-    user_id: UUID,
-    task_name: str,
-    variables: dict,          # {"entry": {...}} or {"entries": [...]}
-    entry_id: UUID | None = None,
-    target_type: str = None,  # "entry", "campaign", etc.
-    target_id: UUID | None = None,
-    force: bool = False,
-    timeout_seconds: float | None = None,
-    caller: Caller | None = None,
-) -> dict | None:
-    # 1. Resolve the provider for the caller (resolve_assignment)
-    # 2. Check for cached result (dedup via target_id)
-    # 3. Enforce the site allowance when the site's provider answers a person
-    # 4. Get the prompt template (and its version)
-    # 5. Render prompt with variables
-    # 6. Execute provider
-    # 7. Parse JSON response
-    # 8. Store AIResult, attributed to the caller and the key owner
-    # 9. Return parsed_result
-```
-
-The `AIResult` model (`models/ai_result.py:12-38`) captures execution:
-
-```python
-class AIResult(Base):
-    id: UUID
-    entry_id: UUID | None           # Which entry triggered this (for backlinks)
-    target_type: str | None         # "entry", "campaign", "custom"
-    target_id: UUID | None          # ID of the target (for dedup)
-    is_current: bool = True         # Dedup: mark old results as not_current on re-run
-    task_id: UUID
-    provider_id: UUID | None        # ON DELETE SET NULL: a deleted key keeps its results
-    model_name: str                 # Actual model used
-    prompt_used: str                # Full rendered prompt (for debugging)
-    raw_response: str               # Unprocessed provider output
-    parsed_result: dict             # Parsed JSON or extraction result
-    tokens_input: int
-    tokens_output: int
-    cost_estimate: Decimal          # Calculated from cost_table
-    processing_time_ms: int
-    caller_kind: str                # user | system | automation | share
-    user_id: UUID | None            # who it is attributed to (SET NULL)
-    key_owner_id: UUID | None       # set = a personal key paid for this (SET NULL)
-    provider_name: str              # survives the provider row
-    created_at: datetime
-
-    __table_args__ = (
-        Index("ix_ai_results_target_task_current",
-              "target_type", "target_id", "task_id", "is_current"),
-    )
-```
-
-**Deduplication:** If a task is run twice on the same target (entry), the first result is returned (cached) unless `force=True`. When `force=True`, prior results for that target/task are marked `is_current=False` and a new result is computed. This prevents re-running expensive AI tasks.
-
-**Attribution:** `attribution_fields()` (`backend/app/ai/engine.py:71`) fills `caller_kind`, `user_id`, `key_owner_id` and `provider_name` on every row `run_task` writes, error rows included. The four paths that call a provider outside `run_task` — copilot and rule chat (streamed), the shared Ask Agent and rule conversion — ledger a row per call through `record_direct_result()` (`engine.py:265`): a spend row, not an answer, so it is never `is_current` and never served from the dedup cache; a failure or a disconnect mid-stream is ledgered too. Two meta keys ride in `parsed_result` beside `_extraction_status`: `_fallback_reason` when the person's key could not answer and the site's provider did, and `_prompt_version` when a template override ran. The API exposes `caller_kind`, `user_id`, `key_owner_id` and `provider_name` on every result, which is what the result card's provider chip and Who-answered hover read.
-
-**Cost Tracking:**
-
-```python
-COST_TABLE: dict[str, tuple[float, float]] = {
-    "claude-opus-4-6": (15.0, 75.0),           # $15 per 1M input, $75 per 1M output
+COST_TABLE = {
+    "claude-opus-4-6": (15.0, 75.0),
     "claude-sonnet-4-6": (3.0, 15.0),
     "claude-haiku-4-5-20251001": (0.80, 4.0),
 }
-
-# Cost calculation:
-cost = (tokens_in / 1_000_000) * rate_input + (tokens_out / 1_000_000) * rate_output
 ```
 
-Costs are tracked in Prometheus metrics and summed in the `AI_COST_TOTAL` counter. When the provider reports a real dollar figure (the Claude Code CLI's `total_cost_usd`), that is recorded instead of the token-table estimate; Anthropic Message Batches submissions apply the 50% batch discount.
+Models not in the table cost $0. Anthropic Message Batches submissions get the 50% batch discount. Every call also updates the Prometheus counters `AI_REQUESTS_TOTAL`, `AI_TOKENS_TOTAL` and `AI_COST_TOTAL`.
 
-`GET /api/ai/cost-breakdown` (admin only) splits the trailing 30 days into what the operator pays (`instance_cost_30d`, rows with no `key_owner_id`) and spend on people's own keys (`user_key_cost_30d`), counts the requests that came in at $0 (`unpriced_requests_30d`, so a low dollar figure is not mistaken for low usage), and adds `by_caller`: one row per person and one each for the pipeline, automation and share links, each with instance versus own-key cost, own-key requests, and today's count against `site_allowance_per_user`. The Cost Dashboard's tiles and By-user table render it.
+`GET /api/ai/cost-breakdown` (admin) covers the last 30 days. It splits what the operator pays (`instance_cost_30d`, no `key_owner_id`) from spend on people's own keys (`user_key_cost_30d`), counts the requests that cost $0 (`unpriced_requests_30d`, so a low bill is not mistaken for low use), and adds `by_caller`: one row per person plus one each for the pipeline, automation and share links, with today's count against `site_allowance_per_user`. The Cost Dashboard renders it.
 
 ### Error Handling & Retries
 
-Failed completions store error in `parsed_result`:
+`run_task` returns a dict either way, and `_extraction_status` says what happened:
 
-```python
-# If provider raises exception:
-ai_result = AIResult(
-    ...,
-    parsed_result={"_error": str(e), "_extraction_status": "provider_error"}
-)
+| Outcome | Saved `parsed_result` | Returned |
+|---|---|---|
+| Success | The model's JSON plus `_extraction_status: "success"` | Same |
+| Not JSON | `{"raw": <text>, "_extraction_status": "parse_error"}` | Same |
+| Provider error | `{"_error": <message>}` (current, so the UI shows the failure) | `{"_extraction_status": "provider_error", "_error": ...}` |
+| Quota or rate limit | `{"_error", "_extraction_status": "provider_paused"}` (not current) | Adds `_pause_until` |
 
-# If response is not valid JSON:
-parsed_result = {"raw": response.content, "_extraction_status": "parse_error"}
-
-# On success:
-parsed_result = {...user_data..., "_extraction_status": "success"}
-```
-
-Automation actions check `_extraction_status` to handle errors gracefully.
+On a quota error the provider is paused until the reset time the provider gave (or one hour). Celery tasks that see `provider_paused` re-queue themselves for that time. A provider-type mismatch or missing `base_url` is recorded as a provider error instead of crashing the worker.
 
 ### Streaming
 
-The base class provides a `stream_complete()` method for real-time streaming. The default implementation falls back to `complete()` and yields the full response. Provider subclasses (like ClaudeProvider) override to yield chunks.
+`stream_complete()` yields text. The default implementation calls `complete()` once; providers override it to stream real chunks.
 
-A stream has no `AIResponse` to price, so each provider keeps the usage its stream reports in `last_stream_usage` (set on the base `AIProvider` in `backend/app/ai/providers/base.py`): the Anthropic SDK's final message, Ollama's `done` chunk, an OpenAI-compatible server's trailing usage chunk when it sends one. Copilot and rule chat read it after the stream ends and ledger the turn with real tokens, priced from the cost table when the provider reports tokens but no dollar figure, so a streamed turn on a personal key counts toward its monthly cap.
+A stream has no `AIResponse` to price, so each provider saves its stream's usage in `last_stream_usage` (`backend/app/ai/providers/base.py`): the Anthropic SDK's final message, Ollama's `done` chunk, or an OpenAI-compatible server's trailing usage chunk when it sends one. Copilot and rule chat read it after the stream ends and record the turn with real token counts (priced from the cost table when there is no dollar figure), so a streamed turn on a personal key counts toward its monthly cap.
+
+### One-Pass Entry Analysis (engine phase 4)
+
+One `entry_analysis` call per article replaces the old per-type extraction tasks. Its output (summary, actors, malware, tools, TTPs, CVEs, countries, sectors, observables, relationships and more) is fanned out to the same store functions (`store_entry_analysis`, `backend/app/services/entry_analysis.py`).
+
+How an article gets analyzed (switch: `ai_one_pass_enabled`, default on):
+
+1. `score_entry_task` calls `enqueue_entry_analysis`, which checks, in order: an existing result, the feed's AI policy, the relevance junk gate, and **echo reuse** (a near-duplicate copies the original's analysis for $0). A passing entry gets a row in `ai_analysis_requests`.
+2. The `ai-analysis-batch-submit` job (every 30 minutes) picks up missed entries, orders the queue by `entries.priority_score`, and stops at the daily budget (`ai_daily_budget_usd`, default $2). On the `claude` provider with an API key and `ai_use_batches` on, it submits through the **Anthropic Message Batches API** (50% cheaper). Otherwise (Ollama, the CLI, an OAuth token, or batches off) it queues `run_entry_analysis_task` per entry on the `ai` queue.
+3. `ai-analysis-batch-poll` (every 10 minutes) collects finished batches through `store_external_result`. It is safe to re-run.
+4. When the analysis lands, the `adjudicate` stage may review it ([engine.md](engine.md)).
+
+Status: `GET /api/engine/extraction/status`.
+
+The same payload also confirms or rejects **pending autolinks** (dictionary-word matches the autolinker holds until the AI agrees) and asserts entity relationships. The manual per-type extraction endpoints and the `extract_threat_actors` / `extract_malware` automation actions route through `entry_analysis` too, and the result cache means several per-type calls on one entry share one AI call.
+
+The store path (`backend/app/intelligence/enrichment.py`) guards entity quality: it drops new aliases that `is_junk_alias()` flags, rejects new names that `is_fp_entity_name()` flags (the false-positive denylist plus `*.exe` / `*.dll` / `*.sys` file names), and sends would-be duplicates of a reclassified entity to the surviving one (see [intelligence-engine.md](intelligence-engine.md)). The daily digest gets each article's signal explanations (`priority_signals`), so a briefing can say why an article matters.
 
 ---
 
@@ -766,754 +536,126 @@ A stream has no `AIResponse` to price, so each provider keeps the usage its stre
 
 ### Architecture Overview
 
-The enrichment system augments entities (IOCs, CVEs, threat actors, etc.) with external context. It's composed of:
+Enrichment adds outside facts to entities: a CVE's CVSS score and EPSS probability, an actor's Wikipedia article, an IP address's open ports. The pieces:
 
-1. **Adapter Pattern** — Base class + 10 concrete implementations (NVD, CISA KEV, EPSS, Malpedia, Wikipedia, etc.). There are no IOC-reputation adapters (VirusTotal, AbuseIPDB, Shodan, OTX, GreyNoise, ThreatFox, URLhaus, MalBazaar, urlscan) — indicator lookups are left to external tooling
-2. **Rate Limiting** — Redis-backed token bucket per source
-3. **Budget Tracking** — Daily quota enforcement
-4. **Caching** — TTL-based result deduplication
-5. **User Overrides** — Per-user API key and trigger mode customization
+1. **Adapters**: one class per source, 13 in all (see [Adapter Registry](#adapter-registry)).
+2. **Rate limiting**: a Redis sliding window per source.
+3. **Daily budgets**: an optional per-source cap on calls per UTC day.
+4. **Caching**: results expire after a per-adapter TTL; a fresh result is reused.
+5. **Per-user API keys**: a person can store their own key for a source.
+
+Sources are configured at Settings → Engine → Enrichment (`/api/enrichment/sources`). After an auto enrichment, `apply_enrichment_results_to_entity` (`backend/app/enrichment/entity_updater.py`) copies the useful fields onto the entity itself.
 
 ### Data Models
 
-**EnrichmentSource** (`models/enrichment.py:11-44`):
+All three tables are in `backend/app/models/enrichment.py`.
 
-```python
-class EnrichmentSource(Base):
-    id: UUID
-    source_type: str                # "nvd", "epss", "malpedia", etc. (UNIQUE)
-    display_name: str               # "NVD API 2.0"
-    is_enabled: bool = False
-    trigger_mode: str               # "auto", "scheduled", "manual"
-    api_key_encrypted: str | None
-    rate_limit_config: dict         # {"requests_per_period": 50, "period_seconds": 604800}
-    last_synced_at: datetime | None
-    health_status: str              # "healthy", "degraded", "down", "unknown"
-    config: dict                    # Adapter-specific config
-    min_confidence_threshold: str   # "high", "medium", "low"
-    daily_budget: int | None        # Max API calls/day; None = unlimited
-    daily_budget_used: int = 0      # Synced from Redis for display
-    schedule_interval_hours: int = 24
-    next_scheduled_at: datetime | None
-    created_at, updated_at: datetime
-```
+**`enrichment_sources`**: one row per source. `source_type` (unique), `display_name`, `is_enabled` (default `false`), `trigger_mode` (`auto` / `scheduled` / `manual`), `api_key_encrypted`, `rate_limit_config` (`requests_per_period`, `period_seconds`), `config`, `min_confidence_threshold` (`low` / `medium` / `high`), `daily_budget` (NULL = unlimited), `daily_budget_used`, `schedule_interval_hours` (default 24), `next_scheduled_at`, `last_synced_at`, `health_status`.
 
-**UserEnrichmentOverride** (`models/enrichment.py:48`):
+**`user_enrichment_overrides`**: a person's own `api_key_encrypted` for a source, one row per user per source. The pipeline uses it in place of the source's key for that person's enrichments.
 
-```python
-class UserEnrichmentOverride(Base):
-    id: UUID
-    created_by: UUID | None
-    source_id: UUID
-    api_key_encrypted: str | None   # User's own API key (overrides global)
-    trigger_mode_override: str | None  # User can override e.g. "manual" → "auto"
-    created_at: datetime
-
-    __table_args__ = (
-        UniqueConstraint("source_id"),  # One override per user per source
-    )
-```
-
-**EnrichmentResult** (`models/enrichment.py:69`):
-
-```python
-class EnrichmentResult(Base):
-    id: UUID
-    entity_type: str                # "ioc", "cve", "threat_actor", "malware", "ttp"
-    entity_id: UUID
-    source_type: str
-    raw_response: dict              # Full API response (for debugging)
-    parsed_data: dict               # Normalized/extracted fields
-    enriched_at: datetime
-    expires_at: datetime            # Cache TTL expiration
-    status: str                     # "success", "error", "rate_limited", "not_found", "budget_exhausted", "skipped_low_confidence"
-
-    __table_args__ = (
-        Index("ix_enrichment_entity", "entity_type", "entity_id"),
-        Index("ix_enrichment_source_entity", "source_type", "entity_type", "entity_id"),
-    )
-```
+**`enrichment_results`**: `entity_type`, `entity_id`, `source_type`, `raw_response`, `parsed_data`, `enriched_at`, `expires_at`, `status`. Only `success` and `error` rows are stored. The other outcomes (`cached`, `skipped_low_confidence`, `budget_exhausted`, `rate_limited`) appear only in the list `enrich_entity()` returns.
 
 ### Adapter Registry
 
-The registry (`backend/app/enrichment/registry.py`) maps `source_type` strings to adapter classes:
+`ADAPTER_REGISTRY` (`backend/app/enrichment/registry.py:20`) maps each `source_type` to its adapter class. `DEFAULT_SOURCES` (`registry.py:38`) gives each one its seed settings:
 
-```python
-ADAPTER_REGISTRY: dict[str, type[EnrichmentAdapter]] = {
-    "epss": EPSSAdapter,
-    "nvd": NVDAdapter,
-    "cisa_kev": CISAKEVAdapter,
-    "mitre_attack": MITREAttackAdapter,
-    "vulncheck": VulnCheckAdapter,
-    "osv": OSVAdapter,
-    "malpedia": MalpediaAdapter,
-    "github_poc": GitHubPoCAdapter,
-    "cvedetails": CVEDetailsAdapter,
-    "wikipedia": WikipediaAdapter,
-}
-```
+| `source_type` | Display name | Entity types | Default trigger | Key? | Default rate limit | Min confidence |
+|---|---|---|---|---|---|---|
+| `epss` | FIRST EPSS | cve | scheduled | No | 100 / 60 s | low |
+| `nvd` | NVD API 2.0 | cve | auto | No | 50 / 30 s | low |
+| `cisa_kev` | CISA KEV | cve | scheduled | No | 100 / 60 s | low |
+| `mitre_attack` | MITRE ATT&CK | ttp, threat_actor, malware, tool, mitigation | scheduled | No | 10 / 3600 s | low |
+| `vulncheck` | VulnCheck KEV | cve | scheduled | Yes | 1000 / 60 s | medium |
+| `osv` | OSV | cve | auto | No | 100 / 60 s | low |
+| `malpedia` | Malpedia | malware, tool, threat_actor | scheduled | No | 30 / 60 s | low |
+| `github_poc` | GitHub PoC | cve | scheduled | No (optional token) | 10 / 60 s | low |
+| `cvedetails` | CVEDetails | cve | auto | Yes | 60 / 60 s | medium |
+| `wikipedia` | Wikipedia | threat_actor, malware, tool, country, vendor, product, ttp, mitigation, cve, cwe | auto | No | 10 / 60 s | low |
+| `virustotal` | VirusTotal v3 | observable | manual | Yes | 4 / 60 s | medium |
+| `greynoise` | GreyNoise Community | observable | manual | Yes | 10 / 3600 s | medium |
+| `shodan` | Shodan InternetDB | observable (IPv4 only) | auto | No | 30 / 60 s | medium |
 
-Each adapter registers with a default trigger mode and rate limit:
-
-```python
-DEFAULT_SOURCES = [
-    {
-        "source_type": "epss",
-        "display_name": "FIRST EPSS",
-        "default_trigger_mode": "scheduled",
-        "requires_api_key": False,
-        "default_rate_limit": {"requests_per_period": 100, "period_seconds": 60},
-        "default_min_confidence_threshold": "low",
-    },
-    {
-        "source_type": "nvd",
-        "display_name": "NVD API 2.0",
-        "default_trigger_mode": "auto",
-        "requires_api_key": False,
-        "default_rate_limit": {"requests_per_period": 50, "period_seconds": 30},
-        "default_min_confidence_threshold": "low",
-    },
-    # ... 8 more sources (registry.py:31-113)
-]
-```
-
-### Adapter Base Class
-
-All adapters inherit from `EnrichmentAdapter` (`backend/app/enrichment/base.py:17-54`):
-
-```python
-class EnrichmentAdapter(ABC):
-    source_type: str
-    display_name: str
-    supported_entity_types: list[str]  # ["ioc_domain", "ioc_ipv4", "ioc_md5", ...]
-    requires_api_key: bool = False
-    default_trigger_mode: str = "manual"
-    default_rate_limit: dict = {"requests_per_period": 100, "period_seconds": 86400}
-    shared_key_group: str | None = None  # e.g. "abuse_ch" (ThreatFox, URLhaus, MalBazaar share key)
-
-    @abstractmethod
-    async def enrich(self, entity_type: str, entity_value: str) -> EnrichmentData:
-        """Enrich a single entity; return normalized data."""
-
-    async def bulk_sync(self) -> list[EnrichmentData]:
-        """For scheduled sources (e.g., EPSS, MITRE ATT&CK). Override in subclasses."""
-
-    async def check_health() -> bool:
-        """Verify API key and connectivity."""
-
-    def supports_entity(self, entity_type: str) -> bool:
-        """Check if this adapter enriches the given entity type."""
-
-    def get_cache_ttl(self) -> timedelta:
-        """Return cache TTL (default: 24 hours)."""
-```
-
-**Example Adapter: GitHub PoC** (`backend/app/enrichment/adapters/github_poc.py`):
-
-```python
-class GitHubPoCAdapter(EnrichmentAdapter):
-    source_type = "github_poc"
-    display_name = "GitHub PoC"
-    supported_entity_types = ["cve"]
-    requires_api_key = False          # optional Bearer PAT for higher rate limits
-    default_trigger_mode = "scheduled"
-
-    _api_url = "https://api.github.com/search/repositories"
-
-    async def enrich(self, entity_type: str, entity_value: str) -> EnrichmentData:
-        # Search GitHub for "<CVE-ID> poc exploit", sorted by stars
-        resp = await client.get(self._api_url, params={"q": query, "sort": "stars", ...})
-
-        if resp.status_code == 403:
-            # Rate limited — cache the miss briefly and retry later
-            return EnrichmentData(
-                raw_response={"error": "rate_limited"},
-                parsed_data={"found": False, "error": "GitHub API rate limited"},
-                ttl_hours=1,
-            )
-
-        items = resp.json().get("items", [])
-        return EnrichmentData(
-            raw_response=data,
-            parsed_data={
-                "found": True,
-                "cve_id": entity_value,
-                "has_public_poc": bool(items),
-                "poc_count": len(items),
-                # top repos, stars, urls ...
-            },
-        )
-```
+Every adapter extends `EnrichmentAdapter` (`backend/app/enrichment/base.py`). It sets `source_type`, `display_name`, `supported_entity_types`, `requires_api_key`, `default_trigger_mode`, and optionally `shared_key_group`. It implements `enrich(entity_type, value) -> EnrichmentData(raw_response, parsed_data, ttl_hours=24)`, and may override `bulk_sync()` and `check_health()`.
 
 ### Trigger Modes
 
-Enrichment fires based on the source's `trigger_mode`:
-
-| Mode | When | Use Case |
-|------|------|----------|
-| `auto` | On entity extraction | Per-entity lookups: NVD, OSV, CVEDetails, Wikipedia |
-| `scheduled` | Periodic bulk sync | EPSS scores, CISA KEV, MITRE ATT&CK, VulnCheck, Malpedia, GitHub PoC scanner |
-| `manual` | User-initiated via UI | Any source the operator flips to manual to conserve quota |
-
-Implementation: `pipeline.py:134-289` (`enrich_entity()`).
+| Mode | When it runs |
+|---|---|
+| `auto` | When an entity is created or linked: the autolinker, TTP and CVE extraction, the observables ledger and GitHub rule import queue `auto_enrich_entity` |
+| `scheduled` | The `scheduled-enrichment-check` job (every 15 minutes) calls `bulk_sync()` on each due source, then sets `next_scheduled_at` to now + `schedule_interval_hours`, even when the sync failed |
+| `manual` | A person asks: `POST /api/enrichment/enrich`, or an "Enrich" button. Naming `source_types` runs those sources whatever their mode; the hygiene "Enrich N" buttons use `bulk_enrich_for_gap` the same way |
 
 ### Pipeline Flow
 
-```
-User/Automation triggers enrich_entity()
-  ↓
-  Get enabled sources matching trigger_mode
-  ↓
-  For each source:
-    1. Resolve API key (user override > global > shared key group)
-    2. Get adapter instance: get_adapter(source.source_type, api_key=...)
-    3. Check confidence threshold (auto mode only)
-    4. Check cache (fresh result?):
-       - YES: return cached parsed_data (no budget used)
-       - NO: proceed to step 5
-    5. Check daily budget:
-       - Over limit: status="budget_exhausted", skip
-       - OK: proceed to step 6
-    6. Check rate limit (Redis token bucket):
-       - Allowed: proceed
-       - Throttled: status="rate_limited", skip
-    7. Call adapter.enrich(entity_type, entity_value)
-    8. Store EnrichmentResult
-    9. Append to results list
-  ↓
-  Return results: [{"source_type": "vt", "status": "success", "parsed_data": {...}}, ...]
-```
+`enrich_entity()` (`backend/app/enrichment/pipeline.py:134`) loops over the enabled sources whose `trigger_mode` matches (or the named `source_types`). For each source:
 
-Reference code: `pipeline.py:134-289`.
+1. Skip it if the adapter does not support the entity type.
+2. Resolve the API key ([below](#api-key-resolution)).
+3. **Auto mode only**: skip it if the entity's confidence is below the source's minimum (`skipped_low_confidence`).
+4. If a fresh `success` result exists, return it (`cached`). No budget is used.
+5. If the source has a daily budget and it is used up, skip it (`budget_exhausted`).
+6. If the rate limit is reached, skip it (`rate_limited`).
+7. Call `adapter.enrich()` and store a `success` row that expires after `ttl_hours`. If the adapter raises, store an `error` row that expires after 1 hour.
+
+If Redis is down, the budget and rate-limit checks let the call through.
 
 ### API Key Resolution
 
-Multi-level fallback chain (`resolve_api_key`, `pipeline.py:54`):
+`resolve_api_key()` (`backend/app/enrichment/pipeline.py:54`) tries, in order:
 
-```python
-async def resolve_api_key(
-    source: EnrichmentSource,
-    user_id: UUID | None,
-    db: AsyncSession,
-) -> str | None:
-    # 1. Check user override for this specific source
-    if user_id:
-        override = await db.query(UserEnrichmentOverride).filter(
-            UserEnrichmentOverride.source_id == source.id,
-            UserEnrichmentOverride.created_by == user_id,
-        ).first()
-        if override and override.api_key_encrypted:
-            return decrypt_value(override.api_key_encrypted)
+1. The calling user's override for this source.
+2. The source's own key.
+3. A key on a sibling source in the same `shared_key_group` (the user's override first, then the sibling's own key).
 
-    # 2. Check global key on source
-    if source.api_key_encrypted:
-        return decrypt_value(source.api_key_encrypted)
-
-    # 3. Shared key group fallback
-    # (adapters that set shared_key_group share one key across sibling sources)
-    adapter_cls = ADAPTER_REGISTRY.get(source.source_type)
-    shared_group = getattr(adapter_cls, "shared_key_group", None)
-    if shared_group:
-        # Check user overrides for sibling sources
-        # Check global keys on sibling sources
-        # Return first found
-        ...
-
-    return None
-```
-
-This allows:
-- Team-wide key (e.g. VulnCheck, CVEDetails) + user's personal key for higher quota
-- Per-user overrides for any source
-
-Note: no current adapter sets `shared_key_group` — the mechanism exists (`base.py:26`, `SHARED_KEY_GROUPS` in `backend/app/enrichment/registry.py:151`) but the map is empty.
+No current adapter sets `shared_key_group`, so `SHARED_KEY_GROUPS` (`backend/app/enrichment/registry.py:151`) is empty and step 3 never finds anything. Auto enrichment runs in a worker with no user, so it only uses the source's own key.
 
 ### Confidence Thresholds
 
-IOCs can have confidence levels (high/medium/low or numeric 0-1). The source's `min_confidence_threshold` controls which entities get enriched:
+A source's `min_confidence_threshold` stops cheap or low-value indicators from using up a paid quota (`_passes_confidence_threshold`, `backend/app/enrichment/pipeline.py:22`):
 
-```python
-_CONFIDENCE_LEVELS = {"high": 3, "medium": 2, "low": 1}
-_CONFIDENCE_FLOAT_THRESHOLDS = {"high": 0.7, "medium": 0.4, "low": 0.0}
+- `low` (or empty) enriches everything.
+- An entity with no confidence value at all (most non-observable entities) always passes.
+- Otherwise the entity passes if its text level (`high` 3 / `medium` 2 / `low` 1) meets the threshold, or its numeric confidence meets `high` 0.7 / `medium` 0.4.
 
-def _passes_confidence_threshold(
-    source: EnrichmentSource,
-    entity_confidence: str | None,
-    entity_base_confidence: float | None,
-) -> bool:
-    threshold = source.min_confidence_threshold
-    if threshold == "low":
-        return True  # Enrich everything
-
-    # Check string confidence level (e.g., "high" >= "medium"?)
-    # Check numeric confidence (e.g., 0.65 >= 0.4?)
-    # Return True if entity meets threshold
-```
-
-Thresholds prevent wasting budget on low-confidence indicators. For example:
-- NVD / EPSS / Wikipedia (default "low") enrich everything
-- VulnCheck / CVEDetails (default "medium") only enrich medium/high confidence entities
+Only auto enrichment checks this. Manual enrichment skips it.
 
 ### Caching & TTL
 
-Results are cached in the DB with expiry:
+A `success` result is reused until `expires_at`. Each adapter picks its TTL per result, for example:
 
-```python
-async def get_cached_result(
-    db: AsyncSession,
-    entity_type: str,
-    entity_id: UUID,
-    source_type: str,
-) -> EnrichmentResult | None:
-    # Query for the latest successful result
-    result = await db.query(EnrichmentResult).filter(
-        EnrichmentResult.entity_type == entity_type,
-        EnrichmentResult.entity_id == entity_id,
-        EnrichmentResult.source_type == source_type,
-        EnrichmentResult.status == "success",
-    ).order_by(EnrichmentResult.enriched_at.desc()).first()
-
-    # Check if result.expires_at > now()
-    if result and result.expires_at > datetime.now(timezone.utc):
-        return result
-
-    return None
-```
-
-Each adapter specifies `ttl_hours` (default 24) via the `EnrichmentData` return object. This allows:
-- Static data (MITRE ATT&CK, Malpedia) to cache for weeks
-- Live data (NVD scores, GitHub PoC hits) to cache for hours
-- Negative results ("not found", rate-limited misses) to cache briefly
+- Wikipedia: 720 hours (30 days). Not-found: 168 hours.
+- NVD, Malpedia, MITRE ATT&CK, GreyNoise: 168 hours (7 days).
+- EPSS, CISA KEV, VulnCheck, GitHub PoC: 24 hours.
+- VirusTotal: 72 hours.
+- Short-lived misses (a GitHub rate limit, a missing VirusTotal or VulnCheck key, a failed Wikipedia fetch): 1 hour. These misses are stored as `success` rows with `found: false`, so they are cached too.
 
 ### Rate Limiting
 
-Redis-backed token bucket per source (`enrichment/rate_limiter.py`):
-
-```python
-class RedisRateLimiter:
-    def __init__(self, source_type: str, config: dict):
-        self.source_type = source_type
-        self.requests_per_period = config.get("requests_per_period", 100)
-        self.period_seconds = config.get("period_seconds", 86400)
-
-    async def check(self) -> bool:
-        """Check if we have capacity; return True/False."""
-        # Lua script: decrement token bucket, return allowed
-```
-
-Example configs from registry:
-- NVD: 50 requests/30s
-- MITRE ATT&CK: 10 requests/3600s
-- VulnCheck: 1000 requests/60s
-- Malpedia: 30 requests/60s
-- GitHub PoC / Wikipedia: 10 requests/60s
+`RedisRateLimiter` (`backend/app/enrichment/rate_limiter.py`) is a sliding window: each call is added to a Redis sorted set at `enrichment:rate:{source_type}`, calls older than `period_seconds` are dropped, and the call is allowed while fewer than `requests_per_period` remain. Limits come from the source's `rate_limit_config` (seeded from the table above; edit them per source).
 
 ### Daily Budgets
 
-Soft cap on API calls (`pipeline.py:204-216`):
-
-```python
-if source.daily_budget is not None:
-    budget_tracker = RedisBudgetTracker(source.source_type)
-    within_budget = await budget_tracker.check_and_increment(source.daily_budget)
-    if not within_budget:
-        status="budget_exhausted"
-        skip enrichment
-```
-
-Useful for keyed sources (VulnCheck, CVEDetails) to prevent runaway quota burn. Set to `None` for unlimited.
+When `daily_budget` is set, `RedisBudgetTracker` counts calls in `enrichment:budget:{source_type}:{YYYY-MM-DD}` (UTC; the key expires after 25 hours). A call over the budget is refused and not counted. Only real API calls count; cached results are free. Set a budget on keyed sources such as VirusTotal (free tier: 500 a day) or VulnCheck. `GET /api/enrichment/budget-summary` shows today's use.
 
 ### Scheduled Enrichment
 
-The Celery Beat scheduler runs periodic enrichment for sources with `trigger_mode='scheduled'`:
+Besides the generic `scheduled-enrichment-check`, these beat jobs keep reference data fresh (defaults; change them in the Jobs view of the Engine console):
 
-| Source | Beat cadence | Reason |
-|--------|--------------|--------|
-| EPSS | Daily at 06:30 UTC | Updated exploitation-probability scores |
-| MITRE ATT&CK | Weekly Sunday 03:00 UTC | Full framework sync |
-| Malpedia | Weekly Sunday 03:30 UTC | Malware family updates |
-| GitHub PoC | Daily at 05:00 UTC | New public exploits |
-| NVD refresh / backfill | Daily 12:00 / 01:30 UTC | CVSS changes; missing CVE data |
+| Job key | Default schedule (UTC) | What it does |
+|---|---|---|
+| `epss-bulk-sync` | Daily 06:30 | EPSS scores for every CVE |
+| `sync-kev-feed` | Every 6 hours at :15 | CISA KEV flags |
+| `cve-nvd-backfill` | Daily 01:30 | NVD data for CVEs that lack it |
+| `cve-nvd-refresh` | Daily 12:00 | CVSS changes on existing CVEs |
+| `github-poc-scan` | Daily 05:00 | Public exploit repos for CVEs |
+| `mitre-attack-sync` | Sunday 03:00 | ATT&CK techniques, groups and mitigations |
+| `malpedia-sync` | Sunday 03:30 | Malware families |
+| `misp-galaxy-sync` | Sunday 03:30 | Reference actor aliases from the MISP Galaxy |
+| `metasploit-sync` | Sunday 03:45 | Maps CVEs to Metasploit modules |
+| `wikipedia-bulk-sync` | Wednesday 04:00 | Wikipedia content for entities that lack it |
 
-Implementation: Celery tasks call `adapter.bulk_sync()`, which handles pagination and large datasets. The Malpedia sync passes `alt_names` through `filter_aliases()` (`intelligence/autolinker.py`) so junk aliases from Malpedia never enter entity `aliases` arrays.
-
----
-
-## Integration: How Three Systems Work Together
-
-### Automation Triggering Enrichment
-
-When an automation action extracts an IOC, enrichment can be triggered immediately:
-
-```python
-# Action: extract_iocs from entry text
-iocs = await extract_and_store_iocs(db, entry.id, entry.content_text)
-
-# Then auto-enrich (if sources have trigger_mode='auto')
-for ioc in iocs:
-    results = await enrich_entity_auto(
-        entity_type="ioc",
-        entity_id=ioc.id,
-        entity_value=ioc.value,
-        db=db,
-        entity_confidence=ioc.confidence,  # Threshold filtering
-    )
-
-# Entity now has enrichment results from the enabled auto-mode sources
-# (NVD, OSV, CVEDetails, Wikipedia, ...)
-```
-
-### AI Task Extracting Intelligence for Detection Rules
-
-An automation rule can chain AI tasks:
-
-```python
-{
-  "type": "run_ai_task",
-  "config": { "task_id": "extract_ttps" }
-}
-→ context["extraction_results"]["ttps"] = [...]
-
-{
-  "type": "generate_detection_rules",
-  "config": { "rule_types": ["sigma", "splunk_spl"] }
-}
-→ Uses TTPs from context to generate rules
-```
-
-### Automation Sending Enriched Data via Webhook
-
-A notification action can include enrichment results:
-
-```python
-{
-  "type": "send_notification",
-  "config": {
-    "webhook_url": "...",
-    "message_template": "CVE: {url}\nKEV status: {context.kev_status}"
-  }
-}
-```
-
-(Note: Full context passing for webhook actions requires extensions to the template system.)
-
----
-
-## Execution Diagrams
-
-### Automation Rule Trigger → Action Execution
-
-```
-┌─────────────────────────────────────────────────────────┐
-│ New Entry Ingested                                      │
-│ id=uuid, feed_id=uuid, content_text=...                │
-└─────────────┬───────────────────────────────────────────┘
-              │
-              ↓
-┌─────────────────────────────────────────────────────────┐
-│ run_automations_for_entry(db, entry, feed_id)           │
-│ (async from entry creation task)                        │
-└─────────────┬───────────────────────────────────────────┘
-              │
-              ↓ Query enabled rules
-┌─────────────────────────────────────────────────────────┐
-│ SELECT * FROM automation_rules                          │
-│ WHERE is_enabled=true                                   │
-│ AND trigger_type IN ('on_new_entry', ...)               │
-└─────────────┬───────────────────────────────────────────┘
-              │
-              ↓ For each rule
-         ┌────┴────────────────┬──────────────────┐
-         │                     │                  │
-         ↓                     ↓                  ↓
-    (on_new_entry        (on_keyword_match  (on_cve_detected
-     always true)         regex check)       CVSS threshold)
-         │                     │                  │
-         └────────────┬────────┴──────────────────┘
-                      ↓
-         Should this rule fire? (check trigger-specific logic)
-                      │
-              ┌───────┴───────┐
-              ↓               ↓
-             YES             NO (skip to next rule)
-              │
-              ↓
-    ┌─────────────────────────────────────────┐
-    │ evaluate_conditions(db, entry, {AND/OR})│  Evaluate nested conditions
-    └─────────────┬───────────────────────────┘
-                  │
-          ┌───────┴────────┐
-          ↓                ↓
-        PASS              FAIL (log as skipped)
-          │
-          ↓
-    ┌─────────────────────────────────────────────┐
-    │ _execute_action_chain(                      │
-    │   db, entry, rule.actions,                  │
-    │   user_id, context={}, dry_run=False        │
-    │ )                                           │
-    └────────┬────────────────────────────────────┘
-             │
-             ↓ For each action
-        ┌────────────────────────────────┐
-        │ action.type                    │
-        └────┬─────────────────────┬─────┘
-             │                     │
-        ┌────┴────┐          ┌─────┴────────┐
-        │          │          │              │
-        ↓ branch   ↓ normal   ↓ ...
-    ┌───────┐ ┌──────────────────┐
-    │Eval   │ │execute_action()  │
-    │branch │ │per entry         │
-    │cond   │ │(tag, AI, etc.)   │
-    └───┬───┘ └────────┬─────────┘
-        │              │
-    ┌───┴────┐         │
-    ↓        ↓         │
-then    else      action
-sub     sub      result
-chain   chain     dict
-    │    │         │
-    └────┴─────────┘
-         │
-         ↓ All results collected
-    actions_executed = [
-      {"type": "tag", "status": "success", ...},
-      {"type": "notify", "status": "success", ...},
-      ...
-    ]
-         │
-         ↓
-    ┌─────────────────────────────────────┐
-    │ Create AutomationLog                │
-    │ status="success"                    │
-    │ actions_executed=[...]              │
-    │ rule.last_triggered_at = now()      │
-    │ rule.run_count += 1                 │
-    └─────────────┬───────────────────────┘
-                  ↓
-            Flush & commit to DB
-```
-
-### AI Task Execution Pipeline
-
-```
-┌────────────────────────────────────────────────────┐
-│ Automation Action / Manual Request                 │
-│ run_ai_task(task_id="article_summary", entry_id=..) │
-└────────┬───────────────────────────────────────────┘
-         │
-         ↓
-┌────────────────────────────────────────────────────┐
-│ run_task(task_name, variables, entry_id, caller)   │
-│ (backend/app/ai/engine.py:837)                     │
-└────────┬───────────────────────────────────────────┘
-         │
-         ↓
-┌────────────────────────────────────────────────────┐
-│ resolve_assignment(caller, task_name)              │
-│ site assignment; plus the person's own key when    │
-│ personal keys are on and the task allows them      │
-└────────┬───────────────────────────────────────────┘
-         │
-    ┌────┴─────┬──────────────┐
-    ↓          ↓              ↓
-Resolved   Nothing        UserKeyRequired
-    │          └──→ None      └──→ 403 user_ai_key_required
-    ↓
-┌────────────────────────────────────────────────────┐
-│ Check dedup: is_current result for (target, task)? │
-│ (skip if fresh, unless force=True)                 │
-└────────┬───────────────────────────────────────────┘
-         │
-         ↓
-┌────────────────────────────────────────────────────┐
-│ Site provider answering a person? Enforce the      │
-│ daily site allowance (429 ai_allowance_exceeded)   │
-└────────┬───────────────────────────────────────────┘
-         │
-         ↓
-┌────────────────────────────────────────────────────┐
-│ get_active_prompt(task_id, user_id)                │
-│ User template? → System template? → Default?       │
-└────────┬───────────────────────────────────────────┘
-         │
-         ↓
-┌────────────────────────────────────────────────────┐
-│ render_prompt(template_text, variables)            │
-│ Jinja2({{entry.title}}, {{entry.content}}, ...)    │
-└────────┬───────────────────────────────────────────┘
-         │
-         ↓
-┌────────────────────────────────────────────────────┐
-│ provider.complete(                                 │
-│   prompt=rendered_prompt,                          │
-│   temperature=config.temperature,                  │
-│   max_tokens=config.max_tokens,                    │
-│   response_format=task.output_schema               │
-│ )                                                  │
-│ → AIResponse(content, tokens_input, tokens_output) │
-└────────┬───────────────────────────────────────────┘
-         │
-    ┌────┴──────────────┐
-    ↓                   ↓
-Success             Exception
-    │                   └──→ Store error result
-    ↓
-┌────────────────────────────────────────────────────┐
-│ Parse JSON from response.content                   │
-│ If invalid: extract from ```json...``` block       │
-│ Tag with _extraction_status="success" (if valid)   │
-└────────┬───────────────────────────────────────────┘
-         │
-         ↓
-┌────────────────────────────────────────────────────┐
-│ Estimate cost: tokens → $$$ (from COST_TABLE)      │
-│ Update Prometheus: AI_COST_TOTAL, AI_TOKENS_TOTAL  │
-└────────┬───────────────────────────────────────────┘
-         │
-         ↓
-┌────────────────────────────────────────────────────┐
-│ Create AIResult                                    │
-│ - entry_id, task_id, provider_id, provider_name    │
-│ - caller_kind, user_id, key_owner_id               │
-│ - parsed_result (JSON dict, + _fallback_reason,    │
-│   _prompt_version when they apply)                 │
-│ - cost_estimate, tokens_*, processing_time_ms      │
-│ - is_current=True (mark old as not_current)        │
-└────────┬───────────────────────────────────────────┘
-         │
-         ↓
-    ┌────────────────────────────────────┐
-    │ Store to DB                        │
-    │ Publish SSE event (ai_task_complete)│
-    └────┬───────────────────────────────┘
-         │
-         ↓
-    Return parsed_result dict
-    (available in automation context)
-```
-
-### Enrichment Job → Merge
-
-```
-┌───────────────────────────────────────────────────┐
-│ Entity extracted (IOC, CVE, actor, etc.)          │
-│ id=uuid, value=..., confidence=...                │
-└───────┬───────────────────────────────────────────┘
-        │
-        ↓ trigger='auto' (optional)
-┌───────────────────────────────────────────────────┐
-│ enrich_entity(                                    │
-│   entity_type, entity_id, entity_value,           │
-│   db, user_id, trigger='auto',                    │
-│   entity_confidence=...                           │
-│ )                                                 │
-└───────┬───────────────────────────────────────────┘
-        │
-        ↓
-┌───────────────────────────────────────────────────┐
-│ Query: EnrichmentSource where                     │
-│   is_enabled=true AND trigger_mode=trigger        │
-└───────┬───────────────────────────────────────────┘
-        │
-        ↓ For each source
-    ┌───┴──────────────────────────────────────┐
-    │                                          │
-    ↓                                          ↓
-┌──────────────────────────┐           ┌──────────────────────────┐
-│ resolve_api_key()        │           │ next source              │
-│ user override            │           └──────────────────────────┘
-│ → global key             │
-│ → shared group sibling   │
-└──────┬───────────────────┘
-       │
-       ↓
-┌──────────────────────────────────────────────────┐
-│ Get adapter instance                             │
-│ get_adapter(source.source_type, api_key, config) │
-└──────┬───────────────────────────────────────────┘
-       │
-       ↓ (trigger='auto' only)
-┌──────────────────────────────────────────────────┐
-│ _passes_confidence_threshold()?                  │
-│ entity.confidence >= source.min_threshold?       │
-└────┬─────┐
-     │     │
-    YES   NO → append {"status": "skipped_low_confidence"}
-     │          continue to next source
-     ↓
-┌──────────────────────────────────────────────────┐
-│ get_cached_result()                              │
-│ Is there a fresh (not expired) result?           │
-└──────┬───────────────────────────────────────────┘
-       │
-    ┌──┴──┐
-    ↓     ↓
-Found    Not Found
-    │        │
-   YES      NO → proceed to API call
-    └──┘
-       └──→ append {"status": "cached", "parsed_data": {...}}
-           continue to next source
-             (no budget/rate limit check needed)
-             │
-             ↓
-┌──────────────────────────────────────────────────┐
-│ Check daily_budget                               │
-│ budget_used >= budget_limit?                     │
-└──────┬───────────────────────────────────────────┘
-       │
-       ↓ if exceeded
-    append {"status": "budget_exhausted"}
-    continue
-       │
-       ↓ if OK
-┌──────────────────────────────────────────────────┐
-│ RedisRateLimiter.check()                         │
-│ Have tokens in bucket?                           │
-└──────┬───────────────────────────────────────────┘
-       │
-       ↓ if throttled
-    append {"status": "rate_limited"}
-    continue
-       │
-       ↓ if allowed
-┌──────────────────────────────────────────────────┐
-│ adapter.enrich(entity_type, entity_value)        │
-│ Make actual API call                             │
-│ Return EnrichmentData(raw, parsed, ttl_hours)    │
-└──────┬───────────────────────────────────────────┘
-       │
-       ↓
-┌──────────────────────────────────────────────────┐
-│ Create EnrichmentResult                          │
-│ - entity_type, entity_id, source_type            │
-│ - raw_response, parsed_data                      │
-│ - status="success"                               │
-│ - expires_at = now + ttl_hours                   │
-└──────┬───────────────────────────────────────────┘
-       │
-       ↓
-   append {"status": "success", "parsed_data": {...}}
-
-
-┌──────────────────────────────────────────────────┐
-│ All sources complete                             │
-│ results = [                                      │
-│   {"source": "nvd", "status": "success", ...},   │
-│   {"source": "epss", "status": "cached"},        │
-│   {"source": "github_poc", "status": "rate_limited"},│
-│   ...                                            │
-│ ]                                                │
-└──────┬───────────────────────────────────────────┘
-       │
-       ↓
-   Flush & commit DB (new EnrichmentResult records)
-       │
-       ↓
-   Return results to caller
-```
+The Malpedia sync passes `alt_names` through `filter_aliases()` (`backend/app/intelligence/autolinker.py`), so junk aliases never enter an entity's `aliases`.
 
 ---
 
@@ -1521,153 +663,48 @@ Found    Not Found
 
 ### Adding a New Enrichment Adapter
 
-1. Create class in `backend/app/enrichment/adapters/myapi.py`:
-```python
-class MyAPIAdapter(EnrichmentAdapter):
-    source_type = "myapi"
-    display_name = "My API Service"
-    supported_entity_types = ["ioc_ipv4", "ioc_domain"]
-    requires_api_key = True
-    default_trigger_mode = "manual"
-    shared_key_group = None  # or "groupname" to share a key
+1. Write the class in `backend/app/enrichment/adapters/myapi.py`:
 
-    async def enrich(self, entity_type: str, entity_value: str) -> EnrichmentData:
-        # Make API request
-        # Parse response
-        # Return EnrichmentData(raw, parsed, ttl_hours)
+   ```python
+   class MyAPIAdapter(EnrichmentAdapter):
+       source_type = "myapi"
+       display_name = "My API Service"
+       supported_entity_types = ["observable"]
+       requires_api_key = True
+       default_trigger_mode = "manual"
 
-    async def check_health(self) -> bool:
-        # Ping API to verify connectivity
-```
+       async def enrich(self, entity_type: str, entity_value: str) -> EnrichmentData:
+           # call the API, then:
+           return EnrichmentData(raw_response=data, parsed_data={...}, ttl_hours=72)
+   ```
 
-2. Register in `registry.py`:
-```python
-from app.enrichment.adapters import MyAPIAdapter
-
-ADAPTER_REGISTRY["myapi"] = MyAPIAdapter
-
-DEFAULT_SOURCES.append({
-    "source_type": "myapi",
-    "display_name": "My API Service",
-    ...
-})
-```
-
-3. Adapter is now available in the UI for configuration.
+2. Export it from `backend/app/enrichment/adapters/__init__.py`, and add it to `ADAPTER_REGISTRY` and `DEFAULT_SOURCES` in `backend/app/enrichment/registry.py`.
+3. It then appears under Settings → Engine → Enrichment, disabled until someone turns it on.
 
 ### Adding a New AI Task
 
-1. Create task record via API or CLI:
-```python
-AITask(
-    name="my_analysis",
-    display_name="My Custom Analysis",
-    category="analysis",
-    default_prompt_template="Analyze: {{entry.content_text}}",
-    output_schema={"type": "object", "properties": {...}},
-    allows_user_provider=True,   # optional: let a person's own key answer it
-)
-```
+1. Add it to `SYSTEM_TASKS` in `backend/app/ai/prompts/defaults.py` (name, display name, category, templates, `output_schema`), or create a custom task through the API.
+2. Assign it to an instance provider at Settings → AI Configuration. Until then `run_task` returns `None`.
+3. If a Celery task calls it, route that Celery task to the `ai` queue ([The `ai` queue](#the-ai-queue)).
+4. To let personal keys answer it, add it to `USER_PROVIDER_ELIGIBLE_TASKS` and set `allows_user_provider`.
+5. Use it from automation:
 
-2. Assign to provider via API (one of the instance's providers; a personal key is refused):
-```python
-AITaskAssignment(
-    task_id=task.id,
-    provider_id=provider.id,
-    model_name="claude-opus-4-6",
-    is_enabled=True,
-    config={"temperature": 0.5, "max_tokens": 2048},
-)
-```
-
-3. Use in automation:
-```json
-{
-  "type": "run_ai_task",
-  "config": { "task_id": "my_analysis" }
-}
-```
+   ```json
+   { "type": "run_ai_task", "config": { "task_id": "my_analysis" } }
+   ```
 
 ### Adding a New Automation Action
 
-1. Implement handler in `backend/app/automation/actions.py`:
-```python
-async def _action_my_action(
-    db: AsyncSession,
-    entry: Entry,
-    config: dict,
-    user_id: UUID,
-    context: dict,
-) -> dict:
-    # Logic here
-    return {"status": "success", "result": "..."}
-```
-
-2. Add case to `execute_action()` match statement
-3. Optionally add to `PER_ENTRY_ACTIONS` or `BATCH_ACTIONS` if supporting batch execution
-4. Action now available in rule builder UI
+1. Write the handler in `backend/app/automation/actions.py` and add a `case` to `_execute_action`.
+2. Add the type to `PER_ENTRY_ACTIONS` (changes one entry) or `BATCH_ACTIONS` (runs once over many entries).
+3. Add it to the rule builder in the frontend.
 
 ---
 
 ## Testing & Debugging
 
-### Dry-Run Automation Rules
-
-Test rules without side effects:
-```python
-log = await execute_automation(db, entry, rule, dry_run=True)
-# log.status = "success" (if conditions pass)
-# log.actions_executed shows what would run
-# No tags added, no webhooks sent, no DB changes
-```
-
-### AI Task Cost Estimation
-
-Review estimated costs before running:
-```python
-# In UI or API response:
-AIResult.cost_estimate  # Decimal: $0.001234
-```
-
-Aggregate across time:
-```
-Prometheus: AI_COST_TOTAL{provider="claude"} = $123.45
-```
-
-### Enrichment Budget Tracking
-
-Monitor daily spend:
-```python
-RedisBudgetTracker("cvedetails").check_budget()  # Returns remaining calls
-```
-
-Manual reset:
-```python
-RedisBudgetTracker("cvedetails").reset()
-```
-
----
-
-## Summary
-
-IntelFeed's three subsystems are tightly integrated:
-
-1. **Automation Engine** provides flexible rule-based triggering with sequential action execution, branching, and shared context flow.
-
-2. **AI Provider System** abstracts LLM backends with pluggable providers, versioned prompt templates, deduplication, and cost tracking.
-
-3. **Enrichment Pipeline** orchestrates 10 external threat intel sources with rate limiting, budgets, caching, and user customization.
-
-Together, they enable sophisticated intelligence automation workflows: extract CVEs/entities from articles → auto-enrich with NVD/EPSS/KEV context → if critical, generate detection rules via AI → send Slack alert with summary.
-
-## One-Pass Entry Analysis (engine phase 4)
-
-The per-entry AI extraction tasks (`threat_actor_id`, `malware_id`, `tool_extraction`, `country_id`, `sector_id`, `article_metadata`, `mitigation_extraction`, `cve_extraction`) are **deprecated** — kept in the DB so their ai_results history survives, hidden from run pickers, assignments force-disabled by the seeder. Their replacement is one consolidated `entry_analysis` task (Haiku, combined output schema) whose parsed payload fans out to the same store functions (`app/services/entry_analysis.py::store_entry_analysis`).
-
-Ingest flow (flag `ai_one_pass_enabled`): `score_entry_task` → `enqueue_entry_analysis` (dedup via AIResult is_current → feed policy → relevance junk gate → **echo-reuse**: near-duplicates copy the original's analysis at $0) → `ai_analysis_requests` queue. Hourly `ai-analysis-batch-submit` self-heals missed enqueues, clamps to the daily budget (`ai_daily_budget_usd`), orders by `entries.priority_score`, and submits via the **Anthropic Message Batches API** (50% discount; falls back to sequential `run_entry_analysis_task` calls when the provider uses an OAuth token). `ai-analysis-batch-poll` (10-min) ingests ended batches idempotently via `store_external_result`. Status: `GET /api/engine/extraction/status`.
-
-The one-pass `entry_analysis` payload also adjudicates **pending autolinks** — dictionary-word autolinker matches are held in a pending tier until the AI confirms or rejects them (requires `ai_one_pass_enabled`) — and asserts entity relationships at ingest. Manual per-type extraction endpoints and `run_ai_task` automation actions still work — `extract_threat_actors`/`extract_malware`/etc. now route through `entry_analysis`, and run_task's dedup means successive per-type calls on one entry share a single AI call. The AI-extraction store path (`intelligence/enrichment.py`) also guards entity quality: new aliases are dropped if `is_junk_alias()` flags them, new entity names are rejected by `is_fp_entity_name()` (FP denylist + `*.exe`/`*.dll`/`*.sys` filenames), and cross-type reclassify tombstones redirect would-be shadow entities to the surviving canonical entity (see `docs/intelligence-engine.md`, "Cross-Type Resurrection Guard"). The daily digest receives per-article signal explanations (`priority_signals`) so briefings say why an article matters.
-
-### Signal-engine automation (engine phase 7)
-
-Automation rules can react to what the pipeline learned: condition types `priority_score_above` (entry's signal-engine score), `has_signal` (specific signal types, e.g. kev_added / novel_entity / under_reported), and `entity_watchlisted` (entry links an entity the rule creator watches). The "Signal Engine" template category ships recipes for both. `has_observable` fires when the entry carries a captured observable (config: `kinds`, `roles`, `min_confidence`, `exclude_infra_tagged` — default true — and `sources`, which defaults to every door but the indicator-feed one, so "new C2 captured" means reporting, not a blocklist mirror). Notification and webhook templates can cite them with `{observables_count}` and `{observables}` (defanged, one per line as `kind value (role)`). The `on_observable_captured` trigger takes the same config as the condition, so a rule can be narrow at the trigger ("C2 only") and keep its conditions for everything else about the entry. `add_to_campaign` gains `link_observables` (with optional `observable_kinds` / `observable_roles`): besides linking the entry it attaches the entry's reporting-door observables as `campaign_entities` rows of type `observable`, dual-use infra excluded. Two templates ship for this: "Notify on New C2 Infrastructure" and "Add an Actor's New Infrastructure to Its Campaign". Radar items accept ▲/▼ feedback (`entry_signal_feedback`); the nightly rates job converts 30 days of feedback into bounded ±10% per-family weight nudges applied on top of the admin-set multipliers.
+- **Dry-run a rule**: `POST /api/automation/rules/{id}/test?entry_id=<uuid>`. Nothing is saved or sent.
+- **Run a rule now**: `POST /api/automation/rules/{id}/run?hours=24&limit=50`.
+- **See AI spend**: `AIResult.cost_estimate` per result, the Cost Dashboard (`GET /api/ai/cost-breakdown`), or the Prometheus counter `AI_COST_TOTAL{provider=...}`.
+- **See enrichment budgets**: `GET /api/enrichment/budget-summary`, or in code `await RedisBudgetTracker("virustotal").get_used()`.
+- **Tests**: `backend/tests/test_ai_providers.py`, `test_ai_tasks.py`, `test_ai_prompts.py`, `test_ai_allowance.py`, `test_user_ai_providers.py`, `test_openai_provider.py`, `test_ollama_provider.py`.

@@ -1,8 +1,6 @@
 # Detection Engineering
 
-## Overview
-
-IntelFeed's Detection Engineering subsystem provides analysts with end-to-end detection rule lifecycle management: extracting rules from intelligence articles, authoring new rules in a rich code editor, validating syntax across 9 detection languages, versioning all changes, and exporting to SIEM/EDR platforms. It also classifies detection coverage against the analyst's telemetry inventory and renders a full ATT&CK matrix (Enterprise/Mobile/ICS) heat-mapped by feed frequency and coverage. The subsystem bridges intelligence ingestion and detection implementation, enabling security teams to operationalize threat research into runnable detection logic.
+This is the technical reference for IntelFeed's detection rule features, for developers and detection engineers. After reading it you will know how rules are pulled out of articles, how they are checked, stored and versioned, how the Rules Library search works, how coverage is measured against your telemetry, and which API endpoints do what. For a how-to written for analysts, see [guide/detection-rules.md](guide/detection-rules.md).
 
 ## Table of Contents
 
@@ -24,36 +22,27 @@ IntelFeed's Detection Engineering subsystem provides analysts with end-to-end de
 
 ### End-to-End Flow
 
-See [diagrams/detection-engineering-rule-pipeline.md](diagrams/detection-engineering-rule-pipeline.md) for the full extraction → validation → coverage flowchart. In short:
+The full flowchart is in [diagrams/detection-engineering-rule-pipeline.md](diagrams/detection-engineering-rule-pipeline.md). In short:
 
-```
-Threat Intelligence Article
-  ↓
-Rule Extraction (6 output formats)
-  ↓
-Syntax Validation (per-format validator; invalid rules dropped)
-  ↓
-Auto-Tag & Deduplicate
-  ↓
-Storage as DetectionRule (is_draft = true)
-  ↓
-Manual Review/Editing in RuleBuilderShell
-  ↓
-Publish to Rule Library (immutable version trail)
-  ↓
-Telemetry-Aware Coverage Classification (covered / library_only / no_rule)
-  ↓
-Export to SIEM/EDR (YAML, ZIP, ATT&CK Navigator layer)
+```text
+Article
+  → extract rules (6 formats, no AI)
+  → check syntax (invalid rules are dropped)
+  → de-duplicate and store as a draft DetectionRule
+  → review and edit in the rule editor (/workbench/rule/:id)
+  → publish (every content edit saves a version)
+  → coverage: covered / library_only / no_rule, against your telemetry
+  → export (YAML, ZIP, ATT&CK Navigator layer)
 ```
 
 ### Key Principles
 
-- **No AI required for extraction** — Pattern matching + regex + parsers only (lines 1-5, `rule_extraction.py`)
-- **Format-agnostic storage** — Rule content stored as-is; validation per-format
-- **Immutable versioning** — Every edit creates a new `DetectionRuleVersion`; no soft deletes
-- **Entry linkage** — Rules traced back to source article for provenance and context
-- **TTP/CVE mapping** — Rules inherit and link to TTPs/CVEs extracted from their source entry
-- **Telemetry-aware** — Feasibility assessments based on user's configured data sources
+- **Extraction needs no AI.** It uses regex and parsers only.
+- **Rules are stored as written.** Each format has its own syntax check.
+- **Edits are versioned.** Changing a rule's content saves the old content as a version.
+- **Rules point back to their article,** so you can see where a rule came from.
+- **Rules inherit the article's TTPs and CVEs** (ATT&CK techniques and vulnerabilities).
+- **Coverage depends on your telemetry.** A rule only counts if you collect the logs it needs.
 
 ---
 
@@ -61,575 +50,282 @@ Export to SIEM/EDR (YAML, ZIP, ATT&CK Navigator layer)
 
 ### Supported Formats
 
-Extraction pipeline (`rule_extraction.py`) scans article content for 6 detection languages:
+`backend/app/intelligence/rule_extraction.py` finds rules in six formats. CrowdStrike QL, Nuclei and Panther can be validated and stored but are never extracted from articles.
 
-| Format | Detection Heuristic | Extractor | Confidence |
-|--------|-------------------|-----------|-----------|
-| **SIGMA** | YAML with `title:`, `detection:`, `logsource:` | `_extract_sigma_rules()` | High |
-| **Splunk SPL** | Code block with `index=` or `\|` pipes + SPL commands; inline lines starting `index=` / `search` / `\| tstats` | `_extract_query_rules()` | Medium-High |
-| **Elastic QL** | Code block with EQL (`process where`, `sequence by`) or ES\|QL (`FROM logs-* \| …`); TOML `[rule]` section with `query` field | `_extract_query_rules()`, `_extract_elastic_toml_rules()` | High |
-| **KQL** | Code block with a Defender XDR / Sentinel table + tabular operators (`\| where`, `\| summarize`, `\| project`); Elastic TOML with `language: kusto/kql` or `type: query/threshold/new_terms` | `_extract_query_rules()`, `_extract_elastic_toml_rules()` | Medium-High |
-| **CrowdStrike QL** | Reserved words like `event_simpleName` | Reserved in validator only; no dedicated extractor | Low |
-| **YARA** | `rule {name}` with `strings:` and `condition:` | `_extract_yara_rules()` | High |
-| **Snort/Suricata** | `alert/log/pass/drop/reject` + protocol + options | `_extract_snort_suricata_rules()` | High |
+| Format | What it is | How it is found | Extractor |
+|--------|------------|-----------------|-----------|
+| **Sigma** (`sigma`) | Vendor-neutral YAML rules for log events | YAML with `title:`, `detection:` and `logsource:` | `_extract_sigma_rules()` |
+| **Splunk SPL** (`splunk_spl`) | Splunk's search language | Code blocks that look like SPL; also plain-text lines starting `index=`, `search ` or `\| tstats` | `_extract_query_rules()` |
+| **Elastic QL** (`elastic_ql`) | Elastic's EQL and ES\|QL query languages | EQL (`process where …`, `sequence by …`) or ES\|QL (`FROM logs-* \| …`) in code blocks; Elastic TOML rule files | `_extract_query_rules()`, `_extract_elastic_toml_rules()` |
+| **KQL** (`kql`) | Kusto Query Language, used by Microsoft Sentinel and Defender XDR | Code blocks with a known Defender/Sentinel table or KQL-only syntax; Elastic TOML rules of type `query`, `threshold` or `new_terms` | `_extract_query_rules()`, `_extract_elastic_toml_rules()` |
+| **YARA** (`yara`) | Pattern rules for matching files and memory | `rule <name> { … condition: … }` | `_extract_yara_rules()` |
+| **Snort/Suricata** (`snort_suricata`) | Network intrusion-detection rules | One-line rules starting with an action and protocol | `_extract_snort_suricata_rules()` |
+
+### When extraction runs
+
+- At ingest, inside `extract_entry_intel_task`, when the feed has **Extract detection rules** (`extract_detection_rules`) turned on.
+- On demand with `POST /entries/{id}/extract-detection-rules`.
+- GitHub repository entries go through their own import path instead, which mirrors upstream rules with their repo, author and license.
 
 ### Extraction Algorithm
 
-**Entry point:** `extract_rules_from_content(text, source_url=None, *, html=None, article_title=None) -> list[dict]` (lines 32-87). `html` is the entry's sanitized `content_html`, read for `<pre>`/`<code>` blocks (the plain text has them flattened); HTML entities (`&gt;` `&lt;` `&amp;`) are decoded before extraction.
+The entry point is `extract_rules_from_content()` (`backend/app/intelligence/rule_extraction.py:32`). It takes `text`, an optional `source_url`, and keyword arguments `html` and `article_title`.
 
-For each format, the extractor:
+- `text` is the article's plain text. HTML entities (`&gt;`, `&lt;`, `&amp;`) are decoded first, so a saved rule runs as written.
+- `html` is the article's sanitized HTML. Code blocks are read from its `<pre>`/`<code>` tags, because the plain text has them flattened into prose.
+- Every extractor runs. Each result is then checked with `validate_rule()`. Rules that fail are logged and dropped.
+- Duplicates are dropped by `(rule_type, body)`, ignoring whitespace. The same query found in both the HTML and the plain text counts once.
 
-1. **Scans for code blocks** — Fenced markdown (`\`\`\`sigma`, `\`\`\`yaml`, `\`\`\`spl`, `\`\`\`kql`) and the article HTML's `<pre>`/`<code>`
-2. **Matches pattern** — Language-specific regex or parser
-3. **Extracts metadata** — Title (from content or fallback), severity, tags, MITRE tactics, log sources
-4. **Returns structured dict** with keys:
-   - `rule_type` — Format identifier
-   - `title` — Human-readable name (max 200 chars)
-   - `rule_content` — Full rule text
-   - `severity` — low | medium | high | critical (nullable)
-   - `tags` — String array (auto-extracted, ATT&CK IDs)
-   - `mitre_tactics` — Extracted from tags or metadata
-   - `log_sources` — Dict with category/product/service keys
-
-**Deduplication:** After extraction, rules are validated. Repeats are dropped and invalid rules (lines 64-84) are logged but filtered out before storage.
+Each rule comes back as a dict with `rule_type`, `title`, `rule_content`, `severity`, `tags`, `mitre_tactics` and `log_sources`.
 
 ### Per-Format Details
 
-#### SIGMA (lines 299-369)
+#### Sigma
 
-- **Parser:** `yaml.safe_load_all()` handles multi-document YAML
-- **Required fields:** `title`, `detection`, `logsource`
-- **Metadata extraction:**
-  - Title from `title:` field
-  - Severity from `level:` (e.g., `level: high`)
-  - MITRE tactics from tags like `attack.execution` → prefix check + title-casing (lines 254-260); `attack.t…` technique tags are excluded from tactics but kept as tags
-- **Log sources:** Entire `logsource:` dict (category, product, service, etc.)
-- **Normalization:** Re-serialized to canonical YAML for storage (line 265)
+- Read from fenced code blocks (any tag, `yaml` or `sigma`), from HTML `<pre>` blocks, or from the whole text if it looks like a Sigma file. Multi-document YAML is supported.
+- The document must have `title`, `detection` and `logsource`.
+- Severity comes from `level:`. Tactics come from tags like `attack.execution`, stored as the ATT&CK tactic slug (`execution`). Technique tags (`attack.t1059`) stay as tags only.
+- The rule is re-saved as clean YAML.
+- **The validator also requires `status:`.** A Sigma rule without it is dropped at extraction.
 
-#### Splunk SPL (lines 405-600)
+#### Splunk SPL
 
-- **Heuristic detection:** `_is_spl_query()` (lines 405-441) checks for:
-  - `index=` + pipe operators (strong)
-  - `search ` + pipe operators
-  - `| tstats` anywhere in text
-  - Pipe into known SPL commands (stats, where, eval, table, rex, dedup, etc.)
-- **False positive avoidance:** Requires multiple SPL indicators; won't match raw pipes alone
-- **Code block parsing:** Any fenced or `<pre>`/`<code>` block + content analysis; a \`\`\`spl / \`\`\`splunk tag is a hint, not proof
-- **Inline extraction:** Multi-line blocks starting with `index=`, `search `, or `| tstats`; fragments under 30 chars skipped
-- **Dedup by content:** Whitespace-blind, so the copy from the `<pre>` block and the copy from the flattened text count once
-- **Title:** `"<article title> — SPL query N"`, numbered in article order
+`_is_spl_query()` decides whether text is SPL. It accepts:
 
-#### KQL, EQL and ES|QL in code blocks (`_extract_query_rules()`)
+- `index=` plus a pipe, or text starting `search ` plus a pipe, or `| tstats` anywhere.
+- A pipe into a common SPL command (`stats`, `where`, `eval`, `table`, `rex`, `dedup`, …) only if `index=`, `sourcetype=` or `source=` also appears. A bare pipe is not enough.
 
-- **Code blocks only** — prose that mentions `where` or a table name never becomes a rule
-- **KQL:** a table followed by a pipe and a tabular operator. The table must be a known Defender XDR / Sentinel table (`DeviceProcessEvents`, `SecurityEvent`, `SigninLogs`…), or the query must use syntax SPL lacks (`| summarize`, `| project`, `ago(`, `=~`, `has`, `==`). Stored as `kql`
-- **EQL:** `<category> where …`, `sequence [by …] [with maxspan=…] [`, `join … [`. Stored as `elastic_ql`
-- **ES|QL:** `FROM <index pattern> | WHERE/STATS/EVAL/KEEP/…`. Stored as `elastic_ql`
-- **Title:** `"<article title> — KQL query N"` / `EQL` / `ES|QL`, numbered per language in article order
+A `spl` or `splunk` code-block tag is a hint, not proof. Plain-text matches shorter than 30 characters are skipped.
 
-#### Elastic/KQL TOML (lines 205-296)
+#### KQL, EQL and ES|QL
 
-- **Format detection:** TOML files with `[rule]` or `[metadata]` sections
-- **Type mapping:** Query language in TOML determines rule_type:
-  - `type: eql | esql` → `elastic_ql`
-  - `type: query | threshold | new_terms` → `kql`
-  - `language: eql` → `elastic_ql`; `language: kusto | kql` → `kql` (overrides type)
-  - Unknown types default to `elastic_ql`
-- **MITRE mapping:** `[[rule.threat]]` arrays with `tactic.name` and `technique.id` (lines 182-196)
-- **Log sources:** Pulled from `rule.index[]` field
-- **Query extraction:** `rule.query` field contains the actual query
+These come **only from code blocks**, so a sentence that says "where" never becomes a rule.
 
-#### YARA (lines 139-202)
+- **KQL:** a table name, a pipe, and a tabular operator. The table must be a known Defender XDR or Sentinel table (`DeviceProcessEvents`, `SecurityEvent`, `SigninLogs`, …), or the query must use syntax SPL lacks (`| summarize`, `| project`, `ago(`, `=~`, `has`, `==`).
+- **EQL:** `<category> where …`, `sequence [by …]`, or `join … [`. Stored as `elastic_ql`.
+- **ES|QL:** `FROM <index> | WHERE/STATS/EVAL/KEEP/…`. Stored as `elastic_ql`.
 
-- **Pattern:** Regex matches `rule {name}` with balanced braces (lines 63-81)
-- **Validation:** Must contain `condition:` section
-- **Metadata:** Extracted from `meta:` section:
-  - Description → title (or rule name if missing)
-  - Severity from `severity = "..."` key-value pair
-- **Fallback title:** Rule name if description missing or < 10 chars
+#### Query rule titles
 
-#### Snort/Suricata (lines 372-402)
+SPL, KQL, EQL and ES|QL queries have no name of their own. They are titled `<article title> — KQL query 2` (or `SPL`, `EQL`, `ES|QL`), numbered per language in article order.
 
-- **Pattern:** Single-line rules starting with action (alert/log/pass/drop/reject/sdrop)
-- **Structure:** `action protocol src_addr src_port direction dst_addr dst_port (options)`
-- **Title extraction:** From `msg: "..."` field in options
-- **No severity/log_sources:** Protocol and direction are implicit in rule syntax
+#### Elastic TOML
 
-### Storage (lines 619-718)
+- Used when the text has a `[rule]` or `[metadata]` section. The `rule.query` field is the rule body.
+- The rule `type` picks the format: `eql` and `esql` become `elastic_ql`; `query`, `threshold` and `new_terms` become `kql`. Anything else becomes `elastic_ql`.
+- `language = "eql"` forces `elastic_ql`; `language = "kusto"` or `"kql"` forces `kql`.
+- Tactics and technique IDs come from `[[rule.threat]]`. `rule.index` becomes the log source.
 
-**Function:** `store_extracted_rules(db, entry_id, user_id, rules) -> list[DetectionRule]`
+#### YARA
 
-1. **Fetch context:**
-   - All TTPs linked to the entry (via EntryTTP junction)
-   - All CVEs linked to the entry (via EntryCVE junction)
+- Matches `rule <name>` and reads to the matching closing brace. The rule must contain `condition:`.
+- The title is the `meta:` description (cut to 200 characters) if it is longer than 10 characters, otherwise the rule name. Severity comes from `severity = "…"` in `meta:`.
 
-2. **Deduplication strategy (on content, not title):**
-   - Same rule body already stored by this user, or auto-extracted by anyone: skip. Processing an article again adds nothing
-   - Same entry + title + type with a new body: the rule was edited upstream, so its content is replaced in place
-   - A title shared across articles never merges two rules
+#### Snort/Suricata
 
-3. **Tag construction (line 678):**
-   - Always include `"auto-extracted"` and `rule_type`
-   - Merge in extracted tags (severity, technique IDs, etc.)
-   - Deduplicate via set
+- One rule per line: `action protocol src_addr src_port direction dst_addr dst_port (options)`.
+- Actions: `alert`, `log`, `pass`, `drop`, `reject`, `sdrop`. The title is the `msg:` text.
 
-4. **TTP linkage (line 681):**
-   - Merge entry-level TTPs with any TTPs parsed from rule metadata
-   - Store as array in `source_ttps` JSONB
+### Storage
 
-5. **CVE linkage (line 684):**
-   - Merge entry-level CVEs with any CVEs mentioned in rule
-   - Store as array in `source_cves` JSONB
+`store_extracted_rules()` (`backend/app/intelligence/rule_extraction.py:619`) saves the rules for one entry.
 
-6. **Create or update (lines 686-712):**
-   - Existing rule (same entry + title + type): Update `rule_content` and metadata fields
-   - New rule: Create record with `is_draft = true` (line 705)
+1. It reads the TTPs and CVEs already linked to the entry.
+2. It de-duplicates **on the rule body, never the title**:
+   - If the same body is already stored by this user, or was auto-extracted by anyone, it is skipped. Processing an article again adds nothing.
+   - If the same entry already has an auto-extracted rule with the same title and type but a different body, the rule was edited upstream. Its content is replaced in place.
+3. Tags are the extracted tags plus `auto-extracted` and the rule type.
+4. `source_ttps` and `source_cves` get the entry's techniques and CVEs.
+5. New rules are saved as drafts (`is_draft = true`) and added to the search index.
 
 ---
 
 ## Rule Validation Engine
 
-**Module:** `backend/app/intelligence/rule_validation.py` (486 lines)
-
-Syntax-only validation (no semantic checks) for 9 rule types (7 formats plus `nuclei` and `panther`). Returns `ValidationResult` with optional errors and suggestions.
+`backend/app/intelligence/rule_validation.py` checks syntax only. It does not check whether a rule makes sense. It covers nine rule types: the six extracted formats plus CrowdStrike QL, Nuclei (YAML templates for web scanning) and Panther (Python detections).
 
 ### Validation Architecture
 
-**Function:** `validate_rule(rule_type: str, rule_content: str) -> ValidationResult` (lines 458-486)
-
-Routes to format-specific validator via dispatch table:
-
-```python
-validators = {
-    "sigma": validate_sigma,
-    "splunk_spl": validate_splunk_spl,
-    "kql": validate_kql,
-    "elastic_ql": validate_elastic_ql,
-    "crowdstrike_ql": validate_crowdstrike_ql,
-    "snort_suricata": validate_snort_suricata,
-    "yara": validate_yara,
-    "nuclei": validate_sigma,  # YAML-based
-    "panther": _validate_panther,
-}
-```
-
-Each validator returns `ValidationResult(valid: bool, errors: list, suggestions: list)`.
-
-### Per-Format Validators
-
-#### SIGMA Validation (lines 131-205)
-
-**Required fields:** `title`, `status`, `logsource`, `detection`
-
-**Checks:**
-- YAML syntax (try `yaml.safe_load()`)
-- Root must be dict
-- `logsource` must have at least one of: `category`, `product`, `service`
-- `detection.condition` required (lines 180-185)
-- At least one named selection (not just condition/timeframe) (lines 186-195)
-
-**Suggestions:**
-- Missing `level` → suggest severity levels
-- Missing `falsepositives` → suggest documenting FP scenarios
-- Missing `tags` → suggest ATT&CK mapping
-
-#### Splunk SPL Validation (lines 208-228)
-
-**Checks:**
-- Non-empty content
-- Balanced parens, brackets, quotes (helper `_check_balanced()`, `_check_balanced_quotes()`)
-
-**Suggestions:**
-- Missing `index=` specification
-
-#### KQL/Elastic QL/CrowdStrike QL (lines 231-298)
-
-**Checks:**
-- Non-empty content
-- Balanced parens, brackets, quotes. KQL and Elastic QL leave `//` and `/* */` comments out of the check (`_check_balanced_code()`), so a comment like "// processes that don't …" is not an unbalanced quote; KQL verbatim strings (`@"C:\Temp\"`) take no backslash escapes
-
-**Suggestions (per-format):**
-- KQL: Suggests starting with table name before pipes
-- EQL: Suggests event categories (process, file, network, registry, sequence, join) unless the query is ES|QL (`FROM …`)
-- CrowdStrike: Suggests filtering by event_simpleName or event_platform
-
-#### Snort/Suricata (lines 301-385)
-
-**Structure:** `action protocol src_addr src_port direction dst_addr dst_port (options)`
-
-**Checks per line (lines 318-382):**
-- Minimum 7 parts (action, protocol, addresses, ports, direction)
-- Valid action from {alert, log, pass, drop, reject, sdrop}
-- Known protocol (tcp, udp, icmp, ip, http, ftp, tls, smb, dns, pkthdr)
-- Valid direction ({->, <>})
-- Options block with parentheses
-- Required `sid:` in options
-- Suggested `msg:` field
-
-#### YARA Validation (lines 388-425)
-
-**Checks:**
-- Non-empty content
-- Balanced braces and parens
-- Regex match for `rule <name>` declaration (line 403)
-- Required `condition:` section (lines 410-415)
-
-**Suggestions:**
-- Missing `strings:` section
-- Missing `meta:` section (author, description, date)
-
-#### Panther Validation (lines 428-455)
-
-Python-based Panther detections: requires a `def rule(event)` function, checks balanced parens/brackets/braces, and suggests a `def title(event)` function. `nuclei` rules reuse the SIGMA YAML validator.
-
-### Error Data Model
+`validate_rule()` (`backend/app/intelligence/rule_validation.py:530`) takes a rule type and body, picks the validator for that type, and returns a `ValidationResult`:
 
 ```python
 @dataclass
 class ValidationError:
-    line: int | None          # Line number if available
-    column: int | None        # Column (rarely populated)
-    severity: str             # "error" | "warning"
-    message: str              # Human-readable error text
+    line: int | None
+    column: int | None
+    severity: str      # "error" | "warning"
+    message: str
 
 @dataclass
 class ValidationResult:
-    valid: bool               # Pass/fail
-    errors: list[ValidationError] = []
-    suggestions: list[str] = []  # Improvement ideas
+    valid: bool
+    errors: list[ValidationError]
+    suggestions: list[str]
 ```
 
-### Integration Points
+A rule is valid when it has no `error`-level problems. Warnings and suggestions do not fail it. An unknown rule type fails.
 
-- **Backend:** Validation called during extraction (`extract_rules_from_content()`, `rule_extraction.py` lines 64-84), the `POST /detection-rules/validate` endpoint, and the SIGMA import endpoint
-- **Frontend:** `useValidateRule()` hook (`useDetectionRules.ts` lines 97-113) triggers real-time validation in CodeMirror editor
+### Per-Format Validators
+
+| Type | Fails when | Suggests |
+|------|-----------|----------|
+| `sigma` | Not valid YAML; not a mapping; missing `title`, `status`, `logsource` or `detection`; `logsource` has none of `category`/`product`/`service`; `detection` has no `condition` or no named selection | `level`, `falsepositives`, ATT&CK `tags` |
+| `splunk_spl` | Empty; unbalanced `()`, `[]` or quotes | An `index=` |
+| `kql` | Empty; unbalanced brackets or quotes (comments ignored) | Start with a table name, not a pipe |
+| `elastic_ql` | Empty; unbalanced brackets or quotes (comments ignored) | Start with an event category, unless it is ES\|QL (`FROM …`) |
+| `crowdstrike_ql` | Empty; unbalanced `()`, `[]` or quotes | Filter on `event_simpleName` or `event_platform` |
+| `snort_suricata` | A line with fewer than 7 parts, a bad action, a bad direction (`->` or `<>`), no `( … )` options, or no `sid:` | `msg:` (an unknown protocol is a warning) |
+| `yara` | Empty; unbalanced `{}` or `()`; no `rule <name>`; no `condition:` | `strings:` and `meta:` sections |
+| `nuclei` | Empty; not valid YAML; not a mapping; no `id`; no `info` with `name`, `author` and `severity`; an unknown severity; no request block (`http`, `dns`, `network`, `file`, `headless`, `code`, `workflows` and the like) | `info.tags` |
+| `panther` | Empty; no `def rule(event)`; unbalanced brackets | A `def title(event)` |
+
+For KQL and Elastic QL, `//` and `/* */` comments are left out of the bracket and quote check, so "// processes that don't …" is not an unbalanced quote. KQL verbatim strings (`@"C:\Temp\"`) take no backslash escapes.
+
+### Where validation runs
+
+- During extraction, to drop broken rules.
+- `POST /detection-rules/validate`, which the rule editor calls as you type (`useValidateRule()` in `frontend/src/hooks/useDetectionRules.ts`).
+- `POST /detection-rules/import`, for each imported Sigma file.
 
 ---
 
 ## Data Model
 
-### DetectionRule (lines 11-85, `detection_rule.py`)
+### DetectionRule
 
-```python
-class DetectionRule(Base):
-    __tablename__ = "detection_rules"
-    
-    id                  UUID          PK
-    entry_id            UUID          FK (entries)
-    created_by          UUID          FK (users)
-    rule_type           str(30)       Index (sigma, splunk_spl, kql, etc.)
-    title               str(500)
-    description         Text
-    rule_content        Text          Full rule body
-    severity            str(20)       Optional (critical, high, medium, low)
-    tags                ARRAY(Text)   Searchable tags
-    source_ttps         JSONB         TTPs from entry or rule metadata
-    source_cves         JSONB         CVEs from entry or rule metadata
-    is_draft            bool          true = unpublished, false = published
-    log_sources         JSONB         Category/product/service dict
-    mitre_tactics       ARRAY(Text)   Extracted MITRE tactics
-    data_sources        ARRAY(Text)   Telemetry sources required
-    notes               Text          Analyst notes
-    metadata_           JSONB         Extensible metadata
-    source_entries      ARRAY(UUID)   Entry IDs rule was extracted from
-    source_actors       ARRAY(UUID)   ThreatActor IDs mentioned in rule
-    source_campaigns    ARRAY(UUID)   Campaign IDs for context
-    license             str(60)       Upstream repo license (MIT/DRL/CC0/...)
-    upstream_updated_at DateTime      Source commit date for mirrored rules
-    references          ARRAY(Text)   Advisory/blog URLs the rule cites
-    source_products     JSONB         Product names the rule detects against
-    created_at          DateTime
-    updated_at          DateTime
-    
-    # Relationships
-    entry               Entry         Back-reference
-    creator             User
-    versions            [DetectionRuleVersion]  Immutable edit history
-```
+Table `detection_rules` (`backend/app/models/detection_rule.py`):
 
-The `license`/`upstream_updated_at`/`references`/`source_products` columns carry rule provenance.
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | UUID | Primary key |
+| `entry_id` | UUID | Source article (indexed; set to null if the entry is deleted) |
+| `created_by` | UUID | Owner (indexed) |
+| `rule_type` | str(30) | `sigma`, `splunk_spl`, `kql`, … (indexed) |
+| `title` | str(500) | |
+| `description`, `notes` | Text | |
+| `rule_content` | Text | The rule body |
+| `severity` | str(20) | `critical`, `high`, `medium`, `low` or null |
+| `tags` | text[] | |
+| `source_ttps`, `source_cves` | JSONB | Technique IDs and CVE IDs |
+| `is_draft` | bool | `true` until published |
+| `log_sources` | JSONB | Sigma `logsource` or Elastic index list |
+| `mitre_tactics` | text[] | ATT&CK tactic slugs |
+| `data_sources` | text[] | Telemetry the rule needs |
+| `metadata` | JSONB | Upstream repo, owner, file path, conversion details |
+| `source_entries`, `source_actors`, `source_campaigns` | uuid[] | Extra links |
+| `license`, `upstream_updated_at`, `references`, `source_products` | | Upstream provenance |
+| `derived_from` | UUID | Parent rule, for conversions and extensions (indexed) |
+| `created_at`, `updated_at` | timestamp | |
 
-**Composite query fields:**
-- `entry_title` (property) — Convenience accessor
-- `entry_url` (property) — Rule provenance
-- `source_repo` / `source_author` (properties) — Upstream repo name and original author, derived from `metadata_` for mirrored rules
-- `is_authored_local` (property) — True when the rule originated in-app rather than mirrored from a repo
-- `linked_entry_count` / `linked_actor_count` (properties) — Sizes of the `source_entries` / `source_actors` arrays
+Computed properties: `entry_title`, `entry_url`, `source_repo`, `source_author`, `is_authored_local` (no upstream repo), `linked_entry_count`, `linked_actor_count`.
 
-**Indexes:**
-- `rule_type` — Fast filtering in Rule Library
-- `created_by` — Per-user rules
-- `entry_id` — Reverse lookups from entry
+The `entry` relationship is `lazy="joined"`, so every `select(DetectionRule)` also loads the full source article. Bulk reads that only need rule fields select columns instead, to avoid loading the same article text once per rule.
 
-**Eager-load caveat:** The `entry` relationship is `lazy="joined"`, so any `select(DetectionRule)` pulls the full source article with each rule. Bulk read paths that only need rule metadata (e.g., the correlation pivot's related-rules block) deliberately select individual columns instead — the entity form of the query once duplicated each entry's article content per rule and OOM'd the worker on heavily-linked entities.
+### DetectionRuleVersion
 
-### DetectionRuleVersion (lines 11-28, `detection_rule_version.py`)
+Table `detection_rule_versions`: `rule_id` (cascade delete), `version_number`, `rule_content`, `rule_type`, `change_description`, `changed_by`, `created_at`.
 
-```python
-class DetectionRuleVersion(Base):
-    __tablename__ = "detection_rule_versions"
-    
-    id                  UUID          PK
-    rule_id             UUID          FK (detection_rules) CASCADE
-    version_number      int           1, 2, 3, ...
-    rule_content        Text          Immutable snapshot
-    rule_type           str(30)       May change across versions
-    change_description  Text          Changelog entry
-    changed_by          UUID          FK (users)
-    created_at          DateTime      When edit was made
-    
-    # Relationships
-    rule                DetectionRule  Back-reference
-```
+- A new rule has no versions.
+- When `PUT /detection-rules/{id}` changes `rule_content`, the **old** content is saved as version `max + 1`, then the rule is updated.
+- Rollback (`POST /detection-rules/{id}/versions/{vid}/rollback`) first saves the current content as a new version ("Snapshot before rollback to vN"), then copies the target version's content and type onto the rule. Old versions are never changed.
 
-**Semantics:**
-- Newly created/auto-extracted rules have no version rows; a version is auto-created whenever `rule_content` changes via `PUT /detection-rules/{id}` (numbered `max + 1`, starting at 1)
-- **Immutable:** Old versions never modified; new version created for each edit
-- **Rollback:** Rollback endpoint (RuleDetailPage) snapshots the current content as a new version, then restores the target version's content (and type) onto the rule
+### DetectionSummary
 
-### DetectionSummary (lines 11-29, `detection_summary.py`)
+Table `detection_summaries`: a saved AI analysis of several entries. Columns: `created_by`, `title`, `entry_ids`, `analysis_focus` (default `campaign`), `summary_content` (the full AI result as JSONB), `created_at`, `updated_at`. The coverage workspace also stores its saved sets here.
 
-Captures AI-generated detection content from multi-entry analysis:
+### TelemetrySource
 
-```python
-class DetectionSummary(Base):
-    __tablename__ = "detection_summaries"
-    
-    id                  UUID          PK
-    created_by          UUID          FK (users)
-    title               str(500)      User-provided title
-    entry_ids           ARRAY(UUID)   Entries analyzed
-    analysis_focus      str(30)       campaign | vulnerability | malware | actor
-    summary_content     JSONB         Full AI response:
-                                      - executive_summary
-                                      - attack_chain (list)
-                                      - indicators (host/network/behavioral)
-                                      - generated_rules (list)
-                                      - gaps_and_recommendations
-                                      - related_intelligence
-    created_at          DateTime
-    updated_at          DateTime
-    
-    # Relationships
-    creator             User
-```
+Table `telemetry_sources`: one row per log source you collect. Columns: `name`, `category`, `vendor`, `product`, `log_types`, `log_types_canonical`, `ingested_into`, `enabled`, `notes`, `created_by`, `created_at`.
 
-**Used by:** Detection Workbench page (saves AI analysis for later retrieval).
+### Mitigation
 
-### TelemetrySource (lines 11-31, `telemetry_source.py`)
-
-Analysts define available data sources to inform feasibility checks:
-
-```python
-class TelemetrySource(Base):
-    __tablename__ = "telemetry_sources"
-    
-    id                  UUID          PK
-    created_by          UUID          FK (users)
-    name                str(255)      e.g., "Windows Event Logs"
-    category            str(30)       endpoint | network | email | identity | 
-                                      cloud | saas | virtualization | container | 
-                                      database | application
-    vendor              str(100)      e.g., "Microsoft"
-    product             str(100)      e.g., "Windows Server"
-    log_types           ARRAY(Text)   e.g., ["Security", "Sysmon", "PowerShell"]
-    ingested_into       str(50)       splunk | elastic | sentinel | crowdstrike | etc.
-    enabled             bool
-    notes               Text          Availability/quality notes
-    created_at          DateTime
-    
-    # Relationships
-    creator             User
-```
-
-### Mitigation (lines 11-31, `mitigation.py`)
-
-Tracks MITRE ATT&CK mitigations and cross-references:
-
-```python
-class Mitigation(Base):
-    __tablename__ = "mitigations"
-    
-    id                  UUID          PK
-    mitre_id            str(20)       Unique (M-ID)
-    name                str(255)      e.g., "Data Backup"
-    description         Text          MITRE description
-    mitre_url           Text          MITRE link
-    cis_controls        ARRAY(Text)   CIS v8 mappings
-    nist_controls       ARRAY(Text)   NIST 800-53 mappings
-    article_count       int           Denormalized mention count
-    first_seen_at       DateTime
-    last_seen_at        DateTime
-    wikipedia_url       Text          External reference
-    wikipedia_content   Text
-    wikipedia_image_url Text
-    
-    # Relationships
-    entry_mitigations   [EntryMitigation]   Links to entries
-    ttp_mitigations     [TTPMitigation]     Links to TTPs (M-ID mappings)
-```
+Table `mitigations`: MITRE ATT&CK mitigations. Columns: `mitre_id` (unique M-ID), `name`, `description`, `mitre_url`, `cis_controls`, `nist_controls`, `article_count`, `first_seen_at`, `last_seen_at`, and Wikipedia fields. See [Mitigations](#mitigations-and-attck-integration) for the link tables.
 
 ---
 
 ## Detection Workbench
 
-**Component:** `DetectionWorkbenchPage.tsx` (783 lines)
-
-AI-powered interface for analyzing multi-entry threat intelligence and generating detection content.
-
-**Where it lives:** It renders as the collapsible "Generate Rules" generator panel inside the Rule Library section of the Workbench (`WorkbenchPage.tsx` `RulesSection`). `/detection-workbench` redirects to `/workbench/explore`.
+`frontend/src/pages/DetectionWorkbenchPage.tsx` is the AI rule generator. It opens as the **Generate Rules** panel inside the Rules Library. `/detection-workbench` redirects to `/workbench/explore`.
 
 ### Workflow
 
-1. **Entry Selection**
-   - Search bar debounced at 300ms (line 82-84)
-   - Multi-select via autocomplete dropdown (lines 298-318)
-   - Selected entries shown as removable chips (lines 319-334)
+1. **Pick entries.** Search articles by title (debounced 300 ms) and add them as chips.
+2. **Pick formats.** Sigma (default), Splunk SPL, CrowdStrike QL, Elastic QL, KQL, Snort/Suricata, YARA.
+3. **Pick a focus.** Auto-detect, Campaign, Vulnerability, Malware or Threat Actor.
+4. **Generate Analysis.** The page posts to `POST /intelligence/detection-summary`. The AI call runs inside the request and is capped at 150 seconds, below the 180-second gunicorn worker timeout.
+5. **Read the results:**
+   - Executive summary
+   - Attack chain: ATT&CK steps, each with a detection idea, feasibility and log sources
+   - Indicators, in Network / Host / Behavioral tabs
+   - Generated rules, each with **Copy** and **Save to library**
+   - Related intelligence: earlier articles, existing rules, related CVEs
+   - Gaps and recommendations
+6. **Export:** all rules as text, the summary as Markdown, or an ATT&CK Navigator layer (built in the browser).
 
-2. **Configuration**
-   - **Rule Formats:** Checkbox toggles for SIGMA, Splunk SPL, CrowdStrike QL, Elastic QL, KQL, Snort/Suricata, YARA (lines 340-357)
-   - **Analysis Focus:** Dropdown selector for campaign | vulnerability | malware | actor | auto-detect (lines 359-373)
-
-3. **Generation**
-   - API call to `/intelligence/detection-summaries` via `useDetectionSummary()` hook (line 89-90)
-   - Request payload: `DetectionSummaryRequest` with entry_ids, rule_formats, focus, include_existing_intelligence flag
-   - Single long-running POST with loading spinner (lines 408-415). The backend runs the AI task synchronously inside the request, bounded to 150s so a slow provider call can't outlast the 180s gunicorn worker timeout (`detection_summary.py`, lines 166-178)
-
-4. **Results Display** (sections 425-471)
-
-   a. **Executive Summary** (ExecutiveSummarySection)
-      - High-level threat overview
-      
-   b. **Attack Chain** (AttackChainSection)
-      - MITRE-mapped steps: tactic → technique
-      - Each step includes:
-        - Phase (e.g., "Initial Access")
-        - Technique ID and name
-        - Description
-        - Detection opportunity
-        - Feasibility badge (High/Medium/Low)
-        - Log source tags
-      
-   c. **Indicators** (IndicatorsSection, lines 544-601)
-      - Tabbed view: Network | Host | Behavioral
-      - Each indicator card shows type, value, context, detection note
-      
-   d. **Generated Rules** (GeneratedRulesSection, lines 624-690)
-      - Multi-language rule output
-      - Copy to clipboard (lines 130-134)
-      - Save to library (lines 136-150)
-      - Rules display in a preformatted block (line 682)
-      
-   e. **Related Intelligence** (lines 692-760)
-      - Previous articles mentioning same entities
-      - Existing detection rules for same TTPs
-      - Related CVEs
-      
-   f. **Gaps & Recommendations** (lines 762-783)
-      - Detection gaps (TTPs with no rules)
-      - Feasibility constraints
-      - Data source recommendations
-
-5. **Export Options** (lines 451-470)
-   - **Export Rules:** All generated rules as newline-separated blocks
-   - **Export Summary:** Markdown with all sections
-   - **Export Navigator:** ATT&CK Navigator JSON layer (line 243-261)
-
-### State Management
-
-```typescript
-[entrySearch, setEntrySearch]           // Live input
-[debouncedSearch, setDebouncedSearch]   // Debounced for API
-[selectedEntries, setSelectedEntries]   // Multi-select state
-[ruleFormats, setRuleFormats]           // Checkbox selections
-[focus, setFocus]                       // Analysis focus dropdown
-[activeIndicatorTab, setActiveIndicatorTab]  // Indicator section tab
-[copiedRuleIndex, setCopiedRuleIndex]   // Feedback for copy action
-[savedRuleIndices, setSavedRuleIndices] // Track saved rules
-```
-
-### Key Hooks
-
-- `useEntitySearch(query)` — Search entries by title (from correlation engine)
-- `useDetectionSummary()` — Mutation for AI analysis request (TanStack Query)
-- `useCreateDetectionRule()` — Save individual rule to library
-- `useNavigate()` — Route to chat agent with entry context
-
-### API Integration
-
-**Frontend → Backend flow:**
-1. User clicks "Generate Analysis"
-2. `handleGenerate()` assembles `DetectionSummaryRequest` (lines 108-120)
-3. `detectionSummary.mutate(request)` POSTs to `/intelligence/detection-summaries`
-4. Backend runs AI task with variables (entry data, TTPs, telemetry sources)
-5. Frontend receives `DetectionSummaryResponse` with all sections
-6. UI renders results with copy/save/export actions
+`POST /intelligence/detection-summaries` does the same generation and also saves the result as a `DetectionSummary`. `GET` and `DELETE` on `/intelligence/detection-summaries[/{id}]` list, read and remove saved ones.
 
 ---
 
 ## Rule Library
 
-**Component:** `RulesSection` in `WorkbenchPage.tsx`
-
-The rule library is a section of the unified Workbench: sidebar group **DETECTION → Rules Library** at `/workbench/explore`. Deep links: `/workbench/explore?section=rules` activates the section, and `?rules_q=<term>` seeds the search box (used by entity profile "Search library" CTAs).
-
-The library is a research/authoring surface: a faceted rail, provenance columns, and an "Intel → Rules" coverage board.
+The Rules Library is the **Rules** section of the Workbench (sidebar group **Detection → Rules Library**, at `/workbench/explore?section=rules`). It is built by `RulesSection` in `frontend/src/pages/WorkbenchPage.tsx`. `?rules_q=<term>` fills the search box, which entity profiles use for their "Search library" links.
 
 ### Search and Filters
 
-The library reads its rows **and** its facet counts from a dedicated Meilisearch `rules` index via `GET /detection-rules/search` (no client-side query parser). Rows and counts arrive in the same round trip, so the rail narrows with the list instead of showing library-wide totals.
+The list and its facet counts both come from the Meilisearch `rules` index through `GET /detection-rules/search`, in one request. (Meilisearch is the search engine IntelFeed uses; a "facet" is a filter group with a count next to each value.) Because they arrive together, the counts always match the list.
 
-- **Search box** — debounced, relevance-ranked with typo tolerance (`q=` param). Searchable fields: title, description, tags, tactics, techniques, source products, repo, author, and the actors/malware/tools/vendors/products borrowed from the rule's source entry — so typing "APT33" or "Fortinet" filters the list even though rules carry no such columns of their own.
-- **Facet rail** — fourteen groups: **Rule format** (`rule_type=`), **Severity** (`severity=`), **ATT&CK tactic** (`tactic=`), **Technique** (`technique=`), **Telemetry** (`telemetry_token=`), **Source repo** (`source_repo=`), **Author** (`source_author=`), **License** (`license=`), **Tags** (`tag=`), and the entry-borrowed **Actors** / **Malware** / **Tools** / **Vendors** / **Products** (`actor=`, `malware=`, `tool=`, `vendor=`, `product=`).
-  - Values within one group OR together; groups AND with each other. Ticking two formats widens the list.
-  - Counts are **disjunctive** — each facet is counted with every other filter applied but not its own, so picking "sigma" still shows the other formats. This costs one extra Meilisearch query per active facet, batched into a single multi-search request.
-- **Telemetry switch** — All telemetry / My telemetry / Gaps, beside the search box. It is a **bulk-select over the rail's Telemetry group**, not a filter of its own: clicking it ticks the matching boxes and the boxes do the filtering, so the list can never disagree with what the rail shows and every tick stays adjustable afterwards. The same action sits on the group itself as `select mine`. Which values count as collected comes from `GET /detection-rules/telemetry-vocabulary` — the match is tiered and fuzzy (a ticked product name, a canonical behaviour id, or a category with a ticked source), so the client cannot derive it by comparing strings. Hand-editing the ticks leaves no segment lit rather than one claiming a preset that no longer holds.
-  - Because a group ORs internally, "My telemetry" means *touches at least one source we collect* — partially covered rules included. For the strict "every required source is collected" read, the API takes `telemetry=covered|missing`; the Telemetry column's per-row ring shows the same verdict.
-- **Research Views** — All rules / New this week (`created_after=`) / Recently updated upstream (sorts by `upstream_updated_at`) / My drafts (`authored_local=true` + `is_draft=true`). These have no facet group of their own, so they narrow every count including their own.
-- **Lens toggle** — client-side regrouping of loaded rows: Flat / Technique / Repo / Product
-- **Library / Intel → Rules toggle** — the board mode renders `RuleCoverageBoard` (backed by `GET /detection-rules/coverage-board`): entities trending in recent entries with how many library rules cover each
-- **Sortable column headers** — Rule (title) and Added (created_at) in the UI; `sort_by` also accepts rule_type, severity, is_draft, updated_at, upstream_updated_at, and `relevance` (used automatically whenever the search box has text)
+- **Search box.** Relevance-ranked and typo-tolerant. A **Search in** switch picks All, Metadata or Rule body. Metadata covers title, description, tags, tactics, techniques, products, repo, author, and the actors, malware, tools, vendors and products linked to the rule's source article. So typing "APT33" finds rules even though rules have no actor column.
+- **Facet rail.** Thirteen groups: Rule format, Severity, Source repo, ATT&CK tactic, Technique, Threat actor, Malware, Tool, Vendor, Product, Telemetry, Tags, License.
+  - Values in one group are ORed. Groups are ANDed. Ticking two formats widens the list.
+  - Counts are **disjunctive**: each group is counted with every other filter applied but not its own, so picking "sigma" still shows how many rules the other formats have. This costs one extra Meilisearch query per active group, sent together as one multi-search.
+- **Telemetry switch** (All telemetry / My telemetry / Gaps). It ticks boxes in the rail's Telemetry group; the boxes do the filtering. The rail group's **select mine** link does the same. Which values you collect comes from `GET /detection-rules/telemetry-vocabulary`, because the match is fuzzy and the browser cannot work it out by comparing strings.
+  - Since a group ORs its values, "My telemetry" means "needs at least one source you collect". For "every source the rule needs is collected", call the API with `telemetry=covered` (or `missing`). The Telemetry column's ring shows that strict verdict per rule.
+- **Research Views:** All rules, New this week, Recently updated upstream, My drafts.
+- **Group rules by:** Flat, Technique, Repo or Product. This regroups the loaded rows in the browser.
+- **Sorting.** The Rule and Added headers sort by title and creation date. The API also accepts `rule_type`, `severity`, `is_draft`, `updated_at`, `upstream_updated_at` and `relevance` (used whenever the search box has text).
 
-`GET /detection-rules` (PostgreSQL, `ILIKE` substring matching) remains for scripted/API use and for the `search=` + `status=` shape; the UI no longer calls it for the list.
+`GET /detection-rules` is a separate PostgreSQL list for scripts and the API. It filters with `search=` (substring match), `rule_type=`, `is_draft=`, `severity=`, `technique=`, `cve=` and others. The library does not use it.
 
-**Deep links:** `?rules_q=<term>` seeds the search box (used by entity profile "Search library" CTAs).
-
-The app's global search bar covers rules too, as one entity type among many: `rule:`, `rule.type:`, `rule.severity:`, `rule.data_source:`, `rule.tactic:`, `rule.tag:`, `rule.draft:`, `rule.license:` (see [`query-language.md`](query-language.md)). Use that to find rules *alongside* other intelligence; use the library when rules are the subject.
+The global search bar also finds rules, with `rule:`, `rule.type:`, `rule.severity:`, `rule.data_source:`, `rule.tactic:`, `rule.tag:`, `rule.draft:` and `rule.license:`. See [query-language.md](query-language.md).
 
 #### The `rules` index
 
-`entity_indexer.sync_rules()` builds one document per rule. Beyond the rule's own columns it precomputes four things Meilisearch cannot express:
+`entity_indexer.sync_rules()` builds one search document per rule. On top of the rule's own fields it adds:
 
-- **`authored_local`** — "no repo in metadata"; Meilisearch has no "attribute is absent" filter.
-- **`telemetry_tokens`** — what the rule needs to fire, across every format: `data_sources` where declared, else the Sigma `log_source` triple or the per-format defaults (`detection_coverage.telemetry_tokens_from_rule`). This is what the rail's **Telemetry** group faces: 8,479 of the corpus leave `data_sources` empty and would otherwise be untickable. The raw column stays filterable for the `data_source=` param, but is no longer a facet.
-- **Entity links** — actors/malware/tools/vendors/products resolved from the source entry's autolink junctions, one query per junction per batch.
-- **Flattened JSONB** — `source_products` and `source_cves` have historically held both bare strings and `{name: ...}` objects; both are flattened to strings so a facet has one value per product rather than a mix of shapes.
+- **`authored_local`**: true when the rule has no upstream repo. Meilisearch cannot filter on "field is missing", so this is stored.
+- **`telemetry_tokens`**: what the rule needs to fire. It is `data_sources` if set, otherwise the Sigma `logsource` product/category/service, otherwise a default per format (YARA: file, memory; Snort: network, ids; Nuclei: http, web, waf). The Telemetry group uses this, because most rules leave `data_sources` empty.
+- **Entity links**: actors, malware, tools, vendors and products from the source article.
+- **Flattened lists**: `source_products` and `source_cves` can hold plain strings or `{name: …}` objects; both become strings.
 
-Timestamps are epoch integers, not ISO strings, so range filters and sorts compare numerically. `maxTotalHits` is raised to 100,000 (the default 1,000 caps both the reported total *and* paging depth), and facet values are sorted by count so the default 100-value truncation keeps the meaningful ones — sorted alphabetically, the Technique facet stopped at T1068 and dropped T1078, its most common technique.
+Index settings that matter:
 
-Writes keep the index current: create, update, bulk-update and both delete paths re-index or remove the affected documents. Drift is healed by `sync_entity_search_indexes` (every 4 hours), which now includes rules.
+- Timestamps are stored as numbers, so date filters and sorts work.
+- `maxTotalHits` is 100,000. The default of 1,000 would cap both the total shown and how far you can scroll.
+- `maxValuesPerFacet` is 5,000 and facet values are sorted by count, so the most common techniques are never cut off.
+- `source_products` is searchable but not a facet: few rules set it and its values are raw CPE strings. The Product group uses the article-linked products instead.
 
-`source_products` stays searchable but is deliberately **not** a facet: only a handful of rules declare it and the values are raw CPE strings (`6bk1602-0aa12-0tp0_firmware`). The Products facet uses the entry-derived `products` instead — the same vocabulary as the rest of the app.
+Creating, editing, bulk-editing and deleting rules update the index straight away. The `sync_entity_search_indexes` job (every 4 hours) repairs any drift.
 
 ### Display
 
-Plain table with infinite scroll (100 rules per page, IntersectionObserver sentinel — not virtualized):
-- Severity stripe (color-coded critical/high/medium/low) + checkbox column for multi-select
-- Rule cell — title (clickable through to `/workbench/rule/{id}`) with format badge, severity, CVE chip, and linked-entry count
-- Source — "authored here" vs. upstream GitHub repo, original author, and license (provenance columns)
-- ATT&CK — technique chips (first 3)
-- Telemetry — per-rule feasibility ring against the enabled telemetry inventory
-- Added — relative age
+The list is a table that loads 100 rules at a time as you scroll. Columns:
 
-Toolbar actions: **+ New Rule** (`/workbench/rule/new`), **Generate Rules** (toggles the embedded AI Detection Workbench generator panel), **Import**, **Export**.
+- Severity stripe and a select checkbox
+- **Rule**: title (links to `/workbench/rule/{id}`), format badge, severity, CVE and linked-entry count
+- **Source**: "authored here" or the upstream GitHub repo, with author and license
+- **ATT&CK**: the first technique chips
+- **Telemetry**: a ring showing how much of the needed telemetry you collect
+- **Added**: age
+
+Toolbar: **+ New Rule** (`/workbench/rule/new`), **Generate Rules**, **Import**, **Export**. On narrow screens Import, Export and Generate move into a `⋯` menu.
 
 ### Bulk Operations
 
-Selecting rows reveals a bulk bar: Publish / Unpublish / Export (ZIP) / Delete (with undo toast) / Clear.
+Selecting rows shows a bar with **Publish**, **Unpublish**, **Export** (ZIP), **Delete** (with an undo toast) and **Clear**. These call `POST /detection-rules/bulk-update` (`is_draft`, `tags_add`, `tags_remove`) and `POST /detection-rules/bulk-delete`. Tag changes are available in the API only.
 
-`useBulkUpdateRules()` hook (lines 133-152 in `useDetectionRules.ts`) → `POST /detection-rules/bulk-update`:
-- `is_draft` — bulk publish/unpublish
-- `tags_add` / `tags_remove` — bulk tag management (API-level; the UI bulk bar currently only exposes publish state)
+### Rule detail page
+
+`frontend/src/pages/RuleDetailPage.tsx` (`/workbench/rule/:id`) is the editor. The center is a CodeMirror editor with live validation. Side panes: **Details**, **AI Assist** (streaming chat), **Convert**, **History** (versions, diff and rollback), plus **Structure**, **Context** and **Compare**. The pane components live in `frontend/src/components/ruleBench/`.
 
 ---
 
@@ -637,124 +333,71 @@ Selecting rows reveals a bulk bar: Publish / Unpublish / Export (ZIP) / Delete (
 
 ### Telemetry-Aware Coverage Classification
 
-**Service:** `backend/app/services/detection_coverage.py`
-
-Coverage is deliberately not a rule-lifecycle concept. Each ATT&CK technique (or CVE) is classified three ways:
+`backend/app/services/detection_coverage.py` sorts each ATT&CK technique (or CVE) into one of three states:
 
 | Status | Meaning |
 |--------|---------|
-| `covered` | At least one **non-draft** rule references it AND that rule's `data_sources` are all satisfiable by the enabled telemetry inventory (rules with no data sources count as satisfiable). |
-| `library_only` | Rules exist, but every one requires data sources missing from enabled telemetry. `missing_data_sources` reports the best (fewest-missing) rule's gaps — the cheapest telemetry unlock. |
-| `no_rule` | No non-draft rule references the technique at all. |
+| `covered` | At least one published rule references it, and you collect everything that rule needs. Rules with no `data_sources` count as satisfiable. |
+| `library_only` | Rules exist, but each one needs telemetry you do not collect. `missing_data_sources` lists the gaps of the rule that is closest to working. |
+| `no_rule` | No published rule references it. |
 
-Key functions:
-- `classify_techniques(db, technique_ids)` — matches rules via `source_ttps` JSONB (with a legacy fallback on `mitre_tactics`), returns `{technique_id: {status, rule_count, satisfiable_rule_count, missing_data_sources, rules[]}}` (max 5 rules per technique)
-- `classify_cves(db, cve_ids)` — same statuses; a rule references a CVE when `source_cves` contains it or the title mentions it
-- `summarize(classification)` — aggregate counts + `coverage_percentage`
-- `entry_opportunity_tiers(...)` — per-entry tier: `actionable_gap` (some technique has no rule at all), `telemetry_gap` (rules exist but are telemetry-blocked), or `None`
+Drafts never count.
 
-Data-source ↔ telemetry matching (normalized exact or bidirectional substring match) is shared with the rule-detail feasibility check, so both surfaces agree on "satisfiable."
+Main functions:
 
-**API endpoint:** `POST /intelligence/detection-coverage` with a list of technique IDs (max 500) → `{summary, techniques}`. Used by entity profiles to roll up genuine detection coverage; also feeds the ATT&CK matrix (below).
+- `classify_techniques(db, technique_ids)`: matches rules on `source_ttps` (and, for older rows, technique IDs stored in `mitre_tactics`). Returns status, rule counts, missing sources and up to 5 example rules per technique.
+- `classify_cves(db, cve_ids)`: the same, for CVEs. A rule references a CVE if `source_cves` contains it or the title mentions it.
+- `summarize(classification)`: totals and a `coverage_percentage`.
+- `entry_opportunity_tiers(...)`: per entry, `actionable_gap` (a technique has no rule at all), `telemetry_gap` (rules exist but are blocked by telemetry) or `None`.
 
-### Coverage Gap Detection
+**How a data source matches your telemetry.** Rules and your inventory name things differently (Elastic index patterns, Sentinel connector IDs, product names, ATT&CK log channels). So matching runs in three tiers, strongest first: a ticked product name, a shared canonical log type, or a category that has at least one ticked source. The rule-detail feasibility badge, the telemetry gaps list and the ATT&CK matrix all use this same match.
 
-**Widget endpoint:** `GET /widgets/attack-coverage-gap` (`widgets_detection.py` lines 49-96)
+`POST /intelligence/detection-coverage` takes up to 500 technique IDs and returns `{summary, techniques}`. Entity profiles and the ATT&CK matrix use it.
 
-Identifies TTPs mentioned in recent articles that lack detection rules:
+### Coverage workspace
 
-```python
-# Query entries with TTPs but NO detection rules
-covered_entries = select(DetectionRule.entry_id)  # Rules link to entries
+An entity profile's **Detection** tab is backed by `/api/coverage-workspace` (`backend/app/services/coverage_workspace.py`). For one actor, malware, CVE or technique over a window (7d, 14d, 30d, 90d or all), it shows the articles, the techniques they describe (with the quoted sentence), prior rules for each technique, and a set of rules you are assembling. Sets are saved as `DetectionSummary` rows and export as Markdown or a ZIP. It makes no AI calls. A technique whose log channels match nothing you collect is shown as a sourcing problem, not a detection gap.
 
-# Find TTPs in UNCOVERED entries
-select(
-    TTP.technique_id,
-    TTP.technique_name,
-    TTP.tactic,
-    count(distinct EntryTTP.entry_id)  # Frequency
-)
-.join(TTP, TTP.id == EntryTTP.ttp_id)
-.where(
-    EntryTTP.extracted_at >= start,
-    EntryTTP.extracted_at <= end,
-    ~EntryTTP.entry_id.in_(covered_entries)  # NOT in covered_entries
-)
-.group_by(TTP.id, ...)
-.order_by(count DESC)
-.limit(15)
-```
+### Dashboard widgets
 
-**Output:** Ranked list of gap techniques with:
-- technique_id, technique_name, tactic
-- mention_count (how many articles reference this TTP without rules)
+These endpoints live in `backend/app/api/widgets_detection.py` unless noted. Each takes `date_from`, `date_to` (default: the last 30 days) and `limit` (default 15).
 
-**Use case:** Priority queue for which TTPs to author rules for next.
-
-### Format Breakdown Widget
-
-**Endpoint:** `GET /widgets/detection-format-breakdown`
-
-Counts rules by type in a date window:
-
-```python
-select(DetectionRule.rule_type, count())
-.where(DetectionRule.created_at >= start, <= end)
-.group_by(rule_type)
-```
-
-**Output:** `[{rule_type, count}, ...]` — Visualized as bar chart showing SIGMA vs. Splunk vs. YARA distribution.
-
-### KEV Coverage
-
-**Endpoint:** `GET /widgets/kev-matches`
-
-Identifies known exploited CVEs (from CISA KEV catalog) mentioned in detection gaps:
-
-```python
-window_cves = CVEs mentioned in [date_from, date_to]
-kev_cves = window_cves WHERE exploit_status="active_exploitation"
-          OR exploit_availability="active_exploitation"
-
-select(CVE, mention_count, ...)
-.where(CVE.id.in_(kev_cves))
-.order_by(mention_count DESC, cvss_score DESC)
-```
-
-**Output:** CVE list with CVSS/EPSS scores and mention count — prioritizes which CVEs to create rules for.
+- **`GET /widgets/attack-coverage-gap`**: techniques mentioned in articles that have no rule extracted from them, ranked by how many such articles mention each. Use it to choose what to write next.
+- **`GET /widgets/detection-format-breakdown`**: rule counts by format, for rules created in the window.
+- **`GET /widgets/kev-matches`**: CVEs mentioned in the window that are marked as actively exploited, ranked by mentions and then CVSS score, with EPSS, KEV status and KEV due date.
+- **`GET /widgets/detection-coverage`** (`widgets.py`): technique coverage for the Detection Coverage widget.
 
 ---
 
 ## ATT&CK Catalog and Matrix
 
-The full MITRE ATT&CK catalog is hydrated locally and rendered as a Navigator-style matrix with feed-frequency heat and telemetry-aware coverage.
-
 ### Catalog Hydration
 
-**Module:** `backend/app/intelligence/attack_catalog.py`
+`backend/app/intelligence/attack_catalog.py` downloads the official MITRE ATT&CK data for the `enterprise`, `mobile` and `ics` domains and writes every technique to the `ttps` table. Catalog fields on `TTP`: `matrix_domain`, `tactics` (all tactics; `tactic` is the main one), `is_subtechnique`, `parent_technique_id`, `is_deprecated`.
 
-- Fetches official ATT&CK STIX bundles for the `enterprise`, `mobile`, and `ics` domains and upserts every technique into the `ttps` table
-- Catalog fields on `TTP`: `matrix_domain`, `tactics` (all tactics; `tactic` remains the primary), `is_subtechnique`, `parent_technique_id`, `is_deprecated`
-- Refreshed via `scripts/seed/seed_mitre_attack.py` (run inside the API container) or the enrichment worker task that calls `hydrate_attack_catalog()` (`workers/enrichment_tasks.py`)
+It runs in the weekly `run_mitre_attack_sync` job (Sunday 03:00 UTC). To run it by hand, inside the API container:
+
+```bash
+docker compose -f docker-compose.dev.yml exec api python scripts/seed/seed_mitre_attack.py
+```
 
 ### Matrix Endpoint
 
-**Endpoint:** `GET /attack/matrix?domain=enterprise|mobile|ics&days=<n>&include_deprecated=<bool>` (`attack.py` lines 95-223)
+`GET /attack/matrix?domain=enterprise|mobile|ics&days=<n>&include_deprecated=<bool>` (`backend/app/api/attack.py`):
 
-- Tactics returned in canonical kill-chain order (`TACTIC_ORDER`, lines 29-78) with legacy/v18 slug handling; empty tactics dropped
-- Per-technique cell: `article_count` (windowed via `days`, or the all-time rollup), `rule_count`, `has_rule`, `coverage` (covered / library_only / no_rule via `classify_techniques()`), `deployable` (legacy boolean alias for `coverage == "covered"`), `missing_data_sources`, nested `subtechniques`, and `rollup_article_count` (parent + subs)
-- Top-level payload includes `coverage_summary` and `max_article_count` for heat scaling
-- Heavy aggregate — cached in Redis for 180s per `(domain, days, include_deprecated)` combination
+- Tactics come back in kill-chain order (`TACTIC_ORDER` in `backend/app/intelligence/tactics.py`). Empty tactics are left out.
+- Each technique has `article_count` (in the `days` window, or all time), `rule_count`, `has_rule`, `coverage` (from `classify_techniques()`), `deployable` (same as `coverage == "covered"`), `missing_data_sources`, its `subtechniques`, and `rollup_article_count` (parent plus subs).
+- The response also has `coverage_summary` and `max_article_count` (for scaling the heat colors).
+- Results are cached in Redis for 180 seconds per domain, window and deprecated flag. Anonymous visitors get their own cache entry.
 
 ### Matrix UI
 
-**Component:** `AttackMatrixSection.tsx` — Workbench sidebar **DETECTION → ATT&CK Matrix**
+`frontend/src/components/AttackMatrixSection.tsx`, at Workbench **Detection → ATT&CK Matrix**:
 
-- Domain toggle (Enterprise / Mobile / ICS) and time windows (7d / 30d / 90d / All)
-- Three layer modes: **Feed heat** (color by article frequency), **Coverage** (color by covered/library_only/no_rule), **Both** (heat fill + coverage edge)
-- Coverage legend: covered = green, "Missing telemetry" (library_only) = amber, "No rule" = red
-- Expandable sub-technique rows; hover tooltip shows coverage status and missing data sources; cells click through to TTP profiles
-- Client-side ATT&CK Navigator layer export via `buildNavigatorLayer()` (`utils/attackMatrix.ts`)
+- Domain: Enterprise, Mobile, ICS. Window: 7d, 30d (default), 90d, All.
+- Layer mode: **Feed heat** (color by article count), **Coverage** (green covered, amber "Missing telemetry", red "No rule"), or **Both** (heat fill, coverage border). Visitors see Feed heat only.
+- Sub-technique rows expand. Hovering shows coverage and missing sources. Clicking opens the technique profile.
+- **Export Navigator JSON** downloads an ATT&CK Navigator layer built in the browser by `buildNavigatorLayer()` (`frontend/src/utils/attackMatrix.ts`). ATT&CK Navigator is MITRE's web tool for coloring the technique matrix.
 
 ---
 
@@ -762,66 +405,30 @@ The full MITRE ATT&CK catalog is hydrated locally and rendered as a Navigator-st
 
 ### Export Formats
 
-**API endpoint:** `GET /detection-rules/export?format=yaml|zip&rule_ids=<csv>`
+`GET /detection-rules/export?format=yaml|zip&rule_ids=<comma-separated ids>`. Leave out `rule_ids` to export every rule.
 
-Supported formats:
+| Format | What you get |
+|--------|--------------|
+| `yaml` (default) | One `detection-rules.yml` with every rule body joined by `---` |
+| `zip` | `detection-rules.zip` with one file per rule, named from the title, with an extension per format: `.yml` (Sigma), `.spl`, `.kql`, `.eql`, `.cql`, `.rules` (Snort/Suricata), `.yar`, or `.txt` |
 
-| Format | Content | Use |
-|--------|---------|-----|
-| **YAML** | YAML-based rules (SIGMA, Nuclei) | Import to detection as code repos |
-| **ZIP** | All selected rules + metadata | Backup, sharing |
-| **ATT&CK Navigator Layer** | Technique coverage heatmap | Strategic visualizations |
-
-**Frontend integration:** `useExportRules()` hook (lines 191-219, `useDetectionRules.ts`) — triggers a blob download of `detection-rules.zip` / `.yml`
+The library's Export buttons always ask for ZIP. ATT&CK Navigator layers come from the matrix page or `GET /attack/layer` (below).
 
 ### Rule Import
 
-**Endpoint:** `POST /detection-rules/import`
+`POST /detection-rules/import` takes one file up to 20 MB:
 
-- Accepts a single `.yml`/`.yaml` file or a `.zip` archive (non-YAML zip entries counted as skipped)
-- **SIGMA only** — each YAML document is validated with `validate_rule("sigma", ...)`; failures land in `errors`
-- Imported rules are created as drafts with title/description/severity/tags/tactics lifted from the SIGMA fields; no content-hash dedup — re-importing creates duplicates
-- Returns: `{imported: N, skipped: M, errors: [...]}`
-
-**Frontend:** `useImportRules()` hook
+- A `.yml`/`.yaml` file, or a `.zip` of them. Other files in a ZIP are counted as skipped.
+- **Sigma only.** Each file is checked with `validate_rule("sigma", …)`; failures are listed in `errors`.
+- Imported rules are drafts, with title, description, severity, tags and tactics taken from the Sigma fields.
+- There is no duplicate check. Importing the same file twice makes two copies.
+- Returns `{imported, skipped, errors}`.
 
 ### ATT&CK Navigator
 
-**Endpoint:** `GET /attack/layer` (`attack.py` lines 226-308)
+`GET /attack/layer` (`backend/app/api/attack.py`) returns a Navigator layer of techniques seen in articles between `date_from` and `date_to` (default: the last 30 days). Each technique gets a score from 0 to 100, relative to the most-mentioned one, and a white-to-red color. The comment says how many articles mention it. The layer is for the `enterprise-attack` domain.
 
-Generates navigator-compatible JSON layer:
-
-```python
-techniques = []
-for ttp in covered_ttps:
-    score = (mention_count / max_mention) * 100
-    intensity = 255 - (score / 100) * 155
-    color = f"#ff{intensity:02x}{intensity:02x}"  # Red gradient
-    
-    techniques.append({
-        "techniqueID": row.technique_id,
-        "tactic": row.tactic,
-        "color": color,           # Gradient by frequency
-        "score": score,           # 0-100
-        "comment": f"Found in {row.count} articles",
-        "metadata": [
-            {"name": "articles", "value": str(row.count)},
-            {"name": "latest", "value": str(row.latest.date())},
-        ]
-    })
-
-return {
-    "name": "IntelFeed - Detected TTPs (Month Year)",
-    "domain": "enterprise-attack",
-    "versions": {"attack": "15", "navigator": "4.9.5", "layer": "4.5"},
-    "gradient": {"colors": ["#ffffff", "#ff6666"], "minValue": 0, "maxValue": 100},
-    "techniques": techniques
-}
-```
-
-**Frontend:** DetectionWorkbenchPage exports navigator layer on demand (line 243-261).
-
-**Use:** Import into MITRE ATT&CK Navigator at https://mitre-attack.github.io/attack-navigator/ for heatmap visualization.
+Import the file at <https://mitre-attack.github.io/attack-navigator/> to view it.
 
 ---
 
@@ -829,45 +436,33 @@ return {
 
 ### Inventory Management
 
-Analysts maintain their telemetry inventory in the Workbench (**DETECTION → Telemetry Sources**). CRUD endpoints: `GET/POST /telemetry-sources`, `PUT/DELETE /telemetry-sources/{id}`.
+You list the log sources you collect at Workbench **Detection → Telemetry Sources**. Endpoints under `/telemetry-sources`:
 
-Two catalog endpoints back the picker UI:
-
-- `GET /telemetry-sources/taxonomy` — legacy flat taxonomy: `{category: [data_source_name, ...]}` (e.g., `endpoint: ["process_creation", "file_creation", ...]`)
-- `GET /telemetry-sources/catalog` — prepopulated catalog entries (`name`, `category`, `vendor`, `product`, `log_types`) for checkbox selection
-- `POST /telemetry-sources/sync` — reconciles `TelemetrySource` records against a list of selected catalog names (creates / enables / disables; returns per-item actions and counts)
+| Endpoint | Purpose |
+|----------|---------|
+| `GET`, `POST /telemetry-sources` | List and add sources |
+| `PUT`, `DELETE /telemetry-sources/{id}` | Edit and remove a source |
+| `GET /telemetry-sources/catalog` | The built-in catalog of common sources, for the checkbox picker |
+| `POST /telemetry-sources/sync` | Admin only. Match the inventory to a list of ticked catalog names (creates, enables or disables rows) |
+| `GET /telemetry-sources/taxonomy` | An older flat list of data-source names by category |
+| `POST /telemetry-sources/check-feasibility` | Which of a list of data sources you collect |
+| `GET /telemetry-sources/telemetry-gaps` | Rules blocked by missing telemetry |
 
 ### Feasibility Checking
 
-**Endpoint:** `POST /telemetry-sources/check-feasibility`
-
-Request:
 ```json
-{
-  "data_sources": ["Windows Security Log", "Network IDS", "Endpoint EDR"]
-}
+// POST /telemetry-sources/check-feasibility
+{ "data_sources": ["Windows Security Log", "Network IDS", "Endpoint EDR"] }
+
+// response
+{ "feasible": ["Windows Security Log", "Endpoint EDR"], "missing": ["Network IDS"], "coverage_pct": 0.67 }
 ```
 
-Response:
-```json
-{
-  "feasible": ["Windows Security Log", "Endpoint EDR"],
-  "missing": ["Network IDS"],
-  "coverage_pct": 0.67
-}
-```
-
-Matching delegates to `services/detection_coverage.py` (`get_available_telemetry()` + `split_data_sources()`), so the rule-detail feasibility badge, telemetry gaps, and the ATT&CK matrix coverage statuses all agree on what "satisfiable" means.
-
-**Frontend hook:** `useCheckFeasibility()` (lines 221-231, `useDetectionRules.ts`)
-
-**Integration:** Rule detail page re-checks feasibility whenever the rule's data sources change and shows a badge colored by `coverage_pct` (≥0.8 green, ≥0.5 amber, else red).
+It uses the same three-tier match as coverage (`get_available_telemetry()` and `split_data_sources()`). The rule detail page re-checks whenever the rule's data sources change and colors its badge by `coverage_pct`: 0.8 or more is green, 0.5 or more is amber, below that is red.
 
 ### Telemetry Gaps
 
-**Endpoint:** `GET /telemetry-sources/telemetry-gaps`
-
-Scans every rule that declares `data_sources` and returns `{rules_with_gaps[], total_rules_checked, rules_with_gaps_count, most_needed_sources[]}` — rules sorted by lowest coverage, plus the top 20 most-needed missing sources across the library (a telemetry shopping list).
+`GET /telemetry-sources/telemetry-gaps` checks every rule that declares `data_sources`. It returns `rules_with_gaps` (lowest coverage first), `total_rules_checked`, `rules_with_gaps_count`, and `most_needed_sources`: the 20 missing sources that would unblock the most rules.
 
 ---
 
@@ -875,31 +470,14 @@ Scans every rule that declares `data_sources` and returns `{rules_with_gaps[], t
 
 ### Mitigation Model
 
-TTP-to-mitigation mappings (`TTPMitigation` junction table in `mitigation.py`):
+Two link tables in `backend/app/models/mitigation.py`:
 
-```python
-class TTPMitigation(Base):
-    ttp_id: UUID        FK (ttps)
-    mitigation_id: UUID FK (mitigations)
-    created_at: DateTime
-```
-
-Also entry-level mitigations (`EntryMitigation`):
-```python
-class EntryMitigation(Base):
-    entry_id: UUID
-    mitigation_id: UUID
-    confidence: str             # high | medium | low
-    source: str                 # regex | ai
-    extracted_at: DateTime
-    paragraph_indices: int[]    # Where in entry text
-```
+- **`TTPMitigation`**: `ttp_id`, `mitigation_id`, `created_at`. Which mitigations address which techniques (from ATT&CK).
+- **`EntryMitigation`**: `entry_id`, `mitigation_id`, `confidence`, `source` (`regex` or `ai`), `extracted_at`, `paragraph_indices`. Which articles mention which mitigations.
 
 ### MITRE ATT&CK Integration
 
-**Technique listing:** `GET /attack/techniques`
-
-Returns top techniques by frequency (default limit 50, max 500; default window last 30 days):
+`GET /attack/techniques` returns the most-mentioned techniques between `date_from` and `date_to` (default: the last 30 days), with `limit` 50 by default and up to 500:
 
 ```json
 [
@@ -909,19 +487,9 @@ Returns top techniques by frequency (default limit 50, max 500; default window l
     "tactic": "execution",
     "count": 42,
     "latest": "2024-01-15"
-  },
-  ...
+  }
 ]
 ```
-
-**Frontend:** Displayed in campaigns, entity profiles, workbench results.
-
-### Detection Rule → Mitigation Flow
-
-1. Rule extracts `mitre_tactics` from YAML tags (e.g., `attack.execution`)
-2. TTPs in entry are fetched; mitigation mappings retrieved
-3. Suggested mitigations displayed in rule detail page
-4. Analyst can manually link mitigations via UI
 
 ---
 
@@ -929,96 +497,33 @@ Returns top techniques by frequency (default limit 50, max 500; default window l
 
 ### Rule Conversion (AI-powered)
 
-**Endpoint:** `POST /detection-rules/{ruleId}/convert`
+`POST /detection-rules/{id}/convert` with `{"target_type": "splunk_spl"}` asks the AI provider assigned to the `detection_rules` task to rewrite the rule in another format. It fails with `no_ai_assignment` if no provider is assigned.
 
-Request:
-```json
-{
-  "target_type": "splunk_spl"
-}
-```
+The result is saved as its own rule, linked to the original by `derived_from`. There is one converted rule per original and target format; converting again overwrites it and saves the old body as a version. The new rule copies the original's techniques, CVEs, actors and entries, but not its data sources or log sources, which are worked out again from the new body.
 
-Response (via `useConvertRule()` hook):
-```typescript
-{
-  converted_content: string,      // Target format rule
-  source_type: string,
-  target_type: string,
-  model: string,                  // e.g., "claude-opus"
-  tokens_input: number,
-  tokens_output: number,
-  tokens_used: number,
-  cost: number
-}
-```
+The response has `converted_content`, `source_type`, `target_type`, `model`, `tokens_input`, `tokens_output`, `tokens_used`, `cost`, and the new rule's `rule_id` and `title`. `GET /detection-rules/{id}/conversions` lists a rule's conversions.
 
-**Use case:** Convert SIGMA rule to Splunk SPL for local deployment.
+### Extending a rule
+
+`POST /detection-rules/{id}/extend` makes a draft copy titled "<title> (extended)", linked by `derived_from`, so you can change an upstream rule and keep a record of where it came from. Each call makes a new copy.
 
 ### Rule Chat (Streaming)
 
-**Function:** `streamRuleChat(options, signal?)` (lines 547-627, `useDetectionRules.ts`)
-
-Streaming endpoint for asking AI about a rule:
-
-```typescript
-POST /detection-rules/chat with:
-{
-  message: string,
-  rule_content: string,
-  rule_type: string,
-  title: string,
-  severity: string,
-  mitre_tactics: string[],
-  data_sources: string[],
-  history: ChatMessage[]
-}
-```
-
-**Response:** Server-sent events (SSE) with `data: {text, error}` frames.
-
-**Frontend:** Real-time streaming text display in rule detail chat panel.
+`POST /detection-rules/chat` streams an AI conversation about a rule as server-sent events (`data: {text, error}` frames). The request carries `message`, `rule_content`, `rule_type`, `title`, `severity`, `mitre_tactics`, `data_sources` and `history`. The frontend helper is `streamRuleChat()` in `frontend/src/hooks/useDetectionRules.ts`.
 
 ### Version Management
 
-**Rollback:** `POST /detection-rules/{ruleId}/versions/{versionId}/rollback`
-
-Snapshots the current content as a new version, then restores the target version's content onto the rule:
-
-```python
-snapshot = DetectionRuleVersion(
-    rule_id=rule_id,
-    version_number=max_ver + 1,
-    rule_content=rule.rule_content,  # Pre-rollback content preserved
-    change_description=f"Snapshot before rollback to v{target_version.version_number}",
-    changed_by=user.id,
-)
-rule.rule_content = target_version.rule_content  # Restored
-```
-
-**Timeline:** RuleDetailPage shows version history with dates, authors, change descriptions.
+See [DetectionRuleVersion](#detectionruleversion) for how versions are made and how rollback works. The History pane lists versions with date, author and description. `GET /detection-rules/{id}/diff` compares two versions, or a version with the current content.
 
 ### Provenance Tracking
 
-**Endpoint:** `GET /detection-rules/{ruleId}/provenance`
+`GET /detection-rules/{id}/provenance` returns where a rule came from: the rule's upstream fields (repo, author, license, references, upstream date), its linked entries (`entry_id` plus `source_entries`), the TTPs and malware on those entries, and threat actors from those entries plus `source_actors`.
 
-Returns the full intelligence provenance chain:
-```typescript
-{
-  rule: {                 // id, title, rule_type, created_at, plus upstream
-    source_repo,          // provenance: repo, author, license, references,
-    source_author,        // upstream_updated_at
-    license, references, upstream_updated_at, ...
-  },
-  entries: Entry[],       // Linked entries (source_entries + entry_id)
-  ttps: TTP[],            // TTPs from linked entries
-  threat_actors: Actor[], // From linked entries + source_actors
-  malware: Malware[]      // From linked entries
-}
-```
+Related endpoints on the rule page:
 
-Two sibling research endpoints round out the provenance panel on RuleDetailPage:
-- `GET /detection-rules/{ruleId}/fresh-intel` — entries on the rule's CVEs/techniques that arrived **after** the rule was last edited (the decay signal)
-- `GET /detection-rules/{ruleId}/related` — rules related by shared CVE, shared technique, alternate format, or near-duplicate content
+- `GET /detection-rules/{id}/fresh-intel`: articles about the rule's CVEs or techniques that arrived **after** the rule was last edited. A sign the rule may be going stale.
+- `GET /detection-rules/{id}/related`: rules that share a CVE or technique, other formats of the same rule, and near-duplicates.
+- `GET /detection-rules/{id}/commits`: the upstream GitHub commit history, for mirrored rules.
 
 ---
 
@@ -1026,76 +531,77 @@ Two sibling research endpoints round out the provenance panel on RuleDetailPage:
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| `RulesSection` | `pages/WorkbenchPage.tsx` | Rule library section of the Workbench (search, filters, bulk ops, import/export) |
-| `DetectionWorkbenchPage` | `pages/DetectionWorkbenchPage.tsx` | Multi-entry AI analysis interface (embedded generator panel in `RulesSection`) |
-| `RuleDetailPage` | `pages/RuleDetailPage.tsx` | Single rule view with edit/version/chat (`/workbench/rule/:id`) |
-| `AttackMatrixSection` | `components/AttackMatrixSection.tsx` | ATT&CK matrix with feed heat + coverage layers |
-| `RuleBuilderShell` | `components/RuleBuilderShell.tsx` | CodeMirror editor wrapper |
-| `SaveRuleModal` | `components/SaveRuleModal.tsx` | Modal for creating new rules |
-| `RuleEntryCard` | `components/RuleEntryCard.tsx` | Compact rule display card |
-| `RuleCoverageBoard` | `components/RuleCoverageBoard.tsx` | Intel → Rules coverage board (trending entities vs. rule counts) |
-| `CodeMirrorEditor` | `components/CodeMirrorEditor.tsx` | Syntax-highlighting editor with validation |
-| `DetectionCoverageWidget` | `components/widgets/DetectionCoverageWidget.tsx` | Dashboard widget for coverage metrics |
-| `DetectionFormatBreakdownWidget` | `components/widgets/DetectionFormatBreakdownWidget.tsx` | Chart of rules by type |
-| `AttackCoverageGapWidget` | `components/widgets/AttackCoverageGapWidget.tsx` | Uncovered-technique ranking widget |
-| `KEVMatchesWidget` | `components/widgets/KEVMatchesWidget.tsx` | Known-exploited CVE widget |
+| `RulesSection` | `pages/WorkbenchPage.tsx` | The Rules Library: search, facets, bulk actions, import/export |
+| `DetectionWorkbenchPage` | `pages/DetectionWorkbenchPage.tsx` | AI generator, shown inside the Rules Library |
+| `RuleDetailPage` | `pages/RuleDetailPage.tsx` | Rule editor (`/workbench/rule/:id`) |
+| `ruleBench/*` | `components/ruleBench/` | Editor panes: details, chat, convert, history, compare, structure, context |
+| `RuleBuilderShell` | `components/RuleBuilderShell.tsx` | Editor frame around CodeMirror |
+| `CodeMirrorEditor` | `components/CodeMirrorEditor.tsx` | Code editor with syntax highlighting |
+| `RuleEntryCard` | `components/RuleEntryCard.tsx` | Compact rule card |
+| `AttackMatrixSection` | `components/AttackMatrixSection.tsx` | ATT&CK matrix with heat and coverage |
+| `CoverageWorkspace` | `components/coverageWorkspace/` | Entity profile Detection tab |
+| `DetectionCoverageWidget` | `components/widgets/DetectionCoverageWidget.tsx` | Coverage widget |
+| `DetectionFormatBreakdownWidget` | `components/widgets/DetectionFormatBreakdownWidget.tsx` | Rules by format |
+| `AttackCoverageGapWidget` | `components/widgets/AttackCoverageGapWidget.tsx` | Techniques with no rule |
+| `KEVMatchesWidget` | `components/widgets/KEVMatchesWidget.tsx` | Actively exploited CVEs |
 
 ## Appendix: Backend API Endpoints Reference
 
+All paths are under `/api`.
+
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/detection-rules` | POST | Create new rule |
-| `/detection-rules` | GET | List rules (PostgreSQL; paginated, `search=`/`status=` filters) |
-| `/detection-rules/search` | GET | Library list + disjunctive facet counts (Meilisearch `rules` index) |
-| `/detection-rules/{id}` | GET | Fetch single rule (with telemetry feasibility annotation) |
-| `/detection-rules/{id}` | PUT | Update rule (content change creates a new version) |
-| `/detection-rules/{id}` | DELETE | Delete rule |
-| `/detection-rules/{id}/status` | PATCH | Publish/unpublish |
-| `/detection-rules/facets` | GET | Facet distribution counts (type, repo, tactic, product) |
-| `/detection-rules/coverage-board` | GET | Trending entities vs. library rule counts (Intel → Rules board) |
-| `/detection-rules/{id}/versions` | GET | List all versions |
-| `/detection-rules/{id}/versions/{vid}` | GET | Fetch single version |
-| `/detection-rules/{id}/versions/{vid}/rollback` | POST | Revert to previous version (snapshots current first) |
-| `/detection-rules/validate` | POST | Syntax validation |
-| `/detection-rules/extract-metadata` | POST | Parse rule, extract fields |
-| `/detection-rules/bulk-update` | POST | Batch tag/publish/unpublish |
-| `/detection-rules/bulk-delete` | POST | Batch delete |
-| `/detection-rules/import` | POST | Import YAML/ZIP |
-| `/detection-rules/export` | GET | Export selected rules |
-| `/detection-rules/{id}/convert` | POST | AI rule format conversion |
-| `/detection-rules/{id}/provenance` | GET | Source entries, entities, and upstream lineage |
-| `/detection-rules/{id}/fresh-intel` | GET | New intel since the rule's last edit |
-| `/detection-rules/{id}/related` | GET | Related rules (shared CVE/technique, alt format, near-dup) |
-| `/detection-rules/{id}/commits` | GET | Upstream GitHub commit timeline (mirrored rules) |
+| `/detection-rules` | POST | Create a rule |
+| `/detection-rules` | GET | PostgreSQL list with filters (scripts and API) |
+| `/detection-rules/search` | GET | Library list and facet counts (Meilisearch `rules` index) |
+| `/detection-rules/facets` | GET | Facet value counts |
+| `/detection-rules/telemetry-vocabulary` | GET | Telemetry values split into collected and missing |
+| `/detection-rules/coverage-board` | GET | Trending entities and how many library rules cover each (not used by the UI) |
 | `/detection-rules/needing-review` | GET | Published rules with new intel for their techniques |
-| `/detection-rules/{id}/diff` | GET | Version comparison |
-| `/detection-rules/chat` | POST | Streaming AI chat about rule |
-| `/intelligence/detection-summaries` | POST | Generate multi-entry analysis |
-| `/intelligence/detection-summaries` | GET | List saved summaries |
-| `/intelligence/detection-summaries/{id}` | GET | Fetch saved summary |
-| `/intelligence/detection-summaries/{id}` | DELETE | Remove summary |
-| `/intelligence/detection-coverage` | POST | Classify techniques covered / library_only / no_rule |
-| `/entries/{id}/extract-detection-rules` | POST | Re-run regex extraction on one entry |
+| `/detection-rules/{id}` | GET | One rule, with its telemetry feasibility |
+| `/detection-rules/{id}` | PUT | Update (a content change saves a version) |
+| `/detection-rules/{id}` | DELETE | Delete |
+| `/detection-rules/{id}/status` | PATCH | Publish or unpublish |
+| `/detection-rules/{id}/versions` | GET | List versions, newest first |
+| `/detection-rules/{id}/versions/{vid}` | GET | One version |
+| `/detection-rules/{id}/versions/{vid}/rollback` | POST | Restore a version (saves the current content first) |
+| `/detection-rules/{id}/diff` | GET | Compare versions |
+| `/detection-rules/validate` | POST | Syntax check |
+| `/detection-rules/extract-metadata` | POST | Read fields out of a rule body |
+| `/detection-rules/bulk-update` | POST | Publish, unpublish, add or remove tags |
+| `/detection-rules/bulk-delete` | POST | Delete many |
+| `/detection-rules/import` | POST | Import Sigma YAML or ZIP |
+| `/detection-rules/export` | GET | Export YAML or ZIP |
+| `/detection-rules/{id}/convert` | POST | AI conversion to another format (saved as a rule) |
+| `/detection-rules/{id}/conversions` | GET | A rule's conversions |
+| `/detection-rules/{id}/extend` | POST | Draft copy for editing an upstream rule |
+| `/detection-rules/chat` | POST | Streaming AI chat about a rule |
+| `/detection-rules/{id}/provenance` | GET | Source entries, entities and upstream details |
+| `/detection-rules/{id}/fresh-intel` | GET | New intel since the last edit |
+| `/detection-rules/{id}/related` | GET | Related rules |
+| `/detection-rules/{id}/commits` | GET | Upstream GitHub commits |
+| `/entries/{id}/extract-detection-rules` | POST | Run regex extraction on one entry |
 | `/entries/{id}/generate-rules` | POST | AI rule generation from one entry |
-| `/attack/matrix` | GET | Full ATT&CK matrix with heat + coverage |
-| `/attack/layer` | GET | ATT&CK Navigator JSON |
-| `/attack/techniques` | GET | Ranked technique list |
-| `/widgets/detection-format-breakdown` | GET | Rule type distribution |
-| `/widgets/attack-coverage-gap` | GET | Uncovered techniques |
-| `/widgets/kev-matches` | GET | Known exploited CVEs |
-| `/telemetry-sources/taxonomy` | GET | Legacy flat data-source taxonomy |
-| `/telemetry-sources/catalog` | GET | Prepopulated telemetry catalog |
-| `/telemetry-sources/sync` | POST | Sync inventory to catalog selections |
-| `/telemetry-sources/check-feasibility` | POST | Assess rule implementability |
-| `/telemetry-sources/telemetry-gaps` | GET | Missing data sources |
+| `/intelligence/detection-summary` | POST | Generate a multi-entry analysis (not saved) |
+| `/intelligence/detection-summaries` | POST | Generate and save an analysis |
+| `/intelligence/detection-summaries` | GET | List saved analyses |
+| `/intelligence/detection-summaries/{id}` | GET, DELETE | Read or remove a saved analysis |
+| `/intelligence/detection-coverage` | POST | Classify techniques as covered / library_only / no_rule |
+| `/coverage-workspace/{entity_type}/{entity_key}` | GET | Coverage workspace for one entity (plus `/sets` and export routes) |
+| `/attack/matrix` | GET | ATT&CK matrix with heat and coverage |
+| `/attack/layer` | GET | ATT&CK Navigator layer |
+| `/attack/techniques` | GET | Most-mentioned techniques |
+| `/widgets/detection-format-breakdown` | GET | Rules by format |
+| `/widgets/attack-coverage-gap` | GET | Techniques with no rule |
+| `/widgets/kev-matches` | GET | Actively exploited CVEs |
+| `/widgets/detection-coverage` | GET | Technique coverage widget |
+| `/telemetry-sources/...` | | See [Inventory Management](#inventory-management) |
 
 ---
 
 ## See Also
 
-- **Section 9 of architecture.md** — Overview of rule formats, lifecycle, and gap analysis
-- **backend/app/intelligence/** — All extraction, validation, and generation logic
-- **backend/app/api/** — REST endpoint definitions
-- **frontend/src/pages/** — Page-level UI components
-- **frontend/src/hooks/useDetectionRules.ts** — All detection-related TanStack Query hooks
-
+- [guide/detection-rules.md](guide/detection-rules.md): using the rule features as an analyst
+- [architecture.md](architecture.md#8-detection-engineering): where detection fits in the system
+- [workers-search-dashboards.md](workers-search-dashboards.md): the jobs that maintain rules (`rebuild_rule_coverage`, `backfill_rule_attack_mappings`, `backfill_rule_data_sources`) and the search indexes
+- `frontend/src/hooks/useDetectionRules.ts`: the frontend hooks for rules

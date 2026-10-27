@@ -5,7 +5,7 @@ Executes one or more read-only tool calls against the running IntelFeed API and
 prints JSON results to stdout. Zero external dependencies — stdlib only.
 
 Environment variables:
-    INTELFEED_API_URL       Base URL of the IntelFeed API (default: https://intelfeed.cc); https://, or http://localhost
+    INTELFEED_API_URL       Base URL of your IntelFeed instance (required); https://, or http://localhost
     INTELFEED_ALLOW_INSECURE_HTTP  1 to allow plain http:// to another host (a trusted LAN or compose network)
     INTELFEED_USERNAME      Username for authentication
     INTELFEED_PASSWORD      Password for authentication
@@ -39,8 +39,7 @@ import urllib.request
 # Configuration
 # ---------------------------------------------------------------------------
 
-API_URL = os.environ.get("INTELFEED_API_URL", "https://intelfeed.cc").rstrip("/")
-WEB_URL = os.environ.get("INTELFEED_WEB_URL", "https://intelfeed.cc").rstrip("/")
+API_URL = os.environ.get("INTELFEED_API_URL", "").strip().rstrip("/")
 USERNAME = os.environ.get("INTELFEED_USERNAME", "")
 PASSWORD = os.environ.get("INTELFEED_PASSWORD", "")
 
@@ -54,6 +53,8 @@ def insecure_url_problem(url: str) -> str | None:
     """
     from urllib.parse import urlsplit
 
+    if not url:
+        return "INTELFEED_API_URL is not set. Point it at your instance, e.g. https://intelfeed.example.com."
     parts = urlsplit(url)
     if parts.scheme == "https" and parts.hostname:
         return None

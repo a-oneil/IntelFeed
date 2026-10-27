@@ -1,6 +1,6 @@
 # Dev Stack Services (docker-compose.dev.yml)
 
-Service topology for local development. Arrows follow `depends_on`; dashed lines are runtime connections configured via env URLs. Host port → container port shown where they differ.
+The services `docker-compose.dev.yml` starts for local development. Solid arrows follow `depends_on`; dashed arrows are runtime connections set by env URLs. Ports read host → container where they differ.
 
 ```mermaid
 flowchart TD
@@ -13,15 +13,15 @@ flowchart TD
 
     worker["celery-worker<br/>default queue"] --> db
     worker --> redis
-    cli["celery-worker-ai<br/>ai queue (copilot)"] --> db
+    cli["celery-worker-ai<br/>ai queue (all AI calls, one at a time)"] --> db
     cli --> redis
     beat["celery-beat<br/>scheduler"] --> db
     beat --> redis
     tg["telegram-listener"] --> api
     tg --> redis
 
-    db[("db — PostgreSQL 16<br/>host 5433 → 5432")]
+    db[("db — PostgreSQL 16 + pgvector<br/>host 5433 → 5432")]
     redis[("redis — Redis 7<br/>host 6380 → 6379")]
 ```
 
-The celery services also `depends_on` the api (service_started) — those arrows are omitted to keep the graph readable. `./docs` is mounted read-only into the api container to serve the in-app documentation.
+The celery services also `depends_on` the api (service_started); those arrows are left out to keep the graph readable. `./docs` is mounted read-only into the api container for the in-app documentation, and `./scripts` is mounted so the utility scripts can run there.

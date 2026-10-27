@@ -1,235 +1,127 @@
 # CLI Reference
 
-This is the complete reference for the IntelFeed CLI — a zero-dependency Python tool that exposes 187 tools (organized into two flavors: full and lite) to query and manage a running IntelFeed deployment.
+This page is for anyone who wants to drive IntelFeed from a terminal, a script or a Claude skill. After reading it you can set up the CLI, call any tool, search with the query language, and add new tools.
 
-**Table of Contents:**
-1. [Overview](#overview)
-2. [Installation & Setup](#installation--setup)
-3. [Invocation Patterns](#invocation-patterns)
-4. [Read-Only Mode](#read-only-mode)
-5. [The Lite Skill vs. Full Skill](#the-lite-skill-vs-full-skill)
+The CLI is one Python file that calls a running IntelFeed server. There are two copies:
+
+- **Full CLI** (`intelfeed-skill/scripts/intelfeed_cli.py`): every tool, read and write.
+- **Lite CLI** (`intelfeed-lite-skill/scripts/intelfeed_cli.py`): read tools only.
+
+Both are generated from the backend tool registry (`backend/app/tools/`), so the server and the CLIs always list the same tools. Run `--list-tools` to see what your copy has.
+
+**Contents**
+
+1. [Installation & Setup](#installation--setup)
+2. [Invocation Patterns](#invocation-patterns)
+3. [Read-Only Mode](#read-only-mode)
+4. [The Lite Skill vs. Full Skill](#the-lite-skill-vs-full-skill)
+5. [Admin tools and confirmations](#admin-tools-and-confirmations)
 6. [Search Query Language](#search-query-language)
 7. [Tool Reference](#tool-reference)
-   - [Search & Discovery (4 tools)](#search--discovery-4-tools)
-   - [Read Operations (17 tools)](#read-operations-17-tools)
-   - [Campaign Analysis (6 tools)](#campaign-analysis-6-tools)
-   - [Automation (5 tools)](#automation-5-tools)
-   - [Advanced Analytics (5 tools)](#advanced-analytics-5-tools)
-   - [Intelligence Extraction (5 tools)](#intelligence-extraction-5-tools)
-   - [Correlation & Analysis (8 tools)](#correlation--analysis-8-tools)
-   - [Detection Engineering (3 tools)](#detection-engineering-3-tools)
-   - [Write Operations (28 tools)](#write-operations-28-tools)
-   - [Export (1 tool)](#export-1-tool)
-   - [Delete (1 tool)](#delete-1-tool)
-   - [Telegram (2 tools)](#telegram-2-tools)
-   - [Extended Tool Surface](#extended-tool-surface)
 8. [Common Workflows](#common-workflows)
 9. [Error Handling & Troubleshooting](#error-handling--troubleshooting)
 10. [Extending the CLI](#extending-the-cli)
 
 ---
 
-## Overview
-
-The IntelFeed CLI enables Claude skills (and humans, scripts, and CI systems) to interact with the IntelFeed platform without direct HTTP clients. It provides:
-
-- **Search & discovery** across threat intelligence feeds and entities
-- **Intelligence lookups** (threat actors, malware, CVEs, MITRE ATT&CK techniques)
-- **Entry analysis** (full content, extracted TTPs, CVEs, campaigns, notes)
-- **Detection engineering** (rule generation, validation, coverage analysis)
-- **Campaign management** (timeline, correlation, detection gaps)
-- **Entity correlation** (pivots, relationship graphs, temporal clustering)
-- **Automation & triage** (rules, execution logs, priority scoring)
-- **Data curation** (creation, modification, deletion, exports)
-
-The CLI is shipped in two variants:
-
-| Feature | Full CLI | Lite CLI |
-|---------|----------|----------|
-| **Tools** | 180 | 87 |
-| **Write Operations** | Yes (create, update, extract, generate) | No |
-| **Read-Only Mode** | Opt-in via `INTELFEED_READ_ONLY=1` (write-tool denylist) | Effectively always (no write tools shipped) |
-| **Delete Operations** | Yes | No |
-| **AI Tasks** | Yes | No |
-| **Automation Execution** | Yes (execute, test, create rules) | No (view only) |
-| **Intelligence Extraction** | Yes (TTPs, CVEs, actors, malware) | No |
-| **Detection Rule Generation** | Yes | No |
-| **Report Generation** | Yes | No |
-| **Use Case** | Analyst workflows, automation scripts | Read-only dashboards, query APIs |
-| **Context Window** | Standard | Smaller (fewer tool definitions) |
-
-### Why a Custom CLI?
-
-1. **Zero dependencies** — Uses only Python stdlib (`urllib`, `json`, `os`, `sys`). No `requests`, `httpx`, or other external libraries.
-2. **Stateless** — Each invocation is independent; no persistent connections or state.
-3. **Batching** — Supports multiple tool calls in a single invocation to reduce round-trips.
-4. **Token caching** — Handles login once and caches tokens within a single CLI invocation; no persistent cache between invocations.
-5. **Skill integration** — Designed to be embedded in Claude skill YAML manifests; keeps skill size small.
-
-### The `--list-tools` Flag
-
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py --list-tools
-```
-
-Prints all available tools with their descriptions, required parameters, and defaults. Useful for discovering what's available without memorizing the reference.
-
----
-
 ## Installation & Setup
 
-### Requirements
+You need Python 3 and network access to your IntelFeed server. The CLI uses only the standard library, so there is nothing to install.
 
-- **Python 3.12+** (no version pinning needed — uses only stdlib)
-- **Network access** to the running IntelFeed API
-- **Three required environment variables** (plus one optional):
+Set these environment variables:
 
-| Variable | Purpose | Example |
-|----------|---------|---------|
-| `INTELFEED_API_URL` | Base URL of the IntelFeed API | `https://intelfeed.example.com` or `http://localhost:8000` |
-| `INTELFEED_USERNAME` | Username for authentication | `analyst@company.com` |
-| `INTELFEED_PASSWORD` | Password for authentication | (store securely, e.g., in `.env` or secrets manager) |
-| `INTELFEED_READ_ONLY` | Optional. Truthy value (`1`, `true`, `yes`, `on`) refuses all write tools before they reach the API | `1` (see [Read-Only Mode](#read-only-mode)) |
-| `INTELFEED_ALLOW_INSECURE_HTTP` | Optional. Truthy value allows plain `http://` to a host other than localhost (a trusted LAN or compose network); otherwise the CLI refuses to send the password there | `1` |
-
-### Setup
-
-1. **Set environment variables** (one-time per shell or permanently in `~/.bashrc`, `~/.zshrc`, Docker secrets, etc.):
+| Variable | Required | What it does |
+|---|---|---|
+| `INTELFEED_API_URL` | Yes | Your server's address, for example `https://intelfeed.example.com` or `http://localhost:8000`. There is no default. |
+| `INTELFEED_USERNAME` | Yes | Your IntelFeed username. |
+| `INTELFEED_PASSWORD` | Yes | Your IntelFeed password. Keep it in a secrets store or an untracked file. |
+| `INTELFEED_READ_ONLY` | No | Full CLI only. Set to `1`, `true`, `yes` or `on` to block every write tool. See [Read-Only Mode](#read-only-mode). |
+| `INTELFEED_ALLOW_INSECURE_HTTP` | No | Set to `1` to allow plain `http://` to a host other than localhost, such as a trusted LAN or the Docker Compose network. |
 
 ```bash
+# On your machine, once per shell (or in your shell profile)
 export INTELFEED_API_URL="https://intelfeed.example.com"
 export INTELFEED_USERNAME="your-username"
 export INTELFEED_PASSWORD="your-password"
 ```
 
-2. **For Docker deployments** (dev), set them when running the CLI container or in `docker-compose.env`:
+**The URL must be `https://`, or `http://` to `localhost`, `127.0.0.1` or `::1`.** The CLI sends your password on login, so it refuses plain `http://` to any other host unless you set `INTELFEED_ALLOW_INSECURE_HTTP=1`.
 
-```bash
-docker run -e INTELFEED_API_URL=http://api:8000 -e INTELFEED_ALLOW_INSECURE_HTTP=1 \
-           -e INTELFEED_USERNAME=admin \
-           -e INTELFEED_PASSWORD=password \
-           python:3.12 python intelfeed_cli.py search_entries '{"query": "ransomware"}'
-```
+### How login works
 
-### Authentication Under the Hood
-
-1. **Login happens automatically** on first CLI invocation. The client POSTs to `/api/auth/login` with credentials.
-2. **Tokens are returned** as `access_token` and `refresh_token` and stored in memory for the duration of the CLI process.
-3. **Token refresh** happens automatically if the access token expires (401 response). The CLI uses the refresh token to get a new access token without re-prompting for credentials.
-4. **No persistent cache** between invocations. Each CLI invocation logs in fresh. For high-frequency scripts, this is inefficient; consider a persistent client or API gateway (future enhancement).
-5. **Redirects are not followed.** urllib would re-send the `Authorization` header to whatever host a redirect names, so a 3xx comes back as an `API returned 30x` error instead. Point `INTELFEED_API_URL` at the final `https://` address (not an `http://` one that redirects).
+- Each run logs in once with `POST /api/auth/login` and keeps the tokens in memory. Nothing is saved between runs.
+- If a call gets a 401, the CLI refreshes the token (or logs in again) and retries once.
+- Each tool call is a `POST /api/tools/execute`. The request times out after 120 seconds.
+- Redirects are not followed, because that could send your token to another host. A redirect shows up as an `API returned 30x` error. Point `INTELFEED_API_URL` at the final `https://` address.
 
 ---
 
 ## Invocation Patterns
 
-### Single Tool Call
+All examples run on your machine from the repo root. Swap in `intelfeed-lite-skill/` to use the lite CLI.
 
 ```bash
+# One tool, with JSON arguments
 python3 intelfeed-skill/scripts/intelfeed_cli.py search_entries '{"query": "ransomware", "limit": 5}'
-```
 
-**Output:**
-```json
-{
-  "tool": "search_entries",
-  "result": [
-    {
-      "id": "entry-uuid-1",
-      "title": "Ransomware Trends Q1 2026",
-      "feed": "Krebs on Security",
-      "published": "2026-05-01",
-      ...
-    }
-  ]
-}
-```
+# A tool with no arguments
+python3 intelfeed-skill/scripts/intelfeed_cli.py get_dashboard_stats
 
-### Multiple Tool Calls (Batched)
-
-```bash
+# Several tools in one run (one login, calls run in order)
 python3 intelfeed-skill/scripts/intelfeed_cli.py \
   search_entries '{"query": "APT29"}' \
   get_feeds '{"limit": 10}' \
   get_dashboard_stats
-```
 
-**Output:**
-```json
-[
-  {
-    "tool": "search_entries",
-    "result": [ ... ]
-  },
-  {
-    "tool": "get_feeds",
-    "result": [ ... ]
-  },
-  {
-    "tool": "get_dashboard_stats",
-    "result": { ... }
-  }
-]
-```
+# Every tool with its description and parameters ([optional] in brackets)
+python3 intelfeed-skill/scripts/intelfeed_cli.py --list-tools
 
-### Tool with No Arguments
-
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_dashboard_stats
-```
-
-### Tool-Specific Help
-
-```bash
+# One tool's parameters, types, defaults, allowed values and an example
 python3 intelfeed-skill/scripts/intelfeed_cli.py --help-tool search_entries
 ```
 
-**Output:**
-```
-search_entries
-  Full-text search across RSS entries. Supports query language: ...
-
-  Parameters:
-    query (str) — required
-    limit (int) — default: 20
-    offset (int) — default: 0
-    sort (str) — default: relevance, values: ['relevance', 'newest', 'oldest']
-
-  Example:
-    python intelfeed_cli.py search_entries '{"query": "<query>"}'
-```
+Arguments are one JSON object after the tool name. A tool with no JSON after it runs with no arguments. Keys set to `null` are dropped before sending.
 
 ### Output Format
 
-All results are **JSON to stdout**, one per line for single tool, or a JSON array for multiple tools.
-
-**Usage and auth errors** (unknown tool, bad JSON, missing env vars, login failure) go to **stderr** as plain text with exit code 1. **API-level errors** are embedded in the stdout result object for the failing tool:
+Results print to stdout as indented JSON. One call prints one object; several calls print an array of them, in order.
 
 ```json
 {
-  "tool": "get_entry",
+  "tool": "search_entries",
   "result": {
-    "error": "API returned 404",
-    "detail": "{...}"
+    "total": 412,
+    "limit": 5,
+    "offset": 0,
+    "entries": [
+      {"id": "…", "title": "…", "summary": "…", "feed_title": "…", "published_at": "…", "url": "…"}
+    ]
   }
 }
 ```
 
-**Read-only refusals** print a JSON error to **stdout** and exit with code 2 (see [Read-Only Mode](#read-only-mode)).
+When the server rejects a call (for example a 403 or 404), the CLI still exits 0 and puts the error in that tool's `result`:
+
+```json
+{"tool": "get_entry", "result": {"error": "API returned 404", "detail": "…"}}
+```
+
+A tool that fails on the server returns `{"error": "<message>"}` as its result in the same way.
 
 ### Exit Codes
 
-| Code | Meaning |
-|------|---------|
-| `0` | Success |
-| `1` | Usage error (unknown tool, bad JSON, missing env vars, auth failure, or an `INTELFEED_API_URL` that would send the password over plain http to another host) |
-| `2` | Read-only mode refusal — a write tool was requested while `INTELFEED_READ_ONLY` is set |
+| Code | Meaning | Where the message goes |
+|---|---|---|
+| `0` | The run finished. Check each `result` for an `error` key. | stdout |
+| `1` | Usage problem: unknown tool, bad JSON, missing username or password, login failed. | stderr |
+| `1` | `INTELFEED_API_URL` is missing or not allowed (see the https rule above). | stdout, as `{"error": …}` |
+| `2` | Read-only mode refused a write tool. | stdout, as `{"error": …}` |
 
 ---
 
 ## Read-Only Mode
 
-The full CLI supports a hard read-only mode. When the environment variable `INTELFEED_READ_ONLY` is set to a truthy value (`1`, `true`, `yes`, `on` — case-insensitive), any invocation containing a **write tool** is refused **before any network call is made** — including the login request. This is a physical boundary for read-only agents (e.g., a query-only copilot): even if the agent's system prompt is bypassed, the CLI process itself will not send a mutating request.
+Set `INTELFEED_READ_ONLY=1` to make the full CLI refuse every write tool. The check happens before login, so a refused run sends nothing to the server. This is a hard stop for agents that should only read, even if their instructions are ignored.
 
 ```bash
 export INTELFEED_READ_ONLY=1
@@ -238,2322 +130,654 @@ python3 intelfeed-skill/scripts/intelfeed_cli.py create_campaign '{"name": "Test
 # exit code: 2
 ```
 
-**Semantics:**
+- The blocked list is `WRITE_TOOLS` in the full CLI: every tool the registry marks `mutating`. The tables below show these as **write**. AI tools that save results, such as `extract_ttps`, `run_ai_task` and `generate_detection_rules`, are on it.
+- If any tool in a batch is a write tool, the whole batch is refused and nothing runs.
+- The list is generated by `scripts/dev/sync_skill_clis.py`; don't edit it by hand.
 
-- The check runs against a `WRITE_TOOLS` denylist (a frozenset in the CLI script) — **90 tools**: every registry tool flagged `mutating`. That includes the AI tools that persist as a side effect (`extract_ttps`, `extract_cves`, `extract_threat_actors`, `extract_malware`, `run_ai_task`, `generate_detection_rules`, `build_detection_summary`): they are flagged in the registry, so the same tools are refused by this gate, by the read-only agent token and by the Ollama read-only copilot.
-- The denylist is **generated, not hand-maintained**: `scripts/dev/sync_skill_clis.py` rewrites it from the registry's `mutating` flags (plus its `EXTRA_WRITE_TOOLS` set), and `backend/tests/test_tool_registry_sync.py` fails if any mutating tool is missing from the CLI's denylist or a denylist entry no longer exists in the registry. Every tool not in the set (`search_*`, `get_*`, `list_*`, `check_*`, `pivot_*`, `export_attack_layer`, `export_campaign`, `validate_detection_rule`, `generate_detection_rules`, `build_detection_summary`, etc.) runs normally.
-- In a **batched invocation**, if *any* requested tool is on the denylist, the **entire batch is refused** — no tool in the batch executes.
-- The refusal is a JSON error printed to **stdout** with **exit code 2** (distinct from exit code 1 usage errors).
-
-See the [CLI invocation & read-only gating diagram](diagrams/cli-readonly-gating.md) for the full flow (local validation → read-only gate → login → execute with token refresh).
+See the [CLI read-only gating diagram](diagrams/cli-readonly-gating.md) for the full flow.
 
 ---
 
 ## The Lite Skill vs. Full Skill
 
-### When to Use Each
+| | Full CLI (`intelfeed-skill`) | Lite CLI (`intelfeed-lite-skill`) |
+|---|---|---|
+| Tools | Every registry tool | Every read tool, minus a few heavy ones |
+| Writes, deletes, merges | Yes | No |
+| AI calls and exports | Yes | No |
+| Read-only switch | `INTELFEED_READ_ONLY=1` | Not needed: it has no write tools |
+| Best for | Analyst work, automation, curation | Questions, lookups, dashboards, smaller tool lists for an agent |
 
-Use **`intelfeed-lite-skill`** when:
-- You only need to **read** data (search, lookup, browse, analyze)
-- You want **smaller context windows** (94 tool definitions vs. 187)
-- You're building a **read-only dashboard** or **query interface**
-- Your Claude skill doesn't need to create entries, extract intelligence, or generate rules
+The lite CLI drops the tools the registry marks `mutating`, then the read tools in `LITE_EXCLUDE` in `scripts/dev/sync_skill_clis.py`. Today those are `validate_detection_rule`, `export_attack_layer` and `export_campaign` (shown as **read, full only** below). The other names in that set are already write tools.
 
-Use **`intelfeed-skill` (full)** when:
-- You need to **write** data (create campaigns, extraction, detection rules)
-- You're building an **analyst automation** tool or **triage system**
-- You want to **generate detection rules** or **intelligence reports**
-- You need to **manage automation rules** or **run extraction tasks**
+The lite CLI is not a permission boundary on the server: it logs in as your user. It just has no write tools to call.
 
-### Feature Comparison
+---
 
-Both CLIs are code-generated from the backend tool registry by `scripts/dev/sync_skill_clis.py`, so the split is rule-based rather than a hand-picked list:
+## Admin tools and confirmations
 
-- **Full CLI (187 tools):** every tool in the backend registry (`backend/app/tools/`), read and write.
-- **Lite CLI (94 tools):** every tool the registry does **not** flag as `mutating` (90 write tools are excluded), minus the compute-heavy read-only tools in the script's `LITE_EXCLUDE` set (AI invocation and document export: `extract_ttps`, `extract_cves`, `extract_threat_actors`, `extract_malware`, `run_ai_task`, `generate_detection_rules`, `validate_detection_rule`, `build_detection_summary`, `export_attack_layer`, `export_campaign`).
+**Admin tools.** Some tools need an admin account, because the matching web API is admin-only. They are listed in `ADMIN_TOOLS` in `backend/app/tools/__init__.py` and marked **admin** in the tables below. They cover entity merges and reclassification, feed edits and deletes, every automation rule change except creating one, bulk unlinking, sector claims, the IOC deny list, some deletes, and the curation and extraction review reads. A non-admin call comes back as `API returned 403`.
 
-In practice the lite CLI covers all search/lookup/pivot/analytics/landscape reads (including the newer curation-stats, ransomware-tracker, and reader read tools), while creation, updates, merges, deletes, extraction, automation execution, and report generation are full-CLI only. Run `--list-tools` against either script for the authoritative listing.
+**Confirmations.** Tools that delete for good take a `confirmation_token` and run in two steps:
+
+1. Call without a token. Nothing is deleted. The result has `"status": "confirmation_required"`, a message, and a `confirmation_token`.
+2. Show the message to the person. Only if they agree, call again with the same arguments plus the token. The result has `"status": "deleted"`.
+
+The token is tied to your user and that one item, and stops working after 5 to 10 minutes. These tools work this way: `delete_entity`, `delete_feed`, `delete_campaign`, `delete_automation_rule`, `delete_detection_rule`, `delete_intel_report` and `delete_requirement`.
+
+```bash
+python3 intelfeed-skill/scripts/intelfeed_cli.py delete_entity \
+  '{"entity_type": "campaign", "entity_id": "<uuid>"}'
+# result: {"status": "confirmation_required", "confirmation_token": "<token>", ...}
+
+python3 intelfeed-skill/scripts/intelfeed_cli.py delete_entity \
+  '{"entity_type": "campaign", "entity_id": "<uuid>", "confirmation_token": "<token>"}'
+# result: {"status": "deleted", ...}
+```
 
 ---
 
 ## Search Query Language
 
-All search tools (`search_entries`, `search_entities`, `search_unified`) support a powerful query language for precise filtering.
+`search_entries` and `search_unified` accept the full query language below. It is the same one as the search box in the web app. `search_entities` only matches entity names.
 
 ### Entry Filters
 
-| Filter | Syntax | Example |
-|--------|--------|---------|
-| Title | `title:"..."` | `title:"zero day"` |
-| Content | `content:...` | `content:ransomware` |
-| Author | `author:...` | `author:Krebs` |
-| Feed | `feed:"..."` | `feed:"Krebs on Security"` |
-| Tag | `tag:...` | `tag:critical` |
-| Type | `type:` | `type:rss`, `type:atom`, `type:youtube`, `type:podcast` |
-| Date | `date:>{DATE}` | `date:>2026-03-01`, `date:2026-01..2026-03` |
-| State | `is:...` | `is:starred`, `is:unread`, `is:read`, `is:bookmarked`, `is:noted`, `is:muted`, `is:translated`, `is:image` |
-| Media | `media:...` | `media:audio`, `media:video`, `media:image`, `media:document` |
-| Language | `lang:...` | `lang:en` |
-| Category | `category:...` | `category:Blogs` — the feed's folder |
-| Signal | `signal:...` | `signal:under_reported`, `signal:kev_added`, `signal:novel_entity` — the signal engine's reason for ranking an entry |
-| URL | `url:...` | `url:github.com` |
-| Length | `words:` | `words:>1500`, `words:500..2000` |
-| Source grade | `feed.reliability:` | `feed.reliability:B` — Admiralty-code grade (also `feed.timeliness:`, `feed.relevance:`) |
-| Sort | `sort:` | `relevance`, `newest`, `oldest`, `radar`, `title_asc`, `title_desc`, `shortest`, `longest` |
+These filter articles.
 
-`category`, `signal`, `url`, `feed.*` and the `is:muted/translated/image`
-values are answered from PostgreSQL rather than the search index, so they need no
-re-index; the endpoint folds their entry IDs into the same constraint an entity
-join uses. `sort:radar` is likewise PostgreSQL-backed — it orders by the signal
-engine's `priority_score` (the Priority Queue's ranking), which means it excludes
-unscored entries and does not rank free-text terms.
+| Filter | Examples | Notes |
+|---|---|---|
+| `title:` | `title:"zero day"` | |
+| `content:` | `content:ransomware` | |
+| `author:` | `author:Krebs` | |
+| `feed:` | `feed:"Krebs on Security"` | Feed name |
+| `category:` | `category:Blogs` | The feed's folder |
+| `tag:` | `tag:critical` | |
+| `type:` | `type:rss`, `type:youtube`, `type:podcast` | Feed type |
+| `date:` | `date:>2026-03-01`, `date:2026-01..2026-03` | |
+| `is:` | `is:starred`, `is:unread`, `is:read`, `is:bookmarked`, `is:noted`, `is:muted`, `is:translated`, `is:image` | |
+| `media:` | `media:audio`, `media:video`, `media:image`, `media:document` | |
+| `lang:` | `lang:en` | |
+| `signal:` | `signal:under_reported`, `signal:kev_added`, `signal:novel_entity` | Why the signal engine ranked the article |
+| `url:` | `url:github.com` | |
+| `words:` | `words:>1500`, `words:500..2000` | Article length |
+| `feed.reliability:` | `feed.reliability:B` | Source grade (Admiralty code). Also `feed.timeliness:` and `feed.relevance:` |
+| `sort:` | `sort:newest` | `relevance`, `newest`, `oldest`, `radar`, `title_asc`, `title_desc`, `shortest`, `longest` |
 
-Three things to know before trusting a filter's output:
+`sort:radar` orders by the signal engine's priority score, the same ranking as the Priority Queue. It leaves out unscored articles and ignores text relevance.
 
-- **`OR` between two entry-scoped PostgreSQL filters silently means AND.** `signal:kev_added OR
-  signal:scoop` intersects rather than unions and returns a plausible wrong number, not an error.
-  Affects `signal:`, `url:` and `is:translated`/`is:image`. `is:muted` is worse still —
-  it does not participate in OR at all, giving neither the union nor a reliable intersection.
-  `feed:`, `category:` and the source grades OR correctly. Run the two queries separately.
-- **A negated PostgreSQL filter only subtracts from an entry-ID set.** `NOT signal:feed_echo`
-  removes its matches from a set that an *entity* filter or another *entry-scoped PostgreSQL*
-  filter established. A bare text term or an index filter (`tag:`, `type:`, `date:` …) builds no
-  such set, so the negation is silently dropped — `ransomware NOT signal:kev_added` returns every
-  ransomware entry unchanged. On its own it matches everything.
-- **Feed grades are exact letters.** `feed.reliability:>B` is not supported, and
-  ungraded feeds match no grade filter.
+Things to know:
+
+- **Some negations are dropped.** A negated `signal:`, `url:`, `is:translated` or `is:image` only removes matches from a set that another filter already built: an entity filter, or another positive `signal:`, `url:`, `is:translated` or `is:image`. With only text or index filters around it, the negation is ignored. For example `ransomware NOT signal:kev_added` returns every ransomware article.
+- **Grades are exact letters.** `feed.reliability:>B` does not work, and feeds with no grade match no grade filter.
+- **An unknown field becomes free text.** `titel:ransomware` searches for the word `ransomware`.
 
 ### Intelligence Filters
 
-| Filter | Syntax | Examples |
-|--------|--------|----------|
-| CVE | `cve:` | `cve:CVE-2025-5777`, `cve.severity:critical`, `cve.cvss:>9.0` |
-| CVE exploitation | `cve.kev:` | `cve.kev:true`, `cve.epss:>0.5`, `cve.epss_percentile:>0.9`, `cve.poc:>0`, `cve.exploit:kev` |
-| CVE products | `cve.product:` | `cve.product:fortinet` — matches the NVD CPE vendor or product |
-| TTP | `ttp:` | `ttp:T1059*`, `ttp.tactic:initial-access` |
-| TTP shape | `ttp.platform:` | `ttp.platform:Windows`, `ttp.data_source:process`, `ttp.domain:ics`, `ttp.subtechnique:true` |
-| Actor | `threat_actor:` | `threat_actor:APT29`, `threat_actor.country:Russia`, `threat_actor.motivation:espionage`, `threat_actor.sector:healthcare`, `threat_actor.type:ransomware` |
-| Malware | `malware:` | `malware:Emotet`, `malware.type:trojan`, `malware.sector:finance` |
-| Sector | `sector:` | `sector:healthcare`, `sector:banks` (name, slug or alias — articles the analysis judged to describe the industry as targeted), `sector.slug:financial-services` |
-| Tool | `tool:` | `tool:Mimikatz`, `tool.type:...`, `tool.platform:Windows` |
-| Country | `country:` | `country:"United States"`, `country.region:Europe`, `country.iso:RU` |
-| Vendor / product | `vendor:` | `vendor:Cisco`, `product:ASA`, `product.vendor:Cisco` |
-| Rule | `rule:` | `rule:"Sigma Detection"`, `rule.type:sigma`, `rule.severity:high` |
-| Rule content | `rule.data_source:` | `rule.data_source:sysmon`, `rule.tactic:persistence`, `rule.tag:attack`, `rule.draft:false` |
-| Ransomware victim | `ransomware_victim:` | `ransomware_victim.sector:manufacturing`, `ransomware_victim.group:lockbit` |
-| PIR | `pir:` | `pir:"Ransomware Activity"`, `pir.priority:critical`, `pir.category:tactical` |
-| Notes | `note:` | `note:fortibleed` (title or body), `note.tag:`, `note.type:analysis`, `note.about:cve` / `:entry` / `:standalone`, `note.pinned:true` |
-| Report | `intel_report:` | `intel_report:quarterly`, `intel_report.status:draft`, `intel_report.tlp:amber` |
-| Catalogue | `<entity>.articles:` | `threat_actor.articles:>100`, `malware.seen:>2026-01-01`, `ttp.first_seen:>2026-06`, `cve.via:ai_extraction`, `threat_actor.review:true` |
+These filter articles by the entities linked to them.
 
-The catalogue suffixes (`.articles`, `.seen`, `.first_seen`) work on every
-entity type; `.review` and `.via` (extraction provenance) work on
-`threat_actor`, `malware`, `cve`, `ttp` and `tool`.
+| Filter | Examples |
+|---|---|
+| CVE | `cve:CVE-2025-5777`, `cve.severity:critical`, `cve.cvss:>9.0` |
+| CVE exploitation | `cve.kev:true`, `cve.epss:>0.5`, `cve.epss_percentile:>0.9`, `cve.poc:>0`, `cve.exploit:kev` |
+| CVE products | `cve.product:fortinet` (NVD vendor or product) |
+| CWE | `cwe:CWE-79`, `cwe.abstraction:`, `cwe.parent:` |
+| TTP (ATT&CK technique) | `ttp:T1059*`, `ttp.tactic:initial-access` |
+| TTP shape | `ttp.platform:Windows`, `ttp.data_source:process`, `ttp.domain:ics`, `ttp.subtechnique:true` |
+| Threat actor | `threat_actor:APT29`, `threat_actor.country:Russia`, `threat_actor.motivation:espionage`, `threat_actor.sector:healthcare`, `threat_actor.type:ransomware` |
+| Malware | `malware:Emotet`, `malware.type:trojan`, `malware.sector:finance` |
+| Sector | `sector:healthcare`, `sector.slug:financial-services` (articles that describe the industry being targeted) |
+| Tool | `tool:Mimikatz`, `tool.type:`, `tool.platform:Windows` |
+| Country | `country:"United States"`, `country.region:Europe`, `country.iso:RU` |
+| Vendor / product | `vendor:Cisco`, `vendor.type:`, `product:ASA`, `product.vendor:Cisco`, `product.type:` |
+| Observable (IOC) | `observable.kind:domain`, `observable.role:`, `observable.status:` (`ioc` works as a short form) |
+| Campaign | `campaign:`, `campaign.status:active` |
+| Mitigation | `mitigation:` |
+| Detection rule | `rule:"Sigma Detection"`, `rule.type:sigma`, `rule.severity:high`, `rule.data_source:sysmon`, `rule.tactic:persistence`, `rule.tag:attack`, `rule.draft:false` |
+| Ransomware victim | `ransomware_victim.sector:manufacturing`, `ransomware_victim.group:lockbit`, `ransomware_victim.domain:` |
+| Requirement (PIR) | `pir:"Ransomware Activity"`, `pir.priority:critical`, `pir.category:tactical` |
+| Note | `note:fortibleed` (title or body), `note.tag:`, `note.type:analysis`, `note.about:cve` (or `entry`, `standalone`), `note.pinned:true` |
+| Intel report | `intel_report:quarterly`, `intel_report.status:draft`, `intel_report.type:`, `intel_report.tlp:amber` |
+
+Catalogue suffixes:
+
+- `.articles`, `.seen` and `.first_seen` work on `threat_actor`, `malware`, `ttp`, `tool`, `country`, `sector`, `vendor`, `product`, `mitigation`, `cwe` and `observable`. Examples: `threat_actor.articles:>100`, `malware.seen:>2026-01-01`, `ttp.first_seen:>2026-06`.
+- `.review` and `.via` (how the entity was created) work on `threat_actor`, `malware`, `cve`, `ttp` and `tool`. Examples: `threat_actor.review:true`, `cve.via:ai_extraction`.
+
+The full list of field names is `ENTRY_FIELDS` and `ENTITY_FIELDS` in `backend/app/search/query_planner.py`.
 
 ### Operators
 
 | Operator | Meaning | Example |
-|----------|---------|---------|
-| `AND` | Both conditions (implicit between adjacent terms) | `ransomware AND type:rss` |
-| `OR` | Either condition | `APT29 OR APT28` |
+|---|---|---|
+| `AND` | Both. Also the default between terms. | `ransomware AND type:rss` |
+| `OR` | Either | `APT29 OR APT28` |
 | `NOT` | Exclude | `NOT type:youtube` |
-| `*` | Wildcard | `T1059*` (matches T1059.001, T1059.002, etc.) |
+| `*` | Wildcard | `ttp:T1059*` |
 | `"..."` | Exact phrase | `"device code phishing"` |
 | `()` | Grouping | `(ransomware OR malware) AND type:rss` |
-| `>`, `>=`, `<`, `<=` | Comparison (numeric/date) | `cve.cvss:>9.0`, `date:>=2026-04-01`, `words:>1500` |
+| `>`, `>=`, `<`, `<=`, `..` | Compare numbers or dates, or give a range | `cve.cvss:>9.0`, `date:>=2026-04-01`, `words:500..2000` |
 
 ### Example Queries
 
-```
-# Find recent RSS entries about ransomware
+```text
+# Recent RSS articles about ransomware
 ransomware type:rss sort:newest
 
-# Find starred entries with critical CVEs
+# Starred articles with critical CVEs
 cve.severity:critical is:starred
 
-# Find articles about specific TTPs and tactics
+# APT29 initial-access reporting
 threat_actor:APT29 AND ttp.tactic:initial-access
 
-# Find high-CVSS CVEs from the last month
-cve.cvss:>9.0 AND date:>2026-04-01
-
-# Known-exploited CVEs that the world is likely already attacking
+# Known-exploited CVEs that are likely to be attacked
 cve.kev:true cve.epss:>0.5
 
-# What the signal engine thinks is under-covered, ranked by its own score
+# Under-reported stories, in the signal engine's order
 signal:under_reported sort:radar
 
-# Persistence rules that need Sysmon telemetry
+# Persistence rules that need Sysmon
 rule.data_source:sysmon rule.tactic:persistence
 
-# Windows techniques detectable from process telemetry
-ttp.platform:Windows ttp.data_source:process
+# Manufacturing victims on ransomware leak sites
+ransomware_victim.sector:manufacturing
 
-# Who has been posting manufacturing victims
-ransomware_victim.group:lockbit
-
-# Exclude YouTube, search for phishing
+# Phishing, without YouTube
 (phishing OR "social engineering") NOT type:youtube
-
-# Complex: entries about specific actors' malware
-threat_actor:APT29 AND (malware:APT29_Malware* OR threat_actor.country:Russia)
 ```
 
 ---
 
 ## Tool Reference
 
-The registry contains 187 tools. The sections below document 83 core tools in full detail; the remaining 104 are summarized in [Extended Tool Surface](#extended-tool-surface) at the end of this section — use `--help-tool <name>` for their parameters. Each fully documented tool includes:
-
-- **Name & Purpose** — what it does (1-line summary)
-- **Arguments** — required and optional parameters with types and defaults
-- **Returns** — shape of the JSON response
-- **Backed by** — which backend API endpoint(s)
-- **Example** — copy-paste-able invocation
-
-### Search & Discovery (4 tools)
-
-#### search_entries
-
-Search across all RSS/Atom/YouTube/podcast entries with the full query language. Returns paginated results.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `query` | `str` | Yes | — | Search query (see Query Language above) |
-| `limit` | `int` | No | 20 | Max results to return (per-call max 1000) |
-| `offset` | `int` | No | 0 | Skip N results — use with `limit` to paginate through larger result sets |
-| `sort` | `str` | No | `relevance` | Sort order: `relevance`, `newest`, `oldest` |
-
-**Returns:** Array of entry objects with `id`, `title`, `content`, `feed`, `published`, `author`, `url`, `tags`, `starred`, `read`, `bookmarked`.
-
-**Backed by:** `POST /api/tools/execute` → backend tool registry → `app.tools.search.search_entries()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py search_entries '{"query": "ransomware", "limit": 5, "sort": "newest"}'
-```
-
----
-
-#### search_entities
-
-Search across all intelligence entities (threat actors, malware, CVEs, TTPs, countries, vendors, products, mitigations, tools). Returns matching entities with type and basic details.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `query` | `str` | Yes | — | Entity name or partial match |
-| `limit` | `int` | No | 30 | Max results to return |
-
-**Returns:** Array of entity objects with `type` (threat_actor, malware, cve, ttp, etc.), `id`, `name`, `aliases`, `description` (summary).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.search.search_entities()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py search_entities '{"query": "APT29", "limit": 10}'
-```
-
----
-
-#### search_unified
-
-Unified search across both entries and entities simultaneously. Returns combined results grouped by type (entries first, then entities).
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `query` | `str` | Yes | — | Search query |
-| `limit` | `int` | No | 20 | Max results per type |
-
-**Returns:** Object with `entries` (array) and `entities` (array) keys.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.search.search_unified()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py search_unified '{"query": "Emotet", "limit": 15}'
-```
-
----
-
-#### get_search_facets
-
-Get available search facets: all feeds, categories, tags, and feed types present in the system. Useful for understanding what's available before searching.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| (none) | — | — | — | No parameters |
-
-**Returns:** Object with `feeds` (array), `categories` (array), `tags` (array), `feed_types` (array).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.search.get_search_facets()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_search_facets
-```
-
----
-
-### Read Operations (17 tools)
-
-#### get_entry
-
-Fetch a single entry by ID with full content and any extracted intelligence (TTPs, CVEs, threat actors, malware, campaigns, detection rules, notes).
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `entry_id` | `str` | Yes | — | UUID of the entry |
-
-**Returns:** Entry object with `id`, `title`, `content`, `feed`, `published`, `author`, `url`, `media_urls`, `ttps` (array), `cves` (array), `threat_actors` (array), `malware` (array), `campaigns` (array), `detection_rules` (array), `notes` (array), `tags` (array), `starred`, `read`, `bookmarked`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.get_entry()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_entry '{"entry_id": "550e8400-e29b-41d4-a716-446655440000"}'
-```
-
----
-
-#### get_feed_entries
-
-List recent entries from a specific feed, paginated.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `feed_id` | `str` | Yes | — | UUID of the feed |
-| `limit` | `int` | No | 20 | Max results to return |
-
-**Returns:** Array of entry objects (same schema as `search_entries` results).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.get_feed_entries()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_feed_entries '{"feed_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479", "limit": 10}'
-```
-
----
-
-#### get_threat_actor
-
-Get a threat actor profile including aliases, motivation, country of origin, associated TTPs, campaigns, and linked articles.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `actor_id` | `str` | Yes | — | UUID or actor name (e.g., "APT29") |
-
-**Returns:** Threat actor object with `id`, `name`, `aliases`, `description`, `motivation`, `country`, `ttps` (array), `malware` (array), `campaigns` (array), `entry_count` (int), `recent_entries` (array).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.get_threat_actor()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_threat_actor '{"actor_id": "APT29"}'
-```
-
----
-
-#### get_malware
-
-Get malware family profile with aliases, malware type, associated threat actors, TTPs, and linked articles.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `malware_id` | `str` | Yes | — | UUID or malware name (e.g., "Emotet") |
-
-**Returns:** Malware object with `id`, `name`, `aliases`, `description`, `type`, `threat_actors` (array), `ttps` (array), `entry_count` (int), `recent_entries` (array).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.get_malware()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_malware '{"malware_id": "Emotet"}'
-```
-
----
-
-#### list_sectors / get_sector / who_targets_sector / sector_victims / set_target_sector
-
-The victim-industry vocabulary as an entity (21 closed, seeded sectors). `list_sectors` carries per-sector article, targeting-actor/malware and 90-day victim counts; `get_sector` is the victimology profile (reported vs asserted targeting, campaigns, leak-site victims, the country cross-tab, intel profiles, recent articles); `who_targets_sector` and `sector_victims` are its two halves trimmed for a model's context. A sector is addressable by UUID, slug (`healthcare`), display name or alias (`banks`). `set_target_sector` (admin) asserts or withdraws a targets-sector claim on an actor or malware family. Pivot, graph and timeline on a sector go through `pivot_entity` / `get_entity_graph` / `get_entity_timeline` with `entity_type: "sector"`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.sector`
-
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py who_targets_sector '{"sector": "healthcare", "limit": 10}'
-python3 intelfeed-skill/scripts/intelfeed_cli.py sector_victims '{"sector": "financial-services", "window_days": 30}'
-```
-
-#### get_cve
-
-Get CVE details including CVSS score (v3.1), CVSS vector, EPSS score, severity, affected products, and linked articles.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `cve_id` | `str` | Yes | — | CVE identifier (e.g., "CVE-2025-5777" or UUID) |
-
-**Returns:** CVE object with `id`, `cve_id`, `description`, `cvss_score`, `cvss_vector`, `severity`, `epss_score`, `affected_products` (array), `vendors` (array), `entry_count` (int), `recent_entries` (array), `references` (array).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.get_cve()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_cve '{"cve_id": "CVE-2025-5777"}'
-```
-
----
-
-#### get_ttp
-
-Get a MITRE ATT&CK technique (TTP) by ID, including tactic, platforms, data sources, detections, and linked articles.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `ttp_id` | `str` | Yes | — | Technique ID (e.g., "T1059.001" or UUID) |
-
-**Returns:** TTP object with `id`, `technique_id`, `name`, `description`, `tactic`, `platforms` (array), `data_sources` (array), `detection_rules` (array), `entry_count` (int), `recent_entries` (array).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.get_ttp()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_ttp '{"ttp_id": "T1059.001"}'
-```
-
----
-
-#### get_campaign
-
-Get campaign details with timeline (chronological entries), linked entities, linked detection rules, and detection gaps (uncovered TTPs).
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `campaign_id` | `str` | Yes | — | UUID of the campaign |
-
-**Returns:** Campaign object with `id`, `name`, `description`, `status`, `tlp_marking`, `created_at`, `entries` (array), `entities` (array), `detection_rules` (array), `detection_gaps` (array), `timeline` (array).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.get_campaign()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_campaign '{"campaign_id": "550e8400-e29b-41d4-a716-446655440000"}'
-```
-
----
-
-#### get_feeds
-
-List all configured RSS/Atom/YouTube/podcast feeds with health status (last fetch time, error count, entry count).
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `limit` | `int` | No | 50 | Max feeds to return |
-
-**Returns:** Array of feed objects with `id`, `title`, `url`, `feed_type`, `category`, `enabled`, `last_fetched`, `fetch_error_count`, `entry_count`, `health_status`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.get_feeds()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_feeds '{"limit": 20}'
-```
-
----
-
-#### get_detection_rules
-
-List detection rules. Optionally filter by rule type (SIGMA, Splunk SPL, CrowdStrike QL, Elastic QL, KQL, YARA, Snort/Suricata).
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `rule_type` | `str` | No | `None` (all types) | Filter by type: `sigma`, `splunk_spl`, `crowdstrike_ql`, `elastic_ql`, `kql`, `yara`, `snort_suricata` |
-| `limit` | `int` | No | 30 | Max rules to return |
-
-**Returns:** Array of detection rule objects with `id`, `title`, `rule_type`, `rule_content`, `description`, `severity`, `ttp_coverage` (array), `created_at`, `entry_source` (optional).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.get_detection_rules()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_detection_rules '{"rule_type": "sigma", "limit": 10}'
-```
-
----
-
-#### get_requirements
-
-Get intelligence requirements (Priority Intelligence Requirements / PIRs) with optional status filter.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `status` | `str` | No | `None` (all) | Filter by status: `active`, `fulfilled`, `expired`, `draft` |
-
-**Returns:** Array of requirement objects with `id`, `title`, `keywords`, `description`, `priority`, `category`, `status`, `created_at`, `coverage_count` (int), `recent_matches` (array).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.get_requirements()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_requirements '{"status": "active"}'
-```
-
----
-
-#### get_correlation_events
-
-Get recent correlation events — new entity sightings, shared infrastructure detections, detection gaps, campaign matches, etc.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `limit` | `int` | No | 30 | Max events to return |
-| `unread_only` | `bool` | No | `False` | Filter to unread events only |
-
-**Returns:** Array of correlation event objects with `id`, `type` (sighting, shared_infrastructure, detection_gap, campaign_match, etc.), `entity_type`, `entity_id`, `description`, `linked_entries` (array), `created_at`, `read`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.get_correlation_events()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_correlation_events '{"limit": 20, "unread_only": true}'
-```
-
----
-
-#### get_analytics
-
-Get platform analytics: trending entities, intelligence velocity, detection coverage gaps, and overview stats.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `metric` | `str` | Yes | — | Metric to retrieve: `overview`, `trending`, `detection_coverage`, `velocity` |
-| `entity_type` | `str` | No | `None` | For trending: `threat_actor`, `malware`, `cve`, `ttp` |
-| `days` | `int` | No | 30 | Time window in days |
-
-**Returns:** Varies by metric. `overview` returns totals. `trending` returns entity rankings. `detection_coverage` returns gap analysis. `velocity` returns extraction/publication rates.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.get_analytics()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_analytics '{"metric": "trending", "entity_type": "threat_actor", "days": 30}'
-```
-
----
-
-#### get_dashboard_stats
-
-Get system-wide statistics: total entries, feeds, entities by type, recent activity, unread counts.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| (none) | — | — | — | No parameters |
-
-**Returns:** Object with `total_entries`, `total_feeds`, `total_threat_actors`, `total_malware`, `total_cves`, `total_ttps`, `unread_entries`, `recent_activity` (array), `feed_health_summary`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.get_dashboard_stats()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_dashboard_stats
-```
-
----
-
-#### get_enrichment_data
-
-Get enrichment results for an entity (EPSS scores, PoC availability, Malpedia details, known exploits, etc.).
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `entity_type` | `str` | Yes | — | Entity type: `cve` or `malware` |
-| `entity_id` | `str` | Yes | — | UUID or identifier of the entity |
-
-**Returns:** Object with `entity_id`, `entity_type`, `epss_score` (if CVE), `poc_available` (bool), `exploit_count` (int), `honeypot_hits` (if malware), `aliases_enriched` (array), `metadata`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.get_enrichment_data()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_enrichment_data '{"entity_type": "cve", "entity_id": "CVE-2025-5777"}'
-```
-
----
-
-#### get_attack_layer
-
-Get MITRE ATT&CK Navigator layer JSON for the system (all TTPs with coverage stats) or a specific entry (TTPs in that entry only). Useful for visualization.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `entry_id` | `str` | No | `None` (system-wide) | UUID of entry to scope to; if None, returns all TTPs |
-| `title` | `str` | No | `"IntelFeed ATT&CK Coverage"` | Title for the layer |
-
-**Returns:** JSON object conforming to ATT&CK Navigator v4.3 layer format with techniques, heatmap scores, annotations.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.get_attack_layer()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_attack_layer '{"entry_id": "550e8400-e29b-41d4-a716-446655440000", "title": "This Article'\''s TTPs"}'
-```
-
----
-
-#### get_telemetry_sources
-
-List configured telemetry/log sources and their coverage (which TTPs can be detected with available data sources).
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| (none) | — | — | — | No parameters |
-
-**Returns:** Array of telemetry source objects with `name`, `type` (event logs, network, cloud, etc.), `coverage_ttps` (array), `enabled`, `provider`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.get_telemetry_sources()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_telemetry_sources
-```
-
----
-
-#### get_requirement_coverage
-
-Get intelligence requirements coverage summary — counts by status, priority, category, and staleness (how long since last match).
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| (none) | — | — | — | No parameters |
-
-**Returns:** Object with `total_requirements`, `by_status` (active, fulfilled, expired, draft counts), `by_priority` (critical, high, medium, low counts), `by_category` (strategic, operational, tactical, technical counts), `stale_count` (unfulfilled >30 days).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.get_requirement_coverage()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_requirement_coverage
-```
-
----
-
-### Campaign Analysis (6 tools)
-
-#### get_campaigns
-
-List campaigns with optional status filter.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `status` | `str` | No | `None` (all) | Filter by status: `active`, `monitoring`, `closed`, `historical` |
-| `limit` | `int` | No | 30 | Max campaigns to return |
-
-**Returns:** Array of campaign objects with `id`, `name`, `description`, `status`, `entry_count`, `entity_count`, `detection_rule_count`, `created_at`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.get_campaigns()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_campaigns '{"status": "active", "limit": 15}'
-```
-
----
-
-#### get_campaign_timeline
-
-Get chronological entries in a campaign, sorted by publication date (oldest to newest by default).
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `campaign_id` | `str` | Yes | — | UUID of the campaign |
-
-**Returns:** Array of entry objects sorted by `published` date.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.get_campaign_timeline()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_campaign_timeline '{"campaign_id": "550e8400-e29b-41d4-a716-446655440000"}'
-```
-
----
-
-#### get_campaign_attack_layer
-
-Get MITRE ATT&CK Navigator layer JSON for all TTPs linked to a campaign.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `campaign_id` | `str` | Yes | — | UUID of the campaign |
-
-**Returns:** ATT&CK Navigator layer JSON with campaign-specific TTPs highlighted.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.get_campaign_attack_layer()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_campaign_attack_layer '{"campaign_id": "550e8400-e29b-41d4-a716-446655440000"}'
-```
-
----
-
-#### get_campaign_detection_gaps
-
-Find TTPs linked to a campaign that have no active detection rules. Identifies coverage gaps.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `campaign_id` | `str` | Yes | — | UUID of the campaign |
-
-**Returns:** Array of TTP objects with `id`, `technique_id`, `name`, `tactic`, `data_sources`, `required_telemetry`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.get_campaign_detection_gaps()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_campaign_detection_gaps '{"campaign_id": "550e8400-e29b-41d4-a716-446655440000"}'
-```
-
----
-
-#### suggest_campaign_entries
-
-Suggest entries that share entities (TTPs, CVEs, actors, malware) with a campaign but aren't yet explicitly linked to it. Useful for finding related articles.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `campaign_id` | `str` | Yes | — | UUID of the campaign |
-| `limit` | `int` | No | 10 | Max suggestions to return |
-
-**Returns:** Array of entry objects with `id`, `title`, `published`, `shared_entities` (array showing which entities match the campaign).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.suggest_campaign_entries()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py suggest_campaign_entries '{"campaign_id": "550e8400-e29b-41d4-a716-446655440000", "limit": 10}'
-```
-
----
-
-#### export_campaign
-
-Export a complete campaign intel package including all linked entries, entities, and detection rules. Useful for sharing or archiving.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `campaign_id` | `str` | Yes | — | UUID of the campaign |
-
-**Returns:** JSON object containing `campaign` (profile), `entries` (array), `entities` (array), `detection_rules` (array), `export_timestamp`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.export.export_campaign()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py export_campaign '{"campaign_id": "550e8400-e29b-41d4-a716-446655440000"}'
-```
-
----
-
-### Automation (5 tools)
-
-#### get_automation_rules
-
-List automation rules with optional label filter.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `label` | `str` | No | `None` | Filter by label tag |
-| `limit` | `int` | No | 30 | Max rules to return |
-
-**Returns:** Array of automation rule objects with `id`, `name`, `description`, `trigger_type` (new_entry, new_entity, schedule, manual), `conditions` (query), `actions` (array), `enabled`, `execution_count`, `last_executed_at`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.get_automation_rules()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_automation_rules '{"label": "ransomware", "limit": 10}'
-```
-
----
-
-#### get_automation_templates
-
-List pre-built automation rule templates with categories and example configurations.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| (none) | — | — | — | No parameters |
-
-**Returns:** Array of template objects with `id`, `name`, `description`, `category`, `trigger_type`, `trigger_config_template` (example), `actions_template` (example).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.get_automation_templates()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_automation_templates
-```
-
----
-
-#### get_automation_logs
-
-Get recent automation rule execution logs.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `rule_id` | `str` | No | `None` | Filter to specific rule; if None, all rules' logs |
-| `limit` | `int` | No | 30 | Max log entries to return |
-
-**Returns:** Array of log objects with `rule_id`, `rule_name`, `entry_id`, `executed_at`, `action_results` (array), `status` (success, partial, error).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.get_automation_logs()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_automation_logs '{"rule_id": "550e8400-e29b-41d4-a716-446655440000", "limit": 20}'
-```
-
----
-
-#### test_automation_rule
-
-Dry-run an automation rule against an entry to see what would happen without executing actions. Useful for testing before enabling.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `rule_id` | `str` | Yes | — | UUID of the automation rule |
-| `entry_id` | `str` | Yes | — | UUID of the entry to test against |
-
-**Returns:** Object with `rule_id`, `entry_id`, `conditions_met` (bool), `matched_conditions` (array), `actions_would_execute` (array showing what would happen), `dry_run` (true).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.write.test_automation_rule()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py test_automation_rule '{"rule_id": "550e8400-e29b-41d4-a716-446655440000", "entry_id": "660e8400-e29b-41d4-a716-446655440000"}'
-```
-
----
-
-#### run_automation_rule
-
-Execute an automation rule immediately against recent entries (from the last N hours).
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `rule_id` | `str` | Yes | — | UUID of the automation rule |
-| `hours` | `int` | No | 24 | Look back this many hours for matching entries |
-
-**Returns:** Object with `rule_id`, `entries_matched` (int), `actions_executed` (int), `results` (array of action outcomes), `timestamp`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.write.run_automation_rule()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py run_automation_rule '{"rule_id": "550e8400-e29b-41d4-a716-446655440000", "hours": 12}'
-```
-
----
-
-### Advanced Analytics (5 tools)
-
-#### get_trending_entities
-
-Get top entities by mention count over a time window.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `entity_type` | `str` | Yes | — | Entity type: `threat_actor`, `malware`, `cve`, `ttp` |
-| `days` | `int` | No | 30 | Time window in days |
-| `limit` | `int` | No | 10 | Max entities to return |
-
-**Returns:** Array of entity objects with `id`, `name`, `mention_count`, `appearance_trend` (sparkline array), `recent_articles` (array).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.get_trending_entities()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_trending_entities '{"entity_type": "threat_actor", "days": 30, "limit": 10}'
-```
-
----
-
-#### get_feed_value
-
-Get feed value scores — composite 0-100 intelligence contribution metric per feed based on entity extraction, rule generation, and entry quality.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `days` | `int` | No | 30 | Time window in days |
-
-**Returns:** Array of feed objects with `id`, `title`, `feed_type`, `value_score` (0-100), `entry_contribution` (%), `entity_extraction_count`, `rule_generation_count`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.get_feed_value()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_feed_value '{"days": 30}'
-```
-
----
-
-#### get_source_reliability
-
-Get feeds ranked by intelligence contribution (entity extraction, detection rule generation, unique intelligence).
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `limit` | `int` | No | 20 | Max feeds to return |
-
-**Returns:** Array of feed objects ranked by reliability score, with `id`, `title`, `reliability_score`, `entity_count`, `rule_count`, `unique_intelligence_count`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.get_source_reliability()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_source_reliability '{"limit": 15}'
-```
-
----
-
-#### get_entry_insights
-
-Get actionable intelligence insights for a specific entry's entities — what you should do based on what's in this article.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `entry_id` | `str` | Yes | — | UUID of the entry |
-
-**Returns:** Object with `entry_id`, `insights` (array of actionable recommendations), `entities_mentioned` (array), `risk_level` (low, medium, high, critical), `recommended_actions` (array).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.get_entry_insights()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_entry_insights '{"entry_id": "550e8400-e29b-41d4-a716-446655440000"}'
-```
-
----
-
-#### get_triage_queue
-
-Get priority-scored entry queue for analyst review. Entries are scored by recency, entity importance, requirement matches, and detection gaps.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `days` | `int` | No | 7 | Look back this many days |
-| `limit` | `int` | No | 20 | Max entries to return |
-
-**Returns:** Array of entry objects with added `priority_score` (0-100), `score_breakdown` (recency, entities, requirements, gaps).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.get_triage_queue()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_triage_queue '{"days": 7, "limit": 20}'
-```
-
----
-
-### Intelligence Extraction (5 tools)
-
-#### extract_ttps
-
-Extract MITRE ATT&CK techniques (TTPs) from an entry. Maps content to technique IDs using pattern matching and optionally AI. Stores results.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `entry_id` | `str` | Yes | — | UUID of the entry |
-| `use_ai` | `bool` | No | `True` | Use AI-powered extraction (more accurate, slower) vs. pattern matching only |
-
-**Returns:** Object with `entry_id`, `ttps_extracted` (array with technique_id, name, tactic, confidence), `extraction_method` (pattern or ai), `timestamp`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.extraction.extract_ttps()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py extract_ttps '{"entry_id": "550e8400-e29b-41d4-a716-446655440000", "use_ai": true}'
-```
-
----
-
-#### extract_cves
-
-Extract CVE references from an entry and optionally enrich with NVD data (CVSS, severity, affected products). Stores results.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `entry_id` | `str` | Yes | — | UUID of the entry |
-
-**Returns:** Object with `entry_id`, `cves_extracted` (array with cve_id, description, cvss_score, severity), `enrichment_source`, `timestamp`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.extraction.extract_cves()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py extract_cves '{"entry_id": "550e8400-e29b-41d4-a716-446655440000"}'
-```
-
----
-
-#### extract_threat_actors
-
-AI-identify threat actors mentioned in an entry. Creates new threat actor entities or links to existing ones. Stores results.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `entry_id` | `str` | Yes | — | UUID of the entry |
-
-**Returns:** Object with `entry_id`, `threat_actors_found` (array with actor_id, name, aliases, confidence), `new_actors_created` (int), `existing_actors_linked` (int), `timestamp`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.extraction.extract_threat_actors()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py extract_threat_actors '{"entry_id": "550e8400-e29b-41d4-a716-446655440000"}'
-```
-
----
-
-#### extract_malware
-
-AI-identify malware families mentioned in an entry. Creates new malware entities or links to existing ones. Stores results.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `entry_id` | `str` | Yes | — | UUID of the entry |
-
-**Returns:** Object with `entry_id`, `malware_found` (array with malware_id, name, aliases, type, confidence), `new_malware_created` (int), `existing_malware_linked` (int), `timestamp`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.extraction.extract_malware()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py extract_malware '{"entry_id": "550e8400-e29b-41d4-a716-446655440000"}'
-```
-
----
-
-#### run_ai_task
-
-Run any registered AI task on an entry (summary, threat_assessment, detection_engineering_summary, etc.). Uses the AI task assignment system.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `task_name` | `str` | Yes | — | Task name: `summary`, `threat_assessment`, `detection_engineering_summary`, or custom registered tasks |
-| `entry_id` | `str` | Yes | — | UUID of the entry |
-
-**Returns:** Object with `entry_id`, `task_name`, `result` (task-specific output), `status`, `timestamp`, `model_used`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.extraction.run_ai_task()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py run_ai_task '{"task_name": "threat_assessment", "entry_id": "550e8400-e29b-41d4-a716-446655440000"}'
-```
-
----
-
-### Correlation & Analysis (8 tools)
-
-#### pivot_entity
-
-Find all entities related to a given entity via co-occurrence in entries. One-hop pivot — shows direct relationships only.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `entity_type` | `str` | Yes | — | Entity type: `ttp`, `cve`, `threat_actor`, `malware`, `country`, `vendor`, `product`, `mitigation`, `tool` |
-| `entity_id` | `str` | Yes | — | UUID or identifier of the entity |
-
-**Returns:** Array of related entity objects, each with `id`, `type`, `name`, `co_occurrence_count` (how many entries mention both entities), `related_entries` (sample).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.correlation.pivot_entity()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py pivot_entity '{"entity_type": "threat_actor", "entity_id": "APT29"}'
-```
-
----
-
-#### get_entity_graph
-
-Build a correlation graph centered on an entity. Shows nodes (entities) and edges (co-occurrence relationships) up to specified depth.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `entity_type` | `str` | Yes | — | Entity type: `ttp`, `cve`, `threat_actor`, `malware`, `country`, `vendor`, `product`, `mitigation`, `tool` |
-| `entity_id` | `str` | Yes | — | UUID or identifier of the entity |
-| `depth` | `int` | No | 1 | Graph depth (1-3): how many hops to follow |
-
-**Returns:** Graph object with `nodes` (array of entities), `edges` (array of relationships with co-occurrence weights), `center_node` (the queried entity), `layout` (for visualization).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.correlation.get_entity_graph()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_entity_graph '{"entity_type": "malware", "entity_id": "Emotet", "depth": 2}'
-```
-
----
-
-#### get_entity_timeline
-
-Get chronological timeline of when an entity appeared in articles. Shows emergence and activity patterns.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `entity_type` | `str` | Yes | — | Entity type: `ttp`, `cve`, `threat_actor`, `malware`, `country`, `vendor`, `product`, `mitigation`, `tool` |
-| `entity_id` | `str` | Yes | — | UUID or identifier of the entity |
-
-**Returns:** Array of timeline events with `date`, `entry_count`, `sample_entries` (articles from that date), `activity_trend` (sparkline).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.correlation.get_entity_timeline()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_entity_timeline '{"entity_type": "cve", "entity_id": "CVE-2025-5777"}'
-```
-
----
-
-#### check_detection_gaps
-
-Identify TTPs and CVEs that have been observed in entries but lack detection rule coverage. Highlights blind spots.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| (none) | — | — | — | No parameters |
-
-**Returns:** Object with `gap_summary` (total count), `uncovered_ttps` (array), `uncovered_cves` (array), `affected_entries_count`, `remediation_suggestions` (array).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.correlation.check_detection_gaps()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py check_detection_gaps
-```
-
----
-
-#### check_requirement_match
-
-Check if a specific entry's content matches any active intelligence requirements (PIRs). Returns matched requirements.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `entry_id` | `str` | Yes | — | UUID of the entry |
-
-**Returns:** Array of matched requirement objects with `id`, `title`, `keywords_matched` (which PIR keywords matched), `match_strength` (0-100).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.correlation.check_requirement_match()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py check_requirement_match '{"entry_id": "550e8400-e29b-41d4-a716-446655440000"}'
-```
-
----
-
-#### check_telemetry_feasibility
-
-Check if detection rules are feasible given configured telemetry sources. Identifies what log sources are needed vs. available.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `rule_id` | `str` | No | `None` | Check a specific rule; if None, check all rules |
-
-**Returns:** Array of feasibility assessments with `rule_id`, `rule_title`, `required_log_sources` (array), `available_log_sources` (array), `feasible` (bool), `gaps` (array of missing sources).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.correlation.check_telemetry_feasibility()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py check_telemetry_feasibility '{"rule_id": "550e8400-e29b-41d4-a716-446655440000"}'
-```
-
----
-
-#### get_temporal_clusters
-
-Find entries sharing entities within time windows — useful for detecting emerging campaigns or coordinated activity.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `days` | `int` | No | 14 | Look back this many days |
-| `window_hours` | `int` | No | 72 | Cluster entries published within this many hours of each other |
-| `min_shared` | `int` | No | 3 | Minimum shared entities to form a cluster |
-| `limit` | `int` | No | 10 | Max clusters to return |
-
-**Returns:** Array of cluster objects with `cluster_id`, `entries` (array), `shared_entities` (array showing common TTPs, actors, malware, etc.), `temporal_span` (hours), `emergence_score`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.correlation.get_temporal_clusters()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_temporal_clusters '{"days": 14, "window_hours": 72, "min_shared": 3, "limit": 10}'
-```
-
----
-
-#### get_entry_graph
-
-Get relationship graph for all entities linked to a single entry. Shows what's in this article and how entities relate to each other.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `entry_id` | `str` | Yes | — | UUID of the entry |
-
-**Returns:** Graph object with `entry_id`, `nodes` (entities in the entry), `edges` (relationships between them), `statistics` (entity counts by type).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.correlation.get_entry_graph()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_entry_graph '{"entry_id": "550e8400-e29b-41d4-a716-446655440000"}'
-```
-
----
-
-### Detection Engineering (3 tools)
-
-#### generate_detection_rules
-
-Generate detection rules from an entry's TTPs. Supports 7 rule formats: SIGMA, Splunk SPL, CrowdStrike QL, Elastic QL, KQL, YARA, Snort/Suricata.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `entry_id` | `str` | Yes | — | UUID of the entry |
-| `rule_types` | `list[str]` | Yes | — | List of rule formats to generate: `sigma`, `splunk_spl`, `crowdstrike_ql`, `elastic_ql`, `kql`, `yara`, `snort_suricata` |
-
-**Returns:** Object with `entry_id`, `rules_generated` (array with rule_type, rule_content, coverage_ttps), `generation_timestamp`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.detection.generate_detection_rules()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py generate_detection_rules '{"entry_id": "550e8400-e29b-41d4-a716-446655440000", "rule_types": ["sigma", "splunk_spl"]}'
-```
-
----
-
-#### validate_detection_rule
-
-Validate detection rule syntax for any supported format. Returns validation errors, warnings, and improvement suggestions.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `rule_type` | `str` | Yes | — | Rule format: `sigma`, `splunk_spl`, `crowdstrike_ql`, `elastic_ql`, `kql`, `yara`, `snort_suricata` |
-| `rule_content` | `str` | Yes | — | The rule text to validate |
-
-**Returns:** Object with `valid` (bool), `errors` (array of error messages), `warnings` (array), `suggestions` (array of improvements).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.detection.validate_detection_rule()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py validate_detection_rule '{"rule_type": "sigma", "rule_content": "title: Test Rule\nlogsource: ...\ndetection: ..."}'
-```
-
----
-
-#### build_detection_summary
-
-Full detection engineering analysis: gathers all intelligence context for entries and produces comprehensive attack chain analysis and detection gaps.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `entry_ids` | `list[str]` | Yes | — | UUIDs of entries to analyze |
-| `rule_formats` | `list[str]` | Yes | — | Rule formats to generate: `sigma`, `splunk_spl`, `crowdstrike_ql`, `elastic_ql`, `kql`, `yara`, `snort_suricata` |
-
-**Returns:** Object with `entries_analyzed` (int), `attack_chain` (array showing tactic progression), `all_ttps` (array), `coverage_analysis` (TTPs with/without rules), `generated_rules` (array), `gaps` (array), `recommendations` (array).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.detection.build_detection_summary()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py build_detection_summary '{"entry_ids": ["550e8400-e29b-41d4-a716-446655440000", "660e8400-e29b-41d4-a716-446655440000"], "rule_formats": ["sigma", "splunk_spl"]}'
-```
-
----
-
-### Write Operations (28 tools)
-
-#### create_threat_actor
-
-Create a new threat actor entity.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `name` | `str` | Yes | — | Primary name of the threat actor (e.g., "APT29", "Cozy Bear") |
-| `aliases` | `list[str]` | No | `None` | Alternative names (e.g., ["Cozy Bear", "The Dukes", "NOBELIUM"]) |
-| `description` | `str` | No | `None` | Description of the actor, motivations, history |
-| `country` | `str` | No | `None` | Country of attribution (e.g., "Russia", "China") |
-| `motivation` | `str` | No | `None` | Motivation type: `espionage`, `financial`, `hacktivism`, `unknown` |
-
-**Returns:** Threat actor object with `id`, `name`, `aliases`, `description`, `country`, `motivation`, `created_at`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.write.create_threat_actor()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py create_threat_actor '{"name": "APT99", "aliases": ["The New Group"], "country": "North Korea", "motivation": "financial"}'
-```
-
----
-
-#### create_malware
-
-Create a new malware family entity.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `name` | `str` | Yes | — | Malware name (e.g., "Emotet", "Trickbot") |
-| `aliases` | `list[str]` | No | `None` | Alternative names |
-| `description` | `str` | No | `None` | Description and analysis |
-| `malware_type` | `str` | No | `None` | Type: `trojan`, `worm`, `ransomware`, `spyware`, `rootkit`, `botnet`, etc. |
-
-**Returns:** Malware object with `id`, `name`, `aliases`, `description`, `malware_type`, `created_at`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.write.create_malware()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py create_malware '{"name": "NewRansom", "malware_type": "ransomware", "description": "Recently discovered ransomware"}'
-```
-
----
-
-#### create_detection_rule
-
-Save a detection rule to the library.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `title` | `str` | Yes | — | Rule title (e.g., "Detect Mimikatz via Command Line") |
-| `rule_type` | `str` | Yes | — | Rule format: `sigma`, `splunk_spl`, `crowdstrike_ql`, `elastic_ql`, `kql`, `yara`, `snort_suricata` |
-| `rule_content` | `str` | Yes | — | The complete rule text (syntax depends on rule_type) |
-| `description` | `str` | No | `None` | Description of what the rule detects |
-| `severity` | `str` | No | `None` | Severity: `critical`, `high`, `medium`, `low`, `info` |
-| `entry_id` | `str` | No | `None` | Link the rule to an entry (source article) |
-
-**Returns:** Detection rule object with `id`, `title`, `rule_type`, `rule_content`, `description`, `severity`, `created_at`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.write.create_detection_rule()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py create_detection_rule '{"title": "Mimikatz Detection", "rule_type": "sigma", "rule_content": "title: Detect Mimikatz\n...", "severity": "high"}'
-```
-
----
-
-#### create_campaign
-
-Create a new campaign to track a threat operation and link entities/entries to it.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `name` | `str` | Yes | — | Campaign name (e.g., "Operation SteadyRain", "Q2 2026 APT29 Activity") |
-| `description` | `str` | No | `None` | Campaign description and context |
-| `status` | `str` | No | `"active"` | Status: `active`, `monitoring`, `closed`, `historical` |
-| `tlp_marking` | `str` | No | `"TLP:GREEN"` | TLP marking: `TLP:WHITE`, `TLP:GREEN`, `TLP:AMBER`, `TLP:RED` |
-
-**Returns:** Campaign object with `id`, `name`, `description`, `status`, `tlp_marking`, `created_at`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.write.create_campaign()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py create_campaign '{"name": "Operation SteadyRain", "description": "Coordinated ransomware activity", "status": "active", "tlp_marking": "TLP:AMBER"}'
-```
-
----
-
-#### create_feed
-
-Subscribe to a new RSS/Atom/YouTube/podcast feed.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `url` | `str` | Yes | — | Feed URL (e.g., https://krebsonsecurity.com/feed/, https://www.youtube.com/@channel/videos) |
-| `title` | `str` | No | `None` | Display title for the feed; auto-detected if not provided |
-| `feed_type` | `str` | No | `"rss"` | Feed type: `rss`, `atom`, `youtube`, `podcast` |
-| `category` | `str` | No | `None` | Category tag (e.g., "Security News", "Academic") |
-
-**Returns:** Feed object with `id`, `title`, `url`, `feed_type`, `category`, `enabled`, `created_at`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.write.create_feed()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py create_feed '{"url": "https://krebsonsecurity.com/feed/", "feed_type": "rss", "category": "News"}'
-```
-
----
-
-#### add_telegram_feed
-
-Subscribe to a Telegram channel feed. Requires server-side Telegram setup and session credentials. Auto-attribution (threat_actor_id / campaign_id) is the killer feature for ransomware leak channels and hacktivist channels that ARE the actor.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `channel` | `str` | Yes | — | Telegram channel username or ID (e.g., "@ransomware_leaks", "@anaraska") |
-| `title` | `str` | No | `None` | Display title for the feed |
-| `include_media` | `bool` | No | `True` | Download and index media files |
-| `extract_forwards` | `bool` | No | `True` | Follow forwarded messages to original source |
-| `max_message_age_days` | `int` | No | 30 | Only fetch messages from the last N days |
-| `max_messages_per_fetch` | `int` | No | 200 | Limit messages per fetch |
-| `fetch_interval_minutes` | `int` | No | 30 | Poll interval in minutes |
-| `threat_actor_id` | `str` | No | `None` | Auto-attribute all posts to this threat actor |
-| `campaign_id` | `str` | No | `None` | Auto-attribute all posts to this campaign |
-| `session_name` | `str` | No | `None` | Telegram session name (if multiple accounts) |
-| `category` | `str` | No | `None` | Category tag |
-
-**Returns:** Telegram feed object with `id`, `channel`, `title`, `threat_actor_id`, `campaign_id`, `created_at`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.write.add_telegram_feed()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py add_telegram_feed '{"channel": "@ransomware_gang", "threat_actor_id": "550e8400-e29b-41d4-a716-446655440000"}'
-```
-
----
-
-#### create_note
-
-Add a note (markdown-enabled) to an entry.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `entry_id` | `str` | Yes | — | UUID of the entry |
-| `content` | `str` | Yes | — | Note content (supports markdown) |
-
-**Returns:** Note object with `id`, `entry_id`, `content`, `created_at`, `updated_at`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.write.create_note()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py create_note '{"entry_id": "550e8400-e29b-41d4-a716-446655440000", "content": "This is a **critical** IOC for Operation X."}'
-```
-
----
-
-#### create_entity_note
-
-Add an analytical note to any intelligence entity (threat actor, malware, CVE, TTP, campaign).
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `entity_type` | `str` | Yes | — | Entity type: `threat_actor`, `malware`, `cve`, `ttp`, `campaign` |
-| `entity_id` | `str` | Yes | — | UUID or identifier of the entity |
-| `content` | `str` | Yes | — | Note content (supports markdown) |
-
-**Returns:** Note object with `id`, `entity_type`, `entity_id`, `content`, `created_at`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.write.create_entity_note()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py create_entity_note '{"entity_type": "threat_actor", "entity_id": "APT29", "content": "Observed new targeting in financial sector."}'
-```
-
----
-
-#### add_tag
-
-Tag an entry with an existing or new tag.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `entry_id` | `str` | Yes | — | UUID of the entry |
-| `tag_name` | `str` | Yes | — | Tag name (e.g., "critical", "followup", "verified") |
-
-**Returns:** Tag object with `id`, `name`, and entry's updated `tags` array.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.write.add_tag()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py add_tag '{"entry_id": "550e8400-e29b-41d4-a716-446655440000", "tag_name": "critical"}'
-```
-
----
-
-#### add_to_campaign
-
-Link an entry or entity to a campaign with an optional role (primary, secondary, related).
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `campaign_id` | `str` | Yes | — | UUID of the campaign |
-| `entry_id` | `str` | No | `None` | UUID of entry to link (mutually exclusive with entity_type/entity_id) |
-| `entity_type` | `str` | No | `None` | Type of entity to link: `ttp`, `cve`, `threat_actor`, `malware` (mutually exclusive with entry_id) |
-| `entity_id` | `str` | No | `None` | UUID or identifier of the entity (required if entity_type is set) |
-| `role` | `str` | No | `"related"` | Role in campaign: `primary` (central to operation), `secondary` (supporting), `related` (tangentially connected) |
-
-**Returns:** Campaign object with updated linked items.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.write.add_to_campaign()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py add_to_campaign '{"campaign_id": "550e8400-e29b-41d4-a716-446655440000", "entity_type": "threat_actor", "entity_id": "APT29", "role": "primary"}'
-```
-
----
-
-#### link_entities
-
-Create a relationship between two intelligence entities.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `source_type` | `str` | Yes | — | Type of source entity: `ttp`, `cve`, `threat_actor`, `malware`, `campaign` |
-| `source_id` | `str` | Yes | — | UUID or identifier of source entity |
-| `target_type` | `str` | Yes | — | Type of target entity: `ttp`, `cve`, `threat_actor`, `malware`, `campaign` |
-| `target_id` | `str` | Yes | — | UUID or identifier of target entity |
-| `relationship_type` | `str` | Yes | — | Relationship type (e.g., "uses", "exploits", "targets", "related_to") |
-| `description` | `str` | No | `None` | Description of the relationship |
-
-**Returns:** Relationship object with `id`, `source_type`, `source_id`, `target_type`, `target_id`, `relationship_type`, `description`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.write.link_entities()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py link_entities '{"source_type": "threat_actor", "source_id": "APT29", "target_type": "malware", "target_id": "Emotet", "relationship_type": "uses"}'
-```
-
----
-
-#### create_automation_rule
-
-Set up an automation rule with trigger, conditions, and actions.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `name` | `str` | Yes | — | Rule name |
-| `trigger_type` | `str` | Yes | — | When to trigger: `new_entry`, `new_entity`, `schedule`, `manual` |
-| `actions` | `list[dict]` | Yes | — | List of action objects (e.g., [{"type": "tag", "value": "critical"}]) |
-| `description` | `str` | No | `None` | Description |
-| `trigger_config` | `dict` | No | `None` | Trigger-specific config (e.g., {"query": "ransomware", "frequency": "daily"} for schedule) |
-| `conditions` | `dict` | No | `None` | Conditions (e.g., {"must_match": "all", "rules": [{"field": "entry.tags", "op": "contains", "value": "critical"}]}) |
-
-**Returns:** Automation rule object with `id`, `name`, `trigger_type`, `enabled`, `created_at`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.write.create_automation_rule()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py create_automation_rule '{"name": "Tag Ransomware", "trigger_type": "new_entry", "actions": [{"type": "tag", "value": "ransomware"}], "trigger_config": {"query": "ransomware"}}'
-```
-
----
-
-#### create_intel_report
-
-Create an intelligence report from a template with linked entities and entries.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `title` | `str` | Yes | — | Report title |
-| `template_type` | `str` | Yes | — | Template: `flash_alert`, `actor_profile`, `campaign_tracker`, `landscape_report`, `custom` |
-| `entry_ids` | `list[str]` | No | `None` | UUIDs of source entries |
-| `entity_ids` | `dict` | No | `None` | Dictionary mapping entity types to IDs: e.g., {"threat_actor": ["APT29"], "malware": ["Emotet"]} |
-| `tlp_marking` | `str` | No | `"TLP:GREEN"` | TLP marking: `TLP:WHITE`, `TLP:GREEN`, `TLP:AMBER`, `TLP:RED` |
-
-**Returns:** Report object with `id`, `title`, `template_type`, `tlp_marking`, `status` (draft), `created_at`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.write.create_intel_report()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py create_intel_report '{"title": "APT29 Activity Report", "template_type": "actor_profile", "entity_ids": {"threat_actor": ["APT29"]}, "tlp_marking": "TLP:AMBER"}'
-```
-
----
-
-#### update_entity_profile
-
-Update any entity's profile (description, aliases, etc.).
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `entity_type` | `str` | Yes | — | Entity type: `threat_actor`, `malware`, `cve`, `campaign` |
-| `entity_id` | `str` | Yes | — | UUID or identifier of the entity |
-| `updates` | `dict` | Yes | — | Dictionary of fields to update (e.g., {"aliases": [...], "description": "..."}) |
-
-**Returns:** Updated entity object.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.write.update_entity_profile()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py update_entity_profile '{"entity_type": "threat_actor", "entity_id": "APT29", "updates": {"aliases": ["Cozy Bear", "Midnight Blizzard"]}}'
-```
-
----
-
-#### merge_threat_actors
-
-Merge a duplicate threat actor into another. Moves all entries and country links from source → target, unions aliases (source name + aliases are added to the target's aliases), optionally rewrites the description, then deletes the source actor. Use `mode: "shadow"` to log the would-be action without making changes. Always include `reasoning` so the maintenance log can be audited.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `target_id` | `str` | Yes | — | UUID of the surviving actor |
-| `source_id` | `str` | Yes | — | UUID of the actor to merge away (deleted at the end) |
-| `mode` | `str` | No | `"apply"` | `shadow` (log only, no changes) or `apply` |
-| `new_description` | `str` | No | `None` | Replace target description; omit to keep existing |
-| `extra_aliases` | `list[str]` | No | `[]` | Additional aliases to add on top of source name + aliases |
-| `reasoning` | `str` | No | `None` | Why this merge — recorded in the maintenance log |
-
-**Returns:** Merge result object with `action` (merge), `mode`, `target_id`, `source_id`, `moved_entry_links`, `moved_country_links`, `merged_alias_count`, `log_id`, `applied` (bool).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.write.merge_threat_actors()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py merge_threat_actors '{"target_id": "550e8400-e29b-41d4-a716-446655440000", "source_id": "660f9511-f3ac-52e5-b827-557766551111", "mode": "shadow", "reasoning": "Same actor: Nobelium is a Microsoft alias for APT29"}'
-```
-
----
-
-#### merge_malware
-
-Merge a duplicate malware family into another. Same semantics as `merge_threat_actors`: moves entry links, unions aliases, optionally rewrites description, deletes the source. Always include `reasoning`.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `target_id` | `str` | Yes | — | UUID of the surviving malware family |
-| `source_id` | `str` | Yes | — | UUID of the malware family to merge away |
-| `mode` | `str` | No | `"apply"` | `shadow` (log only, no changes) or `apply` |
-| `new_description` | `str` | No | `None` | Replace target description; omit to keep existing |
-| `extra_aliases` | `list[str]` | No | `[]` | Additional aliases to add |
-| `reasoning` | `str` | No | `None` | Why this merge — recorded in the maintenance log |
-
-**Returns:** Merge result object (same shape as `merge_threat_actors`, minus country links).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.write.merge_malware()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py merge_malware '{"target_id": "550e8400-e29b-41d4-a716-446655440000", "source_id": "660f9511-f3ac-52e5-b827-557766551111", "reasoning": "QakBot and Qbot are the same family"}'
-```
-
----
-
-#### merge_vendors
-
-Merge a duplicate vendor into another. Same semantics as `merge_threat_actors`.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `target_id` | `str` | Yes | — | UUID of the surviving vendor |
-| `source_id` | `str` | Yes | — | UUID of the vendor to merge away |
-| `mode` | `str` | No | `"apply"` | `shadow` (log only, no changes) or `apply` |
-| `new_description` | `str` | No | `None` | Replace target description; omit to keep existing |
-| `extra_aliases` | `list[str]` | No | `[]` | Additional aliases to add |
-| `reasoning` | `str` | No | `None` | Why this merge — recorded in the maintenance log |
-
-**Returns:** Merge result object (same shape as `merge_malware`).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.write.merge_vendors()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py merge_vendors '{"target_id": "550e8400-e29b-41d4-a716-446655440000", "source_id": "660f9511-f3ac-52e5-b827-557766551111", "reasoning": "Duplicate: MSFT vs Microsoft"}'
-```
-
----
-
-#### merge_products
-
-Merge a duplicate product into another. Same semantics as `merge_threat_actors`.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `target_id` | `str` | Yes | — | UUID of the surviving product |
-| `source_id` | `str` | Yes | — | UUID of the product to merge away |
-| `mode` | `str` | No | `"apply"` | `shadow` (log only, no changes) or `apply` |
-| `new_description` | `str` | No | `None` | Replace target description; omit to keep existing |
-| `extra_aliases` | `list[str]` | No | `[]` | Additional aliases to add |
-| `reasoning` | `str` | No | `None` | Why this merge — recorded in the maintenance log |
-
-**Returns:** Merge result object (same shape as `merge_malware`).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.write.merge_products()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py merge_products '{"target_id": "550e8400-e29b-41d4-a716-446655440000", "source_id": "660f9511-f3ac-52e5-b827-557766551111", "reasoning": "Duplicate: Exchange Server vs Microsoft Exchange"}'
-```
-
----
-
-#### merge_tools
-
-Merge a duplicate tool into another. Same semantics as `merge_vendors`.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `target_id` | `str` | Yes | — | UUID of the surviving tool |
-| `source_id` | `str` | Yes | — | UUID of the tool to merge away |
-| `mode` | `str` | No | `"apply"` | `shadow` (log only, no changes) or `apply` |
-| `new_description` | `str` | No | `None` | Replace target description; omit to keep existing |
-| `extra_aliases` | `list[str]` | No | `[]` | Additional aliases to add |
-| `reasoning` | `str` | No | `None` | Why this merge — recorded in the maintenance log |
-
-**Returns:** Merge result object (same shape as `merge_malware`).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.write.merge_tools()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py merge_tools '{"target_id": "550e8400-e29b-41d4-a716-446655440000", "source_id": "660f9511-f3ac-52e5-b827-557766551111", "reasoning": "Cobalt Strike Beacon is a component of Cobalt Strike"}'
-```
-
----
-
-#### reclassify_entity
-
-Move an entity from one type to another (e.g., `malware` → `tool`) when it was filed under the wrong type. If `target_id` is supplied, the source merges into that existing entity; otherwise a new entity is created in `target_type` by copying name/aliases/description. Type-specific fields (motivation, malware_type, tool_type, etc.) are **not** carried across — fix them afterward with `update_entity_profile`. Use `mode: "shadow"` to log without acting; always include `reasoning`.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `source_type` | `str` | Yes | — | Current type: `threat_actor`, `malware`, `vendor`, `product`, `tool` |
-| `source_id` | `str` | Yes | — | UUID of the entity being moved |
-| `target_type` | `str` | Yes | — | Destination type (same enum as `source_type`) |
-| `target_id` | `str` | No | `None` | Existing target entity to merge into; omit to create a new one |
-| `mode` | `str` | No | `"apply"` | `shadow` (log only, no changes) or `apply` |
-| `new_description` | `str` | No | `None` | Replace description on the target |
-| `extra_aliases` | `list[str]` | No | `[]` | Additional aliases to add |
-| `reasoning` | `str` | No | `None` | Why this reclassification — recorded in the maintenance log |
-
-**Returns:** Reclassify result object with `action` (reclassify), `mode`, `source_type`, `source_id`, `target_type`, `target_id`, `target_created` (bool — true if a new entity was created), `moved_entry_links`, `merged_alias_count`, `log_id`, `applied` (bool).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.write.reclassify_entity()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py reclassify_entity '{"source_type": "malware", "source_id": "550e8400-e29b-41d4-a716-446655440000", "target_type": "tool", "reasoning": "Mimikatz is an offensive tool, not malware"}'
-```
-
----
-
-#### create_requirement
-
-Create a new Priority Intelligence Requirement (PIR).
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `title` | `str` | Yes | — | PIR title |
-| `keywords` | `list[str]` | Yes | — | List of keywords to auto-match against entries |
-| `description` | `str` | No | `None` | Description |
-| `priority` | `str` | No | `"medium"` | Priority: `critical`, `high`, `medium`, `low` |
-| `category` | `str` | No | `None` | Category: `strategic`, `operational`, `tactical`, `technical` |
-| `auto_match` | `bool` | No | `True` | Auto-match new entries against keywords |
-
-**Returns:** Requirement object with `id`, `title`, `keywords`, `priority`, `category`, `status` (active), `created_at`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.write.create_requirement()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py create_requirement '{"title": "Ransomware Activity", "keywords": ["ransomware", "extortion", "double-extortion"], "priority": "high", "category": "operational"}'
-```
-
----
-
-#### update_requirement
-
-Update an existing intelligence requirement (keywords, status, priority, etc.).
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `requirement_id` | `str` | Yes | — | UUID of the requirement |
-| `updates` | `dict` | Yes | — | Dictionary of fields to update (e.g., {"keywords": [...], "status": "fulfilled"}) |
-
-**Returns:** Updated requirement object.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.write.update_requirement()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py update_requirement '{"requirement_id": "550e8400-e29b-41d4-a716-446655440000", "updates": {"status": "fulfilled"}}'
-```
-
----
-
-#### publish_report
-
-Publish an intelligence report — saves current version and sets status to published.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `report_id` | `str` | Yes | — | UUID of the report |
-
-**Returns:** Report object with `status` set to "published", `published_at` timestamp.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.write.publish_report()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py publish_report '{"report_id": "550e8400-e29b-41d4-a716-446655440000"}'
-```
-
----
-
-#### generate_full_report
-
-Generate an AI-powered intelligence report from source entries.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `title` | `str` | Yes | — | Report title |
-| `template_type` | `str` | Yes | — | Template: `flash_alert`, `actor_profile`, `campaign_tracker`, `landscape_report`, `custom` |
-| `entry_ids` | `list[str]` | Yes | — | UUIDs of source entries to analyze |
-| `focus` | `str` | No | `None` | Focus area for the AI (e.g., "detection engineering", "IOC extraction") |
-| `tlp_marking` | `str` | No | `"TLP:GREEN"` | TLP marking |
-
-**Returns:** Report object with AI-generated content, `id`, `title`, `content`, `status` (published), `generated_at`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.write.generate_full_report()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py generate_full_report '{"title": "Ransomware Threat Report", "template_type": "landscape_report", "entry_ids": ["550e8400-e29b-41d4-a716-446655440000", "660e8400-e29b-41d4-a716-446655440000"], "focus": "detection engineering"}'
-```
-
----
-
-#### generate_campaign_report
-
-Generate an intelligence report from a campaign's linked entries and entities.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `campaign_id` | `str` | Yes | — | UUID of the campaign |
-| `template_type` | `str` | No | `"campaign_tracker"` | Template: `flash_alert`, `actor_profile`, `campaign_tracker`, `landscape_report`, `custom` |
-| `title` | `str` | No | `None` | Custom title; auto-generated if not provided |
-| `tlp_marking` | `str` | No | `"TLP:GREEN"` | TLP marking |
-
-**Returns:** Report object with campaign details, timeline, intelligence, and recommendations.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.write.generate_campaign_report()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py generate_campaign_report '{"campaign_id": "550e8400-e29b-41d4-a716-446655440000", "template_type": "campaign_tracker", "tlp_marking": "TLP:AMBER"}'
-```
-
----
-
-#### export_report
-
-Export an intelligence report in markdown or HTML format.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `report_id` | `str` | Yes | — | UUID of the report |
-| `format` | `str` | Yes | — | Export format: `markdown` or `html` |
-
-**Returns:** String containing the formatted report content.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.export.export_report()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py export_report '{"report_id": "550e8400-e29b-41d4-a716-446655440000", "format": "markdown"}'
-```
-
----
-
-### Export (1 tool)
-
-#### export_attack_layer
-
-Export MITRE ATT&CK Navigator layer JSON for visualization in the official Navigator tool.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `entry_id` | `str` | No | `None` | Scope to a specific entry; if None, exports system-wide coverage |
-| `title` | `str` | No | `"IntelFeed ATT&CK Layer"` | Layer title |
-
-**Returns:** ATT&CK Navigator v4.3 layer JSON (can be imported directly into https://mitre-attack.github.io/attack-navigator/).
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.export.export_attack_layer()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py export_attack_layer '{"entry_id": "550e8400-e29b-41d4-a716-446655440000", "title": "This Article'\''s ATT&CK Coverage"}'
-```
-
----
-
-### Delete (1 tool)
-
-#### delete_entity
-
-Delete an entity. Requires user confirmation for safety. First call returns a confirmation prompt — present it to the user. Only call again with the confirmation_token after the user explicitly approves.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `entity_type` | `str` | Yes | — | Entity type to delete: `feed`, `entry`, `note`, `detection_rule`, `campaign`, `automation_rule`, `intelligence_requirement`, `intel_report`, `ttp`, `threat_actor`, `malware`, `tag`, `cve`, `country`, `tool`, `vendor`, `product`, `mitigation`, `observable` |
-| `entity_id` | `str` | Yes | — | UUID or identifier of the entity |
-| `confirmation_token` | `str` | No | `None` | Confirmation token from first call; required to actually delete |
-
-**Returns (first call):** Object with `confirmation_required` (true), `message` (prompt for user), `confirmation_token` (string to pass back).
-
-**Returns (second call with token):** Object with `deleted` (true), `entity_type`, `entity_id`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.delete.delete_entity()`
-
-**Example (first call):**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py delete_entity '{"entity_type": "campaign", "entity_id": "550e8400-e29b-41d4-a716-446655440000"}'
-# Returns: {"confirmation_required": true, "message": "Are you sure...", "confirmation_token": "abc123"}
-```
-
-**Example (second call, after user confirms):**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py delete_entity '{"entity_type": "campaign", "entity_id": "550e8400-e29b-41d4-a716-446655440000", "confirmation_token": "abc123"}'
-# Returns: {"deleted": true, "entity_type": "campaign", "entity_id": "550e8400-e29b-41d4-a716-446655440000"}
-```
-
----
-
-### Telegram (2 tools)
-
-#### list_telegram_feeds
-
-List Telegram channel feeds with their adapter config.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `limit` | `int` | No | 50 | Max feeds to return |
-
-**Returns:** Array of Telegram feed objects with `id`, `channel`, `title`, `threat_actor_id`, `campaign_id`, `enabled`, `last_fetched`, `message_count`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.list_telegram_feeds()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py list_telegram_feeds '{"limit": 20}'
-```
-
----
-
-#### discover_telegram_channels
-
-List every Telegram channel the IntelFeed bootstrap account is joined to. The `is_subscribed` flag shows which ones are already ingested as feeds. Useful for finding channels you joined in Telegram but haven't added to IntelFeed yet.
-
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `session_name` | `str` | No | `""` | Telegram session name (if multiple accounts configured) |
-| `only_unsubscribed` | `bool` | No | `False` | Return only channels not yet subscribed as feeds |
-
-**Returns:** Array of channel objects with `channel_name`, `channel_id`, `is_subscribed` (bool), `member_count`, `description`.
-
-**Backed by:** `POST /api/tools/execute` → `app.tools.read.discover_telegram_channels()`
-
-**Example:**
-```bash
-python3 intelfeed-skill/scripts/intelfeed_cli.py discover_telegram_channels '{"only_unsubscribed": true}'
-```
-
----
-
-### Extended Tool Surface
-
-The 2026-08 registry expansion added 78 tools in five backend modules; Story Threads, the observables ledger, CWE, the server-side Priority Queue and the in-app docs added nine more over September, the sector entity four, the observables-intelligence work five more (`observables.py`), and the workbench boards seven (`boards.py`), bringing the registry to **187**. They follow the same invocation pattern as everything above; run `--help-tool <name>` for parameters and defaults. Grouped by module (`backend/app/tools/`):
-
-**Ledger, queue & catalog reads (`read.py`, 4 tools)** — the September additions to the largest module:
-`get_observable` (one IOC ledger row by UUID or value — kind, role, current/base confidence with decay state, sighting count, the judgment door that captured it with its evidence sentence, first/last seen, recent sighting articles; defanged input like `evil[.]com` or `hxxps://` is normalised), `search_observables` (filter the ledger by substring, kind, role, lifecycle status or capture door, sorted by last sighting), `get_cwe` (a MITRE CWE with its abstraction rung, parent and lineage, mapping guidance, catalog mitigations and detection methods, direct and subtree CVE counts, KEV count, linked articles), `get_priority_queue` (the reading queue exactly as the Priority Queue page shows it — radar-clearing unread entries with story threads folded in as single rows; prefer it over `get_triage_queue`, the older heuristic that does not fold stories)
-
-**Observables (`observables.py`, 5 tools)** — working the IOC ledger from a skill:
-`promote_observable` (the analyst door — a staged candidate or any value the article prints becomes a ledger row sighted in that entry, with role and evidence), `update_observable` (role, label, description, or pin confidence so decay stops), `deny_observable` (admin — tombstone a value so no door captures, sights or exports it again; works on a row or on any kind+value), `get_entity_infrastructure` (an actor's / family's / campaign's / tool's observables in two tiers — claimed attribution edges with trust tier, and values reported alongside it in the same articles, newsletters and list files excluded), `export_observables` (a filtered slice as EDL lines, CSV rows or JSON, refanged, dual-use infra excluded unless asked). `search_observables` also grew `captured_by`, `infra_tag`, `needs_review`, `min_confidence` and `min_reports` filters, and `get_observable` returns the corroboration counts (`report_count` / `feed_source_count`), reputation and `claimed_by`.
-
-**Documentation (`docs.py`, 3 tools)** — the copilot's route into these very docs:
-`list_documentation_pages` (slug, title, section and one-line summary for every page shipped with the deployment), `search_documentation` (full-text with excerpts, to find which page covers a topic), `get_documentation_page` (one page in full as markdown; the slug is the path under `docs/` without `.md`, e.g. `architecture` or `diagrams/entries-lifecycle` — cite it back as a `/documentation/<slug>` link)
-
-
-**Workbench boards (`boards.py`, 7 tools)** — the pages analysts work from, as data:
-`get_threat_board` (the Threats board: actors/malware and exploited CVEs ranked by distinct stories over 7/14/30 days, with lead headline, brief, sources, handled state and, for CVEs, exposure lift and detection posture), `get_coverage_workspace` (one threat's articles and extracted behaviours with the telemetry each needs; `below_line` marks a sourcing gap), `get_entity_whats_new` (novelty and severity signals on an entity's recent articles), `list_intel_profiles` / `get_intel_profile` / `get_profile_threat_surface` (named customer or portfolio scopes, and the actors and malware active against one), `list_tags` (every tag with the caller's counts)
-
-**Story Threads (`threads.py`, 2 tools)** — an unfolding story as one object rather than the twenty-three articles that reported it:
-`get_story_threads` (open threads with their outlets, counts, key entities and best unread score), `get_story_thread` (one thread's spine, members, yield and nearest neighbours — open it in the UI at `/priority-queue?thread=<slug>`)
-
-
-**Curation (`curation.py`, 14 tools)** — entry↔entity link (edge) and relationship management, extraction provenance, hygiene:
-`list_entity_links`, `get_entity_link_stats`, `unlink_entity_from_entry`, `bulk_unlink_entities`, `report_false_positive`, `list_entity_relationships`, `confirm_relationship`, `reject_relationship`, `delete_relationship`, `get_extraction_stats`, `list_extraction_entities`, `confirm_extraction_entities`, `get_hygiene_stats`, `get_hygiene_feed`
-
-**Feeds & Automation (`feeds_automation.py`, 20 tools)** — feed/category CRUD, automation rule lifecycle, webhook presets, notes, campaign updates:
-`update_feed`, `delete_feed`, `refresh_feed`, `list_categories`, `create_category`, `update_automation_rule`, `toggle_automation_rule`, `delete_automation_rule`, `list_webhook_presets`, `create_webhook_preset`, `delete_webhook_preset`, `list_notes`, `update_note`, `delete_note`, `list_entity_notes`, `update_entity_note`, `delete_entity_note`, `update_campaign`, `delete_campaign`, `remove_from_campaign`
-
-**Landscape (`landscape.py`, 12 tools)** — watchlist, ransomware victim tracker, stack exposure, glossary:
-`list_watches`, `watch_entity`, `unwatch_entity`, `get_ransomware_disclosures`, `get_ransomware_stats`, `get_ransomware_victim`, `get_ransomware_group_victims`, `get_stack_exposure`, `list_glossary_terms`, `create_glossary_term`, `delete_glossary_term`, `detect_glossary_terms`
-
-**Reader Operations (`reader_ops.py`, 20 tools)** — entry state, similar/story views, translation, daily summary, manual ingest, share links, saved searches:
-`mark_entry_read`, `star_entry`, `bookmark_entry`, `bulk_entry_action`, `mark_all_read`, `get_similar_entries` (embedding-backed, keyword fallback), `get_entry_story`, `translate_entry`, `get_daily_summary`, `ingest_url`, `ingest_text`, `ingest_file` (base64), `ingest_batch` (URLs and texts; GitHub repo links expand), `get_ingest_batch`, `create_share_link`, `get_share_link`, `revoke_share_link`, `list_saved_searches`, `create_saved_search`, `delete_saved_search`
-
-**Workspace (`workspace.py`, 16 tools)** — detection rule lifecycle/versions, intel report management, requirement matches:
-`get_detection_rule`, `update_detection_rule`, `delete_detection_rule`, `set_detection_rule_status`, `convert_detection_rule`, `get_detection_rule_versions`, `rollback_detection_rule`, `list_intel_reports`, `get_intel_report`, `update_intel_report`, `delete_intel_report`, `archive_intel_report`, `delete_requirement`, `fulfill_requirement`, `add_requirement_match`, `remove_requirement_match`
+The tables below come from the backend registry and are grouped by the file each tool lives in. For the type, default and allowed values of each argument, run `--help-tool <name>`.
+
+- **Arguments**: **bold** ones are required.
+- **Kind**:
+  - **read**: in both CLIs.
+  - **read, full only**: a read tool left out of the lite CLI.
+  - **write**: changes data. Full CLI only, and blocked in read-only mode.
+  - **admin**: needs an admin account. See [Admin tools and confirmations](#admin-tools-and-confirmations).
+
+### Search
+
+Source: `backend/app/tools/search.py`.
+
+| Tool | What it does | Arguments | Kind |
+|---|---|---|---|
+| `search_entries` | Search articles with the full query language. Pages with `offset`. | **`query`**, `limit`, `offset`, `sort` | read |
+| `search_entities` | Search all entity types and analyst notes by name. | **`query`**, `limit` | read |
+| `search_unified` | Search articles and entities in one call. | **`query`**, `limit` | read |
+| `get_search_facets` | Feed types, categories and top tags, with counts. | none | read |
+
+### Entries, entities and platform data
+
+Source: `backend/app/tools/read.py`.
+
+| Tool | What it does | Arguments | Kind |
+|---|---|---|---|
+| `get_entry` | One article with its content and every linked entity. | **`entry_id`** | read |
+| `get_feed_entries` | Recent articles from one feed. | **`feed_id`**, `limit` | read |
+| `get_threat_actor` | A threat actor profile. | **`actor_id`** | read |
+| `get_malware` | A malware family profile. | **`malware_id`** | read |
+| `get_cve` | A CVE with scores, KEV status, exploit info, affected products and CWEs. | **`cve_id`** | read |
+| `get_observable` | One IOC by UUID or value. Accepts defanged input like `evil[.]com`. | **`observable`**, `kind` | read |
+| `search_observables` | Filter the IOC ledger. Sorted by last sighting. | `query`, `kind`, `role`, `status`, `captured_by`, `infra_tag`, `needs_review`, `min_confidence`, `min_reports`, `linked_entity_type`, `linked_entity_id`, `limit` | read |
+| `get_cwe` | A CWE weakness with its lineage, mitigations and CVE counts. | **`cwe_id`** | read |
+| `get_ttp` | An ATT&CK technique by UUID or ID (for example `T1059.001`). | **`ttp_id`** | read |
+| `get_campaign` | A campaign with its timeline, links and detection gaps. | **`campaign_id`** | read |
+| `get_feeds` | Configured feeds with their health. | `limit` | read |
+| `discover_telegram_channels` | Telegram channels the server account has joined, and which are already feeds. | `session_name`, `only_unsubscribed` | read |
+| `list_telegram_feeds` | Telegram feeds with their adapter settings. | `limit` | read |
+| `get_detection_rules` | List detection rules, optionally by format. | `rule_type`, `limit` | read |
+| `get_requirements` | Intelligence requirements and their coverage. | `status` | read |
+| `get_correlation_events` | Recent correlation events (gaps, trends, matches, KEV additions). | `limit`, `unread_only` | read |
+| `get_analytics` | Platform analytics: overview, trending, detection coverage or velocity. | **`metric`**, `entity_type`, `days` | read |
+| `get_dashboard_stats` | System-wide counts and recent activity. | none | read |
+| `get_enrichment_data` | Stored enrichment for a CVE, malware, actor or TTP. | **`entity_type`**, **`entity_id`** | read |
+| `get_attack_layer` | ATT&CK Navigator layer for one article, or for all observed techniques. | `entry_id`, `title` | read |
+| `get_telemetry_sources` | Configured log sources and what they cover. | none | read |
+| `get_campaigns` | List campaigns. | `status`, `limit` | read |
+| `get_campaign_timeline` | A campaign's articles, newest first. | **`campaign_id`** | read |
+| `get_campaign_attack_layer` | ATT&CK Navigator layer for a campaign. | **`campaign_id`** | read |
+| `get_campaign_detection_gaps` | A campaign's techniques split into covered, `library_only` and `gaps`. | **`campaign_id`** | read |
+| `suggest_campaign_entries` | Articles that share entities with a campaign but are not linked to it. | **`campaign_id`**, `limit` | read |
+| `export_campaign` | A full campaign package: articles, entities and rules. | **`campaign_id`** | read, full only |
+| `get_automation_rules` | List automation rules. | `label`, `limit` | read |
+| `get_automation_templates` | Built-in automation rule templates. | none | read |
+| `get_automation_logs` | Recent automation runs. | `rule_id`, `limit` | read |
+| `get_trending_entities` | Most-mentioned entities of one type over a window. | **`entity_type`**, `days`, `limit` | read |
+| `get_feed_value` | A 0-100 value score per feed. | `days` | read |
+| `get_source_reliability` | Feeds ranked by how much intelligence they produce. | `limit` | read |
+| `get_entry_insights` | Insights about the entities in one article. | **`entry_id`** | read |
+| `get_triage_queue` | Scored review queue. Older than `get_priority_queue` and does not fold stories. | `days`, `limit` | read |
+| `get_priority_queue` | The reading queue as the Priority Queue page shows it, with stories folded into one row. | `limit`, `unread_only`, `with_threads`, `cursor` | read |
+| `get_requirement_coverage` | Requirement counts by status, priority, category and staleness. | none | read |
+
+### Pivots, graphs and coverage checks
+
+Source: `backend/app/tools/correlation.py`.
+
+| Tool | What it does | Arguments | Kind |
+|---|---|---|---|
+| `pivot_entity` | Entities that appear in the same articles as this one, ranked by strength. | **`entity_type`**, **`entity_id`**, `limit_per_type`, `window_days`, `offset`, `sort`, `min_tier` | read |
+| `get_entity_graph` | Relationship graph around an entity (typed relationships only). | **`entity_type`**, **`entity_id`**, `depth`, `window_days` | read |
+| `get_entity_timeline` | When an entity appeared in articles, in order. | **`entity_type`**, **`entity_id`** | read |
+| `check_detection_gaps` | Observed techniques with no published detection rule. | none | read |
+| `check_requirement_match` | Which requirements an article matches. Saves nothing. | **`entry_id`** | read |
+| `check_telemetry_feasibility` | Whether your log sources can support a rule. | `rule_id` | read |
+| `get_temporal_clusters` | Groups of articles sharing entities in a short window (possible campaigns). | `days`, `window_hours`, `min_shared`, `limit` | read |
+| `get_entry_graph` | Relationship graph for the entities in one article. | **`entry_id`** | read |
+
+### Workbench boards and intel profiles
+
+Source: `backend/app/tools/boards.py`.
+
+| Tool | What it does | Arguments | Kind |
+|---|---|---|---|
+| `get_threat_board` | The Threats board: actors, malware and exploited CVEs ranked by how many stories carried them. | `window`, `facet`, `limit`, `min_attention`, `include_handled` | read |
+| `list_intel_profiles` | List intel profiles (named scopes such as a customer or portfolio). | `limit`, `offset` | read |
+| `get_intel_profile` | One intel profile with its countries and sectors. | **`profile_id`** | read |
+| `get_profile_threat_surface` | Actors and malware active against one intel profile, with the reason. | **`profile_id`**, `limit` | read |
+| `get_coverage_workspace` | One threat's recent behaviours and the telemetry each one needs. | **`entity_type`**, **`entity_key`**, `window` | read |
+| `list_tags` | Every tag with your entry counts. | none | read |
+| `get_entity_whats_new` | Recent novelty and severity signals for one entity. | **`entity_type`**, **`entity_id`**, `days`, `scoped` | read |
+
+### Story threads
+
+A story thread groups every article about one unfolding story. Source: `backend/app/tools/threads.py`.
+
+| Tool | What it does | Arguments | Kind |
+|---|---|---|---|
+| `get_story_threads` | List story threads with outlets, counts and key entities. | `status`, `limit` | read |
+| `get_story_thread` | One thread: its timeline of coverage, member articles and what it produced. | **`slug`**, `include_members` | read |
+
+### Sectors
+
+Sectors are the fixed list of victim industries (healthcare, finance and so on). Source: `backend/app/tools/sector.py`.
+
+| Tool | What it does | Arguments | Kind |
+|---|---|---|---|
+| `list_sectors` | List sectors with article, actor and victim counts. | `search`, `sort_by`, `limit` | read |
+| `get_sector` | A sector profile: who targets it, campaigns, victims, recent articles. | **`sector`**, `window_days` | read |
+| `who_targets_sector` | Actors and malware ranked by how much they target a sector. | **`sector`**, `limit` | read |
+| `set_target_sector` | Add or remove a claim that an actor or malware family targets a sector. | **`entity_type`**, **`entity_id`**, **`sector`**, `action` | write, admin |
+| `sector_victims` | Ransomware leak-site victims in a sector. | **`sector`**, `window_days`, `limit` | read |
+
+### Observables (IOCs)
+
+Observables are indicators of compromise (IOCs): IPs, domains, hashes and similar values. Source: `backend/app/tools/observables.py`.
+
+| Tool | What it does | Arguments | Kind |
+|---|---|---|---|
+| `promote_observable` | Add a value from an article to the IOC ledger. | **`entry_id`**, **`kind`**, **`value`**, `role`, `evidence`, `label` | write |
+| `update_observable` | Change an IOC's role, label or description, or pin its confidence. | **`observable_id`**, `role`, `label`, `description`, `confidence_pinned` | write |
+| `deny_observable` | Block a value so it is never captured, sighted or exported again. | `observable_id`, `kind`, `value`, `reason` | write, admin |
+| `get_entity_infrastructure` | The IOCs tied to an actor, malware family, campaign or tool. | **`entity_type`**, **`entity_id`**, `limit` | read |
+| `export_observables` | Export IOCs as EDL lines, CSV or JSON. | `format`, `kind`, `role`, `status`, `min_confidence`, `min_reports`, `include_infra_tagged`, `query`, `limit` | read |
+
+### Watchlist, ransomware, My Stack and glossary
+
+Source: `backend/app/tools/landscape.py`.
+
+| Tool | What it does | Arguments | Kind |
+|---|---|---|---|
+| `list_watches` | Your watched, muted and "stack" entities. | `mode` | read |
+| `watch_entity` | Watch, mute or add an entity to your stack. | **`entity_type`**, **`entity_id`**, **`mode`**, `boost` | write |
+| `unwatch_entity` | Remove your watch, mute or stack entry for an entity. | **`entity_type`**, **`entity_id`** | write |
+| `get_ransomware_disclosures` | Ransomware leak-site victim posts, newest first. | `group`, `sector`, `country`, `watched_only`, `since`, `q`, `sort`, `limit`, `offset` | read |
+| `get_ransomware_stats` | Ransomware totals, trends, top groups, sectors and countries. | `days` | read |
+| `get_ransomware_victim` | One ransomware victim organisation and its disclosures. | **`victim_id`** | read |
+| `get_ransomware_group_victims` | Victims posted by one ransomware group. | **`actor_id`**, `limit`, `offset` | read |
+| `get_stack_exposure` | CVEs that affect the vendors and products in your stack. | none | read |
+| `list_glossary_terms` | List glossary terms. | `category`, `search`, `is_system`, `limit` | read |
+| `create_glossary_term` | Add a glossary term. | **`name`**, **`category`**, **`description`**, `maturity`, `long_description`, `technologies`, `search_terms` | write |
+| `delete_glossary_term` | Delete a glossary term you created. | **`term_id`** | write |
+| `detect_glossary_terms` | Glossary terms that appear in one article. | **`entry_id`** | read |
+
+### Reader actions and manual ingest
+
+Source: `backend/app/tools/reader_ops.py`.
+
+| Tool | What it does | Arguments | Kind |
+|---|---|---|---|
+| `mark_entry_read` | Mark an article read or unread. | **`entry_id`**, `read` | write |
+| `star_entry` | Star or unstar an article. | **`entry_id`**, `starred` | write |
+| `bookmark_entry` | Bookmark an article or remove the bookmark. | **`entry_id`**, `bookmarked` | write |
+| `bulk_entry_action` | Read, unread, star, unstar, bookmark, unbookmark or hide many articles. | **`entry_ids`**, **`action`** | write |
+| `mark_all_read` | Mark everything read, or one feed or category. With no scope it marks every article. | `feed_id`, `category_id` | write |
+| `get_similar_entries` | Articles similar to this one. | **`entry_id`**, `limit` | read |
+| `get_entry_story` | Earlier and later articles that share entities with this one, in date order. | **`entry_id`** | read |
+| `translate_entry` | Translate an article and save the translation. | **`entry_id`**, `target` | write |
+| `get_daily_summary` | The saved AI daily summary for a day. Never generates one. | `date` | read |
+| `ingest_url` | Add a web page as a manual article. | **`url`**, `title` | write |
+| `ingest_text` | Add pasted text as a manual article. | **`text`**, `title`, `source_url`, `is_ioc_list` | write |
+| `ingest_file` | Add a file (base64) as a manual article. A `.zip` becomes one article per file. | **`filename`**, **`content_base64`**, `title`, `is_ioc_list` | write |
+| `ingest_batch` | Add many URLs or texts at once. | `urls`, `texts`, `label`, `is_ioc_list` | write |
+| `get_ingest_batch` | Status of an ingest batch. | **`batch_id`** | read |
+| `create_share_link` | Make a public share link for an article. | **`entry_id`**, `ttl_days` | write |
+| `get_share_link` | Your active share link for an article. | **`entry_id`** | read |
+| `revoke_share_link` | Turn off your share link for an article. | **`entry_id`** | write |
+| `list_saved_searches` | Your saved searches with counts. | none | read |
+| `create_saved_search` | Save a search query. | **`name`**, **`query`**, `display_name` | write |
+| `delete_saved_search` | Delete a saved search. | **`search_id`** | write |
+
+### AI extraction
+
+These call the AI provider and save what they find. Source: `backend/app/tools/extraction.py`.
+
+| Tool | What it does | Arguments | Kind |
+|---|---|---|---|
+| `extract_ttps` | Find ATT&CK techniques in an article. `use_ai` adds an AI pass. | **`entry_id`**, `use_ai` | write |
+| `extract_cves` | Find CVEs in an article. | **`entry_id`** | write |
+| `extract_threat_actors` | Find threat actors in an article. | **`entry_id`** | write |
+| `extract_malware` | Find malware families in an article. | **`entry_id`** | write |
+| `run_ai_task` | Run a named AI task on an article. Returns the saved result unless `force` is true. | **`task_name`**, **`entry_id`**, `force` | write |
+
+### Detection rule generation and checks
+
+Source: `backend/app/tools/detection.py`.
+
+| Tool | What it does | Arguments | Kind |
+|---|---|---|---|
+| `generate_detection_rules` | Write draft detection rules from an article's techniques. | **`entry_id`**, **`rule_types`** | write |
+| `validate_detection_rule` | Check a rule's syntax. | **`rule_type`**, **`rule_content`** | read, full only |
+| `build_detection_summary` | Full detection analysis across several articles: attack chain and gaps. | **`entry_ids`**, **`rule_formats`**, `focus`, `include_existing` | write |
+
+### Detection rules, reports and requirements
+
+Source: `backend/app/tools/workspace.py`.
+
+| Tool | What it does | Arguments | Kind |
+|---|---|---|---|
+| `get_detection_rule` | One detection rule with content, source, status and syntax check. | **`rule_id`** | read |
+| `update_detection_rule` | Change a detection rule. Content changes save a new version. | **`rule_id`**, **`updates`** | write |
+| `delete_detection_rule` | Delete a detection rule. Needs confirmation. | **`rule_id`**, `confirmation_token` | write |
+| `set_detection_rule_status` | Set a rule to `draft` or `published`. | **`rule_id`**, **`status`** | write |
+| `convert_detection_rule` | Convert a rule to another format with AI. | **`rule_id`**, **`target_format`**, `save` | write |
+| `get_detection_rule_versions` | A rule's saved versions. | **`rule_id`** | read |
+| `rollback_detection_rule` | Restore a rule from a saved version. | **`rule_id`**, **`version`** | write |
+| `list_intel_reports` | List intel reports. | `status`, `template_type`, `limit`, `offset` | read |
+| `get_intel_report` | One intel report in full. | **`report_id`** | read |
+| `update_intel_report` | Change an intel report. | **`report_id`**, **`updates`** | write |
+| `delete_intel_report` | Delete a draft report. Needs confirmation. | **`report_id`**, `confirmation_token` | write, admin |
+| `archive_intel_report` | Archive a report. | **`report_id`** | write |
+| `delete_requirement` | Delete a requirement and its matches. Needs confirmation. | **`requirement_id`**, `confirmation_token` | write |
+| `fulfill_requirement` | Mark a requirement fulfilled. | **`requirement_id`**, `report_id` | write |
+| `add_requirement_match` | Match an article to a requirement by hand. | **`requirement_id`**, **`entry_id`**, `relevance` | write |
+| `remove_requirement_match` | Remove an article from a requirement. | **`requirement_id`**, **`entry_id`** | write |
+
+### Create, merge and report
+
+Source: `backend/app/tools/write.py`.
+
+| Tool | What it does | Arguments | Kind |
+|---|---|---|---|
+| `create_threat_actor` | Add a threat actor. Returns the existing one if the name already matches. | **`name`**, `aliases`, `description`, `country`, `motivation` | write |
+| `create_malware` | Add a malware family. Returns the existing one if the name already matches. | **`name`**, `aliases`, `description`, `malware_type` | write |
+| `create_detection_rule` | Save a detection rule as a draft. | **`title`**, **`rule_type`**, **`rule_content`**, `description`, `severity`, `entry_id`, `tags`, `references`, `source_entry_ids` | write |
+| `create_campaign` | Create a campaign. | **`name`**, `description`, `status`, `tlp_marking` | write |
+| `create_feed` | Subscribe to a feed. | **`url`**, `title`, `feed_type`, `category`, `adapter_config` | write |
+| `add_telegram_feed` | Subscribe to a Telegram channel. Needs Telegram set up on the server. | **`channel`**, `title`, `include_media`, `extract_forwards`, `max_message_age_days`, `max_messages_per_fetch`, `fetch_interval_minutes`, `threat_actor_id`, `campaign_id`, `session_name`, `category` | write |
+| `create_note` | Add a note to an article. | **`entry_id`**, **`content`**, `title` | write |
+| `create_entity_note` | Add a note to an entity. | **`entity_type`**, **`entity_id`**, **`content`** | write |
+| `add_tag` | Tag an article. | **`entry_id`**, **`tag_name`** | write |
+| `add_to_campaign` | Link an article or entity to a campaign. | **`campaign_id`**, `entry_id`, `entity_type`, `entity_id`, `role` | write |
+| `link_entities` | Record a relationship between two entities (for example actor `uses` malware). | **`source_type`**, **`source_id`**, **`target_type`**, **`target_id`**, **`relationship_type`**, `description`, `confidence`, `evidence_entry_ids` | write |
+| `create_automation_rule` | Create an automation rule. It starts enabled. | **`name`**, **`trigger_type`**, **`actions`**, `description`, `trigger_config`, `conditions` | write |
+| `create_intel_report` | Create a draft report from a template. | **`title`**, **`template_type`**, `entry_ids`, `entity_ids`, `tlp_marking` | write |
+| `merge_threat_actors` | Merge a duplicate actor into another. `mode: shadow` only logs. | **`target_id`**, **`source_id`**, `mode`, `new_description`, `extra_aliases`, `reasoning` | write, admin |
+| `reclassify_entity` | Move an entity filed under the wrong type. | **`source_type`**, **`source_id`**, **`target_type`**, `target_id`, `mode`, `new_description`, `extra_aliases`, `reasoning` | write, admin |
+| `merge_vendors` | Merge a duplicate vendor into another. | **`target_id`**, **`source_id`**, `mode`, `new_description`, `extra_aliases`, `reasoning` | write, admin |
+| `merge_products` | Merge a duplicate product into another. | **`target_id`**, **`source_id`**, `mode`, `new_description`, `extra_aliases`, `reasoning` | write, admin |
+| `merge_tools` | Merge a duplicate tool into another. | **`target_id`**, **`source_id`**, `mode`, `new_description`, `extra_aliases`, `reasoning` | write, admin |
+| `merge_malware` | Merge a duplicate malware family into another. | **`target_id`**, **`source_id`**, `mode`, `new_description`, `extra_aliases`, `reasoning` | write, admin |
+| `update_entity_profile` | Edit an entity's profile fields. | **`entity_type`**, **`entity_id`**, **`updates`** | write |
+| `create_requirement` | Create a Priority Intelligence Requirement (PIR). | **`title`**, **`keywords`**, `description`, `priority`, `category`, `auto_match` | write |
+| `update_requirement` | Change a requirement. | **`requirement_id`**, **`updates`** | write |
+| `test_automation_rule` | Dry-run a rule against one article. Runs no actions. | **`rule_id`**, **`entry_id`** | write, admin |
+| `run_automation_rule` | Run a rule now, once per matching recent article. | **`rule_id`**, `hours` | write, admin |
+| `publish_report` | Publish a report. | **`report_id`** | write |
+| `generate_full_report` | Create a report from articles and queue AI writing. | **`title`**, **`template_type`**, **`entry_ids`**, `focus`, `tlp_marking` | write |
+| `generate_campaign_report` | Create a report from a campaign and queue AI writing. | **`campaign_id`**, `template_type`, `title`, `tlp_marking` | write |
+| `export_report` | Export a report as Markdown or HTML. | **`report_id`**, **`format`** | write |
+
+### Feeds, automation, notes and campaigns
+
+Source: `backend/app/tools/feeds_automation.py`.
+
+| Tool | What it does | Arguments | Kind |
+|---|---|---|---|
+| `update_feed` | Change a feed. Only the fields you send change. | **`feed_id`**, `url`, `title`, `category`, `is_muted`, `is_active`, `fetch_interval_minutes`, `exclude_shorts`, `feed_type`, `retention_days`, `reliability_rating`, `timeliness_rating`, `relevance_rating`, `analyst_notes`, `intel_extraction_mode`, `ai_analysis_enabled`, `auto_extract_on_ingest`, `extract_detection_rules`, `extract_tools`, `visible_to_visitors`, `adapter_config` | write, admin |
+| `delete_feed` | Delete a feed and all its articles. Needs confirmation. | **`feed_id`**, `confirmation_token` | write, admin |
+| `refresh_feed` | Fetch a feed now. | **`feed_id`** | write |
+| `list_categories` | Feed categories as a tree, with feed counts. | none | read |
+| `create_category` | Create a feed category. | **`name`** | write |
+| `update_automation_rule` | Change an automation rule. `actions` replaces the whole list. | **`rule_id`**, `name`, `description`, `trigger_type`, `trigger_config`, `conditions`, `actions`, `labels`, `is_enabled` | write, admin |
+| `toggle_automation_rule` | Turn a rule on or off. | **`rule_id`** | write, admin |
+| `delete_automation_rule` | Delete a rule. Needs confirmation. | **`rule_id`**, `confirmation_token` | write, admin |
+| `list_webhook_presets` | Saved webhook presets. URLs and headers are hidden. | `preset_type`, `limit` | read |
+| `create_webhook_preset` | Save a webhook preset for automation actions. | **`name`**, `url`, `payload`, `headers`, `preset_type`, `config` | write |
+| `delete_webhook_preset` | Delete a webhook preset. | **`preset_id`** | write, admin |
+| `list_notes` | List article and standalone notes. | `entry_id`, `search`, `limit` | read |
+| `update_note` | Change a note. | **`note_id`**, **`content`**, `title` | write |
+| `delete_note` | Delete a note. | **`note_id`** | write |
+| `list_entity_notes` | Notes on one entity. | **`entity_type`**, **`entity_id`**, `limit` | read |
+| `update_entity_note` | Change an entity note. | **`note_id`**, **`content`** | write |
+| `delete_entity_note` | Delete an entity note. | **`note_id`** | write |
+| `update_campaign` | Change a campaign. `tags` replaces the whole list. | **`campaign_id`**, `name`, `description`, `status`, `tlp_marking`, `start_date`, `end_date`, `tags` | write |
+| `delete_campaign` | Delete a campaign (not its articles or entities). Needs confirmation. | **`campaign_id`**, `confirmation_token` | write |
+| `remove_from_campaign` | Unlink an article or entity from a campaign. | **`campaign_id`**, `entry_id`, `entity_type`, `entity_id` | write |
+
+### Curation: links, relationships, extraction review
+
+Source: `backend/app/tools/curation.py`.
+
+| Tool | What it does | Arguments | Kind |
+|---|---|---|---|
+| `list_entity_links` | List article-to-entity links, newest first. | `entity_type`, `entity_id`, `entry_id`, `source`, `confidence`, `search`, `days`, `limit`, `offset` | read |
+| `get_entity_link_stats` | Link counts by type and source, and the held-match queue. | none | read |
+| `unlink_entity_from_entry` | Remove one article-to-entity link. | **`entity_type`**, **`entity_id`**, **`entry_id`** | write |
+| `bulk_unlink_entities` | Remove up to 500 article-to-entity links. | **`items`** | write, admin |
+| `report_false_positive` | Report a wrong link. `scope` sets how far the fix reaches. | **`entity_type`**, **`entity_id`**, **`entity_value`**, **`scope`**, `source_entry_id`, `reason` | write |
+| `list_entity_relationships` | Relationships where an entity is either end. | **`entity_type`**, **`entity_id`**, `relationship_type`, `include_rejected` | read |
+| `confirm_relationship` | Mark a relationship confirmed by an analyst. | **`relationship_id`** | write |
+| `reject_relationship` | Reject a relationship so it is hidden and not re-created. | **`relationship_id`** | write |
+| `delete_relationship` | Delete a relationship. Re-ingest can re-create it; reject cannot. | **`relationship_id`** | write |
+| `get_extraction_stats` | Counts of AI-created entities and their review state. | `window` | read, admin |
+| `list_extraction_entities` | List AI-created entities with their status. | `types`, `status`, `window`, `q`, `source_entry_id`, `sort_by`, `sort_order`, `limit`, `offset` | read, admin |
+| `confirm_extraction_entities` | Sign off AI-created entities so they leave the review queue. | **`entity_type`**, **`ids`** | write, admin |
+| `get_hygiene_stats` | Entity clean-up counters and pending proposals. | none | read, admin |
+| `get_hygiene_feed` | Log of entity clean-up actions and proposals. | `action`, `source`, `mode`, `origin`, `pending`, `since`, `limit`, `offset` | read, admin |
+
+### Export
+
+Source: `backend/app/tools/export.py`.
+
+| Tool | What it does | Arguments | Kind |
+|---|---|---|---|
+| `export_attack_layer` | ATT&CK Navigator layer JSON for one article or all observed techniques. | `entry_id`, `title` | read, full only |
+
+### Delete
+
+Source: `backend/app/tools/delete.py`.
+
+| Tool | What it does | Arguments | Kind |
+|---|---|---|---|
+| `delete_entity` | Delete a record or any entity. Needs confirmation. | **`entity_type`**, **`entity_id`**, `confirmation_token` | write, admin |
+
+### Documentation
+
+These read the pages in `docs/`, as shipped with the deployment. Source: `backend/app/tools/docs.py`.
+
+| Tool | What it does | Arguments | Kind |
+|---|---|---|---|
+| `list_documentation_pages` | Every documentation page with a one-line summary. | none | read |
+| `get_documentation_page` | One page as Markdown. The slug is the path under `docs/` without `.md`. | **`slug`** | read |
+| `search_documentation` | Search the documentation. | **`query`**, `limit` | read |
 
 ---
 
 ## Common Workflows
 
-### Workflow 1: "Find recent entries about X and summarize"
+These run on your machine and use `jq` to pull IDs out of the JSON. Set `CLI=intelfeed-skill/scripts/intelfeed_cli.py` first.
+
+### Find recent articles about a topic and summarise one
 
 ```bash
-# 1. Search for entries
-RESULT=$(python3 intelfeed-skill/scripts/intelfeed_cli.py search_entries \
-  '{"query": "ransomware", "limit": 5, "sort": "newest"}')
+CLI=intelfeed-skill/scripts/intelfeed_cli.py
 
-# 2. For each result, get full entry details and extract intelligence
-for ENTRY_ID in $(echo "$RESULT" | jq -r '.result[].id'); do
-  python3 intelfeed-skill/scripts/intelfeed_cli.py get_entry "{\"entry_id\": \"$ENTRY_ID\"}"
-  python3 intelfeed-skill/scripts/intelfeed_cli.py extract_ttps "{\"entry_id\": \"$ENTRY_ID\", \"use_ai\": true}"
-done
+# 1. Newest five ransomware articles
+python3 $CLI search_entries '{"query": "ransomware", "limit": 5, "sort": "newest"}' \
+  | jq -r '.result.entries[].id'
 
-# 3. Run an AI task to generate a summary
-python3 intelfeed-skill/scripts/intelfeed_cli.py run_ai_task \
-  '{"task_name": "summary", "entry_id": "<entry_id>"}'
+# 2. Read one in full, with its linked entities
+python3 $CLI get_entry '{"entry_id": "<entry_id>"}'
+
+# 3. AI summary (returns the saved one if it exists; add "force": true to redo it)
+python3 $CLI run_ai_task '{"task_name": "article_summary", "entry_id": "<entry_id>"}'
 ```
 
-### Workflow 2: "Look up an actor and pivot to malware"
+### Look up an actor and pivot
 
 ```bash
-# 1. Search for the threat actor
-ACTOR=$(python3 intelfeed-skill/scripts/intelfeed_cli.py search_entities \
-  '{"query": "APT29"}')
+ACTOR_ID=$(python3 $CLI search_entities '{"query": "APT29"}' \
+  | jq -r '.result.results[] | select(.type == "threat_actor") | .id' | head -1)
 
-# Extract actor ID from results
-ACTOR_ID=$(echo "$ACTOR" | jq -r '.result[] | select(.type == "threat_actor") | .id' | head -1)
-
-# 2. Get full actor profile
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_threat_actor \
-  "{\"actor_id\": \"$ACTOR_ID\"}"
-
-# 3. Pivot to find related malware
-python3 intelfeed-skill/scripts/intelfeed_cli.py pivot_entity \
-  "{\"entity_type\": \"threat_actor\", \"entity_id\": \"$ACTOR_ID\"}"
-
-# 4. Build a graph of relationships
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_entity_graph \
-  "{\"entity_type\": \"threat_actor\", \"entity_id\": \"$ACTOR_ID\", \"depth\": 2}"
+python3 $CLI get_threat_actor "{\"actor_id\": \"$ACTOR_ID\"}"
+python3 $CLI pivot_entity "{\"entity_type\": \"threat_actor\", \"entity_id\": \"$ACTOR_ID\"}"
+python3 $CLI get_entity_graph "{\"entity_type\": \"threat_actor\", \"entity_id\": \"$ACTOR_ID\", \"depth\": 2}"
 ```
 
-### Workflow 3: "Extract TTPs from an article and generate detection rules"
+### Turn an article into detection rules
 
 ```bash
-# 1. Get the entry
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_entry \
-  '{"entry_id": "<entry_id>"}'
+# 1. Find the ATT&CK techniques, with an AI pass
+python3 $CLI extract_ttps '{"entry_id": "<entry_id>", "use_ai": true}'
 
-# 2. Extract TTPs with AI
-python3 intelfeed-skill/scripts/intelfeed_cli.py extract_ttps \
-  '{"entry_id": "<entry_id>", "use_ai": true}'
-
-# 3. Generate detection rules in multiple formats
-python3 intelfeed-skill/scripts/intelfeed_cli.py generate_detection_rules \
+# 2. Write draft rules in the formats you use
+python3 $CLI generate_detection_rules \
   '{"entry_id": "<entry_id>", "rule_types": ["sigma", "splunk_spl", "elastic_ql"]}'
 
-# 4. Validate each rule
-python3 intelfeed-skill/scripts/intelfeed_cli.py validate_detection_rule \
-  '{"rule_type": "sigma", "rule_content": "<rule_content>"}'
-
-# 5. Save rule to library
-python3 intelfeed-skill/scripts/intelfeed_cli.py create_detection_rule \
+# 3. Check a rule's syntax, then save your own version as a draft
+python3 $CLI validate_detection_rule '{"rule_type": "sigma", "rule_content": "<rule>"}'
+python3 $CLI create_detection_rule \
   '{"title": "Detect X", "rule_type": "sigma", "rule_content": "<rule>", "entry_id": "<entry_id>"}'
 ```
 
-### Workflow 4: "Audit detection coverage for a campaign"
+### Check a campaign's detection coverage
 
 ```bash
-# 1. Get the campaign
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_campaign \
-  '{"campaign_id": "<campaign_id>"}'
+GAPS=$(python3 $CLI get_campaign_detection_gaps '{"campaign_id": "<campaign_id>"}')
+echo "$GAPS" | jq '.result.coverage_percentage'
 
-# 2. Find detection gaps
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_campaign_detection_gaps \
-  '{"campaign_id": "<campaign_id>"}'
-
-# 3. For each uncovered TTP, understand the technique
-for TTP_ID in $(echo "$GAPS" | jq -r '.uncovered_ttps[].id'); do
-  python3 intelfeed-skill/scripts/intelfeed_cli.py get_ttp \
-    "{\"ttp_id\": \"$TTP_ID\"}"
+# Read up on each technique with no rule
+for T in $(echo "$GAPS" | jq -r '.result.gaps[].technique_id'); do
+  python3 $CLI get_ttp "{\"ttp_id\": \"$T\"}"
 done
-
-# 4. Generate rules for the campaign as a whole
-python3 intelfeed-skill/scripts/intelfeed_cli.py get_campaign_timeline \
-  '{"campaign_id": "<campaign_id>"}' | jq -r '.[] | .id' | xargs -I {} \
-  python3 intelfeed-skill/scripts/intelfeed_cli.py generate_detection_rules \
-    "{\"entry_id\": \"{}\", \"rule_types\": [\"sigma\", \"splunk_spl\"]}"
 ```
 
-### Workflow 5: "Set up continuous monitoring for a threat actor"
+### Watch for a threat actor
 
 ```bash
-# 1. Create a Priority Intelligence Requirement
-python3 intelfeed-skill/scripts/intelfeed_cli.py create_requirement \
-  '{"title": "APT29 Activity", "keywords": ["APT29", "Cozy Bear", "Midnight Blizzard"], "priority": "critical"}'
+# 1. A Priority Intelligence Requirement that matches new articles
+python3 $CLI create_requirement \
+  '{"title": "APT29 activity", "keywords": ["APT29", "Cozy Bear", "Midnight Blizzard"], "priority": "critical"}'
 
-# 2. Create an automation rule to tag entries matching the PIR
-python3 intelfeed-skill/scripts/intelfeed_cli.py create_automation_rule \
-  '{"name": "Tag APT29 Mentions", "trigger_type": "new_entry", "trigger_config": {"query": "APT29"}, "actions": [{"type": "tag", "value": "apt29-monitor"}]}'
+# 2. An automation rule that tags matching articles and extracts techniques
+python3 $CLI create_automation_rule '{
+  "name": "Tag APT29 mentions",
+  "trigger_type": "on_keyword_match",
+  "trigger_config": {"pattern": "APT29|Cozy Bear|Midnight Blizzard", "is_regex": true},
+  "actions": [
+    {"type": "add_tags", "config": {"tags": ["apt29"]}},
+    {"type": "extract_ttps", "config": {}}
+  ]
+}'
 
-# 3. Optionally set up extraction automation
-python3 intelfeed-skill/scripts/intelfeed_cli.py create_automation_rule \
-  '{"name": "Extract TTPs from APT29 articles", "trigger_type": "new_entry", "trigger_config": {"query": "APT29"}, "actions": [{"type": "extract_ttps", "use_ai": true}]}'
-
-# 4. Monitor coverage gaps
-python3 intelfeed-skill/scripts/intelfeed_cli.py check_detection_gaps
+# 3. Dry-run it against one article before it fires for real
+python3 $CLI test_automation_rule '{"rule_id": "<rule_id>", "entry_id": "<entry_id>"}'
 ```
+
+Trigger types start with `on_`. A rule saved with any other spelling never fires. `test_automation_rule` needs an admin account.
 
 ---
 
 ## Error Handling & Troubleshooting
 
-### Auth Failures (401)
-
-**Symptoms:** Error message "API returned 401"
-
-**Causes:**
-- Missing or incorrect `INTELFEED_USERNAME` or `INTELFEED_PASSWORD`
-- Credentials have been revoked
-- Token refresh failed
-
-**Solution:**
-1. Verify environment variables are set correctly:
-   ```bash
-   echo "$INTELFEED_USERNAME"
-   echo "$INTELFEED_PASSWORD"
-   ```
-2. Check with the admin that your account is active
-3. Try logging in via the web UI to confirm credentials work
-
-### Connection Errors
-
-**Symptoms:** Error message "Connection refused" or "Name or service not known"
-
-**Causes:**
-- `INTELFEED_API_URL` is incorrect or unreachable
-- The Docker stack is not running
-- Network connectivity issue
-
-**Solution:**
-1. Verify `INTELFEED_API_URL` is reachable:
-   ```bash
-   curl -I "$INTELFEED_API_URL/healthz"
-   ```
-2. Check Docker stack status:
-   ```bash
-   docker compose -f docker-compose.dev.yml ps
-   ```
-3. Start the stack if needed:
-   ```bash
-   docker compose -f docker-compose.dev.yml up -d
-   ```
-
-### Unknown Tool Error
-
-**Symptoms:** "Error: Unknown tool 'tool_name'"
-
-**Causes:**
-- Typo in tool name
-- Tool doesn't exist in your version of the CLI
-- Lite CLI doesn't have write/delete operations
-
-**Solution:**
-1. Check tool name spelling:
-   ```bash
-   python3 intelfeed-skill/scripts/intelfeed_cli.py --list-tools | grep -i partial_name
-   ```
-2. Use the correct skill/CLI for the operation:
-   - Write operations require **full CLI** (`intelfeed-skill`)
-   - Read-only? Both **lite and full CLI** work
-3. Verify you're using the right script path
-
-### JSON Argument Errors
-
-**Symptoms:** "Invalid JSON for tool"
-
-**Causes:**
-- Unescaped quotes in JSON string
-- Missing curly braces
-- Mismatched brackets/braces
-
-**Solution:**
-1. Test JSON syntax:
-   ```bash
-   echo '{"query": "test"}' | python3 -m json.tool
-   ```
-2. Use proper escaping in shell:
-   ```bash
-   # WRONG
-   python3 intelfeed_cli.py search_entries '{"query": "hello "world""}'
-
-   # RIGHT
-   python3 intelfeed_cli.py search_entries '{"query": "hello \"world\""}'
-   ```
-3. Use `--help-tool` to see example format:
-   ```bash
-   python3 intelfeed_cli.py --help-tool search_entries
-   ```
-
-### Empty or Sparse Results
-
-**Symptoms:** Search returns no results, or entity has no articles linked
-
-**Causes:**
-- Data hasn't been ingested yet (new feed, new feature)
-- Entity extraction hasn't run
-- Search query is too specific
-
-**Solution:**
-1. For search: Try broader queries or alternative names:
-   ```bash
-   python3 intelfeed-skill/scripts/intelfeed_cli.py search_entities \
-     '{"query": "APT29"}' # or "Cozy Bear", "Midnight Blizzard"
-   ```
-2. For entries: Check if extraction has been run:
-   ```bash
-   python3 intelfeed-skill/scripts/intelfeed_cli.py get_entry '{"entry_id": "<id>"}'
-   # Look for ttps, cves, threat_actors, malware arrays
-   ```
-3. Run extraction manually:
-   ```bash
-   python3 intelfeed-skill/scripts/intelfeed_cli.py extract_ttps \
-     '{"entry_id": "<id>", "use_ai": true}'
-   ```
-4. Check dashboard stats:
-   ```bash
-   python3 intelfeed-skill/scripts/intelfeed_cli.py get_dashboard_stats
-   ```
-
-### Timeout Errors
-
-**Symptoms:** "Request timeout" or command hangs
-
-**Causes:**
-- Large result set (1000+ entries)
-- AI extraction task is slow
-- Network latency
-
-**Solution:**
-1. Reduce batch size with `limit`:
-   ```bash
-   python3 intelfeed-skill/scripts/intelfeed_cli.py search_entries \
-     '{"query": "ransomware", "limit": 10}'
-   ```
-2. For AI tasks, be patient (can take 10-30s):
-   ```bash
-   # This might take a while
-   python3 intelfeed-skill/scripts/intelfeed_cli.py extract_threat_actors \
-     '{"entry_id": "<id>"}'
-   ```
-3. Run separately instead of batching:
-   ```bash
-   # SLOW (if each task is slow)
-   python3 intelfeed-skill/scripts/intelfeed_cli.py \
-     extract_ttps '{"entry_id": "<id1>"}' \
-     extract_ttps '{"entry_id": "<id2>"}' \
-     extract_ttps '{"entry_id": "<id3>"}'
-
-   # FASTER (run independently, check status later)
-   for id in id1 id2 id3; do
-     python3 intelfeed-skill/scripts/intelfeed_cli.py \
-       extract_ttps "{\"entry_id\": \"$id\"}" &
-   done
-   wait
-   ```
+| What you see | Likely cause | What to do |
+|---|---|---|
+| `Error: Login failed (401)` on stderr | Wrong username or password | Check `INTELFEED_USERNAME` and `INTELFEED_PASSWORD`. Try logging in to the web app. |
+| `Error: INTELFEED_USERNAME and INTELFEED_PASSWORD must be set.` | A variable is missing | Export both. |
+| `{"error": "INTELFEED_API_URL is not set. …"}` | No server address | Export `INTELFEED_API_URL`. |
+| `{"error": "INTELFEED_API_URL http://… is plain http:// to another host, …"}` | Plain http to a remote host | Use `https://`, or set `INTELFEED_ALLOW_INSECURE_HTTP=1` on a trusted network. |
+| `Connection refused` or `Name or service not known` | Wrong URL, or the server is down | `curl "$INTELFEED_API_URL/api/health"`. For a local stack, `docker compose -f docker-compose.dev.yml ps`. |
+| `"error": "API returned 30x"` | The URL redirects (often http to https) | Use the final `https://` address. |
+| `"error": "API returned 403"` | An admin tool called by a non-admin account | Use an admin account. |
+| `Error: Unknown tool '<name>'` | Typo, a write tool in the lite CLI, or a CLI older than the server | `--list-tools \| grep <part>`. Use the full CLI for writes. Pull the latest CLI. |
+| `Error: Invalid JSON for tool '<name>'` | Shell quoting broke the JSON | Wrap the JSON in single quotes. Escape inner double quotes: `'{"query": "hello \"world\""}'`. |
+| `"error": "Invalid or expired confirmation token. …"` | The token is older than 5 to 10 minutes, or the arguments changed | Call again without a token to get a new one. |
+| A timeout or a long wait | Large `limit`, or an AI tool | Lower `limit`. AI tools can take a while; each request times out after 120 seconds. Run slow calls as separate commands rather than one batch. |
+| Empty results | The data is not there yet, or the query is too narrow | Try other names (`APT29`, `Cozy Bear`). Check that the article has entities with `get_entry`. Run `get_dashboard_stats` to see what is loaded. |
 
 ---
 
 ## Extending the CLI
 
+Tools live on the server, in `backend/app/tools/`. The CLI keeps a copy of each tool's name, description and parameters in its `TOOLS` dict, and refuses any name that is not in it. So a new tool needs two steps: register it on the server, then regenerate the CLIs.
+
 ### Adding a New Tool
 
-The CLI tools are **implemented on the backend** in `backend/app/tools/` and executed via `/api/tools/execute`. The CLI script keeps its own local `TOOLS` dict that mirrors the backend registry — and it **validates tool names against this local dict before calling the API**, so a backend-only tool is rejected with "Unknown tool" until it's also added to the CLI script.
+1. **Write the tool** in a module under `backend/app/tools/` with the `@_tool` decorator:
 
-To add a new tool:
+   ```python
+   # backend/app/tools/my_module.py
+   import uuid
 
-1. **Implement the tool in the backend** (`backend/app/tools/<category>.py`):
+   from sqlalchemy.ext.asyncio import AsyncSession
 
-```python
-# backend/app/tools/my_category.py
-from app.tools import _tool
+   from app.tools import _tool
 
-@_tool(
-    name="my_new_tool",
-    description="What this tool does",
-    input_schema={
-        "properties": {
-            "param1": {"type": "string"},
-            "param2": {"type": "integer", "default": 10},
-        },
-        "required": ["param1"],
-    },
-    mutating=True,  # only if the tool creates/updates/deletes state; defaults to
-                    # True in write.py/delete.py, False elsewhere
-)
-async def my_new_tool(db: AsyncSession, user_id: UUID, param1: str, param2: int = 10):
-    # Implementation
-    return {
-        "result": "success",
-        "data": [...]
-    }
-```
 
-2. **Import the module** in `backend/app/tools/__init__.py`:
+   @_tool(
+       name="my_new_tool",
+       description="What this tool does, in one or two sentences.",
+       input_schema={
+           "properties": {
+               "param1": {"type": "string", "description": "…"},
+               "param2": {"type": "integer", "default": 10},
+           },
+           "required": ["param1"],
+       },
+       mutating=True,  # set when the tool changes data
+   )
+   async def _my_new_tool(db: AsyncSession, user_id: uuid.UUID, param1: str, param2: int = 10) -> dict:
+       return {"ok": True}
+   ```
 
-```python
-from app.tools import my_category  # noqa: F401, E402
-```
+   `mutating` defaults to `True` for tools in `write.py` and `delete.py`, and `False` everywhere else. Set it yourself in any other module if the tool changes data, because it decides read-only blocking and lite membership.
 
-3. **Regenerate the CLI scripts** — run `scripts/dev/sync_skill_clis.py` against a running stack (or `--from-file registry.json`). It rewrites the `TOOLS` dict in both `intelfeed-skill/scripts/intelfeed_cli.py` and `intelfeed-lite-skill/scripts/intelfeed_cli.py` from the backend registry; the lite CLI automatically gets every non-`mutating` tool minus the script's `LITE_EXCLUDE` set. The CLI rejects tool names not present in its local `TOOLS` dict, so this step is required before the tool is callable. `--check` mode reports drift without changing anything.
+2. **Import a new module** in the import block at the bottom of `backend/app/tools/__init__.py`. Existing modules are already imported.
 
-4. **If the tool mutates state**, mark it `mutating=True` in the decorator (or place it in `write.py`/`delete.py`). The regeneration in step 3 then also rewrites the full CLI's `WRITE_TOOLS` frozenset so [read-only mode](#read-only-mode) blocks it — no hand edit needed. A registry change without a regen fails `test_tool_registry_sync.py`.
+3. **If only admins should run it**, add the name to `ADMIN_TOOLS` in `backend/app/tools/__init__.py`. Do this when the matching web API is admin-only, or the tool changes data for everyone (merges, feed pool changes, automation rules, extraction curation).
 
-5. **Run the drift guards**: `backend/tests/test_tool_registry_sync.py` pins schema enums (entity types, rule formats, TLP, triggers, adapters, relationship verbs) to their canonical sources and checks every tool's handler signature against its schema.
+4. **Regenerate the CLIs** (see below). Then update `intelfeed-skill/SKILL.md` and, for read tools, `intelfeed-lite-skill/SKILL.md`.
 
-6. **Update documentation**:
-   - Add the tool to this reference (cli-reference.md)
-   - Update the SKILL.md files in `intelfeed-skill/` and/or `intelfeed-lite-skill/`
+5. **Run the guard tests**: `pytest tests/test_tool_registry_sync.py` from `backend/`. It checks that every mutating tool is in the full CLI's `WRITE_TOOLS`, that the lite CLI has no write tools, that `intelfeed-mcp/registry.json` matches the registry, that schema enums (entity types, rule formats, TLP, triggers, feed types, relationship verbs) match their sources, and that each handler's signature matches its schema.
 
 ### Keeping CLI in Sync with Backend
 
-The CLI scripts mirror the backend's tool registry, and the mirror is **load-bearing**: `parse_tool_calls()` validates every requested tool name against the local `TOOLS` dict and exits with "Unknown tool" for anything missing. If you add a tool to the backend:
-
-- The backend will accept it via `/api/tools/execute`, but the **CLI cannot call it** until its definition is regenerated into the script
-- The local definitions also drive `--list-tools` and `--help-tool`
-- The full CLI's `WRITE_TOOLS` denylist for read-only mode enforcement is regenerated in the same pass (registry `mutating` flags + the script's `EXTRA_WRITE_TOOLS`)
-
-The mirror is not maintained by hand. `scripts/dev/sync_skill_clis.py` makes the backend registry the single source of truth:
+`scripts/dev/sync_skill_clis.py` rewrites three things from the registry: the `TOOLS` dict in both CLIs, the `WRITE_TOOLS` list in the full CLI, and `intelfeed-mcp/registry.json`. The rest of each CLI file is left alone.
 
 ```bash
-# Regenerate both CLIs from the live registry (stack running, creds in env)
+# From the repo root, with the stack running and the CLI login variables set
 INTELFEED_API_URL=http://localhost:8000 python3 scripts/dev/sync_skill_clis.py
 
-# Report drift without changing anything (exit 1 if out of sync)
+# Report drift without changing anything (exits 1 if anything is out of date)
 python3 scripts/dev/sync_skill_clis.py --check
 
-# Regenerate from a saved registry dump instead of the API
-python3 scripts/dev/sync_skill_clis.py --from-file registry.json
+# Use a saved registry file instead of the live server
+python3 scripts/dev/sync_skill_clis.py --from-file intelfeed-mcp/registry.json
 ```
 
-The script rewrites the `TOOLS: dict[str, dict] = {...}` block in each CLI and the `WRITE_TOOLS` frozenset in the full CLI, leaving the rest of each file (auth, batching, read-only gating logic) untouched.
-
----
-
-## Conclusion
-
-The IntelFeed CLI is a powerful, lightweight tool for interacting with the platform. Start with `--list-tools` to explore, use `--help-tool <name>` for specific details, and refer to the Common Workflows section for real-world usage patterns.
-
-For questions, refer to the [main architecture documentation](../docs/architecture.md) or check the backend API routes in `backend/app/api/`.
-
+The sync script reads `/api/tools/tools` from the server. If you leave out `INTELFEED_API_URL`, it uses `http://localhost:8000`.

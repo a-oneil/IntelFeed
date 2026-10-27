@@ -1,104 +1,265 @@
 # Public read-only mode
 
-An admin switch that lets anyone who can reach the instance open IntelFeed and look around without an account. Visitors see the real app with real data from the feeds an admin has chosen, but every control that changes something is gone, nothing they do costs AI time or makes the server fetch anything, and private work stays private. Signing in brings back the full app.
+An admin switch that lets anyone who can reach the instance browse without
+signing in. Visitors see real data from admin-picked
+feeds; nothing they do changes data, uses AI or makes the server fetch
+anything, and private work stays hidden.
 
-The switch is **off by default**. While it is off, every API route except the login, health, share-link, public RSS and indicator-feed routes answers 401 without a token.
+**Off by default**: every API route then answers 401 without a token, except login, health, share links, public RSS and the
+indicator feeds.
 
 ## Turning it on
 
-**Settings → Users → Security → Public read-only mode.** It sits next to Account Registration and Invite Code and is stored as the `public_read_only_enabled` system setting (env default `PUBLIC_READ_ONLY_ENABLED=false`). It never creates accounts and does not change registration or invite codes.
+**Settings → Users → Security → Public read-only mode**, next to Account
+Registration and Invite Code. System setting `public_read_only_enabled` (env
+default `PUBLIC_READ_ONLY_ENABLED=false`); it doesn't touch accounts,
+registration or invite codes. The login page reads it from the no-login
+`GET /api/auth/registration-status`, which returns `public_read_only_enabled`.
 
-The login page learns whether the mode is on from the unauthenticated `GET /api/auth/registration-status`, which carries `public_read_only_enabled` alongside the registration flags.
+**Then pick the feeds.** Every feed starts hidden. An admin ticks **Visible to visitors** in a feed's Readers pane
+(`feeds.visible_to_visitors`, admin-only; the `update_feed` tool sets it
+too). Manual Uploads is never shown.
 
-**Then pick the feeds.** Every feed starts hidden from visitors, so turning the mode on publishes nothing by itself. An admin opens a feed's settings and checks **Visible to visitors** (Readers pane), stored as `feeds.visible_to_visitors`; the `update_feed` tool sets the same flag. Only an admin can change it; the API refuses it from anyone else. Manual Uploads never shows, whatever the flag says.
-
-**Behind Cloudflare,** set `TRUSTED_CLIENT_IP_HEADER=CF-Connecting-IP` in the API's environment before turning the mode on. Without it every visitor arriving through one Cloudflare edge shares that edge's address and one rate-limit bucket, so one busy visitor locks out a region. The header is only trustworthy while the origin accepts Cloudflare's ranges alone (`scripts/ops/cf-origin-lockdown.sh`, see [operations.md](operations.md#rate-limiting)).
+**Behind Cloudflare,** set `TRUSTED_CLIENT_IP_HEADER=CF-Connecting-IP` in the
+API's environment first. Otherwise visitors through one Cloudflare edge share
+one rate-limit bucket, and one busy visitor can lock out a region. Only trust that header if the server accepts traffic from Cloudflare
+alone (`scripts/ops/cf-origin-lockdown.sh`, see
+[operations.md](operations.md#rate-limiting)).
 
 ## What visitors see
 
-There is no banner and no badge. The header's search box, ⌘K, Copilot, Settings and Logout give way to a single **Sign in** button. The login page carries a "Keep browsing read-only" link back, signing in lands on the page that was open (with the visitor's cached responses dropped), and logging out returns to the public view rather than a login wall. If an admin switches the mode off while a visitor has the app open, their next refused request sends them to the login page.
+The header's search box, ⌘K, Copilot, Settings and Logout become
+one **Sign in** button. The login page has a "Keep browsing read-only" link.
+Sign-in returns you to your page; logout to the public view. If the mode is turned off mid-visit, the next
+request goes to login.
 
 | Area | Visitors get | Removed for visitors |
 | --- | --- | --- |
-| Feed reader | Articles from visible feeds, filters, sort, view, text size, Find in article, Open original; read-aloud for articles that already have audio | Read/unread, star, bookmark, tags, notes, the AI tab and summaries, share, export, translate, bulk selection and actions, day summaries, Telegram images, swipe actions on phones |
-| Sidebar | Articles in the last 24 hours, Last 24h / This Week / Priority Queue, the visible feeds by name, in the folders that hold them | Unread counts, Watched / Bookmarked / Starred, Automation, Notes, saved searches, add feed, ingest, new category, folder reordering, right-click menus |
-| Entity lists | The tables and their relationship columns | Create, export, delete, merge, row selection, the TTP coverage and rule columns |
-| Entity profiles (every type) | Overview, relationships, graph, timeline, linked articles, saved assessments (analyst-written or AI-drafted), sources | Detection and Detection Gaps tabs, editing (fields show values only), aliases, Watch, the ⋯ menu, Ask Copilot, AI analysis, notes, the next-actions rail, enrichment, the Wikipedia search, ransomware victims, relationship pin/reject/unlink, drawing new links in the graph |
-| Entity pop-ups | The card, Profile, Copy | Search, Enrich, Wrong? |
-| Intel panel | Extracted entities, the entity graph, glossary, referenced URLs | Extract, Gen Rules, campaigns, Navigator, detection rules, observables, insights, PIR matches |
-| Story threads | Threads with at least one visible article, rebuilt from those articles | Marking a thread opened or read |
-| Priority Queue | Ranking by the system score | Votes, personal ranking, the unread count |
-| Dashboard | The built-in Triage, Intel and CVE tabs, locked and re-packed so removed widgets leave no gaps | New tabs, widgets, widget settings; the DE and Ransomware Ops tabs; morning briefing, saved-search hits, watchlist pulse, AI usage, feed health, worker queue, automation logs, campaign, Telegram, playbook-drift, ransomware, rules and observables widgets; the overview's detection and unread tiles; marking correlations read |
-| Workbench | ATT&CK matrix (article heat only), the entity lists, glossary | Reports, Rules Library, Telemetry Sources, Threats, Campaigns, Observables, Ransomware, Requirements, Telegram Mentions, Watchlist; glossary add/edit/delete |
-| Documentation | The pages and their images | The API reference links and the docs copilot |
-| Keyboard | j/k, o, w, Escape, ? | Every shortcut that writes, opens a hidden panel, exports, searches, or opens the palette or copilot; the `?` help lists only what works |
-| Theme and layout | Changes on the visitor's own screen | Anything saved to the server |
+| Feed reader | Visible-feed articles, filters, sort, view, text size, Find in article, Open original; read-aloud where audio exists | Read/unread, star, bookmark, tags, notes, AI tab and summaries, share, export, translate, bulk actions, day summaries, Telegram images, phone swipe actions |
+| Sidebar | Last-24-hours count, Last 24h / This Week / Priority Queue, visible feeds by name in their folders | Unread counts, Watched / Bookmarked / Starred, Automation, Notes, saved searches, add feed, ingest, new category, folder reordering, right-click menus |
+| Entity lists | Tables and relationship columns | Create, export, delete, merge, row selection, TTP coverage and rule columns |
+| Entity profiles (every type) | Overview, relationships, graph, timeline, linked articles, saved assessments (analyst or AI), sources | Detection and Detection Gaps tabs, editing (values only), aliases, Watch, ⋯ menu, Ask Copilot, AI analysis, notes, next-actions rail, enrichment, Wikipedia search, ransomware victims, relationship pin/reject/unlink, drawing graph links |
+| Entity pop-ups | Card, Profile, Copy | Search, Enrich, Wrong? |
+| Intel panel | Extracted entities, entity graph, glossary, referenced URLs | Extract, Gen Rules, campaigns, Navigator, detection rules, observables, insights, PIR matches |
+| Story threads | Threads with a visible article, rebuilt from visible articles | Marking opened or read |
+| Priority Queue | System-score ranking | Votes, personal ranking, unread count |
+| Dashboard | Built-in Triage, Intel and CVE tabs, locked, remaining widgets packed without gaps | New tabs, widgets, widget settings; DE and Ransomware Ops tabs; morning briefing, saved-search hits, watchlist pulse, AI usage, feed health, worker queue, automation logs, campaign, Telegram, playbook-drift, ransomware, rules and observables widgets; overview detection and unread tiles; marking correlations read |
+| Workbench | ATT&CK matrix (article heat only), entity lists, glossary | Reports, Rules Library, Telemetry Sources, Threats, Campaigns, Observables, Ransomware, Requirements, Telegram Mentions, Watchlist; glossary add/edit/delete |
+| Documentation | Pages and images | API reference links, docs copilot |
+| Keyboard | j/k, o, w, Escape, ? | Shortcuts that write, open a hidden panel, export, search, or open the palette or copilot; `?` help lists only what works |
+| Theme and layout | Local changes | Anything saved to the server |
 
-Search, settings, automation, campaigns, the threat board, rule pages and report builders show **Not available** with a Sign in button. Tag chips and the Top Tags widget are labels for a visitor, not links into Search. The API docs (`/docs`, `/redoc`, `/openapi.json`) stay login-only: `openapi.json` keeps the real `get_current_user` check.
+Search, settings, automation, campaigns, the threat board, rule pages and
+report builders show **Not available** and Sign in. Tag chips and
+the Top Tags widget are plain labels, not Search links. The API docs (`/docs`,
+`/redoc`, `/openapi.json`) still need a login.
 
-**What stays visible regardless of feeds.** The reference catalogs (CVEs, TTPs, CWEs, mitigations, countries, sectors) are public whatever mentions them, and so is an entity with no article links at all (a catalog import). The `article_count`, `first_seen_at` and `last_seen_at` stored on each entity row count every feed; lists and profiles show those stored values. Counts computed per request (widgets, trends, the ATT&CK matrix, pivots, relationship and tag counts) cover visible articles only; a few small aggregates still count every feed (the CWE page's top vendors, a sector's count of targeting actors, the "independent outlets" figure in a signal's explanation).
+**Visible regardless of feeds:** the reference catalogs (CVEs, TTPs, CWEs,
+mitigations, countries, sectors), whatever mentions them, and any entity with
+no article links (such as one from a catalog import).
+
+**Counts.** Stored `article_count`, `first_seen_at` and `last_seen_at` (shown
+in lists and profiles) span all feeds. Per-request counts
+(widgets, trends, the ATT&CK matrix, pivots, relationship and tag counts)
+cover visible articles only. Small figures still counting every feed: the
+CWE page's top vendors, a sector's count of actors targeting it, and a
+signal explanation's "independent outlets" figure.
 
 ## How the server enforces it
 
-**Routes opt in one by one.** A route a visitor may read takes `get_viewer` (`backend/app/core/security.py`) instead of `get_current_user`. With a token, `get_viewer` checks it exactly as `get_current_user` does. With no `Authorization` header it returns an `AnonymousViewer` while the switch is on and a 401 while it is off; a header that carries no usable token (`Bearer` alone, another scheme) is always a 401. The viewer has `id = None`, so every per-user filter (read state, stars, watches, My Stack, personal weights, tag visibility) matches no row. Every other route keeps its login check, so a new or overlooked route stays locked. A route about one article (`{entry_id}` in the path) takes `get_entry_viewer`, which also answers 404 to a visitor for an article they can't see.
+**Routes opt in one by one.** Visitor-readable routes use `get_viewer`
+(`backend/app/core/security.py`) instead of `get_current_user`:
 
-**A second lock on writes.** `AnonymousWriteLockMiddleware` (`backend/app/core/public_access.py`) refuses every non-GET request that carries no bearer token, whatever the route says. It parses the header as FastAPI's `HTTPBearer` does, so a scheme in any case counts and an empty credential does not. The exceptions are login, register, refresh, logout, the share page's own calls, and a short reviewed list of read-only POSTs the visitor UI needs: `/api/entries/intel-counts`, `/api/entries/resolve-names`, `/api/intelligence/resolve-names`, `/api/glossary/detect` and `/api/autolink/scan` (bodies capped at 16 KB), and `/api/entity-relationships/signals/{entity_type}` (48 KB, for the entity tables' id lists). Each takes ids or text and returns matches. In the browser, `api/client.ts` drops a visitor's write before it is sent and shows one "This view is read-only." toast. Personal-state writes (read, star, bookmark, bulk actions, thread opened, playback progress, the Triage view) do nothing for a visitor.
+- With a token, it acts exactly like `get_current_user`.
+- With no `Authorization` header, it returns an `AnonymousViewer` while the
+  switch is on, a 401 while off.
+- A header with no usable token (`Bearer` alone, another scheme) is a 401.
 
-**The data layer hides what no visitor gets** (`backend/app/services/public_view.py`). While the request's viewer is anonymous, a SQLAlchemy `do_orm_execute` listener adds criteria to every ORM select:
+The visitor has `id = None`, so per-user filters (read state, stars, watches,
+My Stack, personal weights, tag visibility) match nothing. Other routes keep
+their login check, so new or forgotten routes stay locked. A route about
+one article (`{entry_id}` in the path) uses `get_entry_viewer`, which also
+404s an article the visitor can't see.
 
-- **Feeds and articles.** `Feed` keeps only feeds with `visible_to_visitors` set (never Manual Uploads); `Entry` keeps only their articles, subqueries and relationship loads included. An article from a hidden feed is a 404 to a visitor, wherever it is linked from.
-- **Article links.** Every article-link table (`EntryTTP`, `EntryCVE`, `EntryThreatActor` and the rest, and story-thread membership) keeps only rows about visible articles, so counts, trends, heatmaps and per-article lists that never load `Entry` still exclude hidden feeds.
-- **Entities.** A threat actor, malware family, tool, vendor or product is hidden when every article mentioning it is in a hidden feed. One known only from a Manual Upload or a hidden feed never appears in a list, profile, relationship, event or autolink match.
-- **Saved AI output.** No `AIResult` row loads, and the AI-extracted article metadata (`metadata.article_intel`) is left out. Entity assessments live on the entity row and stay visible.
-- **Private work.** No row loads from campaigns (and their entries, entities and sources), observables, detection rules, intelligence requirements and their matches, intel profiles, notes, entity notes, comments, or the ransomware victim tracker. A campaign or observable id passed to a pivot, a timeline, a list filter (`campaign_id`) or an enrichment lookup finds nothing.
+**A second lock on writes.** `AnonymousWriteLockMiddleware`
+(`backend/app/core/public_access.py`) refuses every non-GET request without a
+bearer token (parsed as FastAPI's `HTTPBearer` does), whatever the route says.
+Exceptions:
 
-The criteria apply to SQL the ORM emits, so a request's session must start empty: `session.get()` answers from the identity map without a query.
+- login, register, refresh and logout;
+- the share page's own calls;
+- reviewed read-only POSTs that take ids or text and store nothing: `/api/entries/intel-counts`,
+  `/api/entries/resolve-names`, `/api/intelligence/resolve-names`,
+  `/api/glossary/detect` and `/api/autolink/scan` (body up to 16 KB), and
+  `/api/entity-relationships/signals/{entity_type}` (up to 48 KB, for the
+  entity tables' id lists).
 
-**Outside the ORM.** Raw SQL, the search index and caches don't pass through that listener, so each path a visitor reaches states the rule itself:
+In the browser, `api/client.ts` drops visitor writes with one "This view is
+read-only." toast; personal actions (read, star, bookmark, bulk actions,
+thread opened, playback progress, the Triage view) do nothing.
 
-- **Story threads** (raw SQL) come back rebuilt from their visible members: threads with none are dropped; the title is the earliest visible article's; the slug, made from the seed article's headline, gives way to an alias (`t-<thread id>`) that the thread route accepts; the counts, dates, ranking and entity chips cover visible members only; the stored summary and AI spine give way to a day-grouped spine over visible members (computed per request, never stored); a title search matches the rebuilt titles; and related threads are left out. The same applies to threads in the priority queue, in similar-article results and on a profile's Active Story card.
-- **The search index and the embeddings** (similar articles, glossary term pages and counts) are queried with a filter on the visible feeds.
-- **Correlation events** keep an allowlist of types (actor, malware and technique correlations; CVE, exploit, KEV and trending events) about visible articles, or about no article, and visible entities. Campaign and requirement matches, rule and coverage events and feed health are left out: their text names private work.
-- **The entity timeline** leaves out rule and campaign events and anything about a hidden article or entity.
-- **Relationships** need both ends visible and keep only visible evidence; an edge drawn only from hidden articles is left out, and descriptions and creators are cleared.
-- **Field provenance** leaves out claims drawn from hidden articles.
-- **Caches** hold visitors apart: pivots, graphs and the ATT&CK matrix have visitor keys of their own, and the corpus total behind specificity scores is memoized per viewer kind.
-- **Shared state** never comes from a visitor's view. The autolinker vocabulary and the 0–10 scale cutoffs, which a visitor's request can trigger a rebuild of, are built inside `instance_view()`, which lifts the filter for the build.
+**The data layer hides what no visitor gets**
+(`backend/app/services/public_view.py`). A SQLAlchemy `do_orm_execute`
+listener filters every ORM query for visitors:
 
-**Folders and feeds.** The category list keeps only folders holding a visible feed, and their parents, without their pipeline defaults. Feed responses keep the name and category only: the URL, errors, health, pause reasons, adapter config, title filters and analyst notes are cleared, and no unread counts are computed. The tag list keeps global tags on visible articles.
+- **Feeds and articles.** Only feeds with `visible_to_visitors` load (never
+  Manual Uploads), and only their articles, including subqueries and
+  relationship loads; a hidden-feed article is a 404 everywhere.
+- **Article links.** Article-link tables (`EntryTTP`, `EntryCVE`,
+  `EntryThreatActor` and the rest, plus story-thread membership) keep only
+  visible-article rows, so counts, trends, heatmaps and lists exclude hidden
+  feeds without loading `Entry`.
+- **Entities.** An actor, malware family, tool, vendor or product mentioned
+  only in hidden feeds (or Manual Uploads) never appears in a list, profile,
+  relationship, event or autolink match.
+- **Saved AI output.** No `AIResult` row loads, and AI-extracted article
+  metadata (`metadata.article_intel`) is left out. Entity assessments (on the
+  entity row) stay visible.
+- **Private work.** Nothing loads from campaigns (and their entries, entities
+  and sources), observables, detection rules, intelligence requirements and
+  their matches, intel profiles, notes, entity notes, comments, or the
+  ransomware victim tracker. Campaign or observable ids passed to a pivot,
+  timeline, list filter (`campaign_id`) or enrichment lookup find nothing.
 
-**Response scrubbing.** A visitor's JSON loses usernames and user ids (`username`, `analyst`, `created_by` and similar) and any key about rules, coverage, detection gaps, campaigns, observables, requirements and PIR matches, IOCs or translations. It also loses note, comment and AI-result counts and the `unread` figure. A hidden list comes back empty and a hidden count or flag as zero or false, so pages keep their shape; a hidden object or string is removed. Any object whose `type`, `entity_type`, `event_type`, `source_type`, `target_type` or related-entity type is a campaign, observable or rule is removed from its list, along with graph edges left pointing at it. Priority signals whose stored explanation names private work (`pir_match`, `correlation_event`, `detection_content`) keep their score with a generic explanation. Article bylines (`author`) are untouched.
+These filters apply only to ORM SQL, so a request's session must start empty:
+`session.get()` can answer from its cache without a query.
 
-**Products** keep their vendor only when the vendor is one the visitor sees; otherwise the vendor id is cleared too.
+**Outside the ORM.** Raw SQL, the search index and caches skip the listener,
+so each applies the rule itself:
 
-**Reads stay reads.** Read-aloud serves audio that already exists (`GET /api/tts/existing`, then the file) and never synthesizes for a visitor, and a visitor's playback skips the last-played stamp. Audio files are addressed by a hash of their text, so a visitor can fetch one only by already holding its key. The image proxy serves a visitor, from its cache or by fetching, only an image that a visible article shows (an `<img>` source or its lead image), at one of a few fixed widths; otherwise the browser loads the original URL directly. No visitor route starts Celery work.
+- **Story threads** (raw SQL) are rebuilt from visible articles (none →
+  dropped), titled by the earliest one. Visitors get a slug alias (`t-<thread id>`, accepted by the
+  thread route) since the real slug comes from the first headline. Counts, dates, ranking and entity
+  chips cover visible articles only. The stored summary and AI spine become a
+  day-by-day spine of visible articles, built per request, never stored. Title search uses rebuilt titles; related threads are left out.
+  Same in the priority queue, similar-article results and Active Story cards.
+- **Search index and embeddings** (similar articles, glossary term pages and
+  counts) are filtered to visible feeds.
+- **Correlation events** are limited to certain types (actor, malware and
+  technique correlations; CVE, exploit, KEV and trending events) about visible
+  articles or no article, and visible entities. Campaign and requirement
+  matches, rule and coverage events and feed health are left out (their text
+  names private work).
+- **The entity timeline** drops rule and campaign events and anything hidden.
+- **Relationships** need both ends visible and keep only visible evidence;
+  links from only hidden articles are dropped. Descriptions and creators
+  are cleared.
+- **Field sources** drop claims from hidden articles.
+- **Caches**: pivots, graphs, the ATT&CK matrix and the corpus total behind
+  specificity scores have separate visitor cache keys.
+- **Shared data** is never built from a visitor's view. Rebuilds a visitor
+  triggers (autolinker vocabulary, 0–10 scale cutoffs) run inside
+  `instance_view()`, which lifts the filter.
 
-**Dashboards** come from `DEFAULT_BOARDS` (`backend/app/dashboard_defaults.py`), trimmed to Triage, Intel and CVE and to the widget types listed above, re-packed so the remaining widgets fill the rows, with stable synthetic ids.
+**Folders and feeds.** Only folders holding a visible feed, and their
+parents, are listed, without pipeline defaults. Feed responses keep only
+name and folder (URL, errors, health, pause reasons, adapter config, title
+filters, analyst notes cleared; no unread counts). The
+tag list keeps global tags on visible articles.
+
+**Response scrubbing.** A visitor's JSON loses:
+
+- usernames and user ids (`username`, `analyst`, `created_by` and similar);
+- any key about rules, coverage, detection gaps, campaigns, observables,
+  requirements and PIR (priority intelligence requirement) matches, IOCs
+  (indicators of compromise) or translations;
+- note, comment and AI-result counts, and the `unread` figure.
+
+Hidden lists return empty and counts or flags as zero or false, so pages keep
+their shape; hidden objects or strings are removed. Objects
+whose `type`, `entity_type`, `event_type`, `source_type`, `target_type` or
+related-entity type is a campaign, observable or rule are removed, with
+graph edges to them. Priority signals whose saved
+explanation names private work (`pir_match`, `correlation_event`,
+`detection_content`) keep their score but get a generic explanation. Article
+bylines (`author`) are kept.
+
+**Products** keep their vendor only when the visitor can see it; otherwise the
+vendor id is cleared too.
+
+**Reads stay reads.**
+
+- Read-aloud serves only existing audio (`GET /api/tts/existing`, then the
+  file) and saves no last-played time. Files are named by a text hash, so a
+  visitor can only fetch one whose name they have.
+- The image proxy serves visitors only images a visible article shows (an
+  `<img>` source or lead image), at a few fixed widths, cached or fetched;
+  otherwise the browser loads the original URL.
+- No visitor route starts background (Celery) work.
+
+**Dashboards** come from `DEFAULT_BOARDS` (`backend/app/dashboard_defaults.py`),
+cut to Triage, Intel and CVE and the widgets above, packed, with fixed
+made-up ids.
 
 ## Limits and caching
 
-Anonymous `/api/*` traffic is rate-limited per client IP, over a minute and over an hour, so a visitor can click around quickly but nobody can copy the site wholesale:
+Visitor `/api/*` traffic is rate-limited per client IP — enough for a person,
+too little to copy the site:
 
 | What | Per minute | Per hour |
 | --- | --- | --- |
 | Opening an article (`GET /api/entries/{id}`, the only route that returns full article text) | 20 | 150 |
-| Graph, pivot, timeline, analytics, map, calendar, priority-queue, relationship and autolink-scan routes | 20 | 200 |
+| Heavier reads: graph, pivot, timeline, analytics, map, calendar, priority queue, relationships, autolink scan, the entity-links list and the CWE catalog | 20 | 200 |
 | Everything else | 180 | 1,500 |
 
-The heavier group also covers the entity-links list and the CWE catalog. Lists that carry article summaries or bulk links (`/api/entries`, the priority queue, a feed's or glossary term's entries, `/api/entity-links`) return at most 50 rows a page to a visitor, the size the app asks for, so the request budget also bounds how much one can pull.
+Lists carrying article summaries or many links (`/api/entries`, the priority
+queue, a feed's or glossary term's entries, `/api/entity-links`) return at
+most 50 rows per page to visitors (the app's page size), so request limits
+also cap volume.
 
-Opening one article in the reader is about 15 requests (the article, its entity lists, glossary terms, counts) but only one of them is the article itself, so the article budget is what stops a scraper, and the general budget only has to fit a person's pace. The windows are checked and recorded in one atomic Redis step, so parallel requests cannot overrun them. A refused request is not counted. The browser shows one "Too many requests" toast per burst, and the 429's `Retry-After` says how long to wait. Signed-in traffic is not limited, and TAXII and the published indicator files keep their own per-minute budget (see [operations.md](operations.md#rate-limiting)).
+Opening an article takes about 15 requests, only one of them the article, so
+the article limit stops scrapers while the general limit fits a person's pace.
 
-Every API response carries `Cache-Control: private, no-store` (routes that serve the same bytes to everyone, like proxied images and audio files, set their own), plus `X-Robots-Tag: noindex, nofollow`; refusals (401, 413, 429) carry them too. The SPA carries a `noindex` meta tag and serves a disallow-all `robots.txt`.
+- Limits are checked and counted in one Redis step (parallel requests can't
+  slip past); refused requests aren't counted.
+- The browser shows one "Too many requests" toast per burst; the 429's
+  `Retry-After` header says how long to wait.
+- Signed-in users are limited only on AI routes. TAXII
+  and the published indicator files have their own per-minute limit (see
+  [operations.md](operations.md#rate-limiting)).
+
+Every API response, including refusals (401, 413, 429), carries
+`Cache-Control: private, no-store` and `X-Robots-Tag: noindex, nofollow`.
+Shared-bytes routes (proxied images, audio) set their own `Cache-Control`. The web app has a `noindex` meta tag and a
+crawler-blocking `robots.txt`.
 
 ## Keeping it safe as the API grows
 
-`backend/tests/test_public_read_only.py` lists every visitor route and every route that needs no login. It fails when a route takes `get_viewer` or skips auth without being listed, and when a visitor route about one article skips `get_entry_viewer`, so each one is a deliberate decision. It walks every visitor route with the switch off (all 401) and on (no 401/403/5xx, no database writes, no Celery dispatch).
+`backend/tests/test_public_read_only.py` lists every visitor route
+(`VISITOR_ROUTES`) and every no-login route. It fails when a route uses
+`get_viewer` or skips login without being listed, or when a one-article
+visitor route doesn't use `get_entry_viewer` — so opening a route is always
+deliberate. It calls every visitor route with the switch off (all must be 401)
+and on (no 401, 403 or 5xx, no database writes, no Celery tasks).
 
-The **canary test** seeds articles in a hidden feed, marked everywhere they can be (titles, URLs, text, an actor, malware family, tool, vendor and product known only from them, a hidden-only story thread and beat, a thread mixing a hidden seed with a visible article, a correlation event, a relationship, a claim quote), walks every visitor route signed in so caches fill, then walks them as a visitor focused on each entity, and fails if any response carries a marker or a hidden id. Further tests cover signal text, article metadata and campaign filters, thread search, article-less events and page caps. Further tests cover what the walk can't reach: the image proxy, tags, autolink scan and vocabulary, ATT&CK counts and cache, rate-limit windows under parallel requests, and malformed authorization headers.
+The **canary test** marks hidden-feed articles everywhere:
+titles, URLs, text, an actor, malware family, tool, vendor and product known
+only from them, a hidden-only story thread, a thread mixing hidden and visible
+articles, a correlation event, a relationship, and a claim quote. It calls
+every visitor route signed in (filling caches), then as a visitor, failing on
+any marker or hidden id. Other tests cover the rest: signal text, article metadata, campaign filters, thread
+search, events with no article, page caps, the image proxy, tags, autolink
+scan and vocabulary, ATT&CK counts and cache, rate limits under parallel
+requests, and malformed `Authorization` headers.
 
-To open another route to visitors: switch it to `get_viewer` (or `get_entry_viewer` for an `{entry_id}` route), make sure it reads nothing personal and starts no work for an anonymous viewer, check that any raw SQL, search or cache it uses applies the visitor rule, add it to `VISITOR_ROUTES` in the test, and for a read-only POST add it to `ANONYMOUS_READ_POSTS` (or `ANONYMOUS_READ_POST_TEMPLATES`) and to `VISITOR_READ_POSTS` in `frontend/src/api/client.ts`. The canary walk then covers it.
+To open another route to visitors:
+
+1. Switch it to `get_viewer` (or `get_entry_viewer` for an `{entry_id}`
+   route).
+2. Ensure it reads nothing personal and starts no background work for
+   visitors.
+3. Check any raw SQL, search or cache it uses applies the visitor rule.
+4. Add it to `VISITOR_ROUTES` in the test.
+5. For a read-only POST, also add it to `ANONYMOUS_READ_POSTS` (or
+   `ANONYMOUS_READ_POST_TEMPLATES`) in `backend/app/core/public_access.py`,
+   and to `VISITOR_READ_POSTS` in `frontend/src/api/client.ts`.
+
+The canary test then covers it.
 
 ## Live updates
 
-Visitors do not get the live-updates stream. It needs a per-user ticket, and its broadcast channel carries unfiltered payloads (feed and entry ids from every feed, correlation-event text). A visitor's article list refreshes when they navigate, reload, or return to a view after its 30-second cache expires; widgets and thread views that poll on their own interval keep doing so.
+Visitors get no live-updates stream: it needs a per-user ticket, and its
+broadcast channel is unfiltered (feed and entry ids from every
+feed, correlation-event text). A visitor's article list refreshes on page
+change, reload, or returning to a view after its 30-second cache expires.
+Timer-refreshed widgets and thread views keep refreshing.

@@ -66,7 +66,6 @@ SNAPSHOT_PATH = SCRIPT_DIR / "registry.json"
 SERVER_NAME = "intelfeed"
 SERVER_VERSION = "1.0.0"
 PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
-DEFAULT_API_URL = "https://intelfeed.cc"  # same default as the skill CLIs
 
 
 def load_dotenv(path: Path) -> None:
@@ -258,6 +257,8 @@ if len(WRITE_TOOLS) != len(_requested_writes):
 
 def validate_api_url(url: str) -> str:
     """https://, or http:// to this machine; anything else would send the password in clear text."""
+    if not url:
+        raise ValueError("INTELFEED_API_URL is not set. Point it at your instance, e.g. https://intelfeed.example.com.")
     parts = urllib.parse.urlsplit(url)
     if parts.scheme == "https" and parts.hostname:
         return url
@@ -295,7 +296,7 @@ class IntelFeed:
     """IntelFeed API access (login, token refresh, tool calls) plus the tool registry. Thread-safe."""
 
     def __init__(self, api_url: str | None = None, username: str | None = None, password: str | None = None):
-        self.api_url = (api_url or os.environ.get("INTELFEED_API_URL") or DEFAULT_API_URL).rstrip("/")
+        self.api_url = (api_url or os.environ.get("INTELFEED_API_URL") or "").strip().rstrip("/")
         try:
             validate_api_url(self.api_url)
             self.config_error = ""

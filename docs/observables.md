@@ -1,239 +1,166 @@
 # Observables — the IOC ledger, end to end
 
-The observables ledger is where IntelFeed keeps *atoms*: values that exact-match
-in telemetry. An IP, a hash, a C2 domain — and, since the issue #1 work, the
-behavioural artifacts research write-ups quote: full command lines, dropped
-file paths, registry values, scheduled-task and service names, mutexes,
-user-agents and custom HTTP headers. This page is the deep-dive; the summary
-lives in [intelligence-engine.md](intelligence-engine.md#observables--the-ioc-ledger),
-the columns in [data-model.md](data-model.md#observable--the-ioc-ledger), the
-knobs in [engine-settings.md](engine-settings.md#observables-stage).
+An **observable** (IOC) is a value you can match exactly in logs: an IP, hash, C2 domain, or a host artifact quoted in research (command line, file path, registry value, task or service name, mutex, user-agent, custom HTTP header). This page covers how a value becomes a ledger row, the checks it passes, how its confidence changes, and where it is published.
 
-Code: `backend/app/intelligence/observables.py` (engine),
-`backend/app/services/analysis_window.py` (what the AI sees),
-`backend/app/intelligence/infrastructure.py` (attribution surface),
-`backend/app/models/observable.py` (vocabulary + schema).
+Related: summary in [intelligence-engine.md](intelligence-engine.md#observables--the-ioc-ledger), columns in [data-model.md](data-model.md#observable--the-ioc-ledger), settings in [engine-settings.md](engine-settings.md#observables-stage).
+
+| File | Holds |
+|---|---|
+| `backend/app/intelligence/observables.py` | Scanning, validation, doors, sightings, decay |
+| `backend/app/services/analysis_window.py` | What the AI sees of an article |
+| `backend/app/intelligence/infrastructure.py` | "What infrastructure does this actor use?" |
+| `backend/app/models/observable.py` | Kinds, roles, decay rates, the table |
 
 ## The contract
 
-**Regex never creates a row.** Pattern scanning only nominates *candidates*
-that stay on the entry (`entries.observable_candidates`). A ledger row exists
-only when something with judgment created it:
+**Regex never creates a row.** Scanning only nominates *candidates* on the entry (`entries.observable_candidates`, at most `observables_candidate_max`, default 200) and shown in the reader to promote. Only a judgment "door" creates a row, setting `created_via` and a starting confidence:
 
 | Door | `created_via` | Base confidence | What it is |
 |---|---|---|---|
-| One-pass analysis AI | `ai_extraction` | 0.8 (+0.1 if the author defanged) | The `iocs` array of `entry_analysis`: every kind, with a role, an evidence sentence and an optional ATT&CK `technique_id` |
-| TTP observable | `ttp_observable` | 0.85 | `EntryTTP.observable_value` upserts (host artifacts attached to a technique claim) — backfill path; at ingest the AI door covers these |
-| Article IOC table | `publisher_ioc` | 0.9 | The indicator file the article links to (Talos `.txt`/STIX `.json`, Bitdefender CSV, Datadog CSV) — allow-listed repositories only, roles from the publisher's labels, sighted on the article |
-| Curated indicator feed | `ioc_list` | 0.85 | A whole file from a curated list repo (C2IntelFeeds, C2-Tracker), path-gated and infra-tagged; role from the file path |
-| Analyst | `manual` | 1.0 | Promote from the reader, the candidates queue, or the `promote_observable` tool |
+| Analyst | `manual` | 1.0 | Promote from reader, candidates queue or `promote_observable` tool |
+| Article IOC table | `publisher_ioc` | 0.9 | The IOC file an article links to (Talos `.txt` and STIX `.json`, Bitdefender CSV, Datadog CSV). Allow-listed repos only; roles from publisher labels; sighting recorded on the article. Switch: `observables_publisher_ioc_enabled` |
+| Curated indicator feed | `ioc_list` | 0.85 | A whole file from a curated list repo (C2IntelFeeds, C2-Tracker). Path sets role and infrastructure tag. `whitelist`, `allowlist`, `benign` and `unverified` files, and C2-Tracker's combined `all.txt`, are refused |
+| TTP observable | `ttp_observable` | 0.85 | A host artifact on a technique claim (`EntryTTP.observable_value`). Sighting carries the technique |
+| One-pass AI analysis | `ai_extraction` | 0.8 | `entry_analysis`'s `iocs` array: any kind, with role, evidence sentence and optional ATT&CK `technique_id` |
 
-Every door's input passes `validate_kind_value()`. Then the pipeline may
-*sight* a known value in new entries (`sight_known_values`, exact match only).
+Defanged values (`evil[.]com`, `hxxps://`) get +0.1. No `created_via` value means "regex".
+
+Door input must pass `validate_kind_value()` (`backend/app/intelligence/observables.py:1240`). New entries are then **sighted**: `sight_known_values()` (`backend/app/intelligence/observables.py:1001`) records exact matches of ledger values.
+
+## What becomes a candidate
+
+Rules in `scan_candidates()` (`backend/app/intelligence/observables.py:434`):
+
+| Family | Becomes a candidate when |
+|---|---|
+| Hashes, public IPs | Always; IPs must be public, outside reserved or benign ranges (`_valid_public_ip`, `backend/app/intelligence/observables.py:250`) |
+| Domains, URLs, emails | Only when defanged (`microsoft.com` in prose nominates nothing) |
+| Host artifacts | Never from prose. A `<pre>`/`<code>` block may nominate one (`scan_code_block_candidates`) only if the block is mostly commands and the line starts with a shell prompt or known executable |
+
+`refang()` (`backend/app/intelligence/observables.py:66`) undoes `hxxp`, `[.]`, `(dot)`, `[:]`, `[@]` and similar. The defanged form is kept on the sighting (`entry_observables.surface_form`, `was_defanged`).
+
+### Candidate precision rules
+
+The scanner also refuses:
+
+- **Advisory sources.** Entries with a GitHub `content_type` (Sigma, Nuclei, LOLDrivers repositories), feeds in a category in `observables_codeblock_skip_categories` (default "Security Advisories, Government / CERT"), and NVD feeds nominate **only defanged values** (bare hex there is a checksum, a dotted quad a version); their code blocks nominate nothing.
+- **Version numbers.** "9.4.0.0 through 9.4.0.25", "20.15.6.1 and earlier", "from X to Y", or a dotted quad after version/release/affected wording with no address wording nearby.
+- **Commit hashes.** Hex in commit / fixed-in / version context with no sample, hash or file word nearby.
+- **Glued table cells.** The scan reads renderer text (`cell | cell`); a TLD shaped like `com` + letters (`pobelstudio.comdomain`) is rejected.
+- **Placeholders and reference sites.** `attacker.com`, `contoso.com`; sandbox, catalog, vendor and social sites (VirusTotal, urlscan, GitHub, MITRE, Microsoft Learn, Telegram API, IP-echo services); the bare apex of shared hosting (`amazonaws.com`, `github.io`). Their subdomains can still be candidates.
+- **Hashes inside longer tokens.** 32/40/64 hex inside a hostname, path segment or identifier (`pub-9ee1bf…a.r2.dev`). Cloud dev platforms (`r2.dev`, `pages.dev`, `trycloudflare.com`, `ngrok`, `vercel.app`, …) are in `SHARED_INFRA_SUFFIXES`: their apex never nominates, and rows under them are never published.
+- **Bare paths.** One top-level segment (`/PSEMHUB/`) or a well-known location (`/dev/shm`, `/var/tmp`, `/etc/hosts`, `C:\ProgramData`).
+
+The queue re-applies current validators on read, hiding stale candidates. To rebuild:
+
+```bash
+# in the api container
+python scripts/maintenance/rescan_observable_candidates.py --purge-all-scan --purge-invalid --rescan-all
+```
 
 ## Kinds and their validators
 
-| Group | Kinds | Decay | Validator highlights |
+| Group | Kinds | Confidence half-life | Validator highlights |
 |---|---|---|---|
-| network | `ipv4`, `ipv6`, `domain`, `url`, `uri_path`, `email`, `ja3`, `ja4`, `cert_fingerprint` | 30d / 30d / 90d / 60d / 120d / 90d / none | public, non-reserved IPs; real TLDs (file-suffix lookalikes out); benign URI paths (`/favicon.ico`, `/login`) out; placeholders out |
-| hash | `md5`, `sha1`, `sha256` | none | length-classified; the AI door also rejects a 64-hex whose evidence calls it a key/token/secret |
-| host | `cmdline`, `path`, `registry`, `scheduled_task`, `service_name`, `mutex`, `named_pipe`, `user_agent`, `http_header` | none | see below |
-| script | `script` | none | sha256 of the normalised snippet; body in `content` |
+| network (infrastructure rotates, so these decay) | `ipv4`, `ipv6` | 30 days | Public, non-reserved addresses |
+| | `domain`, `email` | 90 days | Real TLDs, not file extensions; no placeholders |
+| | `url` | 60 days | A full `http(s)://` URL |
+| | `uri_path` | 120 days | Starts with `/`; benign paths (`/favicon.ico`, `/login`) rejected |
+| | `ja3`, `ja4`, `cert_fingerprint` | never decays | Correct fingerprint shape |
+| hash | `md5`, `sha1`, `sha256` | never decays | Length sets the kind; the AI door rejects 64-hex its evidence calls a key, token or secret |
+| host | `cmdline`, `path`, `registry`, `scheduled_task`, `service_name`, `mutex`, `named_pipe`, `user_agent`, `http_header` | never decays | See below |
+| script | `script` | never decays | SHA-256 of the normalised snippet (kept in `content`) |
 
-Host-kind rules (`_plausible_cmdline`, `_plausible_path_atom`, the registry /
-header / name branches of `validate_kind_value`):
+Host rules (`_plausible_cmdline`, `_plausible_path_atom`, and the branches of `validate_kind_value`):
 
-- `cmdline` needs ≥2 tokens, is not a generic discovery/admin command
-  (`whoami /priv`, `systeminfo`, `net group "Domain Admins" /domain`,
-  `nltest`, `tasklist`, …), is not detection logic (`process.`, `index=`,
-  `OR`/`AND` chains), and carries something the attacker chose: a two-segment
-  path, a host/URL/IP, a quoted string, an encoded blob, a dropped file name,
-  or a state-changing flag (`/add`, `/create`, `-enc`, `-ExecutionPolicy`).
-- `path` is an absolute path (env-var prefixes allowed) that is not a known OS
-  binary under `System32`/`SysWOW64` (a planted `phoneinfo.dll` there *is*
-  kept), not a bare well-known directory, not a lab path
-  (`C:\Users\Lab\…`), and carries no `REDACTED` / `<…>` / `{…}` placeholder.
-- `registry` is a hive-rooted key **with** the value name
-  (`HKCU\…\Run\AppResolver`); the bare well-known key is the technique's
-  location, not the artifact.
-- `scheduled_task` / `service_name` / `mutex` / `named_pipe` are 3–128 chars,
-  ≤5 words, not an OS default (`Schedule`, `Spooler`, `wuauserv`, …).
-- `http_header` is a custom header name (optionally `Name: value`); standard
-  headers are rejected (`User-Agent` is its own kind).
+- **`cmdline`**: two+ tokens; not a generic admin command (`whoami /priv`, `systeminfo`, `net group "Domain Admins" /domain`, `nltest`, `tasklist`, …); not detection logic (`process.`, `index=`, `OR`/`AND` chains); and has something attacker-chosen: path, host, URL, IP, quoted string, encoded blob, dropped file name, or state-changing flag (`/add`, `/create`, `-enc`, `-ExecutionPolicy`).
+- **`path`**: absolute (env-var prefixes allowed); not a known OS binary under `System32` / `SysWOW64` (a planted `phoneinfo.dll` there *is* kept); not a bare well-known directory or lab path (`C:\Users\Lab\…`); no `REDACTED`, `<…>` or `{…}`.
+- **`registry`**: a hive-rooted key **with** the value name (`HKCU\…\Run\AppResolver`); a bare well-known key is not an artifact.
+- **`scheduled_task`, `service_name`, `mutex`, `named_pipe`**: 3–128 characters, at most 5 words, not an OS default (`Schedule`, `Spooler`, `wuauserv`, …).
+- **`http_header`**: a custom header name, optionally `Name: value`; standard headers rejected (`User-Agent` has its own kind).
+- **`user_agent`**: product/version syntax (`Mozilla/5.0 …`, `curl/8.1.2`).
 
-Roles: network values carry what the infrastructure did (`c2`, `delivery`,
-`payload`, `phishing`, `exfil`, `exploit`, `scanning`); host artifacts carry
-the tactic (`persistence`, `execution`, `defense_evasion`,
-`credential_access`, `discovery`, `lateral_movement`, `collection`). Feed rows
-get their role from the file path (`domainC2s` → `c2`, scanner → `scanning`,
-phish-sim → `phishing`; VPN/RMM/KVM rows carry a tag instead of a role).
+**Roles.** Network: `c2`, `delivery`, `payload`, `phishing`, `exfil`, `exploit`, `scanning`. Host (a tactic): `persistence`, `execution`, `defense_evasion`, `credential_access`, `discovery`, `lateral_movement`, `collection`. Feed rows take it from the file path (`domainC2s` → `c2`, scanners → `scanning`, phishing-simulation → `phishing`); VPN, RMM and KVM lists get an infrastructure tag.
+
+**Shared infrastructure.** `is_shared_infra()` (`backend/app/intelligence/observables.py:652`) tags shared hosting, CDNs and URL shorteners in `infra_tag`; publishing skips them, profiles show them.
 
 ## What the AI sees: the analysis window
 
-`build_analysis_variables` renders the article for the one-pass prompt with
-`analysis_window.py`:
+`build_analysis_variables()` (`backend/app/services/entry_analysis.py:61`) renders the article for the prompt via `analysis_window.py`:
 
-- HTML is flattened with structure kept — table rows become `cell | cell`
-  (a hash stays next to its "loader" description), headings sit on their own
-  line (an empty `<h2 id="indicators-of-compromise">` renders its id),
-  `<pre>` keeps its line breaks.
-- When the body exceeds `ai_analysis_content_max_chars`, the **indicator
-  appendix** is found (an IOC heading past 20% of the body, or an indicator
-  table header row, or the trailing region with ≥3 hash/IP/defanged
-  candidates) and appended after the head behind a marker line, within
-  `observables_analysis_tail_reserve` of the budget. Lines that are only an
-  indicator are quota'd (12 hashes, 20 of each network kind) so the model's
-  output stays bounded; the article's full IOC table is the table door's concern.
-- Candidate hints are ranked (AI stagings, then defanged tokens, hashes, IPs)
-  and scan-origin host kinds never enter the hint block.
+- HTML is flattened with structure kept: table rows become `cell | cell` (a hash stays by its "loader" description), headings get their own line (an empty `<h2 id="indicators-of-compromise">` renders its id), `<pre>` keeps line breaks.
+- If the body exceeds `ai_analysis_content_max_chars`, the **indicator appendix** (an IOC heading past the first 20% of the body, an indicator table header, or else the trailing region with three or more hash, IP or defanged candidates) is appended after the article start behind a marker line. It gets up to `observables_analysis_tail_reserve` (default 0.4) of the budget. Indicator-only lines are capped per kind (10 per hash kind, 15 per network kind); the publisher door handles full IOC files.
+- Candidate hints are ranked (earlier AI stagings, defanged values, hashes, IPs); scanned host candidates are never hints.
 
-Why: Talos, Unit 42, Huntress, Datadog and Bitdefender put the IOC section at
-the end of 20k–80k-character articles; a head slice never showed the model any
-of it. The engine also gives `entry_analysis` a 16k-token output budget so a
-long article's payload is not cut mid-field (`parse_ai_json` repairs the
-illegal backslash escapes small models write into Windows paths).
+(Talos, Unit 42, Huntress, Datadog and Bitdefender put IOCs at the end of 20,000–80,000-character articles.)
+
+The seeded `entry_analysis` assignment has a 10,000-token output budget (`backend/app/ai/prompts/defaults.py`). `parse_ai_json()` (`backend/app/ai/engine.py:161`) repairs bad backslash escapes small models write in Windows paths.
 
 ## Shadow, capture, and the per-kind list
 
-`observables_ai_capture_mode` = `shadow` (default) stages every AI-judged
-value on the entry as a promotable candidate **carrying its role, evidence,
-confidence and technique**; `capture` writes rows — but only for kinds in
-`observables_ai_capture_kinds` (default: network + hash + `script`). Host kinds
-stay shadowed until the extraction fixture says they are precise. Promote
-(UI, API, tool) carries the staged judgment onto the row.
+`observables_ai_capture_mode` controls the AI door:
 
-Backfill after flipping: `scripts/maintenance/replay_ai_observables.py`
-re-applies stored `ai_results` payloads through the same door and re-asserts
-the actor/malware → observable relationships that were dropped while no row
-existed.
+- **`capture`** (default) writes rows only for kinds in `observables_ai_capture_kinds` (default: network kinds, hash kinds and `script`).
+- **`shadow`** stages every AI value as a candidate **carrying its role, evidence, confidence and technique**.
 
-### Candidate-tier precision rules (queue review, 2026-10-01)
+Kinds outside the list are staged as in shadow. The TTP door obeys both switches. Host kinds stay off the list until the fixture (below) shows they are precise. Promoting a staged value (UI, API or tool) carries its judgment to the new row.
 
-The queue is only as useful as its precision, so the prose scanner carries
-these vetoes on top of "hashes and public IPs always, domains/URLs/emails
-only when defanged":
-
-- **Advisory policy.** Entries with a GitHub `content_type` (rule and
-  catalog repositories — Sigma, Nuclei, LOLDrivers YAML), feeds in
-  `observables_codeblock_skip_categories`, and NVD feeds nominate **only
-  defanged tokens**: a bare hex string there is a package checksum or a
-  commit id, a dotted quad is a version.
-- **Version quads.** "9.4.0.0 through 9.4.0.25", "20.15.6.1 and earlier",
-  "from X to Y", and any quad with version/release/affected talk earlier in
-  the sentence and nothing nearby calling it an address, never nominate.
-- **Commit hashes.** A hex id in commit/fixed-in/up-to/version context with
-  no sample/hash/file word nearby is not an indicator.
-- **Glued table cells.** The stage scans the analysis renderer's text
-  (`cell | cell`), not nh3's flat strip, and a TLD shaped like
-  `com`+letters (`pobelstudio.comdomain`, `nuf.co.jpsender`) is rejected
-  for domains and emails alike.
-- **Placeholders and references.** `third-party.com`, `attacker.com`,
-  `contoso.com` and friends; sandbox/catalog/vendor/social hosts
-  (VirusTotal, urlscan, GitHub, MITRE, Microsoft Learn, Telegram API,
-  IP-echo services); and the apex of a shared-infrastructure suffix
-  (`amazonaws.com`, `github.io`) are never candidates. Subdomains on shared
-  infrastructure still are.
-- **Hashes inside tokens.** A 32/40/64-hex run that is part of a larger
-  token (`pub-9ee1bf…a.r2.dev`, a path segment, an identifier) is not a
-  hash. Cloud developer platforms (`r2.dev`, `pages.dev`, `trycloudflare.com`,
-  `ngrok`, `vercel.app`, …) sit in `SHARED_INFRA_SUFFIXES`: their apex never
-  nominates and rows under them never publish.
-- **Paths.** A single top-level segment (`/PSEMHUB/`) and bare well-known
-  locations (`/dev/shm`, `/var/tmp`, `/etc/hosts`, `C:\ProgramData`) are
-  rejected by the validator, which the code-block scanner and the queue
-  both apply.
-- **The queue applies today's validators on read**, so nominations staged
-  under older rules never show; `rescan_observable_candidates.py
-  --purge-all-scan --purge-invalid --rescan-all` rebuilds the tier.
+After changing either, `scripts/maintenance/replay_ai_observables.py` replays stored analysis results through the door and re-creates actor/malware → observable relationships.
 
 ## Measuring the judge: the extraction fixture
 
-`backend/tests/fixtures/observables/cases/*.json` — one case per real article
-(seeded by `scripts/dev/build_observable_fixture.py`, hand-reviewed):
-`expected` (canonical values with roles), `optional` (real artifacts whose
-ledger-worthiness is a call), `must_not` (that article's garbage: publisher
-links, reference URLs, keys quoted as hashes). `scripts/dev/eval_observable_extraction.py`
-renders the prompt exactly as ingest does, runs the model (or `--offline`
-scores stored results), and reports per-kind precision/recall, `must_not`
-hits and attribution-edge recall against the gate (network P ≥ 0.95 / R ≥ 0.80,
-host P ≥ 0.90, zero garbage). `tests/test_observable_fixture.py` keeps the
-fixture consistent with the validators offline.
+`backend/tests/fixtures/observables/cases/*.json` has one hand-reviewed case per real article (from `scripts/dev/build_observable_fixture.py`):
+
+- `expected` — correct values with roles
+- `optional` — real artifacts that may or may not belong
+- `must_not` — garbage: publisher links, reference URLs, keys quoted as hashes
+
+`scripts/dev/eval_observable_extraction.py` runs the ingest prompt (`--offline` scores stored results) and reports per-kind precision/recall, `must_not` hits and attribution-edge recall. Gate: network precision ≥ 0.95, recall ≥ 0.80; host precision ≥ 0.90; zero garbage. `backend/tests/test_observable_fixture.py` checks the fixture agrees with the validators.
 
 ## Sources: reports vs feeds
 
-`sighting_count` is the raw junction count. The UI shows **Sources** instead:
-`report_count` (distinct reporting entries — articles, advisories, rule files)
-and `feed_source_count` (distinct indicator feeds; a feed's eighteen CSV
-variants count once). `record_sighting` increments `report_count` for every
-door but the feed door; the nightly `reconcile-observable-counters` recomputes
-all four from `entry_observables`. A feed-only row's profile says "listed on 1
-indicator feed, no reporting" rather than rendering blank under a big number.
+The UI shows **Sources** instead of the raw `sighting_count`:
+
+- `report_count` — distinct reporting entries (articles, advisories, rule files)
+- `feed_source_count` — distinct indicator feeds (a feed's eighteen CSV variants count once)
+
+`record_sighting()` adds to `report_count` for every door but the indicator feed; the nightly `reconcile-observable-counters` job recomputes the counters. A feed-only row reads "listed on 1 indicator feed, no reporting".
 
 ## Attribution: claimed vs reported alongside
 
-`intelligence/infrastructure.py` answers "what infrastructure does X use?":
+`backend/app/intelligence/infrastructure.py` answers "what infrastructure does X use?":
 
-- **Claimed** — `entity_relationships` edges onto the ledger
-  (`threat_actor|malware|tool|campaign → uses|communicates_with|controls →
-  observable`), born from an evidence sentence (the one-pass AI), an analyst
-  or a tool, carrying the trust ladder. These are the only observable edges in
-  the graph.
-- **Reported alongside** — observables a reporting door sighted in articles
-  that link the entity. Read-time co-occurrence, never persisted, with
-  indicator-list files and newsletters (>2 actors or >3 families in one
-  article) excluded.
+- **Claimed** — `entity_relationships` edges onto the ledger (`threat_actor|malware|tool|campaign → uses|communicates_with|controls → observable`), from the one-pass AI's evidence, an analyst or a tool, with a trust level. The graph's only observable edges.
+- **Reported alongside** — observables sighted by a reporting door in articles linking the entity, computed at read time. Excludes indicator-list files and newsletter-style articles (over 2 actors or over 3 malware families).
 
-Surfaces: `GET /api/entities/{type}/{id}/infrastructure` (`?format=csv`),
-`GET /api/observables/{id}/backlinks`, the **Infrastructure** panel on actor /
-malware / campaign / tool profiles, the **Attribution** panel on the
-observable profile, claim-backed rows in the Relationships tab (co-mention
-observables stay suppressed), and the `get_entity_infrastructure` tool.
+Surfaces: `GET /api/entities/{type}/{id}/infrastructure` (`?format=csv` for a file), `GET /api/observables/{id}/backlinks`, the **Infrastructure** panel on actor, malware, campaign and tool profiles, the **Attribution** panel on the observable profile, claim-backed Relationships-tab rows (co-mention observables hidden), `get_entity_infrastructure`.
 
 ## Tools, automation, enrichment
 
-Registry tools: `get_observable`, `search_observables` (filters: kind, role,
-status, captured_by, infra_tag, needs_review, min_confidence, min_reports,
-linked_entity_type + linked_entity_id for one entity's infrastructure),
-`promote_observable`, `update_observable`, `deny_observable` (admin),
-`get_entity_infrastructure`, `export_observables` (edl/csv/json). Regenerate
-the skill CLIs after changing them (`scripts/dev/sync_skill_clis.py`).
+**Registry tools:** `get_observable`; `search_observables` ( `kind`, `role`, `status`, `captured_by`, `infra_tag`, `needs_review`, `min_confidence`, `min_reports`, and `linked_entity_type` + `linked_entity_id` for one entity's infrastructure); `promote_observable`; `update_observable`; `deny_observable` (admin); `get_entity_infrastructure`; `export_observables` (EDL, CSV or JSON). Regenerate the skill CLIs with `scripts/dev/sync_skill_clis.py` after changes.
 
-Automation: the `on_observable_captured` trigger fires once per rule per
-entry when a judgment door writes rows for it (AI, article IOC table, analyst
-promote — never the indicator-feed door, never the replay backfill); its
-`trigger_config` has the same shape as the `has_observable` condition (kinds,
-roles, min_confidence, exclude dual-use, sighting sources), which also works
-on any entry-triggered rule. `{observables_count}` / `{observables}` template
-variables (defanged, one per line) feed notifications and webhooks, and
-`add_to_campaign` with `link_observables` attaches the captured rows to the
-campaign as entities. Templates: "Notify on New C2 Infrastructure", "Add an
-Actor's New Infrastructure to Its Campaign". The profile's "Open in
-observables browser" pivot is `GET /api/observables?linked_entity=<type>:<id>`
-(claimed + reported-alongside), and the search language has
-`ioc.reports:>0` / `ioc.feeds:>0` for the corroboration counts.
+**Automation:**
 
-Enrichment: Shodan InternetDB (keyless) runs automatically for freshly judged
-IPs from the AI, analyst and article-IOC-table doors — never for bulk feed rows;
-VirusTotal and GreyNoise join once their keys are set (Settings → Engine →
-Enrichment). Results fold into `Observable.reputation` and fill `infra_tag`
-when the host is dual-use (Shodan `vpn`/`proxy`/`tor`, GreyNoise RIOT →
-`benign_service`), which keeps it out of every published feed. The summary
-rides `ObservableResponse.reputation`: a "Reputation" row on the profile's
-provenance panel and a hidden-by-default "Reputation" column in the browser.
-The one-time `backfill_feed_observable_roles.py` gives pre-existing feed rows
-the role their file path implies.
+- `on_observable_captured` fires once per rule per entry when the AI, article IOC table or an analyst promote writes rows — never for the indicator-feed door or replay script.
+- Its `trigger_config` matches the `has_observable` condition (kinds, roles, `min_confidence`, exclude dual-use, sighting sources), which also works on any entry-triggered rule.
+- `{observables_count}` and `{observables}` (defanged, one per line) feed notifications and webhooks.
+- `add_to_campaign` with `link_observables` attaches captured rows to the campaign.
+- Shipped templates: "Notify on New C2 Infrastructure" and "Add an Actor's New Infrastructure to Its Campaign".
+
+**Search and browse:** "Open in observables browser" on a profile is `GET /api/observables?linked_entity=<type>:<id>` (claimed plus reported alongside). The search language has `ioc.reports:>0` and `ioc.feeds:>0` (also `observable.reports` / `observable.feeds`); see [query-language.md](query-language.md).
+
+**Enrichment:** new IPv4, domain and hash rows from the AI, analyst and article-IOC-table doors get a reputation lookup (max 25 per entry); bulk feed rows never do. Shodan InternetDB needs no key; VirusTotal and GreyNoise need keys (Settings → Engine → Enrichment). Results go to `Observable.reputation`. A dual-use host (Shodan `vpn` / `proxy` / `tor`, GreyNoise RIOT → `benign_service`) gets an `infra_tag`, keeping it out of published feeds. It shows as a "Reputation" row on the provenance panel and a hidden-by-default browser column. `scripts/maintenance/backfill_feed_observable_roles.py` fills missing feed-row roles from the file path.
 
 ## Publishing
 
-Unchanged by this work: EDL blocklists, SIEM lookup CSVs and TAXII 2.1 under
-`api/publish.py`, gated on confidence, age, status, shared-infra and
-never-publish suffixes, and the infra tag. Host kinds never publish to
-blocklists; `host_artifacts.csv` carries them.
+`backend/app/api/publish.py` serves firewall blocklists (EDL: `ipv4.txt`, `domains.txt`, `urls.txt`, …), SIEM lookup CSVs and a TAXII 2.1 collection. Filters: confidence, age, status, shared-infrastructure and never-publish suffixes, infrastructure tag. Host kinds never go in blocklists; `host_artifacts.csv` carries them. Gates and switches: [engine-settings.md](engine-settings.md#publishing-engine--publishing-browse-screen).
 
-## Jobs
+## Lifecycle and jobs
 
-| Job | When | Does |
+Confidence = `base × 0.5^(days since last sighting / half-life)`. `status_for()` (`backend/app/intelligence/observables.py:753`) derives status: `active`, `aging` below 0.5, `expired` below 0.15. `retro_sight_observable()` (`backend/app/intelligence/observables.py:1945`) searches recent entries when a row is created, so promoted candidates keep their history.
+
+| Job | When (UTC) | Does |
 |---|---|---|
-| `decay-observable-confidence` | 02:20 | per-kind half-life decay |
-| `reconcile-observable-counters` | 02:50 | recompute sighting / report / feed counters |
-| `retro-sight-observables` | every 6h | exact-match new rows across the corpus |
+| `decay-observable-confidence` | 02:20 daily | Per-kind decay and status changes (switch: `observables_decay_enabled`) |
+| `reconcile-observable-counters` | 02:50 daily | Recounts sighting, report and feed counters from `entry_observables` |
+| `retro-sight-observables` | every 6 hours at :40 | Exact-match search of the corpus for recently confirmed rows |

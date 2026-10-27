@@ -9,7 +9,7 @@ IntelFeed — a self-hosted, security-focused RSS aggregator and threat intellig
 ## Tech Stack
 
 - **Backend:** Python 3.14 / FastAPI / SQLAlchemy (async) / Alembic / Celery + Redis
-- **Frontend:** React 18 / TypeScript / Vite / TanStack Query + Zustand / CSS Modules
+- **Frontend:** React 19 / TypeScript / Vite / TanStack Query + Zustand / CSS Modules
 - **Database:** PostgreSQL 16 (async via asyncpg)
 - **Search:** Meilisearch v1.6
 - **AI:** Model-agnostic provider system (Ollama, Claude API, Claude Code CLI, OpenAI-compatible endpoints — OpenAI, LM Studio, vLLM, llama.cpp, LiteLLM, OpenRouter, Groq)
@@ -78,7 +78,7 @@ GitHub Actions is **one workflow** (`ci.yml`), because Actions bills by the *job
 | `frontend` | `frontend/**` changed | One `pnpm install`, then `eslint`, `pnpm build` (type check), `vitest` |
 | `android` | `android/**` changed (not on the Monday sweep) | Gradle unit tests + debug APK, attached to the run as an artifact. On `main`, publishes the release `android-v<version>` with the APK when `android/version.properties` has a version that has no release yet. Signs with the `ANDROID_DEBUG_KEYSTORE` secret and doesn't publish without it |
 | `images` | A file feeding an image changed | Builds all three images (per-image `gha` cache scopes), `compose config` on dev + prod |
-| `security` | always (gitleaks); audit steps gated on manifests + Monday sweep | `gitleaks`, `pip-audit`, `pnpm audit` |
+| `security` | always (gitleaks, doc checks); audit steps gated on manifests + Monday sweep | `gitleaks`, doc links + `file:line` refs (`scripts/dev/check_doc_*.py`), `pip-audit`, `pnpm audit` |
 | `CI` | always | Aggregate gate |
 
 **Each area is one job, not several.** Splitting `ruff`/`alembic`/`pytest` cost three per-job minimums and three editable installs to save ~90 seconds of wall clock. The tradeoff is accepted deliberately: feedback is a little slower and a failure names a *step* rather than a job. A full-fat commit costs ~13 billed minutes instead of 33; a docs-only commit costs 3 instead of 9.
@@ -147,7 +147,7 @@ scripts/build_apk.sh                    # Bump the Android app version, test, bu
 - **`database.py`** — Async SQLAlchemy session setup with `get_db()` dependency
 
 ### Frontend (`frontend/src/`)
-- **`App.tsx`** — React Router v6 with React.lazy code splitting, two layout branches
+- **`App.tsx`** — React Router v7 with React.lazy code splitting, two layout branches
 - **`pages/`** — Page components (lazy-loaded)
 - **`components/`** — Reusable UI components, each with co-located `.module.css`
 - **`hooks/`** — Custom hooks (TanStack Query v5 wrappers for all API data, plus UI utilities)
@@ -169,7 +169,7 @@ This is the most complex subsystem:
 Alembic migrations in `backend/alembic/`. Migrations run automatically on API container startup via `entrypoint.sh` (controlled by `RUN_MIGRATIONS=true`).
 
 ### Docker Services (dev)
-db (PostgreSQL:5433, built from `db/Dockerfile` — postgres:16-alpine + pgvector) → redis (:6380) → api (FastAPI:8000 + auto-migrations) → celery-worker (default `celery` queue) + celery-worker-ai (`ai` queue) → celery-beat → telegram-listener → frontend (Vite:3001), plus meilisearch (:7700), libretranslate (:5050, article translation), and piper (:5060, read-aloud TTS). All services have health checks. Dev uses volume mounts for live reload; prod uses gunicorn with 4 workers + resource limits.
+db (PostgreSQL:5433, built from `db/Dockerfile` — postgres:16-alpine + pgvector) → redis (:6380) → api (FastAPI:8000 + auto-migrations) → celery-worker (default `celery` queue) + celery-worker-ai (`ai` queue) → celery-beat → telegram-listener → frontend (Vite:3001), plus meilisearch (:7700), libretranslate (:5050, article translation), and piper (:5060, read-aloud TTS). Most services have health checks. Dev uses volume mounts for live reload; prod runs gunicorn with 3 workers + resource limits.
 
 ## Key Patterns
 
@@ -189,7 +189,7 @@ db (PostgreSQL:5433, built from `db/Dockerfile` — postgres:16-alpine + pgvecto
 - **Key libraries** — @codemirror (code editing), @xyflow/react (entity graphs), react-grid-layout (dashboards), @tanstack/react-virtual (virtualized lists), sonner (toasts), dompurify (HTML sanitization).
 
 ### Testing
-- **Backend** (`backend/tests/`): Pytest with async fixtures. `conftest.py` provides `db_session` (fresh schema per test), `client` (ASGI test client with dependency override), `test_user`/`admin_user` with `auth_headers`/`admin_headers`. Test DB uses same URL + `_test` suffix.
+- **Backend** (`backend/tests/`): Pytest with async fixtures. `conftest.py` provides `db_session` (schema built once per session, each test rolled back), `client` (ASGI test client with dependency override), `test_user`/`admin_user` with `auth_headers`/`admin_headers`. Test DB uses same URL + `_test` suffix.
 - **Frontend**: Vitest with jsdom + React Testing Library for unit tests (`src/**/__tests__/`). Playwright for E2E (`tests/e2e/`, baseURL `localhost:3001`, workers: 1, retries: 2 in CI).
 
 ## Environment Setup
@@ -198,7 +198,7 @@ Copy `.env.example` to `.env`. Key variables: `POSTGRES_*`, `REDIS_URL`, `MEILI_
 
 ## IntelFeed CLI
 
-`intelfeed-skill/scripts/intelfeed_cli.py` is a zero-dependency CLI tool (187 tools) that executes IntelFeed operations via the API. Used by Claude skills to interact with the platform.
+`intelfeed-skill/scripts/intelfeed_cli.py` is a zero-dependency CLI tool (one command per registry tool) that executes IntelFeed operations via the API. Used by Claude skills to interact with the platform.
 
 ```bash
 # Single tool call

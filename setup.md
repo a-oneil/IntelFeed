@@ -349,3 +349,38 @@ docker compose -f docker-compose.dev.yml exec -it celery-worker-ai claude /login
 - The `claude_cli` named volume persists across rebuilds. Only `docker compose down -v` wipes it.
 - Tokens revoked at claude.ai require re-running setup-token. Credential health is checked every 30 minutes (`refresh_claude_auth_status`) and shown on the provider card at Settings → AI Configuration, which also offers in-app re-auth.
 - Emergency fallback: set `ANTHROPIC_API_KEY` in `.env` to switch to pay-per-token billing if the OAuth token lapses. The provider auto-uses the env var when present.
+
+## 15. (Optional) Add an AI provider
+
+You don't need one (see step 10). With one, IntelFeed also writes summaries, checks its own entity links, and answers questions in the copilot.
+
+In your browser, go to **Settings → AI Configuration**:
+
+1. **Add a provider.** Ollama (runs on your own GPU), the Claude API, the Claude Code CLI (step 14), or any OpenAI-compatible server (OpenAI, LM Studio, vLLM, llama.cpp, LiteLLM, OpenRouter, Groq).
+2. **Assign tasks to it.** A provider does nothing until a task is assigned to it, on the same page.
+
+Field-by-field steps for each provider are in [docs/integrations.md](docs/integrations.md#16-configure-local-ollama).
+
+**If you use Ollama:**
+
+- A 9B model with tool calling fits an 8 GB GPU. `qwen3.5:9b` works well.
+- The model must fit in GPU memory. If it doesn't, Ollama quietly runs part of it on the CPU and gets about ten times slower. On the Ollama host, `ollama ps` should show `100% GPU`.
+- If Ollama starts before the GPU driver has loaded (common right after a reboot), it falls back to CPU and stays there. Restart Ollama once the driver is up.
+
+## 16. Updates and backups
+
+**Updates.** On the server, `./update.sh` pulls `main` and rebuilds only when the new code changes an image. To update automatically, run it from cron:
+
+```bash
+*/15 * * * * /home/ubuntu/intelfeed/update.sh   # crontab -e on the server; adjust the path
+```
+
+Database migrations run by themselves when the API container starts.
+
+**Backups.** On the server, `scripts/ops/backup.sh` dumps the database and snapshots search, and keeps seven days. Run it nightly from cron:
+
+```bash
+0 2 * * * cd /home/ubuntu/intelfeed && scripts/ops/backup.sh backups   # it must run from the repo folder
+```
+
+Restore with `scripts/ops/restore.sh <file>`. Copy backups off the host too: a backup on the same disk won't help if the disk dies. More detail is in [docs/operations.md](docs/operations.md#backups--recovery).

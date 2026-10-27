@@ -155,6 +155,7 @@ fun LoginScreen(
                         OutlinedTextField(
                             value = serverUrl,
                             onValueChange = { serverUrl = it },
+                            placeholder = { Text("https://intelfeed.example.com", color = TextMuted) },
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                             leadingIcon = {

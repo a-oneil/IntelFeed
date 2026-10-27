@@ -1,6 +1,9 @@
 # Adapters and Feed Ingestion
 
-This document provides a comprehensive reference for IntelFeed's pluggable adapter architecture and feed polling infrastructure. It covers how adapters work, how feeds are polled and ingested, and details specific to each supported feed type.
+This page is for developers and admins who want to know how IntelFeed pulls
+articles in. It covers how feeds are polled, how duplicates are caught, what
+each feed type does and which settings it takes, OPML import and export,
+manual uploads, and how to add a new adapter.
 
 ## Table of Contents
 
@@ -33,14 +36,38 @@ This document provides a comprehensive reference for IntelFeed's pluggable adapt
 
 ## Overview
 
-IntelFeed is a self-hosted threat intelligence RSS aggregator built on a modular adapter system. Each **feed type** (RSS, YouTube, Reddit, GitHub, etc.) has a corresponding **adapter** that knows how to fetch and normalize entries from that source.
+Every feed has a **feed type** (`rss`, `youtube`, `reddit` and so on). Each
+type has an **adapter**: code in `backend/app/adapters/` that fetches that
+kind of source and turns it into a common shape. The registry is
+`backend/app/adapters/__init__.py`.
 
-The system supports two adapter patterns:
+| Feed type | Adapter | Kind | Needs |
+| --- | --- | --- | --- |
+| `rss`, `atom` | `RSSAdapter` | URL feed | A feed URL |
+| `youtube` | `YouTubeAdapter` | URL feed | A channel's feed URL |
+| `podcast` | `PodcastAdapter` | URL feed | A podcast RSS URL |
+| `reddit` | `RedditAdapter` | API | `subreddit` |
+| `github_releases` | `GitHubReleasesAdapter` | API | `owner`, `repo` |
+| `github_advisories` | `GitHubAdvisoriesAdapter` | API | Nothing (filters optional) |
+| `github_repo` | `GitHubRepoAdapter` | API | `owner`, `repo` |
+| `nvd` | `NVDAdapter` | API | Nothing (filters optional) |
+| `mastodon` | `MastodonAdapter` | API | `instance_url` + `account_id` or `hashtags` |
+| `bluesky` | `BlueskyAdapter` | API | A handle, feed URI or search query |
+| `telegram` | `TelegramAdapter` | API | A Telegram login session and a channel |
+| `web_scraper` | `WebScraperAdapter` | API | `blog_url` |
 
-- **BaseAdapter**: Parses raw feed content (XML, HTML, etc.) into normalized entries.
-- **ExtendedAdapter**: Makes direct API calls to fetch entries without requiring the user to provide a feed URL.
+`manual` is a pseudo-type for the Manual Uploads feed. It has no adapter and
+is never polled (see [Manual Ingest](#manual-ingest)).
 
-Both return a common set of normalized data structures (`ParsedEntry`, `ParsedFeedMeta`, `ParsedMedia`) that the feed polling loop (`poll_due_feeds`) consumes.
+There are two kinds of adapter:
+
+- **URL feeds** (`BaseAdapter`) receive the raw text the worker downloaded
+  from the feed URL and parse it.
+- **API adapters** (`ExtendedAdapter`) make their own requests, using the
+  feed's `adapter_config`.
+
+Both return the same objects (`ParsedFeedMeta`, `ParsedEntry`,
+`ParsedMedia`), so everything after the fetch is shared.
 
 ---
 
@@ -48,100 +75,70 @@ Both return a common set of normalized data structures (`ParsedEntry`, `ParsedFe
 
 See diagram: [Feed ingestion pipeline](diagrams/adapters-ingest-pipeline.md)
 
-In short: Celery Beat runs `poll_due_feeds()` every 60 seconds, which dispatches `fetch_feed(feed_id)` tasks guarded by Redis NX locks. Each fetch goes through conditional GET, per-domain rate limiting, and the appropriate adapter (`BaseAdapter.parse_entries()` or `ExtendedAdapter.fetch_entries()`), then normalized entries are deduplicated, sanitized, enriched (full-text extraction, lead images, transcripts), persisted, indexed in Meilisearch, and handed to the entry processing pipeline (autolink, intel extraction, post-processing, signal scoring).
+In short:
+
+1. Celery Beat runs `poll_due_feeds` every 60 seconds. It picks the feeds that
+   are due and queues one `fetch_feed` task per feed.
+2. `fetch_feed` downloads the feed (or calls the API adapter) and parses it.
+3. New items are checked for duplicates, cleaned up, enriched (full article
+   text, lead image, transcripts), saved, and indexed in Meilisearch.
+4. Each new entry then goes through the entry pipeline: linking known
+   entities, extracting intelligence, post-processing and scoring.
 
 ---
 
 ## Adapter Base Classes
 
+Both classes live in `backend/app/adapters/base.py`.
+
 ### BaseAdapter
 
-**File**: `backend/app/adapters/base.py:61-103`
-
-Base class for feed sources that require the user to provide a feed URL.
+For sources with a feed URL. One method to implement:
 
 ```python
-class BaseAdapter(ABC):
-    @abstractmethod
-    def parse_entries(self, feed_url: str, content: str) -> tuple[ParsedFeedMeta, list[ParsedEntry]]:
-        """Parse raw feed content and return (feed_metadata, entries)."""
+def parse_entries(self, feed_url: str, content: str) -> tuple[ParsedFeedMeta, list[ParsedEntry]]:
+    """Parse raw feed content and return (feed_metadata, entries)."""
 ```
 
-**Key responsibilities**:
-- Parse raw feed content (XML, HTML) into normalized `ParsedEntry` objects.
-- Extract feed-level metadata (`title`, `description`, `icon_url`, language, etc.)
-- Detect and handle format-specific metadata (e.g., iTunes namespace for podcasts).
-- Auto-detect feed type via `detect_feed_type()` if initialized as generic RSS.
-
-**Data structures**:
-
-```python
-@dataclass
-class ParsedEntry:
-    guid: str                           # Unique per feed
-    url: str | None = None
-    title: str = "Untitled"
-    author: str | None = None
-    content_html: str | None = None     # Sanitized by worker
-    summary: str | None = None
-    published_at: datetime | None = None
-    metadata: dict = field(default_factory=dict)  # Adapter-specific state
-    media: ParsedMedia | None = None    # Primary attachment
-    # Extra attachments — only Telegram populates this today, when an album of
-    # grouped messages collapses into a single entry
-    additional_media: list[ParsedMedia] = field(default_factory=list)
-
-@dataclass
-class ParsedMedia:
-    media_type: str                  # audio, video, image, document
-    url: str
-    mime_type: str | None = None
-    file_size: int | None = None
-    duration_seconds: int | None = None
-    thumbnail_url: str | None = None
-    transcript_url: str | None = None
-    metadata: dict = field(default_factory=dict)
-
-@dataclass
-class ParsedFeedMeta:
-    title: str | None = None
-    description: str | None = None
-    site_url: str | None = None
-    icon_url: str | None = None
-    language: str | None = None
-    # Podcast-specific
-    podcast_author: str | None = None
-    podcast_categories: list[str] = field(default_factory=list)
-    podcast_explicit: bool = False
-    podcast_type: str = "episodic"
-    podcast_artwork_url: str | None = None
-    # Generic adapter state (e.g., GitHub head SHA)
-    extra: dict = field(default_factory=dict)
-```
+It also has `detect_feed_type()`, described under
+[Type Detection](#type-detection).
 
 ### ExtendedAdapter
 
-**File**: `backend/app/adapters/base.py:106-129`
-
-Base class for API-based sources (Reddit, GitHub, NVD, etc.).
+For sources the adapter calls itself. Two methods to implement:
 
 ```python
-class ExtendedAdapter(ABC):
-    @abstractmethod
-    async def fetch_entries(self, config: dict, since: datetime | None = None) 
-        -> tuple[ParsedFeedMeta, list[ParsedEntry]]:
-        """Fetch entries from the external source."""
+async def fetch_entries(self, config: dict, since: datetime | None = None) -> tuple[ParsedFeedMeta, list[ParsedEntry]]:
+    """Fetch entries. `config` is the feed's adapter_config; `since` is the last fetch time."""
 
-    @abstractmethod
-    def get_feed_meta(self, config: dict) -> ParsedFeedMeta:
-        """Return feed metadata without fetching entries."""
+def get_feed_meta(self, config: dict) -> ParsedFeedMeta:
+    """Feed metadata for display, without fetching entries."""
 ```
 
-**Key responsibilities**:
-- Manage API authentication and rate limiting.
-- Construct the correct API endpoint(s) from `config`.
-- Paginate/scroll through results if needed.
-- Return the same normalized data as BaseAdapter.
+### The shared objects
+
+**`ParsedEntry`** is one item:
+
+| Field | Meaning |
+| --- | --- |
+| `guid` | Unique ID within the feed. Used to spot items already saved. |
+| `url` | Link to the original. Anything but `http(s)` or a relative link is dropped, so a `javascript:` link can't reach the page. |
+| `title` | Defaults to "Untitled". |
+| `author`, `summary`, `published_at` | Optional. |
+| `content_html` | The body. The worker cleans it before saving. |
+| `metadata` | Adapter-specific extras, saved on the entry. |
+| `media` | The main attachment (`ParsedMedia`), if any. |
+| `additional_media` | Extra attachments. Only Telegram uses it, for photo albums. |
+
+**`ParsedMedia`** is an attachment: `media_type` (audio, video, image,
+document), `url`, and optional `mime_type`, `file_size`, `duration_seconds`,
+`thumbnail_url`, `transcript_url` and `metadata`.
+
+**`ParsedFeedMeta`** is feed-level information: `title`, `description`,
+`site_url`, `icon_url`, `language`, podcast show fields (`podcast_author`,
+`podcast_categories`, `podcast_explicit`, `podcast_type`,
+`podcast_artwork_url`), and `extra`, a dict an adapter can use to hand state
+back to the worker (see [Building a New Adapter](#building-a-new-adapter)).
 
 ---
 
@@ -149,379 +146,167 @@ class ExtendedAdapter(ABC):
 
 ### Feed Model
 
-**File**: `backend/app/models/feed.py`
+`backend/app/models/feed.py`. The fields that matter for ingestion:
 
-The `Feed` model stores subscription metadata and adapter configuration:
-
-```python
-class Feed(Base):
-    id: UUID                            # Primary key
-    title: str                          # Display name
-    url: str                            # Unique; feed URL or API endpoint
-    feed_type: str                      # 'rss', 'atom', 'youtube', 'podcast', 'reddit', 'github_releases', ...
-    site_url: str | None                # Canonical website URL
-    icon_url: str | None
-    description: str | None
-    language: str | None
-    is_active: bool                     # Inactive feeds are never polled
-    
-    # Polling state
-    last_fetched_at: datetime | None
-    fetch_interval_minutes: int         # Default 30
-    etag: str | None                    # For conditional GET
-    last_modified: str | None           # For conditional GET
-    
-    # Error tracking
-    error_count: int                    # Incremented on failure; reset on success
-    last_error: str | None              # Last HTTP or parse error
-    
-    # Adapter-specific config (JSON)
-    adapter_config: dict                # E.g. {'subreddit': 'netsec', 'limit': 50}
-    
-    # Intelligence extraction
-    auto_extract_on_ingest: bool        # Auto-extract CVEs, TTPs, etc.
-    extract_detection_rules: bool       # Auto-extract SIGMA, YARA, etc.
-    intel_extraction_mode: str          # 'full', 'selective', 'manual', 'none'
-    
-    # Source quality ratings
-    reliability_rating: str | None      # A-F
-    timeliness_rating: str | None
-    relevance_rating: str | None
-    analyst_notes: str | None
-```
+| Field | Meaning |
+| --- | --- |
+| `url` | Unique. The feed URL, or a placeholder for API adapters. |
+| `feed_type` | Which adapter runs. |
+| `is_active` | Inactive (paused) feeds are never polled. |
+| `fetch_interval_minutes` | How often to poll. Default 30. |
+| `last_fetched_at` | When the last fetch ran. |
+| `etag`, `last_modified` | Saved from the last answer, for conditional requests. |
+| `error_count`, `last_error`, `error_since` | The current failure streak. Cleared by a good fetch. |
+| `auto_paused_at` | Set when the health check paused the feed. |
+| `adapter_config` | JSON settings for the adapter, plus state it keeps between fetches. |
+| `exclude_title_patterns` | Phrases, one per line. Items whose title contains one are dropped. |
+| `intel_extraction_mode` | `full`, `selective` (default), `manual` or `none`. `none` turns off analysis for the feed. |
+| `auto_extract_on_ingest`, `extract_detection_rules` | Run the extract stage on new entries. Off by default. |
+| `ai_analysis_enabled` | Run the one-pass AI analysis on this feed's entries. On by default. |
+| `extract_tools` | Let AI extraction create tool entities from this feed. On by default. |
+| `reliability_rating` (A–F), `timeliness_rating`, `relevance_rating`, `analyst_notes` | Analyst ratings of the source. |
+| `visible_to_visitors` | Shown in [public read-only mode](public-read-only-mode.md). Off by default. |
+| `retention_days`, `category_id`, `custom_title`, `is_muted` | Housekeeping. |
 
 ### Type Detection
 
-**File**: `backend/app/adapters/base.py:80-103`
+After a successful download of an `rss` or `atom` feed,
+`BaseAdapter.detect_feed_type()` checks what it really is and updates
+`feed_type` if needed:
 
-The `BaseAdapter.detect_feed_type()` static method auto-detects feed type from URL and content:
-
-```python
-@staticmethod
-def detect_feed_type(url: str, content: str) -> str:
-    """Detect feed type from URL and content."""
-    import feedparser
-    
-    if "youtube.com" in url:
-        return "youtube"
-    
-    parsed = feedparser.parse(content)
-    
-    # Podcast detection: iTunes namespace or audio enclosures
-    feed = parsed.feed
-    if hasattr(feed, "itunes_type") or hasattr(feed, "itunes_author"):
-        return "podcast"
-    
-    for entry in parsed.entries[:5]:
-        for enclosure in getattr(entry, "enclosures", []):
-            if enclosure.get("type", "").startswith("audio/"):
-                return "podcast"
-    
-    # Atom feeds have explicit version
-    if "atom" in getattr(parsed, "version", "").lower():
-        return "atom"
-    
-    return "rss"  # default
-```
-
-This is called during `_fetch_feed()` (line 366-373 of `feed_tasks.py`) if the feed type is still generic.
+1. A `youtube.com` URL is `youtube`.
+2. A feed with iTunes tags (`itunes:type` or `itunes:author`), or an audio
+   attachment in its first five items, is `podcast`.
+3. A feed that `feedparser` reports as Atom is `atom`.
+4. Anything else is `rss`.
 
 ---
 
 ## Feed Polling Loop
 
+All of this is in `backend/app/workers/feed_tasks.py`.
+
 ### Celery Beat Task: `poll_due_feeds()`
 
-**File**: `backend/app/workers/feed_tasks.py:173-212`
+Runs every 60 seconds (the `poll-feeds` job in `workers/job_registry.py`). It
+selects up to 50 feeds, oldest fetch first, that are:
 
-Runs every 60 seconds (beat default from `workers/job_registry.py`). Finds feeds due for polling and dispatches fetch tasks:
+- active;
+- due: never fetched, or `fetch_interval_minutes` have passed since the last
+  fetch (longer while the feed is failing, see
+  [Failure backoff](#feed-reliability--breakage-alerts));
+- wanted: when per-user subscriptions are on, at least one reader has the
+  feed un-paused.
 
-```python
-@celery_app.task(name="app.workers.feed_tasks.poll_due_feeds", soft_time_limit=120)
-def poll_due_feeds():
-    """Check for feeds that are due for polling and dispatch fetch tasks."""
-    run_async(_poll_due_feeds())
-
-async def _poll_due_feeds():
-    # Find feeds where:
-    # - is_active = TRUE
-    # - last_fetched_at is NULL OR NOW() > last_fetched_at + fetch_interval_minutes
-    # Order by last_fetched_at ASC NULLS FIRST (oldest first)
-    # Limit 50 per cycle to avoid monopolizing the worker
-    
-    # For each feed, try to acquire a Redis NX lock (10-minute TTL)
-    lock_key = f"feed_fetch:{feed_id}"
-    if r.set(lock_key, "1", nx=True, ex=600):
-        fetch_feed.delay(feed_id)  # Dispatch to queue
-```
-
-**Purpose**: Prevents duplicate in-flight fetches for the same feed. The lock is explicitly released in `fetch_feed`'s `finally` block, so a finished feed can be re-dispatched before the TTL expires.
+For each one it sets a Redis lock (`feed_fetch:{feed_id}`, 10 minutes) and
+queues `fetch_feed`. A feed whose lock is already set is skipped, so the same
+feed is never fetched twice at once. `fetch_feed` removes the lock when it
+finishes.
 
 ### Task: `fetch_feed()`
 
-**File**: `backend/app/workers/feed_tasks.py:215-243`
-
-Fetches and parses a single feed with automatic retries:
-
-- **Max retries**: 3
-- **Soft time limit**: 10 minutes (600s) → graceful shutdown
-- **Hard time limit**: 11 minutes (660s) → forceful kill
-- **Exponential backoff**: `2^retries * 10 + random(0-10)` seconds, capped at 300s
-- **Error tracking**: Increments `feed.error_count` on failure; resets to 0 on success
+Fetches one feed. Up to 3 retries on an unexpected error, waiting
+`2^retries × 10` seconds plus up to 10 seconds of jitter, at most 300
+seconds. Soft time limit 10 minutes, hard limit 11 minutes.
 
 ### Core Fetch Logic: `_fetch_feed()`
 
-**File**: `backend/app/workers/feed_tasks.py:246-627`
+The steps, in order:
 
-Implements the full feed ingestion pipeline:
+1. **Pick the path.** API feed types go to `_fetch_extended_feed()` (see
+   below). `manual` feeds and URLs that aren't `http(s)` are skipped quietly.
+2. **Per-domain rate limit.** At most one request per domain every
+   `rate_limit_default_interval` seconds (default 2, editable in Settings),
+   with per-domain overrides in `RATE_LIMIT_OVERRIDES`. If the domain is busy,
+   the feed waits for the next poll.
+3. **Conditional request.** The worker sends `If-None-Match` and
+   `If-Modified-Since` from the last answer. A `304 Not Modified` ends the
+   fetch with nothing to do. The request also carries a browser-like
+   `Accept` and `Accept-Language`, and the `user_agent` setting.
+4. **Bot walls.** If the answer is a 403, or a 429/503 whose body looks like
+   a challenge page, the worker tries once more with **curl_cffi**, which
+   imitates Chrome's network fingerprint. Some publishers (CISA, for example)
+   refuse Python's TLS handshake whatever the headers. Whichever client gets a
+   200 or 304 is remembered in `adapter_config.fetch_health.client`, and later
+   polls start with it. Blocks by IP address can't be worked around this way.
+5. **YouTube retries.** YouTube's feed sometimes answers 404 or 5xx for no
+   reason. The worker retries twice, 5 seconds apart. If both fail, it skips
+   this cycle without counting an error.
+6. **Other errors.** Any other non-200 answer counts as a failure (see
+   [Feed Reliability](#feed-reliability--breakage-alerts)). After 3 or more
+   404s in a row on an `rss`, `atom` or `podcast` feed, the worker looks for
+   a new feed URL on the site's home page (`<link rel="alternate">` tags),
+   checks that it really is a feed, and switches the feed to it. The change
+   is logged in `adapter_config.url_autodiscovery_history`.
+7. **Detect the type** (see [Type Detection](#type-detection)) and **parse**
+   with the adapter.
+8. **Spot dead feeds.** An `rss` or `atom` feed that answers 200 with an
+   HTML page and no items counts as a failure, not an empty poll. That is
+   usually an old feed URL that now shows the website.
+9. **Drop duplicates** (see
+   [Entry Deduplication](#entry-deduplication--processing)).
+10. **YouTube Shorts.** If `adapter_config.exclude_shorts` is set, each new
+    video is checked with a request to `youtube.com/shorts/{id}`. A 200 means
+    it is a Short and it is dropped.
+11. **Full article text** (`rss` and `atom` only). When an item's text is
+    under 500 characters, or ends in "Continue reading on … »", the worker
+    downloads the article page and pulls out the body. Up to 25 per fetch.
+    See [Full-text extraction](#full-text-extraction).
+12. **Clean up the HTML** and work out the plain text and word count.
+13. **Lead image.** The first `<img>` in the body, then in the summary, then
+    the page's `og:image` (from step 11, or a separate fetch that reads only
+    the first 50 KB of the page).
+14. **Save** the entry and its media. A publish date in the future is set to
+    now. A duplicate that slips in at the same moment is skipped.
+15. **Index** it in Meilisearch. If that fails, the entry id goes into the
+    Redis set `meili:failed_entry_ids` to retry later.
+16. **Update the feed**: fetch time, `etag`, `last_modified`, clear the
+    failure streak. The feed's title, description and site URL are filled in
+    from the source if they are empty (or if the title is still just the
+    URL).
+17. **Tell the rest of the app.** One `feed_fetched` live-update event,
+    automation rules for each new entry, and the entry pipeline.
 
-#### 1. Determine Adapter Type
-```python
-from app.adapters import is_extended_feed_type
+**The entry pipeline** (`dispatch_entry_pipeline`, stages listed in
+`app/pipeline/registry.py`) runs these in parallel: autolink, observables,
+Telegram link scan, and extract (only when the feed has
+`auto_extract_on_ingest` or `extract_detection_rules` on and analysis isn't
+turned off). Then co-occurrence, correlation and requirement matching run,
+then scoring. If the feed has `adapter_config.auto_translate`, translation
+runs first so every stage sees the translated text. The target language is
+`adapter_config.translation_target`, else the `translation_default_target`
+setting (default `en`).
 
-if is_extended_feed_type(feed.feed_type):
-    await _fetch_extended_feed(db, feed)
-    return
-```
+### Full-text extraction
 
-Pseudo-feeds with nothing to fetch (`NON_FETCHABLE_FEED_TYPES`, currently `manual` — e.g. the `manual://` uploads feed) are skipped instead of erroring every cycle.
+`_extract_full_text()`:
 
-#### 2. Rate Limiting
-```python
-from app.services.rate_limiter import acquire_rate_limit
+1. **Google News links** are decoded to the real publisher URL first, and the
+   entry's link is changed to match.
+2. **Permission.** `robots.txt` must allow the fetch, and its `Crawl-delay`
+   is used as the minimum gap for that domain.
+3. **Fetch** with httpx, falling back to curl_cffi on a block. Medium-hosted
+   sites go straight to curl_cffi.
+4. **Extract.** Medium has its own extractor. Everything else uses
+   readability-lxml, then a list of common article-body CSS selectors.
+5. **Reject wall pages.** If the result is under 1,000 characters and reads
+   like "Please enable JavaScript" or a bot check ("Checking your browser"),
+   it is thrown away and the entry keeps the feed's own text
+   (`app/services/js_wall.py`). Single-page sites such as NCSC, Europol and
+   MSRC only show that notice to non-browsers.
+   `scripts/maintenance/repair_js_wall_entries.py` fixes entries that saved
+   one.
 
-if not await acquire_rate_limit(feed.url):
-    logger.warning(f"Rate limited for feed {feed.id}, will retry on next poll")
-    return
-```
+### API feeds: `_fetch_extended_feed()`
 
-Per-domain Redis-backed rate limiter (default interval with per-domain overrides). Article-level fetches (full-text extraction, og:image, web scraper) additionally honor `robots.txt` `Crawl-delay` as a floor.
-
-#### 3. Conditional GET (HTTP 304 Not Modified)
-```python
-headers = _feed_request_headers(user_agent)  # UA + browser-like Accept/Accept-Language
-# User-Agent: system_settings DB override > env default
-if feed.etag:
-    headers["If-None-Match"] = feed.etag
-if feed.last_modified:
-    headers["If-Modified-Since"] = feed.last_modified
-
-response = await client.get(feed.url, headers=headers)
-
-if response.status_code == 304:
-    # Not modified; skip ingestion
-    feed.last_fetched_at = datetime.now(timezone.utc)
-    db.add(feed)
-    await db.commit()
-    return
-```
-
-Saves bandwidth and API quota.
-
-**Bot walls.** `_get_feed_response()` makes the GET. When the answer is a 403 (or a 429/503 whose body looks like a challenge page), it retries once through **curl_cffi** impersonating Chrome, with the same `Accept` and conditional headers and the same 30-second timeout; the impersonation supplies its own User-Agent so it matches the TLS fingerprint. Some publishers (CISA) refuse Python's TLS handshake whatever the headers while answering curl. The client that got a 200/304 is remembered in `adapter_config.fetch_health.client`, so later polls go straight to it; if the remembered curl_cffi client errors or is blocked, the fetch falls back to httpx and forgets it once httpx works. Blocks by IP (CloudFront refusing a datacenter range) are not something either client gets past.
-
-#### 4. YouTube Retry Logic (Quirk)
-```python
-# YouTube feed API returns spurious 404/500s — retry up to 2 times
-if feed.feed_type == "youtube" and response.status_code in (404, 500, 502, 503):
-    for _retry in range(2):
-        await asyncio.sleep(5)
-        try:
-            response = await client.get(feed.url)
-            if response.status_code == 200:
-                break
-        except httpx.HTTPError:
-            pass
-```
-
-**Other non-200 responses** increment `feed.error_count`, record `last_error = "HTTP {status}"`, and create a `feed_error` correlation event once `error_count >= 3` (see [Feed Reliability & Breakage Alerts](#feed-reliability--breakage-alerts)). After 3+ consecutive HTTP 404s on an rss/atom/podcast feed, `_attempt_feed_url_autodiscovery()` fetches the site homepage, parses RSS/Atom autodiscovery `<link>` tags, verifies the first working candidate actually parses as a feed, and repoints `feed.url` (audit trail kept in `adapter_config.url_autodiscovery_history`).
-
-#### 5. Parse with Adapter
-```python
-from app.adapters import get_adapter
-
-adapter = get_adapter(feed.feed_type)
-feed_meta, parsed_entries = adapter.parse_entries(feed.url, response.text)
-```
-
-**Silent failure detection**: an rss/atom feed that returns HTTP 200 with an HTML content-type and zero parsed entries (a deprecated feed URL now serving the site's HTML page) is treated as an error, not an empty poll.
-
-#### 6. Entry Deduplication
-
-**Exclude-title filter** (per feed, every adapter): `_drop_excluded_titles()` removes any parsed entry whose title contains one of the feed's `exclude_title_patterns` before the GUID check. The list is plain phrases, one per line, matched case-insensitively as substrings (not regular expressions) by `app/services/title_filter.py`. The extended-adapter path and the GitHub full sync call the same helper, so a dropped title never reaches tagging, the AI, scoring or search. The feed modal's Source pane edits it, with a preview of how many of the last 100 titles it would drop (`POST /api/feeds/{id}/title-filter/preview`). Excluded items are never stored, so they are re-checked (and dropped again) on each fetch.
-
-**GUID-based deduplication** (primary):
-```python
-existing = await db.execute(
-    select(Entry).where(Entry.feed_id == feed.id, Entry.guid == parsed.guid)
-)
-if existing.scalar_one_or_none():
-    continue  # Skip; GUID already seen
-```
-
-**Same-feed URL deduplication** (catches guid churn): a guid miss whose item key — normalised link, normalised title, enclosure path (`item_key()` in `app/services/dedup.py`) — matches a row this feed already has is the same article under a new guid, so it is skipped. Link normalisation drops the fragment and tracking parameters (`utm_*`, `mc_*`, `fbclid`, `gclid` …) and keeps every other parameter, so a `?p=123` link stays distinct. The title and enclosure keep apart distinct items that point at one page, such as podcast episodes sharing a show-notes URL. When the re-listed copy carries a substantive body (500+ characters, not a "Continue reading" stub) that differs from the stored one, the stored row is updated in place and re-indexed. The lookup is one ILIKE query per fetch over this feed's rows (`ix_entries_feed_id`), run only when the fetch has guid misses. CrowdStrike's RSS is the case it exists for: its `<guid isPermaLink="false">` is a fresh random `?p=` on every fetch while `<link>` stays put. `scripts/maintenance/merge_same_url_entries.py` collapses copies already stored.
-
-**Content-hash deduplication** (cross-feed, catches republishes):
-```python
-content_hash = compute_content_hash(parsed.title, content_text)
-
-existing = await db.execute(
-    select(Entry.id).where(Entry.content_hash == content_hash).limit(1)
-)
-if existing.scalar_one_or_none():
-    logger.debug("Skipping content-hash duplicate %s for feed %s", parsed.guid, feed.id)
-    continue
-```
-
-Prevents exact duplicates even when GUIDs change (e.g., WordPress republish).
-
-#### 7. YouTube Shorts Filtering
-```python
-if feed.feed_type == "youtube" and feed.adapter_config.get("exclude_shorts"):
-    from app.services.youtube import filter_shorts
-    
-    video_ids = [p.metadata.get("video_id") for p in new_parsed_entries if p.metadata.get("video_id")]
-    if video_ids:
-        short_ids = await filter_shorts(video_ids)
-        new_parsed_entries = [p for p in new_parsed_entries if p.metadata.get("video_id") not in short_ids]
-```
-
-Async HEAD requests to `youtube.com/shorts/{video_id}` classify videos as Shorts or full-length.
-
-#### 8. Full-Text Extraction (for RSS)
-```python
-# For RSS articles with short summaries, fetch full article content
-if feed.feed_type in ("rss", "atom") and parsed.url:
-    content_text_plain = html_to_text(content_html) if content_html else ""
-    is_truncated = bool(re.search(r"Continue reading on .+\s*»", content_text_plain))
-    
-    if is_truncated or len(content_text_plain) < 500:
-        extracted, og_image = await _extract_full_text(parsed.url)
-        if extracted:
-            content_html = extracted
-```
-
-Extraction strategy (`_extract_full_text()`):
-1. **Google News resolution**: `news.google.com` wrapper URLs are decoded to the real publisher URL first (via `googlenewsdecoder`); `parsed.url` is also rewritten so "Open original" links point at the canonical article.
-2. **Fetch**: httpx, falling back to **curl_cffi** (browser impersonation) on 403/429/503 bot challenges; Medium-hosted domains go straight to curl_cffi. Checks `robots.txt` and rate limits per domain.
-3. **Extract**: Medium gets a dedicated `<article><section>` extractor (readability misses their DOM); everything else tries **readability-lxml**, then a CSS-selector fallback for known article-body patterns (`div.article-body`, `div.entry-content`, etc.).
-4. **Reject wall pages**: when the extracted text is short (under 1,000 characters) and reads as a JavaScript-required notice ("Please enable JavaScript", "You need to enable JavaScript to run this app") or a bot challenge ("Checking your browser", "Just a moment — verifying connection security"), extraction returns nothing and the entry keeps the feed's own description (`app/services/js_wall.py`, logged at debug with the feed id). Single-page sites such as NCSC, Europol and MSRC serve only that notice to a non-browser fetch. `scripts/maintenance/repair_js_wall_entries.py` repairs entries that stored one.
-
-Capped at 25 extractions per cycle to avoid monopolizing workers.
-
-#### 9. HTML Sanitization & Proxy
-```python
-from app.services.sanitizer import sanitize_html, html_to_text
-
-sanitized_html = sanitize_html(content_html) if content_html else None
-content_text = html_to_text(content_html) if content_html else None
-word_count = len(content_text.split()) if content_text else None
-```
-
-Uses **nh3** (Rust HTML sanitizer) to allow safe tags but strip scripts, XSS vectors, etc.
-
-#### 10. Image Extraction & Proxying
-```python
-image_url = (extract_first_image(content_html, base_url=parsed.url) if content_html else None) 
-            or extract_first_image(parsed.summary or "", base_url=parsed.url)
-
-if not image_url and og_image:
-    image_url = og_image
-```
-
-Prioritizes:
-1. First `<img>` in content
-2. First `<img>` in summary
-3. og:image captured during full-text extraction
-4. Dedicated og:image fetch (`_fetch_og_image()` — streams only the first 50KB of the article page, shares the 25-per-cycle cap)
-
-The frontend rewrites the stored URL through the image proxy for display.
-
-#### 11. Create Entry & Media Records
-```python
-entry = Entry(
-    feed_id=feed.id,
-    guid=parsed.guid,
-    url=parsed.url,
-    title=parsed.title,
-    author=parsed.author,
-    content_html=sanitized_html,
-    content_text=content_text,
-    summary=parsed.summary,
-    image_url=image_url,
-    published_at=min(parsed.published_at, datetime.now(UTC)) if parsed.published_at else None,  # clamp future dates
-    word_count=word_count,
-    content_hash=content_hash,
-    metadata_=parsed.metadata,
-)
-db.add(entry)
-await db.flush()  # inside a SAVEPOINT; unique-violation races are skipped, not fatal
-
-# Create media record (shared helper)
-await _create_entry_media(db, feed, entry, parsed)
-```
-
-#### 12. Meilisearch Indexing
-```python
-from app.services.meilisearch_client import index_entry
-
-try:
-    index_entry(
-        entry_id=entry.id,
-        feed_id=feed.id,
-        title=parsed.title,
-        content_text=entry.content_text,
-        summary=parsed.summary,
-        author=parsed.author,
-        published_at=parsed.published_at.isoformat() if parsed.published_at else None,
-        feed_type=feed.feed_type,
-        feed_title=feed.title,
-        language=entry.language,
-        word_count=entry.word_count,
-    )
-except Exception as meili_exc:
-    # Queue for retry
-    r.sadd("meili:failed_entry_ids", str(entry.id))
-```
-
-#### 13. Update Feed Metadata
-```python
-feed.last_fetched_at = datetime.now(timezone.utc)
-feed.etag = response.headers.get("etag")
-feed.last_modified = response.headers.get("last-modified")
-feed.error_count = 0
-feed.last_error = None
-
-# Update feed title/description from parsed metadata if missing
-if feed_meta.title and not feed.title:
-    feed.title = feed_meta.title
-```
-
-#### 14. Broadcast & Automation
-```python
-broadcast_event("feed_fetched", {"feed_id": ..., "new_entries": n, "entry_ids": [...]})  # SSE
-
-for eid in new_entry_ids:
-    run_entry_automations.delay(eid, str(feed.id))  # user automation rules
-```
-
-#### 15. Dispatch Entry Processing Pipeline
-```python
-run_extraction = bool(feed.auto_extract_on_ingest or feed.extract_detection_rules)
-feed_plan = await resolve_feed_plan(db, feed)          # per-feed pipeline plan
-translate_target = _auto_translate_target(feed)        # adapter_config.auto_translate
-for eid in new_entry_ids:
-    dispatch_entry_pipeline(eid, run_extraction=run_extraction, plan=feed_plan, translate_target=translate_target)
-```
-
-Uses a **Celery chord** to run autolink + extraction in parallel, then post-processing (correlation, requirements) once both complete, then signal scoring as a final callback. Stage composition comes from `app/pipeline/registry.py`; feeds with `auto_translate` set get a translate stage chained ahead of the chord so all downstream stages see the translated text.
-
-#### 16. Check Keyword Alerts
-```python
-await _check_keyword_alerts(db, new_entry_ids, feed)
-```
-
-Dispatches real-time notifications for highlight keywords configured with `alert_enabled=True`.
+API adapters skip steps 2–8 and 10–11. The worker calls `fetch_entries()`
+with the feed's `adapter_config` (plus a temporary `_feed_id` key) and the
+last fetch time. Then it applies the title filter, GUID and content-hash
+checks, cleaning, the lead image (also from `metadata.image_url`), saving,
+the [auto-attribution](#auto-attribution) links, indexing, and the same
+events and pipeline. Adapter state handed back in
+`feed_meta.extra["_adapter_state"]` is merged into `adapter_config`. An
+exception from the adapter counts as a failed fetch.
 
 ---
 
@@ -529,1094 +314,593 @@ Dispatches real-time notifications for highlight keywords configured with `alert
 
 ### Deduplication Strategy
 
-**GUID** (per feed):
-```python
-existing = await db.execute(
-    select(Entry).where(Entry.feed_id == feed.id, Entry.guid == parsed.guid)
-)
-```
+Checks run in this order. An item that matches any of them is not saved.
 
-Fastest check; catches feed re-publishes of the same ID.
-
-**Link + title** (per feed, RSS-path feeds): catches a feed that changes an item's guid between fetches; see [Entry Deduplication](#6-entry-deduplication) above.
-
-**Content Hash** (global):
-```python
-content_hash = compute_content_hash(parsed.title, content_text)
-
-existing = await db.execute(
-    select(Entry.id).where(Entry.content_hash == content_hash).limit(1)
-)
-```
-
-Catches articles republished under different GUIDs (e.g., WordPress updates, feed ID resets).
+1. **Title filter** (every feed type). Items whose title contains one of the
+   feed's `exclude_title_patterns` are dropped before anything else
+   (`app/services/title_filter.py`). The phrases are plain text, not regular
+   expressions, and matching ignores case. Edit them in the feed settings'
+   Source pane, which previews how many of the last 100 titles would be
+   dropped (`POST /api/feeds/{id}/title-filter/preview`). Dropped items are
+   never saved, so they are checked again on every fetch.
+2. **GUID** (per feed). An item whose `guid` this feed already has is skipped.
+3. **Same link, new GUID** (per feed; URL feeds only). Some feeds give the
+   same article a new GUID on every fetch (CrowdStrike's RSS does). So an
+   item whose link, title and attachment match one this feed already has is
+   treated as the same article (`item_key()` in `app/services/dedup.py`).
+   Links are compared without the `#fragment` and tracking parameters
+   (`utm_*`, `mc_*`, `fbclid`, `gclid` and similar); other parameters such as
+   `?p=123` still count. If the new copy has a real body (500+ characters,
+   not a teaser) that differs from the saved one, the saved entry is updated
+   and re-indexed. `scripts/maintenance/merge_same_url_entries.py` merges
+   copies saved before this check existed.
+4. **Content hash** (across all feeds). A SHA-256 of the cleaned-up title
+   plus the first 500 characters of the text. Catches the same article
+   republished under a different GUID or in another feed.
 
 ### HTML Sanitization
 
-Uses **nh3** library (Rust-based, sandboxed HTML parser):
-- Allows safe tags: `<p>`, `<a>`, `<img>`, `<blockquote>`, `<code>`, `<pre>`, etc.
-- Strips scripts, event handlers, `<iframe>`, `<embed>`.
-- Preserves links but adds `rel="noopener noreferrer nofollow"`.
+`app/services/sanitizer.py` uses **nh3**, a fast HTML cleaner. It keeps a
+fixed list of safe tags (paragraphs, links, images, headings, lists, code,
+quotes, tables, emphasis and so on) and removes everything else, including
+scripts, event handlers and iframes. Links get
+`rel="noopener noreferrer nofollow"`.
 
 ### Image Proxying
 
-`sanitize_html()` rewrites every `<img src>` in entry content to IntelFeed's proxy endpoint (`/api/proxy/image?url=...`) at ingest time, to:
-- Avoid leaking user IP to external hosts.
-- Cache images locally.
-- Handle redirects gracefully.
-
-Telegram-downloaded media (`/api/telegram-media/...`) is served by IntelFeed's own auth-gated route and is never proxied.
+`sanitize_html()` rewrites every `<img src>` to IntelFeed's image proxy
+(`/api/proxy/image?url=…`) when the entry is saved. That keeps the reader's
+IP address away from outside servers and lets images be cached. Telegram
+media (`/api/telegram-media/…`) is already served by IntelFeed and is left
+alone.
 
 ### Transcript Handling
 
-All handled by the shared `_create_entry_media()` helper (`feed_tasks.py:688-770`), which also persists any `additional_media` (e.g. Telegram album items) as sibling `EntryMedia` rows:
+`_create_entry_media()` saves the attachment rows (including every Telegram
+album photo) and adds text where it can:
 
-**For YouTube**: Auto-fetches transcript via **youtube-transcript-api**.
+- **Podcasts:** the Podcast 2.0 `transcript` URL is downloaded.
+- **YouTube:** the video's transcript is fetched with youtube-transcript-api.
+- **Telegram:** when `TELEGRAM_OCR_ENABLED` is on, images are run through
+  Tesseract OCR (reading text out of a picture). Results shorter than
+  `TELEGRAM_OCR_MIN_CHARS` (default 30) are ignored.
 
-**For Podcasts**: Extracts `transcript_url` from Podcast 2.0 namespace and fetches it during entry creation.
-
-**For Telegram**: OCR images with **Tesseract** if `settings.telegram_ocr_enabled` — runs synchronously inside the fetch task so OCR text lands before the autolink pipeline dispatches.
-
-Fetched transcripts are appended to `entry.content_html` / `content_text` so they're searchable and visible to intel extraction.
+Transcript and OCR text is added to the entry's text before the entry
+pipeline starts, so it is searchable and the intelligence stages see it.
 
 ---
 
 ## Feed Reliability & Breakage Alerts
 
-Fetch failures feed a breakage-alerting layer on top of the polling loop:
-
-- **`error_count` semantics**: incremented on every failed fetch (HTTP error, non-200, adapter exception, non-feed response), reset to 0 on any success — so it counts *consecutive* failures.
-- **`feed_error` correlation events**: `_maybe_create_feed_error_event()` creates a correlation event (via `app/intelligence/correlation_events.py`) once `error_count >= 3`, surfacing broken feeds in the events stream.
-- **`check_feed_health` beat task** (`backend/app/workers/feed_tasks.py:1970`, every 6 hours): creates `feed_stale` events for active, recently-polled feeds whose newest entry is older than 120 days, and `feed_error` events for feeds with 3+ consecutive errors.
-- **`GET /api/feeds/health/failing`** (`api/feeds.py`): lists active feeds with `error_count >= threshold` (default 5). Feeds rated A/B for reliability are flagged `is_high_value` and sorted first so alerting UIs can highlight them.
-- **`GET /api/feeds/{feed_id}/analytics`**: per-feed source analytics (`app/intelligence/source_analytics.py`) — volume, intel yield, and the analyst-assigned reliability ratings.
-- **404 recovery**: persistent 404s trigger RSS autodiscovery and automatic URL repointing (see the polling loop above).
-- **Failure backoff**: `poll_due_feeds` (`DUE_FEEDS_SQL`) doubles a failing feed's interval for each consecutive failure, up to 64x and at most 24 hours (an interval already longer than that is kept). The first clean fetch resets it. A blocked feed therefore logs a few dozen failures over the auto-pause window, not thousands.
-- **Auto-pause and its reason**: `check_feed_health` pauses a feed whose HTTP 4xx streak has outlasted `feed_auto_pause_days` (see [engine-settings.md](engine-settings.md)) and records why in `adapter_config.fetch_health.paused`: the error, its status, the failure count, when the streak began and which client was in use. `FeedResponse.pause_reason` and the health endpoint carry it, so the feed modal, the sidebar tooltip and the Feeds view say "paused automatically after HTTP 403 for 30 days" where a feed a person switched off just reads "Paused". Resuming (the resume endpoint, or switching the feed back on) clears it.
-- **Reachable but empty**: an rss/atom/podcast fetch that answers 200 but parses to zero items is noted in `adapter_config.fetch_health.empty` (since when, where a redirect ended up, the content type) and cleared by the next fetch that has items. `FeedResponse.health_warning` turns it into a warning at once when the feed URL redirected somewhere else (a feed URL that now lands on a marketing page), or after 3 days of empty answers otherwise. The Feeds view lists these as **Empty**, and the feed modal and sidebar tooltip show the warning. `fetch_health` is server-owned: PUT `/feeds/{id}`, feed creation and OPML import/export drop it.
+- **`error_count`** goes up on every failed fetch (network error, non-200
+  answer, adapter error, HTML instead of a feed) and goes back to 0 on any
+  good fetch. So it counts failures *in a row*. `error_since` records when the
+  streak began.
+- **`feed_error` events.** Once `error_count` reaches 3, a `feed_error`
+  correlation event is created, so broken feeds show up in the events stream.
+- **`check_feed_health`** (every 6 hours, at minute 30) creates:
+  - `feed_stale` events for active feeds fetched in the last 2 days whose
+    newest entry is more than 120 days old;
+  - `feed_error` events for active feeds with 3 or more failures in a row;
+  - and pauses dead feeds (see Auto-pause).
+- **Failure backoff.** While a feed is failing, the poller doubles its wait
+  for each failure in a row, up to 64 times the normal interval and at most
+  24 hours (an interval already longer than that is kept). The first good
+  fetch resets it. A blocked feed then logs about 20 failures before it is
+  paused, not thousands.
+- **Auto-pause.** `check_feed_health` pauses a feed whose current failure
+  streak is an HTTP 4xx (a client error such as 403 or 404) that began more
+  than `feed_auto_pause_days` ago (default 30; 0 turns it off; see
+  [engine-settings.md](engine-settings.md)). Server errors and timeouts never
+  pause a feed. The reason is saved in `adapter_config.fetch_health.paused`:
+  the error, status, failure count, when the streak began and which client
+  was used. The feed settings, the sidebar tooltip and the Feeds view show it
+  as "paused automatically after HTTP 403 for 30 days", while a feed someone
+  paused by hand just says "Paused". Resuming the feed clears it.
+- **Reachable but empty.** An `rss`, `atom` or `podcast` feed that answers
+  200 but has no items is noted in `adapter_config.fetch_health.empty` (since
+  when, where a redirect ended up, the content type). The next fetch with
+  items clears it. It becomes a warning (`FeedResponse.health_warning`) at
+  once if the feed URL redirected somewhere else, or after 3 days otherwise.
+  The Feeds view lists these as **Empty**.
+- `fetch_health` belongs to the server: updating a feed, creating one, and
+  OPML import and export all drop it.
+- **`GET /api/feeds/health/failing`** lists active feeds with at least
+  `threshold` failures in a row (default 5). Feeds rated A or B for
+  reliability are marked `is_high_value` and listed first.
+- **`GET /api/feeds/{feed_id}/analytics`** gives per-feed source analytics
+  (`app/intelligence/source_analytics.py`): volume, how much intelligence the
+  feed yields, and the analyst ratings.
 
 ---
 
 ## Per-Adapter Details
 
+Settings below are keys in the feed's `adapter_config`. The add-feed form
+fills them in; you only see the raw keys in the API, the registry tools and
+OPML exports.
+
 ### RSS/Atom
 
-**Type**: BaseAdapter  
-**File**: `backend/app/adapters/rss.py`
+**Type**: URL feed. **File**: `backend/app/adapters/rss.py`
 
-Uses **feedparser** library to parse RSS 2.0 and Atom feeds.
+Parses RSS 2.0 and Atom with **feedparser**.
 
-**Entry extraction**:
-```python
-def parse_entries(self, feed_url: str, content: str) -> tuple[ParsedFeedMeta, list[ParsedEntry]]:
-    parsed = feedparser.parse(content)
-    
-    for item in parsed.entries:
-        guid = item.get("id") or item.get("link") or item.get("title")
-        
-        # Try content > summary > description
-        content_html = ""
-        if item.get("content"):
-            content_html = item.content[0].get("value", "")
-        elif item.get("summary"):
-            content_html = item.summary
-        elif item.get("description"):
-            content_html = item.description
-        
-        published_at = _parse_date(item)  # From published_parsed or updated_parsed
-```
+- **GUID:** the item's `id`, else its link, else its title. Items with none
+  are skipped. GUIDs and titles are cut at 2,000 characters.
+- **Body:** the item's `content`, else `summary`, else `description`.
+- **Summary:** cut to 500 characters.
+- **Date:** `published`, else `updated`.
+- **Feed info:** title, description (or subtitle), site link, image, language.
 
-**Feed metadata extraction**:
-- `title`, `description` (or `subtitle`), `link` (site_url), `image.href` (icon_url), `language`.
-
-**Quirks**:
-- Summaries longer than 500 chars are truncated with an ellipsis; title/GUID capped at 2000 chars.
-- Date parsing via `calendar.timegm()` to handle feedparser's internal time tuple format.
+Short items get the full article text fetched (see
+[Full-text extraction](#full-text-extraction)).
 
 ---
 
 ### YouTube
 
-**Type**: BaseAdapter  
-**File**: `backend/app/adapters/youtube.py`
+**Type**: URL feed. **File**: `backend/app/adapters/youtube.py`
 
-Parses YouTube Atom feeds (namespace-aware).
+Parses a channel's YouTube feed.
 
-**Entry extraction**:
-```python
-# Extract video ID from feed entry
-video_id = item.get("yt_videoid") or re.match(YT_VIDEO_RE, guid).group(1)
+- **Link:** `https://www.youtube.com/watch?v={video_id}`.
+- **Body:** the video description, with plain-text links made clickable and
+  line breaks kept. The summary is its first 500 characters.
+- **Thumbnail:** from the feed, else `i.ytimg.com/vi/{id}/hqdefault.jpg`.
+- **Metadata:** `video_id`, `channel_id`, `channel_name`, `view_count`,
+  `star_rating`, `embed_url`.
+- **Transcript:** fetched when the entry is saved.
 
-# Thumbnail: try media:thumbnail or construct from video_id
-thumbnail_url = media_thumbnail[0].get("url") or f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
-
-# Media statistics: view_count, star_rating
-media_stats = item.get("media_statistics")
-view_count = int(media_stats.get("views", 0)) if media_stats.get("views") else None
-
-entry = ParsedEntry(
-    guid=guid,
-    url=f"https://www.youtube.com/watch?v={video_id}",
-    title=item.get("title", "Untitled"),
-    author=item.get("author") or parsed.feed.get("title"),
-    content_html=_format_description(description),  # Plain text → HTML with links
-    summary=description[:500],
-    published_at=published_at,
-    metadata={
-        "video_id": video_id,
-        "channel_id": channel_id or item.get("yt_channelid"),
-        "channel_name": ...,
-        "view_count": view_count,
-        "star_rating": star_rating,
-        "embed_url": f"https://www.youtube.com/embed/{video_id}",
-    },
-    media=ParsedMedia(
-        media_type="video",
-        url=video_url,
-        mime_type="text/html",
-        thumbnail_url=thumbnail_url,
-    ),
-)
-```
-
-**Quirks**:
-- Shorts filtering: Can be enabled in `adapter_config.exclude_shorts`. Detection is a HEAD request to `youtube.com/shorts/{video_id}` — 200 means Short, redirect means regular video (fail-open).
-- Description formatting: Converts plain-text URLs to `<a>` tags; preserves newlines as `<br>`.
-- Retry logic: YouTube feed API has spurious 404s; feed_tasks retries up to 2 times with 5s delay.
+| Setting | Meaning |
+| --- | --- |
+| `exclude_shorts` | Drop YouTube Shorts. If the check fails, the video is kept. |
 
 ---
 
 ### Podcast
 
-**Type**: BaseAdapter  
-**File**: `backend/app/adapters/podcast.py`
+**Type**: URL feed. **File**: `backend/app/adapters/podcast.py`
 
-Parses podcast RSS with iTunes and Podcast 2.0 namespace extensions.
+Parses podcast RSS, including iTunes and Podcast 2.0 tags.
 
-**Feed metadata extraction**:
-```python
-meta = ParsedFeedMeta(
-    title=feed.get("title"),
-    description=feed.get("description") or feed.get("subtitle"),
-    site_url=feed.get("link"),
-    language=feed.get("language"),
-    podcast_author=getattr(feed, "itunes_author", None) or feed.get("author"),
-    podcast_categories=[tag.get("term") for tag in feed.tags if tag.get("term")],
-    podcast_explicit=_parse_explicit(getattr(feed, "itunes_explicit", None)),
-    podcast_type=getattr(feed, "itunes_type", "episodic") or "episodic",  # episodic or serial
-    podcast_artwork_url=itunes_image.get("href") or feed.itunes_image.get("href"),
-)
-```
-
-**Episode extraction**:
-```python
-for item in parsed.entries:
-    # Audio enclosure (first audio/* MIME type)
-    audio_url = None
-    for enclosure in item.enclosures:
-        if enclosure.type.startswith("audio/") or enclosure.type == "application/octet-stream":
-            audio_url = enclosure.href
-            audio_mime = enclosure.type or "audio/mpeg"
-            audio_size = int(enclosure.length) or None
-            break
-    
-    # Duration from itunes:duration (HH:MM:SS, MM:SS, or seconds)
-    duration_seconds = parse_duration(getattr(item, "itunes_duration", None))
-    
-    # Episode metadata
-    entry_metadata = {
-        "episode_number": int(getattr(item, "itunes_episode", None)) or None,
-        "season_number": int(getattr(item, "itunes_season", None)) or None,
-        "episode_type": getattr(item, "itunes_episodetype", "full"),
-        "is_explicit": _parse_explicit(getattr(item, "itunes_explicit", None)),
-    }
-    
-    # Media: audio + transcript URL
-    media = ParsedMedia(
-        media_type="audio",
-        url=audio_url,
-        mime_type=audio_mime,
-        file_size=audio_size,
-        duration_seconds=duration_seconds,
-        thumbnail_url=episode_artwork or artwork_url,
-        transcript_url=getattr(item, "podcast_transcript", {}).get("url"),
-    ) if audio_url else None
-```
-
-**Quirks**:
-- Podcast show metadata (author, categories, explicit flag, type) stored in separate `Podcast` model.
-- Transcript URLs fetched asynchronously during entry creation.
-- Duration parsing handles multiple formats: `"1:23:45"`, `"12:30"`, or `"3600"` (seconds).
+- **Audio:** the first attachment whose type is `audio/*`,
+  `application/octet-stream` or blank.
+- **Duration:** from `itunes:duration`, written as `1:23:45`, `12:30` or
+  plain seconds.
+- **Metadata:** `episode_number`, `season_number`, `episode_type`,
+  `is_explicit`.
+- **Show info** (author, categories, explicit flag, episodic or serial,
+  artwork) is stored in a separate `Podcast` row for the feed.
+- **Transcript:** the Podcast 2.0 `transcript` URL is downloaded when the
+  entry is saved.
 
 ---
 
 ### Reddit
 
-**Type**: ExtendedAdapter  
-**File**: `backend/app/adapters/reddit.py`
+**Type**: API. **File**: `backend/app/adapters/reddit.py`
 
-Fetches posts from a subreddit's public `/hot.rss` feed. There is no JSON API path — Reddit blocks unauthenticated JSON access.
+Reads a subreddit's public `/hot.rss` feed. Reddit blocks JSON access without
+a login, so RSS is the only route.
 
-**Configuration**:
-```python
-{
-    "subreddit": "netsec",          # Required
-    "limit": 50,                    # Max 100
-}
-```
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `subreddit` | (required) | For example `netsec`. |
+| `limit` | 50 | Posts per fetch, at most 100. |
 
-**Fetch**:
-```python
-url = f"https://www.reddit.com/r/{subreddit}/hot.rss?limit={limit}"
-# Parsed with feedparser
-
-for idx, item in enumerate(parsed.entries):
-    entry = ParsedEntry(
-        guid=hashlib.sha256(guid_raw.encode()).hexdigest()[:32],  # guid_raw = item id or link
-        url=item.link,
-        title=item.title,
-        author=_clean_author(item.author),   # strips "/u/" prefix
-        content_html=item.content or item.summary,
-        published_at=published,
-        metadata={
-            "source": "reddit",
-            "subreddit": subreddit,
-            "reddit_url": item.link,
-            "hot_rank": idx + 1,
-            # Synthetic engagement proxy: RSS exposes no real score, but /hot.rss
-            # is already ordered by Reddit's hot algorithm, so rank position keeps
-            # the digest's "top posts" sort working.
-            "score": max(limit - idx, 1),
-        },
-    )
-```
-
-**Quirks**:
-- GUID is a truncated SHA-256 hash of the RSS item ID (or link).
-- No `since` filtering: deduplication handled entirely in `feed_tasks.py` (GUID-based).
-- No real engagement metrics — `score` is synthesized from the item's `/hot.rss` rank position.
+- **GUID:** SHA-256 of the post's id (or link), cut to 32 characters.
+- **Author:** with the `/u/` prefix removed.
+- **Metadata:** `subreddit`, `reddit_url`, `hot_rank`, and `score`. RSS has
+  no real vote counts, so `score` comes from the post's position in the hot
+  list (first post scores highest).
 
 ---
 
 ### GitHub (Releases & Advisories)
 
-**Type**: ExtendedAdapter  
-**File**: `backend/app/adapters/github.py`
-
-Two separate adapters for different GitHub data:
+**Type**: API. **File**: `backend/app/adapters/github.py`
 
 #### GitHubReleasesAdapter
 
-**Configuration**:
-```python
-{
-    "owner": "foo",
-    "repo": "bar",
-    "include_prereleases": false,
-    "token": "ghp_...",  # Optional; increases rate limit
-}
-```
+Reads the 30 most recent releases of one repository. Drafts are skipped.
 
-**Fetch**:
-```python
-url = f"https://api.github.com/repos/{owner}/{repo}/releases?per_page=30"
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `owner`, `repo` | (required) | The repository. |
+| `include_prereleases` | `false` | Also include pre-releases. |
+| `token` | none | GitHub token for a higher rate limit. |
 
-for rel in releases:
-    if rel.get("draft"):
-        continue
-    if not include_prereleases and rel.get("prerelease"):
-        continue
-    
-    entry = ParsedEntry(
-        guid=hashlib.sha256(str(rel.get("id")).encode()).hexdigest()[:32],
-        url=rel.get("html_url"),
-        title=rel.get("name") or rel.get("tag_name"),
-        author=rel.get("author", {}).get("login"),
-        content_html=rel.get("body") or "",  # Release notes in Markdown
-        published_at=datetime.fromisoformat(rel.get("published_at") or rel.get("created_at")),
-        metadata={
-            "source": "github_releases",
-            "owner": owner,
-            "repo": repo,
-            "tag_name": rel.get("tag_name"),
-            "prerelease": rel.get("prerelease", False),
-        },
-    )
-```
+The release notes (Markdown) become the body. Metadata: `owner`, `repo`,
+`tag_name`, `prerelease`.
 
 #### GitHubAdvisoriesAdapter
 
-**Configuration**:
-```python
-{
-    "ecosystem": "npm",  # Optional: npm, pip, rubygems, maven, nuget, composer, rust
-    "severity": "high,critical",  # Comma-separated: critical, high, moderate, low
-    "token": "ghp_...",
-}
-```
+Reads the 30 newest entries in the GitHub Advisory Database.
 
-**Fetch**:
-```python
-url = "https://api.github.com/advisories"
-params = {
-    "per_page": 30,
-    "direction": "desc",
-    "sort": "published",
-}
-if ecosystem:
-    params["ecosystem"] = ecosystem
-if severity:
-    params["severity"] = severity
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `ecosystem` | all | A GitHub ecosystem name, such as `npm` or `pip`. |
+| `severity` | `high,critical` | Comma-separated: `critical`, `high`, `moderate`, `low`. |
+| `token` | none | GitHub token for a higher rate limit. |
 
-for adv in advisories:
-    cve_ids = [v.get("value") for v in adv.get("identifiers", []) if v.get("type") == "CVE"]
-    
-    entry = ParsedEntry(
-        guid=hashlib.sha256(adv.get("ghsa_id", "").encode()).hexdigest()[:32],
-        url=adv.get("html_url"),
-        title=adv.get("summary"),
-        content_html=adv.get("description") or "",
-        published_at=datetime.fromisoformat(adv.get("published_at")),
-        metadata={
-            "source": "github_advisories",
-            "ghsa_id": adv.get("ghsa_id"),
-            "cve_ids": cve_ids,
-            "severity": adv.get("severity"),
-            "cvss_score": adv.get("cvss", {}).get("score"),
-            "ecosystem": ecosystem,
-        },
-    )
-```
+Links go to the GitHub advisory page. Metadata: `ghsa_id`, `cve_ids`,
+`severity`, `cvss_score`, `ecosystem`.
 
-**Quirks**:
-- Token optional; unauthenticated requests have lower rate limit (60 req/hr vs 5000).
-- Release body is raw Markdown; stored in `content_html` as-is (sanitized by worker).
-- Advisory links point to GitHub security advisory page, not CVE detail.
+Without a token, GitHub allows 60 API requests an hour; with one, 5,000.
 
 ---
 
 ### GitHub (Repository Monitor)
 
-**Type**: ExtendedAdapter  
-**File**: `backend/app/adapters/github_repo.py`
+**Type**: API. **File**: `backend/app/adapters/github_repo.py`
 
-Monitors a GitHub repository for new/changed files (detection rules, configs, etc.).
+Watches a repository for new and changed files, such as detection rules. Each
+file is one entry (GUID `{owner}/{repo}/{path}`), updated in place when the
+file changes.
 
-**Configuration**:
-```python
-{
-    "owner": "SigmaHQ",
-    "repo": "sigma",
-    "branch": "main",
-    "paths": ["rules/**/*.yml"],          # Glob patterns (** for recursive)
-    "watch_mode": "commits",              # "commits" or "tree_diff"
-    "max_entries_per_poll": 50,
-    "include_content": true,              # Fetch file content
-    "backfill_days": 90,                  # On first poll, how far back to go (default 30)
-    "last_commit_sha": "abc...",          # Persisted in adapter_config
-}
-```
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `owner`, `repo` | (required) | The repository. |
+| `branch` | `main` | Branch to watch. |
+| `paths` | all files | Glob patterns, such as `rules/**/*.yml`. |
+| `watch_mode` | `commits` | `commits` or `tree_diff` (see below). |
+| `max_entries_per_poll` | 50 | Files per fetch. |
+| `include_content` | `true` | Download each file's content. |
+| `backfill_days` | 90 | On the first fetch, how far back to look. |
+| `last_commit_sha` | (kept by the adapter) | Where the last fetch stopped. |
 
-The GitHub token is **not** per-feed config: `_get_token()` reads the `github_token` system setting (DB) with fallback to the `GITHUB_TOKEN` env var, so one token serves all GitHub repo feeds.
+The GitHub token is **not** a feed setting. One token serves every repo
+feed: the `github_token` setting (Settings), or the `GITHUB_TOKEN` env var.
 
-**Watch Modes**:
+**Watch modes:**
 
-1. **`commits`** (default): Polls the Commits API for new commits.
-   ```python
-   url = f"https://api.github.com/repos/{owner}/{repo}/commits"
-   params = {
-       "sha": branch,
-       "per_page": max_entries_per_poll,
-       "since": since.isoformat() if since else ...,
-   }
-   ```
-   Efficient for incremental polling; handles renames naturally.
+- **`commits`** reads new commits through the Commits API. Good for normal
+  polling.
+- **`tree_diff`** compares `last_commit_sha` with the branch head through the
+  Compare API. Faster for busy repos. If the difference is too large for
+  GitHub to return (over 250 commits or 300 files), it falls back to
+  `commits`.
 
-2. **`tree_diff`**: Uses the Compare API to diff `last_commit_sha` against branch HEAD.
-   ```python
-   url = f"https://api.github.com/repos/{owner}/{repo}/compare/{last_commit_sha}...{branch_head_sha}"
-   
-   # Response includes: files added, modified, deleted, renamed
-   # More efficient for high-volume repos; can exceed GitHub's 250-commit / 300-file limit
-   # (falls back to commits mode if diff too large).
-   ```
+**File types** (`github_content_types.py`):
 
-**Content Extraction**:
+1. A known repository path decides first, for example
+   `SigmaHQ/sigma:rules/**/*.yml` is `sigma_rule`.
+2. Otherwise the file extension: `.yar`/`.yara` is a YARA rule, `.kql` a KQL
+   query, `.yml`/`.yaml` and `.toml` generic files, and so on.
+3. A generic YAML or TOML file is then checked for a rule format the importer
+   supports: Sigma, a Microsoft Sentinel analytics rule, a Splunk detection,
+   an Anvilogic Armory detection, or an Elastic TOML rule. The rule's query
+   must pass the rule validator (`rule_validation.py`), or the file stays
+   generic.
 
-For each file matched by `paths` patterns:
+`scripts/maintenance/reprocess_github_repo_types.py` re-runs this on saved
+entries still typed `yaml_file`, `toml_file` or `unknown`, and imports the
+rules it finds.
 
-1. **Detect content type**: YAML rule, Elastic detection, YARA rule, Markdown, etc.
-   - Uses `github_content_types.py:detect_content_type()`.
-   - A per-repo path pattern decides first. Example: `SigmaHQ/sigma:rules/**/*.yml` → `sigma_rule`.
-   - Otherwise the extension decides: `.yar`/`.yara` → `yara_rule`, `.kql` → `kql_query` (imported as a KQL rule), `.yml`/`.yaml` → `yaml_file`, `.toml` → `toml_file`.
-   - A generic YAML or TOML file is then read for a rule format the importer supports, whichever repo it sits in: Sigma (`title` + `logsource` + `detection`), a Sentinel analytics rule (`query` + `queryFrequency`, or `kind: Scheduled`/`NRT`), a Splunk detection (`name` + `search`), an Anvilogic Armory detection (`title` + `logic` + a Splunk or KQL `logic_format`), or an Elastic TOML rule. The candidate's query must pass the rule validator (`rule_validation.py`), or the file stays generic.
-   - `scripts/maintenance/reprocess_github_repo_types.py` re-runs this detection over stored entries typed `yaml_file`, `toml_file` or `unknown`, and imports the rules it finds.
+The title comes from the file where it can (a Sigma `title`, an Elastic
+`rule.name`), else the filename. The body is rendered for reading: rules with
+ATT&CK badges, code in a code block, Markdown as is.
 
-2. **Derive title**: Extracted from file content.
-   - SIGMA: `title` field from YAML.
-   - Elastic: `rule.name` from TOML.
-   - Markdown: Filename (fallback).
+**Full sync.** The `full_sync_github_feed` Celery task reads **every** file in
+the repository through the Git Trees API, not just recent changes, adds the
+ones not yet saved, and records the head commit for later fetches.
 
-3. **Render content**: Formatted for readability.
-   - SIGMA: Highlighted YAML with metadata badges.
-   - Code: Syntax-highlighted code block.
-   - Markdown: Rendered as-is.
+**Limits:**
 
-**Entry Creation**:
-
-```python
-entry = ParsedEntry(
-    guid=f"{owner}/{repo}/{file_path}",  # Plain path GUID — one entry per file, updated in place
-    url=f"https://github.com/{owner}/{repo}/blob/{branch}/{file_path}",
-    title=derive_title(file_path, content, content_type),
-    author=_extract_commit_author(commit),
-    content_html=render_content(file_path, content, content_type),
-    published_at=datetime.fromisoformat(commit.get("commit").get("author").get("date")),
-    metadata={
-        "source": "github_repo",
-        "owner": owner,
-        "repo": repo,
-        "file_path": file_path,
-        "content_type": content_type,
-        "commit_sha": commit.get("sha"),
-        "_head_sha": head_sha,  # Persisted to adapter_config for next poll
-    },
-)
-```
-
-**Full-Tree Sync**:
-
-The `full_sync_github_feed()` Celery task (`backend/app/workers/feed_tasks.py:2158`) enumerates **every** file in the repo (not just recent changes):
-
-```python
-# Uses Git Trees API to get complete file list
-await adapter.fetch_full_tree(config, existing_guids=existing_guids)
-
-# Creates entries for files not yet ingested
-# Persists head SHA for incremental fetches afterward
-```
-
-**Quirks**:
-- Max file size: 5 MB (configurable via `GITHUB_REPO_MAX_FILE_SIZE_KB`, default 5120).
-- Rate limiting: Tracks GitHub API quota via response headers; backs off if remaining < 100.
-- State persistence: `last_commit_sha` stored in `feed.adapter_config` for next poll.
+- Files larger than `GITHUB_REPO_MAX_FILE_SIZE_KB` (default 5120, so 5 MB)
+  are skipped.
+- The adapter watches GitHub's rate-limit headers and backs off when fewer
+  than 100 requests remain.
 
 ---
 
 ### NVD/CVE
 
-**Type**: ExtendedAdapter  
-**File**: `backend/app/adapters/nvd.py`
+**Type**: API. **File**: `backend/app/adapters/nvd.py`
 
-Fetches CVEs from the NIST National Vulnerability Database API 2.0.
+Reads CVEs (published vulnerabilities) from the NIST National Vulnerability
+Database API 2.0.
 
-**Configuration**:
-```python
-{
-    "api_key": "nvd_...",       # Optional; increases rate limit
-    "keywords": ["Cisco", "ASA"],  # Optional keyword filtering
-    "min_cvss": 7.0,            # Filter by CVSS score
-}
-```
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `api_key` | none | NVD API key for a higher rate limit. |
+| `keywords` | none | List of words; CVEs must match them. |
+| `min_cvss` | 0.0 | Skip CVEs scored below this. |
 
-**Fetch**:
-```python
-url = "https://services.nvd.nist.gov/rest/json/cves/2.0"
-
-params = {
-    "resultsPerPage": 50,
-}
-
-# Incremental polling
-if since:
-    params["lastModStartDate"] = since.strftime("%Y-%m-%dT%H:%M:%S.000")
-    params["lastModEndDate"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000")
-else:
-    # First poll: last 7 days
-    start = datetime.now(timezone.utc) - timedelta(days=7)
-    params["lastModStartDate"] = start.strftime("%Y-%m-%dT%H:%M:%S.000")
-
-if keywords:
-    params["keywordSearch"] = " ".join(keywords)
-    params["keywordExactMatch"] = ""
-
-for vuln in data.get("vulnerabilities", []):
-    cve_id = vuln.get("cve", {}).get("id", "")
-    
-    # Extract CVSS score (tries v3.1, v3.0, v2.0 in order)
-    cvss_score = _extract_cvss_score(cve)
-    if cvss_score is not None and cvss_score < min_cvss:
-        continue
-    
-    # Convert CVSS score to severity label
-    severity = _score_to_severity(cvss_score) if cvss_score else None
-    
-    # Get English description
-    descriptions = cve.get("descriptions", [])
-    desc_en = next((d.get("value") for d in descriptions if d.get("lang") == "en"), "")
-    
-    entry = ParsedEntry(
-        guid=hashlib.sha256(cve_id.encode()).hexdigest()[:32],
-        url=f"https://nvd.nist.gov/vuln/detail/{cve_id}",
-        title=f"{cve_id}: {desc_en[:120]}..." if len(desc_en) > 120 else f"{cve_id}: {desc_en}",
-        content_html=desc_en,
-        published_at=datetime.fromisoformat(cve.get("published")),
-        metadata={
-            "source": "nvd",
-            "cve_id": cve_id,
-            "cvss_score": cvss_score,
-            "severity": severity,
-            "references": [r.get("url") for r in cve.get("references", [])],
-        },
-    )
-```
-
-**Quirks**:
-- Single request per poll (`resultsPerPage: 50`), windowed by `lastModStartDate`/`lastModEndDate` from the last fetch time.
-- CVSS score logic: tries v3.1 (latest), falls back to v3.0, then v2.0.
-- Title truncates long descriptions; content_html stores full description.
-- Links point to NVD detail page, not external CVE databases.
+- One request per fetch, up to 50 CVEs changed since the last fetch. The first
+  fetch looks back 7 days.
+- The CVSS score is taken from v3.1, else v3.0, else v2.0, and turned into a
+  severity label.
+- **Title:** `CVE-ID: description`, with the description cut to 120
+  characters. The body is the full English description.
+- **Link:** the NVD detail page. Metadata: `cve_id`, `cvss_score`,
+  `severity`, `references`.
 
 ---
 
 ### Mastodon
 
-**Type**: ExtendedAdapter  
-**File**: `backend/app/adapters/mastodon.py`
+**Type**: API. **File**: `backend/app/adapters/mastodon.py`
 
-Fetches public posts from Mastodon instances.
+Reads public posts from one account, or from hashtag timelines, on a Mastodon
+server.
 
-**Configuration**:
-```python
-{
-    "instance_url": "https://fosstodon.org",
-    "account_id": "123456",          # Numeric account ID (resolve via webfinger if needed)
-    "hashtags": ["infosec"],         # Alternative to account_id
-    "access_token": "...",           # Optional; enables private timeline access
-    "limit": 40,                     # Max 40
-}
-```
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `instance_url` | (required) | For example `https://infosec.exchange`. |
+| `account_id` | none | The account's numeric id (not its handle). |
+| `hashtags` | none | List of hashtags, used when there is no `account_id`. |
+| `access_token` | none | Optional token. |
+| `limit` | 40 | Posts per request, at most 40. |
 
-**Fetch Account Posts**:
-```python
-url = f"{instance_url}/api/v1/accounts/{account_id}/statuses"
-params = {
-    "limit": limit,
-    "exclude_replies": true,    # Skip replies (only top-level posts)
-    "exclude_reblogs": true,    # Skip boosts
-}
-
-for status in statuses:
-    author = status.get("account", {})
-    content_html = status.get("content", "")  # HTML
-    
-    # Title: first line of content (HTML tags stripped)
-    plain = re.sub(r"<[^>]+>", "", content_html).strip()
-    title = plain[:120] + "..." if len(plain) > 120 else plain
-    
-    entry = ParsedEntry(
-        guid=hashlib.sha256(str(status.get("id")).encode()).hexdigest()[:32],
-        url=status.get("url"),
-        title=title,
-        author=f"{author.get('display_name')} (@{author.get('acct')})",
-        content_html=content_html,
-        published_at=datetime.fromisoformat(status.get("created_at")),
-        metadata={
-            "source": "mastodon",
-            "instance": instance_url,
-            "account": author.get("acct"),
-            "status_id": status.get("id"),
-            "reblogs_count": status.get("reblogs_count", 0),
-            "favourites_count": status.get("favourites_count", 0),
-            "tags": [t.get("name") for t in status.get("tags", [])],
-        },
-    )
-```
-
-**Fetch Hashtag Timeline**:
-```python
-url = f"{instance_url}/api/v1/timelines/tag/{hashtag}"
-
-# Same parsing as account posts
-```
-
-**Quirks**:
-- Content is pre-rendered HTML (includes `<a>` tags for mentions, hashtags).
-- Replies and boosts excluded by default for cleaner timeline.
-- Account ID is numeric (not handle); if only handle provided, must resolve via webfinger first.
+- Account posts leave out replies and boosts.
+- **Title:** the post text without HTML, cut to 120 characters. The body is
+  Mastodon's own HTML.
+- **Author:** `Display Name (@account)`.
+- **Metadata:** `instance`, `account`, `status_id`, `reblogs_count`,
+  `favourites_count`, `tags`.
+- Attachments are not saved as media.
 
 ---
 
 ### Bluesky
 
-**Type**: ExtendedAdapter  
-**File**: `backend/app/adapters/bluesky.py`
+**Type**: API. **File**: `backend/app/adapters/bluesky.py`
 
-Fetches public posts via the AT Protocol XRPC API (no auth required; optional app-password for higher rate limits).
+Reads public posts through Bluesky's public API
+(`https://public.api.bsky.app/xrpc`). No login is needed. An app password is
+optional and raises the rate limit.
 
-**Configuration**:
-```python
-{
-    "mode": "author",                       # "author", "feed", or "search"
-    "handle": "alice.bsky.social",          # For mode="author"
-    "filter": "posts_no_replies",           # Author-feed filter (default)
-    "include_reposts": false,               # Author mode: include reposts
-    "feed_uri": "at://...",                 # For mode="feed" (algorithmic feed)
-    "query": "detection rules",             # For mode="search"
-    "lang": "en",                           # Optional search language filter
-    "render_replies": false,                # Render reply context into content_html
-    "identifier": "alice.bsky.social",      # Optional auth: account identifier...
-    "app_password": "<encrypted>",          # ...plus app password (stored encrypted)
-    "pds_url": "https://bsky.social",       # PDS for session creation (default)
-    "max_per_poll": 50,
-    "last_seen_cid": "bafy...",             # Watermark; persisted via _adapter_state
-}
-```
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `mode` | `author` | `author`, `feed` or `search`. |
+| `handle` | | For `author` mode, such as `alice.bsky.social`. |
+| `filter` | `posts_no_replies` | For `author` mode. |
+| `include_reposts` | `false` | For `author` mode. |
+| `feed_uri` | | For `feed` mode: an `at://` URI of a custom feed. |
+| `query`, `lang` | | For `search` mode. |
+| `render_replies` | `false` | Add a "Reply to …" line naming the parent post. |
+| `identifier`, `app_password` | none | Optional login. The password is stored encrypted. |
+| `pds_url` | `https://bsky.social` | Server to log in to. |
+| `max_per_poll` | 50 | Posts per fetch. |
+| `last_seen_cid` | (kept by the adapter) | Newest post already seen. |
 
-**Author Timeline**:
-```python
-url = f"{PUBLIC_BASE}/app.bsky.feed.getAuthorFeed"   # PUBLIC_BASE = https://public.api.bsky.app/xrpc
-params = {
-    "actor": handle,
-    "limit": 50,        # AUTHOR_PAGE_SIZE
-    "filter": "posts_no_replies",
-}
-
-for post in response.get("feed", []):
-    record = post.get("post", {}).get("record", {})
-    
-    entry = ParsedEntry(
-        guid=_stable_guid(post.get("post", {}).get("cid", "")),  # SHA-256 of CID
-        url=_bsky_post_url(handle, post.get("post", {}).get("uri", "")),
-        title=record.get("text", "")[:120],
-        author=handle,
-        content_html=...,  # text + embedded media rendered to HTML
-        published_at=_parse_iso(record.get("createdAt")),
-        metadata={"source": "bluesky", "cid": ..., "uri": ...},
-    )
-```
-
-**Feed (Algorithmic)**:
-```python
-url = f"{PUBLIC_BASE}/app.bsky.feed.getFeed"
-params = {
-    "feed": feed_uri,
-    "limit": 50,      # FEED_PAGE_SIZE
-}
-```
-
-**Search**:
-```python
-url = f"{PUBLIC_BASE}/app.bsky.feed.searchPosts"
-params = {
-    "q": query,
-    "limit": 25,      # SEARCH_PAGE_SIZE
-}
-```
-
-**Quirks**:
-- **Session caching**: access JWT cached in Redis (`bluesky:session:{feed_id}`, 90-min TTL, in-process fallback); session invalidated and re-created on auth failure. `app_password` is stored encrypted and decrypted via `app.core.encryption`.
-- **GUID stability**: Uses CID (content hash) instead of URI so GUID doesn't change if post is edited/deleted.
-- **Incremental polling**: newest CID is persisted to `adapter_config.last_seen_cid` (via `feed_meta.extra["_adapter_state"]`) so the next poll short-circuits at already-seen posts.
-- **Rate limiting**: on a 429 the adapter backs off and returns an empty batch until the next poll; app-password auth lifts limits.
-- **Embeds**: Posts can embed images, videos, links, etc.; extracted into metadata.
+- Requests fetch 50 posts in `author` and `feed` mode, 25 in `search` mode.
+- **GUID:** a hash of the post's CID (its content ID).
+- The fetch stops at the post saved in `last_seen_cid`.
+- **Login session:** cached in Redis (`bluesky:session:{feed_id}`, 90
+  minutes) and created again when it stops working.
+- **Rate limit:** on a 429 the adapter returns nothing and tries again next
+  poll.
+- **Embeds:** images, video, link cards and quoted posts are rendered into
+  the body. The first image or video becomes the entry's media.
 
 ---
 
 ### Telegram
 
-**Type**: ExtendedAdapter  
-**File**: `backend/app/adapters/telegram.py`
+**Type**: API. **File**: `backend/app/adapters/telegram.py`
 
-Fetches messages from public Telegram channels via MTProto protocol (Telethon library).
+Reads messages from Telegram channels with the Telethon library, logged in as
+a real Telegram account.
 
-**Configuration**:
-```python
-{
-    "channel": "@channelname",          # Username or t.me link
-    "channel_id": 123456789,            # Numeric channel ID (resolved and cached)
-    "channel_username": "channelname",  # Cached after first fetch
-    "session_name": "default",          # Session file name
-    "last_seen_id": 0,                  # Message ID watermark (persisted)
-    "max_messages_per_fetch": 200,
-    "max_message_age_days": 30,         # First fetch: only get last N days
-    "include_media": true,
-    "media_types": ["photo", "video"],  # Default: photo, video, document, audio
-    "extract_forwards": true,
-    "edit_probe_window": 50,            # Probe last 50 messages for edits/deletes
-    "threat_actor_id": "uuid",          # Auto-link entries to threat actor
-    "campaign_id": "uuid",              # Auto-link entries to campaign
-}
-```
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `channel` | (required) | `@name` or a `t.me` link. |
+| `session_name` | default session | Which login session to use (see Setup). |
+| `max_messages_per_fetch` | 200 | Messages per fetch. |
+| `max_message_age_days` | 30 | On the first fetch, how far back to look. |
+| `include_media` | `true` | Download attachments. |
+| `media_types` | photo, video, document, audio | Which attachments to download. |
+| `extract_forwards` | `true` | Record where a forwarded message came from. |
+| `edit_probe_window` | 50 | How many recent messages to re-check for edits and deletes. 0 turns it off. |
+| `realtime` | `false` | Get new messages as they arrive (see [Telegram Operations](#telegram-operations)). |
+| `threat_actor_id`, `campaign_id`, `author_entity` | none | [Auto-attribution](#auto-attribution). |
+| `channel_id`, `channel_username`, `last_seen_id` | (kept by the adapter) | The resolved channel and the newest message seen. |
 
-**Setup** (out-of-band, one-time per session):
+**Setup** (once per session, outside the app):
 
 ```bash
-# Run interactive login script (creates persistent session file)
-python scripts/telegram/telegram_login.py
+# On the host. Set in .env, then restart the stack:
+TELEGRAM_API_ID=123456
+TELEGRAM_API_HASH=abcd1234...
+# Optional; this is the default. Named sessions sit in the same folder.
+TELEGRAM_SESSION_PATH=/data/telegram.session
 
-# Env vars required:
-export TELEGRAM_API_ID=123456
-export TELEGRAM_API_HASH=abcd1234...
-export TELEGRAM_SESSION_PATH=/data/telegram.session   # Default; named sessions live alongside it
+# Log in interactively. This writes the session file.
+docker compose -f docker-compose.dev.yml exec -it api python scripts/telegram/telegram_login.py
+
+# A second, named session (adapter_config.session_name = "osint"):
+docker compose -f docker-compose.dev.yml exec -it api python scripts/telegram/telegram_login.py --session osint
 ```
 
-Session file persists Telegram auth state; reused across worker restarts. Named sessions (`adapter_config.session_name = "osint"`) resolve to `{dirname(TELEGRAM_SESSION_PATH)}/osint.session` and are bootstrapped with `scripts/telegram/telegram_login.py --session osint`.
+A named session lives at `{folder of TELEGRAM_SESSION_PATH}/osint.session`.
+The session file is as sensitive as the account's password.
+`scripts/telegram/telegram_join.py` joins a channel with the session account.
 
-**Fetch Messages**:
-```python
-# Lazy-init client per session (post-fork, to avoid shared socket in Celery prefork)
-client = await self._get_client(session_name)
+**How a fetch works:**
 
-# Resolve channel entity
-entity = await client.get_entity(channel_input or channel_id)
-resolved_channel_id = entity.id
-resolved_username = entity.username or ""
+- The first fetch reads messages from the last `max_message_age_days`. Later
+  fetches read messages newer than `last_seen_id`, oldest first.
+- **GUID:** `telegram:{channel_id}:{message_id}`.
+- **Link:** `t.me/{username}/{id}` for public channels, `t.me/c/{id}/{id}`
+  for private ones.
+- **Title:** the first line of the message, else "Message {id}".
+- **Body:** Telegram's formatting (bold, code, links, mentions) is turned
+  into HTML. A forwarded message gets a "Forwarded from …" line.
+- **Metadata:** `message_id`, `channel_id`, `channel_username`, `edited_at`,
+  `views`, `reactions`, and `forwarded_from` when forwarded.
+- **Albums:** Telegram sends an album of N photos as N messages. The adapter
+  merges them into one entry: the message with the caption is the entry, and
+  the other photos go into `additional_media`.
+- **Media:** attachments of the chosen types up to `TELEGRAM_MAX_MEDIA_SIZE_MB`
+  (default 25) are downloaded. Videos also get a thumbnail. See
+  [Telegram Operations](#telegram-operations) for storage.
+- **Flood waits:** when Telegram says "slow down", the adapter keeps what it
+  has so far and stops. `last_seen_id` only moves past messages actually
+  read.
+- **Handles:** `t.me/s/<name>` preview links are turned into the plain
+  channel name.
+- **One login per process:** the session file is read once per process, then
+  Telethon runs from an in-memory copy. That stops the api, listener and
+  worker from fighting over the file ("database is locked").
 
-# Fetch messages (newest first, then reversed to chronological)
-async for message in client.iter_messages(
-    entity,
-    min_id=last_seen_id,          # Only fetch messages after watermark
-    limit=max_messages_per_fetch,
-    reverse=True,                 # Chronological order
-):
-    msg_id = int(message.id or 0)
-    if msg_id > max_id_seen:
-        max_id_seen = msg_id
-    
-    # Parse message to entry
-    parsed = self._message_to_entry(
-        message,
-        channel_id=resolved_channel_id,
-        channel_username=resolved_username,
-        extract_forwards=extract_forwards,
-    )
-    
-    # Extract media (if enabled)
-    if include_media and message.media:
-        media = await self._build_media(
-            client,
-            message,
-            channel_id=resolved_channel_id,
-            media_types=media_types,
-            max_size_mb=settings.telegram_max_media_size_mb,
-        )
-        if media:
-            parsed.media = media
-    
-    entries.append(parsed)
-```
+**Edits and deletes.** After each fetch the worker re-reads the last
+`edit_probe_window` saved messages. An edited message gets its text updated
+and goes through the entry pipeline again. A deleted message is not removed:
+it gets `metadata.telegram_deleted_at`, because a Telegram hiccup can look
+like a delete.
 
-**Entry Parsing**:
-```python
-def _message_to_entry(self, message, channel_id, channel_username, extract_forwards):
-    msg_id = int(message.id or 0)
-    msg_date = message.date
-    
-    # Content: message text
-    text = message.message or ""
-    
-    # Metadata: message_id, edited_at, views, reactions, forwarded_from
-    metadata = {
-        "source": "telegram",
-        "message_id": msg_id,
-        "channel_id": channel_id,
-        "channel_username": channel_username,
-        "edited_at": message.edit_date.isoformat() if message.edit_date else None,
-        "views": message.views,
-        "reactions": [{"emoji": ..., "count": ...}],
-        "reactions_total": ...,
-    }
-    
-    # If forwarded, extract original author into metadata["forwarded_from"]
-    # and prepend a "Forwarded from ..." banner to content_html
-    
-    entry = ParsedEntry(
-        guid=f"telegram:{channel_id}:{msg_id}",
-        # Public channels: t.me/<username>/<msg_id>; private: t.me/c/<id>/<msg_id>
-        url=f"https://t.me/{channel_username}/{msg_id}",
-        title=first_line[:120] or f"Message {msg_id}",   # First line of text
-        content_html=self._render_message_html(message), # Entity-aware rich rendering
-        published_at=msg_date,
-        metadata=metadata,
-    )
-    
-    return entry
-```
+#### Auto-attribution
 
-`_render_message_html()` converts Telegram's per-character formatting entities (bold, italic, code, pre, links, mentions) into HTML rather than just escaping the raw text.
-
-**Media Extraction**:
-
-Supports photos, videos, documents, audio with size and type filtering:
-
-```python
-media = await self._build_media(client, message, ...)
-
-# For photos: download to disk (OCR if enabled)
-# For documents: extract filename, MIME type, size
-# For videos/audio: metadata only (don't download large files)
-
-media_record = ParsedMedia(
-    media_type="photo",        # or video, audio, document
-    url="...",                 # Proxied URL to IntelFeed media storage
-    mime_type="image/jpeg",
-    file_size=12345,
-    duration_seconds=60,       # For audio/video
-    thumbnail_url="...",
-    metadata={"telegram_file_id": "..."},
-)
-```
-
-**OCR** (optional, experimental):
-
-If enabled (`TELEGRAM_OCR_ENABLED=1`), runs Tesseract on images:
-```python
-if feed.feed_type == "telegram" and parsed.media.media_type in ("photo", "image"):
-    if settings.telegram_ocr_enabled:
-        ocr_text = ocr_image(local_path, min_chars=settings.telegram_ocr_min_chars)
-        if ocr_text:
-            entry.content_text += "\n\n[Image OCR]\n" + ocr_text
-```
-
-**Edit/Delete Probing**:
-
-After each fetch, re-fetches the last N messages to detect edits and deletes:
-
-```python
-async def _probe_telegram_edits_and_deletes(db, feed, adapter, config):
-    # Get last 50 messages from DB
-    candidates = await db.execute(
-        select(Entry)
-        .where(Entry.feed_id == feed.id)
-        .order_by(Entry.published_at.desc())
-        .limit(50)
-    )
-    
-    # Re-fetch those message IDs
-    probe = await adapter.probe_messages(config, [e.metadata_.get("message_id")])
-    
-    for msg_id, parsed in probe.items():
-        entry = by_msg_id[msg_id]
-        
-        if parsed is None:
-            # Soft-delete (mark as deleted, don't hard-delete)
-            entry.metadata_["telegram_deleted_at"] = datetime.now().isoformat()
-        else:
-            # Check if edited
-            new_edited_at = parsed.metadata.get("edited_at")
-            old_edited_at = entry.metadata_.get("edited_at")
-            if new_edited_at and new_edited_at != old_edited_at:
-                # Update content and re-run autolink/extraction
-                entry.content_html = parsed.content_html
-                entry.content_text = parsed.content_text
-                dispatch_entry_pipeline(entry.id, run_extraction=...)
-```
-
-**Auto-Attribution**:
-
-If `threat_actor_id` or `campaign_id` set in `adapter_config`, every entry is auto-linked:
-
-```python
-await _apply_post_ingest_links(db, feed, entry, parsed, config)
-
-# Creates EntryThreatActor, CampaignEntry with "high" confidence
-# Many Telegram channels ARE operated by threat actors, so auto-attribution is safe
-```
-
-The same hook also supports a generic `author_entity: {"type": "threat_actor"|"vendor"|"product", "id": "uuid"}` config for feeds whose author is a known entity. All inserts use `ON CONFLICT DO NOTHING`, so re-ingest and autolinker passes never error.
-
-**Quirks**:
-- **Session bootstrap**: Interactive login required once per session; persists session file.
-- **Telethon client**: Per-process, per-session singleton, lazy-init'd post-fork (avoids shared socket in Celery). The SQLite session file is read **once** per process to extract the auth key, then Telethon runs entirely off an in-memory `StringSession` so api/listener/celery processes don't fight over the SQLite writer lock ("database is locked").
-- **Album coalescing**: Telegram sends an N-photo album as N messages sharing a `grouped_id`; the adapter merges them into a single entry — caption entry becomes canonical, extra attachments land in `ParsedEntry.additional_media`.
-- **Channel handle normalization**: `t.me/s/<handle>` web-preview URLs (which Telethon rejects) are normalized to the real channel handle.
-- **Flood waiting**: Telegram API rate limits; adapter catches `FloodWaitError` and returns partial batch.
-- **Watermarking**: `last_seen_id` prevents re-fetching old messages; updated only if fetch succeeded (safe on partial batches).
-- **Soft-delete**: Deleted messages not hard-deleted (preserves audit trail); marked with `telegram_deleted_at` in metadata.
-- **Edit probing**: Detects post-publish edits (Telegram allows message editing); re-runs intel extraction on edited content.
+Many Telegram channels *are* the threat actor (leak sites, hacktivist
+channels). If the feed's `adapter_config` has `threat_actor_id` or
+`campaign_id`, every new entry is linked to that actor (confidence `high`) or
+added to that campaign. `author_entity`
+(`{"type": "threat_actor" | "vendor" | "product", "id": "<uuid>"}`) does the
+same for any API feed whose author is a known entity. Repeat links are
+ignored, so this never fails an ingest.
 
 ---
 
 ### Telegram Operations
 
-Beyond the adapter itself, Telegram has a small operational subsystem: a realtime listener process, media storage/serving, discovery endpoints, and scheduled tasks.
+**Realtime listener** (`backend/app/workers/telegram_listener.py`)
 
-**Realtime listener** (`backend/app/workers/telegram_listener.py`):
+A long-running process in its own container (`telegram-listener`, command
+`python -m app.workers.telegram_listener`), not a Celery task. It stays
+connected to Telegram and watches every channel whose feed has
+`adapter_config.realtime = true`. When a message arrives it queues
+`fetch_feed` for that feed (waiting 1.5 seconds to group bursts), so the
+normal fetch does all the work.
 
-A long-lived process run as its own docker-compose service (`telegram-listener`, command `python -m app.workers.telegram_listener`) — **not** a Celery task. It holds a persistent MTProto connection per session file and registers a Telethon `NewMessage` handler for each subscribed channel. On a new message it just dispatches `fetch_feed.delay(feed_id)` (debounced 1.5 s per channel to coalesce bursts), so the existing polling pipeline does all dedup/sanitization/media/autolink work — nothing is duplicated in the listener.
+- Normal polling keeps running, so messages still arrive if the listener
+  stops.
+- Every 5 minutes it re-reads the database for feeds that turned realtime on
+  or off.
+- Every 30 seconds it writes a heartbeat to Redis
+  (`intelfeed:telegram_listener:heartbeat`). `GET /api/telegram/listener/status`
+  reports `running: false` when the heartbeat is more than 2 minutes old.
+- Without `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` it sits idle instead of
+  exiting, so the container doesn't restart in a loop. Restart it after you
+  log in.
 
-- **Opt-in per feed**: only feeds with `adapter_config.realtime = true` are subscribed.
-- **Polling stays on** as the safety net — if the listener dies, entries still arrive on the normal fetch interval.
-- **Reconciliation**: re-polls the DB every 5 minutes to pick up added/removed realtime feeds.
-- **Heartbeat**: writes `intelfeed:telegram_listener:heartbeat` to Redis every 30 s (plus a subscription count). `GET /api/telegram/listener/status` reports `running: false` when the heartbeat is older than 2 minutes.
-- **Unconfigured behavior**: if `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` are unset, the process idles instead of exiting, so the container stays "Up" without a restart loop; restart it after bootstrapping a session.
+**Channel discovery** (`backend/app/api/telegram.py`)
 
-**Channel discovery** (`backend/app/api/telegram.py`):
+- `GET /api/telegram/discover` lists every channel the logged-in account has
+  joined, marked `is_subscribed`, with channels not yet added listed first.
+- `GET /api/telegram/feeds/{id}/health` shows one feed's state: the resolved
+  channel, `last_seen_id`, any flood wait, edited and deleted counts for the
+  last 7 days, the session name, and the channel's subscriber count when
+  available.
 
-`GET /api/telegram/discover` calls `TelegramAdapter.list_my_dialogs()` to list every broadcast channel the bootstrap account is joined to, annotated with `is_subscribed` (unsubscribed channels sort first so "to add" candidates are on top). `GET /api/telegram/feeds/{id}/health` gives a per-feed snapshot: resolved channel, watermark, flood-wait state, edited/soft-deleted counts (7d), session name, and best-effort live subscriber count.
+**Link mentions** (`backend/app/workers/telegram_link_tasks.py`)
 
-**Link mentions** (`backend/app/workers/telegram_link_tasks.py`):
+A stage of the entry pipeline finds `t.me` links in entries from
+**non-Telegram** feeds and records which channels are being mentioned
+(`telegram_channel_mentions`, `telegram_link_mentions`).
+`GET /api/telegram/mentions` lists channels your feeds mention that you
+don't read yet. You can dismiss them, or subscribe with
+`POST /api/telegram/mentions/{id}/subscribe`, which creates a Telegram feed.
+Invite-only channels are refused: join them first.
 
-`scan_telegram_links_task` runs per entry as part of the entry processing pipeline (alongside autolink). It extracts `t.me` channel/invite/message links from **non-Telegram** entries (Telegram-sourced entries are skipped to avoid self-mention noise) and upserts `telegram_channel_mentions` (per-channel aggregate with mention/feed counters) and `telegram_link_mentions` (raw refs, deduped on `(entry_id, url)`). Surfaced at `GET /api/telegram/mentions` — "channels mentioned across my feeds that I'm not ingesting yet" — with dismiss/undismiss and a one-click `POST /mentions/{id}/subscribe` that creates a Telegram feed (invite-only channels are refused; join out-of-band first).
+**Forward graph** (`backend/app/workers/intel_feed_tasks.py`)
 
-**Forward graph** (`backend/app/workers/intel_feed_tasks.py`):
+`build_telegram_forward_relationships` runs every 4 hours. When a channel
+attributed to actor X forwards a message from a channel attributed to actor
+Y, it records a `communicates_with` relationship between the two actors
+(confidence `probable`, source `auto_extracted`, up to 50 evidence entries).
 
-`build_telegram_forward_relationships` runs on beat every 4 hours. When channel A (auto-attributed to actor X via `adapter_config.threat_actor_id`) forwards a message from channel B (attributed to actor Y), it materializes an `EntityRelationship` of type `communicates_with` between the actors (confidence `probable`, source `auto_extracted`, evidence entry IDs capped at 50). Idempotent via `ON CONFLICT DO NOTHING`.
+**Album repair** (`backend/app/workers/telegram_backfill_tasks.py`)
 
-**Album backfill** (`backend/app/workers/telegram_backfill_tasks.py`):
+`backfill_telegram_albums` merges album photos that were saved as separate
+entries into the entry with the caption, then deletes the extras. Run it with
+`backfill_telegram_albums.delay()` (optionally with a `feed_id`).
 
-`backfill_telegram_albums` is a one-shot repair task for entries that pre-date the adapter's album-merge logic: groups fragment entries by `metadata.telegram_grouped_id`, reparents all `EntryMedia` onto the caption-bearing canonical entry, and deletes the strays. Trigger via `docker compose exec api python -m app.scripts.backfill_telegram_albums` or `backfill_telegram_albums.delay()`; optional `feed_id` scopes to one feed.
+**Media storage and serving** (`backend/app/api/telegram_media.py`)
 
-**Media storage & serving** (`backend/app/api/telegram_media.py`):
+Telegram media has no public URL. The worker downloads it into
+`TELEGRAM_MEDIA_DIR` (default `/app/data/telegram_media`, the shared
+`telegram_media` volume used by the api, worker and listener), as
+`<channel_id>/<message_id>.<ext>` plus `<message_id>.thumb.jpg` for video
+thumbnails. Files are served by:
 
-Telegram media has no public URL — bytes are downloaded over MTProto by the celery-worker and written to `settings.telegram_media_dir` (`/app/data/telegram_media`, the shared `telegram_media` volume mounted by api, worker, and listener), laid out as `<channel_id>/<message_id>.<ext>` plus `<message_id>.thumb.jpg` thumbnails. Files are served by an auth-gated route:
-
-```
+```text
 GET /api/telegram-media/{channel_id}/{filename}
 ```
 
-Accepts the JWT via `Authorization: Bearer` **or** `?token=` query param (so `<img>`/`<video>` tags work). Both path segments are regex-validated and resolved paths are checked against the media root to block traversal. Responses are `Cache-Control: private, max-age=86400`.
+It needs a login token, in the `Authorization` header or as `?token=` (so
+`<img>` and `<video>` tags work). File names are checked so a request can't
+reach outside the media folder. Responses carry
+`Cache-Control: private, max-age=86400`.
 
-**Media cleanup** (`backend/app/workers/maintenance.py`):
+**Media cleanup** (`backend/app/workers/maintenance.py`)
 
-`cleanup_telegram_media` runs weekly on beat (Sun 04:20 UTC). It walks the media dir and deletes files whose `(channel_id, message_id)` pair no longer matches any entry — i.e. media orphaned by entry deletion or feed retention. Soft-deleted entries (`telegram_deleted_at` set) keep their media so analysts can still inspect the artefact.
-
-> **Operational note**: this task only prunes *orphans* — there is no size cap or age-based eviction for media whose entries are retained. On feeds with unlimited retention the media dir grows unbounded.
-
-**Session files**: the session-file architecture (interactive bootstrap via `scripts/telegram/telegram_login.py`, named sessions, in-memory `StringSession` to avoid SQLite lock contention) is covered under [Telegram](#telegram) above; the listener reuses the same per-session client init as the adapter.
+- `cleanup_telegram_media` (Sundays 04:20 UTC) deletes files whose entry no
+  longer exists. Media of soft-deleted messages is kept.
+- `evict_old_telegram_media` (daily 04:25 UTC) deletes files older than
+  `telegram_media_ttl_days` (default 30). The entries and their intelligence
+  are kept; only the file goes.
 
 ---
 
 ### Web Scraper
 
-**Type**: ExtendedAdapter  
-**File**: `backend/app/adapters/web_scraper.py`
+**Type**: API. **File**: `backend/app/adapters/web_scraper.py`
 
-Discovers and scrapes blog index pages for article links (no RSS feed required).
+For blogs with no RSS feed. It reads the blog's index page, finds article
+links, and downloads each article.
 
-**Feed name**: `_build_meta()` names the feed after the index page — its `<title>`, then `og:title`, then `og:site_name`, and only then the hostname. A feed created without a `custom_title` is titled with its URL until the first fetch, which replaces that placeholder (`_title_is_placeholder()` in `workers/feed_tasks.py`); a real title is never overwritten.
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `blog_url` | (required) | The index page. |
+| `link_selector` | built-in list | CSS selector for article links. |
+| `url_pattern` | none | Regular expression a link must match. |
+| `max_articles` | 20 | Articles per fetch, at most 100. |
+| `follow_pagination` | `false` | Also read the next index pages. |
+| `pagination_selector` | built-in list | CSS selector for the "next page" link. |
+| `max_pages` | 3 | Index pages to read, at most 10. |
 
-**Configuration**:
-```python
-{
-    "blog_url": "https://blog.example.com",
-    "link_selector": "a.post-link",                    # CSS selector to find article links
-    "url_pattern": "/blog/.*",                         # Regex to filter URLs
-    "max_articles": 20,                                # Max per fetch (capped at 100)
-    "follow_pagination": true,                         # Default false
-    "pagination_selector": "a[rel='next'], a.next",    # CSS selector for next page link
-    "max_pages": 3,                                    # Capped at 10
-}
-```
-
-**Article Discovery**:
-```python
-# Fetch index page(s) and find article links via CSS selectors
-visited_pages = set()
-pages_to_visit = [blog_url]
-
-for page_num in range(max_pages):
-    if not pages_to_visit:
-        break
-    
-    page_url = pages_to_visit.pop(0)
-    if page_url in visited_pages:
-        continue
-    visited_pages.add(page_url)
-    
-    response = await client.get(page_url)
-    tree = lxml_html.fromstring(response.text)
-    
-    # Find article links using CSS selector
-    if link_selector:
-        links = tree.cssselect(link_selector)
-    else:
-        # Default selectors: article a[href], main a[href], .post a[href], etc.
-        links = []
-        for sel in _INDEX_LINK_SELECTORS:
-            links.extend(tree.cssselect(sel))
-    
-    # Filter by URL pattern and domain
-    for link in links:
-        href = link.get("href", "")
-        full_url = urljoin(page_url, href)
-        
-        if not full_url.startswith(("http://", "https://")):
-            continue
-        if urlparse(full_url).netloc != base_domain:
-            continue  # Stay on same domain
-        if _SKIP_PATH_PATTERNS.match(urlparse(full_url).path):
-            continue  # Skip login, about, etc.
-        if _SKIP_EXTENSIONS.match(full_url):
-            continue  # Skip images, PDFs, etc.
-        
-        all_links.append(full_url)
-    
-    # Find next page link
-    if follow_pagination:
-        next_links = tree.cssselect(pagination_selector)
-        if next_links:
-            next_url = urljoin(page_url, next_links[0].get("href", ""))
-            if next_url and next_url not in visited_pages:
-                pages_to_visit.append(next_url)
-```
-
-**Article Parsing**:
-
-Articles are fetched concurrently (semaphore of 3) with a curl_cffi browser-impersonation fallback for bot-protected sites, then parsed by `_extract_article()`:
-
-```python
-# Extract metadata from <meta>/<title> tags
-title = self._extract_title(raw_html)          # og:title / <title>, site-suffix stripped
-author = self._extract_author(raw_html)
-published_at = self._extract_date(raw_html)    # article:published_time etc.
-image_url = self._extract_og_image(raw_html)
-summary = self._extract_description(raw_html)
-
-# Extract article body: readability-lxml first, then CSS-selector fallback
-content_html = self._extract_content(raw_html)
-
-entry = ParsedEntry(
-    guid=hashlib.sha256(url.encode()).hexdigest()[:32],
-    url=url,
-    title=title,
-    author=author,
-    content_html=content_html,
-    summary=summary,
-    published_at=published_at,
-    metadata={
-        "source": "web_scraper",
-        "blog_url": blog_url,
-        "image_url": image_url,   # Promoted to entry.image_url by the worker
-    },
-)
-```
-
-**Quirks**:
-- Heuristic-based link discovery; requires tuning CSS selectors per blog.
-- Respects `robots.txt` (fetched and cached).
-- Rate-limited per domain; honors `Crawl-delay`.
-- Body extraction is **readability-lxml** first, with `_ARTICLE_CONTENT_SELECTORS` CSS fallback.
-- Requires no RSS feed (useful for blogs that don't publish feeds).
+- Only links on the same domain are kept. Login, about and similar pages, and
+  links to images and PDFs, are skipped.
+- Every request checks `robots.txt` and the per-domain rate limit (with
+  `Crawl-delay` as the minimum gap).
+- Up to 3 articles download at once, with the curl_cffi fallback for
+  bot-protected sites.
+- From each article it takes the title (`og:title` or `<title>`, without the
+  site name), author, date, `og:image`, description, and the body
+  (readability-lxml, then common article CSS selectors).
+- **GUID:** SHA-256 of the article URL, cut to 32 characters.
+- **Feed name:** the index page's `<title>`, else `og:title`, else
+  `og:site_name`, else the host name. A feed created without a name is titled
+  with its URL until the first fetch names it. A real name is never replaced.
 
 ---
 
 ### Ransomware Leak Sites (ransomware.live)
 
-**Type**: ExtendedAdapter (deliberately unregistered — no feed type)  
-**File**: `backend/app/adapters/ransomware_live.py`
+**Type**: API adapter with **no feed type**. **File**:
+`backend/app/adapters/ransomware_live.py`
 
-Polls the ransomware.live v2 `/recentvictims` API for leak-site victim postings. Structurally it mirrors `nvd.py` — an `ExtendedAdapter` returning `ParsedEntry` objects with a rich `metadata` dict — but it is **not** registered in `_EXTENDED_ADAPTERS` and never runs through the feed polling loop. Its entries are not persisted as `Entry` rows: the sync path (`app/intelligence/ransomware_sync.py`) reads each entry's `metadata` and upserts structured `RansomwareVictim` (the organization) + `VictimDisclosure` (the posting event) records instead.
+Reads ransomware leak-site victim postings from the ransomware.live v2
+`/recentvictims` API. It is not in the adapter registry and never runs in the
+feed loop, and its items are not saved as entries. Instead,
+`app/intelligence/ransomware_sync.py` turns each one into a
+`RansomwareVictim` (the organization) and a `VictimDisclosure` (the posting).
 
-**Wiring**:
-
-- Driven by the `sync_ransomware_victims` beat task (`app/workers/intel_feed_tasks.py`), every 30 minutes (`sync-ransomware-victims` in `job_registry.py`).
-- The v2 endpoint has no server-side `since` filter, so incremental polling is client-side against each posting's `discovered` timestamp (first poll looks back 7 days).
-- GUID is `make_disclosure_guid(source, group, victim, discovered)` — a truncated SHA-256 over the posting event, stable across runs.
-- A group name/alias catalog is fetched once per sync from `/v2/groups` (the endpoint is rate-limited to 1/min) so the resolver can fold group slugs into tracked ThreatActors by alias; syncs that create new groups trigger `refresh_autolinker_vocabulary`.
-- Source-pluggable: each leak-site aggregator is one `ExtendedAdapter` subclass with a distinct `SOURCE` string (`"ransomware.live"` today); additional sources slot in as siblings iterated by the sync function.
-- Surfaced via `GET /api/ransomware/*` (victims feed, landscape stats, sync) and the Workbench ransomware views; watchlist matches raise SSE alerts.
+- Runs as the `sync-ransomware-victims` job every 30 minutes.
+- The API can't filter by date, so the adapter keeps only postings
+  discovered since the last run. The first run looks back 7 days.
+- **GUID:** a hash of source, group, victim and discovery time
+  (`make_disclosure_guid`), the same on every run.
+- Each sync reads the group list from `/v2/groups` once (the API allows one
+  call a minute), so group names can be matched to tracked threat actors by
+  alias. A sync that creates new groups rebuilds the autolinker vocabulary.
+- More sources can be added as sibling adapters with their own `SOURCE`
+  name.
+- Shown through `GET /api/ransomware/*` and the Workbench ransomware pages.
+  Watchlist matches raise live alerts.
 
 ---
 
@@ -1624,61 +908,54 @@ Polls the ransomware.live v2 `/recentvictims` API for leak-site victim postings.
 
 **File**: `backend/app/api/opml.py`
 
+OPML is the standard file format feed readers use to share subscription
+lists.
+
 ### Import
 
-```python
-@router.post("/import")
-async def import_opml(file: UploadFile, user: User, db: AsyncSession):
-    """Import OPML file (Outline Processor Markup Language)."""
-    
-    content = await file.read()
-    if len(content) > 10 * 1024 * 1024:  # 10 MB limit
-        return {"error": "OPML file too large"}
-    
-    root = DefusedET.fromstring(content)  # Safely parse XML
-    body = root.find("body")
-    
-    stats = {"feeds_added": 0, "feeds_skipped": 0, "categories_created": 0, "errors": []}
-    
-    for outline in body:
-        children = list(outline)
-        if children:
-            # This outline has children → category
-            category_name = outline.get("text") or outline.get("title")
-            
-            # Reuse existing category by name, or create it
-            category = existing_by_name(category_name) or Category(created_by=user.id, name=category_name)
-            
-            # Import feeds in category
-            for feed_outline in children:
-                await _import_feed_outline(feed_outline, user, category.id, db, stats)
-        else:
-            # Top-level feed (no category)
-            await _import_feed_outline(outline, user, None, db, stats)
-    
-    # Queue initial fetch for newly added feeds
-    if stats["feeds_added"] > 0:
-        unfetched = await db.execute(select(Feed.id).where(Feed.last_fetched_at == None))
-        for (feed_id,) in unfetched.all():
-            fetch_feed.delay(str(feed_id))
-    
-    return stats
-```
+`POST /api/opml/import` takes an OPML file (up to 10 MB, parsed with
+defusedxml so a hostile file can't attack the parser).
 
-**OPML Format**:
+- An outline with children is a folder. An existing folder with the same name
+  is reused; otherwise it is created.
+- An outline with no folder goes in the default folder for its feed type.
+- A feed whose URL already exists is skipped (and, with per-user
+  subscriptions on, subscribed to).
+- Outlines whose `xmlUrl` isn't `http(s)` are skipped (for example another
+  reader's keyword monitors), except for API feed types.
+- New feeds get a first fetch queued straight away.
+- With per-user subscriptions off, import changes the shared feed list, so it
+  is admin-only.
+
+The plain OPML `type` attribute can only be `rss`, `atom`, `youtube` or
+`podcast` (`PORTABLE_FEED_TYPES`); anything else becomes `rss`. That stops a
+file from another reader creating, say, a `reddit` feed with no settings,
+which could never fetch.
+
+### The `intelfeed:` extension
+
+IntelFeed adds its own attributes in the namespace
+`https://intelfeed.app/ns/opml/1`. Other readers ignore them, so the file
+still works elsewhere. On import they win over the plain attributes:
+
+| Attribute | Feed field |
+| --- | --- |
+| `intelfeed:feedType` | `feed_type` (any type that has an adapter) |
+| `intelfeed:config` | `adapter_config`, as JSON |
+| `intelfeed:interval` | `fetch_interval_minutes` |
+| `intelfeed:extractionMode` | `intel_extraction_mode` |
+| `intelfeed:aiAnalysis`, `intelfeed:extractTools`, `intelfeed:extractRules`, `intelfeed:autoExtract` | The extraction switches (`true` / `false`) |
+| `intelfeed:excludeTitles` | `exclude_title_patterns`, as a JSON list of phrases |
+
+A bad attribute is dropped on its own; it doesn't fail the import.
+
 ```xml
-<?xml version="1.0"?>
-<opml version="1.0">
-  <head>
-    <title>My Subscriptions</title>
-  </head>
+<opml version="1.0" xmlns:intelfeed="https://intelfeed.app/ns/opml/1">
   <body>
-    <outline text="Security" title="Security">
-      <outline text="Hacker News" type="rss" xmlUrl="https://news.ycombinator.com/rss" htmlUrl="https://news.ycombinator.com" />
-      <outline text="Reddit /r/netsec" type="rss" xmlUrl="https://www.reddit.com/r/netsec/.rss" htmlUrl="https://www.reddit.com/r/netsec" />
-    </outline>
-    <outline text="Blog" title="Blog">
-      <outline text="My Blog" type="rss" xmlUrl="https://example.com/feed.xml" htmlUrl="https://example.com" />
+    <outline text="Detection">
+      <outline text="SigmaHQ rules" type="rss" xmlUrl="https://github.com/SigmaHQ/sigma"
+               intelfeed:feedType="github_repo"
+               intelfeed:config='{"owner":"SigmaHQ","repo":"sigma","paths":["rules/**/*.yml"]}' />
     </outline>
   </body>
 </opml>
@@ -1686,236 +963,232 @@ async def import_opml(file: UploadFile, user: User, db: AsyncSession):
 
 ### Export
 
-```python
-@router.get("/export")
-async def export_opml(user: User, db: AsyncSession):
-    """Export all subscriptions as OPML."""
-    
-    # Fetch feeds grouped by category
-    feeds_result = await db.execute(
-        select(Feed, Category)
-        .outerjoin(Category, Category.id == Feed.category_id)
-        .order_by(Category.name, Feed.title)
-    )
-    
-    # Build OPML structure
-    opml = ET.Element("opml", version="1.0")
-    head = ET.SubElement(opml, "head")
-    title = ET.SubElement(head, "title")
-    title.text = "IntelFeed Subscriptions"
-    body = ET.SubElement(opml, "body")
-    
-    # Group by category and create outline hierarchy
-    categories: dict[str | None, list] = {}
-    for feed, category in rows:
-        cat_name = category.name if category else None
-        if cat_name not in categories:
-            categories[cat_name] = []
-        categories[cat_name].append(feed)
-    
-    for cat_name, feeds in categories.items():
-        if cat_name:
-            cat_outline = ET.SubElement(body, "outline", text=cat_name, title=cat_name)
-            parent = cat_outline
-        else:
-            parent = body
-        
-        for feed in feeds:
-            attrs = {
-                "text": feed.custom_title or feed.title,
-                "title": feed.custom_title or feed.title,
-                "type": "rss",  # Always export as RSS (OPML standard)
-                "xmlUrl": feed.url,
-            }
-            if feed.site_url:
-                attrs["htmlUrl"] = feed.site_url
-            ET.SubElement(parent, "outline", **attrs)
-    
-    return Response(
-        content=ET.tostring(opml, encoding="unicode", xml_declaration=True),
-        media_type="text/xml",
-        headers={"Content-Disposition": "attachment; filename=intelfeed-subscriptions.opml"},
-    )
-```
+`GET /api/opml/export` downloads `intelfeed-subscriptions.opml`, grouped by
+folder. With per-user subscriptions on, it holds the feeds you read.
 
-**Quirks**:
-- Import type detection: if `type` attribute not present, defaults to `rss`. Only `rss`, `atom`, `youtube`, `podcast` are accepted; anything else falls back to `rss`.
-- Only imports feeds with `xmlUrl` starting with `http://` or `https://` (skips keyword monitoring, etc.).
-- Categories created on-demand during import (reused by name if they already exist).
-- Export always marks feeds as `type="rss"` for compatibility.
+- `type` is the real type when it is one of the four portable types, else
+  `rss`.
+- The `intelfeed:` attributes are written only when they differ from the
+  defaults, so the file stays easy to compare.
+- Secrets are never exported: `token`, `api_key` and `app_password` are left
+  out of `intelfeed:config`, and so is `fetch_health`.
+
+### Starter feed packs
+
+A fresh install has no feeds. The starter packs in `backend/app/feed_packs/`
+fix that: ten curated OPML files with the `intelfeed:` extension, listed in
+`packs.json`. **Core** is the recommended one; the others are news and
+government, vendor advisories, vendor research, detection engineering,
+GitHub rule repos (needs a GitHub token), blogs, Reddit, YouTube and
+podcasts. Telegram and Bluesky sources are never included, because they need
+setup or credentials.
+
+- The onboarding wizard reads them from `GET /api/opml/starter-packs` and
+  imports with `POST /api/opml/starter-packs/import`.
+- `scripts/seed/seed_feeds.py` imports them without the UI.
+- `scripts/maintenance/audit_feed_packs.py` checks the packs for dead
+  sources. Run it before a release.
 
 ---
 
 ## Manual Ingest
 
-Not everything arrives via a feed. Analysts push material in by hand through the ingest icon in the sidebar (`IngestModal`): a pile of files, a list of URLs, pasted text, or a one-time GitHub repository. `backend/app/services/ingest_batches.py` is the batch orchestration, `backend/app/services/ingest_parsers.py` holds one parser per file type, `backend/app/services/manual_ingest.py` owns the singleton feed and the single-item doors, and `backend/app/api/ingest.py` exposes all of it (mounted under `/api/entries`).
+Not everything comes from a feed. Analysts can add material by hand with the
+ingest button in the sidebar: files, a list of URLs, pasted text, or a GitHub
+repository read once.
 
-**The `manual` pseudo-feed**:
+| File | Role |
+| --- | --- |
+| `backend/app/services/ingest_batches.py` | Runs batches |
+| `backend/app/services/ingest_parsers.py` | One parser per file type |
+| `backend/app/services/manual_ingest.py` | The Manual Uploads feed and the single-item routes |
+| `backend/app/api/ingest.py` | The API, under `/api/entries` |
 
-All manually ingested entries attach to a singleton "Manual Uploads" feed (`url = "manual://uploads"`, `feed_type = "manual"`), created on first use. The poller skips it twice over: it is created with `is_active = False` (so `poll_due_feeds()` never selects it), and `fetch_feed()` independently rejects `feed_type = "manual"` via `NON_FETCHABLE_FEED_TYPES` — there is no adapter behind it. It defaults to `intel_extraction_mode = "full"` with `auto_extract_on_ingest` and `extract_detection_rules` enabled, so manual uploads get the most aggressive intel treatment. There is one such feed, never one per batch or per user; batches group entries through `metadata.batch_id`.
+**The Manual Uploads feed.** Every hand-added entry belongs to one shared
+feed, "Manual Uploads" (`url = "manual://uploads"`, `feed_type = "manual"`),
+created the first time it is needed. It is never polled: it is created
+inactive, and `fetch_feed` skips the `manual` type anyway. It uses
+`intel_extraction_mode = "full"` with both extraction switches on, so uploads
+get the fullest analysis. Batches are grouped by `metadata.batch_id`, not by
+separate feeds.
 
-**Batches** (`ingest_batches`, `ingest_batch_items`, `ingest_files`):
+**Batches**
 
-- `POST /api/entries/ingest/batches` opens a batch. Items are added one request each — `.../files` (multipart, one file), `.../urls` (JSON list), `.../text` (a paste) — and every item is queued on the default Celery queue the moment it is added (`workers/ingest_tasks.py`); there is no submit step. One request per file keeps a forty-file drop under the 100 MB per-request cap at the Cloudflare edge in front of production.
-- The worker parses, creates **one ordinary entry per item**, and calls `dispatch_entry_pipeline(entry_id, run_extraction=True)` — the same Celery chord as a polled entry (autolink, observables, extraction, post-processing, scoring; the one-pass AI analysis follows from the half-hourly sweep on the `ai` queue). AI-created entities stay behind the entity-creation gates and remain curatable in Workbench → Engine → Extraction; a bulk drop does not bypass anything.
-- **Every outcome is a status on the item row**, never a failed request: `queued`, `parsing`, `created`, `expanded` (a `.zip` or repo that became child items), `duplicate` (same URL or same bytes; `entry_id` points at the existing entry), `no_text` (scanned PDF, empty file), `unsupported`, `too_large`, `failed` (retryable), `cancelled`. `GET .../batches/{id}` returns every item plus a summary, and `created` items carry a `phase` of `analyzing` until a current `entry_analysis` result exists, then `done`. The `ingest_item_updated` SSE event fires on every change.
-- **Originals are kept.** Each file (pastes included, as `.txt`) is written under `ingest_files_dir` (`<batch_id>/<file_id>.<ext>`, a bind-mount shared by api and celery-worker) with an `ingest_files` row, and served by `GET /api/ingest-files/{file_id}` (JWT in the header or `?token=`, modeled on the Telegram media route). The nightly `evict-old-ingest-files` job deletes files older than `ingest_files_ttl_days` (default 180; 0 keeps them forever), stamps `evicted_at` and flips the entry's `metadata.original_retained` to `false`; the entry and its intel are untouched. Entries ingested before originals were kept carry no `ingest_file_id` and read as "not kept" in the UI.
-- **Dedup**: GUIDs are `manual:url:<sha256(url)>`, `manual:pdf:<sha256(bytes)>` for PDFs (the historical form, so a PDF ingested before batches existed still reads as a duplicate), `manual:file:<sha256(bytes)>` for other files and pastes, and `manual:github:<owner>/<repo>/<path>` for repo files.
-- **Entry metadata**: `source` (`url_ingest`, `pdf_upload`, `file_upload`, `text_paste`, `github_repo`), `batch_id`, `ingest_item_id`, `ingest_file_id`, `filename`, `file_content_type`, `size_bytes`, `original_retained`, `uploaded_by`. The reader shows the original (filename, type, size, Download) and a batch chip in the byline; the Manual Uploads feed in the reader's table view gains File, Size and Original columns.
+- `POST /api/entries/ingest/batches` opens a batch. Items are added one per
+  request: `.../files` (one file, multipart), `.../urls` (a JSON list) or
+  `.../text` (a paste). Each item is queued for a worker as soon as it is
+  added; there is no submit step. One file per request keeps a large drop
+  under the 100 MB per-request limit of a Cloudflare proxy.
+- The worker parses each item into **one normal entry** and sends it through
+  the same entry pipeline as a polled entry. The AI analysis follows from its
+  regular sweep. Entities the AI creates go through the same checks as
+  always and can be reviewed in Workbench → Engine → Extraction.
+- **Every result is a status on the item, never a failed request:**
 
-**Formats** (`ingest_parsers.py`, detection by extension, then content type, then magic bytes): PDF (PyMuPDF, text + page HTML with embedded images), HTML, plain text, Markdown, CSV/TSV (rendered as a table, text as `cell | cell` rows), `.eml` (subject as title, text or HTML part, attachments listed not parsed), `.docx` (paragraphs, headings and tables from `word/document.xml`), JSON/YAML/XML/log as a code block, and `.zip` (expanded into one item per member, with a member cap, a per-member size cap, and a path-traversal guard; nested archives are not recursed). No OCR: a scanned PDF is a clean `no_text` row.
+  | Status | Meaning |
+  | --- | --- |
+  | `queued` | Waiting for a worker |
+  | `parsing` | A worker has it |
+  | `created` | The entry exists |
+  | `expanded` | A `.zip` or repo that became child items |
+  | `duplicate` | Same URL or same bytes as an existing entry (`entry_id` points to it) |
+  | `no_text` | Nothing to read (a scanned PDF, an empty file) |
+  | `unsupported` | No parser for this type |
+  | `too_large` | Over the size limit; not stored |
+  | `failed` | Fetch or parse error; can be retried |
+  | `cancelled` | Removed before a worker took it |
 
-**Indicator lists**: an item marked `is_ioc_list` has `metadata.content_type = "ioc_list"` (and `raw_content`) on its entry, so the observables stage parses the body through the curated-list door (`store_ioc_list_observables`) at feed trust instead of staging regex candidates. Unmarked prose takes the normal candidate path — regex never creates a ledger row.
+- `GET .../batches/{id}` returns every item and a summary. `created` items
+  show a `phase` of `analyzing` until the AI analysis exists, then `done`. An
+  `ingest_item_updated` live-update event fires on every change.
+  `.../items/{item_id}/retry` retries an item and `DELETE .../items/{item_id}`
+  cancels one. `GET /api/entries/ingest/capabilities` returns the limits.
 
-**One-time GitHub repositories**: a `github.com/owner/repo` URL (optionally `/tree/<branch>/<path>`) on the URLs tab becomes a `github_repo` item. The worker calls `GitHubRepoAdapter.fetch_full_tree` once with a throwaway config (the shared token, the adapter's own content-type detection and rendering, path globs from the URL) and turns each returned file into a `github_file` child item — one entry per file, no feed row, nothing polls afterwards. The adapter's classification (Sigma, YARA, `ioc_list` for repos it already knows) rides along in the entry metadata; the analyst's explicit indicator-list mark wins.
+**Originals are kept.** Each file (pastes too, as `.txt`) is saved under
+`INGEST_FILES_DIR` (`<batch_id>/<file_id>.<ext>`, a folder shared by the api
+and worker) and downloaded with `GET /api/ingest-files/{file_id}` (login
+token in the header or `?token=`). The nightly `evict-old-ingest-files` job
+deletes files older than `ingest_files_ttl_days` (default 180; 0 keeps them
+forever) and sets the entry's `metadata.original_retained` to `false`. The
+entry and its intelligence stay.
 
-**The single-item doors** keep their synchronous contract for the Android client and the `ingest_url` registry tool: `POST /api/entries/ingest/url` fetches and returns the entry in the request (`409 duplicate`, `422 extraction_failed`); `POST /api/entries/ingest/pdf` runs as a one-item batch so the original is kept, but still answers with the entry (`409`, `422`, `413 file_too_large`, `400 invalid_file`).
+**Duplicates** are spotted by GUID:
 
-**Settings** (Settings → Engine): `ingest_files_ttl_days`, `ingest_max_file_mb` (default 50, applies to zip members too), `ingest_max_batch_items` (default 200, zip members and repo files included), `ingest_zip_max_members` (default 100). `ingest_files_dir` is env-only.
+| Source | GUID |
+| --- | --- |
+| URL | `manual:url:<sha256 of url>` |
+| PDF | `manual:pdf:<sha256 of bytes>` |
+| Other file or paste | `manual:file:<sha256 of bytes>` |
+| GitHub repo file | `manual:github:<owner>/<repo>/<path>` |
 
-**Registry tools**: `ingest_url`, `ingest_text`, `ingest_file` (base64), `ingest_batch` (URLs and texts), `get_ingest_batch`.
+**Entry metadata:** `source` (`url_ingest`, `pdf_upload`, `file_upload`,
+`text_paste`, `github_repo`), `batch_id`, `ingest_item_id`, `ingest_file_id`,
+`filename`, `file_content_type`, `size_bytes`, `original_retained`,
+`uploaded_by`. The reader shows the original file (name, type, size,
+Download) and a batch chip. The Manual Uploads feed's table view adds File,
+Size and Original columns.
+
+**Formats** (`ingest_parsers.py`; detected by extension, then content type,
+then the file's first bytes):
+
+- PDF (text plus page HTML with images, via PyMuPDF)
+- HTML, plain text, Markdown
+- CSV/TSV (shown as a table)
+- `.eml` email (subject as title; attachments listed, not parsed)
+- `.docx` (paragraphs, headings and tables)
+- JSON, YAML, XML and logs (shown as code)
+- `.zip` (one item per file inside, with a file count limit, a per-file size
+  limit and protection against path tricks; zips inside zips are not opened)
+
+There is no OCR: a scanned PDF ends as `no_text`.
+
+**Indicator lists.** An item marked as an indicator list (`is_ioc_list`) is
+saved with `metadata.content_type = "ioc_list"`. The observables stage then
+reads it as a trusted list of IOCs (indicators of compromise) instead of
+treating it as prose. Regular expressions alone never create an observable.
+
+**GitHub repositories, read once.** A `github.com/owner/repo` URL (optionally
+`/tree/<branch>/<path>`) on the URLs tab becomes a `github_repo` item. The
+worker reads the repository once with the
+[repository monitor](#github-repository-monitor)'s full-tree reader and makes
+one child item per file. No feed is created and nothing polls afterwards. The
+adapter's file types (Sigma, YARA, indicator lists for repos it knows) carry
+over; an analyst's own indicator-list mark wins.
+
+**The single-item routes** answer in the same request, for the Android app
+and the `ingest_url` tool:
+
+- `POST /api/entries/ingest/url` returns the entry, or `409 duplicate`, or
+  `422 extraction_failed`.
+- `POST /api/entries/ingest/pdf` runs as a one-item batch (so the original is
+  kept) but still returns the entry, or `409`, `422`, `413 file_too_large` or
+  `400 invalid_file`.
+
+**Settings** (Settings → Engine):
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `ingest_files_ttl_days` | 180 | Days to keep originals. 0 keeps them forever. |
+| `ingest_max_file_mb` | 50 | Per-file limit, zip contents included. |
+| `ingest_max_batch_items` | 200 | Items per batch, zip contents and repo files included. |
+| `ingest_zip_max_members` | 100 | Files taken out of one `.zip`. |
+
+`INGEST_FILES_DIR` is set only in the environment.
+
+**Registry tools:** `ingest_url`, `ingest_text`, `ingest_file` (base64),
+`ingest_batch` (URLs and texts), `get_ingest_batch`.
 
 ---
 
 ## Building a New Adapter
 
-### Step 1: Choose Base Class
+1. **Pick a base class.**
+   - `BaseAdapter` if the user gives a URL and the worker can download it
+     (RSS-like formats, HTML).
+   - `ExtendedAdapter` if you build the requests yourself from settings, need
+     credentials, or page through an API.
 
-**BaseAdapter** if:
-- You have a URL to fetch raw content (RSS, Atom, HTML, etc.).
-- User provides the feed URL.
+2. **Write the class** in `backend/app/adapters/` and return `ParsedEntry`
+   objects. Each entry needs a `guid` that is unique and stable within the
+   feed: that is how duplicates are spotted. Add a `metadata["source"]` name.
 
-**ExtendedAdapter** if:
-- You construct API endpoints from `config` (no user-provided URL).
-- You have API credentials/tokens to manage.
-- You paginate through API results.
+   ```python
+   from app.adapters.base import ExtendedAdapter, ParsedEntry, ParsedFeedMeta
 
-### Step 2: Define Data Structures
+   class MyAdapter(ExtendedAdapter):
+       async def fetch_entries(self, config, since=None):
+           entry = ParsedEntry(
+               guid="unique-id-for-this-item",
+               url="https://example.com/article",
+               title="Article Title",
+               content_html="<p>Article body</p>",
+               metadata={"source": "my_adapter"},
+           )
+           return self.get_feed_meta(config), [entry]
 
-```python
-from app.adapters.base import BaseAdapter, ParsedEntry, ParsedFeedMeta, ParsedMedia
+       def get_feed_meta(self, config):
+           return ParsedFeedMeta(title="My source")
+   ```
 
-class MyAdapter(BaseAdapter):
-    def parse_entries(self, feed_url: str, content: str) -> tuple[ParsedFeedMeta, list[ParsedEntry]]:
-        # Parse raw content into entries
-        # Return (feed_meta, list_of_entries)
-        pass
-```
+3. **Register it** in `backend/app/adapters/__init__.py`: URL feeds in
+   `_ADAPTERS`, API adapters in `_EXTENDED_ADAPTERS`, and the class in
+   `__all__`. `is_extended_feed_type()`, `get_extended_adapter()` and
+   `known_feed_types()` read those dicts, and the feed API and OPML import
+   check feed types against `known_feed_types()`. No migration is needed:
+   `feed_type` is a plain text column (up to 30 characters).
 
-### Step 3: Normalize Entries
+4. **Add it to the UI.** The add-feed form and the feed settings need fields
+   for its settings (`frontend/src/components/AddFeedModal.tsx`,
+   `frontend/src/components/feedModal/panes/adapterFields.tsx`) and an icon
+   (`frontend/src/components/FeedTypeIcon.tsx`).
 
-Each entry must have:
-- **guid**: Unique per feed (used for deduplication).
-- **url**: Link to original entry (optional).
-- **title**: Human-readable title (fallback to "Untitled").
-- **content_html**: HTML content (sanitized by worker).
-- **published_at**: Timestamp (optional).
-- **metadata**: Adapter-specific dict (optional).
-- **media**: ParsedMedia object (optional).
+5. **Handle errors.** Log with enough context to debug (feed, endpoint). An
+   exception from `fetch_entries()` counts as a failed fetch, with the
+   message saved in `last_error`. For a quiet "nothing this time" (a 429, say)
+   return an empty list instead.
 
-Example:
+6. **Keep state between fetches** by returning it in
+   `feed_meta.extra["_adapter_state"] = {...}` (Bluesky does this with
+   `last_seen_cid`). The worker merges it into `adapter_config` after a good
+   fetch. The worker also passes a temporary `_feed_id` in `config` for
+   per-feed caches; it is never saved.
 
-```python
-entry = ParsedEntry(
-    guid="unique-id-for-this-entry",
-    url="https://example.com/article",
-    title="Article Title",
-    author="Jane Doe",
-    content_html="<p>Article body...</p>",
-    summary="Short summary...",
-    published_at=datetime.now(timezone.utc),
-    metadata={
-        "source": "my_adapter",
-        "custom_field": "value",
-    },
-)
-```
+7. **Test it.** Adapter tests live in `backend/tests/` (for example
+   `test_adapters.py`, `test_bluesky_adapter.py`).
 
-### Step 4: Register Adapter
-
-**File**: `backend/app/adapters/__init__.py`
-
-```python
-from app.adapters.my_adapter import MyAdapter
-
-# BaseAdapter subclasses go in _ADAPTERS; ExtendedAdapter subclasses in _EXTENDED_ADAPTERS
-_EXTENDED_ADAPTERS: dict[str, ExtendedAdapter] = {
-    "my_feed_type": MyAdapter(),
-    ...
-}
-```
-
-Also add the class to `__all__`. `is_extended_feed_type()` and `get_extended_adapter()` pick it up automatically from `_EXTENDED_ADAPTERS`.
-
-### Step 5: Add Feed Type to Feed Model
-
-Create a migration to add your feed_type to the database if needed.
-
-### Step 6: Configure in Feed
-
-Users create feeds with:
-```python
-feed = Feed(
-    title="My Feed",
-    url="https://...",  # or dummy URL for ExtendedAdapter
-    feed_type="my_feed_type",
-    adapter_config={
-        "setting1": "value1",
-        "setting2": 123,
-    },
-)
-```
-
-### Step 7: Handle Errors Gracefully
-
-- Catch exceptions in `parse_entries()` / `fetch_entries()`.
-- Log with context (feed URL, API endpoint, etc.).
-- Raise specific exceptions for `feed_tasks` to handle retry logic.
-
-**State persistence**: an ExtendedAdapter can return state to persist into `feed.adapter_config` by setting `feed_meta.extra["_adapter_state"] = {...}` (e.g. Bluesky's `last_seen_cid`); the worker merges it after a successful fetch. The worker also injects a scratch `_feed_id` key into `config` so adapters can scope per-feed caches.
-
-### Step 8: Test
-
-```python
-# Unit tests
-@pytest.mark.asyncio
-async def test_fetch_entries():
-    adapter = MyAdapter()
-    config = {"setting": "value"}
-    meta, entries = await adapter.fetch_entries(config)
-    
-    assert len(entries) > 0
-    assert entries[0].guid
-    assert entries[0].title
-```
-
----
-
-## Summary Table: Adapter Capabilities
-
-| Feed Type | Class | Auth | Pagination | Rate Limiting | Media | Notes |
-|-----------|-------|------|-----------|---------------|-------|-------|
-| **RSS** | BaseAdapter | No | N/A | Domain-based | No | Standard feedparser library |
-| **Atom** | BaseAdapter | No | N/A | Domain-based | No | Same as RSS (feedparser) |
-| **YouTube** | BaseAdapter | No | Feed-based | Domain-based | Yes (video) | Shorts filtering, retry logic |
-| **Podcast** | BaseAdapter | No | Feed-based | Domain-based | Yes (audio) | iTunes/Podcast 2.0 namespaces |
-| **Reddit** | ExtendedAdapter | No | N/A | Reddit quota | No | Public /hot.rss (JSON API blocked); synthetic rank-based score |
-| **GitHub Releases** | ExtendedAdapter | Optional token | API pagination | GitHub quota | No | Pre-releases filterable |
-| **GitHub Advisories** | ExtendedAdapter | Optional token | API pagination | GitHub quota | No | Severity/ecosystem filtering |
-| **GitHub Repo** | ExtendedAdapter | Optional token | API pagination | GitHub quota | No | File content extraction, commits/tree diff modes |
-| **NVD CVE** | ExtendedAdapter | Optional key | API pagination | NVD quota | No | CVSS score filtering, incremental polling |
-| **Mastodon** | ExtendedAdapter | Optional token | API pagination | Instance quota | Yes (images) | Public timelines, hashtag support |
-| **Bluesky** | ExtendedAdapter | Optional app-password | API pagination | AT Protocol quota | Yes (images) | Author/feed/search modes, JWT caching |
-| **Telegram** | ExtendedAdapter | Session file | MTProto streaming | Telegram rate limit | Yes (photos/video) | Edit/delete probing, OCR, auto-attribution |
-| **Web Scraper** | ExtendedAdapter | No | Pagination selectors | Domain-based | No | Blog discovery, CSS selectors, robots.txt |
-
-Not listed: `RansomwareLiveAdapter` has no feed type — it feeds the ransomware victim tracker's structured records via its own beat task, not the entry pipeline (see [Ransomware Leak Sites](#ransomware-leak-sites-ransomwarelive)).
+   ```python
+   @pytest.mark.asyncio
+   async def test_fetch_entries():
+       meta, entries = await MyAdapter().fetch_entries({"setting": "value"})
+       assert entries and entries[0].guid and entries[0].title
+   ```
 
 ---
 
 ## See Also
 
-- **architecture.md**: System design, entity extraction, correlation events.
-- **entries.md**: Entry lifecycle, field definitions, sanitization.
-- **entity-profiles.md**: Threat actor, CVE, TTP modeling.
-
+- [architecture.md](architecture.md): system design, entity extraction,
+  correlation events.
+- [entries.md](entries.md): the entry lifecycle, fields and cleaning.
+- [entity-profiles.md](entity-profiles.md): how entities are modelled.
+- [engine-settings.md](engine-settings.md): the settings mentioned here.

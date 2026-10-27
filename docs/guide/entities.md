@@ -1,184 +1,180 @@
 # Entities and profiles
 
-An **entity** is a thing IntelFeed tracks across articles rather than inside
-one: a threat actor, a malware family, a CVE, an ATT&CK technique, a weakness
-(CWE), a vendor, a product, a country, a tool, a mitigation, a ransomware
-victim, and an observable (an indicator — an IP, domain, hash, command line).
+An **entity** is a named thing IntelFeed tracks across many articles, such as
+an actor, malware family or CVE. This page covers profiles, watching, and
+fixing mistakes. The types:
 
-Every article that arrives is scanned against a dictionary of known entity names
-and aliases. Matches become links in the article body and rows in the database,
-which is what makes a profile page accumulate.
+- **Threat actor**: a group or person behind attacks, such as APT29.
+- **Malware**: a family of malicious software, such as LockBit.
+- **CVE**: a public ID for a known software flaw, such as CVE-2026-1234.
+- **TTP**: a MITRE ATT&CK technique (how attackers do something).
+- **Weakness (CWE)**: a category of software flaw, such as SQL injection.
+- **Vendor** and **product**: who makes software, and the software itself.
+- **Country** and **sector**: where and which industries are involved.
+- **Tool**: software attackers use that isn't malware, such as Mimikatz.
+- **Mitigation**: a defence that counters a technique.
+- **Observable**: an indicator of compromise (IOC), such as an IP address,
+  domain, file hash or command line.
+- **Campaign**: an investigation you create. See
+  [Campaigns and reports](campaigns-and-reports.md).
+
+Each known name or alias found in a new article becomes a link and adds the
+article to that entity's profile.
 
 ![The Threat Actors table in the Workbench, with columns for aliases, country, motivation, sectors, activity and first seen](../assets/screenshots/entities-list.png)
 
-*Every entity type gets the same table: filterable per column, with the columns you pick.*
+*Every entity type has the same kind of table. You can filter each column and choose which columns to show.*
 
 ## Profile pages
 
 ![The Scattered Spider profile page showing aliases, best-evidenced claims, an AI assessment, and a detection-gap panel](../assets/screenshots/entity-profile.png)
 
-*A profile page is assembled from every article that mentioned the entity.*
+*A profile page is built from every article that mentioned the entity.*
 
+To open a profile, click a linked name in an article, or pick a type under
+**Entities** in the Workbench sidebar.
 
-Click any linked name in an article, or browse by type under **Workbench →
-Entities**. Every type shares the same page shape:
+**The header** shows the name, aliases, description and badges (such as **KEV**
+on a CVE known to be exploited). Click the name or aliases to edit them. The
+**Watch** button and the **⋯** menu of other actions are here too.
 
-**The header** carries the name, aliases, a description, and outbound pivot
-links — MITRE ATT&CK, VirusTotal, MalwareBazaar, Hybrid Analysis and so on,
-chosen per entity type. Those are outbound searches, not data IntelFeed holds.
-Click the name itself to rename the entity.
+**Tabs.** Every profile has **Overview** and **Relationships**. Some types add
+more:
 
-**Overview** is the substance, and what's in it depends on the type. A CVE shows
-severity, exploitation status and KEV listing; an actor shows attribution,
-targeting and the toolset; everything shows the timeline of when it was first
-seen, when it was last active, and what happened in between.
+| Tab | Shown on | What it shows |
+|---|---|---|
+| Detection | Actors, malware, CVEs, weaknesses, TTPs, campaigns | Detection rules for this entity, and gaps in coverage |
+| Weaknesses | CVEs | The CWE weaknesses behind the flaw |
+| Vulnerabilities | Vendors, products, weaknesses | CVEs that affect it |
+| Geography | Countries | Actors from or targeting the country, its role in reports, related countries |
+| Victimology | Sectors | Who targets this industry |
 
-**Relationships** shows what this entity is connected to and *why* — the
-evidence behind each link, not just the link. See below.
+**Overview** holds an **Assessment**, a **Snapshot** of key facts, **Latest
+developments**, the most important articles, AI analysis, **Notes**, and
+**Sources & References**. The Sources card links to searches on sites such
+as MITRE ATT&CK, VirusTotal and MalwareBazaar. A CVE also shows severity and
+exploitation; an actor shows attribution and targeting.
 
-**Articles** lists everything mentioning it, newest first.
+**Relationships**: see [Relationships](#relationships) below.
 
-**Sectors** are the one entity nobody extracts by name. An article links to
-*Healthcare* only when the analysis judged healthcare to be the target, never
-because the word appeared, so a sector profile's **Victimology** tab is built
-from judgments: who targets it (split into *reported* — co-occurring on those
-articles — and *asserted* — an explicit claim with its source), the leak-site
-victims posted in it, and where in the world it is being hit. The chips on an
-actor's header link to these profiles.
+**Sectors** work differently. An article links to *Healthcare* only when the AI
+analysis judged healthcare a target. The
+**Victimology** tab splits who targets the sector into *reported* (named in
+articles about attacks on it) and *asserted* (an explicit claim, with its
+source). It also shows ransomware leak-site victims in that sector. Leak-site
+posts are the gang's claims, not confirmed breaches.
 
-**Notes** are yours to write and everyone's to read.
+**Notes** on a profile are yours to write and everyone's to read.
 
 ## Where the facts come from
 
-Profile fields are filled from several places, and the profile tells you which.
-Hover a value for its provenance popover: which source claimed it, when, and
-whether other sources agree. A field two sources agree on and a field one blog
-asserted look different on the page, deliberately.
+Hover a value to see who claimed it, when, and whether other sources agree.
 
-Enrichment sources an admin can turn on under **Settings → Engine**, enrich
-stage:
+**Enrichment** sources add data from outside services. An admin turns them on
+under **Settings → Engine**, in the enrich stage:
 
 | Source | What it adds |
 |---|---|
-| NVD | CVE metadata, CVSS scores, timelines |
-| EPSS | Probability a CVE gets exploited |
-| CISA KEV | Known-exploited catalogue flags and due dates |
-| MITRE ATT&CK | The technique and tactic catalogue |
-| VulnCheck / CVEDetails | Extended CVE intelligence (supports per-user keys) |
+| NVD | CVE details, CVSS severity scores, dates |
+| EPSS | How likely a CVE is to be exploited |
+| CISA KEV | Whether a CVE is known to be exploited, and the fix-by date |
+| MITRE ATT&CK | The catalogue of techniques and tactics |
+| VulnCheck / CVEDetails | More CVE data |
 | OSV | Open-source vulnerability data |
 | Malpedia | Actor and malware profiles and aliases |
-| GitHub PoC | Proof-of-concept exploit references |
-| Wikipedia | An article summary on the profile |
+| GitHub PoC | Links to proof-of-concept exploit code |
+| Wikipedia | A summary from Wikipedia |
+| VirusTotal, GreyNoise, Shodan InternetDB | Reputation data for observables (VirusTotal and GreyNoise need an API key) |
 
-NVD, EPSS and KEV together are what make a CVE page worth opening: how bad,
-how likely, and whether it's already happening.
+Sources run when an entity is created, on a schedule, or when you ask. The
+page shows how old results are; the refresh icon fetches them again.
 
-Enrichment runs automatically when an entity is first created and caches its
-results — the age is shown. The refresh icon re-queries. If Wikipedia matched
-the wrong article, pick **None** in the profile's Wikipedia picker; that clears
-it *and* stops it being re-matched later.
-
-IntelFeed does not ship indicator-reputation sources — no VirusTotal, AbuseIPDB,
-Shodan or GreyNoise lookups. For indicator reputation, use the outbound pivot
-links in the profile header.
+If Wikipedia matched the wrong article, choose **None — no Wikipedia article**
+in the profile's Wikipedia picker. It won't be matched again.
 
 ## Observables (indicators)
 
-Observables are the one entity type that deliberately does **not** get created
-by pattern matching. An IP-shaped string in an article is not an indicator; it
-is a string. A row only appears when something with judgment puts it there: the
-AI analysis confirming it as an indicator, a curated indicator-list feed, an
-ATT&CK technique's host artifact, or you promoting it yourself.
+IntelFeed never creates an observable just because a string looks like an IP.
+One is created only when something with judgment confirms it:
 
-What the scan *does* produce is **candidates** — suggestions shown against the
-article, which you promote or dismiss from the reader. Hashes and public IPs are
-always nominated; domains, URLs and emails are nominated only when the author
-defanged them (`evil[.]com`, `hxxps://`), because defanging is the author
-telling you it's an indicator.
+- the AI analysis of an article,
+- a curated indicator-list feed,
+- a host artifact listed on an ATT&CK technique,
+- or you, promoting it yourself.
 
-Every observable carries where it came from, the sentence that justified it, and
-a confidence that **decays** — an IP halves every 30 days, a URL every 60, a
-domain every 90, while hashes and host artifacts never decay, because behaviour
-and math persist while infrastructure rotates. A fresh sighting resets the
-clock.
+Anything that looks like an indicator shows as a **candidate** on the article
+for you to promote or dismiss. Hashes and public IPs are always
+suggested. Domains, URLs and email addresses are suggested only when the author
+defanged them (`evil[.]com`, `hxxps://`).
 
-The **Sources** column says how many *independent* places back a value:
-"3 reports · 1 feed" means three articles or advisories mentioned it and one
-indicator feed lists it. A curated feed that republishes the same list as
-eighteen CSV files counts once, so a value with "1 feed" and no reports is
-exactly that — on a blocklist, never written up — and its profile says so
-instead of showing an empty page under a large number.
+Each observable records its source, the sentence behind it, and a confidence
+score. Confidence halves every 30 days for an IP, 60 for a URL and
+90 for a domain. Hashes and host artifacts never fade. A new sighting resets
+the clock.
 
-Beyond IPs, domains, URLs and hashes, the ledger holds the behavioural
-observables research write-ups quote: full command lines, dropped file paths,
-registry values, scheduled-task and service names, mutexes, user-agents and
-custom HTTP headers. Each carries the role it played (persistence, execution,
-credential access, …) and, where the article makes it clear, the ATT&CK
-technique. Generic discovery commands (`whoami /priv`, `systeminfo`), system
-binaries named as the technique's target (`C:\Windows\System32\cmd.exe`) and
-redacted or templated values are kept out by design.
+The **Sources** column counts separate backers: "3 reports · 1 feed" means
+three articles or advisories and one indicator feed. A feed split across many
+files counts once.
 
-Browse them under **Workbench → Entities → Observables**. Dual-use infrastructure (shared
-hosting, CDNs, URL shorteners) is kept but tagged, so it stays visible as intel
-without ever reaching a blocklist. If your administrator has turned on
-publishing, the ledger is also served as EDL blocklists, SIEM lookup CSVs and a
-TAXII 2.1 collection.
+Observables also include command lines, file paths, registry values, scheduled
+task and service names, mutexes, user-agents and HTTP headers, each with its
+role (such as persistence) and, where clear, its ATT&CK technique. Generic commands (`whoami /priv`,
+`systeminfo`), standard system files and redacted values are left out.
+
+Browse them under **Entities → Observables** in the Workbench. Shared
+infrastructure (hosting, CDNs, URL shorteners) is tagged so it never reaches a
+blocklist. If your admin has turned on publishing, observables are
+also served as blocklists, SIEM lookup files and a TAXII 2.1 feed.
 
 ## Relationships
 
-Relationships between entities — "this actor uses that malware", "this malware
-exploits that CVE" — are typed, and each one carries the evidence that produced
-it: which articles said so, and how confidently.
+Relationships link two entities, such as "this actor uses that malware", with
+the articles that said so and a confidence. They come from the MITRE ATT&CK catalogue, article text and analysts. One backed by
+MITRE and eleven articles shows as stronger than one backed by a single article.
 
-They come from a few places: the MITRE ATT&CK catalogue, extraction from article
-text, and analyst assertions. A relationship asserted by one article and one
-confirmed by MITRE plus eleven articles are not shown as equals.
-
-The graph view draws them as a network. Clicking a cluster filters the page to
-that cluster, which is usually the fastest way to answer "what is the group of
-things involved in this story?"
+In the graph view, click a cluster to filter the list to it.
 
 ## Watching and muting
 
-The **⋯** menu on any profile has **Watch** and **Mute**. Both are per-user —
-nothing you do here affects anyone else's view.
+Watching and muting are personal. They don't change what anyone else sees.
 
-- **Watch** — articles mentioning this entity get a priority boost in *your*
-  Priority Queue, and surface there even when they'd otherwise fall below the
-  threshold.
-- **Mute** — articles mentioning it are suppressed from your Priority Queue
-  entirely. They still appear in normal feed views and in search.
+- **Watch**: click **Watch** in the profile header, or **Watch entity** in the
+  **⋯** menu. Articles that mention it get a boost in *your* Priority Queue,
+  and threats involving it are pinned to the
+  [Threats board](threats-board.md).
+- **Mute**: **Mute entity** in the **⋯** menu hides articles that mention it
+  from your Priority Queue. They still show in feeds and search.
 
-Watch the handful of things you're actually responsible for: your vendors, your
-products, the actors that target your sector. Watching forty things is the same
-as watching none. Automation rules can also fire on "entity is watchlisted", so
-a watch can become a notification — see [Automation and AI](automation-and-ai.md).
+On vendors and products, **Follow for vuln alerts** in the **⋯** menu shows
+their vulnerabilities in **Vendor watch** on the Threats board.
 
-The **Watchlist** section under Workbench → Intelligence lists what you're
-watching in one place.
+Watch only the few things you're responsible for. Watching forty things is the
+same as watching none. Automation rules can notify you when a watched entity is
+mentioned. See
+[Automation and AI](automation-and-ai.md).
+
+**Watchlist**, under **Intelligence** in the Workbench sidebar, lists
+everything you watch.
 
 ## Duplicates and mistakes
 
-Entity extraction produces duplicates. Two names for one group, a malware family
-that also got created as a tool, a vendor recorded twice with different
-capitalisation.
+Extraction sometimes makes duplicates, such as two names for one group or
+malware also recorded as a tool. These fixes are admin-only.
 
-**Merging** — from the **⋯** menu on a profile, choose Merge and pick the
-duplicate. Articles, relationships and aliases are unioned onto the survivor.
-Merging is admin-only, and it's same-type only.
-
-**Converting** — when the type itself is wrong (something recorded as a tool
-that is really a product), convert it rather than deleting and recreating.
-Converting writes a tombstone so extraction doesn't just recreate the wrong one
-within the hour; deleting doesn't, which is why the deleted thing keeps coming
-back.
-
-**Wrong links** — if the problem is the *linking* rather than the entity, fix it
-in the reader with the **Wrong?** control on the link, described in
-[Reading and triage](reading-and-triage.md).
+- **Merge**: on the duplicate's profile, open the **⋯** menu, choose
+  **Merge…**, and pick the entity to keep. Articles, relationships and aliases
+  move to it. Both must be the same type.
+- **Convert type**: when the type is wrong (say, a "tool" that is really a
+  product), use **Convert type** in the **⋯** menu. Converting stops extraction
+  recreating the wrong entity. Deleting doesn't, which is why deleted entities
+  can come back.
+- **Wrong links**: use the **Wrong?** control on the link in the reader. See
+  [Reading and triage](reading-and-triage.md).
 
 ## Glossary
 
-Hover an unfamiliar term — a technique ID, an acronym — for a definition
-popover. The glossary behind it is editable under **Workbench → Glossary**, so
-house terms and internal shorthand can live there too.
+Hover an unfamiliar term, such as a technique ID or acronym, to see a
+definition. Edit the glossary under **Intelligence → Glossary** in the
+Workbench sidebar to add your team's own terms.
+
+Next: [Priority Queue and watching](priority-queue.md)

@@ -1,69 +1,69 @@
 # IntelFeed Documentation
 
-Documentation for IntelFeed — a self-hosted, security-focused RSS aggregator and threat intelligence platform.
+The index of every IntelFeed doc. Use it to find the right page, whether you want to use the app, run it, or change its code.
 
-**If you are here to use the app, start with the [user guide](guide/README.md).** Everything below it is developer and operator reference.
+**If you want to use the app, start with the [user guide](guide/README.md).** Everything after it is reference for operators and developers.
 
-For a top-level project overview and quickstart, see [`../readme.md`](../readme.md). For deployment walkthroughs, see [`../setup.md`](../setup.md). Repo-wide conventions live in [`../CLAUDE.md`](../CLAUDE.md).
+For a project overview and quickstart, see [`../readme.md`](../readme.md). To install on a server, see [`../setup.md`](../setup.md). Short repo conventions are in [`../CLAUDE.md`](../CLAUDE.md).
 
 ---
 
 ## For users
 
-- **[guide/](guide/README.md)** — **The user guide.** How to actually work in IntelFeed: getting started, reading and triage, search, entity profiles, the Priority Queue, the workbench, detection rules, campaigns and reports, automation and the copilot. Start here if you want to *use* IntelFeed rather than build it.
-- **[query-language.md](query-language.md)** — Full reference for the search query syntax used across the unified search bar, command palette, query builder, and saved searches.
-- **[cli-reference.md](cli-reference.md)** — Reference for the `intelfeed_cli.py` tool — all 187 tools in the full CLI (94 in the read-only lite variant), with args, returns, and examples.
-- **[../intelfeed-mcp/README.md](../intelfeed-mcp/README.md)** — The MCP server for local models (LM Studio and other MCP clients): the same tool registry behind nine fixed tools, on-demand skills and size-capped results, so it fits a small context window.
-- **[android-app.md](android-app.md)** — The native Android client: where to download the APK, what the app covers, how it is built, signed and released from CI, and how its source is synced into `android/`.
+- **[guide/](guide/README.md)** — The user guide: getting started, reading and triage, search, entities, the Priority Queue, the workbench, detection rules, campaigns and reports, automation and the copilot.
+- **[query-language.md](query-language.md)** — The search query syntax used by the search bar, command palette and saved searches.
+- **[cli-reference.md](cli-reference.md)** — The `intelfeed_cli.py` tool: 191 tools in the full CLI and 95 in the read-only lite CLI, with arguments, results and examples.
+- **[../intelfeed-mcp/README.md](../intelfeed-mcp/README.md)** — The MCP server for local models (LM Studio and other MCP clients). It offers the same tools behind nine fixed tools, loads task guides on demand and keeps results small to fit a small context window.
+- **[android-app.md](android-app.md)** — The Android app: where to download it, what it does, and how it is built, signed and released.
 
 ## For operators
 
-- **[operations.md](operations.md)** — Deployment (dev vs prod Docker Compose, Caddy auto-TLS), security posture, observability, backup/restore, scaling, troubleshooting.
-- **[public-read-only-mode.md](public-read-only-mode.md)** — The admin switch that lets anyone browse IntelFeed without an account: what visitors see, what stays private, how the server enforces it, and the request limits.
-- **[integrations.md](integrations.md)** — Copy-paste recipes for hooking IntelFeed into Slack, Discord, Teams, SIEMs (Splunk/Elastic/Sentinel), MISP, GitHub, and configuring AI providers / enrichment sources.
+- **[operations.md](operations.md)** — Running in production: the dev and prod compose stacks, Caddy and TLS, security, logs and metrics, backup and restore, updates, scaling and troubleshooting.
+- **[public-read-only-mode.md](public-read-only-mode.md)** — The admin switch that lets anyone browse without an account: what visitors see, what stays private, how the server enforces it, and the request limits.
+- **[integrations.md](integrations.md)** — Recipes for connecting IntelFeed to Slack, Discord, Teams, SIEMs (Splunk, Elastic, Sentinel), MISP and GitHub, and for setting up AI providers and enrichment sources.
 
 ## For contributors
 
-- **[contributing.md](contributing.md)** — Local dev setup (Docker, hybrid, native), backend & frontend workflows, tests, CI, migrations, code style, debugging.
-- **[architecture.md](architecture.md)** — System overview and a tour of every major subsystem. Read this first when learning the codebase.
+- **[contributing.md](contributing.md)** — Local setup (full Docker or hybrid), backend and frontend workflow, tests, CI, migrations, code style and debugging.
+- **[architecture.md](architecture.md)** — How the system fits together, with a tour of each major part. Read this first when learning the code.
 
 ## Subsystem deep dives (developer reference)
 
 | Doc | Covers |
 |---|---|
-| **[entries.md](entries.md)** | End-to-end lifecycle of a single entry, from feed poll to correlated intelligence. |
-| **[entity-profiles.md](entity-profiles.md)** | How entity profile pages (actors, malware, CVEs, vendors, products, countries) are assembled. |
-| **[adapters.md](adapters.md)** | RSS / YouTube / podcast / Reddit / GitHub / NVD / Mastodon / Bluesky / Telegram / web-scraper adapters, the polling loop, dedup, conditional GET, OPML, and how to add a new adapter. |
-| **[intelligence-engine.md](intelligence-engine.md)** | Aho-Corasick autolinker, vocab versioning, correlation engine, proximity scoring and relationship strength, MITRE ATT&CK / CVE / TTP pipelines, reporting & export. |
-| **[detection-engineering.md](detection-engineering.md)** | Detection rule extraction (Sigma, SPL, CrowdStrike QL, Elastic QL, KQL, YARA), validation, the rule library, the workbench, ATT&CK Navigator export, telemetry sources, mitigations. |
-| **[automation-ai-enrichment.md](automation-ai-enrichment.md)** | Automation rule engine (triggers / conditions / actions), pluggable AI provider system, prompt templates, AI task assignments, and the enrichment-source adapter pipeline. |
-| **[engine.md](engine.md)** | Pipeline stage registry & plans (feed > category > global), signal-engine priority scoring (IDF weights, feedback loop, shadow/surface flags), Radar triage surfacing, and the Settings → Engine console (single-surface living table: entries/links/relationships/entities/feeds, job runs, pipeline runs, retention). |
-| **[engine-settings.md](engine-settings.md)** | Every runtime setting: what it does, its default, and which Engine console surface edits it — plus the setting→scheduled-job map and the env-only list. |
-| **[copilot.md](copilot.md)** | The global AI copilot: SSE streaming with tool traces, the `ai`-queue CLI worker topology, read-only skill tooling, confirmable writes, conversation persistence & public sharing, Claude OAuth sign-in / in-app re-auth, and cost-tracking caveats. |
-| **[workers-search-dashboards.md](workers-search-dashboards.md)** | Celery worker layer (every task + beat schedule), distributed coordination, Meilisearch indexing & query language, widgets system (the standalone dashboards feature is removed; widgets now live on the workbench Dashboard). |
-| **[frontend.md](frontend.md)** | React/TypeScript SPA: routing, layouts, Zustand stores, TanStack Query conventions, Axios JWT refresh, CSS-variable theming, component tour, testing. |
-| **[api-reference.md](api-reference.md)** | REST API reference: every router, endpoint, auth flow, error envelope, pagination conventions, rate limiting, middleware stack. |
-| **[observables.md](observables.md)** | The IOC ledger: kinds and validators, the judgment doors (AI, article IOC table, feed, analyst) and why regex never creates a row, the indicator-aware analysis window, shadow vs capture and the per-kind list, the extraction fixture and eval, corroboration counts, attribution (claimed vs reported alongside), publishing, tools, automation hooks, enrichment. |
-| **[story-threads.md](story-threads.md)** | Entry embeddings (pgvector), story-thread clustering and merging, the spine (heuristic and written), where threads render, and the tuning knobs. |
-| **[data-model.md](data-model.md)** | Database schema reference: ER diagram, every table & junction, enums, indexes, JSONB columns, Alembic migration conventions. |
+| **[entries.md](entries.md)** | The life of one entry, from feed poll to linked intelligence. |
+| **[entity-profiles.md](entity-profiles.md)** | How entity profile pages (actors, malware, CVEs, TTPs, tools, vendors, products, countries and more) are built and where their data comes from. |
+| **[adapters.md](adapters.md)** | The feed adapters (RSS, YouTube, podcasts, Reddit, GitHub, NVD, Mastodon, Bluesky, Telegram, ransomware.live, web scraper), the polling loop, dedup, OPML, manual ingest, and how to add an adapter. |
+| **[intelligence-engine.md](intelligence-engine.md)** | The autolinker, correlation engine and relationship strength, ATT&CK, CVE and TTP pipelines, and reporting and export. |
+| **[detection-engineering.md](detection-engineering.md)** | Detection rules: extraction from articles, validation in 9 languages, the rule library, the workbench, coverage, ATT&CK Navigator export, telemetry sources and mitigations. |
+| **[automation-ai-enrichment.md](automation-ai-enrichment.md)** | Automation rules (triggers, conditions, actions), the AI provider system, prompts, AI task assignments and the enrichment pipeline. |
+| **[engine.md](engine.md)** | Pipeline stages and plans (feed, then category, then global), signal-engine priority scoring, Radar triage, and the Settings → Engine console. |
+| **[engine-settings.md](engine-settings.md)** | Every runtime setting: what it does, its default, where it is edited, which scheduled job it drives, and which settings are env-only. |
+| **[copilot.md](copilot.md)** | The AI copilot: streaming with tool traces, the `ai`-queue worker, read-only tools, confirmed writes, saved and shared conversations, Claude sign-in and cost tracking. |
+| **[workers-search-dashboards.md](workers-search-dashboards.md)** | The Celery workers and schedule, Meilisearch indexing and queries, and the widgets on the workbench Dashboard. |
+| **[frontend.md](frontend.md)** | The React app: routing, layouts, Zustand stores, TanStack Query, the Axios client, theming, components and testing. |
+| **[api-reference.md](api-reference.md)** | The REST API: every router and endpoint, auth, errors, pagination, rate limits and middleware. |
+| **[observables.md](observables.md)** | The IOC ledger: kinds and validators, which sources can create an observable (and why regex alone never does), shadow and capture modes, corroboration, attribution, publishing and enrichment. |
+| **[story-threads.md](story-threads.md)** | Entry embeddings, grouping articles into story threads, the spine, where threads appear, and the tuning settings. |
+| **[data-model.md](data-model.md)** | The database: ER diagram, tables and junction tables, enums, indexes, JSONB columns and migration conventions. |
 
 ## How to navigate
 
-- **New analyst** → guide/README.md → guide/getting-started.md → query-language.md.
-- **Onboarding a new contributor** → architecture.md → contributing.md → frontend.md or api-reference.md depending on focus → relevant subsystem doc.
-- **Wiring IntelFeed into another tool** → integrations.md → api-reference.md or cli-reference.md.
-- **Adding a new feed source** → adapters.md.
-- **Adding a new enrichment source or AI task** → automation-ai-enrichment.md.
-- **Tuning intelligence extraction** → intelligence-engine.md.
-- **"What does this setting actually do?"** → engine-settings.md.
-- **Threads folding the wrong articles together** → story-threads.md.
-- **Building a new widget** → workers-search-dashboards.md (widgets section) + frontend.md.
-- **Writing or modifying a migration** → data-model.md (migrations section) + contributing.md.
-- **Running in production** → operations.md + [`../setup.md`](../setup.md).
+- **New analyst:** guide/README.md → guide/getting-started.md → query-language.md.
+- **New contributor:** architecture.md → contributing.md → frontend.md or api-reference.md → the subsystem doc you need.
+- **Connecting another tool:** integrations.md → api-reference.md or cli-reference.md.
+- **Adding a feed source:** adapters.md.
+- **Adding an enrichment source or AI task:** automation-ai-enrichment.md.
+- **Tuning extraction:** intelligence-engine.md.
+- **What a setting does:** engine-settings.md.
+- **Threads grouping the wrong articles:** story-threads.md.
+- **Building a widget:** workers-search-dashboards.md (widgets section) and frontend.md.
+- **Writing a migration:** data-model.md (migrations section) and contributing.md.
+- **Running in production:** operations.md and [`../setup.md`](../setup.md).
 
 ## Conventions
 
-- File references use `path/to/file.py:line` format (e.g. `backend/app/intelligence/autolinker.py:101`) so links survive refactors. Line numbers drift whenever code above them moves, so after a refactor run `python3 scripts/dev/check_doc_refs.py` (add `--fix` to repair the unambiguous ones) and `python3 scripts/dev/check_doc_links.py` to catch broken links and anchors.
-- The deep-dive docs deliberately reference, rather than duplicate, content in `architecture.md`. If you find yourself paraphrasing the same content in two places, link instead.
-- Dates in docs are absolute (e.g. `2026-05-03`), not relative.
-- Mermaid diagrams are used for sequence flows, ER diagrams, and pipeline overviews. Each diagram lives as a standalone file under [`diagrams/`](diagrams/) — one diagram per file — and the doc links to it rather than embedding the chart inline.
+- **Code references** use `path/to/file.py:line` (for example `backend/app/intelligence/autolinker.py:101`). Line numbers move when code changes, so after a refactor run `python3 scripts/dev/check_doc_refs.py` (`--fix` repairs the clear cases) and `python3 scripts/dev/check_doc_links.py` (broken links and anchors). CI runs both.
+- **Link, don't repeat.** If the same explanation would appear in two docs, keep it in one and link to it.
+- **Dates are absolute** (`2026-05-03`), never "last week".
+- **Diagrams** are Mermaid, one per file under [`diagrams/`](diagrams/). Docs link to them instead of embedding them.

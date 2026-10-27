@@ -601,10 +601,19 @@ jobs:
       - name: Scan for committed secrets
         run: gitleaks dir . --config .gitleaks.toml --redact --no-banner --verbose
 
+      # Unconditional: the doc checks below parse backend code with `ast`, and
+      # the runner's own python3 can't read 3.14-only syntax.
       - uses: actions/setup-python@v7
-        if: needs.changes.outputs.python == 'true'
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+
+      # Docs rot is diff-local too — a renamed heading or a moved function
+      # breaks the doc that points at it — so these ride the always-on job.
+      # Stdlib only, a few seconds. Fix drift with `check_doc_refs.py --fix`.
+      - name: Doc links and file:line refs
+        run: |
+          python scripts/dev/check_doc_links.py
+          python scripts/dev/check_doc_refs.py
 
       # Audits the lockfiles: they are exactly what the images install, so
       # there is nothing to resolve. requirements.lock is what production runs;

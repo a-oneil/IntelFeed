@@ -1,9 +1,6 @@
 # Frontend JWT Refresh Flow
 
-Sequence of token handling in `frontend/src/api/client.ts`. Concurrent refresh
-attempts are deduplicated through a single shared promise (`doRefresh`), and a
-hard logout happens only when the refresh endpoint itself rejects the refresh
-token with 401/403.
+How the browser keeps a user signed in (`frontend/src/api/client.ts`). Several requests that need a new token at once share one refresh call (`doRefresh`). The user is signed out only when the refresh endpoint itself rejects the refresh token with 401 or 403.
 
 ```mermaid
 sequenceDiagram
@@ -14,9 +11,11 @@ sequenceDiagram
     participant AS as authStore
 
     C->>RI: api.get(/entries)
-    alt access token valid (>5 min to exp)
+    alt visitor (public read-only) sending a write
+        RI-->>C: ReadOnlyViewError, request never sent
+    else access token valid (more than 5 min left)
         RI->>A: request + Bearer access token
-    else expiring soon or missing
+    else expiring soon or missing, refresh token present
         RI->>RP: await refresh
         RP->>A: POST /auth/refresh (refresh token)
         alt refresh OK
@@ -24,9 +23,10 @@ sequenceDiagram
             RP->>AS: setTokens()
             RI->>A: request + new Bearer token
         else 401/403 from refresh
-            RP->>AS: logout() (hard logout)
+            RP->>AS: logout()
+            Note over RP: full page load to /login,<br/>or to / in public read-only mode
         else network error
-            Note over RP,AS: session kept — no logout
+            Note over RP,AS: session kept, no logout
         end
     end
 
@@ -36,7 +36,7 @@ sequenceDiagram
         Note over C,AS: Response interceptor fallback
         A-->>C: 401 on a normal request
         C->>RP: await refresh (once, _retry flag)
-        RP-->>C: new token → retry original request
-        Note over C: 429 is rejected immediately, never retried
+        RP-->>C: new token, retry original request
+        Note over C: 429 is rejected at once, never retried
     end
 ```

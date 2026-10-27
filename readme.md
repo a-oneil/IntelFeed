@@ -10,6 +10,7 @@ generate detection rules.
 
 <p align="center">
   <a href="https://github.com/a-oneil/IntelFeed/actions/workflows/ci.yml"><img src="https://github.com/a-oneil/IntelFeed/actions/workflows/ci.yml/badge.svg?branch=main&event=push" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="License: AGPL-3.0"></a>
 </p>
 
 <p align="center">
@@ -197,7 +198,13 @@ Start here depending on what you're doing:
 | Use IntelFeed day to day | [User guide](docs/guide/README.md), [Query language](docs/query-language.md) |
 | Run it in production | [Operations](docs/operations.md), [setup.md](setup.md) |
 | Wire it into other tools | [Integrations](docs/integrations.md), [API reference](docs/api-reference.md), [CLI reference](docs/cli-reference.md) |
-| Work on the code | [Architecture](docs/architecture.md), [Contributing](docs/contributing.md) |
+| Work on the code | [Architecture](docs/architecture.md), [Contributing](contributing.md) |
+
+## Support
+
+IntelFeed is maintained in spare time. Issues and pull requests are welcome and get a best-effort
+reply, with no guaranteed response time. Report security problems privately: see
+[security.md](security.md).
 
 ## Built with Claude
 
@@ -212,7 +219,7 @@ in your own environment.
 ## Tech stack
 
 Python 3.14 · FastAPI · SQLAlchemy (async) · Alembic · Celery + Redis · PostgreSQL 16 · Meilisearch ·
-React 18 · TypeScript · Vite · TanStack Query + Zustand · Docker Compose · Caddy
+React 19 · TypeScript · Vite · TanStack Query + Zustand · Docker Compose · Caddy
 
 ## License
 

@@ -1,7 +1,8 @@
 # Automation and AI
 
-Two ways of getting work done without doing it: rules that run on their own, and
-a copilot you can ask.
+This page covers automation rules, which run tasks for you, and the copilot, an
+AI assistant you can ask questions. The copilot and AI actions need an AI
+provider set up by an admin; rules without AI actions work without one.
 
 ![The Automation page listing rules with their triggers, run counts, and per-rule actions](../assets/screenshots/automation.png)
 
@@ -9,145 +10,148 @@ a copilot you can ask.
 
 ## Automation rules
 
-**Sidebar → Automation → + New.** A rule is a trigger, optional conditions, and
-one or more actions.
+Click **Automation** in the Reading sidebar, then **+ New Rule**. A rule has a
+trigger, optional conditions, and one or more actions. **Templates** starts from
+a ready-made rule, and **Import** / **Export** move rules between instances.
 
-**Triggers**
+**Triggers:**
 
-- when a new article arrives
-- on a schedule
-- when a keyword matches
-- when a CVE is linked
-- manually, from a button
+- New entry arrives
+- Entry scored
+- Observable captured (a new IOC, such as a bad IP or file hash)
+- On schedule (cron)
+- Keyword match
+- CVE detected
+- Manual trigger (the rule's **Run Now** button)
 
-**Conditions** narrow it: the feed, words in the content, severity, whether it's
-starred or tagged, whether a mentioned entity is on your watchlist.
+**Conditions:** the feed or feed type, words in the content, severity, author,
+tags, read/starred/bookmarked state, whether it has a note, its priority score
+or signals, whether a watched entity is mentioned, and whether it has a
+captured IOC.
 
-**Actions** are the point:
+**Actions**, among others:
 
-- extract TTPs, CVEs, actors or malware
+- run an AI task, or extract TTPs, CVEs, threat actors or malware
 - generate detection rules
-- add tags
-- notify — Slack, Discord, Teams, email, webhook
-- add to a campaign
-- mark read, starred, bookmarked, or prioritised
-- create a note from a template
-
-Webhook URLs live on the notification action inside the rule, not in a separate
-settings page.
+- add or remove tags
+- send a notification to Slack, Discord or a custom webhook (the URL is set on
+  the action)
+- add to a campaign, or track on the Threats board
+- mark read, star, bookmark, mark priority, or hide
+- create a note or an intel report
+- chain another rule, or branch with if/else
 
 ### Worked example
 
 > **Auto-Sigma on critical CVE**
-> Trigger: a CVE is linked
-> Condition: CVSS ≥ 9.0
-> Actions: extract TTPs → generate a Sigma rule → tag `auto-rules` →
-> post to Slack
+> Trigger: CVE detected
+> Condition: Severity above 9.0
+> Actions: Extract TTPs → Generate Detection Rules (Sigma) → Add Tags
+> `auto-rules` → Send Notification to Slack
 
-Now a critical CVE landing produces a draft rule in your library and a message
-in the channel, and someone reviews it in the morning.
+A critical CVE then gives you a draft rule and a Slack message.
 
 ### Before you enable it
 
-**Dry-run first.** Rules have a test mode that runs against recent entries and
-shows what would have happened. Use it. A rule that notifies is a rule that can
-flood a channel, and the distance between "fires twice a day" and "fires two
-hundred times a day" is one condition you forgot.
+**Start small.** One missing condition can turn two messages a day into two
+hundred. There is no dry run: **Run Now** runs the rule for real on recent
+articles (by default up to 50 from the last 24 hours). Try a new rule with a
+harmless action, such as adding a tag, before adding the notification.
 
-Be especially careful with batch rules — a rule you expected to send one digest
-can instead act per-article. Check the dry-run output count, not just that it
-succeeded.
-
-**Watch the logs.** **Settings → Logs** shows every run: rule, time, whether
-conditions matched, which actions ran, and errors. When an automation seems to
-have stopped, check per-action status rather than the run's overall result — a
-run can report success with one action quietly failing inside it.
+**Watch the logs.** **Settings → Logs → Automation** (admin only) shows every
+run: the rule, the time, whether the conditions matched, which actions ran, and
+any errors. Check each action's status: a run can report success while one action
+failed.
 
 ## The copilot
 
-The chat panel that docks on the right of every page. Open it from the header or
-with `Ctrl+Shift+K` / `⌘⇧K`.
+A chat panel that docks on the right of every page. Open it with the
+**Copilot** button in the header, or `Ctrl+Shift+K` (`⌘⇧K` on a Mac).
 
-It has tools. It isn't answering from memory — it searches your entries, looks
-up entities, pivots, and reads the documentation, and it shows you a chip for
-every tool call as it works, so you can see where an answer came from. If an
-answer has no tool chips behind it, treat it as the model talking rather than
-your data talking.
+It uses tools to search your articles, look up entities and read these docs,
+each shown as a chip. An
+answer with no tool chips came from the model alone, not your data.
 
-**Context.** A pill shows what it's looking at — the open article, the entity
-profile, the campaign — based on where you are. **Ask Copilot** buttons around
-the app open it pre-scoped to one thing. Dismiss the pill to ask instance-wide
-questions instead.
+**Context.** A pill shows what it is looking at, such as the open article.
+**Ask Copilot** buttons open it focused on one thing. Remove the pill to ask
+about everything.
 
-**Writes need confirmation.** It can propose creating a campaign or adding a
-note. Both surface a confirmation card, and nothing is written until you accept.
+**Writes need your OK.** Nothing is changed until you accept its confirmation
+card.
 
-**Conversations** are saved and resumable, and can be shared as a public link.
+**Conversations** are saved. **History** reopens old ones. **Share** makes a
+public read-only link (see [Notes and sharing](notes-and-sharing.md#share-links)).
 
-**On the documentation page** there's a second, smaller copilot that answers
-from these guide pages and the developer docs — good for "how do I…" and "where
-does X live", and it cites the page it used.
+**On the documentation page**, a second copilot, "Ask about IntelFeed", answers
+"how do I…" questions from the guide and developer docs and cites its page.
 
-Things it's good at: "what's trending in the last 24 hours", "summarise what we
-have on this actor", "which CVEs in our feeds are known-exploited", "draft a
-Sigma rule from this article". Things to check rather than trust: anything
-numeric, anything attributive, anything you're about to put in a report.
+Good uses: "what's trending in the last 24 hours", "which CVEs in our feeds are
+known to be exploited". Check numbers,
+attribution, and anything going into a report.
 
 ## AI features elsewhere
 
-- **Article summaries** in the entry list.
-- **Daily summaries** on day dividers — shared instance-wide, so regenerating
-  one spends tokens for everyone.
-- **Entity extraction** at ingest, which is what fills profile pages.
-- **The AI panel** (`a`) in the reader for questions about the open article.
-- **Report and rule drafting**, covered in their own pages.
+- **Article summaries** above the article text in the reader.
+- **Daily summaries** on the day dividers. These are shared, so regenerating
+  one uses AI for everyone.
+- **Entity extraction** when articles arrive, which fills profile pages.
+- **The AI panel** (`a`) in the reader, with tasks to run on the open article
+  and **Ask Copilot**.
+- **Report and rule drafting**, covered in
+  [Campaigns and reports](campaigns-and-reports.md) and
+  [Writing detection rules](detection-rules.md).
 
 ## Your own key
 
-If your admin has turned personal keys on, **Settings → My AI** lets you add
-your own key — Claude API, OpenAI-compatible or Ollama, whichever types your
-admin allows — and run the tasks *you* start on it: the copilot, rule drafts, summaries, reports. Route one task at a
-time or set a default key for all of them; "Instance default" on a task sends
-that one back to the instance's provider. The page shows this month's spend
-against your cap, and you can set a monthly cap of your own or turn off
-falling back to the instance's providers when your key can't answer.
+If your admin allows it, **Settings → My AI** lets you add your own AI key, of
+the types your admin allows (for example OpenAI-compatible, Claude API or
+Ollama). Tasks you start yourself (copilot, rule drafts, summaries, reports) can then
+run on your key.
 
-Two things to know. The copilot on a Claude API or OpenAI-compatible key has
-no tools, so it answers from the prompt alone, and the dock says "no tools".
-Automation rules, share links and the pipeline never use your key, even when
-they run as you. Every result card says who answered — your key, the instance,
-or a fallback and why.
+- Set a default key, or pick one per task. **Instance default** sends that task
+  back to the instance's provider.
+- The page shows this month's spend and today's requests. Set your own monthly
+  cap, and turn off **Fall back to the instance's providers** if you never want
+  the instance to answer for you.
+
+Two things to know:
+
+- On some keys the copilot has no tools; the dock shows **no tools**.
+- Automation rules, share links and background processing never use your key,
+  even under your name. Each result says who answered: your key, the instance,
+  or a fallback and why.
 
 ## Providers and cost (admin)
 
-**Settings → AI Configuration**, four tabs: **Providers** (which model runs
-what), **Prompts** (the prompt behind each task, editable), **Cost**, and
-**User keys** (personal keys: off, optional or required; which key types; a
-private-endpoint switch for homelab Ollamas; the daily request cap on personal keys, the
-per-person allowance on your own providers and the share-link limit; which prompts a personal key may
-answer; and everyone's keys, to disable or delete but not use).
+**Settings → AI Configuration** has four tabs:
 
-You can run entirely locally on Ollama, on a hosted API, or mix — different
-tasks can go to different providers, which is how you put cheap bulk work on a
-local model and keep the expensive model for analysis.
+- **Providers**: the AI services the instance can use, and which model runs
+  which task.
+- **Prompts**: the editable instructions for each task.
+- **User keys**: whether people may add their own keys (Off, Optional or
+  Required), which types, whether private network addresses are allowed, the
+  daily limits (per user's own key, per user on the instance's providers, and
+  per share link), which prompts a personal key may answer, and everyone's keys
+  (you can disable or delete them, not use them).
+- **Cost Dashboard**: tokens and spend per provider, task and person, split
+  between the instance and people's own keys.
 
-Worth knowing: **registering a provider is not the same as configuring AI.** Work
-runs off a per-task assignment naming a provider *and* a model, so a provider
-with no task pointing at it does nothing at all. The onboarding tour's AI step
-wires them for you — it tests the host, caches its model list, and routes every
-compatible task at it. Outside that, assignments are per task on this tab.
+Run everything locally on Ollama, on a hosted API, or a mix: cheap bulk work on
+a local model, analysis on a stronger one.
 
-Agentic tasks — the copilot and the entity maintenance jobs — only ever go to a
-provider that can execute tools. A plain chat provider would report merges it
-never applied, so the wizard leaves those on the Claude Code CLI and says so.
+**Adding a provider does not turn AI on by itself.** Each task needs an
+assignment naming a provider and a model. The AI step in the onboarding tour
+tests the provider and assigns the tasks for you. After that, change
+assignments on the Providers tab.
 
-The Cost tab shows tokens and spend per provider and task, split between what
-the instance pays and what ran on people's own keys, with a By-user table and
-each person's requests today against the allowance. One caveat: where the
-copilot runs on a flat-rate sign-in, its dollar figures are notional — what the
-tokens *would* cost at API rates, not a charge you'll see. The real limit there
-is the plan's quota.
+Tasks that use tools, such as the copilot, only run on a provider that supports
+tool calls. The onboarding step tells you which it couldn't move.
 
-Prompts are editable, and editing them is the highest-leverage thing an admin
-can do here. If extraction keeps making a particular mistake, the fix is usually
-a sentence in the prompt.
+On the Cost Dashboard, a copilot on a flat-rate sign-in shows what the tokens
+*would* cost at API prices, not a real charge. The real limit is the plan's
+quota.
+
+If extraction keeps making the same mistake, one sentence in its prompt usually
+fixes it.
+
+Next: [Notes and sharing](notes-and-sharing.md)

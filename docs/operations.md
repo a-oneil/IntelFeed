@@ -1,8 +1,6 @@
 # Operations Guide
 
-Deployment, security, observability, and troubleshooting for IntelFeed in production.
-
-**Prerequisites:** Complete [setup.md](../setup.md) first. See [architecture.md](./architecture.md) for system design context.
+Running IntelFeed in production. Install first with [setup.md](../setup.md); code structure is in [architecture.md](./architecture.md).
 
 ---
 
@@ -16,6 +14,7 @@ Deployment, security, observability, and troubleshooting for IntelFeed in produc
 6. [Backups & Recovery](#backups--recovery)
 7. [Performance & Scaling](#performance--scaling)
 8. [Troubleshooting](#troubleshooting)
+9. [Update & Deployment](#update--deployment)
 
 ---
 
@@ -23,32 +22,42 @@ Deployment, security, observability, and troubleshooting for IntelFeed in produc
 
 ### Dev vs. Prod Docker Compose
 
-**Development** (`docker-compose.dev.yml`):
-- **Volumes:** Full code volume mount (`./backend:/app`) for hot reload
-- **API:** Uvicorn with `--reload` flag (slow, for development)
-- **Workers:** 4 Celery workers (light load) + the single-concurrency `celery-worker-ai` serializing AI tasks (copilot, batch AI jobs)
-- **Healthchecks:** All services
-- **Ports:** Exposed individually (8000, 5433, 6380, 7700, 5050, 5060, 3001)
-- **Resources:** Unlimited memory
-- **Storage:** Local Docker volumes (`pgdata`, `redisdata`, `meilidata`, …)
+Dev mounts code for live edits; prod builds it into images and adds memory limits, a TLS proxy and network separation.
 
-**Production** (`docker-compose.prod.yml`):
-- **Volumes:** No code mounts (code copied into image) — only host mounts for logs, backups, `docs/` (read-only, serves the in-app documentation), Telegram session/media, and TTS audio, plus named volumes for data/cache
-- **API:** Gunicorn with 4 UvicornWorker workers (180s timeout). Startup seeders (enrichment sources, AI tasks) serialize across workers via a Postgres advisory lock, so multiple workers never race the unique keys.
-- **Workers:** 4 Celery workers with memory limits (300 MB/child, 50 tasks/child), plus `celery-worker-ai` (`--queues=ai,claude_code` — the second is the pre-rename queue name, kept so in-flight tasks from an older deploy still drain; concurrency 1 via `CLAUDE_CODE_CONCURRENCY`, `--prefetch-multiplier=1`, `--max-tasks-per-child=20`. It serializes every AI-provider call and owns the Claude CLI OAuth credentials volume). Managed by `update.sh` like every other service
-- **LibreTranslate:** on-demand only, behind the `translate` compose profile (preloading ~20 language models pins ~740 MB 24/7). Start with `--profile translate up -d libretranslate`; auto-translate degrades gracefully while it's down and the `retry_untranslated_entries` beat task (every 30 min) backfills once it's up
-- **Redis:** Capped at 1 GB (`--maxmemory 1gb --maxmemory-policy volatile-lru`); Celery task results expire after 1 hour (`result_expires=3600`), which keeps accumulated results from triggering "OOM command not allowed"
-- **Healthchecks:** All services (10–30s intervals)
-- **Port:** Only Caddy reverse proxy (80, 443)
-- **Networks:** Separate `backend` and `frontend` networks (service isolation)
-- **Resources:** Per-service memory limits (DB 1500M, Redis 1500M, Meilisearch 1536M, LibreTranslate 2G, Piper 1536M, API 1G, Workers 2G, CLI worker 1G, Beat 256M, Telegram listener 512M, Frontend 128M, Caddy 128M)
-- **OOM priorities:** `oom_score_adj` orders kernel OOM kills — protect db (−900), redis (−800), api (−700), caddy (−500); sacrifice workers (+600) and piper (+300) first. Paired with host swap so a memory spike degrades instead of taking the site down
-- **Restart:** `unless-stopped` (auto-recovery on crash)
+| | Dev ([docker-compose.dev.yml](../docker-compose.dev.yml)) | Prod ([docker-compose.prod.yml](../docker-compose.prod.yml)) |
+|---|---|---|
+| Code | `./backend` mounted at `/app` | Built into the image |
+| API server | `uvicorn --reload` | Gunicorn, 3 Uvicorn workers, 180 s timeout, recycled after 800–1,000 requests |
+| Default worker | `--concurrency=4`, `celery` queue | `--concurrency=2`, `celery` queue, child restart after 50 tasks or 300 MB |
+| AI worker | `celery-worker-ai`, one task at a time | Same, plus child restart after 20 tasks |
+| Redis | 512 MB cap, `allkeys-lru`, no password | 1 GB cap, `volatile-lru`, password, append-only file |
+| Health checks | db, redis, meilisearch, libretranslate, piper | Same, plus api and frontend |
+| Host ports | 8000, 3001, 5433, 6380, 7700, 5050, 5060 | 80 and 443 only (Caddy) |
+| Memory limits | None | Per service (below) |
+| Restart policy | `unless-stopped` | Same |
 
-**Key Diff:** Dev mounts code; prod bakes it into the image. Prod has strict resource limits.
+- **The AI worker** (`celery-worker-ai`) drains the `ai` queue and the older `claude_code` queue, one task at a time (`CLAUDE_CODE_CONCURRENCY`, default 1) so AI calls never overlap. Only it holds the Claude CLI login (`claude_cli` volume).
+- **LibreTranslate** is off by default, behind the `translate` profile, since its models hold about 740 MB. Start: `docker compose -f docker-compose.prod.yml --profile translate up -d libretranslate`. While off, auto-translate skips; `retry-untranslated-entries` (every 30 minutes) catches up later.
+- **Startup seeders** (AI tasks, enrichment sources) take a Postgres advisory lock so the three API workers don't collide.
+- **OOM order.** `oom_score_adj` sets what the kernel kills first: workers (+600) and piper (+300); db (−900), redis (−800), api (−700) and caddy (−500) are protected. Add host swap so spikes slow rather than kill.
+- **Container logs**: `json-file` driver, 3 × 20 MB per container.
 
-File: [docker-compose.dev.yml](../docker-compose.dev.yml)
-File: [docker-compose.prod.yml](../docker-compose.prod.yml)
+**Memory limits (prod):**
+
+| Service | Limit |
+|---|---|
+| db | 1500M |
+| redis | 1500M |
+| meilisearch | 1536M |
+| libretranslate | 2G |
+| piper | 1536M |
+| api | 1500M |
+| celery-worker | 2G |
+| celery-worker-ai | 1G |
+| celery-beat | 256M |
+| telegram-listener | 512M |
+| frontend | 128M |
+| caddy | 128M |
 
 ---
 
@@ -56,59 +65,47 @@ File: [docker-compose.prod.yml](../docker-compose.prod.yml)
 
 ### Service Dependency Graph
 
-See [diagrams/operations-service-topology.md](./diagrams/operations-service-topology.md) for the full production service graph (Caddy → frontend nginx → API, the backend data services, and the Celery/Telegram/CLI workers).
+See [diagrams/operations-service-topology.md](./diagrams/operations-service-topology.md) for the production service graph.
 
 ### Services & Ports
 
-| Service | Port (Dev) | Port (Prod) | Docker Network | Purpose |
-|---------|------------|------------|---|---|
-| **PostgreSQL** | 5433 | internal | backend | Persistent data store |
-| **Redis** | 6380 | internal | backend | Celery broker, caching, locks |
-| **Meilisearch** | 7700 | internal (7700) | backend | Full-text search index |
-| **LibreTranslate** | 5050 | internal (5000) | backend | Entry translation (self-hosted, pinned v1.9.6). Prod: behind the `translate` compose profile (on-demand) |
-| **Piper** | 5060 | internal (5000) | backend | Text-to-speech read-aloud sidecar (called by API + workers) |
-| **API** | 8000 | 8000 (internal) | backend, frontend | FastAPI application |
-| **Celery Worker** | — | — | backend | Background job execution (`celery` queue) |
-| **Celery Worker (AI)** | — | — | backend | Serialized AI tasks + copilot turns (`ai` queue, concurrency 1) |
-| **Celery Beat** | — | — | backend | Scheduled job execution |
-| **Telegram Listener** | — | — | backend | Telegram channel monitoring |
-| **Frontend** | 3001 | 80 (internal) | frontend | React SPA (nginx, proxies `/api/*` to API) |
-| **Caddy** | — | 80, 443 | frontend | Reverse proxy + TLS |
+"Internal" = reachable only from other containers.
 
-**Network Isolation (Prod):**
-- `backend` network: DB, Redis, Meilisearch, API, workers (no external access)
-- `frontend` network: Frontend, Caddy (external access via Caddy)
-- Only Caddy exposed to internet (ports 80, 443)
+| Service (compose name) | Dev host port | Prod | Prod network | Purpose |
+|---|---|---|---|---|
+| `db` (PostgreSQL 16 + pgvector) | 5433 | internal 5432 | backend | Database |
+| `redis` | 6380 | internal 6379 | backend | Celery broker, caches, locks, rate-limit counters |
+| `meilisearch` | 7700 | internal 7700 | backend | Full-text search |
+| `libretranslate` (v1.9.6) | 5050 | internal 5000, `translate` profile | backend | Article translation |
+| `piper` | 5060 | internal 5000 | backend | Read-aloud TTS |
+| `api` | 8000 | internal 8000 | backend, frontend | FastAPI app |
+| `celery-worker` | — | — | backend | Background jobs (`celery` queue) |
+| `celery-worker-ai` | — | — | backend | AI tasks and copilot turns (`ai` queue), serially |
+| `celery-beat` | — | — | backend | Scheduler |
+| `telegram-listener` | — | — | backend | Telegram channel watcher |
+| `frontend` | 3001 | internal 80 | frontend | Web app (Vite in dev; nginx in prod, forwarding `/api/*` to `api`) |
+| `caddy` | — | 80, 443 | frontend | Reverse proxy, TLS (prod only) |
 
-File: [docker-compose.prod.yml](../docker-compose.prod.yml)
+Only Caddy is public in prod. The `backend` network holds data services and workers; `frontend` holds the frontend and Caddy; the API is on both.
 
 ### Caddy Reverse Proxy & TLS
 
-**Configuration:** `Caddyfile`
+[Caddyfile](../Caddyfile):
 
-```
+```text
 {$SITE_DOMAIN} {
-    # Service worker never cached
-    @sw path /sw.js
-    header @sw Cache-Control "no-store"
+	@sw path /sw.js
+	header @sw Cache-Control "no-store"
 
-    reverse_proxy frontend:80
+	reverse_proxy frontend:80
 }
 ```
 
-The domain comes from `SITE_DOMAIN` in `.env`, which `docker-compose.prod.yml` passes into the caddy container. It is required in prod — compose fails fast with a message rather than starting a Caddy with no site.
-
-**What it does:**
-- Auto-obtains a Let's Encrypt certificate for `$SITE_DOMAIN`
-- Manages TLS termination
-- Routes all traffic to frontend:80
-- Frontend internally routes `/api/*` to API container
-
-**SPA caching:** the frontend nginx serves `index.html` with `expires -1` so browsers always revalidate it. Without it, a heuristically cached `index.html` would reference the previous build's hashed chunks after a deploy, stranding users on a stale bundle. The service worker (`/sw.js`) is additionally `no-store` at the Caddy layer.
-
-**Important:** DNS must resolve `$SITE_DOMAIN` → EC2 public IP **before** Caddy starts (Let's Encrypt verification).
-
-File: [Caddyfile](../Caddyfile), [frontend/nginx.conf](../frontend/nginx.conf)
+- `SITE_DOMAIN` comes from `.env`; prod compose won't start without it.
+- Caddy gets and renews a Let's Encrypt certificate, ends TLS, redirects HTTP to HTTPS, and proxies to the frontend.
+- DNS for `SITE_DOMAIN` must point at the server **before** Caddy starts, or the certificate request fails.
+- The service worker (`/sw.js`) is never cached.
+- The frontend nginx ([frontend/nginx.conf](../frontend/nginx.conf)) serves `index.html` with `expires -1`, so browsers fetch the new build after a deploy.
 
 ---
 
@@ -116,84 +113,48 @@ File: [Caddyfile](../Caddyfile), [frontend/nginx.conf](../frontend/nginx.conf)
 
 ### Environment Variables
 
-**Required in `.env`:**
+Settings go in `.env` at the repo root; [`.env.example`](../.env.example) documents each. Prod needs:
 
 ```bash
-# Database
-POSTGRES_HOST=db
-POSTGRES_PORT=5432
-POSTGRES_DB=intelfeed
-POSTGRES_USER=intelfeed
+# Secrets
+SECRET_KEY=<generated>          # signs login tokens; at least 32 characters in prod
+ENCRYPTION_KEY=<generated>      # Fernet key for encrypted columns
 POSTGRES_PASSWORD=<generated>
-
-# Redis
+MEILI_MASTER_KEY=<generated>
 REDIS_PASSWORD=<generated>
 REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
 
-# Meilisearch
-MEILI_URL=http://meilisearch:7700
-MEILI_MASTER_KEY=<generated>
-
-# API
-SECRET_KEY=<generated>  # JWT signing key
-ENCRYPTION_KEY=<generated>  # Fernet key for encrypted DB columns
-CORS_ORIGINS=["https://intelfeed.example.com"]  # JSON array — a bare string fails to parse
-
-# Frontend
-VITE_API_URL=/api
+# Where the app lives
+SITE_DOMAIN=intelfeed.example.com
+CORS_ORIGINS=["https://intelfeed.example.com"]   # a JSON list; a bare string fails to parse
 ```
 
-**Optional:**
-- `SENTRY_DSN` — Sentry error tracking
-- `BACKUP_ENCRYPT_KEY` — GPG encryption for backups
-- `RUN_MIGRATIONS=true` — auto-run migrations on startup (set in compose)
-- `ENV=production` — enable production optimizations
-
-**Secret Generation (setup.md references these):**
+Generate secrets:
 
 ```bash
-# SECRET_KEY (32 hex bytes)
-openssl rand -hex 32
-
-# ENCRYPTION_KEY (Fernet base64)
-python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-
-# Password & MEILI_MASTER_KEY (24 base64 bytes)
-openssl rand -base64 24
+openssl rand -hex 32        # SECRET_KEY
+python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"   # ENCRYPTION_KEY
+openssl rand -base64 24     # POSTGRES_PASSWORD, REDIS_PASSWORD, MEILI_MASTER_KEY
 ```
 
-File: [`setup.md`](../setup.md), step 5
+Prod compose sets `ENV=production` on app containers and `RUN_MIGRATIONS=true` on the API. With `ENV=production` the app won't start if a secret is a placeholder like `changeme`, `SECRET_KEY` is under 32 characters, or `CORS_ORIGINS` contains `*`; logs are JSON instead of coloured.
+
+Also:
+
+- `TRUSTED_CLIENT_IP_HEADER` — [Cloudflare Origin Lockdown](#cloudflare-origin-lockdown).
+- `ENCRYPTION_KEY_PREVIOUS` — the old key after rotation, so stored secrets stay readable.
+- `SENTRY_DSN` — error reporting (also in **Settings → System**).
+- `PUBLIC_BASE_URL` — builds full article links in notifications and reports.
 
 ### System Settings (Database)
 
-**Singleton table:** `system_settings` (id = 1)
+Most settings live in the database and are edited in the Settings UI; saved values beat `.env` defaults.
 
-**Columns:**
-- `settings` (JSONB) — public configuration
-- `secrets` (JSONB) — encrypted secrets (API keys, webhook URLs)
-- `updated_at` — last modification
-
-Keys are declared in `CONFIGURABLE_KEYS` in `backend/app/services/system_settings.py`; DB values override the `.env`/`config.py` defaults (`config.get()` chain). **Example settings:**
-
-```json
-{
-  "default_feed_fetch_interval": 30,
-  "image_proxy_enabled": true,
-  "ai_one_pass_enabled": true,
-  "ai_daily_budget_usd": 5.0,
-  "autolinker_min_name_length": 4,
-  "adjudication_mode": "shadow",
-  "_job_schedule_overrides": {
-    "fetch-feeds": {"type": "crontab", "minute": "*/15"}
-  }
-}
-```
-
-(`_job_schedule_overrides` is written by the Jobs UI via `app/api/job_schedules.py`, mirrored into Redis for beat.)
-
-**Secrets (encrypted):** `github_token`, `nvd_api_key`, `sentry_dsn`, `registration_invite_code` — stored Fernet-encrypted in the `secrets` JSONB, masked in API responses. (AI-provider and enrichment API keys live on their own tables, not here.)
-
-Access via API (admin only): `GET /api/system-settings` / `PATCH /api/system-settings`
+- **Table:** `system_settings`, one row (`id = 1`) with `settings` and `secrets` JSONB columns and `updated_at`.
+- **Keys:** `CONFIGURABLE_KEYS` in `backend/app/services/system_settings.py`, described in [engine-settings.md](engine-settings.md).
+- **Secrets:** `github_token`, `nvd_api_key`, `sentry_dsn`, `registration_invite_code` and `observables_publish_token` are encrypted and masked in API responses. AI-provider and enrichment keys have their own tables.
+- **Job schedules:** Jobs UI overrides are stored under `_job_schedule_overrides` (`app/api/job_schedules.py`) and copied to Redis for beat.
+- **API (admin):** `GET`, `PATCH /api/system-settings`, `DELETE /api/system-settings/{key}`.
 
 ---
 
@@ -201,208 +162,124 @@ Access via API (admin only): `GET /api/system-settings` / `PATCH /api/system-set
 
 ### Authentication & JWT
 
-**Flow:**
-1. User submits username + password → `/api/auth/login`
-2. API verifies password (bcrypt) against `users.password_hash`
-3. API returns `access_token` (2-hour TTL, `access_token_expire_minutes`) + `refresh_token` (7-day TTL)
-4. Frontend stores tokens in localStorage (Zustand `authStore` with persist middleware)
-5. Frontend attaches `Authorization: Bearer <access_token>` header to requests
-6. API verifies token signature and expiration
+1. `POST /api/auth/login` checks the password against the bcrypt hash in `users.password_hash`.
+2. It returns an access token (120 minutes, `access_token_expire_minutes`) and a refresh token (7 days, `refresh_token_expire_days`).
+3. The frontend keeps both in localStorage (Zustand `authStore`) and sends `Authorization: Bearer <access_token>`.
+4. On 401 it calls `POST /api/auth/refresh` and retries.
 
-**Token Structure (JWT payload):**
+Tokens are HS256 (PyJWT) signed with `SECRET_KEY`, algorithm pinned on every decode; changing `SECRET_KEY` logs everyone out. An access token carries:
 
 ```json
 {
-  "sub": "<user_uuid>",
-  "role": "admin|user",
+  "sub": "<user uuid>",
+  "role": "admin",
   "username": "alice",
   "type": "access",
-  "jti": "<token_id>",
+  "jti": "<token id>",
   "exp": 1234567890,
   "iat": 1234567800
 }
 ```
 
-**Refresh Flow:**
-- Frontend detects 401 response (expired access token)
-- Frontend calls `/api/auth/refresh` with refresh token
-- API returns new access token
-- Frontend retries original request
+On logout the `jti` goes on a Redis blocklist (checked on every request) until the token would expire. Passwords are bcrypt-hashed (12 rounds).
 
-**Token Blacklist (on logout):**
-- API adds JTI to Redis blacklist with TTL = token expiration
-- Subsequent requests check Redis for revoked token
-
-**Password Hashing:**
-- Bcrypt with salt (cost 12)
-- Never store plaintext passwords
-
-File: `backend/app/core/security.py` (lines 1–100+)
+Code: `backend/app/core/security.py`.
 
 ### HTTPS & TLS
 
-**Caddy auto-TLS:**
-- Requests Let's Encrypt certificate on first run
-- Auto-renews 30 days before expiration
-- Stores certs in `caddy_data` volume (persistent)
-- Enforces HTTP → HTTPS redirect
-
-**SSL/TLS versions:** TLS 1.2+ (Caddy default)
-
-**Certificate validation:** `$SITE_DOMAIN` must resolve to the server IP before Caddy startup.
-
-File: [Caddyfile](../Caddyfile)
+Caddy defaults: Let's Encrypt certificates, auto-renewal, HTTP-to-HTTPS redirect, TLS 1.2+. Certificates persist in the `caddy_data` volume across restarts.
 
 ### Cloudflare Origin Lockdown
 
-The site is proxied through Cloudflare, but an origin that accepts 80/443 from anywhere lets anyone who learns its IP bypass the WAF, bot rules, and rate limiting entirely. `scripts/ops/cf-origin-lockdown.sh` closes that hole by restricting inbound 80/443 to Cloudflare's published edge ranges via ufw:
+Behind Cloudflare, anyone who learns the server's IP can bypass Cloudflare's firewall and rate limits. [scripts/ops/cf-origin-lockdown.sh](../scripts/ops/cf-origin-lockdown.sh) allows ports 80 and 443 only from Cloudflare's published ranges (via ufw). On the host:
 
 ```bash
 sudo ./scripts/ops/cf-origin-lockdown.sh [--dry-run]
 ```
 
-- Narrows **both** rule families: `ufw allow` (INPUT — the host-bound docker-proxy listener) **and** `ufw route allow` (FORWARD — Docker DNATs container traffic through the FORWARD chain). Narrowing only one leaves the other wide open.
-- Idempotent — re-run any time to refresh the ranges (fetched live from cloudflare.com/ips-v4 and ips-v6, with a sanity gate so a bad fetch never wipes the rules).
-- Port 22 is never touched, so it cannot lock you out of SSH.
+- It sets both `ufw allow` (host traffic) and `ufw route allow` (Docker-forwarded traffic) rules; either alone leaves a gap.
+- Safe to re-run: it fetches and checks current ranges before touching rules.
+- It never touches port 22, so SSH stays open.
 
-File: [scripts/ops/cf-origin-lockdown.sh](../scripts/ops/cf-origin-lockdown.sh)
-
-With the origin locked down, every request's `CF-Connecting-IP` header is Cloudflare's, so set `TRUSTED_CLIENT_IP_HEADER=CF-Connecting-IP` in `.env`: the rate limiter then buckets anonymous traffic (login, the share page's AI calls) per visitor instead of per edge node. Without the lockdown leave it unset — anyone who reaches the origin directly could send the header. With [public read-only mode](public-read-only-mode.md) on it is required: without it every visitor behind one edge node shares one budget of 20 articles a minute.
+Then set `TRUSTED_CLIENT_IP_HEADER=CF-Connecting-IP` in `.env` so anonymous traffic counts per visitor, not per edge node. Without lockdown, leave it unset — the header is fakeable. [Public read-only mode](public-read-only-mode.md) behind Cloudflare requires it: otherwise all visitors behind one edge node share one limit of 20 articles a minute.
 
 ### Security Headers
 
-**Applied by `SecurityHeadersMiddleware`:**
+`SecurityHeadersMiddleware` (`backend/app/core/security_headers.py`) adds to every API response:
 
-```
+```text
 X-Content-Type-Options: nosniff
 X-Frame-Options: DENY
 X-XSS-Protection: 0
 Referrer-Policy: strict-origin-when-cross-origin
-Strict-Transport-Security: max-age=63072000; includeSubDomains
-Content-Security-Policy: default-src 'self'; script-src 'self'; img-src 'self' data: blob: https:; ...
 Permissions-Policy: camera=(), microphone=(), geolocation=()
+Strict-Transport-Security: max-age=63072000; includeSubDomains
 X-Robots-Tag: noindex, nofollow
+Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self'; font-src 'self'; media-src 'self' https:; worker-src 'self' blob:; frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com; frame-ancestors 'none'; upgrade-insecure-requests
 ```
 
-Every `/api/*` response (and `/openapi.json`) also carries `Cache-Control: private, no-store` unless the route sets its own, so no shared cache (Cloudflare, a corporate proxy) serves one caller's response to another. The image proxy and audio files set their own. The SPA adds `<meta name="robots" content="noindex, nofollow">` and serves a disallow-all `robots.txt`.
-
-- **CSP:** No external scripts, styles from CDN (except for `/docs`), image proxying allowed
-- **HSTS:** 730 days cache (enforce HTTPS)
-- **Clickjacking:** X-Frame-Options DENY (no embedding)
-
-File: `backend/app/core/security_headers.py` (lines 5–25)
+- **CSP:** own scripts only; images from any HTTPS source; only YouTube embeds. The API docs (`/docs`, `/redoc`, `/openapi.json`) get a looser policy so Swagger loads from its CDN.
+- **HSTS:** HTTPS for two years.
+- **No framing:** other sites can't embed IntelFeed.
+- **No caching:** `/api/*` responses (and `/openapi.json`) get `Cache-Control: private, no-store` unless the route sets its own (the image proxy and audio files do), so shared caches like Cloudflare never leak one user's data to another.
+- **No indexing:** the SPA adds `<meta name="robots" content="noindex, nofollow">` and a crawler-blocking `robots.txt`.
 
 ### CORS Configuration
 
-Value is a JSON array of allowed origins (a bare string fails to parse):
+`CORS_ORIGINS` is a JSON list of browser origins allowed to call the API:
 
-**Dev:** `CORS_ORIGINS=["http://localhost:3000","http://localhost:3001"]`
-**Prod:** `CORS_ORIGINS=["https://intelfeed.example.com"]`
+Dev `CORS_ORIGINS=["http://localhost:3000","http://localhost:3001"]`; prod `CORS_ORIGINS=["https://intelfeed.example.com"]`.
 
-Configured in FastAPI middleware (`app/main.py`, line ~14):
-
-```python
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-```
-
----
+It feeds `CORSMiddleware` in `backend/app/main.py`, allowing credentials and all methods and headers.
 
 ### Rate Limiting
 
-**Middleware:** `RateLimitMiddleware` in `app/core/rate_limit.py`
+`RateLimitMiddleware` (`backend/app/core/rate_limit.py`) limits by path. Normal signed-in use is **not** limited; limits protect logins, AI spend and anonymous access.
 
-Limits are bucketed by path, not a global per-IP cap — general authenticated API traffic is **not** rate limited (self-hosted app with a small trusted user base; a global cap broke normal operation with 200+ feeds triggering SSE-driven query invalidations):
+| Bucket | Applies to | Limit |
+|---|---|---|
+| `auth` | `/api/auth/login`, `/api/auth/register`, `/api/auth/refresh` | 10 per 5 minutes |
+| `chat` | `POST /api/chat` | 10 per minute |
+| `ai` | AI calls under `/api/ai/*`; creating or testing an AI provider; the share page's `ask-agent` and `run-ai-task`. Not counted: settings reads under `/api/ai/tasks`, `/api/ai/providers`, `/api/ai/prompts`, `/api/ai/copilot-auth` | 20 per minute |
+| `anon_article` | `GET /api/entries/{id}` without a valid token (a full article) | 20/min and 150/hour |
+| `anon_heavy` | Graph, pivot, timeline, analytics, map, calendar, priority-queue, relationship, entity-link, CWE and autolink-scan routes without a valid token | 20/min and 200/hour |
+| `anon` | Other `/api/*` requests without a valid token ([public read-only mode](public-read-only-mode.md), share pages) | 180/min and 1,500/hour |
+| `indicator_feeds` | `/api/taxii2/*` and `/api/publish/*` without a valid token (publish-token pulls) | 240/min |
+| — | Everything else signed in | Not limited |
 
-| Bucket | Paths | Limit |
-|--------|-------|-------|
-| `auth` | `/api/auth/login`, `/api/auth/register`, `/api/auth/refresh` | 10 req / 5 min (brute-force protection) |
-| `chat` | `POST /api/chat` | 10 req / min (protects API credits) |
-| `ai` | `/api/ai/*` inference calls (config/read prefixes like `/api/ai/tasks`, `/api/ai/providers`, `/api/ai/prompts` are exempt) | 20 req / min |
-| `anon_article` | `GET /api/entries/{id}` with no valid token: the full text of one article | 20 req / min and 150 req / hour per IP |
-| `anon_heavy` | Requests with no valid token to graph, pivot, timeline, analytics, map/calendar, priority-queue, relationship and autolink-scan routes | 20 req / min and 200 req / hour per IP |
-| `anon` | Every other `/api/*` request with no valid token ([public read-only mode](public-read-only-mode.md), share pages) | 180 req / min and 1,500 req / hour per IP |
-| `indicator_feeds` | `/api/taxii2/*` and `/api/publish/*` with no valid token (firewalls and SIEMs pulling with a publish token) | 240 req / min per IP |
-| everything else | signed-in traffic | not limited |
+Never limited: `/api/health`, `/metrics`, `OPTIONS` requests.
 
-**Exempt:** `/api/health`, `/metrics` (the metrics endpoint has its own IP allowlist), and all `OPTIONS` requests.
-
-**Mechanics:** Redis sliding-window (sorted set per identity). Identity is the `sub` of a JWT whose signature verifies, else the client IP: the first `X-Forwarded-For` hop when the direct peer is on a private network (Caddy strips the incoming header and writes its own peer there, so it can't be forged), or the header named in `TRUSTED_CLIENT_IP_HEADER` first (an unverified bearer falls back to the IP). This trusts whatever a private-network peer forwards, so the API port must only be reachable through the proxy, as the prod compose file arranges; a port 8000 published to the LAN would let a caller forge the header and the bucket. A bucket with two windows must fit both, checked and recorded in one atomic Redis script so parallel requests can't overrun it, and a refused request is not counted, so a visitor who hits the minute window is back as soon as their earlier requests age out. If Redis is down the limiter fails open (allows the request, logs a warning). Responses carry `X-RateLimit-Limit` / `X-RateLimit-Remaining` for the tightest window; a 429 includes `Retry-After`, the seconds until enough counted requests leave the full window for one more to fit.
-
-File: `backend/app/core/rate_limit.py`
+- **Who is counted:** the user for a valid, signature-checked JWT; else the client IP.
+- **Client IP.** For private-network connections (Caddy, or your machine in dev), the API uses the `TRUSTED_CLIENT_IP_HEADER` header if set, else the first `X-Forwarded-For` entry. Caddy overwrites `X-Forwarded-For` with the real peer; never publish port 8000 to your LAN, or anyone could fake it.
+- **Counting.** Redis sliding windows, checked and recorded by one script, so parallel requests can't slip past. Refused requests aren't counted.
+- **Responses.** Allowed: `X-RateLimit-Limit` and `X-RateLimit-Remaining` for the tightest window. Refused: `429` with `Retry-After` (seconds until a request fits).
+- **Redis down:** requests are allowed, with a logged warning.
 
 ### SQL Injection Prevention
 
-**Method:** SQLAlchemy ORM (parameterized queries)
-
-All database access goes through SQLAlchemy, which:
-- Uses parameterized queries (placeholders, no string interpolation)
-- Prevents SQL injection by design
-
-**Raw SQL (if needed):**
-```python
-from sqlalchemy import text
-
-result = await db.execute(text(
-    "SELECT * FROM entries WHERE id = :id"
-).bindparams(id=entry_id))
-```
-
-Never do:
-```python
-# WRONG — vulnerable to SQL injection
-db.execute(f"SELECT * FROM entries WHERE id = '{entry_id}'")
-```
+All queries use SQLAlchemy bound parameters; raw SQL uses `text()` with named parameters (`:id`), never string formatting.
 
 ### CSRF Protection
 
-Not applicable by design: the API does not use cookie-based sessions. Authentication is a Bearer token read from localStorage and attached explicitly by the frontend's Axios client — a cross-site request from another origin never carries it, so the classic CSRF vector doesn't exist. There is no CSRF token middleware.
+Not needed: login uses no cookies, and forged cross-site requests lack the bearer token.
 
 ### XSS & Content Sanitization
 
-**Server-side:**
-- HTML in feed entries sanitized with the `nh3` library (Rust ammonia bindings) before storage
-- Only safe tags allowed: `<p>`, `<a>`, `<img>`, `<br>`, `<code>`, `<pre>`, etc.
-- `<script>`, `<iframe>`, `<style>` stripped
-
-**Client-side (Frontend):**
-- `DOMPurify` library sanitizes HTML before rendering
-- CSP prevents inline scripts
-
-**Image Proxying:**
-- All `<img src>` URLs rewritten to `/api/proxy/image?url=...`
-- Prevents direct external resource loading
-- Caches proxied images locally (protects against tracking)
-- Migration script: `scripts/maintenance/resanitize_entries.py` fixed historical entries
-
-File: [scripts/maintenance/resanitize_entries.py](../scripts/maintenance/resanitize_entries.py)
+- **Server:** article HTML is cleaned with `nh3` before storage (`backend/app/services/sanitizer.py`). Only allowlisted formatting tags survive (paragraphs, links, images, headings, lists, tables, code and similar); `<script>`, `<iframe>` and `<style>` are removed.
+- **Browser:** DOMPurify cleans HTML again before display; the CSP blocks inline scripts.
+- **Images** load through `/api/proxy/image` while `image_proxy_enabled` is on (default), cached in `image_cache`, so original hosts can't track readers.
+- After a sanitizer change, re-clean stored entries with [scripts/maintenance/resanitize_entries.py](../scripts/maintenance/resanitize_entries.py) in the api container.
 
 ### Encrypted Columns
 
-**Columns encrypted at rest (Fernet):**
-- `ai_providers.api_key_encrypted` — AI provider API keys
-- `enrichment_sources.api_key_encrypted` — decrypted on-read for API calls
-- `user_enrichment_overrides.api_key_encrypted` — per-user API key
-- `system_settings.secrets` — JSONB of encrypted secrets
+Encrypted with Fernet (AES-128 plus HMAC) using `ENCRYPTION_KEY`:
 
-(`users.password_hash` is bcrypt-*hashed*, not encrypted — it is never decrypted, only compared.)
+- `ai_providers.api_key_encrypted`
+- `enrichment_sources.api_key_encrypted`
+- `user_enrichment_overrides.api_key_encrypted`
+- `system_settings.secrets`
 
-**Encryption:** Fernet (AES-128 + HMAC) via `cryptography` library
-
-```python
-from cryptography.fernet import Fernet
-
-cipher = Fernet(settings.encryption_key)
-encrypted = cipher.encrypt(plaintext.encode())
-decrypted = cipher.decrypt(encrypted).decode()
-```
-
-**Key storage:** `ENCRYPTION_KEY` env var (must be backed up securely)
+Back up `ENCRYPTION_KEY`: without it these are unreadable, even from a good backup. `users.password_hash` is a bcrypt hash, only ever compared.
 
 ---
 
@@ -410,81 +287,71 @@ decrypted = cipher.decrypt(encrypted).decode()
 
 ### Structured Logging
 
-**Framework:** `structlog` with JSON output
+`structlog` (`backend/app/core/logging.py`) writes JSON lines to host-mounted `logs/`, rotating at 10 MB, 5 old files kept:
 
-**Log files** (in `logs/` directory):
-- `app.log` — all INFO+ logs (catch-all)
-- `error.log` — ERROR+ only
-- `http.log` — HTTP request/response logs
-- `tasks.log` — Celery worker/beat logs
-- `audit.log` — mutating API actions (create/update/delete)
-- `update.log` — `update.sh` deployment log
+| File | Contents |
+|---|---|
+| `app.log` | App INFO and above, excluding workers |
+| `error.log` | ERROR and above |
+| `http.log` | One line per request: method, path, status, `duration_ms`, client |
+| `tasks.log` | Celery worker and beat |
+| `audit.log` | Create, update and delete actions via the API |
+| `update.log` | `update.sh` output |
 
-**Log format (JSON lines):**
+Admins read them in **Settings → Logs** or via the API:
 
-```json
-{"timestamp": "2026-05-03T21:02:00Z", "level": "INFO", "event": "entry_fetched", "feed_id": "uuid-123", "logger": "app.tasks.fetch_feeds"}
-{"timestamp": "2026-05-03T21:02:01Z", "level": "ERROR", "event": "api_error", "exception": "...", "logger": "app.api.entries"}
-```
-
-**Correlation IDs:**
-- Each request gets unique `request_id` (set via middleware)
-- All logs within request include `request_id`
-- Enables tracing request → worker job → database queries
-
-File: `backend/app/core/logging.py` (lines 1–150+)
-
-**API Logs Viewer (Admin):**
-- `GET /api/logs` — list available log files
-- `GET /api/logs/{filename}?lines=500` — tail last 500 lines
-- `DELETE /api/logs/{filename}` — clear log file
-
-File: `backend/app/api/logs.py` (lines 1–119)
+`GET /api/logs` (list), `GET /api/logs/{filename}?lines=500` (last N lines, up to 10,000), `DELETE /api/logs/{filename}` (empty a file).
 
 ### Prometheus Metrics
 
-**Endpoint:** `/metrics` — the API gates it to loopback/RFC1918 client IPs (`app/api/metrics.py`). In prod the frontend nginx returns **404** for `/metrics` outright: the proxy hop rewrote `$remote_addr`/`X-Real-IP` to the Caddy container's (always-RFC1918) IP, which defeated any ACL, so the path is simply never served through the proxy. Scrapers must run inside the compose `backend` network and hit `http://api:8000/metrics` directly.
-
-**Instrumented metrics:**
-
-| Metric | Type | Labels |
-|--------|------|--------|
-| `intelfeed_http_requests_total` | Counter | method, path, status |
-| `intelfeed_http_request_duration_seconds` | Histogram | method, path |
-| `intelfeed_feeds_active` | Gauge | — |
-| `intelfeed_feed_fetch_total` | Counter | status (success, error, not_modified) |
-| `intelfeed_feed_fetch_duration_seconds` | Histogram | feed_type |
-| `intelfeed_entries_ingested_total` | Counter | feed_type |
-| `intelfeed_ai_requests_total` | Counter | provider, task |
-| `intelfeed_ai_tokens_total` | Counter | provider, direction (input/output) |
-| `intelfeed_ai_cost_total` | Counter | provider |
-| `intelfeed_automation_runs_total` | Counter | trigger_type, status |
-| `intelfeed_search_queries_total` | Counter | — |
-
-**Scrape config (Prometheus, running as a container on the compose `backend` network):**
+`/metrics` answers only loopback and private (RFC 1918) addresses (`backend/app/api/metrics.py`). In prod the frontend nginx always returns **404** for it, since behind the proxy every request looks private. Scrape `http://api:8000/metrics` from Prometheus on the compose `backend` network; in dev, use `http://localhost:8000/metrics`.
 
 ```yaml
 scrape_configs:
-  - job_name: 'intelfeed'
+  - job_name: intelfeed
     scrape_interval: 15s
+    metrics_path: /metrics
     static_configs:
       - targets: ['api:8000']
-    metrics_path: '/metrics'
 ```
 
-(In dev, `localhost:8000` works from the host since the API port is published.)
+Metrics (`backend/app/core/metrics.py`):
 
-File: `backend/app/core/metrics.py` (lines 1–100+)
+| Metric | Type | Labels |
+|---|---|---|
+| `intelfeed_http_requests_total` | Counter | method, path, status |
+| `intelfeed_http_request_duration_seconds` | Histogram | method, path |
+| `intelfeed_feeds_active` | Gauge | — |
+| `intelfeed_feed_fetch_total` | Counter | status (success, error, not_modified, rate_limited) |
+| `intelfeed_feed_fetch_duration_seconds` | Histogram | feed_type |
+| `intelfeed_entries_ingested_total` | Counter | feed_type |
+| `intelfeed_ai_requests_total` | Counter | provider, task |
+| `intelfeed_ai_tokens_total` | Counter | provider, direction (input, output) |
+| `intelfeed_ai_cost_total` | Counter | provider (estimated USD) |
+| `intelfeed_ai_request_duration_seconds` | Histogram | provider, task |
+| `intelfeed_signal_probe_failures_total` | Counter | probe |
+| `intelfeed_entry_signals_fired_total` | Counter | signal_type |
+| `intelfeed_automation_runs_total` | Counter | trigger_type, status |
+| `intelfeed_correlation_events_total` | Counter | event_type |
+| `intelfeed_search_queries_total` | Counter | — |
+| `intelfeed_celery_tasks_total` | Counter | task_name, status |
+| `intelfeed_celery_task_duration_seconds` | Histogram | task_name |
+| `intelfeed_entries_cleaned_total` | Counter | — |
+| `intelfeed_images_evicted_total` | Counter | — |
+| `intelfeed_telegram_media_evicted_total` | Counter | — |
+
+`/api/health` and `/metrics` aren't counted in HTTP metrics.
 
 ### Health Endpoints
 
-**Liveness check:** `GET /api/health`
+`GET /api/health` (no login) pings PostgreSQL, Redis and Meilisearch with latencies:
 
-**Response (healthy):**
 ```json
 {
   "status": "healthy",
-  "version": "0.1.0",
+  "version": "v1.2.3",
+  "git_sha": "abc1234",
+  "built_at": "2026-10-01T12:00:00Z",
   "components": {
     "database": {"status": "ok", "latency_ms": 2.5},
     "redis": {"status": "ok", "latency_ms": 1.2},
@@ -493,12 +360,10 @@ File: `backend/app/core/metrics.py` (lines 1–100+)
 }
 ```
 
-**Statuses:**
-- `healthy` — all critical components OK (database is critical)
-- `degraded` — database OK, but non-critical services down
-- `unhealthy` — database down
+`healthy` = all up; `degraded` = database up, Redis or Meilisearch down; `unhealthy` = database down.
 
-**Docker Compose healthcheck:**
+`GET /api/version` returns only the build stamp (cheap to poll). Prod health check:
+
 ```yaml
 healthcheck:
   test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
@@ -508,98 +373,109 @@ healthcheck:
   start_period: 30s
 ```
 
-File: `backend/app/api/health.py` (lines 1–73)
+Code: `backend/app/api/health.py`.
 
 ---
 
 ## Backups & Recovery
 
+Two ways:
+
+1. **Nightly job.** `backup-database` runs `pg_dump` in the worker daily at 02:00 UTC, writing `backups/intelfeed_YYYYMMDD_HHMMSS.sql.gz` (host `./backups`) and keeping `backup_retention_days` days (default 7, **Settings → System**). No encryption or Meilisearch snapshot; schedule is in the Jobs view (**Settings → Engine**).
+2. **[scripts/ops/backup.sh](../scripts/ops/backup.sh)** on the host, which can encrypt and also requests a Meilisearch snapshot.
+
+Copy backups off the server either way.
+
 ### Backup Strategy
 
-**Script:** `scripts/ops/backup.sh`
-
-**What's backed up:**
-1. **PostgreSQL database** — full dump via `pg_dump --clean --if-exists --no-owner`
-2. **Meilisearch index** — snapshot via `POST /snapshots`, executed **inside the meilisearch container** (`docker compose exec meilisearch curl …`). This works in prod where Meilisearch is internal-only (no host port) and needs no host-side env: the container ships curl (its healthcheck uses it) and already has `MEILI_MASTER_KEY`. The snapshot is written asynchronously by Meilisearch to `/meili_data/snapshots` in the `meilidata` volume — not to `backups/`.
-3. **Compression:** gzip (default) or GPG+gzip (if `BACKUP_ENCRYPT_KEY` set)
-
-**Failure behavior:** a failed `pg_dump` aborts immediately (`set -e`). A failed Meilisearch snapshot does **not** block the database backup — the script logs a clear `ERROR`, still runs retention pruning, and then exits `1` so cron/monitoring notices.
-
-**Streaming:** the dump is piped straight through `gzip` (and `gpg` when encrypting) to the backup file — no uncompressed intermediate ever hits disk or memory. Resource usage stays flat regardless of database size; buffering the dump before compressing it would risk OOMing the host on large DBs.
-
-**Schedule:** Recommended daily or after major changes
+Run `backup.sh` **from the repo folder** (it finds the compose file relative to it).
 
 ```bash
-# Run manually
-./scripts/ops/backup.sh ./backups
+# On the host, from the repo folder
+./scripts/ops/backup.sh                 # writes to ./backups
+./scripts/ops/backup.sh /mnt/backups    # or to another folder
 
-# Cron (daily at 2 AM)
-0 2 * * * /path/to/intelfeed/scripts/ops/backup.sh /mnt/backups
+# Cron, daily at 03:00
+0 3 * * * cd /path/to/intelfeed && scripts/ops/backup.sh /mnt/backups
 ```
 
-**Retention:** 7 days (configurable `RETENTION_DAYS=7`)
+It:
 
-**Backup file:** `backups/intelfeed_YYYYMMDD_HHMMSS.sql.gz` (or `.sql.gz.gpg`)
+1. **Dumps the database** with `pg_dump --clean --if-exists --no-owner`, streamed through `gzip` (and `gpg` when encrypting), never holding it uncompressed.
+2. **Requests a Meilisearch snapshot** from inside its container (no host port needed), written in the background to `/meili_data/snapshots` in the `meilidata` volume, not the backup folder.
+3. **Deletes backups** past retention.
 
-**Size estimate:** ~50–200 MB compressed (depends on entry count)
+Settings come from the shell environment, not `.env`:
 
-File: [scripts/ops/backup.sh](../scripts/ops/backup.sh)
+| Variable | Default | Meaning |
+|---|---|---|
+| `RETENTION_DAYS` | 7 | Delete backups older than this; 0 keeps all |
+| `BACKUP_ENCRYPT_KEY` | empty | If set, GPG (AES-256) encrypt to `.sql.gz.gpg` |
+| `COMPOSE_FILE` | `docker-compose.prod.yml` | `docker-compose.dev.yml` for the dev stack |
+| `POSTGRES_USER` / `POSTGRES_DB` | `intelfeed` | If your `.env` uses other names |
+
+A `pg_dump` failure stops it. A snapshot-only failure keeps the backup, still prunes, and exits 1 for cron or monitoring.
 
 ### Restore Procedure
 
-**Script:** `scripts/ops/restore.sh`
-
-**Restore from backup:**
+[scripts/ops/restore.sh](../scripts/ops/restore.sh) replaces the database with a backup (on the host, from the repo folder):
 
 ```bash
 ./scripts/ops/restore.sh ./backups/intelfeed_20260503_020000.sql.gz
-# OR (encrypted)
+
+# Encrypted backup
 export BACKUP_ENCRYPT_KEY="<passphrase>"
 ./scripts/ops/restore.sh ./backups/intelfeed_20260503_020000.sql.gz.gpg
 ```
 
-**What it does:**
-1. Stops API and worker services
-2. Drops and recreates database
-3. Restores from backup (gunzip → psql)
-4. Restarts services
+With no argument it lists `./backups`. It asks for confirmation, stops `api`, `celery-worker` and `celery-beat`, drops and recreates the database, loads the backup in one transaction, and restarts those three.
 
-**Warning:** Restoring **overwrites** the current database. Backups should be immutable copies.
+It leaves `celery-worker-ai` and `telegram-listener` running (stop them for a write-free restore) and honours `COMPOSE_FILE`, `POSTGRES_USER` and `POSTGRES_DB`.
 
-**Meilisearch restore:** Manual — snapshots live in the `meilidata` volume at `/meili_data/snapshots/` (created by `backup.sh`):
+**Restoring overwrites the current database.** Keep backups read-only.
+
+**Meilisearch.** After a restore, rebuild the index from the database: **Settings → System → Rebuild Search Index**, or:
+
 ```bash
-# List available snapshots
-docker compose -f docker-compose.prod.yml exec meilisearch ls /meili_data/snapshots
-
-# Import: start Meilisearch once with --import-snapshot pointing at the file
-# (e.g. temporary `command: meilisearch --import-snapshot /meili_data/snapshots/<file>.snapshot`)
+docker compose -f docker-compose.prod.yml exec api python scripts/maintenance/rebuild_search_indexes.py
 ```
-Alternatively, skip snapshot restore entirely: the index is derived data and can be rebuilt from PostgreSQL via the search reindex task.
 
-File: [scripts/ops/restore.sh](../scripts/ops/restore.sh)
+Or start Meilisearch once with `--import-snapshot`:
+
+```bash
+docker compose -f docker-compose.prod.yml exec meilisearch ls /meili_data/snapshots
+# Then temporarily set the meilisearch service's command to
+#   meilisearch --import-snapshot /meili_data/snapshots/<file>.snapshot
+```
 
 ### Volume Layout
 
-**Production volumes:**
+Prod named volumes:
 
-| Volume | Mount | Purpose | Cleanup |
-|--------|-------|---------|---------|
-| `pgdata` | `/var/lib/postgresql/data` | DB persistence | Never (data)
-| `redisdata` | `/data` | Redis persistence (AOF) | With DB restore |
-| `meilidata` | `/meili_data` | Meilisearch index | With index rebuild |
-| `image_cache` | `/app/data/image_cache` | Cached article images | Safe to delete (re-cache on next access) |
-| `libretranslate_models` | `/home/libretranslate/.local` | Downloaded language models | Safe to delete (re-downloaded on start) |
-| `piper_voices` | `/voices` | Downloaded Piper TTS voice models | Safe to delete (re-downloaded on start) |
-| `claude_cli` | `/home/appuser/.claude` | Claude Code CLI OAuth credentials + state (CLI worker only) | Never (loses copilot auth) |
-| `caddy_data` | `/data` | TLS certificates | Never (expiration tracking) |
-| `caddy_config` | `/config` | Caddy config state | Safe to delete (re-generated) |
+| Volume | Mounted at | Holds | Safe to delete? |
+|---|---|---|---|
+| `pgdata` | `/var/lib/postgresql/data` | Database | No |
+| `redisdata` | `/data` | Redis append-only file | Yes, losing queued jobs, the logout blocklist and rate-limit counts |
+| `meilidata` | `/meili_data` | Search index and snapshots | Yes, then rebuild |
+| `image_cache` | `/app/data/image_cache` | Cached article images | Yes, refetched |
+| `libretranslate_models` | `/home/libretranslate/.local` | Translation models | Yes, redownloaded on start |
+| `piper_voices` | `/voices` | TTS voice models | Yes, redownloaded on start |
+| `claude_cli` | `/home/appuser/.claude` | Claude CLI login (AI worker only) | No, you'd have to sign in again |
+| `caddy_data` | `/data` (caddy) | TLS certificates | No, re-requesting can hit Let's Encrypt rate limits |
+| `caddy_config` | `/config` (caddy) | Caddy config | Yes |
 
-**Logs:** Mounted from host `./logs/` (not a volume)
-**Backups:** Mounted from host `./backups/` (not a volume)
-**Docs:** `./docs/` mounted read-only into the API container at `/app/docs` — serves the in-app documentation (`app/api/documentation.py`); if the mount is missing the docs page degrades to an empty index
-**Telegram:** Session file and media mounted from host `./telegram_data/` and `./telegram_media/` (media grows unbounded — monitor disk)
-**TTS audio:** Generated read-aloud MP3s mounted from host `./tts_media/` — written by uid 1000 inside the containers, so the dir must be owned by 1000 (`update.sh` chowns it idempotently)
-**Manual upload originals:** The files behind bulk ingest mounted from host `./ingest_files/` (api writes, celery-worker reads and evicts past `ingest_files_ttl_days`) — same uid-1000 ownership rule, same idempotent chown in `update.sh`
+Host folders (relative to the repo):
+
+| Folder | Used by | Notes |
+|---|---|---|
+| `./logs` | api, workers, beat, telegram-listener | Log files |
+| `./backups` | api, celery-worker | Nightly-job and `backup.sh` backups |
+| `./docs` | api (read-only) | In-app documentation (`app/api/documentation.py`); without it the docs page is empty |
+| `./scripts` | api (read-only) | Seed and maintenance scripts |
+| `./intelfeed-mcp` | celery-worker-ai (read-only) | MCP server for the Claude CLI provider |
+| `./telegram_data`, `./telegram_media` | api, celery-worker, telegram-listener | Telegram session and media; media older than `telegram_media_ttl_days` (default 30) is deleted |
+| `./tts_media` | api, celery-worker | Read-aloud MP3s; must be owned by uid 1000 (`update.sh` fixes this) |
+| `./ingest_files` | api, celery-worker | Uploaded originals, deleted after `ingest_files_ttl_days` (default 180); must be owned by uid 1000 (`update.sh` fixes this) |
 
 ---
 
@@ -607,354 +483,222 @@ File: [scripts/ops/restore.sh](../scripts/ops/restore.sh)
 
 ### Bottlenecks
 
-**Common failure points:**
-
-1. **Feed fetching** — if many feeds + slow upstream
-   - Mitigation: Increase fetch workers, stagger feed schedules, HTTP timeout
-
-2. **Meilisearch indexing** — if large entry volume
-   - Mitigation: Run rebuild at off-peak hours (2 AM), increase `MEILI_MAX_INDEX_SIZE`
-
-3. **AI API calls** — if heavy auto-extraction + many providers
-   - Mitigation: Rate limit via `AIProvider.config`, queue management
-
-4. **Database connections** — if high concurrency
-   - Mitigation: Increase `max_connections` in PostgreSQL, tune connection pool
-
-5. **Telegram listener** — if monitoring many channels
-   - Mitigation: Stagger polling, filter channels
+| Symptom | Likely cause | What to try |
+|---|---|---|
+| Feeds fall behind | Many or slow feeds | More default-worker concurrency, longer fetch intervals |
+| AI analysis backlog grows | The AI worker runs one task at a time by design | Faster model or provider; raise `CLAUDE_CODE_CONCURRENCY` only if the provider handles parallel calls |
+| Slow pages, timeouts | API out of memory or database disk-bound | Check `docker stats`; raise api or db memory limits and Postgres buffers |
+| Too many database connections | Up to 15 per API worker (`db_pool_size` 5 + `db_max_overflow` 10), 8 per task | Lower pool settings or raise Postgres `max_connections` (prod default 100) |
 
 ### Scaling Strategies
 
-**Vertical Scaling (single server):**
-- Increase EC2 instance size (more CPU, RAM)
-- Increase resource limits in `docker-compose.prod.yml` (see lines 19–126)
-- Add Celery workers: change `--concurrency=4` to `--concurrency=8`
+**One bigger server.** Add CPU and RAM, then raise `memory` limits in `docker-compose.prod.yml` and worker `--concurrency`. Keep Gunicorn's worker count (`-w 3`) small enough to fit under the api memory limit; a swapping worker is worse than one fewer.
 
-**Horizontal Scaling (multiple servers):**
-- Run PostgreSQL on RDS (managed)
-- Run Redis on ElastiCache
-- Run multiple Celery worker nodes (share Broker & Database)
-- Use ELB/ALB for load balancing API
+**Queues.** `celery` (everything but AI work) is served by `celery-worker`; `ai` (every task calling an AI provider) only by `celery-worker-ai`. New AI-calling tasks must be routed to `ai` in `task_routes` in `backend/app/workers/celery_app.py`.
 
-**Queue Separation (single server):**
+**Postgres tuning.** Prod `db` settings are command-line flags (`shared_buffers=320MB`, `work_mem=24MB`, `maintenance_work_mem=96MB`, `effective_cache_size=2GB`, `random_page_cost=1.1`). They override `ALTER SYSTEM`; edit the compose file and recreate:
+
 ```bash
-# Worker 1 — feed fetching only
-celery -A app.workers.celery_app worker -Q feeds --loglevel=info
-
-# Worker 2 — AI extraction only
-celery -A app.workers.celery_app worker -Q ai --loglevel=info
-
-# Worker 3 — general tasks
-celery -A app.workers.celery_app worker -Q celery --loglevel=info
+docker compose -f docker-compose.prod.yml up -d db
 ```
 
-**Database Tuning:**
-```sql
--- Increase connections (in PostgreSQL container)
-ALTER SYSTEM SET max_connections = 500;
-ALTER SYSTEM SET shared_buffers = '256MB';
-ALTER SYSTEM SET work_mem = '32MB';
-SELECT pg_reload_conf();
-```
+**Several servers.** Point `POSTGRES_HOST`, `REDIS_URL` and `MEILI_URL` at managed services (`POSTGRES_SSL=true` for remote databases); extra worker hosts share the broker and database. Keep one `celery-worker-ai` if it paces a single GPU.
 
 ---
 
 ## Troubleshooting
 
+Run commands on the prod host from the repo folder.
+
 ### Common Failure Modes & Solutions
 
-#### 1. **Feed Stuck (Redis Lock)**
+#### 1. A feed stops updating
 
-**Symptom:** Feed not updating despite scheduled time.
-
-**Cause:** Previous fetch job holds Redis lock (crashed without releasing).
+**Cause:** a crashed fetch left its Redis lock, which expires after 10 minutes — wait first.
 
 **Fix:**
-```bash
-# Clear lock manually (locks self-expire after 10 minutes)
-docker compose -f docker-compose.prod.yml exec redis redis-cli -a ${REDIS_PASSWORD}
-> DEL feed_fetch:<feed_id>
-> EXIT
 
-# Restart feed fetcher
+```bash
+docker compose -f docker-compose.prod.yml exec redis redis-cli -a "$REDIS_PASSWORD" DEL feed_fetch:<feed_id>
 docker compose -f docker-compose.prod.yml restart celery-worker celery-beat
 ```
 
-#### 2. **Failed Database Migration**
+#### 2. A database migration fails
 
-**Symptom:** API fails to start; migration error in logs.
+**Symptom:** the API restart-loops with a migration error. `exec` won't work (migrations run at start); use a one-off container:
 
-**Cause:** Migration file has syntax error or schema conflict.
-
-**Fix:**
 ```bash
-# Check current migration status
-docker compose -f docker-compose.prod.yml exec api alembic current
-docker compose -f docker-compose.prod.yml exec api alembic history
-
-# Downgrade to last known-good migration
-docker compose -f docker-compose.prod.yml exec api alembic downgrade -1
-
-# Fix migration file, commit, and re-deploy
-git commit -am "fix: migration syntax"
-./update.sh
+docker compose -f docker-compose.prod.yml run --rm -e RUN_MIGRATIONS=false api alembic current
+docker compose -f docker-compose.prod.yml run --rm -e RUN_MIGRATIONS=false api alembic history
+docker compose -f docker-compose.prod.yml logs api --tail 100
 ```
 
-#### 3. **Meilisearch Out of Sync**
+**Fix:** correct the migration and push to `main`; the next `update.sh` rebuilds and applies it. Downgrade (`alembic downgrade -1`) only if you know what it drops.
 
-**Symptom:** Entries visible in UI but not searchable; search returns stale results.
+#### 3. Search is missing entries or shows old results
 
-**Cause:** Index rebuild failed or lagged.
+**Fix:** **Settings → System → Rebuild Search Index**, or:
 
-**Fix:** Trigger a full rebuild from the UI (**Settings > Engine** — "Rebuild search index" clears the index and re-indexes all entries from the database), or from the CLI:
 ```bash
-# Re-trigger rebuild job (task lives in intel_feed_tasks and takes an admin user id)
-docker compose -f docker-compose.prod.yml exec api \
-  python -c "from app.workers.intel_feed_tasks import rebuild_search_index; rebuild_search_index.delay('<admin_user_uuid>')"
+docker compose -f docker-compose.prod.yml exec api python scripts/maintenance/rebuild_search_indexes.py
 ```
 
-#### 4. **Telegram Listener Idle**
+#### 4. Telegram messages stop arriving
 
-**Symptom:** Telegram mentions stop appearing; listener logs show no activity.
-
-**Cause:** Telegram session expired or network connectivity lost.
+**Cause:** expired session or network drop.
 
 **Fix:**
+
 ```bash
-# Check listener logs
 docker compose -f docker-compose.prod.yml logs telegram-listener --tail 100
-
-# Restart listener
 docker compose -f docker-compose.prod.yml restart telegram-listener
 
-# Re-authenticate if the session expired (interactive; writes the session file)
-docker compose -f docker-compose.prod.yml exec telegram-listener \
-  python scripts/telegram/telegram_login.py
+# Expired session: log in again (interactive). The api container has the
+# scripts and shares the session folder.
+docker compose -f docker-compose.prod.yml exec -it api python scripts/telegram/telegram_login.py
 ```
 
-#### 5. **AI Provider Timeout**
+#### 5. AI tasks time out
 
-**Symptom:** AI extraction tasks fail with timeout; error logs show "exceeded maximum retries".
+**Cause:** slow or unreachable provider.
 
-**Cause:** Provider API slow or unreachable; request timeout too short.
+**Fix:** in **Settings → AI Configuration**, raise `timeout_seconds` in the task's assignment config, or switch provider or model. For Ollama, check it's really on the GPU.
 
-**Fix:**
-- Increase `timeout_seconds` in the affected task's assignment config in **Settings > AI Configuration**, or temporarily reassign the task to a healthier provider/model there.
-- Inspect provider config via the API:
+#### 6. A container is killed for using too much memory
+
+**Symptom:** a restart with `OOMKilled: true` in `docker inspect`.
+
 ```bash
-curl -H "Authorization: Bearer ${ACCESS_TOKEN}" http://localhost:8000/api/ai/providers
+docker stats --no-stream
 ```
 
-#### 6. **High Memory Usage**
+**Fix:** raise its `memory` limit in `docker-compose.prod.yml` or lower worker `--concurrency`, then `docker compose -f docker-compose.prod.yml up -d <service>`.
 
-**Symptom:** Container killed due to OOM; Docker logs show "Killed" signal.
+#### 7. Redis says "OOM command not allowed"
 
-**Cause:** Memory leak in worker or large cache buildup.
+**Cause:** Redis hit its 1 GB cap, and `volatile-lru` evicts only expiring keys. Celery results expire hourly (`result_expires=3600`); find big keys without expiry:
 
-**Fix:**
 ```bash
-# Check memory usage
-docker compose -f docker-compose.prod.yml stats
-
-# Increase worker memory limit (in docker-compose.prod.yml)
-# celery-worker deploy.resources.limits.memory: "3G"  (was 2G)
-
-# OR reduce Celery worker count
-# --concurrency=2 (was 4)
-
-# Restart with new limits
-docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml exec redis redis-cli -a "$REDIS_PASSWORD" INFO memory
+docker compose -f docker-compose.prod.yml exec redis redis-cli -a "$REDIS_PASSWORD" --bigkeys
 ```
 
-#### 7. **Redis "OOM command not allowed"**
-
-**Symptom:** Tasks fail; Redis logs `OOM command not allowed when used memory > 'maxmemory'`.
-
-**Cause:** Redis hit its memory cap — usually Celery task results accumulating in the same Redis as the broker/copilot streams.
-
-**Fix:** Two mitigations are on by default — Redis runs with `--maxmemory 1gb --maxmemory-policy volatile-lru`, and Celery `result_expires=3600` caps result retention at 1 hour. If OOM still occurs:
-```bash
-# Inspect what's consuming memory
-docker compose -f docker-compose.prod.yml exec redis redis-cli -a ${REDIS_PASSWORD} INFO memory
-docker compose -f docker-compose.prod.yml exec redis redis-cli -a ${REDIS_PASSWORD} --bigkeys
-
-# volatile-lru only evicts keys WITH a TTL — look for large keys without one
-```
+`$REDIS_PASSWORD` isn't in your shell by default; paste it from `.env` or run `set -a; . ./.env; set +a`.
 
 ### Useful Commands
 
-**One-shot after deploying the per-user tags migration (`y6q8s0u2w4y6`):**
+**After the per-user tags migration** (`y6q8s0u2w4y6`), run once so tag search hides other users' tags (re-runnable; `--dry-run` only counts):
+
 ```bash
-# Re-push tag fields to Meilisearch so `tag:` search and the Tags facet stop showing
-# pre-migration shared tags to everyone. Safe to re-run; --dry-run just counts.
 docker compose -f docker-compose.prod.yml exec api python scripts/maintenance/reindex_entry_tags.py --all
 ```
 
-**Docker Compose:**
+**Containers:**
+
 ```bash
-# View logs for service
-docker compose -f docker-compose.prod.yml logs api --tail 100 -f
-
-# Execute command in container
-docker compose -f docker-compose.prod.yml exec api bash
-
-# View resource usage
-docker compose -f docker-compose.prod.yml stats
-
-# Restart service
-docker compose -f docker-compose.prod.yml restart api
-
-# Rebuild service
-docker compose -f docker-compose.prod.yml up -d --build api
+docker compose -f docker-compose.prod.yml ps                     # state and health
+docker compose -f docker-compose.prod.yml logs api --tail 100 -f # follow a service's log
+docker compose -f docker-compose.prod.yml exec api bash          # shell in a container
+docker compose -f docker-compose.prod.yml restart api            # restart one service
 ```
 
 **Database:**
+
 ```bash
-# Connect to PostgreSQL
 docker compose -f docker-compose.prod.yml exec db psql -U intelfeed -d intelfeed
+```
 
-# Common queries
+```sql
 SELECT count(*) FROM entries;
-SELECT count(*) FROM feeds WHERE is_active = true;
-SELECT name, article_count FROM threat_actors ORDER BY article_count DESC LIMIT 10;
+SELECT count(*) FROM feeds WHERE is_active;
 ```
 
-**Celery (worker inspection):**
+**Celery:**
+
 ```bash
-# List active tasks
 docker compose -f docker-compose.prod.yml exec celery-worker celery -A app.workers.celery_app inspect active
-
-# Check worker stats
 docker compose -f docker-compose.prod.yml exec celery-worker celery -A app.workers.celery_app inspect stats
-
-# Purge queue (warning: deletes pending jobs)
-docker compose -f docker-compose.prod.yml exec celery-worker celery -A app.workers.celery_app purge
-
-# Revoke task (stop running task)
-docker compose -f docker-compose.prod.yml exec celery-worker celery -A app.workers.celery_app revoke <task_id>
+# Deletes every waiting job in the celery queue
+docker compose -f docker-compose.prod.yml exec celery-worker celery -A app.workers.celery_app purge -Q celery
 ```
 
-**Alembic (migration inspection):**
+**Migrations:**
+
 ```bash
-# Current migration
 docker compose -f docker-compose.prod.yml exec api alembic current
-
-# Migration history
 docker compose -f docker-compose.prod.yml exec api alembic history
-
-# Downgrade (careful!)
-docker compose -f docker-compose.prod.yml exec api alembic downgrade -1
 ```
-
----
 
 ### Log Analysis Examples
 
-**Find errors in app.log:**
-```bash
-grep "ERROR" logs/app.log | tail -20
-```
+Logs are JSON lines, so use `jq`:
 
-**Find slow HTTP requests (>1 second):**
 ```bash
-grep "duration_ms" logs/http.log | awk '{print $NF}' | awk '$1 > 1000 {print}' | tail
-```
+# Last 20 errors
+tail -n 20 logs/error.log | jq .
 
-**Find failed feed fetches:**
-```bash
-grep "status.*error" logs/app.log | grep "feed_fetch"
-```
+# Requests slower than one second
+jq -c 'select(.duration_ms > 1000) | {path, status, duration_ms}' logs/http.log | tail
 
-**Count entries ingested today:**
-```bash
-grep "entry_ingested" logs/app.log | grep "$(date +%Y-%m-%d)" | wc -l
+# Rate-limited requests
+grep '"rate_limited"' logs/app.log | tail
 ```
 
 ---
 
 ## Update & Deployment
 
-**Automated updates:** `update.sh`
+[update.sh](../update.sh) updates a prod checkout from `origin/main`. Cron runs it every 2 minutes, so a push to `main` is a deploy:
 
-**What it does:**
-1. Fetches latest commits from `origin/main`
-2. Checks if commits exist (skip if up-to-date)
-3. Pulls latest code
-4. Classifies what changed since the last deploy, and does the least that works (see below)
-5. For an image change: ensures `./tts_media/` and `./ingest_files/` exist and are owned by uid 1000 (chowns if not — Piper audio and manual-upload originals are written by the in-container appuser), then rebuilds images and `up -d`
-6. Logs all activity to `logs/update.log`
+```bash
+*/2 * * * * /path/to/intelfeed/update.sh
+```
 
-**It only rebuilds when a rebuild would change something.** Most commits here touch
-`docs/`, `scripts/`, `planning/`, the Android client or CI, and none of those are
-baked into an image — `./docs`, `./scripts` and `./intelfeed-skill` are bind-mounted
-read-only, so new content is live the moment the pull lands. A cold build on the prod
-box is minutes of CPU on a box that OOMs under load, and `up -d` drops every request
-in flight, so paying that for a typo fix is pure downtime. The classification:
+Run by hand with `./update.sh`. Each run:
+
+1. Fetches `origin/main`; stops if nothing is new and no update is unfinished.
+2. Pulls.
+3. Does the least that works for what changed since the last deploy:
 
 | Changed path | Action |
-| --- | --- |
-| `backend/**`, `frontend/**`, `db/**`, `piper/**`, `docker-compose*.yml` | `build` then `up -d` |
-| `Caddyfile` | `caddy reload` in place (it is bind-mounted, so `up -d` would never re-read it) |
-| anything else | pull only; nothing is restarted |
+|---|---|
+| `backend/**`, `frontend/**`, `db/**`, `piper/**`, `docker-compose*.yml` | Build the images, then `up -d` |
+| `Caddyfile` | `caddy reload` in place (TLS stays up) |
+| Anything else | Pull only; nothing restarts |
 
-Note that `backend/**` and `frontend/**` count *in full* here, unlike the narrower
-`images` filter in CI: prod has no source volume mounts, so the api, worker and SPA
-images `COPY` the code at build time and a lone Python or TSX edit reaches the running
-stack only through a build.
+4. Before a build, ensures `./tts_media` and `./ingest_files` exist, owned by uid 1000.
+5. Logs to `logs/update.log` (JSON lines, also in **Settings → Logs**).
 
-The decision diffs against `.update-deployed`, a gitignored file holding the commit
-the running containers were last built from — **not** against the previous `HEAD`. That
-distinction is the whole point: a docs-only commit landing on top of a backend change
-that failed to build must still rebuild, and diffing `HEAD~1..HEAD` would skip it.
-If that file is missing during a retry the script cannot know what is running, so it
-rebuilds.
+- **Most commits need no rebuild.** Docs, scripts, Android and CI aren't in any image; mounted `./docs` and `./scripts` go live on pull. Rebuilds cost CPU minutes and `up -d` drops in-flight requests.
+- **Code changes rebuild** (prod has no code mounts).
+- **Images build before anything restarts.** A failed build leaves the stack running; the next run retries.
+- **It diffs against what's deployed.** `.update-deployed` (gitignored) holds the containers' build commit, so a failed backend build retries even after a docs commit lands on top; a missing file during a retry means rebuild.
+- **The app's version can trail `HEAD`** after a pull-only run.
+- **Profile services:** `up -d` doesn't start `libretranslate`; use `--profile translate`.
 
-One consequence: on a pull-only tick the images keep the version stamp of the commit
-they were actually built from, so the About page can sit a few commits behind `HEAD`.
-That is accurate rather than wrong — the image really is that old.
-
-Note: profile-gated services (`libretranslate`) are **not** restarted by `update.sh` — re-enable them explicitly with `--profile translate` after an update if you use them. (`celery-worker-ai` was un-gated when the CLI-credential era ended; update.sh now manages it like any other service.)
-
-**Usage (manual):**
-```bash
-./update.sh
-```
-
-**Cron (auto-update every 15 minutes):**
-```bash
-*/15 * * * * /path/to/intelfeed/update.sh
-```
-
-**Log file:** `logs/update.log` (JSON format, viewable via `/api/logs/update.log`)
-
-**From a workstation:** `scripts/ops/deploy.sh` wraps the whole flow — pushes `main` to origin, runs `update.sh` on the prod host over SSH, verifies "Update complete." appeared, and checks container health (`docker compose ps`), failing loudly on unhealthy/restarting containers.
-
-File: [update.sh](../update.sh), [scripts/ops/deploy.sh](../scripts/ops/deploy.sh)
+**From a workstation,** [scripts/ops/deploy.sh](../scripts/ops/deploy.sh) (on `main`) pushes, runs `update.sh` over SSH, checks for `Update complete.`, and fails on any unhealthy, restarting or exited container. Set `INTELFEED_PROD_HOST` (such as `user@prod.example.com`); `INTELFEED_PROD_DIR` overrides the host checkout path (default `intelfeed`). `--skip-push` deploys what's already on origin.
 
 ---
 
 ## Summary: Operations Checklist
 
-- [ ] **Deployment** — services running, healthchecks passing
-- [ ] **Secrets** — `.env` file generated, no defaults exposed
-- [ ] **TLS** — Caddy certificate valid (check `/data/caddy_data/`)
-- [ ] **Logs** — no ERROR entries; check `logs/app.log` daily
-- [ ] **Backups** — scheduled daily, tested restore procedure
-- [ ] **Monitoring** — `/metrics` accessible, Prometheus scraping
-- [ ] **Capacity** — memory usage <80%, disk usage <80%
-- [ ] **Security** — security headers present, rate limiting active
-- [ ] **Updates** — `update.sh` cron running, migrations up-to-date
+- [ ] All containers up and healthy (`docker compose -f docker-compose.prod.yml ps`)
+- [ ] No placeholder secrets in `.env`; `ENCRYPTION_KEY` backed up
+- [ ] Site loads over HTTPS with a valid certificate
+- [ ] `logs/error.log` checked regularly
+- [ ] Nightly backups copied off the host; a restore tested
+- [ ] Prometheus scraping `api:8000/metrics` inside the compose network, if used
+- [ ] Memory and disk under ~80%
+- [ ] `update.sh` cron running and `logs/update.log` ending in `Update complete.`
 
 ---
 
 ## References
 
-- Docker Compose: [docker-compose.prod.yml](../docker-compose.prod.yml)
-- Caddy: [Caddyfile](../Caddyfile)
-- Entrypoint: [backend/entrypoint.sh](../backend/entrypoint.sh)
-- Backup/Restore: [scripts/ops/backup.sh](../scripts/ops/backup.sh), [scripts/ops/restore.sh](../scripts/ops/restore.sh)
-- Update Script: [update.sh](../update.sh)
-- Setup Guide: [setup.md](../setup.md)
-- Architecture: [architecture.md](./architecture.md)
-- Service topology diagram: [diagrams/operations-service-topology.md](./diagrams/operations-service-topology.md)
+- Compose: [docker-compose.prod.yml](../docker-compose.prod.yml), [docker-compose.dev.yml](../docker-compose.dev.yml)
+- Proxy: [Caddyfile](../Caddyfile), [frontend/nginx.conf](../frontend/nginx.conf)
+- Startup and migrations: [backend/entrypoint.sh](../backend/entrypoint.sh)
+- Backups: [scripts/ops/backup.sh](../scripts/ops/backup.sh), [scripts/ops/restore.sh](../scripts/ops/restore.sh)
+- Updates: [update.sh](../update.sh), [scripts/ops/deploy.sh](../scripts/ops/deploy.sh)
+- Install: [setup.md](../setup.md)
+- Design: [architecture.md](./architecture.md), [diagrams/operations-service-topology.md](./diagrams/operations-service-topology.md)

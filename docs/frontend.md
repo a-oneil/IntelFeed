@@ -1,268 +1,210 @@
 # Frontend Architecture
 
-IntelFeed's frontend is a modern React 18 + TypeScript single-page application (SPA) built with Vite. It provides a rich, responsive interface for threat intelligence feed consumption, analysis, and detection rule development. This document outlines the architectural patterns, state management, routing, component hierarchy, and conventions that guide frontend development.
+This is a guide to IntelFeed's web app for developers who want to change it. After reading it you will know where pages, state, data fetching, theming and tests live, and the patterns to follow.
+
+The app is a single-page app built with React 19, TypeScript and Vite. It uses React Router 7, TanStack Query 5 for server data, Zustand 5 for browser state, and CSS Modules for styling.
 
 ## Project Layout
 
-```
+```text
 frontend/
 ├── src/
-│   ├── App.tsx                          # Root routing & layout branching
-│   ├── main.tsx                         # Entry point with provider setup + SW registration
-│   ├── index.css                        # Global CSS variables & theming system
-│   ├── queryClient.ts                   # TanStack Query client config
-│   │
+│   ├── App.tsx              # Routes, layouts, app-wide components
+│   ├── main.tsx             # Entry point; registers the service worker
+│   ├── index.css            # Global CSS variables and themes
+│   ├── queryClient.ts       # TanStack Query defaults and error toasts
 │   ├── api/
-│   │   ├── client.ts                    # Axios instance, token refresh logic
-│   │   └── types.ts                     # TypeScript interfaces for API responses
-│   │
-│   ├── stores/
-│   │   ├── authStore.ts                 # Auth state + Zustand persist
-│   │   ├── uiStore.ts                   # UI layout, sidebar, reader, copilot dock state
-│   │   ├── intelStore.ts                # Workbench section, pivots, rule format prefs
-│   │   ├── playerStore.ts               # Audio & speech playback state
-│   │   └── triageViewStore.ts           # Triage-specific view settings
-│   │
-│   ├── hooks/
-│   │   ├── useEntries.ts                # Entry queries: useEntries, useEntry, mutations
-│   │   ├── useIntelligence.ts           # Entity extraction hooks
-│   │   ├── useFeeds.ts                  # Feed CRUD operations
-│   │   ├── useAI.ts                     # AI tasks, copilot chat streaming, conversations
-│   │   ├── useCopilotAuth.ts            # Copilot Claude OAuth status / re-auth flow
-│   │   ├── useCopilotContext.ts         # Route-derived ambient copilot context
-│   │   ├── useDailySummary.ts           # Shared per-day AI triage summaries
-│   │   ├── useSearch.ts                 # Unified search queries
-│   │   ├── useThemes.ts                 # Theme queries & CSS var injection
-│   │   ├── useDetectionRules.ts         # Rule creation, versioning, coverage, telemetry gaps
-│   │   ├── useAutomation.ts             # Automation flow management
-│   │   ├── useCampaigns.ts              # Campaign CRUD & correlation
-│   │   ├── useTags.ts                   # Tag CRUD, merge, recolor
-│   │   ├── useWidgetData.ts             # Dashboard widget data hooks
-│   │   ├── useMediaQuery.ts             # Responsive design helpers
-│   │   ├── useSwipe.ts                  # Touch gesture handling
-│   │   ├── useGlobalShortcuts.ts        # App-wide shortcuts (⌘⇧K copilot toggle)
-│   │   ├── useSSE.ts                    # Server-Sent Events for real-time updates
-│   │   ├── useTts.ts                    # Server-side Piper read-aloud (enqueue, poll, play MP3)
-│   │   ├── useDocumentation.ts          # In-app documentation (docs/) content queries
-│   │   └── [60+ domain-specific hooks]
-│   │
-│   ├── utils/
-│   │   ├── entityTheme.ts               # Entity color & icon mappings
-│   │   ├── colorSchemes.ts              # Shared TLP + severity color scales
-│   │   ├── queryParser.ts               # Search DSL parsing (AST + filter extraction)
-│   │   ├── pivotLinks.ts                # Intelligence pivot link building
-│   │   ├── dashboardTemplates.ts        # Widget preset layouts
-│   │   ├── groupEntries.ts              # Entry list grouping (consecutive same-feed runs)
-│   │   └── [10+ utility modules]
-│   │
-│   ├── pages/                           # Route-level components + CSS modules
-│   │   ├── MainLayout.tsx               # Three-panel feed reader (eager)
-│   │   ├── SidebarLayout.tsx            # Tool pages wrapper (eager)
-│   │   ├── WorkbenchPage.tsx            # Intelligence workspace + WorkbenchLayout (lazy)
-│   │   ├── EntityProfilePage.tsx        # Unified config-driven entity profile (lazy)
-│   │   ├── DashboardPage.tsx            # Workbench dashboard: correlation browser + widgets (lazy)
-│   │   ├── ExposurePage.tsx             # Workbench → Vendor Watch exposure view (lazy)
-│   │   ├── DocumentationPage.tsx        # In-app docs at /documentation/* (lazy)
-│   │   ├── AutomationPage.tsx           # Automation rules (lazy)
-│   │   ├── DetectionWorkbenchPage.tsx   # Rule editor (rendered inside Workbench)
-│   │   ├── GlossaryPage.tsx             # Glossary (rendered inside Workbench)
-│   │   ├── RuleDetailPage.tsx           # Single rule detail / versioning
-│   │   ├── SettingsPage.tsx             # Settings sections (account → system)
-│   │   ├── CampaignsPage.tsx            # Campaign management
-│   │   ├── CampaignProfilePage.tsx      # Campaign detail
-│   │   ├── ReportBuilderPage.tsx        # Intelligence report composition
-│   │   ├── LoginPage.tsx / RegisterPage.tsx
-│   │   ├── SharedEntryPage.tsx          # Public entry sharing (no auth)
-│   │   └── SharedCopilotPage.tsx        # Public copilot conversation sharing (no auth)
-│   │
-│   ├── components/                      # Flat directory; one .tsx + one .module.css per component
-│   │   ├── Sidebar.tsx, EntryList.tsx, EntryReader.tsx, AppHeader.tsx, ...
-│   │   ├── CopilotDockPanel.tsx, ToolTraceChip.tsx, ConfirmCard.tsx, ...
-│   │   ├── TagManager.tsx, TagPicker.tsx, TagInput.tsx, ...
-│   │   ├── automation/                  # FlowBuilder, TemplateGallery, nodes/
-│   │   ├── engine/                      # Settings → Engine console (matrix, stages, jobs, plans)
-│   │   ├── entityProfile/               # Config-driven profile: header, tabs/, actions
-│   │   ├── ransomware/                  # Ransomware tracker: LeakWatchFeed, RansomwareLandscape
-│   │   ├── triage/                      # TriageControls, corrEventCards
-│   │   ├── widgets/                     # 50+ dashboard widgets + registry
-│   │   └── __tests__/                   # Vitest + RTL component tests
-│   │
-│   └── test/
-│       └── setup.ts                     # Vitest environment init
-│
-├── tests/
-│   └── e2e/
-│       ├── auth.spec.ts
-│       ├── feeds.spec.ts
-│       └── relationships.spec.ts
-│
-├── vite.config.ts                       # Build config with manual chunking + Vitest config
-├── package.json
-└── tsconfig.json
+│   │   ├── client.ts        # Axios instance, token refresh, visitor write block
+│   │   └── types.ts         # API response types
+│   ├── stores/              # Zustand stores (see State Management)
+│   ├── hooks/               # 88 hook modules, mostly TanStack Query wrappers
+│   ├── utils/               # 44 helper modules
+│   ├── pages/               # Route-level pages
+│   ├── components/          # One .tsx + one .module.css per component;
+│   │                        # subfolders for larger areas (automation/, engine/,
+│   │                        # entityProfile/, primitives/, search/, table/,
+│   │                        # triage/, widgets/, onboarding/)
+│   └── test/setup.ts        # Vitest setup
+├── tests/e2e/               # Playwright tests
+├── vite.config.ts           # Build, dev server and Vitest config
+└── playwright.config.ts
 ```
 
 ## Routing & Layouts
 
-IntelFeed uses React Router v6 with two distinct layout branches in `App.tsx`. A few globals mount at the App level, outside the router: `AudioPlayer`, `ReportWizardModal`, `OnboardingWizard` (shown until `user.settings.onboarding_completed`), and — for authenticated users — the global `CopilotDockPanel`.
+Routes are in `App.tsx`. There are two layouts:
+
+- **MainLayout:** the three-panel reader.
+- **SidebarLayout:** app header, sidebar and a content area, for tool pages.
+
+Some things mount once at the app level, outside any route: `AudioPlayer`, `GlobalModals` (add-feed, the shortcut help, the external-link guard), and for signed-in users `ReportWizardModal`, `SendToReportModal` and `CopilotDockPanel`. `App.tsx` also starts `useSSE` (one live-event connection per session), `useTableLayoutSync`, `useReadingPrefsSync`, `useGlobalShortcuts` and `useAutoTheme`.
+
+Protected routes go through `ProtectedRoute`. It sends signed-out users to `/login`, unless the instance is in public read-only mode, where visitors can browse. Pages wrapped in `SignedInOnly` show a "not available" message to visitors. New users see the `OnboardingWizard` until they finish or dismiss it.
 
 ### MainLayout Route Tree
-**Path:** `/feeds`, `/` (catch-all for authenticated users), and `/priority-queue` (renders `<MainLayout priorityMode />` — the same entry list + reader shell pinned to the signal-engine "radar" sort, with a Why-ranked card in the reader and inline story-thread rows in the list; `?thread=<slug>` opens a thread's spine in the reader, which is the only way a thread is read — threads have no page of their own)
 
-Renders a **three-panel layout**:
-1. **Sidebar** (collapsible, resizable) — feeds, categories, virtual folders, nav links
-2. **Entry List** (resizable, collapsible when the reader is open) — feed entries with cursor pagination
-3. **Entry Reader** (fluid) — full-width entry content + side panels
+**Paths:** `/`, `/feeds`, `/priority-queue`, and any path no other route matches.
 
-Keyboard shortcuts registered in `MainLayout.tsx`:
-- `Cmd/Ctrl+K` → Open command palette (Shift is reserved for the copilot: `Cmd/Ctrl+Shift+K` toggles the copilot dock via `useGlobalShortcuts`)
-- `Escape` → Close reader or search
-- `n` / `w` → Toggle workbench side panel
-- `t` → Toggle tag side panel
-- `e` → Export current entry as Markdown
-- `?` → Keyboard shortcuts help
+The three panels:
+1. **Sidebar** (resizable, can collapse): feeds, categories, folders, links.
+2. **Entry list** (resizable): the entries, loaded page by page.
+3. **Entry reader:** the article and its side panels.
 
-List navigation (`j`/`k`, `m`, `s`, `b`, `o`, etc.) is handled inside `EntryList`/`EntryReader`; the full list lives in `KeyboardShortcutsHelp.tsx`.
+`/priority-queue` renders `<MainLayout priorityMode />`: the same layout with the list sorted by score (`radar`), story threads shown as single rows, and a "why ranked" card in the reader. `?thread=<slug>` opens a thread in the reader; threads have no page of their own.
+
+Keyboard shortcuts set in `MainLayout.tsx`:
+- `Cmd/Ctrl+K`: command palette. (`Cmd/Ctrl+Shift+K` opens the copilot, from `useGlobalShortcuts`.)
+- `Escape`: close the reader or the shortcut help.
+- With the reader open: `w` intel panel, `a` AI panel, `n` notes panel, `t` tags panel, `e` export as Markdown.
+- `?`: shortcut help.
+
+List keys (`j`/`k`, `m`, `s`, `b`, `o` and others) are handled in `EntryList` and `EntryReader`. The full list is in `KeyboardShortcutsHelp.tsx`.
 
 ### SidebarLayout Route Tree
-**Paths:** `/settings`, `/automation`, `/campaigns`, `/workbench/*`, etc.
 
-Renders **app header + sidebar + content area**, used for tools and admin pages.
+All lazy-loaded:
 
-**Routes (all lazy):**
-- `/settings` → SettingsPage
-- `/automation` → AutomationPage
-- `/campaigns` → CampaignsPage
-- `/documentation/*` → DocumentationPage (in-app docs; splat slug is a docs/ path, `/documentation` redirects to `/documentation/README`; `/handbook/*` also redirects here)
-- `/workbench` → WorkbenchLayout with nested routes:
-  - index → redirects to `dashboard`
-  - `dashboard` → DashboardPage (correlation browser + widget grid — the workbench landing page)
-  - `explore` → WorkbenchPage (entity/section browser)
-  - `exposure` → ExposurePage (Vendor Watch)
-  - `threat_actor|malware|cve|ttp|country|tool|mitigation|vendor|product/:id` → EntityProfilePage (unified, config-driven; slug prop selects the entity config)
-  - `actor/:id` → redirects to `threat_actor/:id` (pre-2026-08 vocabulary)
-  - `campaign/:id` → CampaignProfilePage
-  - `rule/:id` → RuleDetailPage
-  - `report/new`, `report/:id` → ReportBuilderPage
+- `/settings`: SettingsPage
+- `/search`: SearchPage
+- `/automation`: AutomationPage
+- `/campaigns`: CampaignsPage
+- `/documentation/*`: DocumentationPage. The bare path is the docs home page; anything after it is a page in `docs/`.
+- `/workbench`: WorkbenchLayout, with:
+  - index: redirects to `dashboard`
+  - `dashboard`: DashboardPage, the Workbench home
+  - `explore`: WorkbenchPage, the entity and section browser
+  - `threats`: ThreatsPage (tabs: All, Actors, Malware, Vulnerabilities)
+  - `{type}/:id`: EntityProfilePage, for `threat_actor`, `malware`, `cve`, `cwe`, `ttp`, `country`, `sector`, `tool`, `mitigation`, `observable`, `vendor`, `product` and `campaign`
+  - `rule/:id`: RuleDetailPage
+  - `report/new`, `report/:id`: ReportBuilderPage
+  - `report/exposure`: ExposureBuilderPage
 
-**Redirects:**
-- `/triage`, `/workbench/triage` → `/workbench/dashboard` (query params preserved — the Dashboard is the workbench landing page)
-- `/atlas` → `/workbench/dashboard`
-- `/dashboards` → `/workbench/dashboard`
+**Redirects** (kept so old links work):
+- `/triage`, `/workbench/triage`, `/atlas`, `/dashboards` → `/workbench/dashboard` (`/triage` keeps its query string)
 - `/intelligence`, `/detection-workbench` → `/workbench/explore`
-- `/glossary` → `/workbench/explore?section=glossary`, `/workbench/rules` → `/workbench/explore?section=rules`
-- `/workbench/engine` → `/settings?section=engine` (query string preserved, so old console deep links still resolve)
-- `/feed-health` → `/settings?section=engine&tab=pipeline&stage=feeds` (feed health lives in Settings → Engine)
+- `/glossary` → `/workbench/explore?section=glossary`; `/workbench/rules` → `/workbench/explore?section=rules`
+- `/workbench/exposure` → `/workbench/threats?tab=vulns`
+- `/workbench/engine` → `/settings?section=engine` (query string kept)
+- `/feed-health` → `/settings?section=engine&tab=pipeline&stage=feeds`
 - `/countries/:id` → `/workbench/country/:id`
-- `/intelligence/threat_actor/:id`, `/intelligence/malware/:id` → still render EntityProfilePage directly for old links (`/intelligence/actor/:id` redirects to the `threat_actor` form)
+- `/intelligence/threat_actor/:id`, `/intelligence/malware/:id` → the `/workbench/` profile
+- `/workbench/actor/:id`, `/intelligence/actor/:id` → `/workbench/threat_actor/:id`
+- `/handbook/*` → `/documentation/*`
 
-**Unauthenticated routes:** `/login`, `/register`, `/shared/:token` (SharedEntryPage), `/shared/copilot/:token` (SharedCopilotPage).
+**Public routes** (no sign-in): `/login`, `/register`, `/shared/:token` (SharedEntryPage), `/shared/copilot/:token` (SharedCopilotPage).
 
 ### Dynamic Entity Resolution
-Routes like `/workbench/ttp/T1490` accept either a UUID or a natural key (technique ID, CVE ID, name); `EntityProfilePage`/`useEntityProfile` resolve non-UUID IDs via API lookup.
+
+A profile URL can use a UUID or a natural key, such as `/workbench/ttp/T1490` or a CVE ID. The profile page looks up non-UUID IDs through the API.
 
 ### Lazy Loading & Code Splitting
-All routes except MainLayout and SidebarLayout use `React.lazy()` + `Suspense`. Vite automatically creates separate chunks for each lazy-loaded page, reducing initial bundle size.
+
+Every page except MainLayout and SidebarLayout is loaded with `React.lazy()`, so each gets its own bundle.
 
 ## API Client & HTTP
 
-**File:** `frontend/src/api/client.ts`
-
-Axios instance with intelligent JWT handling (see the [JWT refresh flow diagram](diagrams/frontend-jwt-refresh.md)):
+`frontend/src/api/client.ts` is the Axios instance every hook uses. See the [JWT refresh flow diagram](diagrams/frontend-jwt-refresh.md).
 
 ### Token Refresh Strategy
-- Proactive refresh (request interceptor): Before every request, checks if the access token expires within 5 minutes via the JWT `exp` claim and refreshes first if so.
-- Automatic refresh on 401 (response interceptor): If a request returns 401, attempts refresh and retries the original request once (`_retry` flag).
-- Deduplication: Concurrent refresh attempts share a single promise (`doRefresh`) to avoid race conditions.
-- Hard logout only on explicit 401/403 from the refresh endpoint (revoked/expired refresh token); transient network errors during refresh do not wipe the session.
+
+- **Before a request:** if the access token has less than 5 minutes left, refresh it first.
+- **After a 401:** refresh and retry the request once (`_retry` flag).
+- **One refresh at a time:** requests that need a new token share one refresh promise (`doRefresh`).
+- **Sign-out:** only when the refresh endpoint returns 401 or 403. A network error keeps the session. After sign-out the page reloads to `/login`, or to `/` in public read-only mode.
+
+### Visitors
+
+In public read-only mode, a visitor's write request is stopped in the browser with a `ReadOnlyViewError`, except a short list of read-only POSTs (`VISITOR_READ_POSTS`). One quiet "read-only" toast is shown instead of an error.
 
 ### Error Handling
-- Rate limit (429): Rejected immediately, no retry to prevent storms.
-- Auth errors (401/403 on refresh): Hard logout clears auth store.
-- Transient errors: Retry up to 1 time for non-auth failures (configured in `queryClient.ts` `defaultOptions.queries.retry`; 429/401/403 never retry).
 
-### Global Error Toast
-`queryClient.ts` installs `QueryCache`/`MutationCache` `onError` handlers that show toast notifications via Sonner for all query/mutation errors, except validation errors (`validation_error` code) and 401s.
+- **429 (rate limited):** rejected at once, never retried.
+- **Other failures:** queries retry once, except 401, 403 and 429 (`queryClient.ts`).
+- **Toasts:** `queryClient.ts` shows a Sonner toast for every failed query or mutation, except validation errors, 401s, visitor write blocks, and queries that set `meta.silenceToast`.
 
 ## State Management
 
+There are three kinds of state:
+
+1. **Server data:** TanStack Query. Never copy it into a store.
+2. **Browser state:** Zustand stores in `frontend/src/stores/`.
+3. **Component state:** `useState`, for things like an open menu.
+
 ### Zustand Stores with Persistence
-All stores use Zustand's `persist` middleware to hydrate from localStorage on app load. Each store saves a `name` prefix (`intelfeed-*`) and `partialize` to control which slices are persisted.
 
-#### `authStore` (frontend/src/stores/authStore.ts)
-**Owns:** JWT tokens, current user, auth status
-**Persisted:** accessToken, refreshToken, user
-**Key methods:**
-- `setTokens(access, refresh)` — Called by API client on successful refresh
-- `setUser(user)` — Called on login/registration
-- `logout()` — Clears state, revokes token server-side (fire-and-forget), invalidates all queries
-- `isAuthenticated()` — Returns true if tokens exist
+Stores saved to localStorage use Zustand's `persist` with a `name` of `intelfeed-*` and a `partialize` that picks what to save.
 
-#### `uiStore` (frontend/src/stores/uiStore.ts, ~550 lines)
-**Owns:** Layout state for MainLayout (sidebar width, reader open, entry selection, etc.), reader preferences, and the global copilot dock
-**Persisted:** viewMode, sortOrder, sidebar/list/panel widths, reader typography, section collapse states, copilot width/collapsed, per-table DataTable state (`tables`)
+| Store | Saved as | Holds |
+|---|---|---|
+| `authStore` | `intelfeed-auth` | Tokens and the current user (saved), plus whether public read-only mode is on (not saved) |
+| `uiStore` | `intelfeed-ui` | Layout, view and sort, panel widths, reader typography, collapsed sections, copilot dock, table layouts, dashboard lock, docs chat |
+| `intelStore` | `intelfeed-intel` | Workbench section, rule-format preferences, Workbench menu collapse, recent pivots and searches, last profile visits |
+| `playerStore` | `intelfeed-player` | Audio and read-aloud playback. Only speed and volume are saved |
+| `triageViewStore` | `intelfeed-triage-view` | A local copy of the user's dashboard view; the real copy is the `triage_view` user setting |
+| `dialogStore` | not saved | Queue of confirm, alert and prompt dialogs |
+| `externalLinkStore` | not saved | The link waiting for confirmation, and hosts trusted for this tab |
 
-**Table layouts start from a curated preset:** `components/table/defaultLayouts.ts` holds the instance's out-of-the-box arrangement per `tableId` — column visibility, widths, and order. `DataTable` consults it only where the user has no preference of their own (`stored ?? preset ?? column default`, per column; a stored column *order* replaces the preset order wholesale). Filters and sort are deliberately not part of it. Refresh the snapshot from a `state.tables` dump when the reference layout changes. A column declaring `sticky: "right"` (the entity tables' actions cell) is always ordered last and can't be dragged, whatever the stored order says.
+On sign-out, `clearUserScopedState()` removes each account's saved state, so the next person on the same browser starts clean. Theme and player volume are kept.
 
-**Table layouts follow the user, not the browser:** `tables[tableId]` holds each DataTable's column visibility/widths/order plus its filters and client sort. The column layout half also lives on the user profile under the `table_layouts` setting — `useTableLayoutSync` (mounted once in `App.tsx`) pulls it on load, merges per table by `layoutUpdatedAt` (newest edit wins; a table this device never touched adopts the server copy), and debounce-saves local changes back via `PATCH /api/auth/me/settings`. Filters and sort stay device-local on purpose. `tablesOwnerId` records whose layouts the map holds so a second account signing in on the same browser gets its own columns instead of inheriting — and uploading — the previous user's.
-**Key layout methods:**
-- `setSelectedEntry(id)` — Opens reader, auto-closes sidebar on mobile, resets panels
-- `setActivePanel(panel)` — Switches between entries/search/notes; clears search when switching away
-- `setActiveReaderPanel(panel)` — Reader side panels: `"note" | "tag" | "workbench" | "glossary" | "create_entity" | "add_alias" | "link_entity" | null`
+#### `authStore`
 
-**Reader preferences:**
-- `readerFontSize`: 13 | 14 | 15 | 16 | 18 | 20 px (default 16)
-- `readerLineHeight`: default 1.7
-- `readerMaxWidth`: default 720px
+- `setTokens(access, refresh)`: called after a refresh.
+- `setUser(user)`: called after sign-in.
+- `logout()`: tells the server to revoke the token, clears the store and the query cache, and clears user state.
+- `isAuthenticated()`: true if any token exists.
+- Helpers: `useIsVisitor()`, `useIsAdmin()`, `useCanWrite()`.
 
-**Copilot dock state:**
-- `copilotOpen` / `copilotCollapsed` / `copilotWidth` (width + collapsed persisted)
-- `copilotActiveConversationId` — resume the last thread
-- `openCopilotWith(seed)` — open the dock pre-scoped from "Ask Copilot" buttons: a `CopilotSeed` can pin an entity/entry/campaign context and/or auto-send a starter question
-- `toggleCopilot()` — bound to `Cmd/Ctrl+Shift+K` via `useGlobalShortcuts`
+#### `uiStore`
 
-#### `intelStore` (frontend/src/stores/intelStore.ts, ~250 lines)
-**Owns:** Workbench state (active section, nav section collapse, pivots, rule format preferences)
-**Persisted:** activeSection, autoExtractOnOpen, autoOpenIntelPanel, preferredRuleFormats, nav section collapse flags, recentPivots, recentSearches
-**Key methods:**
-- `setActiveSection(section)` — Switch workbench section (threat_actors, malware, rules, etc.)
-- Recent pivots/searches are capped rolling lists used by the workbench nav
+The largest store (`frontend/src/stores/uiStore.ts`, about 1,000 lines). Main parts:
 
-The workbench's rail collapse now lives in `uiStore` (`sidebarCollapsed`), because the app sidebar *is* the workbench nav in Workbench mode — there is no second rail to track.
+- **Selection:** `setSelectedEntry(id)` opens the reader (and closes the sidebar on phones). `setActivePanel(panel)` switches the main panel. `setActiveReaderPanel(panel)` opens a reader side panel: `"intel" | "ai" | "notes" | "tag" | "create_entity" | "add_alias" | "link_entity" | null`.
+- **View:** `viewMode` (`compact`, `expanded`, `magazine` or `table`; default `magazine`), `sortOrder` (including `radar`), `showUnreadOnly`, `markReadOnScroll`.
+- **Reader typography:** `readerFontSize` 13, 14, 15, 16, 18 or 20 px (default 15); `readerLineHeight` 1.4 to 2.0 (default 1.7); `readerMaxWidth` 600, 720, 860, 1000 or unlimited (default 1000).
+- **Copilot dock:** `copilotOpen`, `copilotCollapsed`, `copilotWidth` (the last two saved), `openCopilotWith(seed)` to open it with an entity, entry or campaign in context and an optional first question, and `toggleCopilot()`.
+- **Dashboard lock:** `dashboardLocked` (default on), so widgets can't be dragged by accident.
+- **Tables:** `tables[tableId]` holds each `DataTable`'s columns, widths, order, filters and sort.
 
-#### `playerStore` (frontend/src/stores/playerStore.ts, ~210 lines)
-**Owns:** Audio & text-to-speech (TTS) playback state
-**Persisted:** playbackRate, volume (not queue or active track)
-**Dual modes:**
-- **Audio mode**: Queue-based playback of media files (audio, video). Tracks carry a `kind` (`"podcast" | "tts"`) — server-side Piper read-aloud (`useTts.ts`: enqueue synthesis, poll until the MP3 is ready) plays through this mode.
-  - `play(track)` → Set current track, clear speech state
-  - `playNext()` → Dequeue next track
-- **Speech mode**: Paragraph-by-paragraph browser Web Speech TTS (the fallback when Piper synthesis fails)
-  - `playSpeech(track)` → Set speech paragraphs, clear audio track
-  - `setSpeechWord(start, length)` → Update highlighted word position (consumed by SpeechHighlighter)
+**Table layouts.** `components/table/defaultLayouts.ts` holds the starting column layout for each table. `DataTable` uses it for any column the user hasn't changed. The column part of `tables` is also saved on the user's profile as the `table_layouts` setting. `useTableLayoutSync` (mounted in `App.tsx`) loads it, keeps the newest edit per table, and saves changes back with `PATCH /api/auth/me/settings`. Filters and sort stay on the device. `tablesOwnerId` records whose layouts are stored, so a second account on the same browser doesn't inherit them. A column marked `sticky: "right"` (the actions column) always stays last.
 
-#### `triageViewStore` (frontend/src/stores/triageViewStore.ts)
-**Owns:** Triage-specific filters and view settings for the swipe UI.
+#### `intelStore`
+
+`setActiveSection(section)` switches the Workbench section (such as `threat_actors` or `rules`). Recent pivots and searches are short rolling lists. The Workbench menu's open/closed state for the whole sidebar is `uiStore.sidebarCollapsed`, because the app sidebar *is* the Workbench menu in Workbench mode.
+
+#### `playerStore`
+
+Two modes:
+- **Audio:** a queue of tracks with a `kind` of `"podcast"` or `"tts"`. Read-aloud uses server-side Piper speech (`useTts.ts` asks for the audio, waits until the MP3 is ready, then plays it here). `play(track)`, `playNext()`.
+- **Speech:** the browser's own speech, paragraph by paragraph, used when Piper fails. `playSpeech(track)`, and `setSpeechWord(start, length)` to highlight the current word (`SpeechHighlighter`).
+
+#### `triageViewStore`
+
+A local copy of the dashboard view (widget layout, collapsed state, time range). The real copy is the `triage_view` user setting. The store gives the page an instant value and keeps edits safe across a reload while a save is in progress. `viewOwnerId` stops one account's view being saved onto another's.
 
 ## Server State Management
 
-**TanStack Query v5** (`@tanstack/react-query`) manages all server state with a centralized `queryClient` (frontend/src/queryClient.ts).
+TanStack Query (`@tanstack/react-query`) handles all server data, using the client in `frontend/src/queryClient.ts`.
 
 ### Query Configuration
-- **Stale time:** 30 seconds (data considered fresh for 30s)
-- **Retry:** 1 retry for transient failures; no retry for 429/401/403
-- **Window focus:** Disabled (`refetchOnWindowFocus: false`)
-- **Cache invalidation:** Mutations invalidate related queries by key pattern
+
+- **Stale time:** 30 seconds.
+- **Retry:** once; never for 401, 403 or 429.
+- **Refetch on window focus:** off.
+- **After a change:** mutations invalidate the queries they affect, by key.
 
 ### Infinite Query Pattern
-Used for paginated lists (entries, rules, etc.). Example from `useEntries.ts`:
+
+Long lists use `useInfiniteQuery` with cursor paging. From `useEntries.ts`:
 
 ```typescript
-export function useEntries(filters: EntryFilters) {
+export function useEntries(filters: EntryFilters, { enabled = true } = {}) {
   return useInfiniteQuery({
+    enabled,
     queryKey: ["entries", filters],
     queryFn: async ({ pageParam }) => {
       const params: Record<string, string | boolean | undefined> = {
-        ...filters, limit: "50"
+        ...filters,
+        limit: String(currentReadingPrefs().entries_per_page),
       };
       if (pageParam) params.cursor = pageParam;
       const res = await api.get<CursorPaginatedResponse<Entry>>("/entries", { params });
@@ -274,463 +216,360 @@ export function useEntries(filters: EntryFilters) {
 }
 ```
 
-- `cursor`-based pagination for stable streaming behavior
-- 50 items per page
-- `getNextPageParam` extracts next cursor from response
+Page size comes from the user's reading preferences: 25, 50 or 100 (default 50).
 
 ### Mutation & Cache Invalidation
-Mark-read mutations in `useEntries.ts` invalidate entries, entry counts, and feeds:
 
-```typescript
-export function useMarkRead() {
-  const queryClient = useQueryClient();
-  const debouncedFeedsInvalidate = useDebouncedFeedsInvalidation();
-  return useMutation({
-    mutationFn: async (entryId: string) => {
-      await api.put(`/entries/${entryId}/read`);
-    },
-    onSuccess: (_data, entryId) => {
-      queryClient.invalidateQueries({ queryKey: ["entries"] });
-      queryClient.invalidateQueries({ queryKey: ["entries-count"] });
-      queryClient.invalidateQueries({ queryKey: ["entry", entryId] });
-      debouncedFeedsInvalidate();
-    },
-  });
-}
-```
-
-Debounced feeds invalidation prevents request storms when markReadOnScroll is enabled.
+`useMarkRead()` and `useMarkUnread()` update the cache *before* the server answers (an optimistic update). They flip the entry's read flag in every cached list and in the open reader, drop it from lists filtered to unread, and undo the change if the request fails. A debounced refetch then syncs with the server, so fast scrolling doesn't flood the API. For a visitor they do nothing.
 
 ## Theming System
 
-**Files:** `frontend/src/index.css`, `frontend/src/hooks/useThemes.ts`, `frontend/src/utils/entityTheme.ts`, `frontend/src/utils/colorSchemes.ts`
+**Files:** `frontend/src/index.css`, `frontend/src/hooks/useThemes.ts`, `frontend/src/utils/entityTheme.ts`, `frontend/src/utils/colorSchemes.ts`.
 
 ### CSS Variables Architecture (index.css)
 
-Organized into five design dimensions:
+Themes are sets of CSS variables on `:root`:
 
-**D1: Base colors** (light/dark mode)
-- `--bg-primary`, `--bg-secondary`, `--bg-tertiary` (backgrounds)
-- `--text-primary`, `--text-secondary`, `--text-muted` (text)
-- `--border` (dividers)
+- **Base colors:** `--bg-primary`, `--bg-secondary`, `--bg-tertiary`, `--text-primary`, `--text-secondary`, `--text-muted`, `--border`.
+- **Area accents:** `--accent-feeds`, `--accent-intel`, `--accent-detect`, `--accent-dash`, each with a lighter `*-bg` version.
+- **Entity colors:** `--entity-actor`, `--entity-malware`, `--entity-cve`, `--entity-ttp`, `--entity-vendor`, `--entity-product` and more. Read them with `getEntityColor(type)` in `entityTheme.ts`.
+- **Elevation:** shadows `--elevation-0` to `--elevation-3`.
+- **Heatmap:** `--heatmap-empty` to `--heatmap-5`.
+- **Severity:** `--severity-critical` to `--severity-info`.
 
-**D2: Domain accent colors** (feeds, intelligence, detection, dashboards)
-- `--accent-feeds`, `--accent-intel`, `--accent-detect`, `--accent-dash`
-- Paired with lighter `*-bg` variants for highlights
-
-**D3: Entity type colors**
-- `--entity-actor`, `--entity-malware`, `--entity-ttp`, `--entity-cve`, etc.
-- Mapped via `getEntityColor(type)` in `entityTheme.ts`
-
-**D4: Elevation** (shadows for depth)
-- `--elevation-1` (subtle), `--elevation-3` (prominent)
-
-**D5: Heatmap palette** (part of the theme variable contract; currently unused by core UI)
-- `--heatmap-empty` through `--heatmap-5` (GitHub-style gradient)
-
-**Cross-cutting badge scales** live in `utils/colorSchemes.ts` rather than per-component constants: `getTLPColor()` (TLP:CLEAR/GREEN/AMBER/AMBER+STRICT/RED) and `getSeverityColor()` (critical→info, resolving through `--severity-*` CSS variables set at runtime by `applyTheme()` with theme defaults as fallbacks). Entity-type colors stay in `entityTheme.ts`.
+`utils/colorSchemes.ts` holds the shared badge colors: `getTLPColor()` (TLP:CLEAR, GREEN, AMBER, AMBER+STRICT, RED) and `getSeverityColor()`, which reads the `--severity-*` variables.
 
 ### Runtime Theme Switching
+
 `applyTheme(theme)` in `useThemes.ts`:
 
-1. Sets all CSS variables on `:root`
-2. Auto-computes contrast-safe text colors using WCAG luminance
-3. Auto-generates hover states if not provided
-4. Updates favicon + PWA theme-color meta tag
-5. Caches theme ID + background color in localStorage for instant restore
-
-**Auto-contrast text:** Calculates luminance of background color; returns white for dark backgrounds, black for light backgrounds.
+1. Sets every CSS variable on `:root`.
+2. Picks readable text colors using WCAG luminance (light text on dark backgrounds, dark on light).
+3. Makes hover colors if the theme has none.
+4. Updates the favicon and the browser theme color.
+5. Saves the theme to localStorage so it loads instantly next time.
 
 ### useAutoTheme Hook
-On app boot:
-1. If user has a saved theme preference, apply it
-2. Else, apply the admin-set instance default theme (`is_default`)
-3. Else, load from localStorage cache (instant restore on revisit)
-4. Else, fall back to "GitHub Dark" theme
 
-Logged-out pages (login/register) get the instance default via a public `/themes/default` endpoint.
+When the app loads, it picks a theme in this order:
+1. The user's own theme.
+2. The admin's instance default (`is_default`).
+3. The theme saved in localStorage.
+4. "GitHub Dark".
+
+Signed-out pages use the instance default from the public `/themes/default` endpoint.
 
 ## Component Library
 
-Most components live flat in `src/components/` (colocated `.tsx` + `.module.css` per component); domain clusters with many files get subdirectories (`automation/`, `engine/`, `entityProfile/`, `triage/`, `widgets/`). The groupings below are by purpose, not by directory.
+Most components sit directly in `src/components/`, each with its own `.module.css`. Bigger areas have subfolders. The groups below are by purpose, not folder.
 
 ### Core Layout Components
-- **Sidebar** (Sidebar.tsx) — Two modes behind a Reading/Workbench switch at the top. Reading: category tree, feed list, virtual-folder chips (starred, bookmarked, today, last_24h, this_week) plus a Priority Queue chip under the Unread-articles hero, nav links (Notes, Automation), saved searches. Workbench: renders `WorkbenchNav` — the workbench's section list, which no longer has a rail of its own
-- **EntryList** (EntryList.tsx) — Virtualized row list using `@tanstack/react-virtual`, day dividers with shared AI daily summaries (`DayDividerSummary`) and day intel chips (`DayIntelChips`)
-- **EntryReader** (EntryReader.tsx) — Content pane with note/tag/workbench/glossary/entity side panels, text selection context menu, article inline entity highlighting, TTS
-- **AppHeader** (AppHeader.tsx) — Top nav with logo, search, user menu
-- **ResizeHandle** (ResizeHandle.tsx) — Draggable layout dividers
+
+- **Sidebar:** has a Reading / Workbench switch at the top. Reading shows categories, feeds, folders (starred, bookmarked, watched, today, last 24 hours, this week), a Priority Queue chip, links and saved searches. Workbench shows `WorkbenchNav`, the Workbench menu.
+- **EntryList:** a virtualized list (only on-screen rows are drawn, via `@tanstack/react-virtual`), with day dividers that show AI daily summaries (`DayDividerSummary`) and entity chips (`DayIntelChips`).
+- **EntryReader:** the article, its side panels, a text-selection menu, entity highlighting and read-aloud.
+- **AppHeader:** logo, search and user menu.
+- **ResizeHandle:** drag handles between panels.
+- **primitives/:** shared building blocks: `PageHeader`, `Segmented`, `Panel`, `Chip`, `Hint`, `FacetSection`, `RailToggle`, `MobileNavSheet`, `Spinner`.
+- **table/DataTable:** the shared table used by the entry list's table view and the Workbench entity tables.
 
 ### Global Copilot Dock
-- **CopilotDockPanel** (CopilotDockPanel.tsx) — App-level, resizable right-hand dock mounted in `App.tsx` for all authenticated users; toggled with `Cmd/Ctrl+Shift+K` or the header button. Streams chat responses (`streamCopilotChat` in `useAI.ts`) and interleaves them with:
-  - **ToolTraceChip** — live trace chips for each IntelFeed tool the copilot calls while answering
-  - **ConfirmCard** — proposed writes (e.g. create rule/tag) held for explicit user confirmation
-  - **ContextPill** — ambient context derived from the current route (`useCopilotContext`), or a pinned context when opened via an "Ask Copilot" seed (`openCopilotWith`)
-  - **SlashCommandMenu** — `/` command completion (`copilotCommands.ts`)
-- Conversation history via `useConversations`; conversations can be shared publicly (`POST /ai/conversations/:id/share` → `/shared/copilot/:token`, rendered by **SharedCopilotPage**)
-- **CopilotAuthCard** / **CopilotReauthModal** — copilot Claude OAuth sign-in status and in-app re-auth (Settings → AI Configuration); the dock shows an admin-only re-auth banner when `useCopilotAuthStatus` reports the session expired
-- Copilot token spend surfaces in the **Cost** tab of Settings → AI Configuration (`useAICostSummary`)
+
+- **CopilotDockPanel:** a resizable dock on the right for signed-in users, opened with `Cmd/Ctrl+Shift+K` or the header button. It streams answers (`streamCopilotChat` in `useAI.ts`) and shows:
+  - **ToolTraceChip:** each IntelFeed lookup the copilot makes.
+  - **ConfirmCard:** a proposed change, which runs only if you confirm.
+  - **ContextPill:** the context taken from the current page (`useCopilotContext`), or the one passed by an "Ask Copilot" button.
+  - **SlashCommandMenu:** `/` commands (`copilotCommands.ts`).
+- Past conversations come from `useConversations`. A conversation can be shared read-only (`POST /ai/conversations/:id/share` → `/shared/copilot/:token`).
+- **CopilotAuthCard** and **CopilotReauthModal:** sign-in status and re-auth for the Claude Code provider, on Settings → AI Configuration. Admins see a banner in the dock when that sign-in has expired.
+- Copilot spending shows on the **Cost** tab of Settings → AI Configuration.
 
 ### Search Components
-Search is one input and one results surface, on every route and every breakpoint.
-`HeaderSearch` is the input; `/search` (**SearchPage**) is the only place results
-are drawn. There is no second engine: the workbench's mobile overlay and its
-`useIntelSearch` against `/intelligence/search` were removed — that path knew
-only `type:` filters, discarded every other field, and never returned articles,
-so a phone got different answers from a laptop.
 
-- **HeaderSearch** (HeaderSearch.tsx) — The app's one search field. Carries the `in:`
-  scope chip (Tab cycles `everything` → `workbench` → `feeds`) and completes against
-  `/search/autocomplete` or the local intelligence dictionary depending on scope. Typing
-  routes to `/search`; it renders no results of its own.
-- **queryFields.ts** (components/search/) — The query language as data: field groups
-  (one per entity type, each carrying its entity colour), known values, hints, examples,
-  and `queryFieldColor()`. The reference card, the autocomplete dots and the intelligence
-  completion dictionary all derive from it, so they cannot drift apart.
-- **SearchPage** (pages/SearchPage.tsx) — The results route, under `SidebarLayout`. Owns
-  the debounced query, the scope, the facet state, and an `EntryReader` pane. Its facet
-  rail is a second sidebar inside the content area, like the workbench and settings rails,
-  so the app sidebar is untouched.
-- **SearchFacetSidebar** (components/search/) — Scope, entity type (server counts),
-  matched-on (identity vs mention), and the entry facets (date window, read state, feed,
-  content type, tags, media, language). Entry facets are written into the query string as
-  `field:value`, so they are visible, hand-editable and saveable.
-- **SearchResults** (components/search/) — Direct matches (with an expanded card for the
-  top one) above per-type mention groups, then articles via the shared `EntryRow`. Also
-  hosts saved/recent searches, the query builder and the syntax reference.
-- **EntityResults** (components/search/) — Per-type grouping, labels (`ENTITY_TYPE_LABELS`),
-  row naming and click routing for every entity type, **notes included**. A note has no
-  route of its own, so the row opens whichever surface holds it: an entity note goes to
-  `/workbench/{type}/{id}?tab=notes`, an entry note selects the entry and opens the reader's
-  notes panel, and a standalone note opens the notes browser with `setPendingNoteSearch()`
-  seeding its filter so the clicked row lands on top.
-- **QueryBuilder** (QueryBuilder.tsx) — DSL syntax helper for advanced queries
-- **CommandPalette** (CommandPalette.tsx) — Cmd+K action menu; fuzzy search actions like "Mark all read", "Export", "Share"
+There is one search box and one results page. `HeaderSearch` is the box; `/search` (SearchPage) is the only place results appear, on every screen size.
 
-The `in:` chip is a **content** contract, not a routing one: `feeds` renders articles only,
-`workbench` renders entities only, `everything` renders both. Nothing else moves. Entering
-search seeds the chip from the route you came from, then it sticks.
+- **HeaderSearch:** the search field. Its `in:` chip sets the scope (Tab cycles `everything` → `workbench` → `feeds`). It suggests completions from `/search/autocomplete` or the local entity list. Typing goes to `/search`.
+- **search/queryFields.ts:** the query language as data: fields, known values, hints, examples and colors. The syntax help, autocomplete and completion list all read from it.
+- **SearchPage** (`pages/SearchPage.tsx`): owns the query, scope, filters and a reader pane. Its filter rail is a second sidebar inside the page.
+- **search/SearchFacetSidebar:** filters for scope, entity type (with counts), match type, and entry fields (date, read state, feed, content type, tags, media, language). Entry filters are written into the query as `field:value`, so you can see, edit and save them.
+- **search/SearchResults:** direct matches first, then mentions grouped by type, then articles (shared `EntryRow`). Also holds saved and recent searches, the query builder and syntax help.
+- **search/EntityResults:** groups, labels and click targets for every result type, including notes. An entity note opens `/workbench/{type}/{id}?tab=notes`; an article note opens the reader's notes panel; a standalone note opens the notes browser filtered to it.
+- **QueryBuilder:** helps build advanced queries.
+- **CommandPalette:** the `Cmd+K` action menu.
 
-**Mobile.** The same page, with the facet rail as a slide-over sheet opened from the
-toolbar's Filters button (the desktop rail toggle is a hover affordance that does not
-exist on touch) and the reader as a full-screen overlay. The workbench keeps one mobile
-affordance of its own — a "Sections" button for its section nav.
+The `in:` scope controls content only: `feeds` shows articles, `workbench` shows entities, `everything` shows both. It starts from the page you came from.
+
+**On phones** the filter rail opens as a sheet from a Filters button, and the reader opens full screen.
+
+Full query syntax: [query-language.md](query-language.md).
 
 ### Intelligence Components
-- **entityProfile/** — Config-driven entity profile used by the unified `EntityProfilePage`: `ProfileHeader`, `ProfileTabs` + `tabs/` (overview, articles, relationships, detection, etc.), `EntityActionsMenu` (watch, convert, merge, export, delete), `EntityEditModal`, `IdentityFields`, `SignalBadges`, `StatGrid`, `ActivityFeed`, `PivotTrail`, `WhatsNewStrip` — all driven by `entityProfileConfig.tsx`
-- **EntityActionsMenu** is shared by the profile hero (`variant="header"`) and each workbench table row (`variant="row"`, via `EntityRowActionsCell`, which mounts the menu's ~20 data hooks only after the row's ⋯ is first clicked). The row variant adds Open profile and Edit…, and portals its popovers to `document.body` — a virtualized row's `transform` would otherwise become the containing block for anything `position: fixed`.
-- **EntityEditModal** gathers the profile's inline editors into one form for table-side maintenance. Its fields are derived from `entityProfileConfig` (name when `nameEditable`, aliases, every click-to-edit signal badge, identity fields, description), and only fields the operator changed are sent — so a value the row payload didn't carry can't be blanked by saving. `mitigation` has no PUT endpoint and gets no Edit item.
-- **EntityGraph** (EntityGraph.tsx) — Relationship network visualization (@xyflow/react)
-- **EntityTimeline** (EntityTimeline.tsx) — Activity timeline, entry mentions, rule matches
-- **EntityTableSection** (EntityTableSection.tsx) — Sortable/filterable table (threat_actors, malware, CVEs, TTPs, etc.). Appends the shared relationship/coverage columns plus a right-pinned ⋯ actions column, and offers Export / Merge / Delete over the checkbox selection
-- **EntityMergeSelectionModal** — folds the checked rows into one keeper (defaulting to the profile with the most articles) via a single `POST /entities/{type}/merge`. Only offered for `MERGEABLE_ENTITY_TYPES` with 2+ rows checked; shares `EntityMergeIntoModal`'s stylesheet since it's the same flow sourced from a selection rather than a search
-- **EntityPopover / EntityActionMenu / EntityMergeModal / EntityMergeIntoModal** — inline entity hover cards, actions, and dedup/merge flows
-- **CreateEntityPanel** (CreateEntityPanel.tsx) — Form to create new entity
-- **AddAliasPanel** / **LinkEntityPanel** — Link aliases or text spans to existing entities
-- **EnrichmentPanel** (EnrichmentPanel.tsx) — Entity enrichment status/results
-- **AttackMatrixSection** (AttackMatrixSection.tsx) — ATT&CK matrix with per-technique detection coverage ("covered" badges)
+
+- **entityProfile/:** the config-driven profile used by `EntityProfilePage`: `ProfileHeader`, `ProfileTabs` and `tabs/`, `EntityActionsMenu` (watch, convert, merge, export, delete), `EntityEditModal`, `IdentityFields`, `SignalBadges`, `ActivityFeed` and others, all driven by `entityProfileConfig.tsx`.
+- **EntityActionsMenu** is shared by the profile header and each Workbench table row. In a row it adds Open profile and Edit, loads its data only after the row's ⋯ is clicked, and draws its popovers on `document.body` (a virtualized row's CSS `transform` would otherwise break fixed positioning).
+- **EntityEditModal** puts a profile's editable fields in one form for editing from a table. It sends only the fields you changed, so values the table didn't load can't be wiped. Mitigations can't be edited this way.
+- **EntityGraph:** the relationship graph, a custom SVG drawing with its own layout code (`entityGraphLayout.ts`).
+- **EntityTableSection:** the sortable, filterable Workbench tables. Adds relationship and coverage columns and a pinned actions column, plus Export, Merge and Delete for checked rows.
+- **EntityMergeSelectionModal:** merges the checked rows into one (default: the one with the most articles) with `POST /entities/{type}/merge`.
+- **EntityPopover**, **EntityActionMenu**, **EntityMergeModal**, **EntityMergeIntoModal:** hover cards, actions and merge flows.
+- **CreateEntityPanel**, **AddAliasPanel**, **LinkEntityPanel:** create an entity, add an alias, or link selected text to an entity.
+- **EnrichmentPanel:** enrichment status and results.
+- **AttackMatrixSection:** the ATT&CK matrix with rule coverage per technique.
 
 ### Reader Experience Components
-- **SafeHTML** (SafeHTML.tsx) — DOMPurify renderer for entry content
-- **ExternalLinkGuard** (ExternalLinkGuard.tsx, ExternalLinkModal.tsx, `utils/externalLinks.ts`) — one capture-phase `click`/`auxclick` listener mounted in `GlobalModals` that holds off-site links for a confirmation dialog. `SafeHTML` marks its wrapper `data-untrusted-content`; that attribute is what the default "article content" scope keys on (add it to any other renderer of feed text). Preferences and the trusted-host list live in `user.settings` (`external_link_mode`, `external_link_trusted_hosts`), saved with `PATCH /auth/me/settings`
-- **ReaderTypography** (ReaderTypography.tsx) — Font size, line height, max-width controls
-- **FindInArticle** (FindInArticle.tsx) — Ctrl+F-like text search within entry
-- **AudioPlayer** (AudioPlayer.tsx, 200+ lines) — Playback controls, queue management, speed/volume
-- **YouTubePlayer** (YouTubePlayer.tsx) — Embedded video player with transcript
-- **SpeechHighlighter** (SpeechHighlighter.tsx) — Highlights currently-spoken word in TTS mode
-- **EntryIntelBadges** (EntryIntelBadges.tsx) — Inline entity badges (click to pivot)
-- **InlineEntityHighlighter** (InlineEntityHighlighter.tsx) — Highlights entities extracted from content
+
+- **SafeHTML:** renders article HTML through DOMPurify. It marks its wrapper `data-untrusted-content`.
+- **ExternalLinkGuard** (with `ExternalLinkModal` and `utils/externalLinks.ts`): one click listener, mounted in `GlobalModals`, that asks before opening off-site links from untrusted content. Preferences and trusted hosts are in `user.settings` (`external_link_mode`, `external_link_trusted_hosts`).
+- **ReaderTypography:** font size, line height and width controls.
+- **FindInArticle:** find text in the article.
+- **AudioPlayer:** playback controls, queue, speed and volume.
+- **YouTubePlayer:** embedded video with transcript.
+- **SpeechHighlighter:** highlights the word being read aloud.
+- **EntryIntelBadges:** entity count badges.
+- **InlineEntityHighlighter:** highlights entities in the article.
 
 ### Notes Components
-The notes experience is split into viewer and editor:
-- **NoteBrowser** (NoteBrowser.tsx) — Full-panel notes view in MainLayout (`activePanel === "notes"`), listing entry and entity notes
-- **NoteCard** / **NoteBody** — Read-only note rendering (markdown; single newlines render as hard breaks)
-- **InlineNoteEditor** (InlineNoteEditor.tsx) — Editing surface, separate from the viewer
-- **EntryNotePanel** (EntryNotePanel.tsx) — Reader side panel for the current entry's note
-- **EntityNotesSection** (EntityNotesSection.tsx) — Notes on entity profiles, with per-note titles (`useEntityNotes`)
+
+- **NoteBrowser:** the full notes view in MainLayout (`activePanel === "notes"`).
+- **NoteCard** and **NoteBody:** read-only notes in Markdown (a single line break shows as a line break).
+- **InlineNoteEditor:** the note editor.
+- **EntryNotePanel:** the reader's notes panel.
+- **EntityNotesSection:** notes on entity profiles (`useEntityNotes`).
 
 ### Triage Components
-- **TriageControls** (triage/TriageControls.tsx) — Filter/range controls for the triage dashboard
-- **corrEventCards** (triage/corrEventCards.tsx) — Correlation-event card components + helpers shared by the Dashboard (correlation browser) and the Priority Queue (inline row expansions)
+
+- **triage/TriageControls:** filters and time range for the Dashboard.
+- **triage/corrEventCards:** correlation event cards, used by the Dashboard and the Priority Queue.
 
 ### Automation Components
-- **FlowBuilder** (FlowBuilder.tsx) — No-code automation rule editor (nodes: trigger, filter, action, fork)
-- **TemplateGallery** (TemplateGallery.tsx) — Preset automation templates
-- **ImportExportDialog** (ImportExportDialog.tsx) — Flow YAML/JSON import/export
-- **flowSerializer** (flowSerializer.ts) — Serialization logic for flows (node graph ↔ JSON)
+
+In `components/automation/`:
+- **FlowBuilder:** the no-code rule editor (trigger, filter, action and fork nodes).
+- **TemplateGallery:** ready-made rule templates.
+- **ImportExportDialog:** import and export rules as YAML or JSON.
+- **flowSerializer.ts:** converts between the node graph and JSON.
 
 ### Widget System
-**Location:** `frontend/src/components/widgets/`
 
-30+ dashboard widgets registered in `widgets/registry.ts`, rendered on the Dashboard's widget grid, including:
-- **OverviewWidget** — Key stats (feeds, entries, rules)
-- **FeedActivityChart** — Feed volume over time
-- **NewActorsWidget** — Recently discovered threat actors
-- **DetectionCoverageWidget** / **AttackCoverageGapWidget** — Technique coverage ("covered" vs. gaps)
-- **CorrelationEventsWidget** — Related entry cluster visualization
-- **IntelVelocityWidget** — Entity discovery rate
-- **AutomationLogsWidget** — Automation execution history
-- **AIUsageWidget**, **KEVMatchesWidget**, **SourceReliabilityWidget**, **TriageQueueStatsWidget**, and other domain-specific widgets
+**Location:** `frontend/src/components/widgets/`.
 
-**Widget API:**
+`registry.ts` lists 51 widget types (5 are hidden from the picker but still render on boards that have them). Each `WidgetDefinition` has:
+
 ```typescript
-interface Widget {
-  id: string;
-  type: string;              // "overview", "feed_activity", etc.
-  title: string;
-  config: Record<string, unknown>;  // Widget-specific settings
-  size: "small" | "medium" | "large";  // Grid layout
-  filters?: {
-    feedId?: string;
-    entityType?: string;
-    dateRange?: TimeRange;
-  };
+interface WidgetDefinition {
+  type: string;            // stable ID saved in dashboards; never rename
+  label: string;
+  description: string;
+  defaultW: number;        // default grid width
+  defaultH: number;        // default grid height
+  component: ComponentType<WidgetComponentProps>;
+  configPatch?: WidgetConfig;          // defaults merged under the user's config
+  configFields?: WidgetConfigField[];  // shows the settings gear
+  hidden?: boolean;                    // left out of the picker
 }
 ```
 
-**WidgetRenderer** — Generic component that instantiates widgets by type
-**WidgetPicker** — Modal to add widgets to dashboard
+- **WidgetRenderer:** draws a widget by type.
+- **WidgetPicker:** adds widgets to a board.
+- **WidgetSettingsPopover:** edits a widget's `configFields`.
+- **DashboardTabs:** the board tabs.
+
+Examples: `OverviewWidget`, `FeedActivityChart`, `NewActorsWidget`, `DetectionCoverageWidget`, `AttackCoverageGapWidget`, `CorrelationEventsWidget`, `IntelVelocityWidget`, `MorningBriefingWidget`, `RansomwarePulseWidget`, `KEVMatchesWidget`.
 
 ### Detection Rule Components
-- **RuleBuilderShell** (RuleBuilderShell.tsx) — Layout for rule editor (editor + preview pane)
-- **CodeMirrorEditor** (CodeMirrorEditor.tsx) — Syntax-highlighted code editor (SIGMA, YARA, etc.)
-- **RuleEntryCard** (RuleEntryCard.tsx) — Card showing rule match against entry
-- **SaveRuleModal** (SaveRuleModal.tsx) — Dialog to save/publish rule
+
+- **RuleBuilderShell:** the rule editor layout (editor and preview).
+- **CodeMirrorEditor:** the code editor with syntax highlighting.
+- **RuleEntryCard:** a rule matched against an article.
 
 ### Settings & System Components
-- **SystemSettings** — Admin system toggles (image proxy, backup, etc.)
-- **ThemeEditor** — Create/edit custom themes with live CSS variable preview
-- **AISettings** — Providers | Prompts | Cost | User keys tabs; includes CopilotAuthCard for in-app Claude re-auth; the Prompts tab renders the master–detail **PromptWorkspace**; the Providers tab, health banner and assignment pickers show the instance's providers only; the Cost tab's tiles split instance spend from people's own keys and its By-user table (`ByUserTable`) carries allowance meters
-- **UserKeysSection** (UserKeysSection.tsx) — the User keys tab: the personal-key policy as one segmented control (Off / Optional / Required, writing both flags), allowed key types as chips, the private-endpoint switch, the four limits (monthly and daily caps on personal keys, the per-person site allowance, the share-link limit), the per-task eligibility table (pipeline tasks locked), and everyone's keys to disable or delete
-- **MyAISection** (MyAISection.tsx) — Settings → My AI (`?section=myai`): this month's spend against the cap with a per-key meter, the person's keys (test, edit, delete, set as default; the add form tests-and-saves and refuses Claude Code), per-task route and model pickers with the "no tools" chip and an "Instance default" opt-out, the fallback switch (hidden under Required) and the personal cap; `utils/aiProvenance.ts` holds the fallback-reason wording that result cards (`AIResultsDisplay`'s Who-answered hover and fallback stripe), task rows (`AIAnalysisSection`'s key dot) and the copilot dock share
-- **engine/EngineSection** — the Settings → Engine console (rendered by SettingsPage's `engine` section at `/settings?section=engine`): a single-surface table card (entries matrix, links, relationships, Review, in-card stage settings) with Jobs / Feeds / Plans as separate views; hosts feed health, enrichment, and job schedules, and maps bookmarked `?tab=` / `?section=` deep links onto console states
-- **TagManager** (TagManager.tsx) — Settings → Tags: rename, recolor, merge, and delete tags with usage counts; **TagPicker** is the reusable tag-selection dropdown used by the reader tag panel, report wizard, and automation editor
-- **TelegramSection** (in SettingsPage.tsx) — Admin walkthrough for Telegram user-session setup
+
+- **SystemSettings:** renders system settings, filtered by group or key. Used across Settings and the Engine console.
+- **ThemeEditor:** create and edit themes with a live preview.
+- **AISettings:** the AI Configuration tabs: Providers, Prompts (`PromptWorkspace`), User keys and Cost. Includes `CopilotAuthCard`.
+- **UserKeysSection:** the User keys tab: whether people may use their own keys (Off, Optional, Required), allowed key types, private addresses, limits, which tasks may use personal keys, and everyone's keys.
+- **MyAISection:** Settings → My AI: this month's spend, your own keys, which key and model each task uses, the fallback switch and your cap. `utils/aiProvenance.ts` holds the wording for why a fallback happened.
+- **engine/EngineSection:** the Settings → Engine console (`/settings?section=engine`): one table card (entries, links, relationships, Review, stage settings) and the Jobs, Feeds, Plans, Enrichment, Publishing and Maintenance screens. Old `?tab=` and `?section=` links still open the right screen.
+- **TagManager:** Settings → Tags: rename, recolor, merge and delete tags. **TagPicker** is the tag dropdown used in the reader, the report wizard and automation.
+- **TelegramSection** (in `SettingsPage.tsx`): admin steps for Telegram setup.
 
 ## Page Components & Routes
 
-**Pages in `frontend/src/pages/`:**
+In `frontend/src/pages/`:
 
-- **MainLayout.tsx** (eager) — Three-panel feed reader with keyboard shortcuts; also serves `/priority-queue` in `priorityMode` (EntryList pinned to the radar sort, docked reader with a Why-ranked card, inline story-thread rows)
-- **SidebarLayout.tsx** (eager) — Tool pages wrapper
-- **WorkbenchPage.tsx** (lazy) — Intelligence entity workbench; also exports `WorkbenchLayout` for the nested route tree, and hosts the glossary and detection workbench as workbench sections
-- **EntityProfilePage.tsx** (lazy) — Unified, config-driven profile for all entity types (threat_actor, malware, cve, ttp, country, tool, mitigation, vendor, product)
-- **DashboardPage.tsx** (lazy) — Workbench dashboard (correlation browser + widget grid via `useDashboards` + WidgetPicker)
-- **ExposurePage.tsx** (lazy) — Workbench → Vendor Watch (`/workbench/exposure`)
-- **DocumentationPage.tsx** (lazy) — In-app docs (`/documentation/*`, backed by `useDocumentation` with `MermaidDiagram` rendering for diagram fences)
-- **AutomationPage.tsx** (lazy) — Automation flow management
-- **DetectionWorkbenchPage.tsx** — Rule creation & testing (rendered inside the workbench; `/detection-workbench` redirects to `/workbench`)
-- **GlossaryPage.tsx** — Glossary term management (rendered inside the workbench)
-- **RuleDetailPage.tsx** (lazy) — Single rule versioning & testing
-- **SettingsPage.tsx** (lazy) — Section-based settings (Account, AI Configuration, Appearance, My AI, Claude Code Skill, Engine, Telegram Setup, Feeds & Import, Logs, Reading, Tags, System, Users). Engine is the admin-only pipeline console section (`?section=engine`, hosting `engine/EngineSection`); legacy `?section=schedules|enrichment|feed-health|workbench` deep links resolve onto it.
-- **CampaignsPage.tsx** (lazy) — Campaign management & correlation
-- **CampaignProfilePage.tsx** (lazy) — Campaign detail with related entities
-- **ReportBuilderPage.tsx** (lazy) — Intelligence report composition
-- **LoginPage.tsx** (lazy) → Auth guard redirects here
-- **RegisterPage.tsx** (lazy) → Self-service registration
-- **SharedEntryPage.tsx** (lazy) → Public entry sharing (no auth required)
-- **SharedCopilotPage.tsx** (lazy) → Public copilot conversation sharing (no auth required)
-- **OnboardingWizard** → Modal overlay for new users (triggered by `!user.settings.onboarding_completed`)
+- **MainLayout.tsx** (loaded up front): the reader. Also serves `/priority-queue`.
+- **SidebarLayout.tsx** (loaded up front): the tool-page frame.
+- **WorkbenchPage.tsx:** the entity browser. Also exports `WorkbenchLayout` and hosts the glossary and detection workbench as sections.
+- **EntityProfilePage.tsx:** one profile page for every entity type and campaigns.
+- **DashboardPage.tsx:** the Workbench dashboard (widget boards via `useDashboards`).
+- **ThreatsPage.tsx:** `/workbench/threats`, ranked by story. Its Vulnerabilities tab uses `FollowView` from `ExposurePage.tsx`.
+- **ExposureBuilderPage.tsx:** `/workbench/report/exposure`.
+- **SearchPage.tsx:** `/search`.
+- **DocumentationPage.tsx:** in-app docs (`useDocumentation`, with `MermaidDiagram` for diagrams).
+- **AutomationPage.tsx:** automation rules.
+- **DetectionWorkbenchPage.tsx**, **GlossaryPage.tsx:** shown inside the Workbench.
+- **RuleDetailPage.tsx:** one rule, its versions and tests.
+- **SettingsPage.tsx:** settings sections in three groups. You: Account, Appearance, My AI, Reading, Tags. Connect: Claude Code Skill, Feeds & Export, Telegram. Administration (admins only): AI Configuration, Engine, Logs, System, Users.
+- **CampaignsPage.tsx:** the campaign list.
+- **ReportBuilderPage.tsx:** write a report.
+- **LoginPage.tsx**, **RegisterPage.tsx**, **SharedEntryPage.tsx**, **SharedCopilotPage.tsx:** public pages.
 
-Country profiles use the unified EntityProfilePage (`/countries/:id` redirects to `/workbench/country/:id`); the former standalone RuleLibraryPage, FeedHealthPage, and PriorityQueuePage were removed (rule library lives in the workbench, feed health in Settings → Engine, and the priority queue is MainLayout's `priorityMode`).
+`OnboardingWizard` (`components/onboarding/`) is a modal, not a page.
 
 ## Hooks (Custom React Hooks)
 
-**60+ custom hooks in `frontend/src/hooks/`**, organized by domain:
+`frontend/src/hooks/` has 88 modules. Most wrap TanStack Query for one area of the API. A few to know:
 
-### Data Fetching Hooks (TanStack Query wrappers)
-- **useEntries(filters)** — Infinite query for paginated entries
-- **useEntry(entryId)** — Single entry detail
-- **useFeeds()** — All feeds
-- **useIntelligence()** — Workbench entity hooks
-  - `useEntryCVEs(entryId)` — Extract CVEs from entry
-  - `useEntryTTPs(entryId)` — Extract TTPs
-  - `useEntryThreatActors(entryId)` — Extract actors
-  - (etc. for all entity types)
-- **useUnifiedSearch(query, opts)** — The search page's data source: `POST /search/unified`, running the whole query language. `opts` accepts `limit`/`offset` plus `entityLimit` (how much of the graph may match, server default 200) and `entityGroupLimit` (rows per entity type, server default 25). Omit them and the server defaults apply; SearchPage passes `entityGroupLimit: 500` because its facet rail needs the whole set.
-- **useSearchAutocomplete(query)** — Field/value completions for `HeaderSearch`
-- **useSearch(filters)** — Structured `POST /search/advanced` (explicit filter object, no query language). Used by the saved-search and filter-object paths, not by the search page.
-- **useCampaigns()** — Campaign CRUD
-- **useDetectionRules(filters)** — Rule queries
-- **usePlayback()** → Entry media playback progress
+### Data Fetching Hooks
+
+- **useEntries(filters)**, **useEntry(id)**, **useEntriesCount(filters)** (`useEntries.ts`).
+- **useFeeds()** (`useFeeds.ts`).
+- **useIntelligence.ts:** per-entry entities (`useEntryTTPs`, `useEntryCVEs`, `useEntryThreatActors`, …) and on-demand extraction (`useExtractTTPs`, `useExtractCVEs`, `useExtractThreatActors`, `useExtractMalware`, `useExtractCountries`, `useExtractMitigations`, `useExtractTools`).
+- **useCorrelation.ts:** `usePivot`, `useEntityGraph`, `useEntityTimeline`, `useEntitySearch`, `useDetectionSummary`.
+- **useUnifiedSearch(query, opts):** the search page's data, `POST /search/unified`. `opts` takes `limit`, `offset`, `entityLimit` (server default 200) and `entityGroupLimit` (rows per type, server default 25). SearchPage passes `entityGroupLimit: 500` so its filter counts cover everything.
+- **useSearchAutocomplete(query):** completions for `HeaderSearch`.
+- **useSearch(filters):** `POST /search/advanced` with a filter object, for saved searches. Not used by the search page.
+- **useCampaigns()**, **useDetectionRules(filters)**, **useDashboards()**.
+- **usePlayback.ts:** podcast and media progress.
+- **useWidgetData.ts**, **useAnalytics.ts** and the `useWidget*Data.ts` files: dashboard widget data.
 
 ### Mutation Hooks
-- **useMarkRead() / useMarkUnread()** — Entry read status
-- **useToggleStar() / useToggleBookmark()** — Entry favorites
-- **useAddTagsToEntry() / useRemoveTagFromEntry() / useBulkTag()** — Entry tagging; **useCreateTag() / useUpdateTag() / useMergeTags() / useDeleteTag()** back the Tags settings section
-- **useCreateDetectionRule() / useValidateRule() / useToggleRuleStatus()** — Rule mutations
-- **useRollbackVersion() / useVersionDiff()** — Rule versioning
-- **useAddFeed() / useUpdateFeed() / useDeleteFeed() / useRefreshFeed()** — Feed management
+
+- **useMarkRead() / useMarkUnread()**, **useToggleStar() / useToggleBookmark()**.
+- **useAddTagsToEntry() / useRemoveTagFromEntry() / useBulkTag()**; **useCreateTag() / useUpdateTag() / useMergeTags() / useDeleteTag()** for Settings → Tags.
+- **useCreateDetectionRule() / useValidateRule() / useToggleRuleStatus()**; **useDetectionRuleVersions() / useRollbackVersion() / useVersionDiff()**.
+- **useAddFeed() / useUpdateFeed() / useDeleteFeed() / useRefreshFeed()**.
 
 ### UI & Interaction Hooks
-- **useUIStore()** → Zustand store accessors
-- **useAuthStore()** → Auth store accessors
-- **useIntelStore()** → Workbench store accessors
-- **useIsMobile()** — Media query hook
-- **useMediaQuery(query)** — Generic media query
-- **useSwipe(config)** → Swipe gesture detection (threshold, direction callbacks)
-- **useLongPress(timeout)** → Long-press gesture
-- **useFocusTrap(containerRef)** → Modal focus management
-- **usePullToRefresh(callback)** → Mobile pull-to-refresh
-- **useUndoableDelete(onDelete)** → Undo/redo delete mutations
+
+- **useIsMobile()**, **useMediaQuery(query)**.
+- **useSwipe(config)**, **useLongPress()**, **usePullToRefresh(callback)**: touch gestures.
+- **useFocusTrap(ref)**: keeps focus inside a modal.
+- **useUndoableDelete(onDelete)**: delete with an undo toast.
 
 ### Specialized Hooks
-- **useThemes()** → Theme queries & mutations
-- **useAutoTheme()** → Auto-apply user theme on load
-- **useDomainTheme()** → Get domain-specific theme (feeds vs. workbench vs. detection)
-- **useDetectGlossaryTerms(entryId)** → Detect glossary matches in an entry
-- **useSSE()** → Server-Sent Events subscription (real-time entry updates, rule matches)
-- **useIngest(feedConfig)** → Feed ingestion status polling
-- **useJobSchedules()** → Background job scheduling
-- **useGlobalShortcuts()** → App-wide shortcuts (mounted once in App.tsx; `Cmd/Ctrl+Shift+K` toggles the copilot dock)
-- **useCopilotAuthStatus() / useStartCopilotAuth() / useSubmitCopilotAuthCode()** → Copilot Claude OAuth status and in-app re-auth flow
-- **useCopilotContext()** → Derives the copilot's ambient context (entity/entry/campaign) from the current route
-- **useDailySummary(dayKey) / useGenerateDailySummary()** → Shared per-day AI triage summaries shown in entry-list day dividers
+
+- **useThemes()**, **useAutoTheme()**.
+- **useSSE()**: the live-event connection (mounted once in `App.tsx`).
+- **useTableLayoutSync()**, **useReadingPrefsSync()**: sync preferences with the user profile.
+- **useIngest.ts:** manual upload batches.
+- **useJobSchedules()**: scheduled jobs.
+- **useGlobalShortcuts()**: app-wide shortcuts.
+- **useCopilotAuthStatus() / useStartCopilotAuth() / useSubmitCopilotAuthCode()**: copilot sign-in.
+- **useCopilotContext()**: the copilot's context from the current page.
+- **useDailySummary(dayKey) / useGenerateDailySummary()**: the AI daily summaries on day dividers.
+- **useTts.ts:** server-side read-aloud.
 
 ## Utilities
 
-**10+ utility modules in `frontend/src/utils/`:**
+`frontend/src/utils/` has 44 helper modules. Some common ones:
 
 ### `entityTheme.ts`
-Centralized visual language for entities:
-```typescript
-getEntityColor(type: string): string        // Hex color
-getEntityCssVar(type: string): string       // CSS variable reference
-getEntityLabel(type: string): string        // Singular label
-getEntityPluralLabel(type: string): string  // Plural label
-getEntityIcon(type: string): string         // Lucide icon name
-getEntityTheme(type: string): EntityTheme   // Full theme object
-```
 
-Example:
+Colors, labels and icons for entity types:
+
 ```typescript
-const color = getEntityColor("threat_actor");  // "#f97316"
-const icon = getEntityIcon("malware");        // "shield-alert"
+getEntityColor(type: string): string        // hex color
+getEntityCssVar(type: string): string       // CSS variable reference
+getEntityLabel(type: string): string        // singular label
+getEntityPluralLabel(type: string): string  // plural label
+getEntityIcon(type: string): string         // Lucide icon name
+getEntityTheme(type: string): EntityTheme   // all of the above
 ```
 
 ### `queryParser.ts`
-Tokenizer + recursive-descent parser for the search DSL. Builds an AST (`TextNode | FieldNode | BoolNode | NotNode`), with helpers for the UI:
+
+Parses the search language into a tree (`TextNode | FieldNode | BoolNode | NotNode`):
+
 ```typescript
 parseQuery(query: string): ASTNode
-extractFilters(node: ASTNode): ParsedFilter[]   // → structured filters for API params
-getTokenAtCursor(query, cursorPos): CursorToken // autocomplete support
-removeFilterFromQuery(query, filterRaw): string // filter-chip removal
-```
-Syntax examples: `feed:xyz title:"New APT" is:starred after:2024-01-01` (full grammar in [query-language.md](query-language.md)).
-
-### `colorSchemes.ts`
-Shared TLP and severity color scales (see Theming above): `getTLPColor(tlp)`, `getSeverityColor(severity)`.
-
-### `pivotLinks.ts`
-Builds intelligence pivot links from an entity type + value:
-```typescript
-getPivotLinks(type: string, value: string): PivotLink[]
-// e.g. workbench profile, filtered search, external references (MITRE, NVD, ...)
+extractFilters(node: ASTNode): ParsedFilter[]   // filters for API params
+getTokenAtCursor(query, cursorPos): CursorToken // for autocomplete
+removeFilterFromQuery(query, filterRaw): string // for removing a filter chip
 ```
 
-### `dashboardTemplates.ts`
-Preset widget layouts for the Dashboard:
-```typescript
-DASHBOARD_TEMPLATES: DashboardTemplate[]
-```
+Example: `feed:xyz title:"New APT" is:starred after:2024-01-01`. Full grammar: [query-language.md](query-language.md).
 
-### `groupEntries.ts`
-Entry list grouping — collapses consecutive runs of same-feed entries into expandable groups:
-```typescript
-groupConsecutiveEntries(entries, ...): DisplayItem[]  // SingleItem | GroupItem
-```
+### Others
 
-### `mapTopology.ts`
-World topology loading and ISO-code utilities for the choropleth:
-```typescript
-loadWorldTopology(): Promise<TopologyFeature[]>
-alpha3FromNumeric(id): string | null
-buildIsoCountMap(countryStats): Record<string, number>
-```
+- **colorSchemes.ts:** `getTLPColor(tlp)`, `getSeverityColor(severity)`.
+- **pivotLinks.ts:** `getPivotLinks(type, value)`, links to a profile, a search, or outside references such as MITRE and NVD.
+- **dashboardTemplates.ts:** `DASHBOARD_TEMPLATES`, preset widget layouts on the Dashboard.
+- **groupEntries.ts:** `groupConsecutiveEntries()`, folds runs of entries from the same feed into one group.
+- **threads.ts:** flattens Priority Queue rows and story threads for display.
+- **aiProvenance.ts:** wording for which AI key answered and why.
 
 ## Testing
 
 ### Unit & Component Tests (Vitest + RTL)
-**Location:** `frontend/src/**/__tests__/` (colocated with source files)
 
-Test setup in `frontend/src/test/setup.ts` (Vitest config lives in the `test` block of `vite.config.ts`):
-- jsdom environment with globals enabled
-- In-memory `localStorage` shim (jsdom's Storage proxy breaks Zustand persist)
-- `window.matchMedia` mock
-- Module CSS with non-scoped classNameStrategy (stable class names in tests)
+Tests live in `__tests__/` folders next to the code. Run them in `frontend/`:
 
-Example test (`Sidebar.test.tsx`):
-```typescript
-import { render, screen } from "@testing-library/react";
-import { useUIStore } from "@/stores/uiStore";
-import { Sidebar } from "@/components/Sidebar";
-
-describe("Sidebar", () => {
-  it("renders feed categories", () => {
-    render(<Sidebar />);
-    expect(screen.getByText("My Feeds")).toBeInTheDocument();
-  });
-});
+```bash
+pnpm test          # run once
+pnpm test:watch    # watch mode
 ```
 
-Tests cover:
-- Component rendering with mocked hooks
-- User interactions (click, type, keyboard)
-- Store state updates
-- API calls mocked by stubbing the Axios client / hooks with `vi.mock` (no MSW)
+`frontend/src/test/setup.ts` (Vitest config is the `test` block in `vite.config.ts`):
+- jsdom, with global test functions.
+- An in-memory `localStorage`, because jsdom's breaks Zustand `persist`.
+- A `window.matchMedia` mock.
+- Plain (non-hashed) CSS Module class names, so tests can find them.
+- At most 2 worker processes, to save memory.
+
+Tests mock hooks or the Axios client with `vi.mock` (no MSW). Example: `components/__tests__/Sidebar.test.tsx`.
 
 ### End-to-End Tests (Playwright)
-**Location:** `frontend/tests/e2e/`
 
-Tests run against a live backend instance:
-- **auth.spec.ts** — Registration, login, auth guards
-- **feeds.spec.ts** — Feed list, entry open, mark read
-- **relationships.spec.ts** — Entity relationship browser and graph
+`frontend/tests/e2e/` runs against a running dev stack:
+- **auth.spec.ts:** register, sign in, protected routes.
+- **feeds.spec.ts:** feed list, open an entry, mark read.
+- **relationships.spec.ts:** the relationship browser and graph.
 
-Playwright configuration in `frontend/playwright.config.ts` (baseURL `localhost:3001`, workers: 1, retries: 2 in CI).
+Config: `frontend/playwright.config.ts` (base URL `localhost:3001`, 1 worker, 2 retries in CI). E2E tests are not run in CI.
+
+```bash
+pnpm exec playwright install chromium   # once
+pnpm exec playwright test
+```
 
 ## Build & Optimization
 
-**Vite config:** `frontend/vite.config.ts`
+**Config:** `frontend/vite.config.ts`.
 
 ### Code Splitting
-Manual chunk configuration (function-form `manualChunks` — required by Vite 8 / rolldown) creates separate bundles:
-- `vendor-react` → React, React DOM, React Router
-- `vendor-tanstack` → TanStack Query (large, separate for caching)
-- `vendor-misc` → Zustand, Axios, DOMPurify
-- **Page bundles** → Each lazy-loaded page in its own chunk
+
+`manualChunks` (the function form, which Vite 8 requires) makes these shared bundles:
+- `vendor-react`: React, React DOM, React Router DOM
+- `vendor-tanstack`: TanStack Query
+- `vendor-misc`: Zustand, Axios, DOMPurify
+
+Each lazy-loaded page gets its own bundle too.
 
 ### Development Server
-- Proxy `/api` (plus `/docs`, `/redoc`, `/openapi.json`) to `http://localhost:8000` (configurable via `VITE_API_URL`)
-- Port 3000 (3001 when run through docker-compose.dev.yml)
-- HMR enabled for instant hot reloads
+
+- Port 3000 (`pnpm dev`). In `docker-compose.dev.yml` it is published on 3001.
+- Sends `/api`, `/docs`, `/redoc` and `/openapi.json` to `http://localhost:8000`, or to `VITE_API_URL` if set.
+- Hot reload is on. The `.git` folder is not watched.
 
 ### Build Output
-- No sourcemaps in production (`sourcemap: false`)
-- Minified + mangled code
-- CSS extracted into per-chunk stylesheets
+
+- No source maps (`sourcemap: false`).
+- The build stamp (version, commit, build time) comes from build args, `git`, or the mounted `.git` folder, in that order, and shows in the footer.
 
 ## Conventions & Best Practices
 
-### Component Structure
-1. Imports (React, hooks, components, styles)
-2. Type definitions (`interface ComponentProps { ... }`)
-3. Utility functions (formatters, helpers)
-4. Main component function with JSDoc
-5. Error boundary / suspense handling
-6. Event handlers (in logical order: click, change, submit)
-7. Return JSX
-
 ### Naming Conventions
-- **Components:** PascalCase (`EntryReader`, `EntityProfilePanel`)
-- **Hooks:** camelCase with `use` prefix (`useEntries`, `useSwipe`)
-- **Utilities:** camelCase (`getEntityColor`, `bucketByDay`)
-- **Stores:** camelCase (`useUIStore`, `useAuthStore`)
-- **Events:** on-prefixed (`onItemClick`, `onModalClose`)
-- **CSS modules:** kebab-case (`.container`, `.entry-title`)
+
+- **Components:** PascalCase (`EntryReader`).
+- **Hooks:** `use` + camelCase (`useEntries`).
+- **Utilities:** camelCase (`getEntityColor`).
+- **Stores:** `use…Store` (`useUIStore`).
+- **Event props:** `on…` (`onItemClick`).
 
 ### CSS Module Usage
-Every component has a colocated `.module.css` file:
+
+Each component has its own `.module.css` file:
 
 ```typescript
 // EntryReader.tsx
@@ -741,60 +580,36 @@ export function EntryReader({ entryId }: EntryReaderProps) {
 }
 ```
 
-CSS variables are inherited globally from `:root`; component-scoped variables are uncommon.
-
-### State Management Decision Tree
-1. **Component-local state** — useState for UI state (open/closed, selected tab)
-2. **Zustand store** — Persistent, cross-page state (auth, layout, entity selection)
-3. **TanStack Query** — Server state (entries, feeds, rules)
-4. **Context** — Rare; used only for deeply nested provider configs
+Colors come from the global CSS variables on `:root`. Don't hard-code colors.
 
 ### Error Handling Pattern
-```typescript
-function useMyQuery() {
-  const { data, isLoading, error } = useQuery({...});
-  if (error) {
-    // Auto-handled by queryClient error interceptor → toast
-    // OR handle UI-specific error in component
-  }
-  return { data, isLoading, error };
-}
-```
 
-Toast notifications are the primary error feedback mechanism (Sonner library).
+Failed queries and mutations show a toast automatically (see [Error Handling](#error-handling)). Handle an error in the component only when the page needs to show something specific.
 
 ### Accessibility
-- Semantic HTML (`<button>`, `<nav>`, `<article>`, etc.)
-- ARIA roles for custom widgets (`role="dialog"`, `role="listbox"`)
-- Keyboard navigation (Tab, Enter, Escape, arrow keys)
-- Color contrast: WCAG AA minimum (verified by `contrastText()` in theme system)
-- Focus visible outlines (2px solid accent color, 2px offset)
+
+- Use real elements (`<button>`, `<nav>`, `<article>`).
+- Give custom widgets ARIA roles (`role="dialog"`, `role="listbox"`).
+- Everything should work from the keyboard (Tab, Enter, Escape, arrows).
+- Themes keep text contrast at WCAG AA (`contrastText()`).
 
 ### Performance Optimization
-- **Virtualization:** EntryList (and large workbench tables) use `@tanstack/react-virtual` for 10K+ rows
-- **Memoization:** `useMemo` for expensive calculations (entity extraction, grouping)
-- **Code splitting:** Lazy-loaded pages + manual chunks reduce initial load
-- **Query caching:** 30s stale time prevents redundant API calls
-- **Debouncing:** Search input, sidebar drag handlers
-- **PWA support:** Service worker registration in `main.tsx`
 
-### Git Workflow
-- Feature branches: `feature/entity-comparison` or `fix/auth-logout`
-- No CI pipeline is configured — run `pnpm lint` + `pnpm build` (and backend `ruff` + `pytest`) locally before pushing
-- Deployment: push to the Git remote, then run `update.sh` on the production host (see the `/deploy` skill)
+- Long lists and tables are virtualized with `@tanstack/react-virtual`.
+- `useMemo` for expensive work such as grouping.
+- Pages load lazily, and shared libraries are in separate bundles.
+- The 30-second stale time avoids repeat requests.
+- Search input and drag handlers are debounced.
+- A service worker is registered in `main.tsx`.
 
----
+### Checks before you push
 
-## Summary
+Run these in `frontend/`. CI runs the same three:
 
-IntelFeed's frontend is a sophisticated React SPA balancing feature richness with maintainability. Key architectural pillars:
+```bash
+pnpm lint
+pnpm build   # also type-checks
+pnpm test
+```
 
-1. **Routing** — Two-layout pattern (MainLayout for feeds, SidebarLayout for tools) plus a global copilot dock mounted above both
-2. **State** — Zustand for persistent UI/app state, TanStack Query for server state
-3. **Styling** — Global CSS variables for runtime theming + scoped CSS modules + shared color scales (`entityTheme.ts`, `colorSchemes.ts`)
-4. **Components** — Domain-organized, colocated with styles, reusable across pages
-5. **Hooks** — 60+ custom hooks encapsulate domain logic (queries, mutations, gestures, copilot)
-6. **Testing** — Vitest + RTL for components, Playwright for e2e
-7. **Build** — Vite with manual code splitting and lazy-loaded pages
-
-The codebase prioritizes **clarity** (explicit over implicit), **reusability** (hooks + utilities), and **performance** (code splitting, caching, virtualization).
+Pushing to `main` deploys: the production host runs `update.sh` every few minutes. See [operations.md](operations.md).

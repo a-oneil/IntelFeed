@@ -1,128 +1,132 @@
 # When something isn't working
 
-Ordered by how often it comes up.
+Common problems and what to do about them, most frequent first. Some fixes
+need an admin; those are marked.
 
 ![The Engine console showing per-entry pipeline stages across translate, autolink, observables, extraction, correlation and scoring](../assets/screenshots/engine.png)
 
-*The Engine console shows what each pipeline stage decided for every entry.*
+*The Engine console shows what each processing step did with each article.*
 
 ## A feed stopped producing
 
-Feeds die quietly, and "no new articles" looks exactly like "a quiet week".
+A dead feed looks just like a quiet week, so check rather than wait.
 
-1. **Dashboard → Feed Activity / Feed Health** widgets. A bar that went to zero and stayed
-   there is your answer.
-2. **Settings → Engine → Feeds** (admin) for the definitive view: last
-   successful fetch, error count, reliability.
+1. On the dashboard, the **Feed Activity** and **Feed Health** widgets show
+   it. A bar that drops to zero and stays there is your answer.
+2. Admins: **Settings → Engine**, **Feeds** view, shows each feed's last
+   successful fetch, its errors and how reliable it has been.
 
-Usual causes: the site moved its feed URL, a web scraper's target was
-redesigned, or a credential expired. Fix the URL in the feed's settings; for a
-scraper, check whether the site now offers a real feed and switch to it.
+The usual causes: the site moved its feed, a scraped site was redesigned, or a
+login expired. Fix the URL in the feed's settings. For a scraper, check whether
+the site now offers a real feed and switch to it. See
+[Adding and managing feeds](feeds.md).
 
 ## An entity is linked to the wrong thing
 
-"apt" in a sentence about package managers, a product name that's also an
-ordinary word. Use the **Wrong?** control on the link in the reader and pick the
-narrowest scope that's true — just this article, this alias anywhere, this
-entity anywhere, or never link this word.
+For example "apt" in a sentence about package managers, or a product name that
+is also an ordinary word. Open the entity's card in the reader, click
+**Wrong?**, and pick the narrowest option that's true. See
+[If something is linked wrongly](reading-and-triage.md#if-something-is-linked-wrongly).
 
-These are real corrections that change future linking, so the widest option is
-not the safe default. See [Entities and profiles](entities.md).
+These choices change future linking, so the widest option isn't the safe
+default.
 
 ## There are two pages for the same thing
 
-Merge them from the **⋯** menu on either profile. Articles, relationships and
-aliases are unioned onto the survivor. Admin-only, and same-type only.
+Admins: open the **⋯** menu on either profile and choose **Merge…**. The
+articles, relationships and aliases move onto the page you keep. You can only
+merge two entities of the same type.
 
-If the *type* is wrong rather than there being a duplicate — something recorded
-as a tool that is really a product — **convert** it instead of deleting. Convert
-writes a tombstone so extraction doesn't recreate the wrong version within the
-hour. Deleting doesn't, which is why the thing you deleted keeps coming back.
+If the *type* is wrong (say, something saved as a tool that is really a
+product), choose **Convert type** instead. Convert stops the AI from
+re-creating the wrong version.
+
+If you delete an entity, tick **Don't re-create it** in the delete dialog.
+Without it, the AI or the autolinker may bring the entity back.
 
 ## An automation rule stopped firing
 
-**Settings → Logs** shows every run. Two traps:
+Admins: **Settings → Logs**, **Automation** tab, shows every run. Two things to
+check:
 
-- Check the **per-action** status, not just the run's overall result. A run can
-  report success with one action failing quietly inside it.
-- Check whether the conditions still match. A rule keyed to a feed name breaks
-  when the feed is renamed.
+- Look at each **action's** status, not only the run's overall result. A run
+  can succeed while one of its actions fails.
+- Check that the conditions still match. A rule that names a feed breaks when
+  the feed is renamed.
 
-Before re-enabling anything you've edited, dry-run it. A notification rule that
-fires per-article instead of per-batch will flood a channel.
+Before you turn an edited notification rule back on, make sure it won't send
+one message per article. That can flood a channel.
 
 ## The copilot isn't answering
 
-- **A sign-in banner in the dock** — the Claude sign-in expired. Admins can
-  re-authenticate in-app at **Settings → AI Configuration**; no server access
-  needed.
-- **No provider assigned** — the copilot task needs a provider under
-  **Settings → AI Configuration → Providers**.
-- **Answers with no tool chips** — it answered from the model's own knowledge
-  rather than your data. Ask it again, more specifically; if it still doesn't
-  reach for tools, the provider may not support tool calling.
+- **A sign-in prompt in the copilot panel**: the AI service's sign-in has
+  expired. An admin can sign in again at **Settings → AI Configuration**.
+- **No provider set**: an admin needs to give the copilot task a provider
+  under **Settings → AI Configuration → Providers**.
+- **Answers with no tool chips**: the copilot answered from the AI model's
+  general knowledge, not from your data. Ask again more specifically. If it
+  still doesn't use tools, the provider may not support tool calling.
 
 ## Search returns nothing for something I can see
 
-- Check the **scope chip** — it may be set to Workbench (entities only) or Feeds
-  (articles only). **Tab** cycles it.
-- Check the filter rail; filters you ticked earlier are written into the query
-  and persist visibly in the box.
-- If an article is genuinely missing from search, the index has drifted from the
-  database. A nightly `reconcile-meilisearch` job repairs that on its own
-  (07:15 UTC), and `retry-failed-indexing` retries individual failures every
-  five minutes — so usually the answer is to wait. An admin can force it from
-  **Settings → Engine → Jobs** with *Run now* on either job, or run
-  `scripts/maintenance/reconcile_search_index.py` in the api container.
+- Check the **scope chip** in the search box. It may be limited to entities or
+  to articles. Press **Tab** in the box to change it.
+- Check the filter rail. Filters you picked earlier are written into the query
+  and stay there.
+- If one article is truly missing from search, the search index has fallen out
+  of step. IntelFeed repairs this by itself: failed articles are retried every
+  five minutes, and a full check runs every night. Usually you only need to
+  wait. Admins can run the **reconcile-meilisearch** job straight away from
+  **Settings → Engine → Jobs** with **Run now**.
 
 ## A saved search shows the wrong count
 
-Expected, and documented. The number is computed by a background job that skips
-the intelligence half of the query, so any saved search built on an entity
-filter shows a count you can't trust. **Opening it runs the real query and
-returns the right results.** Counts are reliable for `tag:`, `feed:`,
-`category:`, `type:`, `date:`, `is:` and plain text.
+The number next to a saved search is worked out in the background, so it can
+lag behind new articles. It also stops counting at 5,000. Open the saved
+search to run the real query and see the right results.
 
 ## Entity profiles are empty
 
-Two different problems:
+There are two different causes:
 
-- **New instance** — profiles are cumulative. They're thin on day one and useful
-  by the end of the month. This is not a fault.
-- **Enrichment off** — CVE pages with no severity or KEV status mean the
-  enrichment sources aren't enabled. An admin turns them on at
-  **Settings → Engine**, enrich stage. NVD, EPSS and KEV are the three that
-  matter most.
+- **New instance**: profiles build up over time. They're thin on day one and
+  useful by the end of the month. Nothing is wrong.
+- **Enrichment off**: a CVE page with no severity or KEV status means the
+  enrichment sources are off. An admin turns them on at
+  **Settings → Engine → Enrichment**. NVD, EPSS and CISA KEV matter most.
 
 ## The Priority Queue ranks badly for me
 
-It's per-analyst and it learns, but it needs steering:
+It needs steering:
 
-- **Watch** the entities you're actually responsible for, and **mute** the ones
-  that are noise to you. This is the biggest lever and the most underused.
-- **Write your intelligence requirements** at **Workbench → Requirements**. The
-  PIR-match signal is the heaviest in the ranking and it's the one you configure.
-- **Use the thumbs.** They adjust *your* signal weights.
+- **Watch** the entities you're responsible for, and **mute** the ones that
+  are noise to you (both on the entity's profile). This is the biggest lever,
+  and the least used.
+- **Write your intelligence requirements** (the standing questions you need
+  answered) at **Workbench → Requirements**. Articles that match them rank
+  higher.
+- **Vote** with ▲ and ▼ on queue items to teach the ranking what is useful.
 
-Give it a couple of weeks before concluding it's wrong. See
+Give it a couple of weeks before deciding it's wrong. See
 [Priority Queue and watching](priority-queue.md).
 
 ## Images aren't loading
 
-If the image proxy is on, the first view of an image is slower because it's
-being cached. If an image on the source changed, you'll still see the cached
-copy. Admins can clear the cache in System settings.
+If the image proxy is on, the first view of an image is slower while your
+server saves a copy. If the original image changes, you still see the saved
+copy until it expires.
 
 ## Enrichment says rate limited
 
-Each source has a rate-limit budget and requests beyond it are deferred and
-retried, not dropped. NVD's public API is the usual culprit. If it's constant,
-an admin can add an API key for that source under **Settings → Engine**.
+Each enrichment source has a limit on how many requests it accepts. Requests
+over the limit wait and are retried, not dropped. NVD's public API is the usual
+cause. If it happens all the time, an admin can add an **NVD API Key** under
+**Settings → Engine** to raise the limit.
 
 ## Still stuck
 
-Ask the copilot on the [documentation home](/documentation) — it can search
+Ask the copilot on the [documentation home](/documentation). It can search
 these pages and the developer documentation. (On GitHub, start from the
-[docs index](../README.md).) If the answer is genuinely about
-how something is *built* rather than how to use it, point it at the reference
-docs; it knows the difference.
+[docs index](../README.md).)
+
+Back to the start: [Using IntelFeed](README.md)
