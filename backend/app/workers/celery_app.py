@@ -76,6 +76,12 @@ celery_app.conf.update(
         # Thread spines are generative; the sweeper that builds the threads
         # themselves is pure SQL and stays on the default queue.
         "app.workers.thread_tasks.narrate_story_threads": {"queue": "ai"},
+        # Written products: each one calls run_task, so it waits its turn on the
+        # AI worker instead of holding a default-worker slot for minutes.
+        "app.workers.maintenance.generate_threat_briefs": {"queue": "ai"},
+        "app.workers.daily_summary_tasks.generate_daily_summaries": {"queue": "ai"},
+        "app.workers.reddit_digest_tasks.generate_reddit_digest": {"queue": "ai"},
+        "app.workers.report_tasks.generate_full_report": {"queue": "ai"},
         # Interactive global copilot CLI turns — same dedicated worker (owns the
         # OAuth credentials volume), streamed back to the api over Redis.
         "app.workers.copilot_tasks.run_copilot_stream": {"queue": "ai"},
