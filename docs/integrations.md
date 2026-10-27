@@ -348,7 +348,7 @@ Requests need a publish token, not a login token: `Authorization: Bearer <secret
 | `/api/taxii2/` | TAXII 2.1, read-only | Collection `observables` of STIX 2.1 indicators |
 
 ```bash
-curl -H "Authorization: Bearer YOUR_PUBLISH_SECRET" \
+curl -H "Authorization: Bearer <publish-secret>" \
   https://intelfeed.example.com/api/publish/edl/domains.txt
 ```
 
