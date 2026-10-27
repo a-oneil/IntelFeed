@@ -221,7 +221,7 @@ This installs all runtime + test dependencies (pytest, pytest-asyncio, pytest-co
 
 Commit the lockfiles with the change. CI re-runs `./lock.sh` and fails when the output differs, and `pip-audit` grades the lock itself. The production image installs only `requirements.lock`, so pytest, ruff and the compiler never ship.
 
-**Python 3.14 only.** `backend/Dockerfile` is `python:3.14.8`, and every container that runs app code (api, celery-worker, celery-worker-ai, celery-beat, telegram-listener) is built from it. CI tests that one version; `requires-python` is `>=3.14`.
+**Python 3.14 only.** `backend/Dockerfile` is `python:3.14.9`, and every container that runs app code (api, celery-worker, celery-worker-ai, celery-beat, telegram-listener) is built from it. CI tests that one version; `requires-python` is `>=3.14`.
 
 This used to be a 3.12/3.13/3.14 matrix, kept because two stdlib behaviour changes had bitten the codebase — `urllib.robotparser` moved the catch-all `*` group in 3.13 (`app/services/robots.py`), and `fnmatch.translate` changed its end anchor from `\Z` to `\z` in 3.14 (`app/adapters/github_content_types.py`). Both were found climbing *toward* 3.14, and both were fixed by deriving what they need at runtime instead of assuming a layout — so they stay correct on any version. Once 3.14 became the only runtime, the matrix was costing about a quarter of the repo's CI minutes to test interpreters nothing runs. Keep those two call sites version-agnostic; there is no matrix to keep green any more.
 
