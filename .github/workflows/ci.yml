@@ -37,7 +37,7 @@ permissions:
 
 env:
   # The version every container that runs app code ships: backend/Dockerfile is
-  # python:3.14.8, and api / celery-worker / celery-worker-ai / celery-beat /
+  # python:3.14.9, and api / celery-worker / celery-worker-ai / celery-beat /
   # telegram-listener are all built from it. The host venvs are 3.14 too.
   #
   # This used to be a 3.12/3.13/3.14 matrix. Both bugs it caught
