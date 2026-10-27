@@ -2843,7 +2843,6 @@ export interface UserEnrichmentOverride {
   id: string;
   source_id: string;
   has_api_key: boolean;
-  trigger_mode_override: string | null;
   created_at: string;
 }
 

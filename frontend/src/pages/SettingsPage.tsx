@@ -2017,7 +2017,7 @@ TELEGRAM_API_HASH=abc123...`}</code>
           password.
         </p>
         <pre className={styles.codeBlock}>
-          <code>docker compose -f docker-compose.prod.yml exec -it api python scripts/telegram_login.py</code>
+          <code>docker compose -f docker-compose.prod.yml exec -it api python scripts/telegram/telegram_login.py</code>
         </pre>
         <p className={styles.cardDesc}>
           On success the script prints{" "}
@@ -2048,7 +2048,7 @@ TELEGRAM_API_HASH=abc123...`}</code>
           channels, either join through the Telegram client app or run:
         </p>
         <pre className={styles.codeBlock}>
-          <code>docker compose -f docker-compose.prod.yml exec api python scripts/telegram_join.py "https://t.me/+HASH"</code>
+          <code>docker compose -f docker-compose.prod.yml exec api python scripts/telegram/telegram_join.py "https://t.me/+HASH"</code>
         </pre>
       </div>
 

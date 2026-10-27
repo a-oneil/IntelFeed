@@ -216,6 +216,45 @@ rule test_rule
         assert result.valid is False
 
 
+NUCLEI_TEMPLATE = """
+id: CVE-2024-1234
+info:
+  name: Example RCE
+  author: someone
+  severity: critical
+  tags: cve,rce
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/api/v1/status"
+    matchers:
+      - type: word
+        words:
+          - "vulnerable"
+"""
+
+
+class TestNucleiValidation:
+    def test_valid_template(self):
+        result = validate_rule("nuclei", NUCLEI_TEMPLATE)
+        assert result.valid is True, result.errors
+
+    def test_sigma_rule_is_not_a_nuclei_template(self):
+        result = validate_rule("nuclei", "title: x\nstatus: test\nlogsource: {}\ndetection: {condition: sel}\n")
+        messages = {e.message for e in result.errors}
+        assert "Required field 'id' missing" in messages
+        assert any(m.startswith("No request block") for m in messages)
+
+    def test_missing_severity_and_bad_severity(self):
+        missing = validate_rule("nuclei", NUCLEI_TEMPLATE.replace("  severity: critical\n", ""))
+        assert "Required field 'info.severity' missing" in {e.message for e in missing.errors}
+        bad = validate_rule("nuclei", NUCLEI_TEMPLATE.replace("severity: critical", "severity: urgent"))
+        assert bad.valid is False
+
+    def test_empty(self):
+        assert validate_rule("nuclei", "  ").errors[0].message == "Empty rule content"
+
+
 class TestValidateRuleRouter:
     def test_unknown_rule_type(self):
         result = validate_rule("unknown_type", "some content")

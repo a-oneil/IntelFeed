@@ -93,7 +93,6 @@ export function useUpsertUserOverride() {
     }: {
       sourceId: string;
       api_key?: string;
-      trigger_mode_override?: string;
     }) => {
       const { data } = await api.put(
         `/enrichment/user-overrides/${sourceId}`,

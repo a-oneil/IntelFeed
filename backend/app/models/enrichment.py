@@ -56,10 +56,10 @@ class UserEnrichmentOverride(Base):
         UUID(as_uuid=True), ForeignKey("enrichment_sources.id", ondelete="CASCADE"), nullable=False, index=True
     )
     api_key_encrypted: Mapped[str | None] = mapped_column(Text)
-    trigger_mode_override: Mapped[str | None] = mapped_column(String(20))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    __table_args__ = (UniqueConstraint("source_id", name="uq_enrichment_overrides_source_id"),)
+    # One override per user per source.
+    __table_args__ = (UniqueConstraint("created_by", "source_id", name="uq_enrichment_overrides_user_source"),)
 
     # Relationships
     creator = relationship("User", back_populates="enrichment_overrides")

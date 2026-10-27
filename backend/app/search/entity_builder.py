@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 
-from sqlalchemy import Text, cast, false, func, or_, select
+from sqlalchemy import Integer, Numeric, Text, cast, false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.campaign import Campaign, CampaignEntry
@@ -571,6 +571,15 @@ def _build_condition(cond: EntityCondition, model, entity_type: str):
         if cond.op in ("lt", "lte") or value.startswith("<"):
             return column <= parsed
         return column >= parsed
+
+    # Numbers (`cve.cvss:9`, `cve.poc:2`): a bare value is an exact match, a wildcard
+    # (`cve.cvss:9.*`) matches the number's text. The text paths below call
+    # lower()/ILIKE, which Postgres refuses on a numeric column.
+    if isinstance(column.type, (Integer, Numeric)) and cond.op in ("eq", "contains"):
+        if "*" in value:
+            return cast(column, Text).ilike(value.replace("*", "%"))
+        number = _numeric(value)
+        return None if number is None else column == number
 
     # Wildcard → ILIKE
     if cond.op == "contains" and "*" in value:

@@ -204,7 +204,7 @@ class TestUserOverrides:
     ):
         resp = await client.put(
             f"/api/enrichment/user-overrides/{enrichment_source.id}",
-            json={"api_key": "my-personal-key", "trigger_mode_override": "manual"},
+            json={"api_key": "my-personal-key"},
             headers=auth_headers,
         )
         assert resp.status_code == 200
@@ -215,7 +215,20 @@ class TestUserOverrides:
         overrides = list_resp.json()
         assert len(overrides) == 1
         assert overrides[0]["has_api_key"] is True
-        assert overrides[0]["trigger_mode_override"] == "manual"
+
+    async def test_two_users_can_each_override_the_same_source(
+        self, client: AsyncClient, auth_headers: dict, admin_headers: dict, enrichment_source: EnrichmentSource
+    ):
+        for headers in (auth_headers, admin_headers):
+            resp = await client.put(
+                f"/api/enrichment/user-overrides/{enrichment_source.id}",
+                json={"api_key": "personal-key"},
+                headers=headers,
+            )
+            assert resp.status_code == 200
+        for headers in (auth_headers, admin_headers):
+            list_resp = await client.get("/api/enrichment/user-overrides", headers=headers)
+            assert len(list_resp.json()) == 1
 
     async def test_delete_user_override(
         self, client: AsyncClient, auth_headers: dict, enrichment_source: EnrichmentSource
