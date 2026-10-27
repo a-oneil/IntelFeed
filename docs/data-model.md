@@ -1,22 +1,23 @@
 # Database Schema Reference
 
-Complete reference to the IntelFeed PostgreSQL 16 schema, including tables, relationships, indexes, and migration patterns.
+For developers who read or change the IntelFeed database. After reading it you can find any table, see what its columns mean and how tables connect, and add a migration safely.
 
-**Setup Context:** This document assumes you've completed [setup.md](../setup.md). See [architecture.md](./architecture.md) for conceptual overview.
+The database is PostgreSQL 16 with two extensions: `pg_trgm` (fuzzy name matching) and `vector` (pgvector, for article embeddings). The models in `backend/app/models/` are the source of truth; this page explains them. See [architecture.md](./architecture.md) for the bigger picture and [setup.md](../setup.md) to get a database running.
 
 ---
 
 ## Table of Contents
 
 1. [ER Diagram](#er-diagram)
-2. [Entity Clusters](#entity-clusters)
-3. [Junction Tables](#junction-tables)
-4. [Enums & Constants](#enums--constants)
-5. [Unique Constraints & Deduplication](#unique-constraints--deduplication)
-6. [Indexing Strategy](#indexing-strategy)
-7. [JSONB Columns](#jsonb-columns)
-8. [Migration System](#migration-system)
-9. [Test Database Pattern](#test-database-pattern)
+2. [Conventions](#conventions)
+3. [Entity Clusters](#entity-clusters)
+4. [Junction Tables](#junction-tables)
+5. [Enums & Constants](#enums--constants)
+6. [Unique Constraints & Deduplication](#unique-constraints--deduplication)
+7. [Indexing Strategy](#indexing-strategy)
+8. [JSONB Columns](#jsonb-columns)
+9. [Migration System](#migration-system)
+10. [Test Database Pattern](#test-database-pattern)
 
 ---
 
@@ -26,100 +27,118 @@ See diagram: [ER diagram](diagrams/data-model-er-diagram.md)
 
 ---
 
+## Conventions
+
+These hold for every table unless its section says otherwise, so the column lists below skip them.
+
+- **Primary keys** are UUIDs named `id`. The exceptions are junction tables (composite keys), `system_settings` (integer `1`), `tts_audio` (`cache_key`), `log_type_alias` (`raw`), `rule_coverage` and `threat_board_state` (composite keys), `entry_embeddings` and `user_ai_preferences` (keyed by the row they belong to).
+- **Timestamps** are timezone-aware. `created_at` and `updated_at` default to `now()`.
+- **`created_by`** points at `users` with `ON DELETE SET NULL`, so deleting a user keeps their work. Per-user state (read marks, watches, personal AI keys, subscriptions) uses `CASCADE` instead.
+- **`metadata_`** is the Python attribute name. On `entries`, `campaigns`, `detection_rules`, `entry_media` and `podcasts` the database column is called `metadata`; on the entity tables it is `metadata_`.
+- **Entity-type columns** (`entity_type`, `source_type`, `target_type`, …) store a slug from `backend/app/entity_types.py`: `threat_actor`, `malware`, `cve`, `ttp`, `cwe`, `observable`, `country`, `sector`, `tool`, `vendor`, `product`, `mitigation`, `ransomware_victim`. Import the constants rather than typing the strings. The `malware` slug is stored in the `malware_families` table (class `MalwareFamily`).
+- **Fixed value sets** are plain string columns, not native PostgreSQL enums. Many carry a CHECK constraint named `ck_<table>_<column>`, added by migrations. Those constraints exist only in a migrated database, not in the test schema built by `create_all`.
+
+---
+
 ## Entity Clusters
 
 ### 1. Users & Auth
 
-Tables: `users`, `user_entry_states`, `playback_progress`
+**Tables:** `users`, `user_entry_states`, `playback_progress`
 
-**Purpose:** User accounts, roles, and per-user application state (read/unread entries, podcast playback position).
+#### User (`users`)
+- `username` (String 30, unique)
+- `password_hash` — bcrypt
+- `role` — `admin`, `user` or `system`. The single `system` row is a service account that cannot log in. Background workers attribute auto-created data to it, and the users admin page hides it.
+- `is_active`, `last_login` (set on successful login)
+- `settings` (JSONB) — per-user preferences
+- `theme_id` (UUID, no foreign key), `custom_css`
 
-**Key Relationships:**
-- `User.id` (UUID PK, unique `username`)
-- Users have many `UserEntryState` records (cascade delete on user removal)
-- Users can own `Categories`, `Tags`, `SavedSearches`, etc. (soft delete via `created_by` not CASCADE)
-- Users can own personal AI keys (`ai_providers.user_id`), AI routes and AI preferences (all CASCADE); their `ai_results` rows stay, with `user_id` / `key_owner_id` set NULL
+A user's personal AI keys (`ai_providers.user_id`), AI routes and AI preferences are deleted with them. Their `ai_results` rows stay, with `user_id` / `key_owner_id` set to NULL.
 
-**Notes:**
-- Password stored as bcrypt hash (`password_hash` field)
-- `role` field: "admin", "user", or "system" — the single `system` row is a non-loginable service account that background workers attribute auto-created data to (hidden from the users admin UI)
-- `settings` JSONB: per-user preferences (theme, API settings, notification config)
-- `last_login` tracks user activity (set on successful auth)
-- `theme_id` FK omitted from model to avoid circular dependency with `Theme.created_by`; constraint exists in migration
+#### UserEntryState (`user_entry_states`)
+One row per user per entry they have touched. Unique on `(user_id, entry_id)`.
+- `is_read`, `is_starred`, `is_bookmarked`, `is_hidden`, `read_at`
+
+#### PlaybackProgress (`playback_progress`)
+Where a user stopped in a podcast or video. Unique on `(user_id, entry_media_id)`.
+- `entry_media_id` (FK → `entry_media`, CASCADE), `position_seconds`, `is_completed`
 
 ---
 
 ### 2. Feeds & Entries
 
-**Tables:** `feeds`, `entries`, `entry_media`, `user_entry_states`, `user_feed_subscriptions`, `podcasts`, `playback_progress`, `tags`, `entry_tags`
+**Tables:** `feeds`, `user_feed_subscriptions`, `podcasts`, `entries`, `entry_media`, `ingest_batches`, `ingest_batch_items`, `ingest_files`
 
-**Purpose:** RSS/Atom feed subscriptions, ingest of feed articles, and metadata tracking.
+#### Feed (`feeds`)
+- `url` (Text, unique), `title`, `custom_title`, `site_url`, `icon_url`, `description`, `language`
+- `feed_type` (default `rss`, indexed) — see [Enums & Constants](#enums--constants)
+- `adapter_config` (JSONB) — settings for the feed's adapter (for example `auto_translate`, `exclude_shorts`)
+- `category_id` (FK → `categories`, SET NULL)
+- Fetching: `fetch_interval_minutes` (default 30), `last_fetched_at`, `etag`, `last_modified`
+- Health: `error_count`, `last_error`, `error_since`, `auto_paused_at`. While errors continue, the poller waits longer between fetches.
+- Switches: `is_active` (indexed), `is_muted`, `visible_to_visitors` (shown in public read-only mode; default off)
+- Analyst ratings: `reliability_rating` (one letter, A–F), `timeliness_rating` (excellent / good / fair / poor), `relevance_rating` (high / medium / low), `analyst_notes`, `last_reviewed_at`
+- Pipeline switches:
+  - `intel_extraction_mode` (default `selective`) — `full`, `selective`, `manual` or `none`. `none` turns off autolinking and extraction for the feed.
+  - `ai_analysis_enabled` — lets the one-pass AI read this feed. It works separately from the extraction mode, so a noisy feed can still be matched against known entities without the AI reading it.
+  - `auto_extract_on_ingest` (regex CVE/TTP pass), `extract_detection_rules`, `extract_tools`
+  - `exclude_title_patterns` — entries whose title contains one of these phrases are skipped
+- `retention_days` — entries older than this are deleted
 
-#### Feeds
+A feed has many entries and at most one `podcasts` row (both CASCADE).
 
-**Columns:**
-- `id` (UUID PK)
-- `url` (Text, unique) — canonical feed URL
-- `title`, `custom_title` — feed title and user-customized title
-- `feed_type` ("rss", "atom", "json", "email", etc.) — indexed
-- `last_fetched_at`, `error_count`, `last_error` — fetch health
-- `etag`, `last_modified` — HTTP caching headers
-- `is_active` (Boolean, indexed) — subscription status
-- `reliability_rating`, `timeliness_rating`, `relevance_rating` — analyst ratings (A-F or similar)
-- `intel_extraction_mode` ("full", "selective", "manual", "none") — TTP/CVE/Actor extraction strategy
-- `ai_analysis_enabled`, `auto_extract_on_ingest`, `extract_detection_rules` — per-feed pipeline switches. `ai_analysis_enabled` gates the one-pass AI analysis independently of `intel_extraction_mode`, so a noisy source can stay matched against the catalog without the AI reading it
-- `category_id` (FK, nullable, SET NULL on category delete)
-- `retention_days` — auto-delete entries older than N days
-- `adapter_config` (JSONB) — feed-type-specific config
+#### UserFeedSubscription (`user_feed_subscriptions`)
+Each analyst's view of the shared feed pool. Unique on `(user_id, feed_id)`.
+- `is_muted` — articles still arrive but leave this user's unread counts
+- `is_paused` — this user stops receiving new articles. The feed keeps fetching while at least one subscriber has it unpaused.
 
-**Relationships:**
-- Has many `Entry` records (CASCADE delete)
-- Has one `Podcast` (CASCADE delete, if feed is audio)
-- Belongs to `Category` (optional, SET NULL)
+Read only while the `per_user_subscriptions_enabled` setting is on (the default). With it off, `feeds.is_active` and `feeds.is_muted` are the shared switches.
 
-**Deduplication:** `Entry(feed_id, guid)` unique constraint ensures no duplicate entries per feed.
+#### Podcast (`podcasts`)
+Extra details for an audio feed. Unique on `feed_id`.
+- `author`, `categories` (Text[]), `is_explicit`, `podcast_type` (default `episodic`), `artwork_url`, `metadata`
 
-#### User Feed Subscriptions
+#### Entry (`entries`)
+One article, post, video or uploaded file.
+- `feed_id` (FK, CASCADE, indexed)
+- `guid` (String 2000, nullable) — the feed's own id for the item
+- `url`, `title` (String 2000), `author`, `summary`
+- `content_html` (sanitized), `content_text`
+- `published_at` (indexed), `fetched_at`, `created_at`
+- `word_count`, `language`
+- `content_hash` (String 64) — SHA-256 of the normalized title plus the first 500 characters of text. Used to spot the same article arriving from another feed.
+- `image_url` — lead image
+- `extracted_urls` (JSONB) — links found in the content
+- `observable_candidates` (JSONB) — indicator-like strings found by pattern scanning. They stay here until a judgment step creates a ledger row (see [Observable — the IOC ledger](#observable--the-ioc-ledger)).
+- `metadata` (JSONB) — adapter-specific data (for example the GitHub `content_type`, Telegram `forwarded_from`, or an upload's `batch_id`)
+- Translation cache: `translated_html`, `translated_title`, `translation_source_language`, `translation_target_language`, `translated_at`
+- Signal engine: `priority_raw` (unbounded weighted sum, the sort key, indexed), `priority_score` (the same placed on a 0–10 scale, indexed), `scored_at`
 
-**Columns:**
-- `user_id` (FK, CASCADE), `feed_id` (FK, CASCADE) — unique together
-- `is_muted` (Boolean) — personal mute over the shared feed pool
+Unique on `(feed_id, guid)`.
 
-Each analyst's visibility and personal mute over the shared feed pool; only consulted when the `per_user_subscriptions_enabled` system setting is on (default off). Backfilled so every existing user subscribes to every feed.
+What happens to related rows when an entry is deleted:
+- **Deleted with it (CASCADE), among others:** read state, media, tags, every entity junction, `entry_signals`, `entry_signal_feedback`, `entry_pipeline_runs`, `ai_analysis_requests`, `ai_results`, `entry_embeddings`, story-thread membership, share links.
+- **Kept, link cleared (SET NULL):** `notes`, `detection_rules`, `entity_field_claims`, upload items and files, and the `created_from_entry_id` on entities.
 
-#### Entries
+#### EntryMedia (`entry_media`)
+Audio, video or images attached to an entry.
+- `entry_id` (FK, CASCADE), `media_type`, `url`, `mime_type`, `file_size`, `duration_seconds`, `thumbnail_url`
+- `transcript_text` — YouTube or podcast transcript
+- `metadata`
 
-**Columns:**
-- `id` (UUID PK)
-- `feed_id` (FK, CASCADE) — which feed this came from
-- `guid` (String 2000, nullable) — feed-provided ID (nullable for some feed types)
-- `url`, `title`, `author` — article metadata
-- `content_html`, `content_text` — article body
-- `summary` — feed summary
-- `published_at` (DateTime, indexed) — article publication time
-- `fetched_at` (DateTime, server default) — when IntelFeed ingested it
-- `word_count`, `language` — content metrics
-- `content_hash` (String 64, indexed) — SHA256 of content for dedup
-- `image_url` — featured/hero image
-- `extracted_urls` (JSONB array) — URLs found in content
-- `metadata_` (JSONB) — feed-specific metadata (e.g., feed author's categories, tags)
-- `translated_html`, `translated_title`, `translation_source_language`, `translation_target_language`, `translated_at` — machine translation cache
-- `priority_score` (Float, indexed), `priority_raw` (Float, indexed), `scored_at` — signal engine score on a 0–10 scale, and the unbounded weighted sum it is ranked from (the ordering key; see Signal Engine cluster)
+#### Bulk ingest (`ingest_batches`, `ingest_batch_items`, `ingest_files`)
+Files, pasted text and URLs an analyst uploads. Each item that parses becomes an ordinary entry on the built-in Manual Uploads feed and goes through the normal pipeline. The only trace on the entry is `metadata.batch_id` plus some file bookkeeping keys.
 
-**Relationships:**
-- Belongs to `Feed` (CASCADE delete)
-- Has many `UserEntryState` (CASCADE delete)
-- Has many `EntryMedia` (CASCADE delete)
-- Has many `EntryTag` (CASCADE delete)
-- Has many `EntryTTP`, `EntryCVE`, `EntryThreatActor`, `EntryMalware`, `EntryCountry`, `EntryMitigation`, `EntryVendor`, `EntryProduct`, `EntryTool`, `EntrySector` (all CASCADE delete)
-- Has many `EntrySignal`, `EntryPipelineRun`, `EntitySignalFeedback` rows and one `AIAnalysisRequest` (all CASCADE delete; signal engine)
-- Has many `Note` records (NO cascade; keep notes on entry deletion)
-- Has many `DetectionRule` references (NO cascade; rule may apply to many entries)
-- Has many `AIResult` (NO cascade; analysis results are reference data)
-
-**Deduplication Strategy:**
-- Unique constraint on `(feed_id, guid)` prevents re-ingesting same article
-- `content_hash` indexed for detecting near-duplicates across feeds
+- **`ingest_batches`** — one upload. `user_id` (SET NULL), `label`, `source` (default `ui`), `options` (JSONB).
+- **`ingest_batch_items`** — one thing in the batch.
+  - `batch_id` (CASCADE), `parent_item_id` (a .zip or repo expands into child items), `position`
+  - `kind` — `url`, `file`, `text`, `github_repo`, `github_file`
+  - `status` — `queued`, `parsing`, `created`, `expanded`, `duplicate`, `no_text`, `unsupported`, `too_large`, `failed`, `cancelled`. Every outcome is a status here, not a failed request.
+  - `filename`, `content_type`, `size_bytes`, `sha256`, `title`, `source_url`, `is_ioc_list`
+  - `entry_id` (SET NULL) — the entry it became, or the existing twin for a duplicate
+  - `error`, `attempts`, `extra` (JSONB), `started_at`, `finished_at`
+- **`ingest_files`** — the original bytes on disk (under `ingest_files_dir`). Unique on `item_id`. `path`, `sha256` (indexed), `filename`, `content_type`, `size_bytes`, `entry_id`. A nightly sweep deletes old files and sets `evicted_at` but keeps the row, so the reader can say "original not kept".
 
 ---
 
@@ -127,1454 +146,849 @@ Each analyst's visibility and personal mute over the shared feed pool; only cons
 
 **Tables:** `ttps`, `cves`, `cve_affected`, `cve_weaknesses`, `cwes`, `observables`, `threat_actors`, `malware_families`, `countries`, `sectors`, `vendors`, `products`, `mitigations`, `tools`, `ransomware_victims`, `victim_disclosures`
 
-**Maintenance & audit tables:** `entity_maintenance_log`, `actor_description_history`, `entity_link_validation_log`, `entity_merge_suggestion_dismissals`, `entity_reclassify_tombstones`
+**Maintenance and audit tables:** `entity_maintenance_log`, `actor_description_history`, `entity_link_validation_log`, `entity_merge_suggestion_dismissals`, `entity_reclassify_tombstones`, `proposal_dismissals`
 
-**Resolution infrastructure:** `entity_alias_index`, `known_alias_map`, `entity_name_denylist`, `pending_autolink_matches`
+**Name-resolution tables:** `entity_alias_index`, `known_alias_map`, `entity_name_denylist`, `pending_autolink_matches`
 
-**Canonical type vocabulary:** every `entity_type`-style column stores a slug from `app/entity_types.py` (`threat_actor`, `malware`, `cve`, `ttp`, `cwe`, `observable`, `country`, `tool`, `vendor`, `product`, `mitigation`, `ransomware_victim`). Note that the slug and the storage name diverge in one place: the `malware` slug is backed by the `malware_families` table and the `MalwareFamily` class.
+These hold the threat-intel "things" that articles mention, plus the tables that keep them clean.
 
-**Name-resolved entity tables** (`threat_actors`, `malware_families`, `tools`, `vendors`, `products`, `ransomware_victims`) carry a DB-computed `normalized_name` column (`entity_norm(name)`, persisted, indexed) — the hardened normal form used for dedup and alias lookups.
+Columns shared across entity tables:
+- **Activity:** `article_count`, `first_seen_at`, `last_seen_at`.
+- **Wikipedia:** `wikipedia_url`, `wikipedia_content`, `wikipedia_image_url` (on actors, malware, tools, vendors, products, CVEs, TTPs, CWEs, countries and mitigations).
+- **Normalized name:** `threat_actors`, `malware_families`, `tools`, `vendors`, `products` and `ransomware_victims` have a `normalized_name` column. The database computes it as `entity_norm(name)` and stores and indexes it. Dedup and alias lookups use it.
+- **Creation provenance:** `threat_actors`, `malware_families`, `tools`, `cves`, `ttps`, `cwes` and `observables` record how a row was created:
+  - `created_via` — for example `ai_extraction`, `manual` or `seed`; NULL when unknown
+  - `created_from_entry_id` (FK → `entries`, SET NULL), `created_confidence`
+  - `needs_review` (Boolean)
 
-**AI-extraction provenance** (migration `f1a3c5e7g9i1`): `threat_actors`, `malware_families`, `tools`, `cves`, and `ttps` carry `created_via` ("ai_extraction", "manual", "seed", or NULL when unattributed), `created_from_entry_id` (FK, SET NULL), `created_confidence`, and `needs_review` (Boolean) — powering the Engine → Extraction management tab.
-
-**Purpose:** Catalog of threat intelligence entities extracted from entries and enriched from external sources.
+  The Engine → Extraction page reads these columns.
 
 #### TTP (Tactic/Technique/Procedure)
-
-**Columns:**
-- `id` (UUID PK)
-- `technique_id` (String 20, unique, indexed) — MITRE ATT&CK ID (e.g., "T1234.001")
-- `technique_name` — human-readable name
-- `tactic` (String 100, indexed) — MITRE tactic (e.g., "Initial Access")
-- `description`, `platforms`, `data_sources` (JSONB) — MITRE metadata; `data_sources` and `detection` are resolved from ATT&CK detection strategies (v17+ no longer puts them on the technique object)
-- `mitre_url` — link to MITRE page
-- `detection` — detection guidance
-- `is_subtechnique` — true if sub-technique (T1234.001 vs T1234)
-- `tactics` (JSONB) — full multi-tactic list (a technique can span tactics)
-- `parent_technique_id` (String 20, indexed) — parent technique for sub-techniques
-- `is_deprecated`, `superseded_by` — ATT&CK deprecation/revocation tracking
-- `matrix_domain` (String 20, indexed) — "enterprise", "mobile", or "ics"
-- `first_seen_at`, `last_seen_at` — temporal tracking
-- `article_count` — how many entries mention this TTP
-- `wikipedia_url`, `wikipedia_content`, `wikipedia_image_url` — enrichment from Wikipedia
-
-**Deduplication:** `technique_id` unique constraint (one TTP per MITRE ID).
+Table `ttps`: one MITRE ATT&CK technique or sub-technique.
+- `technique_id` (String 20, unique) — for example `T1059.001`
+- `technique_name`
+- `tactic` (indexed) — the primary tactic; `tactics` (JSONB) — every tactic the technique belongs to
+- `description`, `platforms` (JSONB), `data_sources` (JSONB), `detection`, `mitre_url`. `data_sources` and `detection` come from ATT&CK detection strategies.
+- `is_subtechnique`, `parent_technique_id` (indexed)
+- `is_deprecated`, `superseded_by`
+- `matrix_domain` (indexed) — `enterprise`, `mobile` or `ics`
 
 #### CVE
-
-**Columns:**
-- `id` (UUID PK)
-- `cve_id` (String 20, unique) — CVE ID (e.g., "CVE-2021-44228")
-- `cvss_score`, `severity` (indexed) — CVSS v3 score & severity
-- `affected_products` (JSONB array) — affected software/products
-- `exploit_status`, `exploit_sources` — exploitation tracking
-- `references_` (JSONB array) — links to advisories
-- `nvd_data` (JSONB) — NVD metadata
-- `timeline` (JSONB) — timeline of events (disclosure, exploitation, patch)
-- `epss_score`, `epss_percentile`, `epss_updated_at` — EPSS (Exploit Prediction Scoring System)
-- `epss_previous_score`, `epss_changed_at` — prior score + when it last actually changed (read by the `epss_jump` signal)
-- `exploit_availability` ("none", "poc", "weaponized", "active_exploitation")
-- `exploit_status_source` (String 20) — provenance: "manual" when analyst-set (enrichment never clobbers it), NULL/"auto" otherwise
-- `is_kev` (Boolean, indexed), `kev_date_added`, `kev_due_date` — first-class CISA KEV tracking
-- `github_poc_count`, `github_poc_urls` — public exploits
-- `metasploit_module` — Metasploit module if available
-- `wikipedia_url`, `wikipedia_content`, `wikipedia_image_url` — enrichment
-
-**Deduplication:** `cve_id` unique constraint.
+Table `cves`: one published vulnerability.
+- `cve_id` (String 20, unique) — for example `CVE-2021-44228`
+- `description`, `cvss_score` (Numeric 3,1), `severity` (indexed)
+- `affected_products`, `references_`, `nvd_data`, `timeline` (all JSONB)
+- EPSS (the Exploit Prediction Scoring System, a daily probability that a CVE will be exploited): `epss_score` (indexed), `epss_percentile`, `epss_updated_at`, `epss_previous_score`, `epss_changed_at`. The `epss_jump` signal reads the last two.
+- Exploitation:
+  - `exploit_status`, `exploit_sources` (JSONB)
+  - `exploit_availability` — `none`, `poc`, `weaponized` or `active_exploitation`
+  - `exploit_status_source` — `manual` when an analyst set it; enrichment never overwrites a manual value
+- KEV (CISA's Known Exploited Vulnerabilities list): `is_kev` (indexed), `kev_date_added`, `kev_due_date`
+- Public exploits: `github_poc_count`, `github_poc_urls` (Text[]), `metasploit_module`
 
 #### CVEAffected
+Table `cve_affected`: which vendors and products a CVE affects, read from NVD CPE data (CPE is NVD's naming scheme for software). These links live here, not in `entity_relationships`. The raw CPE strings are always kept. `vendor_id` and `product_id` are filled in when the strings match a known entity, so an unmatched pair can still match later.
+- `cve_id` (FK, CASCADE)
+- `cpe_vendor`, `cpe_product` — raw lowercase CPE 2.3 parts
+- `vendor_id`, `product_id` (FK, SET NULL)
+- `version_start`, `version_end`, `source` (default `nvd`), `resolved_at`
 
-Authoritative CVE → vendor/product affects-links parsed from NVD CPE data (table `cve_affected`; not `EntityRelationship` rows). Raw CPE strings are always kept; `vendor_id`/`product_id` fill in only when the strings resolve to canonical entities, so unmatched pairs persist and can resolve retroactively.
-
-**Columns:**
-- `id` (UUID PK)
-- `cve_id` (FK, CASCADE, indexed)
-- `cpe_vendor`, `cpe_product` (Text) — raw lowercase CPE 2.3 segments
-- `vendor_id`, `product_id` (FK, nullable, SET NULL, indexed) — resolved canonical entities
-- `version_start`, `version_end` (Text)
-- `source` (String 20, default "nvd")
-- `created_at`, `resolved_at`
-
-**Unique Constraint:** `(cve_id, cpe_vendor, cpe_product)`.
+Unique on `(cve_id, cpe_vendor, cpe_product)`.
 
 #### ThreatActor
-
-**Columns:**
-- `id` (UUID PK)
-- `name` (String 255, unique, indexed) — canonical name (e.g., "APT29")
-- `aliases` (ARRAY(Text)) — alternate names
-- `normalized_name` (String 255, computed `entity_norm(name)`, indexed)
-- `description`, `mitre_id` — metadata
-- `actor_type` (String 30, indexed) — "ransomware", "nation-state", "hacktivist", "ecrime", …
-- `country` (String 100) — attributed country (denormalized)
-- `origin_country_id` (FK, nullable, SET NULL) — link to `Country` record
-- `motivation` (String 100) — e.g., "financial", "espionage", "activism"
-- `targeted_sectors` (ARRAY(Text)) — read cache of the sector *labels* on `threat_actor_target_sectors`, rebuilt by `services/sector_links.refresh_targeted_sectors_cache` and written by nothing else
-- `associated_ttps` (JSONB) — list of TTPs used by this actor
-- `first_seen_at`, `last_seen_at`, `article_count` — temporal & frequency
-- `wikipedia_url`, `wikipedia_content`, `wikipedia_image_url` — enrichment
-- `metadata_` (JSONB) — additional fields
-
-**Deduplication:** `name` unique constraint.
+Table `threat_actors`.
+- `name` (String 255, unique), `aliases` (Text[]), `normalized_name`
+- `description`, `mitre_id`
+- `actor_type` (indexed) — for example `ransomware`, `nation-state`, `hacktivist`, `ecrime`
+- `country` (String 100, free text), `origin_country_id` (FK → `countries`, SET NULL)
+- `motivation` — for example `financial`, `espionage`
+- `targeted_sectors` (Text[]) — a cache of the sector labels in `threat_actor_target_sectors`. Only `services/sector_links.refresh_targeted_sectors_cache` writes it.
+- `associated_ttps` (JSONB), `metadata_` (JSONB)
 
 #### MalwareFamily
-
-**Columns:**
-- `id` (UUID PK)
-- `name` (String 255, unique, indexed) — canonical name (e.g., "Emotet")
-- `aliases` (ARRAY(Text)) — alternate names
-- `normalized_name` (String 255, computed `entity_norm(name)`, indexed)
-- `description`, `malpedia_url` — metadata
-- `malware_type` (String 50, indexed) — e.g., "trojan", "ransomware", "worm"
-- `associated_actors` (JSONB) — list of actors known to use this malware
-- `targeted_sectors` (ARRAY(Text)) — read cache of `malware_target_sectors`, same rule as the actor column
-- `first_seen_at`, `last_seen_at`, `article_count` — temporal & frequency
-- `wikipedia_url`, `wikipedia_content`, `wikipedia_image_url` — enrichment
-- `metadata_` (JSONB)
-
-**Deduplication:** `name` unique constraint.
+Table `malware_families`.
+- `name` (String 255, unique), `aliases`, `normalized_name`
+- `description`, `mitre_id`, `malpedia_url`
+- `malware_type` (indexed) — for example `trojan`, `ransomware`, `worm`
+- `associated_actors` (JSONB)
+- `targeted_sectors` (Text[]) — a cache of `malware_target_sectors`, kept the same way as the actor column
+- `metadata_`
 
 #### Country
-
-**Columns:**
-- `id` (UUID PK)
-- `name` (String 100, unique, indexed) — country name
-- `iso_code` (String 2, unique) — ISO 3166-1 alpha-2 code
-- `region` (String 50, indexed) — geographic region
+Table `countries`.
+- `name` (String 255, unique), `iso_code` (String 3), `aliases`, `region` (String 100), `description`, `metadata_`
 
 #### Sector
+Table `sectors`: the industries that attacks target. There are 21 rows, one per slug in `app/intelligence/sectors.py`. Each id is `uuid5(SECTOR_NAMESPACE, slug)`, so every install has the same ids. The list is closed: no create, merge, convert or delete. Sectors are never autolinked, because their names are everyday words.
+- `slug` (String 50, unique) — for example `financial-services`
+- `name` (String 100, unique) — for example `Financial Services`
+- `aliases` — alternative names (`banks`, `hospitals`) so a search like `sector:banks` works. They are never fed to the autolinker.
+- `description` (analyst-editable), `metadata_`
 
-The victim-industry vocabulary as an entity: 21 rows seeded from `app/intelligence/sectors.py` (one per canonical slug), ids minted as `uuid5(SECTOR_NAMESPACE, slug)` so every install agrees on them. Closed — no create, merge, convert or delete — and never autolinked, because sector names are everyday words.
-
-**Columns:**
-- `id` (UUID PK) — deterministic from the slug
-- `slug` (String 50, unique, indexed) — canonical slug, e.g. `financial-services`
-- `name` (String 100, unique) — display label, e.g. `Financial Services`
-- `aliases` (ARRAY(Text)) — the vocabulary's alias map (`banks`, `hospitals`), so `sector:banks` resolves; never fed to the autolinker
-- `description` (Text) — analyst-editable
-- `article_count`, `first_seen_at`, `last_seen_at`, `metadata_` (JSONB)
-
-Linked to entries through `entry_sectors` (written only by the one-pass AI analysis) and to actors / malware / campaigns through `threat_actor_target_sectors`, `malware_target_sectors` and `campaign_sectors` (see Junction Tables). The `targeted_sectors` arrays on actors and malware are a read cache of those junctions' labels.
+Entries link to sectors through `entry_sectors`, which only the one-pass AI analysis writes. Actors, malware and campaigns link through `threat_actor_target_sectors`, `malware_target_sectors` and `campaign_sectors` (see [Junction Tables](#junction-tables)).
 
 #### Vendor & Product
-
-**Columns (Vendor):**
-- `id` (UUID PK)
-- `name` (String 255, unique, indexed) — vendor name
-- `aliases` (ARRAY(Text))
-- `vendor_type` (String 50, indexed) — "software", "hardware", "cloud", etc.
-- `website` (Text)
-- `article_count`, `first_seen_at`, `last_seen_at`
-- `wikipedia_url`, `wikipedia_content`, `wikipedia_image_url`
-- `metadata_` (JSONB)
-
-**Columns (Product):**
-- `id` (UUID PK)
-- `vendor_id` (FK, nullable, SET NULL)
-- `name` (String 255, unique, indexed)
-- `aliases` (ARRAY(Text))
-- `product_type` (String 50, indexed) — "os", "application", "security_tool", etc.
-- `website` (Text)
-- `article_count`, `first_seen_at`, `last_seen_at`
-- `wikipedia_url`, `wikipedia_content`, `wikipedia_image_url`
-- `metadata_` (JSONB)
-
-**Deduplication:** Vendor.name and Product.name unique constraints.
+Tables `vendors` and `products`.
+- Both: `name` (String 255, unique), `aliases`, `normalized_name`, `description`, `website`, `metadata_`
+- `vendors.vendor_type` (indexed) — see [Enums & Constants](#enums--constants)
+- `products.vendor_id` (FK → `vendors`, SET NULL), `products.product_type` (indexed)
 
 #### Mitigation
+Table `mitigations`: MITRE ATT&CK mitigations.
+- `mitre_id` (String 20, unique) — for example `M1036`
+- `name`, `description`, `mitre_url`
+- `cis_controls`, `nist_controls` (Text[])
 
-**Columns:**
-- `id` (UUID PK)
-- `mitigation_id` (String 20, unique) — MITRE mitigation ID
-- `name` — mitigation name
-- `description` — mitigation guidance
-- `mitre_url`
-
-**Relationships:** Many-to-many with TTP via `TTPMitigation` junction table.
+Linked to TTPs through `ttp_mitigations`.
 
 #### Tool
-
-Table `tools` — any software tool: offensive, defensive, general software, services, LLMs.
-
-**Columns:**
-- `id` (UUID PK)
-- `name` (String 255, unique, indexed)
-- `aliases` (ARRAY(Text))
-- `normalized_name` (String 255, computed `entity_norm(name)`, indexed)
-- `description` (Text)
-- `tool_type` (String 50, indexed) — controlled vocabulary (`TOOL_TYPES` in `models/tool.py`): "c2_framework", "credential_access", "exploitation", "lolbas", "phishing_kit", "remote_access", "ai_model", "defensive", "dev_tool", "service", "software", etc. Free text is coerced on write; the raw string lands in `metadata_["raw_tool_type"]`
-- `platforms` (ARRAY(Text)) — windows, linux, macos, cross-platform
-- `malpedia_url`, `github_url`
-- `detection_artifacts` (JSONB) — named pipes, process names, PE metadata, etc.
-- `article_count`, `first_seen_at`, `last_seen_at`
-- `wikipedia_url`, `wikipedia_content`, `wikipedia_image_url`
-- `metadata_` (JSONB)
-
-**Relationships:** Many-to-many with entries via `entry_tools` junction (confidence, matched_names, paragraph_indices).
-
-**Deduplication:** `name` unique constraint.
+Table `tools`: any named software. That includes attack tools, defensive tools, ordinary software, online services and AI models.
+- `name` (String 255, unique), `aliases`, `normalized_name`, `description`, `mitre_id`
+- `tool_type` (indexed) — one of `TOOL_TYPES` in `models/tool.py`. Free text is mapped onto the list when written, and the original string is kept in `metadata_["raw_tool_type"]`.
+- `platforms` (Text[]), `malpedia_url`, `github_url`
+- `detection_artifacts` (JSONB) — named pipes, process names, file metadata and similar
+- `metadata_`
 
 #### RansomwareVictim & VictimDisclosure
+The leak-site victim tracker, filled by the `sync_ransomware_victims` job from ransomware.live. A victim is the organization. A disclosure is one posting: one organization, one group, one time, one leak site. If a group re-lists a victim, or a second group claims it, there is still one victim with several disclosures.
 
-Leak-site victim tracker (migration `c3d5e7f9a1b3`, behind `ransomware_tracker_enabled`). A victim is the *organization*; a disclosure is one *posting event* (org × group × timestamp × leak site) — re-extortion or a second group re-listing the same victim yields one org with multiple disclosures.
+**`ransomware_victims`:**
+- `name` (indexed, **not** unique — dedup uses `normalized_name` and `domain`), `aliases`, `normalized_name`
+- `domain` (indexed) — the strongest dedup signal when present
+- `country_id` (FK, SET NULL), `sector` (a sector slug)
+- `description`, `disclosure_count` (kept up to date by the resolver), `metadata_`
 
-**Columns (`ransomware_victims`):**
-- `id` (UUID PK)
-- `name` (String 255, indexed, NOT unique — dedup goes through `normalized_name`/`domain`)
-- `aliases` (ARRAY(Text)), `normalized_name` (computed `entity_norm(name)`, indexed)
-- `domain` (String 255, indexed) — strongest dedup signal when present
-- `country_id` (FK, SET NULL), `sector` (String 50, canonical sector slug)
-- `description`, `first_seen_at`, `last_seen_at`
-- `disclosure_count` (Integer) — denormalized, resolver-maintained
-- `metadata_` (JSONB), `created_at`, `updated_at`
-
-**Columns (`victim_disclosures`):**
-- `id` (UUID PK)
-- `victim_id` (FK, CASCADE, indexed)
-- `group_id` (FK to threat_actors, nullable, SET NULL) — ransomware group; `group_name_raw` keeps the as-posted name
-- `leak_site_url`, `posted_at` (indexed), `published_at` (countdown deadline)
-- `country_id` (FK, SET NULL), `sector`, `claimed_data` (Text)
-- `source` (String 30, e.g. "ransomware.live"), `guid` (String 64) — dedup id
-- `metadata_` (JSONB), `created_at`
-
-**Unique Constraint:** `victim_disclosures(source, guid)`.
+**`victim_disclosures`:**
+- `victim_id` (FK, CASCADE)
+- `group_id` (FK → `threat_actors`, SET NULL); `group_name_raw` keeps the name as posted
+- `leak_site_url`, `posted_at` (indexed), `published_at` (the countdown deadline)
+- `country_id`, `sector`, `claimed_data`
+- `source` (for example `ransomware.live`), `guid` — together the dedup key, unique on `(source, guid)`
 
 #### Entity Resolution Infrastructure
 
-**`entity_alias_index`** — trigger-maintained (entity, surface form, normalized form) index over the six name+aliases entity tables (actors, malware, tools, vendors, products, ransomware victims). One row per name/alias with its `entity_norm()` form; powers O(1) normalized lookups and cross-type collision checks. Unique on `(entity_type, entity_id, normalized)`.
+These tables stop duplicate and junk entities from being created.
 
-**`known_alias_map`** — read-only industry alias knowledge from MISP Galaxy and MITRE ATT&CK intrusion sets (full replace per `source` on the enrichment beat). Lets the resolver map "Secret Blizzard" → Turla without an AI call. Unique on `(source, normalized_canonical, normalized_alias)`.
-
-**`entity_name_denylist`** — names banned from entity creation per type (seeded from the 2026-08 prod cleanup). Unique on `(entity_type, normalized_name)`.
-
-**`proposal_dismissals`** — analyst decisions that keep a cleanup proposal from coming back: `kind='reclassify'` stops reclassify proposals for `(entity_type, entity_id)` from being filed, `kind='not_duplicate'` drops the pair `(entity_id, other_key)` (smaller id first) from the likely-duplicate check. Unique on `(kind, entity_type, entity_id, other_key)`.
-
-**`pending_autolink_matches`** — dictionary-word autolinker matches ("Royal", "Hive", "Turkey") held for one-pass AI confirmation instead of creating junction rows; promoted or rejected via `resolution` (`promoted` / `rejected`, or `dropped_ai_off` from `scripts/maintenance/resolve_pending_ai_off.py`), expired by `prune_engine_tables`. Unique on `(entry_id, entity_type, entity_id)`.
+- **`entity_alias_index`** — one row per name or alias of every actor, malware family, tool, vendor, product and ransomware victim, kept up to date by database triggers. Columns: `entity_type`, `entity_id`, `surface` (as written), `normalized`, `is_name`. It gives fast normalized lookups and catches the same name used by two entity types. Unique on `(entity_type, entity_id, normalized)`.
+- **`known_alias_map`** — alias lists from MISP Galaxy and MITRE ATT&CK intrusion sets, refreshed weekly by `misp-galaxy-sync` and `mitre-attack-sync` (each sync replaces its own source's rows). It lets the resolver map "Secret Blizzard" to Turla without asking the AI. Unique on `(source, normalized_canonical, normalized_alias)`.
+- **`entity_name_denylist`** — names that may not be created as a given entity type. Columns: `display_name`, `reason`, `source`, `active`. Unique on `(entity_type, normalized_name)`.
+- **`proposal_dismissals`** — analyst decisions that stop a cleanup proposal from coming back. `kind='reclassify'` stops reclassify proposals for `(entity_type, entity_id)`. `kind='not_duplicate'` drops the pair `(entity_id, other_key)` from the likely-duplicate check. Unique on `(kind, entity_type, entity_id, other_key)`.
+- **`pending_autolink_matches`** — autolinker matches on dictionary words ("Royal", "Hive", "Turkey") that wait for the one-pass AI to confirm them, instead of becoming links straight away. `resolution` records the outcome: `promoted`, `rejected`, or `dropped_ai_off` (written by `scripts/maintenance/resolve_pending_ai_off.py`). `prune_engine_tables` deletes old rows. Unique on `(entry_id, entity_type, entity_id)`.
 
 #### EntityMaintenanceLog & ActorDescriptionHistory
 
-Audit trail for autonomous entity maintenance (merge/alias/description actions by AI tasks).
+Audit trail for automatic entity maintenance: merges, alias and description changes, and adjudication verdicts.
 
-**Columns (`entity_maintenance_log`):**
-- `id` (UUID PK)
-- `entity_type` (String 30, indexed) — canonical slugs from `app/entity_types.py`, e.g. "threat_actor", "malware"
-- `entity_id` (UUID, nullable, indexed) — surviving/updated entity; NULL for cluster no-ops
-- `action` (String 40, indexed) — "merge", "update_description", "update_aliases", "no_op", the on-demand
-  scanners' proposal codes, and the adjudicate stage's `adjudication_*` verdicts. An `adjudication_restored`
-  row is the audit line an analyst's undo writes: it is always `applied`, carries the code it undid in
-  `before.undid`, and is deliberately not a proposal, so nothing offers to apply it again
-- `mode` (String 10) — "shadow" or "apply"
-- `before`, `after` (JSONB) — snapshots
-- `reasoning` (Text), `ai_result_id` (FK, SET NULL), `applied` (Boolean)
+**`entity_maintenance_log`:**
+- `entity_type`, `entity_id` (NULL for a no-op)
+- `action` — for example `merge`, `update_description`, `update_aliases`, `no_op`, the cleanup scanners' proposal codes, and the adjudicate stage's `adjudication_*` verdicts. An `adjudication_restored` row records an analyst undoing a verdict. It is always `applied`, holds the undone code in `before.undid`, and is never offered as a proposal.
+- `mode` — `shadow` (recorded only) or `apply`
+- `before`, `after` (JSONB snapshots), `reasoning`, `ai_result_id` (SET NULL), `applied`
 
-**Columns (`actor_description_history`):**
-- `id` (UUID PK)
-- `actor_id` (FK, CASCADE)
-- `previous_text`, `new_text`, `change_reason` (Text)
-- `source` (String 30) — "ai_refresh", "manual", "initial_extraction"
-- `ai_result_id` (FK, SET NULL), `applied` (Boolean)
+**`actor_description_history`:**
+- `actor_id` (FK, CASCADE), `previous_text`, `new_text`, `change_reason`
+- `source` — for example `ai_refresh`, `manual`, `initial_extraction`
+- `ai_result_id` (SET NULL), `applied`
 
 #### EntityLinkValidationLog
+Table `entity_link_validation_log`: one row per decision about a link between an entry and an actor, malware family, vendor, product or country.
+- The adjudicate stage writes `shadow_remove` and `needs_reclassification` in shadow mode, and `removed` in apply mode.
+- An analyst restore writes `restored` (via `POST /api/admin/hygiene/link-log/{id}/restore` or the adjudication undo).
 
-One row per decision on an entity↔entry link of a validator junction type: written by the adjudicate stage (`entry_adjudication` task — `shadow_remove` / `needs_reclassification` verdicts in shadow mode, `removed` in apply mode) and by analyst restores (`restored`, via `POST /api/admin/hygiene/link-log/{id}/restore` or the adjudication restore). Snapshots the junction row so removals can be restored; a `restored` row within 90 days shields the link from the adjudicator (this log is what that guard reads, so only these five junction types are shielded).
+Each row keeps a copy of the junction row so a removal can be undone. A `restored` row from the last 90 days stops the adjudicator from changing that link again. This guard reads this table, so it only protects those five link types.
 
-**Columns:**
-- `id` (UUID PK)
-- `entry_id` (FK, CASCADE), `entity_type` (String 20), `entity_id` (UUID, no FK — keeps audit history after entity deletion)
-- `entity_name_snapshot` (String 255)
-- `action` (String 40) — "shadow_remove", "removed", "restored", "needs_reclassification"
-- `reason` (Text), `suggested_entity_type` (String 20)
-- `original_source`, `original_confidence`, `original_matched_names`, `original_paragraph_indices`, `original_extracted_at` — junction row snapshot for restore
-- `ai_result_id` (FK, SET NULL)
+- `entry_id` (FK, CASCADE), `entity_type`, `entity_id` (no FK, so history survives entity deletion), `entity_name_snapshot`
+- `action`, `reason`, `suggested_entity_type`
+- `original_source`, `original_confidence`, `original_matched_names`, `original_paragraph_indices`, `original_extracted_at` — the junction row copy
+- `ai_result_id` (SET NULL)
 
 #### EntityMergeSuggestionDismissal
+Table `entity_merge_suggestion_dismissals`: pairs an analyst dismissed in Find Duplicates, so the suggestion never comes back. Pairs are stored in a fixed order by `(entity_type, entity_id::text)`.
+- `entity_type_a`, `entity_id_a`, `entity_type_b`, `entity_id_b`, `dismissed_by` (SET NULL)
 
-Dismissed merge-suggestion pairs from the Find Duplicates workbench — the suggestion engine never re-surfaces them. Pairs stored canonically ordered by `(entity_type, entity_id::text)`.
-
-**Columns:**
-- `id` (UUID PK)
-- `entity_type_a`, `entity_id_a`, `entity_type_b`, `entity_id_b`
-- `dismissed_by` (FK, SET NULL)
-
-**Unique Constraint:** `(entity_type_a, entity_id_a, entity_type_b, entity_id_b)`.
+Unique on all four pair columns.
 
 #### EntityReclassifyTombstone
+Table `entity_reclassify_tombstones`: stops an entity that was folded into another type from being created again. For example, a malware family merged into a threat actor of the same name. Automatic creation paths (AI extraction, external feed syncs) check `(source_type, normalized_name)` first and link to the surviving entity instead.
+- `normalized_name`, `source_type` (the type the name was folded out of)
+- `target_type`, `target_id` — the surviving entity
+- `active` (default true) — set false to allow the split again
 
-Suppresses resurrection of an entity deliberately folded cross-type (e.g., a malware family folded into a same-named threat actor). Automated creation paths (AI extraction, external feed sync) check `(source_type, normalized_name)` before creating an entity and link into the survivor at `(target_type, target_id)` instead.
-
-**Columns:**
-- `id` (UUID PK)
-- `normalized_name` (String 255) — lowercased folded name/alias
-- `source_type` (String 30) — entity type the name was folded OUT of
-- `target_type` (String 30), `target_id` (UUID, indexed) — surviving canonical entity
-- `active` (Boolean, default true) — set false to intentionally re-allow a split
-
-**Unique Constraint:** `(source_type, normalized_name)`.
+Unique on `(source_type, normalized_name)`.
 
 #### Observable — the IOC ledger
 
-The indicator ledger, first-class as of 2026-09 (successor to the v1 IOC tables
-dropped in `060_remove_ioc_tables`). Identity is `(kind, value)`. See
-[intelligence-engine.md](intelligence-engine.md) for the capture doors.
+Table `observables`: the indicator ledger. An IOC (indicator of compromise) is a value such as an IP address, domain, file hash or command line that points to attacker activity. Identity is `(kind, value)`. See [intelligence-engine.md](intelligence-engine.md) and [observables.md](observables.md) for how rows get here.
 
-**The rule the schema is built around: regex never creates a row.** Pattern
-scanning stages entry-local candidates on `entries.observable_candidates`; rows
-come only from judgment doors, and known values are then *sighted* by exact
-match.
+**The rule the schema is built around: regex never creates a row.** Pattern scanning only stages candidates on `entries.observable_candidates`. Rows come from judgment steps ("capture doors"), and once a value is known, later articles containing it are recorded as sightings by exact match.
 
-**Columns:**
-- `id` (UUID PK)
-- `kind` (String 20, indexed) — one of `ALL_KINDS` (`backend/app/models/observable.py:55`), in four families:
-  - **network** — `ipv4`, `ipv6`, `domain`, `url`, `uri_path`, `ja3`, `ja4`, `cert_fingerprint`, `email` (stored refanged/canonical; the defanged surface form lives on the sighting)
+- `kind` (indexed) — one of `ALL_KINDS` (`backend/app/models/observable.py:55`), in four families:
+  - **network** — `ipv4`, `ipv6`, `domain`, `url`, `uri_path`, `ja3`, `ja4`, `cert_fingerprint`, `email`
   - **hash** — `md5`, `sha1`, `sha256`
-  - **host** — `cmdline`, `registry`, `path`, `mutex`, `named_pipe`, `service_name`, `scheduled_task`, `user_agent`, `http_header` (judged by the one-pass AI's `iocs` array, or mapped from `EntryTTP.observable_type`'s vocabulary)
-  - **script** — `script`, for a body-carrying fragment rather than an atom
-- `value` (Text, indexed) — the canonical refanged form; `evil[.]com` and `hxxps://` normalise on the way in
-- `label`, `content`, `language` — for body-carrying kinds (a rule/script fragment rather than an atom)
-- `role` (String 20, indexed) — how it was used: `c2`, `delivery`, `payload`, `phishing`, `exfil`, `exploit`, `scanning` (`ROLES`)
-- `description`, `evidence` (Text) — the sentence the capture door quoted
-- `base_confidence`, `current_confidence` (Float, default 0.8) — base is what capture asserted, current is after decay
-- `confidence_pinned` (Boolean) — exempt this row from decay
-- `status` (String 12, indexed, default `active`) — derived from current confidence: `active` ≥ 0.5, `aging` < 0.5, `expired` < 0.15; `is_denied` (Boolean) — analyst denial is separate from lifecycle status
-- `infra_tag` (String 20, indexed) — dual-use infrastructure kept but marked (shared hosting, CDN, URL shortener) so publishing can exclude it without deleting the intel
-- `created_via` (String 20, indexed) — **which judgment door created the row**: `ai_extraction` (the one-pass `entry_analysis` `iocs` array, base confidence 0.8), `ttp_observable` (`EntryTTP.observable_value` upsert, 0.85), `ioc_list` / `publisher_ioc` (curated indicator-list feed body, 0.85), or `manual` (analyst promote/create, 1.0). There is intentionally **no value meaning "regex"**. Author-defanged input earns a +0.1 bonus — someone who defangs a string is telling you it is an indicator
-- `created_from_entry_id` (FK, SET NULL), `created_confidence`, `needs_review`
-- `article_count`, `sighting_count` (Integer) — raw junction counts, maintained as O(1) counters, reconciled nightly by `reconcile-observable-counters`
-- `report_count`, `feed_source_count` (Integer) — the corroboration pair the UI shows as *Sources*: distinct reporting entries (articles, advisories, rule files) and distinct indicator feeds carrying the value. A feed that republishes one list as eighteen CSV variants is `feed_source_count = 1`, `report_count = 0`. `record_sighting` increments `report_count` for every door but the feed door; the nightly reconcile recomputes both from `entry_observables` (migration `s8j0l2n4p6r8`)
-- `first_seen_at`, `last_seen_at`
+  - **host** — `cmdline`, `registry`, `path`, `mutex`, `named_pipe`, `service_name`, `scheduled_task`, `user_agent`, `http_header`
+  - **script** — `script`, a block of code rather than a single value
+- `value` (indexed) — the canonical form with defanging removed (`evil[.]com` and `hxxps://` are normalized on the way in). The defanged form as written is kept on the sighting.
+- `label`, `content`, `language` — for script-like kinds
+- `role` (indexed) — what the indicator was doing:
+  - network roles: `c2`, `delivery`, `payload`, `phishing`, `exfil`, `exploit`, `scanning`
+  - host roles: `persistence`, `execution`, `defense_evasion`, `credential_access`, `discovery`, `lateral_movement`, `collection`
+- `description`, `evidence` — the sentence the capture step quoted
+- `base_confidence`, `current_confidence` (Float, default 0.8) — base is what capture asserted; current is after decay
+- `confidence_pinned` — exempt from decay
+- `status` (indexed, default `active`) — set from current confidence: `active` at 0.5 or above, `aging` below 0.5, `expired` below 0.15
+- `is_denied` — analyst denial, separate from status
+- `infra_tag` (indexed) — marks shared infrastructure (shared hosting, CDN, URL shortener) so publishing can leave it out without deleting it
+- `reputation` (JSONB)
+- `created_via` (indexed) — which judgment step created the row, with its base confidence:
 
-**Unique Constraint:** `uq_observable_kind_value` on `(kind, value)` — the same
-string is a different observable as a domain than as a URL path component.
+  | `created_via` | Source | Base confidence |
+  |---|---|---|
+  | `ai_extraction` | the one-pass `entry_analysis` `iocs` array | 0.8 |
+  | `ttp_observable` | an `EntryTTP.observable_value` | 0.85 |
+  | `ioc_list` | a curated indicator-list feed | 0.85 |
+  | `publisher_ioc` | the indicator file a write-up links to | 0.9 |
+  | `manual` | analyst promote or create | 1.0 |
 
-**Confidence decay** (`decay-observable-confidence`, daily 02:20 UTC, gated by
-`observables_decay_enabled`) is per kind (`DECAY_HALF_LIFE_DAYS`,
-`observable.py:59`): `ipv4`/`ipv6` 30-day half-life, `url` 60, `domain`/`email`
-90, `uri_path` 120. Hashes, host artifacts, scripts, JA3/JA4 and certificate
-fingerprints never decay — behaviour and math persist, infrastructure rotates.
-A new sighting resets the clock, and `confidence_pinned` opts a row out.
+  There is deliberately no value meaning "regex". A value the author defanged gets +0.1, because defanging tells you the author meant it as an indicator.
+- `created_from_entry_id`, `created_confidence`, `needs_review`
+- `article_count`, `sighting_count` — raw counts, updated as sightings arrive and corrected nightly by `reconcile-observable-counters`
+- `report_count` (indexed), `feed_source_count` — the pair the UI shows as *Sources*: how many distinct reporting entries (articles, advisories, rule files) and how many distinct indicator feeds carry the value. A feed that publishes one list as eighteen CSV files counts as `feed_source_count = 1`, `report_count = 0`.
+
+Unique on `(kind, value)` (`uq_observable_kind_value`), because the same string is a different observable as a domain than as a URL path.
+
+**Confidence decay.** `decay-observable-confidence` runs daily at 02:20 UTC when `observables_decay_enabled` is on. Half-lives are per kind (`DECAY_HALF_LIFE_DAYS`, `observable.py:59`):
+
+| Kind | Half-life |
+|---|---|
+| `ipv4`, `ipv6` | 30 days |
+| `url` | 60 days |
+| `domain`, `email` | 90 days |
+| `uri_path` | 120 days |
+| hashes, host kinds, `script`, `ja3`, `ja4`, `cert_fingerprint` | never decay |
+
+Attacker infrastructure changes often; file hashes and host artifacts do not. A new sighting resets the clock, and `confidence_pinned` opts a row out.
 
 #### EntryObservable
-
-Junction, PK `(entry_id, observable_id)`.
-
-**Columns:** `confidence`, `source` (String 20), `extracted_at`,
-`paragraph_indices` (Integer[]), `surface_form` (Text — the literal string as it
-appeared, which may be defanged), `was_defanged` (Boolean), `ttp_id`
-(FK → ttps, SET NULL — set when the sighting came from a TTP's observable
-upsert, so the artifact keeps its technique).
-
-**Index:** `observable_id`.
+Table `entry_observables`: one sighting. Primary key `(entry_id, observable_id)`; `observable_id` is indexed.
+- `confidence`, `source`, `extracted_at`, `paragraph_indices`
+- `surface_form` — the string as it appeared, possibly defanged; `was_defanged`
+- `ttp_id` (FK → `ttps`, SET NULL) — set when the sighting came from a TTP's observable, so the artifact keeps its technique
 
 #### CWE
-
-The MITRE CWE catalog as an entity type (deployed 2026-09-12). Seeded from the
-official catalog by `refresh-cwe-catalog` (Mondays 03:45 UTC).
-
-**Columns:**
-- `id` (UUID PK), `cwe_id` (String 20, **unique index**) — e.g. `CWE-79`
-- `name` (String 500), `kind` (String 20, indexed, default `weakness`) — the catalog also carries categories and views
-- `abstraction` (String 20, indexed) — `Pillar` | `Class` | `Base` | `Variant`, the rung on the ladder
-- `status`, `mapping_usage` (String 24, indexed) — MITRE's own guidance on whether the ID is appropriate for mapping
-- `description`, `extended_description`
-- `parent_cwe_id` (String 20, indexed) — the lineage is walked in SQL, not materialised
-- `likelihood_of_exploit`
-- `alternate_terms`, `capec_ids` (String[]), `consequences`, `mitigations`, `detection_methods` (JSONB arrays)
+Table `cwes`: the MITRE CWE catalog (Common Weakness Enumeration, the list of software weakness types). Loaded by `refresh-cwe-catalog` (Mondays 03:45 UTC).
+- `cwe_id` (String 20, unique) — for example `CWE-79`
+- `name`, `kind` (indexed, default `weakness`; the catalog also has categories and views)
+- `abstraction` (indexed) — `Pillar`, `Class`, `Base` or `Variant`
+- `status`, `mapping_usage` (indexed) — MITRE's advice on whether the id should be used for mapping
+- `description`, `extended_description`, `likelihood_of_exploit`
+- `parent_cwe_id` (indexed) — the parent chain is walked in SQL
+- `alternate_terms`, `capec_ids` (Text[]); `consequences`, `mitigations`, `detection_methods` (JSONB)
 - `cwe_url`, `is_deprecated`, `superseded_by`
-- `article_count`, `first_seen_at`, `last_seen_at`
-- `wikipedia_url` / `wikipedia_content` / `wikipedia_image_url` — enrichment, same shape as the other entity tables
-- AI-extraction provenance: `created_via` (indexed), `created_from_entry_id`, `created_confidence`, `needs_review`
 
 #### EntryCWE
-
-Junction, PK `(entry_id, cwe_id)`, with `confidence`, `source`, `extracted_at`,
-`paragraph_indices` — the standard entry-junction shape.
+Table `entry_cwes`: primary key `(entry_id, cwe_id)`, with `confidence`, `source`, `extracted_at`, `paragraph_indices`.
 
 #### CVEWeakness
+Table `cve_weaknesses`: which CWE a CVE is classed under. It is separate from `entry_cwes` because it describes the vulnerability, not an article.
+- `cve_id` (FK, CASCADE)
+- `cwe_ref` (String 40) — the reference exactly as NVD gave it, including placeholders like `NVD-CWE-noinfo`
+- `cwe_id` (FK → `cwes`, SET NULL) — NULL until the reference matches a catalog row
+- `is_primary`, `assigner`, `source` (default `nvd`), `resolved_at`
 
-The CVE → CWE affects-link, kept separate from `entry_cwes` because it is a
-property of the vulnerability, not of an article.
-
-**Columns:** `id`, `cve_id` (FK, CASCADE), `cwe_ref` (String 40 — the raw
-reference as NVD gave it, including non-CWE placeholders like `NVD-CWE-noinfo`),
-`cwe_id` (FK → cwes, SET NULL — null until the ref resolves to a catalog row),
-`is_primary` (Boolean), `assigner` (String 120), `source` (String 20, default
-`nvd`), `created_at`, `resolved_at`.
-
-**Unique Constraint:** `uq_cve_weakness_pair` on `(cve_id, cwe_ref)`.
-Storing the unresolved ref is deliberate: a CVE can cite a CWE the catalog
-doesn't carry, and dropping it would lose the assignment.
+Unique on `(cve_id, cwe_ref)`. Keeping unmatched references is deliberate: a CVE can cite a CWE the catalog lacks, and dropping it would lose the assignment.
 
 ---
 
 ### 4. Detection & Correlation
 
-**Tables:** `detection_rules`, `detection_rule_versions`, `detection_summaries`, `correlation_event_records`, `rule_coverage`, `threat_board_state`, `log_type_alias`
-
-**Purpose:** Detection engineering content, version control, and correlation event tracking.
+**Tables:** `detection_rules`, `detection_rule_versions`, `detection_summaries`, `correlation_event_records`, `rule_coverage`, `threat_board_state`, `log_type_alias`, `telemetry_sources`
 
 #### DetectionRule
+Table `detection_rules`.
+- `rule_type` (indexed) — see [Enums & Constants](#enums--constants)
+- `title`, `description`, `rule_content`, `severity`, `tags` (Text[]), `notes`
+- `is_draft` (default true)
+- `entry_id` (FK, SET NULL) — the article it came from
+- `created_by` (SET NULL)
+- `derived_from` (FK → `detection_rules`, SET NULL) — the rule this one was copied or converted from
+- What it detects: `source_ttps`, `source_cves` (JSONB); `source_entries`, `source_actors`, `source_campaigns` (UUID[]); `source_products` (JSONB)
+- `mitre_tactics`, `data_sources` (Text[]); `log_sources` (JSONB) — the Sigma `logsource` block
+- Origin: `license`, `upstream_updated_at`, `references` (Text[]). The repo and author come from `metadata` (`repo`, `commit_author`, `owner`).
+- `metadata` (JSONB)
 
-**Columns:**
-- `id` (UUID PK)
-- `entry_id` (FK, nullable, SET NULL) — source entry (if rule extracted from article)
-- `created_by` (FK, nullable, SET NULL) — rule author
-- `rule_type` (String 30, indexed) — "sigma", "splunk_spl", "crowdstrike_ql", "elastic_ql", "kql", "snort_suricata", "yara"
-- `title`, `description` — rule metadata
-- `rule_content` (Text) — actual rule code
-- `severity` — rule severity
-- `tags` (ARRAY(Text)) — rule tags
-- `source_ttps`, `source_cves` (JSONB) — TTP/CVE IDs this rule detects
-- `source_entries`, `source_actors`, `source_campaigns` (ARRAY(UUID)) — cross-references
-- `is_draft` — draft vs published
-- `log_sources` (JSONB) — for Sigma rules, log source filter
-- `mitre_tactics`, `data_sources` (ARRAY(Text)) — MITRE mapping
-- `notes`, `metadata_` (JSONB)
-- `license` (String 60), `upstream_updated_at` (DateTime), `references` (ARRAY(Text)), `source_products` (JSONB) — provenance/reuse columns (migration `b3d5f7h9j1k3`); repo/author provenance is derived from `metadata_` (`repo`, `commit_author`, `owner`)
-- `created_at`, `updated_at`
-
-**Relationships:**
-- Belongs to `Entry` (optional, SET NULL)
-- Belongs to `User` (creator, SET NULL)
-- Has many `DetectionRuleVersion` (CASCADE delete)
+Has many `detection_rule_versions` (CASCADE).
 
 #### DetectionRuleVersion
-
-**Columns:**
-- `id` (UUID PK)
-- `rule_id` (FK, CASCADE)
-- `version_number` (Integer) — incrementing version
-- `rule_content` (Text) — snapshot of content
-- `created_by` (FK, SET NULL)
-- `created_at` — version timestamp
-- `notes` — change summary
+Table `detection_rule_versions`: a saved copy of a rule's content.
+- `rule_id` (FK, CASCADE), `version_number`, `rule_content`, `rule_type`
+- `change_description`, `changed_by` (FK → `users`, CASCADE)
 
 #### DetectionSummary
-
-AI-generated multi-entry detection analysis (executive summary + attack chain + rules).
-
-**Columns:**
-- `id` (UUID PK)
-- `created_by` (FK, nullable, SET NULL)
-- `title` (String 500)
-- `entry_ids` (ARRAY(UUID)) — entries analyzed
-- `analysis_focus` (String 30, default "campaign")
-- `summary_content` (JSONB) — full AI response: executive_summary, attack_chain, indicators, generated_rules, gaps, related_intelligence
-- `created_at`, `updated_at`
+Table `detection_summaries`: an AI detection analysis across several entries (summary, attack chain, rules).
+- `title`, `entry_ids` (UUID[]), `analysis_focus` (default `campaign`)
+- `summary_content` (JSONB) — the full AI response
 
 #### CorrelationEventRecord
-
-Persisted correlation events for user notification (table `correlation_event_records`).
-
-**Columns:**
-- `id` (UUID PK)
-- `event_type` (String 50, indexed)
-- `entry_id` (FK, nullable, CASCADE)
-- `source_entity_type`, `source_entity_id`, `source_entity_label` — pivot origin
-- `related_entity_type`, `related_entity_id`, `related_entity_label` — correlated entity
-- `context` (Text) — human-readable explanation
-- `severity` (String 10, default "medium", indexed)
-- `occurrence_count` (Integer, default 1)
-- `is_read` (Boolean, indexed; composite index `(is_read, created_at)`)
-- `created_at`
+Table `correlation_event_records`: stored correlation events, shown as notifications.
+- `event_type` (indexed) — one of 15 types; see [entries.md](entries.md)
+- `entry_id` (FK, CASCADE)
+- `source_entity_type`, `source_entity_id`, `source_entity_label`; `related_entity_type`, `related_entity_id`, `related_entity_label`
+- `context` — a readable explanation
+- `severity` (default `medium`), `occurrence_count` (default 1)
+- `is_read` (indexed, plus a composite index on `(is_read, created_at)`)
 
 #### RuleCoverage
+Table `rule_coverage`: which rules cover which entity. The Threats board and the coverage pages read it. `rebuild-rule-coverage` rebuilds it daily at 03:50 UTC, because the matching joins rule ATT&CK mappings, CVE references and entity names all at once. Most rules arrive without CVE or actor tags, so this table works the coverage out from the rule itself.
 
-The materialised "which rules cover this entity" index behind the Threats board
-and the coverage workspace. Rebuilt by `rebuild-rule-coverage` (daily 03:50 UTC)
-rather than computed per request, because the join is over rule ATT&CK mappings,
-CVE references and entity names at once.
-
-It exists because the tag columns on `detection_rules` (`source_cves` /
-`source_ttps` / `source_actors`) are only written by in-app authoring and by the
-two importers whose upstream format carries the field — they resolve 3,996 of
-11,517 rules and zero actors. This table is the resolver's answer instead of a
-hope at import time.
-
-**Composite PK:** `(rule_id, entity_type, entity_key)` — `entity_key` is a
-stable string (`CVE-2026-1731`, `T1059.001`, or an entity UUID as text), not
-always a UUID, so a rule can cover a behaviour with no row of its own yet.
-
-**Columns:** `via` (String 10 — `tag` | `meta` | `text`, **which writer produced
-the row**, so the UI can show why a rule matched instead of laundering a
-body-text hit into a green check), `confidence` (`high` | `medium` | `low`),
-`matched_on` (Text — the literal that matched, keeping every text-derived row
-auditable), `updated_at`.
+- Primary key `(rule_id, entity_type, entity_key)`. `entity_key` is a stable string (`CVE-2026-1731`, `T1059.001`, or an entity UUID as text), so a rule can cover something that has no row yet.
+- `via` — `tag`, `meta` or `text`: which matcher produced the row, so the UI can say why a rule matched
+- `confidence` — `high`, `medium` or `low`
+- `matched_on` — the exact text that matched
 
 #### ThreatBoardState
+Table `threat_board_state`: one analyst decision per row on the Threats board. It is not a workflow: IntelFeed does not deploy rules, so there is no stage or owner, only whether you have dealt with the threat.
+- Primary key `(entity_type, entity_key)`
+- `state` (default `open`) — `open`, `handled` or `muted`
+- `new_count_at_decision`, `decided_by` (SET NULL), `decided_at`, `note`
 
-One analyst decision per board row on the Threats board. Deliberately **not**
-a lifecycle: IntelFeed does not deploy rules and cannot see whether one is
-running, so there is no stage, owner or review date — only whether you have
-dealt with this threat.
-
-**Composite PK:** `(entity_type, entity_key)`.
-
-**Columns:** `state` (String 10, default `open` — `open` | `handled` | `muted`),
-`new_count_at_decision` (Integer), `decided_by` (FK → users, SET NULL),
-`decided_at`, `note` (Text).
-
-`new_count_at_decision` is what makes a snooze date unnecessary: a handled
-threat returns on its own once its live count of first-seen techniques exceeds
-the count at dismissal. New tradecraft reopens the row; a quiet fortnight does
-not.
+A handled threat comes back by itself once its count of newly seen techniques goes above `new_count_at_decision`. New attacker behavior reopens it; a quiet fortnight does not.
 
 #### LogTypeAlias
+Table `log_type_alias`: maps the many spellings of a log source ("Microsoft-Windows-Sysmon/Operational", "sysmon") to one name, so telemetry checks compare like with like.
+- Primary key `raw` (String 120); `canonical` (indexed); `note`
 
-A tiny lookup that folds the many spellings of a log source ("Microsoft-Windows-
-Sysmon/Operational", "sysmon", "Sysmon EventLog") onto one canonical name, so
-telemetry-feasibility checks across Sigma `logsource` blocks compare like with
-like.
-
-**PK:** `raw` (String 120). **Columns:** `canonical` (String 60, indexed),
-`note` (Text).
+#### TelemetrySource
+Table `telemetry_sources`: log sources the analyst says they collect. Coverage checks compare rules against these.
+- `name`, `category` (a fixed list, for example `endpoint_edr`), `vendor`, `product`
+- `log_types`, `log_types_canonical` (Text[])
+- `ingested_into`, `enabled`, `notes`, `created_by` (SET NULL)
 
 ---
 
 ### 5. Automation & Execution
 
-**Tables:** `automation_rules`, `automation_logs`, `ai_tasks`, `ai_task_assignments`, `user_ai_routes`, `user_ai_preferences`, `ai_results`, `ai_conversations`, `ai_analysis_requests`, `ai_batch_jobs`
+**Tables:** `automation_rules`, `automation_logs`, `ai_tasks`, `ai_prompt_templates`, `ai_task_assignments`, `user_ai_routes`, `user_ai_preferences`, `ai_results`, `ai_conversations`, `ai_analysis_requests`, `ai_batch_jobs`
 
-**Purpose:** Automation rule definitions, execution logs, and AI task orchestration: which provider answers a task for the instance, which answers it for one person, and who each result belongs to. The lookup over these tables is described in [automation-ai-enrichment.md](automation-ai-enrichment.md#personal-keys--the-lookup).
+Automation rules, their run logs, and AI task routing: which provider answers a task for the whole instance, which answers it for one person, and who each result belongs to. The lookup across these tables is explained in [automation-ai-enrichment.md](automation-ai-enrichment.md#personal-keys--the-lookup).
 
 #### AutomationRule
-
-**Columns:**
-- `id` (UUID PK)
-- `created_by` (FK, nullable, SET NULL) — rule creator
-- `name` (String 255) — rule name
-- `description` (Text)
-- `is_enabled` (Boolean, default true)
-- `trigger_type` (String 50) — "on_entry_ingest", "on_cve_mention", "on_schedule", "webhook", etc.
-- `trigger_config` (JSONB) — trigger-specific config (e.g., schedule cron, webhook path)
-- `conditions` (JSONB) — match conditions (e.g., feed_id filter, keyword filter)
-- `actions` (JSONB array) — list of actions to execute (e.g., tag entries, create detection rules, post to Slack)
-- `labels` (JSONB) — custom labels/tags
+Table `automation_rules`.
+- `name`, `description`, `is_enabled` (default true), `created_by`
+- `trigger_type` — for example `on_new_entry`, `on_schedule`; see [entries.md](entries.md) for the full list
+- `trigger_config`, `conditions` (JSONB objects); `actions`, `labels` (JSONB arrays)
 - `last_triggered_at`, `run_count`
-- `created_at`, `updated_at`
 
-**Relationships:** Has many `AutomationLog` (CASCADE delete).
+Has many `automation_logs` (CASCADE).
 
 #### AutomationLog
-
-**Columns:**
-- `id` (UUID PK)
-- `rule_id` (FK, CASCADE)
-- `entry_id` (FK, nullable, SET NULL)
-- `trigger_source` — what triggered the rule
-- `status` — "success", "error", "skipped"
-- `error_message` (Text)
-- `actions_taken` (JSONB) — result of each action
-- `executed_at`
+Table `automation_logs`: one rule run.
+- `rule_id` (FK, CASCADE), `entry_id` (FK, SET NULL)
+- `trigger_type`, `status`, `actions_executed` (JSONB), `error_message`, `executed_at`
 
 #### AITask
+Table `ai_tasks`: one kind of AI job, for example `entry_analysis`, `entry_adjudication`, `daily_summary` or `copilot`.
+- `name` (String 100, unique), `display_name`, `description`
+- `category` — `analysis`, `extraction`, `generation` or `maintenance` for the built-in tasks
+- `default_prompt_template`, `default_system_template`
+- `output_schema`, `output_schema_override` (JSONB) — the expected JSON shape
+- `variables` (JSONB) — hints for the prompt editor only. The backend never checks them when rendering.
+- `is_system` (built-in), `is_deprecated` (kept for old `ai_results`, hidden from pickers)
+- `show_in_entry_actions`, `entry_action_order`, `show_in_entity_actions` — where the task appears as a one-click action
+- `allows_user_provider` (default false) — a person's own key may answer this task. It starts true for the tasks in `USER_PROVIDER_ELIGIBLE_TASKS` (`backend/app/ai/capabilities.py:53`). The admin can turn it off, or on for a custom task, but not on for a pipeline task outside that set.
 
-**Columns:**
-- `id` (UUID PK)
-- `name` (String 100) — task name (e.g., "extract_iocs", "summarize_entry")
-- `display_name` (String 255)
-- `description` (Text)
-- `category` (String 50) — "extraction", "analysis", "summarization"
-- `default_prompt_template` (Text) — default system prompt
-- `output_schema` (JSONB) — expected output structure (JSON schema)
-- `variables` (JSONB array) — placeholder variables in prompt
-- `default_system_template` (Text) — default system prompt
-- `is_system` (Boolean) — true for built-in tasks
-- `is_deprecated` (Boolean) — superseded task seeds (kept for `ai_results` history, hidden from run pickers)
-- `allows_user_provider` (Boolean, default false) — a person's own key may answer this task. Seeded true for the tasks in `USER_PROVIDER_ELIGIBLE_TASKS` (`backend/app/ai/capabilities.py:53`); the admin may turn it off, or on for a custom task, but not on for a pipeline task outside that set
-- `created_at`
+Has many prompt templates, assignments and user routes (all CASCADE).
 
-**Relationships:** Has many `AITaskAssignment` and `UserAIRoute` (CASCADE delete).
+#### AIPromptTemplate
+Table `ai_prompt_templates`: an edited prompt that replaces the task's default.
+- `task_id` (FK, CASCADE), `created_by`, `name`
+- `template_text`, `system_text`, `variables` (JSONB)
+- `is_active`, `version`
 
 #### AITaskAssignment
+Table `ai_task_assignments`: which instance provider and model run a task. Unique on `task_id` (one assignment per task).
+- `task_id`, `provider_id` (both FK, CASCADE). The provider is always an instance provider (`ai_providers.user_id` NULL), never a personal key.
+- `model_name`, `is_enabled`
+- `execution_mode` (default `api`) — `api` or `agent`
+- `config` (JSONB) — provider options such as temperature or max tokens
 
-**Columns:**
-- `id` (UUID PK)
-- `created_by` (FK, nullable, SET NULL)
-- `task_id` (FK, CASCADE) — which AI task
-- `provider_id` (FK, CASCADE) — which AI provider; always one of the instance's (`ai_providers.user_id` NULL), never a personal key
-- `model_name` (String 100) — model to use (e.g., "claude-opus-4", "gpt-4")
-- `is_enabled` (Boolean, default true)
-- `execution_mode` (String 10) — "api" or "agent"
-- `config` (JSONB) — provider-specific config (temperature, max_tokens, etc.)
-
-**Unique Constraint:** One assignment per task (`uq_ai_task_assignments_task_id`).
-
-**Relationships:** Belongs to `AITask`, `AIProvider`, and `User` (creator).
+A provider row on its own runs nothing; work only happens for tasks that have an assignment.
 
 #### UserAIRoute
-
-One person's answer to "which of my keys runs this task": the personal counterpart of `AITaskAssignment` (`backend/app/models/user_ai_route.py:21`). Consulted only for `user` callers while `allow_user_ai_providers` is on, and only for tasks with `allows_user_provider`.
-
-**Columns:**
-- `id` (UUID PK)
-- `user_id` (FK, CASCADE, indexed)
-- `task_id` (FK, CASCADE, nullable) — NULL is the person's default key, which covers every allowed task without a row of its own
-- `provider_id` (FK, CASCADE, nullable, indexed) — one of the person's own keys. NULL on a per-task row is an opt-out: that task runs on the instance's provider despite a default key
-- `model_name` (String 100, nullable) — NULL only with a NULL `provider_id`
+Table `user_ai_routes`: which of a person's own keys runs a task. It is the personal version of `ai_task_assignments` (`backend/app/models/user_ai_route.py:21`). It is used only for `user` callers, only while `allow_user_ai_providers` is on, and only for tasks with `allows_user_provider`.
+- `user_id` (FK, CASCADE)
+- `task_id` (FK, CASCADE, nullable) — NULL is the person's default key, which covers every allowed task that has no row of its own
+- `provider_id` (FK, CASCADE, nullable) — one of the person's keys. NULL on a per-task row is an opt-out: that task uses the instance's provider even though a default key exists.
+- `model_name` — NULL only when `provider_id` is NULL
 - `config` (JSONB) — merged over the provider's config at call time
-- `created_at`, `updated_at`
 
-**Unique Indexes:** one route per task per person (`uq_user_ai_routes_task`, partial on `task_id IS NOT NULL`) and one default per person (`uq_user_ai_routes_default`, partial on `task_id IS NULL`).
-
-**Relationships:** Belongs to `User`, `AITask`, `AIProvider`.
+Two partial unique indexes: one route per task per person (`uq_user_ai_routes_task`, where `task_id IS NOT NULL`) and one default per person (`uq_user_ai_routes_default`, where `task_id IS NULL`).
 
 #### UserAIPreferences
-
-One row per person, created on first write (`backend/app/models/user_ai_route.py:58`).
-
-**Columns:**
-- `user_id` (UUID PK, FK CASCADE)
-- `fallback_to_site` (Boolean, default true) — when the person's key can't answer, let the instance's provider take the call. Off refuses instead, like the Required policy, but only once the person has a key
-- `monthly_cap_usd` (Numeric 10,4, nullable) — the person's own cap on their keys' spend, theirs alone to set; NULL is no cap
-- `updated_at`
+Table `user_ai_preferences`: one row per person, created on first save (`backend/app/models/user_ai_route.py:58`). Primary key `user_id` (FK, CASCADE).
+- `fallback_to_site` (default true) — when the person's key can't answer, the instance's provider takes the call. Turned off, the call is refused instead, but only once the person has a key.
+- `monthly_cap_usd` (Numeric 10,4) — the person's own spending cap on their keys; NULL is no cap
 
 #### AIResult
+Table `ai_results`: one row per AI call. It is either the answer from `run_task`, or a cost-only row for paths that stream or call a provider directly (copilot, rule chat, the shared Ask Agent, rule conversion). It is the only spending record: the cost dashboard, the per-person allowance and the personal-key caps are all sums over it.
+- `entry_id` (FK, CASCADE) — an entry's results are deleted with it
+- `target_type`, `target_id` — what the result is about (`entry`, `conversation`, an entity type, …)
+- `is_current` (default true) — re-runs mark the previous row not current. Cost-only rows are never current.
+- `task_id` (FK, no ON DELETE) — a task that has results can't be deleted; the delete route answers 409 `task_has_results`
+- `provider_id` (FK, SET NULL), `provider_name` (kept after the provider is deleted), `model_name`
+- `prompt_used`, `raw_response`
+- `parsed_result` (JSONB) — the parsed output plus meta keys:
+  - `_extraction_status`, `_error`
+  - `_fallback_reason` — the person's key could not answer, so the instance's provider did
+  - `_prompt_version` — an edited prompt ran
+- `tokens_input`, `tokens_output`, `cost_estimate` (Numeric 10,6), `processing_time_ms`
+- `caller_kind` — `user`, `system`, `automation` or `share` (`backend/app/ai/caller.py:41`). NULL where nothing recorded it; the dashboard shows these as `unattributed`.
+- `user_id` (SET NULL) — who the call counts against: the person, the rule's author or the sharer
+- `key_owner_id` (SET NULL) — set when a personal key paid; NULL means the instance's provider did
 
-One row per AI call: the answer when `run_task` ran it, or a spend-only row for the paths that stream or call a provider directly (copilot, rule chat, the shared Ask Agent, rule conversion). The row is the only ledger: the cost dashboard, the per-person site allowance and the personal-key caps are all counts and sums over it.
-
-**Columns:**
-- `id` (UUID PK)
-- `entry_id` (FK, nullable, CASCADE, indexed) — an entry's results go with it
-- `target_type` (String 20, indexed), `target_id` (UUID, indexed) — what the result is about ("entry", "conversation", an entity type, …)
-- `is_current` (Boolean, default true, indexed) — the dedup flag; re-runs demote the previous row. Spend-only rows are never current
-- `task_id` (FK) — plain, so a task that has results can't be deleted: the task delete route answers 409 `task_has_results`
-- `provider_id` (FK, nullable, SET NULL) — deleting a provider, or a person whose key has results, keeps the rows
-- `model_name` (String 100)
-- `prompt_used` (Text) — the rendered prompt
-- `raw_response` (Text)
-- `parsed_result` (JSONB) — parsed output plus meta keys: `_extraction_status`, `_error`, `_fallback_reason` (the person's key could not answer and the instance's provider did), `_prompt_version` (a template override ran)
-- `tokens_input`, `tokens_output` (Integer)
-- `cost_estimate` (Numeric 10,6)
-- `processing_time_ms` (Integer)
-- `caller_kind` (String 12) — "user", "system", "automation" or "share": who asked (`backend/app/ai/caller.py:41`). NULL where nothing recorded it, which the dashboard reports as `unattributed`
-- `user_id` (FK, nullable, SET NULL) — who the call is attributed to: the person, the rule's author, the sharer
-- `key_owner_id` (FK, nullable, SET NULL) — set when a personal key paid for the call; NULL means the instance's provider did
-- `provider_name` (String 255) — survives the provider row
-- `created_at`
-
-**Index:** `ix_ai_results_target_task_current` on (`target_type`, `target_id`, `task_id`, `is_current`).
+Index `ix_ai_results_target_task_current` on `(target_type, target_id, task_id, is_current)`, plus `(user_id, created_at)` and `(key_owner_id, created_at)` for spending sums.
 
 #### AIConversation
-
-Server-side persistence for AI copilot chat threads (global dock panel + entry/entity scoped chats).
-
-**Columns:**
-- `id` (UUID PK)
-- `user_id` (FK, CASCADE, indexed)
-- `title` (String 200)
-- `scope_type` (String 20, indexed) — "entry", "multi_entry", "entity", "global"
-- `scope_id` (String 200) — entry id, "{entity_type}:{entity_id}", or NULL for global
-- `entry_ids` (JSONB) — entry list for multi_entry scope
+Table `ai_conversations`: saved copilot chat threads.
+- `user_id` (FK, CASCADE), `title`
+- `scope_type` (indexed) — `entry`, `multi_entry`, `entity` or `global`
+- `scope_id` — the entry id, `{entity_type}:{entity_id}`, or NULL for global
+- `entry_ids` (JSONB) — for `multi_entry`
 - `messages` (JSONB array) — `{role, content, created_at, meta?}` objects
-- `share_token` (String 64, unique, indexed) — non-null when a read-only public share link is published
-- `created_at`, `updated_at`
+- `share_token` (String 64, unique) — set when a read-only share link exists
 
 #### AIAnalysisRequest & AIBatchJob
+Bookkeeping for the one-pass `entry_analysis` (one AI call that reads an article and returns all its entities and indicators) and the adjudicate stage after it. `prune_engine_tables` deletes rows older than 30 days (`engine_run_retention_days`).
 
-Bookkeeping for the one-pass `entry_analysis` batch extraction pipeline and the adjudicate stage that follows it. Rows pruned after 30 days by `prune_engine_tables`.
+**`ai_analysis_requests`** — one row per entry (unique `entry_id`, CASCADE):
+- `status` — `pending`, `submitted`, `completed`, `failed`, `skipped_junk`, `reused_echo`, `skipped_feed_ai` (the feed's AI switch is off) or `skipped_feed_none` (the feed's extraction mode is `none`). The last two are looked at again by the missed-entry sweep once the feed allows AI.
+- `batch_id` (indexed), `custom_id`, `attempts`, `reused_from_entry_id`, `error`
+- `adjudication_status` (indexed) — the adjudicate stage's state:
+  - `pending`, `completed` or `failed`
+  - or why it was skipped: `skipped_off`, `skipped_plan`, `skipped_echo`, `skipped_nothing_new`, `skipped_score`, `skipped_budget`, `skipped_paused`
 
-**Columns (`ai_analysis_requests`):**
-- `id` (UUID PK)
-- `entry_id` (FK, CASCADE, unique) — one request per entry
-- `status` (String 20) — "pending", "submitted", "completed", "failed", "skipped_junk", "reused_echo", "skipped_feed_ai" (feed AI toggle off), "skipped_feed_none" (feed extraction mode none — both re-decided by the missed-entry sweep when the feed allows AI again)
-- `batch_id` (String 80, indexed), `custom_id` (String 64)
-- `attempts` (Integer), `reused_from_entry_id` (UUID), `error` (Text)
-- `adjudication_status` (String 24, indexed) — the adjudicate stage's decision for this entry: "pending", "completed", "failed", or a gate skip ("skipped_off", "skipped_plan", "skipped_echo", "skipped_nothing_new", "skipped_score", "skipped_budget", "skipped_paused"); the resweep re-enqueues budget/paused rows and lost pending rows
-- `adjudicated_at` — when the review completed
-- `adjudication_queued_at` — when the row went pending; a pending row older than 6 hours with no run is treated as a lost task and re-enqueued
-- `created_at`, `submitted_at`, `completed_at`
+  An hourly resweep queues budget and paused rows again.
+- `adjudication_queued_at` — when the row went pending. A pending row older than 6 hours with no run is treated as lost and queued again.
+- `adjudicated_at`, `submitted_at`, `completed_at`
 
-**Columns (`ai_batch_jobs`):**
-- `id` (UUID PK)
-- `provider_batch_id` (String 80, unique), `provider_id` (FK, SET NULL)
-- `status` (String 20) — "in_progress", "ingesting", "ended", "canceled", "failed"
-- `request_count`, `succeeded`, `errored`, `expired` (Integer)
-- `cost_estimate` (Numeric 12,6)
-- `created_at`, `ended_at`
+**`ai_batch_jobs`** — one provider batch:
+- `provider_batch_id` (unique), `provider_id` (SET NULL)
+- `status` — for example `in_progress`, `ingesting`, `ended`, `canceled`, `failed`
+- `request_count`, `succeeded`, `errored`, `expired`, `cost_estimate` (Numeric 12,6), `ended_at`
 
 ---
 
 ### 6. Enrichment & External Data
 
-**Tables:** `enrichment_sources`, `user_enrichment_overrides`, `enrichment_results`, `entity_notes`, `entity_relationships`
-
-**Purpose:** Enrichment source management, per-user overrides, and enrichment result caching.
+**Tables:** `enrichment_sources`, `user_enrichment_overrides`, `enrichment_results`, `entity_notes`, `entity_field_claims`, `entity_relationships`
 
 #### EnrichmentSource
-
-**Columns:**
-- `id` (UUID PK)
-- `source_type` (String 30, unique) — "nvd", "epss", "cisa_kev", "mitre_attack", "vulncheck", "osv", "malpedia", "github_poc", "cvedetails", "wikipedia"
-- `display_name` (String 100)
-- `is_enabled` (Boolean, default false)
-- `trigger_mode` (String 20) — "auto", "scheduled", "manual"
-- `api_key_encrypted` (Text) — encrypted API key
-- `rate_limit_config` (JSONB) — {"requests_per_period": 50, "period_seconds": 604800}
-- `last_synced_at` (DateTime, nullable)
-- `health_status` (String 20) — "healthy", "degraded", "down", "unknown"
-- `config` (JSONB) — source-specific config
-- `min_confidence_threshold` (String 10) — "high", "medium", "low"
-- `daily_budget` (Integer, nullable) — max enrichment requests per day
-- `daily_budget_used` (Integer) — counter synced from Redis
-- `schedule_interval_hours` (Integer) — for scheduled trigger mode
-- `next_scheduled_at` (DateTime, nullable)
-- `created_at`, `updated_at`
+Table `enrichment_sources`: one external data source.
+- `source_type` (unique) — `nvd`, `epss`, `cisa_kev`, `mitre_attack`, `vulncheck`, `osv`, `malpedia`, `github_poc`, `cvedetails`, `wikipedia`, `greynoise`, `shodan`, `virustotal`
+- `display_name`, `is_enabled` (default false)
+- `trigger_mode` (default `manual`) — `auto`, `scheduled` or `manual`
+- `api_key_encrypted`, `config` (JSONB)
+- `rate_limit_config` (JSONB) — for example `{"requests_per_period": 50, "period_seconds": 604800}`
+- `health_status` (default `unknown`) — `healthy`, `degraded`, `down` or `unknown`
+- `min_confidence_threshold` (default `low`)
+- `daily_budget`, `daily_budget_used` (synced from Redis)
+- `schedule_interval_hours` (default 24), `next_scheduled_at`, `last_synced_at`
 
 #### UserEnrichmentOverride
-
-**Columns:**
-- `id` (UUID PK)
-- `created_by` (FK, nullable, SET NULL)
-- `source_id` (FK, CASCADE)
-- `api_key_encrypted` (Text) — per-user API key override
-- `trigger_mode_override` (String 20) — per-user trigger mode override
-
-**Unique Constraint:** One override per source per user.
+Table `user_enrichment_overrides`: a person's own API key for a source. Unique on (`created_by`, `source_id`): each user has at most one override per source.
+- `source_id` (FK, CASCADE), `created_by`, `api_key_encrypted`
 
 #### EnrichmentResult
-
-**Columns:**
-- `id` (UUID PK)
-- `entity_type` (String 20) — "ioc", "cve", "threat_actor", "malware", "ttp"
-- `entity_id` (UUID) — ID of entity being enriched
-- `source_type` (String 30) — which source provided this
-- `raw_response` (JSONB) — original API response
-- `parsed_data` (JSONB) — normalized/parsed data
-- `enriched_at` (DateTime)
-- `expires_at` (DateTime) — cache TTL
-- `status` — "success", "error", "rate_limited", "not_found", "budget_exhausted", "skipped_low_confidence"
-- `error_message` (Text)
+Table `enrichment_results`: a cached answer from a source.
+- `entity_type`, `entity_id`, `source_type`
+- `raw_response`, `parsed_data` (JSONB)
+- `status` (default `success`) — for example `success`, `error`, `rate_limited`, `not_found`, `budget_exhausted`, `skipped_low_confidence`
+- `enriched_at`, `expires_at` (when the cache entry runs out)
 
 #### EntityNote
-
-**Columns:**
-- `id` (UUID PK)
-- `user_id` (FK, CASCADE)
-- `entity_type` (String 20, indexed) — "ttp", "cve", "threat_actor", "malware", "campaign"
-- `entity_id` (UUID, indexed)
-- `title` (String 500, nullable) — unified note-card rendering with entry notes
-- `content` (Text) — analyst note
-- `note_type` (String 20, default "annotation") — "annotation", "analysis", "action_taken", "false_positive", "context"
-- `tags` (ARRAY(Text))
-- `created_at`, `updated_at`
+Table `entity_notes`: an analyst's note on an entity.
+- `user_id` (FK, CASCADE), `entity_type`, `entity_id` (both indexed)
+- `title`, `content`, `tags` (Text[])
+- `note_type` (default `annotation`) — `annotation`, `analysis`, `action_taken`, `false_positive` or `context`
 
 #### EntityFieldClaim
-
-Provenance for scalar profile fields — the field-level counterpart to `EntityRelationship`'s trust ladder. One row per (field, value, asserter), written alongside the column by every path that fills one. Agreement with the live column is computed at read time, never stored. See [entity-profiles.md](entity-profiles.md).
-
-**Columns:**
-- `id` (UUID PK)
-- `entity_type` (String 30), `entity_id` (UUID) — `app.entity_types` slug
-- `field` (String 40) — the entity column, e.g. "motivation", "targeted_sectors"
-- `value_text` (Text) — the asserted value, rendered as the profile shows it
-- `source_kind` (String 20) — analyst, ai_extraction, ai_assessment, enrichment, external_feed, seed
-- `source_ref` (String 100, nullable) — adapter/feed within that kind ("wikipedia", "cybergeist")
-- `entry_id` (FK, SET NULL, indexed), `quote` (Text, nullable) — the article and sentence behind the claim
-- `confidence` (String 10, nullable), `created_by` (FK, SET NULL), `ai_result_id` (FK, SET NULL)
-- `claim_key` (String 64, unique) — digest of entity + field + value + source + article
+Table `entity_field_claims`: where each profile field value came from. It does for single fields (motivation, origin country, …) what the trust levels on `entity_relationships` do for links. Each path that sets a field writes one row per (field, value, source). Whether a claim agrees with the current value is worked out when read, never stored. See [entity-profiles.md](entity-profiles.md#field-provenance).
+- `entity_type`, `entity_id`
+- `field` — the column, for example `motivation` or `targeted_sectors`
+- `value_text` — the value as the profile shows it
+- `source_kind` — `analyst`, `ai_extraction`, `ai_assessment`, `enrichment`, `external_feed` or `seed`
+- `source_ref` — the adapter or feed within that kind (for example `wikipedia`, `cybergeist`)
+- `entry_id` (FK, SET NULL), `quote` — the article and sentence behind the claim
+- `confidence`, `created_by` (SET NULL), `ai_result_id` (SET NULL)
+- `claim_key` (String 64, unique) — a digest of entity + field + value + source + article
 - `first_asserted_at`, `last_asserted_at`
 
-**Indexes:** `(entity_type, entity_id, field)`, `(entity_type, last_asserted_at)`, `entry_id`. Repeat assertions collapse on `claim_key` and bump `last_asserted_at`; different sources or articles stay distinct rows so corroboration is countable.
+Indexes on `(entity_type, entity_id, field)`, `(entity_type, last_asserted_at)` and `entry_id`. A repeated claim updates `last_asserted_at`. Different sources or articles stay separate rows, so agreement between sources can be counted.
 
 #### EntityRelationship
+Table `entity_relationships`: a typed link between two entities, for example "APT29 uses Cobalt Strike".
+- `source_type`, `source_id`, `target_type`, `target_id` (all indexed)
+- `relationship_type` (indexed) — the verb: `uses`, `exploits`, `targets`, `attributed_to`, `variant_of`, `communicates_with`, `delivers`, `drops`, `controls`, `related_to`, `successor_of`, `subgroup_of`, `overlaps_with`. Which (source type, verb, target type) combinations are allowed is set by `ALLOWED_RELATIONSHIPS` in `app/intelligence/relationship_matrix.py`, checked on every write.
+- `confidence` (default `possible`) — `confirmed`, `probable` or `possible`
+- `source` (default `analyst_created`) — `co_occurrence`, `auto_extracted`, `analyst_confirmed`, `analyst_created`, `analyst_rejected` (hidden and never recreated by co-occurrence) or `external_feed`
+- `description`
+- `evidence_entry_ids` (UUID[]) — articles that support the link (GIN-indexed)
+- `adjudication_verdict`, `adjudicated_at` — the adjudicate stage's outcome:
+  - `corroborated` — promoted to confirmed
+  - `coincidental` — demoted to possible, and never promoted again by co-occurrence
+- `reviewer_kept_entry_ids` (UUID[]) — articles whose adjudicate review explicitly kept this link in apply mode, at or above the apply confidence floor. At `relationship_evidence_promote_count` distinct articles the link becomes confirmed and corroborated.
+- `created_by` (FK, CASCADE)
 
-**Columns:**
-- `id` (UUID PK)
-- `source_type` (String 20, indexed) — "threat_actor", "malware", "ttp", etc.
-- `source_id` (UUID, indexed)
-- `target_type` (String 20, indexed)
-- `target_id` (UUID, indexed)
-- `relationship_type` (String 30, indexed) — "uses", "exploits", "targets", "attributed_to", "variant_of", "communicates_with", "delivers", "drops", "hosts", "related_to". Valid (source_type, verb, target_type) triples are gated by the semantic allowlist in `app/intelligence/relationship_matrix.py` (`ALLOWED_RELATIONSHIPS`), enforced on every write path
-- `confidence` (String 20) — "confirmed", "probable", "possible"
-- `source` (String 20) — "co_occurrence", "auto_extracted", "analyst_confirmed", "analyst_created", "analyst_rejected" (hidden + never resurrected by co-occurrence), "external_feed"
-- `description` (Text)
-- `adjudication_verdict` (String 20, nullable), `adjudicated_at` — the adjudicate stage's outcome: "corroborated" (promoted to confirmed) or "coincidental" (demoted to possible, sticky — never re-promoted by co-occurrence)
-- `reviewer_kept_entry_ids` (ARRAY(UUID)) — entries whose adjudicate-stage review explicitly kept this edge in apply mode, at or above the apply confidence floor (an edge the review did not name does not count); at `relationship_evidence_promote_count` distinct entries the edge becomes confirmed/corroborated
-- `evidence_entry_ids` (ARRAY(UUID)) — entries supporting this relationship
-- `created_by` (FK, nullable, CASCADE)
-- `created_at`, `updated_at`
-
-**Unique Constraint:** One relationship per (source_type, source_id, target_type, target_id, relationship_type) tuple.
+Unique on `(source_type, source_id, target_type, target_id, relationship_type)`.
 
 ---
 
 ### 7. Dashboards & Reporting
 
-**Tables:** `dashboards`, `dashboard_widgets`, `saved_searches`, `intel_profiles`, `intel_reports`, `intel_report_versions`, `report_templates`, `campaigns`, `campaign_entries`, `campaign_entities`, `campaign_saved_searches`, `campaign_countries`, `campaign_sectors`, `campaign_sources`
-
-**Purpose:** User dashboards, intelligence reports, campaigns, and saved searches.
+**Tables:** `dashboards`, `dashboard_widgets`, `saved_searches`, `campaigns`, `campaign_entries`, `campaign_entities`, `campaign_saved_searches`, `campaign_sources`, `campaign_countries`, `campaign_sectors`, `intel_profiles`, `intel_reports`, `intel_report_versions`, `report_templates`
 
 #### Dashboard
+Table `dashboards`.
+- `name`, `layout` (JSONB, react-grid-layout), `is_default`, `sort_order`, `created_by`
 
-**Columns:**
-- `id` (UUID PK)
-- `created_by` (FK, nullable, SET NULL)
-- `name` (String 255)
-- `layout` (JSONB) — react-grid-layout definition
-- `is_default` (Boolean) — the default dashboard
-- `sort_order` (Integer)
-- `created_at`
-
-**Relationships:** Has many `DashboardWidget` (CASCADE delete).
+Has many `dashboard_widgets` (CASCADE).
 
 #### DashboardWidget
-
-**Columns:**
-- `id` (UUID PK)
+Table `dashboard_widgets`.
 - `dashboard_id` (FK, CASCADE)
-- `widget_type` (String 50) — "feed-activity", "cve-severity", "triage-queue-stats", …
-- `title`, `config` (JSONB) — widget-specific config
-- `position_x`, `position_y`, `width`, `height` — grid layout position
+- `widget_type` — for example `feed-activity`, `cve-severity`, `triage-queue-stats`
+- `title`, `config` (JSONB)
+- `position_x`, `position_y`, `width` (default 4), `height` (default 3)
 
 #### SavedSearch
-
-**Columns:**
-- `id` (UUID PK)
-- `created_by` (FK, nullable, SET NULL)
-- `name` (String 255)
-- `display_name` (String 255) — UI-facing name (may differ from name)
-- `query` (Text) — search query/filter
-- `filters` (JSONB) — parsed filter object
-- `created_at`
-
-**Relationships:** Has many `CampaignSavedSearch` (CASCADE delete on search deletion).
+Table `saved_searches`.
+- `name`, `display_name`, `query`, `filters` (JSONB), `created_by`
 
 #### Campaign
+Table `campaigns`: an analyst's case file for an operation or threat.
+- `name`, `description`, `created_by`
+- `status` (indexed, default `active`) — `active`, `monitoring`, `closed` or `historical`
+- `tlp_marking` (default `TLP:GREEN`) — see [Enums & Constants](#enums--constants)
+- `start_date`, `end_date` (Date), `tags` (Text[]), `metadata` (JSONB)
 
-**Columns:**
-- `id` (UUID PK)
-- `created_by` (FK, nullable, SET NULL)
-- `name` (String 255)
-- `description` (Text)
-- `status` (String 20) — "active", "monitoring", "closed", "historical"
-- `tlp_marking` (String 20) — TLP:CLEAR, TLP:GREEN, TLP:AMBER, TLP:AMBER+STRICT, TLP:RED
-- `start_date`, `end_date` (Date, nullable)
-- `tags` (ARRAY(Text))
-- `metadata_` (JSONB)
-- `created_at`, `updated_at`
-
-**Relationships:**
-- Has many `CampaignEntry` (CASCADE delete)
-- Has many `CampaignEntity` (CASCADE delete)
-- Has many `CampaignSavedSearch` (CASCADE delete)
-- Has many `CampaignCountry` (CASCADE delete)
+Its entries, entities, saved searches, sources, countries and sectors are deleted with it.
 
 #### CampaignEntry
-
-**Columns:**
-- `campaign_id` (FK, CASCADE) — PK
-- `entry_id` (FK, CASCADE) — PK
-- `added_by` (FK, nullable)
-- `notes` (Text)
-- `added_at` (DateTime)
+Table `campaign_entries`: primary key `(campaign_id, entry_id)`, both CASCADE.
+- `added_by`, `notes`, `added_at`
 
 #### CampaignEntity
-
-**Columns:**
-- `id` (UUID PK)
-- `campaign_id` (FK, CASCADE)
-- `entity_type` (String 20) — "ttp", "cve", "threat_actor", "malware"
-- `entity_id` (UUID) — ID of entity
-- `role` (String 20) — "primary", "secondary", "related"
-- `added_by` (FK, nullable)
-- `added_at` (DateTime)
+Table `campaign_entities`.
+- `campaign_id` (FK, CASCADE), `entity_type`, `entity_id`
+- `role` (default `related`) — for example `primary`, `secondary`, `related`
+- `added_by`, `added_at`
 
 #### CampaignSavedSearch
-
-**Columns:**
-- `id` (UUID PK)
-- `campaign_id` (FK, CASCADE)
-- `saved_search_id` (FK, CASCADE)
-- `auto_sync` (Boolean, default true) — auto-add matching entries
-- `last_synced_at` (DateTime, nullable)
-- `entries_added` (Integer)
-- `added_by` (FK, nullable)
-- `created_at` (DateTime)
+Table `campaign_saved_searches`: a saved search linked to a campaign.
+- `campaign_id`, `saved_search_id` (both FK, CASCADE)
+- `auto_sync` (default true), `last_synced_at`, `entries_added`, `added_by`
 
 #### CampaignSource
+Table `campaign_sources`: a standing source of new articles that the campaign itself owns. A linked saved search belongs to whoever saved it: teammates can't see it, and it drifts when the campaign's subject changes. A campaign source avoids both problems.
+- `campaign_id` (FK, CASCADE)
+- `kind`:
+  - `entity` — an actor, malware family, CVE or other entity. Every article that mentions it joins the campaign.
+  - `story` — a story thread the campaign already holds part of, so later waves of the story join too.
+  - `query` — a search-language query typed into the campaign. Everyone on the campaign can read, pause and edit it.
+- `entity_type`, `ref_id` — the target; both NULL for a `query` source
+- `query` — set only when `kind = 'query'`
+- `label` — fixed when the source is added, so it still reads correctly after the target is renamed or merged. For a query it is the query text, cut to 120 characters.
+- `auto_sync` (default true), `last_synced_at`, `entries_added`, `added_by` (SET NULL)
 
-Standing intake the **campaign** owns. The alternative, a linked saved search,
-belongs to whoever saved it: teammates cannot see it in their own list, it can
-only be linked if it already exists, and it drifts — the campaign's subject
-changes and the query doesn't.
+Constraints:
+- `uq_campaign_sources_target` on `(campaign_id, kind, entity_type, ref_id)`
+- `uq_campaign_sources_query` — a partial unique index on `(campaign_id, query) WHERE kind = 'query'`. PostgreSQL treats NULL `ref_id`s as distinct, so query rows need their own uniqueness.
+- `ck_campaign_sources_shape` — a `query` row has a query and no `ref_id`; every other kind has a `ref_id` and no query
 
-**Columns:**
-- `id` (UUID PK)
-- `campaign_id` (FK, CASCADE, indexed)
-- `kind` (String 20) — one of:
-  - `entity` — the actor, malware, CVE or other entity named as the subject. Every article carrying it joins, which is what makes curating the primary role worth doing.
-  - `story` — a thread the campaign has already accepted part of; later waves of a story you are tracking are the clearest "obviously yes".
-  - `query` — a query-language string typed into the campaign. Same reach as a saved search; campaign-owned, so every analyst on it can read, pause and rewrite the query.
-- `entity_type` (String 32, nullable), `ref_id` (UUID, nullable) — the target. Both null for a `query` source.
-- `query` (Text, nullable) — the query-language string; set **only** when `kind = 'query'`
-- `label` (Text) — **frozen at link time**, so a source still reads after its target is renamed or merged away. For a `query` source it is the query text, truncated to 120 characters.
-- `auto_sync` (Boolean, default true), `last_synced_at`, `entries_added` (Integer)
-- `added_by` (FK → users, SET NULL), `created_at`
+An entity source is refused for a type that has no entry junction, because it would never add anything. `GET /api/campaigns/source-options` returns the allowed types, and the pickers read it.
 
-**Constraints:**
-- `uq_campaign_sources_target` on `(campaign_id, kind, entity_type, ref_id)` — identity for an entity/story source.
-- `uq_campaign_sources_query`, a partial unique index on `(campaign_id, query) WHERE kind = 'query'` — Postgres treats NULL `ref_id`s as distinct, so query rows need their own uniqueness on the text.
-- `ck_campaign_sources_shape` — `query` rows carry a query and no `ref_id`; every other kind carries a `ref_id` and no query.
-
-**Followable types.** An entity source is refused for a type with no entry
-junction (`entry_scope_junction` answers `None`): it would be created and then
-never add anything. `GET /api/campaigns/source-options` is the server's own list
-— the pickers read it rather than keeping a copy.
-
-**Sync semantics.** Every kind recomputes its *full* claimed set each run and
-inserts only what the campaign does not already hold, so an article that joins a
-story, gains an entity link or starts matching the query later still arrives.
-(The older `campaign_saved_searches` sweep diffs instead, which is why an
-article that gains a link later never reaches a campaign through one.)
+Every sync works out the full set of matching articles and adds only the ones the campaign doesn't have yet. So an article that later joins a story, gains an entity link or starts matching the query still arrives. The `campaign_saved_searches` sync only looks at new matches instead, so an article that gains a link later never arrives that way.
 
 #### CampaignCountry
-
-**Columns:**
-- `campaign_id` (FK, CASCADE) — PK
-- `country_id` (FK, CASCADE) — PK
-- `role` (String 20) — "origin", "target"
-- `added_at` (DateTime)
+Table `campaign_countries`: primary key `(campaign_id, country_id)`, both CASCADE.
+- `role` (default `target`) — `origin` or `target`; `added_at`
 
 #### IntelProfile
-
-A named, reusable **report scope**: a saved regions × verticals combination (a
-customer, a client portfolio, a watch area). The platform is
-enterprise-agnostic — nothing here is "the org". Analysts keep one profile per
-scope they report against, and exposure reports, standing briefs and
-threat-surface previews all take a profile as input.
-
-**Columns:**
-- `id` (UUID PK)
-- `name` (String 255, **unique**), `description` (Text)
-- `country_ids` (UUID[]) — regions, as country entity ids
-- `sectors` (Text[]) — canonical slugs from the `app.intelligence.sectors` vocabulary
-- `window_days` (Integer, default 90) — the lookback a surface build uses
-- `curation` (JSONB) — keep/drop decisions from the last exposure build, remembered per profile: `{"kept": {"actors": [...], "malware": [...]}, "dropped": {...}}`, so a rebuild doesn't re-ask what the analyst already rejected
-- `created_by` (FK → users, SET NULL, indexed), `created_at`, `updated_at`
+Table `intel_profiles`: a named, reusable report scope. It saves a set of regions and industries, for example one customer, a client portfolio or a watch area. Analysts keep one profile per scope they report on. Exposure reports, standing briefs and threat-surface previews take a profile as input.
+- `name` (unique), `description`
+- `country_ids` (UUID[]) — regions, as country ids
+- `sectors` (Text[]) — sector slugs
+- `window_days` (default 90) — how far back a build looks
+- `curation` (JSONB) — keep and drop decisions from the last exposure build, for example `{"kept": {"actors": [...], "malware": [...]}, "dropped": {...}}`, so a rebuild doesn't ask again
+- `created_by` (SET NULL)
 
 #### IntelReport
+Table `intel_reports`.
+- `title`, `summary`, `created_by` (SET NULL)
+- `template_type` — `actor_profile`, `campaign_tracker`, `detection_report`, `exposure_report`, `flash_alert` or `landscape_report`
+- `status` (indexed, default `draft`) — `draft`, `published` or `archived`
+- `tlp_marking` (default `TLP:GREEN`)
+- `content` (JSONB) — the report sections
+- `version` (default 1), `entry_ids` (UUID[]), `entity_ids` (JSONB), `tags` (Text[]), `published_at`
 
-**Columns:**
-- `id` (UUID PK)
-- `created_by` (FK, CASCADE)
-- `title` (String 500)
-- `description` (Text)
-- `template_id` (FK, nullable, SET NULL)
-- `status` (String 20) — "draft", "published", "archived"
-- `tlp_marking` (String 20)
-- `created_at`, `updated_at`
-
-**Relationships:** Has many `IntelReportVersion` (CASCADE delete).
+Has many `intel_report_versions` (CASCADE).
 
 #### IntelReportVersion
-
-**Columns:**
-- `id` (UUID PK)
-- `report_id` (FK, CASCADE)
-- `version_number` (Integer)
-- `content_html` (Text)
-- `entities` (JSONB) — referenced entities
-- `created_at`
+Table `intel_report_versions`.
+- `report_id` (FK, CASCADE), `version`, `content` (JSONB), `change_description`
+- `created_by` (FK → `users`, CASCADE)
 
 #### ReportTemplate
-
-**Columns:**
-- `id` (UUID PK)
-- `created_by` (FK, cascade)
-- `name` (String 255)
-- `description` (Text)
-- `content_template` (Text) — Jinja2 template
-- `variables` (JSONB array) — template variables
-- `created_at`, `updated_at`
+Table `report_templates`.
+- `name`, `description`
+- `template_slug` (String 50, unique)
+- `sections` (JSONB) — the section list
+- `is_builtin`, `is_shared`, `created_by` (SET NULL)
 
 ---
 
-### 8. Tags & Comments
+### 8. Tags, Comments & Notes
 
 **Tables:** `tags`, `entry_tags`, `comments`, `comment_mentions`, `notes`
 
-**Purpose:** User-defined tags, comments with @mentions, and free-form notes on entries.
-
 #### Tag
+Table `tags`. The tag list is shared: one row per name, with a color, a chip flag and a tooltip, managed in Tag Manager. Who sees a tag on an entry is per user (see EntryTag), unless the tag is global. A tag shown as a chip (`display_as_chip`) appears in the entry's badge row instead of the quiet meta line, with `description` as its tooltip.
+- `name` (String 100, unique), `color` (default `#6B7280`)
+- `display_as_chip` (default false), `description` (String 255)
+- `is_global` (default false):
+  - Global — one shared tag row per entry that everyone sees.
+  - Personal — each user's tags are their own.
 
-The tag *list* is shared: one row per name, with its colour, chip flag and
-tooltip, managed via the Tag Manager UI. Who sees a tag *on an entry* is per
-user (see EntryTag) unless the tag is global. A tag promoted to a chip
-(`display_as_chip`) renders in the entry's badge row (`EntryIntelBadges`)
-instead of the quiet meta line, with `description` as its tooltip.
-
-**Columns:**
-- `id` (UUID PK)
-- `created_by` (FK, nullable, SET NULL) — audit only
-- `name` (String 100, unique, indexed)
-- `color` (String 7, default "#6B7280")
-- `display_as_chip` (Boolean, default false)
-- `description` (String 255, nullable) — chip tooltip
-- `is_global` (Boolean, default false) — global: one shared assignment per
-  entry that everyone sees; personal: each user's assignments are their own.
-  Anyone can flip it in Tag Manager; flipping re-homes the tag's existing
-  assignments (to global collapses everyone's rows into one shared row per
-  entry; to personal hands the shared row to every human account) and
-  reindexes the affected entries
-- `created_at`
+  Anyone can switch a tag in Tag Manager. Switching to global merges everyone's rows into one shared row per entry. Switching to personal gives the shared row to every human account. Both reindex the affected entries.
+- `created_by` (audit only)
 
 #### EntryTag
+Table `entry_tags`: one tag on one entry.
+- `entry_id`, `tag_id` (FK, CASCADE)
+- `user_id` (FK, CASCADE, nullable) — who applied a personal tag, by hand, in bulk, through the copilot or through their automation rule. Only they see it. A global tag has one row per entry with `user_id` NULL.
 
-One tag on one entry. For a personal tag (the default) `user_id` is the user
-who applied it — by hand, in bulk, through the copilot tool, or via their
-automation rule — and only they see it, in entry responses, tag counts, `tag:`
-search, the Tags facet and `tag_matches`. For a global tag there is one row per
-entry with `user_id` NULL that everyone sees. Read through
-`app.services.entry_tags.visible_to`; write through `ensure_assignment`, which
-derives the owner from the tag's scope and inserts with `ON CONFLICT`. In
-Meilisearch, global tag names live in `tags`; personal assignments live in the
-filter-only `user_tags` as `"<user_id>:<name>"`, which is stripped from every
-hit and folded into the viewer's own `tags` facet server-side.
+Unique on `(entry_id, tag_id, user_id)` with NULLs not distinct.
 
-Migration `y6q8s0u2w4y6` introduced the per-user model by copying every
-existing shared assignment to every non-system user (the saved-searches
-precedent) and dropping the shared rows; every pre-existing tag started
-personal. `scripts/maintenance/reindex_entry_tags.py` re-pushes the index's
-tag fields afterwards.
-
-**Columns:**
-- `id` (UUID PK)
-- `entry_id` (FK, CASCADE)
-- `tag_id` (FK, CASCADE)
-- `user_id` (FK users, CASCADE, nullable, indexed)
-- Unique (`entry_id`, `tag_id`, `user_id`), NULLs not distinct
+Read tags through `app.services.entry_tags.visible_to` and write them through `ensure_assignment`, which picks the owner from the tag's scope. In Meilisearch, global tag names are in `tags`. Personal tags are in the filter-only field `user_tags` as `"<user_id>:<name>"`; the server strips that field from results and folds it into the viewer's own `tags` facet. `scripts/maintenance/reindex_entry_tags.py` re-pushes the search index's tag fields.
 
 #### Comment
-
-Polymorphic — comments attach to any commentable object, with threading.
-
-**Columns:**
-- `id` (UUID PK)
-- `user_id` (FK, CASCADE) — comment author
-- `commentable_type` (String 30, indexed), `commentable_id` (UUID, indexed) — polymorphic target
-- `parent_id` (FK to comments, CASCADE) — threaded replies
-- `content` (Text)
-- `created_at`, `updated_at`
-
-**Relationships:** Has many `CommentMention` (CASCADE delete).
+Table `comments`: a comment on any object, with replies.
+- `user_id` (FK, CASCADE) — the author
+- `commentable_type`, `commentable_id` (both indexed) — what it is attached to, for example a `detection_rule`
+- `parent_id` (FK → `comments`, CASCADE) — the comment it replies to
+- `content`
 
 #### CommentMention
-
-**Columns (composite PK):**
-- `comment_id` (FK, CASCADE) — PK
-- `mentioned_user_id` (FK, CASCADE) — PK; who was mentioned
+Table `comment_mentions`: primary key `(comment_id, mentioned_user_id)`, both CASCADE.
 
 #### Note
-
-**Columns:**
-- `id` (UUID PK)
-- `created_by` (FK, nullable, SET NULL)
-- `entry_id` (FK, nullable, SET NULL) — notes survive entry deletion
-- `title` (String 500)
-- `content_markdown` (Text), `content_html` (Text)
-- `tags` (ARRAY(Text))
-- `is_pinned` (Boolean)
-- `created_at`, `updated_at`
+Table `notes`: a free-form note, optionally on an entry.
+- `created_by` (SET NULL), `entry_id` (FK, SET NULL — the note survives the entry)
+- `title`, `content_markdown`, `content_html`, `tags` (Text[]), `is_pinned`
 
 ---
 
 ### 9. System & Configuration
 
-**Tables:** `system_settings`, `themes`, `categories`, `intelligence_requirements`, `requirement_matches`, `telemetry_sources`, `glossary_terms`, `ai_providers`, `ai_prompt_templates`, `webhook_presets`, `shared_entries`, `telegram_channel_mentions`, `telegram_link_mentions`, `false_positive_records`, `tts_audio`
-
-**Purpose:** System-wide configuration, user themes, feed categories, and external system integrations.
+**Tables:** `system_settings`, `themes`, `categories`, `intelligence_requirements`, `requirement_matches`, `glossary_terms`, `ai_providers`, `webhook_presets`, `shared_entries`, `telegram_channel_mentions`, `telegram_link_mentions`, `false_positive_records`, `tts_audio`
 
 #### SystemSettings (Singleton)
-
-**Columns:**
-- `id` (Integer PK = 1) — enforced by CHECK constraint
-- `settings` (JSONB) — public settings (alert thresholds, feed update frequency, etc.)
-- `secrets` (JSONB) — encrypted secrets (API keys, webhooks)
-- `updated_at` (DateTime)
-
-**Notes:** Only one row allowed (CHECK constraint id = 1).
+Table `system_settings`: one row only (`id = 1`, enforced by the `singleton_row` CHECK constraint).
+- `settings` (JSONB) — settings changed in the UI. `config.py` reads this before falling back to `.env`.
+- `secrets` (JSONB) — encrypted secrets such as API keys
 
 #### Theme
-
-**Columns:**
-- `id` (UUID PK)
-- `created_by` (FK, nullable, SET NULL)
-- `name` (String 100)
-- `css_variables` (JSONB) — CSS variables (--primary-color, etc.)
-- `is_system` (Boolean) — built-in themes
-- `created_at`
+Table `themes`.
+- `name`, `css_variables` (JSONB), `is_system` (built-in), `created_by` (SET NULL)
 
 #### Category
-
-**Columns:**
-- `id` (UUID PK)
-- `created_by` (FK, nullable, SET NULL)
-- `name` (String 255)
-- `parent_id` (FK, nullable, SET NULL) — self-referential for hierarchy
-- `position` (Integer) — sort order
-- `created_at`
-
-**Relationships:** Has many `Feed` records.
+Table `categories`: feed folders.
+- `name`, `parent_id` (FK → `categories`, SET NULL), `position`
+- `feed_defaults` (JSONB) — default settings for feeds in this category
+- `created_by`
 
 #### IntelligenceRequirement
-
-**Columns:**
-- `id` (UUID PK)
-- `created_by` (FK, nullable, SET NULL)
-- `title` (String 500)
-- `description` (Text)
-- `priority` (String 20) — "critical", "high", "medium", "low"
-- `status` (String 20, indexed) — "active", "fulfilled", "expired", "draft"
-- `category` (String 20, default "operational") — "strategic", "operational", "tactical", "technical"
-- `keywords` (ARRAY(Text)) — search keywords
-- `linked_feed_ids` (ARRAY(UUID)) — feed scoping
-- `linked_entities` (JSONB) — entity refs the PIR tracks: `{"threat_actors": [{"id", "name"}], "malware": [...], "cves": [...], "ttps": [...]}`
-- `min_relevance` (String 10, nullable) — per-PIR floor for auto-match relevance (NULL keeps all)
-- `auto_match` (Boolean, default true)
-- `match_count` (Integer), `last_matched_at`
-- `expires_at` (DateTime, nullable)
-- `fulfilled_by_report_id` (FK to intel_reports, SET NULL) — report that fulfilled this requirement
-- `created_at`, `updated_at`
-
-**Relationships:** Has many `RequirementMatch` (CASCADE delete).
+Table `intelligence_requirements`: a PIR (priority intelligence requirement), a question the team needs answered. Matching entries are recorded in `requirement_matches`.
+- `title`, `description`, `created_by`
+- `priority` — for example `critical`, `high`, `medium`, `low`
+- `status` (indexed, default `active`), `category` (default `operational`)
+- `keywords` (Text[]), `linked_feed_ids` (UUID[])
+- `linked_entities` (JSONB) — the entities it tracks: `{"threat_actors": [{"id", "name"}], "malware": [...], "cves": [...], "ttps": [...]}`
+- `min_relevance` — the lowest relevance an automatic match may have; NULL keeps all
+- `auto_match` (default true), `match_count`, `last_matched_at`, `expires_at`
+- `fulfilled_by_report_id` (FK → `intel_reports`, SET NULL)
 
 #### RequirementMatch
-
-**Columns (composite PK):**
-- `requirement_id` (FK, CASCADE) — PK
-- `entry_id` (FK, CASCADE) — PK
-- `match_type` (String 20) — "keyword", "entity", "manual"
-- `matched_on` (String 500) — what matched
-- `relevance` (String 10) — "high", "medium", "low"
-- `matched_at` (DateTime)
-
-#### TelemetrySource
-
-**Columns:**
-- `id` (UUID PK)
-- `created_by` (FK, CASCADE)
-- `name` (String 255)
-- `source_type` (String 50) — "log", "event", "alert", "telemetry"
-- `description` (Text)
-- `config` (JSONB)
-- `is_enabled` (Boolean)
-- `created_at`, `updated_at`
+Table `requirement_matches`: primary key `(requirement_id, entry_id)`, both CASCADE.
+- `match_type` — for example `keyword`, `entity`, `manual`
+- `matched_on` — what matched
+- `relevance` — `high`, `medium` or `low`; `matched_at`
 
 #### GlossaryTerm
-
-**Columns:**
-- `id` (UUID PK)
-- `created_by` (FK, nullable, SET NULL)
-- `is_system` (Boolean) — seeded terms
-- `name` (String 200, unique, indexed)
-- `category` (String 50), `maturity` (String 20)
-- `description` (Text), `long_description` (Text)
-- `technologies`, `search_terms` (JSONB arrays)
-- `created_at`, `updated_at`
+Table `glossary_terms`.
+- `name` (String 200, unique), `category`, `maturity`
+- `description`, `long_description`, `technologies`, `search_terms` (JSONB)
+- `is_system` (seeded), `created_by`
 
 #### AIProvider
+Table `ai_providers`: one AI endpoint and its credentials.
+- `name`
+- `provider_type` — `claude`, `claude_code`, `ollama` or `openai_compatible`
+- `base_url`, `models` (JSONB), `config` (JSONB), `is_active`
+- `api_key_encrypted` — encrypted with the instance's `ENCRYPTION_KEY`, personal keys included
+- `user_id` (FK, CASCADE, nullable):
+  - NULL — an instance provider, used by site assignments and background work.
+  - Set — a personal key. Only its owner's `user_ai_routes` point at it, it is never a site assignment, and only the owner and admins can see it (`backend/app/api/ai_providers.py:59`).
+- `paused_until`, `paused_reason` — set automatically after a quota or rate-limit answer; a paused key is treated as unable to answer
+- `last_tested_at`, `last_test_error` — the last connection test; a NULL error means it passed
 
-**Columns:**
-- `id` (UUID PK)
-- `name` (String 255)
-- `provider_type` (String 30) — "claude", "claude_code", "ollama", or "openai_compatible"
-- `base_url` (Text, nullable)
-- `api_key_encrypted` (Text) — encrypted with the instance's `ENCRYPTION_KEY`, personal keys included
-- `models` (JSONB array) — list of available models
-- `is_active` (Boolean)
-- `config` (JSONB) — provider-specific config
-- `user_id` (FK, nullable, CASCADE, indexed) — NULL is one of the instance's providers, which site assignments and background work use. Set is a personal key (`is_personal`): only its owner's `user_ai_routes` point at it, it is never a site assignment, and the owner and the admin are the only people who can see it (`backend/app/api/ai_providers.py:59`)
-- `paused_until` (DateTime, nullable), `paused_reason` (String 500) — auto-pause after a quota or rate-limit response; the lookup treats a paused key as unable to answer
-- `last_tested_at` (DateTime, nullable), `last_test_error` (String 500, nullable) — the outcome of the last connectivity test; error NULL means it passed. The keys list shows "Tested 2h ago" or "Last test failed" from these without contacting the provider
-- `created_at`, `updated_at`
-
-**Relationships:** Has many `AITaskAssignment` and `UserAIRoute` (CASCADE delete); `AIResult` rows keep their `provider_name` and are set to NULL `provider_id` (`passive_deletes`).
-
-#### AIPromptTemplate
-
-**Columns:**
-- `id` (UUID PK)
-- `task_id` (FK, CASCADE)
-- `name` (String 255)
-- `content` (Text) — Jinja2 template
-- `variables` (JSONB array)
-- `is_default` (Boolean)
-- `created_at`
+Assignments and user routes are deleted with the provider. `ai_results` rows keep their `provider_name` and have `provider_id` set to NULL.
 
 #### WebhookPreset
-
-Reusable webhook/notification targets for automation actions.
-
-**Columns:**
-- `id` (UUID PK)
-- `created_by` (FK, nullable, SET NULL)
-- `name` (String 255)
-- `preset_type` (String 30, default "webhook")
-- `url` (Text), `payload` (Text) — payload template
-- `headers`, `config` (JSONB)
-- `created_at`, `updated_at`
+Table `webhook_presets`: saved webhook targets for automation actions.
+- `name`, `preset_type` (default `webhook`), `url`, `payload` (a template), `headers`, `config` (JSONB), `created_by`
 
 #### SharedEntry
-
-Token-based public share links for entries.
-
-**Columns:**
-- `id` (UUID PK)
-- `entry_id` (FK, CASCADE)
-- `token` (String 64, unique) — random share token
-- `created_by` (FK, nullable, SET NULL)
-- `is_active` (Boolean, default true)
-- `expires_at` (DateTime, nullable) — link expiration
-- `created_at`
+Table `shared_entries`: a public share link for one entry.
+- `entry_id` (FK, CASCADE), `token` (String 64, unique, random)
+- `is_active` (default true), `expires_at`, `created_by` (SET NULL)
 
 #### TelegramChannelMention
-
-Aggregated discovery of Telegram channels mentioned across feeds (candidate sources).
-
-**Columns:**
-- `id` (UUID PK)
-- `handle` (String 255, unique, indexed) — normalized channel handle
-- `display_handle` (String 255), `canonical_url` (Text)
-- `primary_link_type` (String 20, default "channel")
-- `mention_count`, `distinct_feed_count` (Integer)
-- `feed_id` (FK, nullable) — set once subscribed as a feed
-- `dismissed_at`, `dismissed_by` — analyst dismissal
-- `notes` (Text)
-- `first_seen_at`, `last_seen_at`
+Table `telegram_channel_mentions`: Telegram channels mentioned across feeds, as possible new sources.
+- `handle` (unique) — the normalized channel name; `display_handle`, `canonical_url`
+- `primary_link_type` (default `channel`)
+- `mention_count`, `distinct_feed_count`
+- `feed_id` (FK, SET NULL) — set once the channel is added as a feed
+- `dismissed_at`, `dismissed_by` (SET NULL), `notes`
 
 #### TelegramLinkMention
-
-Individual t.me link sightings backing the channel aggregate.
-
-**Columns:**
-- `id` (UUID PK)
-- `channel_id` (FK to telegram_channel_mentions, CASCADE)
-- `entry_id` (FK, CASCADE), `feed_id` (FK, nullable)
-- `url` (Text), `link_type` (String 20)
-- `message_id` (BigInteger), `invite_hash` (String 255)
-- `discovered_at` (DateTime)
+Table `telegram_link_mentions`: each t.me link found, behind the channel totals. Unique on `(entry_id, url)`.
+- `channel_id` (FK, CASCADE), `entry_id` (FK, CASCADE), `feed_id` (FK, SET NULL)
+- `url`, `link_type`, `message_id`, `invite_hash`, `discovered_at`
 
 #### TTSAudio
-
-Bookkeeping for server-side (Piper) read-aloud audio. One row per cached MP3 on the `tts_media` volume; the bytes live on disk keyed by `cache_key`.
-
-**Columns:**
-- `cache_key` (String 64 PK) — sha256 of (source + ref_id + content-hash + voice); also the mp3 filename stem
-- `source` (String 20) — "entry" or "summary"
-- `ref_id` (String 200) — entry_id / day_key, for debugging
-- `voice` (String 80)
-- `status` (String 20) — "pending", "ready", "error"
-- `duration_seconds` (Float), `byte_size` (BigInteger), `error` (String 500)
-- `created_at`, `last_accessed_at` — LRU eviction key
-- `ttl_days` (Float, nullable) — per-row eviction TTL override in days since last access (migration `a1b2c3d4e5f6`); NULL → global `tts_cache_ttl_days`; share pre-generation sets 1.0 (~24h)
+Table `tts_audio`: bookkeeping for read-aloud audio made by the Piper text-to-speech service. Each row is one cached MP3 on the `tts_media` volume.
+- `cache_key` (String 64, primary key) — SHA-256 of source + ref id + text hash + voice; also the MP3 file name
+- `source` — `entry` or `summary`; `ref_id` — the entry id or day key; `voice`
+- `status` (default `pending`) — `pending`, `ready` or `error`
+- `duration_seconds`, `byte_size`, `error`
+- `last_accessed_at` — the eviction sweep removes the least recently used files
+- `ttl_days` (nullable) — keep the file this many days after last access. NULL uses the `tts_cache_ttl_days` setting; share links pre-generate audio with 1.0 (about a day).
 
 #### FalsePositiveRecord
-
-Tracks entity FP markings for the AI prompt feedback loop.
-
-**Columns:**
-- `id` (UUID PK)
-- `entity_type` (String 20, indexed), `entity_id` (UUID, indexed), `entity_value` (String 500)
-- `source_entry_id` (FK, nullable, SET NULL)
-- `reason` (Text) — why this is a false positive
-- `marked_by` (FK, not null)
-- `extraction_source` (String 20)
-- `created_at`
+Table `false_positive_records`: entities an analyst marked as wrong matches, fed back into AI prompts.
+- `entity_type`, `entity_id` (both indexed), `entity_value`
+- `source_entry_id` (FK, SET NULL), `reason`, `extraction_source`
+- `marked_by` (FK → `users`, no ON DELETE)
 
 ---
 
 ### 10. Signal Engine & Pipeline Observability
 
-**Tables:** `entry_signals`, `entry_signal_feedback`, `user_entity_watches`, `job_runs`, `entry_pipeline_runs`, `pipeline_plans`
+**Tables:** `entry_signals`, `entry_signal_feedback`, `user_signal_weights`, `user_entity_watches`, `job_runs`, `entry_pipeline_runs`, `pipeline_plans`
 
-**Purpose:** Signal engine scoring (Radar/Priority Queue), per-user entity curation, and observability for scheduled jobs and per-entry pipeline stages. Bookkeeping rows (`job_runs`, `entry_pipeline_runs`, `ai_analysis_requests`) are pruned after 30 days by `prune_engine_tables`.
+The signal engine scores each entry so the Radar and Priority Queue can rank them. These tables also record what scheduled jobs and per-entry pipeline stages did. `prune_engine_tables` deletes `job_runs` and `entry_pipeline_runs` rows older than 30 days.
 
 #### EntrySignal
+Table `entry_signals`: one scored, explained signal per (entry, signal type). Rows are upserted, never appended. Unique on `(entry_id, signal_type)`.
+- `entry_id` (FK, CASCADE)
+- `signal_type` — grouped into five families (`SIGNAL_FAMILIES` in `app/intelligence/signals.py`):
 
-One scored, explainable signal per (entry, signal_type) — upserted, never appended.
+  | Family | Signal types |
+  |---|---|
+  | novelty | `novel_entity`, `entity_resurgence`, `new_pairing`, `scoop` |
+  | coverage | `source_convergence`, `under_reported`, `feed_echo` |
+  | severity | `kev_added`, `epss_jump`, `epss_high`, `weaponized_poc`, `critical_cvss` |
+  | interest | `pir_match`, `correlation_event` |
+  | content | `detection_content`, `research_depth` |
 
-**Columns:**
-- `id` (UUID PK)
-- `entry_id` (FK, CASCADE, indexed)
-- `signal_type` (String 40) — novelty: `novel_entity`, `entity_resurgence`, `new_pairing`, `scoop`; coverage: `source_convergence`, `under_reported`, `feed_echo` (negative); severity: `kev_added`, `epss_jump`, `weaponized_poc`, `critical_cvss`; interest: `pir_match`, `correlation_event` (`watchlist` is read-time only, not stored); content: `detection_content`, `research_depth`
-- `score` (Float) — raw strength 0..1
-- `explanation` (Text), `payload` (JSONB)
-- `created_at`
+- `score` (Float, 0–1), `explanation`, `payload` (JSONB)
 
-**Unique Constraint:** `(entry_id, signal_type)`. The weighted sum lands on `entries.priority_raw`, its 0–10 placement on `entries.priority_score`, plus `entries.scored_at`.
+The weighted sum goes to `entries.priority_raw`, its 0–10 placement to `entries.priority_score`, and the time to `entries.scored_at`.
 
 #### EntrySignalFeedback
-
-Per-user thumbs verdict on an entry's Radar placement.
-
-**Columns:**
-- `id` (UUID PK)
-- `entry_id` (FK, CASCADE), `created_by` (FK, CASCADE)
-- `verdict` (SmallInteger)
-- `created_at`
-
-**Unique Constraint:** `(entry_id, created_by)`.
+Table `entry_signal_feedback`: a user's thumbs up or down on an entry's Radar placement. Unique on `(entry_id, created_by)`.
+- `entry_id`, `created_by` (both FK, CASCADE), `verdict` (SmallInteger)
 
 #### UserSignalWeight
-
-Per-analyst learned signal-family weight, fitted nightly from that user's own Radar thumbs by `fit_user_signal_weights`. Applied as a read-time lift on their Radar ordering; the stored `entries.priority_raw` / `priority_score` stay global, so personalisation is reversible with one toggle. See [engine.md](engine.md).
-
-**Columns:**
-- `id` (UUID PK)
-- `user_id` (FK, CASCADE, indexed)
-- `family` (String 20) — novelty, coverage, severity, interest, content
-- `weight` (Float) — clamped to 0.65–1.35
-- `up_votes`, `down_votes`, `sample_count` (Integer) — the attributed votes behind the fit
-- `updated_at`
-
-**Unique Constraint:** `(user_id, family)`.
+Table `user_signal_weights`: a per-analyst weight for each signal family, fitted nightly from that user's own thumbs by `fit_user_signal_weights` (04:35 UTC). It is applied when that user's Radar is read; the stored `priority_raw` and `priority_score` stay the same for everyone, so the personal weighting can be switched off at any time. See [engine.md](engine.md). Unique on `(user_id, family)`.
+- `user_id` (FK, CASCADE), `family` — `novelty`, `coverage`, `severity`, `interest` or `content`
+- `weight` (default 1.0, kept between 0.65 and 1.35)
+- `up_votes`, `down_votes`, `sample_count` — the votes behind the fit
 
 #### UserEntityWatch
-
-Per-user entity watch/mute — watch boosts read-time priority, mute suppresses entries from Radar/chips.
-
-**Columns:**
-- `id` (UUID PK)
+Table `user_entity_watches`: a user's watch or mute on an entity. Watching raises an entry's priority when that user reads it; muting hides entries from their Radar and chips. Unique on `(created_by, entity_type, entity_id)`.
 - `created_by` (FK, CASCADE)
-- `entity_type` (String 20) — threat_actor, malware, cve, tool, vendor, product, country
-- `entity_id` (UUID)
-- `mode` (String 10) — "watch" or "mute"
-- `boost` (Float, default 1.0)
-
-**Unique Constraint:** `(created_by, entity_type, entity_id)`.
+- `entity_type` — `threat_actor`, `malware`, `cve`, `cwe`, `tool`, `vendor`, `product`, `country`, `sector`, `ransomware_victim` or `observable`
+- `entity_id`, `mode` (`watch` or `mute`), `boost` (default 1.0)
 
 #### JobRun
-
-Execution record for scheduled (JOB_REGISTRY) Celery tasks, written by celery signal handlers.
-
-**Columns:**
-- `id` (UUID PK)
-- `task_name` (String 200), `job_key` (String 60), `celery_task_id` (String 64)
-- `status` (String 12) — "success", "error", "retry"
-- `started_at`, `finished_at`, `duration_ms`
-- `error` (Text)
-- `detail` (JSONB) — clipped `{args, kwargs, result}` context
+Table `job_runs`: one run of a scheduled Celery task (a `JOB_REGISTRY` job), written by Celery signal handlers. Indexed on `(task_name, started_at)`.
+- `task_name`, `job_key`, `celery_task_id`
+- `status` — `success`, `error` or `retry`
+- `started_at`, `finished_at`, `duration_ms`, `error`
+- `detail` (JSONB) — shortened `{args, kwargs, result}`
 
 #### EntryPipelineRun
-
-Per-entry pipeline stage run records (which stages ran, how long, what failed).
-
-**Columns:**
-- `id` (UUID PK)
-- `entry_id` (FK, CASCADE, indexed)
-- `stage` (String 30), `status` (String 12)
-- `duration_ms` (Integer), `error` (Text), `detail` (JSONB)
-- `created_at`
+Table `entry_pipeline_runs`: one pipeline stage run for one entry. Indexed on `(entry_id, created_at)`.
+- `entry_id` (FK, CASCADE), `stage`, `status`, `duration_ms`, `error`, `detail` (JSONB)
 
 #### PipelinePlan
-
-Data-defined pipeline stage composition per scope. A seeded "Global default" row always exists; unspecified stages fall through category → global → legacy Feed booleans.
-
-**Columns:**
-- `id` (UUID PK)
-- `name` (String 100)
-- `scope_type` (String 10) — "global", "category", "feed"
-- `scope_id` (UUID, nullable)
+Table `pipeline_plans`: which pipeline stages run for a scope. A "Global default" row is seeded. For each stage the setting is taken from the feed's plan, then its category's plan, then the global plan, then the feed's own switches (`intel_extraction_mode`, `auto_extract_on_ingest`, `extract_detection_rules`).
+- `name`, `scope_type` — `global`, `category` or `feed`; `scope_id` (NULL for global)
 - `stages` (JSONB) — `{stage_name: {"enabled": bool, "config": {...}}}`
-- `is_active` (Boolean)
-- `created_at`, `updated_at`
+- `is_active`
 
-**Unique Constraint:** `(scope_type, scope_id)`.
+Unique on `(scope_type, scope_id)` with NULLs not distinct, so there is only one global plan.
 
 ---
-
-## Junction Tables
-
-**Key junction tables (many-to-many):**
-
-- **`entry_ttps`** — links entries to TTPs (with confidence, source_text, paragraph_indices)
-- **`entry_cves`** — links entries to CVEs (with paragraph_indices)
-- **`entry_cwes`** — links entries to CWE weaknesses (with confidence, source, paragraph_indices)
-- **`entry_observables`** — links entries to IOC ledger rows (with surface_form, was_defanged, and an optional `ttp_id` when the sighting came from a TTP's observable upsert)
-- **`entry_threat_actors`** — links entries to threat actors (with confidence, matched_names)
-- **`entry_malware`** — links entries to malware families (with confidence, matched_names)
-- **`entry_countries`** — links entries to countries (with confidence)
-- **`entry_mitigations`** — links entries to mitigations
-- **`entry_vendors`** — links entries to vendors (with confidence, matched_names)
-- **`entry_products`** — links entries to products (with confidence, matched_names)
-- **`entry_tools`** — links entries to tools (with confidence, matched_names, paragraph_indices)
-- **`entry_sectors`** — links entries to the victim sectors the article describes as *targeted* (`sector_id` FK to `sectors` plus the canonical slug as a natural key; confidence, source, role, paragraph_indices). Written only by the one-pass AI analysis (`store_sectors`) — sectors are never autolinked, so a row is a judgment, not a word match
-- **`entry_tags`** — links entries to user-defined tags; one row per (entry, tag, user) for a personal tag, one shared row (`user_id` NULL) for a global tag
-- **`threat_actor_target_countries`** — links threat actors to targeted countries
-- **`threat_actor_target_sectors`** / **`malware_target_sectors`** — "X targets sector S" claims, each with a `source` (`rollup` from the entity's own articles, `enrichment`, `seed`, `analyst`) and an `article_count` of evidence; the nightly rollup owns only its own rows
-- **`campaign_sectors`** — the victim verticals a campaign is scoped to
-- **`campaign_countries`** — links campaigns to countries (origin/target role)
-- **`ttp_mitigations`** — links TTPs to mitigations
-
-**Pattern:** All junction tables use composite primary keys on FK columns, with the right-hand entity's ID as PK2 indexed separately for fast lookups in reverse direction.
 
 ### 11. Story Threads
 
 **Tables:** `entry_embeddings`, `story_threads`, `story_thread_entries`, `story_thread_beats`, `user_thread_states`
 
-**Purpose:** One unfolding story as a persistent object, so a story reported
-twenty-three times is one row rather than twenty-three. Written only by
-`app.intelligence.story_threads` (clustering) and `app.services.thread_narrative`
-(the spine). See [story-threads.md](story-threads.md).
+A story thread groups every article about one unfolding story, so a story reported twenty-three times is one row rather than twenty-three. Only `app.intelligence.story_threads` (grouping) and `app.services.thread_narrative` (the written summary, called the spine) write these tables. See [story-threads.md](story-threads.md).
 
-**Requires the `vector` extension** — the db image is built from `db/Dockerfile`
-(`postgres:16-alpine` + pgvector 0.8.1, so the existing data directory needs no
-migration).
+These tables need the `vector` extension. The db image is built from `db/Dockerfile` (`postgres:16-alpine` plus pgvector 0.8.1).
 
 #### EntryEmbedding
+Table `entry_embeddings`: one vector per entry, in its own table so the busy `entries` table doesn't carry 1.5 KB per row.
+- `entry_id` (primary key, FK → `entries`, CASCADE)
+- `embedding` (`halfvec(768)`, 2 bytes per dimension)
+- `model` (indexed), `content_hash` — hash of the exact text that was embedded, so an unchanged entry is never embedded again
+- `threaded_checked_at` — when the thread sweeper last looked at this entry
+- `verified_at` — when `content_hash` was last checked against the entry's current text. NULL sorts first in the re-check pass, so a re-sanitized article finds its way back through the sweeper.
 
-One dense vector per entry. Its own table rather than a column on `entries`,
-which is the hottest table in the schema and would carry 1.5KB per row through
-every sequential scan that never touches it.
-
-**Columns:**
-- `entry_id` (UUID PK, FK → entries, CASCADE)
-- `embedding` (`halfvec(768)`) — 2 bytes per dimension; `vector` would cost ~200MB more resident index at 134k rows
-- `model` (String 80), `content_hash` (String 64) — hash of the exact text that was embedded, so an unchanged entry is never re-embedded
-- `threaded_checked_at` (timestamptz, null) — when the thread sweeper last considered this entry
-- `verified_at` (timestamptz, null) — when `content_hash` was last confirmed against the entry's current text. Null sorts first in the re-hash pass, which is what makes a re-sanitized article (or a changed `build_text` recipe) find its own way back through the sweeper
-- `created_at`
-
-**Indexes:** HNSW on `embedding halfvec_cosine_ops` (created empty, before the
-backfill — building it afterwards over 134k rows needs a `maintenance_work_mem`
-the production host cannot spare), btree on `model`, `threaded_checked_at` and
-`verified_at`.
+An HNSW index (`halfvec_cosine_ops`) on `embedding` serves similarity search.
 
 #### StoryThread
+Table `story_threads`.
+- `slug` (unique), `title`, `summary`
+- `status` (default `open`) — `open`, `dormant` or `closed`
+- `centroid` (`halfvec(768)`) — the average of its members
+- `entry_count`, `source_count` (distinct outlets, not feed rows), `echo_count`
+- `first_seen`, `last_seen`, `peak_at`
+- `key_entities` (JSONB) — `[{entity_type, entity_id, label, count}]`
+- `narrative_hash` (the member set the current spine was written from), `narrated_at`
 
-**Columns:** `id`, `slug` (unique), `title`, `summary`, `status`
-(`open` | `dormant` | `closed`), `centroid` (`halfvec(768)`, the mean of its
-members), `entry_count`, `source_count` (distinct outlets, not feed rows),
-`echo_count`, `first_seen`, `last_seen`, `peak_at`, `key_entities` (JSONB,
-`[{entity_type, entity_id, label, count}]`), `narrative_hash` (member-set hash
-the current spine was written from), `narrated_at`, `created_at`, `updated_at`.
-
-**Index:** `(status, last_seen)`.
+Indexed on `(status, last_seen)`.
 
 #### StoryThreadEntry
-
-**Columns:** `id`, `thread_id` (FK, CASCADE), `entry_id` (FK, CASCADE, **unique**),
-`role` (`origin` | `beat` | `echo`), `similarity`, `duplicate_of_entry_id` (FK,
-SET NULL — for echoes, the article this one re-reports), `source_key` (host, not
-feed id), `added_at`.
-
-`entry_id` is unique on purpose: an article belongs to at most one story.
+Table `story_thread_entries`: one article in a thread.
+- `thread_id` (FK, CASCADE), `entry_id` (FK, CASCADE, **unique** — an article belongs to at most one story)
+- `role` (default `beat`) — `origin`, `beat` or `echo`
+- `similarity`, `duplicate_of_entry_id` (FK, SET NULL — for an echo, the article it repeats)
+- `source_key` (the outlet's host, not the feed id), `added_at`
 
 #### StoryThreadBeat
-
-One wave of coverage. Regenerated wholesale whenever the spine is rewritten.
-
-**Columns:** `id`, `thread_id` (FK, CASCADE), `position`, `occurred_at`, `kind`
-(`first_disclosure` | `new_tradecraft` | `peak` | `update`), `headline`, `body`,
-`lead_entry_id` (FK, SET NULL), `entry_ids` (JSONB), `collapsed_count`, `is_ai`
-(false = the day-grouping fallback).
+Table `story_thread_beats`: one wave of coverage. All beats are rewritten whenever the spine is rewritten.
+- `thread_id` (FK, CASCADE), `position`, `occurred_at`
+- `kind` (default `update`) — `first_disclosure`, `new_tradecraft`, `peak` or `update`
+- `headline`, `body`, `lead_entry_id` (FK, SET NULL), `entry_ids` (JSONB), `collapsed_count`
+- `is_ai` — false means the simple group-by-day fallback wrote it
 
 #### UserThreadState
-
-**Columns:** `id`, `user_id` (FK, CASCADE), `thread_id` (FK, CASCADE),
-`last_opened_at` (what "N new" is measured from).
-
-**Unique Constraint:** `(user_id, thread_id)`.
+Table `user_thread_states`: unique on `(user_id, thread_id)`, both CASCADE.
+- `last_opened_at` — what "N new" counts from
 
 ---
 
@@ -1582,207 +996,139 @@ One wave of coverage. Regenerated wholesale whenever the spine is rewritten.
 
 **Tables:** `narrative_briefings`, `narrative_theme_members`
 
-**Purpose:** Keep the daily briefing's own grouping of the day's articles. The
-briefing already does something the engine pays an AI nowhere else to do — it
-reads a whole day of reporting, sorts it into `### Theme` sections, and links
-every article it cites back by entry id. That structure was rendered, shown to a
-reader, and thrown away. Parsing it back costs nothing: it reads markdown that
-was already generated and cached. See
-`backend/app/intelligence/narrative_themes.py`; gated by
-`narrative_themes_enabled` and `narrative_theme_gating`
-([engine-settings.md](engine-settings.md#narrative-themes-and-actor-refresh-mode)).
+The daily briefing sorts a day's articles into `### Theme` sections and links each article it cites. These tables save that grouping by parsing the briefing's markdown, which costs no extra AI call. See `backend/app/intelligence/narrative_themes.py`. Controlled by `narrative_themes_enabled` and `narrative_theme_gating` ([engine-settings.md](engine-settings.md#narrative-themes-and-actor-refresh-mode)).
 
 #### NarrativeBriefing
-
-One parsed daily briefing — its existence is what lets "no rows for this entry"
-be told apart from "this day was never parsed".
-
-**Columns:** `id`, `day_key` (String 10, **unique index**), `theme_count`,
-`cited_entry_count`, `parsed_at`.
+Table `narrative_briefings`: one parsed daily briefing. Its existence tells "this entry has no theme" apart from "this day was never parsed".
+- `day_key` (String 10, unique), `theme_count`, `cited_entry_count`, `parsed_at`
 
 #### NarrativeThemeMember
+Table `narrative_theme_members`: which articles the briefing put under which heading. Unique on `(day_key, entry_id, theme)`; also indexed on `(day_key, theme)`.
+- `day_key`, `entry_id` (FK, CASCADE), `theme` (String 200)
+- `section` (default `theme`) — `theme`, `notable`, `closer` or `tldr`. Only `theme` rows have a heading. An article the briefing couldn't place under a theme backs up nothing.
 
-Which articles the briefing placed under which heading.
+---
 
-**Columns:** `id`, `day_key` (String 10, indexed), `entry_id` (FK, CASCADE,
-indexed), `theme` (String 200), `section` (String 20, default `theme`),
-`created_at`.
+## Junction Tables
 
-**Unique Constraint:** `uq_narrative_theme_member` on `(day_key, entry_id, theme)`.
-**Index:** `(day_key, theme)`.
+Junction tables link entries to entities (many to many). Each has a composite primary key on its two foreign keys (both CASCADE), with the entity-side column indexed for reverse lookups.
 
-`section` is one of `theme` | `notable` | `closer` | `tldr`. Only `theme` rows
-carry a heading; the rest are the briefing's own leftover buckets — which is
-itself worth knowing, because an article the briefing could not place under any
-theme is not corroborating anything.
+| Table | Links entries to | Extra columns |
+|---|---|---|
+| `entry_ttps` | TTPs | `confidence`, `source_text`, `paragraph_indices`, `observable_type`, `observable_value`, `telemetry` |
+| `entry_cves` | CVEs | `paragraph_indices` |
+| `entry_cwes` | CWEs | `confidence`, `source`, `paragraph_indices` |
+| `entry_observables` | observables | see [EntryObservable](#entryobservable) |
+| `entry_threat_actors` | threat actors | `confidence`, `source`, `matched_names`, `paragraph_indices` |
+| `entry_malware` | malware families | `confidence`, `source`, `matched_names`, `paragraph_indices` |
+| `entry_tools` | tools | `confidence`, `source`, `matched_names`, `paragraph_indices` |
+| `entry_vendors` | vendors | `confidence`, `source`, `matched_names`, `paragraph_indices` |
+| `entry_products` | products | `confidence`, `source`, `matched_names`, `paragraph_indices` |
+| `entry_countries` | countries | `confidence`, `source`, `role`, `matched_names`, `paragraph_indices` |
+| `entry_mitigations` | mitigations | `confidence`, `source`, `paragraph_indices` |
+| `entry_sectors` | sectors | `confidence`, `source`, `role`, `paragraph_indices` |
+
+All of them also carry `extracted_at`.
+
+`entry_sectors` is the exception to the key pattern. Its primary key is `(entry_id, sector)`, where `sector` is the slug, and it also has a `sector_id` foreign key that is unique per entry. Only the one-pass AI analysis writes it (`store_sectors`). Sectors are never autolinked, so every row is a judgment, not a word match.
+
+`entry_tags` has its own `id` key; see [EntryTag](#entrytag).
+
+Other many-to-many tables:
+- **`threat_actor_target_countries`** — countries an actor targets
+- **`threat_actor_target_sectors`**, **`malware_target_sectors`** — "X targets sector S" claims. Each has a `source` (`rollup` from the entity's own articles, `enrichment`, `seed` or `analyst`, the default) and an `article_count` of evidence. The nightly `rollup-targeted-sectors` job changes only its own `rollup` rows.
+- **`campaign_sectors`** — industries a campaign is scoped to
+- **`campaign_countries`** — see [CampaignCountry](#campaigncountry)
+- **`ttp_mitigations`** — mitigations for a TTP
 
 ---
 
 ## Enums & Constants
 
-Enums are defined as string columns with CHECK constraints or documented in Python constant lists. No native PostgreSQL enums are used (for migration flexibility).
+Fixed value sets are plain strings. The lists below come from code; where a migration also adds a CHECK constraint, it is noted.
 
-### Key Enums
+| Column | Values | Defined in |
+|---|---|---|
+| `feeds.feed_type` | `rss`, `atom`, `youtube`, `podcast` (HTTP adapters); `reddit`, `github_releases`, `github_advisories`, `github_repo`, `nvd`, `mastodon`, `web_scraper`, `bluesky`, `telegram` (extended adapters) | `app/adapters/` |
+| `feeds.intel_extraction_mode` | `full`, `selective`, `manual`, `none` | `schemas/feed.py` |
+| `detection_rules.rule_type` | `sigma`, `splunk_spl`, `crowdstrike_ql`, `elastic_ql`, `kql`, `snort_suricata`, `yara`, `nuclei`, `panther` | `RULE_TYPE_PATTERN` in `schemas/intelligence.py`. The `ck_detection_rules_rule_type` CHECK lists only the first seven. |
+| `campaigns.status` | `active`, `monitoring`, `closed`, `historical` | CHECK `ck_campaigns_status` |
+| `cves.exploit_availability` | `none`, `poc`, `weaponized`, `active_exploitation` | CHECK `ck_cves_exploit_availability` |
+| `entity_relationships.confidence` | `confirmed`, `probable`, `possible` | CHECK `ck_entity_relationships_confidence` |
+| `vendors.vendor_type` | `software`, `hardware`, `cloud`, `security`, `networking`, `semiconductor`, `telecommunications`, `other` | `VENDOR_TYPES` in `models/vendor.py` |
+| `products.product_type` | `os`, `application`, `security_tool`, `network_device`, `cloud_service`, `database`, `firmware`, `library`, `other` | `PRODUCT_TYPES` in `models/product.py` |
+| `tools.tool_type` | `c2_framework`, `credential_access`, `lateral_movement`, `reconnaissance`, `exploitation`, `persistence`, `defense_evasion`, `lolbas`, `framework`, `phishing_kit`, `tunneling`, `remote_access`, `ai_model`, `defensive`, `observability`, `cloud`, `identity`, `dev_tool`, `service`, `software`, `other` | `TOOL_TYPES` in `models/tool.py` |
+| TLP markings (`campaigns`, `intel_reports`) | `TLP:CLEAR`, `TLP:GREEN`, `TLP:AMBER`, `TLP:AMBER+STRICT`, `TLP:RED`. `TLP:WHITE` is accepted on input and stored as `TLP:CLEAR`. | `app/schemas/tlp.py` |
+| `users.role` | `admin`, `user`, `system` | CHECK `ck_users_role` |
+| `enrichment_sources.trigger_mode` | `auto`, `scheduled`, `manual` | |
+| `enrichment_sources.health_status` | `healthy`, `degraded`, `down`, `unknown` | |
 
-**Feed Types:** `rss`, `atom`, `json`, `email`, `telegram`, `api`
-
-**Intelligence Extraction Modes:** `full`, `selective`, `manual`, `none`
-
-**Rule Types:** `sigma`, `splunk_spl`, `crowdstrike_ql`, `elastic_ql`, `kql`, `snort_suricata`, `yara`
-
-**Campaign Status:** `active`, `monitoring`, `closed`, `historical`
-
-**Intelligence Requirement Status:** `active`, `fulfilled`, `expired`, `draft`
-
-**Exploit Availability (CVE):** `none`, `poc`, `weaponized`, `active_exploitation`
-
-**Threat Level:** `critical`, `high`, `medium`, `low`, `informational`
-
-**Confidence Levels:** `confirmed`, `probable`, `possible`
-
-**Vendor Types:** `software`, `hardware`, `cloud`, `security`, `networking`, `semiconductor`, `telecommunications`, `other`
-
-**Product Types:** `os`, `application`, `security_tool`, `network_device`, `cloud_service`, `database`, `firmware`, `library`, `other`
-
-**TLP Markings:** `TLP:CLEAR`, `TLP:GREEN`, `TLP:AMBER`, `TLP:AMBER+STRICT`, `TLP:RED`
-
-**Enrichment Trigger Modes:** `auto`, `scheduled`, `manual`
-
-**Enrichment Source Health:** `healthy`, `degraded`, `down`, `unknown`
+TLP (Traffic Light Protocol) marks how widely a report may be shared.
 
 ---
 
 ## Unique Constraints & Deduplication
 
-**Critical Deduplication Constraints:**
+Each table's section lists its unique keys. These are the ones that prevent duplicate data:
 
-- **`entries(feed_id, guid)`** — no duplicate entries per feed
-- **`feeds(url)`** — one feed per unique URL
-- **`users(username)`** — unique usernames
-- **`threat_actors(name)`** — one threat actor per canonical name
-- **`cves(cve_id)`** — one CVE per CVE ID
-- **`ttps(technique_id)`** — one TTP per MITRE technique ID
-- **`malware_families(name)`** — one malware per canonical name
-- **`tools(name)`** — one tool per canonical name
-- **`vendors(name)`** — one vendor per canonical name
-- **`products(name)`** — one product per canonical name
-- **`cve_affected(cve_id, cpe_vendor, cpe_product)`** — one affects-link per CPE pair
-- **`victim_disclosures(source, guid)`** — one leak-site posting per source dedup id
-- **`pending_autolink_matches(entry_id, entity_type, entity_id)`** — one pending match per entry/entity
-- **`entity_alias_index(entity_type, entity_id, normalized)`** — one row per entity surface form
-- **`enrichment_sources(source_type)`** — one source per type
-- **`ai_task_assignments(task_id)`** — one assignment per task
-- **`user_enrichment_overrides(source_id)`** — one override per source per user
-- **`countries(iso_code)`** — one country per ISO code
-- **`entity_relationships(source_type, source_id, target_type, target_id, relationship_type)`** — one relationship per directed pair and type
-- **`glossary_terms(name)`** — unique glossary entries
-- **`tags(name)`** — the tag list is shared; unique by name (assignments are per user unless the tag is global)
-- **`ai_tasks(name)`** — one task per name
-- **`campaign_saved_searches(campaign_id, saved_search_id)`** — one link per pair
-- **`entry_signals(entry_id, signal_type)`** — one signal per type per entry (upsert)
-- **`entry_signal_feedback(entry_id, created_by)`** — one verdict per user per entry
-- **`user_entity_watches(created_by, entity_type, entity_id)`** — one watch/mute per user per entity
+- **`entries(feed_id, guid)`** — the same item is never stored twice for one feed. Duplicates across feeds are caught by `entries.content_hash` before insert (no constraint).
+- **`feeds(url)`** — one feed per URL
+- **Entity names** — `threat_actors(name)`, `malware_families(name)`, `tools(name)`, `vendors(name)`, `products(name)`, `countries(name)`, `sectors(slug)`, `sectors(name)`
+- **Catalog ids** — `cves(cve_id)`, `ttps(technique_id)`, `cwes(cwe_id)`, `mitigations(mitre_id)`
+- **`observables(kind, value)`** — one ledger row per indicator
+- **`victim_disclosures(source, guid)`** — one leak-site posting per source id
+- **`cve_affected(cve_id, cpe_vendor, cpe_product)`**, **`cve_weaknesses(cve_id, cwe_ref)`**
+- **`entity_relationships(source_type, source_id, target_type, target_id, relationship_type)`** — one link per direction and verb
+- **`entity_field_claims(claim_key)`** — repeated claims update one row
+- **`entry_signals(entry_id, signal_type)`** — signals are upserted
 - **`ai_analysis_requests(entry_id)`** — one analysis request per entry
-- **`ai_batch_jobs(provider_batch_id)`** — one row per provider batch
-- **`ai_conversations(share_token)`** — unique public share tokens
-- **`pipeline_plans(scope_type, scope_id)`** — one plan per scope
-- **`entity_reclassify_tombstones(source_type, normalized_name)`** — one tombstone per folded name per source type
-- **`entity_merge_suggestion_dismissals(entity_type_a, entity_id_a, entity_type_b, entity_id_b)`** — one dismissal per canonical pair
-- **`shared_entries(token)`** — unique share links
-- **`telegram_channel_mentions(handle)`** — one row per discovered channel
+- **`story_thread_entries(entry_id)`** — an article is in at most one story
+- **`entity_reclassify_tombstones(source_type, normalized_name)`**, **`entity_name_denylist(entity_type, normalized_name)`**, **`pending_autolink_matches(entry_id, entity_type, entity_id)`**, **`entity_alias_index(entity_type, entity_id, normalized)`**
+
+Ransomware victims are the one name-keyed entity without a unique name; the resolver matches on `normalized_name` and `domain` instead.
 
 ---
 
 ## Indexing Strategy
 
-### Clustered Indexes (Primary Keys)
+Every foreign key and most filter columns have a plain btree index, declared in the models with `index=True` or `__table_args__`. These indexes are worth knowing about:
 
-All tables have UUID PKs with btree indexes (default).
+| Index | Why it exists |
+|---|---|
+| `entries.priority_raw` | Radar and Priority Queue ordering |
+| `entries.priority_score`, `ix_entries_published_priority (published_at, priority_score)` | score threshold filters |
+| `entries (content_hash, created_at)` | cross-feed duplicate check |
+| `user_entry_states (user_id, is_read)`, `(user_id, is_starred)`, `(user_id, is_bookmarked)` | unread, starred and bookmarked lists |
+| `cves.is_kev`, `cves.epss_score` | exploited-first CVE sorting |
+| `ttps.parent_technique_id`, `ttps.matrix_domain` | ATT&CK catalog navigation |
+| `entity_relationships.evidence_entry_ids` (GIN) | the `new_pairing` signal's lookup |
+| `normalized_name` (GIN, `gin_trgm_ops`) on the six name tables, and `entity_alias_index.normalized` | fuzzy name matching |
+| `entry_embeddings.embedding` (HNSW, `halfvec_cosine_ops`) | similar-article search |
+| `entry_signals (signal_type, created_at)` | signal timelines |
+| `job_runs (task_name, started_at)` | job history |
+| `ai_results (target_type, target_id, task_id, is_current)` | latest result per target |
 
-### Non-Clustered Indexes
+Partial unique indexes: `uq_user_ai_routes_task`, `uq_user_ai_routes_default` and `uq_campaign_sources_query` (see their sections).
 
-**Performance-critical indexes:**
-- `feeds.is_active` — for active feed selection
-- `feeds.feed_type` — for feed type filtering
-- `entries.feed_id` — for feed → entries joins
-- `entries.published_at` — for timeline queries
-- `entries.content_hash` — for dedup detection
-- `entries.priority_raw` — Priority Queue / Radar ordering; `entries.priority_score` + composite `(published_at, priority_score)` — threshold filters
-- `cves.is_kev`, `cves.epss_score` — exploited-first CVE sorting
-- `ttps.parent_technique_id`, `ttps.matrix_domain` — ATT&CK catalog navigation
-- `ttps.technique_id`, `threat_actors.name`, `cves.cve_id`, `malware_families.name` — entity lookups
-- `threat_actors.origin_country_id` — actor by country
-- `products.vendor_id` — product by vendor
-- `cves.severity` — by CVSS severity
-- `detection_rules.rule_type` — by rule type
-- `automation_rules.is_enabled` — active rules
-- `campaigns.status` — campaign lifecycle
-- `enrichment_sources.source_type` — source lookup
-- `entity_relationships(source_type, source_id, target_type, target_id)` — relationship traversal
-- `entity_relationships.evidence_entry_ids` — GIN index (new_pairing signal probe)
-- `entry_ttps(ttp_id)`, `entry_cves(cve_id)`, `entry_threat_actors(threat_actor_id)` — reverse junction lookups
-- `entry_signals(signal_type, created_at)` — signal-type timelines
-- `job_runs(task_name, started_at)` — job history
-- `user_entry_states(user_id, entry_id)` — per-user entry state
-- `playback_progress(user_id, podcast_id)` — podcast resume
+The GIN, HNSW and `ix_entries_published_priority` indexes are created by migrations only. The models don't declare them, so the test schema doesn't have them.
 
 ### Full-Text Search Indexes
 
-**Meilisearch indexes (separate from PostgreSQL):**
-- `entries.title`, `entries.content_text`, `entries.author` — article search
-- `threat_actors.name`, `threat_actors.aliases` — actor search
-- `cves.cve_id`, `cves.description` — CVE search
-- `campaigns.name`, `campaigns.description` — campaign search
-- `detection_rules.title`, `detection_rules.rule_content` — rule search
-
-### Partial Indexes
-
-- `feeds(id) WHERE is_active = true` — speed up active feed queries
-- `automation_rules(id) WHERE is_enabled = true` — active rules only
+Text search runs in Meilisearch, not PostgreSQL (`app/services/meilisearch_client.py`):
+- **`entries`** — searches `title`, `content_text`, `summary`, `author`, `feed_title`, `tags`
+- **`rules`** — detection rules: rule metadata plus `rule_content`
+- **`entities_<type>`** — one index each for `cve`, `ttp`, `threat_actor`, `malware`, `country`, `sector`, `cwe`, `mitigation`, `observable` and `tool`
 
 ---
 
 ## JSONB Columns
 
-**JSONB is used for semi-structured, extensible data:**
+JSONB holds data whose shape changes often or differs by type: adapter settings, raw API responses, AI output, per-type metadata and layouts. The column lists above mark each JSONB column.
 
-- **`users.settings`** — per-user preferences (theme color, notification level, API tokens)
-- **`feeds.adapter_config`** — feed-type-specific config (auth headers, pagination, custom selectors)
-- **`entries.metadata_`** — feed-provided metadata (original feed categories, tags, custom fields)
-- **`entries.extracted_urls`** — array of URLs found in content
-- **`ttps.platforms`, `ttps.data_sources`, `ttps.tactics`** — MITRE ATT&CK metadata
-- **`cves.affected_products`, `cves.references_`, `cves.timeline`, `cves.nvd_data`** — NVD enrichment
-- **`threat_actors.associated_ttps`, `threat_actors.metadata_`** — actor-TTP relationships & custom data
-- **`malware_families.associated_actors`, `malware_families.metadata_`** — malware-actor relationships
-- **`detection_rules.source_ttps`, `detection_rules.source_cves`** — detection coverage mapping
-- **`detection_rules.log_sources`, `detection_rules.metadata_`** — Sigma-specific & custom data
-- **`automation_rules.trigger_config`, `automation_rules.conditions`, `automation_rules.actions`, `automation_rules.labels`** — rule definition
-- **`campaign.metadata_`** — campaign-specific data
-- **`enrichment_sources.rate_limit_config`, `enrichment_sources.config`** — source-specific settings
-- **`enrichment_results.raw_response`, `enrichment_results.parsed_data`** — caching enrichment results
-- **`entity_relationships.evidence_entry_ids`** — supporting evidence
-- **`dashboard.layout_config`** — grid layout
-- **`dashboard_widget.config`** — widget-specific settings
-- **`system_settings.settings`, `system_settings.secrets`** — global config & secrets
-- **`themes.css_variables`** — CSS custom properties
-- **`ai_provider.models`, `ai_provider.config`** — supported models & settings
-- **`ai_prompt_template.variables`** — template placeholders
-- **`ai_task.variables`** — task variable definitions
-- **`ai_task_assignment.config`** — model-specific execution config
-- **`intel_report.entities`** — referenced entities in report
-- **`report_template.variables`** — template placeholders
-- **`intelligence_requirements.linked_entities`** — PIR entity matching criteria
-- **`ai_conversations.messages`, `ai_conversations.entry_ids`** — copilot chat threads
-- **`entry_signals.payload`** — per-signal evidence for explanations
-- **`pipeline_plans.stages`** — data-defined stage composition
-- **`job_runs.detail`, `entry_pipeline_runs.detail`** — clipped execution context
-- **`detection_summaries.summary_content`** — full AI detection analysis
-- **`entity_maintenance_log.before` / `.after`** — entity snapshots for AI maintenance audit
-
-**Indexing JSONB:** Use `GIN` (Generalized Inverted Index) for JSON containment queries. Example:
+None of them has a GIN index. If you need to query inside one with containment (`@>`), add the index in a migration:
 
 ```sql
-CREATE INDEX idx_feeds_adapter_config_gin ON feeds USING gin(adapter_config);
+CREATE INDEX ix_feeds_adapter_config_gin ON feeds USING gin (adapter_config);
 ```
 
 ---
@@ -1791,238 +1137,102 @@ CREATE INDEX idx_feeds_adapter_config_gin ON feeds USING gin(adapter_config);
 
 ### Alembic Setup
 
-**Location:** `backend/alembic/` — Alembic migration scripts directory.
+- **Migrations:** `backend/alembic/versions/`
+- **Config:** `backend/alembic.ini`; `backend/alembic/env.py` reads the database URL from app settings
+- **Startup:** the api container runs `alembic upgrade head` from `backend/entrypoint.sh` when `RUN_MIGRATIONS=true`
 
-**Configuration:** `backend/alembic.ini` — Alembic configuration file.
-
-**Versions:** `backend/alembic/versions/` — migration files.
+The history has a single head. CI fails if there is more than one, and it also tests a fresh `upgrade head` and a `downgrade -1` followed by re-applying it. Find the current head with `alembic heads`.
 
 ### Migration Naming
 
-Migration file naming convention (by convention, not enforced by Alembic):
-
-```
-NNNN_descriptive_name.py         (legacy numeric style, e.g., 001_initial_schema.py)
-<uuid>_descriptive_name.py       (UUID style, e.g., 10cba6685383_merge_heads.py)
-```
-
-Common migration prefixes:
-- `add_` — add new column, table, or constraint
-- `remove_` — drop column or table
-- `rename_` — rename column or table
-- `create_` — explicitly create a new table
-- `merge_` — merge migration heads (after parallel development)
-- `sync_` — sync model changes (indexes, constraints)
-
-### Migration History
-
-**Current head migration** (as of 2026-09-13, single head):
-- `v7x9y1z3b5c7_embedding_verified_at.py` — `entry_embeddings.verified_at`
-
-**Recent notable migrations (September 2026):**
-- `s4t6u8w0x2y4` — `entry_embeddings` + the `vector` extension (pgvector)
-- `u6w8x0y2z4a6` — `entry_embeddings.threaded_checked_at` (thread scan marker)
-- `t5u7w9x1y3z5` — `story_threads`, `story_thread_entries`, `story_thread_beats`, `user_thread_states`
-- `q2r4s6t8u0w2` — per-analyst learned Radar weights
-- `r3s5t7u9w1x3` — `entity_field_claims` (profile-field provenance)
-
-**Recent notable migrations (August 2026):**
-- `h3c5e7g9i1k3` — canonical entity-type slugs (`malware_family` → `malware` across all `entity_type` columns)
-- `x2m4n6p8r0s1` — `tts_audio` cache table; `a1b2c3d4e5f6` added `ttl_days`
-- `y4p6q8r0s2t3` — `pending_autolink_matches` (dictionary-word matches held for AI confirmation)
-- `b2d4f6h8j0l2` — CVE EPSS jump tracking (`epss_previous_score`, `epss_changed_at`)
-- `c3e5g7i9k1m3` — `cve_affected` (NVD CPE affects-links)
-- `d4f6h8j0l2n4`–`f6h8j0l2n4p6` — entity resolution guardrails: `entity_norm()` + `normalized_name` computed columns, `entity_alias_index`, `entity_name_denylist`, `known_alias_map`
-- `g7i9k1m3o5q7` — `offensive_tools` → `tools` rename
-- `c3d5e7f9a1b3` — ransomware victim tracker (`ransomware_victims`, `victim_disclosures`)
-- `b3d5f7h9j1k3` — detection rule provenance (license, upstream_updated_at, references, source_products)
-- `f1a3c5e7g9i1` — AI-extraction provenance columns on the five extractable entity tables
-- `g2b4d6f8h0j2` — relationship adjudication columns (`adjudication_verdict`, `adjudicated_at`)
-- `z8w0y2a4c6e8`, `c2d3e4f5a6b7` — adjudicate stage bookkeeping on `ai_analysis_requests` (`adjudication_status`, `adjudicated_at`, `adjudication_queued_at`)
-- `a0b1c2d3e4f5` — `entity_relationships.reviewer_kept_entry_ids`
-- `b1c2d3e4f5a6` — drops the reviewer verdict columns from both proposal logs and the pending stale/cluster proposal rows
-
-**Notable migrations (July 2026):**
-- `d2a2b3c4d5g0` — CVE KEV flags + exploit-status provenance
-- `e2a2b3c4d5g1` — TTP ATT&CK catalog fields (multi-tactic, sub-technique linkage, matrix domain)
-- `f2a2b3c4d5g2` — dropped `boards`/`board_entries`
-- `g2a2b3c4d5g3`–`i2a2b3c4d5g5` — merge suggestion dismissals, PIR entity matching, entry sectors
-- `j2a2b3c4d5g6`, `l2a2b3c4d5g8` — AI copilot conversations + share tokens
-- `m2a2b3c4d5g9` — pruned ~1.9M duplicate bulk-sync enrichment_results rows
-- `n2b3c4d5e6f7`–`t6h8i9j0k1l2` — signal engine + pipeline observability (entry_signals, job_runs, user_entity_watches, ai_analysis queue, entry_pipeline_runs, pipeline_plans, signal feedback)
-- `u7i9j0k1l2m3` — cross-type reclassify tombstones
-
-**Notable migrations (September–October 2026):**
-- `q6h8j0l2n4p6` — sector as an entity: `sectors` table seeded from the vocabulary, `entry_sectors.sector_id` FK, the three target-sector junctions, enum CHECKs widened to `sector`
-- `r7i9k1m3o5q7` — `my_sectors` setting folded into per-user `sector` watches and removed
-
-**Previous major migrations:**
-- Phase 1: Core schema (users, feeds, entries, TTPs, CVEs, threat actors)
-- Phase 2: Intelligence requirements & campaigns
-- Phase 3: Enrichment sources & results
-- Phase 4: Entity relationships & notes
-- Phase 5: Detection rules & versions
-- Phase 6: Automation rules & logs
-- Phase 7: AI tasks & results
-- Phase 8: Dashboards & themes
-- Phase 9: Telegram mentions & shared entries
-- Phase 10: Vendor/Product entities
-- Phase 11: Index & constraint sync migrations
-- Phase 12: Feature flag columns, metadata JSONB migrations
+File names are `<revision>_<description>.py`. Older files use a short number (`016_glossary_terms.py`); newer ones use a 12-character revision id (`h5c6d7e8f9a0_feed_visible_to_visitors.py`). The docstring at the top of each file explains the change. Read it before changing anything nearby.
 
 ### Writing a New Migration
 
-**Step 1: Run Alembic create**
+Run these from `backend/`, against a database you can throw away.
+
+**1. Generate a draft.**
 
 ```bash
-cd backend
-alembic revision --autogenerate -m "descriptive_name"
+# from backend/
+alembic revision --autogenerate -m "short_description"
 ```
 
-Alembic will auto-detect model changes and create a draft migration file.
+Autogenerate compares the models with the database and writes a draft file.
 
-**Step 2: Review the generated migration**
+**2. Review it.** Open the new file in `backend/alembic/versions/` and check:
+- `upgrade()` and `downgrade()` both exist and undo each other
+- column types, constraints, indexes and `ondelete` behavior match the model
+- nothing unrelated was picked up. Autogenerate does not know about the migration-only indexes listed above and may try to drop them.
 
-Open `backend/alembic/versions/<rev>_descriptive_name.py` and verify:
-- `upgrade()` and `downgrade()` functions
-- Column definitions, constraints, indexes
-- Foreign key relationships (ONDELETE behavior)
-
-**Step 3: Manual edits (if needed)**
-
-For non-ORM changes (raw SQL, data migrations), edit the migration manually:
+**3. Edit by hand when needed.** Data changes and raw SQL go in by hand:
 
 ```python
 def upgrade() -> None:
-    op.add_column('entries', sa.Column('new_field', sa.String(255)))
-    op.create_index('idx_entries_new_field', 'entries', ['new_field'])
+    op.add_column("entries", sa.Column("new_field", sa.String(255)))
+    op.create_index("ix_entries_new_field", "entries", ["new_field"])
+
 
 def downgrade() -> None:
-    op.drop_index('idx_entries_new_field', 'entries')
-    op.drop_column('entries', 'new_field')
+    op.drop_index("ix_entries_new_field", table_name="entries")
+    op.drop_column("entries", "new_field")
 ```
 
-**Step 4: Test locally**
+**4. Test it** the way CI does:
 
 ```bash
-# Run migration up
+# from backend/, against a scratch database
 alembic upgrade head
-
-# Verify schema changes
-psql -U intelfeed -d intelfeed_test -c "\d entries"
-
-# Test rollback
 alembic downgrade -1
-
-# Test re-apply
 alembic upgrade head
 ```
 
-**Step 5: Commit and deploy**
-
-```bash
-git add backend/alembic/versions/<rev>_descriptive_name.py
-git commit -m "add: new feature schema"
-```
-
-Migrations run automatically on app startup (see `backend/entrypoint.sh` and `RUN_MIGRATIONS=true`).
+Don't run these against a dev database you care about. A downgrade drops data.
 
 ### Multiple Heads & Merging
 
-If two branches introduce migrations independently, you may have multiple heads:
+If two branches each add a migration, there will be two heads:
 
 ```bash
+# from backend/
 alembic heads
-# outputs:
-# <hash1>_feature_a.py
-# <hash2>_feature_b.py
+alembic merge -m "merge_feature_a_and_feature_b" <head_a> <head_b>
 ```
 
-To merge:
-
-```bash
-alembic merge --message "merge feature_a and feature_b"
-```
-
-This creates a new migration file with `down_revision` pointing to both parents.
+The merge file has a `down_revision` pointing at both parents.
 
 ### Migration Status
 
-**Check migration status:**
-
 ```bash
-alembic current          # current DB version
-alembic history          # all migrations
-alembic heads            # current branch tips
+# from backend/
+alembic current   # the revision the database is at
+alembic history   # every migration
+alembic heads     # branch tips
 ```
 
 ---
 
 ## Test Database Pattern
 
-### Setup
+The backend tests use their own database: the main database name plus `_test` (for example `intelfeed_test`). The name can have two more suffixes:
+- `PYTEST_DB_SUFFIX` — set it so two test sessions in one checkout don't share a database
+- the xdist worker name — added by `pytest -n auto`, so each worker gets its own
 
-Tests use a separate PostgreSQL database with suffix `_test`:
+`backend/tests/conftest.py` sets the database up like this:
+1. Once per session it creates the database if needed, then drops and recreates the `public` schema.
+2. It installs the `vector` extension and builds every table with `Base.metadata.create_all`. Migrations do not run, so migration-only indexes and CHECK constraints are missing from the test schema.
+3. It seeds the 21 sector rows.
+4. Each test runs inside a transaction that is rolled back afterwards. A `commit()` in the code under test becomes a savepoint release.
+5. Tests marked `@pytest.mark.committed_db` commit for real (to act like Celery workers with their own connections). After them, every table is truncated and the sectors are seeded again.
 
-```bash
-POSTGRES_DB=intelfeed_test
-```
-
-### Fresh Schema Per Test (Recommended)
-
-Each test should start with a fresh schema:
-
-```python
-# conftest.py
-@pytest.fixture(scope="function")
-async def db():
-    """Fresh schema per test."""
-    async with async_engine.connect() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-        await conn.run_sync(Base.metadata.create_all)
-        await conn.commit()
-    
-    async with async_session() as session:
-        yield session
-        await session.rollback()
-```
-
-### Alternative: Alembic for Tests
-
-If you need to test migrations:
-
-```bash
-alembic -x db_name=intelfeed_test upgrade head
-```
-
-### Test Cleanup
-
-Truncate key tables between test runs:
-
-```sql
-TRUNCATE TABLE entries, feeds, users, ttps, cves, threat_actors CASCADE;
-```
-
----
-
-## Summary: Key Schema Patterns
-
-1. **UUIDs everywhere** — UUID primary keys across all tables (idempotent, distributed-friendly)
-2. **Soft deletes via relationships** — `created_by` FKs do NOT cascade; delete users without losing their work
-3. **Cascade deletes for user data** — `UserEntryState`, `PlaybackProgress` cascade on user delete (personal data)
-4. **JSONB for extensibility** — Configuration, metadata, enrichment results stored in JSONB (easy schema evolution)
-5. **Temporal tracking** — `created_at`, `updated_at`, `first_seen_at`, `last_seen_at` on entity tables for trending
-6. **Dedup constraints** — Unique constraints on entity names, feed URLs, and entry GUIDs prevent duplicates
-7. **Junction tables with metadata** — EntryTTP, EntryCVE, etc. include `confidence`, `source`, `paragraph_indices` for extraction provenance
-8. **Relationship cardinality** — Most entity relationships are many-to-many (via junctions); campaigns are many-to-many with entries
-9. **Enrichment result caching** — `EnrichmentResult` table caches API responses with `expires_at` TTL
-10. **Audit trail** — Detection rules, automation logs, and comments track `created_by` and timestamps
+To check a migration, use `alembic upgrade head` against a scratch database, as above.
 
 ---
 
 ## File References
 
 - Models: `backend/app/models/`
+- Entity-type slugs: `backend/app/entity_types.py`
 - Migrations: `backend/alembic/versions/`
-- Config: `backend/alembic.ini`
-- Tests: `backend/tests/`
+- Alembic config: `backend/alembic.ini`, `backend/alembic/env.py`
+- Test fixtures: `backend/tests/conftest.py`

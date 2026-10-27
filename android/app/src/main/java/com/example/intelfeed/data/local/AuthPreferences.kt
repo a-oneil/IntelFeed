@@ -52,14 +52,15 @@ class AuthPreferences(
         val KEY_ACCESS_TOKEN = stringPreferencesKey("access_token")
         val KEY_REFRESH_TOKEN = stringPreferencesKey("refresh_token")
         val KEY_USERNAME = stringPreferencesKey("username")
-        const val DEFAULT_SERVER_URL = "https://intelfeed.cc"
+        // No built-in server: the address is entered on the login screen.
+        const val DEFAULT_SERVER_URL = ""
     }
 
     // Every flow below is distinctUntilChanged: DataStore emits on any write (e.g. each token
     // refresh), and collectors of isLoggedIn reload the whole app on each emission.
 
-    // Stored values are re-validated so an invalid URL saved by an older build falls back to the
-    // default instead of crashing Retrofit at startup.
+    // Stored values are re-validated so an invalid URL saved by an older build reads as no address
+    // (and the login screen) instead of crashing Retrofit at startup.
     val serverUrl: Flow<String> = store.data.map { prefs ->
         prefs[KEY_SERVER_URL]?.let(ServerUrl::normalize) ?: DEFAULT_SERVER_URL
     }.distinctUntilChanged()
@@ -76,10 +77,11 @@ class AuthPreferences(
         prefs[KEY_USERNAME]
     }.distinctUntilChanged()
 
-    // A token that can no longer be decrypted (Keystore key gone) counts as signed out, so the
-    // login screen shows instead of every request failing.
+    // A token that can no longer be decrypted (Keystore key gone), or no valid server address,
+    // counts as signed out, so the login screen shows instead of every request failing.
     val isLoggedIn: Flow<Boolean> = store.data.map { prefs ->
-        !accessCache.get(prefs[KEY_ACCESS_TOKEN]).isNullOrBlank()
+        !accessCache.get(prefs[KEY_ACCESS_TOKEN]).isNullOrBlank() &&
+            prefs[KEY_SERVER_URL]?.let(ServerUrl::normalize) != null
     }.distinctUntilChanged()
 
     private suspend fun ensureCacheLoaded() {

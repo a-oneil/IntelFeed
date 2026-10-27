@@ -8,7 +8,7 @@ object InAppLinks {
     private val ID = Regex("^[A-Za-z0-9-]{1,64}$")
 
     /**
-     * The article id in a web-app link such as https://intelfeed.cc/?entry=<id> (the form the AI
+     * The article id in a web-app link such as https://<your-server>/?entry=<id> (the form the AI
      * briefings use), or null. Only links on the signed-in server ([serverUrl]) count, so a
      * look-alike host can't route into the app.
      */

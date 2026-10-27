@@ -84,7 +84,7 @@ data class IntelFeedUiState(
     val isLoggedIn: Boolean = false,
     // False until the stored session has been read, so the login screen doesn't flash at startup.
     val sessionChecked: Boolean = false,
-    val serverUrl: String = "https://intelfeed.cc",
+    val serverUrl: String = "",
     val username: String? = null,
     val currentUser: UserProfile? = null,
     val loginLoading: Boolean = false,

@@ -58,7 +58,6 @@ class UserEnrichmentOverrideResponse(BaseModel):
     id: uuid.UUID
     source_id: uuid.UUID
     has_api_key: bool = False
-    trigger_mode_override: str | None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -66,13 +65,8 @@ class UserEnrichmentOverrideResponse(BaseModel):
 
 class UserEnrichmentOverrideCreate(BaseModel):
     api_key: str | None = None
-    trigger_mode_override: str | None = Field(default=None, pattern=r"^(auto|scheduled|manual)$")
 
-    model_config = ConfigDict(
-        json_schema_extra={
-            "example": {"api_key": "vt-user-api-key-0123456789abcdef", "trigger_mode_override": "manual"}
-        }
-    )
+    model_config = ConfigDict(json_schema_extra={"example": {"api_key": "vt-user-api-key-0123456789abcdef"}})
 
 
 class EnrichmentResultResponse(BaseModel):

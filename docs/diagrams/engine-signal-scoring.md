@@ -1,16 +1,19 @@
 # Signal scoring feedback loop — per-entry scoring, nightly self-tuning, analyst feedback
 
+How each entry gets its 0–10 priority score, how the nightly jobs retune the weights, and how analyst votes feed back in.
+
 ```mermaid
 flowchart TD
     subgraph SCORE["Per-entry scoring (workers/signal_tasks.py)"]
         TASK["score_entry_task<br/>(final chord callback)"] --> GATE{"signal_engine_shadow<br/>OR signal_engine_surface?<br/>(system_settings DB)"}
         GATE -- "both off" --> NOOP([no-op])
-        GATE -- "on" --> COMPUTE["compute_entry_signals(db, entry)<br/>intelligence/signals.py:966<br/>16 signal types across 5 families"]
+        GATE -- "on" --> COMPUTE["compute_entry_signals(db, entry)<br/>intelligence/signals.py:1130<br/>16 signal types across 5 families"]
         COMPUTE --> WEIGH["compute_priority_score(hits)<br/>Σ raw_score × idf_weight(rate) × family_mult<br/>(feed_echo: fixed −0.5 weight)"]
         WEIGH --> SCALE["scale_score(raw, cutoffs)<br/>rank against 30 days → 0–10<br/>(0 = nothing fired, 9 ≈ top 5%, 10 = top 1%)"]
         SCALE --> PERSIST["Upsert entry_signals rows<br/>(entry_id, signal_type unique;<br/>stale signals deleted)<br/>+ Entry.priority_raw / priority_score / scored_at"]
         PERSIST --> AIQ["enqueue_entry_analysis<br/>(one-pass AI extraction queue)"]
         PERSIST --> SSE["SSE entry_scored broadcast<br/>(surface flag only)"]
+        PERSIST --> AUTOR["run_scored_entry_automations<br/>(only when an on_entry_scored rule is enabled)"]
     end
 
     subgraph REDIS["Redis tuning state"]

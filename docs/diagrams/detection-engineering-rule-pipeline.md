@@ -1,5 +1,7 @@
 # Detection rule pipeline: extraction → validation → coverage
 
+For detection engineers. It shows how a rule found in an article becomes a draft, gets reviewed and published, and is then graded against your telemetry as `covered`, `library_only` or `no_rule`.
+
 ```mermaid
 flowchart TD
     A[Threat Intelligence Article] --> B["Rule Extraction<br/>rule_extraction.py — 5 extractors,<br/>6 output formats"]

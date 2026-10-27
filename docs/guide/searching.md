@@ -1,25 +1,32 @@
 # Searching
 
-One box, one results page. The field in the header is the only search input in
-the app, on every route and every screen size. Typing in it takes you to
-`/search`, which is the only place results are drawn.
+This page covers the search box, the results page, filters and saved searches.
+By the end you can find any article, entity or note, narrow the results, and
+save a search to come back to.
+
+There is one search box, in the header on every page. Typing in it opens the
+results page at `/search`.
 
 ![Search results for ransomware showing direct entity matches, grouped actors and malware, and a faceted filter rail](../assets/screenshots/search.png)
 
-*One query returns both articles and entities, with facets to narrow by type.*
+*One query returns both articles and entities, with filters to narrow by type.*
 
 ## The basics
 
-Open it with `/`. Type what you're looking for:
+Press `/` to jump to the search box. Then type what you're looking for:
 
-- `ransomware` — articles mentioning it
-- `APT29` — articles about APT29, *and* the APT29 entity itself
-- `CVE-2026-1234` — the CVE and everything linked to it
-- `LockBit builder` — articles containing both words
+- `ransomware` finds articles that mention it.
+- `APT29` finds articles about APT29, and the APT29 entity itself. (An
+  *entity* is a named thing IntelFeed tracks: a threat actor, malware, CVE and
+  so on. See [Entities and profiles](entities.md).)
+- `CVE-2026-1234` finds that CVE (a public ID for a software flaw) and
+  everything linked to it.
+- `LockBit builder` finds articles containing both words.
 
 ## Scope
 
-The box carries a scope chip. **Tab** cycles it:
+The search box has a scope chip that reads **in: everything**. Click it, or
+press **Tab** in the box, to cycle through the three scopes:
 
 | Scope | Results |
 |---|---|
@@ -27,136 +34,131 @@ The box carries a scope chip. **Tab** cycles it:
 | Workbench | Entities only |
 | Feeds | Articles only |
 
-It only decides what the results page shows — it never navigates you somewhere
-else. It starts on whatever suits the page you searched from and then stays
-where you put it.
+The scope only changes what the results page shows. It starts on whatever
+suits the page you searched from, then stays where you put it.
 
 ## Direct matches vs mentions
 
-Results come back in two halves, and the distinction is the most useful thing
-about the results page.
+Entity results come in two groups.
 
-**Direct matches** are things whose *name* you typed. Searching `lockbit`
-surfaces the LockBit group itself.
+- **Direct matches** are entities whose name, alias or ID matches what you
+  typed. Searching `lockbit` shows the LockBit group itself. The top one is
+  opened up so you can read it straight away.
+- **Mentions** are entities that only talk about it, such as other actor
+  profiles or detection rules that refer to LockBit. They are grouped by type
+  below the direct matches.
 
-**Mentions** are things that merely talk about it — thirty other actor profiles
-that cite LockBit, sixteen YARA rules that detect it, the articles that name it.
-
-Direct matches come first with the top one expanded; mentions are grouped by
-type below. The filter rail can show you one or the other if you only want one.
+Articles that match are listed too, when the scope includes them.
 
 ## The filter rail
 
-The rail on the left narrows results: scope, entity type with counts, matched-on,
-and for articles a published window, read state, feed, content type, tags, media
-and language.
+The rail on the left narrows the results. It has the scope, entity type (with
+counts), **Matched on**, and, for articles: a date range, **State** (Unread,
+Starred, Bookmarked, Has notes), **Feed**, **Content type**, **Tags**,
+**Media** and **Language**.
 
-Everything you tick is **written back into the search box as a filter**. Tick
-"Last 7 days" and "Unread" and the box now reads `date:>=… is:unread`. That's
-deliberate: you can see exactly what the rail did, hand-edit it, and save the
-result. Clicking around the rail is a decent way to learn the query syntax.
+Every box you tick is written into the search box as a filter. Tick
+"Last 7 days" and "Unread" and the box gains a `date:` filter and `is:unread`.
+You can see exactly what the rail did, edit it by hand, and save it. Clicking
+around the rail is a good way to learn the query syntax.
 
-On a phone the rail is a slide-over behind the **Filters** button.
+On a phone, the rail opens from the **Filters** button.
 
 ## Field filters
 
-Free text plus field restrictions. A few that earn their keep:
+You can mix free text with field filters. Some useful ones:
 
 ```
 feed:nvd cve.severity:critical
-# NVD articles carrying a critical CVE
+# NVD articles that mention a critical CVE
 
 threat_actor:APT29 date:>2026-01-01
 # APT29 articles from this year
 
 cve.kev:true cve.epss:>0.5
-# Known-exploited AND statistically likely to be attacked
+# Known to be exploited, and likely to be attacked
 
 signal:under_reported sort:radar
-# What the engine thinks is under-covered, in its own ranking
+# Stories IntelFeed thinks are under-covered, in priority order
 
 rule.data_source:sysmon rule.tactic:persistence
-# Persistence detections that run on telemetry you already collect
+# Persistence detection rules that use Sysmon logs
 
 category:"Vendor Blogs" is:unread
-# Unread articles from one folder of feeds
+# Unread articles from one feed category
 
 is:starred NOT type:youtube
-# Your starred entries, minus video
+# Your starred articles, minus videos
 ```
 
-There are 18 article fields and 94 intelligence fields. The box autocompletes
-them as you type and the **?** button opens the full reference card in-app.
-[Query language](../query-language.md) is the complete reference.
+The box suggests field names and values as you type. On the results page, the
+**?** button opens the syntax help and **Builder** opens a visual query
+builder. [Query language](../query-language.md) is the full reference.
 
-`sort:radar` is worth remembering: it orders by the signal engine's priority
-score — the same ranking the [Priority Queue](priority-queue.md) uses.
+`sort:radar` orders results by priority score, the same ranking the
+[Priority Queue](priority-queue.md) uses.
 
 ## Your notes are searchable
 
-Notes come back as their own result group, alongside actors and CVEs — the note
-you left on an article, the one on a threat actor's profile, and the standalone
-one in the Notes panel.
+Notes show up as their own group of results. That includes notes on
+articles, notes on entity profiles, and standalone notes from the Notes panel.
 
-The row shows the sentence that *matched*, not the note's first line, because a
-note is prose and its opening rarely says why it turned up. A note on an entity
-with no title is named for its subject: "Note on CVE-2026-20262".
+Each note result shows the sentence that matched, not the note's first line.
+A note on an entity with no title is named after its subject, for example
+"Note on CVE-2026-20262".
 
 ```
 note:fortibleed          # title or body
 note.tag:followup        # by tag
-note.about:cve           # notes you left on CVEs
+note.about:cve           # notes on CVEs
 note.about:entry         # notes on articles
-note.about:standalone    # notes attached to nothing
-note.pinned:true         # just the pinned ones
+note.about:standalone    # notes not attached to anything
+note.pinned:true         # pinned notes only
 note.type:analysis       # entity notes of one type
 ```
 
-`note.about:entry` pulls the articles through too, so you get the notes and what
-you wrote them on.
+`note.about:entry` also returns the articles the notes are on.
 
-**Notes are shared across the instance.** Search shows any note anyone wrote.
-Only the author or an admin can edit or delete one, but everyone can read it.
-Write accordingly.
+**Notes are shared.** Search shows notes written by anyone on the instance.
+Only the author or an admin can edit or delete a note, but everyone can read
+it.
 
 ## The command palette
 
-`Ctrl+K` / `⌘K`. Type a prefix to jump rather than search:
-
-- `feed:` — switch feeds
-- `rule:` — a rule in your library
-- `campaign:` — a campaign
-- `search:` — a saved search
-- `page:` — any page in the app
+Press `Ctrl+K` (or `⌘K` on a Mac) to open the command palette. With nothing
+typed, it lists the entities and pages you visited recently, then every
+command, grouped as **Run**, **Create**, **Go to**, **Browse** and **Manage**.
+Type to filter the list, for example "add feed", "create rule", "threat
+actors" or "tags". Admins also see admin pages such as the Engine console and
+Feed health.
 
 ## The rule library has its own search
 
-**Workbench → Rules Library** searches separately, because there a rule is the
-subject rather than one result type among many. It's a faceted list: type, and
-the rail's counts narrow with you across format, severity, tactic, technique,
-log source, repo, author, license, tags, and the actors and malware the rule's
-source article mentioned. Ticking two formats *widens* the list rather than
-emptying it.
+**Workbench → Rules Library** has its own search, because there the rules are
+the whole subject. You can filter by **Rule format**, **Severity**,
+**Source repo**, **ATT&CK tactic**, **Technique**, **Threat actor**,
+**Malware**, **Tool**, **Vendor**, **Product**, **Telemetry**, **Tags** and
+**License**. The counts update as you filter. Ticking two values in the same
+group shows rules that match either one.
 
-Use `rule:` filters in the main box when you want rules alongside other
-intelligence; use the library when rules are the work.
+Use `rule.` filters in the main search box when you want rules mixed with other
+results. Use the library when rules are the work. See
+[Writing detection rules](detection-rules.md).
 
 ## Saved searches
 
-Run a query, click **Save**, name it, and it pins to the sidebar.
+Run a query, click **Save**, and give it a name. It appears under
+**Saved Searches** in the sidebar.
 
 ```
 tag:to-rule is:unread                    # flagged for rule work, not yet read
-category:"Vendor Research" is:unread     # one folder, unread only
-type:youtube OR type:podcast             # everything to watch or listen to
-signal:under_reported                    # what the engine thinks is under-covered
+category:"Vendor Research" is:unread     # one category, unread only
+type:youtube OR type:podcast             # things to watch or listen to
+signal:under_reported                    # what IntelFeed thinks is under-covered
 ```
 
-**The number beside a saved search can lie; the search itself does not.**
-Opening one runs the real query and returns exactly what the search bar would.
-The count next to it is computed by a background job that skips the intelligence
-half, so any search built on an entity filter shows a number you can't trust —
-`country:"United States"` reads 0 next to a search that opens 5,896 articles.
+The number next to a saved search is worked out in the background, so it can
+lag behind, and it stops counting at 5,000. Opening the saved search always
+runs the real query, so the results themselves are always current.
 
-Counts are reliable for `tag:`, `feed:`, `category:`, `type:`, `date:`, `is:`
-and plain text. `signal:` and `url:` read low past about 500 matches.
+Next: [Entities and profiles](entities.md)

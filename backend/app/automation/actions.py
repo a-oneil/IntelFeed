@@ -91,7 +91,7 @@ def _render_template(template: str, entry: Entry, context: dict | None = None) -
 
     Supported variables are the single-brace ({ }) set declared in
     ``variables.NOTIFICATION_TEMPLATE_FIELDS``:
-      {title}, {url}, {author}, {summary}, {published_at},
+      {title}, {url}, {app_url}, {author}, {summary}, {published_at},
       {ai_summary}, {feed_name}
     """
     ctx = context or {}
@@ -101,6 +101,7 @@ def _render_template(template: str, entry: Entry, context: dict | None = None) -
     replacements = {
         "title": entry.title or "Untitled",
         "url": entry.url or "",
+        "app_url": _entry_app_url(entry.id),
         "author": entry.author or "Unknown",
         "summary": summary,
         "published_at": str(entry.published_at) if entry.published_at else "",
@@ -182,6 +183,7 @@ def _render_template_json_safe(template: str, entry: Entry, context: dict | None
     replacements = {
         "title": entry.title or "Untitled",
         "url": entry.url or "",
+        "app_url": _entry_app_url(entry.id),
         "author": entry.author or "Unknown",
         "summary": summary,
         "published_at": str(entry.published_at) if entry.published_at else "",
@@ -470,9 +472,9 @@ async def _action_run_ai_task(db: AsyncSession, entry: Entry, config: dict, user
     parsed = result if isinstance(result, dict) else None
     if parsed:
         ai_results[task_name] = parsed
-        # Convenience: store summary text for notification/webhook actions
-        if task_name == "summarization":
-            summary_text = parsed.get("summary") or parsed.get("text") or str(parsed)
+        # Main text for notification/webhook templates ({ai_summary})
+        summary_text = _extract_summary_text(parsed)
+        if summary_text:
             context["ai_summary"] = summary_text
 
     return {"status": "success", "task": task_name}

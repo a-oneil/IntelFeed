@@ -1,7 +1,8 @@
 # Writing detection rules
 
-Turning an article into something that actually fires in your SIEM, and keeping
-what you write.
+A detection rule is a search or pattern your security tools run to spot an
+attack. This page covers drafting, editing and storing rules. Drafting with AI needs an AI provider; writing
+and storing rules by hand does not.
 
 ![The Rules Library listing Sigma and SPL rules with severity, source CVE, and telemetry columns](../assets/screenshots/detection-rules.png)
 
@@ -9,86 +10,90 @@ what you write.
 
 ## Formats
 
-Nine, all validated for syntax when you save:
+IntelFeed checks the syntax of nine formats:
 
 | Format | Where it runs |
 |---|---|
-| Sigma | Vendor-neutral YAML, converted downstream |
+| Sigma | Vendor-neutral YAML, converted for your SIEM |
 | Splunk SPL | Splunk |
 | CrowdStrike QL | CrowdStrike Falcon |
 | Elastic QL | Elastic |
 | KQL | Microsoft Sentinel / Defender |
-| Snort / Suricata | Network IDS |
+| Snort / Suricata | Network intrusion detection |
 | YARA | File and memory scanning |
 | Nuclei | Vulnerability scanning templates |
 | Panther | Panther |
 
-Sigma is the sensible default if you're not sure — it's the one that travels.
+Not sure? Use Sigma; it converts to most tools.
 
 ## From an article to a rule
 
-Detection content is extracted from articles automatically: when a write-up
-contains rules, or describes behaviour concretely enough to derive one, that
-shows up on the article and feeds the *detection content* signal in the
-[Priority Queue](priority-queue.md).
+Rules and search queries already in an article are pulled out and shown on it.
+To draft one yourself:
 
-To work on one deliberately, open the article and use the AI panel (`a`), or
-start from the **Threats** board where the drafting controls sit next to the
-threat you're responding to. Pick a format and a focus — malware, campaign,
-vulnerability, or let it choose — and you get a draft, which will include:
+- Press `a` for the AI panel. If the article names techniques or CVEs but has
+  no rules, a suggestion reads "N TTPs but no detection rules". Click
+  **Gen Rules →** to draft a Sigma rule and a Splunk SPL rule, saved to the
+  library as drafts.
+- Or open the intel panel (`w`) and click **Gen Rules**.
+- Or use a threat's button on the **Threats** board. See [The Threats board](threats-board.md).
+- Or go to **Workbench → Rules Library → Generate Rules**. Pick articles,
+  formats and an **Analysis Focus** (Auto-detect, Campaign, Vulnerability,
+  Malware or Threat Actor), then click **Generate Analysis**. You get the
+  indicators, the ATT&CK techniques, and how detectable each step is with
+  ordinary logs.
 
-- the indicators it found (hashes, paths, registry keys, process names),
-- the ATT&CK techniques it mapped,
-- a feasibility read: whether this is detectable with ordinary telemetry or
-  needs something you probably don't collect.
-
-**The draft is a draft.** It has read one article. It doesn't know your
-environment, your naming conventions, or what's normal on your network. Treat it
-as a first pass that saves you the boilerplate, not as a rule.
+**A draft is only a draft.** The AI doesn't know your environment. Review it.
 
 ## The editor
 
-Syntax highlighting, bracket matching and auto-indent per format, with
-validation errors inline as you type — an undefined YARA variable or a malformed
-Sigma condition is flagged before you save, not after.
+Open a rule from the library, or click **+ New Rule**. The editor highlights
+syntax and flags errors as you type.
 
-## Saving to the library
+Side panels: **Details** (severity, description, tags, MITRE tactics, analyst
+notes), **AI Assist**, **Convert** (to another format), **History**, and
+**Compare**. Click **Save** to keep your changes.
 
-**Save → Library**, with a title, a description, tags, and the ATT&CK techniques
-(pre-filled from the draft). The description is worth writing properly: in six
-months it's the only thing that explains why the rule exists.
+Write a real description: in six months it is the only record of why the rule
+exists.
 
-Every edit creates a new version. The rule's detail page has the history, and
-you can revert — which is what you want the first time a tuning change makes a
-rule noisy at 3am.
+## Drafts and versions
+
+New and generated rules start as **Draft**. Click the **Draft** button to mark a
+rule **Published** when it is ready.
+
+Each save keeps the earlier version. To go back, open one in the **History**
+panel and click **Rollback to this version**.
 
 ## The library
 
-**Workbench → Rules Library.** A faceted table: search in the box and the rail's
-counts narrow with you across format, severity, tactic, technique, log source,
-repo, author, license, tags, and the actors, malware, tools, vendors and
-products the rule's source article mentioned.
+**Workbench → Rules Library** lists every rule. Search, or filter with the side
+rail by format, severity, tactic, technique, log source, repository, license,
+tags, and linked actors, malware, tools, vendors and products.
 
-Ticking two formats widens the list rather than emptying it — facets within a
-dimension are OR, across dimensions are AND.
+Two values in the same filter widen the list (either matches). Values in
+different filters narrow it (all must match).
+
+**Import** loads rules from files.
 
 ## Coverage and gaps
 
-**ATT&CK Matrix** colours the technique grid by what you've seen in your feeds
-and what you have rules for. The interesting cells are the ones where those two
-disagree: techniques showing up in your reading with nothing detecting them.
+**Workbench → ATT&CK Matrix** shades each technique by how often your feeds
+report it and whether you have a rule for it.
 
-**Telemetry Sources** is what makes this honest. Record what log sources you
-actually collect, and the app can tell the difference between "we have no rule"
-and "we have a rule that cannot possibly fire here". A rule's data sources are
-matched against your telemetry, so gap analysis reflects your environment rather
-than a generic one.
+In **Workbench → Telemetry Sources**, tick the log sources you collect.
+IntelFeed compares each rule's required sources with your list, so you can tell
+"we have no rule" from "we have a rule that can't fire here".
 
 ## Exporting
 
-From a rule, or from a multi-select in the library: the native format
-(`.yml`, `.spl`, `.kql`, `.yar`, …), or an **ATT&CK Navigator layer** (`.json`)
-for visualising coverage in Navigator itself.
+- **One rule:** **Export ↧** downloads it in its own format (`.yml`, `.spl`,
+  `.kql`, `.yar`, and so on). **Copy** puts it on the clipboard.
+- **Many rules:** **Export** in the library header downloads all rules as a ZIP,
+  or only the selected rows.
+- **Coverage:** **Export Navigator JSON** on the ATT&CK Matrix downloads a layer
+  for MITRE's ATT&CK Navigator.
 
-Rules can also be attached to campaigns and pulled into reports — see
-[Campaigns and reports](campaigns-and-reports.md).
+Rules can also go into reports. See [Campaigns and reports](campaigns-and-reports.md).
+
+Next: [Campaigns and reports](campaigns-and-reports.md)

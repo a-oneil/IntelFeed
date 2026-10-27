@@ -1,116 +1,124 @@
 # Priority Queue and watching
 
-The Priority Queue is the same articles as your inbox, ranked by how likely they
-are to matter. It's the answer to "I have four hundred unread and twenty
-minutes."
+The Priority Queue shows your unread articles ranked by how likely they are to
+matter. This page explains what the ranking looks at and how to steer it, so
+you can get through a big backlog in a short time.
 
-Open it from the sidebar, or search with `sort:radar` for the same ranking
-inside any query.
+Open it with **Priority Queue** in the sidebar. To use the same ranking inside
+any search, add `sort:radar` to the query.
 
 ## What it looks like
 
 ![Priority Queue story cards, each showing a score, outlet and article counts, and entity chips](../assets/screenshots/priority-queue.png)
 
-*Each card is one story, not one article — duplicate coverage is folded in and counted.*
+*Each card is one story, not one article. Repeat coverage is folded in and counted.*
 
+It works like the normal article list and reader, with the same keys and
+actions, but it is sorted by priority score instead of date. Two things are
+different.
 
-It is a normal entry list and reader — same keys, same actions — pinned to the
-priority ranking instead of date order. Two things are different:
+**The "Why this ranked" card.** Each article shows its score and the signals
+that raised it, with what each one added. You can always see why something
+ranked where it did.
 
-**A "Why" card** sits with each article, above the table of contents, listing
-the signals that lifted it and what each one contributed. The ranking is never a
-number you have to take on faith; it always shows its work.
+**Story rows.** When several outlets cover the same story, the queue shows it
+once, as one row you can open. The articles inside it are left out of the
+list. A story ranks by the score of its best unread article, and sits in the
+same highest-first list as single articles. Once you've read a story, it
+leaves the queue.
 
-**Story rows** appear inline when several outlets are covering the same thing.
-Rather than showing you the same story five times, the queue folds it into one
-row you can open — and the articles inside it are withheld from the list, so
-the story appears once, not once per outlet. A story ranks by the score of its
-best unread article, in the same list as everything else — the queue runs
-highest score first whether a row is a story or an article. A story you have finished reading drops
-out of the queue entirely.
-
-What a story row opens into — the spine, the coverage list, what "N new" counts,
-and why threads may be missing on a fresh instance — is in
-[Story threads](story-threads.md).
+What a story row opens into is covered in [Story threads](story-threads.md).
 
 ## What the ranking looks at
 
-Signals fall into five families. None of them is "this article is important" —
-each is a specific, checkable observation:
+The ranking uses *signals*: specific, checkable facts about an article. They
+come in five families.
 
-**Novelty** — is this new?
-- *novel entity* — first, or nearly first, mention of an actor, malware or tool
-- *entity resurgence* — something resurfacing after a long silence
-- *new pairing* — two entities appearing together for the first time
-- *scoop* — the source that broke it
+**Novelty**: is this new?
+- *novel entity*: the first, or nearly first, mention of an actor, malware or
+  tool
+- *entity resurgence*: something coming back after a long quiet spell
+- *new pairing*: two entities named together for the first time
+- *scoop*: this source broke the story
 
-**Coverage** — who else is saying it?
-- *source convergence* — independent outlets landing on the same story
-- *under-reported* — real substance, barely covered
-- *feed echo* — the opposite: everyone syndicating one piece
+**Coverage**: who else is reporting it?
+- *source convergence*: separate outlets reporting the same story
+- *under-reported*: real substance, but little coverage
+- *feed echo*: the opposite, many outlets reprinting one piece
 
-**Severity** — how bad, concretely?
-- *KEV added* — a CVE entered CISA's known-exploited catalogue
-- *EPSS jump* / *EPSS high* — exploitation probability rising, or already high
-- *weaponised PoC* — working exploit code exists
-- *critical CVSS*
+**Severity**: how bad is it?
+- *KEV added*: a CVE was added to CISA's Known Exploited Vulnerabilities list
+- *EPSS jump* / *EPSS high*: the predicted chance of attack (EPSS) is rising,
+  or already high
+- *weaponised PoC*: working exploit code exists
+- *critical CVSS*: the CVE has a critical severity score
 
-**Interest** — does this match *you*?
-- *PIR match* — it hits one of your intelligence requirements
-- *correlation event* — it connects to something you're already tracking
+**Interest**: does this match what you care about?
+- *PIR match*: it matches one of your intelligence requirements (PIRs, the
+  standing questions you need answered)
+- *correlation event*: it connects to something already being tracked
 
-**Content** — is there anything to act on?
-- *detection content* — the article contains rules or detection logic
-- *research depth* — substantive analysis rather than a news blurb
+**Content**: is there something to act on?
+- *detection content*: the article contains detection rules or logic
+- *research depth*: real analysis, not a short news item
 
-`signal:under_reported`, `signal:kev_added` and the rest work as search filters,
-so any signal can become a saved search.
+Each signal also works as a search filter, such as `signal:under_reported` or
+`signal:kev_added`, so you can turn any signal into a saved search.
+
+Rare signals count for more. A signal that fires on half the articles adds
+almost nothing to the score.
 
 ## Steering it
 
-The queue learns from you, in two ways you control directly.
+You can steer the ranking in three ways.
 
-**Watch and mute.** From any entity profile's **⋯** menu. Watched entities lift
-their articles and surface them even below the normal threshold; muted entities
-disappear from the queue entirely (but not from search or the feed list). Both
-are per-user. This is the biggest lever you have, and the most underused — watch
-your vendors, your products, the actors that go after your sector, and the sector
-itself: watching **Healthcare** boosts every article the analysis judged to describe
-healthcare as the target.
+**Watch and mute.** Use **Watch** on any entity profile, or **Mute entity** in
+its **⋯** menu (see [Entities and profiles](entities.md#watching-and-muting)).
+Watched entities raise their articles, and can bring an article into the queue
+even when its score is below the usual cut-off. Muted entities drop out of
+your queue, but still show in search and your feeds. Both are personal.
 
-**Thumbs.** The queue asks whether a ranking was right. Everyone's votes
-together nudge the shared ranking by at most ±10%, which is deliberate — a
-handful of votes should not swing what the whole instance sees.
+This is your biggest lever. Watch your vendors, your products, the actors that
+target your sector, and the sector itself. Watching **Healthcare**, for
+example, raises every article the analysis judged to be about attacks on
+healthcare.
 
-If your administrator has enabled **Personalised Radar**, you can additionally
-opt in under Settings → Reading → *Your Radar*, and then your own votes fit a
-personal weight per signal family: if novelty rankings keep wasting your time
-and KEV rankings keep earning it, the weights shift a Radar-sorted entry list
-through the API. The Priority Queue itself always runs in the order of the score
-each row shows, highest first, so the weights never move a row there. The panel
-shows each family's weight, the votes behind it, and both ways out (switch off,
-or discard the fitted weights).
+**Votes.** The "Why this ranked" card has **▲** (useful) and **▼** (noise)
+buttons. All
+users' votes together adjust the shared ranking by at most 10% either way, so a
+few votes can't swing what everyone sees.
 
-**Intelligence requirements.** *PIR match* is the one signal whose meaning you
-define. Write your standing requirements under **Workbench → Requirements** —
-the sectors, regions, technologies and actors you are actually responsible for
-— and articles matching them rise. If you do one piece of setup beyond watching
-entities, do this.
+If an admin has turned on **Personalised Radar**, a **Your Radar** card
+appears under **Settings → Reading**. Switch it on and your own votes set a
+personal weight for each signal family, refitted nightly. These weights change
+the order of article lists sorted by `sort:radar`. They don't reorder the
+Priority Queue, which always runs in the order of the score each row shows.
+They can bring extra articles into it, though. The card shows each family's
+weight and the votes behind it. You can pause it to see the shared ranking, or
+clear the learned weights and start over.
 
-One caveat worth knowing: the engine weights every signal by how *rare* it is,
-so a signal that fires on half the queue contributes almost nothing. If your
-requirements are written broadly enough that most articles match, PIR match
-stops distinguishing anything. Narrow requirements are worth more than many.
+**Intelligence requirements.** *PIR match* is the one signal you define. Write
+your requirements under **Intelligence → Requirements** in the Workbench
+sidebar: the sectors, regions, technologies and actors you are responsible
+for. Articles that match them rank higher. If you do one piece of setup beyond
+watching entities, do this.
+
+Keep requirements narrow. Because rare signals count for more, a requirement
+so broad that most articles match it stops helping. A few narrow requirements
+work better than many broad ones.
 
 ## Working it
 
-1. Open the Priority Queue and read the top of the ranking, not the whole list.
-2. For each, read the Why card before the article. It often answers the question
-   on its own — "EPSS jumped from 0.04 to 0.71" is frequently the whole story.
+1. Open the Priority Queue and work from the top. You don't need to read the
+   whole list.
+2. Read the "Why this ranked" card before the article. It often tells you
+   enough on its own, for example "EPSS jumped from 0.04 to 0.71".
 3. Star what needs real work. Mark the rest read.
-4. Thumbs-down anything that clearly wasted your time, so it happens less.
-5. When the ranking stops being interesting, stop. That's the signal the queue
-   exists to give you; there's no prize for reaching the bottom.
+4. Vote **▼** on anything that wasted your time, so you see less like it.
+5. When the items stop being interesting, stop. That is the point of the
+   queue; there's no prize for reaching the bottom.
 
-Give the thumbs a couple of weeks before deciding the ranking is wrong for you.
-It's adjusting weights from a small number of judgements at first.
+Give your votes a couple of weeks to have an effect before you decide the
+ranking is wrong for you.
+
+Next: [Story threads](story-threads.md)

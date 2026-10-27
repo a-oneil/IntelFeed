@@ -119,6 +119,7 @@ def ai_prompt_variable_contexts() -> dict:
 NOTIFICATION_TEMPLATE_FIELDS: list[str] = [
     "title",
     "url",
+    "app_url",
     "author",
     "summary",
     "published_at",
@@ -129,6 +130,7 @@ NOTIFICATION_TEMPLATE_FIELDS: list[str] = [
 ]
 
 _NOTIFICATION_DESCRIPTIONS: dict[str, str] = {
+    "app_url": _FIELD_DESCRIPTIONS["app_url"],
     "observables_count": "Captured observables sighted in the entry by a reporting door (feed-list rows excluded)",
     "observables": "Those observables, one per line, defanged, as 'kind value (role)'",
     "title": "Entry title",

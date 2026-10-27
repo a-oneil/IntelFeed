@@ -1,52 +1,105 @@
 # Users and access
 
-For whoever runs an instance for more than one person: how accounts get created, how to lock registration or gate it with an invite link, how to manage accounts, and what changes when each analyst keeps their own feed list. Everything here is under **Settings**, and everything except the first part is admin-only.
+This page is for whoever runs an instance for more than one person: sign-up,
+invites, accounts, browsing without an account, and per-person feed lists.
+Everything here is under **Settings → Users** and is admin-only, except the
+first section.
 
 ## Roles
 
-There are two: **user** and **admin**.
+There are two roles: **user** and **admin**.
 
-Anyone can read everything, write notes, build campaigns and reports, save searches and write detection rules. Admins additionally manage feeds, AI configuration, users, the engine and system settings — see [Getting started](getting-started.md#your-account).
+Everyone can read everything, add feeds, write notes, build campaigns and
+reports, save searches and write detection rules. Admins can also manage and
+delete feeds, and control AI configuration, users, the Engine and system
+settings. See [Getting started](getting-started.md#your-account).
 
-The **first human account** registered on a fresh instance becomes the admin; everyone after that is a user. (A built-in `system` service account, used for attribution on automatic work, never counts as "first" and never appears in the user list.) Promote a colleague to admin from **Settings → Users**.
+The **first person** to register becomes the admin; everyone after is a user. A
+built-in `system` account signs automatic work and never appears in the user
+list. To make a colleague an admin, edit
+their account in **Settings → Users**.
 
 ## Controlling registration
 
-**Settings → Users** has two settings at the top:
+**Settings → Users** has three switches at the top:
 
-- **Account Registration** — on by default. Turn it off to lock the instance: the register page refuses with "Account registration is currently disabled". There is no "add user" button — accounts only come from the register page — so to add someone to a locked instance, turn registration back on while they sign up.
-- **Invite Code** — a code the register page asks for. One is generated the moment the first account (the admin) registers, so a fresh install is never open to strangers by accident. Clear it and anyone who can reach the register page can sign up; change it whenever you want a fresh one.
+- **Account Registration**: on by default. Turn it off to lock the instance;
+  the register page then says "Account registration is currently disabled".
+  There is no "add user" button. To add someone to a locked instance, turn
+  registration on while they sign up, then off again.
+- **Invite Code**: a code the register page asks for. One is created when the
+  first account registers. Clear it and anyone who can reach the register page can sign up.
+- **Public read-only mode**: see [below](#letting-people-browse-without-an-account).
 
-Once a code is set, **Copy Invite Link** puts a link on your clipboard — your instance's `/register` page with the code already filled in. Send that instead of the bare code.
+When a code is set, **Copy Invite Link** copies a register link with the code
+filled in. Send that instead of the bare code.
 
-The code is one shared secret for the whole instance, not one per person. Anyone holding the link can register until you change the code or turn registration off, so send it the way you'd send a password, and change it after a batch of new people has joined.
+The code is one shared secret, valid until you change it or turn registration
+off. Send it like a password and change it after a group has joined.
 
 ## Managing accounts
 
-**Settings → Users** lists every account with its **role**, **status** (Active or Inactive), how many **feeds** it subscribes to, **last login** and **created** date. For each:
+**Settings → Users** lists every account with its **Role**, **Status** (Active
+or Inactive), **Feeds** (how many it subscribes to), **Last Login** and
+**Created** date. For each one:
 
-- **Edit** — change the username, role, active state, or set a new password (six characters minimum).
-- **Delete** — permanently removes the account, with a confirmation step.
+- **Edit**: change the username, role or active state, or set a new password
+  (at least six characters).
+- **Delete**: removes the account for good, after you confirm.
 
-Inactive accounts can't log in, and a session that's already open stops working on its next request. That makes **Inactive** the right tool for someone who has left, when you want to keep their name on the notes and comments they wrote; delete only when you're sure.
+An inactive account can't sign in, and an open session stops working on its
+next request. Make someone **Inactive** when they leave to keep their name on
+their notes and comments.
 
-You can't lock yourself out: an admin can't remove their own admin role, deactivate their own account or delete their own account. Ask another admin.
+An admin can't remove their own admin role, or deactivate or delete their own
+account. Ask another admin.
+
+## Letting people browse without an account
+
+**Public read-only mode** (off by default) lets anyone who can reach the
+instance look around without signing in.
+
+Visitors see articles, entity profiles, story threads and the built-in
+dashboards. They can't change anything, run AI, or see private work such as
+notes, campaigns, detection rules, observables and reports. The header shows
+**Sign in** in place of search, the copilot and Settings.
+
+Turning it on publishes nothing by itself, because every feed starts hidden
+from visitors. To show a feed, tick **Visible to visitors** in its **Readers**
+pane. Manual uploads are never shown.
+
+Full details: [Public read-only mode](../public-read-only-mode.md).
 
 ## What's personal and what's shared
 
-- **Personal:** each person's read, starred and bookmarked state, their personal tags, their saved searches, and their dashboard layouts.
-- **Shared across the instance:** entities and their profiles, notes, the feeds and their articles, and campaigns. Anyone can *read* any note; only its author or an admin can edit it ([Notes and sharing](notes-and-sharing.md)).
-- **Tags** come in two kinds: a *global* tag is one assignment everyone sees, a *personal* tag is yours alone ([Settings and personalising](settings.md)).
+- **Personal:** your read, starred and bookmarked state, the entities you
+  watch, your saved searches and your dashboard layouts.
+- **Shared:** entities and profiles, feeds and articles, notes and campaigns.
+  Anyone can *read* any note, but only its author or an admin can edit it
+  ([Notes and sharing](notes-and-sharing.md)).
+- **Tags:** tag names are shared. A *global* tag has one set of assignments
+  everyone sees; a *personal* tag's assignments are yours alone
+  ([Settings and personalising](settings.md#tags)).
 
 ## One feed list, or one per person
 
-By default there's a single shared feed list: a feed an admin adds is read by everyone, and **muting** a feed hides it from everyone.
+By default there's one shared feed list: a feed anyone adds is read by
+everyone, and **muting** a feed hides it for everyone.
 
-Turn on **per-user feed subscriptions** (admin; **Settings → Engine**, in the Feeds view, the setting labelled *Per-user feed subscriptions*) and each analyst gets their own list over the shared pool. Then:
+To give each analyst their own list from the shared pool, an admin turns on
+**Per-user feed subscriptions** (**Settings → Engine**, **Feeds** view). Then:
 
-- **Muting and unsubscribing are personal.** Removing a feed as a non-admin only unsubscribes *you*; the feed and its articles stay for everyone else. A feed with no subscribers stops being fetched. An admin can still delete a feed outright by purging it.
-- **Any user can import an OPML file**, and the feeds they import subscribe them (otherwise importing is admin-only).
-- **The Feeds column in Settings → Users** shows how much of the shared pool each account reads, with a count of muted feeds.
-- **New accounts** start subscribed to the instance's default list — the earliest admin's subscriptions.
+- **Muting and unsubscribing are personal.** A non-admin who removes a feed is
+  only unsubscribed; the feed stays for everyone else. A feed with no
+  subscribers stops being fetched. An admin can still delete a feed for
+  everyone.
+- **Any user can import an OPML file** into their own list.
+- **The Feeds column in Settings → Users** shows how many shared feeds each
+  account reads and has muted.
+- **New accounts** start with the same subscriptions as the earliest admin.
 
-**Check your muted feeds before you switch it on.** While the setting is off, muting a feed changes the shared feed only; nobody's personal list records it. Turning the setting on switches everyone to their personal lists, so any feed muted while it was off reappears for everyone. Note which feeds are muted first, and re-mute what should stay muted afterwards.
+**Check your muted feeds before you turn it on.** Mutes made while the setting
+is off aren't recorded on anyone's personal list, so those feeds show up again
+for everyone. Note which feeds are muted first, and mute them again afterwards.
+
+Next: [When something isn't working](troubleshooting.md)

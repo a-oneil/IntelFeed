@@ -17,7 +17,7 @@ class CommentCreate(BaseModel):
             "example": {
                 "commentable_type": "detection_rule",
                 "commentable_id": "d5b2c8a1-4f3e-4b7a-9c6d-2e8f1a0b3c4d",
-                "content": "@austin this Sigma rule needs a filter for legit admin use of PsExec.",
+                "content": "This Sigma rule needs a filter for legit admin use of PsExec.",
             }
         }
     )

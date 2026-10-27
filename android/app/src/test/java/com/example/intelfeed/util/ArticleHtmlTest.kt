@@ -13,7 +13,7 @@ import org.junit.Test
 
 class ArticleHtmlTest {
 
-    private fun parse(html: String, url: String? = "https://example.com/posts/1", server: String? = "https://intelfeed.cc"): List<Block> =
+    private fun parse(html: String, url: String? = "https://example.com/posts/1", server: String? = "https://intelfeed.example.com"): List<Block> =
         ArticleHtml.parse(html, url, server)
 
     @Test
@@ -60,7 +60,7 @@ class ArticleHtmlTest {
                 "<img src=\"https://t.example.com/p.gif\" width=\"1\" height=\"1\"><img src=\"data:image/png;base64,AAA\">"
         )
         assertEquals(
-            listOf("https://intelfeed.cc/api/proxy/image?url=x", "https://cdn.example.com/a.png", "https://example.com/posts/b.png"),
+            listOf("https://intelfeed.example.com/api/proxy/image?url=x", "https://cdn.example.com/a.png", "https://example.com/posts/b.png"),
             blocks.filterIsInstance<Image>().map { it.url }
         )
     }

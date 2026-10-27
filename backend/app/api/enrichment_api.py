@@ -233,7 +233,6 @@ async def list_user_overrides(
             id=o.id,
             source_id=o.source_id,
             has_api_key=bool(o.api_key_encrypted),
-            trigger_mode_override=o.trigger_mode_override,
             created_at=o.created_at,
         )
         for o in overrides
@@ -263,8 +262,6 @@ async def upsert_user_override(
     override = result.scalar_one_or_none()
 
     if override:
-        if body.trigger_mode_override is not None:
-            override.trigger_mode_override = body.trigger_mode_override
         if body.api_key is not None:
             from app.core.encryption import encrypt_value
 
@@ -273,7 +270,6 @@ async def upsert_user_override(
         override = UserEnrichmentOverride(
             created_by=user.id,
             source_id=source_id,
-            trigger_mode_override=body.trigger_mode_override,
         )
         if body.api_key:
             from app.core.encryption import encrypt_value

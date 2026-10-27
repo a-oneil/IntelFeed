@@ -1,12 +1,15 @@
 # Application Overview
 
+The main parts of IntelFeed and how data moves between them, from feed collection to entity profiles, search, detection and AI. Each box links to its source file.
+
 ```mermaid
 flowchart TD
 
 subgraph group_collection["Collection and reading"]
   node_reader["Reader interface<br/>[App.tsx]"]
   node_feed_adapters["Feed adapters"]
-  node_ingest["Ingestion API<br/>[ingest.py]"]
+  node_ingest["Feed fetch worker<br/>[feed_tasks.py]"]
+  node_upload["Manual upload API<br/>[ingest.py]"]
   node_entry[("Article records<br/>[entry.py]")]
   node_feed[("Feed records<br/>[feed.py]")]
 end
@@ -30,7 +33,7 @@ subgraph group_detection["Detection and automation"]
   node_automation["Automation engine<br/>[engine.py]"]
   node_ai_engine["AI task engine<br/>[engine.py]"]
   node_ai_capabilities["AI capabilities<br/>[capabilities.py]"]
-  node_claude_provider["Claude Code provider"]
+  node_claude_provider["AI providers<br/>(Ollama, Claude API, Claude Code CLI,<br/>OpenAI-compatible)"]
 end
 
 subgraph group_platform["Application platform"]
@@ -55,9 +58,11 @@ node_sources(("Threat sources"))
 node_analyst -->|"uses"| node_reader
 node_reader -.->|"requests data"| node_api
 node_sources -->|"provide content"| node_feed_adapters
-node_feed_adapters -.->|"collects feeds"| node_ingest
+node_ingest -.->|"runs adapters"| node_feed_adapters
 node_ingest -.->|"stores articles"| node_entry
 node_ingest -.->|"uses feeds"| node_feed
+node_analyst -->|"uploads files"| node_upload
+node_upload -.->|"stores articles"| node_entry
 node_entry -->|"links entities"| node_autolink
 node_entry -.->|"enriches entities"| node_enrichment
 node_enrichment -->|"calls adapters"| node_enrichment_sources
@@ -86,7 +91,8 @@ node_engine_settings -->|"supports engine UI"| node_reader
 
 click node_reader "https://github.com/a-oneil/intelfeed/blob/main/frontend/src/App.tsx"
 click node_feed_adapters "https://github.com/a-oneil/intelfeed/tree/main/backend/app/adapters"
-click node_ingest "https://github.com/a-oneil/intelfeed/blob/main/backend/app/api/ingest.py"
+click node_ingest "https://github.com/a-oneil/intelfeed/blob/main/backend/app/workers/feed_tasks.py"
+click node_upload "https://github.com/a-oneil/intelfeed/blob/main/backend/app/api/ingest.py"
 click node_entry "https://github.com/a-oneil/intelfeed/blob/main/backend/app/models/entry.py"
 click node_feed "https://github.com/a-oneil/intelfeed/blob/main/backend/app/models/feed.py"
 click node_autolink "https://github.com/a-oneil/intelfeed/blob/main/backend/app/intelligence/autolinker.py"
@@ -101,7 +107,7 @@ click node_detection "https://github.com/a-oneil/intelfeed/blob/main/backend/app
 click node_automation "https://github.com/a-oneil/intelfeed/blob/main/backend/app/automation/engine.py"
 click node_ai_engine "https://github.com/a-oneil/intelfeed/blob/main/backend/app/ai/engine.py"
 click node_ai_capabilities "https://github.com/a-oneil/intelfeed/blob/main/backend/app/ai/capabilities.py"
-click node_claude_provider "https://github.com/a-oneil/intelfeed/blob/main/backend/app/ai/providers/claude_code_provider.py"
+click node_claude_provider "https://github.com/a-oneil/intelfeed/tree/main/backend/app/ai/providers"
 click node_api "https://github.com/a-oneil/intelfeed/blob/main/backend/app/main.py"
 click node_database "https://github.com/a-oneil/intelfeed/blob/main/backend/app/database.py"
 click node_settings "https://github.com/a-oneil/intelfeed/blob/main/backend/app/services/system_settings.py"
@@ -123,7 +129,7 @@ classDef toneMint fill:#14532d,stroke:#4ade80,stroke-width:1.5px,color:#f8fafc
 classDef toneRose fill:#881337,stroke:#fb7185,stroke-width:1.5px,color:#f8fafc
 classDef toneIndigo fill:#312e81,stroke:#818cf8,stroke-width:1.5px,color:#f8fafc
 classDef toneTeal fill:#134e4a,stroke:#2dd4bf,stroke-width:1.5px,color:#f8fafc
-class node_reader,node_feed_adapters,node_ingest,node_entry,node_feed toneBlue
+class node_reader,node_feed_adapters,node_ingest,node_upload,node_entry,node_feed toneBlue
 class node_autolink,node_enrichment,node_enrichment_sources,node_entities toneAmber
 class node_correlation,node_priority,node_search,node_meilisearch toneMint
 class node_detection,node_automation,node_ai_engine,node_ai_capabilities,node_claude_provider toneRose

@@ -1,193 +1,204 @@
 # Adding and managing feeds
 
-Feeds are where everything else comes from. An instance with twelve good
-sources is more useful than one with two hundred, so this is worth doing
-deliberately rather than importing everything you've ever subscribed to.
-
-Adding and editing feeds is admin-only on most instances.
+Feeds are where every article comes from. This page covers adding, sorting
+and tuning feeds, and spotting broken ones. Any signed-in user can add a feed;
+admin-only settings are marked.
 
 ![The Engine feed health view showing 307 feeds split into healthy, stale and erroring, with a table of erroring feeds](../assets/screenshots/feeds.png)
 
-*Feed health lives in the Engine console: what is healthy, what is stale, and what is erroring.*
+*Feed health in the Engine console: which feeds are healthy, stale or erroring.*
+
+Start small. Twelve good sources beat two hundred.
 
 ## Adding one
 
-**+ Add Feed** in the sidebar. The modal has five tabs.
+Click the **+** button (**Add feed**) in the sidebar. The **Add Feed** window
+has six tabs: **Feed URL**, **GitHub Repo**, **Web Scraper**, **Bluesky**,
+**Telegram** and **OPML**. If your instance has categories, you must pick one
+before you can subscribe.
 
 ### URL
 
-The one you'll use most. Paste an RSS or Atom feed URL and IntelFeed works out
-what it is — these are all recognised from the URL alone, no separate tab
-needed:
+Paste an RSS or Atom feed URL, or a website's address, and click **Discover**
+to see a preview. YouTube channels and podcast feeds are recognised: videos
+appear as entries, and episodes play in the app. Pick a category and a **Poll
+Interval** (default 30 minutes), then click **Subscribe**.
 
-| Paste this | You get |
-|---|---|
-| A YouTube channel | New videos, with transcripts where available |
-| A subreddit | New posts |
-| A Mastodon account | New posts |
-| An NVD feed | CVEs as structured entries, not just article text |
-| A podcast feed | Episodes, playable in the app |
-| Anything else RSS/Atom | Articles |
-
-If a site gives you a choice of feed URLs, prefer the full-content one over the
-summary-only one. IntelFeed's extraction is only as good as the text it gets,
-and a feed that ships two-sentence teasers produces thin entity linking.
+Prefer a site's full-text feed over a summary-only one.
 
 ### GitHub repo
 
-Paste a repository URL to follow its releases or commits. Useful for tooling you
-depend on, and for security advisories from projects in your stack.
+Follow the files in a repository, such as a detection rule repo. Enter
+`owner/repo`, the **Branch**, and **File Patterns** (one per line, for example
+`**/*.yml`). Tick **Include file content** to import the files themselves.
+
+**Set Up All Detection Repos** subscribes you to a ready-made set of public
+detection rule repositories (SigmaHQ, Elastic, Splunk, YARA and more) in one
+click.
 
 ### Web scraper
 
-For a site with no feed at all. Point it at a page and IntelFeed extracts
-articles from it. Expect this to be less reliable than a real feed — scrapers
-break when sites redesign — so check it a week after adding it. The feed is
-named after the page's own title on its first fetch; rename it under Identity
-if that title is unhelpful.
+For a site with no feed. Give it the **Blog URL** and IntelFeed pulls the
+article links from the page. Narrow it with a **Link Selector** or **URL
+Pattern**, and cap it with **Max Articles**.
+
+Scrapers break when a site is redesigned, so check it again after a week. To
+rename it, edit the feed's **Display name**.
 
 ### Bluesky
 
-Follow an author, a custom feed, or a standing search query. The search option
-is the interesting one: a standing query for your product name is a cheap
-early-warning source.
+Choose a **Mode**:
+
+- **Author**: every post from one handle.
+- **Custom feed**: a Bluesky custom feed (you can paste its bsky.app link).
+- **Search**: posts that match a query. A search for your product's name is a
+  cheap early warning.
 
 ### Telegram
 
-Channels. This one needs a one-time admin bootstrap before the tab will work —
-see [Telegram setup](#telegram-setup) below.
+An admin has to set Telegram up once on the server first. See
+[Telegram setup](#telegram-setup) below. After that, **Discover from my
+Telegram account** lists the channels the account has joined.
 
 ## Categories
 
-Every feed belongs to a category, and categories are the folders in your
-sidebar. This is the single most consequential decision in feed setup, because
-categories are what you filter by for the rest of the instance's life.
+Categories are the folders in your sidebar, and every feed sits in one. Group
+feeds by how you want to read them, not by name or vendor. For example:
 
-The add-feed form asks for one whenever any exist. A feed created without one
-through the API, the `create_feed` tool, or an OPML outline outside any folder
-is filed in the category most feeds of its type already sit in; it stays
-uncategorized only when no feed of that type has a category yet.
+- *Government advisories*: CISA, NCSC, national CERTs.
+- *Vendor research*: the big security vendor blogs.
+- *CVE feeds*: NVD and similar.
+- *Ransomware*: leak sites and tracking blogs.
+- *Community*: Reddit, Mastodon, Bluesky, YouTube.
 
-Group by **how you'd want to read them**, not by alphabet or by vendor:
+A good test: when something breaks at 9am, which folder do you open first?
 
-- *Government advisories* — CISA, NCSC, national CERTs
-- *Vendor research* — the big vendor blogs
-- *CVE feeds* — NVD and friends
-- *Ransomware* — leak sites, tracking blogs
-- *Community* — Reddit, Mastodon, Bluesky, YouTube
+Create categories before you import in bulk. A feed added without a category
+goes into the one most feeds of its type already use.
 
-The test: when something is on fire at 9am, which folder do you open? Build
-those folders.
-
-Create categories before you bulk-import, not after — re-filing a hundred feeds
-by hand is tedious in a way that filing them once is not.
+Right-click a category (or long-press on a phone) for **Rename...**,
+**Extract Intelligence**, and, for admins, **Edit Category...** and
+**Delete Category**.
 
 ### Category settings and defaults
 
-**Edit Category…** in a category's right-click menu (admin) changes settings on
-every feed in it at once: fetch interval, retention, ratings, and what runs on
-each new article. Two switches at the bottom say where the change goes:
+**Edit Category...** (admins only) changes settings for every feed in a
+category: check interval, retention, source ratings, and what runs on each new
+article. Two switches decide where the change goes:
 
-- **Apply to the feeds here now** — every feed currently in the category.
-- **Save the pipeline settings as this category's default** — a feed added to
-  the category later (by hand, from OPML, or from a starter pack) starts with
-  the analysis mode, AI analysis, tool entities, CVE/ATT&CK lookup and
-  detection-rule settings saved here. Anything the category doesn't set uses
-  the global default, and a value a feed is added with explicitly wins.
+- **Apply to the feeds here now**: changes every feed in the category today.
+- **Save the pipeline settings as this category's default**: a feed added to
+  this category later (by hand, from OPML, or from a starter pack) starts with
+  the settings under "What runs on each new article". Interval, retention and
+  ratings are never saved as defaults.
 
-The defaults apply once, when a feed is created. Changing them, or moving an
-existing feed into the category, doesn't change feeds that are already there —
-that's what the first switch is for.
+Defaults apply only when a feed is created. They don't change feeds already in
+the category, or a feed moved into it. Use the first switch for that.
 
 ## Importing in bulk
 
-**Settings → Feeds & Import** takes an OPML file, which is what every other
-feed reader exports. Categories come across as folders.
+The **OPML** tab in the **Add Feed** window imports an OPML file, the format
+other feed readers export. Folders become categories. Importing is admin-only,
+unless per-user feed subscriptions are on (see
+[Users and access](users-and-access.md)).
 
-After an import, go through and delete. An OPML export from a general reader
-will carry a lot that has nothing to do with security, and every feed you keep
-is volume you have to triage forever.
+To save a copy of your feeds, use **Export OPML** under
+**Settings → Feeds & Export** (admins only).
+
+After an import, delete what isn't about security.
 
 ## Per-feed settings
 
-Click a feed to edit it:
+Right-click a feed in the sidebar for **Edit Feed...**, **Mark All Read**,
+**Refresh**, **Mute**, **Extract Intelligence**, **Translate Articles**,
+**Move to...** and **Unsubscribe**.
 
-- **Category** — move it between folders.
-- **Fetch interval** — how often it's polled, in minutes. Leave it alone unless
-  you have a reason. A source that publishes twice a week doesn't need polling
-  every five minutes, and a fast-moving one you're actually watching might
-  deserve more.
-- **Retention** — how long entries from this feed are kept before being cleaned
-  up. Blank means the instance default. Set a short retention on high-volume,
-  low-value sources; that's how you keep the database from being 80% noise.
-- **Skip articles whose title contains** (admin, Source pane) — phrases, one
-  per line, matched anywhere in the title and ignoring case. A matching article
-  is dropped before it is saved, so it never reaches tagging, the AI or
-  scoring. The pane shows how many of the feed's last 100 titles the list would
-  have dropped, with examples, before you save. Use it for a source's recurring
-  stubs: "ISC Stormcast For" on SANS ISC Diary, "Chromium CVE-" on MSRC.
-  Articles already saved stay.
-- **Mute** — stop it appearing in your reading views without deleting it and
-  losing its history. Muting does not stop the pipeline: the feed's articles are
-  still tagged, analysed by the AI and scored, and the public RSS proxy leaves
-  muted feeds out. A muted feed's Overview shows its AI runs and tokens over the
-  last 30 days, and an admin can turn its AI off there in one click.
-- **Source assessment** — your own note on how much you trust it.
+**Edit Feed...** has six panes:
+
+- **Overview**: what the feed has produced, and its last error.
+- **Identity**: the **Display name**, the **Category**, and two switches.
+  **Receive new articles** off pauses the feed. **Count toward unread** off
+  mutes it (see below).
+- **Source** (admins): the URL, feed type, **Check for new articles** (poll
+  interval), **Keep articles for** (retention; anything extracted stays), and
+  **Translate articles into English**. Set short retention on busy, low-value
+  feeds.
+- **Pipeline** (admins): what runs on each new article.
+- **Assessment**: your rating of the source's reliability, timeliness and
+  relevance, plus notes.
+- **Readers** (admins): who reads the feed, and **Visible to visitors** for
+  public read-only mode.
+
+**Skip articles whose title contains** (admins, Source pane) drops articles
+whose title contains a listed phrase (one per line, any case) before they are
+saved, so they never reach tagging, AI or scoring. The pane shows how many of
+the last 100 titles would have been dropped. Use it for repeating filler, such
+as "ISC Stormcast For" on SANS ISC Diary. Articles already saved stay.
+
+**Mute** hides a feed's articles from your main list and unread count. You can
+still open the feed. Its articles are still tagged, analysed by AI and scored.
+A muted feed's Overview shows its AI use over the last 30 days, and an admin can
+switch its AI off there in one click. Muted feeds sit in a **Muted** fold in the
+sidebar.
 
 ## Keeping feeds healthy
 
-Feeds die quietly. A site moves its feed URL, a scraper's target redesigns, a
-token expires — and the feed just stops producing, which looks identical to "a
-quiet week" until you go looking.
+Feeds stop working quietly, and a silent feed looks like a quiet week. Check
+once a month in:
 
-Two places to check:
-
-- **The Feed Activity and Feed Health widgets** on the Dashboard. A feed whose bar went to zero
-  and stayed there is the thing to investigate.
-- **Settings → Engine → Feeds** (admin) shows fetch status, last success, error
-  counts and reliability per feed. This is the definitive view when something's
-  wrong.
-
-Worth doing monthly. It takes five minutes and it's the difference between a
-blind spot you know about and one you don't.
+- The **Feed Activity** and **Feed Health** widgets on the Dashboard. A bar that
+  drops to zero and stays there needs a look.
+- **Settings → Engine**, **Feeds** view (admins). It lists dead, empty,
+  erroring, stale and disabled feeds, with each feed's errors and value.
 
 ## Duplicates
 
-The same story arrives from five sources, and IntelFeed deduplicates on content
-rather than just URL, so syndicated copies collapse into one entry. The
-*feed echo* signal in the [Priority Queue](priority-queue.md) uses the same
-information in the other direction — an article everyone is running verbatim
-gets pushed **down**, because volume of coverage isn't evidence of importance.
+IntelFeed compares the title and the start of the text, so copies of one story
+become one entry. The Priority Queue ranks
+an article that many feeds copy word for word **lower**, because more copies
+doesn't mean more important. See [Priority Queue and watching](priority-queue.md).
 
 ## Telegram setup
 
-Telegram is the one source that can't be set up from the UI alone. Reading
-channels needs a real Telegram **user** account — bots cannot read channels — so
-an admin has to do a one-time bootstrap:
+Telegram is the one source an admin sets up on the server first. Reading
+channels needs a real Telegram user account, because bots can't read channels.
 
-1. Create a Telegram API application at my.telegram.org and note the `api_id`
-   and `api_hash`.
-2. Put `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` in the server's `.env` and
-   restart the api and worker services.
-3. Run the interactive login script on the host to write a persistent session
-   file.
-4. Back that session file up. Losing it means doing this again.
+1. Create a Telegram API application at my.telegram.org and note the
+   `api_id` and `api_hash`.
+2. Put `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` in the server's `.env` file
+   and restart the services.
+3. Run the interactive login script on the server. It saves a session file.
+4. Back up that session file. If you lose it, you have to log in again.
 
-**Settings → Telegram** has the full walkthrough in-app, with the exact
+**Settings → Telegram** (admins) walks through each step with the exact
 commands.
 
-Use a dedicated identity for this, not a personal account. It joins the channels
-you track, and some of those are places you'd rather not be present under your
-own name.
+Use a separate Telegram account, not your personal one; it joins every channel
+you track.
 
-Once it's running, **Workbench → Telegram Mentions** is where channel chatter
-surfaces.
+To find channels, open **Workbench → Telegram Mentions**: the channels your
+articles link to, and where each was mentioned.
+
+## Adding content by hand
+
+The upload button next to **+** in the sidebar (**Ingest**) adds content that
+isn't in a feed. It has three tabs:
+
+- **URLs**: one link per line. A GitHub repository link adds one item per file.
+- **Files**: drop many files at once. A `.zip` file is unpacked.
+- **Paste**: paste a report, an advisory or a chat log.
+
+Tick **Indicator list** when each line is one indicator (IP, domain, hash or
+URL). Each item becomes an entry under **Manual Uploads** and is processed like
+any article. The original file can be downloaded from the entry.
 
 ## What happens after you add a feed
 
-The feed is polled, new entries are stored and deduplicated, each one is scanned
-for known entities and linked, and — if AI is configured — summarised and
-extracted from. Then it lands in your entry list.
+IntelFeed saves new articles, merges duplicates, and links the entities each
+mentions. If AI is set up, it also summarises each article.
 
-The first poll can take a few minutes. If a feed still shows nothing after an
-hour, check Engine → Feeds for its error state.
+The first check can take a few minutes. If a feed still shows nothing after an
+hour, look for its error in the feed's **Overview** pane or in
+**Settings → Engine**, **Feeds** view.
+
+Next: [Reading and triage](reading-and-triage.md)

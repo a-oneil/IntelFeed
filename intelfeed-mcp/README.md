@@ -112,7 +112,7 @@ stayed small end to end:
 
 | Variable | Default | |
 |---|---|---|
-| `INTELFEED_API_URL` | `https://intelfeed.cc` | as for the skill CLIs |
+| `INTELFEED_API_URL` | — | required: your instance's address, as for the skill CLIs |
 | `INTELFEED_USERNAME` / `INTELFEED_PASSWORD` | — | required |
 | `INTELFEED_MCP_ALLOW_WRITES` | off | exposes `write_action` |
 | `INTELFEED_MCP_WRITE_TOOLS` | the allowlist above | comma-separated; can only narrow it |

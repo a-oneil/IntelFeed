@@ -455,6 +455,78 @@ def _validate_panther(content: str) -> ValidationResult:
     return ValidationResult(valid=not has_errors, errors=errors, suggestions=suggestions)
 
 
+# Top-level request blocks a Nuclei template can carry (`requests` is the
+# pre-v3 spelling of `http`); a workflow template has `workflows` instead.
+_NUCLEI_PROTOCOLS = (
+    "http",
+    "requests",
+    "dns",
+    "file",
+    "network",
+    "tcp",
+    "headless",
+    "ssl",
+    "websocket",
+    "whois",
+    "code",
+    "javascript",
+    "workflows",
+)
+_NUCLEI_SEVERITIES = ("info", "low", "medium", "high", "critical", "unknown")
+
+
+def _validate_nuclei(rule_content: str) -> ValidationResult:
+    """Validate a Nuclei template: an id, an info block, and at least one request block."""
+    errors: list[ValidationError] = []
+    suggestions: list[str] = []
+
+    def error(message: str) -> None:
+        errors.append(ValidationError(line=None, column=None, severity="error", message=message))
+
+    if not rule_content.strip():
+        error("Empty rule content")
+        return ValidationResult(valid=False, errors=errors)
+
+    try:
+        template = yaml.safe_load(rule_content)
+    except yaml.YAMLError as e:
+        mark = getattr(e, "problem_mark", None)
+        return ValidationResult(
+            valid=False,
+            errors=[
+                ValidationError(
+                    line=mark.line + 1 if mark else None, column=None, severity="error", message=f"Invalid YAML: {e}"
+                )
+            ],
+        )
+
+    if not isinstance(template, dict):
+        error("Nuclei template must be a YAML mapping")
+        return ValidationResult(valid=False, errors=errors)
+
+    if not template.get("id"):
+        error("Required field 'id' missing")
+
+    info = template.get("info")
+    if not isinstance(info, dict):
+        error("Required field 'info' missing")
+    else:
+        for required_field in ("name", "author", "severity"):
+            if not info.get(required_field):
+                error(f"Required field 'info.{required_field}' missing")
+        severity = str(info.get("severity") or "").lower()
+        if severity and severity not in _NUCLEI_SEVERITIES:
+            error(f"Invalid severity '{severity}' (expected one of: {', '.join(_NUCLEI_SEVERITIES)})")
+        if not info.get("tags"):
+            suggestions.append("Consider adding 'info.tags' so the template can be selected by tag")
+
+    if not any(template.get(p) for p in _NUCLEI_PROTOCOLS):
+        error(f"No request block (expected one of: {', '.join(_NUCLEI_PROTOCOLS)})")
+
+    has_errors = any(e.severity == "error" for e in errors)
+    return ValidationResult(valid=not has_errors, errors=errors, suggestions=suggestions)
+
+
 def validate_rule(rule_type: str, rule_content: str) -> ValidationResult:
     """Route to appropriate validator."""
     validators = {
@@ -465,7 +537,7 @@ def validate_rule(rule_type: str, rule_content: str) -> ValidationResult:
         "crowdstrike_ql": validate_crowdstrike_ql,
         "snort_suricata": validate_snort_suricata,
         "yara": validate_yara,
-        "nuclei": validate_sigma,  # YAML-based, reuse Sigma YAML validator
+        "nuclei": _validate_nuclei,
         "panther": _validate_panther,
     }
 

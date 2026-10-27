@@ -1,10 +1,12 @@
 # Entry lifecycle — feed poll → fetch → persist → autolink/extract → correlate → score
 
+Every step an article goes through, from the poller picking its feed to scoring, AI review, and the jobs that run around it.
+
 ```mermaid
 flowchart TD
     subgraph POLLING["① Feed Polling (Celery Beat — every 60s)"]
         BEAT[/"celery-beat: poll_due_feeds"/]
-        BEAT --> QUERY_FEEDS["Query feeds WHERE<br/>is_active=TRUE AND<br/>last_fetched + interval ≤ NOW<br/>ORDER BY last_fetched ASC NULLS FIRST<br/>LIMIT 50"]
+        BEAT --> QUERY_FEEDS["Query feeds WHERE<br/>is_active=TRUE AND<br/>last_fetched + interval ≤ NOW<br/>(interval doubles per failure, cap 24h)<br/>ORDER BY last_fetched ASC NULLS FIRST<br/>LIMIT 50"]
         QUERY_FEEDS --> REDIS_LOCK{"Redis NX lock<br/>feed_fetch:{id}<br/>TTL 10min"}
         REDIS_LOCK -- "Already locked<br/>(in-flight)" --> SKIP([Skip])
         REDIS_LOCK -- "Lock acquired" --> DISPATCH["fetch_feed.delay(feed_id)"]
@@ -81,7 +83,6 @@ flowchart TD
         REQ_TASK --> SCORE_TASK
 
         TASK_FAN -.->|"dispatched directly,<br/>not part of chord"| RULE_TASK["run_entry_automations(eid, fid)"]
-        TASK_FAN -.->|"per-feed batch"| KEYWORD_TASK["_check_keyword_alerts(eid)"]
     end
 
     subgraph AUTOLINK["⑦ Autolinking (Aho-Corasick Entity Recognition)"]
@@ -98,7 +99,7 @@ flowchart TD
         SPLIT --> AC_SCAN["Phase 1: Aho-Corasick scan<br/>word-boundary check +<br/>ambiguity filter (short names<br/>must be capitalized)"]
         AC_SCAN --> REGEX_SCAN["Phase 2: Regex scan<br/>CVE-YYYY-NNNN<br/>TNNNN(.NNN) — validated against<br/>MITRE catalog, revoked IDs remapped"]
         REGEX_SCAN --> CONFIDENCE_W["Confidence scoring:<br/>canonical → high, alias → medium<br/>downgraded by feed<br/>reliability_rating weight"]
-        CONFIDENCE_W --> STORE_LINKS["Store junction records<br/>EntryThreatActor / EntryMalware /<br/>EntryCountry / EntryCVE / EntryTTP /<br/>EntryVendor / EntryProduct /<br/>EntryTool / EntryMitigation<br/>ON CONFLICT DO NOTHING —<br/>provisional dictionary-word matches<br/>held in pending_autolink_matches<br/>(promoted/rejected by AI reconcile)"]
+        CONFIDENCE_W --> STORE_LINKS["Store junction records<br/>EntryThreatActor / EntryMalware /<br/>EntryCountry / EntryCVE / EntryTTP /<br/>EntryVendor / EntryProduct /<br/>EntryTool / EntryMitigation<br/>ON CONFLICT DO NOTHING —<br/>provisional dictionary-word matches<br/>held in pending_autolink_matches<br/>(promoted or rejected by the one-pass AI analysis)"]
         STORE_LINKS --> UPDATE_STATS["Update entity stats<br/>article_count++<br/>last_seen_at = now"]
     end
 
@@ -115,12 +116,12 @@ flowchart TD
         RULE_EXTRACT -- "Yes" --> RULE_PARSE["extract_rules_from_content()<br/>Detects: Sigma (YAML) ·<br/>Elastic TOML (→ elastic_ql / kql) ·<br/>YARA · Snort/Suricata · Splunk SPL"]
         RULE_PARSE --> RULE_STORE["store_extracted_rules()<br/>→ DetectionRule + version v1"]
 
-        TTP_STORE --> SYNC_IDX["sync_entity_search_indexes<br/>(if any extracted)"]
+        TTP_STORE --> SYNC_IDX["index_entities()<br/>(only the entities this entry touched)"]
         CVE_STORE --> SYNC_IDX
     end
 
     subgraph ENRICHMENT["⑨ Enrichment (auto + Celery Beat schedules)"]
-        ENRICH_PIPE["enrich_entity(trigger=auto)<br/>for new entities →<br/>EnrichmentSource adapters:<br/>NVD, OSV, CVEDetails, Wikipedia, …"]
+        ENRICH_PIPE["auto_enrich_entity()<br/>for new entities →<br/>EnrichmentSource adapters:<br/>NVD, OSV, CVEDetails, Wikipedia, …"]
         SCHEDULED["Beat-scheduled syncs:<br/>sync-kev-feed — every 6h<br/>cve-nvd-refresh — daily 12:00 UTC<br/>cve-nvd-backfill — daily 01:30 UTC<br/>epss-bulk-sync — daily 06:30 UTC<br/>github-poc-scan — daily 05:00 UTC<br/>cybergeist sync — daily 02:30 UTC<br/>mitre-attack-sync — weekly Sun 03:00<br/>malpedia-sync — weekly Sun 03:30<br/>wikipedia-bulk-sync — weekly Wed 04:00"]
     end
 
@@ -141,7 +142,7 @@ flowchart TD
     end
 
     subgraph AUTOMATION["⑪ Automation Engine"]
-        RULE_TASK --> AUTO_ENGINE["Triggers: on_new_entry ·<br/>on_keyword_match · on_cve_detected ·<br/>on_correlation_event · on_schedule"]
+        RULE_TASK --> AUTO_ENGINE["Triggers: on_new_entry ·<br/>on_keyword_match · on_cve_detected ·<br/>on_correlation_event · on_entry_scored ·<br/>on_observable_captured · on_schedule · on_manual"]
         AUTO_ENGINE --> EVAL_CONDITIONS["Conditions: feed/feed_type/author/tag<br/>matches · content_contains ·<br/>severity_above · priority_score_above ·<br/>has_signal · entity_watchlisted ·<br/>read/starred/bookmarked/note state"]
         EVAL_CONDITIONS -- "Match" --> ACTIONS["Actions: run_ai_task · add/remove tags ·<br/>send_notification (Slack + in-app) ·<br/>run_webhook · mark/star/bookmark/hide ·<br/>create_note · extract_* · generate rules ·<br/>add_to_campaign · create_intel_report ·<br/>branch (conditional sub-chains)"]
         CORR_AUTO --> AUTO_ENGINE
@@ -155,6 +156,7 @@ flowchart TD
     subgraph SIGNAL["⑬ Signal Scoring & Triage"]
         SCORE_TASK --> SIG_SCORE["Signal engine writes<br/>Entry.priority_score + entry_signals"]
         SIG_SCORE --> ENQ["enqueue_entry_analysis()<br/>→ one-pass AI batch queue<br/>(ai_one_pass_enabled + budget)"]
+        ENQ -.->|"analysis lands"| ADJ["adjudicate_entry_task<br/>(ai queue) — AI review of what the<br/>analysis wrote; adjudication_mode"]
         SIG_SCORE --> TRIAGE["Triage queue (services/triage.py)<br/>legacy composite, or the stored<br/>priority_score when the signal<br/>engine is surfaced"]
         SIG_SCORE --> PQ["Priority Queue<br/>GET /entries/priority-queue —<br/>radar-ranked unread with open<br/>story threads folded in as rows"]
     end

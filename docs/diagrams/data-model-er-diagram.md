@@ -1,5 +1,7 @@
 # Database ER Diagram
 
+For developers. It shows the main PostgreSQL tables and how they connect. It is not every table: small lookup and audit tables appear only as notes at the bottom, and some (themes, glossary terms, share links, report templates) are left out.
+
 ```mermaid
 erDiagram
     USER ||--o{ ENTRY_STATE : creates
@@ -28,9 +30,12 @@ erDiagram
     USER ||--o{ AI_CONVERSATION : owns
     USER ||--o{ USER_ENTITY_WATCH : creates
     USER ||--o{ ENTRY_SIGNAL_FEEDBACK : creates
+    USER ||--o{ USER_FEED_SUBSCRIPTION : subscribes
+    USER ||--o{ INGEST_BATCH : uploads
 
     FEED ||--o{ ENTRY : hosts
     FEED ||--o{ PODCAST : has
+    FEED ||--o{ USER_FEED_SUBSCRIPTION : "subscribed by"
     CATEGORY ||--o{ FEED : groups
 
     ENTRY ||--o{ ENTRY_STATE : tracks
@@ -117,6 +122,10 @@ erDiagram
 
     AUTOMATION_RULE ||--o{ AUTOMATION_LOG : logs
 
+    DASHBOARD ||--o{ DASHBOARD_WIDGET : holds
+
+    INGEST_BATCH ||--o{ INGEST_BATCH_ITEM : contains
+    INGEST_BATCH_ITEM |o--o| ENTRY : creates
 
     INTELLIGENCE_REQUIREMENT ||--o{ REQUIREMENT_MATCH : matches
 
@@ -134,6 +143,9 @@ erDiagram
     AI_TASK ||--o{ USER_AI_ROUTE : routes
     AI_TASK ||--o{ AI_RESULT : results
 
+    ENTITY_FIELD_CLAIM {
+        string note "who asserted each entity field value (provenance)"
+    }
     ENTITY_RELATIONSHIP {
         string note "polymorphic typed edges between intel entities"
     }

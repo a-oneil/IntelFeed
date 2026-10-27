@@ -92,7 +92,7 @@ class DayDividerTest {
             code block
             ```
         """.trimIndent()
-        val blocks = MarkdownText.parse(md, "https://intelfeed.cc")
+        val blocks = MarkdownText.parse(md, "https://intelfeed.example.com")
         val h2 = blocks[0] as ArticleHtml.Paragraph
         assertEquals(TextKind.H2, h2.kind)
         assertEquals("TL;DR", h2.text.text)
@@ -101,7 +101,7 @@ class DayDividerTest {
         assertEquals("Three themes converge today, see Mind the Gap.", para.text.text)
         assertTrue(para.text.spans.any { it.kind == SpanKind.BOLD && para.text.text.substring(it.start, it.end) == "converge" })
         val link = para.text.spans.single { it.kind == SpanKind.LINK }
-        assertEquals("https://intelfeed.cc/?entry=cc568026-0b81-49ea-869c-a79c56351fee", link.url)
+        assertEquals("https://intelfeed.example.com/?entry=cc568026-0b81-49ea-869c-a79c56351fee", link.url)
         assertEquals("Mind the Gap", para.text.text.substring(link.start, link.end))
 
         assertEquals(TextKind.H3, (blocks[2] as ArticleHtml.Paragraph).kind)
@@ -120,7 +120,7 @@ class DayDividerTest {
         // snake_case isn't italic; a lone asterisk stays; unsafe link schemes are dropped but the text kept.
         assertEquals("apt_group_29 and 5 * 3", MarkdownText.inline("apt_group_29 and 5 * 3").text)
         assertTrue(MarkdownText.inline("apt_group_29").spans.isEmpty())
-        val js = MarkdownText.inline("[click](javascript:alert(1))", "https://intelfeed.cc")
+        val js = MarkdownText.inline("[click](javascript:alert(1))", "https://intelfeed.example.com")
         assertTrue(js.spans.none { it.kind == SpanKind.LINK })
         val bold = MarkdownText.inline("**[Title](https://example.com/a)** and *it*")
         assertEquals("Title and it", bold.text)
@@ -131,10 +131,10 @@ class DayDividerTest {
     @Test
     fun onlyEntryLinksOnTheSignedInServerOpenInTheApp() {
         val id = "cc568026-0b81-49ea-869c-a79c56351fee"
-        assertEquals(id, InAppLinks.entryId("https://intelfeed.cc/?entry=$id", "https://intelfeed.cc"))
-        assertNull(InAppLinks.entryId("https://intelfeed.cc.evil.com/?entry=$id", "https://intelfeed.cc"))
-        assertNull(InAppLinks.entryId("https://example.com/?entry=$id", "https://intelfeed.cc"))
-        assertNull(InAppLinks.entryId("https://intelfeed.cc/?entry=../../x", "https://intelfeed.cc"))
-        assertNull(InAppLinks.entryId("https://intelfeed.cc/about", "https://intelfeed.cc"))
+        assertEquals(id, InAppLinks.entryId("https://intelfeed.example.com/?entry=$id", "https://intelfeed.example.com"))
+        assertNull(InAppLinks.entryId("https://intelfeed.example.com.evil.com/?entry=$id", "https://intelfeed.example.com"))
+        assertNull(InAppLinks.entryId("https://example.com/?entry=$id", "https://intelfeed.example.com"))
+        assertNull(InAppLinks.entryId("https://intelfeed.example.com/?entry=../../x", "https://intelfeed.example.com"))
+        assertNull(InAppLinks.entryId("https://intelfeed.example.com/about", "https://intelfeed.example.com"))
     }
 }
