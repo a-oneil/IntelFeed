@@ -763,10 +763,10 @@ def status_for(confidence: float) -> str:
 # ---------------------------------------------------------------------------
 
 
-#: Kinds and doors that trigger a reputation lookup on creation (sources with
-#: trigger_mode=auto — Shodan InternetDB is keyless; VirusTotal / GreyNoise
-#: once their keys are configured).
-AUTO_ENRICH_KINDS = frozenset({"ipv4", "domain", "sha256", "md5", "sha1"})
+#: Kinds and doors that queue lookups on creation, at every enabled source
+#: with trigger_mode=auto that takes the kind (Shodan InternetDB, Team Cymru
+#: and RDAP are keyless; VirusTotal once its key is configured).
+AUTO_ENRICH_KINDS = frozenset({"ipv4", "ipv6", "domain", "sha256", "md5", "sha1"})
 AUTO_ENRICH_DOORS = frozenset({"ai_extraction", "manual", "publisher_ioc"})
 #: A publisher's indicator file can carry hundreds of fresh rows for one
 #: article; only this many of them queue a reputation lookup (the rest stay

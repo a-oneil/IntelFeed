@@ -1537,10 +1537,10 @@ const OBSERVABLE_COLUMNS: ColumnDef<ObservableResponse>[] = [
   },
   {
     key: "reputation", label: "Reputation", width: 180, minWidth: 120, hideable: true, defaultHidden: true,
-    sortValue: (o) => (o.reputation ? 1 : 0),
+    sortValue: (o) => (reputationLabel(o) ? 1 : 0),
     render: (o) =>
-      o.reputation ? (
-        <span title={`Enriched ${o.reputation.enriched_at ?? ""}`}>{reputationLabel(o.reputation)}</span>
+      reputationLabel(o) ? (
+        <span title={o.reputation?.enriched_at ? `Enriched ${o.reputation.enriched_at}` : undefined}>{reputationLabel(o)}</span>
       ) : (
         <span className={styles.muted}>—</span>
       ),

@@ -1,0 +1,17 @@
+{
+ "131.135.6.71.origin.asn.cymru.com": [
+  "10439 | 71.6.128.0/17 | US | arin | 2006-02-01"
+ ],
+ "AS10439.asn.cymru.com": [
+  "10439 | US | arin | 1997-08-05 | CARINET - CariNet, Inc., US"
+ ],
+ "8.8.8.8.origin.asn.cymru.com": [
+  "15169 | 8.8.8.0/24 | US | arin | 2023-12-28"
+ ],
+ "AS15169.asn.cymru.com": [
+  "15169 | US | arin | 2000-03-30 | GOOGLE - Google LLC, US"
+ ],
+ "8.8.8.8.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.6.8.4.0.6.8.4.1.0.0.2.origin6.asn.cymru.com": [
+  "15169 | 2001:4860::/32 | US | arin | 2005-03-14"
+ ]
+}

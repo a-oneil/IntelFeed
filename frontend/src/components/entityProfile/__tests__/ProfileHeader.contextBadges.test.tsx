@@ -62,10 +62,10 @@ describe("ProfileHeader context badges", () => {
 
   it("gives a badge that mirrors a column that column's provenance marker", () => {
     const [mirrored, plain] = contextBadgeSpecs([
-      { source_type: "greynoise", key: "classification", label: "noise · benign", tone: "success", field: "reputation.gn_classification" },
+      { source_type: "greynoise", key: "noise_class", label: "noise · benign", tone: "success", field: "noise_class" },
       { source_type: "vulncheck", key: "in_kev", label: "VulnCheck KEV", tone: "critical" },
     ]);
-    expect(mirrored.provenanceKey).toBe("reputation.gn_classification");
+    expect(mirrored.provenanceKey).toBe("noise_class");
     expect(plain.provenanceKey).toBeUndefined();
   });
 });

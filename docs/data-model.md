@@ -340,7 +340,11 @@ Table `observables`: the indicator ledger. An IOC (indicator of compromise) is a
 - `status` (indexed, default `active`) — set from current confidence: `active` at 0.5 or above, `aging` below 0.5, `expired` below 0.15
 - `is_denied` — analyst denial, separate from status
 - `infra_tag` (indexed) — marks shared infrastructure (shared hosting, CDN, URL shortener) so publishing can leave it out without deleting it
-- `reputation` (JSONB)
+- `reputation` (JSONB) — the reputation summary enrichment writes (Shodan ports, hostnames, tags and vulns; VirusTotal `vt_*`; GreyNoise `gn_noise`, `gn_riot`, `gn_name`; `enriched_at`)
+- `asn` (Integer), `asn_org`, `geo_country` (2 letters) — the IP's origin AS, its name and the allocation's country (Team Cymru, VirusTotal)
+- `registered_at` — when the registrable domain was registered (RDAP)
+- `popularity_rank` (indexed) — the domain's rank in the daily Tranco top-1M list; null when it isn't in it
+- `noise_class` — GreyNoise: `malicious`, `benign` or `unknown` when seen mass-scanning, `not_seen` otherwise
 - `created_via` (indexed) — which judgment step created the row, with its base confidence:
 
   | `created_via` | Source | Base confidence |
@@ -586,7 +590,7 @@ Bookkeeping for the one-pass `entry_analysis` (one AI call that reads an article
 
 #### EnrichmentSource
 Table `enrichment_sources`: one external data source.
-- `source_type` (unique) — `nvd`, `epss`, `cisa_kev`, `mitre_attack`, `vulncheck`, `osv`, `malpedia`, `github_poc`, `cvedetails`, `wikipedia`, `greynoise`, `shodan`, `virustotal`, and the catalog sources `misp_galaxy`, `metasploit`, `mitre_cwe`, `ransomware_live`, `cybergeist`, `wikidata`, `endoflife`
+- `source_type` (unique) — `nvd`, `epss`, `cisa_kev`, `mitre_attack`, `vulncheck`, `osv`, `malpedia`, `github_poc`, `cvedetails`, `wikipedia`, `greynoise`, `shodan`, `virustotal`, `cymru`, `rdap`, and the catalog sources `misp_galaxy`, `metasploit`, `mitre_cwe`, `ransomware_live`, `cybergeist`, `wikidata`, `endoflife`, `tranco`
 - `display_name`, `is_enabled` (seeded on for a source with scheduled jobs; a disabled source's jobs skip)
 - `trigger_mode` (default `manual`) — `auto` or `manual`
 - `api_key_encrypted`, `config` (JSONB)

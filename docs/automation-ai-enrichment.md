@@ -571,7 +571,7 @@ All five tables are in `backend/app/models/enrichment.py`.
 
 ### Source Registry
 
-Each source is a class that carries its own manifest (`backend/app/enrichment/manifest.py`): the entity types it `applies_to` (for observables, the kinds it handles), what it `requires` (`("api_key",)` when it can't run without one), its `quota`, its `egress` (`none`: downloads a whole catalog; `low`: sends public identifiers such as a CVE id or a group name; `shares_ioc`: sends an observable's value to a third party), its `license`, its scheduled `jobs`, and its `outputs`. Lookup sources extend `EnrichmentAdapter` (`backend/app/enrichment/base.py`) and look up one entity per `enrich()` call; catalog sources (`backend/app/enrichment/catalogs.py`, and `wikidata.py` and `endoflife.py` beside it) only have jobs.
+Each source is a class that carries its own manifest (`backend/app/enrichment/manifest.py`): the entity types it `applies_to` (for observables, the kinds it handles), what it `requires` (`("api_key",)` when it can't run without one), its `quota`, its `egress` (`none`: downloads a whole catalog; `low`: sends public identifiers such as a CVE id or a group name; `shares_ioc`: sends an observable's value to a third party), its `license`, its scheduled `jobs`, and its `outputs`. A `scope` (column → values) narrows the entities a source looks up on its own: Team Cymru and RDAP set `{"status": ("active",)}`, so aged and expired observables are never queued by the `new` or `backfill` lanes, nor counted in its fill rate or backfill gap. `Source.scope_filter()` turns the kinds and the scope into one SQL condition that `enqueue()` and the console share; a person's request (`manual` lane, the Enrich button) looks up any entity the source applies to. Lookup sources extend `EnrichmentAdapter` (`backend/app/enrichment/base.py`) and look up one entity per `enrich()` call; catalog sources (`backend/app/enrichment/catalogs.py`, and `wikidata.py` and `endoflife.py` beside it) only have jobs.
 
 `SOURCE_REGISTRY` (`backend/app/enrichment/registry.py`) lists them all; `ADAPTER_REGISTRY` holds the lookup sources. Generated from the manifests:
 
@@ -595,6 +595,8 @@ Each source is a class that carries its own manifest (`backend/app/enrichment/ma
 | `virustotal` | VirusTotal v3 | lookup | observable (ipv4, domain, md5, sha1, sha256) | manual | Yes | 4 / 60 s | — | shares_ioc |
 | `greynoise` | GreyNoise Community | lookup | observable (ipv4) | manual | No (optional key) | 10 / 3600 s | — | shares_ioc |
 | `shodan` | Shodan InternetDB | lookup | observable (ipv4) | auto | No | 30 / 60 s | — | shares_ioc |
+| `cymru` | Team Cymru | lookup | observable (ipv4, ipv6; active) | auto | No | 60 / 60 s | — | low |
+| `rdap` | RDAP | lookup | observable (domain; active) | auto | No | 1 / 1 s | 1 / 1 s | low |
 | `misp_galaxy` | MISP Galaxy | catalog | threat_actor | manual | No | 10 / 3600 s | — | none |
 | `metasploit` | Metasploit modules | catalog | cve | manual | No | 10 / 3600 s | — | none |
 | `mitre_cwe` | MITRE CWE | catalog | cwe | manual | No | 10 / 3600 s | — | none |
@@ -602,6 +604,7 @@ Each source is a class that carries its own manifest (`backend/app/enrichment/ma
 | `cybergeist` | Cybergeist | catalog | threat_actor, malware | manual | No | 10 / 3600 s | — | none |
 | `wikidata` | Wikidata | catalog | vendor, product, country | manual | No | 30 / 60 s | — | low |
 | `endoflife` | endoflife.date | catalog | product | manual | No | 1 / 1 s | — | none |
+| `tranco` | Tranco | catalog | observable (domain) | manual | No | 1 / 1 s | 1 / 1 s | none |
 
 The ceiling is the most the source documents it allows; `PUT /api/enrichment/sources/{id}` refuses a `rate_limit_config` above it with a 400 (`rate_above_ceiling`). Each manifest's comment cites the documented limit. A keyed rate (GitHub PoC) applies when the source has a key and its row's rate is still the keyless default, so an admin's own rate stands. A catalog source has no lookup: it lists no entity types for manual enrichment, and its test button answers 400.
 
@@ -620,19 +623,22 @@ A source's `outputs` are `Column` and `Context` entries. A `Column` says which `
 
 A column that `follows` a target is written with it, empty or not, whenever its source writes that target.
 
-A `filter` transforms the value first: `aliases` runs `filter_aliases()` (`backend/app/intelligence/autolinker.py`), so junk aliases never reach the autolinker vocabulary, and `date` turns an ISO date string into a date. A `resolve` looks the value up in the database and writes what it finds: `vendor` turns a developer (`{label, enwiki}`) into the id of an existing vendor, the one whose Wikipedia article is that title, else one whose name or alias is the label. It never creates a vendor; with no match nothing is written. `apply_enrichment_results_to_entity` (`backend/app/enrichment/entity_updater.py`) applies every output for the entity's type and records a claim (`entity_field_claims`, `source_kind = enrichment`, `source_ref` = the source) for each value it writes. What the sources write:
+A `filter` transforms the value first: `aliases` runs `filter_aliases()` (`backend/app/intelligence/autolinker.py`), so junk aliases never reach the autolinker vocabulary; `date` turns an ISO date string into a date; `timestamp` turns an ISO date into a datetime for a timestamp column; `country_code` keeps a two-letter code, upper-cased. A `resolve` looks the value up in the database and writes what it finds: `vendor` turns a developer (`{label, enwiki}`) into the id of an existing vendor, the one whose Wikipedia article is that title, else one whose name or alias is the label. It never creates a vendor; with no match nothing is written. `apply_enrichment_results_to_entity` (`backend/app/enrichment/entity_updater.py`) applies every output for the entity's type and records a claim (`entity_field_claims`, `source_kind = enrichment`, `source_ref` = the source) for each value it writes. What the sources write:
 
 - **Wikipedia**: `wikipedia_url` (newer wins), with `wikipedia_content` and `wikipedia_image_url` following it, so a new article never keeps the old one's image; `description` from `first_paragraph`, rank 1 (rank 2 for a CVE).
 - **MITRE ATT&CK**: `description` rank 2, `mitre_id`, `aliases` (union, first), `platforms` (ttp, tool).
 - **Malpedia**: `description` rank 3, `malpedia_url` (malware, tool), `github_url` (a tool's first github.com reference), `aliases` (union, after MITRE), actor `country`.
-- **VirusTotal, GreyNoise, Shodan**: keys of `Observable.reputation` (`vt_ratio`, `vt_malicious`, `vt_threat_label`, `vt_tags`, `asn`, `as_owner`, `country`; `gn_classification`, `gn_noise`, `gn_riot`, `gn_name`; `ports`, `hostnames`, `shodan_tags`, `vulns`), newest wins, empty values skipped; `reputation.enriched_at` is stamped whenever one of them answers. `infra_tag` fills when blank: a Shodan `vpn` / `proxy` / `tor` tag first, else `benign_service` for GreyNoise RIOT.
+- **VirusTotal, GreyNoise, Shodan**: keys of `Observable.reputation` (`vt_ratio`, `vt_malicious`, `vt_threat_label`, `vt_tags`; `gn_noise`, `gn_riot`, `gn_name`; `ports`, `hostnames`, `shodan_tags`, `vulns`), newest wins, empty values skipped; `reputation.enriched_at` is stamped whenever one of them answers. `infra_tag` fills when blank: a Shodan `vpn` / `proxy` / `tor` tag first, else `benign_service` for GreyNoise RIOT. GreyNoise writes `noise_class` (`malicious`, `benign` or `unknown` when seen mass-scanning, `not_seen` otherwise), newest wins.
+- **Team Cymru, VirusTotal**: the observable's network columns, newest wins: `asn`, `asn_org` (Cymru's AS name, VirusTotal's `as_owner`) and `geo_country` (`country_code`). Each fact has one home; none is kept in `reputation`.
+- **RDAP**: `registered_at` (newest wins, `timestamp`), the registration date of the registrable domain.
+- **Tranco**: its daily job writes `popularity_rank` directly ([below](#source-jobs)); the `Column` output names the column for the console's fill rate.
 
 - **NVD**: `cvss_score` rank 1, `severity`, and `description` rank 1 (Wikipedia's is rank 2 for a CVE), all into blank columns only. Article extraction (`extract_and_store_cves`) and the NVD jobs write these columns from their own NVD calls; a lookup fills a CVE whose extraction-time call was throttled and leaves a filled one alone.
 - **CVE List (cvelistV5)**: `cvss_score` from the CNA's metric rank 2 and from CISA-ADP's rank 3, with `severity` following the score it wrote (so a score never sits beside extraction's `UNKNOWN`); `description` rank 1, since NVD republishes the CNA's text; `ssvc_exploitation`, `ssvc_automatable` and `ssvc_technical_impact`, newer wins. CVSS 3.1 is preferred, then 3.0, then 4.0.
 - **Wikidata**: vendor `website`, product `vendor_id` (resolved to an existing vendor), country `region` and `iso_code`, all into blank columns only.
 - **endoflife.date**: product `support_status` and `next_eol`, newer wins; `next_eol` `clears`, so it empties when no end date is left.
 
-A `Context` (key, label, display: `fact`, `chips`, `table`, `timeline`, `link` or `badge`) is a value for the entity's profile rather than a column; the adapters declare them (Shodan ports and tags, GreyNoise classification, OSV affected packages, Malpedia references, and so on). `entity_types` limits one to some of the source's types.
+A `Context` (key, label, display: `fact`, `chips`, `table`, `timeline`, `link` or `badge`) is a value for the entity's profile rather than a column; the adapters declare them (Shodan ports and tags, GreyNoise's class, Team Cymru's announced prefix, registry and allocation date, RDAP's registrar, expiry, status and nameservers, OSV affected packages, Malpedia references, and so on). `entity_types` limits one to some of the source's types.
 
 ### Source Context
 
@@ -650,7 +656,7 @@ Each lookup in `enrich_entity()`, fresh or cached, writes the source's `Context`
 `GET /api/entities/{entity_type}/{entity_id}/context` (`backend/app/api/entity_context.py`) serves the profile's Context panel and header badges:
 
 - `sources`: each enabled source that applies to the entity (for an observable, to its kind) and declares context for it, sorted by name, with `label`, `license`, `observed_at`, `stale` (past `expires_at`) and its `items` (`key`, `label`, `display`, `value`). A source with nothing stored yet is listed with empty `items` and `observed_at: null`.
-- `badges`: the badge items whose value has a tone, labelled `"<label> · <value>"` (just the label for `true`). A badge whose key the source also writes to a column carries `field` (GreyNoise's classification: `reputation.gn_classification`), so the header shows that column's provenance.
+- `badges`: the badge items whose value has a tone, labelled `"<label> · <value>"` (just the label for `true`). A badge whose key the source also writes to a column carries `field` (GreyNoise's class: `noise_class`), so the header shows that column's provenance.
 - `unavailable`: for admins only, enabled sources missing a requirement (`needs: "api_key"`). Such a source is in `sources` only while it has stored items.
 - `can_enrich`: false for visitors.
 
@@ -667,7 +673,7 @@ In public read-only mode a visitor never sees a source whose `egress` is `shares
 
 ### Pipeline Flow
 
-`enrich_entity()` (`backend/app/enrichment/pipeline.py:211`) loops over the enabled sources whose `trigger_mode` matches (or the named `source_types`). For each source:
+`enrich_entity()` (`backend/app/enrichment/pipeline.py:225`) loops over the enabled sources whose `trigger_mode` matches (or the named `source_types`). For each source:
 
 1. Skip it if it is a catalog source or does not apply to the entity type.
 2. Resolve the API key ([below](#api-key-resolution)).
@@ -717,7 +723,7 @@ While enrichment is [paused](#enrichment-console), a tick claims nothing. A `run
 
 Scheduled jobs resolve their key through the same function (`gateway_for`), so a job and a per-entity lookup with the same key always share one gateway bucket.
 
-No current source sets `shared_key_group`, so `SHARED_KEY_GROUPS` (`backend/app/enrichment/registry.py:84`) is empty and step 3 never finds anything. Queued jobs run in a worker with no user, so they use the source's own key, except a `manual`-lane job, which uses the key of the person who asked.
+No current source sets `shared_key_group`, so `SHARED_KEY_GROUPS` (`backend/app/enrichment/registry.py:93`) is empty and step 3 never finds anything. Queued jobs run in a worker with no user, so they use the source's own key, except a `manual`-lane job, which uses the key of the person who asked.
 
 ### Confidence Thresholds
 
@@ -734,7 +740,7 @@ Only auto enrichment (`new`-lane jobs) checks this. Manual enrichment skips it.
 A `success` result is reused until `expires_at`. Each adapter picks its TTL per result, for example:
 
 - Wikipedia: 720 hours (30 days). Not-found: 168 hours.
-- NVD, Malpedia, MITRE ATT&CK, GreyNoise: 168 hours (7 days).
+- NVD, Malpedia, MITRE ATT&CK, GreyNoise, Team Cymru, RDAP: 168 hours (7 days). An unannounced IP at Team Cymru: 24 hours.
 - EPSS, CISA KEV, VulnCheck, GitHub PoC: 24 hours.
 - VirusTotal: 72 hours.
 - Wikidata: 720 hours, not-found titles included. endoflife.date: 48 hours (its job runs daily).
@@ -755,9 +761,11 @@ The bucket, budget and breaker belong to the credential, not the source type: th
 
 If Redis can't be reached, the gateway refuses the request (`gateway_unavailable`) and sends nothing.
 
+Team Cymru answers over DNS, not HTTP, so its adapter takes each query's permit itself: `gateway.acquire()` before the TXT query and `gateway.record()` after it, so the rate limit, budget, breaker and pause apply the same way. An NXDOMAIN (an unannounced IP) counts as an answer; a timeout or resolver failure counts toward the breaker.
+
 Wikipedia goes through the gateway too: `wikipediaapi` takes the gateway's transport for the httpx client it builds, with its own retries off.
 
-**Jobs.** A job (NVD, EPSS, CISA KEV, MITRE ATT&CK, Malpedia, GitHub PoC, Wikipedia, CVE List, Wikidata, endoflife.date) uses its source row's rate limit, budget and key, so it shares one allowance with the per-entity lookups under the same key. The NVD sweeps fall back to the `nvd_api_key` setting and the GitHub PoC scan to `github_token` when the row has no key; a different key has its own allowance. The catalog sources' jobs (MISP Galaxy, Metasploit, MITRE CWE, Cybergeist, ransomware.live) use their rows the same way.
+**Jobs.** A job (NVD, EPSS, CISA KEV, MITRE ATT&CK, Malpedia, GitHub PoC, Wikipedia, CVE List, Wikidata, endoflife.date) uses its source row's rate limit, budget and key, so it shares one allowance with the per-entity lookups under the same key. The NVD sweeps fall back to the `nvd_api_key` setting and the GitHub PoC scan to `github_token` when the row has no key; a different key has its own allowance. The catalog sources' jobs (MISP Galaxy, Metasploit, MITRE CWE, Cybergeist, ransomware.live, Tranco) use their rows the same way.
 
 When the gateway refuses (`rate_limited`, `breaker_open`, `budget_exhausted`, `paused`), a job stops, commits what it has done, and records the reason as `stopped` in its stats, which land in the run's details in the Jobs view. The run still counts as a success. Loop jobs also stop with `stopped: "out_of_time"` before their time limit. `gateway_unavailable` fails the run.
 
@@ -765,7 +773,7 @@ NVD allows 50 requests per 30 seconds with a key and 5 without. The bucket (50 p
 
 ### Daily Budgets
 
-Every source starts with a budget of about twice the requests a busy day sends (the `daily_budget` of its manifest's `quota`): CVE List 12,000, NVD 5,000, Wikipedia 2,000, OSV 2,000, GitHub PoC 1,000, Malpedia 1,000, Shodan 1,000, CVEDetails 1,000, VulnCheck 1,000, endoflife.date 1,000, EPSS 500, CISA KEV 500, VirusTotal 500 (its free tier), Wikidata 500, ransomware.live 200, MITRE ATT&CK 100, GreyNoise 100, and 50 each for MISP Galaxy, Metasploit, MITRE CWE and Cybergeist. An admin can change or clear one under Settings → Engine → Enrichment. A source that runs out stops until midnight UTC, jobs included. Every request the gateway sends counts; cached results are free. The console's source detail (`used_today`) and the source list's `daily_budget_used` show today's use under the source's own key, and `GET /api/enrichment/sources/{id}/health` shows the tokens left in its bucket.
+Every source starts with a budget of about twice the requests a busy day sends (the `daily_budget` of its manifest's `quota`): CVE List 12,000, NVD 5,000, Wikipedia 2,000, OSV 2,000, GitHub PoC 1,000, Malpedia 1,000, Team Cymru 4,000 (two queries per IP), RDAP 2,000 (two requests per domain: rdap.org's redirect and the registry), Shodan 1,000, CVEDetails 1,000, VulnCheck 1,000, endoflife.date 1,000, EPSS 500, CISA KEV 500, VirusTotal 500 (its free tier), Wikidata 500, ransomware.live 200, MITRE ATT&CK 100, GreyNoise 100, and 50 each for MISP Galaxy, Metasploit, MITRE CWE and Cybergeist; Tranco 20. An admin can change or clear one under Settings → Engine → Enrichment. A source that runs out stops until midnight UTC, jobs included. Every request the gateway sends counts; cached results are free. The console's source detail (`used_today`) and the source list's `daily_budget_used` show today's use under the source's own key, and `GET /api/enrichment/sources/{id}/health` shows the tokens left in its bucket.
 
 ### Enrichment Console
 
@@ -807,6 +815,7 @@ Each source declares its scheduled jobs in its manifest. They are registered in 
 | `malpedia-sync` | `malpedia` | Saturday 01:00 | Malware families; on its own day because it writes the actor rows the Sunday syncs also write |
 | `wikipedia-bulk-sync` | `wikipedia` | Wednesday 04:00 | Wikipedia content for entities that lack it, as many as fit in 55 minutes |
 | `sync-cybergeist-feeds` | `cybergeist` | Daily 02:30 | Threat actors and malware from the Cybergeist feeds |
+| `tranco-sync` | `tranco` | Daily 04:20 | Ranks the ledger's domains against the Tranco top-1M list (`popularity_rank`) and flags top-10k ones for review |
 | `sync-ransomware-victims` | `ransomware_live` | Every 30 minutes | Leak-site victim postings |
 | `cvelist-backfill` | `cvelist` | Hourly at :20 | The CVE record for CVEs with no current cvelist result, as many as fit in 13 minutes: those missing a score or description first, then KEV entries, then the newest |
 | `cvelist-delta-sync` | `cvelist` | Hourly at :40 | The CVE records changed since its last run, from cvelistV5's delta zips |
@@ -856,6 +865,10 @@ Every looked-up entity also gets a link to its Wikidata item. A title Wikidata h
 | `unknown` | endoflife.date lists no releases |
 
 `next_eol` is the soonest date after today that a maintained release stops getting security fixes: its end of life, or the end of extended support for one already past end of life. It is empty when no maintained release has one. The profile shows the newest 20 releases (release, released, active until, security until, status) and a link to the product's endoflife.date page. endoflife.date's data is MIT-licensed; the profile credits it.
+
+### Tranco
+
+The Tranco sync (`_run_tranco_sync` in `backend/app/workers/enrichment_tasks.py`) asks `tranco-list.eu/api/lists/date/latest` for the day's list, then streams its CSV (about 22 MB) line by line, matching 10,000 rows at a time against the ledger's `domain` observables, so only the matches are held in memory. A match is exact: `evil.workers.dev` never takes `workers.dev`'s rank. Matched domains get `popularity_rank` and a `rank` context row (expires in 48 hours); domains that left the list lose both. A domain entering the top 10,000 (`TRANCO_REVIEW_RANK`) gets `needs_review = true` once: a popular site named as an indicator is often a false positive, but nothing is deleted or denied, and a row an analyst has cleared isn't flagged again while it stays there. Denied rows are never flagged.
 
 ---
 

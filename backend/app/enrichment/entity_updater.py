@@ -88,6 +88,20 @@ def _date(value, entity) -> date | None:
         return None
 
 
+def _timestamp(value, entity) -> datetime | None:
+    """An ISO 8601 date or datetime (JSON carries them as text), in UTC when it names no zone."""
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _country_code(value, entity) -> str | None:
+    code = str(value or "").strip().upper()
+    return code if len(code) == 2 and code.isalpha() else None
+
+
 #: ``Column.filter`` names → transforms of (parsed value, entity) into the value written.
 FILTERS = {
     "aliases": _aliases,
@@ -95,6 +109,8 @@ FILTERS = {
     "infra_tag": _infra_tag,
     "benign_service": _benign_service,
     "date": _date,
+    "timestamp": _timestamp,
+    "country_code": _country_code,
 }
 
 

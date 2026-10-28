@@ -57,7 +57,15 @@ import { SinceLastVisitRibbon } from "../SinceLastVisitRibbon";
 import type { PivotResponse } from "@/api/types";
 import { entityDisplayName, entityProfilePath, type EntityProfileConfig, type OverviewPanelKey } from "../entityProfileConfig";
 import { dedupeProducts, extractNvd, type RefLink } from "../cveRefs";
-import { capturedByLabel, defangObservable, observableSourcesLabel, stixBundle, STIX_PATTERNS } from "@/utils/observables";
+import {
+  capturedByLabel,
+  defangObservable,
+  networkLabel,
+  observableSourcesLabel,
+  registeredLabel,
+  stixBundle,
+  STIX_PATTERNS,
+} from "@/utils/observables";
 import { Chip } from "@/components/primitives";
 import {
   infrastructureCsvUrl,
@@ -574,6 +582,14 @@ export function OverviewTab({
               />
             )}
             {o.role && <Row k="Role" v={o.role} />}
+            {o.asn != null && <Row k="Network" v={networkLabel(o)} />}
+            {o.registered_at && <Row k="Registered" v={registeredLabel(o.registered_at)} />}
+            {o.popularity_rank != null && (
+              <Row
+                k="Popularity"
+                v={`Tranco #${o.popularity_rank.toLocaleString()}${o.popularity_rank <= 10_000 ? " — a top-10k site, often a false positive" : ""}`}
+              />
+            )}
             {o.evidence && (
               <Row k="Evidence" v={<span className={styles.metaLabel} style={{ fontStyle: "italic", textTransform: "none", letterSpacing: 0 }}>“{o.evidence}”</span>} />
             )}

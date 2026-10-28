@@ -56,7 +56,7 @@ def _ip(value="71.6.135.131", kind="ipv4") -> Observable:
 SHODAN = {"found": True, "ports": "22, 443, 22", "hostnames": None, "tags": "vpn", "vulns": None, "cpes": None}
 GREYNOISE = {
     "found": True,
-    "classification": "benign",
+    "noise_class": "benign",
     "noise": True,
     "riot": False,
     "name": "Shodan.io",
@@ -145,7 +145,7 @@ async def test_a_result_writes_every_declared_output_it_has(db_session):
     assert await _context(db_session, "observable", obs.id) == {
         ("shodan", "ports"): ["22", "443"],
         ("shodan", "tags"): ["vpn"],
-        ("greynoise", "classification"): "benign",
+        ("greynoise", "noise_class"): "benign",
         ("greynoise", "riot"): "no",
         ("greynoise", "name"): "Shodan.io",
         ("greynoise", "last_seen"): "2026-10-27",
@@ -300,14 +300,14 @@ async def test_a_signed_in_viewer_gets_each_applicable_source(client, auth_heade
         {"key": "ports", "label": "Open ports", "display": "chips", "value": ["22", "443"]},
         {"key": "tags", "label": "Tags", "display": "chips", "value": ["vpn"]},
     ]
-    # The badge mirrors the reputation key GreyNoise also writes.
+    # The badge mirrors the column GreyNoise also writes.
     assert body["badges"] == [
         {
             "source_type": "greynoise",
-            "key": "classification",
+            "key": "noise_class",
             "label": "noise · benign",
             "tone": "success",
-            "field": "reputation.gn_classification",
+            "field": "noise_class",
         }
     ]
 

@@ -177,12 +177,19 @@ async def test_console_filters_by_entity_type(client, admin_headers, db_session)
     resp = await client.get("/api/enrichment/console", params={"entity_type": "observable"}, headers=admin_headers)
     data = resp.json()
 
-    assert {s["source_type"] for s in data["sources"]} == {"virustotal", "greynoise", "shodan"}
+    assert {s["source_type"] for s in data["sources"]} == {
+        "virustotal",
+        "greynoise",
+        "shodan",
+        "cymru",
+        "rdap",
+        "tranco",
+    }
     # The summary and the tabs always count every source.
     assert data["summary"] == everything["summary"]
     assert data["entity_types"] == everything["entity_types"]
     tabs = {t["entity_type"]: t for t in data["entity_types"]}
-    assert tabs["observable"] == {"entity_type": "observable", "label": "Observable", "source_count": 3}
+    assert tabs["observable"] == {"entity_type": "observable", "label": "Observable", "source_count": 6}
     assert tabs["cve"]["label"] == "CVE"
 
 

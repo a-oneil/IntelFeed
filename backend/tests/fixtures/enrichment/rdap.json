@@ -1,0 +1,176 @@
+{
+ "redirect": {
+  "url": "https://rdap.org/domain/carinet.com",
+  "status": 302,
+  "location": "https://rdap.verisign.com/com/v1/domain/carinet.com"
+ },
+ "domain": {
+  "url": "https://rdap.verisign.com/com/v1/domain/carinet.com",
+  "status": 200,
+  "body": {
+   "objectClassName": "domain",
+   "handle": "115263_DOMAIN_COM-VRSN",
+   "ldhName": "CARINET.COM",
+   "links": [
+    {
+     "value": "https://rdap.verisign.com/com/v1/domain/carinet.com",
+     "rel": "self",
+     "href": "https://rdap.verisign.com/com/v1/domain/carinet.com",
+     "type": "application/rdap+json"
+    },
+    {
+     "value": "https://rdap.verisign.com/com/v1/domain/carinet.com",
+     "rel": "related",
+     "href": "https://rdap.networksolutions.com/rdap/domain/CARINET.COM",
+     "type": "application/rdap+json"
+    }
+   ],
+   "status": [
+    "client transfer prohibited"
+   ],
+   "entities": [
+    {
+     "objectClassName": "entity",
+     "handle": "2",
+     "roles": [
+      "registrar"
+     ],
+     "links": [
+      {
+       "href": "http://networksolutions.com",
+       "type": "text/html",
+       "value": "https://rdap.networksolutions.com/rdap/",
+       "rel": "about"
+      }
+     ],
+     "publicIds": [
+      {
+       "type": "IANA Registrar ID",
+       "identifier": "2"
+      }
+     ],
+     "vcardArray": [
+      "vcard",
+      [
+       [
+        "version",
+        {},
+        "text",
+        "4.0"
+       ],
+       [
+        "fn",
+        {},
+        "text",
+        "Network Solutions, LLC"
+       ]
+      ]
+     ],
+     "entities": [
+      {
+       "objectClassName": "entity",
+       "roles": [
+        "abuse"
+       ],
+       "vcardArray": [
+        "vcard",
+        [
+         [
+          "version",
+          {},
+          "text",
+          "4.0"
+         ],
+         [
+          "fn",
+          {},
+          "text",
+          ""
+         ],
+         [
+          "tel",
+          {
+           "type": "voice"
+          },
+          "uri",
+          "tel:+1.8777228662"
+         ],
+         [
+          "email",
+          {},
+          "text",
+          "domain.operations@web.com"
+         ]
+        ]
+       ]
+      }
+     ]
+    }
+   ],
+   "events": [
+    {
+     "eventAction": "registration",
+     "eventDate": "1996-10-29T05:00:00Z"
+    },
+    {
+     "eventAction": "expiration",
+     "eventDate": "2027-10-28T04:00:00Z"
+    },
+    {
+     "eventAction": "last changed",
+     "eventDate": "2026-10-13T08:09:17Z"
+    },
+    {
+     "eventAction": "last update of RDAP database",
+     "eventDate": "2026-10-28T13:33:42Z"
+    }
+   ],
+   "secureDNS": {
+    "delegationSigned": false
+   },
+   "nameservers": [
+    {
+     "objectClassName": "nameserver",
+     "ldhName": "NS1.SANDALSBETA.COM"
+    },
+    {
+     "objectClassName": "nameserver",
+     "ldhName": "NS2.SANDALSBETA.COM"
+    }
+   ],
+   "rdapConformance": [
+    "rdap_level_0",
+    "icann_rdap_technical_implementation_guide_1",
+    "icann_rdap_response_profile_1"
+   ],
+   "notices": [
+    {
+     "title": "Terms of Service",
+     "description": [
+      "Service subject to Terms of Use."
+     ],
+     "links": [
+      {
+       "href": "https://www.verisign.com/domain-names/registration-data-access-protocol/terms-service/index.xhtml",
+       "type": "text/html",
+       "value": "https://rdap.verisign.com/com/v1/domain/carinet.com",
+       "rel": "terms-of-service"
+      }
+     ]
+    }
+   ]
+  }
+ },
+ "not_found": {
+  "url": "https://rdap.org/domain/example.ru",
+  "status": 404,
+  "body": {
+   "rdapConformance": [
+    "rdap_level_0"
+   ],
+   "lang": "en",
+   "errorCode": 404,
+   "title": "No RDAP service is available for this resource"
+  }
+ }
+}

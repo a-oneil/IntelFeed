@@ -109,12 +109,6 @@ def _filled(model, path: str):
     return col.isnot(None)
 
 
-def _in_scope(cls: type[Source], entity_type: str, model):
-    """SQL: the entity is one the source can look up (observable kinds)."""
-    kinds = cls.applies_to.get(entity_type)
-    return model.kind.in_(kinds) if kinds and hasattr(model, "kind") else None
-
-
 async def fill_rates(db: AsyncSession, cls: type[Source]) -> dict[str, float | None]:
     """Percent of in-scope entities whose column holds a value, per column
     target. One query per entity type."""
@@ -131,7 +125,7 @@ async def fill_rates(db: AsyncSession, cls: type[Source]) -> dict[str, float | N
             func.count(),
             *(func.count().filter(_filled(model, t.split(".", 1)[1])) for t in targets),
         ).select_from(model)
-        scope = _in_scope(cls, entity_type, model)
+        scope = cls.scope_filter(entity_type, model)
         if scope is not None:
             query = query.where(scope)
         total, *filled = (await db.execute(query)).one()
@@ -147,7 +141,7 @@ def _missing(cls: type[Source], column: Column, source_type: str, *, in_scope: b
     model = _model(column.entity_type)
     where = [not_(_filled(model, column.path))]
     if in_scope:
-        scope = _in_scope(cls, column.entity_type, model)
+        scope = cls.scope_filter(column.entity_type, model)
         if scope is not None:
             where.append(scope)
         waiting = exists().where(
@@ -381,6 +375,8 @@ async def detail(db: AsyncSession, source_type: str) -> dict | None:
         scope = f"{entity_types.LABELS.get(primary.entity_type, primary.entity_type)}"
         if kinds:
             scope += f" ({', '.join(kinds)})"
+        for col, values in cls.scope.items():
+            scope += f", {_words(col)} {' or '.join(values)}"
         scope += f" with no {_words(primary.path)}"
 
     lanes = {lane: 0 for lane in LANES}

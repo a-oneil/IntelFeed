@@ -35,10 +35,10 @@ _EXAMPLE = {
     "badges": [
         {
             "source_type": "greynoise",
-            "key": "classification",
+            "key": "noise_class",
             "label": "noise · benign",
             "tone": "success",
-            "field": "reputation.gn_classification",
+            "field": "noise_class",
         }
     ],
     "can_enrich": True,

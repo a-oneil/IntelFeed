@@ -974,6 +974,7 @@ dnspython==2.9.0 \
     --hash=sha256:b44dc6b18f07a8b1c56676a19fbfdb5209415b046a9cece286baafa87ff3f7f1
     # via
     #   -c requirements.lock
+    #   intelfeed (pyproject.toml)
     #   email-validator
 docstring-parser==0.18.0 \
     --hash=sha256:292510982205c12b1248696f44959db3cdd1740237a968ea1e2e7a900eeb2015 \
@@ -2193,6 +2194,12 @@ psutil==7.2.2 \
     # via
     #   -c requirements.lock
     #   pymupdf
+publicsuffixlist==1.1.2.20261023 \
+    --hash=sha256:2bf96290efe1d089861e759387da6bf7b145cf8caf7c77b8548f2b657ea22139 \
+    --hash=sha256:c792aa3fd37076c15f1c9d9897e59e9d58e8bacdf4315eb9cc10141a26d8995c
+    # via
+    #   -c requirements.lock
+    #   intelfeed (pyproject.toml)
 pyaes==1.6.1 \
     --hash=sha256:02c1b1405c38d3c370b085fb952dd8bea3fadcee6411ad99f312cc129c536d8f
     # via

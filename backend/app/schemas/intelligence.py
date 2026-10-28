@@ -671,9 +671,17 @@ class ObservableResponse(BaseModel):
     #: eighteen CSV variants is report_count=0, feed_source_count=1.
     report_count: int = 0
     feed_source_count: int = 0
-    #: Compact reputation summary from enrichment (Shodan / GreyNoise / VT):
-    #: asn, country, ports, tags, vt_ratio, gn_classification, gn_riot, enriched_at.
+    #: Compact reputation summary from enrichment (Shodan ports/hostnames/tags,
+    #: VirusTotal vt_*, GreyNoise gn_noise/gn_riot/gn_name, enriched_at).
     reputation: dict | None = None
+    #: Network context: origin AS and its name, allocation country (Team Cymru,
+    #: VirusTotal), registration date (RDAP), Tranco rank, GreyNoise class.
+    asn: int | None = None
+    asn_org: str | None = None
+    geo_country: str | None = None
+    registered_at: datetime | None = None
+    popularity_rank: int | None = None
+    noise_class: str | None = None
     first_seen_at: datetime
     last_seen_at: datetime
     #: Decay projection: half-life for the kind (None = never decays) and the

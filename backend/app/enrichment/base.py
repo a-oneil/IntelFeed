@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 
 import httpx
+from sqlalchemy import and_
 
 from app.enrichment.gateway import THROTTLE_STATUSES, SourceGateway
 from app.enrichment.manifest import Column, Context, Egress, Job, License, Quota
@@ -40,6 +41,10 @@ class Source:
     kind: str = "catalog"
     #: entity_type → the observable kinds it handles (None = every value).
     applies_to: dict[str, tuple[str, ...] | None]
+    #: Column → the values an entity must hold for the source to look it up on
+    #: its own (every queue lane but manual), e.g. {"status": ("active",)}. A
+    #: person's request looks up anything the source applies to.
+    scope: dict[str, tuple[str, ...]] = {}
     #: Secrets or settings the source can't work without, e.g. ("api_key",).
     requires: tuple[str, ...] = ()
     quota: Quota
@@ -58,6 +63,17 @@ class Source:
     @classmethod
     def columns(cls) -> tuple[Column, ...]:
         return tuple(o for o in cls.outputs if isinstance(o, Column))
+
+    @classmethod
+    def scope_filter(cls, entity_type: str, model):
+        """SQL: the entity is one the source looks up on its own — of a kind it
+        takes, holding its ``scope`` values. None when every entity is."""
+        clauses = []
+        kinds = cls.applies_to.get(entity_type)
+        if kinds and hasattr(model, "kind"):
+            clauses.append(model.kind.in_(kinds))
+        clauses += [getattr(model, col).in_(values) for col, values in cls.scope.items() if hasattr(model, col)]
+        return and_(*clauses) if clauses else None
 
     @_derived
     def supported_entity_types(cls) -> list[str]:

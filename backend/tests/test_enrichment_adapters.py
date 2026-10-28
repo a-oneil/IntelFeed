@@ -18,7 +18,7 @@ class TestEnrichmentBase:
 
 class TestAdapterRegistry:
     def test_registry_has_all_adapters(self):
-        assert len(ADAPTER_REGISTRY) == 14
+        assert len(ADAPTER_REGISTRY) == 16
 
     def test_registry_contains_expected_sources(self):
         expected = {
@@ -37,6 +37,9 @@ class TestAdapterRegistry:
             "virustotal",
             "greynoise",
             "shodan",
+            # Observable network context.
+            "cymru",
+            "rdap",
         }
         assert set(ADAPTER_REGISTRY.keys()) == expected
 
@@ -58,7 +61,7 @@ class TestAdapterRegistry:
         assert adapter.config["ttl_hours"] == 48
 
     def test_default_sources_defined(self):
-        assert len(DEFAULT_SOURCES) == 21
+        assert len(DEFAULT_SOURCES) == 24
         source_types = {s["source_type"] for s in DEFAULT_SOURCES}
         assert source_types == set(ADAPTER_REGISTRY) | {
             "misp_galaxy",
@@ -68,6 +71,7 @@ class TestAdapterRegistry:
             "cybergeist",
             "wikidata",
             "endoflife",
+            "tranco",
         }
 
     def test_all_adapters_have_required_attributes(self):

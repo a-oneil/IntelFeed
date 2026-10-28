@@ -240,7 +240,7 @@ async def test_reputation_folds_every_source(db_session):
         obs,
         [
             _ok("shodan", {"found": True, "ports": "22, 443", "tags": "cloud, vpn", "hostnames": "", "vulns": None}),
-            _ok("greynoise", {"found": True, "classification": "benign", "noise": False, "riot": False, "name": ""}),
+            _ok("greynoise", {"found": True, "noise_class": "benign", "noise": False, "riot": False, "name": ""}),
             _ok(
                 "virustotal",
                 {"found": True, "detection_ratio": "3/92", "malicious_votes": 0, "asn": 63949, "country": "US"},
@@ -253,19 +253,18 @@ async def test_reputation_folds_every_source(db_session):
     assert rep == {
         "ports": "22, 443",
         "shodan_tags": "cloud, vpn",
-        "gn_classification": "benign",
         "gn_noise": False,
         "gn_riot": False,
         "vt_ratio": "3/92",
         "vt_malicious": 0,
-        "asn": 63949,
-        "country": "US",
     }
+    # Network facts and the GreyNoise class live in their own columns.
+    assert (obs.asn, obs.geo_country, obs.noise_class) == (63949, "US", "benign")
     assert obs.infra_tag == "vpn"
 
 
 async def test_reputation_keeps_what_a_new_result_lacks(db_session):
-    obs = await _add(db_session, _obs(reputation={"asn": 1, "as_owner": "Old AS", "ports": "80", "vt_ratio": "1/9"}))
+    obs = await _add(db_session, _obs(asn=1, asn_org="Old AS", reputation={"ports": "80", "vt_ratio": "1/9"}))
     await _apply(
         db_session,
         "observable",
@@ -275,12 +274,8 @@ async def test_reputation_keeps_what_a_new_result_lacks(db_session):
             _ok("shodan", {"ports": "8080"}),
         ],
     )
-    assert {k: obs.reputation[k] for k in ("asn", "as_owner", "ports", "vt_ratio")} == {
-        "asn": 1,
-        "as_owner": "Old AS",
-        "ports": "8080",
-        "vt_ratio": "5/90",
-    }
+    assert (obs.asn, obs.asn_org) == (1, "Old AS")
+    assert {k: obs.reputation[k] for k in ("ports", "vt_ratio")} == {"ports": "8080", "vt_ratio": "5/90"}
 
 
 async def test_infra_tag_order_and_fill_only(db_session):

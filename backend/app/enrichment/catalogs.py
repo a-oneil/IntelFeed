@@ -3,7 +3,7 @@ whole file or feed. Each has an enrichment_sources row for its gateway (rate,
 budget, breaker) and its on/off switch."""
 
 from app.enrichment.base import Source
-from app.enrichment.manifest import Egress, Job, License, Quota
+from app.enrichment.manifest import Column, Context, Display, Egress, Job, License, Policy, Quota
 
 
 class MISPGalaxySource(Source):
@@ -100,4 +100,33 @@ class CybergeistSource(Source):
             {"type": "crontab", "minute": "30", "hour": "2"},
             "Sync threat actor and malware feeds from Cybergeist",
         ),
+    )
+
+
+class TrancoSource(Source):
+    source_type = "tranco"
+    display_name = "Tranco"
+    applies_to = {"observable": ("domain",)}
+    # A daily sync makes two requests: the latest list's id, then its CSV. The
+    # API allows one query a second (https://tranco-list.eu/api_documentation).
+    quota = Quota(1, 1, daily_budget=20, ceiling_per_period=1)
+    egress = Egress.NONE
+    # Tranco asks to be cited (Le Pochat et al., NDSS 2019); its inputs are
+    # Cisco Umbrella (free), Majestic (CC BY 3.0), Farsight, the Chrome UX
+    # Report (CC BY-SA 4.0) and Cloudflare Radar (CC BY 4.0) (https://tranco-list.eu/).
+    license = License(
+        "Tranco list; inputs under CC BY 3.0, CC BY-SA 4.0 and CC BY 4.0",
+        attribution="Tranco (Le Pochat et al., NDSS 2019)",
+    )
+    jobs = (
+        Job(
+            "tranco-sync",
+            "app.workers.enrichment_tasks.run_tranco_sync",
+            {"type": "crontab", "minute": "20", "hour": "4"},
+            "Rank tracked domains against the daily Tranco top-1M list and flag top-10k ones for review",
+        ),
+    )
+    outputs = (
+        Column("rank", "observable.popularity_rank", Policy.NEWER_WINS),
+        Context("rank", "Tranco rank", Display.FACT),
     )

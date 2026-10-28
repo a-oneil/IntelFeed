@@ -1507,16 +1507,23 @@ export interface ObservableResponse {
   feed_source_count: number;
   /** Compact enrichment summary (Shodan / GreyNoise / VT) written by the updater. */
   reputation?: {
-    asn?: number | string | null;
-    country?: string | null;
     ports?: string | null;
     tags?: string | null;
     hostnames?: string | null;
     vt_ratio?: string | null;
-    gn_classification?: string | null;
     gn_riot?: boolean | null;
     enriched_at?: string | null;
   } | null;
+  /** Network context: origin AS, its name and allocation country (Team Cymru / VT). */
+  asn?: number | null;
+  asn_org?: string | null;
+  geo_country?: string | null;
+  /** When the registrable domain was registered (RDAP). */
+  registered_at?: string | null;
+  /** Rank in the daily Tranco top-1M list; null when unlisted. */
+  popularity_rank?: number | null;
+  /** GreyNoise: malicious / benign / unknown when seen scanning, else not_seen. */
+  noise_class?: string | null;
   first_seen_at: string;
   last_seen_at: string;
   // Decay projection.

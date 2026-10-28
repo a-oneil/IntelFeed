@@ -89,6 +89,7 @@ JOBS_BEFORE = {
         "app.workers.enrichment_tasks.run_endoflife_sync",
         {"type": "crontab", "minute": "15", "hour": "5"},
     ),
+    "tranco-sync": ("app.workers.enrichment_tasks.run_tranco_sync", {"type": "crontab", "minute": "20", "hour": "4"}),
 }
 
 JOB_SOURCE = {
@@ -110,6 +111,7 @@ JOB_SOURCE = {
     "cvelist-delta-sync": "cvelist",
     "wikidata-sync": "wikidata",
     "endoflife-sync": "endoflife",
+    "tranco-sync": "tranco",
 }
 
 
@@ -143,6 +145,7 @@ def test_every_source_has_a_seed_row_from_its_manifest():
         "cybergeist",
         "wikidata",
         "endoflife",
+        "tranco",
     }
     assert all(cls.kind == "catalog" and not issubclass(cls, EnrichmentAdapter) for cls in CATALOG_REGISTRY.values())
     assert all(cls.kind == "lookup" for cls in ADAPTER_REGISTRY.values())

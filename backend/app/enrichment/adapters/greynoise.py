@@ -17,7 +17,7 @@ from app.enrichment.manifest import Column, Context, Display, Egress, License, P
 _IPV4_RE = re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}$")
 
 #: parsed_data key → key in Observable.reputation.
-_REPUTATION = {"classification": "gn_classification", "noise": "gn_noise", "riot": "gn_riot", "name": "gn_name"}
+_REPUTATION = {"noise": "gn_noise", "riot": "gn_riot", "name": "gn_name"}
 
 
 class GreyNoiseAdapter(EnrichmentAdapter):
@@ -31,10 +31,11 @@ class GreyNoiseAdapter(EnrichmentAdapter):
     license = License("GreyNoise Community terms", attribution="GreyNoise", commercial_ok=False)
     outputs = (
         *(Column(key, f"observable.reputation.{rep}", Policy.NEWER_WINS) for key, rep in _REPUTATION.items()),
+        Column("noise_class", "observable.noise_class", Policy.NEWER_WINS),
         # RIOT: a known benign business service. Shodan's tags rank first.
         Column("riot", "observable.infra_tag", Policy.RANK, rank=2, filter="benign_service"),
         Context(
-            "classification",
+            "noise_class",
             "noise",
             Display.BADGE,
             tones={"malicious": "danger", "benign": "success", "unknown": "neutral"},
@@ -68,6 +69,7 @@ class GreyNoiseAdapter(EnrichmentAdapter):
                     raw_response=data,
                     parsed_data={
                         "found": False,
+                        "noise_class": "not_seen",
                         "noise": data.get("noise", False),
                         "riot": data.get("riot", False),
                         "note": "not seen mass-scanning — targeted, not noise",
@@ -81,7 +83,7 @@ class GreyNoiseAdapter(EnrichmentAdapter):
             raw_response=data,
             parsed_data={
                 "found": True,
-                "classification": data.get("classification", "unknown"),
+                "noise_class": data.get("classification") or "unknown",
                 "noise": data.get("noise", False),
                 "riot": data.get("riot", False),
                 "name": data.get("name"),

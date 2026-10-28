@@ -1,5 +1,6 @@
 """Celery tasks for the enrichment sources' scheduled jobs — EPSS, MITRE ATT&CK,
-MISP Galaxy, Malpedia, Metasploit, NVD, GitHub PoC, Wikipedia, cvelistV5, Wikidata, endoflife.date."""
+MISP Galaxy, Malpedia, Metasploit, NVD, GitHub PoC, Wikipedia, cvelistV5, Wikidata, endoflife.date,
+Tranco."""
 
 import csv
 import io
@@ -8,7 +9,7 @@ import logging
 import re
 import time
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import bindparam, select, text
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
@@ -1767,3 +1768,174 @@ async def _run_endoflife_sync():
     gateway, _ = await _job_gateway("endoflife")
     async with _get_worker_session() as db:
         return await sync_endoflife(db, gateway)
+
+
+TRANCO_LATEST_URL = "https://tranco-list.eu/api/lists/date/latest"
+#: A domain ranked this high is a popular site: worth an analyst's look before
+#: it is treated as an indicator.
+TRANCO_REVIEW_RANK = 10_000
+#: List rows matched against the ledger per query.
+_TRANCO_CHUNK = 10_000
+#: How long a rank stays fresh on the profile: one daily list plus slack.
+_TRANCO_CONTEXT_TTL = timedelta(hours=48)
+
+
+def parse_tranco_line(line: str) -> tuple[int, str] | None:
+    """``"1,google.com"`` → (1, "google.com"); None for anything else."""
+    rank, _, domain = line.strip().partition(",")
+    domain = domain.strip().lower()
+    return (int(rank), domain) if rank.isdigit() and domain else None
+
+
+@celery_app.task(name="app.workers.enrichment_tasks.run_tranco_sync", soft_time_limit=900, time_limit=960)
+def run_tranco_sync():
+    """Daily: rank the ledger's domains against the Tranco top-1M list."""
+    start = time.monotonic()
+    try:
+        stats = run_async(_run_tranco_sync())
+        logger.info("Tranco sync stats: %s", stats)
+        CELERY_TASKS_TOTAL.labels(task_name="run_tranco_sync", status="success").inc()
+        return stats
+    except Exception:
+        CELERY_TASKS_TOTAL.labels(task_name="run_tranco_sync", status="error").inc()
+        logger.exception("Tranco sync failed")
+        raise
+    finally:
+        CELERY_TASK_DURATION_SECONDS.labels(task_name="run_tranco_sync").observe(time.monotonic() - start)
+
+
+def _uuids(ids):
+    """A uuid[] parameter: one bind however many ids (an IN list would bind each)."""
+    return bindparam(None, list(ids), type_=ARRAY(UUID(as_uuid=True)))
+
+
+async def _tranco_match(db, batch: dict[str, int]) -> dict:
+    """The ledger's domains among ``batch`` (domain → rank), as
+    id → (rank, rank before, is_denied)."""
+    from app.models.observable import Observable
+
+    rows = await db.execute(
+        select(Observable.id, Observable.value, Observable.popularity_rank, Observable.is_denied).where(
+            Observable.kind == "domain", Observable.value.in_(list(batch))
+        )
+    )
+    return {oid: (batch[value], old, denied) for oid, value, old, denied in rows}
+
+
+@source_job("tranco")
+async def _run_tranco_sync():
+    """Write ``popularity_rank`` (and the profile's rank context) for the
+    ledger's domains in today's list, clear it for those that dropped out, and
+    set ``needs_review`` on a domain the first time it ranks in the top
+    TRANCO_REVIEW_RANK. Nothing is deleted or denied.
+
+    The ~22 MB CSV is streamed line by line and matched against the ledger a
+    chunk at a time, so only the ledger's matches are held in memory.
+    """
+    from sqlalchemy import all_, any_, delete, update
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from app.models.enrichment import EnrichmentSource, EntityContext
+    from app.models.observable import Observable
+
+    stats = {"listed": 0, "matched": 0, "ranked": 0, "dropped": 0, "flagged": 0}
+    matched: dict = {}
+
+    gateway, _ = await _job_gateway("tranco")
+    try:
+        async with gateway.client(timeout=120.0, follow_redirects=True) as client:
+            meta = await client.get(TRANCO_LATEST_URL)
+            meta.raise_for_status()
+            latest = meta.json()
+            stats["list_id"] = latest.get("list_id")
+            async with _get_worker_session() as db, client.stream("GET", latest["download"]) as resp:
+                resp.raise_for_status()
+                batch: dict[str, int] = {}
+                async for line in resp.aiter_lines():
+                    if (row := parse_tranco_line(line)) is None:
+                        continue
+                    stats["listed"] += 1
+                    batch.setdefault(row[1], row[0])
+                    if len(batch) >= _TRANCO_CHUNK:
+                        matched.update(await _tranco_match(db, batch))
+                        batch = {}
+                if batch:
+                    matched.update(await _tranco_match(db, batch))
+    except SOURCE_REFUSALS as e:
+        logger.warning("Tranco sync skipped: %s", e)
+        return {**stats, "stopped": e.status}
+    if not stats["listed"]:
+        # An empty file would read as "every domain dropped out".
+        raise RuntimeError(f"Tranco list {stats['list_id']} had no rows")
+
+    now = datetime.now(UTC)
+    changed = [{"id": oid, "popularity_rank": rank} for oid, (rank, old, _) in matched.items() if rank != old]
+    flagged = [
+        oid
+        for oid, (rank, old, denied) in matched.items()
+        if rank <= TRANCO_REVIEW_RANK and (old is None or old > TRANCO_REVIEW_RANK) and not denied
+    ]
+    async with _get_worker_session() as db:
+        if changed:
+            await db.execute(update(Observable), changed)
+        if flagged:
+            await db.execute(update(Observable).where(Observable.id == any_(_uuids(flagged))).values(needs_review=True))
+        dropped = (
+            (
+                await db.execute(
+                    update(Observable)
+                    .where(
+                        Observable.kind == "domain",
+                        Observable.popularity_rank.isnot(None),
+                        Observable.id != all_(_uuids(matched)),
+                    )
+                    .values(popularity_rank=None)
+                    .returning(Observable.id)
+                    .execution_options(synchronize_session=False)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if dropped:
+            await db.execute(
+                delete(EntityContext).where(
+                    EntityContext.entity_type == "observable",
+                    EntityContext.entity_id == any_(_uuids(dropped)),
+                    EntityContext.source_type == "tranco",
+                )
+            )
+        context = [
+            {
+                "entity_type": "observable",
+                "entity_id": oid,
+                "source_type": "tranco",
+                "key": "rank",
+                "value": rank,
+                "observed_at": now,
+                "expires_at": now + _TRANCO_CONTEXT_TTL,
+            }
+            for oid, (rank, _, _) in matched.items()
+        ]
+        for chunk in itertools.batched(context, 5000):
+            insert = pg_insert(EntityContext).values(list(chunk))
+            await db.execute(
+                insert.on_conflict_do_update(
+                    index_elements=["entity_type", "entity_id", "source_type", "key"],
+                    set_={
+                        "value": insert.excluded.value,
+                        "observed_at": insert.excluded.observed_at,
+                        "expires_at": insert.excluded.expires_at,
+                    },
+                )
+            )
+        source = (
+            await db.execute(select(EnrichmentSource).where(EnrichmentSource.source_type == "tranco"))
+        ).scalar_one_or_none()
+        if source:
+            source.last_synced_at = now
+            source.health_status = "healthy"
+        await db.commit()
+
+    stats.update(matched=len(matched), ranked=len(changed), dropped=len(dropped), flagged=len(flagged))
+    return stats

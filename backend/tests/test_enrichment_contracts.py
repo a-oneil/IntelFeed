@@ -169,7 +169,7 @@ async def test_greynoise_works_without_a_key():
     assert "key" not in seen[0].headers
     assert data.parsed_data == {
         "found": True,
-        "classification": "benign",
+        "noise_class": "benign",
         "noise": True,
         "riot": False,
         "name": "Shodan.io",
@@ -188,6 +188,7 @@ async def test_greynoise_not_observed():
     adapter, _ = _wire("greynoise")
     data = await adapter.enrich("observable", "1.1.1.1")
     assert data.parsed_data["found"] is False
+    assert data.parsed_data["noise_class"] == "not_seen"
     assert data.parsed_data["noise"] is False
     assert data.parsed_data["riot"] is False
 

@@ -149,7 +149,16 @@ Surfaces: `GET /api/entities/{type}/{id}/infrastructure` (`?format=csv` for a fi
 
 **Search and browse:** "Open in observables browser" on a profile is `GET /api/observables?linked_entity=<type>:<id>` (claimed plus reported alongside). The search language has `ioc.reports:>0` and `ioc.feeds:>0` (also `observable.reports` / `observable.feeds`); see [query-language.md](query-language.md).
 
-**Enrichment:** new IPv4, domain and hash rows from the AI, analyst and article-IOC-table doors queue a reputation lookup in the [enrichment job queue](automation-ai-enrichment.md#enrichment-job-queue) (max 25 per entry); bulk feed rows never do. Shodan InternetDB and GreyNoise Community need no key; VirusTotal needs one (Settings → Engine → Enrichment). Results go to `Observable.reputation`. A dual-use host (Shodan `vpn` / `proxy` / `tor`, GreyNoise RIOT → `benign_service`) gets an `infra_tag`, keeping it out of published feeds. It shows as a "Reputation" row on the provenance panel and a hidden-by-default browser column. `scripts/maintenance/backfill_feed_observable_roles.py` fills missing feed-row roles from the file path.
+**Enrichment:** new IPv4, IPv6, domain and hash rows from the AI, analyst and article-IOC-table doors queue lookups in the [enrichment job queue](automation-ai-enrichment.md#enrichment-job-queue) at each auto source that takes the kind (max 25 per entry); bulk feed rows never do. Shodan InternetDB, GreyNoise Community, Team Cymru and RDAP need no key; VirusTotal needs one (Settings → Engine → Enrichment). Reputation goes to `Observable.reputation`; network context has its own columns:
+
+| Column | Source | What it holds |
+|---|---|---|
+| `asn`, `asn_org`, `geo_country` | Team Cymru (DNS), VirusTotal | The IP's origin AS, its name and the allocation's country; newest answer wins |
+| `registered_at` | RDAP | When the registrable domain (`login.evil.co.uk` → `evil.co.uk`) was registered; the profile shows its age |
+| `popularity_rank` | Tranco (daily job) | The domain's exact rank in the top-1M list, null when unlisted |
+| `noise_class` | GreyNoise | `malicious` / `benign` / `unknown` when seen mass-scanning, `not_seen` otherwise |
+
+Team Cymru and RDAP look up only `active` rows on their own; aged and expired rows are never queued or backfilled, though an analyst's Enrich button still runs. RDAP caches each registrable domain for 7 days, so a second subdomain costs no request. A domain that enters the Tranco top 10,000 gets `needs_review` once (a popular site named as an indicator is often a false positive); it stays in the ledger, and shows in the browser's Review column and `search_observables(needs_review=true)`. The prefix, registry and allocation date, the registrar, expiry, status and nameservers, and the rank show in the profile's Context panel. A dual-use host (Shodan `vpn` / `proxy` / `tor`, GreyNoise RIOT → `benign_service`) gets an `infra_tag`, keeping it out of published feeds. The provenance panel shows Network, Registered (with the domain's age) and Popularity rows, and the browser has a hidden-by-default Reputation column. `scripts/maintenance/backfill_feed_observable_roles.py` fills missing feed-row roles from the file path.
 
 ## Publishing
 

@@ -825,6 +825,8 @@ Enrichment adds outside data to CVEs, techniques, malware and indicators. Each s
 | VirusTotal v3 | Yes | Manual | 4/min | | Indicator reputation |
 | GreyNoise Community | No (optional) | Manual | 10/hour | | IP noise, reputation |
 | Shodan InternetDB | No | Auto | 30/min | | IP open ports and tags |
+| Team Cymru | No | Auto | 60/min (DNS) | | IP origin AS, AS name, country, prefix |
+| RDAP | No | Auto | 1/s | | Domain registration date, registrar, expiry, nameservers |
 | MISP Galaxy | No | — | 10/hour | Weekly | Reference actor aliases |
 | Metasploit modules | No | — | 10/hour | Weekly | CVEs with Metasploit modules |
 | MITRE CWE | No | — | 10/hour | Weekly | The CWE catalog |
@@ -832,8 +834,9 @@ Enrichment adds outside data to CVEs, techniques, malware and indicators. Each s
 | Cybergeist | No | — | 10/hour | Daily | Threat actors and malware |
 | Wikidata | No | — | 30/min | Weekly | Vendor websites and facts, product vendors, country regions |
 | endoflife.date | No | — | 1/s | Daily | Product support status and release lifecycles |
+| Tranco | No | — | 1/s | Daily | Domain popularity rank |
 
-Auto = looked up when a new entity appears; Manual = on request from an entity or indicator. The last seven are catalog sources: they only run their jobs. Turning a source off also stops its jobs. A rate above what a source documents it allows is refused.
+Auto = looked up when a new entity appears; Manual = on request from an entity or indicator. The last eight are catalog sources: they only run their jobs. Team Cymru and RDAP look up active observables only. Turning a source off also stops its jobs. A rate above what a source documents it allows is refused.
 
 **To configure:** **Settings → Engine → Pipeline** → **enrich** stage: turn on sources, paste keys, optionally change rate limit and confidence threshold, save.
 

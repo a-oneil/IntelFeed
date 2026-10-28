@@ -87,7 +87,9 @@ async def enqueue(
     source types queued.
 
     Applicable: enabled and supporting the entity type; for the ``new`` lane,
-    also ``trigger_mode='auto'``. Other lanes may name ``source_types``.
+    also ``trigger_mode='auto'``. Other lanes may name ``source_types``. Outside
+    the ``manual`` lane the entity must also be in the source's scope (its
+    kinds and ``scope`` values, ``Source.scope_filter``).
 
     Enqueueing an entity/source pair again upserts its row: it keeps the
     higher-priority lane (and that lane's requester) and the earlier due_at,
@@ -107,6 +109,8 @@ async def enqueue(
                 for st in (await db.execute(query)).scalars()
                 if st in ADAPTER_REGISTRY and entity_type in ADAPTER_REGISTRY[st].applies_to
             ]
+            if lane != "manual":
+                applicable = [st for st in applicable if await _in_scope(db, st, entity_type, entity_id)]
             if not applicable:
                 return []
             due = due_at or datetime.now(UTC)
@@ -131,6 +135,17 @@ async def enqueue(
         logger.exception("Could not queue enrichment for %s/%s", entity_type, entity_value)
         return []
     return applicable
+
+
+async def _in_scope(db: AsyncSession, source_type: str, entity_type: str, entity_id) -> bool:
+    from app.enrichment.entity_updater import _get_model_map
+
+    model = _get_model_map().get(entity_type)
+    scope = ADAPTER_REGISTRY[source_type].scope_filter(entity_type, model) if model else None
+    if scope is None:
+        return True
+    found = await db.scalar(select(model.id).where(model.id == uuid.UUID(str(entity_id)), scope))
+    return found is not None
 
 
 def _row(

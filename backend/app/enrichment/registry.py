@@ -5,6 +5,7 @@ from app.enrichment.adapters import (
     CISAKEVAdapter,
     CVEDetailsAdapter,
     CVEListAdapter,
+    CymruAdapter,
     EPSSAdapter,
     GitHubPoCAdapter,
     GreyNoiseAdapter,
@@ -12,6 +13,7 @@ from app.enrichment.adapters import (
     MITREAttackAdapter,
     NVDAdapter,
     OSVAdapter,
+    RDAPAdapter,
     ShodanAdapter,
     VirusTotalAdapter,
     VulnCheckAdapter,
@@ -24,6 +26,7 @@ from app.enrichment.catalogs import (
     MISPGalaxySource,
     MITRECWESource,
     RansomwareLiveSource,
+    TrancoSource,
 )
 from app.enrichment.endoflife import EndOfLifeSource
 from app.enrichment.gateway import SourceGateway
@@ -46,6 +49,9 @@ ADAPTER_REGISTRY: dict[str, type[EnrichmentAdapter]] = {
     "virustotal": VirusTotalAdapter,
     "greynoise": GreyNoiseAdapter,
     "shodan": ShodanAdapter,
+    # Observable network context: routing (Team Cymru) and registration (RDAP).
+    "cymru": CymruAdapter,
+    "rdap": RDAPAdapter,
 }
 
 # Catalog sources: scheduled jobs only, no per-entity lookup.
@@ -59,6 +65,7 @@ CATALOG_REGISTRY: dict[str, type[Source]] = {
         CybergeistSource,
         WikidataSource,
         EndOfLifeSource,
+        TrancoSource,
     )
 }
 

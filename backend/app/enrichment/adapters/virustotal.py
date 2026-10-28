@@ -22,9 +22,6 @@ _REPUTATION = {
     "malicious_votes": "vt_malicious",
     "threat_label": "vt_threat_label",
     "tags": "vt_tags",
-    "asn": "asn",
-    "as_owner": "as_owner",
-    "country": "country",
 }
 
 
@@ -42,6 +39,10 @@ class VirusTotalAdapter(EnrichmentAdapter):
     license = License("VirusTotal public API terms", attribution="VirusTotal", commercial_ok=False)
     outputs = (
         *(Column(key, f"observable.reputation.{rep}", Policy.NEWER_WINS) for key, rep in _REPUTATION.items()),
+        # Network facts have one home each, shared with Team Cymru: the latest answer stands.
+        Column("asn", "observable.asn", Policy.NEWER_WINS),
+        Column("as_owner", "observable.asn_org", Policy.NEWER_WINS),
+        Column("country", "observable.geo_country", Policy.NEWER_WINS, filter="country_code"),
         Context("detection_ratio", "Detections", Display.FACT),
         Context("threat_label", "Threat label", Display.FACT),
         Context("tags", "Tags", Display.CHIPS),
