@@ -38,9 +38,7 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.SavedSearch
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.TrackChanges
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.AlertDialog
@@ -63,6 +61,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -77,6 +76,7 @@ import com.example.intelfeed.ui.components.AddFeedDialog
 import com.example.intelfeed.data.model.FeedSource
 import com.example.intelfeed.data.repository.FeedFilter
 import com.example.intelfeed.theme.CyberAmber
+import com.example.intelfeed.R
 import com.example.intelfeed.theme.CyberBlue
 import com.example.intelfeed.theme.CyberRed
 import com.example.intelfeed.theme.SlateDark700
@@ -117,8 +117,6 @@ fun FeedDrawerSheet(
     // Saved searches are listed (with their unread counts) when this is set.
     onOpenSavedSearch: ((SavedSearch) -> Unit)? = null,
     onDeleteSavedSearch: ((SavedSearch) -> Unit)? = null,
-    // The server's intelligence requirements (shared keyword matching). Row hidden when null.
-    onOpenRequirements: (() -> Unit)? = null,
     // Add Feed. The button is hidden when onDiscoverFeeds is null.
     onDiscoverFeeds: ((url: String, onResult: (Result<List<DiscoveredFeed>>) -> Unit) -> Unit)? = null,
     onSubscribe: (feed: DiscoveredFeed, categoryId: String?, intervalMinutes: Int?) -> Unit = { _, _, _ -> },
@@ -206,7 +204,8 @@ fun FeedDrawerSheet(
                 modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 16.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(Icons.Default.Shield, contentDescription = null, tint = CyberBlue, modifier = Modifier.size(24.dp))
+                // Tinted with the theme accent, as the web logo uses currentColor.
+                Icon(painterResource(R.drawable.ic_logo), contentDescription = null, tint = CyberBlue, modifier = Modifier.size(24.dp))
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text("IntelFeed", style = MaterialTheme.typography.titleMedium, color = TextPrimary, fontWeight = FontWeight.Bold)
@@ -215,7 +214,7 @@ fun FeedDrawerSheet(
                 IconButton(onClick = onOpenSettings) { Icon(Icons.Default.Settings, contentDescription = strings.drawerAccountSettings, tint = TextSecondary) }
             }
 
-            // "Find a feed" sits below the views, requirements and saved searches, so its results used to
+            // "Find a feed" sits below the views and saved searches, so its results used to
             // appear under the keyboard. Typing scrolls the feed section to the top, and the list
             // stays above the keyboard.
             val listState = rememberLazyListState()
@@ -233,10 +232,6 @@ fun FeedDrawerSheet(
                             count = uiState.viewCounts.forFilter(filter),
                             onClick = { onFilterSelect(filter) }
                         )
-                    }
-                    if (onOpenRequirements != null) {
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = SlateDark700)
-                        DrawerItem(icon = Icons.Default.TrackChanges, title = strings.drawerServerRequirements, isSelected = false, onClick = onOpenRequirements)
                     }
                     if (uiState.savedSearches.isNotEmpty() && onOpenSavedSearch != null) {
                         HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = SlateDark700)

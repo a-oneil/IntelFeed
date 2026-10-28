@@ -249,7 +249,6 @@ private fun HomeShell(viewModel: IntelFeedViewModel, uiState: IntelFeedUiState) 
                 onRetry = { viewModel.loadCategoriesAndFeeds() },
                 onOpenSavedSearch = { saved -> closeDrawer(); viewModel.openSavedSearch(saved) },
                 onDeleteSavedSearch = { saved -> viewModel.deleteSavedSearch(saved) },
-                onOpenRequirements = { closeDrawer(); viewModel.openRequirements() },
                 onDiscoverFeeds = { url, onResult -> viewModel.discoverFeeds(url, onResult) },
                 onSubscribe = { feed, catId, interval -> viewModel.subscribeToFeed(feed, catId, interval); closeDrawer() },
                 onAddArticle = { url -> viewModel.ingestSharedUrl(url); closeDrawer() }
