@@ -233,6 +233,7 @@ Tables `vendors` and `products`.
 - Both: `name` (String 255, unique), `aliases`, `normalized_name`, `description`, `website`, `metadata_`
 - `vendors.vendor_type` (indexed) — see [Enums & Constants](#enums--constants)
 - `products.vendor_id` (FK → `vendors`, SET NULL), `products.product_type` (indexed)
+- `products.support_status` (String 20) — `maintained`, `security_only`, `eol` or `unknown`; `products.next_eol` (Date) — the soonest end of security support among maintained releases. Both come from endoflife.date and stay empty for products it doesn't list ([rules](automation-ai-enrichment.md#endoflifedate))
 
 #### Mitigation
 Table `mitigations`: MITRE ATT&CK mitigations.
@@ -585,7 +586,7 @@ Bookkeeping for the one-pass `entry_analysis` (one AI call that reads an article
 
 #### EnrichmentSource
 Table `enrichment_sources`: one external data source.
-- `source_type` (unique) — `nvd`, `epss`, `cisa_kev`, `mitre_attack`, `vulncheck`, `osv`, `malpedia`, `github_poc`, `cvedetails`, `wikipedia`, `greynoise`, `shodan`, `virustotal`, and the catalog sources `misp_galaxy`, `metasploit`, `mitre_cwe`, `ransomware_live`, `cybergeist`
+- `source_type` (unique) — `nvd`, `epss`, `cisa_kev`, `mitre_attack`, `vulncheck`, `osv`, `malpedia`, `github_poc`, `cvedetails`, `wikipedia`, `greynoise`, `shodan`, `virustotal`, and the catalog sources `misp_galaxy`, `metasploit`, `mitre_cwe`, `ransomware_live`, `cybergeist`, `wikidata`, `endoflife`
 - `display_name`, `is_enabled` (seeded on for a source with scheduled jobs; a disabled source's jobs skip)
 - `trigger_mode` (default `manual`) — `auto` or `manual`
 - `api_key_encrypted`, `config` (JSONB)

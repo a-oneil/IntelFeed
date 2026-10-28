@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.encryption import decrypt_value
 from app.enrichment.base import EnrichmentData
 from app.enrichment.context import store_context
+from app.enrichment.entity_updater import apply_enrichment_results_to_entity
 from app.enrichment.gateway import MAX_TOKEN_WAIT, BreakerOpen, GatewayError, RateLimited, SourceGateway
 from app.enrichment.registry import (
     ADAPTER_REGISTRY,
@@ -205,6 +206,19 @@ async def store_result(
         )
     await store_context(
         db, entity_type, entity_id, source_type, data.parsed_data, observed_at=now, expires_at=expires_at
+    )
+
+
+async def apply_catalog_result(
+    db: AsyncSession, entity_type: str, entity_id: uuid.UUID, source_type: str, data: EnrichmentData
+) -> bool:
+    """A catalog job's answer for one entity, handled as a lookup's would be:
+    stored, its Context written, its Column outputs applied. Returns True if
+    the entity's columns changed."""
+    existing = await get_cached_result(db, entity_type, entity_id, source_type)
+    await store_result(db, entity_type, entity_id, source_type, data, existing)
+    return await apply_enrichment_results_to_entity(
+        db, entity_type, entity_id, [{"source_type": source_type, "status": "success", "parsed_data": data.parsed_data}]
     )
 
 

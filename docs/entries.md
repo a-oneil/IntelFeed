@@ -56,4 +56,6 @@ UTC defaults from `backend/app/workers/job_registry.py`; admins can override.
 | `backfill-rule-data-sources` | weekly Sun 04:50 | fills rule `data_sources` from log sources, for telemetry coverage |
 | `backfill-rule-attack-mappings` | weekly Sun 05:30 | re-fetches GitHub rules for ATT&CK ids; derives tactics from techniques |
 | `wikipedia-bulk-sync` | weekly Wed 04:00 | Wikipedia summaries |
+| `wikidata-sync` | weekly Thu 04:30 | vendor websites, product vendors, country regions from Wikidata |
+| `endoflife-sync` | daily 05:15 | product support status from endoflife.date |
 | `build-telegram-forward-relationships` | every 4h | Telegram `forwarded_from` → `communicates_with` links |

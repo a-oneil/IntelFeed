@@ -38,7 +38,8 @@ class Policy(StrEnum):
       target, the lowest ``rank`` with a value wins.
     - ``UNION``: list columns; adds the items the column doesn't hold yet,
       outputs in ``rank`` order.
-    - ``NEWER_WINS``: a value replaces whatever the column holds.
+    - ``NEWER_WINS``: a value replaces whatever the column holds. A missing
+      value leaves the column alone unless the output ``clears``.
 
     A column that ``follows`` a target is written, empty or not, whenever its
     source writes that target (a score's severity goes with the score).
@@ -88,6 +89,9 @@ class Column:
     ``<entity_type>.<column>``, or ``<entity_type>.<column>.<key>`` for a key
     inside a JSON column. ``filter`` names a transform in the field map
     (``app/enrichment/entity_updater.py``), e.g. ``"aliases"`` → filter_aliases.
+    ``resolve`` names a database lookup there that turns the value into what
+    the column holds, e.g. ``"vendor"`` → the id of an existing vendor; with no
+    match nothing is written.
     """
 
     key: str
@@ -96,6 +100,8 @@ class Column:
     rank: int | None = None
     filter: str | None = None
     follows: str | None = None  # written whenever its source writes this target
+    resolve: str | None = None
+    clears: bool = False  # NEWER_WINS: an answer without a value empties the column
 
     @property
     def entity_type(self) -> str:

@@ -36,7 +36,7 @@ LOOKUP_COLUMN = {"cve": "cve_id", "cwe": "cwe_id", "ttp": "technique_id", "obser
 BACKFILL_DEFAULT = 1000
 BACKFILL_MAX = 50000
 
-_ACRONYMS = {"cvss", "cwe", "epss", "id", "kev", "mitre", "url", "github"}
+_ACRONYMS = {"cvss", "cwe", "eol", "epss", "id", "iso", "kev", "mitre", "url", "github"}
 _SPELLING = {"github": "GitHub", "mitre": "MITRE"}
 
 

@@ -12,7 +12,7 @@ import pytest
 from sqlalchemy import select, text
 
 from app.enrichment.base import EnrichmentAdapter
-from app.enrichment.entity_updater import FILTERS, _get_model_map
+from app.enrichment.entity_updater import FILTERS, RESOLVERS, _get_model_map
 from app.enrichment.manifest import Column, Policy
 from app.enrichment.registry import (
     ADAPTER_REGISTRY,
@@ -80,6 +80,15 @@ JOBS_BEFORE = {
     ),
     "cvelist-backfill": ("app.workers.enrichment_tasks.run_cvelist_backfill", {"type": "crontab", "minute": "20"}),
     "cvelist-delta-sync": ("app.workers.enrichment_tasks.run_cvelist_delta_sync", {"type": "crontab", "minute": "40"}),
+    # Sources added since.
+    "wikidata-sync": (
+        "app.workers.enrichment_tasks.run_wikidata_sync",
+        {"type": "crontab", "minute": "30", "hour": "4", "day_of_week": "4"},
+    ),
+    "endoflife-sync": (
+        "app.workers.enrichment_tasks.run_endoflife_sync",
+        {"type": "crontab", "minute": "15", "hour": "5"},
+    ),
 }
 
 JOB_SOURCE = {
@@ -99,6 +108,8 @@ JOB_SOURCE = {
     "sync-cybergeist-feeds": "cybergeist",
     "cvelist-backfill": "cvelist",
     "cvelist-delta-sync": "cvelist",
+    "wikidata-sync": "wikidata",
+    "endoflife-sync": "endoflife",
 }
 
 
@@ -124,7 +135,15 @@ def test_every_source_has_a_seed_row_from_its_manifest():
         assert row["default_daily_budget"] == cls.quota.daily_budget
         assert row["default_trigger_mode"] in ("auto", "manual")
         assert row["default_enabled"] is bool(cls.jobs)
-    assert set(CATALOG_REGISTRY) == {"misp_galaxy", "metasploit", "mitre_cwe", "ransomware_live", "cybergeist"}
+    assert set(CATALOG_REGISTRY) == {
+        "misp_galaxy",
+        "metasploit",
+        "mitre_cwe",
+        "ransomware_live",
+        "cybergeist",
+        "wikidata",
+        "endoflife",
+    }
     assert all(cls.kind == "catalog" and not issubclass(cls, EnrichmentAdapter) for cls in CATALOG_REGISTRY.values())
     assert all(cls.kind == "lookup" for cls in ADAPTER_REGISTRY.values())
 
@@ -138,6 +157,10 @@ def test_every_column_output_names_a_real_column():
             assert hasattr(models[column.entity_type], name), (source_type, column.target)
             if column.filter:
                 assert column.filter in FILTERS
+            if column.resolve:
+                assert column.resolve in RESOLVERS
+            if column.clears:
+                assert column.policy == Policy.NEWER_WINS
             if column.follows:
                 leader = next(c for c in cls.columns() if c.target == column.follows)
                 assert leader.policy != Policy.UNION and not leader.follows

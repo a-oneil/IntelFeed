@@ -5,7 +5,8 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from urllib.parse import quote
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -80,12 +81,48 @@ def _benign_service(value, entity) -> str | None:
     return "benign_service" if value is True else None
 
 
+def _date(value, entity) -> date | None:
+    try:
+        return date.fromisoformat(value) if isinstance(value, str) else None
+    except ValueError:
+        return None
+
+
 #: ``Column.filter`` names → transforms of (parsed value, entity) into the value written.
 FILTERS = {
     "aliases": _aliases,
     "github_url": _github_url,
     "infra_tag": _infra_tag,
     "benign_service": _benign_service,
+    "date": _date,
+}
+
+
+async def _existing_vendor(db: AsyncSession, value) -> uuid.UUID | None:
+    """The vendor a source's ``{"label", "enwiki"}`` names, if IntelFeed has it:
+    the one vendor whose Wikipedia article is that sitelink, else a vendor whose
+    name or alias is the label. Never creates one."""
+    from app.intelligence.entity_dedup import find_entity_by_name_or_alias
+    from app.models.vendor import Vendor
+
+    if not isinstance(value, dict):
+        return None
+    title = value.get("enwiki")
+    if isinstance(title, str) and title:
+        path = title.replace(" ", "_")
+        urls = {f"https://en.wikipedia.org/wiki/{p}" for p in (path, quote(path, safe=";@$!*(),/~:"))}
+        ids = (await db.execute(select(Vendor.id).where(Vendor.wikipedia_url.in_(urls)).limit(2))).scalars().all()
+        if len(ids) == 1:
+            return ids[0]
+    label = value.get("label")
+    vendor = await find_entity_by_name_or_alias(db, Vendor, label) if isinstance(label, str) else None
+    return vendor.id if vendor else None
+
+
+#: ``Column.resolve`` names → database lookups of (session, value) into the
+#: value written, or None when there is no match.
+RESOLVERS = {
+    "vendor": _existing_vendor,
 }
 
 _EMPTY = (None, "", [])
@@ -97,7 +134,7 @@ def _lookup(data: dict, key: str):
     return data
 
 
-def _value(column: Column, data: dict, entity):
+async def _value(db: AsyncSession, column: Column, data: dict, entity):
     """The value a column output would write, or None when it has none."""
     value = _lookup(data, column.key)
     if column.filter:
@@ -107,6 +144,8 @@ def _value(column: Column, data: dict, entity):
             value = value.strip()
         elif isinstance(value, list):
             value = [v for v in value if isinstance(v, str)]
+    if column.resolve and value not in _EMPTY:
+        value = await RESOLVERS[column.resolve](db, value)
     return None if value in _EMPTY else value
 
 
@@ -140,10 +179,11 @@ async def apply_enrichment_results_to_entity(
     ones for this entity type by their ``Policy``: blank columns are filled,
     ranked outputs fill from the best-ranked source that has a value, list
     columns gain the items they lack, and newer-wins outputs replace what is
-    there; columns that follow a target are written with it. Every write
-    records a claim naming its source. A JSON column a
-    source writes into (``Observable.reputation``) is stamped ``enriched_at``
-    whenever one of its sources returned a result.
+    there; columns that follow a target are written with it. An output that
+    resolves its value (a developer → an existing vendor's id) writes only what
+    the lookup finds. Every write records a claim naming its source. A JSON
+    column a source writes into (``Observable.reputation``) is stamped
+    ``enriched_at`` whenever one of its sources returned a result.
 
     Each enrichment-result entry should look like:
       {"source_type": "...", "status": "success"|"cached", "parsed_data": {...}}
@@ -212,7 +252,7 @@ async def apply_enrichment_results_to_entity(
             if not _blank(current):
                 continue
             for src, column in outputs:
-                value = _value(column, by_source[src], entity)
+                value = await _value(db, column, by_source[src], entity)
                 if value is not None:
                     write(src, column, value)
                     break
@@ -223,7 +263,7 @@ async def apply_enrichment_results_to_entity(
             for src, column in outputs:
                 added = [
                     a
-                    for a in _value(column, by_source[src], entity) or []
+                    for a in await _value(db, column, by_source[src], entity) or []
                     if a.casefold() not in seen and not seen.add(a.casefold())
                 ]
                 if added:
@@ -234,8 +274,8 @@ async def apply_enrichment_results_to_entity(
 
         elif policy == Policy.NEWER_WINS:
             for src, column in outputs:
-                value = _value(column, by_source[src], entity)
-                if value is None or value == _get(entity, path):
+                value = await _value(db, column, by_source[src], entity)
+                if (value is None and not column.clears) or value == _get(entity, path):
                     continue
                 write(src, column, value)
 

@@ -1,5 +1,5 @@
 """Celery tasks for the enrichment sources' scheduled jobs — EPSS, MITRE ATT&CK,
-MISP Galaxy, Malpedia, Metasploit, NVD, GitHub PoC, Wikipedia, cvelistV5."""
+MISP Galaxy, Malpedia, Metasploit, NVD, GitHub PoC, Wikipedia, cvelistV5, Wikidata, endoflife.date."""
 
 import csv
 import io
@@ -1461,16 +1461,11 @@ async def _apply_cvelist_record(db, cve_pk, data, cwe_index: dict) -> bool:
     """Store one CVE record as the cvelist source's result for the CVE: its
     context, its declared columns, and its CWE ids as cve_weaknesses links.
     Returns True when a column changed."""
-    from app.enrichment.entity_updater import apply_enrichment_results_to_entity
-    from app.enrichment.pipeline import get_cached_result, store_result
+    from app.enrichment.pipeline import apply_catalog_result
     from app.intelligence.cve import sync_cve_weaknesses
 
-    existing = await get_cached_result(db, "cve", cve_pk, "cvelist")
-    await store_result(db, "cve", cve_pk, "cvelist", data, existing)
+    changed = await apply_catalog_result(db, "cve", cve_pk, "cvelist", data)
     parsed = data.parsed_data
-    changed = await apply_enrichment_results_to_entity(
-        db, "cve", cve_pk, [{"source_type": "cvelist", "status": "success", "parsed_data": parsed}]
-    )
     weaknesses = [
         {"cwe_ref": ref, "is_primary": False, "assigner": parsed.get("assigner")}
         for ref in dict.fromkeys(parsed.get("weaknesses") or [])
@@ -1720,3 +1715,55 @@ async def _run_cvelist_delta_sync():
             logger.warning("cvelist delta sync stopping: %s", e)
             stats["stopped"] = e.status
     return stats
+
+
+@celery_app.task(name="app.workers.enrichment_tasks.run_wikidata_sync", soft_time_limit=900, time_limit=960)
+def run_wikidata_sync():
+    """Weekly: vendor websites, product vendors, country regions and vendor facts from Wikidata."""
+    start = time.monotonic()
+    try:
+        stats = run_async(_run_wikidata_sync())
+        logger.info("Wikidata sync stats: %s", stats)
+        CELERY_TASKS_TOTAL.labels(task_name="run_wikidata_sync", status="success").inc()
+        return stats
+    except Exception:
+        CELERY_TASKS_TOTAL.labels(task_name="run_wikidata_sync", status="error").inc()
+        logger.exception("Wikidata sync failed")
+        raise
+    finally:
+        CELERY_TASK_DURATION_SECONDS.labels(task_name="run_wikidata_sync").observe(time.monotonic() - start)
+
+
+@source_job("wikidata")
+async def _run_wikidata_sync():
+    from app.enrichment.wikidata import sync_wikidata
+
+    gateway, _ = await _job_gateway("wikidata")
+    async with _get_worker_session() as db:
+        return await sync_wikidata(db, gateway)
+
+
+@celery_app.task(name="app.workers.enrichment_tasks.run_endoflife_sync", soft_time_limit=900, time_limit=960)
+def run_endoflife_sync():
+    """Daily: product support lifecycles from endoflife.date."""
+    start = time.monotonic()
+    try:
+        stats = run_async(_run_endoflife_sync())
+        logger.info("endoflife.date sync stats: %s", stats)
+        CELERY_TASKS_TOTAL.labels(task_name="run_endoflife_sync", status="success").inc()
+        return stats
+    except Exception:
+        CELERY_TASKS_TOTAL.labels(task_name="run_endoflife_sync", status="error").inc()
+        logger.exception("endoflife.date sync failed")
+        raise
+    finally:
+        CELERY_TASK_DURATION_SECONDS.labels(task_name="run_endoflife_sync").observe(time.monotonic() - start)
+
+
+@source_job("endoflife")
+async def _run_endoflife_sync():
+    from app.enrichment.endoflife import sync_endoflife
+
+    gateway, _ = await _job_gateway("endoflife")
+    async with _get_worker_session() as db:
+        return await sync_endoflife(db, gateway)

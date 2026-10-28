@@ -1,0 +1,159 @@
+{
+ "schema_version": "1.2.1",
+ "generated_at": "2026-10-28T02:11:39+00:00",
+ "last_modified": "2026-09-24T07:44:41+00:00",
+ "result": {
+  "name": "windows-server",
+  "aliases": [
+   "windowsserver"
+  ],
+  "label": "Microsoft Windows Server",
+  "category": "os",
+  "tags": [
+   "microsoft",
+   "os",
+   "windows"
+  ],
+  "versionCommand": "winver",
+  "identifiers": [],
+  "labels": {
+   "eoas": "Active Support",
+   "discontinued": null,
+   "eol": "Security Support",
+   "eoes": "Extended Security Updates"
+  },
+  "links": {
+   "icon": null,
+   "html": "https://endoflife.date/windows-server",
+   "releasePolicy": "https://learn.microsoft.com/lifecycle/products/?terms=Windows%20Server"
+  },
+  "releases": [
+   {
+    "name": "2025",
+    "codename": null,
+    "label": "Windows Server 2025 (LTSC)",
+    "releaseDate": "2024-11-01",
+    "isLts": true,
+    "ltsFrom": null,
+    "isEoas": false,
+    "eoasFrom": "2029-11-13",
+    "isEol": false,
+    "eolFrom": "2034-11-14",
+    "isEoes": null,
+    "eoesFrom": null,
+    "isMaintained": true,
+    "latest": {
+     "name": "10.0.26100",
+     "date": null,
+     "link": "https://learn.microsoft.com/windows/release-health/windows-server-release-info"
+    },
+    "custom": null
+   },
+   {
+    "name": "23h2-ac",
+    "codename": null,
+    "label": "Windows Server 23H2 AC",
+    "releaseDate": "2023-10-24",
+    "isLts": false,
+    "ltsFrom": null,
+    "isEoas": true,
+    "eoasFrom": "2026-05-12",
+    "isEol": true,
+    "eolFrom": "2026-05-12",
+    "isEoes": null,
+    "eoesFrom": null,
+    "isMaintained": false,
+    "latest": {
+     "name": "10.0.25398",
+     "date": null,
+     "link": "https://support.microsoft.com/servicing/os/windows-server/2026/05/end-of-updates-statement"
+    },
+    "custom": null
+   },
+   {
+    "name": "2022",
+    "codename": null,
+    "label": "Windows Server 2022 (LTSC)",
+    "releaseDate": "2021-08-18",
+    "isLts": true,
+    "ltsFrom": null,
+    "isEoas": true,
+    "eoasFrom": "2026-10-13",
+    "isEol": false,
+    "eolFrom": "2031-10-14",
+    "isEoes": null,
+    "eoesFrom": null,
+    "isMaintained": true,
+    "latest": {
+     "name": "10.0.20348",
+     "date": null,
+     "link": "https://learn.microsoft.com/windows/release-health/windows-server-release-info"
+    },
+    "custom": null
+   },
+   {
+    "name": "20h2-sac",
+    "codename": null,
+    "label": "Windows Server 20H2 SAC",
+    "releaseDate": "2020-10-20",
+    "isLts": false,
+    "ltsFrom": null,
+    "isEoas": true,
+    "eoasFrom": "2022-08-09",
+    "isEol": true,
+    "eolFrom": "2022-08-09",
+    "isEoes": null,
+    "eoesFrom": null,
+    "isMaintained": false,
+    "latest": {
+     "name": "10.0.19042",
+     "date": null,
+     "link": "https://learn.microsoft.com/lifecycle/announcements/windows-server-20h2-retiring"
+    },
+    "custom": null
+   },
+   {
+    "name": "2004-sac",
+    "codename": null,
+    "label": "Windows Server 2004 SAC",
+    "releaseDate": "2020-05-27",
+    "isLts": false,
+    "ltsFrom": null,
+    "isEoas": true,
+    "eoasFrom": "2021-12-14",
+    "isEol": true,
+    "eolFrom": "2021-12-14",
+    "isEoes": null,
+    "eoesFrom": null,
+    "isMaintained": false,
+    "latest": {
+     "name": "10.0.19041",
+     "date": null,
+     "link": "https://learn.microsoft.com/lifecycle/announcements/windows-server-version-2004-end-of-servicing"
+    },
+    "custom": null
+   },
+   {
+    "name": "1909-sac",
+    "codename": null,
+    "label": "Windows Server 1909 SAC",
+    "releaseDate": "2019-11-12",
+    "isLts": false,
+    "ltsFrom": null,
+    "isEoas": true,
+    "eoasFrom": "2021-05-11",
+    "isEol": true,
+    "eolFrom": "2021-05-11",
+    "isEoes": null,
+    "eoesFrom": null,
+    "isMaintained": false,
+    "latest": {
+     "name": "10.0.18363",
+     "date": null,
+     "link": "https://learn.microsoft.com/lifecycle/announcements/windows-server-1909-end-of-servicing"
+    },
+    "custom": null
+   }
+  ]
+ }
+}

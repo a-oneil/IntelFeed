@@ -25,7 +25,9 @@ from app.enrichment.catalogs import (
     MITRECWESource,
     RansomwareLiveSource,
 )
+from app.enrichment.endoflife import EndOfLifeSource
 from app.enrichment.gateway import SourceGateway
+from app.enrichment.wikidata import WikidataSource
 from app.models.enrichment import EnrichmentSource
 
 ADAPTER_REGISTRY: dict[str, type[EnrichmentAdapter]] = {
@@ -49,7 +51,15 @@ ADAPTER_REGISTRY: dict[str, type[EnrichmentAdapter]] = {
 # Catalog sources: scheduled jobs only, no per-entity lookup.
 CATALOG_REGISTRY: dict[str, type[Source]] = {
     cls.source_type: cls
-    for cls in (MISPGalaxySource, MetasploitSource, MITRECWESource, RansomwareLiveSource, CybergeistSource)
+    for cls in (
+        MISPGalaxySource,
+        MetasploitSource,
+        MITRECWESource,
+        RansomwareLiveSource,
+        CybergeistSource,
+        WikidataSource,
+        EndOfLifeSource,
+    )
 }
 
 #: Every source, lookup or catalog, by source_type.

@@ -922,6 +922,8 @@ class ProductResponse(BaseModel):
     description: str | None = None
     product_type: str | None = None
     website: str | None = None
+    support_status: str | None = None  # maintained | security_only | eol | unknown (endoflife.date)
+    next_eol: date | None = None
     article_count: int = 0
     first_seen_at: datetime | None = None
     last_seen_at: datetime | None = None

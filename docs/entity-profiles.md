@@ -41,6 +41,7 @@ Every profile — actors, malware, CVEs, CWEs, TTPs, countries, sectors, tools, 
 | Regex and AI extraction | `CVE-YYYY-NNNN` and `TNNNN(.NNN)` regex; one-pass AI analysis | CVE and TTP links, new entities, sectors, indicators |
 | NVD / EPSS / KEV / GitHub PoC | Scheduled syncs ([entries.md](entries.md#beat-scheduled-enrichment)) | CVE scores, exploit status, affected products |
 | MITRE ATT&CK / Malpedia / Wikipedia | Weekly syncs | TTP details and mitigations; actor and malware descriptions and aliases |
+| Wikidata / endoflife.date | Weekly and daily syncs ([rules](automation-ai-enrichment.md#wikidata)) | Vendor websites and facts, product vendors, country regions; product support status and releases |
 | Co-occurrence and the Telegram forward graph | Post-ingest pipeline step; job every 4 hours | `entity_relationships` links |
 | Analyst | Badge edits, descriptions, merges, notes, relationship confirm/reject | Any of the above, marked analyst-sourced |
 
@@ -88,7 +89,7 @@ Single fields (an actor's motivation, origin country, targeted sectors, assessme
 | `analyst` | Per-type `PUT /api/entities/...` endpoints via `_apply_fields` (only on a real change), and the sector tool |
 | `ai_extraction` | `intelligence/enrichment.py` while reading an article (records the `entry_id`) |
 | `ai_assessment` | The AI gap-fill in `workers/entity_maintenance_tasks.py` and the assessment writer in `services/entity_summary.py` (the model's reason is the quote) |
-| `enrichment` | `enrichment/entity_updater.py` (Wikipedia, MITRE ATT&CK, Malpedia) and the sector rollup in `workers/maintenance.py`, which writes `threat_actor_target_sectors` / `malware_target_sectors` rows from the entity's articles and rebuilds the `targeted_sectors` cache (`services/sector_links.py`). |
+| `enrichment` | `enrichment/entity_updater.py` (Wikipedia, MITRE ATT&CK, Malpedia, Wikidata, endoflife.date and the other sources' declared columns) and the sector rollup in `workers/maintenance.py`, which writes `threat_actor_target_sectors` / `malware_target_sectors` rows from the entity's articles and rebuilds the `targeted_sectors` cache (`services/sector_links.py`). |
 | `external_feed` | The CyberGeist attribute fill (`workers/enrichment_tasks.py`) and the ransomware.live sync (`intelligence/ransomware_sync.py`) |
 | `seed` | Reserved for seeded reference data; nothing writes it. |
 

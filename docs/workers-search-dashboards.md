@@ -121,6 +121,8 @@ All times are UTC. "AI" means the job calls an AI provider. "(`ai` queue)" means
 | `run_wikipedia_bulk_sync` | `wikipedia` | Wednesday 04:00 | Add Wikipedia content to entities that lack it; stops 5 minutes before its time limit |
 | `sync_cybergeist_feeds` | `cybergeist` | Daily 02:30 | Sync threat actor and malware lists from Cybergeist |
 | `sync_ransomware_victims` | `ransomware_live` | Every 30 min | Collect ransomware leak-site victim posts as structured records |
+| `run_wikidata_sync` | `wikidata` | Thursday 04:30 | Fill vendor websites, product vendors and country regions, and vendor facts, from Wikidata |
+| `run_endoflife_sync` | `endoflife` | Daily 05:15 | Match products to endoflife.date and set their support status and next end of life |
 
 Each source declares its jobs in its manifest ([Source Jobs](automation-ai-enrichment.md#source-jobs)). A job skips while its source is switched off (`{"skipped": "source disabled"}`), and sends its requests through its source's gateway ([Source Gateway](automation-ai-enrichment.md#source-gateway)). A refusal (rate limited, breaker open, budget spent) stops the job; it keeps what it did and records `stopped` in its stats.
 
@@ -584,12 +586,13 @@ Built from the `JOB_REGISTRY` defaults. Admins can change any of these in Engine
 04:15 ├─ evict_tts_cache
 04:20 ├─ recompute_signal_rates · rank_threat_board · rollup_targeted_sectors · cleanup_telegram_media (Sun)
 04:25 ├─ evict_old_telegram_media
-04:30 ├─ promote_watchlist_threats
+04:30 ├─ promote_watchlist_threats · run_wikidata_sync (Thu)
 04:35 ├─ fit_user_signal_weights · evict_old_ingest_files
 04:40 ├─ generate_threat_briefs
 04:45 ├─ archive_correlation_events
 04:50 ├─ backfill_rule_data_sources (Sun)
 05:00 ├─ run_github_poc_scan
+05:15 ├─ run_endoflife_sync
 05:30 ├─ backfill_rule_attack_mappings (Sun)
 05:45 ├─ kickoff_assessment_backfill
 06:00 ├─ generate_daily_summaries

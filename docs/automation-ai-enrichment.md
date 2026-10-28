@@ -571,7 +571,7 @@ All five tables are in `backend/app/models/enrichment.py`.
 
 ### Source Registry
 
-Each source is a class that carries its own manifest (`backend/app/enrichment/manifest.py`): the entity types it `applies_to` (for observables, the kinds it handles), what it `requires` (`("api_key",)` when it can't run without one), its `quota`, its `egress` (`none`: downloads a whole catalog; `low`: sends public identifiers such as a CVE id or a group name; `shares_ioc`: sends an observable's value to a third party), its `license`, its scheduled `jobs`, and its `outputs`. Lookup sources extend `EnrichmentAdapter` (`backend/app/enrichment/base.py`) and look up one entity per `enrich()` call; catalog sources (`backend/app/enrichment/catalogs.py`) only have jobs.
+Each source is a class that carries its own manifest (`backend/app/enrichment/manifest.py`): the entity types it `applies_to` (for observables, the kinds it handles), what it `requires` (`("api_key",)` when it can't run without one), its `quota`, its `egress` (`none`: downloads a whole catalog; `low`: sends public identifiers such as a CVE id or a group name; `shares_ioc`: sends an observable's value to a third party), its `license`, its scheduled `jobs`, and its `outputs`. Lookup sources extend `EnrichmentAdapter` (`backend/app/enrichment/base.py`) and look up one entity per `enrich()` call; catalog sources (`backend/app/enrichment/catalogs.py`, and `wikidata.py` and `endoflife.py` beside it) only have jobs.
 
 `SOURCE_REGISTRY` (`backend/app/enrichment/registry.py`) lists them all; `ADAPTER_REGISTRY` holds the lookup sources. Generated from the manifests:
 
@@ -600,6 +600,8 @@ Each source is a class that carries its own manifest (`backend/app/enrichment/ma
 | `mitre_cwe` | MITRE CWE | catalog | cwe | manual | No | 10 / 3600 s | — | none |
 | `ransomware_live` | ransomware.live | catalog | threat_actor | manual | No | 2 / 60 s | 2 / 60 s | none |
 | `cybergeist` | Cybergeist | catalog | threat_actor, malware | manual | No | 10 / 3600 s | — | none |
+| `wikidata` | Wikidata | catalog | vendor, product, country | manual | No | 30 / 60 s | — | low |
+| `endoflife` | endoflife.date | catalog | product | manual | No | 1 / 1 s | — | none |
 
 The ceiling is the most the source documents it allows; `PUT /api/enrichment/sources/{id}` refuses a `rate_limit_config` above it with a 400 (`rate_above_ceiling`). Each manifest's comment cites the documented limit. A keyed rate (GitHub PoC) applies when the source has a key and its row's rate is still the keyless default, so an admin's own rate stands. A catalog source has no lookup: it lists no entity types for manual enrichment, and its test button answers 400.
 
@@ -614,11 +616,11 @@ A source's `outputs` are `Column` and `Context` entries. A `Column` says which `
 | `fill_blank` | Only into a blank column |
 | `rank` | Only into a blank column; when several outputs share it, the lowest `rank` with a value wins |
 | `union` | Adds the list items the column doesn't hold yet, outputs in `rank` order |
-| `newer_wins` | Replaces what the column holds |
+| `newer_wins` | Replaces what the column holds. An answer without a value leaves the column alone, unless the output `clears` |
 
 A column that `follows` a target is written with it, empty or not, whenever its source writes that target.
 
-A `filter` transforms the value first: `aliases` runs `filter_aliases()` (`backend/app/intelligence/autolinker.py`), so junk aliases never reach the autolinker vocabulary. `apply_enrichment_results_to_entity` (`backend/app/enrichment/entity_updater.py`) applies every output for the entity's type and records a claim (`entity_field_claims`, `source_kind = enrichment`, `source_ref` = the source) for each value it writes. What the sources write:
+A `filter` transforms the value first: `aliases` runs `filter_aliases()` (`backend/app/intelligence/autolinker.py`), so junk aliases never reach the autolinker vocabulary, and `date` turns an ISO date string into a date. A `resolve` looks the value up in the database and writes what it finds: `vendor` turns a developer (`{label, enwiki}`) into the id of an existing vendor, the one whose Wikipedia article is that title, else one whose name or alias is the label. It never creates a vendor; with no match nothing is written. `apply_enrichment_results_to_entity` (`backend/app/enrichment/entity_updater.py`) applies every output for the entity's type and records a claim (`entity_field_claims`, `source_kind = enrichment`, `source_ref` = the source) for each value it writes. What the sources write:
 
 - **Wikipedia**: `wikipedia_url` (newer wins), with `wikipedia_content` and `wikipedia_image_url` following it, so a new article never keeps the old one's image; `description` from `first_paragraph`, rank 1 (rank 2 for a CVE).
 - **MITRE ATT&CK**: `description` rank 2, `mitre_id`, `aliases` (union, first), `platforms` (ttp, tool).
@@ -627,12 +629,14 @@ A `filter` transforms the value first: `aliases` runs `filter_aliases()` (`backe
 
 - **NVD**: `cvss_score` rank 1, `severity`, and `description` rank 1 (Wikipedia's is rank 2 for a CVE), all into blank columns only. Article extraction (`extract_and_store_cves`) and the NVD jobs write these columns from their own NVD calls; a lookup fills a CVE whose extraction-time call was throttled and leaves a filled one alone.
 - **CVE List (cvelistV5)**: `cvss_score` from the CNA's metric rank 2 and from CISA-ADP's rank 3, with `severity` following the score it wrote (so a score never sits beside extraction's `UNKNOWN`); `description` rank 1, since NVD republishes the CNA's text; `ssvc_exploitation`, `ssvc_automatable` and `ssvc_technical_impact`, newer wins. CVSS 3.1 is preferred, then 3.0, then 4.0.
+- **Wikidata**: vendor `website`, product `vendor_id` (resolved to an existing vendor), country `region` and `iso_code`, all into blank columns only.
+- **endoflife.date**: product `support_status` and `next_eol`, newer wins; `next_eol` `clears`, so it empties when no end date is left.
 
 A `Context` (key, label, display: `fact`, `chips`, `table`, `timeline`, `link` or `badge`) is a value for the entity's profile rather than a column; the adapters declare them (Shodan ports and tags, GreyNoise classification, OSV affected packages, Malpedia references, and so on). `entity_types` limits one to some of the source's types.
 
 ### Source Context
 
-Each lookup in `enrich_entity()`, fresh or cached, writes the source's `Context` outputs for the entity into `entity_context` (`store_context`, `backend/app/enrichment/context.py`): one row per output that has a value, `observed_at` the result's time and `expires_at` its expiry. A key the new result lacks is deleted, so a source that stops reporting something stops showing it. Values are stored shaped for their display:
+Each lookup in `enrich_entity()`, fresh or cached, writes the source's `Context` outputs for the entity into `entity_context` (`store_context`, `backend/app/enrichment/context.py`): one row per output that has a value, `observed_at` the result's time and `expires_at` its expiry. A key the new result lacks is deleted, so a source that stops reporting something stops showing it. The Wikidata and endoflife.date jobs store each entity's answer the same way (`apply_catalog_result`, `backend/app/enrichment/pipeline.py`): the result row, its context, then its columns. Values are stored shaped for their display:
 
 | Display | Stored value |
 |---|---|
@@ -713,7 +717,7 @@ While enrichment is [paused](#enrichment-console), a tick claims nothing. A `run
 
 Scheduled jobs resolve their key through the same function (`gateway_for`), so a job and a per-entity lookup with the same key always share one gateway bucket.
 
-No current source sets `shared_key_group`, so `SHARED_KEY_GROUPS` (`backend/app/enrichment/registry.py:74`) is empty and step 3 never finds anything. Queued jobs run in a worker with no user, so they use the source's own key, except a `manual`-lane job, which uses the key of the person who asked.
+No current source sets `shared_key_group`, so `SHARED_KEY_GROUPS` (`backend/app/enrichment/registry.py:84`) is empty and step 3 never finds anything. Queued jobs run in a worker with no user, so they use the source's own key, except a `manual`-lane job, which uses the key of the person who asked.
 
 ### Confidence Thresholds
 
@@ -733,6 +737,7 @@ A `success` result is reused until `expires_at`. Each adapter picks its TTL per 
 - NVD, Malpedia, MITRE ATT&CK, GreyNoise: 168 hours (7 days).
 - EPSS, CISA KEV, VulnCheck, GitHub PoC: 24 hours.
 - VirusTotal: 72 hours.
+- Wikidata: 720 hours, not-found titles included. endoflife.date: 48 hours (its job runs daily).
 - Short-lived misses (a missing VirusTotal or VulnCheck key, a failed Wikipedia fetch): 1 hour. These misses are stored as `success` rows with `found: false`, so they are cached too.
 
 ### Source Gateway
@@ -752,7 +757,7 @@ If Redis can't be reached, the gateway refuses the request (`gateway_unavailable
 
 Wikipedia goes through the gateway too: `wikipediaapi` takes the gateway's transport for the httpx client it builds, with its own retries off.
 
-**Jobs.** A job (NVD, EPSS, CISA KEV, MITRE ATT&CK, Malpedia, GitHub PoC, Wikipedia, CVE List) uses its source row's rate limit, budget and key, so it shares one allowance with the per-entity lookups under the same key. The NVD sweeps fall back to the `nvd_api_key` setting and the GitHub PoC scan to `github_token` when the row has no key; a different key has its own allowance. The catalog sources' jobs (MISP Galaxy, Metasploit, MITRE CWE, Cybergeist, ransomware.live) use their rows the same way.
+**Jobs.** A job (NVD, EPSS, CISA KEV, MITRE ATT&CK, Malpedia, GitHub PoC, Wikipedia, CVE List, Wikidata, endoflife.date) uses its source row's rate limit, budget and key, so it shares one allowance with the per-entity lookups under the same key. The NVD sweeps fall back to the `nvd_api_key` setting and the GitHub PoC scan to `github_token` when the row has no key; a different key has its own allowance. The catalog sources' jobs (MISP Galaxy, Metasploit, MITRE CWE, Cybergeist, ransomware.live) use their rows the same way.
 
 When the gateway refuses (`rate_limited`, `breaker_open`, `budget_exhausted`, `paused`), a job stops, commits what it has done, and records the reason as `stopped` in its stats, which land in the run's details in the Jobs view. The run still counts as a success. Loop jobs also stop with `stopped: "out_of_time"` before their time limit. `gateway_unavailable` fails the run.
 
@@ -760,7 +765,7 @@ NVD allows 50 requests per 30 seconds with a key and 5 without. The bucket (50 p
 
 ### Daily Budgets
 
-Every source starts with a budget of about twice the requests a busy day sends (the `daily_budget` of its manifest's `quota`): CVE List 12,000, NVD 5,000, Wikipedia 2,000, OSV 2,000, GitHub PoC 1,000, Malpedia 1,000, Shodan 1,000, CVEDetails 1,000, VulnCheck 1,000, EPSS 500, CISA KEV 500, VirusTotal 500 (its free tier), ransomware.live 200, MITRE ATT&CK 100, GreyNoise 100, and 50 each for MISP Galaxy, Metasploit, MITRE CWE and Cybergeist. An admin can change or clear one under Settings → Engine → Enrichment. A source that runs out stops until midnight UTC, jobs included. Every request the gateway sends counts; cached results are free. The console's source detail (`used_today`) and the source list's `daily_budget_used` show today's use under the source's own key, and `GET /api/enrichment/sources/{id}/health` shows the tokens left in its bucket.
+Every source starts with a budget of about twice the requests a busy day sends (the `daily_budget` of its manifest's `quota`): CVE List 12,000, NVD 5,000, Wikipedia 2,000, OSV 2,000, GitHub PoC 1,000, Malpedia 1,000, Shodan 1,000, CVEDetails 1,000, VulnCheck 1,000, endoflife.date 1,000, EPSS 500, CISA KEV 500, VirusTotal 500 (its free tier), Wikidata 500, ransomware.live 200, MITRE ATT&CK 100, GreyNoise 100, and 50 each for MISP Galaxy, Metasploit, MITRE CWE and Cybergeist. An admin can change or clear one under Settings → Engine → Enrichment. A source that runs out stops until midnight UTC, jobs included. Every request the gateway sends counts; cached results are free. The console's source detail (`used_today`) and the source list's `daily_budget_used` show today's use under the source's own key, and `GET /api/enrichment/sources/{id}/health` shows the tokens left in its bucket.
 
 ### Enrichment Console
 
@@ -805,6 +810,8 @@ Each source declares its scheduled jobs in its manifest. They are registered in 
 | `sync-ransomware-victims` | `ransomware_live` | Every 30 minutes | Leak-site victim postings |
 | `cvelist-backfill` | `cvelist` | Hourly at :20 | The CVE record for CVEs with no current cvelist result, as many as fit in 13 minutes: those missing a score or description first, then KEV entries, then the newest |
 | `cvelist-delta-sync` | `cvelist` | Hourly at :40 | The CVE records changed since its last run, from cvelistV5's delta zips |
+| `wikidata-sync` | `wikidata` | Thursday 04:30 | Vendor websites and facts, product vendors, country regions ([below](#wikidata)) |
+| `endoflife-sync` | `endoflife` | Daily 05:15 | Product support lifecycles ([below](#endoflifedate)) |
 
 **CVE List.** The source reads the CVE Program's records from the cvelistV5 repository on GitHub: the CNA's container and CISA's ADP container (SSVC, and CVSS for CVEs the CNA left unscored). The repository's daily baseline zip of every record is about 650 MB, so it is never fetched. Instead:
 
@@ -816,6 +823,39 @@ Both jobs store each record as the source's result, write its context and column
 `resolve-cve-affected` belongs to no source: it matches CPE pairs already stored against new vendors and products, and sends nothing to NVD.
 
 The Malpedia sync passes `alt_names` through `filter_aliases()` (`backend/app/intelligence/autolinker.py`), so junk aliases never enter an entity's `aliases`.
+
+### Wikidata
+
+`wikidata-sync` (`backend/app/enrichment/wikidata.py`) looks up vendors, products and countries that have an English Wikipedia article and no unexpired Wikidata answer: every such vendor (its profile shows Wikidata's facts), products with no vendor, and countries missing a region or ISO code, up to 200 of each per run.
+
+It reads Wikidata through the action API (`wbgetentities`), not the SPARQL query service: one call turns up to 20 article titles straight into their items, and it is the cached read path Wikimedia asks tools to use. The API takes 50 titles, but a country's item can run to megabytes, so calls stay at 20. The item-valued claims the job keeps (country, headquarters, industry, developer) are named by id, so a second call fetches their English labels and article titles, 50 ids at a time.
+
+Each property is read at its best rank: the `preferred` statements when there are any, else the `normal` ones. `deprecated` statements never count, which is what makes Microsoft's logo the current one and not its 1980 logo.
+
+| Entity | Property | Writes |
+|---|---|---|
+| Vendor | P856 official website | `website` (when blank) |
+| Vendor | P571 inception, P159 headquarters, P17 country, P452 industry, P154 logo | Profile context: Founded, Headquarters, Country, Industry (chips), Logo (a Commons link) |
+| Product | P178 developer | `vendor_id`, only to a vendor IntelFeed already has (see the `vendor` resolver above) |
+| Country | P30 continent | `region`, mapped to the seed data's six regions (Insular Oceania counts as Oceania) |
+| Country | P297 ISO 3166-1 alpha-2 | `iso_code` (when blank) |
+
+Every looked-up entity also gets a link to its Wikidata item. A title Wikidata has no item for is stored as not found, so it isn't asked for again for 30 days. Wikidata's data is CC0.
+
+### endoflife.date
+
+`endoflife-sync` (`backend/app/enrichment/endoflife.py`) downloads endoflife.date's product list, matches IntelFeed products to it, then fetches each matched product's releases once. A product matches when its name, or its vendor's name followed by its name, equals an endoflife.date product's name, label or alias once case and punctuation are dropped: "Windows Server" is `windows-server`, "Exchange" by Microsoft is "Microsoft Exchange". Nothing fuzzy. A product whose forms point at two endoflife.date products gets nothing, and a product's own aliases are not used, because extracted aliases are too noisy ("XDR", "AWS Lambda"). `OVERRIDES` in the module covers known mismatches (SUSE Linux Enterprise → `sles`, Splunk Enterprise → `splunk`). Products that don't match get nothing.
+
+`support_status` describes the product as a whole, from the releases' flags:
+
+| Value | When |
+|---|---|
+| `maintained` | A release is maintained and neither its active support nor its security support has ended |
+| `security_only` | Releases are maintained, but only for security fixes: active support has ended, or end of life has passed and the release is in extended support |
+| `eol` | No release is maintained |
+| `unknown` | endoflife.date lists no releases |
+
+`next_eol` is the soonest date after today that a maintained release stops getting security fixes: its end of life, or the end of extended support for one already past end of life. It is empty when no maintained release has one. The profile shows the newest 20 releases (release, released, active until, security until, status) and a link to the product's endoflife.date page. endoflife.date's data is MIT-licensed; the profile credits it.
 
 ---
 

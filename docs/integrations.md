@@ -807,7 +807,7 @@ OpenRouter's health check doesn't validate the key, so a bad key passes **Test**
 
 ### 18. Configure Enrichment Sources
 
-Enrichment adds outside data to CVEs, techniques, malware and indicators. Each source declares itself in its class (`backend/app/enrichment/adapters/`, `backend/app/enrichment/catalogs.py`), listed in `backend/app/enrichment/registry.py`:
+Enrichment adds outside data to CVEs, techniques, malware and indicators. Each source declares itself in its class (`backend/app/enrichment/adapters/`, `backend/app/enrichment/catalogs.py`, `wikidata.py`, `endoflife.py`), listed in `backend/app/enrichment/registry.py`:
 
 | Source | Key | Default trigger | Default rate limit | Scheduled jobs | Adds |
 |--------|---------|-----------------|--------------------|----------------|------|
@@ -830,8 +830,10 @@ Enrichment adds outside data to CVEs, techniques, malware and indicators. Each s
 | MITRE CWE | No | — | 10/hour | Weekly | The CWE catalog |
 | ransomware.live | No | — | 2/min | Every 30 min | Leak-site victims |
 | Cybergeist | No | — | 10/hour | Daily | Threat actors and malware |
+| Wikidata | No | — | 30/min | Weekly | Vendor websites and facts, product vendors, country regions |
+| endoflife.date | No | — | 1/s | Daily | Product support status and release lifecycles |
 
-Auto = looked up when a new entity appears; Manual = on request from an entity or indicator. The last five are catalog sources: they only run their jobs. Turning a source off also stops its jobs. A rate above what a source documents it allows is refused.
+Auto = looked up when a new entity appears; Manual = on request from an entity or indicator. The last seven are catalog sources: they only run their jobs. Turning a source off also stops its jobs. A rate above what a source documents it allows is refused.
 
 **To configure:** **Settings → Engine → Pipeline** → **enrich** stage: turn on sources, paste keys, optionally change rate limit and confidence threshold, save.
 
