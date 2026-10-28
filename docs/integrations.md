@@ -820,6 +820,7 @@ Enrichment adds outside data to CVEs, techniques, malware and indicators. Each s
 | Malpedia | No | Manual | 30/min | Weekly family sync | Malware families |
 | GitHub PoC | No (optional token) | Manual | 10/min, 30/min with a token | Daily PoC scan | Public PoC repos |
 | CVEDetails | Yes | Auto | 60/min | | CVE context |
+| CVE List (cvelistV5) | No | Manual | 30/min | Hourly backfill, hourly delta sync | CNA CVSS and descriptions, CISA SSVC |
 | Wikipedia | No | Auto | 20/min | Weekly sync | Background articles |
 | VirusTotal v3 | Yes | Manual | 4/min | | Indicator reputation |
 | GreyNoise Community | No (optional) | Manual | 10/hour | | IP noise, reputation |

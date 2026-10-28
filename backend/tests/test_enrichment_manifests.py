@@ -78,6 +78,8 @@ JOBS_BEFORE = {
         "app.workers.intel_feed_tasks.sync_cybergeist_feeds",
         {"type": "crontab", "minute": "30", "hour": "2"},
     ),
+    "cvelist-backfill": ("app.workers.enrichment_tasks.run_cvelist_backfill", {"type": "crontab", "minute": "20"}),
+    "cvelist-delta-sync": ("app.workers.enrichment_tasks.run_cvelist_delta_sync", {"type": "crontab", "minute": "40"}),
 }
 
 JOB_SOURCE = {
@@ -95,6 +97,8 @@ JOB_SOURCE = {
     "refresh-cwe-catalog": "mitre_cwe",
     "sync-ransomware-victims": "ransomware_live",
     "sync-cybergeist-feeds": "cybergeist",
+    "cvelist-backfill": "cvelist",
+    "cvelist-delta-sync": "cvelist",
 }
 
 
@@ -136,7 +140,7 @@ def test_every_column_output_names_a_real_column():
                 assert column.filter in FILTERS
             if column.follows:
                 leader = next(c for c in cls.columns() if c.target == column.follows)
-                assert leader.policy == Policy.NEWER_WINS and not leader.follows
+                assert leader.policy != Policy.UNION and not leader.follows
         targets: dict[str, set] = {}
         for column in cls.columns():
             targets.setdefault(column.target, set()).add(column.policy)

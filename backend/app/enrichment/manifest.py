@@ -38,8 +38,10 @@ class Policy(StrEnum):
       target, the lowest ``rank`` with a value wins.
     - ``UNION``: list columns; adds the items the column doesn't hold yet,
       outputs in ``rank`` order.
-    - ``NEWER_WINS``: a value replaces whatever the column holds. Columns that
-      ``follow`` it are written with it, empty or not.
+    - ``NEWER_WINS``: a value replaces whatever the column holds.
+
+    A column that ``follows`` a target is written, empty or not, whenever its
+    source writes that target (a score's severity goes with the score).
     """
 
     FILL_BLANK = "fill_blank"
@@ -93,7 +95,7 @@ class Column:
     policy: Policy = Policy.FILL_BLANK
     rank: int | None = None
     filter: str | None = None
-    follows: str | None = None  # NEWER_WINS: written whenever this target is
+    follows: str | None = None  # written whenever its source writes this target
 
     @property
     def entity_type(self) -> str:

@@ -72,6 +72,7 @@ ENDPOINTS = {
     "malpedia": r"^https://malpedia\.caad\.fkie\.fraunhofer\.de/api/(get/family/[^/]+|list/families)$",
     "github_poc": r"^https://api\.github\.com/search/repositories\?q=",
     "wikipedia": r"^https://en\.wikipedia\.org/w/api\.php\?.*action=query",
+    "cvelist": r"^https://raw\.githubusercontent\.com/CVEProject/cvelistV5/main/cves/\d{4}/\d+xxx/CVE-[\d-]+\.json$",
 }
 
 # One enrich() call per adapter, for the endpoint-shape check.
@@ -86,6 +87,7 @@ ENRICH_CALLS = {
     "malpedia": ("malware", "WannaCry"),
     "github_poc": ("cve", "CVE-2021-44228"),
     "wikipedia": ("threat_actor", "Lazarus Group"),
+    "cvelist": ("cve", "CVE-2024-3400"),
 }
 
 

@@ -18,7 +18,7 @@ class TestEnrichmentBase:
 
 class TestAdapterRegistry:
     def test_registry_has_all_adapters(self):
-        assert len(ADAPTER_REGISTRY) == 13
+        assert len(ADAPTER_REGISTRY) == 14
 
     def test_registry_contains_expected_sources(self):
         expected = {
@@ -31,6 +31,7 @@ class TestAdapterRegistry:
             "malpedia",
             "github_poc",
             "cvedetails",
+            "cvelist",
             "wikipedia",
             # Observable (IOC ledger) reputation adapters, restored from v1.
             "virustotal",
@@ -57,7 +58,7 @@ class TestAdapterRegistry:
         assert adapter.config["ttl_hours"] == 48
 
     def test_default_sources_defined(self):
-        assert len(DEFAULT_SOURCES) == 18
+        assert len(DEFAULT_SOURCES) == 19
         source_types = {s["source_type"] for s in DEFAULT_SOURCES}
         assert source_types == set(ADAPTER_REGISTRY) | {
             "misp_galaxy",

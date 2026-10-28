@@ -1,5 +1,5 @@
 """Celery tasks for the enrichment sources' scheduled jobs — EPSS, MITRE ATT&CK,
-MISP Galaxy, Malpedia, Metasploit, NVD, GitHub PoC, Wikipedia."""
+MISP Galaxy, Malpedia, Metasploit, NVD, GitHub PoC, Wikipedia, cvelistV5."""
 
 import csv
 import io
@@ -1451,4 +1451,272 @@ async def _run_metasploit_sync():
         for cve_id in rescored:
             dispatch_cve_rescore(cve_id)
 
+    return stats
+
+
+# --- cvelistV5: the CVE Program's records, CNA and CISA-ADP containers ---
+
+
+async def _apply_cvelist_record(db, cve_pk, data, cwe_index: dict) -> bool:
+    """Store one CVE record as the cvelist source's result for the CVE: its
+    context, its declared columns, and its CWE ids as cve_weaknesses links.
+    Returns True when a column changed."""
+    from app.enrichment.entity_updater import apply_enrichment_results_to_entity
+    from app.enrichment.pipeline import get_cached_result, store_result
+    from app.intelligence.cve import sync_cve_weaknesses
+
+    existing = await get_cached_result(db, "cve", cve_pk, "cvelist")
+    await store_result(db, "cve", cve_pk, "cvelist", data, existing)
+    parsed = data.parsed_data
+    changed = await apply_enrichment_results_to_entity(
+        db, "cve", cve_pk, [{"source_type": "cvelist", "status": "success", "parsed_data": parsed}]
+    )
+    weaknesses = [
+        {"cwe_ref": ref, "is_primary": False, "assigner": parsed.get("assigner")}
+        for ref in dict.fromkeys(parsed.get("weaknesses") or [])
+    ]
+    if weaknesses:
+        await sync_cve_weaknesses(db, cve_pk, weaknesses, cwe_index, source="cvelist")
+    return changed
+
+
+@celery_app.task(name="app.workers.enrichment_tasks.run_cvelist_backfill", soft_time_limit=900, time_limit=960)
+def run_cvelist_backfill():
+    """Hourly: fetch the CVE record for CVEs the cvelist source hasn't checked lately."""
+    start = time.monotonic()
+    try:
+        stats = run_async(_run_cvelist_backfill())
+        logger.info("cvelist backfill stats: %s", stats)
+        CELERY_TASKS_TOTAL.labels(task_name="run_cvelist_backfill", status="success").inc()
+        return stats
+    except Exception:
+        CELERY_TASKS_TOTAL.labels(task_name="run_cvelist_backfill", status="error").inc()
+        logger.exception("cvelist backfill failed")
+        raise
+    finally:
+        CELERY_TASK_DURATION_SECONDS.labels(task_name="run_cvelist_backfill").observe(time.monotonic() - start)
+
+
+# Wall-clock seconds a backfill run may spend fetching: 120s under the 900s
+# soft limit, left for the last commit.
+_CVELIST_BACKFILL_BUDGET_S = 780
+
+
+@source_job("cvelist")
+async def _run_cvelist_backfill():
+    """Fetch the record of each CVE with no unexpired cvelist result: the CVEs
+    missing a score or description first, then KEV entries, then the newest.
+
+    Each record is one raw.githubusercontent.com request, paced by the source's
+    bucket; a run fetches what its time budget allows and the next run goes on.
+    The delta sync keeps a fetched record current, and it is checked again here
+    once its result expires (RECORD_TTL_HOURS).
+    """
+    import httpx
+    from sqlalchemy import exists, func, or_
+
+    from app.enrichment.adapters.cvelist import CVEListAdapter
+    from app.enrichment.pipeline import gateway_for
+    from app.intelligence.cve import build_cwe_index
+    from app.models.cve import CVE
+    from app.models.enrichment import EnrichmentResult
+
+    stats = {"fetched": 0, "updated": 0, "not_found": 0, "failed": 0, "pending": 0, "stopped": None}
+    deadline = time.monotonic() + _CVELIST_BACKFILL_BUDGET_S
+    async with _get_worker_session() as db:
+        gateway, _ = await gateway_for(db, "cvelist", max_wait=JOB_TOKEN_WAIT)
+        adapter = CVEListAdapter(gateway=gateway)
+        checked = exists().where(
+            EnrichmentResult.source_type == "cvelist",
+            EnrichmentResult.entity_type == "cve",
+            EnrichmentResult.entity_id == CVE.id,
+            EnrichmentResult.expires_at > datetime.now(UTC),
+        )
+        stats["pending"] = (await db.execute(select(func.count()).select_from(CVE).where(~checked))).scalar_one()
+        # Only as many as one run can fetch at the bucket's rate.
+        per_run = int(_CVELIST_BACKFILL_BUDGET_S * gateway.capacity / gateway.period) + gateway.capacity
+        rows = (
+            await db.execute(
+                select(CVE.id, CVE.cve_id)
+                .where(~checked)
+                .order_by(
+                    or_(CVE.cvss_score.is_(None), CVE.description.is_(None)).desc(),
+                    CVE.is_kev.desc(),
+                    CVE.first_seen_at.desc(),
+                )
+                .limit(per_run)
+            )
+        ).all()
+        cwe_index = await build_cwe_index(db)
+
+        for i, (cve_pk, cve_id) in enumerate(rows):
+            if time.monotonic() >= deadline:
+                stats["stopped"] = "out_of_time"
+                break
+            try:
+                data = await adapter.enrich("cve", cve_id)
+            except SOURCE_REFUSALS as e:
+                logger.warning("cvelist backfill stopping at %d/%d: %s", i, len(rows), e)
+                stats["stopped"] = e.status
+                break
+            except (httpx.HTTPError, ValueError) as e:
+                # A server error or an unreadable record: left unchecked, so
+                # the next run tries it again.
+                logger.warning("cvelist record for %s failed: %s", cve_id, e)
+                stats["failed"] += 1
+                continue
+            stats["fetched"] += 1
+            if not data.parsed_data.get("found"):
+                stats["not_found"] += 1
+            if await _apply_cvelist_record(db, cve_pk, data, cwe_index):
+                stats["updated"] += 1
+            if (i + 1) % 50 == 0:
+                await db.commit()
+        await db.commit()
+    return stats
+
+
+@celery_app.task(name="app.workers.enrichment_tasks.run_cvelist_delta_sync", soft_time_limit=600, time_limit=660)
+def run_cvelist_delta_sync():
+    """Hourly: apply the CVE records that changed, from cvelistV5's delta zips."""
+    start = time.monotonic()
+    try:
+        stats = run_async(_run_cvelist_delta_sync())
+        logger.info("cvelist delta sync stats: %s", stats)
+        CELERY_TASKS_TOTAL.labels(task_name="run_cvelist_delta_sync", status="success").inc()
+        return stats
+    except Exception:
+        CELERY_TASKS_TOTAL.labels(task_name="run_cvelist_delta_sync", status="error").inc()
+        logger.exception("cvelist delta sync failed")
+        raise
+    finally:
+        CELERY_TASK_DURATION_SECONDS.labels(task_name="run_cvelist_delta_sync").observe(time.monotonic() - start)
+
+
+# Wall-clock seconds a delta sync may spend before starting another zip.
+_CVELIST_DELTA_BUDGET_S = 480
+# The largest delta zip the sync downloads. A whole day's is about 4 MB; the
+# daily baseline of every record (about 650 MB) is never fetched.
+_CVELIST_DELTA_MAX_BYTES = 64 * 1024 * 1024
+# Releases listed per run: about four days of hourly releases.
+_CVELIST_RELEASES_PAGE = 100
+
+
+def pick_cvelist_deltas(releases: list[dict], since: datetime | None) -> tuple[list[tuple[datetime, str]], bool]:
+    """The delta zips covering the records changed after ``since``, oldest day
+    first, as ``(published_at, url)``; and whether the listing starts after
+    ``since``, so changes in between are missed.
+
+    cvelistV5 publishes a release every hour whose delta zip holds every record
+    changed since midnight UTC, and after midnight an end-of-day delta for the
+    whole day. Per day that leaves one zip to read: the end-of-day one once it
+    is out, else the newest hourly one. Without ``since`` (the first run) only
+    the newest zip is read; the backfill covers the rest.
+    """
+    by_day: dict[str, tuple[bool, datetime, str]] = {}
+    oldest = None
+    for release in releases:
+        published = datetime.fromisoformat(release["published_at"])
+        oldest = min(oldest or published, published)
+        if since and published <= since:
+            continue
+        for asset in release.get("assets") or []:
+            name = asset.get("name") or ""
+            if "_delta_CVEs_at_" not in name or not name.endswith(".zip"):
+                continue
+            day, end_of_day = name[:10], name.endswith("_end_of_day.zip")
+            best = by_day.get(day)
+            if best is None or (end_of_day, published) > best[:2]:
+                by_day[day] = (end_of_day, published, asset["browser_download_url"])
+    picked = [(published, url) for _, (_, published, url) in sorted(by_day.items())]
+    gap = bool(since and oldest and oldest > since)
+    return (picked if since else picked[-1:]), gap
+
+
+async def _download_to(client, url: str, fh, limit: int) -> None:
+    """Stream ``url`` into the open file ``fh``, refusing more than ``limit`` bytes."""
+    async with client.stream("GET", url) as resp:
+        resp.raise_for_status()
+        size = 0
+        async for chunk in resp.aiter_bytes():
+            size += len(chunk)
+            if size > limit:
+                raise ValueError(f"{url} is larger than {limit} bytes")
+            fh.write(chunk)
+    fh.seek(0)
+
+
+async def _apply_cvelist_delta(db, fh, cwe_index: dict, stats: dict) -> None:
+    """Apply the records in a delta zip whose CVE ids are in the cves table,
+    reading only those members."""
+    import json
+    import zipfile
+
+    from app.enrichment.adapters.cvelist import record_result
+    from app.models.cve import CVE
+
+    with zipfile.ZipFile(fh) as archive:
+        members = {
+            name.rsplit("/", 1)[-1].removesuffix(".json").upper(): name
+            for name in archive.namelist()
+            if name.endswith(".json")
+        }
+        stats["records"] += len(members)
+        ids = list(members)
+        for start in range(0, len(ids), 1000):
+            ours = (await db.execute(select(CVE.id, CVE.cve_id).where(CVE.cve_id.in_(ids[start : start + 1000])))).all()
+            for cve_pk, cve_id in ours:
+                record = json.loads(archive.read(members[cve_id.upper()]))
+                stats["ours"] += 1
+                if await _apply_cvelist_record(db, cve_pk, record_result(record), cwe_index):
+                    stats["updated"] += 1
+
+
+@source_job("cvelist")
+async def _run_cvelist_delta_sync():
+    """Read the delta zips released since the last run (the source row's
+    ``last_synced_at`` holds the newest one read) and apply the records of the
+    CVEs we track. Each zip streams to a temporary file and only our records
+    are read from it, so a run holds one record in memory at a time."""
+    import tempfile
+
+    from app.enrichment.adapters.cvelist import RELEASES_URL
+    from app.enrichment.pipeline import gateway_for
+    from app.intelligence.cve import build_cwe_index
+    from app.models.enrichment import EnrichmentSource
+
+    stats = {"deltas": 0, "records": 0, "ours": 0, "updated": 0, "gap": False, "stopped": None}
+    deadline = time.monotonic() + _CVELIST_DELTA_BUDGET_S
+    async with _get_worker_session() as db:
+        gateway, _ = await gateway_for(db, "cvelist", max_wait=JOB_TOKEN_WAIT)
+        source = (
+            await db.execute(select(EnrichmentSource).where(EnrichmentSource.source_type == "cvelist"))
+        ).scalar_one_or_none()
+        cwe_index = await build_cwe_index(db)
+        try:
+            async with gateway.client(timeout=60, follow_redirects=True) as client:
+                resp = await client.get(
+                    RELEASES_URL,
+                    params={"per_page": _CVELIST_RELEASES_PAGE},
+                    headers={"Accept": "application/vnd.github+json"},
+                )
+                resp.raise_for_status()
+                deltas, stats["gap"] = pick_cvelist_deltas(resp.json(), source.last_synced_at if source else None)
+                if stats["gap"]:
+                    logger.warning("cvelist delta sync: releases since %s are no longer listed", source.last_synced_at)
+                for published, url in deltas:
+                    if time.monotonic() >= deadline:
+                        stats["stopped"] = "out_of_time"
+                        break
+                    with tempfile.TemporaryFile() as fh:
+                        await _download_to(client, url, fh, _CVELIST_DELTA_MAX_BYTES)
+                        await _apply_cvelist_delta(db, fh, cwe_index, stats)
+                    if source:
+                        source.last_synced_at = published
+                    await db.commit()
+                    stats["deltas"] += 1
+        except SOURCE_REFUSALS as e:
+            # Keeps the zips already applied; the next run starts after them.
+            logger.warning("cvelist delta sync stopping: %s", e)
+            stats["stopped"] = e.status
     return stats

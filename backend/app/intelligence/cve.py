@@ -268,12 +268,15 @@ async def sync_cve_weaknesses(
     cve_pk: uuid.UUID,
     weaknesses: list[dict],
     index: dict[str, uuid.UUID],
+    source: str = "nvd",
 ) -> int:
-    """Upsert cve_weaknesses rows for a CVE from parsed NVD weakness records.
+    """Upsert cve_weaknesses rows for a CVE from parsed weakness records (NVD's,
+    or the CNA's from its CVE record, ``source="cvelist"``).
 
-    Idempotent on (cve_id, cwe_ref). Mirrors sync_cve_affected: the raw ref is
-    always stored, the FK is filled only when it resolves, and a resolved FK is
-    never cleared by a later pass.
+    Idempotent on (cve_id, cwe_ref); a pair keeps the source that first
+    recorded it. Mirrors sync_cve_affected: the raw ref is always stored, the
+    FK is filled only when it resolves, and a resolved FK is never cleared by a
+    later pass.
     """
     count = 0
     for item in weaknesses:
@@ -287,6 +290,7 @@ async def sync_cve_weaknesses(
             cwe_id=cwe_pk,
             is_primary=item.get("is_primary", False),
             assigner=item.get("assigner"),
+            source=source,
             resolved_at=resolved_at,
         )
         stmt = stmt.on_conflict_do_update(

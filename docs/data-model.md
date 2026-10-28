@@ -184,6 +184,7 @@ Table `cves`: one published vulnerability.
   - `exploit_availability` — `none`, `poc`, `weaponized` or `active_exploitation`
   - `exploit_status_source` — `manual` when an analyst set it; enrichment never overwrites a manual value
 - KEV (CISA's Known Exploited Vulnerabilities list): `is_kev` (indexed), `kev_date_added`, `kev_due_date`
+- SSVC (CISA's Stakeholder-Specific Vulnerability Categorization, from the CISA-ADP container of the CVE record): `ssvc_exploitation` (`none`, `poc`, `active`), `ssvc_automatable` (`yes`, `no`), `ssvc_technical_impact` (`partial`, `total`). The cvelist enrichment source writes them.
 - Public exploits: `github_poc_count`, `github_poc_urls` (Text[]), `metasploit_module`
 
 #### CVEAffected
@@ -391,9 +392,10 @@ Table `entry_cwes`: primary key `(entry_id, cwe_id)`, with `confidence`, `source
 #### CVEWeakness
 Table `cve_weaknesses`: which CWE a CVE is classed under. It is separate from `entry_cwes` because it describes the vulnerability, not an article.
 - `cve_id` (FK, CASCADE)
-- `cwe_ref` (String 40) — the reference exactly as NVD gave it, including placeholders like `NVD-CWE-noinfo`
+- `cwe_ref` (String 40) — the reference exactly as NVD or the CNA gave it, including placeholders like `NVD-CWE-noinfo`
 - `cwe_id` (FK → `cwes`, SET NULL) — NULL until the reference matches a catalog row
-- `is_primary`, `assigner`, `source` (default `nvd`), `resolved_at`
+- `is_primary`, `assigner`, `resolved_at`
+- `source` — `nvd` (default) or `cvelist` (the CNA's CWE ids in its CVE record); a pair keeps the source that recorded it first
 
 Unique on `(cve_id, cwe_ref)`. Keeping unmatched references is deliberate: a CVE can cite a CWE the catalog lacks, and dropping it would lose the assignment.
 

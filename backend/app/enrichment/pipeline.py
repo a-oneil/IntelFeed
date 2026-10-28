@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.encryption import decrypt_value
+from app.enrichment.base import EnrichmentData
 from app.enrichment.context import store_context
 from app.enrichment.gateway import MAX_TOKEN_WAIT, BreakerOpen, GatewayError, RateLimited, SourceGateway
 from app.enrichment.registry import (
@@ -174,6 +175,39 @@ async def get_cached_result(
     return result.scalar_one_or_none()
 
 
+async def store_result(
+    db: AsyncSession,
+    entity_type: str,
+    entity_id: uuid.UUID,
+    source_type: str,
+    data: EnrichmentData,
+    existing: EnrichmentResult | None,
+) -> None:
+    """Keep a source's fresh result for an entity and its context. A new
+    enrichment_results row is written only when parsed_data changed from
+    ``existing`` (the latest one); otherwise that row stands, as of now."""
+    now = datetime.now(UTC)
+    expires_at = now + timedelta(hours=data.ttl_hours)
+    if existing and existing.parsed_data == data.parsed_data:
+        existing.enriched_at, existing.expires_at = now, expires_at
+    else:
+        db.add(
+            EnrichmentResult(
+                entity_type=entity_type,
+                entity_id=entity_id,
+                source_type=source_type,
+                raw_response=data.raw_response,
+                parsed_data=data.parsed_data,
+                enriched_at=now,
+                expires_at=expires_at,
+                status="success",
+            )
+        )
+    await store_context(
+        db, entity_type, entity_id, source_type, data.parsed_data, observed_at=now, expires_at=expires_at
+    )
+
+
 async def enrich_entity(
     entity_type: str,
     entity_id: uuid.UUID,
@@ -259,34 +293,7 @@ async def enrich_entity(
         # circuit breaker on each HTTP request it makes.
         try:
             enrichment_data = await adapter.enrich(adapter_entity_type, entity_value)
-
-            now = datetime.now(UTC)
-            expires_at = now + timedelta(hours=enrichment_data.ttl_hours)
-            if existing and existing.parsed_data == enrichment_data.parsed_data:
-                # Nothing changed: the latest row stands, as of now.
-                existing.enriched_at, existing.expires_at = now, expires_at
-            else:
-                db.add(
-                    EnrichmentResult(
-                        entity_type=entity_type,
-                        entity_id=entity_id,
-                        source_type=source.source_type,
-                        raw_response=enrichment_data.raw_response,
-                        parsed_data=enrichment_data.parsed_data,
-                        enriched_at=now,
-                        expires_at=expires_at,
-                        status="success",
-                    )
-                )
-            await store_context(
-                db,
-                entity_type,
-                entity_id,
-                source.source_type,
-                enrichment_data.parsed_data,
-                observed_at=now,
-                expires_at=expires_at,
-            )
+            await store_result(db, entity_type, entity_id, source.source_type, enrichment_data, existing)
 
             results.append(
                 {

@@ -1,0 +1,696 @@
+{
+ "cna_and_cisa_adp": {
+  "url": "https://raw.githubusercontent.com/CVEProject/cvelistV5/main/cves/2024/3xxx/CVE-2024-3400.json",
+  "status": 200,
+  "body": {
+   "dataType": "CVE_RECORD",
+   "dataVersion": "5.1",
+   "cveMetadata": {
+    "cveId": "CVE-2024-3400",
+    "assignerOrgId": "d6c1279f-00f6-4ef7-9217-f89ffe703ec0",
+    "state": "PUBLISHED",
+    "assignerShortName": "palo_alto",
+    "dateReserved": "2024-04-05T17:40:30.117Z",
+    "datePublished": "2024-04-12T07:20:00.707Z",
+    "dateUpdated": "2025-10-21T23:05:21.315Z"
+   },
+   "containers": {
+    "cna": {
+     "affected": [
+      {
+       "defaultStatus": "unaffected",
+       "product": "PAN-OS",
+       "vendor": "Palo Alto Networks",
+       "versions": [
+        {
+         "status": "unaffected",
+         "version": "9.0.0"
+        },
+        {
+         "status": "unaffected",
+         "version": "9.1.0"
+        },
+        {
+         "status": "unaffected",
+         "version": "10.0.0"
+        },
+        {
+         "status": "unaffected",
+         "version": "10.1.0"
+        },
+        {
+         "changes": [
+          {
+           "at": "10.2.9-h1",
+           "status": "unaffected"
+          }
+         ],
+         "lessThan": "10.2.9-h1",
+         "status": "affected",
+         "version": "10.2.0",
+         "versionType": "custom"
+        },
+        {
+         "changes": [
+          {
+           "at": "11.0.4-h1",
+           "status": "unaffected"
+          }
+         ],
+         "lessThan": "11.0.4-h1",
+         "status": "affected",
+         "version": "11.0.0",
+         "versionType": "custom"
+        },
+        {
+         "changes": [
+          {
+           "at": "11.1.2-h3",
+           "status": "unaffected"
+          }
+         ],
+         "lessThan": "11.1.2-h3",
+         "status": "affected",
+         "version": "11.1.0",
+         "versionType": "custom"
+        }
+       ]
+      },
+      {
+       "defaultStatus": "unaffected",
+       "product": "Cloud NGFW",
+       "vendor": "Palo Alto Networks",
+       "versions": [
+        {
+         "status": "unaffected",
+         "version": "All"
+        }
+       ]
+      },
+      {
+       "defaultStatus": "unaffected",
+       "product": "Prisma Access",
+       "vendor": "Palo Alto Networks",
+       "versions": [
+        {
+         "status": "unaffected",
+         "version": "All"
+        }
+       ]
+      }
+     ],
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "A command injection as a result of arbitrary file creation vulnerability in the GlobalProtect feature of Palo Alto Networks PAN-OS software for specific PAN-OS versions and distinct feature configurations may enable an unauthenticated attacker to execute arbitrary code with root privileges on the firewall.\n\nCloud NGFW, Panorama appliances, and Prisma Access are not impacted by this vulnerability."
+      }
+     ],
+     "exploits": [
+      {
+       "lang": "en",
+       "value": "Palo Alto Networks is aware of an increasing number of attacks that leverage the exploitation of this vulnerability. Proof of concepts for this vulnerability have been publicly disclosed by third parties.\n\nMore information about the vulnerability's exploitation in the wild can be found in the Unit 42 threat brief ( https://unit42.paloaltonetworks.com/cve-2024-3400/ ) and the Palo Alto Networks PSI"
+      }
+     ],
+     "impacts": [
+      {
+       "capecId": "CAPEC-248",
+       "descriptions": [
+        {
+         "lang": "en",
+         "value": "CAPEC-248 Command Injection"
+        }
+       ]
+      }
+     ],
+     "metrics": [
+      {
+       "cvssV3_1": {
+        "attackComplexity": "LOW",
+        "attackVector": "NETWORK",
+        "availabilityImpact": "HIGH",
+        "baseScore": 10,
+        "baseSeverity": "CRITICAL",
+        "confidentialityImpact": "HIGH",
+        "integrityImpact": "HIGH",
+        "privilegesRequired": "NONE",
+        "scope": "CHANGED",
+        "userInteraction": "NONE",
+        "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+        "version": "3.1"
+       },
+       "format": "CVSS",
+       "scenarios": [
+        {
+         "lang": "en",
+         "value": "GENERAL"
+        }
+       ]
+      }
+     ],
+     "problemTypes": [
+      {
+       "descriptions": [
+        {
+         "cweId": "CWE-77",
+         "description": "CWE-77 Improper Neutralization of Special Elements used in a Command ('Command Injection')",
+         "lang": "en",
+         "type": "CWE"
+        }
+       ]
+      },
+      {
+       "descriptions": [
+        {
+         "cweId": "CWE-20",
+         "description": "CWE-20 Improper Input Validation",
+         "lang": "en",
+         "type": "CWE"
+        }
+       ]
+      }
+     ],
+     "providerMetadata": {
+      "orgId": "d6c1279f-00f6-4ef7-9217-f89ffe703ec0",
+      "shortName": "palo_alto",
+      "dateUpdated": "2024-04-19T22:27:27.179Z"
+     },
+     "references": [
+      {
+       "tags": [
+        "vendor-advisory"
+       ],
+       "url": "https://security.paloaltonetworks.com/CVE-2024-3400"
+      },
+      {
+       "tags": [
+        "technical-description"
+       ],
+       "url": "https://unit42.paloaltonetworks.com/cve-2024-3400/"
+      },
+      {
+       "tags": [
+        "technical-description"
+       ],
+       "url": "https://www.volexity.com/blog/2024/04/12/zero-day-exploitation-of-unauthenticated-remote-code-execution-vulnerability-in-globalprotect-cve-2024-3400/"
+      },
+      {
+       "tags": [
+        "technical-description"
+       ],
+       "url": "https://www.paloaltonetworks.com/blog/2024/04/more-on-the-pan-os-cve/"
+      }
+     ],
+     "solutions": [
+      {
+       "lang": "en",
+       "value": "We strongly advise customers to immediately upgrade to a fixed version of PAN-OS to protect their devices even when workarounds and mitigations have been applied.\n\nThis issue is fixed in PAN-OS 10.2.9-h1, PAN-OS 11.0.4-h1, PAN-OS 11.1.2-h3, and in all later PAN-OS versions. Customers who upgrade to these versions will be fully protected."
+      }
+     ],
+     "title": "PAN-OS: Arbitrary File Creation Leads to OS Command Injection Vulnerability in GlobalProtect",
+     "workarounds": [
+      {
+       "lang": "en",
+       "value": "Recommended Mitigation: Customers with a Threat Prevention subscription can block attacks for this vulnerability using Threat IDs 95187, 95189, and 95191 (available in Applications and Threats content version 8836-8695 and later). Please monitor this advisory and new Threat Prevention content updates for additional Threat Prevention IDs around CVE-2024-3400.\n\nTo apply the Threat IDs, customers mus"
+      }
+     ]
+    },
+    "adp": [
+     {
+      "metrics": [
+       {
+        "other": {
+         "type": "ssvc",
+         "content": {
+          "id": "CVE-2024-3400",
+          "role": "CISA Coordinator",
+          "options": [
+           {
+            "Exploitation": "active"
+           },
+           {
+            "Automatable": "yes"
+           },
+           {
+            "Technical Impact": "total"
+           }
+          ],
+          "version": "2.0.3",
+          "timestamp": "2024-04-17T04:00:13.543064Z"
+         }
+        }
+       },
+       {
+        "other": {
+         "type": "kev",
+         "content": {
+          "dateAdded": "2024-04-12",
+          "reference": "https://www.cisa.gov/known-exploited-vulnerabilities-catalog?field_cve=CVE-2024-3400"
+         }
+        }
+       }
+      ],
+      "affected": [
+       {
+        "cpes": [
+         "cpe:2.3:o:paloaltonetworks:pan-os:10.2.0:*:*:*:*:*:*:*"
+        ],
+        "vendor": "paloaltonetworks",
+        "product": "pan-os",
+        "versions": [
+         {
+          "status": "affected",
+          "version": "10.2.0",
+          "lessThan": "10.2.9-h1",
+          "versionType": "custom"
+         }
+        ],
+        "defaultStatus": "unknown"
+       },
+       {
+        "cpes": [
+         "cpe:2.3:o:paloaltonetworks:pan-os:11.0.0:*:*:*:*:*:*:*"
+        ],
+        "vendor": "paloaltonetworks",
+        "product": "pan-os",
+        "versions": [
+         {
+          "status": "affected",
+          "version": "11.0.0",
+          "lessThan": "11.0.4-h1",
+          "versionType": "custom"
+         }
+        ],
+        "defaultStatus": "unknown"
+       },
+       {
+        "cpes": [
+         "cpe:2.3:o:paloaltonetworks:pan-os:11.1.0:-:*:*:*:*:*:*"
+        ],
+        "vendor": "paloaltonetworks",
+        "product": "pan-os",
+        "versions": [
+         {
+          "status": "affected",
+          "version": "11.1.0",
+          "lessThan": "11.1.2-h3",
+          "versionType": "custom"
+         }
+        ],
+        "defaultStatus": "unknown"
+       }
+      ],
+      "references": [
+       {
+        "url": "https://www.cisa.gov/known-exploited-vulnerabilities-catalog?field_cve=CVE-2024-3400",
+        "tags": [
+         "government-resource"
+        ]
+       }
+      ],
+      "title": "CISA ADP Vulnrichment",
+      "providerMetadata": {
+       "orgId": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+       "shortName": "CISA-ADP",
+       "dateUpdated": "2025-10-21T23:05:21.315Z"
+      }
+     },
+     {
+      "providerMetadata": {
+       "orgId": "af854a3a-2127-422b-91ae-364da2661108",
+       "shortName": "CVE",
+       "dateUpdated": "2024-08-01T20:12:06.667Z"
+      },
+      "title": "CVE Program Container",
+      "references": [
+       {
+        "tags": [
+         "vendor-advisory",
+         "x_transferred"
+        ],
+        "url": "https://security.paloaltonetworks.com/CVE-2024-3400"
+       },
+       {
+        "tags": [
+         "technical-description",
+         "x_transferred"
+        ],
+        "url": "https://unit42.paloaltonetworks.com/cve-2024-3400/"
+       },
+       {
+        "tags": [
+         "technical-description",
+         "x_transferred"
+        ],
+        "url": "https://www.volexity.com/blog/2024/04/12/zero-day-exploitation-of-unauthenticated-remote-code-execution-vulnerability-in-globalprotect-cve-2024-3400/"
+       },
+       {
+        "tags": [
+         "technical-description",
+         "x_transferred"
+        ],
+        "url": "https://www.paloaltonetworks.com/blog/2024/04/more-on-the-pan-os-cve/"
+       }
+      ]
+     }
+    ]
+   }
+  }
+ },
+ "adp_cvss_only": {
+  "url": "https://raw.githubusercontent.com/CVEProject/cvelistV5/main/cves/2024/41xxx/CVE-2024-41713.json",
+  "status": 200,
+  "body": {
+   "dataType": "CVE_RECORD",
+   "cveMetadata": {
+    "state": "PUBLISHED",
+    "cveId": "CVE-2024-41713",
+    "assignerOrgId": "8254265b-2729-46b6-b9e3-3dfca2d5bfca",
+    "assignerShortName": "mitre",
+    "dateUpdated": "2026-08-04T03:55:35.454Z",
+    "dateReserved": "2024-07-22T00:00:00.000Z",
+    "datePublished": "2024-10-21T00:00:00.000Z"
+   },
+   "containers": {
+    "cna": {
+     "providerMetadata": {
+      "orgId": "8254265b-2729-46b6-b9e3-3dfca2d5bfca",
+      "shortName": "mitre",
+      "dateUpdated": "2024-10-21T20:52:04.542Z"
+     },
+     "descriptions": [
+      {
+       "lang": "en",
+       "value": "A vulnerability in the NuPoint Unified Messaging (NPM) component of Mitel MiCollab through 9.8 SP1 FP2 (9.8.1.201) could allow an unauthenticated attacker to conduct a path traversal attack, due to insufficient input validation. A successful exploit could allow unauthorized access, enabling the attacker to view, corrupt, or delete users' data and system configurations."
+      }
+     ],
+     "affected": [
+      {
+       "vendor": "n/a",
+       "product": "n/a",
+       "versions": [
+        {
+         "version": "n/a",
+         "status": "affected"
+        }
+       ]
+      }
+     ],
+     "references": [
+      {
+       "url": "https://www.mitel.com/support/security-advisories/mitel-product-security-advisory-misa-2024-0029"
+      }
+     ],
+     "problemTypes": [
+      {
+       "descriptions": [
+        {
+         "type": "text",
+         "lang": "en",
+         "description": "n/a"
+        }
+       ]
+      }
+     ]
+    },
+    "adp": [
+     {
+      "metrics": [
+       {
+        "cvssV3_1": {
+         "scope": "UNCHANGED",
+         "version": "3.1",
+         "baseScore": 9.1,
+         "attackVector": "NETWORK",
+         "baseSeverity": "CRITICAL",
+         "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
+         "integrityImpact": "HIGH",
+         "userInteraction": "NONE",
+         "attackComplexity": "LOW",
+         "availabilityImpact": "NONE",
+         "privilegesRequired": "NONE",
+         "confidentialityImpact": "HIGH"
+        }
+       },
+       {
+        "other": {
+         "type": "ssvc",
+         "content": {
+          "timestamp": "2024-12-06T00:00:00+00:00",
+          "options": [
+           {
+            "Exploitation": "active"
+           },
+           {
+            "Automatable": "yes"
+           },
+           {
+            "Technical Impact": "total"
+           }
+          ],
+          "role": "CISA Coordinator",
+          "version": "2.0.3",
+          "id": "CVE-2024-41713"
+         }
+        }
+       },
+       {
+        "other": {
+         "type": "kev",
+         "content": {
+          "dateAdded": "2025-01-07",
+          "reference": "https://www.cisa.gov/known-exploited-vulnerabilities-catalog?field_cve=CVE-2024-41713"
+         }
+        }
+       }
+      ],
+      "affected": [
+       {
+        "cpes": [
+         "cpe:2.3:a:mitel:micollab:-:*:*:*:*:*:*:*"
+        ],
+        "vendor": "mitel",
+        "product": "micollab",
+        "versions": [
+         {
+          "status": "affected",
+          "version": "0",
+          "versionType": "custom",
+          "lessThanOrEqual": "9.8.1.201"
+         }
+        ],
+        "defaultStatus": "unknown"
+       }
+      ],
+      "references": [
+       {
+        "url": "https://www.cisa.gov/known-exploited-vulnerabilities-catalog?field_cve=CVE-2024-41713",
+        "tags": [
+         "government-resource"
+        ]
+       }
+      ],
+      "problemTypes": [
+       {
+        "descriptions": [
+         {
+          "lang": "en",
+          "type": "CWE",
+          "cweId": "CWE-22",
+          "description": "CWE-22 Improper Limitation of a Pathname to a Restricted Directory ('Path Traversal')"
+         }
+        ]
+       }
+      ],
+      "title": "CISA ADP Vulnrichment",
+      "providerMetadata": {
+       "orgId": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+       "shortName": "CISA-ADP",
+       "dateUpdated": "2026-08-04T03:55:35.454Z"
+      }
+     }
+    ]
+   },
+   "dataVersion": "5.2"
+  }
+ },
+ "rejected": {
+  "url": "https://raw.githubusercontent.com/CVEProject/cvelistV5/main/cves/2025/12xxx/CVE-2025-12534.json",
+  "status": 200,
+  "body": {
+   "dataType": "CVE_RECORD",
+   "dataVersion": "5.2",
+   "cveMetadata": {
+    "cveId": "CVE-2025-12534",
+    "assignerOrgId": "ceab7361-8a18-47b1-92ba-4d7d25f6715a",
+    "state": "REJECTED",
+    "dateReserved": "2025-10-30T19:03:58.652Z",
+    "dateUpdated": "2026-10-27T22:18:54.557Z",
+    "dateRejected": "2026-10-27T22:18:54.557Z",
+    "assignerShortName": "GitLab"
+   },
+   "containers": {
+    "cna": {
+     "providerMetadata": {
+      "orgId": "ceab7361-8a18-47b1-92ba-4d7d25f6715a",
+      "shortName": "GitLab",
+      "dateUpdated": "2026-10-27T22:18:54.557Z"
+     },
+     "rejectedReasons": [
+      {
+       "lang": "en",
+       "value": "This CVE ID has been rejected or withdrawn by its CVE Numbering Authority."
+      }
+     ]
+    }
+   }
+  }
+ },
+ "releases": {
+  "url": "https://api.github.com/repos/CVEProject/cvelistV5/releases?per_page=100",
+  "status": 200,
+  "body": [
+   {
+    "tag_name": "cve_2026-10-28_1300Z",
+    "published_at": "2026-10-28T13:26:09Z",
+    "assets": [
+     {
+      "name": "2026-10-28_all_CVEs_at_midnight.zip.zip",
+      "size": 644872485,
+      "browser_download_url": "https://github.com/CVEProject/cvelistV5/releases/download/cve_2026-10-28_1300Z/2026-10-28_all_CVEs_at_midnight.zip.zip"
+     },
+     {
+      "name": "2026-10-28_delta_CVEs_at_1300Z.zip",
+      "size": 801749,
+      "browser_download_url": "https://github.com/CVEProject/cvelistV5/releases/download/cve_2026-10-28_1300Z/2026-10-28_delta_CVEs_at_1300Z.zip"
+     },
+     {
+      "name": "release_notes.md",
+      "size": 10347,
+      "browser_download_url": "https://github.com/CVEProject/cvelistV5/releases/download/cve_2026-10-28_1300Z/release_notes.md"
+     }
+    ]
+   },
+   {
+    "tag_name": "cve_2026-10-28_1200Z",
+    "published_at": "2026-10-28T12:30:30Z",
+    "assets": [
+     {
+      "name": "2026-10-28_all_CVEs_at_midnight.zip.zip",
+      "size": 644872485,
+      "browser_download_url": "https://github.com/CVEProject/cvelistV5/releases/download/cve_2026-10-28_1200Z/2026-10-28_all_CVEs_at_midnight.zip.zip"
+     },
+     {
+      "name": "2026-10-28_delta_CVEs_at_1200Z.zip",
+      "size": 722993,
+      "browser_download_url": "https://github.com/CVEProject/cvelistV5/releases/download/cve_2026-10-28_1200Z/2026-10-28_delta_CVEs_at_1200Z.zip"
+     },
+     {
+      "name": "release_notes.md",
+      "size": 9491,
+      "browser_download_url": "https://github.com/CVEProject/cvelistV5/releases/download/cve_2026-10-28_1200Z/release_notes.md"
+     }
+    ]
+   },
+   {
+    "tag_name": "cve_2026-10-28_0100Z",
+    "published_at": "2026-10-28T01:19:35Z",
+    "assets": [
+     {
+      "name": "2026-10-28_all_CVEs_at_midnight.zip.zip",
+      "size": 644872485,
+      "browser_download_url": "https://github.com/CVEProject/cvelistV5/releases/download/cve_2026-10-28_0100Z/2026-10-28_all_CVEs_at_midnight.zip.zip"
+     },
+     {
+      "name": "2026-10-28_delta_CVEs_at_0100Z.zip",
+      "size": 13211,
+      "browser_download_url": "https://github.com/CVEProject/cvelistV5/releases/download/cve_2026-10-28_0100Z/2026-10-28_delta_CVEs_at_0100Z.zip"
+     },
+     {
+      "name": "release_notes.md",
+      "size": 183,
+      "browser_download_url": "https://github.com/CVEProject/cvelistV5/releases/download/cve_2026-10-28_0100Z/release_notes.md"
+     }
+    ]
+   },
+   {
+    "tag_name": "cve_2026-10-28_0000Z",
+    "published_at": "2026-10-28T00:31:37Z",
+    "assets": [
+     {
+      "name": "2026-10-27_all_CVEs_at_midnight.zip.zip",
+      "size": 644007051,
+      "browser_download_url": "https://github.com/CVEProject/cvelistV5/releases/download/cve_2026-10-28_0000Z/2026-10-27_all_CVEs_at_midnight.zip.zip"
+     },
+     {
+      "name": "2026-10-28_delta_CVEs_at_0000Z.zip",
+      "size": 22,
+      "browser_download_url": "https://github.com/CVEProject/cvelistV5/releases/download/cve_2026-10-28_0000Z/2026-10-28_delta_CVEs_at_0000Z.zip"
+     },
+     {
+      "name": "release_notes.md",
+      "size": 89,
+      "browser_download_url": "https://github.com/CVEProject/cvelistV5/releases/download/cve_2026-10-28_0000Z/release_notes.md"
+     }
+    ]
+   },
+   {
+    "tag_name": "cve_2026-10-27_at_end_of_day",
+    "published_at": "2026-10-28T00:37:54Z",
+    "assets": [
+     {
+      "name": "2026-10-27_delta_CVEs_at_end_of_day.zip",
+      "size": 4339733,
+      "browser_download_url": "https://github.com/CVEProject/cvelistV5/releases/download/cve_2026-10-27_at_end_of_day/2026-10-27_delta_CVEs_at_end_of_day.zip"
+     },
+     {
+      "name": "release_notes.md",
+      "size": 41114,
+      "browser_download_url": "https://github.com/CVEProject/cvelistV5/releases/download/cve_2026-10-27_at_end_of_day/release_notes.md"
+     }
+    ]
+   },
+   {
+    "tag_name": "cve_2026-10-27_2300Z",
+    "published_at": "2026-10-27T23:26:27Z",
+    "assets": [
+     {
+      "name": "2026-10-27_all_CVEs_at_midnight.zip.zip",
+      "size": 644007051,
+      "browser_download_url": "https://github.com/CVEProject/cvelistV5/releases/download/cve_2026-10-27_2300Z/2026-10-27_all_CVEs_at_midnight.zip.zip"
+     },
+     {
+      "name": "2026-10-27_delta_CVEs_at_2300Z.zip",
+      "size": 4293071,
+      "browser_download_url": "https://github.com/CVEProject/cvelistV5/releases/download/cve_2026-10-27_2300Z/2026-10-27_delta_CVEs_at_2300Z.zip"
+     },
+     {
+      "name": "release_notes.md",
+      "size": 40196,
+      "browser_download_url": "https://github.com/CVEProject/cvelistV5/releases/download/cve_2026-10-27_2300Z/release_notes.md"
+     }
+    ]
+   },
+   {
+    "tag_name": "cve_2026-10-27_2200Z",
+    "published_at": "2026-10-27T22:18:50Z",
+    "assets": [
+     {
+      "name": "2026-10-27_all_CVEs_at_midnight.zip.zip",
+      "size": 644007051,
+      "browser_download_url": "https://github.com/CVEProject/cvelistV5/releases/download/cve_2026-10-27_2200Z/2026-10-27_all_CVEs_at_midnight.zip.zip"
+     },
+     {
+      "name": "2026-10-27_delta_CVEs_at_2200Z.zip",
+      "size": 4254405,
+      "browser_download_url": "https://github.com/CVEProject/cvelistV5/releases/download/cve_2026-10-27_2200Z/2026-10-27_delta_CVEs_at_2200Z.zip"
+     },
+     {
+      "name": "release_notes.md",
+      "size": 39765,
+      "browser_download_url": "https://github.com/CVEProject/cvelistV5/releases/download/cve_2026-10-27_2200Z/release_notes.md"
+     }
+    ]
+   }
+  ]
+ }
+}

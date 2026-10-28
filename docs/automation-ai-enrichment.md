@@ -590,6 +590,7 @@ Each source is a class that carries its own manifest (`backend/app/enrichment/ma
 | `malpedia` | Malpedia | lookup | malware, tool, threat_actor | manual | No (optional) | 30 / 60 s | — | low |
 | `github_poc` | GitHub PoC | lookup | cve | manual | No (optional token) | 10 / 60 s; 30 / 60 s with a token | the same | low |
 | `cvedetails` | CVEDetails | lookup | cve | auto | Yes | 60 / 60 s | — | low |
+| `cvelist` | CVE List (cvelistV5) | lookup | cve | manual | No | 30 / 60 s | — | none |
 | `wikipedia` | Wikipedia | lookup | threat_actor, malware, tool, country, vendor, product, ttp, mitigation, cve, cwe | auto | No | 20 / 60 s | — | low |
 | `virustotal` | VirusTotal v3 | lookup | observable (ipv4, domain, md5, sha1, sha256) | manual | Yes | 4 / 60 s | — | shares_ioc |
 | `greynoise` | GreyNoise Community | lookup | observable (ipv4) | manual | No (optional key) | 10 / 3600 s | — | shares_ioc |
@@ -613,7 +614,9 @@ A source's `outputs` are `Column` and `Context` entries. A `Column` says which `
 | `fill_blank` | Only into a blank column |
 | `rank` | Only into a blank column; when several outputs share it, the lowest `rank` with a value wins |
 | `union` | Adds the list items the column doesn't hold yet, outputs in `rank` order |
-| `newer_wins` | Replaces what the column holds; columns that `follow` it are written with it |
+| `newer_wins` | Replaces what the column holds |
+
+A column that `follows` a target is written with it, empty or not, whenever its source writes that target.
 
 A `filter` transforms the value first: `aliases` runs `filter_aliases()` (`backend/app/intelligence/autolinker.py`), so junk aliases never reach the autolinker vocabulary. `apply_enrichment_results_to_entity` (`backend/app/enrichment/entity_updater.py`) applies every output for the entity's type and records a claim (`entity_field_claims`, `source_kind = enrichment`, `source_ref` = the source) for each value it writes. What the sources write:
 
@@ -622,7 +625,8 @@ A `filter` transforms the value first: `aliases` runs `filter_aliases()` (`backe
 - **Malpedia**: `description` rank 3, `malpedia_url` (malware, tool), `github_url` (a tool's first github.com reference), `aliases` (union, after MITRE), actor `country`.
 - **VirusTotal, GreyNoise, Shodan**: keys of `Observable.reputation` (`vt_ratio`, `vt_malicious`, `vt_threat_label`, `vt_tags`, `asn`, `as_owner`, `country`; `gn_classification`, `gn_noise`, `gn_riot`, `gn_name`; `ports`, `hostnames`, `shodan_tags`, `vulns`), newest wins, empty values skipped; `reputation.enriched_at` is stamped whenever one of them answers. `infra_tag` fills when blank: a Shodan `vpn` / `proxy` / `tor` tag first, else `benign_service` for GreyNoise RIOT.
 
-- **NVD**: `cvss_score` rank 1 (a CNA score would be rank 2), `severity`, and `description` rank 1 (Wikipedia's is rank 2 for a CVE), all into blank columns only. Article extraction (`extract_and_store_cves`) and the NVD jobs write these columns from their own NVD calls; a lookup fills a CVE whose extraction-time call was throttled and leaves a filled one alone.
+- **NVD**: `cvss_score` rank 1, `severity`, and `description` rank 1 (Wikipedia's is rank 2 for a CVE), all into blank columns only. Article extraction (`extract_and_store_cves`) and the NVD jobs write these columns from their own NVD calls; a lookup fills a CVE whose extraction-time call was throttled and leaves a filled one alone.
+- **CVE List (cvelistV5)**: `cvss_score` from the CNA's metric rank 2 and from CISA-ADP's rank 3, with `severity` following the score it wrote (so a score never sits beside extraction's `UNKNOWN`); `description` rank 1, since NVD republishes the CNA's text; `ssvc_exploitation`, `ssvc_automatable` and `ssvc_technical_impact`, newer wins. CVSS 3.1 is preferred, then 3.0, then 4.0.
 
 A `Context` (key, label, display: `fact`, `chips`, `table`, `timeline`, `link` or `badge`) is a value for the entity's profile rather than a column; the adapters declare them (Shodan ports and tags, GreyNoise classification, OSV affected packages, Malpedia references, and so on). `entity_types` limits one to some of the source's types.
 
@@ -659,7 +663,7 @@ In public read-only mode a visitor never sees a source whose `egress` is `shares
 
 ### Pipeline Flow
 
-`enrich_entity()` (`backend/app/enrichment/pipeline.py:177`) loops over the enabled sources whose `trigger_mode` matches (or the named `source_types`). For each source:
+`enrich_entity()` (`backend/app/enrichment/pipeline.py:211`) loops over the enabled sources whose `trigger_mode` matches (or the named `source_types`). For each source:
 
 1. Skip it if it is a catalog source or does not apply to the entity type.
 2. Resolve the API key ([below](#api-key-resolution)).
@@ -748,7 +752,7 @@ If Redis can't be reached, the gateway refuses the request (`gateway_unavailable
 
 Wikipedia goes through the gateway too: `wikipediaapi` takes the gateway's transport for the httpx client it builds, with its own retries off.
 
-**Jobs.** A job (NVD, EPSS, CISA KEV, MITRE ATT&CK, Malpedia, GitHub PoC, Wikipedia) uses its source row's rate limit, budget and key, so it shares one allowance with the per-entity lookups under the same key. The NVD sweeps fall back to the `nvd_api_key` setting and the GitHub PoC scan to `github_token` when the row has no key; a different key has its own allowance. The catalog sources' jobs (MISP Galaxy, Metasploit, MITRE CWE, Cybergeist, ransomware.live) use their rows the same way.
+**Jobs.** A job (NVD, EPSS, CISA KEV, MITRE ATT&CK, Malpedia, GitHub PoC, Wikipedia, CVE List) uses its source row's rate limit, budget and key, so it shares one allowance with the per-entity lookups under the same key. The NVD sweeps fall back to the `nvd_api_key` setting and the GitHub PoC scan to `github_token` when the row has no key; a different key has its own allowance. The catalog sources' jobs (MISP Galaxy, Metasploit, MITRE CWE, Cybergeist, ransomware.live) use their rows the same way.
 
 When the gateway refuses (`rate_limited`, `breaker_open`, `budget_exhausted`, `paused`), a job stops, commits what it has done, and records the reason as `stopped` in its stats, which land in the run's details in the Jobs view. The run still counts as a success. Loop jobs also stop with `stopped: "out_of_time"` before their time limit. `gateway_unavailable` fails the run.
 
@@ -756,7 +760,7 @@ NVD allows 50 requests per 30 seconds with a key and 5 without. The bucket (50 p
 
 ### Daily Budgets
 
-Every source starts with a budget of about twice the requests a busy day sends (the `daily_budget` of its manifest's `quota`): NVD 5,000, Wikipedia 2,000, OSV 2,000, GitHub PoC 1,000, Malpedia 1,000, Shodan 1,000, CVEDetails 1,000, VulnCheck 1,000, EPSS 500, CISA KEV 500, VirusTotal 500 (its free tier), ransomware.live 200, MITRE ATT&CK 100, GreyNoise 100, and 50 each for MISP Galaxy, Metasploit, MITRE CWE and Cybergeist. An admin can change or clear one under Settings → Engine → Enrichment. A source that runs out stops until midnight UTC, jobs included. Every request the gateway sends counts; cached results are free. The console's source detail (`used_today`) and the source list's `daily_budget_used` show today's use under the source's own key, and `GET /api/enrichment/sources/{id}/health` shows the tokens left in its bucket.
+Every source starts with a budget of about twice the requests a busy day sends (the `daily_budget` of its manifest's `quota`): CVE List 12,000, NVD 5,000, Wikipedia 2,000, OSV 2,000, GitHub PoC 1,000, Malpedia 1,000, Shodan 1,000, CVEDetails 1,000, VulnCheck 1,000, EPSS 500, CISA KEV 500, VirusTotal 500 (its free tier), ransomware.live 200, MITRE ATT&CK 100, GreyNoise 100, and 50 each for MISP Galaxy, Metasploit, MITRE CWE and Cybergeist. An admin can change or clear one under Settings → Engine → Enrichment. A source that runs out stops until midnight UTC, jobs included. Every request the gateway sends counts; cached results are free. The console's source detail (`used_today`) and the source list's `daily_budget_used` show today's use under the source's own key, and `GET /api/enrichment/sources/{id}/health` shows the tokens left in its bucket.
 
 ### Enrichment Console
 
@@ -799,6 +803,15 @@ Each source declares its scheduled jobs in its manifest. They are registered in 
 | `wikipedia-bulk-sync` | `wikipedia` | Wednesday 04:00 | Wikipedia content for entities that lack it, as many as fit in 55 minutes |
 | `sync-cybergeist-feeds` | `cybergeist` | Daily 02:30 | Threat actors and malware from the Cybergeist feeds |
 | `sync-ransomware-victims` | `ransomware_live` | Every 30 minutes | Leak-site victim postings |
+| `cvelist-backfill` | `cvelist` | Hourly at :20 | The CVE record for CVEs with no current cvelist result, as many as fit in 13 minutes: those missing a score or description first, then KEV entries, then the newest |
+| `cvelist-delta-sync` | `cvelist` | Hourly at :40 | The CVE records changed since its last run, from cvelistV5's delta zips |
+
+**CVE List.** The source reads the CVE Program's records from the cvelistV5 repository on GitHub: the CNA's container and CISA's ADP container (SSVC, and CVSS for CVEs the CNA left unscored). The repository's daily baseline zip of every record is about 650 MB, so it is never fetched. Instead:
+
+- `cvelist-backfill` fetches one record at a time from raw.githubusercontent.com for the CVEs in `cves`. A record's result lasts 90 days (30 for an id with no record), so each CVE is checked again a quarter later.
+- `cvelist-delta-sync` lists the repository's releases (one API call) and reads the delta zips released since the source row's `last_synced_at`. Each hourly zip holds every record changed since midnight UTC, and an end-of-day zip holds the whole day, so it reads one zip per day: the end-of-day one once it is out, else the newest hourly one. A zip (about 4 MB for a whole day, refused above 64 MB) streams to a temporary file, and only the records of CVEs in `cves` are read from it. On its first run it reads only the newest zip. If the listing (about four days) no longer reaches back to `last_synced_at`, its stats say `gap: true`; the backfill catches those CVEs when their results expire.
+
+Both jobs store each record as the source's result, write its context and columns, and link its CWE ids in `cve_weaknesses` (`source = cvelist`). A lookup ("Enrich now") stores the result, context and columns. The stored `raw_response` is only the record's `cveMetadata`. The data is used under the [CVE Program terms of use](https://www.cve.org/Legal/TermsOfUse). The KEV columns stay with the KEV sync.
 
 `resolve-cve-affected` belongs to no source: it matches CPE pairs already stored against new vendors and products, and sends nothing to NVD.
 

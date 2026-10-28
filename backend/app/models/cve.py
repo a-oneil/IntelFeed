@@ -44,6 +44,11 @@ class CVE(Base):
     is_kev: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false", index=True)
     kev_date_added: Mapped[date | None] = mapped_column(Date)
     kev_due_date: Mapped[date | None] = mapped_column(Date)
+    # CISA's SSVC decision points, from its ADP container in the CVE record
+    # (cvelist enrichment source): none | poc | active, yes | no, partial | total.
+    ssvc_exploitation: Mapped[str | None] = mapped_column(String(10))
+    ssvc_automatable: Mapped[str | None] = mapped_column(String(10))
+    ssvc_technical_impact: Mapped[str | None] = mapped_column(String(10))
     github_poc_count: Mapped[int | None] = mapped_column(Integer)
     github_poc_urls: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
     metasploit_module: Mapped[str | None] = mapped_column(String(255))

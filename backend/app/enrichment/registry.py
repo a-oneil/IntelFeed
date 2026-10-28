@@ -4,6 +4,7 @@ job registry entries and gateways."""
 from app.enrichment.adapters import (
     CISAKEVAdapter,
     CVEDetailsAdapter,
+    CVEListAdapter,
     EPSSAdapter,
     GitHubPoCAdapter,
     GreyNoiseAdapter,
@@ -37,6 +38,7 @@ ADAPTER_REGISTRY: dict[str, type[EnrichmentAdapter]] = {
     "malpedia": MalpediaAdapter,
     "github_poc": GitHubPoCAdapter,
     "cvedetails": CVEDetailsAdapter,
+    "cvelist": CVEListAdapter,
     "wikipedia": WikipediaAdapter,
     # Observable (IOC ledger) reputation — restored from the v1-era adapters.
     "virustotal": VirusTotalAdapter,

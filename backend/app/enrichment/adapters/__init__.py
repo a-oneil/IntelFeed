@@ -1,5 +1,6 @@
 from app.enrichment.adapters.cisa_kev import CISAKEVAdapter
 from app.enrichment.adapters.cvedetails import CVEDetailsAdapter
+from app.enrichment.adapters.cvelist import CVEListAdapter
 from app.enrichment.adapters.epss import EPSSAdapter
 from app.enrichment.adapters.github_poc import GitHubPoCAdapter
 from app.enrichment.adapters.greynoise import GreyNoiseAdapter
@@ -25,5 +26,6 @@ __all__ = [
     "MalpediaAdapter",
     "GitHubPoCAdapter",
     "CVEDetailsAdapter",
+    "CVEListAdapter",
     "WikipediaAdapter",
 ]

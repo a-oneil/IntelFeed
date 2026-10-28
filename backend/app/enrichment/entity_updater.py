@@ -140,7 +140,8 @@ async def apply_enrichment_results_to_entity(
     ones for this entity type by their ``Policy``: blank columns are filled,
     ranked outputs fill from the best-ranked source that has a value, list
     columns gain the items they lack, and newer-wins outputs replace what is
-    there. Every write records a claim naming its source. A JSON column a
+    there; columns that follow a target are written with it. Every write
+    records a claim naming its source. A JSON column a
     source writes into (``Observable.reputation``) is stamped ``enriched_at``
     whenever one of its sources returned a result.
 
@@ -193,6 +194,15 @@ async def apply_enrichment_results_to_entity(
     # (path, value, source) for every write, recorded once at the end — a
     # failed audit write must not cost the fill.
     claimed: list[tuple[str, object, str]] = []
+
+    def write(src: str, column: Column, value) -> None:
+        _set(entity, column.path, value)
+        claimed.append((column.path, value, src))
+        for follower in followers.get((src, column.target), ()):
+            follower_value = _lookup(by_source[src], follower.key)
+            _set(entity, follower.path, follower_value)
+            claimed.append((follower.path, follower_value, src))
+
     for outputs in targets.values():
         outputs.sort(key=lambda o: o[1].rank or 0)
         path, policy = outputs[0][1].path, outputs[0][1].policy
@@ -204,8 +214,7 @@ async def apply_enrichment_results_to_entity(
             for src, column in outputs:
                 value = _value(column, by_source[src], entity)
                 if value is not None:
-                    _set(entity, path, value)
-                    claimed.append((path, value, src))
+                    write(src, column, value)
                     break
 
         elif policy == Policy.UNION:
@@ -228,12 +237,7 @@ async def apply_enrichment_results_to_entity(
                 value = _value(column, by_source[src], entity)
                 if value is None or value == _get(entity, path):
                     continue
-                _set(entity, path, value)
-                claimed.append((path, value, src))
-                for follower in followers.get((src, column.target), ()):
-                    follower_value = _lookup(by_source[src], follower.key)
-                    _set(entity, follower.path, follower_value)
-                    claimed.append((follower.path, follower_value, src))
+                write(src, column, value)
 
     for column in stamped:
         _set(entity, f"{column}.enriched_at", datetime.now(UTC).isoformat())
