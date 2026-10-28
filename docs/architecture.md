@@ -306,7 +306,7 @@ Enrichment adds facts from outside sources to an entity.
 
 When a **new** entity is created, `auto_enrich_entity(entity_type, entity_id, entity_value)` runs. It finds the `EnrichmentSource` rows for that entity type set to `auto`, runs each adapter, and saves the results on the entity. For CVEs it also updates exploit status, KEV status and EPSS scores.
 
-Adapters (`backend/app/enrichment/adapters/`): NVD, EPSS, CISA KEV, MITRE ATT&CK, Malpedia, GitHub PoC, Wikipedia, CVEDetails, OSV, VulnCheck, and for observables VirusTotal, GreyNoise and Shodan InternetDB. Each one makes its HTTP requests through a `SourceGateway` (`backend/app/enrichment/gateway.py`), which applies the source's rate limit, daily budget and circuit breaker to every request and refuses to send when Redis is down. See [automation-ai-enrichment.md](automation-ai-enrichment.md#source-gateway).
+Adapters (`backend/app/enrichment/adapters/`): NVD, EPSS, CISA KEV, MITRE ATT&CK, Malpedia, GitHub PoC, Wikipedia, CVEDetails, OSV, VulnCheck, and for observables VirusTotal, GreyNoise and Shodan InternetDB. Each one, and each scheduled enrichment job, makes its HTTP requests through a `SourceGateway` (`backend/app/enrichment/gateway.py`), which applies the source's rate limit, daily budget and circuit breaker to every request and refuses to send when Redis is down. See [automation-ai-enrichment.md](automation-ai-enrichment.md#source-gateway).
 
 ### Scheduled Enrichment
 

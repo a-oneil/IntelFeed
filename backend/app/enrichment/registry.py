@@ -36,7 +36,9 @@ ADAPTER_REGISTRY: dict[str, type[EnrichmentAdapter]] = {
     "shodan": ShodanAdapter,
 }
 
-# Default source definitions for seeding the database
+# Default source definitions for seeding the database. default_daily_budget is
+# requests per UTC day per credential, about twice what the jobs and per-entity
+# lookups send on a busy day (migration j7e8f9a0b1c2 has the breakdown).
 DEFAULT_SOURCES = [
     {
         "source_type": "epss",
@@ -44,6 +46,7 @@ DEFAULT_SOURCES = [
         "default_trigger_mode": "scheduled",
         "requires_api_key": False,
         "default_rate_limit": {"requests_per_period": 100, "period_seconds": 60},
+        "default_daily_budget": 500,
         "default_min_confidence_threshold": "low",
     },
     {
@@ -52,6 +55,7 @@ DEFAULT_SOURCES = [
         "default_trigger_mode": "auto",
         "requires_api_key": False,
         "default_rate_limit": {"requests_per_period": 50, "period_seconds": 30},
+        "default_daily_budget": 5000,
         "default_min_confidence_threshold": "low",
     },
     {
@@ -60,6 +64,7 @@ DEFAULT_SOURCES = [
         "default_trigger_mode": "scheduled",
         "requires_api_key": False,
         "default_rate_limit": {"requests_per_period": 100, "period_seconds": 60},
+        "default_daily_budget": 500,
         "default_min_confidence_threshold": "low",
     },
     {
@@ -68,6 +73,7 @@ DEFAULT_SOURCES = [
         "default_trigger_mode": "scheduled",
         "requires_api_key": False,
         "default_rate_limit": {"requests_per_period": 10, "period_seconds": 3600},
+        "default_daily_budget": 100,
         "default_min_confidence_threshold": "low",
     },
     {
@@ -76,6 +82,7 @@ DEFAULT_SOURCES = [
         "default_trigger_mode": "scheduled",
         "requires_api_key": True,
         "default_rate_limit": {"requests_per_period": 1000, "period_seconds": 60},
+        "default_daily_budget": 1000,
         "default_min_confidence_threshold": "medium",
     },
     {
@@ -84,6 +91,7 @@ DEFAULT_SOURCES = [
         "default_trigger_mode": "auto",
         "requires_api_key": False,
         "default_rate_limit": {"requests_per_period": 100, "period_seconds": 60},
+        "default_daily_budget": 2000,
         "default_min_confidence_threshold": "low",
     },
     {
@@ -92,6 +100,7 @@ DEFAULT_SOURCES = [
         "default_trigger_mode": "scheduled",
         "requires_api_key": False,
         "default_rate_limit": {"requests_per_period": 30, "period_seconds": 60},
+        "default_daily_budget": 1000,
         "default_min_confidence_threshold": "low",
     },
     {
@@ -100,6 +109,7 @@ DEFAULT_SOURCES = [
         "default_trigger_mode": "scheduled",
         "requires_api_key": False,
         "default_rate_limit": {"requests_per_period": 10, "period_seconds": 60},
+        "default_daily_budget": 1000,
         "default_min_confidence_threshold": "low",
     },
     {
@@ -108,6 +118,7 @@ DEFAULT_SOURCES = [
         "default_trigger_mode": "auto",
         "requires_api_key": True,
         "default_rate_limit": {"requests_per_period": 60, "period_seconds": 60},
+        "default_daily_budget": 1000,
         "default_min_confidence_threshold": "medium",
     },
     {
@@ -116,6 +127,7 @@ DEFAULT_SOURCES = [
         "default_trigger_mode": "auto",
         "requires_api_key": False,
         "default_rate_limit": {"requests_per_period": 10, "period_seconds": 60},
+        "default_daily_budget": 2000,
         "default_min_confidence_threshold": "low",
     },
     {
@@ -123,8 +135,9 @@ DEFAULT_SOURCES = [
         "display_name": "VirusTotal v3",
         "default_trigger_mode": "manual",
         "requires_api_key": True,
-        # Free tier: 4 req/min, 500/day — set daily_budget on the source row too.
+        # Free tier: 4 req/min, 500/day.
         "default_rate_limit": {"requests_per_period": 4, "period_seconds": 60},
+        "default_daily_budget": 500,
         "default_min_confidence_threshold": "medium",
     },
     {
@@ -134,6 +147,7 @@ DEFAULT_SOURCES = [
         # The Community endpoint answers without a key; one raises the allowance.
         "requires_api_key": False,
         "default_rate_limit": {"requests_per_period": 10, "period_seconds": 3600},
+        "default_daily_budget": 100,
         "default_min_confidence_threshold": "medium",
     },
     {
@@ -145,6 +159,7 @@ DEFAULT_SOURCES = [
         "default_trigger_mode": "auto",
         "requires_api_key": False,
         "default_rate_limit": {"requests_per_period": 30, "period_seconds": 60},
+        "default_daily_budget": 1000,
         "default_min_confidence_threshold": "medium",
     },
 ]
@@ -172,11 +187,16 @@ def get_adapter(
     return adapter_class(api_key=api_key, config=config, gateway=gateway)
 
 
-def source_gateway(source: EnrichmentSource, api_key: str | None) -> SourceGateway:
+def source_gateway(source: EnrichmentSource, api_key: str | None, **kwargs) -> SourceGateway:
     """The gateway for a source row and the key it will use."""
-    adapter_class = ADAPTER_REGISTRY.get(source.source_type)
-    group = adapter_class.shared_key_group if adapter_class else None
-    return SourceGateway.for_source(source, api_key, shared_key_group=group)
+    adapter_class = ADAPTER_REGISTRY.get(source.source_type) or EnrichmentAdapter
+    return SourceGateway.for_source(
+        source,
+        api_key,
+        shared_key_group=adapter_class.shared_key_group,
+        throttle_statuses=adapter_class.throttle_statuses,
+        **kwargs,
+    )
 
 
 def adapter_for_source(source: EnrichmentSource, api_key: str | None) -> EnrichmentAdapter:

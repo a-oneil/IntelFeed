@@ -4,10 +4,10 @@ import asyncio
 import logging
 from datetime import UTC, date, datetime
 
-import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.enrichment.gateway import JOB_TOKEN_WAIT, SOURCE_REFUSALS, SourceGateway
 from app.intelligence.entity_resolution import gate_aliases, resolve_entity_creation
 from app.models.cve import CVE
 from app.models.malware_family import MalwareFamily
@@ -21,6 +21,14 @@ KEV_REDIS_KEY = "intelfeed:kev:version"
 
 CYBERGEIST_ACTOR_URL = "https://pubbucket.cybergeist.io/cybergeist.io-threatActor-public-feed.json"
 CYBERGEIST_MALWARE_URL = "https://pubbucket.cybergeist.io/cybergeist.io-malware-public-feed.json"
+# Two files a day, with no enrichment_sources row to configure them.
+CYBERGEIST_GATEWAY = SourceGateway(
+    "cybergeist", rate_limit_config={"requests_per_period": 10, "period_seconds": 3600}, max_wait=JOB_TOKEN_WAIT
+)
+
+# New KEV CVEs enriched from NVD per sync, and the seconds that may take.
+MAX_NVD_ENRICHMENT = 50
+NVD_ENRICH_SECONDS = 180
 
 
 def _parse_kev_date(value: str | None) -> date | None:
@@ -82,12 +90,19 @@ async def sync_kev_feed(db: AsyncSession) -> dict:
 
     Returns stats dict with counts of new/updated CVEs.
     """
+    from app.enrichment.pipeline import gateway_for
+
     stats = {"new": 0, "updated": 0, "skipped": 0, "errors": 0, "kev_additions": 0}
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.get(KEV_CATALOG_URL)
-        resp.raise_for_status()
-        catalog = resp.json()
+    gateway, _ = await gateway_for(db, "cisa_kev", max_wait=JOB_TOKEN_WAIT)
+    try:
+        async with gateway.client(timeout=30) as client:
+            resp = await client.get(KEV_CATALOG_URL)
+            resp.raise_for_status()
+            catalog = resp.json()
+    except SOURCE_REFUSALS as e:
+        logger.warning("KEV sync skipped: %s", e)
+        return {**stats, "stopped": e.status}
 
     catalog_version = catalog.get("catalogVersion", "")
     r = await get_redis()
@@ -172,23 +187,29 @@ async def sync_kev_feed(db: AsyncSession) -> dict:
         for _, cve_obj in kev_addition_cves:
             dispatch_cve_rescore(cve_obj.id)
 
-    # Enrich new CVEs from NVD (rate limited: ~5 req/30s without API key)
-    # Cap at 50 per sync to avoid blocking for hours; rest will be enriched on next sync
-    MAX_NVD_ENRICHMENT = 50
+    # Enrich new CVEs from NVD at its pace (5 req/30s without an API key), at
+    # most what fits in NVD_ENRICH_SECONDS of the task's 300s limit; the nightly
+    # reenrich-cve-nvd job picks up the rest.
     if new_cve_ids:
-        from app.intelligence.cve import enrich_from_nvd
+        from app.intelligence.cve import enrich_from_nvd, nvd_gateway, nvd_request_pace
 
-        enrich_batch = new_cve_ids[:MAX_NVD_ENRICHMENT]
+        nvd_gw, api_key = await nvd_gateway(db)
+        pace = nvd_request_pace(api_key)
+        enrich_batch = new_cve_ids[: min(MAX_NVD_ENRICHMENT, int(NVD_ENRICH_SECONDS / pace))]
         logger.info(
             "Enriching %d/%d new KEV CVEs from NVD",
             len(enrich_batch),
             len(new_cve_ids),
         )
         for i, cve_id in enumerate(enrich_batch):
-            if i > 0 and i % 5 == 0:
-                await asyncio.sleep(30)  # NVD rate limit
-
-            nvd = await enrich_from_nvd(cve_id)
+            if i:
+                await asyncio.sleep(pace)
+            try:
+                nvd = await enrich_from_nvd(cve_id, nvd_gw, api_key)
+            except SOURCE_REFUSALS as e:
+                logger.warning("KEV sync: NVD enrichment stopping at %d/%d: %s", i, len(enrich_batch), e)
+                stats["stopped"] = e.status
+                break
             if nvd:
                 cve_obj = existing_map[cve_id]
                 cve_obj.cvss_score = nvd.get("cvss_score")
@@ -213,10 +234,14 @@ async def sync_cybergeist_threat_actors(db: AsyncSession) -> dict:
     stats = {"new": 0, "updated": 0, "skipped": 0, "errors": 0}
     new_entity_ids = []
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.get(CYBERGEIST_ACTOR_URL)
-        resp.raise_for_status()
-        actors_data = resp.json()
+    try:
+        async with CYBERGEIST_GATEWAY.client(timeout=30) as client:
+            resp = await client.get(CYBERGEIST_ACTOR_URL)
+            resp.raise_for_status()
+            actors_data = resp.json()
+    except SOURCE_REFUSALS as e:
+        logger.warning("Cybergeist actors sync skipped: %s", e)
+        return {**stats, "stopped": e.status, "new_entity_ids": []}
 
     if not isinstance(actors_data, list):
         actors_data = actors_data.get("objects", actors_data.get("data", []))
@@ -308,10 +333,14 @@ async def sync_cybergeist_malware(db: AsyncSession) -> dict:
     stats = {"new": 0, "updated": 0, "skipped": 0, "errors": 0}
     new_entity_ids = []
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.get(CYBERGEIST_MALWARE_URL)
-        resp.raise_for_status()
-        malware_data = resp.json()
+    try:
+        async with CYBERGEIST_GATEWAY.client(timeout=30) as client:
+            resp = await client.get(CYBERGEIST_MALWARE_URL)
+            resp.raise_for_status()
+            malware_data = resp.json()
+    except SOURCE_REFUSALS as e:
+        logger.warning("Cybergeist malware sync skipped: %s", e)
+        return {**stats, "stopped": e.status, "new_entity_ids": []}
 
     if not isinstance(malware_data, list):
         malware_data = malware_data.get("objects", malware_data.get("data", []))

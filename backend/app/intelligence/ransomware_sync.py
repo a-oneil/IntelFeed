@@ -26,8 +26,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import entity_types
 from app.adapters.base import ParsedEntry
-from app.adapters.ransomware_live import RansomwareLiveAdapter, _parse_dt
+from app.adapters.ransomware_live import RANSOMWARE_LIVE_GATEWAY, RansomwareLiveAdapter, _parse_dt
 from app.api.events import publish_event
+from app.enrichment.gateway import SOURCE_REFUSALS, GatewayUnavailable
 from app.intelligence.entity_dedup import find_entity_by_name_or_alias
 from app.intelligence.entity_resolution import gate_aliases, resolve_entity_creation
 from app.intelligence.sectors import normalize_sector, sector_label, sector_uuid
@@ -62,7 +63,7 @@ async def fetch_group_catalog() -> dict[str, dict]:
     falls back to the slug (still de-versioned + alias-unioned)."""
     catalog: dict[str, dict] = {}
     try:
-        async with httpx.AsyncClient(timeout=60.0, headers={"User-Agent": "IntelFeed/1.0"}) as client:
+        async with RANSOMWARE_LIVE_GATEWAY.client(timeout=60.0) as client:
             resp = await client.get(RANSOMWARE_LIVE_GROUPS_URL)
         if resp.status_code != 200:
             logger.warning("ransomware.live /v2/groups returned %s — resolving on slugs only", resp.status_code)
@@ -394,6 +395,7 @@ async def sync_ransomware_victims(
         "skipped_existing": 0,
         "errors": 0,
         "watchlist_alerts": 0,
+        "stopped": None,
     }
     new_group_ids: list[str] = []
     new_victim_ids: list[str] = []
@@ -402,13 +404,23 @@ async def sync_ransomware_victims(
     # Group name/alias catalog (fetched once — the endpoint is rate-limited 1/min) so
     # the resolver can fold slugs into tracked actors by alias.
     if catalog is None:
-        catalog = await fetch_group_catalog()
+        try:
+            catalog = await fetch_group_catalog()
+        except SOURCE_REFUSALS as e:
+            logger.warning("ransomware sync skipped: %s", e)
+            return {**stats, "stopped": e.status, "new_group_ids": [], "new_victim_ids": []}
 
     for adapter in adapters or _default_adapters():
         source = getattr(adapter, "SOURCE", adapter.__class__.__name__)
         cutoff = since if since is not None else await _last_posted_at(db, source)
         try:
             _meta, entries = await adapter.fetch_entries({}, cutoff)
+        except SOURCE_REFUSALS as e:
+            logger.warning("ransomware sync: %s refused, skipping it this run: %s", source, e)
+            stats["stopped"] = e.status
+            continue
+        except GatewayUnavailable:
+            raise
         except Exception:
             logger.exception("ransomware sync: fetch failed for source=%s", source)
             stats["errors"] += 1

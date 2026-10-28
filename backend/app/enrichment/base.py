@@ -6,7 +6,7 @@ from datetime import timedelta
 
 import httpx
 
-from app.enrichment.gateway import SourceGateway
+from app.enrichment.gateway import THROTTLE_STATUSES, SourceGateway
 
 
 @dataclass
@@ -27,6 +27,7 @@ class EnrichmentAdapter(ABC):
     requires_api_key: bool = False
     default_trigger_mode: str = "manual"
     shared_key_group: str | None = None  # Adapters sharing an API key set this (e.g. "abuse_ch")
+    throttle_statuses: tuple[int, ...] = THROTTLE_STATUSES  # Statuses the gateway treats as "slow down"
 
     def __init__(self, api_key: str | None = None, config: dict | None = None, gateway: SourceGateway | None = None):
         self.api_key = api_key

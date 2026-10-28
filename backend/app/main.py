@@ -284,6 +284,7 @@ async def _seed_enrichment_sources() -> None:
                         is_enabled=False,
                         trigger_mode=src.get("default_trigger_mode", "manual"),
                         rate_limit_config=src.get("default_rate_limit", {}),
+                        daily_budget=src.get("default_daily_budget"),
                         health_status="unknown",
                         config={},
                     )

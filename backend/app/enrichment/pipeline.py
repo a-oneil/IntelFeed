@@ -8,8 +8,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.encryption import decrypt_value
-from app.enrichment.gateway import BreakerOpen, GatewayError, RateLimited
-from app.enrichment.registry import ADAPTER_REGISTRY, SHARED_KEY_GROUPS, adapter_for_source
+from app.enrichment.gateway import MAX_TOKEN_WAIT, BreakerOpen, GatewayError, RateLimited, SourceGateway
+from app.enrichment.registry import (
+    ADAPTER_REGISTRY,
+    DEFAULT_SOURCES,
+    SHARED_KEY_GROUPS,
+    adapter_for_source,
+    source_gateway,
+)
 from app.models.enrichment import EnrichmentResult, EnrichmentSource, UserEnrichmentOverride
 
 logger = logging.getLogger(__name__)
@@ -108,6 +114,32 @@ async def resolve_api_key(
                 return decrypt_value(sib_source.api_key_encrypted)
 
     return None
+
+
+async def gateway_for(
+    db: AsyncSession,
+    source_type: str,
+    fallback_key: str | None = None,
+    max_wait: float = MAX_TOKEN_WAIT,
+) -> tuple[SourceGateway, str | None]:
+    """The gateway and key for calls made outside ``enrich_entity`` (scheduled
+    jobs, bulk syncs): the source row's rate limit, budget and global key, so
+    they draw on the same allowance as per-entity lookups. ``fallback_key`` is
+    used when the row has no key; without a row the DEFAULT_SOURCES limits apply."""
+    source = (
+        await db.execute(select(EnrichmentSource).where(EnrichmentSource.source_type == source_type))
+    ).scalar_one_or_none()
+    if source is None:
+        defaults = next(s for s in DEFAULT_SOURCES if s["source_type"] == source_type)
+        source = EnrichmentSource(
+            source_type=source_type,
+            rate_limit_config=defaults["default_rate_limit"],
+            daily_budget=defaults["default_daily_budget"],
+        )
+        api_key = fallback_key
+    else:
+        api_key = await resolve_api_key(source, None, db) or fallback_key
+    return source_gateway(source, api_key, max_wait=max_wait), api_key
 
 
 async def get_cached_result(

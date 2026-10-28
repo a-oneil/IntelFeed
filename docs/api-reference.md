@@ -7,7 +7,7 @@ For developers who want to script IntelFeed or build on its REST API. After read
 - **Base URL:** `/api` on your IntelFeed host (in the dev stack, `http://localhost:8000`).
 - **Format:** JSON in, JSON out, unless an endpoint says otherwise (file downloads, SSE streams, RSS, CSV).
 - **Full schemas:** the interactive docs at `/docs` (Swagger) and `/redoc` list every parameter and response field. They are built from the code, so they are always current. The pages themselves load for anyone, but the spec behind them (`/openapi.json`) needs a signed-in user: the docs page reads your token from the web app's local storage, so sign in to IntelFeed in the same browser first.
-- **This page** is the map: how the API behaves, plus every endpoint with its access level and a one-line purpose. The routers are mounted in `backend/app/main.py:824-905`.
+- **This page** is the map: how the API behaves, plus every endpoint with its access level and a one-line purpose. The routers are mounted in `backend/app/main.py:825-906`.
 
 ---
 

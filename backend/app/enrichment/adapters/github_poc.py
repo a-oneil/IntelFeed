@@ -14,6 +14,8 @@ class GitHubPoCAdapter(EnrichmentAdapter):
     supported_entity_types = ["cve"]
     requires_api_key = False
     default_trigger_mode = "scheduled"
+    # GitHub answers its primary and secondary rate limits with 403 or 429.
+    throttle_statuses = (403, 429, 503)
 
     _api_url = "https://api.github.com/search/repositories"
 
@@ -35,14 +37,6 @@ class GitHubPoCAdapter(EnrichmentAdapter):
                     "per_page": 5,
                 },
             )
-
-            if resp.status_code == 403:
-                # Rate limited
-                return EnrichmentData(
-                    raw_response={"error": "rate_limited"},
-                    parsed_data={"found": False, "error": "GitHub API rate limited"},
-                    ttl_hours=1,
-                )
 
             resp.raise_for_status()
             data = resp.json()

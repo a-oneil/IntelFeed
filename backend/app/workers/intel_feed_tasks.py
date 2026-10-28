@@ -27,6 +27,7 @@ def sync_kev_feed():
         stats = run_async(_sync_kev_feed())
         logger.info("KEV sync stats: %s", stats)
         CELERY_TASKS_TOTAL.labels(task_name="sync_kev_feed", status="success").inc()
+        return stats
     except Exception:
         CELERY_TASKS_TOTAL.labels(task_name="sync_kev_feed", status="error").inc()
         logger.exception("KEV sync failed")
@@ -56,6 +57,7 @@ def refresh_cwe_catalog():
         stats = run_async(_refresh_cwe_catalog())
         logger.info("CWE catalog refresh stats: %s", stats)
         CELERY_TASKS_TOTAL.labels(task_name="refresh_cwe_catalog", status="success").inc()
+        return stats
     except Exception:
         CELERY_TASKS_TOTAL.labels(task_name="refresh_cwe_catalog", status="error").inc()
         logger.exception("CWE catalog refresh failed")
@@ -79,6 +81,7 @@ def sync_cybergeist_feeds():
         stats = run_async(_sync_cybergeist_feeds())
         logger.info("Cybergeist sync stats: %s", stats)
         CELERY_TASKS_TOTAL.labels(task_name="sync_cybergeist_feeds", status="success").inc()
+        return stats
     except Exception:
         CELERY_TASKS_TOTAL.labels(task_name="sync_cybergeist_feeds", status="error").inc()
         logger.exception("Cybergeist sync failed")

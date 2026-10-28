@@ -1,17 +1,16 @@
 """CVE extraction and NVD enrichment."""
 
-import asyncio
 import logging
 import re
 import uuid
 from datetime import UTC, datetime, timedelta
 
-import httpx
 from sqlalchemy import Integer, and_, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.enrichment.gateway import MAX_TOKEN_WAIT, GatewayError, SourceGateway
 from app.intelligence.cpe_resolver import CPEIndex, build_cpe_index
 from app.models.cve import CVE, EntryCVE
 from app.models.cve_affected import CVEAffected
@@ -22,12 +21,12 @@ logger = logging.getLogger(__name__)
 CVE_PATTERN = re.compile(r"CVE-\d{4}-\d{4,}")
 
 NVD_API_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
-NVD_MAX_RETRIES = 3
-NVD_BACKOFF_BASE = 2  # seconds
-# NVD rolling window is 5 req/30s unkeyed, 50 req/30s with an API key
+# NVD's rolling window is 5 req/30s unkeyed, 50 req/30s with an API key. The
+# gateway's bucket (50 per 30s) refills while it drains, so a sweep that only
+# waited on it could send ~100 in one window: sweeps also sleep this long
+# between lookups.
 NVD_PACE_UNKEYED = 6.5
 NVD_PACE_KEYED = 0.7
-
 
 # NVD sweeps stop asking about an id after this many misses, spaced at least
 # NVD_RETRY_DAYS apart. A miss is stamped into nvd_data, so a junk id pulled
@@ -57,15 +56,18 @@ def stamp_nvd_miss(cve: CVE, now: datetime) -> None:
     cve.nvd_data = blob
 
 
-class NVDRateLimited(Exception):
-    """NVD kept returning 403/429 after all retries — back off, don't record
-    the failure against the CVE's retry budget."""
-
-
-def nvd_request_pace() -> float:
+def nvd_request_pace(api_key: str | None) -> float:
     """Seconds to sleep between consecutive NVD requests in sweep loops."""
-    api_key = settings.get("nvd_api_key") or settings.nvd_api_key
     return NVD_PACE_KEYED if api_key else NVD_PACE_UNKEYED
+
+
+async def nvd_gateway(db: AsyncSession, max_wait: float = MAX_TOKEN_WAIT) -> tuple[SourceGateway, str | None]:
+    """The NVD source's gateway and key; the instance-wide ``nvd_api_key``
+    setting stands in when the source row has no key."""
+    from app.enrichment.pipeline import gateway_for
+    from app.services.system_settings import get_setting
+
+    return await gateway_for(db, "nvd", fallback_key=await get_setting("nvd_api_key", db) or None, max_wait=max_wait)
 
 
 def extract_cve_ids(text: str) -> list[str]:
@@ -75,100 +77,68 @@ def extract_cve_ids(text: str) -> list[str]:
     return list(set(CVE_PATTERN.findall(text)))
 
 
-async def enrich_from_nvd(cve_id: str, raise_on_rate_limit: bool = False) -> dict | None:
-    """Fetch CVE details from NVD API 2.0 with optional API key and retry.
+async def enrich_from_nvd(cve_id: str, gateway: SourceGateway, api_key: str | None = None) -> dict | None:
+    """Fetch CVE details from NVD API 2.0 through the NVD source's gateway.
 
-    With raise_on_rate_limit, exhausting retries on 403/429 raises
-    NVDRateLimited instead of returning None, so sweep callers can
-    distinguish "NVD has nothing for this id" from "we're being throttled".
+    Returns None when NVD has nothing for the id or the request failed. A
+    gateway refusal (throttled, breaker open, budget spent) raises, so callers
+    can tell "NVD has nothing" from "not now".
     """
-    headers: dict[str, str] = {}
-    api_key = settings.get("nvd_api_key") or settings.nvd_api_key
-    if api_key:
-        headers["apiKey"] = api_key
-
-    rate_limited = False
-    for attempt in range(NVD_MAX_RETRIES):
-        try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                resp = await client.get(
-                    NVD_API_URL,
-                    params={"cveId": cve_id},
-                    headers=headers,
-                )
-
-                if resp.status_code in (403, 429):
-                    rate_limited = True
-                    # Back off past the 30s rolling window on the last retry
-                    wait = NVD_BACKOFF_BASE ** (attempt + 1) if attempt < NVD_MAX_RETRIES - 1 else 31
-                    logger.warning(f"NVD rate limited for {cve_id}, retrying in {wait}s (attempt {attempt + 1})")
-                    await asyncio.sleep(wait)
-                    continue
-                rate_limited = False
-
-                if resp.status_code != 200:
-                    logger.warning(f"NVD returned {resp.status_code} for {cve_id}")
-                    return None
-
-                data = resp.json()
-
-            vulns = data.get("vulnerabilities", [])
-            if not vulns:
-                return None
-
-            cve_data = vulns[0].get("cve", {})
-
-            # Extract CVSS v3.1 score
-            cvss_score = None
-            severity = None
-            metrics = cve_data.get("metrics", {})
-            for version_key in ("cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
-                metric_list = metrics.get(version_key, [])
-                if metric_list:
-                    cvss_data = metric_list[0].get("cvssData", {})
-                    cvss_score = cvss_data.get("baseScore")
-                    severity = cvss_data.get("baseSeverity", "").upper()
-                    break
-
-            # Description
-            descriptions = cve_data.get("descriptions", [])
-            description = next(
-                (d["value"] for d in descriptions if d.get("lang") == "en"),
-                descriptions[0]["value"] if descriptions else None,
-            )
-
-            affected_products = parse_cpe_affected(cve_data)
-
-            # References (tags drive the advisory/patch/analysis grouping in the UI)
-            references = [
-                {"url": r.get("url"), "source": r.get("source"), "tags": r.get("tags", [])}
-                for r in cve_data.get("references", [])
-            ]
-
-            return {
-                "cvss_score": cvss_score,
-                "severity": severity or _severity_from_score(cvss_score),
-                "description": description,
-                "affected_products": affected_products,
-                "references": references,
-                "nvd_data": cve_data,
-            }
-
-        except httpx.TimeoutException:
-            if attempt < NVD_MAX_RETRIES - 1:
-                wait = NVD_BACKOFF_BASE ** (attempt + 1)
-                logger.warning(f"NVD timeout for {cve_id}, retrying in {wait}s")
-                await asyncio.sleep(wait)
-                continue
-            logger.warning(f"NVD enrichment timed out for {cve_id} after {NVD_MAX_RETRIES} attempts")
+    headers = {"apiKey": api_key} if api_key else {}
+    try:
+        async with gateway.client(timeout=15) as client:
+            resp = await client.get(NVD_API_URL, params={"cveId": cve_id}, headers=headers)
+        if resp.status_code != 200:
+            logger.warning(f"NVD returned {resp.status_code} for {cve_id}")
             return None
-        except Exception as e:
-            logger.warning(f"NVD enrichment failed for {cve_id}: {e}")
-            return None
+        data = resp.json()
+    except GatewayError:
+        raise
+    except Exception as e:
+        logger.warning(f"NVD enrichment failed for {cve_id}: {e}")
+        return None
 
-    if rate_limited and raise_on_rate_limit:
-        raise NVDRateLimited(cve_id)
-    return None
+    vulns = data.get("vulnerabilities", [])
+    if not vulns:
+        return None
+
+    cve_data = vulns[0].get("cve", {})
+
+    # Extract CVSS v3.1 score
+    cvss_score = None
+    severity = None
+    metrics = cve_data.get("metrics", {})
+    for version_key in ("cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
+        metric_list = metrics.get(version_key, [])
+        if metric_list:
+            cvss_data = metric_list[0].get("cvssData", {})
+            cvss_score = cvss_data.get("baseScore")
+            severity = cvss_data.get("baseSeverity", "").upper()
+            break
+
+    # Description
+    descriptions = cve_data.get("descriptions", [])
+    description = next(
+        (d["value"] for d in descriptions if d.get("lang") == "en"),
+        descriptions[0]["value"] if descriptions else None,
+    )
+
+    affected_products = parse_cpe_affected(cve_data)
+
+    # References (tags drive the advisory/patch/analysis grouping in the UI)
+    references = [
+        {"url": r.get("url"), "source": r.get("source"), "tags": r.get("tags", [])}
+        for r in cve_data.get("references", [])
+    ]
+
+    return {
+        "cvss_score": cvss_score,
+        "severity": severity or _severity_from_score(cvss_score),
+        "description": description,
+        "affected_products": affected_products,
+        "references": references,
+        "nvd_data": cve_data,
+    }
 
 
 def parse_cpe_affected(cve_data: dict) -> list[dict]:
@@ -466,6 +436,20 @@ async def extract_and_store_cves(
     if not cve_ids:
         return []
 
+    nvd_access: tuple[SourceGateway, str | None] | None = None
+
+    async def lookup(cve_id: str) -> dict | None:
+        nonlocal nvd_access
+        if nvd_access is None:
+            nvd_access = await nvd_gateway(db)
+        try:
+            return await enrich_from_nvd(cve_id, *nvd_access)
+        except GatewayError as e:
+            # Not now (throttled, over budget): store the CVE bare and let the
+            # nightly NVD sweeps fill it in.
+            logger.info("NVD lookup for %s skipped: %s", cve_id, e)
+            return None
+
     stored = []
     freshly_enriched: list[tuple[CVE, list[dict]]] = []
     for cve_id in cve_ids:
@@ -476,7 +460,7 @@ async def extract_and_store_cves(
             existing.updated_at = datetime.now(UTC)
             # Re-enrich from NVD if key data is still missing (e.g., prior NVD lookup failed)
             if enrich and not existing.cvss_score and not existing.description:
-                nvd = await enrich_from_nvd(cve_id)
+                nvd = await lookup(cve_id)
                 if nvd:
                     existing.cvss_score = nvd.get("cvss_score")
                     existing.severity = nvd.get("severity")
@@ -499,7 +483,7 @@ async def extract_and_store_cves(
 
             # NVD enrichment
             if enrich:
-                nvd = await enrich_from_nvd(cve_id)
+                nvd = await lookup(cve_id)
                 if nvd:
                     cve_obj.cvss_score = nvd.get("cvss_score")
                     cve_obj.severity = nvd.get("severity")

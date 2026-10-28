@@ -152,7 +152,7 @@ def backfill(db_session, monkeypatch):
 
     looked_up: list[str] = []
 
-    async def fake_enrich(cve_id, raise_on_rate_limit: bool = False):
+    async def fake_enrich(cve_id, gateway, api_key=None):
         looked_up.append(cve_id)
         return None  # NVD has nothing for any of these
 
@@ -189,12 +189,13 @@ async def test_backfill_stamps_misses_and_respects_the_budget(db_session, backfi
 
 
 async def test_backfill_rate_limit_does_not_spend_a_retry(db_session, backfill, monkeypatch):
+    from app.enrichment.gateway import RateLimited
     from app.intelligence import cve as cve_mod
 
     run, _ = backfill
 
-    async def throttled(cve_id, raise_on_rate_limit: bool = False):
-        raise cve_mod.NVDRateLimited(cve_id)
+    async def throttled(cve_id, gateway, api_key=None):
+        raise RateLimited("nvd", 60)
 
     monkeypatch.setattr(cve_mod, "enrich_from_nvd", throttled)
     row = CVE(cve_id="CVE-2026-55555", nvd_data={})
@@ -203,7 +204,7 @@ async def test_backfill_rate_limit_does_not_spend_a_retry(db_session, backfill, 
 
     stats = await run()
 
-    assert stats["rate_limited"] is True
+    assert stats["stopped"] == "rate_limited"
     await db_session.refresh(row)
     assert "_enrich_attempts" not in row.nvd_data
 

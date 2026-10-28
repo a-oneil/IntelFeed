@@ -72,7 +72,7 @@ The non-AI layer ("Layer 0") runs on every entry the feed allows. The AI layer r
 
 Paragraph numbers matter because they are stored on every link. Correlation uses them to tell "named in the same paragraph" (strong) from "both somewhere in a long roundup" (weak).
 
-When an entry has a translation, the autolinker and the extract stage scan the original and translated text together (`entry_text_with_translation`, called from `_autolink_entry` in `backend/app/workers/intel_feed_tasks.py:204`).
+When an entry has a translation, the autolinker and the extract stage scan the original and translated text together (`entry_text_with_translation`, called from `_autolink_entry` in `backend/app/workers/intel_feed_tasks.py:207`).
 
 ### Phase 2: Autolinker Scan (Layer 0)
 
@@ -106,7 +106,7 @@ How each ID type is handled:
 | Type | Behaviour |
 |---|---|
 | CVE | The one type the autolinker creates. An unknown ID becomes a stub row (`created_via = "auto_link"`) and is queued for NVD enrichment, unless the ID is on the do-not-recreate list. |
-| TTP | Checked against the ATT&CK catalog first (`resolve_technique_ids()`, `backend/app/intelligence/attack_catalog.py:612`): unknown IDs are dropped, revoked IDs map to their replacement, and ICS techniques (`T0xxx`) need ICS/OT words in the entry. |
+| TTP | Checked against the ATT&CK catalog first (`resolve_technique_ids()`, `backend/app/intelligence/attack_catalog.py:615`): unknown IDs are dropped, revoked IDs map to their replacement, and ICS techniques (`T0xxx`) need ICS/OT words in the entry. |
 | CWE | Linked only if the ID is in the seeded CWE catalog. Never created. |
 | Dictionary words | Held for AI confirmation instead of linked; see [Pending Tier](#pending-tier-dictionary-word-matches). |
 
@@ -115,7 +115,7 @@ How each ID type is handled:
 Other stages add more intelligence after (or beside) the autolinker:
 
 - **Observables stage** — stages IOC candidates and records sightings of known ledger values. See [observables.md](observables.md).
-- **Extract stage** (`_extract_entry_intel`, `backend/app/workers/intel_feed_tasks.py:469`) — a standalone regex pass for CVEs (with NVD lookups), TTPs and mitigation IDs, plus detection-rule extraction and GitHub rule import.
+- **Extract stage** (`_extract_entry_intel`, `backend/app/workers/intel_feed_tasks.py:472`) — a standalone regex pass for CVEs (with NVD lookups), TTPs and mitigation IDs, plus detection-rule extraction and GitHub rule import.
 - **One-pass AI analysis** (`entry_analysis` task) — reads the article once and returns entities, relationships, IOCs and a summary. It confirms or rejects held autolinks.
 - **Adjudicate stage** — a second AI call that reviews what the analysis wrote. See [Entity Hygiene Console](#entity-hygiene-console).
 
@@ -154,7 +154,7 @@ The same word lists keep junk out of `aliases` arrays in the first place (`backe
 - `is_junk_alias(alias, canonical_name)` rejects aliases shorter than the minimum length, copies of the entity's own name, and anything on the false-positive or blocked lists.
 - `filter_aliases(aliases, canonical_name)` drops junk aliases and removes case-insensitive duplicates, keeping order.
 
-AI extraction and the Cybergeist sync pass new aliases through `gate_aliases()` (`backend/app/intelligence/entity_resolution.py:1435`), which applies `is_junk_alias()` plus further quality checks. The Malpedia sync (`_run_malpedia_sync`, `backend/app/workers/enrichment_tasks.py:974`) runs Malpedia's `alt_names` through `filter_aliases()`.
+AI extraction and the Cybergeist sync pass new aliases through `gate_aliases()` (`backend/app/intelligence/entity_resolution.py:1435`), which applies `is_junk_alias()` plus further quality checks. The Malpedia sync (`_run_malpedia_sync`, `backend/app/workers/enrichment_tasks.py:1020`) runs Malpedia's `alt_names` through `filter_aliases()`.
 
 ### Cross-Type Resurrection Guard
 
@@ -375,10 +375,10 @@ Re-processing the same article stores nothing new. See [detection-engineering.md
 
 ### CVE Extraction & NVD Enrichment
 
-CVE IDs come from the autolinker (stubs) and the extract stage (`extract_and_store_cves()` in `backend/app/intelligence/cve.py`). `enrich_from_nvd()` (`backend/app/intelligence/cve.py:78`) calls the NVD API 2.0 and fills in the CVSS score and severity (v3.1, then v3.0, then v2), the English description, affected products (CPE) and references.
+CVE IDs come from the autolinker (stubs) and the extract stage (`extract_and_store_cves()` in `backend/app/intelligence/cve.py`). `enrich_from_nvd()` (`backend/app/intelligence/cve.py:80`) calls the NVD API 2.0 and fills in the CVSS score and severity (v3.1, then v3.0, then v2), the English description, affected products (CPE) and references.
 
-- An NVD API key (`nvd_api_key`, Settings → Engine) raises the rate limit. Requests are paced at about one per 6.5 s without a key and one per 0.7 s with one.
-- On HTTP 403/429 it backs off and retries (up to 3 tries).
+- Every lookup goes through the `nvd` source's [gateway](automation-ai-enrichment.md#source-gateway). An NVD API key (on the source, else `nvd_api_key` under Settings → Engine) raises the rate limit. The sweeps pace lookups at one per 6.5 s without a key and one per 0.7 s with one.
+- A 403 or 429 opens the gateway's breaker for the whole source. A sweep then stops and picks up on its next run; extraction stores the CVE without NVD data and the sweeps fill it in.
 - An ID NVD has no record of is retried at most 3 times, 7 days apart, so junk IDs stop costing quota.
 
 ### EPSS & Exploit Tracking
@@ -395,7 +395,7 @@ CVE IDs come from the autolinker (stubs) and the extract stage (`extract_and_sto
 
 ### CVE Scoring & Priority
 
-The UI shows a **risk tier** from `compute_risk_tier()` (`backend/app/intelligence/cve.py:388`), weighted toward evidence of exploitation:
+The UI shows a **risk tier** from `compute_risk_tier()` (`backend/app/intelligence/cve.py:358`), weighted toward evidence of exploitation:
 
 | Tier | Rule |
 |---|---|
@@ -404,7 +404,7 @@ The UI shows a **risk tier** from `compute_risk_tier()` (`backend/app/intelligen
 | medium | A public GitHub PoC, or CVSS critical/high |
 | low | Everything else |
 
-CVSS alone never goes above medium. API responses also carry a simpler `priority` field (`calculate_cve_priority()`, `backend/app/intelligence/cve.py:349`): CRITICAL if in KEV; HIGH if EPSS > 0.5 or CVSS ≥ 9.0; MEDIUM if EPSS > 0.1 or CVSS ≥ 7.0; else LOW.
+CVSS alone never goes above medium. API responses also carry a simpler `priority` field (`calculate_cve_priority()`, `backend/app/intelligence/cve.py:319`): CRITICAL if in KEV; HIGH if EPSS > 0.5 or CVSS ≥ 9.0; MEDIUM if EPSS > 0.1 or CVSS ≥ 7.0; else LOW.
 
 ---
 
@@ -538,9 +538,9 @@ The observables stage has no switch of its own, but `_scan_entry_observables` sk
 
 ### The two pipelines
 
-**Pipeline A — the autolinker.** Entry point `_autolink_entry` (`backend/app/workers/intel_feed_tasks.py:204`). Runs for `full` and `selective` (if the entry passes the relevance filter). It links actors, malware, countries, vendors, products, tools and mitigations, plus CVE, CWE and technique IDs. See [Phase 2](#phase-2-autolinker-scan-layer-0).
+**Pipeline A — the autolinker.** Entry point `_autolink_entry` (`backend/app/workers/intel_feed_tasks.py:207`). Runs for `full` and `selective` (if the entry passes the relevance filter). It links actors, malware, countries, vendors, products, tools and mitigations, plus CVE, CWE and technique IDs. See [Phase 2](#phase-2-autolinker-scan-layer-0).
 
-**Pipeline B — the extract stage.** Entry point `_extract_entry_intel` (`backend/app/workers/intel_feed_tasks.py:469`):
+**Pipeline B — the extract stage.** Entry point `_extract_entry_intel` (`backend/app/workers/intel_feed_tasks.py:472`):
 
 - CVE extraction with NVD enrichment
 - Technique-ID regex pass

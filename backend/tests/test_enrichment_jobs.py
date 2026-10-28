@@ -60,7 +60,7 @@ def nvd_backfill(db_session, worker_session, monkeypatch):
     clock = _Clock()
     looked_up: list[str] = []
 
-    async def fake_enrich(cve_id, raise_on_rate_limit: bool = False):
+    async def fake_enrich(cve_id, gateway, api_key=None):
         looked_up.append(cve_id)
         clock.now += 400  # a slow NVD: two lookups spend the 780s budget
         return {"description": f"{cve_id} described", "cvss_score": 7.5, "severity": "HIGH"}
@@ -81,7 +81,7 @@ async def test_nvd_backfill_stops_at_the_time_budget(db_session, nvd_backfill):
     stats = await tasks._run_cve_nvd_backfill()
 
     assert looked_up == ["CVE-2026-60000", "CVE-2026-60001"]
-    assert stats["out_of_time"] is True
+    assert stats["stopped"] == "out_of_time"
     assert stats["enriched"] == 2
     assert stats["pending"] == 5
     for row in rows[:2]:
@@ -102,7 +102,7 @@ async def test_nvd_backfill_loads_only_what_fits_the_budget(db_session, nvd_back
     assert stats["total"] == 2
     assert stats["pending"] == 5
     assert looked_up == ["CVE-2026-60000", "CVE-2026-60001"]
-    assert stats["out_of_time"] is False
+    assert stats["stopped"] is None
 
 
 # ── NVD refresh selection ───────────────────────────────────────────
@@ -121,7 +121,7 @@ async def test_nvd_refresh_selects_by_its_own_stamp_not_updated_at(db_session, w
 
     looked_up: list[str] = []
 
-    async def fake_enrich(cve_id, raise_on_rate_limit: bool = False):
+    async def fake_enrich(cve_id, gateway, api_key=None):
         looked_up.append(cve_id)
         if cve_id == "CVE-2026-61002":
             return None  # NVD has nothing this time
@@ -150,7 +150,7 @@ async def test_nvd_refresh_selects_by_its_own_stamp_not_updated_at(db_session, w
     stats = await tasks._run_cve_nvd_refresh()
 
     assert looked_up == ["CVE-2026-61001", "CVE-2026-61002"]  # never-checked first
-    assert stats == {"checked": 1, "score_changes": 0, "failed": 1, "total": 2}
+    assert stats == {"checked": 1, "score_changes": 0, "failed": 1, "total": 2, "stopped": None}
     for row in (never, stale):
         await db_session.refresh(row)
         assert row.nvd_data["_refreshed_at"] > (now - timedelta(minutes=1)).isoformat()

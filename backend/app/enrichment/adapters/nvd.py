@@ -14,6 +14,8 @@ class NVDAdapter(EnrichmentAdapter):
     supported_entity_types = ["cve"]
     requires_api_key = False
     default_trigger_mode = "auto"
+    # NVD answers 403 as well as 429 when a client exceeds its rolling window.
+    throttle_statuses = (403, 429, 503)
 
     async def enrich(self, entity_type: str, entity_value: str) -> EnrichmentData:
         headers = {}

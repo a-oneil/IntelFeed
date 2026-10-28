@@ -320,6 +320,13 @@ class _FakeAsyncPage:
         return _get()
 
 
+def _wiki_transport():
+    """A gateway transport; the fake wikipediaapi below never sends through it."""
+    from app.enrichment.gateway import SourceGateway
+
+    return SourceGateway("wikipedia").transport()
+
+
 class TestFetchWikipediaGuardrail:
     def _install_fake_wiki(self, monkeypatch, resolver):
         import sys as _sys
@@ -345,14 +352,14 @@ class TestFetchWikipediaGuardrail:
 
         # Every query resolves to the ISBN article (the historic auto-suggest bug)
         self._install_fake_wiki(monkeypatch, lambda q: _FakeAsyncPage("International Standard Book Number"))
-        result = await fetch_wikipedia("Iran", "country")
+        result = await fetch_wikipedia("Iran", "country", transport=_wiki_transport())
         assert result is None
 
     async def test_accepts_matching_resolution(self, monkeypatch):
         from app.enrichment.wikipedia_helper import fetch_wikipedia
 
         self._install_fake_wiki(monkeypatch, lambda q: _FakeAsyncPage("Iran"))
-        result = await fetch_wikipedia("Iran", "country")
+        result = await fetch_wikipedia("Iran", "country", transport=_wiki_transport())
         assert result is not None
         assert result["title"] == "Iran"
         assert result["url"] == "https://en.wikipedia.org/wiki/Iran"
@@ -361,7 +368,7 @@ class TestFetchWikipediaGuardrail:
         from app.enrichment.wikipedia_helper import fetch_wikipedia
 
         self._install_fake_wiki(monkeypatch, lambda q: _FakeAsyncPage("Cozy Bear"))
-        result = await fetch_wikipedia("APT29", "threat_actor", aliases=["Cozy Bear"])
+        result = await fetch_wikipedia("APT29", "threat_actor", aliases=["Cozy Bear"], transport=_wiki_transport())
         assert result is not None
         assert result["title"] == "Cozy Bear"
 
@@ -370,7 +377,7 @@ class TestFetchWikipediaGuardrail:
 
         # CVE-id pages exist only as redirects to the vuln's common name
         self._install_fake_wiki(monkeypatch, lambda q: _FakeAsyncPage("Log4Shell"))
-        result = await fetch_wikipedia("CVE-2021-44228", "cve")
+        result = await fetch_wikipedia("CVE-2021-44228", "cve", transport=_wiki_transport())
         assert result is not None
         assert result["title"] == "Log4Shell"
 
@@ -378,7 +385,7 @@ class TestFetchWikipediaGuardrail:
         from app.enrichment.wikipedia_helper import fetch_wikipedia_by_title
 
         self._install_fake_wiki(monkeypatch, lambda q: _FakeAsyncPage(q))
-        result = await fetch_wikipedia_by_title("Iran")
+        result = await fetch_wikipedia_by_title("Iran", transport=_wiki_transport())
         assert result is not None
         assert result["title"] == "Iran"
 

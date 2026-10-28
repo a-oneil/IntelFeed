@@ -173,6 +173,21 @@ async def test_throttle_without_retry_after_backs_off():
     assert exc.value.retry_after == gw.BACKOFF_BASE
 
 
+async def test_throttle_statuses_are_per_source():
+    from app.enrichment.registry import source_gateway
+
+    server = _Source(httpx.Response(403), httpx.Response(403))
+    assert (await _get(_gateway(server))).status_code == 403  # an ordinary answer by default
+
+    nvd = source_gateway(EnrichmentSource(source_type="nvd", rate_limit_config={}), None)
+    nvd._inner = httpx.MockTransport(server)
+    with pytest.raises(RateLimited):
+        await _get(nvd)  # NVD throttles with 403
+    with pytest.raises(BreakerOpen):
+        await _get(nvd)
+    assert len(server.requests) == 2
+
+
 async def test_three_server_errors_open_the_breaker():
     server = _Source(httpx.Response(500), httpx.Response(502), httpx.ConnectError("refused"))
     g = _gateway(server)
@@ -260,15 +275,31 @@ def test_parse_retry_after():
     assert parse_retry_after(past) == 0
 
 
-def test_adapters_never_build_their_own_client():
-    """Every adapter request must go through self.http() / the gateway."""
-    adapters = Path(__file__).parents[1] / "app" / "enrichment" / "adapters"
-    direct = re.compile(r"httpx\.(AsyncClient|Client|get|post|put|request|stream)\b|from httpx import")
+def test_enrichment_code_never_builds_its_own_client():
+    """Every request from an adapter, an enrichment job or a helper they call
+    goes through a gateway: self.http(), gateway.client(), or a client built
+    on a gateway transport."""
+    app_dir = Path(__file__).parents[1] / "app"
+    paths = [
+        *sorted((app_dir / "enrichment" / "adapters").glob("*.py")),
+        app_dir / "enrichment" / "wikipedia_helper.py",
+        app_dir / "workers" / "enrichment_tasks.py",
+        app_dir / "intelligence" / "cve.py",
+        app_dir / "intelligence" / "external_feeds.py",
+        app_dir / "intelligence" / "attack_catalog.py",
+        app_dir / "intelligence" / "cwe_catalog.py",
+        app_dir / "intelligence" / "ransomware_sync.py",
+        app_dir / "adapters" / "ransomware_live.py",
+    ]
+    direct = re.compile(
+        r"httpx\.(AsyncClient|Client|get|post|put|request|stream)\b|from httpx import"
+        r"|\brequests\.(get|post|Session)|urllib\.request"
+    )
     offenders = [
         f"{path.name}:{n}"
-        for path in sorted(adapters.glob("*.py"))
+        for path in paths
         for n, line in enumerate(path.read_text().splitlines(), 1)
-        if direct.search(line)
+        if direct.search(line) and "transport=transport" not in line
     ]
     assert offenders == []
 

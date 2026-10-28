@@ -251,7 +251,7 @@ class TestReenrichSweep:
         db_session.add_all([stuck, healthy, junk])
         await db_session.flush()
 
-        async def fake_enrich(cve_id, raise_on_rate_limit: bool = False):
+        async def fake_enrich(cve_id, gateway, api_key=None):
             if cve_id == "CVE-2023-4966":
                 return {
                     "cvss_score": 9.4,

@@ -1100,10 +1100,11 @@ async def _reenrich_cve_nvd(batch_size: int | None = None) -> dict:
 
     from sqlalchemy import and_, or_
 
+    from app.enrichment.gateway import JOB_TOKEN_WAIT, SOURCE_REFUSALS
     from app.intelligence.cpe_resolver import build_cpe_index
     from app.intelligence.cve import (
-        NVDRateLimited,
         enrich_from_nvd,
+        nvd_gateway,
         nvd_request_pace,
         nvd_retry_allowed,
         stamp_nvd_miss,
@@ -1136,8 +1137,9 @@ async def _reenrich_cve_nvd(batch_size: int | None = None) -> dict:
         or_(~CVE.nvd_data.has_key("_enrich_last_attempt"), last_attempt < stale_cutoff),
     )
 
-    stats = {"attempted": 0, "enriched": 0, "with_config": 0, "pairs": 0}
+    stats = {"attempted": 0, "enriched": 0, "with_config": 0, "pairs": 0, "stopped": None}
     async with _get_worker_session() as db:
+        gateway, api_key = await nvd_gateway(db, max_wait=JOB_TOKEN_WAIT)
         index = await build_cpe_index(db)
         rows = (
             (
@@ -1151,18 +1153,19 @@ async def _reenrich_cve_nvd(batch_size: int | None = None) -> dict:
             .scalars()
             .all()
         )
-        pace = nvd_request_pace()
+        pace = nvd_request_pace(api_key)
         for i, cve in enumerate(rows):
             if i:
                 await asyncio.sleep(pace)  # stay under NVD's rolling window
-            stats["attempted"] += 1
             try:
-                nvd = await enrich_from_nvd(cve.cve_id, raise_on_rate_limit=True)
-            except NVDRateLimited:
-                # Throttled even after backoff — abort the batch WITHOUT
+                nvd = await enrich_from_nvd(cve.cve_id, gateway, api_key)
+            except SOURCE_REFUSALS as e:
+                # Throttled, breaker open or budget spent — stop WITHOUT
                 # stamping this CVE; the nightly rerun picks it back up.
-                logger.warning("reenrich_cve_nvd aborting batch at %s/%s: NVD rate limit", i, len(rows))
+                logger.warning("reenrich_cve_nvd stopping at %s/%s: %s", i, len(rows), e)
+                stats["stopped"] = e.status
                 break
+            stats["attempted"] += 1
             if not nvd:
                 stamp_nvd_miss(cve, now)
                 continue

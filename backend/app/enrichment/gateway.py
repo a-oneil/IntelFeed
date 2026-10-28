@@ -9,11 +9,14 @@ Adapters open clients with ``self.http(...)``; the client's transport
    (``rate_limit_config``: ``requests_per_period`` per ``period_seconds``) and
    counts the request against ``daily_budget`` — both or neither, so a refused
    request costs nothing;
-3. a short wait for a token when one is about to refill, else ``RateLimited``;
+3. a wait for a token when one is about to refill, else ``RateLimited``: up to
+   ``MAX_TOKEN_WAIT`` for a per-entity lookup, ``JOB_TOKEN_WAIT`` for a
+   scheduled job, which the bucket paces through its backlog;
 4. the enrichment User-Agent;
-5. the response check: 429/503 open the breaker for Retry-After (or an
-   exponential backoff when there is none) and raise ``RateLimited``; three
-   5xx or transport errors in a row open it for a backoff; any other response
+5. the response check: a throttle status (429/503, plus 403 for sources that
+   throttle with it) opens the breaker for Retry-After (or an exponential
+   backoff when there is none) and raises ``RateLimited``; three 5xx or
+   transport errors in a row open it for a backoff; any other response
    closes it.
 
 Redis errors before the send raise ``GatewayUnavailable`` and nothing is sent:
@@ -50,6 +53,10 @@ KEY_PREFIX = "enrichment:gw:"
 
 #: Longest a request waits for its next token before giving up as rate limited.
 MAX_TOKEN_WAIT = 2.0
+#: The same for scheduled jobs, which would rather wait than stop early.
+JOB_TOKEN_WAIT = 120.0
+#: Statuses that mean "slow down" unless a source says otherwise.
+THROTTLE_STATUSES = (429, 503)
 #: Consecutive 5xx / transport errors that open the breaker.
 FAILURE_THRESHOLD = 3
 #: Breaker backoff when the source gives no Retry-After: doubles per trip.
@@ -131,7 +138,7 @@ class GatewayError(Exception):
 
 
 class RateLimited(GatewayError):
-    """No token within MAX_TOKEN_WAIT, or the source answered 429/503."""
+    """No token in time, or the source answered with a throttle status."""
 
     status = "rate_limited"
 
@@ -156,6 +163,11 @@ class GatewayUnavailable(GatewayError):
     """Redis is unreachable, so limits can't be checked: nothing is sent."""
 
     status = "gateway_unavailable"
+
+
+#: Refusals a scheduled job stops on, keeping what it has done. GatewayUnavailable
+#: is not one: a job that can't check its limits fails.
+SOURCE_REFUSALS = (RateLimited, BudgetExhausted, BreakerOpen)
 
 
 def parse_retry_after(value: str | None) -> float | None:
@@ -184,6 +196,8 @@ class SourceGateway:
         daily_budget: int | None = None,
         api_key: str | None = None,
         shared_key_group: str | None = None,
+        throttle_statuses: tuple[int, ...] = THROTTLE_STATUSES,
+        max_wait: float = MAX_TOKEN_WAIT,
         inner: httpx.AsyncBaseTransport | None = None,
     ):
         rate = {**_DEFAULT_RATE, **(rate_limit_config or {})}
@@ -191,6 +205,8 @@ class SourceGateway:
         self.capacity = max(1, int(rate["requests_per_period"]))
         self.period = max(1, int(rate["period_seconds"]))
         self.daily_budget = daily_budget
+        self.throttle_statuses = throttle_statuses
+        self.max_wait = max_wait
         scope = shared_key_group or source_type
         if api_key:
             scope += ":" + hashlib.sha256(api_key.encode()).hexdigest()[:12]
@@ -198,14 +214,14 @@ class SourceGateway:
         self._inner = inner
 
     @classmethod
-    def for_source(cls, source, api_key: str | None, shared_key_group: str | None = None) -> SourceGateway:
+    def for_source(cls, source, api_key: str | None, **kwargs) -> SourceGateway:
         """The gateway for an ``EnrichmentSource`` row and the key it will use."""
         return cls(
             source.source_type,
             rate_limit_config=source.rate_limit_config,
             daily_budget=source.daily_budget,
             api_key=api_key,
-            shared_key_group=shared_key_group,
+            **kwargs,
         )
 
     def transport(self) -> httpx.AsyncBaseTransport:
@@ -224,7 +240,7 @@ class SourceGateway:
         return self._key("budget:" + datetime.now(UTC).strftime("%Y-%m-%d"))
 
     async def acquire(self) -> None:
-        """Take a permit for one request, waiting up to MAX_TOKEN_WAIT for a
+        """Take a permit for one request, waiting up to ``max_wait`` for a
         token. Raises a GatewayError when the request must not be sent."""
         waited = 0.0
         while True:
@@ -251,7 +267,7 @@ class SourceGateway:
                 raise BudgetExhausted(f"{self.source_type} daily budget of {self.daily_budget} used up")
             if code == 3:
                 raise BreakerOpen(self.source_type, seconds)
-            if waited + seconds > MAX_TOKEN_WAIT:
+            if waited + seconds > self.max_wait:
                 raise RateLimited(self.source_type, seconds)
             await asyncio.sleep(seconds)
             waited += seconds
@@ -273,10 +289,10 @@ class SourceGateway:
 
     async def record(self, response: httpx.Response | None) -> None:
         """Feed one outcome to the breaker: ``None`` for a transport error.
-        Raises RateLimited for a 429/503. A Redis error here is logged, not
-        raised: the request already went out and its answer is still good."""
+        Raises RateLimited for a throttle status. A Redis error here is logged,
+        not raised: the request already went out and its answer is still good."""
         try:
-            if response is not None and response.status_code in (429, 503):
+            if response is not None and response.status_code in self.throttle_statuses:
                 retry_after = parse_retry_after(response.headers.get("Retry-After"))
                 opened = await self._trip("throttle", retry_after)
                 raise RateLimited(self.source_type, opened)

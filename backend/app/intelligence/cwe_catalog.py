@@ -27,11 +27,16 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.enrichment.gateway import JOB_TOKEN_WAIT, SOURCE_REFUSALS, SourceGateway
 from app.models.cwe import CWE, KIND_CATEGORY, KIND_WEAKNESS, CVEWeakness
 
 logger = logging.getLogger(__name__)
 
 CWE_CATALOG_URL = "https://cwe.mitre.org/data/xml/cwec_latest.xml.zip"
+# One file a week, with no enrichment_sources row to configure it.
+CWE_GATEWAY = SourceGateway(
+    "cwe_catalog", rate_limit_config={"requests_per_period": 10, "period_seconds": 3600}, max_wait=JOB_TOKEN_WAIT
+)
 
 #: The catalog's own XML namespace. Bumped by MITRE only on major schema
 #: revisions; the parser tolerates a different one by reading it off the root.
@@ -71,9 +76,7 @@ class ParsedCWE:
 
 async def fetch_cwe_catalog(url: str = CWE_CATALOG_URL) -> bytes:
     """Download the zipped catalog and return the raw XML bytes."""
-    import httpx
-
-    async with httpx.AsyncClient(timeout=180.0, follow_redirects=True) as client:
+    async with CWE_GATEWAY.client(timeout=180.0, follow_redirects=True) as client:
         resp = await client.get(url)
         resp.raise_for_status()
     with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
@@ -319,7 +322,11 @@ async def resolve_cve_weakness_refs(db: AsyncSession) -> int:
 
 async def refresh_cwe_catalog(db: AsyncSession, url: str = CWE_CATALOG_URL) -> dict:
     """Download, parse, hydrate and re-resolve. Commits."""
-    xml_bytes = await fetch_cwe_catalog(url)
+    try:
+        xml_bytes = await fetch_cwe_catalog(url)
+    except SOURCE_REFUSALS as e:
+        logger.warning("CWE catalog refresh skipped: %s", e)
+        return {"stopped": e.status}
     parsed = parse_cwe_catalog(xml_bytes)
     stats = await hydrate_cwe_catalog(db, parsed)
     await db.flush()

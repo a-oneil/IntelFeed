@@ -14,6 +14,7 @@ from sqlalchemy.dialects.postgresql import ARRAY, UUID
 
 from app.config import settings
 from app.core.metrics import CELERY_TASK_DURATION_SECONDS, CELERY_TASKS_TOTAL
+from app.enrichment.gateway import JOB_TOKEN_WAIT, SOURCE_REFUSALS, GatewayError, GatewayUnavailable, SourceGateway
 from app.intelligence.autolinker import filter_aliases
 from app.intelligence.entity_dedup import find_entity_by_name_or_alias
 from app.workers.celery_app import celery_app
@@ -24,6 +25,15 @@ logger = logging.getLogger(__name__)
 
 def _get_worker_session():
     return worker_session()
+
+
+async def _job_gateway(source_type: str, fallback_key: str | None = None) -> tuple[SourceGateway, str | None]:
+    """A scheduled job's gateway and key for a source that has a row: the same
+    bucket, budget and breaker its per-entity lookups use."""
+    from app.enrichment.pipeline import gateway_for
+
+    async with _get_worker_session() as db:
+        return await gateway_for(db, source_type, fallback_key, max_wait=JOB_TOKEN_WAIT)
 
 
 def iter_epss_csv(text: str) -> Iterator[tuple[str, float, float]]:
@@ -48,11 +58,6 @@ def iter_epss_csv(text: str) -> Iterator[tuple[str, float, float]]:
             yield cve_id, float(row.get("epss", 0)), float(row.get("percentile", 0))
         except (TypeError, ValueError):
             continue
-
-
-def parse_epss_csv(text: str) -> dict[str, dict]:
-    """Parse the FIRST EPSS daily CSV into {cve_id: {epss_score, percentile}}."""
-    return {cve_id: {"epss_score": score, "percentile": pct} for cve_id, score, pct in iter_epss_csv(text)}
 
 
 def _cvss_tier_rank(score: float) -> int:
@@ -227,6 +232,7 @@ def run_scheduled_enrichment():
         if stats["sources_processed"] > 0:
             logger.info("Scheduled enrichment stats: %s", stats)
         CELERY_TASKS_TOTAL.labels(task_name="run_scheduled_enrichment", status="success").inc()
+        return stats
     except Exception:
         CELERY_TASKS_TOTAL.labels(task_name="run_scheduled_enrichment", status="error").inc()
         logger.exception("Scheduled enrichment failed")
@@ -240,7 +246,7 @@ async def _run_scheduled_enrichment():
 
     from sqlalchemy import or_
 
-    from app.enrichment.registry import get_adapter
+    from app.enrichment.registry import adapter_for_source
     from app.models.enrichment import EnrichmentSource
 
     stats = {"sources_processed": 0, "results": 0, "errors": 0}
@@ -266,7 +272,7 @@ async def _run_scheduled_enrichment():
                 from app.core.encryption import decrypt_value
 
                 api_key = decrypt_value(source.api_key_encrypted) if source.api_key_encrypted else None
-                adapter = get_adapter(source.source_type, api_key=api_key, config=source.config)
+                adapter = adapter_for_source(source, api_key)
                 bulk_results = await adapter.bulk_sync()
                 stats["results"] += len(bulk_results)
                 source.last_synced_at = now
@@ -304,6 +310,8 @@ def run_epss_bulk_sync():
         CELERY_TASK_DURATION_SECONDS.labels(task_name="run_epss_bulk_sync").observe(time.monotonic() - start)
 
 
+EPSS_CSV_URL = "https://epss.empiricalsecurity.com/epss_scores-current.csv.gz"
+
 # CSV rows applied per UPDATE, each chunk its own transaction: no CVE ORM
 # objects are loaded, and a run holds a bounded set of row locks.
 _EPSS_CHUNK_SIZE = 5000
@@ -313,17 +321,20 @@ async def _run_epss_bulk_sync():
     import gzip
     from datetime import timedelta
 
-    import httpx
-
     from app.intelligence.correlation_events import create_cve_score_change_event
     from app.models.enrichment import EnrichmentSource
     from app.workers.signal_tasks import dispatch_cve_rescore
 
     stats = {"updated": 0, "total_scores": 0, "score_changes": 0}
 
-    async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
-        resp = await client.get("https://epss.empiricalsecurity.com/epss_scores-current.csv.gz")
-        resp.raise_for_status()
+    gateway, _ = await _job_gateway("epss")
+    try:
+        async with gateway.client(timeout=120.0, follow_redirects=True) as client:
+            resp = await client.get(EPSS_CSV_URL)
+            resp.raise_for_status()
+    except SOURCE_REFUSALS as e:
+        logger.warning("EPSS bulk sync skipped: %s", e)
+        return {**stats, "stopped": e.status}
     csv_text = gzip.decompress(resp.content).decode("utf-8")
 
     now = datetime.now(UTC)
@@ -451,6 +462,7 @@ def run_mitre_attack_sync():
         stats = run_async(_run_mitre_attack_sync())
         logger.info("MITRE ATT&CK sync stats: %s", stats)
         CELERY_TASKS_TOTAL.labels(task_name="run_mitre_attack_sync", status="success").inc()
+        return stats
     except Exception:
         CELERY_TASKS_TOTAL.labels(task_name="run_mitre_attack_sync", status="error").inc()
         logger.exception("MITRE ATT&CK sync failed")
@@ -468,10 +480,14 @@ async def _run_mitre_attack_sync():
     )
     from app.models.enrichment import EnrichmentSource
 
-    bundles = await fetch_attack_bundles()
-    parsed = [parse_attack_bundle(bundle, domain) for domain, bundle in bundles.items()]
-
     async with _get_worker_session() as db:
+        try:
+            bundles = await fetch_attack_bundles(db)
+        except SOURCE_REFUSALS as e:
+            logger.warning("MITRE ATT&CK sync skipped: %s", e)
+            return {"stopped": e.status}
+        parsed = [parse_attack_bundle(bundle, domain) for domain, bundle in bundles.items()]
+
         # Full catalog hydration (Enterprise + Mobile + ICS): techniques with
         # tactics/platforms/parents/deprecation flags, mitigations, and
         # TTP-mitigation links. Updates existing rows in place so stub rows
@@ -519,6 +535,10 @@ async def _run_mitre_attack_sync():
 
 
 MISP_GALAXY_THREAT_ACTOR_URL = "https://raw.githubusercontent.com/MISP/misp-galaxy/main/clusters/threat-actor.json"
+# One file a week, with no enrichment_sources row to configure it.
+MISP_GALAXY_GATEWAY = SourceGateway(
+    "misp_galaxy", rate_limit_config={"requests_per_period": 10, "period_seconds": 3600}, max_wait=JOB_TOKEN_WAIT
+)
 
 
 def parse_misp_galaxy_clusters(data: dict) -> list[tuple[str, list[str]]]:
@@ -594,6 +614,7 @@ def run_misp_galaxy_sync():
         stats = run_async(_run_misp_galaxy_sync())
         logger.info("MISP Galaxy sync stats: %s", stats)
         CELERY_TASKS_TOTAL.labels(task_name="run_misp_galaxy_sync", status="success").inc()
+        return stats
     except Exception:
         CELERY_TASKS_TOTAL.labels(task_name="run_misp_galaxy_sync", status="error").inc()
         logger.exception("MISP Galaxy sync failed")
@@ -603,14 +624,16 @@ def run_misp_galaxy_sync():
 
 
 async def _run_misp_galaxy_sync():
-    import httpx
-
     from app.intelligence.entity_resolution import upsert_known_aliases
 
-    async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
-        resp = await client.get(MISP_GALAXY_THREAT_ACTOR_URL)
-        resp.raise_for_status()
-        data = resp.json()
+    try:
+        async with MISP_GALAXY_GATEWAY.client(timeout=60, follow_redirects=True) as client:
+            resp = await client.get(MISP_GALAXY_THREAT_ACTOR_URL)
+            resp.raise_for_status()
+            data = resp.json()
+    except SOURCE_REFUSALS as e:
+        logger.warning("MISP Galaxy sync skipped: %s", e)
+        return {"stopped": e.status}
 
     items = parse_misp_galaxy_clusters(data)
     if not items:
@@ -722,15 +745,20 @@ async def _run_cve_nvd_backfill():
     import asyncio as _asyncio
     from datetime import UTC, datetime
 
-    from app.intelligence.cve import NVDRateLimited, enrich_from_nvd, nvd_retry_allowed, stamp_nvd_miss
+    from app.intelligence.cve import (
+        enrich_from_nvd,
+        nvd_gateway,
+        nvd_request_pace,
+        nvd_retry_allowed,
+        stamp_nvd_miss,
+    )
     from app.models.cve import CVE
 
     stats = {
         "enriched": 0,
         "failed": 0,
         "skipped_invalid": 0,
-        "rate_limited": False,
-        "out_of_time": False,
+        "stopped": None,
         "total": 0,
         "pending": 0,
     }
@@ -738,12 +766,8 @@ async def _run_cve_nvd_backfill():
     deadline = time.monotonic() + _NVD_BACKFILL_BUDGET_S
 
     async with _get_worker_session() as db:
-        # Resolve API key from DB (secrets are encrypted, cache may not be warm)
-        from app.services.system_settings import get_setting
-
-        api_key = await get_setting("nvd_api_key", db)
-        # With API key: 50 req/30s (~0.6s each); without: 5 req/30s (~6s each)
-        delay = 0.7 if api_key else 6
+        gateway, api_key = await nvd_gateway(db, max_wait=JOB_TOKEN_WAIT)
+        delay = nvd_request_pace(api_key)
 
         # Process valid-format CVEs first (4-5 digit suffix), skip obviously bogus ones
         from sqlalchemy import func as sa_func
@@ -790,15 +814,15 @@ async def _run_cve_nvd_backfill():
                 # Out of budget: stop cleanly so the run commits and records its
                 # stats instead of being killed at the soft limit.
                 logger.info("CVE NVD backfill stopping at %d/%d: time budget spent", i, len(cves))
-                stats["out_of_time"] = True
+                stats["stopped"] = "out_of_time"
                 break
             try:
-                nvd = await enrich_from_nvd(cve_obj.cve_id, raise_on_rate_limit=True)
-            except NVDRateLimited:
-                # Throttled even after backoff: stop without charging this CVE
-                # a retry; tomorrow's run picks it back up.
-                logger.warning("CVE NVD backfill aborting at %d/%d: NVD rate limit", i, len(cves))
-                stats["rate_limited"] = True
+                nvd = await enrich_from_nvd(cve_obj.cve_id, gateway, api_key)
+            except SOURCE_REFUSALS as e:
+                # Throttled, breaker open or budget spent: stop without charging
+                # this CVE a retry; tomorrow's run picks it back up.
+                logger.warning("CVE NVD backfill stopping at %d/%d: %s", i, len(cves), e)
+                stats["stopped"] = e.status
                 break
             if nvd:
                 cve_obj.cvss_score = nvd.get("cvss_score")
@@ -852,16 +876,14 @@ async def _run_cve_nvd_refresh():
     import asyncio as _asyncio
     from datetime import timedelta
 
-    from app.intelligence.cve import enrich_from_nvd
+    from app.intelligence.cve import enrich_from_nvd, nvd_gateway, nvd_request_pace
     from app.models.cve import CVE
 
-    stats = {"checked": 0, "score_changes": 0, "failed": 0, "total": 0}
+    stats = {"checked": 0, "score_changes": 0, "failed": 0, "total": 0, "stopped": None}
 
     async with _get_worker_session() as db:
-        from app.services.system_settings import get_setting
-
-        api_key = await get_setting("nvd_api_key", db)
-        delay = 0.7 if api_key else 6
+        gateway, api_key = await nvd_gateway(db, max_wait=JOB_TOKEN_WAIT)
+        delay = nvd_request_pace(api_key)
 
         # Select CVEs that hold an NVD record not re-checked in 7 days, oldest
         # first. Limit to 100 per run to stay within rate limits. Staleness uses
@@ -896,7 +918,13 @@ async def _run_cve_nvd_refresh():
 
         for i, cve_obj in enumerate(cves):
             old_cvss = float(cve_obj.cvss_score) if cve_obj.cvss_score is not None else None
-            nvd = await enrich_from_nvd(cve_obj.cve_id)
+            try:
+                nvd = await enrich_from_nvd(cve_obj.cve_id, gateway, api_key)
+            except SOURCE_REFUSALS as e:
+                # Left unstamped, so the next run starts with it.
+                logger.warning("CVE NVD refresh stopping at %d/%d: %s", i, len(cves), e)
+                stats["stopped"] = e.status
+                break
             if nvd:
                 new_cvss = nvd.get("cvss_score")
                 new_cvss_float = float(new_cvss) if new_cvss is not None else None
@@ -971,43 +999,48 @@ def run_malpedia_sync():
 _MALPEDIA_COMMIT_EVERY = 200
 
 
-async def _run_malpedia_sync():
-    import httpx
+async def _malpedia_get(client, kind: str) -> dict:
+    """Malpedia's full ``get/<kind>`` payload, or {} when the fetch fails.
+    Gateway refusals propagate."""
+    try:
+        resp = await client.get(f"https://malpedia.caad.fkie.fraunhofer.de/api/get/{kind}")
+        resp.raise_for_status()
+        data = resp.json()
+    except GatewayError:
+        raise
+    except Exception as e:
+        logger.warning("Malpedia %s fetch failed: %s", kind, e)
+        return {}
+    if not isinstance(data, dict):
+        logger.warning("Malpedia %s response was %s, not a dict; skipping", kind, type(data).__name__)
+        return {}
+    return data
 
+
+async def _run_malpedia_sync():
     from app.intelligence.actor_attributes import resolve_country_name
     from app.models.enrichment import EnrichmentSource
     from app.models.malware_family import MalwareFamily
     from app.models.threat_actor import ThreatActor
     from app.models.tool import Tool
 
-    stats = {"families_updated": 0, "tools_updated": 0, "actors_updated": 0, "families_seen": 0}
+    stats = {"families_updated": 0, "tools_updated": 0, "actors_updated": 0, "families_seen": 0, "stopped": None}
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        # `get/families` returns the full {family_key: {...}} payload. The
-        # `list/families` endpoint this used to call returns a bare list of keys,
-        # so the isinstance guard below discarded every row and the sync had been
-        # a silent no-op — which is why no malware profile carried a malpedia_url.
+    # `get/families` returns the full {family_key: {...}} payload. The
+    # `list/families` endpoint this used to call returns a bare list of keys,
+    # so the isinstance guard discarded every row and the sync had been a
+    # silent no-op — which is why no malware profile carried a malpedia_url.
+    families: dict = {}
+    actors: dict = {}
+    gateway, _ = await _job_gateway("malpedia")
+    async with gateway.client(timeout=120.0) as client:
         try:
-            resp = await client.get("https://malpedia.caad.fkie.fraunhofer.de/api/get/families")
-            resp.raise_for_status()
-            families = resp.json()
-            if not isinstance(families, dict):
-                logger.warning("Malpedia families response was %s, not a dict; skipping", type(families).__name__)
-                families = {}
-        except Exception as e:
-            logger.warning("Malpedia families fetch failed: %s", e)
-            families = {}
-
-        try:
-            resp = await client.get("https://malpedia.caad.fkie.fraunhofer.de/api/get/actors")
-            resp.raise_for_status()
-            actors = resp.json()
-            if not isinstance(actors, dict):
-                logger.warning("Malpedia actors response was %s, not a dict; skipping", type(actors).__name__)
-                actors = {}
-        except Exception as e:
-            logger.warning("Malpedia actors fetch failed: %s", e)
-            actors = {}
+            families = await _malpedia_get(client, "families")
+            actors = await _malpedia_get(client, "actors")
+        except SOURCE_REFUSALS as e:
+            # Apply whatever arrived before the refusal.
+            logger.warning("Malpedia sync stopping: %s", e)
+            stats["stopped"] = e.status
 
     stats["families_seen"] = len(families)
     stats["actors_seen"] = len(actors)
@@ -1095,6 +1128,7 @@ def run_github_poc_scan():
         stats = run_async(_run_github_poc_scan())
         logger.info("GitHub PoC scan stats: %s", stats)
         CELERY_TASKS_TOTAL.labels(task_name="run_github_poc_scan", status="success").inc()
+        return stats
     except Exception:
         CELERY_TASKS_TOTAL.labels(task_name="run_github_poc_scan", status="error").inc()
         logger.exception("GitHub PoC scan failed")
@@ -1103,19 +1137,25 @@ def run_github_poc_scan():
         CELERY_TASK_DURATION_SECONDS.labels(task_name="run_github_poc_scan").observe(time.monotonic() - start)
 
 
+# Wall-clock seconds the scan may spend starting searches: the source's bucket
+# paces them, so a big batch on a slow bucket stops here and commits instead of
+# being killed at the 600s soft limit (120s left for a token wait + commit).
+_GITHUB_POC_BUDGET_S = 480
+
+
 async def _run_github_poc_scan():
     from datetime import timedelta
 
-    import httpx
     from sqlalchemy import case, or_
 
+    from app.enrichment.pipeline import gateway_for
     from app.enrichment.results import upsert_enrichment_result
     from app.models.cve import CVE
     from app.models.enrichment import EnrichmentResult, EnrichmentSource
 
-    stats = {"scanned": 0, "pocs_found": 0, "rate_limited": False}
+    stats = {"scanned": 0, "pocs_found": 0, "stopped": None}
+    deadline = time.monotonic() + _GITHUB_POC_BUDGET_S
 
-    # Get source for API key
     async with _get_worker_session() as db:
         # Warm before the settings.get() reads below — batch limit, rescan
         # window and the fallback token are all DB-overridable.
@@ -1124,15 +1164,12 @@ async def _run_github_poc_scan():
         await warm_settings_cache(db)
         source_result = await db.execute(select(EnrichmentSource).where(EnrichmentSource.source_type == "github_poc"))
         source = source_result.scalar_one_or_none()
-        api_key = None
-        if source and source.api_key_encrypted:
-            from app.core.encryption import decrypt_value
-
-            api_key = decrypt_value(source.api_key_encrypted)
         # Fall back to a globally configured token so the scan isn't stuck on
         # GitHub's 10 req/min unauthenticated search limit just because nobody
         # pasted a key into the enrichment source form.
-        api_key = api_key or (settings.get("github_token") or None)
+        gateway, api_key = await gateway_for(
+            db, "github_poc", fallback_key=settings.get("github_token") or None, max_wait=JOB_TOKEN_WAIT
+        )
 
         headers = {"Accept": "application/vnd.github.v3+json"}
         if api_key:
@@ -1140,7 +1177,7 @@ async def _run_github_poc_scan():
 
         # Authenticated search allows 30 req/min; unauthenticated only 10, and
         # it 403s partway through a run. Size the batch to the credential we
-        # actually have.
+        # actually have; the source's bucket paces the requests.
         batch_limit = int(settings.get("github_poc_batch_limit") or (300 if api_key else 40))
 
         # Backfill-aware candidate selection. The old query took the 50 CVEs
@@ -1185,8 +1222,11 @@ async def _run_github_poc_scan():
         )
         cves = result.scalars().all()
 
-        async with httpx.AsyncClient(timeout=30.0, headers=headers) as client:
+        async with gateway.client(timeout=30.0, headers=headers) as client:
             for cve in cves:
+                if time.monotonic() >= deadline:
+                    stats["stopped"] = "out_of_time"
+                    break
                 try:
                     # Bare "<cve> poc exploit" ANDs all three words across the
                     # searched fields, so a repo literally named CVE-2024-3400
@@ -1197,10 +1237,6 @@ async def _run_github_poc_scan():
                         "https://api.github.com/search/repositories",
                         params={"q": f'"{cve.cve_id}" in:name,description', "sort": "stars", "per_page": 5},
                     )
-                    if resp.status_code in (403, 429):
-                        logger.warning("GitHub rate limited after %d CVEs, stopping scan", stats["scanned"])
-                        stats["rate_limited"] = True
-                        break
                     resp.raise_for_status()
                     data = resp.json()
 
@@ -1285,6 +1321,12 @@ async def _run_github_poc_scan():
                         stats["pocs_found"] += 1
                     stats["scanned"] += 1
 
+                except SOURCE_REFUSALS as e:
+                    logger.warning("GitHub PoC scan stopping after %d CVEs: %s", stats["scanned"], e)
+                    stats["stopped"] = e.status
+                    break
+                except GatewayUnavailable:
+                    raise
                 except Exception as e:
                     logger.warning("GitHub PoC scan failed for %s: %s", cve.cve_id, e)
 
@@ -1306,6 +1348,7 @@ def run_wikipedia_bulk_sync():
         stats = run_async(_run_wikipedia_bulk_sync())
         logger.info("Wikipedia bulk sync stats: %s", stats)
         CELERY_TASKS_TOTAL.labels(task_name="run_wikipedia_bulk_sync", status="success").inc()
+        return stats
     except Exception:
         CELERY_TASKS_TOTAL.labels(task_name="run_wikipedia_bulk_sync", status="error").inc()
         logger.exception("Wikipedia bulk sync failed")
@@ -1314,10 +1357,15 @@ def run_wikipedia_bulk_sync():
         CELERY_TASK_DURATION_SECONDS.labels(task_name="run_wikipedia_bulk_sync").observe(time.monotonic() - start)
 
 
+# Wall-clock seconds the sync may spend fetching: the wikipedia bucket paces it,
+# so it stops here and commits rather than run into the 3600s soft limit.
+_WIKIPEDIA_BULK_BUDGET_S = 3300
+
+
 async def _run_wikipedia_bulk_sync():
-    import asyncio as _asyncio
     from datetime import timedelta
 
+    from app.enrichment.pipeline import gateway_for
     from app.enrichment.wikipedia_helper import extract_first_paragraph, fetch_wikipedia
     from app.models.country import Country
     from app.models.enrichment import EnrichmentResult, EnrichmentSource
@@ -1349,13 +1397,18 @@ async def _run_wikipedia_bulk_sync():
         "total": 0,
         "failed": 0,
         "skipped": 0,
+        "stopped": None,
     }
+    deadline = time.monotonic() + _WIKIPEDIA_BULK_BUDGET_S
 
     async with _get_worker_session() as db:
         now = datetime.now(UTC)
         batch_count = 0
+        gateway, _ = await gateway_for(db, "wikipedia", max_wait=JOB_TOKEN_WAIT)
 
         for entity_type, model_cls, name_attr in entity_configs:
+            if stats["stopped"]:
+                break
             # Skip entities a user explicitly cleared ("None") — they carry a
             # long-lived user_cleared marker and must not be re-populated by name.
             cleared_marker = (
@@ -1377,22 +1430,30 @@ async def _run_wikipedia_bulk_sync():
             entities = result.scalars().all()
 
             for entity in entities:
+                if time.monotonic() >= deadline:
+                    stats["stopped"] = "out_of_time"
+                    break
                 entity_name = getattr(entity, name_attr)
                 if not entity_name:
                     stats["skipped"] += 1
                     continue
 
+                # The source's bucket paces the requests (several per entity).
                 try:
-                    wiki_result = await fetch_wikipedia(entity_name, entity_type)
+                    wiki_result = await fetch_wikipedia(entity_name, entity_type, transport=gateway.transport())
+                except SOURCE_REFUSALS as e:
+                    logger.warning("Wikipedia bulk sync stopping: %s", e)
+                    stats["stopped"] = e.status
+                    break
+                except GatewayUnavailable:
+                    raise
                 except Exception as e:
                     logger.warning("Wikipedia fetch failed for %s/%s: %s", entity_type, entity_name, e)
                     stats["failed"] += 1
-                    await _asyncio.sleep(6.0)
                     continue
 
                 if not wiki_result:
                     stats["skipped"] += 1
-                    await _asyncio.sleep(6.0)
                     continue
 
                 # Topical guard (F11): a wrong-subject article (calendar year,
@@ -1407,7 +1468,6 @@ async def _run_wikipedia_bulk_sync():
                         db, entity_type, entity.id, entity_name, reject_reason, detail=wiki_result.get("url")
                     )
                     stats["skipped"] += 1
-                    await _asyncio.sleep(6.0)
                     continue
 
                 # Update entity model directly
@@ -1455,9 +1515,6 @@ async def _run_wikipedia_bulk_sync():
                     await db.commit()
                     logger.info("Wikipedia bulk sync progress: %s", stats)
 
-                # Rate limit: ~10 requests/minute
-                await _asyncio.sleep(6.0)
-
         # Update source last_synced_at
         source_result = await db.execute(select(EnrichmentSource).where(EnrichmentSource.source_type == "wikipedia"))
         source = source_result.scalar_one_or_none()
@@ -1473,6 +1530,10 @@ async def _run_wikipedia_bulk_sync():
 
 METASPLOIT_METADATA_URL = (
     "https://raw.githubusercontent.com/rapid7/metasploit-framework/master/db/modules_metadata_base.json"
+)
+# One file a week, with no enrichment_sources row to configure it.
+METASPLOIT_GATEWAY = SourceGateway(
+    "metasploit", rate_limit_config={"requests_per_period": 10, "period_seconds": 3600}, max_wait=JOB_TOKEN_WAIT
 )
 
 _MSF_CVE_RE = re.compile(r"^CVE-\d{4}-\d{4,}$", re.IGNORECASE)
@@ -1526,17 +1587,19 @@ async def _run_metasploit_sync():
     escalation permanently inert. Rapid7 publishes the module index as a single
     JSON file, so this needs no API key and no per-CVE requests.
     """
-    import httpx
-
     from app.intelligence.external_feeds import coerce_exploit_sources
     from app.models.cve import CVE
 
     stats = {"modules_seen": 0, "cves_matched": 0, "cves_updated": 0, "escalated": 0}
 
-    async with httpx.AsyncClient(timeout=180.0, follow_redirects=True) as client:
-        resp = await client.get(METASPLOIT_METADATA_URL)
-        resp.raise_for_status()
-        metadata = resp.json()
+    try:
+        async with METASPLOIT_GATEWAY.client(timeout=180.0, follow_redirects=True) as client:
+            resp = await client.get(METASPLOIT_METADATA_URL)
+            resp.raise_for_status()
+            metadata = resp.json()
+    except SOURCE_REFUSALS as e:
+        logger.warning("Metasploit sync skipped: %s", e)
+        return {**stats, "stopped": e.status}
 
     if not isinstance(metadata, dict):
         logger.warning("Metasploit metadata was %s, not a dict; skipping", type(metadata).__name__)

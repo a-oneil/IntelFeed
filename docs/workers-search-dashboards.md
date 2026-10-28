@@ -117,8 +117,10 @@ When `sync_cybergeist_feeds` creates new entities, it queues `refresh_autolinker
 | `run_metasploit_sync` | Sunday 03:45 | Map tracked CVEs to Metasploit modules and mark them weaponized |
 | `run_cve_nvd_refresh` | Daily 12:00 | Re-check NVD for CVSS changes |
 | `run_cve_nvd_backfill` | Daily 01:30 | Fill in NVD data (CVSS, description, affected products, references) for CVEs that lack it; stops starting lookups 2 minutes before its time limit |
-| `run_github_poc_scan` | Daily 05:00 | Search GitHub for proof-of-concept exploits |
-| `run_wikipedia_bulk_sync` | Wednesday 04:00 | Add Wikipedia content to entities that lack it |
+| `run_github_poc_scan` | Daily 05:00 | Search GitHub for proof-of-concept exploits; stops starting searches 2 minutes before its time limit |
+| `run_wikipedia_bulk_sync` | Wednesday 04:00 | Add Wikipedia content to entities that lack it; stops 5 minutes before its time limit |
+
+Every enrichment job sends its requests through its source's gateway ([Source Gateway](automation-ai-enrichment.md#source-gateway)). A refusal (rate limited, breaker open, budget spent) stops the job; it keeps what it did and records `stopped` in its stats.
 
 #### Maintenance
 

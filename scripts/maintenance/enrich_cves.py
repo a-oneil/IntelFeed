@@ -13,53 +13,24 @@ Run inside the API container:
 
 import argparse
 import asyncio
-import gzip
 import sys
-from datetime import UTC, datetime
 
 sys.path.insert(0, "/app")
 
-import httpx
 from sqlalchemy import func as sa_func
 from sqlalchemy import select
 
 from app.database import async_session
 from app.models.cve import CVE
 
-EPSS_CSV_URL = "https://epss.empiricalsecurity.com/epss_scores-current.csv.gz"
-BATCH_SIZE = 200
-
 
 async def backfill_epss() -> None:
-    """Bulk-load EPSS scores for every CVE in the database."""
-    from app.workers.enrichment_tasks import parse_epss_csv
+    """Bulk-load EPSS scores for every CVE in the database (the epss-bulk-sync job)."""
+    from app.workers.enrichment_tasks import _run_epss_bulk_sync
 
     print("[epss] downloading EPSS daily CSV...")
-    async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
-        resp = await client.get(EPSS_CSV_URL)
-        resp.raise_for_status()
-    epss_data = parse_epss_csv(gzip.decompress(resp.content).decode("utf-8"))
-    print(f"[epss] parsed {len(epss_data)} scores")
-
-    now = datetime.now(UTC)
-    updated = 0
-    async with async_session() as db:
-        result = await db.execute(select(CVE))
-        cves = result.scalars().all()
-        for i, cve in enumerate(cves):
-            scores = epss_data.get(cve.cve_id)
-            if not scores:
-                continue
-            cve.epss_score = scores["epss_score"]
-            cve.epss_percentile = scores["percentile"]
-            cve.epss_updated_at = now
-            db.add(cve)
-            updated += 1
-            if updated % BATCH_SIZE == 0:
-                await db.commit()
-                print(f"[epss] {updated} updated ({i + 1}/{len(cves)} scanned)")
-        await db.commit()
-    print(f"[epss] done: {updated}/{len(cves)} CVEs updated")
+    stats = await _run_epss_bulk_sync()
+    print(f"[epss] done: {stats}")
 
 
 async def backfill_kev() -> None:
@@ -82,12 +53,12 @@ async def backfill_kev() -> None:
 
 async def backfill_nvd(limit: int | None) -> None:
     """Enrich CVEs missing CVSS/description from NVD (rate-limit aware, resumable)."""
-    from app.intelligence.cve import enrich_from_nvd
-    from app.services.system_settings import get_setting
+    from app.enrichment.gateway import JOB_TOKEN_WAIT, SOURCE_REFUSALS
+    from app.intelligence.cve import enrich_from_nvd, nvd_gateway, nvd_request_pace
 
     async with async_session() as db:
-        api_key = await get_setting("nvd_api_key", db)
-        delay = 0.7 if api_key else 6.0
+        gateway, api_key = await nvd_gateway(db, max_wait=JOB_TOKEN_WAIT)
+        delay = nvd_request_pace(api_key)
 
         # Only valid-format CVEs still missing authoritative data (resumable)
         query = (
@@ -107,7 +78,11 @@ async def backfill_nvd(limit: int | None) -> None:
 
         enriched = failed = 0
         for i, cve in enumerate(cves):
-            nvd = await enrich_from_nvd(cve.cve_id)
+            try:
+                nvd = await enrich_from_nvd(cve.cve_id, gateway, api_key)
+            except SOURCE_REFUSALS as e:
+                print(f"[nvd] stopping at {i}/{total}: {e} (re-run to resume)")
+                break
             if nvd:
                 if nvd.get("cvss_score") is not None:
                     cve.cvss_score = nvd["cvss_score"]

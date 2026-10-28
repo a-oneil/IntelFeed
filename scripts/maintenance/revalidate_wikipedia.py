@@ -18,7 +18,8 @@ sys.path.insert(0, "/app")
 from sqlalchemy import delete, select
 
 from app.database import async_session
-from app.enrichment.gateway import USER_AGENT
+from app.enrichment.gateway import JOB_TOKEN_WAIT, USER_AGENT
+from app.enrichment.pipeline import gateway_for
 from app.enrichment.wikipedia_helper import (
     extract_first_paragraph,
     get_search_queries,
@@ -56,20 +57,21 @@ def title_from_url(url: str) -> str | None:
     return unquote(url.rsplit("/wiki/", 1)[-1]).replace("_", " ").strip() or None
 
 
-def redirect_confirms(name: str, entity_type: str, stored_title: str) -> bool | None:
+async def redirect_confirms(name: str, entity_type: str, stored_title: str, transport) -> bool | None:
     """Live check: does a direct lookup of the entity name redirect to the stored title?
 
     Wikipedia redirects are trustworthy (e.g. "CVE-2021-44228" -> "Log4Shell"), unlike
     the old auto-suggest search that caused mismatches like "Iran" -> "ISBN".
-    Returns True/False, or None if Wikipedia was unreachable (caller should keep).
+    Returns True/False, or None if Wikipedia was unreachable or the wikipedia
+    source's gateway refused (caller should keep).
     """
     try:
         import wikipediaapi
 
-        wiki = wikipediaapi.Wikipedia(user_agent=USER_AGENT, language="en")
+        wiki = wikipediaapi.AsyncWikipedia(user_agent=USER_AGENT, language="en", transport=transport, max_retries=0)
         for q in get_search_queries(name, entity_type):
             page = wiki.page(q)
-            if page.exists() and title_matches_entity(stored_title, page.title):
+            if await page.exists() and title_matches_entity(stored_title, page.title):
                 return True
         return False
     except Exception as e:
@@ -82,6 +84,7 @@ async def main(dry_run: bool) -> None:
     total_cleared = 0
 
     async with async_session() as db:
+        gateway, _ = await gateway_for(db, "wikipedia", max_wait=JOB_TOKEN_WAIT)
         for entity_type, model, name_attrs in ENTITY_MODELS:
             result = await db.execute(select(model).where(model.wikipedia_url.isnot(None)))
             entities = result.scalars().all()
@@ -107,7 +110,7 @@ async def main(dry_run: bool) -> None:
 
                 # Title doesn't match — but a direct lookup redirecting to it is legit
                 # (e.g. CVE-2021-44228 -> Log4Shell). Only clear confirmed mismatches.
-                if redirect_confirms(name, entity_type, title) is not False:
+                if await redirect_confirms(name, entity_type, title, gateway.transport()) is not False:
                     continue
 
                 cleared += 1

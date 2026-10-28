@@ -7,7 +7,7 @@ import re
 
 import httpx
 
-from app.enrichment.gateway import USER_AGENT, GatewayError
+from app.enrichment.gateway import USER_AGENT, GatewayError, SourceGateway
 
 logger = logging.getLogger(__name__)
 
@@ -308,42 +308,14 @@ def extract_first_paragraph(content: str) -> str | None:
 
 
 WIKI_API_URL = "https://en.wikipedia.org/w/api.php"
-WIKI_API_HEADERS = {"User-Agent": USER_AGENT}
-
-
-def _fetch_page_image(title: str, thumb_size: int = 300) -> str | None:
-    """Fetch the lead/infobox image URL for a Wikipedia page via the MediaWiki API."""
-    try:
-        resp = httpx.get(
-            WIKI_API_URL,
-            params={
-                "action": "query",
-                "titles": title,
-                "prop": "pageimages",
-                "format": "json",
-                "pithumbsize": thumb_size,
-            },
-            headers=WIKI_API_HEADERS,
-            timeout=10,
-        )
-        if resp.status_code != 200:
-            return None
-        pages = resp.json().get("query", {}).get("pages", {})
-        for page_data in pages.values():
-            thumb = page_data.get("thumbnail", {}).get("source")
-            if thumb:
-                return thumb
-    except Exception:
-        pass
-    return None
 
 
 async def _fetch_page_image_async(
-    title: str, thumb_size: int = 300, transport: httpx.AsyncBaseTransport | None = None
+    title: str, thumb_size: int = 300, *, transport: httpx.AsyncBaseTransport
 ) -> str | None:
-    """Async version of _fetch_page_image."""
+    """The lead/infobox image URL for a Wikipedia page, from the MediaWiki API."""
     try:
-        async with httpx.AsyncClient(headers=WIKI_API_HEADERS, timeout=10, transport=transport) as client:
+        async with httpx.AsyncClient(timeout=10, transport=transport) as client:
             resp = await client.get(
                 WIKI_API_URL,
                 params={
@@ -368,49 +340,12 @@ async def _fetch_page_image_async(
     return None
 
 
-def fetch_wikipedia_sync(entity_name: str, entity_type: str, aliases: list[str] | None = None) -> dict | None:
-    """Fetch Wikipedia content for an entity (synchronous).
-
-    Returns {"content": str, "url": str, "title": str} on success, or None.
-    """
-    try:
-        import wikipediaapi
-    except ImportError:
-        logger.warning("wikipedia-api package not installed")
-        return None
-
-    wiki = wikipediaapi.Wikipedia(user_agent=USER_AGENT, language="en")
-    queries = get_search_queries(entity_name, entity_type)
-
-    for q in queries:
-        try:
-            page = wiki.page(q)
-            if not page.exists():
-                continue
-            # CVE-id pages only exist as redirects to the vuln's common-name article
-            # (e.g. CVE-2021-44228 -> Log4Shell), so an exact-id lookup is trusted.
-            trusted_redirect = entity_type == "cve" and q == entity_name
-            ok = trusted_redirect or title_matches_entity(page.title, entity_name, aliases, extra_titles=queries)
-            if not ok:
-                logger.warning(
-                    "Wikipedia title mismatch for %s/%s: got %r — skipping", entity_type, entity_name, page.title
-                )
-                continue
-            raw_text = _reconstruct_wiki_text(page.summary, page.sections)
-            content = format_wiki_content(raw_text, page.fullurl)
-            image_url = _fetch_page_image(page.title)
-            return {"content": content, "url": page.fullurl, "title": page.title, "image_url": image_url}
-        except Exception:
-            continue
-
-    return None
-
-
 async def fetch_wikipedia(
     entity_name: str,
     entity_type: str,
     aliases: list[str] | None = None,
-    transport: httpx.AsyncBaseTransport | None = None,
+    *,
+    transport: httpx.AsyncBaseTransport,
 ) -> dict | None:
     """Async Wikipedia fetch using wikipediaapi's native async support.
 
@@ -425,8 +360,7 @@ async def fetch_wikipedia(
         logger.warning("wikipedia-api package not installed")
         return None
 
-    client_kwargs = {"transport": transport, "max_retries": 0} if transport else {}
-    wiki = wikipediaapi.AsyncWikipedia(user_agent=USER_AGENT, language="en", **client_kwargs)
+    wiki = wikipediaapi.AsyncWikipedia(user_agent=USER_AGENT, language="en", transport=transport, max_retries=0)
     queries = get_search_queries(entity_name, entity_type)
 
     for q in queries:
@@ -458,15 +392,16 @@ async def fetch_wikipedia(
     return None
 
 
-async def fetch_wikipedia_by_title(title: str) -> dict | None:
-    """Fetch a specific Wikipedia article by exact title (user-selected — no guardrail)."""
+async def fetch_wikipedia_by_title(title: str, *, transport: httpx.AsyncBaseTransport) -> dict | None:
+    """Fetch a specific Wikipedia article by exact title (user-selected — no guardrail).
+    ``transport`` works as in fetch_wikipedia."""
     try:
         import wikipediaapi
     except ImportError:
         logger.warning("wikipedia-api package not installed")
         return None
 
-    wiki = wikipediaapi.AsyncWikipedia(user_agent=USER_AGENT, language="en")
+    wiki = wikipediaapi.AsyncWikipedia(user_agent=USER_AGENT, language="en", transport=transport, max_retries=0)
     try:
         page = wiki.page(title)
         if not await page.exists():
@@ -476,8 +411,10 @@ async def fetch_wikipedia_by_title(title: str) -> dict | None:
         fullurl = await page.fullurl
         raw_text = _reconstruct_wiki_text(summary, sections)
         content = format_wiki_content(raw_text, fullurl)
-        image_url = await _fetch_page_image_async(page.title)
+        image_url = await _fetch_page_image_async(page.title, transport=transport)
         return {"content": content, "url": fullurl, "title": page.title, "image_url": image_url}
+    except GatewayError:
+        raise
     except Exception:
         logger.exception("Wikipedia fetch by title failed for %r", title)
         return None
@@ -486,9 +423,9 @@ async def fetch_wikipedia_by_title(title: str) -> dict | None:
 _TAG_RE = re.compile(r"<[^>]+>")
 
 
-async def search_wikipedia(query: str, limit: int = 8) -> list[dict]:
+async def search_wikipedia(query: str, gateway: SourceGateway, limit: int = 8) -> list[dict]:
     """Search Wikipedia article titles. Returns [{"title", "snippet", "url"}, ...]."""
-    async with httpx.AsyncClient(headers=WIKI_API_HEADERS, timeout=10) as client:
+    async with gateway.client(timeout=10) as client:
         resp = await client.get(
             WIKI_API_URL,
             params={

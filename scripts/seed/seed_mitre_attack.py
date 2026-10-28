@@ -42,7 +42,7 @@ async def main(dry_run: bool) -> None:
             # refresh_attack_catalog() commits, so a caller-level rollback could not
             # undo it. Run its three steps inline instead: hydrate only flushes, so
             # the stats below are real and the rollback discards every write.
-            bundles = await fetch_attack_bundles()
+            bundles = await fetch_attack_bundles(db)
             parsed = [parse_attack_bundle(bundle, domain) for domain, bundle in bundles.items()]
             stats = await hydrate_attack_catalog(db, parsed)
             stats["entity_attributes"] = await hydrate_attack_entity_attributes(db, parsed)

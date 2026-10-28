@@ -8,14 +8,15 @@ Run inside the api container:
     docker compose -f docker-compose.dev.yml exec api python scripts/seed/seed_vendor_descriptions.py --dry-run
 
 --dry-run reports how many vendors and products would be processed without
-querying Wikipedia. The fetch is rate-limited to ~3/s, so a real run over the
-full catalog takes several minutes; the dry run returns immediately.
+querying Wikipedia. The fetch goes through the wikipedia source's gateway, whose
+bucket paces it, so a real run over the full catalog takes a while; the dry run
+returns immediately. A run the gateway refuses (rate limited, budget spent)
+stops and keeps what it fetched; re-run it later.
 """
 
 import argparse
 import asyncio
 import sys
-import time
 
 sys.path.insert(0, "/app")
 sys.path.insert(0, "backend")
@@ -23,7 +24,9 @@ sys.path.insert(0, "backend")
 from sqlalchemy import select
 
 from app.database import async_session
-from app.enrichment.wikipedia_helper import fetch_wikipedia_sync
+from app.enrichment.gateway import JOB_TOKEN_WAIT, SOURCE_REFUSALS
+from app.enrichment.pipeline import gateway_for
+from app.enrichment.wikipedia_helper import fetch_wikipedia
 from app.models.product import Product
 from app.models.vendor import Vendor
 
@@ -48,14 +51,23 @@ async def main(dry_run: bool) -> None:
             print("\nDry run — nothing written, and Wikipedia was not queried.")
             return
 
+        gateway, _ = await gateway_for(db, "wikipedia", max_wait=JOB_TOKEN_WAIT)
+
+        async def fetch(name: str, entity_type: str) -> dict | None:
+            return await fetch_wikipedia(name, entity_type, transport=gateway.transport())
+
         updated = 0
         fetched = 0
         failed = 0
 
         for v in vendors:
             print(f"  Vendor: {v.name}...", end=" ", flush=True)
-            time.sleep(0.3)
-            result = fetch_wikipedia_sync(v.name, "vendor")
+            try:
+                result = await fetch(v.name, "vendor")
+            except SOURCE_REFUSALS as e:
+                print(f"stopping: {e}")
+                await db.commit()
+                return
             if result:
                 v.description = result["content"]
                 v.wikipedia_url = result["url"]
@@ -74,8 +86,11 @@ async def main(dry_run: bool) -> None:
         failed_p = 0
         for p in products:
             print(f"  Product: {p.name}...", end=" ", flush=True)
-            time.sleep(0.3)
-            result = fetch_wikipedia_sync(p.name, "product")
+            try:
+                result = await fetch(p.name, "product")
+            except SOURCE_REFUSALS as e:
+                print(f"stopping: {e}")
+                break
             if result:
                 p.description = result["content"]
                 p.wikipedia_url = result["url"]
