@@ -232,6 +232,29 @@
   color: var(--text-primary);
 }
 
+/* A secondary button beside an input in a setting row (Send Test Email). */
+.inlineBtn {
+  padding: 0.4375rem 0.875rem;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  color: var(--text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s;
+}
+
+.inlineBtn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.inlineBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* ─── Save Bar ───────────────────────────────────────── */
 
 .saveBar {

@@ -3,6 +3,14 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+# Keys inside an email preset's ``config`` that are as private as a webhook URL.
+PRESET_PRIVATE_CONFIG_KEYS = ("to", "cc")
+
+
+def redact_preset_config(config: dict | None) -> dict:
+    """A preset's config with its recipient lists replaced by a placeholder."""
+    return {k: ("<REDACTED>" if k in PRESET_PRIVATE_CONFIG_KEYS and v else v) for k, v in (config or {}).items()}
+
 
 class WebhookPresetCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)

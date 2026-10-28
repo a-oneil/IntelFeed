@@ -5,7 +5,7 @@ import {
 } from "@/hooks/useAutomation";
 import { useFeeds, useCategories } from "@/hooks/useFeeds";
 import { useAITasks } from "@/hooks/useAI";
-import { useWebhookPresets } from "@/hooks/useWebhookPresets";
+import { emailPresetConfig, useWebhookPresets } from "@/hooks/useWebhookPresets";
 import type { AutomationRule } from "@/api/types";
 import { TagPicker } from "./TagPicker";
 import { toTagSpecs, type TagSpec } from "@/utils/tagSpecs";
@@ -38,6 +38,7 @@ const ACTION_TYPES = [
   { value: "add_tags", label: "Add Tags" },
   { value: "remove_tags", label: "Remove Tags" },
   { value: "send_notification", label: "Send Notification" },
+  { value: "send_email", label: "Send Email" },
   { value: "run_webhook", label: "Run Webhook" },
   { value: "add_to_campaign", label: "Add to Campaign" },
   { value: "mark_priority", label: "Mark Priority" },
@@ -46,7 +47,6 @@ const ACTION_TYPES = [
   { value: "bookmark_entry", label: "Bookmark Entry" },
   { value: "hide_entry", label: "Hide Entry" },
   { value: "create_note", label: "Create Note" },
-  { value: "mark_false_positive", label: "Mark as False Positive" },
   { value: "create_intel_report", label: "Create Intel Report" },
   { value: "chain_rule", label: "Chain Rule" },
   { value: "export_to", label: "Export Data" },
@@ -311,7 +311,31 @@ function actionConfigFields(
           label: "Message Template",
           placeholder: "**{title}**\\n{url}\\n{summary}",
           multiline: true,
-          hint: "Single-brace variables (distinct from a Run AI Task's {{ }} prompt): {title}, {url}, {author}, {summary}, {published_at}, {ai_summary}, {feed_name}. {ai_summary} is the output of a preceding Run AI Task action.",
+          hint: "Single-brace variables (distinct from a Run AI Task's {{ }} prompt): {title}, {url}, {author}, {summary}, {published_at}, {ai_summary}, {feed_name}, {entry_count}. {ai_summary} is the output of a preceding Run AI Task action.",
+        },
+      ];
+    case "send_email":
+      return [
+        { key: "to", label: "To (comma-separated)", placeholder: "soc@example.com, lead@example.com" },
+        { key: "cc", label: "Cc (optional)", placeholder: "" },
+        { key: "subject_template", label: "Subject", placeholder: "[IntelFeed] {title}" },
+        {
+          key: "body_format",
+          label: "Body format",
+          placeholder: "markdown",
+          fieldType: "select",
+          options: [
+            { value: "markdown", label: "Markdown (sent as formatted HTML + plain text)" },
+            { value: "html", label: "HTML" },
+            { value: "text", label: "Plain text" },
+          ],
+        },
+        {
+          key: "body_template",
+          label: "Body",
+          placeholder: "## {title}\n\n{summary}\n\n[Read the article]({url})",
+          multiline: true,
+          hint: "Same variables as a notification: {title}, {url}, {author}, {summary}, {published_at}, {ai_summary}, {feed_name}, {entry_count}. In batch mode one digest email is sent. Sent through the SMTP server set under Settings > System.",
         },
       ];
     case "run_webhook":
@@ -344,10 +368,6 @@ function actionConfigFields(
           multiline: true,
           hint: "Variables: {title}, {url}, {author}, {summary}, {ai_summary}, {published_at}",
         },
-      ];
-    case "mark_false_positive":
-      return [
-        { key: "reason", label: "Reason", placeholder: "Known benign infrastructure" },
       ];
     case "create_intel_report":
       return [
@@ -1360,9 +1380,16 @@ export function AutomationRuleEditor({ rule, onClose }: Props) {
                           />
                         ) : (
                           <>
-                            {(action.type === "run_webhook" || action.type === "send_notification") &&
+                            {(action.type === "run_webhook" ||
+                              action.type === "send_notification" ||
+                              action.type === "send_email") &&
                               (() => {
-                                const presetType = action.type === "send_notification" ? "notification" : "webhook";
+                                const presetType =
+                                  action.type === "send_notification"
+                                    ? "notification"
+                                    : action.type === "send_email"
+                                      ? "email"
+                                      : "webhook";
                                 const applicable = webhookPresets.filter((p) => p.preset_type === presetType);
                                 if (applicable.length === 0) return null;
                                 return (
@@ -1376,7 +1403,9 @@ export function AutomationRuleEditor({ rule, onClose }: Props) {
                                         setActionItems((prev) => {
                                           const next = [...prev];
                                           const merged =
-                                            action.type === "send_notification"
+                                            action.type === "send_email"
+                                              ? { ...action.config, ...emailPresetConfig(preset) }
+                                              : action.type === "send_notification"
                                               ? {
                                                   ...action.config,
                                                   platform: preset.config.platform ?? "discord",
@@ -1411,12 +1440,14 @@ export function AutomationRuleEditor({ rule, onClose }: Props) {
                               <label>{f.label}</label>
                               {f.fieldType === "select" ? (
                                 <select
-                                  value={configToDisplay(action.config, f.key)}
+                                  // An unset select shows the default the backend falls back to
+                                  // (its placeholder), not "Select...".
+                                  value={configToDisplay(action.config, f.key) || f.placeholder}
                                   onChange={(e) =>
                                     updateActionConfig(i, f.key, e.target.value, action.type)
                                   }
                                 >
-                                  <option value="">Select...</option>
+                                  {!f.placeholder && <option value="">Select...</option>}
                                   {(f.options ?? []).map((o) => (
                                     <option key={o.value} value={o.value}>
                                       {o.label}

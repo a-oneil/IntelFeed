@@ -12,7 +12,14 @@ from app.models.system_setting import SystemSettings
 
 # Which keys are secrets (encrypted in DB, masked in API responses)
 SECRET_KEYS = frozenset(
-    {"github_token", "nvd_api_key", "sentry_dsn", "registration_invite_code", "observables_publish_token"}
+    {
+        "github_token",
+        "nvd_api_key",
+        "sentry_dsn",
+        "registration_invite_code",
+        "observables_publish_token",
+        "smtp_password",
+    }
 )
 
 # Configurable keys with their expected types
@@ -181,6 +188,14 @@ CONFIGURABLE_KEYS: dict[str, type] = {
     "sentry_dsn": str,
     "sentry_traces_sample_rate": float,
     "sentry_profiles_sample_rate": float,
+    # Email (smtp_password is a secret)
+    "smtp_host": str,
+    "smtp_port": int,
+    "smtp_security": str,
+    "smtp_username": str,
+    "smtp_password": str,
+    "smtp_from_address": str,
+    "smtp_max_per_hour": int,
     # Backup
     "backup_retention_days": int,
     # Public RSS
@@ -933,6 +948,48 @@ SETTING_METADATA: dict[str, dict] = {
         "description": "Fraction of transactions to profile (0.0-1.0, requires restart)",
         "group": "monitoring",
     },
+    "smtp_host": {
+        "label": "SMTP Server",
+        "description": "Mail server the Send Email automation action delivers through. Leave empty to turn email off",
+        "group": "email",
+    },
+    "smtp_port": {
+        "label": "SMTP Port",
+        "description": "Usually 587 for STARTTLS, 465 for TLS",
+        "group": "email",
+    },
+    "smtp_security": {
+        "label": "Connection Security",
+        "description": (
+            "starttls: connect plain, then upgrade before logging in (port 587). "
+            "tls: encrypted from the start (port 465). Unencrypted servers aren't supported"
+        ),
+        "group": "email",
+        "options": ["starttls", "tls"],
+    },
+    "smtp_username": {
+        "label": "SMTP Username",
+        "description": "Leave empty if the server doesn't need a login",
+        "group": "email",
+    },
+    "smtp_password": {
+        "label": "SMTP Password",
+        "description": "Password or app password for the SMTP login",
+        "group": "email",
+    },
+    "smtp_from_address": {
+        "label": "From Address",
+        "description": "Sender address on every email, e.g. IntelFeed <alerts@example.com>",
+        "group": "email",
+    },
+    "smtp_max_per_hour": {
+        "label": "Emails per Hour",
+        "description": (
+            "Most emails sent in one clock hour, across every rule. More are not sent and show as errors "
+            "in the rule's run log. Keeps a busy rule from tripping the mail provider's limits. 0 = no limit"
+        ),
+        "group": "email",
+    },
     "backup_retention_days": {
         "label": "Backup Retention",
         "description": "Days to keep database backups",
@@ -1247,6 +1304,7 @@ GROUP_LABELS: dict[str, str] = {
     "rate_limiting": "Rate Limiting",
     "security": "Security",
     "monitoring": "Monitoring",
+    "email": "Email (SMTP)",
     "backup": "Backup",
     "public_rss": "Public RSS",
 }

@@ -2,11 +2,11 @@
 
 This is the list of every IntelFeed setting: what it does, its default, and where you change it. It is for admins tuning an instance and for developers adding a setting. [engine.md](engine.md) explains the systems these settings control.
 
-IntelFeed has **201 settings**:
+IntelFeed has **208 settings**:
 
-- **150** can be changed in the web UI. They are listed in `CONFIGURABLE_KEYS` (`backend/app/services/system_settings.py:19`). One of them, `registration_invite_code`, lives only in the database.
+- **157** can be changed in the web UI. They are listed in `CONFIGURABLE_KEYS` (`backend/app/services/system_settings.py:26`). One of them, `registration_invite_code`, lives only in the database.
 - **51** come only from the environment (`.env`). See [Env-only settings](#env-only-settings).
-- Five are **secrets**. They are encrypted in the database and never sent back to the browser: `github_token`, `nvd_api_key`, `observables_publish_token`, `registration_invite_code`, `sentry_dsn` (`SECRET_KEYS`, `system_settings.py:14`).
+- Six are **secrets**. They are encrypted in the database and never sent back to the browser: `github_token`, `nvd_api_key`, `observables_publish_token`, `registration_invite_code`, `sentry_dsn`, `smtp_password` (`SECRET_KEYS`, `system_settings.py:14`).
 
 ---
 
@@ -32,9 +32,9 @@ A database value that equals the default does nothing useful, and it stops you g
 
 | Structure | File | Role |
 |---|---|---|
-| `CONFIGURABLE_KEYS` | `system_settings.py:19` | Which keys the UI can edit, and each value's type |
-| `SETTING_METADATA` | `backend/app/services/system_settings.py:194` | Label, description and group shown in the UI |
-| `_ENGINE_SECTION_GROUPS` | `backend/app/services/system_settings.py:1261` | Moves engine keys into the group of the Engine panel that owns them |
+| `CONFIGURABLE_KEYS` | `backend/app/services/system_settings.py:26` | Which keys the UI can edit, and each value's type |
+| `SETTING_METADATA` | `backend/app/services/system_settings.py:208` | Label, description and group shown in the UI |
+| `_ENGINE_SECTION_GROUPS` | `backend/app/services/system_settings.py:1319` | Moves engine keys into the group of the Engine panel that owns them |
 | `SECRET_KEYS` | `system_settings.py:14` | Encrypted in the database, hidden on read |
 | `GROUP_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:26` | Which Engine screen shows each group; drives the Engine settings search |
 | `KEY_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:67` | Single keys that live somewhere other than their group's screen |
@@ -431,6 +431,13 @@ These are editable in the UI too, but live on other Settings pages.
 
 | Setting | Type / default | What it does |
 |---|---|---|
+| `smtp_host` | str, empty | Mail server the `send_email` automation action sends through. Empty turns email off, and the action reports an error. |
+| `smtp_port` | int, `587` | Usually 587 for STARTTLS, 465 for TLS. |
+| `smtp_security` | `starttls` / `tls`, `starttls` | `starttls` connects plain, then upgrades. `tls` is encrypted from the start. There is no unencrypted option; any other value makes every send fail. |
+| `smtp_username` | str, empty | Login for the mail server. Empty sends without logging in. |
+| `smtp_password` | secret, empty | Password or app password for that login. |
+| `smtp_from_address` | str, empty | Sender on every email, for example `IntelFeed <alerts@example.com>`. Email is off until this is set too. The **Send Test Email** row at the end of the section uses the saved settings. |
+| `smtp_max_per_hour` | int, `30` | Most emails sent per clock hour across every rule, test emails included, so a busy rule doesn't trip the mail provider's limits. Extra emails aren't sent and show as errors in the rule's run log. Counted in Redis; if Redis is down, mail goes out uncounted. `0` = no limit. |
 | `sentry_dsn` | secret, empty | Sentry error-reporting address. Empty turns Sentry off. Read when the API starts, so a change needs a restart. |
 | `sentry_traces_sample_rate` | float, `0.1` | Share of requests traced. Read at startup. |
 | `sentry_profiles_sample_rate` | float, `0.1` | Share of requests profiled. Read at startup. |
@@ -536,7 +543,7 @@ Three networking keys need a word:
 - `webhook_allow_private_networks` (default `true`): the same rule for automation webhooks.
 - `trusted_client_ip_header` (default empty): the header your edge proxy uses for the visitor's real IP, such as `CF-Connecting-IP` behind Cloudflare. Set it only when the server accepts traffic from that proxy alone. Empty uses the first `X-Forwarded-For` address.
 
-`postgres_password`, `meili_master_key`, `secret_key` and `encryption_key` are checked at startup. The value `changeme` gives a warning in development and **stops startup** in production (`_reject_insecure_defaults`, `backend/app/config.py:472`). `encryption_key` must also be a valid Fernet key (32 bytes, URL-safe base64).
+`postgres_password`, `meili_master_key`, `secret_key` and `encryption_key` are checked at startup. The value `changeme` gives a warning in development and **stops startup** in production (`_reject_insecure_defaults`, `backend/app/config.py:480`). `encryption_key` must also be a valid Fernet key (32 bytes, URL-safe base64).
 
 ---
 

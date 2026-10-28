@@ -97,7 +97,7 @@ def _rule_to_export_item(rule: AutomationRule, include_secrets: bool = False) ->
 
 
 def _mask_secrets_in_actions(actions: list[dict]) -> list[dict]:
-    """Replace webhook URLs and auth headers with placeholders."""
+    """Replace webhook URLs, auth headers and email recipients with placeholders."""
     masked = []
     for action in actions:
         a = {**action}
@@ -108,6 +108,10 @@ def _mask_secrets_in_actions(actions: list[dict]) -> list[dict]:
             config["url"] = "<REDACTED>"
         if "headers" in config:
             config["headers"] = {k: "<REDACTED>" for k in config["headers"]}
+        if a.get("type") == "send_email":
+            for key in ("to", "cc"):
+                if config.get(key):
+                    config[key] = "<REDACTED>"
         # Recurse into branch sub-actions
         if a.get("type") == "branch":
             if "then_actions" in config:
@@ -121,8 +125,9 @@ def _mask_secrets_in_actions(actions: list[dict]) -> list[dict]:
 
 def _sees_rule_secrets(rule: AutomationRule, user: User) -> bool:
     """Rules are visible to everyone; their webhook URLs and auth headers
-    (Slack/Teams incoming-webhook URLs are themselves credentials) only to the
-    owner and admins, the same people who may edit or run the rule."""
+    (Slack/Teams incoming-webhook URLs are themselves credentials) and email
+    recipients only to the owner and admins, the same people who may edit or
+    run the rule."""
     return user.role == "admin" or rule.created_by == user.id
 
 
@@ -136,7 +141,8 @@ def _rule_response(rule: AutomationRule, user: User) -> AutomationRuleResponse:
 
 
 def _collect_action_warnings(actions: list[dict]) -> list[str]:
-    """Return warnings for actions that reference instance-specific UUIDs."""
+    """Return warnings for actions that reference instance-specific UUIDs, or
+    that were exported without secrets and won't run until refilled."""
     warnings = []
     uuid_action_fields = {
         "add_to_campaign": "campaign_id",
@@ -152,6 +158,15 @@ def _collect_action_warnings(actions: list[dict]) -> list[str]:
                 warnings.append(
                     f"Action '{atype}' references {field}='{config[field]}' which may not exist on the target instance"
                 )
+        redacted = [k for k, v in config.items() if v == "<REDACTED>"]
+        headers = config.get("headers")
+        if isinstance(headers, dict) and "<REDACTED>" in headers.values():
+            redacted.append("headers")
+        if redacted:
+            warnings.append(
+                f"Action '{atype}' was exported without secrets ({', '.join(redacted)} redacted); "
+                "fill them in or it will fail when it runs"
+            )
         if atype == "branch":
             warnings.extend(_collect_action_warnings(config.get("then_actions", [])))
             warnings.extend(_collect_action_warnings(config.get("else_actions", [])))

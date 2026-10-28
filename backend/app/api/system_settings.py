@@ -88,3 +88,38 @@ async def regenerate_public_rss_token_endpoint(
     """Issue a new token. Any previously shared URLs stop working immediately."""
     token = await regenerate_public_rss_token(db)
     return {"token": token}
+
+
+class TestEmailRequest(BaseModel):
+    to: str
+
+    model_config = ConfigDict(json_schema_extra={"example": {"to": "analyst@example.com"}})
+
+
+@router.post("/email/test")
+async def send_test_email_endpoint(
+    body: TestEmailRequest,
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Send a test message through the saved SMTP settings to one address."""
+    from app.services.mailer import NOT_CONFIGURED, MailError, load_smtp_config, parse_recipients, send_mail
+
+    to, invalid = parse_recipients(body.to)
+    if invalid or len(to) != 1:
+        raise AppError(code="invalid_recipient", message="Enter one valid email address", status_code=400)
+    cfg = await load_smtp_config(db)
+    if cfg is None:
+        raise AppError(code="email_not_configured", message=NOT_CONFIGURED, status_code=400)
+    try:
+        await send_mail(
+            cfg,
+            to=to,
+            subject="IntelFeed test email",
+            text_body="This is a test from IntelFeed. Your SMTP settings work.",
+        )
+    except MailError as e:
+        # 400, not 502: an edge proxy (Cloudflare) can swap an origin 502 for
+        # its own page and the SMTP reason would never reach the admin.
+        raise AppError(code="email_failed", message=str(e), status_code=400)
+    return {"status": "sent", "to": to[0]}

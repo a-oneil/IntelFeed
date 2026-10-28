@@ -517,8 +517,9 @@ TOOLS: dict[str, dict] = {
             "action types: add_tags, add_to_campaign, bookmark_entry, branch, chain_rule, "
             "create_intel_report, create_note, export_to, extract_cves, extract_malware, "
             "extract_threat_actors, extract_ttps, generate_detection_rules, hide_entry, "
-            "mark_priority, mark_read, remove_tags, run_ai_task, run_webhook, send_notification, "
-            "star_entry, use_daily_summary. The rule is created enabled."
+            "mark_priority, mark_read, remove_tags, run_ai_task, run_webhook, send_email, "
+            "send_notification, star_entry, track_on_threat_board, use_daily_summary. The rule is "
+            "created enabled."
         ),
         "params": {
             "name": {
@@ -4021,8 +4022,9 @@ TOOLS: dict[str, dict] = {
             "add_to_campaign, bookmark_entry, branch, chain_rule, create_intel_report, create_note, "
             "export_to, extract_cves, extract_malware, extract_threat_actors, extract_ttps, "
             "generate_detection_rules, hide_entry, mark_priority, mark_read, remove_tags, "
-            "run_ai_task, run_webhook, send_notification, star_entry, use_daily_summary (branch "
-            "sub-actions are validated recursively). Note: actions replaces the whole list."
+            "run_ai_task, run_webhook, send_email, send_notification, star_entry, "
+            "track_on_threat_board, use_daily_summary (branch sub-actions are validated recursively). "
+            "Note: actions replaces the whole list."
         ),
         "params": {
             "rule_id": {

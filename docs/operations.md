@@ -144,6 +144,7 @@ Also:
 - `TRUSTED_CLIENT_IP_HEADER` — [Cloudflare Origin Lockdown](#cloudflare-origin-lockdown).
 - `ENCRYPTION_KEY_PREVIOUS` — the old key after rotation, so stored secrets stay readable.
 - `SENTRY_DSN` — error reporting (also in **Settings → System**).
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURITY`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_ADDRESS`, `SMTP_MAX_PER_HOUR` — the mail server for the `send_email` automation action (also in **Settings → System**).
 - `PUBLIC_BASE_URL` — builds full article links in notifications and reports.
 
 ### System Settings (Database)

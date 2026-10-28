@@ -44,6 +44,7 @@ const GROUP_DEST: Record<string, EngineDest> = {
   retention: { kind: "browse", browse: "maintenance" },
   security: { kind: "settings", section: "users" },
   monitoring: { kind: "settings", section: "system" },
+  email: { kind: "settings", section: "system" },
   backup: { kind: "settings", section: "system" },
   public_rss: { kind: "settings", section: "feeds" },
 };

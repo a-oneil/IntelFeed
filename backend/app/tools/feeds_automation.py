@@ -23,6 +23,7 @@ from app.models.webhook_preset import WebhookPreset
 from app.schemas.automation import VALID_ACTION_TYPES, VALID_TRIGGER_TYPES
 from app.schemas.feed import keep_stored_secrets
 from app.schemas.tlp import TLP_VALUES, normalize_tlp
+from app.schemas.webhook_preset import redact_preset_config
 from app.tools import _tool
 from app.tools.delete import _make_token, _verify_token
 
@@ -680,7 +681,7 @@ async def _list_webhook_presets(
             "url": "<REDACTED>" if p.url else "",
             "payload": p.payload,
             "headers": {k: "<REDACTED>" for k in (p.headers or {})},
-            "config": p.config,
+            "config": redact_preset_config(p.config),
             "created_at": p.created_at.isoformat() if p.created_at else None,
         }
         for p in presets

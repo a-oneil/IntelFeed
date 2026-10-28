@@ -16,9 +16,27 @@ from app.schemas.webhook_preset import (
     WebhookPresetCreate,
     WebhookPresetResponse,
     WebhookPresetUpdate,
+    redact_preset_config,
 )
 
 router = APIRouter()
+
+
+def _preset_response(preset: WebhookPreset, user: User) -> WebhookPresetResponse:
+    """A preset as ``user`` may read it. Presets are listed to everyone, but
+    the destination — the webhook URL and headers (Slack/Teams URLs are
+    credentials) or an email preset's recipients — only to the owner and
+    admins, the same rule automation rules follow."""
+    response = WebhookPresetResponse.model_validate(preset)
+    if user.role == "admin" or preset.created_by == user.id:
+        return response
+    return response.model_copy(
+        update={
+            "url": "<REDACTED>" if preset.url else "",
+            "headers": {k: "<REDACTED>" for k in (preset.headers or {})},
+            "config": redact_preset_config(preset.config),
+        }
+    )
 
 
 @router.get("", response_model=PaginatedResponse[WebhookPresetResponse])
@@ -29,7 +47,8 @@ async def list_webhook_presets(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List saved webhook presets ordered by name, optionally filtered by preset type."""
+    """List saved webhook presets ordered by name, optionally filtered by preset type.
+    Other users' URLs, headers and email recipients come back redacted."""
     filters = []
     if preset_type:
         filters.append(WebhookPreset.preset_type == preset_type)
@@ -40,7 +59,7 @@ async def list_webhook_presets(
         count_base = count_base.where(*filters)
     total = (await db.execute(count_base)).scalar() or 0
     result = await db.execute(base.order_by(WebhookPreset.name).limit(limit).offset(offset))
-    items = [WebhookPresetResponse.model_validate(p) for p in result.scalars().all()]
+    items = [_preset_response(p, user) for p in result.scalars().all()]
     return PaginatedResponse(items=items, total=total, limit=limit, offset=offset, has_more=(offset + limit) < total)
 
 
@@ -68,7 +87,7 @@ async def get_webhook_preset(
     preset = result.scalar_one_or_none()
     if not preset:
         raise AppError("NOT_FOUND", "Webhook preset not found", status_code=404)
-    return WebhookPresetResponse.model_validate(preset)
+    return _preset_response(preset, user)
 
 
 @router.put("/{preset_id}", response_model=WebhookPresetResponse)

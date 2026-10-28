@@ -414,6 +414,15 @@ class Settings(BaseSettings):
 
     # Webhooks
     webhook_allow_private_networks: bool = True
+
+    # Outbound email (the send_email automation action). Empty host = not set up.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_security: str = "starttls"  # starttls | tls
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_address: str = ""
+    smtp_max_per_hour: int = 30  # instance-wide; 0 = no limit
     # Feeds, full-article fetches, transcripts, manual ingest, the image proxy
     # and other user-supplied URLs (app/core/safe_http.py). Off: only public
     # addresses. On: private ranges too, for an instance that reads feeds from
