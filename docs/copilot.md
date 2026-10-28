@@ -121,7 +121,7 @@ When the provider is not the Claude Code CLI:
 
 The Claude Code CLI needs its OAuth credentials (`~/.claude/.credentials.json`). Only the **`celery-worker-ai`** container mounts them, through the `claude_cli` volume. It is the one process that refreshes the tokens; a second container refreshing them at the same time would corrupt the file. The prod api container has no CLI, no credentials and no MCP mount.
 
-`copilot_worker_dispatch` (`backend/app/config.py:444`, default `true`) picks where the CLI runs. It only matters for the `claude_code` provider:
+`copilot_worker_dispatch` (`backend/app/config.py:452`, default `true`) picks where the CLI runs. It only matters for the `claude_code` provider:
 
 - **Worker dispatch (default)**: the api queues `run_copilot_stream` on the `ai` queue with a new `run_id`, then reads events from a Redis list while the worker runs the CLI.
 - **In-process (`false`)**: the api calls `provider.stream_agent()` itself. This only works where the api container has the CLI and credentials. The dev compose mounts `./intelfeed-mcp` into the api for this case.
@@ -289,7 +289,7 @@ Celery results share Redis with the copilot, so they expire after one hour (`res
 
 | Knob | Where | Value and effect |
 |---|---|---|
-| `copilot_worker_dispatch` | `backend/app/config.py:444` | `true` (default): run the CLI in `celery-worker-ai`. `false`: run it in the api. Ollama always runs in the api |
+| `copilot_worker_dispatch` | `backend/app/config.py:452` | `true` (default): run the CLI in `celery-worker-ai`. `false`: run it in the api. Ollama always runs in the api |
 | `allowed_tools`, `timeout_seconds` | Copilot assignment config (Settings → AI Configuration) | `["IntelFeed"]`, 240 s |
 | `ollama_tools` | Copilot assignment config (Prompt Workspace → Routing) | The read-only tools offered to an Ollama copilot; default `DEFAULT_COPILOT_OLLAMA_TOOLS` |
 | History | `_MAX_HISTORY_MESSAGES` | Last 20 messages sent as `conversation_history` |

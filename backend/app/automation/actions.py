@@ -11,16 +11,18 @@ Batch mode:
   When running scheduled or manual "Run Now" rules against multiple entries,
   actions are split into two phases:
     1. Per-entry actions (extract, tag, AI, etc.) run on each entry individually
-    2. Batch actions (send_notification, run_webhook) run once with all entries
+    2. Batch actions (send_notification, send_email, run_webhook) run once with all entries
   This prevents sending N notifications for N entries — instead a single digest
   notification is sent.
 """
 
 import asyncio
 import contextvars
+import html
 import logging
 import re
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 from sqlalchemy import delete, select
@@ -86,13 +88,24 @@ async def observable_template_context(db: AsyncSession, entry: Entry) -> dict:
     return {"observables_count": len(rows), "observables": "\n".join(lines)}
 
 
-def _render_template(template: str, entry: Entry, context: dict | None = None) -> str:
+def _render_template(
+    template: str,
+    entry: Entry,
+    context: dict | None = None,
+    escape: Callable[[str], str] | None = None,
+    overrides: dict[str, str] | None = None,
+) -> str:
     """Render a message template with entry and context variables.
 
     Supported variables are the single-brace ({ }) set declared in
     ``variables.NOTIFICATION_TEMPLATE_FIELDS``:
       {title}, {url}, {app_url}, {author}, {summary}, {published_at},
-      {ai_summary}, {feed_name}
+      {ai_summary}, {feed_name}, {entry_count}
+
+    ``escape`` is applied to every substituted value (``html.escape`` for an
+    HTML email body), never to the template itself. ``overrides`` replaces a
+    variable's value and is inserted as-is — for a value already in the
+    target format, like an AI summary rendered to HTML.
     """
     ctx = context or {}
     ai_summary = ctx.get("ai_summary", "")
@@ -111,11 +124,17 @@ def _render_template(template: str, entry: Entry, context: dict | None = None) -
         # "new C2 captured" rule can name the indicators in its message.
         "observables_count": str(ctx.get("observables_count", "")),
         "observables": ctx.get("observables", "") or "",
+        # A batch run sets it; a per-entry run is about one entry.
+        "entry_count": str(ctx.get("entry_count", 1)),
     }
 
     result = template
     for key, value in replacements.items():
-        result = result.replace(f"{{{key}}}", str(value))
+        if overrides and key in overrides:
+            text = overrides[key]
+        else:
+            text = escape(str(value)) if escape else str(value)
+        result = result.replace(f"{{{key}}}", text)
     return result
 
 
@@ -249,6 +268,8 @@ async def _execute_action(
                 result = await _action_send_notification(entry, config, context)
             case "run_webhook":
                 result = await _action_run_webhook(entry, config, context)
+            case "send_email":
+                result = await _action_send_email(db, entry, config, context)
             case "mark_priority":
                 result = await _action_mark_priority(db, entry, config, user_id)
             case "mark_read":
@@ -298,7 +319,7 @@ async def _execute_action(
 
 # Actions that naturally aggregate across entries in batch mode.
 # These receive all entries at once instead of running per-entry.
-BATCH_ACTIONS = {"send_notification", "run_webhook", "run_ai_task", "use_daily_summary"}
+BATCH_ACTIONS = {"send_notification", "send_email", "run_webhook", "run_ai_task", "use_daily_summary"}
 
 # Actions that must still run per-entry even in batch mode (they modify
 # individual entry state in the database).
@@ -416,6 +437,9 @@ async def _execute_actions_batch(
                 results.append({"type": action_type, **result})
             elif action_type == "send_notification":
                 result = await _action_send_notification_batch(entries, config, batch_context)
+                results.append({"type": action_type, **result})
+            elif action_type == "send_email":
+                result = await _action_send_email_batch(db, entries, config, batch_context)
                 results.append({"type": action_type, **result})
             elif action_type == "run_webhook":
                 result = await _action_run_webhook_batch(entries, config, batch_context)
@@ -1346,6 +1370,177 @@ async def _action_run_webhook(entry: Entry, config: dict, context: dict | None =
     async with _webhook_client(timeout=15.0) as client:
         response = await client.post(url, json=payload, headers=send_headers)
         return {"status": "success" if response.status_code < 300 else "error", "http_status": response.status_code}
+
+
+# ---------------------------------------------------------------------------
+# Email (send_email) — delivered through the instance SMTP relay
+# ---------------------------------------------------------------------------
+
+EMAIL_BODY_FORMATS = ("markdown", "html", "text")
+
+_DEFAULT_EMAIL_BODY = {
+    "markdown": "## {title}\n\n{summary}\n\n[Read the article]({url})",
+    "html": '<h2>{title}</h2>\n<p>{summary}</p>\n<p><a href="{url}">Read the article</a></p>',
+    "text": "{title}\n{url}\n\n{summary}",
+}
+
+
+async def _email_target(db: AsyncSession, config: dict) -> dict:
+    """Relay, recipients and body format for a send_email action, or
+    ``{"error": reason}`` — checked before anything is rendered."""
+    from app.services.mailer import NOT_CONFIGURED, check_recipients, load_smtp_config, parse_recipients
+
+    to, bad_to = parse_recipients(config.get("to"))
+    cc, bad_cc = parse_recipients(config.get("cc"))
+    err = check_recipients(to, cc, bad_to + bad_cc)
+    if err:
+        return {"error": err}
+    fmt = (config.get("body_format") or "markdown").lower()
+    if fmt not in EMAIL_BODY_FORMATS:
+        return {"error": f"Unknown body_format '{fmt}' (use markdown, html or text)"}
+    smtp = await load_smtp_config(db)
+    if smtp is None:
+        return {"error": NOT_CONFIGURED}
+    return {"smtp": smtp, "to": to, "cc": cc, "format": fmt}
+
+
+async def _deliver_email(target: dict, subject: str, body: str) -> dict:
+    """Send a rendered body as plain text, plus an HTML part for markdown/html."""
+    import nh3
+
+    from app.services.mailer import MailError, send_mail
+    from app.services.markdown import render_markdown
+
+    fmt = target["format"]
+    if fmt == "text":
+        text_body, html_body = body, None
+    elif fmt == "html":
+        text_body, html_body = html.unescape(nh3.clean(body, tags=set())), body
+    else:
+        text_body, html_body = body, render_markdown(body)
+    try:
+        await send_mail(
+            target["smtp"], to=target["to"], cc=target["cc"], subject=subject, text_body=text_body, html_body=html_body
+        )
+    except MailError as e:
+        return {"status": "error", "message": str(e)}
+    return {"status": "success", "recipients": len(target["to"]) + len(target["cc"]), "body_format": fmt}
+
+
+def _render_email_body(template: str, entry: Entry, ctx: dict, fmt: str) -> str:
+    """Render an email body template. In an HTML body, entry values are
+    escaped, but an AI summary is Markdown — it goes in rendered to (cleaned)
+    HTML, both as {ai_summary} and as {summary}, which falls back to it."""
+    if fmt != "html":
+        return _render_template(template, entry, ctx)
+    overrides = None
+    if ctx.get("ai_summary"):
+        from app.services.markdown import render_markdown
+
+        rendered = render_markdown(ctx["ai_summary"])
+        overrides = {"ai_summary": rendered, "summary": rendered}
+    return _render_template(template, entry, ctx, escape=html.escape, overrides=overrides)
+
+
+async def _action_send_email(db: AsyncSession, entry: Entry, config: dict, context: dict | None = None) -> dict:
+    """Email one entry through the instance SMTP relay.
+
+    Config fields:
+      - to: recipients, comma-separated or a list (required)
+      - cc: optional recipients
+      - subject_template: default "[IntelFeed] {title}"
+      - body_template: same variables as a notification message template
+      - body_format: "markdown" (default) | "html" | "text"
+    """
+    target = await _email_target(db, config)
+    if "error" in target:
+        return {"status": "error", "message": target["error"]}
+
+    ctx = context or {}
+    fmt = target["format"]
+    subject = _render_template(config.get("subject_template") or "[IntelFeed] {title}", entry, ctx)
+    body = _render_email_body(config.get("body_template") or _DEFAULT_EMAIL_BODY[fmt], entry, ctx, fmt)
+    if not body.strip():
+        return {"status": "skipped", "message": "Nothing to send: the rendered body was empty"}
+    return await _deliver_email(target, subject, body)
+
+
+def _email_digest_listing(entries: list[Entry], fmt: str) -> str:
+    """The digest body when there is no template and no AI summary."""
+    if fmt == "html":
+        items = []
+        for e in entries:
+            title = html.escape(e.title or "Untitled")
+            link = f'<a href="{html.escape(e.url)}">{title}</a>' if e.url else title
+            summary = html.escape((e.summary or "")[:200])
+            items.append(f"<li><strong>{link}</strong>" + (f"<br>{summary}" if summary else "") + "</li>")
+        return "<ul>\n" + "\n".join(items) + "\n</ul>"
+    lines = []
+    for e in entries:
+        title = e.title or "Untitled"
+        summary = (e.summary or "")[:200]
+        if fmt == "text":
+            line = f"- {title}" + (f"\n  {e.url}" if e.url else "")
+        else:
+            line = f"- **[{title}]({e.url})**" if e.url else f"- **{title}**"
+        if summary:
+            line += f"\n  {summary}"
+        lines.append(line)
+    return "\n\n".join(lines)
+
+
+async def _action_send_email_batch(
+    db: AsyncSession,
+    entries: list[Entry],
+    config: dict,
+    batch_context: dict,
+) -> dict:
+    """Send one digest email for a batch run.
+
+    Same precedence as the notification digest: a body template wins, then a
+    prior AI task's ai_summary (a briefing), then a plain list of the entries.
+    """
+    target = await _email_target(db, config)
+    if "error" in target:
+        return {"status": "error", "message": target["error"]}
+    if not entries:
+        return {"status": "skipped", "message": "No entries to email about"}
+
+    fmt = target["format"]
+    count = len(entries)
+    noun = "entry" if count == 1 else "entries"
+    ai_summary = batch_context.get("ai_summary", "")
+
+    subject = _render_template(
+        config.get("subject_template") or f"IntelFeed digest: {{entry_count}} {noun}", entries[0], batch_context
+    )
+    body_template = config.get("body_template", "")
+    if body_template:
+        # Rendered once, with the first entry + the batch context
+        body = _render_email_body(body_template, entries[0], batch_context, fmt)
+    elif ai_summary:
+        if fmt == "html":
+            from app.services.markdown import render_markdown
+
+            body = render_markdown(ai_summary)
+        else:
+            body = ai_summary
+    else:
+        body = _email_digest_listing(entries, fmt)
+
+    if not body.strip():
+        return {
+            "status": "skipped",
+            "message": (
+                "Nothing to send: the rendered body was empty. If you used "
+                "{ai_summary}, the AI task returned no extractable text."
+            ),
+        }
+    result = await _deliver_email(target, subject, body)
+    if result["status"] == "success":
+        result["entries_included"] = count
+        result["has_ai_summary"] = bool(ai_summary)
+    return result
 
 
 async def _action_mark_priority(db: AsyncSession, entry: Entry, config: dict, user_id: uuid.UUID) -> dict:

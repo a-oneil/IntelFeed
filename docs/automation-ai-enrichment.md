@@ -136,7 +136,7 @@ An unknown condition type, or one that raises an error, evaluates to `false`.
 
 ### Actions
 
-Actions run in order (`execute_action`, `backend/app/automation/actions.py:200`). They share a `context` dict, so a later action can use what an earlier one produced. A failed action records `status: "error"` and the next action still runs.
+Actions run in order (`execute_action`, `backend/app/automation/actions.py:221`). They share a `context` dict, so a later action can use what an earlier one produced. A failed action records `status: "error"` and the next action still runs.
 
 | Action | Config | What it does |
 |---|---|---|
@@ -148,6 +148,7 @@ Actions run in order (`execute_action`, `backend/app/automation/actions.py:200`)
 | `mark_read`, `star_entry`, `bookmark_entry`, `hide_entry` | — | Sets that state for the owner |
 | `create_note` | `title` (default `Auto-note: {title}`), `content` (default `{summary}`) | Writes a note. Both fields take template variables |
 | `send_notification` | `platform` (`discord` default, `slack`, `custom`), `webhook_url`, `channel`, `username`, `message_template`, `include_embeds` | Posts to a chat webhook |
+| `send_email` | `to`, `cc` (comma-separated, 20 addresses at most), `subject_template`, `body_template`, `body_format` (`markdown` default, `html`, `text`) | Emails through the instance mail server (`smtp_*`, **Settings → System**). Markdown is sent as HTML with a plain-text copy. In an `html` body, entry values are HTML-escaped and an AI summary is rendered to HTML. At most `smtp_max_per_hour` emails go out per clock hour across the instance; more fail with an error in the run log |
 | `run_webhook` | `url`, `headers`, `payload` (JSON string with template variables) | Posts JSON to any URL |
 | `extract_ttps` | `use_ai` (default `true`) | Extracts ATT&CK techniques; stores them in `context["extraction_results"]["ttps"]` |
 | `extract_cves` | — | Extracts CVE IDs and links them |
@@ -156,7 +157,7 @@ Actions run in order (`execute_action`, `backend/app/automation/actions.py:200`)
 | `add_to_campaign` | `campaign_id`, `notes`, `link_observables`, `observable_kinds`, `observable_roles` | Links the entry to a campaign. With `link_observables`, also attaches the entry's reporting-door observables (dual-use infrastructure excluded) |
 | `create_intel_report` | `title`, `template_type` (default `flash_alert`), `tlp_marking` (default `TLP:GREEN`), `summary` | Creates a report from the entry and the context |
 | `track_on_threat_board` | — | Pins the entry's linked actors and malware onto the Threats board as tracked. It never overrides a threat a person already handled or muted |
-| `chain_rule` | `rule_id` | Runs another rule on the same entry. The other rule must have the same owner (or the owner is an admin). Loops are refused and chains stop at 5 deep (`MAX_CHAIN_DEPTH`, `backend/app/automation/actions.py:1363`) |
+| `chain_rule` | `rule_id` | Runs another rule on the same entry. The other rule must have the same owner (or the owner is an admin). Loops are refused and chains stop at 5 deep (`MAX_CHAIN_DEPTH`, `backend/app/automation/actions.py:1560`) |
 | `branch` | `condition`, `then_actions`, `else_actions` | See [Branch Actions](#branch-actions) |
 
 AI-calling actions always run as an `automation` caller, so they never spend the owner's personal AI key ([Callers](#callers-who-is-asking)).
@@ -181,9 +182,9 @@ AI-calling actions always run as an `automation` caller, so they never spend the
 
 There are two separate variable systems. `backend/app/automation/variables.py` defines both, and the rule builder reads them from `GET /api/automation/variable-contexts`.
 
-**Message templates** use single braces: `{title}`. They work in `send_notification`, `run_webhook`, `create_note` and `create_intel_report`:
+**Message templates** use single braces: `{title}`. They work in `send_notification`, `send_email`, `run_webhook`, `create_note` and `create_intel_report`:
 
-`{title}`, `{url}`, `{app_url}` (the article's IntelFeed link), `{author}`, `{summary}` (the AI summary if one exists, else the first 500 characters of the entry summary), `{published_at}`, `{ai_summary}`, `{feed_name}`, `{observables_count}`, `{observables}` (the entry's reporting-door observables, defanged, one per line as `kind value (role)`).
+`{title}`, `{url}`, `{app_url}` (the article's IntelFeed link), `{author}`, `{summary}` (the AI summary if one exists, else the first 500 characters of the entry summary), `{published_at}`, `{ai_summary}`, `{feed_name}`, `{observables_count}`, `{observables}` (the entry's reporting-door observables, defanged, one per line as `kind value (role)`), `{entry_count}` (entries in a batch run; `1` per entry).
 
 **AI prompt templates** use Jinja2 double braces: `{{ entry.title }}`. They are used by `run_ai_task`:
 
@@ -225,7 +226,7 @@ In a dry run, both branches are listed and neither runs.
 `execution_mode` in `trigger_config` decides how the actions run over those entries:
 
 - `per_entry` (default): every entry runs the whole action list.
-- `batch` (`execute_actions_batch`, `backend/app/automation/actions.py:324`): `send_notification`, `run_webhook`, `run_ai_task` and `use_daily_summary` run **once** over all entries (one digest message, one AI prompt). Every other action still runs on each entry.
+- `batch` (`execute_actions_batch`, `backend/app/automation/actions.py:347`): `send_notification`, `send_email`, `run_webhook`, `run_ai_task` and `use_daily_summary` run **once** over all entries (one digest message or email, one AI prompt). Every other action still runs on each entry.
 
 **Dry run**: `POST /api/automation/rules/{id}/test?entry_id=...` runs the rule against one entry without saving anything. Conditions are evaluated; actions are listed as `dry_run` and not executed.
 
@@ -261,7 +262,9 @@ Read logs with `GET /api/automation/rules/{id}/logs` or `GET /api/automation/log
 
 ### Webhook Presets
 
-Saved webhook destinations (URL, payload, headers) live in the `webhook_presets` table, managed at `/api/webhook-presets`. Only the owner or an admin may edit or delete one. The rule builder uses them to fill in a webhook action.
+Saved destinations live in the `webhook_presets` table, managed at `/api/webhook-presets`. `preset_type` says which action a preset fills in: `webhook` (URL, payload, headers), `notification` (URL plus platform, channel, bot name and message template in `config`) or `email` (`to`, `cc`, `subject_template`, `body_template` and `body_format` in `config`; no URL). Only the owner or an admin may edit or delete one. The rule builder uses them to fill in an action.
+
+A preset's URL, headers and email recipients show as `<REDACTED>` to anyone who isn't its owner or an admin, so the rule builder only offers your own presets (all of them to an admin). Email recipients in a rule, like webhook URLs and headers, are hidden the same way from anyone who isn't the rule's owner or an admin. An exported rule without secrets imports with a warning for each redacted field, and those actions fail until the fields are filled in.
 
 `send_notification` formats for three platforms:
 

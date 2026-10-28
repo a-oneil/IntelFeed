@@ -1,8 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "@/api/client";
+import { useAuthStore } from "@/stores/authStore";
 import type { WebhookPreset, PaginatedResponse } from "@/api/types";
 
+/** Presets the current user can load into an action: their own, or every
+ *  one for an admin. The API redacts the URL, headers and recipients of
+ *  anyone else's preset, so loading one would fill the action with
+ *  "<REDACTED>". */
 export function useWebhookPresets(presetType?: string) {
+  const user = useAuthStore((s) => s.user);
   return useQuery({
     queryKey: ["webhook-presets", presetType],
     queryFn: async () => {
@@ -12,6 +18,10 @@ export function useWebhookPresets(presetType?: string) {
       );
       return res.data;
     },
+    select: (data) =>
+      user?.role === "admin"
+        ? data
+        : { ...data, items: data.items.filter((p) => p.created_by === user?.id) },
   });
 }
 
@@ -71,4 +81,13 @@ export function useDeleteWebhookPreset() {
       queryClient.invalidateQueries({ queryKey: ["webhook-presets"] });
     },
   });
+}
+
+/** The send_email fields an `email` preset carries. A preset has no URL; the
+ *  recipients and templates live in its `config`. */
+export const EMAIL_PRESET_KEYS = ["to", "cc", "subject_template", "body_template", "body_format"] as const;
+
+/** An email preset's fields as action config, to merge into a send_email action. */
+export function emailPresetConfig(preset: WebhookPreset): Record<string, unknown> {
+  return Object.fromEntries(EMAIL_PRESET_KEYS.map((k) => [k, preset.config[k] ?? ""]));
 }

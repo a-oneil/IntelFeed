@@ -6,6 +6,8 @@ import {
 } from "@/hooks/useAutomation";
 import { useAITasks } from "@/hooks/useAI";
 import {
+  EMAIL_PRESET_KEYS,
+  emailPresetConfig,
   useWebhookPresets,
   useCreateWebhookPreset,
 } from "@/hooks/useWebhookPresets";
@@ -25,6 +27,7 @@ const ACTION_TYPES = [
   { value: "add_tags", label: "Add Tags" },
   { value: "remove_tags", label: "Remove Tags" },
   { value: "send_notification", label: "Send Notification" },
+  { value: "send_email", label: "Send Email" },
   { value: "run_webhook", label: "Run Webhook" },
   { value: "add_to_campaign", label: "Add to Campaign" },
   { value: "mark_priority", label: "Mark Priority" },
@@ -42,6 +45,12 @@ const NOTIFICATION_PLATFORMS = [
   { value: "slack", label: "Slack" },
   { value: "discord", label: "Discord" },
   { value: "custom", label: "Custom" },
+];
+
+const EMAIL_BODY_FORMATS = [
+  { value: "markdown", label: "Markdown" },
+  { value: "html", label: "HTML" },
+  { value: "text", label: "Plain text" },
 ];
 
 const EXPORT_FORMATS = [
@@ -66,9 +75,16 @@ export const ActionNode = memo(function ActionNode({ data }: NodeProps) {
   const { data: rulesData } = useAutomationRules();
   const { data: aiTasks } = useAITasks();
   const { data: varContexts } = useAutomationVariableContexts();
-  const presetType = actionType === "send_notification" ? "notification" : "webhook";
+  const presetType =
+    actionType === "send_notification"
+      ? "notification"
+      : actionType === "send_email"
+        ? "email"
+        : "webhook";
   const { data: presetsData } = useWebhookPresets(
-    actionType === "run_webhook" || actionType === "send_notification" ? presetType : undefined
+    actionType === "run_webhook" || actionType === "send_notification" || actionType === "send_email"
+      ? presetType
+      : undefined
   );
   const savePreset = useCreateWebhookPreset();
   const [savingPreset, setSavingPreset] = useState(false);
@@ -487,6 +503,139 @@ export const ActionNode = memo(function ActionNode({ data }: NodeProps) {
                           username: (config?.username as string) ?? "",
                           message_template: (config?.message_template as string) ?? "",
                         },
+                      },
+                      {
+                        onSuccess: () => {
+                          setSavingPreset(false);
+                          setPresetName("");
+                        },
+                      }
+                    );
+                  }}
+                >
+                  Save
+                </button>
+                <button
+                  type="button"
+                  className={styles.chip}
+                  onClick={() => {
+                    setSavingPreset(false);
+                    setPresetName("");
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {actionType === "send_email" && (
+          <div className={styles.fieldGroup}>
+            {presets.length > 0 && (
+              <>
+                <label className={styles.fieldLabel}>Load Preset</label>
+                <select
+                  value=""
+                  onChange={(e) => {
+                    const preset = presets.find((p) => p.id === e.target.value);
+                    if (preset) onUpdate?.({ config: { ...config, ...emailPresetConfig(preset) } });
+                  }}
+                  className={styles.select}
+                >
+                  <option value="">Select preset...</option>
+                  {presets.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
+            <label className={styles.fieldLabel}>To</label>
+            <input
+              type="text"
+              value={(config?.to as string) ?? ""}
+              onChange={(e) => onUpdate?.({ config: { ...config, to: e.target.value } })}
+              placeholder="soc@example.com, lead@example.com"
+              className={styles.input}
+            />
+            <label className={styles.fieldLabel}>Cc</label>
+            <input
+              type="text"
+              value={(config?.cc as string) ?? ""}
+              onChange={(e) => onUpdate?.({ config: { ...config, cc: e.target.value } })}
+              placeholder="Optional"
+              className={styles.input}
+            />
+            <label className={styles.fieldLabel}>Subject</label>
+            <input
+              type="text"
+              value={(config?.subject_template as string) ?? ""}
+              onChange={(e) => onUpdate?.({ config: { ...config, subject_template: e.target.value } })}
+              placeholder={executionMode === "batch" ? "IntelFeed digest: N entries" : "[IntelFeed] {title}"}
+              className={styles.input}
+            />
+            <label className={styles.fieldLabel}>Body format</label>
+            <select
+              value={(config?.body_format as string) || "markdown"}
+              onChange={(e) => onUpdate?.({ config: { ...config, body_format: e.target.value } })}
+              className={styles.select}
+            >
+              {EMAIL_BODY_FORMATS.map((f) => (
+                <option key={f.value} value={f.value}>
+                  {f.label}
+                </option>
+              ))}
+            </select>
+            <label className={styles.fieldLabel}>Body</label>
+            <textarea
+              value={(config?.body_template as string) ?? ""}
+              onChange={(e) => onUpdate?.({ config: { ...config, body_template: e.target.value } })}
+              placeholder={
+                executionMode === "batch"
+                  ? "Leave empty to send the AI summary, or a list of the entries"
+                  : "## {title}\n\n{summary}\n\n[Read the article]({url})"
+              }
+              className={styles.input}
+              rows={3}
+            />
+            <span className={styles.hint}>
+              Variables:{" "}
+              {(varContexts?.notification_template ?? []).map((v) => `{${v.name}}`).join(", ")}.
+              {" "}Sent through the SMTP server set under Settings &gt; System.
+              {executionMode === "batch" && " Batch mode sends one digest email."}
+            </span>
+            {!savingPreset ? (
+              <button
+                type="button"
+                onClick={() => setSavingPreset(true)}
+                className={styles.chip}
+                style={{ alignSelf: "flex-start", marginTop: "0.25rem" }}
+              >
+                Save as preset
+              </button>
+            ) : (
+              <div style={{ display: "flex", gap: "0.25rem", marginTop: "0.25rem" }}>
+                <input
+                  type="text"
+                  value={presetName}
+                  onChange={(e) => setPresetName(e.target.value)}
+                  placeholder="Preset name"
+                  className={styles.input}
+                  style={{ flex: 1 }}
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  className={styles.chip}
+                  disabled={!presetName.trim() || savePreset.isPending}
+                  onClick={() => {
+                    savePreset.mutate(
+                      {
+                        name: presetName.trim(),
+                        preset_type: "email",
+                        config: Object.fromEntries(EMAIL_PRESET_KEYS.map((k) => [k, config?.[k] ?? ""])),
                       },
                       {
                         onSuccess: () => {

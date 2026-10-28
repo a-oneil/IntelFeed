@@ -114,7 +114,7 @@ def ai_prompt_variable_contexts() -> dict:
 
 # --- Notification/template variables (single-brace { }) ---------------------
 
-# Consumed by `_render_template` for send_notification / run_webhook /
+# Consumed by `_render_template` for send_notification / send_email / run_webhook /
 # create_note / create_intel_report message and payload templates.
 NOTIFICATION_TEMPLATE_FIELDS: list[str] = [
     "title",
@@ -127,6 +127,7 @@ NOTIFICATION_TEMPLATE_FIELDS: list[str] = [
     "feed_name",
     "observables_count",
     "observables",
+    "entry_count",
 ]
 
 _NOTIFICATION_DESCRIPTIONS: dict[str, str] = {
@@ -140,6 +141,7 @@ _NOTIFICATION_DESCRIPTIONS: dict[str, str] = {
     "published_at": "Publication timestamp",
     "ai_summary": "Output of a preceding Run AI Task or Use Daily Summary action (briefing/summary)",
     "feed_name": "Source feed name",
+    "entry_count": "Entries in a batch (digest) run; 1 for a per-entry run",
 }
 
 

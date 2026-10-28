@@ -133,6 +133,7 @@ VALID_ACTION_TYPES = {
     "add_tags",
     "remove_tags",
     "send_notification",
+    "send_email",
     "run_webhook",
     "mark_priority",
     "mark_read",
@@ -148,6 +149,7 @@ VALID_ACTION_TYPES = {
     "add_to_campaign",
     "create_intel_report",
     "chain_rule",
+    "track_on_threat_board",
     "export_to",
     "branch",
 }

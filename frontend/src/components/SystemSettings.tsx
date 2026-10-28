@@ -122,6 +122,7 @@ export default function SystemSettings({
     "content",
     "plans",
     "rate_limiting",
+    "email",
     "monitoring",
     "backup",
     "public_rss",
