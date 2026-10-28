@@ -122,7 +122,7 @@ flowchart TD
 
     subgraph ENRICHMENT["⑨ Enrichment (auto + Celery Beat schedules)"]
         ENRICH_PIPE["auto_enrich_entity()<br/>for new entities →<br/>EnrichmentSource adapters:<br/>NVD, OSV, CVEDetails, Wikipedia, …"]
-        SCHEDULED["Beat-scheduled syncs:<br/>sync-kev-feed — every 6h<br/>cve-nvd-refresh — daily 12:00 UTC<br/>cve-nvd-backfill — daily 01:30 UTC<br/>epss-bulk-sync — daily 06:30 UTC<br/>github-poc-scan — daily 05:00 UTC<br/>cybergeist sync — daily 02:30 UTC<br/>mitre-attack-sync — weekly Sun 03:00<br/>malpedia-sync — weekly Sun 03:30<br/>wikipedia-bulk-sync — weekly Wed 04:00"]
+        SCHEDULED["Beat-scheduled syncs:<br/>sync-kev-feed — every 6h<br/>cve-nvd-refresh — daily 12:00 UTC<br/>cve-nvd-backfill — daily 01:30 UTC<br/>epss-bulk-sync — daily 06:30 UTC<br/>github-poc-scan — daily 05:00 UTC<br/>cybergeist sync — daily 02:30 UTC<br/>mitre-attack-sync — weekly Sun 03:00<br/>malpedia-sync — weekly Sat 01:00<br/>wikipedia-bulk-sync — weekly Wed 04:00"]
     end
 
     TTP_STORE -.-> ENRICH_PIPE

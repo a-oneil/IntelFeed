@@ -129,7 +129,8 @@ DEFAULT_SOURCES = [
         "source_type": "greynoise",
         "display_name": "GreyNoise Community",
         "default_trigger_mode": "manual",
-        "requires_api_key": True,
+        # The Community endpoint answers without a key; one raises the allowance.
+        "requires_api_key": False,
         "default_rate_limit": {"requests_per_period": 10, "period_seconds": 3600},
         "default_min_confidence_threshold": "medium",
     },

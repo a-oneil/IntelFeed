@@ -1,0 +1,75 @@
+{
+ "info": {
+  "url": "https://en.wikipedia.org/w/api.php?format=json&redirects=1&action=query&prop=info&titles=Lazarus+Group&inprop=protection%7Ctalkid%7Cwatched%7Cwatchers%7Cvisitingwatchers%7Cnotificationtimestamp%7Csubjectid%7Curl%7Creadable%7Cpreload%7Cdisplaytitle%7Cvarianttitles",
+  "status": 200,
+  "body": {
+   "batchcomplete": "",
+   "query": {
+    "pages": {
+     "49605366": {
+      "pageid": 49605366,
+      "ns": 0,
+      "title": "Lazarus Group",
+      "contentmodel": "wikitext",
+      "pagelanguage": "en",
+      "pagelanguagehtmlcode": "en",
+      "pagelanguagedir": "ltr",
+      "touched": "2026-10-26T20:00:09Z",
+      "lastrevid": 1382093670,
+      "length": 54068,
+      "protection": [],
+      "restrictiontypes": [
+       "edit",
+       "move"
+      ],
+      "watchers": 145,
+      "notificationtimestamp": "",
+      "talkid": 52884168,
+      "fullurl": "https://en.wikipedia.org/wiki/Lazarus_Group",
+      "editurl": "https://en.wikipedia.org/w/index.php?title=Lazarus_Group&action=edit",
+      "canonicalurl": "https://en.wikipedia.org/wiki/Lazarus_Group",
+      "readable": "",
+      "preload": "",
+      "displaytitle": "Lazarus Group",
+      "varianttitles": {
+       "en": "Lazarus Group"
+      }
+     }
+    }
+   }
+  }
+ },
+ "extracts": {
+  "url": "https://en.wikipedia.org/w/api.php?format=json&redirects=1&action=query&prop=extracts&titles=Lazarus+Group&explaintext=1&exsectionformat=wiki",
+  "status": 200,
+  "body": {
+   "batchcomplete": "",
+   "query": {
+    "pages": {
+     "49605366": {
+      "pageid": 49605366,
+      "ns": 0,
+      "title": "Lazarus Group",
+      "extract": "The Lazarus Group (also known as the Guardians of Peace or Whois Team) is a state-sponsored hacker group made up of unknown members, alleged to be run by the government of North Korea. While not much is known about the group, researchers have attributed many cyberattacks to them since the 2010s.\nOriginally deemed as a clandestine criminal group, the group has now been designated as an advanced persistent threat due to its intended nature, threat, and wide array of methods used when conducting an operation. Names given by cybersecurity organizations include Hidden Cobra (used by the United States Department of Homeland Security to refer to malicious cyber activity by the North Korean government in general), ZINC and Diamond Sleet (by Microsoft). According to North Korean defector Kim Kuk-song, the unit is known internally as the 414 Liaison Office.\nThe Lazarus Group has strong links to North Korea. The United States Department of Justice has claimed the group is part of the North Korean government's strategy to \"undermine global cybersecurity ... and generate illicit revenue in violation of ... sanctions\". North Korea benefits from conducting cyber operations because it can present an asymmetric threat with a small group of operators, especially to South Korea.\n\n\n== History ==\nThe earliest known attack that the group is responsible for is known as \"Operation Troy\", which took place from 2009 to 2012. This was a cyber-espionage campaign that utilized unsophisticated distributed denial-of-service attack (DDoS) techniques to target the South Korean government in Seoul. They were also responsible for attacks in 2011 and 2013. Though uncertain, it is possible that they were also behind a 2007 attack targeting South Korea. A notable attack that the group is known for is the 2014 attack on Sony Pictures. The Sony attack used more sophisticated techniques and highlighted how advanced the group has become over time.\n\nThe Lazarus Group were reported to have stolen US$12 million from the Banco del Austro in Ecuador and US$1 million from Vietnam's Tien Phong Bank in 2015. They have also targeted banks in Poland and Mexico. The 2016 bank heist included an attack on the Bangladesh Bank, successfully stealing US$81 million and was attributed to the group. In 2017, the Lazarus group was reported to have stolen US$60 million from the Far Eastern International Bank of Taiwan although the actual amount stolen was unclear, and most of the funds were recovered.\nIt is not clear who is really behind the group, but media reports have suggested the group has links to North Korea. Kaspersky Lab reported in 2017 that Lazarus tended to concentrate on spying and infiltration cyberattacks whereas a sub-group within their organisation, which Kaspersky called Bluenoroff, specialised in financial cyberattacks. Kaspersky found multiple attacks worldwide and a direct link (IP address) between Bluenoroff and North Korea.\nHowever, Kaspersky also acknowledged that the repetition of the code could be a \"false flag\" meant to mislead investigators and pin the attack on North Korea, given that the worldwide WannaCry worm cyber attack copied techniques from the NSA as well. This ransomware leverages an NSA exploit known as EternalBlue that a hacker group known as Shadow Brokers made public in April 2017. Symantec reported in 2017 that it was \"highly likely\" that Lazarus was behind the WannaCry attack.\n"
+     }
+    }
+   }
+  }
+ },
+ "pageimages": {
+  "url": "https://en.wikipedia.org/w/api.php?action=query&titles=Lazarus+Group&prop=pageimages&format=json&pithumbsize=300",
+  "status": 200,
+  "body": {
+   "batchcomplete": "",
+   "query": {
+    "pages": {
+     "49605366": {
+      "pageid": 49605366,
+      "ns": 0,
+      "title": "Lazarus Group"
+     }
+    }
+   }
+  }
+ }
+}

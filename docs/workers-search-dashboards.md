@@ -113,10 +113,10 @@ When `sync_cybergeist_feeds` creates new entities, it queues `refresh_autolinker
 | `run_epss_bulk_sync` | Daily 06:30 | Update EPSS scores (exploit likelihood) for all CVEs |
 | `run_mitre_attack_sync` | Sunday 03:00 | Sync MITRE ATT&CK techniques, groups and mitigations |
 | `run_misp_galaxy_sync` | Sunday 03:30 | Refresh known actor aliases (`known_alias_map`) from the MISP Galaxy threat-actor cluster |
-| `run_malpedia_sync` | Sunday 03:30 | Sync malware families from Malpedia; aliases pass the junk-alias filter |
+| `run_malpedia_sync` | Saturday 01:00 | Sync malware families from Malpedia; aliases pass the junk-alias filter |
 | `run_metasploit_sync` | Sunday 03:45 | Map tracked CVEs to Metasploit modules and mark them weaponized |
 | `run_cve_nvd_refresh` | Daily 12:00 | Re-check NVD for CVSS changes |
-| `run_cve_nvd_backfill` | Daily 01:30 | Fill in NVD data (CVSS, description, affected products, references) for CVEs that lack it |
+| `run_cve_nvd_backfill` | Daily 01:30 | Fill in NVD data (CVSS, description, affected products, references) for CVEs that lack it; stops starting lookups 2 minutes before its time limit |
 | `run_github_poc_scan` | Daily 05:00 | Search GitHub for proof-of-concept exploits |
 | `run_wikipedia_bulk_sync` | Wednesday 04:00 | Add Wikipedia content to entities that lack it |
 
@@ -555,6 +555,7 @@ Built from the `JOB_REGISTRY` defaults. Admins can change any of these in Engine
 
 ```text
 00:30 ├─ check_requirement_expiry_task
+01:00 ├─ run_malpedia_sync (Sat)
 01:30 ├─ run_cve_nvd_backfill
 02:00 ├─ backup_database
 02:05 ├─ cleanup_expired_entries
@@ -565,7 +566,7 @@ Built from the `JOB_REGISTRY` defaults. Admins can change any of these in Engine
 03:00 ├─ kickoff_actor_profile_refresh (Mon) · run_mitre_attack_sync (Sun)
 03:05 ├─ reenrich_cve_nvd
 03:15 ├─ cleanup_orphaned_references
-03:30 ├─ rebuild_entity_profiles · run_malpedia_sync (Sun) · run_misp_galaxy_sync (Sun)
+03:30 ├─ rebuild_entity_profiles · run_misp_galaxy_sync (Sun)
 03:35 ├─ resolve_cve_affected
 03:45 ├─ decay_relationship_confidence (Sun) · refresh_cwe_catalog (Mon) · run_metasploit_sync (Sun)
 03:50 ├─ rebuild_rule_coverage

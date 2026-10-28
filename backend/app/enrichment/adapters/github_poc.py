@@ -104,8 +104,9 @@ class GitHubPoCAdapter(EnrichmentAdapter):
                 headers["Authorization"] = f"Bearer {self.api_key}"
             async with httpx.AsyncClient(timeout=5) as client:
                 resp = await client.get(
-                    "https://api.github.com/rate_limit",
+                    self._api_url,
                     headers=headers,
+                    params={"q": "CVE-2021-44228 poc exploit", "per_page": 1},
                 )
                 return resp.status_code == 200
         except Exception:

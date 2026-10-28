@@ -149,7 +149,7 @@ Surfaces: `GET /api/entities/{type}/{id}/infrastructure` (`?format=csv` for a fi
 
 **Search and browse:** "Open in observables browser" on a profile is `GET /api/observables?linked_entity=<type>:<id>` (claimed plus reported alongside). The search language has `ioc.reports:>0` and `ioc.feeds:>0` (also `observable.reports` / `observable.feeds`); see [query-language.md](query-language.md).
 
-**Enrichment:** new IPv4, domain and hash rows from the AI, analyst and article-IOC-table doors get a reputation lookup (max 25 per entry); bulk feed rows never do. Shodan InternetDB needs no key; VirusTotal and GreyNoise need keys (Settings → Engine → Enrichment). Results go to `Observable.reputation`. A dual-use host (Shodan `vpn` / `proxy` / `tor`, GreyNoise RIOT → `benign_service`) gets an `infra_tag`, keeping it out of published feeds. It shows as a "Reputation" row on the provenance panel and a hidden-by-default browser column. `scripts/maintenance/backfill_feed_observable_roles.py` fills missing feed-row roles from the file path.
+**Enrichment:** new IPv4, domain and hash rows from the AI, analyst and article-IOC-table doors get a reputation lookup (max 25 per entry); bulk feed rows never do. Shodan InternetDB and GreyNoise Community need no key; VirusTotal needs one (Settings → Engine → Enrichment). Results go to `Observable.reputation`. A dual-use host (Shodan `vpn` / `proxy` / `tor`, GreyNoise RIOT → `benign_service`) gets an `infra_tag`, keeping it out of published feeds. It shows as a "Reputation" row on the provenance panel and a hidden-by-default browser column. `scripts/maintenance/backfill_feed_observable_roles.py` fills missing feed-row roles from the file path.
 
 ## Publishing
 

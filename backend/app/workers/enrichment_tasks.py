@@ -1,8 +1,12 @@
 """Celery tasks for scheduled and auto enrichment — EPSS, MITRE ATT&CK, Malpedia, GitHub PoC."""
 
+import csv
+import io
+import itertools
 import logging
 import re
 import time
+from collections.abc import Iterator
 from datetime import UTC, datetime
 
 from sqlalchemy import bindparam, select, text
@@ -22,34 +26,33 @@ def _get_worker_session():
     return worker_session()
 
 
-def parse_epss_csv(text: str) -> dict[str, dict]:
-    """Parse the FIRST EPSS daily CSV into {cve_id: {epss_score, percentile}}.
+def iter_epss_csv(text: str) -> Iterator[tuple[str, float, float]]:
+    """Yield (cve_id, epss_score, percentile) rows from the FIRST EPSS daily CSV.
 
     The CSV starts with one or more comment lines (#model_version...) before
     the "cve,epss,percentile" header; rows with malformed scores are skipped.
     """
-    import csv
-
-    lines = text.strip().split("\n")
-    csv_start = 0
-    for i, line in enumerate(lines):
+    lines = io.StringIO(text)
+    for line in lines:
         if line.startswith("cve,"):
-            csv_start = i
+            header = line.strip().split(",")
             break
+    else:
+        return
 
-    epss_data: dict[str, dict] = {}
-    for row in csv.DictReader(lines[csv_start:]):
+    for row in csv.DictReader(lines, fieldnames=header):
         cve_id = (row.get("cve") or "").strip()
         if not cve_id.startswith("CVE-"):
             continue
         try:
-            epss_data[cve_id] = {
-                "epss_score": float(row.get("epss", 0)),
-                "percentile": float(row.get("percentile", 0)),
-            }
+            yield cve_id, float(row.get("epss", 0)), float(row.get("percentile", 0))
         except (TypeError, ValueError):
             continue
-    return epss_data
+
+
+def parse_epss_csv(text: str) -> dict[str, dict]:
+    """Parse the FIRST EPSS daily CSV into {cve_id: {epss_score, percentile}}."""
+    return {cve_id: {"epss_score": score, "percentile": pct} for cve_id, score, pct in iter_epss_csv(text)}
 
 
 def _cvss_tier_rank(score: float) -> int:
@@ -292,6 +295,7 @@ def run_epss_bulk_sync():
         stats = run_async(_run_epss_bulk_sync())
         logger.info("EPSS bulk sync stats: %s", stats)
         CELERY_TASKS_TOTAL.labels(task_name="run_epss_bulk_sync", status="success").inc()
+        return stats
     except Exception:
         CELERY_TASKS_TOTAL.labels(task_name="run_epss_bulk_sync", status="error").inc()
         logger.exception("EPSS bulk sync failed")
@@ -300,129 +304,130 @@ def run_epss_bulk_sync():
         CELERY_TASK_DURATION_SECONDS.labels(task_name="run_epss_bulk_sync").observe(time.monotonic() - start)
 
 
+# CSV rows applied per UPDATE, each chunk its own transaction: no CVE ORM
+# objects are loaded, and a run holds a bounded set of row locks.
+_EPSS_CHUNK_SIZE = 5000
+
+
 async def _run_epss_bulk_sync():
     import gzip
     from datetime import timedelta
 
     import httpx
 
-    from app.models.cve import CVE
+    from app.intelligence.correlation_events import create_cve_score_change_event
     from app.models.enrichment import EnrichmentSource
+    from app.workers.signal_tasks import dispatch_cve_rescore
 
-    stats = {"updated": 0, "total_scores": 0}
+    stats = {"updated": 0, "total_scores": 0, "score_changes": 0}
+
+    async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
+        resp = await client.get("https://epss.empiricalsecurity.com/epss_scores-current.csv.gz")
+        resp.raise_for_status()
+    csv_text = gzip.decompress(resp.content).decode("utf-8")
+
+    now = datetime.now(UTC)
+    sql_params = {
+        "now": now,
+        "expires": now + timedelta(hours=24),
+        "date_str": now.strftime("%Y-%m-%d"),
+    }
+
+    # Significant change: the score jumped by >= 0.1 (absolute) or crossed the
+    # 0.5 threshold (high exploitation probability). Columns read in SET are the
+    # pre-update row, so c.epss_score is the score being replaced. The epss_jump
+    # signal reads epss_previous_score/epss_changed_at; epss_updated_at can't
+    # serve since every sync touches it, change or not.
+    significant = (
+        "c.epss_score IS NOT NULL AND (abs(i.score - c.epss_score) >= 0.1 OR (c.epss_score < 0.5 AND i.score >= 0.5))"
+    )
+    update_cves = text(
+        f"""
+        UPDATE cves c
+        SET epss_score = i.score,
+            epss_percentile = i.pct,
+            epss_updated_at = :now,
+            epss_previous_score = CASE WHEN {significant} THEN c.epss_score ELSE c.epss_previous_score END,
+            epss_changed_at = CASE WHEN {significant} THEN :now ELSE c.epss_changed_at END,
+            updated_at = now()
+        FROM unnest(CAST(:cve_ids AS text[]), CAST(:scores AS float8[]), CAST(:pcts AS float8[]))
+            AS i(cve_id, score, pct)
+        WHERE c.cve_id = i.cve_id
+        RETURNING c.id, c.cve_id, c.epss_previous_score, c.epss_score, c.epss_changed_at = :now AS changed
+        """
+    )
+    # Upsert enrichment_results set-based: overwrite the existing EPSS row per
+    # CVE, insert only for CVEs that don't have one yet. The old per-CVE append
+    # grew this table to ~40 rows per CVE (pruned in migration m2a2b3c4d5g9).
+    ids_param = bindparam("ids", type_=ARRAY(UUID(as_uuid=True)))
+    update_results = text(
+        """
+        UPDATE enrichment_results er
+        SET raw_response = jsonb_build_object(
+                'epss_score', c.epss_score, 'percentile', c.epss_percentile),
+            parsed_data = jsonb_build_object(
+                'cve_id', c.cve_id, 'epss_score', c.epss_score,
+                'epss_percentile', c.epss_percentile, 'date', CAST(:date_str AS text)),
+            enriched_at = :now, expires_at = :expires, status = 'success'
+        FROM cves c
+        WHERE c.id = er.entity_id
+          AND er.entity_type = 'cve' AND er.source_type = 'epss'
+          AND c.id = ANY(:ids)
+        """
+    ).bindparams(ids_param)
+    insert_results = text(
+        """
+        INSERT INTO enrichment_results
+            (id, entity_type, entity_id, source_type, raw_response,
+             parsed_data, enriched_at, expires_at, status)
+        SELECT gen_random_uuid(), 'cve', c.id, 'epss',
+               jsonb_build_object(
+                   'epss_score', c.epss_score, 'percentile', c.epss_percentile),
+               jsonb_build_object(
+                   'cve_id', c.cve_id, 'epss_score', c.epss_score,
+                   'epss_percentile', c.epss_percentile, 'date', CAST(:date_str AS text)),
+               :now, :expires, 'success'
+        FROM cves c
+        WHERE c.id = ANY(:ids)
+          AND NOT EXISTS (
+              SELECT 1 FROM enrichment_results er
+              WHERE er.entity_id = c.id
+                AND er.entity_type = 'cve' AND er.source_type = 'epss')
+        """
+    ).bindparams(ids_param)
 
     async with _get_worker_session() as db:
-        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
-            resp = await client.get("https://epss.empiricalsecurity.com/epss_scores-current.csv.gz")
-            resp.raise_for_status()
+        for chunk in itertools.batched(iter_epss_csv(csv_text), _EPSS_CHUNK_SIZE):
+            stats["total_scores"] += len(chunk)
+            cve_ids, scores, pcts = (list(col) for col in zip(*chunk, strict=True))
+            rows = (
+                await db.execute(update_cves, {"now": now, "cve_ids": cve_ids, "scores": scores, "pcts": pcts})
+            ).all()
+            if not rows:
+                continue
+            stats["updated"] += len(rows)
 
-        decompressed = gzip.decompress(resp.content)
-        epss_data = parse_epss_csv(decompressed.decode("utf-8"))
+            matched_ids = [row.id for row in rows]
+            await db.execute(update_results, {**sql_params, "ids": matched_ids})
+            await db.execute(insert_results, {**sql_params, "ids": matched_ids})
 
-        stats["total_scores"] = len(epss_data)
-        stats["score_changes"] = 0
-        # Update CVEs that exist in our database
-        result = await db.execute(select(CVE))
-        cves = result.scalars().all()
-        now = datetime.now(UTC)
-
-        # Collect significant EPSS changes for event generation
-        epss_changes: list[tuple] = []  # (cve_id_str, cve_uuid, old_score, new_score)
-        matched_ids: list = []
-
-        for cve in cves:
-            if cve.cve_id in epss_data:
-                scores = epss_data[cve.cve_id]
-                old_epss = cve.epss_score
-                new_epss = scores["epss_score"]
-
-                # Detect significant EPSS changes:
-                # - Score jumped by >= 0.1 (absolute)
-                # - Score crossed the 0.5 threshold (high exploitation probability)
-                if old_epss is not None and new_epss != old_epss:
-                    delta = abs(new_epss - old_epss)
-                    crossed_threshold = old_epss < 0.5 <= new_epss
-                    if delta >= 0.1 or crossed_threshold:
-                        epss_changes.append((cve.cve_id, cve.id, old_epss, new_epss))
-                        # epss_jump signal reads these; epss_updated_at can't
-                        # serve since every sync touches it, change or not
-                        cve.epss_previous_score = old_epss
-                        cve.epss_changed_at = now
-
-                # Update CVE model directly
-                cve.epss_score = new_epss
-                cve.epss_percentile = scores["percentile"]
-                cve.epss_updated_at = now
-                db.add(cve)
-                matched_ids.append(cve.id)
-                stats["updated"] += 1
-
-        # Upsert enrichment_results set-based: overwrite the existing EPSS row per
-        # CVE, insert only for CVEs that don't have one yet. The old per-CVE append
-        # grew this table to ~40 rows per CVE (pruned in migration m2a2b3c4d5g9).
-        if matched_ids:
-            await db.flush()  # make the CVE column updates visible to the SQL below
-            sql_params = {
-                "ids": matched_ids,
-                "now": now,
-                "expires": now + timedelta(hours=24),
-                "date_str": now.strftime("%Y-%m-%d"),
-            }
-            await db.execute(
-                text(
-                    """
-                    UPDATE enrichment_results er
-                    SET raw_response = jsonb_build_object(
-                            'epss_score', c.epss_score, 'percentile', c.epss_percentile),
-                        parsed_data = jsonb_build_object(
-                            'cve_id', c.cve_id, 'epss_score', c.epss_score,
-                            'epss_percentile', c.epss_percentile, 'date', CAST(:date_str AS text)),
-                        enriched_at = :now, expires_at = :expires, status = 'success'
-                    FROM cves c
-                    WHERE c.id = er.entity_id
-                      AND er.entity_type = 'cve' AND er.source_type = 'epss'
-                      AND c.id = ANY(:ids)
-                    """
-                ).bindparams(bindparam("ids", type_=ARRAY(UUID(as_uuid=True)))),
-                sql_params,
-            )
-            await db.execute(
-                text(
-                    """
-                    INSERT INTO enrichment_results
-                        (id, entity_type, entity_id, source_type, raw_response,
-                         parsed_data, enriched_at, expires_at, status)
-                    SELECT gen_random_uuid(), 'cve', c.id, 'epss',
-                           jsonb_build_object(
-                               'epss_score', c.epss_score, 'percentile', c.epss_percentile),
-                           jsonb_build_object(
-                               'cve_id', c.cve_id, 'epss_score', c.epss_score,
-                               'epss_percentile', c.epss_percentile, 'date', CAST(:date_str AS text)),
-                           :now, :expires, 'success'
-                    FROM cves c
-                    WHERE c.id = ANY(:ids)
-                      AND NOT EXISTS (
-                          SELECT 1 FROM enrichment_results er
-                          WHERE er.entity_id = c.id
-                            AND er.entity_type = 'cve' AND er.source_type = 'epss')
-                    """
-                ).bindparams(bindparam("ids", type_=ARRAY(UUID(as_uuid=True)))),
-                sql_params,
-            )
-
-        # Generate correlation events for significant EPSS changes
-        if epss_changes:
-            from app.intelligence.correlation_events import create_cve_score_change_event
-            from app.workers.signal_tasks import dispatch_cve_rescore
-
-            for cve_id_str, cve_uuid, old_score, new_score in epss_changes:
+            # Correlation events for significant changes; rescores go out after
+            # the commit so the worker reads the new score.
+            increased = []
+            for cve_uuid, cve_id_str, old_score, new_score, changed in rows:
+                if not changed:
+                    continue
                 try:
                     await create_cve_score_change_event(db, cve_id_str, cve_uuid, "epss_score", old_score, new_score)
                     stats["score_changes"] += 1
                 except Exception:
                     logger.debug("Failed to create EPSS change event for %s", cve_id_str, exc_info=True)
                 if new_score > old_score:
-                    dispatch_cve_rescore(cve_uuid)
+                    increased.append(cve_uuid)
+
+            await db.commit()
+            for cve_uuid in increased:
+                dispatch_cve_rescore(cve_uuid)
 
         # Update source last_synced_at
         source_result = await db.execute(select(EnrichmentSource).where(EnrichmentSource.source_type == "epss"))
@@ -434,7 +439,7 @@ async def _run_epss_bulk_sync():
 
         await db.commit()
 
-        return stats
+    return stats
 
 
 @celery_app.task(name="app.workers.enrichment_tasks.run_mitre_attack_sync", soft_time_limit=900, time_limit=960)
@@ -699,12 +704,18 @@ def run_cve_nvd_backfill():
         stats = run_async(_run_cve_nvd_backfill())
         logger.info("CVE NVD backfill stats: %s", stats)
         CELERY_TASKS_TOTAL.labels(task_name="run_cve_nvd_backfill", status="success").inc()
+        return stats
     except Exception:
         CELERY_TASKS_TOTAL.labels(task_name="run_cve_nvd_backfill", status="error").inc()
         logger.exception("CVE NVD backfill failed")
         raise
     finally:
         CELERY_TASK_DURATION_SECONDS.labels(task_name="run_cve_nvd_backfill").observe(time.monotonic() - start)
+
+
+# Wall-clock seconds the backfill may spend starting lookups: 120s under the
+# task's 900s soft limit, left for the final commit.
+_NVD_BACKFILL_BUDGET_S = 780
 
 
 async def _run_cve_nvd_backfill():
@@ -714,8 +725,17 @@ async def _run_cve_nvd_backfill():
     from app.intelligence.cve import NVDRateLimited, enrich_from_nvd, nvd_retry_allowed, stamp_nvd_miss
     from app.models.cve import CVE
 
-    stats = {"enriched": 0, "failed": 0, "skipped_invalid": 0, "rate_limited": False, "total": 0}
+    stats = {
+        "enriched": 0,
+        "failed": 0,
+        "skipped_invalid": 0,
+        "rate_limited": False,
+        "out_of_time": False,
+        "total": 0,
+        "pending": 0,
+    }
     now = datetime.now(UTC)
+    deadline = time.monotonic() + _NVD_BACKFILL_BUDGET_S
 
     async with _get_worker_session() as db:
         # Resolve API key from DB (secrets are encrypted, cache may not be warm)
@@ -732,14 +752,16 @@ async def _run_cve_nvd_backfill():
         # lookups, a week apart) — autolink and extraction mint a stub for any
         # CVE-shaped string, and without the budget every junk id was looked up
         # again every night.
+        due = (
+            CVE.description.is_(None),
+            sa_func.length(sa_func.split_part(CVE.cve_id, "-", 3)) <= 5,
+            nvd_retry_allowed(now),
+        )
+        stats["pending"] = (await db.execute(select(sa_func.count()).select_from(CVE).where(*due))).scalar() or 0
+        # Load only what one run can look up at this pace; the rest waits for
+        # tomorrow's run.
         result = await db.execute(
-            select(CVE)
-            .where(
-                CVE.description.is_(None),
-                sa_func.length(sa_func.split_part(CVE.cve_id, "-", 3)) <= 5,
-                nvd_retry_allowed(now),
-            )
-            .order_by(CVE.cve_id)
+            select(CVE).where(*due).order_by(CVE.cve_id).limit(int(_NVD_BACKFILL_BUDGET_S / delay))
         )
         cves = result.scalars().all()
         stats["total"] = len(cves)
@@ -756,13 +778,20 @@ async def _run_cve_nvd_backfill():
         stats["skipped_invalid"] = invalid_result.scalar() or 0
 
         logger.info(
-            "CVE NVD backfill: %d valid CVEs to enrich, %d invalid skipped (delay=%.1fs)",
+            "CVE NVD backfill: %d of %d valid CVEs this run, %d invalid skipped (delay=%.1fs)",
             stats["total"],
+            stats["pending"],
             stats["skipped_invalid"],
             delay,
         )
 
         for i, cve_obj in enumerate(cves):
+            if time.monotonic() >= deadline:
+                # Out of budget: stop cleanly so the run commits and records its
+                # stats instead of being killed at the soft limit.
+                logger.info("CVE NVD backfill stopping at %d/%d: time budget spent", i, len(cves))
+                stats["out_of_time"] = True
+                break
             try:
                 nvd = await enrich_from_nvd(cve_obj.cve_id, raise_on_rate_limit=True)
             except NVDRateLimited:
@@ -809,6 +838,7 @@ def run_cve_nvd_refresh():
         stats = run_async(_run_cve_nvd_refresh())
         logger.info("CVE NVD refresh stats: %s", stats)
         CELERY_TASKS_TOTAL.labels(task_name="run_cve_nvd_refresh", status="success").inc()
+        return stats
     except Exception:
         CELERY_TASKS_TOTAL.labels(task_name="run_cve_nvd_refresh", status="error").inc()
         logger.exception("CVE NVD refresh failed")
@@ -833,19 +863,25 @@ async def _run_cve_nvd_refresh():
         api_key = await get_setting("nvd_api_key", db)
         delay = 0.7 if api_key else 6
 
-        # Select CVEs that have NVD data and were last updated more than 7 days ago.
-        # Limit to 100 per run to stay within rate limits.
-        cutoff = datetime.now(UTC) - timedelta(days=7)
+        # Select CVEs that hold an NVD record not re-checked in 7 days, oldest
+        # first. Limit to 100 per run to stay within rate limits. Staleness uses
+        # the blob-internal stamp, NOT CVE.updated_at: the daily EPSS sync and
+        # article mentions touch updated_at on nearly every CVE, which left this
+        # job with nothing to select.
+        now = datetime.now(UTC)
+        cutoff = (now - timedelta(days=7)).isoformat()
+        refreshed_at = CVE.nvd_data["_refreshed_at"].astext
         from sqlalchemy import func as sa_func
+        from sqlalchemy import or_
 
         result = await db.execute(
             select(CVE)
             .where(
-                CVE.description.isnot(None),
-                CVE.updated_at < cutoff,
+                CVE.nvd_data.has_key("id"),
+                or_(~CVE.nvd_data.has_key("_refreshed_at"), refreshed_at < cutoff),
                 sa_func.length(sa_func.split_part(CVE.cve_id, "-", 3)) <= 5,
             )
-            .order_by(CVE.updated_at.asc())
+            .order_by(refreshed_at.asc().nulls_first())
             .limit(100)
         )
         cves = result.scalars().all()
@@ -890,10 +926,13 @@ async def _run_cve_nvd_refresh():
                 cve_obj.affected_products = nvd.get("affected_products", cve_obj.affected_products)
                 cve_obj.references_ = nvd.get("references", cve_obj.references_)
                 cve_obj.nvd_data = nvd.get("nvd_data", cve_obj.nvd_data)
-                db.add(cve_obj)
                 stats["checked"] += 1
             else:
                 stats["failed"] += 1
+            # Stamp hits and misses alike so a CVE NVD can't answer for rotates
+            # to the back instead of heading every run.
+            cve_obj.nvd_data = {**(cve_obj.nvd_data or {}), "_refreshed_at": now.isoformat()}
+            db.add(cve_obj)
 
             if (i + 1) % 50 == 0:
                 await db.commit()
@@ -919,12 +958,17 @@ def run_malpedia_sync():
         stats = run_async(_run_malpedia_sync())
         logger.info("Malpedia sync stats: %s", stats)
         CELERY_TASKS_TOTAL.labels(task_name="run_malpedia_sync", status="success").inc()
+        return stats
     except Exception:
         CELERY_TASKS_TOTAL.labels(task_name="run_malpedia_sync", status="error").inc()
         logger.exception("Malpedia sync failed")
         raise
     finally:
         CELERY_TASK_DURATION_SECONDS.labels(task_name="run_malpedia_sync").observe(time.monotonic() - start)
+
+
+# Entities updated per Malpedia transaction.
+_MALPEDIA_COMMIT_EVERY = 200
 
 
 async def _run_malpedia_sync():
@@ -969,7 +1013,13 @@ async def _run_malpedia_sync():
     stats["actors_seen"] = len(actors)
 
     async with _get_worker_session() as db:
+        # Commit in batches: one transaction over thousands of malware, tool and
+        # actor rows held locks long enough to deadlock with other catalog syncs.
+        dirty = 0
         for family_key, family_data in families.items():
+            if dirty >= _MALPEDIA_COMMIT_EVERY:
+                await db.commit()
+                dirty = 0
             if not isinstance(family_data, dict):
                 continue
             common_name = family_data.get("common_name") or family_key
@@ -995,9 +1045,13 @@ async def _run_malpedia_sync():
                         entity.aliases = cleaned
                 db.add(entity)
                 stats[stat_key] += 1
+                dirty += 1
                 break
 
         for actor_key, actor_data in actors.items():
+            if dirty >= _MALPEDIA_COMMIT_EVERY:
+                await db.commit()
+                dirty = 0
             if not isinstance(actor_data, dict):
                 continue
             meta = actor_data.get("meta") or {}
@@ -1018,6 +1072,7 @@ async def _run_malpedia_sync():
                     actor.aliases = cleaned
             db.add(actor)
             stats["actors_updated"] += 1
+            dirty += 1
 
         # Update source
         source_result = await db.execute(select(EnrichmentSource).where(EnrichmentSource.source_type == "malpedia"))

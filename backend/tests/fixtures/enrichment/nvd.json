@@ -1,0 +1,124 @@
+{
+ "found": {
+  "url": "https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=CVE-2021-44228",
+  "status": 200,
+  "body": {
+   "resultsPerPage": 1,
+   "startIndex": 0,
+   "totalResults": 1,
+   "format": "NVD_CVE",
+   "version": "2.0",
+   "timestamp": "2026-10-28T05:49:22.685",
+   "vulnerabilities": [
+    {
+     "cve": {
+      "id": "CVE-2021-44228",
+      "published": "2021-12-10T10:15:09.143",
+      "lastModified": "2026-08-11T19:33:44.513",
+      "vulnStatus": "Analyzed",
+      "descriptions": [
+       {
+        "lang": "en",
+        "value": "Apache Log4j2 2.0-beta9 through 2.15.0 (excluding security releases 2.12.2, 2.12.3, and 2.3.1) JNDI features used in configuration, log messages, and parameters do not protect against attacker controlled LDAP and other JNDI related endpoints. An attacker who can control log messages or log message parameters can execute arbitrary code loaded from LDAP servers when message lookup substitution is enabled. From log4j 2.15.0, this behavior has been disabled by default. From version 2.16.0 (along with 2.12.2, 2.12.3, and 2.3.1), this functionality has been completely removed. Note that this vulnerability is specific to log4j-core and does not affect log4net, log4cxx, or other Apache Logging Services projects."
+       }
+      ],
+      "weaknesses": [
+       {
+        "source": "security@apache.org",
+        "type": "Secondary",
+        "description": [
+         {
+          "lang": "en",
+          "value": "CWE-20"
+         },
+         {
+          "lang": "en",
+          "value": "CWE-400"
+         },
+         {
+          "lang": "en",
+          "value": "CWE-502"
+         }
+        ]
+       },
+       {
+        "source": "nvd@nist.gov",
+        "type": "Secondary",
+        "description": [
+         {
+          "lang": "en",
+          "value": "CWE-917"
+         }
+        ]
+       }
+      ],
+      "metrics": {
+       "cvssMetricV31": [
+        {
+         "source": "nvd@nist.gov",
+         "type": "Primary",
+         "cvssData": {
+          "version": "3.1",
+          "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+          "baseScore": 10.0,
+          "baseSeverity": "CRITICAL",
+          "attackVector": "NETWORK",
+          "attackComplexity": "LOW",
+          "privilegesRequired": "NONE",
+          "userInteraction": "NONE",
+          "scope": "CHANGED",
+          "confidentialityImpact": "HIGH",
+          "integrityImpact": "HIGH",
+          "availabilityImpact": "HIGH"
+         },
+         "exploitabilityScore": 3.9,
+         "impactScore": 6.0
+        }
+       ]
+      },
+      "references": [
+       {
+        "url": "http://packetstormsecurity.com/files/165225/Apache-Log4j2-2.14.1-Remote-Code-Execution.html",
+        "source": "security@apache.org",
+        "tags": [
+         "Third Party Advisory",
+         "VDB Entry"
+        ]
+       },
+       {
+        "url": "http://packetstormsecurity.com/files/165260/VMware-Security-Advisory-2021-0028.html",
+        "source": "security@apache.org",
+        "tags": [
+         "Third Party Advisory",
+         "VDB Entry"
+        ]
+       },
+       {
+        "url": "http://packetstormsecurity.com/files/165261/Apache-Log4j2-2.14.1-Information-Disclosure.html",
+        "source": "security@apache.org",
+        "tags": [
+         "Exploit",
+         "Third Party Advisory",
+         "VDB Entry"
+        ]
+       }
+      ]
+     }
+    }
+   ]
+  }
+ },
+ "not_found": {
+  "url": "https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=CVE-1999-99999",
+  "status": 200,
+  "body": {
+   "resultsPerPage": 0,
+   "startIndex": 0,
+   "totalResults": 0,
+   "format": "NVD_CVE",
+   "version": "2.0",
+   "timestamp": "2026-10-28T05:49:23.173",
+   "vulnerabilities": []
+  }
+ }
+}

@@ -48,7 +48,8 @@ UTC defaults from `backend/app/workers/job_registry.py`; admins can override.
 | `github-poc-scan` | daily 05:00 | public exploit code on GitHub |
 | `sync-cybergeist-feeds` | daily 02:30 | CyberGeist entity attributes |
 | `mitre-attack-sync` | weekly Sun 03:00 | ATT&CK techniques, groups, mitigations, aliases |
-| `misp-galaxy-sync` / `malpedia-sync` | weekly Sun 03:30 | MISP Galaxy actor aliases; Malpedia descriptions and aliases |
+| `misp-galaxy-sync` | weekly Sun 03:30 | MISP Galaxy actor aliases |
+| `malpedia-sync` | weekly Sat 01:00 | Malpedia descriptions and aliases |
 | `metasploit-sync` | weekly Sun 03:45 | links CVEs to Metasploit modules, raises them to `weaponized` |
 | `refresh-cwe-catalog` | weekly Mon 03:45 | MITRE CWE catalog |
 | `rollup-targeted-sectors` | daily 04:20 | turns `entry_sectors` into `threat_actor_target_sectors` / `malware_target_sectors` claims with evidence, then rebuilds `targeted_sectors` |

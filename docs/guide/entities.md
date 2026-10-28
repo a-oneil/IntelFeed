@@ -84,7 +84,7 @@ under **Settings → Engine**, in the enrich stage:
 | Malpedia | Actor and malware profiles and aliases |
 | GitHub PoC | Links to proof-of-concept exploit code |
 | Wikipedia | A summary from Wikipedia |
-| VirusTotal, GreyNoise, Shodan InternetDB | Reputation data for observables (VirusTotal and GreyNoise need an API key) |
+| VirusTotal, GreyNoise, Shodan InternetDB | Reputation data for observables (VirusTotal needs an API key) |
 
 Sources run when an entity is created, on a schedule, or when you ask. The
 page shows how old results are; the refresh icon fetches them again.

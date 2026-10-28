@@ -1,8 +1,10 @@
-"""GreyNoise Community adapter — free with API key (50 requests/week).
+"""GreyNoise Community adapter — free, no API key required.
 
 Classifies IPv4 addresses as benign, malicious, or unknown based on internet
-scanning behavior. Restored from the IOC-v1 era (removed in 22ae889) for the
-observables ledger; non-IP kinds report unsupported rather than erroring.
+scanning behavior. The Community endpoint answers without a key; a key, when
+configured, is sent for its higher allowance. Restored from the IOC-v1 era
+(removed in 22ae889) for the observables ledger; non-IP kinds report
+unsupported rather than erroring.
 """
 
 import re
@@ -18,10 +20,13 @@ class GreyNoiseAdapter(EnrichmentAdapter):
     source_type = "greynoise"
     display_name = "GreyNoise Community"
     supported_entity_types = ["observable"]
-    requires_api_key = True
+    requires_api_key = False
     default_trigger_mode = "manual"
 
     _api_base = "https://api.greynoise.io/v3/community/"
+
+    def _headers(self) -> dict:
+        return {"key": self.api_key} if self.api_key else {}
 
     async def enrich(self, entity_type: str, entity_value: str) -> EnrichmentData:
         if not _IPV4_RE.match(entity_value):
@@ -30,15 +35,21 @@ class GreyNoiseAdapter(EnrichmentAdapter):
                 parsed_data={"found": False, "note": "GreyNoise covers IPv4 only"},
                 ttl_hours=168,
             )
-        headers = {"key": self.api_key} if self.api_key else {}
         async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(f"{self._api_base}{entity_value}", headers=headers)
+            resp = await client.get(f"{self._api_base}{entity_value}", headers=self._headers())
             if resp.status_code == 404:
-                # Not seen scanning the internet — for a suspected C2 that is
-                # itself signal (targeted infrastructure, not mass noise).
+                # Not seen scanning the internet (the body still says
+                # noise:false / riot:false) — for a suspected C2 that is itself
+                # signal: targeted infrastructure, not mass noise.
+                data = resp.json()
                 return EnrichmentData(
-                    raw_response={"status": "not_found"},
-                    parsed_data={"found": False, "note": "not seen mass-scanning — targeted, not noise"},
+                    raw_response=data,
+                    parsed_data={
+                        "found": False,
+                        "noise": data.get("noise", False),
+                        "riot": data.get("riot", False),
+                        "note": "not seen mass-scanning — targeted, not noise",
+                    },
                     ttl_hours=168,
                 )
             resp.raise_for_status()
@@ -60,9 +71,8 @@ class GreyNoiseAdapter(EnrichmentAdapter):
 
     async def check_health(self) -> bool:
         try:
-            headers = {"key": self.api_key} if self.api_key else {}
             async with httpx.AsyncClient(timeout=5) as client:
-                resp = await client.get(f"{self._api_base}8.8.8.8", headers=headers)
+                resp = await client.get(f"{self._api_base}8.8.8.8", headers=self._headers())
                 return resp.status_code in (200, 404)
         except Exception:
             return False

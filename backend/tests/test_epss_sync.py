@@ -124,3 +124,108 @@ async def test_upsert_enrichment_result_helper(db_session, cves):
     )
     assert len(rows) == 1
     assert rows[0].parsed_data["poc_count"] == 3
+
+
+# ── Set-based update matches the per-row logic it replaced ──────────
+
+
+def _expected_change(old: float | None, new: float) -> bool:
+    """The per-CVE ORM rule the set-based UPDATE replaced."""
+    return old is not None and new != old and (abs(new - old) >= 0.1 or old < 0.5 <= new)
+
+
+@pytest.mark.asyncio
+async def test_epss_set_based_update_matches_row_logic(db_session, monkeypatch):
+    from datetime import datetime
+
+    import app.workers.enrichment_tasks as tasks
+    import app.workers.signal_tasks as signal_tasks
+    from app.models.correlation_event import CorrelationEventRecord
+
+    monkeypatch.setattr(tasks, "_EPSS_CHUNK_SIZE", 3)  # several chunks, several commits
+    dispatched: list = []
+    monkeypatch.setattr(signal_tasks, "dispatch_cve_rescore", dispatched.append)
+
+    earlier = datetime(2026, 1, 1, tzinfo=UTC)
+    # cve_id: (stored score, CSV score); a None CSV score = not in the CSV
+    cases = {
+        "CVE-2026-1001": (0.10, 0.25),  # jump >= 0.1, increase
+        "CVE-2026-1002": (0.45, 0.52),  # crosses 0.5 on a small delta
+        "CVE-2026-1003": (0.30, 0.35),  # small delta: no change event
+        "CVE-2026-1004": (None, 0.90),  # first score: no change event
+        "CVE-2026-1005": (0.80, 0.60),  # drop >= 0.1: event, no rescore
+        "CVE-2026-1006": (0.52, 0.48),  # falls below 0.5 on a small delta
+        "CVE-2026-1007": (0.50, 0.50),  # unchanged
+        "CVE-2026-1008": (0.20, 0.30),  # 0.3 - 0.2 is just under 0.1 in floats
+        "CVE-2026-1009": (0.20, None),  # unmatched: untouched
+    }
+    rows = {
+        cve_id: CVE(
+            cve_id=cve_id,
+            epss_score=old,
+            epss_percentile=0.5 if old is not None else None,
+            epss_updated_at=earlier if old is not None else None,
+            epss_previous_score=0.01,
+            epss_changed_at=earlier,
+        )
+        for cve_id, (old, _) in cases.items()
+    }
+    db_session.add_all(rows.values())
+    await db_session.flush()
+
+    csv_rows = {cve_id: (new, 0.77) for cve_id, (_, new) in cases.items() if new is not None}
+    csv_rows["CVE-2026-9999"] = (0.5, 0.5)  # scored by FIRST, unknown here
+    stats = await _run_sync_with(db_session, csv_rows)
+
+    assert stats["total_scores"] == 9
+    assert stats["updated"] == 8
+
+    significant = {}
+    for cve_id, (old, new) in cases.items():
+        row = rows[cve_id]
+        await db_session.refresh(row)
+        if new is None:
+            assert (row.epss_score, row.epss_updated_at, row.epss_previous_score) == (old, earlier, 0.01)
+            continue
+        assert row.epss_score == new, cve_id
+        assert row.epss_percentile == 0.77, cve_id
+        assert row.epss_updated_at > earlier, cve_id
+        if _expected_change(old, new):
+            significant[row.id] = (old, new)
+            assert row.epss_previous_score == old, cve_id
+            assert row.epss_changed_at == row.epss_updated_at, cve_id
+        else:
+            assert row.epss_previous_score == 0.01, cve_id
+            assert row.epss_changed_at == earlier, cve_id
+
+    assert {c for c, row in rows.items() if row.id in significant} == {
+        "CVE-2026-1001",
+        "CVE-2026-1002",
+        "CVE-2026-1005",
+    }
+    assert stats["score_changes"] == 3
+    events = (
+        (
+            await db_session.execute(
+                select(CorrelationEventRecord).where(CorrelationEventRecord.event_type == "cve_score_change")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert {e.source_entity_id for e in events} == set(significant)
+    assert all("EPSS score changed" in e.context for e in events)
+    # Rescores go out for increases only
+    assert sorted(dispatched) == sorted(i for i, (old, new) in significant.items() if new > old)
+    assert len(dispatched) == 2
+
+    # Every matched CVE has its one enrichment row, carrying the new score
+    results = (
+        await db_session.execute(
+            select(EnrichmentResult.entity_id, EnrichmentResult.parsed_data).where(
+                EnrichmentResult.source_type == "epss"
+            )
+        )
+    ).all()
+    matched = {rows[c].id: new for c, (_, new) in cases.items() if new is not None}
+    assert {entity_id: data["epss_score"] for entity_id, data in results} == matched

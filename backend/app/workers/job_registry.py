@@ -387,15 +387,18 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
             "day_of_week": "0",
         },
     },
+    # Writes malware, tool and actor rows, so it runs on its own day: the Sunday
+    # catalog syncs above also write threat_actors, and sharing their slot
+    # deadlocked.
     "malpedia-sync": {
         "task": "app.workers.enrichment_tasks.run_malpedia_sync",
         "description": "Sync malware families from Malpedia",
         "category": "enrichment",
         "default_schedule": {
             "type": "crontab",
-            "minute": "30",
-            "hour": "3",
-            "day_of_week": "0",
+            "minute": "0",
+            "hour": "1",
+            "day_of_week": "6",
         },
     },
     "backfill-rule-attack-mappings": {

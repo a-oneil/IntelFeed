@@ -1,0 +1,283 @@
+{
+ "family": {
+  "url": "https://malpedia.caad.fkie.fraunhofer.de/api/get/family/win.wannacryptor",
+  "status": 200,
+  "body": {
+   "urls": [
+    "http://blog.emsisoft.com/2017/05/12/wcry-ransomware-outbreak/",
+    "http://www.independent.co.uk/news/uk/home-news/wannacry-malware-hack-nhs-report-cybercrime-north-korea-uk-ben-wallace-a8022491.html",
+    "https://baesystemsai.blogspot.de/2017/05/wanacrypt0r-ransomworm.html"
+   ],
+   "uuid": "ad67ff31-2a02-43f9-8b12-7df7e4fcccd6",
+   "notes": [],
+   "sources": [],
+   "updated": "2026-09-24",
+   "alt_names": [
+    "Wana Decrypt0r",
+    "WannaCry",
+    "WannaCrypt",
+    "Wcry"
+   ],
+   "attribution": [
+    "Lazarus Group"
+   ],
+   "common_name": "WannaCryptor",
+   "description": "WannaCry is ransomware that contains a worm component enabled by the EternalBlue exploit. It attempts to use vulnerabilities in the Windows SMBv1 server to remotely compromise systems, encrypt files, and spread to other hosts. Systems that have installed the MS17-010 patch are not vulnerable to the exploits used. The spreading was stopped about 8 hours after initial outbreak due to triggering a kill switch domain.",
+   "library_entries": [
+    "akbanov:201901:wannacry:60d302c"
+   ]
+  }
+ },
+ "family_list": {
+  "url": "https://malpedia.caad.fkie.fraunhofer.de/api/list/families",
+  "status": 200,
+  "body": [
+   "win.wannacryptor",
+   "win.wannahusky",
+   "win.wannaren",
+   "win.zeus",
+   "win.zeus_action",
+   "win.zeus_mailsniffer",
+   "win.zeus_openssl",
+   "win.zeus_sphinx"
+  ]
+ },
+ "actor": {
+  "url": "https://malpedia.caad.fkie.fraunhofer.de/api/get/actor/lazarus_group",
+  "status": 200,
+  "body": {
+   "families": {
+    "win.unidentified_101": {
+     "urls": [
+      "https://securelist.com/bluenoroff-methods-bypass-motw/108383/"
+     ],
+     "uuid": "cca4f240-ac69-437e-b02a-5483ebef5087",
+     "notes": [],
+     "sources": [],
+     "updated": "2023-06-29",
+     "alt_names": [],
+     "attribution": [
+      "Lazarus Group"
+     ],
+     "common_name": "Unidentified 101 (Lazarus?)",
+     "description": "Potential Lazarus sample.",
+     "library_entries": [
+      "park:20221227:bluenoroff:383c86f",
+      "team:20221123:tweets:726f590"
+     ]
+    },
+    "win.unidentified_090": {
+     "urls": [],
+     "uuid": "565de3f5-7eb7-43ca-a9d9-b588dfd6a50a",
+     "notes": [],
+     "sources": [],
+     "updated": "2023-07-24",
+     "alt_names": [],
+     "attribution": [
+      "Lazarus Group"
+     ],
+     "common_name": "Unidentified 090 (Lazarus)",
+     "description": "Recon/Loader malware attributed to Lazarus, disguised as Notepad++ shell extension.",
+     "library_entries": [
+      "cocomelonc:20210906:av:215e5aa",
+      "pasca:20220131:detailed:262ea52",
+      "threatbook:202112:lazarus:63ddb59"
+     ]
+    },
+    "apk.badcall": {
+     "urls": [
+      "https://www.us-cert.gov/ncas/analysis-reports/ar19-252a"
+     ],
+     "uuid": "5eec00de-5d81-4907-817d-f99cb33d9b66",
+     "notes": [],
+     "sources": [],
+     "updated": "2023-05-15",
+     "alt_names": [],
+     "attribution": [
+      "Lazarus Group"
+     ],
+     "common_name": "BADCALL",
+     "description": "remote access tool (RAT) payload on Android devices",
+     "library_entries": [
+      "cisa:20190909:malware:f266520"
+     ]
+    },
+    "apk.hardrain": {
+     "urls": [
+      "https://securingtomorrow.mcafee.com/mcafee-labs/android-malware-appears-linked-to-lazarus-cybercrime-group/#sf174581990"
+     ],
+     "uuid": "0caf0292-b01a-4439-b56f-c75b71900bc0",
+     "notes": [],
+     "sources": [],
+     "updated": "2019-09-09",
+     "alt_names": [],
+     "attribution": [
+      "Lazarus Group"
+     ],
+     "common_name": "HARDRAIN",
+     "description": "",
+     "library_entries": [
+      "han:20171120:android:c3f825c",
+      "kasza:20171120:operation:0bc8efe",
+      "unknown:20180205:hidden:3e1e07e"
+     ]
+    },
+    "elf.spectral_blur": {
+     "urls": [
+      "https://twitter.com/X__Junior/status/1743193763000828066"
+     ],
+     "uuid": "a14e7ea4-668c-4990-a1a9-be99722f88f7",
+     "notes": [],
+     "sources": [],
+     "updated": "2024-03-18",
+     "alt_names": [],
+     "attribution": [
+      "Lazarus Group"
+     ],
+     "common_name": "SpectralBlur",
+     "description": "",
+     "library_entries": [
+      "ashraf:20240105:about:775e874"
+     ]
+    }
+   },
+   "description": "Since 2009, HIDDEN COBRA actors have leveraged their capabilities to target and compromise a range of victims; some intrusions have resulted in the exfiltration of data while others have been disruptive in nature. Commercial reporting has referred to this activity as Lazarus Group and Guardians of Peace. Tools and capabilities used by HIDDEN COBRA actors include DDoS botnets, keyloggers, remote access tools (RATs), and wiper malware. Variants of malware and tools used by HIDDEN COBRA actors include Destover, Duuzer, and Hangman.",
+   "meta": {
+    "attribution-confidence": "50",
+    "cfr-suspected-state-sponsor": "Korea (Democratic People's Republic of)",
+    "cfr-suspected-victims": [
+     "South Korea",
+     "Bangladesh Bank",
+     "Sony Pictures Entertainment",
+     "United States",
+     "Thailand",
+     "France",
+     "China",
+     "Hong Kong",
+     "United Kingdom",
+     "Guatemala",
+     "Canada",
+     "Bangladesh",
+     "Japan",
+     "India",
+     "Germany",
+     "Brazil",
+     "Thailand",
+     "Australia",
+     "Cryptocurrency exchanges in South Korea"
+    ],
+    "cfr-target-category": [
+     "Government",
+     "Private sector"
+    ],
+    "cfr-type-of-incident": [
+     "Espionage",
+     "Sabotage"
+    ],
+    "country": "KP",
+    "name-attribution": [
+     "Hidden Cobra:b8ca0932-c4cb-45c0-b7b1-88b9685ba24b",
+     "Labyrinth Chollima:f9eb432f-2293-48b7-bca4-cc78beb50df0",
+     "Operation Troy:b8ca0932-c4cb-45c0-b7b1-88b9685ba24b",
+     "Operation GhostSecret:b8ca0932-c4cb-45c0-b7b1-88b9685ba24b",
+     "Operation AppleJeus:0d4886f9-97e1-4cb2-8822-580fd09540e5",
+     "APT38:da5cdcd1-7b15-4371-b7eb-ca32916d2052",
+     "APT 38:da5cdcd1-7b15-4371-b7eb-ca32916d2052",
+     "Stardust Chollima:f9eb432f-2293-48b7-bca4-cc78beb50df0",
+     "Citrine Sleet:d0c33595-b684-45ef-91c3-e2f5ce1a8191",
+     "DEV-0139:d0c33595-b684-45ef-91c3-e2f5ce1a8191",
+     "DEV-1222:d0c33595-b684-45ef-91c3-e2f5ce1a8191",
+     "Diamond Sleet:d0c33595-b684-45ef-91c3-e2f5ce1a8191",
+     "Sapphire Sleet:d0c33595-b684-45ef-91c3-e2f5ce1a8191",
+     "TA404:cae79680-67a6-4411-903c-f824dbcc813f",
+     "Moonstone Sleet:d0c33595-b684-45ef-91c3-e2f5ce1a8191",
+     "NICKEL GLADSTONE:a7119872-bc6b-494b-9f7a-8c50faaf53a9",
+     "G0032:a1ad5090-2487-46d2-8237-6151a2dd5063",
+     "G0082:a1ad5090-2487-46d2-8237-6151a2dd5063"
+    ],
+    "origin:APT-C-26": "QiAnXin",
+    "origin:DEV-0139": "Microsoft",
+    "origin:DEV-1222": "Microsoft",
+    "refs": [
+     "https://threatpost.com/operation-blockbuster-coalition-ties-destructive-attacks-to-lazarus-group/116422/",
+     "https://www.us-cert.gov/ncas/alerts/TA17-164A",
+     "https://www.us-cert.gov/ncas/alerts/TA17-318A"
+    ],
+    "synonyms": [
+     "Operation DarkSeoul",
+     "Dark Seoul",
+     "Hidden Cobra",
+     "Hastati Group",
+     "Andariel",
+     "Unit 121",
+     "Bureau 121",
+     "NewRomanic Cyber Army Team",
+     "Bluenoroff",
+     "Subgroup: Bluenoroff",
+     "Group 77",
+     "Labyrinth Chollima",
+     "Operation Troy",
+     "Operation GhostSecret",
+     "Operation AppleJeus",
+     "APT38",
+     "APT 38",
+     "Stardust Chollima",
+     "Whois Hacking Team",
+     "Zinc",
+     "Appleworm",
+     "Nickel Academy",
+     "APT-C-26",
+     "NICKEL GLADSTONE",
+     "COVELLITE",
+     "ATK3",
+     "G0032",
+     "ATK117",
+     "G0082",
+     "Citrine Sleet",
+     "DEV-0139",
+     "DEV-1222",
+     "Diamond Sleet",
+     "ZINC",
+     "Sapphire Sleet",
+     "COPERNICIUM",
+     "TA404",
+     "Lazarus group",
+     "BeagleBoyz",
+     "Moonstone Sleet",
+     "Black Artemis",
+     "Lazarus",
+     "Genie Spider",
+     "UNC1069",
+     "Alluring Pisces",
+     "CageyChameleon",
+     "CryptoCore"
+    ]
+   },
+   "related": [
+    {
+     "dest-uuid": "c93fccb1-e8e8-42cf-ae33-2ad1d183913a",
+     "tags": [
+      "estimative-language:likelihood-probability=\"likely\""
+     ],
+     "type": "similar"
+    },
+    {
+     "dest-uuid": "b06c3af1-0243-4428-88da-b3451c345e1e",
+     "tags": [
+      "estimative-language:likelihood-probability=\"likely\""
+     ],
+     "type": "similar"
+    }
+   ],
+   "uuid": "68391641-859f-4a9a-9a1e-3e5cf71ec376",
+   "value": "Lazarus Group"
+  }
+ },
+ "not_found": {
+  "url": "https://malpedia.caad.fkie.fraunhofer.de/api/get/family/wannacry",
+  "status": 404,
+  "body": {
+   "detail": "No Family matches the given query."
+  }
+ }
+}

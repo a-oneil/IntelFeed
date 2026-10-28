@@ -1,0 +1,43 @@
+{
+ "found": {
+  "url": "https://api.github.com/search/repositories?q=CVE-2021-44228+poc+exploit&sort=stars&order=desc&per_page=5",
+  "status": 200,
+  "body": {
+   "total_count": 15,
+   "incomplete_results": false,
+   "items": [
+    {
+     "id": 437131550,
+     "name": "CVE-2021-44228-PoC-log4j-bypass-words",
+     "full_name": "Puliczek/CVE-2021-44228-PoC-log4j-bypass-words",
+     "html_url": "https://github.com/Puliczek/CVE-2021-44228-PoC-log4j-bypass-words",
+     "description": "🐱‍💻 ✂️ 🤬 CVE-2021-44228 - LOG4J Java exploit - WAF bypass tricks",
+     "created_at": "2021-12-10T22:35:00Z",
+     "updated_at": "2026-10-17T02:30:47Z",
+     "stargazers_count": 952,
+     "language": "Java"
+    },
+    {
+     "id": 442519195,
+     "name": "awesome-list-of-secrets-in-environment-variables",
+     "full_name": "Puliczek/awesome-list-of-secrets-in-environment-variables",
+     "html_url": "https://github.com/Puliczek/awesome-list-of-secrets-in-environment-variables",
+     "description": "🦄🔒 Awesome list of secrets in environment variables 🖥️",
+     "created_at": "2021-12-28T16:22:57Z",
+     "updated_at": "2026-10-22T10:47:12Z",
+     "stargazers_count": 912,
+     "language": null
+    }
+   ]
+  }
+ },
+ "not_found": {
+  "url": "https://api.github.com/search/repositories?q=CVE-1999-99999+poc+exploit&sort=stars&order=desc&per_page=5",
+  "status": 200,
+  "body": {
+   "total_count": 0,
+   "incomplete_results": false,
+   "items": []
+  }
+ }
+}

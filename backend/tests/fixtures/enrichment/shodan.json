@@ -1,0 +1,27 @@
+{
+ "found": {
+  "url": "https://internetdb.shodan.io/8.8.8.8",
+  "status": 200,
+  "body": {
+   "cpes": [],
+   "hostnames": [
+    "dns.google",
+    "direct.suntory.co.jp"
+   ],
+   "ip": "8.8.8.8",
+   "ports": [
+    53,
+    443
+   ],
+   "tags": [],
+   "vulns": []
+  }
+ },
+ "not_found": {
+  "url": "https://internetdb.shodan.io/10.1.2.3",
+  "status": 404,
+  "body": {
+   "detail": "No information available"
+  }
+ }
+}

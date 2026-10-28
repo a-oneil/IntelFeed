@@ -822,7 +822,7 @@ Enrichment adds outside data to CVEs, techniques, malware and indicators. Source
 | CVEDetails | Yes | Auto | 60/min | CVE context |
 | Wikipedia | No | Auto | 10/min | Background articles |
 | VirusTotal v3 | Yes | Manual | 4/min | Indicator reputation |
-| GreyNoise Community | Yes | Manual | 10/hour | IP noise, reputation |
+| GreyNoise Community | No (optional) | Manual | 10/hour | IP noise, reputation |
 | Shodan InternetDB | No | Auto | 30/min | IP open ports and tags |
 
 Auto = on new data, Scheduled = on a timer, Manual = on request from an entity or indicator.

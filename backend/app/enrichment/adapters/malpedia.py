@@ -86,7 +86,7 @@ class MalpediaAdapter(EnrichmentAdapter):
                 "description": (data.get("description") or "")[:2000],
                 "alt_names": data.get("alt_names", []),
                 "attribution": data.get("attribution", []),
-                "urls": [{"url": u.get("url"), "source": u.get("source")} for u in (data.get("urls") or [])[:10]],
+                "urls": (data.get("urls") or [])[:10],  # plain URL strings
                 "malpedia_url": data.get("malpedia_url"),
             },
             ttl_hours=168,
@@ -142,9 +142,8 @@ class MalpediaAdapter(EnrichmentAdapter):
                 "alt_names": data.get("meta", {}).get("synonyms", []),
                 "country": data.get("meta", {}).get("country"),
                 "refs": data.get("meta", {}).get("refs", [])[:10],
-                "families": [f.get("value") for f in (data.get("families") or [])[:20]]
-                if isinstance(data.get("families"), list)
-                else [],
+                # Malpedia keys an actor's families by family id ("win.wannacryptor").
+                "families": list(data.get("families") or {})[:20],
             },
             ttl_hours=168,
         )

@@ -318,8 +318,8 @@ Some of the beat jobs that keep entities current (times UTC):
 | Daily 06:30 | `epss-bulk-sync` | EPSS scores for all CVEs |
 | Daily 05:00 | `github-poc-scan` | Public exploit code on GitHub |
 | Sundays 03:00 | `mitre-attack-sync` | Full ATT&CK import |
-| Sundays 03:30 | `malpedia-sync` | Malware names, aliases, descriptions |
 | Sundays 03:30 | `misp-galaxy-sync` | Reference aliases for threat actors |
+| Saturdays 01:00 | `malpedia-sync` | Malware names, aliases, descriptions |
 
 The full list is in [workers-search-dashboards.md](workers-search-dashboards.md).
 

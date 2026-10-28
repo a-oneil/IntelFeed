@@ -1,0 +1,26 @@
+{
+ "found": {
+  "url": "https://api.greynoise.io/v3/community/71.6.135.131",
+  "status": 200,
+  "body": {
+   "ip": "71.6.135.131",
+   "noise": true,
+   "riot": false,
+   "classification": "benign",
+   "name": "Shodan.io",
+   "link": "https://viz.greynoise.io/ip/71.6.135.131",
+   "last_seen": "2026-10-28",
+   "message": "Success"
+  }
+ },
+ "not_found": {
+  "url": "https://api.greynoise.io/v3/community/1.1.1.1",
+  "status": 404,
+  "body": {
+   "ip": "1.1.1.1",
+   "noise": false,
+   "riot": false,
+   "message": "IP not observed scanning the internet."
+  }
+ }
+}

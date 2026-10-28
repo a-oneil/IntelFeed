@@ -576,7 +576,7 @@ All three tables are in `backend/app/models/enrichment.py`.
 | `cvedetails` | CVEDetails | cve | auto | Yes | 60 / 60 s | medium |
 | `wikipedia` | Wikipedia | threat_actor, malware, tool, country, vendor, product, ttp, mitigation, cve, cwe | auto | No | 10 / 60 s | low |
 | `virustotal` | VirusTotal v3 | observable | manual | Yes | 4 / 60 s | medium |
-| `greynoise` | GreyNoise Community | observable | manual | Yes | 10 / 3600 s | medium |
+| `greynoise` | GreyNoise Community | observable (IPv4 only) | manual | No (optional key) | 10 / 3600 s | medium |
 | `shodan` | Shodan InternetDB | observable (IPv4 only) | auto | No | 30 / 60 s | medium |
 
 Every adapter extends `EnrichmentAdapter` (`backend/app/enrichment/base.py`). It sets `source_type`, `display_name`, `supported_entity_types`, `requires_api_key`, `default_trigger_mode`, and optionally `shared_key_group`. It implements `enrich(entity_type, value) -> EnrichmentData(raw_response, parsed_data, ttl_hours=24)`, and may override `bulk_sync()` and `check_health()`.
@@ -647,15 +647,15 @@ Besides the generic `scheduled-enrichment-check`, these beat jobs keep reference
 
 | Job key | Default schedule (UTC) | What it does |
 |---|---|---|
-| `epss-bulk-sync` | Daily 06:30 | EPSS scores for every CVE |
+| `epss-bulk-sync` | Daily 06:30 | EPSS scores for every CVE, applied in chunks of 5,000 |
 | `sync-kev-feed` | Every 6 hours at :15 | CISA KEV flags |
-| `cve-nvd-backfill` | Daily 01:30 | NVD data for CVEs that lack it |
+| `cve-nvd-backfill` | Daily 01:30 | NVD data for CVEs that lack it, as many as fit in 13 minutes; the rest wait for the next run |
 | `cve-nvd-refresh` | Daily 12:00 | CVSS changes on existing CVEs |
 | `github-poc-scan` | Daily 05:00 | Public exploit repos for CVEs |
 | `mitre-attack-sync` | Sunday 03:00 | ATT&CK techniques, groups and mitigations |
-| `malpedia-sync` | Sunday 03:30 | Malware families |
 | `misp-galaxy-sync` | Sunday 03:30 | Reference actor aliases from the MISP Galaxy |
 | `metasploit-sync` | Sunday 03:45 | Maps CVEs to Metasploit modules |
+| `malpedia-sync` | Saturday 01:00 | Malware families; on its own day because it writes the actor rows the Sunday syncs also write |
 | `wikipedia-bulk-sync` | Wednesday 04:00 | Wikipedia content for entities that lack it |
 
 The Malpedia sync passes `alt_names` through `filter_aliases()` (`backend/app/intelligence/autolinker.py`), so junk aliases never enter an entity's `aliases`.

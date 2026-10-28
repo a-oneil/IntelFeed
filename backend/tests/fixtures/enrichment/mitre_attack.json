@@ -1,0 +1,162 @@
+{
+ "bundle": {
+  "url": "https://raw.githubusercontent.com/mitre-attack/attack-stix-data/refs/heads/master/enterprise-attack/enterprise-attack.json",
+  "status": 200,
+  "body": {
+   "type": "bundle",
+   "id": "bundle--fc207382-c9d1-4ece-bce2-6ef555c62d0a",
+   "objects": [
+    {
+     "type": "attack-pattern",
+     "spec_version": "2.1",
+     "id": "attack-pattern--970a3432-3237-47ad-bcca-7d8cbb217736",
+     "created": "2020-03-09T13:48:55.078Z",
+     "created_by_ref": "identity--c78cb6e5-0c4b-4611-8297-d1b8b55e40b5",
+     "revoked": false,
+     "external_references": [
+      {
+       "source_name": "mitre-attack",
+       "url": "https://attack.mitre.org/techniques/T1059/001",
+       "external_id": "T1059.001"
+      }
+     ],
+     "modified": "2026-09-18T13:23:14.419Z",
+     "name": "PowerShell",
+     "description": "Adversaries may abuse PowerShell commands and scripts for execution. PowerShell is a powerful interactive command-line interface and scripting environment included in the Windows operating system.(Citation: TechNet PowerShell) PowerShell can also be installed on Linux and macOS.(Citation: Powershell",
+     "kill_chain_phases": [
+      {
+       "kill_chain_name": "mitre-attack",
+       "phase_name": "execution"
+      }
+     ],
+     "x_mitre_attack_spec_version": "3.3.0",
+     "x_mitre_deprecated": false,
+     "x_mitre_domains": [
+      "enterprise-attack"
+     ],
+     "x_mitre_is_subtechnique": true,
+     "x_mitre_platforms": [
+      "Windows",
+      "Linux",
+      "macOS"
+     ],
+     "x_mitre_version": "1.6",
+     "x_mitre_remote_support": false
+    },
+    {
+     "type": "intrusion-set",
+     "spec_version": "2.1",
+     "id": "intrusion-set--c93fccb1-e8e8-42cf-ae33-2ad1d183913a",
+     "created": "2017-05-31T21:32:03.807Z",
+     "created_by_ref": "identity--c78cb6e5-0c4b-4611-8297-d1b8b55e40b5",
+     "revoked": false,
+     "external_references": [
+      {
+       "source_name": "mitre-attack",
+       "url": "https://attack.mitre.org/groups/G0032",
+       "external_id": "G0032"
+      }
+     ],
+     "modified": "2026-07-31T20:48:46.106Z",
+     "name": "Lazarus Group",
+     "description": "[Lazarus Group](https://attack.mitre.org/groups/G0032) is a North Korean state-sponsored cyber threat group attributed to the Reconnaissance General Bureau (RGB). (Citation: US-CERT HIDDEN COBRA June 2017) (Citation: Treasury North Korean Cyber Groups September 2019) [Lazarus Group](https://attack.m",
+     "aliases": [
+      "Lazarus Group",
+      "Labyrinth Chollima",
+      "HIDDEN COBRA",
+      "Guardians of Peace",
+      "ZINC",
+      "NICKEL ACADEMY",
+      "Diamond Sleet"
+     ],
+     "x_mitre_deprecated": false,
+     "x_mitre_domains": [
+      "enterprise-attack",
+      "ics-attack"
+     ],
+     "x_mitre_version": "5.0",
+     "x_mitre_attack_spec_version": "3.3.0"
+    },
+    {
+     "modified": "2024-12-09T02:29:13.859Z",
+     "name": "WannaCry",
+     "description": "[WannaCry](https://attack.mitre.org/software/S0366) is ransomware that was first seen in a global attack during May 2017, which affected more than 150 countries. It contains worm-like features to spread itself across a computer network using the SMBv1 exploit EternalBlue.(Citation: LogRhythm WannaCr",
+     "is_family": true,
+     "x_mitre_platforms": [
+      "Windows"
+     ],
+     "x_mitre_deprecated": false,
+     "x_mitre_domains": [
+      "enterprise-attack",
+      "ics-attack"
+     ],
+     "x_mitre_version": "1.1",
+     "x_mitre_aliases": [
+      "WannaCry",
+      "WanaCry",
+      "WanaCrypt",
+      "WanaCrypt0r",
+      "WCry"
+     ],
+     "type": "malware",
+     "spec_version": "2.1",
+     "id": "malware--75ecdbf1-c2bb-4afc-a3f9-c8da4de8c661",
+     "created": "2019-03-25T17:30:17.004Z",
+     "created_by_ref": "identity--c78cb6e5-0c4b-4611-8297-d1b8b55e40b5",
+     "revoked": false,
+     "external_references": [
+      {
+       "source_name": "mitre-attack",
+       "url": "https://attack.mitre.org/software/S0366",
+       "external_id": "S0366"
+      }
+     ],
+     "x_mitre_attack_spec_version": "3.2.0"
+    },
+    {
+     "type": "course-of-action",
+     "spec_version": "2.1",
+     "id": "course-of-action--eb88d97c-32f1-40be-80f0-d61a4b0b4b31",
+     "created": "2019-06-11T16:45:19.740Z",
+     "created_by_ref": "identity--c78cb6e5-0c4b-4611-8297-d1b8b55e40b5",
+     "revoked": false,
+     "external_references": [
+      {
+       "source_name": "mitre-attack",
+       "url": "https://attack.mitre.org/mitigations/M1042",
+       "external_id": "M1042"
+      }
+     ],
+     "modified": "2026-05-12T15:12:00.731Z",
+     "name": "Disable or Remove Feature or Program",
+     "description": "Disable or remove unnecessary and potentially vulnerable software, features, or services to reduce the attack surface and prevent abuse by adversaries. This involves identifying software or features that are no longer needed or that could be exploited and ensuring they are either removed or properly",
+     "x_mitre_deprecated": false,
+     "x_mitre_domains": [
+      "enterprise-attack"
+     ],
+     "x_mitre_version": "1.2",
+     "x_mitre_attack_spec_version": "3.3.0"
+    },
+    {
+     "type": "relationship",
+     "spec_version": "2.1",
+     "id": "relationship--5a580cd0-19f1-41d6-865b-786a41081a7e",
+     "created": "2020-03-09T13:48:55.802Z",
+     "created_by_ref": "identity--c78cb6e5-0c4b-4611-8297-d1b8b55e40b5",
+     "revoked": false,
+     "object_marking_refs": [
+      "marking-definition--fa42a846-8d90-4e51-bc29-71d5b4802168"
+     ],
+     "modified": "2026-04-29T14:23:06.048Z",
+     "description": "It may be possible to remove PowerShell from systems when not needed, but a review should be performed to assess the impact to an environment, since it could be in use for many legitimate purposes and administrative functions.\n\nDisable/restrict the WinRM Service to help prevent uses of PowerShell for remote execution.",
+     "relationship_type": "mitigates",
+     "source_ref": "course-of-action--eb88d97c-32f1-40be-80f0-d61a4b0b4b31",
+     "target_ref": "attack-pattern--970a3432-3237-47ad-bcca-7d8cbb217736",
+     "x_mitre_modified_by_ref": "identity--c78cb6e5-0c4b-4611-8297-d1b8b55e40b5",
+     "x_mitre_deprecated": false,
+     "x_mitre_attack_spec_version": "3.3.0"
+    }
+   ]
+  }
+ }
+}
