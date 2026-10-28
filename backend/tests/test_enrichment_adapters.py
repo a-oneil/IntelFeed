@@ -57,9 +57,15 @@ class TestAdapterRegistry:
         assert adapter.config["ttl_hours"] == 48
 
     def test_default_sources_defined(self):
-        assert len(DEFAULT_SOURCES) == 13
+        assert len(DEFAULT_SOURCES) == 18
         source_types = {s["source_type"] for s in DEFAULT_SOURCES}
-        assert source_types == set(ADAPTER_REGISTRY.keys())
+        assert source_types == set(ADAPTER_REGISTRY) | {
+            "misp_galaxy",
+            "metasploit",
+            "mitre_cwe",
+            "ransomware_live",
+            "cybergeist",
+        }
 
     def test_all_adapters_have_required_attributes(self):
         for source_type, adapter_cls in ADAPTER_REGISTRY.items():
@@ -105,7 +111,7 @@ class TestVulnCheckAdapter:
         adapter = get_adapter("vulncheck")
         assert adapter.supports_entity("cve")
         assert not adapter.supports_entity("ioc_ipv4")
-        assert adapter.default_trigger_mode == "scheduled"
+        assert adapter.default_trigger_mode == "manual"
 
 
 class TestOSVAdapter:
@@ -122,7 +128,7 @@ class TestMalpediaAdapter:
         assert adapter.supports_entity("malware")
         assert adapter.supports_entity("threat_actor")
         assert not adapter.supports_entity("cve")
-        assert adapter.default_trigger_mode == "scheduled"
+        assert adapter.default_trigger_mode == "manual"
 
 
 class TestGitHubPoCAdapter:
@@ -131,7 +137,7 @@ class TestGitHubPoCAdapter:
         assert adapter.supports_entity("cve")
         assert not adapter.supports_entity("ioc_ipv4")
         assert adapter.requires_api_key is False
-        assert adapter.default_trigger_mode == "scheduled"
+        assert adapter.default_trigger_mode == "manual"
 
 
 class TestWikipediaAdapter:

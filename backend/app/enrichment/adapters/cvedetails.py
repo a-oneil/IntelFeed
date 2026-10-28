@@ -10,6 +10,7 @@ API docs: https://www.cvedetails.com/documentation/apis
 import httpx
 
 from app.enrichment.base import EnrichmentAdapter, EnrichmentData
+from app.enrichment.manifest import Context, Display, Egress, License, Quota
 
 API_BASE = "https://www.cvedetails.com/api/v1"
 
@@ -17,9 +18,22 @@ API_BASE = "https://www.cvedetails.com/api/v1"
 class CVEDetailsAdapter(EnrichmentAdapter):
     source_type = "cvedetails"
     display_name = "CVEDetails"
-    supported_entity_types = ["cve"]
-    requires_api_key = True
+    applies_to = {"cve": None}
+    requires = ("api_key",)
+    quota = Quota(60, 60, daily_budget=1000)
+    egress = Egress.LOW
+    license = License("CVEDetails API subscription", attribution="CVEdetails.com", commercial_ok=False)
     default_trigger_mode = "auto"
+    outputs = (
+        Context(
+            "exploits",
+            "Exploits",
+            Display.TABLE,
+            item={"Source": "source", "Link": "url", "Description": "description"},
+        ),
+        Context("advisories", "Advisories", Display.TABLE, item={"Source": "source", "Title": "title", "Link": "url"}),
+        Context("cvedetails_url", "CVEdetails", Display.LINK),
+    )
 
     async def enrich(self, entity_type: str, entity_value: str) -> EnrichmentData:
         headers = {

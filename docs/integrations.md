@@ -807,25 +807,30 @@ OpenRouter's health check doesn't validate the key, so a bad key passes **Test**
 
 ### 18. Configure Enrichment Sources
 
-Enrichment adds outside data to CVEs, techniques, malware and indicators. Sources are in `backend/app/enrichment/registry.py`:
+Enrichment adds outside data to CVEs, techniques, malware and indicators. Each source declares itself in its class (`backend/app/enrichment/adapters/`, `backend/app/enrichment/catalogs.py`), listed in `backend/app/enrichment/registry.py`:
 
-| Source | Key | Default trigger | Default rate limit | Adds |
-|--------|---------|-----------------|--------------------|------|
-| FIRST EPSS | No | Scheduled | 100/min | CVE exploit probability |
-| NVD API 2.0 | No | Auto | 50 per 30 s | CVE details, CVSS |
-| CISA KEV | No | Scheduled | 100/min | Known exploited CVEs |
-| MITRE ATT&CK | No | Scheduled | 10/hour | Technique data |
-| VulnCheck KEV | Yes | Scheduled | 1,000/min | KEV, EPSS, exploit data |
-| OSV | No | Auto | 100/min | Open-source vulnerabilities |
-| Malpedia | No | Scheduled | 30/min | Malware families |
-| GitHub PoC | No | Scheduled | 10/min | Public PoC repos |
-| CVEDetails | Yes | Auto | 60/min | CVE context |
-| Wikipedia | No | Auto | 10/min | Background articles |
-| VirusTotal v3 | Yes | Manual | 4/min | Indicator reputation |
-| GreyNoise Community | No (optional) | Manual | 10/hour | IP noise, reputation |
-| Shodan InternetDB | No | Auto | 30/min | IP open ports and tags |
+| Source | Key | Default trigger | Default rate limit | Scheduled jobs | Adds |
+|--------|---------|-----------------|--------------------|----------------|------|
+| FIRST EPSS | No | Manual | 100/min | Daily score sync | CVE exploit probability |
+| NVD API 2.0 | No | Auto | 50 per 30 s | Backfill, refresh, re-enrich | CVE details, CVSS |
+| CISA KEV | No | Manual | 100/min | Catalog sync every 6 h | Known exploited CVEs |
+| MITRE ATT&CK | No | Manual | 10/hour | Weekly bundle sync | Technique data |
+| VulnCheck KEV | Yes | Manual | 1,000/min | | KEV, EPSS, exploit data |
+| OSV | No | Auto | 100/min | | Open-source vulnerabilities |
+| Malpedia | No | Manual | 30/min | Weekly family sync | Malware families |
+| GitHub PoC | No (optional token) | Manual | 10/min, 30/min with a token | Daily PoC scan | Public PoC repos |
+| CVEDetails | Yes | Auto | 60/min | | CVE context |
+| Wikipedia | No | Auto | 20/min | Weekly sync | Background articles |
+| VirusTotal v3 | Yes | Manual | 4/min | | Indicator reputation |
+| GreyNoise Community | No (optional) | Manual | 10/hour | | IP noise, reputation |
+| Shodan InternetDB | No | Auto | 30/min | | IP open ports and tags |
+| MISP Galaxy | No | — | 10/hour | Weekly | Reference actor aliases |
+| Metasploit modules | No | — | 10/hour | Weekly | CVEs with Metasploit modules |
+| MITRE CWE | No | — | 10/hour | Weekly | The CWE catalog |
+| ransomware.live | No | — | 2/min | Every 30 min | Leak-site victims |
+| Cybergeist | No | — | 10/hour | Daily | Threat actors and malware |
 
-Auto = on new data, Scheduled = on a timer, Manual = on request from an entity or indicator.
+Auto = looked up when a new entity appears; Manual = on request from an entity or indicator. The last five are catalog sources: they only run their jobs. Turning a source off also stops its jobs. A rate above what a source documents it allows is refused.
 
 **To configure:** **Settings → Engine → Pipeline** → **enrich** stage: turn on sources, paste keys, optionally change rate limit and confidence threshold, save.
 
@@ -944,7 +949,7 @@ For email, add a **Run Webhook** to an email relay (recipe 5):
 
 ### Enrichment sources not running
 
-- Is it on (**Settings → Engine → Pipeline**, enrich stage), with a working key and healthy status?
+- Is it on (**Settings → Engine → Pipeline**, enrich stage), with a working key and healthy status? A disabled source's jobs report `skipped: source disabled` in the Jobs view.
 - Errors are in **Settings → Logs** (Tasks).
 - Lower the rate limit if throttled.
 

@@ -7,7 +7,7 @@ from datetime import UTC, date, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.enrichment.gateway import JOB_TOKEN_WAIT, SOURCE_REFUSALS, SourceGateway
+from app.enrichment.gateway import JOB_TOKEN_WAIT, SOURCE_REFUSALS
 from app.intelligence.entity_resolution import gate_aliases, resolve_entity_creation
 from app.models.cve import CVE
 from app.models.malware_family import MalwareFamily
@@ -21,10 +21,6 @@ KEV_REDIS_KEY = "intelfeed:kev:version"
 
 CYBERGEIST_ACTOR_URL = "https://pubbucket.cybergeist.io/cybergeist.io-threatActor-public-feed.json"
 CYBERGEIST_MALWARE_URL = "https://pubbucket.cybergeist.io/cybergeist.io-malware-public-feed.json"
-# Two files a day, with no enrichment_sources row to configure them.
-CYBERGEIST_GATEWAY = SourceGateway(
-    "cybergeist", rate_limit_config={"requests_per_period": 10, "period_seconds": 3600}, max_wait=JOB_TOKEN_WAIT
-)
 
 # New KEV CVEs enriched from NVD per sync, and the seconds that may take.
 MAX_NVD_ENRICHMENT = 50
@@ -234,8 +230,11 @@ async def sync_cybergeist_threat_actors(db: AsyncSession) -> dict:
     stats = {"new": 0, "updated": 0, "skipped": 0, "errors": 0}
     new_entity_ids = []
 
+    from app.enrichment.pipeline import gateway_for
+
+    gateway, _ = await gateway_for(db, "cybergeist", max_wait=JOB_TOKEN_WAIT)
     try:
-        async with CYBERGEIST_GATEWAY.client(timeout=30) as client:
+        async with gateway.client(timeout=30) as client:
             resp = await client.get(CYBERGEIST_ACTOR_URL)
             resp.raise_for_status()
             actors_data = resp.json()
@@ -333,8 +332,11 @@ async def sync_cybergeist_malware(db: AsyncSession) -> dict:
     stats = {"new": 0, "updated": 0, "skipped": 0, "errors": 0}
     new_entity_ids = []
 
+    from app.enrichment.pipeline import gateway_for
+
+    gateway, _ = await gateway_for(db, "cybergeist", max_wait=JOB_TOKEN_WAIT)
     try:
-        async with CYBERGEIST_GATEWAY.client(timeout=30) as client:
+        async with gateway.client(timeout=30) as client:
             resp = await client.get(CYBERGEIST_MALWARE_URL)
             resp.raise_for_status()
             malware_data = resp.json()

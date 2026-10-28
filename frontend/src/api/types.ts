@@ -2810,8 +2810,6 @@ export interface EnrichmentSource {
   min_confidence_threshold: string;
   daily_budget: number | null;
   daily_budget_used: number;
-  schedule_interval_hours: number;
-  next_scheduled_at: string | null;
   supported_entity_types: string[];
   last_synced_at: string | null;
   health_status: string;

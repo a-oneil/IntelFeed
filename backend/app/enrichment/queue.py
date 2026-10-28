@@ -100,7 +100,7 @@ async def enqueue(
             applicable = [
                 st
                 for st in (await db.execute(query)).scalars()
-                if st in ADAPTER_REGISTRY and entity_type in ADAPTER_REGISTRY[st].supported_entity_types
+                if st in ADAPTER_REGISTRY and entity_type in ADAPTER_REGISTRY[st].applies_to
             ]
             if not applicable:
                 return []

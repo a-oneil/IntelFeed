@@ -6,14 +6,30 @@ Provides exploitation probability scores for CVEs.
 import httpx
 
 from app.enrichment.base import EnrichmentAdapter, EnrichmentData
+from app.enrichment.manifest import Context, Display, Egress, Job, License, Quota
 
 
 class EPSSAdapter(EnrichmentAdapter):
     source_type = "epss"
     display_name = "FIRST EPSS"
-    supported_entity_types = ["cve"]
-    requires_api_key = False
-    default_trigger_mode = "scheduled"
+    applies_to = {"cve": None}
+    # The job downloads one CSV a day; api.first.org publishes no request limit.
+    quota = Quota(100, 60, daily_budget=500)
+    egress = Egress.LOW
+    license = License("FIRST EPSS", attribution="EPSS scores by FIRST.org")
+    jobs = (
+        Job(
+            "epss-bulk-sync",
+            "app.workers.enrichment_tasks.run_epss_bulk_sync",
+            {"type": "crontab", "minute": "30", "hour": "6"},
+            "Update all CVEs with EPSS scores from epss.empiricalsecurity.com",
+        ),
+    )
+    outputs = (
+        Context("epss", "EPSS score", Display.FACT),
+        Context("percentile", "EPSS percentile", Display.FACT),
+        Context("date", "Scored on", Display.FACT),
+    )
 
     async def enrich(self, entity_type: str, entity_value: str) -> EnrichmentData:
         """Enrich a single CVE with EPSS score."""

@@ -281,10 +281,13 @@ async def _seed_enrichment_sources() -> None:
                     EnrichmentSource(
                         source_type=src["source_type"],
                         display_name=src["display_name"],
-                        is_enabled=False,
-                        trigger_mode=src.get("default_trigger_mode", "manual"),
-                        rate_limit_config=src.get("default_rate_limit", {}),
-                        daily_budget=src.get("default_daily_budget"),
+                        is_enabled=src["default_enabled"],
+                        # A source on only so its jobs run starts in manual: a
+                        # fresh install makes no per-entity lookups until an
+                        # admin chooses auto.
+                        trigger_mode="manual" if src["default_enabled"] else src["default_trigger_mode"],
+                        rate_limit_config=src["default_rate_limit"],
+                        daily_budget=src["default_daily_budget"],
                         health_status="unknown",
                         config={},
                     )

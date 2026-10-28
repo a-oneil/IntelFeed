@@ -16,6 +16,7 @@ import redis
 from celery.schedules import crontab
 
 from app.config import settings
+from app.enrichment.registry import enrichment_jobs
 
 logger = logging.getLogger(__name__)
 
@@ -61,30 +62,6 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
         "default_schedule": {"type": "crontab", "minute": "30", "hour": "*/6"},
     },
     # --- Intelligence ---
-    "sync-kev-feed": {
-        "task": "app.workers.intel_feed_tasks.sync_kev_feed",
-        "description": "Sync CISA Known Exploited Vulnerabilities catalog",
-        "category": "intelligence",
-        "default_schedule": {"type": "crontab", "minute": "15", "hour": "*/6"},
-    },
-    "refresh-cwe-catalog": {
-        "task": "app.workers.intel_feed_tasks.refresh_cwe_catalog",
-        "description": "Re-pull the MITRE CWE catalog and re-resolve unmatched NVD weakness refs",
-        "category": "intelligence",
-        "default_schedule": {"type": "crontab", "minute": "45", "hour": "3", "day_of_week": "1"},
-    },
-    "sync-cybergeist-feeds": {
-        "task": "app.workers.intel_feed_tasks.sync_cybergeist_feeds",
-        "description": "Sync threat actor and malware feeds from Cybergeist",
-        "category": "intelligence",
-        "default_schedule": {"type": "crontab", "minute": "30", "hour": "2"},
-    },
-    "sync-ransomware-victims": {
-        "task": "app.workers.intel_feed_tasks.sync_ransomware_victims",
-        "description": "Collect ransomware leak-site victim postings",
-        "category": "intelligence",
-        "default_schedule": {"type": "interval", "seconds": 1800},
-    },
     "refresh-autolinker-vocabulary": {
         "task": "app.workers.intel_feed_tasks.refresh_autolinker_vocabulary",
         "description": "Rebuild Aho-Corasick automaton for entity matching",
@@ -240,13 +217,6 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
         "category": "maintenance",
         "default_schedule": {"type": "crontab", "minute": "35", "hour": "3"},
     },
-    "reenrich-cve-nvd": {
-        "settings_keys": ["cve_reenrich_batch_size"],
-        "task": "app.workers.maintenance.reenrich_cve_nvd",
-        "description": "Re-fetch NVD data for CVEs missing it (bulk-imported or awaiting NVD analysis)",
-        "category": "maintenance",
-        "default_schedule": {"type": "crontab", "minute": "5", "hour": "3"},
-    },
     "evict-image-cache": {
         "settings_keys": [
             "image_proxy_cache_ttl_days",
@@ -352,7 +322,7 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
         "category": "maintenance",
         "default_schedule": {"type": "crontab", "minute": "*/30"},
     },
-    # --- Enrichment ---
+    # --- Enrichment --- (each source's own jobs come from its manifest; see below)
     "enrichment-dispatch": {
         "task": "app.workers.enrichment_dispatch_tasks.dispatch_enrichment_jobs",
         "description": "Run due lookups from the enrichment job queue, by lane priority",
@@ -361,54 +331,6 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
         # A tick that sat out a worker restart is stale (the next is 30s
         # behind it): drop it rather than run a backlog of ticks.
         "options": {"expires": 30},
-    },
-    "scheduled-enrichment-check": {
-        "task": "app.workers.enrichment_tasks.run_scheduled_enrichment",
-        "description": "Check and execute scheduled enrichment source syncs",
-        "category": "enrichment",
-        "default_schedule": {"type": "crontab", "minute": "*/15"},
-    },
-    "epss-bulk-sync": {
-        "task": "app.workers.enrichment_tasks.run_epss_bulk_sync",
-        "description": "Update all CVEs with EPSS scores from epss.empiricalsecurity.com",
-        "category": "enrichment",
-        "default_schedule": {"type": "crontab", "minute": "30", "hour": "6"},
-    },
-    "mitre-attack-sync": {
-        "task": "app.workers.enrichment_tasks.run_mitre_attack_sync",
-        "description": "Download and sync MITRE ATT&CK techniques, groups, and mitigations",
-        "category": "enrichment",
-        "default_schedule": {
-            "type": "crontab",
-            "minute": "0",
-            "hour": "3",
-            "day_of_week": "0",
-        },
-    },
-    "misp-galaxy-sync": {
-        "task": "app.workers.enrichment_tasks.run_misp_galaxy_sync",
-        "description": "Refresh the reference alias knowledge from the MISP Galaxy threat-actor cluster",
-        "category": "enrichment",
-        "default_schedule": {
-            "type": "crontab",
-            "minute": "30",
-            "hour": "3",
-            "day_of_week": "0",
-        },
-    },
-    # Writes malware, tool and actor rows, so it runs on its own day: the Sunday
-    # catalog syncs above also write threat_actors, and sharing their slot
-    # deadlocked.
-    "malpedia-sync": {
-        "task": "app.workers.enrichment_tasks.run_malpedia_sync",
-        "description": "Sync malware families from Malpedia",
-        "category": "enrichment",
-        "default_schedule": {
-            "type": "crontab",
-            "minute": "0",
-            "hour": "1",
-            "day_of_week": "6",
-        },
     },
     "backfill-rule-attack-mappings": {
         "settings_keys": ["rule_attack_backfill_limit"],
@@ -475,50 +397,6 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
             "type": "crontab",
             "minute": "20",
             "hour": "4",
-        },
-    },
-    "metasploit-sync": {
-        "task": "app.workers.enrichment_tasks.run_metasploit_sync",
-        "description": "Map tracked CVEs to Metasploit modules and escalate weaponized exploit status",
-        "category": "enrichment",
-        "default_schedule": {
-            "type": "crontab",
-            "minute": "45",
-            "hour": "3",
-            "day_of_week": "0",
-        },
-    },
-    "cve-nvd-refresh": {
-        "task": "app.workers.enrichment_tasks.run_cve_nvd_refresh",
-        "description": "Re-check NVD for CVSS score changes on existing CVEs",
-        "category": "enrichment",
-        "default_schedule": {"type": "crontab", "minute": "0", "hour": "12"},
-    },
-    "cve-nvd-backfill": {
-        "task": "app.workers.enrichment_tasks.run_cve_nvd_backfill",
-        "description": "Backfill NVD data (CVSS, description, affected products, references) for CVEs missing it",
-        "category": "enrichment",
-        "default_schedule": {"type": "crontab", "minute": "30", "hour": "1"},
-    },
-    "github-poc-scan": {
-        "settings_keys": [
-            "github_poc_batch_limit",
-            "github_poc_rescan_days",
-        ],
-        "task": "app.workers.enrichment_tasks.run_github_poc_scan",
-        "description": "Scan GitHub for proof-of-concept exploits related to CVEs",
-        "category": "enrichment",
-        "default_schedule": {"type": "crontab", "minute": "0", "hour": "5"},
-    },
-    "wikipedia-bulk-sync": {
-        "task": "app.workers.enrichment_tasks.run_wikipedia_bulk_sync",
-        "description": "Enrich entities missing Wikipedia content",
-        "category": "enrichment",
-        "default_schedule": {
-            "type": "crontab",
-            "minute": "0",
-            "hour": "4",
-            "day_of_week": "3",
         },
     },
     # --- Automation ---
@@ -643,6 +521,11 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
         "default_schedule": {"type": "crontab", "minute": "40", "hour": "2"},
     },
 }
+
+
+# Every enrichment source's scheduled jobs, from its manifest. Each entry names
+# its ``source``; the job skips while that source is switched off.
+JOB_REGISTRY.update(enrichment_jobs())
 
 
 def schedule_to_human(sched: dict[str, Any]) -> str:

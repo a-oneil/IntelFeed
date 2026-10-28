@@ -26,9 +26,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import entity_types
 from app.adapters.base import ParsedEntry
-from app.adapters.ransomware_live import RANSOMWARE_LIVE_GATEWAY, RansomwareLiveAdapter, _parse_dt
+from app.adapters.ransomware_live import RansomwareLiveAdapter, _parse_dt
 from app.api.events import publish_event
-from app.enrichment.gateway import SOURCE_REFUSALS, GatewayUnavailable
+from app.enrichment.gateway import JOB_TOKEN_WAIT, SOURCE_REFUSALS, GatewayUnavailable, SourceGateway
 from app.intelligence.entity_dedup import find_entity_by_name_or_alias
 from app.intelligence.entity_resolution import gate_aliases, resolve_entity_creation
 from app.intelligence.sectors import normalize_sector, sector_label, sector_uuid
@@ -56,14 +56,14 @@ def _deversion(name: str) -> str | None:
     return base if base and base.lower() != name.strip().lower() and len(base) >= 4 else None
 
 
-async def fetch_group_catalog() -> dict[str, dict]:
+async def fetch_group_catalog(gateway: SourceGateway) -> dict[str, dict]:
     """Slug → {'name', 'altname'} from ransomware.live /v2/groups. Provides the
     proper display name and 'also known as' alias the resolver dedups on. Rate-limited
     (1/min) so it's fetched once per sync; on any failure returns {} and resolution
     falls back to the slug (still de-versioned + alias-unioned)."""
     catalog: dict[str, dict] = {}
     try:
-        async with RANSOMWARE_LIVE_GATEWAY.client(timeout=60.0) as client:
+        async with gateway.client(timeout=60.0) as client:
             resp = await client.get(RANSOMWARE_LIVE_GROUPS_URL)
         if resp.status_code != 200:
             logger.warning("ransomware.live /v2/groups returned %s — resolving on slugs only", resp.status_code)
@@ -88,10 +88,10 @@ async def fetch_group_catalog() -> dict[str, dict]:
     return catalog
 
 
-def _default_adapters() -> list:
+def _default_adapters(gateway: SourceGateway) -> list:
     """Enabled leak-site source adapters. Add sibling adapters here as sources are
     confirmed (eCrime.ch, broker channels) — the sync loop is source-agnostic."""
-    return [RansomwareLiveAdapter()]
+    return [RansomwareLiveAdapter(gateway)]
 
 
 async def _last_posted_at(db: AsyncSession, source: str) -> datetime | None:
@@ -401,16 +401,20 @@ async def sync_ransomware_victims(
     new_victim_ids: list[str] = []
     new_disclosures: list[dict] = []
 
+    from app.enrichment.pipeline import gateway_for
+
+    gateway, _ = await gateway_for(db, "ransomware_live", max_wait=JOB_TOKEN_WAIT)
+
     # Group name/alias catalog (fetched once — the endpoint is rate-limited 1/min) so
     # the resolver can fold slugs into tracked actors by alias.
     if catalog is None:
         try:
-            catalog = await fetch_group_catalog()
+            catalog = await fetch_group_catalog(gateway)
         except SOURCE_REFUSALS as e:
             logger.warning("ransomware sync skipped: %s", e)
             return {**stats, "stopped": e.status, "new_group_ids": [], "new_victim_ids": []}
 
-    for adapter in adapters or _default_adapters():
+    for adapter in adapters or _default_adapters(gateway):
         source = getattr(adapter, "SOURCE", adapter.__class__.__name__)
         cutoff = since if since is not None else await _last_posted_at(db, source)
         try:

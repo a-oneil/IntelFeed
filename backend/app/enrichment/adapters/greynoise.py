@@ -12,16 +12,32 @@ import re
 import httpx
 
 from app.enrichment.base import EnrichmentAdapter, EnrichmentData
+from app.enrichment.manifest import Column, Context, Display, Egress, License, Policy, Quota
 
 _IPV4_RE = re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}$")
+
+#: parsed_data key → key in Observable.reputation.
+_REPUTATION = {"classification": "gn_classification", "noise": "gn_noise", "riot": "gn_riot", "name": "gn_name"}
 
 
 class GreyNoiseAdapter(EnrichmentAdapter):
     source_type = "greynoise"
     display_name = "GreyNoise Community"
-    supported_entity_types = ["observable"]
-    requires_api_key = False
-    default_trigger_mode = "manual"
+    applies_to = {"observable": ("ipv4",)}
+    # GreyNoise publishes no per-minute figure for the Community API; it
+    # answers 429 when a caller goes over, and the breaker backs off.
+    quota = Quota(10, 3600, daily_budget=100)
+    egress = Egress.SHARES_IOC
+    license = License("GreyNoise Community terms", attribution="GreyNoise", commercial_ok=False)
+    outputs = (
+        *(Column(key, f"observable.reputation.{rep}", Policy.NEWER_WINS) for key, rep in _REPUTATION.items()),
+        # RIOT: a known benign business service. Shodan's tags rank first.
+        Column("riot", "observable.infra_tag", Policy.RANK, rank=2, filter="benign_service"),
+        Context("classification", "Classification", Display.BADGE),
+        Context("name", "Actor", Display.FACT),
+        Context("last_seen", "Last seen scanning", Display.FACT),
+        Context("link", "GreyNoise", Display.LINK),
+    )
 
     _api_base = "https://api.greynoise.io/v3/community/"
 

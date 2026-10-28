@@ -326,7 +326,7 @@ The full list is in [workers-search-dashboards.md](workers-search-dashboards.md)
 
 ### Enrichment Sources
 
-Each `EnrichmentSource` row has an `entity_type`, a `trigger_mode` (`auto`, `scheduled` or `manual`), adapter settings such as API keys, rate limits and a daily budget, and health fields (`health_status`, `last_synced_at`). Manage them on Settings → Engine → Enrichment.
+Each `EnrichmentSource` row is one source's settings: on or off, a `trigger_mode` (`auto` or `manual`), an API key, a rate limit and a daily budget, and health fields (`health_status`, `last_synced_at`). What a source applies to, needs, may send and writes, and its scheduled jobs, are declared on its class (`backend/app/enrichment/manifest.py`). Manage them on Settings → Engine → Enrichment.
 
 ---
 

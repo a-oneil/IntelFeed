@@ -191,10 +191,11 @@ async def test_greynoise_not_observed():
 
 
 async def test_greynoise_default_source_needs_no_key():
+    from app.enrichment.adapters.greynoise import GreyNoiseAdapter
     from app.enrichment.registry import DEFAULT_SOURCES
 
+    assert GreyNoiseAdapter.requires == ()
     row = next(s for s in DEFAULT_SOURCES if s["source_type"] == "greynoise")
-    assert row["requires_api_key"] is False
     assert row["default_trigger_mode"] == "manual"
 
 

@@ -1,4 +1,5 @@
-"""Celery tasks for scheduled enrichment — EPSS, MITRE ATT&CK, Malpedia, GitHub PoC."""
+"""Celery tasks for the enrichment sources' scheduled jobs — EPSS, MITRE ATT&CK,
+MISP Galaxy, Malpedia, Metasploit, NVD, GitHub PoC, Wikipedia."""
 
 import csv
 import io
@@ -18,7 +19,7 @@ from app.enrichment.gateway import JOB_TOKEN_WAIT, SOURCE_REFUSALS, GatewayError
 from app.intelligence.autolinker import filter_aliases
 from app.intelligence.entity_dedup import find_entity_by_name_or_alias
 from app.workers.celery_app import celery_app
-from app.workers.db import run_async, worker_session
+from app.workers.db import run_async, source_job, worker_session
 
 logger = logging.getLogger(__name__)
 
@@ -27,13 +28,13 @@ def _get_worker_session():
     return worker_session()
 
 
-async def _job_gateway(source_type: str, fallback_key: str | None = None) -> tuple[SourceGateway, str | None]:
-    """A scheduled job's gateway and key for a source that has a row: the same
-    bucket, budget and breaker its per-entity lookups use."""
+async def _job_gateway(source_type: str) -> tuple[SourceGateway, str | None]:
+    """A scheduled job's gateway and key: its source row's bucket, budget and
+    breaker, the same ones its per-entity lookups use."""
     from app.enrichment.pipeline import gateway_for
 
     async with _get_worker_session() as db:
-        return await gateway_for(db, source_type, fallback_key, max_wait=JOB_TOKEN_WAIT)
+        return await gateway_for(db, source_type, max_wait=JOB_TOKEN_WAIT)
 
 
 def iter_epss_csv(text: str) -> Iterator[tuple[str, float, float]]:
@@ -76,76 +77,6 @@ def _cvss_tier_rank(score: float) -> int:
 # --- Scheduled enrichment tasks ---
 
 
-@celery_app.task(name="app.workers.enrichment_tasks.run_scheduled_enrichment", soft_time_limit=600, time_limit=660)
-def run_scheduled_enrichment():
-    """Periodic task: check for scheduled enrichment sources that are due and run them."""
-    start = time.monotonic()
-    try:
-        stats = run_async(_run_scheduled_enrichment())
-        if stats["sources_processed"] > 0:
-            logger.info("Scheduled enrichment stats: %s", stats)
-        CELERY_TASKS_TOTAL.labels(task_name="run_scheduled_enrichment", status="success").inc()
-        return stats
-    except Exception:
-        CELERY_TASKS_TOTAL.labels(task_name="run_scheduled_enrichment", status="error").inc()
-        logger.exception("Scheduled enrichment failed")
-        raise
-    finally:
-        CELERY_TASK_DURATION_SECONDS.labels(task_name="run_scheduled_enrichment").observe(time.monotonic() - start)
-
-
-async def _run_scheduled_enrichment():
-    from datetime import timedelta
-
-    from sqlalchemy import or_
-
-    from app.enrichment.registry import adapter_for_source
-    from app.models.enrichment import EnrichmentSource
-
-    stats = {"sources_processed": 0, "results": 0, "errors": 0}
-    now = datetime.now(UTC)
-
-    async with _get_worker_session() as db:
-        # Find scheduled sources that are due: next_scheduled_at <= now, or never run (null)
-        result = await db.execute(
-            select(EnrichmentSource)
-            .where(EnrichmentSource.is_enabled == True)  # noqa: E712
-            .where(EnrichmentSource.trigger_mode == "scheduled")
-            .where(
-                or_(
-                    EnrichmentSource.next_scheduled_at <= now,
-                    EnrichmentSource.next_scheduled_at.is_(None),
-                )
-            )
-        )
-        sources = result.scalars().all()
-
-        for source in sources:
-            try:
-                from app.core.encryption import decrypt_value
-
-                api_key = decrypt_value(source.api_key_encrypted) if source.api_key_encrypted else None
-                adapter = adapter_for_source(source, api_key)
-                bulk_results = await adapter.bulk_sync()
-                stats["results"] += len(bulk_results)
-                source.last_synced_at = now
-                source.health_status = "healthy"
-                stats["sources_processed"] += 1
-            except Exception as e:
-                logger.warning("Scheduled enrichment failed for %s: %s", source.source_type, e)
-                source.health_status = "degraded"
-                stats["errors"] += 1
-
-            # Always advance next_scheduled_at so we don't retry immediately on failure
-            interval = source.schedule_interval_hours or 24
-            source.next_scheduled_at = now + timedelta(hours=interval)
-            db.add(source)
-
-        await db.commit()
-
-    return stats
-
-
 @celery_app.task(name="app.workers.enrichment_tasks.run_epss_bulk_sync", soft_time_limit=900, time_limit=960)
 def run_epss_bulk_sync():
     """Daily: download EPSS CSV, update all CVEs."""
@@ -170,6 +101,7 @@ EPSS_CSV_URL = "https://epss.empiricalsecurity.com/epss_scores-current.csv.gz"
 _EPSS_CHUNK_SIZE = 5000
 
 
+@source_job("epss")
 async def _run_epss_bulk_sync():
     import gzip
     from datetime import timedelta
@@ -324,6 +256,7 @@ def run_mitre_attack_sync():
         CELERY_TASK_DURATION_SECONDS.labels(task_name="run_mitre_attack_sync").observe(time.monotonic() - start)
 
 
+@source_job("mitre_attack")
 async def _run_mitre_attack_sync():
     from app.intelligence.attack_catalog import (
         fetch_attack_bundles,
@@ -388,10 +321,6 @@ async def _run_mitre_attack_sync():
 
 
 MISP_GALAXY_THREAT_ACTOR_URL = "https://raw.githubusercontent.com/MISP/misp-galaxy/main/clusters/threat-actor.json"
-# One file a week, with no enrichment_sources row to configure it.
-MISP_GALAXY_GATEWAY = SourceGateway(
-    "misp_galaxy", rate_limit_config={"requests_per_period": 10, "period_seconds": 3600}, max_wait=JOB_TOKEN_WAIT
-)
 
 
 def parse_misp_galaxy_clusters(data: dict) -> list[tuple[str, list[str]]]:
@@ -476,11 +405,13 @@ def run_misp_galaxy_sync():
         CELERY_TASK_DURATION_SECONDS.labels(task_name="run_misp_galaxy_sync").observe(time.monotonic() - start)
 
 
+@source_job("misp_galaxy")
 async def _run_misp_galaxy_sync():
     from app.intelligence.entity_resolution import upsert_known_aliases
 
+    gateway, _ = await _job_gateway("misp_galaxy")
     try:
-        async with MISP_GALAXY_GATEWAY.client(timeout=60, follow_redirects=True) as client:
+        async with gateway.client(timeout=60, follow_redirects=True) as client:
             resp = await client.get(MISP_GALAXY_THREAT_ACTOR_URL)
             resp.raise_for_status()
             data = resp.json()
@@ -594,6 +525,7 @@ def run_cve_nvd_backfill():
 _NVD_BACKFILL_BUDGET_S = 780
 
 
+@source_job("nvd")
 async def _run_cve_nvd_backfill():
     import asyncio as _asyncio
     from datetime import UTC, datetime
@@ -724,6 +656,7 @@ def run_cve_nvd_refresh():
         CELERY_TASK_DURATION_SECONDS.labels(task_name="run_cve_nvd_refresh").observe(time.monotonic() - start)
 
 
+@source_job("nvd")
 async def _run_cve_nvd_refresh():
     """Re-enrich CVEs that already have NVD data, detecting CVSS score changes."""
     import asyncio as _asyncio
@@ -870,6 +803,7 @@ async def _malpedia_get(client, kind: str) -> dict:
     return data
 
 
+@source_job("malpedia")
 async def _run_malpedia_sync():
     from app.intelligence.actor_attributes import resolve_country_name
     from app.models.enrichment import EnrichmentSource
@@ -996,6 +930,7 @@ def run_github_poc_scan():
 _GITHUB_POC_BUDGET_S = 480
 
 
+@source_job("github_poc")
 async def _run_github_poc_scan():
     from datetime import timedelta
 
@@ -1017,12 +952,9 @@ async def _run_github_poc_scan():
         await warm_settings_cache(db)
         source_result = await db.execute(select(EnrichmentSource).where(EnrichmentSource.source_type == "github_poc"))
         source = source_result.scalar_one_or_none()
-        # Fall back to a globally configured token so the scan isn't stuck on
-        # GitHub's 10 req/min unauthenticated search limit just because nobody
-        # pasted a key into the enrichment source form.
-        gateway, api_key = await gateway_for(
-            db, "github_poc", fallback_key=settings.get("github_token") or None, max_wait=JOB_TOKEN_WAIT
-        )
+        # The source's key, else the instance-wide github_token, so the scan
+        # isn't stuck on GitHub's 10 req/min unauthenticated search limit.
+        gateway, api_key = await gateway_for(db, "github_poc", max_wait=JOB_TOKEN_WAIT)
 
         headers = {"Accept": "application/vnd.github.v3+json"}
         if api_key:
@@ -1215,6 +1147,7 @@ def run_wikipedia_bulk_sync():
 _WIKIPEDIA_BULK_BUDGET_S = 3300
 
 
+@source_job("wikipedia")
 async def _run_wikipedia_bulk_sync():
     from datetime import timedelta
 
@@ -1384,10 +1317,6 @@ async def _run_wikipedia_bulk_sync():
 METASPLOIT_METADATA_URL = (
     "https://raw.githubusercontent.com/rapid7/metasploit-framework/master/db/modules_metadata_base.json"
 )
-# One file a week, with no enrichment_sources row to configure it.
-METASPLOIT_GATEWAY = SourceGateway(
-    "metasploit", rate_limit_config={"requests_per_period": 10, "period_seconds": 3600}, max_wait=JOB_TOKEN_WAIT
-)
 
 _MSF_CVE_RE = re.compile(r"^CVE-\d{4}-\d{4,}$", re.IGNORECASE)
 
@@ -1432,6 +1361,7 @@ def run_metasploit_sync():
         CELERY_TASK_DURATION_SECONDS.labels(task_name="run_metasploit_sync").observe(time.monotonic() - start)
 
 
+@source_job("metasploit")
 async def _run_metasploit_sync():
     """Populate CVE.metasploit_module and escalate exploit_availability.
 
@@ -1445,8 +1375,9 @@ async def _run_metasploit_sync():
 
     stats = {"modules_seen": 0, "cves_matched": 0, "cves_updated": 0, "escalated": 0}
 
+    gateway, _ = await _job_gateway("metasploit")
     try:
-        async with METASPLOIT_GATEWAY.client(timeout=180.0, follow_redirects=True) as client:
+        async with gateway.client(timeout=180.0, follow_redirects=True) as client:
             resp = await client.get(METASPLOIT_METADATA_URL)
             resp.raise_for_status()
             metadata = resp.json()

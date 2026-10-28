@@ -25,12 +25,11 @@ class EnrichmentSource(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     source_type: Mapped[str] = mapped_column(String(30), unique=True, nullable=False)
-    # vulncheck, osv, nvd, epss, malpedia, github_poc,
-    # cisa_kev, mitre_attack, cvedetails, wikipedia
+    # a key of app.enrichment.registry.SOURCE_REGISTRY
     display_name: Mapped[str] = mapped_column(String(100), nullable=False)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     trigger_mode: Mapped[str] = mapped_column(String(20), default="manual")
-    # auto, scheduled, manual
+    # auto (looked up when a new entity appears), manual
     api_key_encrypted: Mapped[str | None] = mapped_column(Text)
     rate_limit_config: Mapped[dict] = mapped_column(JSONB, default=dict)
     # {"requests_per_period": 50, "period_seconds": 604800}
@@ -41,13 +40,7 @@ class EnrichmentSource(Base):
     min_confidence_threshold: Mapped[str] = mapped_column(String(10), default="low")
     # high, medium, low — minimum IOC confidence required for auto-enrichment
     daily_budget: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # Maximum enrichment requests per day; None = unlimited
-    daily_budget_used: Mapped[int] = mapped_column(Integer, default=0)
-    # Fallback counter synced from Redis for API reads
-    schedule_interval_hours: Mapped[int] = mapped_column(Integer, default=24)
-    # How often to run when trigger_mode is "scheduled" (in hours)
-    next_scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # When this source should next be enriched (set after each scheduled run)
+    # Maximum requests per UTC day; None = unlimited. The gateway counts usage.
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

@@ -43,7 +43,6 @@ export function useUpdateEnrichmentSource() {
       min_confidence_threshold?: string;
       daily_budget?: number | null;
       clear_daily_budget?: boolean;
-      schedule_interval_hours?: number;
     }) => {
       const { data } = await api.put<EnrichmentSource>(
         `/enrichment/sources/${sourceId}`,

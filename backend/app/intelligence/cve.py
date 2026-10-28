@@ -62,12 +62,11 @@ def nvd_request_pace(api_key: str | None) -> float:
 
 
 async def nvd_gateway(db: AsyncSession, max_wait: float = MAX_TOKEN_WAIT) -> tuple[SourceGateway, str | None]:
-    """The NVD source's gateway and key; the instance-wide ``nvd_api_key``
-    setting stands in when the source row has no key."""
+    """The NVD source's gateway and key (the source row's key, else the
+    instance-wide ``nvd_api_key`` setting)."""
     from app.enrichment.pipeline import gateway_for
-    from app.services.system_settings import get_setting
 
-    return await gateway_for(db, "nvd", fallback_key=await get_setting("nvd_api_key", db) or None, max_wait=max_wait)
+    return await gateway_for(db, "nvd", max_wait=max_wait)
 
 
 def extract_cve_ids(text: str) -> list[str]:

@@ -41,7 +41,7 @@ from app.models.cwe import CWE  # noqa: E402
 async def main(dry_run: bool) -> None:
     async with async_session() as db:
         print("Downloading MITRE CWE catalog (cwec_latest.xml.zip)...")
-        xml_bytes = await fetch_cwe_catalog()
+        xml_bytes = await fetch_cwe_catalog(db)
         parsed = parse_cwe_catalog(xml_bytes)
         print(f"Parsed {len(parsed)} entries ({sum(1 for p in parsed if p.kind == 'weakness')} weaknesses)")
 

@@ -75,6 +75,8 @@ def _job_response(name: str, override: dict, job: dict) -> dict:
         "task": job["task"],
         "description": job["description"],
         "category": job["category"],
+        # The enrichment source whose manifest declares the job, if any.
+        "source": job.get("source"),
         "uses_ai": job.get("uses_ai", False),
         "settings_keys": job.get("settings_keys", []),
         "enabled": override.get("enabled", job.get("enabled_by_default", True)),

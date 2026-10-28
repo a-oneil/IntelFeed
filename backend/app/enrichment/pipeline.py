@@ -11,8 +11,8 @@ from app.core.encryption import decrypt_value
 from app.enrichment.gateway import MAX_TOKEN_WAIT, BreakerOpen, GatewayError, RateLimited, SourceGateway
 from app.enrichment.registry import (
     ADAPTER_REGISTRY,
-    DEFAULT_SOURCES,
     SHARED_KEY_GROUPS,
+    SOURCE_REGISTRY,
     adapter_for_source,
     source_gateway,
 )
@@ -62,7 +62,8 @@ async def resolve_api_key(
     user_id: uuid.UUID | None,
     db: AsyncSession,
 ) -> str | None:
-    """Resolve API key: user override > global default > shared key group sibling."""
+    """Resolve API key: user override > the source's key > a shared key group
+    sibling > the source's ``key_setting`` instance setting."""
     # 1. User override for this specific source
     if user_id:
         result = await db.execute(
@@ -79,8 +80,8 @@ async def resolve_api_key(
         return decrypt_value(source.api_key_encrypted)
 
     # 3. Shared key group fallback — check sibling sources for a key
-    adapter_cls = ADAPTER_REGISTRY.get(source.source_type)
-    shared_group = getattr(adapter_cls, "shared_key_group", None) if adapter_cls else None
+    source_cls = SOURCE_REGISTRY.get(source.source_type)
+    shared_group = source_cls.shared_key_group if source_cls else None
     if shared_group:
         sibling_types = [st for st in SHARED_KEY_GROUPS.get(shared_group, []) if st != source.source_type]
         if sibling_types:
@@ -113,32 +114,41 @@ async def resolve_api_key(
             if sib_source and sib_source.api_key_encrypted:
                 return decrypt_value(sib_source.api_key_encrypted)
 
-    return None
+    # 4. The instance-wide setting the source names (nvd_api_key, github_token)
+    return await _key_from_setting(source.source_type, db)
+
+
+async def _key_from_setting(source_type: str, db: AsyncSession) -> str | None:
+    source_cls = SOURCE_REGISTRY.get(source_type)
+    if not (source_cls and source_cls.key_setting):
+        return None
+    from app.services.system_settings import get_setting
+
+    return await get_setting(source_cls.key_setting, db) or None
 
 
 async def gateway_for(
     db: AsyncSession,
     source_type: str,
-    fallback_key: str | None = None,
     max_wait: float = MAX_TOKEN_WAIT,
 ) -> tuple[SourceGateway, str | None]:
     """The gateway and key for calls made outside ``enrich_entity`` (scheduled
-    jobs, bulk syncs): the source row's rate limit, budget and global key, so
-    they draw on the same allowance as per-entity lookups. ``fallback_key`` is
-    used when the row has no key; without a row the DEFAULT_SOURCES limits apply."""
+    jobs, bulk syncs): the source row's rate limit, budget and key, resolved
+    exactly as per-entity lookups resolve it, so both draw on one allowance.
+    Without a row the manifest's quota applies."""
     source = (
         await db.execute(select(EnrichmentSource).where(EnrichmentSource.source_type == source_type))
     ).scalar_one_or_none()
     if source is None:
-        defaults = next(s for s in DEFAULT_SOURCES if s["source_type"] == source_type)
+        quota = SOURCE_REGISTRY[source_type].quota
         source = EnrichmentSource(
             source_type=source_type,
-            rate_limit_config=defaults["default_rate_limit"],
-            daily_budget=defaults["default_daily_budget"],
+            rate_limit_config=quota.rate_limit_config,
+            daily_budget=quota.daily_budget,
         )
-        api_key = fallback_key
+        api_key = await _key_from_setting(source_type, db)
     else:
-        api_key = await resolve_api_key(source, None, db) or fallback_key
+        api_key = await resolve_api_key(source, None, db)
     return source_gateway(source, api_key, max_wait=max_wait), api_key
 
 
@@ -184,7 +194,7 @@ async def enrich_entity(
         entity_value: The entity value to look up (IP, CVE ID, name, etc.).
         db: Database session.
         user_id: Optional user ID for API key resolution.
-        trigger: Trigger mode filter (auto, scheduled, manual).
+        trigger: Trigger mode filter (auto, manual).
         source_types: Optional list of specific source types to use.
         entity_confidence: IOC confidence level (high/medium/low) for filtering.
         entity_base_confidence: IOC numeric confidence for filtering.
@@ -200,6 +210,8 @@ async def enrich_entity(
     for source in sources_result.scalars():
         if source_types and source.source_type not in source_types:
             continue
+        if source.source_type not in ADAPTER_REGISTRY:
+            continue  # a catalog source: jobs only, no per-entity lookup
 
         # Resolve API key (user override > global)
         api_key = await resolve_api_key(source, user_id, db)

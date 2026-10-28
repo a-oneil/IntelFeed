@@ -27,16 +27,12 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.enrichment.gateway import JOB_TOKEN_WAIT, SOURCE_REFUSALS, SourceGateway
+from app.enrichment.gateway import JOB_TOKEN_WAIT, SOURCE_REFUSALS
 from app.models.cwe import CWE, KIND_CATEGORY, KIND_WEAKNESS, CVEWeakness
 
 logger = logging.getLogger(__name__)
 
 CWE_CATALOG_URL = "https://cwe.mitre.org/data/xml/cwec_latest.xml.zip"
-# One file a week, with no enrichment_sources row to configure it.
-CWE_GATEWAY = SourceGateway(
-    "cwe_catalog", rate_limit_config={"requests_per_period": 10, "period_seconds": 3600}, max_wait=JOB_TOKEN_WAIT
-)
 
 #: The catalog's own XML namespace. Bumped by MITRE only on major schema
 #: revisions; the parser tolerates a different one by reading it off the root.
@@ -74,9 +70,12 @@ class ParsedCWE:
     superseded_by: str | None = None
 
 
-async def fetch_cwe_catalog(url: str = CWE_CATALOG_URL) -> bytes:
-    """Download the zipped catalog and return the raw XML bytes."""
-    async with CWE_GATEWAY.client(timeout=180.0, follow_redirects=True) as client:
+async def fetch_cwe_catalog(db: AsyncSession, url: str = CWE_CATALOG_URL) -> bytes:
+    """Download the zipped catalog through the mitre_cwe gateway and return the raw XML bytes."""
+    from app.enrichment.pipeline import gateway_for
+
+    gateway, _ = await gateway_for(db, "mitre_cwe", max_wait=JOB_TOKEN_WAIT)
+    async with gateway.client(timeout=180.0, follow_redirects=True) as client:
         resp = await client.get(url)
         resp.raise_for_status()
     with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
@@ -323,7 +322,7 @@ async def resolve_cve_weakness_refs(db: AsyncSession) -> int:
 async def refresh_cwe_catalog(db: AsyncSession, url: str = CWE_CATALOG_URL) -> dict:
     """Download, parse, hydrate and re-resolve. Commits."""
     try:
-        xml_bytes = await fetch_cwe_catalog(url)
+        xml_bytes = await fetch_cwe_catalog(db, url)
     except SOURCE_REFUSALS as e:
         logger.warning("CWE catalog refresh skipped: %s", e)
         return {"stopped": e.status}

@@ -197,39 +197,9 @@ function SourceRow({
                 className={styles.modeSelect}
               >
                 <option value="auto">Auto</option>
-                <option value="scheduled">Scheduled</option>
                 <option value="manual">Manual</option>
               </select>
             </div>
-
-            {/* Schedule Interval (only when scheduled) */}
-            {source.trigger_mode === "scheduled" && (
-              <div className={styles.detailField}>
-                <label className={styles.detailLabel}>Run Every</label>
-                <select
-                  value={source.schedule_interval_hours}
-                  onChange={(e) =>
-                    updateSource.mutate({
-                      sourceId: source.id,
-                      schedule_interval_hours: Number(e.target.value),
-                    })
-                  }
-                  className={styles.modeSelect}
-                >
-                  <option value={1}>1 hour</option>
-                  <option value={6}>6 hours</option>
-                  <option value={12}>12 hours</option>
-                  <option value={24}>24 hours</option>
-                  <option value={48}>48 hours</option>
-                  <option value={168}>Weekly</option>
-                </select>
-                {source.next_scheduled_at && (
-                  <span className={styles.detailHint}>
-                    Next run: {formatDate(source.next_scheduled_at)}
-                  </span>
-                )}
-              </div>
-            )}
 
             {/* Confidence Threshold */}
             <div className={styles.detailField}>

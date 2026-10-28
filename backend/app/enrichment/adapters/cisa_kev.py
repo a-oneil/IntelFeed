@@ -6,14 +6,32 @@ Checks if a CVE is in the CISA KEV catalog.
 import httpx
 
 from app.enrichment.base import EnrichmentAdapter, EnrichmentData
+from app.enrichment.manifest import Context, Display, Egress, Job, License, Quota
 
 
 class CISAKEVAdapter(EnrichmentAdapter):
     source_type = "cisa_kev"
     display_name = "CISA KEV"
-    supported_entity_types = ["cve"]
-    requires_api_key = False
-    default_trigger_mode = "scheduled"
+    applies_to = {"cve": None}
+    # One JSON file; a lookup downloads the whole catalog.
+    quota = Quota(100, 60, daily_budget=500)
+    egress = Egress.NONE
+    license = License("CISA KEV (public domain)", attribution="CISA Known Exploited Vulnerabilities Catalog")
+    jobs = (
+        Job(
+            "sync-kev-feed",
+            "app.workers.intel_feed_tasks.sync_kev_feed",
+            {"type": "crontab", "minute": "15", "hour": "*/6"},
+            "Sync CISA Known Exploited Vulnerabilities catalog",
+        ),
+    )
+    outputs = (
+        Context("in_kev", "In KEV", Display.BADGE),
+        Context("date_added", "Added to KEV", Display.FACT),
+        Context("due_date", "Remediation due", Display.FACT),
+        Context("required_action", "Required action", Display.FACT),
+        Context("known_ransomware_use", "Known ransomware use", Display.FACT),
+    )
 
     _kev_url = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
 

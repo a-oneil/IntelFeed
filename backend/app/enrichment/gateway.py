@@ -213,17 +213,6 @@ class SourceGateway:
         self.scope = scope
         self._inner = inner
 
-    @classmethod
-    def for_source(cls, source, api_key: str | None, **kwargs) -> SourceGateway:
-        """The gateway for an ``EnrichmentSource`` row and the key it will use."""
-        return cls(
-            source.source_type,
-            rate_limit_config=source.rate_limit_config,
-            daily_budget=source.daily_budget,
-            api_key=api_key,
-            **kwargs,
-        )
-
     def transport(self) -> httpx.AsyncBaseTransport:
         """A transport that sends through this gateway. Each client gets its
         own, since closing a client closes its transport's connection pool."""

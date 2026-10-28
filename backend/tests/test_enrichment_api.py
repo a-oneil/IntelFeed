@@ -39,7 +39,7 @@ async def disabled_source(db_session: AsyncSession) -> EnrichmentSource:
         source_type="vulncheck",
         display_name="VulnCheck KEV",
         is_enabled=False,
-        trigger_mode="scheduled",
+        trigger_mode="manual",
         rate_limit_config={"requests_per_period": 1000, "period_seconds": 60},
         health_status="unknown",
         config={},

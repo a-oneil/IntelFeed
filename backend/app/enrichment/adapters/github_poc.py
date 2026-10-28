@@ -6,16 +6,41 @@ Searches GitHub for proof-of-concept exploit repositories for CVEs.
 import httpx
 
 from app.enrichment.base import EnrichmentAdapter, EnrichmentData
+from app.enrichment.manifest import Context, Display, Egress, Job, License, Quota
 
 
 class GitHubPoCAdapter(EnrichmentAdapter):
     source_type = "github_poc"
     display_name = "GitHub PoC"
-    supported_entity_types = ["cve"]
-    requires_api_key = False
-    default_trigger_mode = "scheduled"
+    applies_to = {"cve": None}
+    # GitHub's search API allows 10 requests a minute unauthenticated and 30
+    # with a token (docs.github.com, "Rate limits for the REST API").
+    quota = Quota(10, 60, daily_budget=1000, ceiling_per_period=10, keyed=Quota(30, 60, 1000, ceiling_per_period=30))
+    egress = Egress.LOW
+    # Shared GitHub PAT: lifts search from 10 to 30 requests/min.
+    key_setting = "github_token"
+    license = License("GitHub terms of service", attribution="GitHub")
     # GitHub answers its primary and secondary rate limits with 403 or 429.
     throttle_statuses = (403, 429, 503)
+    jobs = (
+        Job(
+            "github-poc-scan",
+            "app.workers.enrichment_tasks.run_github_poc_scan",
+            {"type": "crontab", "minute": "0", "hour": "5"},
+            "Scan GitHub for proof-of-concept exploits related to CVEs",
+            settings_keys=("github_poc_batch_limit", "github_poc_rescan_days"),
+        ),
+    )
+    outputs = (
+        Context("exploit_maturity", "Exploit maturity", Display.BADGE),
+        Context("poc_count", "Public PoCs", Display.FACT),
+        Context(
+            "poc_repos",
+            "PoC repositories",
+            Display.TABLE,
+            item={"Repository": "name", "Link": "url", "Stars": "stars", "Language": "language"},
+        ),
+    )
 
     _api_url = "https://api.github.com/search/repositories"
 

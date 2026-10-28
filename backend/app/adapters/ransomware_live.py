@@ -19,17 +19,11 @@ from datetime import UTC, datetime, timedelta
 import httpx
 
 from app.adapters.base import ExtendedAdapter, ParsedEntry, ParsedFeedMeta
-from app.enrichment.gateway import JOB_TOKEN_WAIT, SourceGateway
+from app.enrichment.gateway import SourceGateway
 
 logger = logging.getLogger(__name__)
 
 RANSOMWARE_LIVE_RECENT_URL = "https://api.ransomware.live/v2/recentvictims"
-# ransomware.live allows about one call a minute per endpoint; a sync makes two
-# (/groups, /recentvictims). No enrichment_sources row configures it yet.
-RANSOMWARE_LIVE_GATEWAY = SourceGateway(
-    "ransomware_live", rate_limit_config={"requests_per_period": 2, "period_seconds": 60}, max_wait=JOB_TOKEN_WAIT
-)
-
 # First poll (no stored high-water mark) looks back this far.
 _INITIAL_LOOKBACK_DAYS = 7
 
@@ -67,6 +61,9 @@ class RansomwareLiveAdapter(ExtendedAdapter):
 
     SOURCE = "ransomware.live"
 
+    def __init__(self, gateway: SourceGateway):
+        self.gateway = gateway
+
     async def fetch_entries(
         self, config: dict, since: datetime | None = None
     ) -> tuple[ParsedFeedMeta, list[ParsedEntry]]:
@@ -74,7 +71,7 @@ class RansomwareLiveAdapter(ExtendedAdapter):
         cutoff = since or (datetime.now(UTC) - timedelta(days=_INITIAL_LOOKBACK_DAYS))
 
         try:
-            async with RANSOMWARE_LIVE_GATEWAY.client(timeout=60.0, headers={"Accept": "application/json"}) as client:
+            async with self.gateway.client(timeout=60.0, headers={"Accept": "application/json"}) as client:
                 resp = await client.get(RANSOMWARE_LIVE_RECENT_URL)
         except httpx.HTTPError as exc:
             logger.warning("ransomware.live fetch failed: %s", exc)

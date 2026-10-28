@@ -82,10 +82,6 @@ All times are UTC. "AI" means the job calls an AI provider. "(`ai` queue)" means
 
 | Task | Default schedule | What it does |
 |------|------------------|--------------|
-| `sync_kev_feed` | Every 6 h at :15 | Sync the CISA Known Exploited Vulnerabilities catalog |
-| `refresh_cwe_catalog` | Monday 03:45 | Re-pull the MITRE CWE catalog and re-match unmatched NVD weakness references |
-| `sync_cybergeist_feeds` | Daily 02:30 | Sync threat actor and malware lists from Cybergeist |
-| `sync_ransomware_victims` | Every 30 min | Collect ransomware leak-site victim posts as structured records |
 | `refresh_autolinker_vocabulary` | Every 30 min | Rebuild the entity-matching dictionary (Aho-Corasick automaton) |
 | `rebuild_entity_profiles` | Daily 03:30 | Rebuild entity correlation profiles |
 | `archive_correlation_events` | Daily 04:45 | Archive old correlation events |
@@ -106,25 +102,29 @@ All times are UTC. "AI" means the job calls an AI provider. "(`ai` queue)" means
 | `rescore_recent_entries` | Every 6 h at :35 | Re-score recent entries so KEV and EPSS changes reach priority scores |
 | `rescore_all_entries` | **Off by default** | Re-score every scored entry. Run it with **Run now**; the Sunday 03:00 schedule only applies if an admin turns it on |
 
-When `sync_cybergeist_feeds` creates new entities, it queues `refresh_autolinker_vocabulary` and, 30 seconds later, `rescan_recent_entries` for the last 7 days. The delay lets the new dictionary load before old entries are re-scanned.
-
 #### Enrichment
 
-| Task | Default schedule | What it does |
-|------|------------------|--------------|
-| `dispatch_enrichment_jobs` | Every 30 s | Run due lookups from the enrichment job queue (`enrichment` queue). See [Enrichment Pipeline](#enrichment-pipeline) |
-| `run_scheduled_enrichment` | Every 15 min | Run enrichment sources whose schedule is due |
-| `run_epss_bulk_sync` | Daily 06:30 | Update EPSS scores (exploit likelihood) for all CVEs |
-| `run_mitre_attack_sync` | Sunday 03:00 | Sync MITRE ATT&CK techniques, groups and mitigations |
-| `run_misp_galaxy_sync` | Sunday 03:30 | Refresh known actor aliases (`known_alias_map`) from the MISP Galaxy threat-actor cluster |
-| `run_malpedia_sync` | Saturday 01:00 | Sync malware families from Malpedia; aliases pass the junk-alias filter |
-| `run_metasploit_sync` | Sunday 03:45 | Map tracked CVEs to Metasploit modules and mark them weaponized |
-| `run_cve_nvd_refresh` | Daily 12:00 | Re-check NVD for CVSS changes |
-| `run_cve_nvd_backfill` | Daily 01:30 | Fill in NVD data (CVSS, description, affected products, references) for CVEs that lack it; stops starting lookups 2 minutes before its time limit |
-| `run_github_poc_scan` | Daily 05:00 | Search GitHub for proof-of-concept exploits; stops starting searches 2 minutes before its time limit |
-| `run_wikipedia_bulk_sync` | Wednesday 04:00 | Add Wikipedia content to entities that lack it; stops 5 minutes before its time limit |
+| Task | Source | Default schedule | What it does |
+|------|--------|------------------|--------------|
+| `dispatch_enrichment_jobs` | | Every 30 s | Run due lookups from the enrichment job queue (`enrichment` queue). See [Enrichment Pipeline](#enrichment-pipeline) |
+| `run_epss_bulk_sync` | `epss` | Daily 06:30 | Update EPSS scores (exploit likelihood) for all CVEs |
+| `sync_kev_feed` | `cisa_kev` | Every 6 h at :15 | Sync the CISA Known Exploited Vulnerabilities catalog |
+| `run_mitre_attack_sync` | `mitre_attack` | Sunday 03:00 | Sync MITRE ATT&CK techniques, groups and mitigations |
+| `run_misp_galaxy_sync` | `misp_galaxy` | Sunday 03:30 | Refresh known actor aliases (`known_alias_map`) from the MISP Galaxy threat-actor cluster |
+| `run_malpedia_sync` | `malpedia` | Saturday 01:00 | Sync malware families from Malpedia; aliases pass the junk-alias filter |
+| `run_metasploit_sync` | `metasploit` | Sunday 03:45 | Map tracked CVEs to Metasploit modules and mark them weaponized |
+| `refresh_cwe_catalog` | `mitre_cwe` | Monday 03:45 | Re-pull the MITRE CWE catalog and re-match unmatched NVD weakness references |
+| `run_cve_nvd_refresh` | `nvd` | Daily 12:00 | Re-check NVD for CVSS changes |
+| `run_cve_nvd_backfill` | `nvd` | Daily 01:30 | Fill in NVD data (CVSS, description, affected products, references) for CVEs that lack it; stops starting lookups 2 minutes before its time limit |
+| `reenrich_cve_nvd` | `nvd` | Daily 03:05 | Re-fetch NVD data for CVEs still missing it |
+| `run_github_poc_scan` | `github_poc` | Daily 05:00 | Search GitHub for proof-of-concept exploits; stops starting searches 2 minutes before its time limit |
+| `run_wikipedia_bulk_sync` | `wikipedia` | Wednesday 04:00 | Add Wikipedia content to entities that lack it; stops 5 minutes before its time limit |
+| `sync_cybergeist_feeds` | `cybergeist` | Daily 02:30 | Sync threat actor and malware lists from Cybergeist |
+| `sync_ransomware_victims` | `ransomware_live` | Every 30 min | Collect ransomware leak-site victim posts as structured records |
 
-Every enrichment job sends its requests through its source's gateway ([Source Gateway](automation-ai-enrichment.md#source-gateway)). A refusal (rate limited, breaker open, budget spent) stops the job; it keeps what it did and records `stopped` in its stats.
+Each source declares its jobs in its manifest ([Source Jobs](automation-ai-enrichment.md#source-jobs)). A job skips while its source is switched off (`{"skipped": "source disabled"}`), and sends its requests through its source's gateway ([Source Gateway](automation-ai-enrichment.md#source-gateway)). A refusal (rate limited, breaker open, budget spent) stops the job; it keeps what it did and records `stopped` in its stats.
+
+When `sync_cybergeist_feeds` creates new entities, it queues `refresh_autolinker_vocabulary` and, 30 seconds later, `rescan_recent_entries` for the last 7 days. The delay lets the new dictionary load before old entries are re-scanned.
 
 #### Maintenance
 
@@ -135,7 +135,6 @@ Every enrichment job sends its requests through its source's gateway ([Source Ga
 | `decay_observable_confidence` | Daily 02:20 | Lower confidence on aging observables (IOCs) and move them through their lifecycle |
 | `prune_engine_tables` | Daily 02:40 | Delete engine bookkeeping rows (`job_runs`, …) older than 30 days |
 | `reconcile_observable_counters` | Daily 02:50 | Recount observable sighting and article counters, which deletes can throw off |
-| `reenrich_cve_nvd` | Daily 03:05 | Re-fetch NVD data for CVEs still missing it |
 | `cleanup_orphaned_references` | Daily 03:15 | Remove references to deleted entities |
 | `resolve_cve_affected` | Daily 03:35 | Re-match unmatched CVE affected-product (CPE) pairs to current vendors and products |
 | `decay_relationship_confidence` | Sunday 03:45 | Demote co-occurrence relationships with no recent evidence from probable to possible |
@@ -174,7 +173,7 @@ Every enrichment job sends its requests through its source's gateway ([Source Ga
 
 ### Beat Schedule and Runtime Overrides
 
-`build_beat_schedule()` (`backend/app/workers/job_registry.py:731`) builds the schedule when beat starts:
+`build_beat_schedule()` (`backend/app/workers/job_registry.py:614`) builds the schedule when beat starts:
 
 1. Read overrides from the Redis key `intelfeed:job_schedule_overrides`.
 2. For each job, skip it if the override disables it, or if it has `enabled_by_default: False` and no override turns it on.
@@ -603,7 +602,7 @@ Recurring:
   Every 60 s      poll_due_feeds, run_scheduled_automations
   Every 5 min     refresh_saved_search_counts, sync_campaign_saved_searches, retry_failed_indexing
   Every 10 min    poll_analysis_batches
-  Every 15 min    embed_pending_entries, run_scheduled_enrichment, sync_campaign_sources
+  Every 15 min    embed_pending_entries, sync_campaign_sources
   Every 30 min    sync_ransomware_victims, refresh_autolinker_vocabulary, refresh_claude_auth_status,
                   retry_untranslated_entries, submit_analysis_batches
   Hourly (:10)    refresh_correlation_cache

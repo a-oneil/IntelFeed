@@ -109,7 +109,7 @@ async def _source_row(db_session, source_type: str, **fields) -> EnrichmentSourc
         source_type=source_type,
         display_name=source_type,
         is_enabled=True,
-        trigger_mode="scheduled",
+        trigger_mode="manual",
         config={},
         rate_limit_config={"requests_per_period": 100, "period_seconds": 60},
     )
@@ -183,7 +183,7 @@ SINGLE_DOWNLOAD_JOBS = [
     pytest.param(
         _run_kev, "known_exploited", _json({"catalogVersion": "t", "vulnerabilities": []}), "cisa_kev", id="kev"
     ),
-    pytest.param(_run_cwe, "cwec_latest", _cwe_zip, "cwe_catalog", id="cwe-catalog"),
+    pytest.param(_run_cwe, "cwec_latest", _cwe_zip, "mitre_cwe", id="cwe-catalog"),
     pytest.param(_run_cybergeist, "cybergeist.io", _json([]), "cybergeist", id="cybergeist"),
     pytest.param(_run_ransomware, "ransomware.live", _json([]), "ransomware_live", id="ransomware-victims"),
 ]
@@ -259,10 +259,10 @@ async def poc_cves(db_session):
 async def test_github_poc_scan_sends_the_fallback_token_through_its_bucket(
     db_session, worker_session, upstream, poc_cves, monkeypatch
 ):
-    monkeypatch.setattr(
-        "app.services.system_settings.get_setting_cached",
-        lambda key: "fallback-token" if key == "github_token" else None,
-    )
+    async def github_token(key, db=None):
+        return "fallback-token" if key == "github_token" else ""
+
+    monkeypatch.setattr("app.services.system_settings.get_setting", github_token)
     upstream.route("api.github.com", _poc_hit)
 
     stats = await tasks._run_github_poc_scan()
@@ -510,14 +510,51 @@ async def test_budget_migration_fills_only_missing_budgets(db_session):
 def test_new_installs_seed_the_same_budgets():
     from app.enrichment.registry import DEFAULT_SOURCES
 
-    assert {s["source_type"]: s["default_daily_budget"] for s in DEFAULT_SOURCES} == _budget_migration().DAILY_BUDGETS
+    budgets = _budget_migration().DAILY_BUDGETS
+    assert {
+        s["source_type"]: s["default_daily_budget"] for s in DEFAULT_SOURCES if s["source_type"] in budgets
+    } == budgets
 
 
-async def test_job_gateway_without_a_source_row_uses_the_defaults(db_session):
+async def test_job_gateway_without_a_source_row_uses_the_defaults(db_session, monkeypatch):
     from app.enrichment.pipeline import gateway_for
 
-    gateway, key = await gateway_for(db_session, "nvd", fallback_key="k", max_wait=gw.JOB_TOKEN_WAIT)
+    async def nvd_key(key, db=None):
+        return "k" if key == "nvd_api_key" else ""
+
+    monkeypatch.setattr("app.services.system_settings.get_setting", nvd_key)
+    gateway, key = await gateway_for(db_session, "nvd", max_wait=gw.JOB_TOKEN_WAIT)
     assert key == "k"
     assert (gateway.capacity, gateway.period, gateway.daily_budget) == (50, 30, 5000)
     assert gateway.throttle_statuses == NVDAdapter.throttle_statuses
     assert gateway.max_wait == gw.JOB_TOKEN_WAIT
+
+
+async def test_jobs_and_lookups_resolve_one_key_so_they_share_one_bucket(db_session, monkeypatch):
+    """With the key only in the nvd_api_key setting, the per-entity path and the
+    jobs must land on the same credential bucket (two buckets would double the
+    real request rate)."""
+    from app.enrichment.pipeline import gateway_for, resolve_api_key
+    from app.enrichment.registry import source_gateway
+    from app.models.enrichment import EnrichmentSource
+
+    async def nvd_key(key, db=None):
+        return "setting-key" if key == "nvd_api_key" else ""
+
+    monkeypatch.setattr("app.services.system_settings.get_setting", nvd_key)
+    row = EnrichmentSource(
+        source_type="nvd",
+        display_name="NVD",
+        is_enabled=True,
+        trigger_mode="manual",
+        rate_limit_config={"requests_per_period": 50, "period_seconds": 30},
+        health_status="unknown",
+        config={},
+    )
+    db_session.add(row)
+    await db_session.flush()
+
+    job_gateway, job_key = await gateway_for(db_session, "nvd")
+    lookup_key = await resolve_api_key(row, None, db_session)
+    assert job_key == lookup_key == "setting-key"
+    assert job_gateway.scope == source_gateway(row, lookup_key).scope

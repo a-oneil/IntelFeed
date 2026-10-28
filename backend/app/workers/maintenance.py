@@ -19,7 +19,7 @@ from app.models.entry import Entry
 from app.models.feed import Feed
 from app.services.system_settings import warm_settings_cache
 from app.workers.celery_app import celery_app
-from app.workers.db import run_async, worker_session
+from app.workers.db import run_async, source_job, worker_session
 
 logger = logging.getLogger(__name__)
 
@@ -1077,13 +1077,7 @@ def reenrich_cve_nvd():
     try:
         stats = run_async(_reenrich_cve_nvd())
         CELERY_TASKS_TOTAL.labels(task_name="reenrich_cve_nvd", status="success").inc()
-        logger.info(
-            "cve nvd re-enrichment: %s attempted, %s enriched, %s got configurations, %s affected pairs",
-            stats["attempted"],
-            stats["enriched"],
-            stats["with_config"],
-            stats["pairs"],
-        )
+        logger.info("cve nvd re-enrichment stats: %s", stats)
         return stats
     except Exception:
         CELERY_TASKS_TOTAL.labels(task_name="reenrich_cve_nvd", status="error").inc()
@@ -1095,6 +1089,7 @@ def reenrich_cve_nvd():
 _REENRICH_PENDING_STATUSES = ("Awaiting Analysis", "Undergoing Analysis", "Received")
 
 
+@source_job("nvd")
 async def _reenrich_cve_nvd(batch_size: int | None = None) -> dict:
     import asyncio
 

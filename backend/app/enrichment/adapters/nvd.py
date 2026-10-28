@@ -6,16 +6,53 @@ Provides CVE details, CVSS scores, references, and affected products.
 import httpx
 
 from app.enrichment.base import EnrichmentAdapter, EnrichmentData
+from app.enrichment.manifest import Context, Display, Egress, Job, License, Quota
 
 
 class NVDAdapter(EnrichmentAdapter):
     source_type = "nvd"
     display_name = "NVD API 2.0"
-    supported_entity_types = ["cve"]
-    requires_api_key = False
+    applies_to = {"cve": None}
+    # NVD allows 50 requests per rolling 30 s with an API key and 5 without
+    # (nvd.nist.gov/developers/start-here). The jobs pace themselves to the
+    # keyless window when there is no key (nvd_request_pace).
+    quota = Quota(50, 30, daily_budget=5000, ceiling_per_period=50)
+    egress = Egress.LOW
+    key_setting = "nvd_api_key"
+    license = License(
+        "NVD terms of use", attribution="This product uses the NVD API but is not endorsed or certified by the NVD."
+    )
     default_trigger_mode = "auto"
     # NVD answers 403 as well as 429 when a client exceeds its rolling window.
     throttle_statuses = (403, 429, 503)
+    jobs = (
+        Job(
+            "cve-nvd-refresh",
+            "app.workers.enrichment_tasks.run_cve_nvd_refresh",
+            {"type": "crontab", "minute": "0", "hour": "12"},
+            "Re-check NVD for CVSS score changes on existing CVEs",
+        ),
+        Job(
+            "cve-nvd-backfill",
+            "app.workers.enrichment_tasks.run_cve_nvd_backfill",
+            {"type": "crontab", "minute": "30", "hour": "1"},
+            "Backfill NVD data (CVSS, description, affected products, references) for CVEs missing it",
+        ),
+        Job(
+            "reenrich-cve-nvd",
+            "app.workers.maintenance.reenrich_cve_nvd",
+            {"type": "crontab", "minute": "5", "hour": "3"},
+            "Re-fetch NVD data for CVEs missing it (bulk-imported or awaiting NVD analysis)",
+            settings_keys=("cve_reenrich_batch_size",),
+        ),
+    )
+    outputs = (
+        Context("cvss_vector", "CVSS vector", Display.FACT),
+        Context("published", "Published", Display.FACT),
+        Context("last_modified", "Last modified", Display.FACT),
+        Context("weaknesses", "Weaknesses", Display.CHIPS),
+        Context("references", "References", Display.LINK),
+    )
 
     async def enrich(self, entity_type: str, entity_value: str) -> EnrichmentData:
         headers = {}

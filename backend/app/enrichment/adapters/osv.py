@@ -8,14 +8,30 @@ record for the CVE.
 import httpx
 
 from app.enrichment.base import EnrichmentAdapter, EnrichmentData
+from app.enrichment.manifest import Context, Display, Egress, License, Quota
 
 
 class OSVAdapter(EnrichmentAdapter):
     source_type = "osv"
     display_name = "OSV"
-    supported_entity_types = ["cve"]
-    requires_api_key = False
+    applies_to = {"cve": None}
+    # api.osv.dev publishes no request limit.
+    quota = Quota(100, 60, daily_budget=2000)
+    egress = Egress.LOW
+    license = License("CC BY 4.0", attribution="OSV.dev")
     default_trigger_mode = "auto"
+    outputs = (
+        Context("aliases", "Also known as", Display.CHIPS),
+        Context("summary", "Summary", Display.FACT),
+        Context("severity", "Severity vectors", Display.CHIPS),
+        Context(
+            "affected",
+            "Affected packages",
+            Display.TABLE,
+            item={"Ecosystem": "ecosystem", "Package": "package_name", "Ranges": "ranges"},
+        ),
+        Context("references", "References", Display.LINK),
+    )
 
     _vulns_url = "https://api.osv.dev/v1/vulns/"
 

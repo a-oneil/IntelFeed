@@ -57,4 +57,3 @@ UTC defaults from `backend/app/workers/job_registry.py`; admins can override.
 | `backfill-rule-attack-mappings` | weekly Sun 05:30 | re-fetches GitHub rules for ATT&CK ids; derives tactics from techniques |
 | `wikipedia-bulk-sync` | weekly Wed 04:00 | Wikipedia summaries |
 | `build-telegram-forward-relationships` | every 4h | Telegram `forwarded_from` → `communicates_with` links |
-| `scheduled-enrichment-check` | every 15 min | runs sources in `scheduled` trigger mode |

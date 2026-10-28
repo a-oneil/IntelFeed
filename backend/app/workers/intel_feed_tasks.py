@@ -9,7 +9,7 @@ from app.ai.caller import Caller
 from app.config import settings
 from app.core.metrics import CELERY_TASK_DURATION_SECONDS, CELERY_TASKS_TOTAL
 from app.workers.celery_app import celery_app
-from app.workers.db import run_async, worker_session
+from app.workers.db import run_async, source_job, worker_session
 from app.workers.pipeline_logging import pipeline_stage
 
 logger = logging.getLogger(__name__)
@@ -36,6 +36,7 @@ def sync_kev_feed():
         CELERY_TASK_DURATION_SECONDS.labels(task_name="sync_kev_feed").observe(time.monotonic() - start)
 
 
+@source_job("cisa_kev")
 async def _sync_kev_feed():
     from app.intelligence.external_feeds import sync_kev_feed
 
@@ -66,6 +67,7 @@ def refresh_cwe_catalog():
         CELERY_TASK_DURATION_SECONDS.labels(task_name="refresh_cwe_catalog").observe(time.monotonic() - start)
 
 
+@source_job("mitre_cwe")
 async def _refresh_cwe_catalog():
     from app.intelligence.cwe_catalog import refresh_cwe_catalog as _refresh
 
@@ -90,6 +92,7 @@ def sync_cybergeist_feeds():
         CELERY_TASK_DURATION_SECONDS.labels(task_name="sync_cybergeist_feeds").observe(time.monotonic() - start)
 
 
+@source_job("cybergeist")
 async def _sync_cybergeist_feeds():
     from app.intelligence.external_feeds import sync_cybergeist_malware, sync_cybergeist_threat_actors
 
@@ -129,6 +132,7 @@ def sync_ransomware_victims():
         CELERY_TASK_DURATION_SECONDS.labels(task_name="sync_ransomware_victims").observe(time.monotonic() - start)
 
 
+@source_job("ransomware_live")
 async def _sync_ransomware_victims():
     from app.intelligence.ransomware_sync import sync_ransomware_victims as _run_sync
 

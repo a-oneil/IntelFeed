@@ -1,4 +1,5 @@
-"""Adapter registry for enrichment sources."""
+"""Registry of enrichment sources, and what their manifests generate: seed rows,
+job registry entries and gateways."""
 
 from app.enrichment.adapters import (
     CISAKEVAdapter,
@@ -15,7 +16,14 @@ from app.enrichment.adapters import (
     VulnCheckAdapter,
     WikipediaAdapter,
 )
-from app.enrichment.base import EnrichmentAdapter
+from app.enrichment.base import EnrichmentAdapter, Source
+from app.enrichment.catalogs import (
+    CybergeistSource,
+    MetasploitSource,
+    MISPGalaxySource,
+    MITRECWESource,
+    RansomwareLiveSource,
+)
 from app.enrichment.gateway import SourceGateway
 from app.models.enrichment import EnrichmentSource
 
@@ -36,138 +44,35 @@ ADAPTER_REGISTRY: dict[str, type[EnrichmentAdapter]] = {
     "shodan": ShodanAdapter,
 }
 
-# Default source definitions for seeding the database. default_daily_budget is
-# requests per UTC day per credential, about twice what the jobs and per-entity
-# lookups send on a busy day (migration j7e8f9a0b1c2 has the breakdown).
-DEFAULT_SOURCES = [
-    {
-        "source_type": "epss",
-        "display_name": "FIRST EPSS",
-        "default_trigger_mode": "scheduled",
-        "requires_api_key": False,
-        "default_rate_limit": {"requests_per_period": 100, "period_seconds": 60},
-        "default_daily_budget": 500,
-        "default_min_confidence_threshold": "low",
-    },
-    {
-        "source_type": "nvd",
-        "display_name": "NVD API 2.0",
-        "default_trigger_mode": "auto",
-        "requires_api_key": False,
-        "default_rate_limit": {"requests_per_period": 50, "period_seconds": 30},
-        "default_daily_budget": 5000,
-        "default_min_confidence_threshold": "low",
-    },
-    {
-        "source_type": "cisa_kev",
-        "display_name": "CISA KEV",
-        "default_trigger_mode": "scheduled",
-        "requires_api_key": False,
-        "default_rate_limit": {"requests_per_period": 100, "period_seconds": 60},
-        "default_daily_budget": 500,
-        "default_min_confidence_threshold": "low",
-    },
-    {
-        "source_type": "mitre_attack",
-        "display_name": "MITRE ATT&CK",
-        "default_trigger_mode": "scheduled",
-        "requires_api_key": False,
-        "default_rate_limit": {"requests_per_period": 10, "period_seconds": 3600},
-        "default_daily_budget": 100,
-        "default_min_confidence_threshold": "low",
-    },
-    {
-        "source_type": "vulncheck",
-        "display_name": "VulnCheck KEV",
-        "default_trigger_mode": "scheduled",
-        "requires_api_key": True,
-        "default_rate_limit": {"requests_per_period": 1000, "period_seconds": 60},
-        "default_daily_budget": 1000,
-        "default_min_confidence_threshold": "medium",
-    },
-    {
-        "source_type": "osv",
-        "display_name": "OSV",
-        "default_trigger_mode": "auto",
-        "requires_api_key": False,
-        "default_rate_limit": {"requests_per_period": 100, "period_seconds": 60},
-        "default_daily_budget": 2000,
-        "default_min_confidence_threshold": "low",
-    },
-    {
-        "source_type": "malpedia",
-        "display_name": "Malpedia",
-        "default_trigger_mode": "scheduled",
-        "requires_api_key": False,
-        "default_rate_limit": {"requests_per_period": 30, "period_seconds": 60},
-        "default_daily_budget": 1000,
-        "default_min_confidence_threshold": "low",
-    },
-    {
-        "source_type": "github_poc",
-        "display_name": "GitHub PoC",
-        "default_trigger_mode": "scheduled",
-        "requires_api_key": False,
-        "default_rate_limit": {"requests_per_period": 10, "period_seconds": 60},
-        "default_daily_budget": 1000,
-        "default_min_confidence_threshold": "low",
-    },
-    {
-        "source_type": "cvedetails",
-        "display_name": "CVEDetails",
-        "default_trigger_mode": "auto",
-        "requires_api_key": True,
-        "default_rate_limit": {"requests_per_period": 60, "period_seconds": 60},
-        "default_daily_budget": 1000,
-        "default_min_confidence_threshold": "medium",
-    },
-    {
-        "source_type": "wikipedia",
-        "display_name": "Wikipedia",
-        "default_trigger_mode": "auto",
-        "requires_api_key": False,
-        "default_rate_limit": {"requests_per_period": 10, "period_seconds": 60},
-        "default_daily_budget": 2000,
-        "default_min_confidence_threshold": "low",
-    },
-    {
-        "source_type": "virustotal",
-        "display_name": "VirusTotal v3",
-        "default_trigger_mode": "manual",
-        "requires_api_key": True,
-        # Free tier: 4 req/min, 500/day.
-        "default_rate_limit": {"requests_per_period": 4, "period_seconds": 60},
-        "default_daily_budget": 500,
-        "default_min_confidence_threshold": "medium",
-    },
-    {
-        "source_type": "greynoise",
-        "display_name": "GreyNoise Community",
-        "default_trigger_mode": "manual",
-        # The Community endpoint answers without a key; one raises the allowance.
-        "requires_api_key": False,
-        "default_rate_limit": {"requests_per_period": 10, "period_seconds": 3600},
-        "default_daily_budget": 100,
-        "default_min_confidence_threshold": "medium",
-    },
-    {
-        "source_type": "shodan",
-        "display_name": "Shodan InternetDB",
-        # Keyless and cheap: run automatically for freshly judged IPs. (Existing
-        # installs keep their row's trigger_mode — flip it under Settings →
-        # Engine → Enrichment.)
-        "default_trigger_mode": "auto",
-        "requires_api_key": False,
-        "default_rate_limit": {"requests_per_period": 30, "period_seconds": 60},
-        "default_daily_budget": 1000,
-        "default_min_confidence_threshold": "medium",
-    },
-]
+# Catalog sources: scheduled jobs only, no per-entity lookup.
+CATALOG_REGISTRY: dict[str, type[Source]] = {
+    cls.source_type: cls
+    for cls in (MISPGalaxySource, MetasploitSource, MITRECWESource, RansomwareLiveSource, CybergeistSource)
+}
+
+#: Every source, lookup or catalog, by source_type.
+SOURCE_REGISTRY: dict[str, type[Source]] = {**ADAPTER_REGISTRY, **CATALOG_REGISTRY}
+
+
+def _seed_row(cls: type[Source]) -> dict:
+    return {
+        "source_type": cls.source_type,
+        "display_name": cls.display_name,
+        "default_trigger_mode": cls.default_trigger_mode,
+        "default_rate_limit": cls.quota.rate_limit_config,
+        "default_daily_budget": cls.quota.daily_budget,
+        # A source with jobs starts on: its jobs skip while it is off.
+        "default_enabled": bool(cls.jobs),
+    }
+
+
+#: Seed rows for the enrichment_sources table, from the manifests.
+DEFAULT_SOURCES = [_seed_row(cls) for cls in SOURCE_REGISTRY.values()]
 
 
 # Map shared_key_group → list of source_types that share that key
 SHARED_KEY_GROUPS: dict[str, list[str]] = {}
-for _st, _cls in ADAPTER_REGISTRY.items():
+for _st, _cls in SOURCE_REGISTRY.items():
     group = getattr(_cls, "shared_key_group", None)
     if group:
         SHARED_KEY_GROUPS.setdefault(group, []).append(_st)
@@ -188,15 +93,41 @@ def get_adapter(
 
 
 def source_gateway(source: EnrichmentSource, api_key: str | None, **kwargs) -> SourceGateway:
-    """The gateway for a source row and the key it will use."""
-    adapter_class = ADAPTER_REGISTRY.get(source.source_type) or EnrichmentAdapter
-    return SourceGateway.for_source(
-        source,
-        api_key,
-        shared_key_group=adapter_class.shared_key_group,
-        throttle_statuses=adapter_class.throttle_statuses,
+    """The gateway for a source row and the key it will use. With a key, a
+    source whose manifest has a ``keyed`` quota gets that rate, unless an admin
+    has changed the row's rate from the keyless default."""
+    cls = SOURCE_REGISTRY.get(source.source_type, Source)
+    rate_limit_config = source.rate_limit_config
+    quota = getattr(cls, "quota", None)
+    if api_key and quota and quota.keyed and rate_limit_config == quota.rate_limit_config:
+        rate_limit_config = quota.keyed.rate_limit_config
+    return SourceGateway(
+        source.source_type,
+        rate_limit_config=rate_limit_config,
+        daily_budget=source.daily_budget,
+        api_key=api_key,
+        shared_key_group=cls.shared_key_group,
+        throttle_statuses=cls.throttle_statuses,
         **kwargs,
     )
+
+
+def enrichment_jobs() -> dict[str, dict]:
+    """JOB_REGISTRY entries for every source's scheduled jobs."""
+    jobs = {}
+    for cls in SOURCE_REGISTRY.values():
+        for job in cls.jobs:
+            entry = {
+                "task": job.task,
+                "description": job.description,
+                "category": "enrichment",
+                "source": cls.source_type,
+                "default_schedule": job.schedule,
+            }
+            if job.settings_keys:
+                entry["settings_keys"] = list(job.settings_keys)
+            jobs[job.key] = entry
+    return jobs
 
 
 def adapter_for_source(source: EnrichmentSource, api_key: str | None) -> EnrichmentAdapter:

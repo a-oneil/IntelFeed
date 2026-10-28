@@ -6,14 +6,41 @@ Provides malware family and threat actor intelligence from Fraunhofer FKIE's Mal
 import httpx
 
 from app.enrichment.base import EnrichmentAdapter, EnrichmentData
+from app.enrichment.manifest import Column, Context, Display, Egress, Job, License, Policy, Quota
+
+_TYPES = ("malware", "tool", "threat_actor")
 
 
 class MalpediaAdapter(EnrichmentAdapter):
     source_type = "malpedia"
     display_name = "Malpedia"
-    supported_entity_types = ["malware", "tool", "threat_actor"]
-    requires_api_key = False
-    default_trigger_mode = "scheduled"
+    applies_to = dict.fromkeys(_TYPES)
+    quota = Quota(30, 60, daily_budget=1000)
+    egress = Egress.LOW
+    license = License("CC BY-NC-SA 3.0", attribution="Malpedia (Fraunhofer FKIE)", commercial_ok=False)
+    jobs = (
+        # Writes malware, tool and actor rows, so it runs on its own day: the
+        # Sunday catalog syncs also write threat_actors, and sharing their slot
+        # deadlocked.
+        Job(
+            "malpedia-sync",
+            "app.workers.enrichment_tasks.run_malpedia_sync",
+            {"type": "crontab", "minute": "0", "hour": "1", "day_of_week": "6"},
+            "Sync malware families from Malpedia",
+        ),
+    )
+    outputs = (
+        *(Column("description", f"{t}.description", Policy.RANK, rank=3) for t in _TYPES),
+        *(Column("malpedia_url", f"{t}.malpedia_url") for t in ("malware", "tool")),
+        # The only place a tool's repository already shows up.
+        Column("urls", "tool.github_url", filter="github_url"),
+        *(Column("alt_names", f"{t}.aliases", Policy.UNION, rank=2, filter="aliases") for t in _TYPES),
+        Column("country", "threat_actor.country"),
+        Context("attribution", "Attributed to", Display.CHIPS, entity_types=("malware", "tool")),
+        Context("urls", "References", Display.LINK, entity_types=("malware", "tool")),
+        Context("families", "Families", Display.CHIPS, entity_types=("threat_actor",)),
+        Context("refs", "References", Display.LINK, entity_types=("threat_actor",)),
+    )
 
     _api_base = "https://malpedia.caad.fkie.fraunhofer.de/api/"
 

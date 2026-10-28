@@ -17,8 +17,6 @@ class EnrichmentSourceResponse(BaseModel):
     min_confidence_threshold: str = "low"
     daily_budget: int | None = None
     daily_budget_used: int = 0
-    schedule_interval_hours: int = 24
-    next_scheduled_at: datetime | None = None
     supported_entity_types: list[str] = []
     last_synced_at: datetime | None
     health_status: str
@@ -31,24 +29,23 @@ class EnrichmentSourceResponse(BaseModel):
 
 class EnrichmentSourceUpdate(BaseModel):
     is_enabled: bool | None = None
-    trigger_mode: str | None = Field(default=None, pattern=r"^(auto|scheduled|manual)$")
+    trigger_mode: str | None = Field(default=None, pattern=r"^(auto|manual)$")
     api_key: str | None = None
     rate_limit_config: dict | None = None
     config: dict | None = None
     min_confidence_threshold: str | None = Field(default=None, pattern=r"^(high|medium|low)$")
     daily_budget: int | None = None
     clear_daily_budget: bool = False
-    schedule_interval_hours: int | None = None
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "is_enabled": True,
-                "trigger_mode": "scheduled",
+                "trigger_mode": "auto",
                 "api_key": "nvd-api-key-0123456789abcdef",
+                "rate_limit_config": {"requests_per_period": 50, "period_seconds": 30},
                 "min_confidence_threshold": "medium",
                 "daily_budget": 200,
-                "schedule_interval_hours": 24,
             }
         }
     )

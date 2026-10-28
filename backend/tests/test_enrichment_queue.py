@@ -94,7 +94,7 @@ async def _dispatch(db, server: _Source, **kw) -> dict:
 async def test_new_lane_queues_enabled_auto_sources_for_the_type(db_session):
     await _source(db_session, "osv")
     await _source(db_session, "nvd")
-    await _source(db_session, "github_poc", trigger_mode="scheduled")
+    await _source(db_session, "github_poc", trigger_mode="manual")
     await _source(db_session, "cvedetails", is_enabled=False)
     await _source(db_session, "shodan")  # doesn't do CVEs
 
@@ -108,7 +108,7 @@ async def test_new_lane_queues_enabled_auto_sources_for_the_type(db_session):
 
 
 async def test_other_lanes_may_name_any_enabled_source(db_session):
-    await _source(db_session, "github_poc", trigger_mode="scheduled")
+    await _source(db_session, "github_poc", trigger_mode="manual")
     await _source(db_session, "osv")
     queued = await q.enqueue(db_session, "cve", uuid.uuid4(), CVE_ID, lane="backfill", source_types=["github_poc"])
     assert queued == ["github_poc"]

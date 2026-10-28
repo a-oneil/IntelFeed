@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 
 from app.adapters.base import ParsedFeedMeta
 from app.adapters.ransomware_live import RansomwareLiveAdapter, make_disclosure_guid
+from app.enrichment.gateway import SourceGateway
 from app.intelligence.ransomware_sync import sync_ransomware_victims
 from app.models.country import Country
 from app.models.ransomware import RansomwareVictim, VictimDisclosure
@@ -78,7 +79,8 @@ async def test_adapter_parses_and_filters_by_cutoff():
     with patch("app.adapters.ransomware_live.httpx.AsyncClient") as mock_client:
         instance = mock_client.return_value.__aenter__.return_value
         instance.get.return_value = mock_resp
-        _meta, entries = await RansomwareLiveAdapter().fetch_entries({}, since=now - timedelta(days=1))
+        adapter = RansomwareLiveAdapter(SourceGateway("ransomware_live"))
+        _meta, entries = await adapter.fetch_entries({}, since=now - timedelta(days=1))
 
     # Old Victim is older than the cutoff → filtered out.
     assert len(entries) == 1

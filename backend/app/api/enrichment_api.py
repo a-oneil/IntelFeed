@@ -35,23 +35,25 @@ async def _source_gateway(source: EnrichmentSource, db: AsyncSession):
 
 
 async def _used_today(source: EnrichmentSource, db: AsyncSession) -> int:
-    """Requests the source sent today, from its gateway; the stored counter if
-    Redis can't answer."""
+    """Requests the source sent today, from its gateway; 0 when Redis can't
+    answer (the gateway is the only counter)."""
     from app.enrichment.gateway import GatewayUnavailable
 
     try:
         return await (await _source_gateway(source, db)).used_today()
     except GatewayUnavailable:
-        return source.daily_budget_used
+        return 0
 
 
 def _source_to_response(s: EnrichmentSource, used_today: int) -> EnrichmentSourceResponse:
-    from app.enrichment.registry import ADAPTER_REGISTRY
+    from app.enrichment.registry import SOURCE_REGISTRY
 
-    adapter_cls = ADAPTER_REGISTRY.get(s.source_type)
-    shared_key_group = getattr(adapter_cls, "shared_key_group", None) if adapter_cls else None
-    supported_entity_types = getattr(adapter_cls, "supported_entity_types", []) if adapter_cls else []
-    requires_api_key = getattr(adapter_cls, "requires_api_key", False) if adapter_cls else False
+    source_cls = SOURCE_REGISTRY.get(s.source_type)
+    shared_key_group = source_cls.shared_key_group if source_cls else None
+    # The entity types a person can ask this source to enrich: none for a
+    # catalog source, whose jobs fill entities in bulk.
+    supported_entity_types = source_cls.supported_entity_types if source_cls and source_cls.kind == "lookup" else []
+    requires_api_key = source_cls.requires_api_key if source_cls else False
 
     return EnrichmentSourceResponse(
         id=s.id,
@@ -66,8 +68,6 @@ def _source_to_response(s: EnrichmentSource, used_today: int) -> EnrichmentSourc
         min_confidence_threshold=s.min_confidence_threshold,
         daily_budget=s.daily_budget,
         daily_budget_used=used_today,
-        schedule_interval_hours=s.schedule_interval_hours,
-        next_scheduled_at=s.next_scheduled_at,
         supported_entity_types=supported_entity_types,
         last_synced_at=s.last_synced_at,
         health_status=s.health_status,
@@ -75,6 +75,31 @@ def _source_to_response(s: EnrichmentSource, used_today: int) -> EnrichmentSourc
         created_at=s.created_at,
         updated_at=s.updated_at,
     )
+
+
+def _check_rate_ceiling(source_type: str, rate_limit_config: dict, has_key: bool) -> None:
+    """Refuse a rate above what the source documents it allows."""
+    from app.enrichment.registry import SOURCE_REGISTRY
+
+    source_cls = SOURCE_REGISTRY.get(source_type)
+    if source_cls is None:
+        return
+    quota = source_cls.quota.keyed if has_key and source_cls.quota.keyed else source_cls.quota
+    requested = rate_limit_config.get("requests_per_period")
+    if quota.ceiling_per_period is None or requested is None:
+        return
+    # The ceiling is per the manifest's period; compare as a rate.
+    period = rate_limit_config.get("period_seconds") or quota.period_seconds
+    if requested / period > quota.ceiling_per_period / quota.period_seconds:
+        raise AppError(
+            code="rate_above_ceiling",
+            message=(
+                f"{source_cls.display_name} allows at most {quota.ceiling_per_period} requests per "
+                f"{quota.period_seconds} s{' with an API key' if quota is source_cls.quota.keyed else ''}"
+            ),
+            details=[{"ceiling_per_period": quota.ceiling_per_period, "period_seconds": quota.period_seconds}],
+            status_code=400,
+        )
 
 
 # --- Admin: Source Management ---
@@ -97,22 +122,22 @@ async def update_enrichment_source(
     user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Admin: update a source's enablement, trigger mode, API key, rate limits, budget or schedule.
-    Only fields present in the body are applied; switching to scheduled mode seeds next_scheduled_at.
+    """Admin: update a source's enablement, trigger mode, API key, rate limit or budget.
+    Only fields present in the body are applied. A rate above the source's documented
+    ceiling (with a key, its keyed ceiling) is refused with 400.
     """
     source = await db.get(EnrichmentSource, source_id)
     if not source:
         raise AppError(code="not_found", message="Enrichment source not found", status_code=404)
 
+    if body.rate_limit_config is not None:
+        has_key = bool(body.api_key) if body.api_key is not None else bool(source.api_key_encrypted)
+        _check_rate_ceiling(source.source_type, body.rate_limit_config, has_key)
+
     if body.is_enabled is not None:
         source.is_enabled = body.is_enabled
     if body.trigger_mode is not None:
         source.trigger_mode = body.trigger_mode
-        # When switching to scheduled, seed next_scheduled_at if not set
-        if body.trigger_mode == "scheduled" and not source.next_scheduled_at:
-            from datetime import timedelta
-
-            source.next_scheduled_at = datetime.now(UTC) + timedelta(hours=source.schedule_interval_hours)
     if body.api_key is not None:
         from app.core.encryption import encrypt_value
 
@@ -125,17 +150,8 @@ async def update_enrichment_source(
         source.min_confidence_threshold = body.min_confidence_threshold
     if body.clear_daily_budget:
         source.daily_budget = None
-        source.daily_budget_used = 0
     elif body.daily_budget is not None:
         source.daily_budget = body.daily_budget
-    if body.schedule_interval_hours is not None:
-        source.schedule_interval_hours = body.schedule_interval_hours
-        # Recalculate next_scheduled_at based on new interval
-        if source.trigger_mode == "scheduled":
-            from datetime import timedelta
-
-            base = source.last_synced_at or datetime.now(UTC)
-            source.next_scheduled_at = base + timedelta(hours=body.schedule_interval_hours)
 
     db.add(source)
     await db.flush()
@@ -159,7 +175,13 @@ async def test_source_connection(
     from app.enrichment.registry import ADAPTER_REGISTRY, adapter_for_source
 
     adapter_cls = ADAPTER_REGISTRY.get(source.source_type)
-    requires_key = getattr(adapter_cls, "requires_api_key", False) if adapter_cls else False
+    if adapter_cls is None:
+        raise AppError(
+            code="not_testable",
+            message=f"{source.display_name} has no lookup to test; its jobs report in the Jobs view",
+            status_code=400,
+        )
+    requires_key = adapter_cls.requires_api_key
     api_key = decrypt_value(source.api_key_encrypted) if source.api_key_encrypted else None
 
     if requires_key and not api_key:

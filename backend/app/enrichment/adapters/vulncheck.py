@@ -6,14 +6,24 @@ Checks if a CVE is in VulnCheck's KEV database with exploit references.
 import httpx
 
 from app.enrichment.base import EnrichmentAdapter, EnrichmentData
+from app.enrichment.manifest import Context, Display, Egress, License, Quota
 
 
 class VulnCheckAdapter(EnrichmentAdapter):
     source_type = "vulncheck"
     display_name = "VulnCheck KEV"
-    supported_entity_types = ["cve"]
-    requires_api_key = True
-    default_trigger_mode = "scheduled"
+    applies_to = {"cve": None}
+    requires = ("api_key",)
+    # VulnCheck's free tier allows 1,000 requests a minute.
+    quota = Quota(1000, 60, daily_budget=1000, ceiling_per_period=1000)
+    egress = Egress.LOW
+    license = License("VulnCheck Community terms", attribution="VulnCheck KEV", commercial_ok=False)
+    outputs = (
+        Context("in_kev", "In VulnCheck KEV", Display.BADGE),
+        Context("date_added", "Added", Display.FACT),
+        Context("known_ransomware_campaign_use", "Known ransomware use", Display.FACT),
+        Context("exploit_references", "Exploit references", Display.LINK),
+    )
 
     _api_base = "https://api.vulncheck.com/v3/"
 

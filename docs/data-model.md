@@ -583,15 +583,14 @@ Bookkeeping for the one-pass `entry_analysis` (one AI call that reads an article
 
 #### EnrichmentSource
 Table `enrichment_sources`: one external data source.
-- `source_type` (unique) — `nvd`, `epss`, `cisa_kev`, `mitre_attack`, `vulncheck`, `osv`, `malpedia`, `github_poc`, `cvedetails`, `wikipedia`, `greynoise`, `shodan`, `virustotal`
-- `display_name`, `is_enabled` (default false)
-- `trigger_mode` (default `manual`) — `auto`, `scheduled` or `manual`
+- `source_type` (unique) — `nvd`, `epss`, `cisa_kev`, `mitre_attack`, `vulncheck`, `osv`, `malpedia`, `github_poc`, `cvedetails`, `wikipedia`, `greynoise`, `shodan`, `virustotal`, and the catalog sources `misp_galaxy`, `metasploit`, `mitre_cwe`, `ransomware_live`, `cybergeist`
+- `display_name`, `is_enabled` (seeded on for a source with scheduled jobs; a disabled source's jobs skip)
+- `trigger_mode` (default `manual`) — `auto` or `manual`
 - `api_key_encrypted`, `config` (JSONB)
 - `rate_limit_config` (JSONB) — for example `{"requests_per_period": 50, "period_seconds": 604800}`
 - `health_status` (default `unknown`) — `healthy`, `degraded`, `down` or `unknown`
 - `min_confidence_threshold` (default `low`)
-- `daily_budget`, `daily_budget_used` (synced from Redis)
-- `schedule_interval_hours` (default 24), `next_scheduled_at`, `last_synced_at`
+- `daily_budget` (requests per UTC day; the gateway counts usage in Redis), `last_synced_at`
 
 #### UserEnrichmentOverride
 Table `user_enrichment_overrides`: a person's own API key for a source. Unique on (`created_by`, `source_id`): each user has at most one override per source.
@@ -1060,7 +1059,7 @@ Fixed value sets are plain strings. The lists below come from code; where a migr
 | `tools.tool_type` | `c2_framework`, `credential_access`, `lateral_movement`, `reconnaissance`, `exploitation`, `persistence`, `defense_evasion`, `lolbas`, `framework`, `phishing_kit`, `tunneling`, `remote_access`, `ai_model`, `defensive`, `observability`, `cloud`, `identity`, `dev_tool`, `service`, `software`, `other` | `TOOL_TYPES` in `models/tool.py` |
 | TLP markings (`campaigns`, `intel_reports`) | `TLP:CLEAR`, `TLP:GREEN`, `TLP:AMBER`, `TLP:AMBER+STRICT`, `TLP:RED`. `TLP:WHITE` is accepted on input and stored as `TLP:CLEAR`. | `app/schemas/tlp.py` |
 | `users.role` | `admin`, `user`, `system` | CHECK `ck_users_role` |
-| `enrichment_sources.trigger_mode` | `auto`, `scheduled`, `manual` | |
+| `enrichment_sources.trigger_mode` | `auto`, `manual` | `EnrichmentSourceUpdate` in `schemas/enrichment.py` |
 | `enrichment_sources.health_status` | `healthy`, `degraded`, `down`, `unknown` | |
 
 TLP (Traffic Light Protocol) marks how widely a report may be shared.

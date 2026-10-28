@@ -6,12 +6,18 @@ prevent both connection leaks and 'Event loop is closed' errors.
 """
 
 import asyncio
+import functools
+import logging
+import sys
 import threading
 from contextlib import asynccontextmanager
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 # Per-process persistent event loop (thread-local for safety in edge cases)
 _local = threading.local()
@@ -52,3 +58,34 @@ async def worker_session():
             yield session
     finally:
         await engine.dispose()
+
+
+#: What a source's job returns when the source is switched off.
+SOURCE_DISABLED = {"skipped": "source disabled"}
+
+
+def source_job(source_type: str):
+    """Skip the decorated job body while its enrichment source is switched off.
+
+    Wraps the async body of a scheduled job in a worker module and reads the
+    source's row through that module's ``_get_worker_session``, the one tests
+    replace. A source with no row yet (before the startup seed) counts as on.
+    """
+
+    def wrap(fn):
+        @functools.wraps(fn)
+        async def run(*args, **kwargs):
+            from app.models.enrichment import EnrichmentSource
+
+            async with sys.modules[fn.__module__]._get_worker_session() as db:
+                enabled = await db.scalar(
+                    select(EnrichmentSource.is_enabled).where(EnrichmentSource.source_type == source_type)
+                )
+            if enabled is False:
+                logger.info("%s skipped: source %s is disabled", fn.__name__.lstrip("_"), source_type)
+                return dict(SOURCE_DISABLED)
+            return await fn(*args, **kwargs)
+
+        return run
+
+    return wrap

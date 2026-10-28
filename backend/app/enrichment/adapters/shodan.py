@@ -10,16 +10,35 @@ import re
 import httpx
 
 from app.enrichment.base import EnrichmentAdapter, EnrichmentData
+from app.enrichment.manifest import Column, Context, Display, Egress, License, Policy, Quota
 
 _IPV4_RE = re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}$")
+
+#: parsed_data key → key in Observable.reputation.
+_REPUTATION = {"ports": "ports", "hostnames": "hostnames", "tags": "shodan_tags", "vulns": "vulns"}
 
 
 class ShodanAdapter(EnrichmentAdapter):
     source_type = "shodan"
     display_name = "Shodan InternetDB"
-    supported_entity_types = ["observable"]
-    requires_api_key = False
+    applies_to = {"observable": ("ipv4",)}
+    quota = Quota(30, 60, daily_budget=1000)
+    egress = Egress.SHARES_IOC
+    license = License("InternetDB, free for non-commercial use", attribution="Shodan", commercial_ok=False)
+    # Keyless and cheap: run automatically for freshly judged IPs. (Existing
+    # installs keep their row's trigger_mode — flip it under Settings →
+    # Engine → Enrichment.)
     default_trigger_mode = "auto"
+    outputs = (
+        *(Column(key, f"observable.reputation.{rep}", Policy.NEWER_WINS) for key, rep in _REPUTATION.items()),
+        # A vpn / proxy / tor tag names dual-use infrastructure.
+        Column("tags", "observable.infra_tag", Policy.RANK, rank=1, filter="infra_tag"),
+        Context("ports", "Open ports", Display.CHIPS),
+        Context("hostnames", "Hostnames", Display.CHIPS),
+        Context("tags", "Tags", Display.CHIPS),
+        Context("cpes", "Software", Display.CHIPS),
+        Context("vulns", "Vulnerabilities", Display.CHIPS),
+    )
 
     async def enrich(self, entity_type: str, entity_value: str) -> EnrichmentData:
         if not _IPV4_RE.match(entity_value):
