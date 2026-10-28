@@ -234,8 +234,18 @@ export type EnrichmentLane = "manual" | "new" | "refresh" | "backfill";
 
 export interface EnrichmentSourceDetail {
   limits: {
-    requests_per_period: number;
-    period_seconds: number;
+    /** The row's stored rate — what the limits form edits. */
+    rate: {
+      requests_per_period: number;
+      period_seconds: number;
+    };
+    /** What the gateway enforces: a keyed quota's rate when a key is set. */
+    effective_rate: {
+      requests_per_period: number;
+      period_seconds: number;
+    };
+    /** "with key" when the effective rate is the keyed one, else null. */
+    rate_note: string | null;
     ceiling_per_period: number | null;
     daily_budget: number | null;
     used_today: number;

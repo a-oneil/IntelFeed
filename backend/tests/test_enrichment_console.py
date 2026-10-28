@@ -273,8 +273,9 @@ async def test_detail_limits_trend_queue_and_jobs(client, admin_headers, db_sess
     data = resp.json()
 
     assert data["limits"] == {
-        "requests_per_period": 40,
-        "period_seconds": 30,
+        "rate": {"requests_per_period": 40, "period_seconds": 30},
+        "effective_rate": {"requests_per_period": 40, "period_seconds": 30},
+        "rate_note": None,
         "ceiling_per_period": 5,  # keyless: NVD allows 5 per 30 s without a key
         "daily_budget": 100,
         "used_today": 3,
@@ -607,6 +608,25 @@ async def test_backfill_refusals(client, admin_headers, db_session, source_type,
     resp = await client.post(f"/api/enrichment/sources/{source_type}/backfill", json=body, headers=admin_headers)
     assert resp.status_code == 400
     assert resp.json()["error"]["code"] == code
+
+
+async def test_detail_shows_the_stored_rate_beside_the_keyed_one(client, admin_headers, db_session, monkeypatch):
+    """With a key, NVD runs at its keyed rate while the row keeps the keyless
+    default. The detail returns both, so the form never saves the keyed rate
+    into the row (which would turn the keyed swap off)."""
+    import app.enrichment.console as console
+
+    async def key(row, db):
+        return "nvd-key"
+
+    monkeypatch.setattr(console, "_global_key", key)
+    await _source(db_session, "nvd", rate_limit_config={"requests_per_period": 5, "period_seconds": 30})
+
+    limits = (await client.get("/api/enrichment/sources/nvd/detail", headers=admin_headers)).json()["limits"]
+    assert limits["rate"] == {"requests_per_period": 5, "period_seconds": 30}
+    assert limits["effective_rate"] == {"requests_per_period": 50, "period_seconds": 30}
+    assert limits["rate_note"] == "with key"
+    assert limits["key"] == "global"
 
 
 # ── Contract with the frontend types ─────────────────────────────────

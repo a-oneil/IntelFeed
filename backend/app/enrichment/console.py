@@ -370,6 +370,9 @@ async def detail(db: AsyncSession, source_type: str) -> dict | None:
         return None
     key = await _global_key(row, db)
     gateway = source_gateway(row, key)
+    # The row's own rate is what the gateway enforces without a key; with one,
+    # a keyed quota may stand in for it. The console edits the stored rate.
+    stored = source_gateway(row, None)
     quota = cls.quota.keyed if key and cls.quota.keyed else cls.quota
 
     try:
@@ -519,8 +522,9 @@ async def detail(db: AsyncSession, source_type: str) -> dict | None:
 
     return {
         "limits": {
-            "requests_per_period": gateway.capacity,
-            "period_seconds": gateway.period,
+            "rate": {"requests_per_period": stored.capacity, "period_seconds": stored.period},
+            "effective_rate": {"requests_per_period": gateway.capacity, "period_seconds": gateway.period},
+            "rate_note": "with key" if (gateway.capacity, gateway.period) != (stored.capacity, stored.period) else None,
             "ceiling_per_period": quota.ceiling_per_period,
             "daily_budget": row.daily_budget,
             "used_today": used_today,

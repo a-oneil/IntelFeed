@@ -10,7 +10,7 @@
  * queues the lookup; the panel says so in one quiet line. Visitors read it
  * with no buttons.
  */
-import { useState } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { Chip, Hint } from "@/components/primitives";
@@ -71,27 +71,51 @@ function linkParts(value: ContextLinkValue): { url: string; text: string } {
 
 /** A value longer than this reads as prose, on its own line under its label. */
 const PROSE_AT = 48;
-/** Prose longer than this starts clamped, with a toggle. */
-const CLAMP_AT = 240;
 const ISO_DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
+const HAS_ZONE = /(Z|[+-]\d{2}:?\d{2})$/i;
+/** abuse.ch's "2024-04-12 08:15:06 UTC". */
+const SPACED_UTC = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}(?::\d{2})?) UTC$/;
 
 function factText(value: string | number): string {
   const text = String(value);
-  return ISO_DATETIME.test(text) ? formatDateTime(text, text) : text;
+  const spaced = SPACED_UTC.exec(text);
+  const iso = spaced ? `${spaced[1]}T${spaced[2]}Z` : text;
+  if (!ISO_DATETIME.test(iso)) return text;
+  // A timestamp with no zone is UTC (NVD's "2024-04-12T08:15:06.230");
+  // new Date() would read it as local time.
+  return formatDateTime(HAS_ZONE.test(iso) ? iso : `${iso}Z`, text);
 }
 
+/** Prose clamps to four lines; the toggle shows only when the text runs past them. */
 function ProseFact({ label, text }: { label: string; text: string }) {
+  const id = useId();
+  const ref = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
-  const long = text.length > CLAMP_AT;
+  const [overflows, setOverflows] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el && !open) setOverflows(el.scrollHeight > el.clientHeight);
+  }, [text, open]);
   return (
     <div className={styles.block}>
       <dt className={styles.key}>{label}</dt>
-      <dd className={`${styles.prose} ${long && !open ? styles.clamped : ""}`}>{text}</dd>
-      {long && (
-        <button type="button" className={styles.more} onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-          {open ? "less" : "more"}
-        </button>
-      )}
+      <dd>
+        <div id={id} ref={ref} className={`${styles.prose} ${open ? "" : styles.clamped}`}>
+          {text}
+        </div>
+        {overflows && (
+          <button
+            type="button"
+            className={styles.more}
+            onClick={() => setOpen((o) => !o)}
+            aria-expanded={open}
+            aria-controls={id}
+            aria-label={`Show ${open ? "less" : "more"} of ${label}`}
+          >
+            {open ? "less" : "more"}
+          </button>
+        )}
+      </dd>
     </div>
   );
 }
@@ -250,7 +274,9 @@ export function ContextPanel({ entityType, entityId }: { entityType: string; ent
   if (withData.length === 0 && unavailable.length === 0 && !canEnrich) return null;
 
   const labelOf = (sourceType: string) => sources.find((s) => s.source_type === sourceType)?.label ?? sourceType;
-  const run = (sourceTypes?: string[], refresh = false) => {
+  // Named explicitly: with no list the server runs only manual-mode sources.
+  const allSources = sources.map((s) => s.source_type);
+  const run = (sourceTypes: string[], refresh = false) => {
     setQueued([]);
     enrich.mutate(
       { entityType, entityId, sourceTypes, refresh },
@@ -279,7 +305,7 @@ export function ContextPanel({ entityType, entityId }: { entityType: string; ent
             body="Looks this up again at every source that applies."
             aside="A rate-limited source queues the lookup and runs it when it can."
           >
-            <button type="button" className={styles.btn} onClick={() => run(undefined, true)} disabled={enrich.isPending}>
+            <button type="button" className={styles.btn} onClick={() => run(allSources, true)} disabled={enrich.isPending}>
               {enrich.isPending ? "Refreshing…" : "Refresh"}
             </button>
           </Hint>
@@ -304,7 +330,7 @@ export function ContextPanel({ entityType, entityId }: { entityType: string; ent
       {withData.length === 0 && canEnrich && (
         <div className={styles.ghost}>
           <span>No context yet</span>
-          <button type="button" className={styles.btn} onClick={() => run()} disabled={enrich.isPending}>
+          <button type="button" className={styles.btn} onClick={() => run(allSources)} disabled={enrich.isPending}>
             {enrich.isPending ? "Enriching…" : "Enrich now"}
           </button>
         </div>

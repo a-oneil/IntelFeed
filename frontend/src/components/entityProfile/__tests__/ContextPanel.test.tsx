@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -21,9 +21,10 @@ const auth = { visitor: false, admin: true };
 vi.mock("@/stores/authStore", () => ({
   useIsVisitor: () => auth.visitor,
   useIsAdmin: () => auth.admin,
-  // Date formatting reads the signed-in user's date-format preference.
-  useAuthStore: { getState: () => ({ user: null }) },
 }));
+
+// Shows what the panel hands the formatter, so a test can see the zone it chose.
+vi.mock("@/utils/formatDate", () => ({ formatDateTime: (input: string) => `at ${input}` }));
 
 const HOUR = 3_600_000;
 const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
@@ -150,35 +151,69 @@ describe("ContextPanel", () => {
     expect(screen.queryByRole("link", { name: "Open Enrichment" })).not.toBeInTheDocument();
   });
 
-  it("puts long text on its own line, clamps very long text, and formats timestamps", async () => {
-    const long = "Apply mitigations per vendor instructions. ".repeat(8).trim();
-    ctx.data = {
-      sources: [
-        {
-          source_type: "cisa_kev",
-          label: "CISA KEV",
-          license: null,
-          observed_at: null,
-          stale: false,
-          items: [
-            { key: "added", label: "Added", display: "fact", value: "2024-04-12" },
-            { key: "required_action", label: "Required action", display: "fact", value: long },
-            { key: "assessed", label: "SSVC assessed", display: "fact", value: "2024-04-17T04:00:13.543064Z" },
-          ],
-        },
-      ],
-      unavailable: [],
-      badges: [],
-      can_enrich: false,
-    };
-    const user = userEvent.setup();
+  const facts = (items: Array<[string, string]>): EntityContext => ({
+    sources: [
+      {
+        source_type: "cisa_kev",
+        label: "CISA KEV",
+        license: null,
+        observed_at: null,
+        stale: false,
+        items: items.map(([label, value]) => ({ key: label, label, display: "fact" as const, value })),
+      },
+    ],
+    unavailable: [],
+    badges: [],
+    can_enrich: false,
+  });
+
+  it("formats timestamps as UTC unless they name a zone, and leaves dates alone", () => {
+    ctx.data = facts([
+      ["Added", "2024-04-12"],
+      ["Assessed", "2024-04-17T04:00:13.543064Z"],
+      ["Offset", "2024-04-17T04:00:13+02:00"],
+      ["Published", "2024-04-12T08:15:06.230"],
+      ["First seen", "2024-04-12 08:15:06 UTC"],
+    ]);
     renderPanel();
     expect(screen.getByText("2024-04-12")).toBeInTheDocument();
-    expect(screen.queryByText("2024-04-17T04:00:13.543064Z")).not.toBeInTheDocument();
-    const more = screen.getByRole("button", { name: "more" });
-    expect(more).toHaveAttribute("aria-expanded", "false");
-    await user.click(more);
-    expect(screen.getByRole("button", { name: "less" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("at 2024-04-17T04:00:13.543064Z")).toBeInTheDocument();
+    expect(screen.getByText("at 2024-04-17T04:00:13+02:00")).toBeInTheDocument();
+    expect(screen.getByText("at 2024-04-12T08:15:06.230Z")).toBeInTheDocument();
+    expect(screen.getByText("at 2024-04-12T08:15:06Z")).toBeInTheDocument();
+  });
+
+  describe("long text", () => {
+    const long = "Apply mitigations per vendor instructions. ".repeat(8).trim();
+    afterEach(() => vi.restoreAllMocks());
+
+    it("puts it on its own line, inside the dd with its toggle, when it runs past four lines", async () => {
+      vi.spyOn(Element.prototype, "scrollHeight", "get").mockReturnValue(200);
+      vi.spyOn(Element.prototype, "clientHeight", "get").mockReturnValue(80);
+      ctx.data = facts([["Required action", long]]);
+      const user = userEvent.setup();
+      renderPanel();
+
+      const text = screen.getByText(long);
+      const more = screen.getByRole("button", { name: "Show more of Required action" });
+      expect(more).toHaveTextContent("more");
+      expect(more).toHaveAttribute("aria-expanded", "false");
+      expect(more).toHaveAttribute("aria-controls", text.id);
+      expect(more.parentElement?.tagName).toBe("DD");
+      expect(text.parentElement).toBe(more.parentElement);
+
+      await user.click(more);
+      const less = screen.getByRole("button", { name: "Show less of Required action" });
+      expect(less).toHaveAttribute("aria-expanded", "true");
+    });
+
+    it("has no toggle when it fits", () => {
+      // jsdom lays nothing out: scrollHeight equals clientHeight.
+      ctx.data = facts([["Required action", long]]);
+      renderPanel();
+      expect(screen.getByText(long)).toBeInTheDocument();
+      expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    });
   });
 
   it("renders nothing when no source applies", () => {
@@ -201,7 +236,8 @@ describe("ContextPanel", () => {
     expect(screen.getByText("No context yet")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Enrich now" }));
     expect(mutate).toHaveBeenCalledWith(
-      { entityType: "observable", entityId: "o1", sourceTypes: undefined, refresh: false },
+      // Named, so auto-mode sources run too, not just manual-mode ones.
+      { entityType: "observable", entityId: "o1", sourceTypes: ["shodan", "greynoise"], refresh: false },
       expect.anything(),
     );
     expect(screen.getByRole("status")).toHaveTextContent("queued: GreyNoise");
@@ -212,7 +248,7 @@ describe("ContextPanel", () => {
     renderPanel();
     await user.click(screen.getByRole("button", { name: "Refresh" }));
     expect(mutate).toHaveBeenLastCalledWith(
-      { entityType: "observable", entityId: "o1", sourceTypes: undefined, refresh: true },
+      { entityType: "observable", entityId: "o1", sourceTypes: ["cymru", "etda", "endoflife"], refresh: true },
       expect.anything(),
     );
     await user.click(screen.getByRole("button", { name: "Refresh Team Cymru" }));

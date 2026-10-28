@@ -71,8 +71,10 @@ const consoleData: ConsoleData = {
 
 const detail: EnrichmentSourceDetail = {
   limits: {
-    requests_per_period: 50,
-    period_seconds: 30,
+    // Keyed: the row stores the keyless 5 per 30 s, the key runs it at 50.
+    rate: { requests_per_period: 5, period_seconds: 30 },
+    effective_rate: { requests_per_period: 50, period_seconds: 30 },
+    rate_note: "with key",
     ceiling_per_period: 100,
     daily_budget: 5000,
     used_today: 3100,
@@ -261,6 +263,7 @@ describe("EnrichmentConsole", () => {
 
     const limits = screen.getByRole("region", { name: "Limits" });
     expect(within(limits).getByText("50 per 30s")).toBeInTheDocument();
+    expect(within(limits).getByText("(with key; 5 per 30s without)")).toBeInTheDocument();
     expect(within(limits).getByText(/3,100 of 5,000 · backfill may use 60%/)).toBeInTheDocument();
     expect(within(limits).getByText("global key set")).toBeInTheDocument();
     expect(within(limits).getByText("1,224 waiting: 240 refresh, 898 backfill, 86 retrying")).toBeInTheDocument();
@@ -327,6 +330,17 @@ describe("EnrichmentConsole", () => {
       }),
       expect.anything(),
     );
+  });
+
+  it("edits the stored rate and leaves it out of a save that doesn't change it", () => {
+    renderConsole("nvd");
+    fireEvent.click(screen.getByRole("button", { name: "Edit limits" }));
+    expect(screen.getByLabelText("Requests")).toHaveValue(5);
+    fireEvent.change(screen.getByLabelText("Daily cap"), { target: { value: "4000" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    const [payload] = updateMutate.mock.calls.at(-1)!;
+    expect(payload).toMatchObject({ sourceId: "id-nvd", daily_budget: 4000 });
+    expect(payload).not.toHaveProperty("rate_limit_config");
   });
 
   it("refuses a rate above the source's ceiling", () => {

@@ -37,6 +37,10 @@ function period(sec: number): string {
   return `${sec}s`;
 }
 
+function rateText(r: EnrichmentSourceDetail["limits"]["rate"]): string {
+  return `${num(r.requests_per_period)} per ${period(r.period_seconds)}`;
+}
+
 function keyText(key: string): string {
   if (key === "global") return "global key set";
   if (key === "none") return "no key";
@@ -113,7 +117,8 @@ function LimitsPanel({
       <dl className={s.kv}>
         <dt>Rate</dt>
         <dd>
-          {num(l.requests_per_period)} per {period(l.period_seconds)}
+          {rateText(l.effective_rate)}
+          {l.rate_note && <span className={s.muted}> ({l.rate_note}; {rateText(l.rate)} without)</span>}
           {l.ceiling_per_period != null && <span className={s.muted}> (max {num(l.ceiling_per_period)})</span>}
         </dd>
         <dt>Today</dt>
@@ -177,8 +182,10 @@ function LimitsEditor({
   const mine = overrides?.find((o) => o.source_id === row.id);
 
   const l = detail.limits;
-  const [rate, setRate] = useState(String(l.requests_per_period));
-  const [per, setPer] = useState(String(l.period_seconds));
+  // The stored rate, not the effective one: saving a keyed rate into the row
+  // would stop the source switching back to its keyless rate without a key.
+  const [rate, setRate] = useState(String(l.rate.requests_per_period));
+  const [per, setPer] = useState(String(l.rate.period_seconds));
   const [cap, setCap] = useState(l.daily_budget != null ? String(l.daily_budget) : "");
   const [trigger, setTrigger] = useState(row.trigger_mode === "manual" ? "manual" : "auto");
   const [apiKey, setApiKey] = useState("");
@@ -190,12 +197,16 @@ function LimitsEditor({
   const overCeiling = l.ceiling_per_period != null && rateN > l.ceiling_per_period;
   const valid = rateN > 0 && perN > 0 && !overCeiling && (cap === "" || Number(cap) >= 0);
 
+  const rateChanged = rateN !== l.rate.requests_per_period || perN !== l.rate.period_seconds;
+
   const save = () => {
     const capN = cap.trim() === "" ? 0 : Number(cap);
     update.mutate(
       {
         sourceId: row.id,
-        rate_limit_config: { ...row.rate_limit_config, requests_per_period: rateN, period_seconds: perN },
+        ...(rateChanged
+          ? { rate_limit_config: { ...row.rate_limit_config, requests_per_period: rateN, period_seconds: perN } }
+          : {}),
         ...(capN > 0 ? { daily_budget: capN } : { clear_daily_budget: true }),
         trigger_mode: trigger,
         ...(apiKey ? { api_key: apiKey } : {}),
