@@ -17,7 +17,7 @@ class EPSSAdapter(EnrichmentAdapter):
 
     async def enrich(self, entity_type: str, entity_value: str) -> EnrichmentData:
         """Enrich a single CVE with EPSS score."""
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with self.http(timeout=10) as client:
             resp = await client.get(
                 "https://api.first.org/data/v1/epss",
                 params={"cve": entity_value},
@@ -47,11 +47,11 @@ class EPSSAdapter(EnrichmentAdapter):
 
     async def check_health(self) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=5) as client:
+            async with self.http(timeout=5) as client:
                 resp = await client.get(
                     "https://api.first.org/data/v1/epss",
                     params={"cve": "CVE-2021-44228"},
                 )
                 return resp.status_code == 200
-        except Exception:
+        except httpx.HTTPError:
             return False

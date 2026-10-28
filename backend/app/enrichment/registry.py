@@ -16,6 +16,8 @@ from app.enrichment.adapters import (
     WikipediaAdapter,
 )
 from app.enrichment.base import EnrichmentAdapter
+from app.enrichment.gateway import SourceGateway
+from app.models.enrichment import EnrichmentSource
 
 ADAPTER_REGISTRY: dict[str, type[EnrichmentAdapter]] = {
     "epss": EPSSAdapter,
@@ -156,9 +158,29 @@ for _st, _cls in ADAPTER_REGISTRY.items():
         SHARED_KEY_GROUPS.setdefault(group, []).append(_st)
 
 
-def get_adapter(source_type: str, api_key: str | None = None, config: dict | None = None) -> EnrichmentAdapter:
-    """Instantiate an adapter by source type."""
+def get_adapter(
+    source_type: str,
+    api_key: str | None = None,
+    config: dict | None = None,
+    gateway: SourceGateway | None = None,
+) -> EnrichmentAdapter:
+    """Instantiate an adapter by source type. Without a gateway it can't make
+    HTTP requests."""
     adapter_class = ADAPTER_REGISTRY.get(source_type)
     if not adapter_class:
         raise ValueError(f"Unknown enrichment source type: {source_type}")
-    return adapter_class(api_key=api_key, config=config)
+    return adapter_class(api_key=api_key, config=config, gateway=gateway)
+
+
+def source_gateway(source: EnrichmentSource, api_key: str | None) -> SourceGateway:
+    """The gateway for a source row and the key it will use."""
+    adapter_class = ADAPTER_REGISTRY.get(source.source_type)
+    group = adapter_class.shared_key_group if adapter_class else None
+    return SourceGateway.for_source(source, api_key, shared_key_group=group)
+
+
+def adapter_for_source(source: EnrichmentSource, api_key: str | None) -> EnrichmentAdapter:
+    """The source's adapter, wired to its gateway."""
+    return get_adapter(
+        source.source_type, api_key=api_key, config=source.config, gateway=source_gateway(source, api_key)
+    )

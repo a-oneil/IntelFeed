@@ -18,7 +18,7 @@ class CISAKEVAdapter(EnrichmentAdapter):
     _kev_url = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
 
     async def enrich(self, entity_type: str, entity_value: str) -> EnrichmentData:
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with self.http(timeout=15) as client:
             resp = await client.get(self._kev_url)
             resp.raise_for_status()
             data = resp.json()
@@ -51,8 +51,8 @@ class CISAKEVAdapter(EnrichmentAdapter):
 
     async def check_health(self) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=5) as client:
+            async with self.http(timeout=5) as client:
                 resp = await client.head(self._kev_url)
                 return resp.status_code == 200
-        except Exception:
+        except httpx.HTTPError:
             return False

@@ -52,7 +52,7 @@ class VirusTotalAdapter(EnrichmentAdapter):
             )
 
         headers = {"x-apikey": self.api_key}
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with self.http(timeout=15) as client:
             resp = await client.get(endpoint, headers=headers)
             if resp.status_code == 404:
                 return EnrichmentData(raw_response={"status": "not_found"}, parsed_data={"found": False}, ttl_hours=72)
@@ -103,8 +103,8 @@ class VirusTotalAdapter(EnrichmentAdapter):
         if not self.api_key:
             return False
         try:
-            async with httpx.AsyncClient(timeout=5) as client:
+            async with self.http(timeout=5) as client:
                 resp = await client.get(f"{self._api_base}ip_addresses/8.8.8.8", headers={"x-apikey": self.api_key})
                 return resp.status_code == 200
-        except Exception:
+        except httpx.HTTPError:
             return False

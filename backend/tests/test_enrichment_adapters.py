@@ -335,7 +335,7 @@ class TestFetchWikipediaGuardrail:
         fake_module = types.SimpleNamespace(AsyncWikipedia=FakeAsyncWikipedia)
         monkeypatch.setitem(_sys.modules, "wikipediaapi", fake_module)
 
-        async def _no_image(title, thumb_size=300):
+        async def _no_image(title, thumb_size=300, transport=None):
             return None
 
         monkeypatch.setattr("app.enrichment.wikipedia_helper._fetch_page_image_async", _no_image)

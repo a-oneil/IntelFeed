@@ -1,8 +1,12 @@
 """Base class for all enrichment adapters."""
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import timedelta
+
+import httpx
+
+from app.enrichment.gateway import SourceGateway
 
 
 @dataclass
@@ -22,12 +26,27 @@ class EnrichmentAdapter(ABC):
     supported_entity_types: list[str]
     requires_api_key: bool = False
     default_trigger_mode: str = "manual"
-    default_rate_limit: dict = field(default_factory=lambda: {"requests_per_period": 100, "period_seconds": 86400})
     shared_key_group: str | None = None  # Adapters sharing an API key set this (e.g. "abuse_ch")
 
-    def __init__(self, api_key: str | None = None, config: dict | None = None):
+    def __init__(self, api_key: str | None = None, config: dict | None = None, gateway: SourceGateway | None = None):
         self.api_key = api_key
         self.config = config or {}
+        self.gateway = gateway
+
+    def http(self, timeout: float = 10, **kwargs) -> httpx.AsyncClient:
+        """An httpx client for this source. Adapters make every outbound
+        request through it, so the source's gateway rate-limits, budgets and
+        circuit-breaks each one."""
+        if self.gateway is None:
+            raise RuntimeError(f"{self.source_type} adapter has no SourceGateway")
+        return self.gateway.client(timeout=timeout, **kwargs)
+
+    def http_transport(self) -> httpx.AsyncBaseTransport:
+        """The gateway transport alone, for libraries that build their own
+        httpx client but accept a transport (wikipediaapi)."""
+        if self.gateway is None:
+            raise RuntimeError(f"{self.source_type} adapter has no SourceGateway")
+        return self.gateway.transport()
 
     @abstractmethod
     async def enrich(self, entity_type: str, entity_value: str) -> EnrichmentData:

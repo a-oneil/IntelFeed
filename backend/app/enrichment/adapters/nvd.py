@@ -20,7 +20,7 @@ class NVDAdapter(EnrichmentAdapter):
         if self.api_key:
             headers["apiKey"] = self.api_key
 
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with self.http(timeout=15) as client:
             resp = await client.get(
                 "https://services.nvd.nist.gov/rest/json/cves/2.0",
                 params={"cveId": entity_value},
@@ -75,11 +75,11 @@ class NVDAdapter(EnrichmentAdapter):
 
     async def check_health(self) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=5) as client:
+            async with self.http(timeout=5) as client:
                 resp = await client.get(
                     "https://services.nvd.nist.gov/rest/json/cves/2.0",
                     params={"cveId": "CVE-2021-44228"},
                 )
                 return resp.status_code == 200
-        except Exception:
+        except httpx.HTTPError:
             return False

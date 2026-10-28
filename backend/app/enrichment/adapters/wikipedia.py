@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 from app.enrichment.base import EnrichmentAdapter, EnrichmentData
+from app.enrichment.gateway import GatewayError
 from app.enrichment.wikipedia_helper import extract_first_paragraph, fetch_wikipedia
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,9 @@ class WikipediaAdapter(EnrichmentAdapter):
     async def enrich(self, entity_type: str, entity_value: str) -> EnrichmentData:
         """Fetch Wikipedia content for an entity."""
         try:
-            result = await fetch_wikipedia(entity_value, entity_type)
+            result = await fetch_wikipedia(entity_value, entity_type, transport=self.http_transport())
+        except GatewayError:
+            raise
         except Exception as e:
             logger.warning("Wikipedia fetch failed for %s/%s: %s", entity_type, entity_value, e)
             return EnrichmentData(
@@ -85,8 +88,5 @@ class WikipediaAdapter(EnrichmentAdapter):
 
     async def check_health(self) -> bool:
         """Verify Wikipedia API is reachable."""
-        try:
-            result = await fetch_wikipedia("Computer security", "ttp")
-            return result is not None
-        except Exception:
-            return False
+        # fetch_wikipedia answers None for anything but a gateway refusal.
+        return await fetch_wikipedia("Computer security", "ttp", transport=self.http_transport()) is not None

@@ -28,7 +28,7 @@ class ShodanAdapter(EnrichmentAdapter):
                 parsed_data={"found": False, "note": "Shodan InternetDB covers IPv4 only"},
                 ttl_hours=168,
             )
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with self.http(timeout=10) as client:
             resp = await client.get(f"https://internetdb.shodan.io/{entity_value}")
             if resp.status_code == 404:
                 return EnrichmentData(raw_response={"status": "not_found"}, parsed_data={"found": False}, ttl_hours=24)
@@ -50,8 +50,8 @@ class ShodanAdapter(EnrichmentAdapter):
 
     async def check_health(self) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=5) as client:
+            async with self.http(timeout=5) as client:
                 resp = await client.get("https://internetdb.shodan.io/8.8.8.8")
                 return resp.status_code in (200, 404)
-        except Exception:
+        except httpx.HTTPError:
             return False

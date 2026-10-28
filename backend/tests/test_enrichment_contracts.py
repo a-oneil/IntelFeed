@@ -2,9 +2,10 @@
 
 The fixtures in ``tests/fixtures/enrichment/`` are trimmed live responses, so a
 test here fails when an adapter's parsing drifts from what the source really
-returns. Each fixture file maps a name to ``{url, status, body}``; the mock
-server answers a request with the recording whose URL matches it (path and
-query), else with the file's ``not_found`` recording, else a bare 404.
+returns. Each fixture file maps a name to ``{url, status, body}``. The adapter
+gets a real SourceGateway whose inner transport is a mock server: it answers a
+request with the recording whose URL matches it (path and query), else with
+the file's ``not_found`` recording, else a bare 404.
 
 Adapters that need a key (VirusTotal, VulnCheck, CVEDetails) have no recording.
 """
@@ -17,10 +18,10 @@ from urllib.parse import parse_qs, urlsplit
 import httpx
 import pytest
 
+from app.enrichment.gateway import SourceGateway
 from app.enrichment.registry import get_adapter
 
 FIXTURES = Path(__file__).parent / "fixtures" / "enrichment"
-_RealAsyncClient = httpx.AsyncClient
 
 
 def _recordings(source: str) -> dict:
@@ -33,8 +34,8 @@ def _key(url: str) -> tuple:
     return parts.netloc, parts.path, tuple(sorted(query.items()))
 
 
-def _wire(monkeypatch, source: str, api_key: str | None = None):
-    """The adapter for ``source`` with every client it opens served from its
+def _wire(source: str, api_key: str | None = None):
+    """The adapter for ``source``, its gateway serving every request from the
     recordings. Returns ``(adapter, requests)`` — the requests it sent, in order."""
     recordings = _recordings(source)
     by_url = {_key(r["url"]): r for r in recordings.values()}
@@ -48,12 +49,13 @@ def _wire(monkeypatch, source: str, api_key: str | None = None):
             return httpx.Response(404, json={})
         return httpx.Response(rec["status"], json=rec["body"])
 
-    def client(*args, **kwargs):
-        kwargs["transport"] = httpx.MockTransport(handler)
-        return _RealAsyncClient(*args, **kwargs)
-
-    monkeypatch.setattr(httpx, "AsyncClient", client)
-    return get_adapter(source, api_key=api_key), seen
+    gateway = SourceGateway(
+        source,
+        rate_limit_config={"requests_per_period": 1000, "period_seconds": 60},
+        api_key=api_key,
+        inner=httpx.MockTransport(handler),
+    )
+    return get_adapter(source, api_key=api_key, gateway=gateway), seen
 
 
 # The endpoint each adapter's enrich() calls first. check_health() must call
@@ -88,14 +90,14 @@ ENRICH_CALLS = {
 
 
 @pytest.mark.parametrize("source", sorted(ENDPOINTS))
-async def test_check_health_uses_the_enrich_endpoint(monkeypatch, source):
+async def test_check_health_uses_the_enrich_endpoint(source):
     pattern = re.compile(ENDPOINTS[source])
 
-    adapter, seen = _wire(monkeypatch, source)
+    adapter, seen = _wire(source)
     await adapter.enrich(*ENRICH_CALLS[source])
     assert seen and pattern.match(str(seen[0].url)), f"enrich() called {seen[0].url if seen else 'nothing'}"
 
-    adapter, seen = _wire(monkeypatch, source)
+    adapter, seen = _wire(source)
     await adapter.check_health()
     assert seen, "check_health() made no request"
     assert all(pattern.match(str(r.url)) for r in seen), f"check_health() called {[str(r.url) for r in seen]}"
@@ -104,8 +106,8 @@ async def test_check_health_uses_the_enrich_endpoint(monkeypatch, source):
 # ── OSV ──────────────────────────────────────────────────────────────
 
 
-async def test_osv_parses_a_vuln_record(monkeypatch):
-    adapter, seen = _wire(monkeypatch, "osv")
+async def test_osv_parses_a_vuln_record():
+    adapter, seen = _wire("osv")
     data = await adapter.enrich("cve", "CVE-2021-44228")
 
     assert seen[0].method == "GET"
@@ -143,22 +145,22 @@ async def test_osv_parses_package_ranges():
     }
 
 
-async def test_osv_not_found(monkeypatch):
-    adapter, _ = _wire(monkeypatch, "osv")
+async def test_osv_not_found():
+    adapter, _ = _wire("osv")
     data = await adapter.enrich("cve", "CVE-1999-99999")
     assert data.parsed_data == {"found": False}
 
 
-async def test_osv_health_is_healthy(monkeypatch):
-    adapter, _ = _wire(monkeypatch, "osv")
+async def test_osv_health_is_healthy():
+    adapter, _ = _wire("osv")
     assert await adapter.check_health() is True
 
 
 # ── GreyNoise ────────────────────────────────────────────────────────
 
 
-async def test_greynoise_works_without_a_key(monkeypatch):
-    adapter, seen = _wire(monkeypatch, "greynoise")
+async def test_greynoise_works_without_a_key():
+    adapter, seen = _wire("greynoise")
     assert adapter.requires_api_key is False
     data = await adapter.enrich("observable", "71.6.135.131")
 
@@ -174,14 +176,14 @@ async def test_greynoise_works_without_a_key(monkeypatch):
     }
 
 
-async def test_greynoise_sends_a_configured_key(monkeypatch):
-    adapter, seen = _wire(monkeypatch, "greynoise", api_key="gn-test-key")
+async def test_greynoise_sends_a_configured_key():
+    adapter, seen = _wire("greynoise", api_key="gn-test-key")
     await adapter.enrich("observable", "71.6.135.131")
     assert seen[0].headers["key"] == "gn-test-key"
 
 
-async def test_greynoise_not_observed(monkeypatch):
-    adapter, _ = _wire(monkeypatch, "greynoise")
+async def test_greynoise_not_observed():
+    adapter, _ = _wire("greynoise")
     data = await adapter.enrich("observable", "1.1.1.1")
     assert data.parsed_data["found"] is False
     assert data.parsed_data["noise"] is False
@@ -199,16 +201,16 @@ async def test_greynoise_default_source_needs_no_key():
 # ── The other keyless adapters ───────────────────────────────────────
 
 
-async def test_epss(monkeypatch):
-    adapter, _ = _wire(monkeypatch, "epss")
+async def test_epss():
+    adapter, _ = _wire("epss")
     data = await adapter.enrich("cve", "CVE-2021-44228")
     assert data.parsed_data == {"cve": "CVE-2021-44228", "epss": 0.99999, "percentile": 1.0, "date": "2026-10-27"}
     data = await adapter.enrich("cve", "CVE-1999-99999")
     assert data.parsed_data == {"found": False}
 
 
-async def test_shodan(monkeypatch):
-    adapter, _ = _wire(monkeypatch, "shodan")
+async def test_shodan():
+    adapter, _ = _wire("shodan")
     data = await adapter.enrich("observable", "8.8.8.8")
     assert data.parsed_data == {
         "found": True,
@@ -222,8 +224,8 @@ async def test_shodan(monkeypatch):
     assert data.parsed_data == {"found": False}
 
 
-async def test_nvd(monkeypatch):
-    adapter, _ = _wire(monkeypatch, "nvd")
+async def test_nvd():
+    adapter, _ = _wire("nvd")
     data = await adapter.enrich("cve", "CVE-2021-44228")
     parsed = data.parsed_data
     assert parsed["cve_id"] == "CVE-2021-44228"
@@ -237,8 +239,8 @@ async def test_nvd(monkeypatch):
     assert data.parsed_data == {"found": False}
 
 
-async def test_cisa_kev(monkeypatch):
-    adapter, _ = _wire(monkeypatch, "cisa_kev")
+async def test_cisa_kev():
+    adapter, _ = _wire("cisa_kev")
     data = await adapter.enrich("cve", "CVE-2021-44228")
     parsed = data.parsed_data
     assert parsed["in_kev"] is True
@@ -250,8 +252,8 @@ async def test_cisa_kev(monkeypatch):
     assert data.parsed_data == {"in_kev": False}
 
 
-async def test_mitre_attack(monkeypatch):
-    adapter, _ = _wire(monkeypatch, "mitre_attack")
+async def test_mitre_attack():
+    adapter, _ = _wire("mitre_attack")
     technique = (await adapter.enrich("ttp", "T1059.001")).parsed_data
     assert technique["name"] == "PowerShell"
     assert technique["is_subtechnique"] is True
@@ -269,8 +271,8 @@ async def test_mitre_attack(monkeypatch):
     assert (await adapter.enrich("ttp", "T9999")).parsed_data == {"found": False}
 
 
-async def test_malpedia(monkeypatch):
-    adapter, _ = _wire(monkeypatch, "malpedia")
+async def test_malpedia():
+    adapter, _ = _wire("malpedia")
     # "WannaCry" has no family of that id: the adapter falls back to the
     # family list and finds win.wannacryptor.
     family = (await adapter.enrich("malware", "WannaCry")).parsed_data
@@ -287,8 +289,8 @@ async def test_malpedia(monkeypatch):
     assert (await adapter.enrich("malware", "Nonexistent")).parsed_data == {"found": False}
 
 
-async def test_github_poc(monkeypatch):
-    adapter, _ = _wire(monkeypatch, "github_poc")
+async def test_github_poc():
+    adapter, _ = _wire("github_poc")
     parsed = (await adapter.enrich("cve", "CVE-2021-44228")).parsed_data
     assert parsed["has_public_poc"] is True
     assert parsed["poc_count"] == 15
@@ -299,8 +301,8 @@ async def test_github_poc(monkeypatch):
     assert parsed["has_public_poc"] is False and parsed["poc_count"] == 0
 
 
-async def test_wikipedia(monkeypatch):
-    adapter, seen = _wire(monkeypatch, "wikipedia")
+async def test_wikipedia():
+    adapter, seen = _wire("wikipedia")
     parsed = (await adapter.enrich("threat_actor", "Lazarus Group")).parsed_data
     assert parsed["found"] is True
     assert parsed["title"] == "Lazarus Group"

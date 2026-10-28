@@ -35,7 +35,7 @@ class GreyNoiseAdapter(EnrichmentAdapter):
                 parsed_data={"found": False, "note": "GreyNoise covers IPv4 only"},
                 ttl_hours=168,
             )
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with self.http(timeout=10) as client:
             resp = await client.get(f"{self._api_base}{entity_value}", headers=self._headers())
             if resp.status_code == 404:
                 # Not seen scanning the internet (the body still says
@@ -71,8 +71,8 @@ class GreyNoiseAdapter(EnrichmentAdapter):
 
     async def check_health(self) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=5) as client:
+            async with self.http(timeout=5) as client:
                 resp = await client.get(f"{self._api_base}8.8.8.8", headers=self._headers())
                 return resp.status_code in (200, 404)
-        except Exception:
+        except httpx.HTTPError:
             return False

@@ -150,6 +150,18 @@ def _private_scale_cutoffs(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _private_gateway_keys(monkeypatch):
+    """Give each test its own Redis namespace for the enrichment gateways'
+    buckets, budgets and breakers, so no test drains another's (or dev's)
+    allowance. The keys expire on their own."""
+    import uuid
+
+    from app.enrichment import gateway
+
+    monkeypatch.setattr(gateway, "KEY_PREFIX", f"intelfeed:test:{uuid.uuid4().hex}:gw:")
+
+
+@pytest.fixture(autouse=True)
 def _offline_meilisearch():
     """Keep tests off the network.
 

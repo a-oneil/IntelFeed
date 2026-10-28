@@ -39,7 +39,7 @@ class MalpediaAdapter(EnrichmentAdapter):
         # Normalize name for Malpedia URL format (lowercase, underscores)
         normalized = family_name.lower().replace(" ", "_").replace("-", "_")
 
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with self.http(timeout=15) as client:
             # Try to get family info
             resp = await client.get(
                 f"{self._api_base}get/family/{normalized}",
@@ -95,7 +95,7 @@ class MalpediaAdapter(EnrichmentAdapter):
     async def _enrich_actor(self, actor_name: str, headers: dict) -> EnrichmentData:
         normalized = actor_name.lower().replace(" ", "_").replace("-", "_")
 
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with self.http(timeout=15) as client:
             resp = await client.get(
                 f"{self._api_base}get/actor/{normalized}",
                 headers=headers,
@@ -153,11 +153,11 @@ class MalpediaAdapter(EnrichmentAdapter):
             headers = {}
             if self.api_key:
                 headers["Authorization"] = f"apitoken {self.api_key}"
-            async with httpx.AsyncClient(timeout=5) as client:
+            async with self.http(timeout=5) as client:
                 resp = await client.get(
                     f"{self._api_base}list/families",
                     headers=headers,
                 )
                 return resp.status_code == 200
-        except Exception:
+        except httpx.HTTPError:
             return False

@@ -20,7 +20,7 @@ class OSVAdapter(EnrichmentAdapter):
     _vulns_url = "https://api.osv.dev/v1/vulns/"
 
     async def enrich(self, entity_type: str, entity_value: str) -> EnrichmentData:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with self.http(timeout=10) as client:
             resp = await client.get(f"{self._vulns_url}{entity_value}")
             if resp.status_code == 404:
                 return EnrichmentData(
@@ -50,10 +50,10 @@ class OSVAdapter(EnrichmentAdapter):
 
     async def check_health(self) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=5) as client:
+            async with self.http(timeout=5) as client:
                 resp = await client.get(f"{self._vulns_url}CVE-2021-44228")
                 return resp.status_code == 200
-        except Exception:
+        except httpx.HTTPError:
             return False
 
 

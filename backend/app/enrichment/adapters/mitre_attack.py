@@ -22,7 +22,7 @@ class MITREAttackAdapter(EnrichmentAdapter):
     default_trigger_mode = "scheduled"
 
     async def enrich(self, entity_type: str, entity_value: str) -> EnrichmentData:
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with self.http(timeout=60) as client:
             resp = await client.get(ATTACK_URL)
             resp.raise_for_status()
             bundle = resp.json()
@@ -248,8 +248,8 @@ class MITREAttackAdapter(EnrichmentAdapter):
 
     async def check_health(self) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with self.http(timeout=10) as client:
                 resp = await client.head(ATTACK_URL)
                 return resp.status_code == 200
-        except Exception:
+        except httpx.HTTPError:
             return False

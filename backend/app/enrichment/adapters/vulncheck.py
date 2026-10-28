@@ -27,7 +27,7 @@ class VulnCheckAdapter(EnrichmentAdapter):
 
         headers = {"Authorization": f"Bearer {self.api_key}"}
 
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with self.http(timeout=10) as client:
             resp = await client.get(
                 f"{self._api_base}index/vulncheck-kev",
                 headers=headers,
@@ -65,12 +65,12 @@ class VulnCheckAdapter(EnrichmentAdapter):
             return False
         try:
             headers = {"Authorization": f"Bearer {self.api_key}"}
-            async with httpx.AsyncClient(timeout=5) as client:
+            async with self.http(timeout=5) as client:
                 resp = await client.get(
                     f"{self._api_base}index/vulncheck-kev",
                     headers=headers,
                     params={"cve": "CVE-2021-44228"},
                 )
                 return resp.status_code == 200
-        except Exception:
+        except httpx.HTTPError:
             return False

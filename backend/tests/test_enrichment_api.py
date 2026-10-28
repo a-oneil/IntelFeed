@@ -1,9 +1,10 @@
-"""Tests for enrichment API endpoints, pipeline, and rate limiter."""
+"""Tests for enrichment API endpoints and the pipeline."""
 
 import uuid
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest_asyncio
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -191,6 +192,83 @@ class TestGetHealth:
         data = resp.json()
         assert data["source_type"] == "nvd"
         assert "health_status" in data
+        assert data["rate_limit_remaining"] == 50  # a full bucket
+
+    async def test_remaining_reads_the_gateway_bucket(
+        self, client: AsyncClient, auth_headers: dict, enrichment_source: EnrichmentSource
+    ):
+        from app.enrichment.registry import source_gateway
+
+        await source_gateway(enrichment_source, None).acquire()
+        resp = await client.get(f"/api/enrichment/sources/{enrichment_source.id}/health", headers=auth_headers)
+        assert resp.json()["rate_limit_remaining"] == 49
+
+
+class TestBudgetUsage:
+    async def test_summary_and_list_read_the_gateway(
+        self, client: AsyncClient, auth_headers: dict, db_session: AsyncSession, enrichment_source: EnrichmentSource
+    ):
+        from app.enrichment.registry import source_gateway
+
+        enrichment_source.daily_budget = 10
+        await db_session.flush()
+        gateway = source_gateway(enrichment_source, None)
+        for _ in range(3):
+            await gateway.acquire()
+
+        resp = await client.get("/api/enrichment/budget-summary", headers=auth_headers)
+        assert resp.status_code == 200
+        (item,) = [i for i in resp.json() if i["source_type"] == "nvd"]
+        assert item == {
+            "source_type": "nvd",
+            "display_name": "NVD API 2.0",
+            "daily_budget": 10,
+            "used_today": 3,
+            "remaining": 7,
+        }
+
+        resp = await client.get("/api/enrichment/sources", headers=auth_headers)
+        (row,) = [s for s in resp.json() if s["source_type"] == "nvd"]
+        assert row["daily_budget_used"] == 3
+
+
+class TestTestSourceThroughGateway:
+    async def test_probe_goes_through_the_gateway(
+        self, client: AsyncClient, admin_headers: dict, enrichment_source: EnrichmentSource
+    ):
+        from app.enrichment.gateway import USER_AGENT, SourceGateway
+
+        seen: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request)
+            return httpx.Response(200, json={"vulnerabilities": []})
+
+        real_init = SourceGateway.__init__
+
+        def init(self, *args, **kwargs):
+            real_init(self, *args, **kwargs, inner=httpx.MockTransport(handler))
+
+        with patch.object(SourceGateway, "__init__", init):
+            resp = await client.post(f"/api/enrichment/sources/{enrichment_source.id}/test", headers=admin_headers)
+
+        assert resp.status_code == 200
+        assert resp.json()["health_status"] == "healthy"
+        assert seen[0].headers["User-Agent"] == USER_AGENT
+
+    async def test_refused_probe_keeps_the_status(
+        self, client: AsyncClient, admin_headers: dict, enrichment_source: EnrichmentSource
+    ):
+        from app.enrichment.gateway import BreakerOpen
+
+        adapter = MagicMock()
+        adapter.check_health = AsyncMock(side_effect=BreakerOpen("nvd", 120))
+        with patch("app.enrichment.registry.adapter_for_source", return_value=adapter):
+            resp = await client.post(f"/api/enrichment/sources/{enrichment_source.id}/test", headers=admin_headers)
+
+        assert resp.status_code == 429
+        assert resp.json()["error"]["code"] == "breaker_open"
+        assert enrichment_source.health_status == "unknown"
 
 
 class TestUserOverrides:
@@ -288,25 +366,18 @@ class TestEnrichmentStatus:
 
 
 class TestEnrichEntity:
-    @patch("app.enrichment.pipeline.RedisRateLimiter")
     async def test_enrich_entity(
         self,
-        mock_limiter_cls,
         client: AsyncClient,
         auth_headers: dict,
         enrichment_source: EnrichmentSource,
         test_actor: ThreatActor,
     ):
-        # Mock rate limiter to always allow
-        mock_limiter = MagicMock()
-        mock_limiter.check = AsyncMock(return_value=True)
-        mock_limiter_cls.return_value = mock_limiter
-
         # Mock the adapter's enrich method
         # Patch where it is used, not where it is defined: pipeline.py does
-        # `from ...registry import get_adapter`, so patching the registry
-        # module leaves the pipeline's own binding untouched.
-        with patch("app.enrichment.pipeline.get_adapter") as mock_get_adapter:
+        # `from ...registry import adapter_for_source`, so patching the
+        # registry module leaves the pipeline's own binding untouched.
+        with patch("app.enrichment.pipeline.adapter_for_source") as mock_get_adapter:
             mock_adapter = MagicMock()
             mock_adapter.supports_entity.return_value = True
             mock_adapter.enrich = AsyncMock(
@@ -421,57 +492,3 @@ class TestPipeline:
 
         cached = await get_cached_result(db_session, "threat_actor", test_actor.id, "nonexistent")
         assert cached is None
-
-
-# --- Rate Limiter Unit Tests ---
-
-
-class TestRateLimiter:
-    @patch("app.enrichment.rate_limiter.redis.from_url")
-    async def test_check_allowed(self, mock_redis_from_url):
-        from app.enrichment.rate_limiter import RedisRateLimiter
-
-        mock_redis = MagicMock()
-        mock_pipe = MagicMock()
-        mock_pipe.zremrangebyscore = MagicMock()
-        mock_pipe.zcard = MagicMock()
-        mock_pipe.zadd = MagicMock()
-        mock_pipe.expire = MagicMock()
-        mock_pipe.execute = AsyncMock(return_value=[None, 5, None, None])
-        mock_redis.pipeline.return_value = mock_pipe
-        mock_redis_from_url.return_value = mock_redis
-
-        limiter = RedisRateLimiter("test_source", {"requests_per_period": 100, "period_seconds": 60})
-        allowed = await limiter.check()
-        assert allowed is True
-
-    @patch("app.enrichment.rate_limiter.redis.from_url")
-    async def test_check_rate_limited(self, mock_redis_from_url):
-        from app.enrichment.rate_limiter import RedisRateLimiter
-
-        mock_redis = MagicMock()
-        mock_pipe = MagicMock()
-        mock_pipe.zremrangebyscore = MagicMock()
-        mock_pipe.zcard = MagicMock()
-        mock_pipe.zadd = MagicMock()
-        mock_pipe.expire = MagicMock()
-        mock_pipe.execute = AsyncMock(return_value=[None, 100, None, None])
-        mock_redis.pipeline.return_value = mock_pipe
-        mock_redis_from_url.return_value = mock_redis
-
-        limiter = RedisRateLimiter("test_source", {"requests_per_period": 100, "period_seconds": 60})
-        allowed = await limiter.check()
-        assert allowed is False
-
-    @patch("app.enrichment.rate_limiter.redis.from_url")
-    async def test_get_remaining(self, mock_redis_from_url):
-        from app.enrichment.rate_limiter import RedisRateLimiter
-
-        mock_redis = MagicMock()
-        mock_redis.zremrangebyscore = AsyncMock()
-        mock_redis.zcard = AsyncMock(return_value=30)
-        mock_redis_from_url.return_value = mock_redis
-
-        limiter = RedisRateLimiter("test_source", {"requests_per_period": 100, "period_seconds": 60})
-        remaining = await limiter.get_remaining()
-        assert remaining == 70

@@ -1,4 +1,4 @@
-"""Enrichment pipeline — orchestrates enrichment with caching, rate limiting, and key resolution."""
+"""Enrichment pipeline — orchestrates enrichment with caching, key resolution and the source gateways."""
 
 import logging
 import uuid
@@ -8,8 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.encryption import decrypt_value
-from app.enrichment.rate_limiter import RedisBudgetTracker, RedisRateLimiter
-from app.enrichment.registry import ADAPTER_REGISTRY, SHARED_KEY_GROUPS, get_adapter
+from app.enrichment.gateway import BreakerOpen, GatewayError, RateLimited
+from app.enrichment.registry import ADAPTER_REGISTRY, SHARED_KEY_GROUPS, adapter_for_source
 from app.models.enrichment import EnrichmentResult, EnrichmentSource, UserEnrichmentOverride
 
 logger = logging.getLogger(__name__)
@@ -172,7 +172,7 @@ async def enrich_entity(
         # Resolve API key (user override > global)
         api_key = await resolve_api_key(source, user_id, db)
 
-        adapter = get_adapter(source.source_type, api_key=api_key, config=source.config)
+        adapter = adapter_for_source(source, api_key)
 
         # Map base entity type to adapter entity type
         adapter_entity_type = entity_type
@@ -201,42 +201,8 @@ async def enrich_entity(
             )
             continue
 
-        # Check daily budget (only for actual API calls, after cache check)
-        if source.daily_budget is not None:
-            try:
-                budget_tracker = RedisBudgetTracker(source.source_type)
-                within_budget = await budget_tracker.check_and_increment(source.daily_budget)
-            except Exception:
-                logger.warning("Budget tracker unavailable for %s, proceeding", source.source_type)
-                within_budget = True
-            if not within_budget:
-                results.append(
-                    {
-                        "source_type": source.source_type,
-                        "status": "budget_exhausted",
-                    }
-                )
-                continue
-
-        # Check rate limit
-        limiter = RedisRateLimiter(source.source_type, source.rate_limit_config)
-        try:
-            allowed = await limiter.check()
-        except Exception:
-            logger.warning("Rate limiter unavailable for %s, proceeding", source.source_type)
-            allowed = True
-
-        if not allowed:
-            logger.info("Rate limited for source %s, skipping", source.source_type)
-            results.append(
-                {
-                    "source_type": source.source_type,
-                    "status": "rate_limited",
-                }
-            )
-            continue
-
-        # Call adapter
+        # Call adapter. Its gateway enforces the rate limit, daily budget and
+        # circuit breaker on each HTTP request it makes.
         try:
             enrichment_data = await adapter.enrich(adapter_entity_type, entity_value)
 
@@ -260,6 +226,15 @@ async def enrich_entity(
                     "parsed_data": enrichment_data.parsed_data,
                 }
             )
+
+        except GatewayError as e:
+            # Refused or told to back off: not a result, so nothing is stored
+            # and the next attempt isn't blocked by a cached error.
+            logger.info("Enrichment skipped for %s/%s: %s", source.source_type, entity_value, e)
+            outcome = {"source_type": source.source_type, "status": e.status}
+            if isinstance(e, RateLimited | BreakerOpen):
+                outcome["retry_after"] = round(e.retry_after)
+            results.append(outcome)
 
         except Exception as e:
             logger.warning("Enrichment failed for %s/%s: %s", source.source_type, entity_value, e)

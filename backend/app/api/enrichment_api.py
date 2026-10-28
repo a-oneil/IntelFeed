@@ -25,7 +25,27 @@ from app.schemas.enrichment import (
 router = APIRouter()
 
 
-def _source_to_response(s: EnrichmentSource) -> EnrichmentSourceResponse:
+async def _source_gateway(source: EnrichmentSource, db: AsyncSession):
+    """The source's gateway under its global key: the allowance and budget the
+    instance spends. A user's override key has its own, not shown here."""
+    from app.enrichment.pipeline import resolve_api_key
+    from app.enrichment.registry import source_gateway
+
+    return source_gateway(source, await resolve_api_key(source, None, db))
+
+
+async def _used_today(source: EnrichmentSource, db: AsyncSession) -> int:
+    """Requests the source sent today, from its gateway; the stored counter if
+    Redis can't answer."""
+    from app.enrichment.gateway import GatewayUnavailable
+
+    try:
+        return await (await _source_gateway(source, db)).used_today()
+    except GatewayUnavailable:
+        return source.daily_budget_used
+
+
+def _source_to_response(s: EnrichmentSource, used_today: int) -> EnrichmentSourceResponse:
     from app.enrichment.registry import ADAPTER_REGISTRY
 
     adapter_cls = ADAPTER_REGISTRY.get(s.source_type)
@@ -45,7 +65,7 @@ def _source_to_response(s: EnrichmentSource) -> EnrichmentSourceResponse:
         rate_limit_config=s.rate_limit_config,
         min_confidence_threshold=s.min_confidence_threshold,
         daily_budget=s.daily_budget,
-        daily_budget_used=s.daily_budget_used,
+        daily_budget_used=used_today,
         schedule_interval_hours=s.schedule_interval_hours,
         next_scheduled_at=s.next_scheduled_at,
         supported_entity_types=supported_entity_types,
@@ -67,7 +87,7 @@ async def list_enrichment_sources(
 ):
     """All configured enrichment sources with adapter metadata (key requirements, supported entity types)."""
     result = await db.execute(select(EnrichmentSource).order_by(EnrichmentSource.display_name))
-    return [_source_to_response(s) for s in result.scalars().all()]
+    return [_source_to_response(s, await _used_today(s, db)) for s in result.scalars().all()]
 
 
 @router.put("/sources/{source_id}", response_model=EnrichmentSourceResponse)
@@ -120,7 +140,7 @@ async def update_enrichment_source(
     db.add(source)
     await db.flush()
     await db.refresh(source)
-    return _source_to_response(source)
+    return _source_to_response(source, await _used_today(source, db))
 
 
 @router.post("/sources/{source_id}/test")
@@ -135,7 +155,8 @@ async def test_source_connection(
         raise AppError(code="not_found", message="Enrichment source not found", status_code=404)
 
     from app.core.encryption import decrypt_value
-    from app.enrichment.registry import ADAPTER_REGISTRY, get_adapter
+    from app.enrichment.gateway import GatewayError, GatewayUnavailable
+    from app.enrichment.registry import ADAPTER_REGISTRY, adapter_for_source
 
     adapter_cls = ADAPTER_REGISTRY.get(source.source_type)
     requires_key = getattr(adapter_cls, "requires_api_key", False) if adapter_cls else False
@@ -144,12 +165,19 @@ async def test_source_connection(
     if requires_key and not api_key:
         source.health_status = "down"
     else:
+        # The probe goes through the gateway like any request, so it can be
+        # refused; that says nothing about the source, so the status stays.
         try:
-            adapter = get_adapter(source.source_type, api_key=api_key, config=source.config)
-            healthy = await adapter.check_health()
-            source.health_status = "healthy" if healthy else "down"
+            healthy = await adapter_for_source(source, api_key).check_health()
+        except GatewayError as e:
+            raise AppError(
+                code=e.status,
+                message=str(e),
+                status_code=503 if isinstance(e, GatewayUnavailable) else 429,
+            ) from e
         except Exception:
-            source.health_status = "down"
+            healthy = False
+        source.health_status = "healthy" if healthy else "down"
 
     db.add(source)
     await db.flush()
@@ -167,13 +195,12 @@ async def get_source_health(
     if not source:
         raise AppError(code="not_found", message="Enrichment source not found", status_code=404)
 
-    from app.enrichment.rate_limiter import RedisRateLimiter
+    from app.enrichment.gateway import GatewayUnavailable
 
     remaining = None
     try:
-        limiter = RedisRateLimiter(source.source_type, source.rate_limit_config)
-        remaining = await limiter.get_remaining()
-    except Exception:
+        remaining = await (await _source_gateway(source, db)).remaining()
+    except GatewayUnavailable:
         pass
 
     return {
@@ -190,21 +217,12 @@ async def get_budget_summary(
     db: AsyncSession = Depends(get_db),
 ):
     """Get daily budget usage for all sources with budgets configured."""
-    from app.enrichment.rate_limiter import RedisBudgetTracker
-
     result = await db.execute(select(EnrichmentSource).where(EnrichmentSource.daily_budget.isnot(None)))
     sources = result.scalars().all()
 
-    if not sources:
-        return []
-
-    # Bulk fetch usage from Redis
-    source_types = [s.source_type for s in sources]
-    usage_map = await RedisBudgetTracker.get_used_bulk(source_types)
-
     summaries = []
     for source in sources:
-        used = usage_map.get(source.source_type, 0)
+        used = await (await _source_gateway(source, db)).used_today()
         summaries.append(
             EnrichmentBudgetSummaryItem(
                 source_type=source.source_type,
@@ -306,7 +324,7 @@ async def enrich_entity(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """On-demand enrichment for a specific entity. Uses pipeline with caching and rate limiting."""
+    """On-demand enrichment for a specific entity. Uses the pipeline: cache, then each source's gateway."""
     from app.enrichment.pipeline import enrich_entity as pipeline_enrich
 
     # Resolve entity value and adapter entity type from the database

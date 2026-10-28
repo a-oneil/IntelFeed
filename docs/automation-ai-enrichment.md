@@ -39,7 +39,7 @@ For contributors and operators. After reading this you will know how automation 
   - [API Key Resolution](#api-key-resolution)
   - [Confidence Thresholds](#confidence-thresholds)
   - [Caching & TTL](#caching--ttl)
-  - [Rate Limiting](#rate-limiting)
+  - [Source Gateway](#source-gateway)
   - [Daily Budgets](#daily-budgets)
   - [Scheduled Enrichment](#scheduled-enrichment)
 - [Configuration and Extensibility](#configuration-and-extensibility)
@@ -557,11 +557,11 @@ All three tables are in `backend/app/models/enrichment.py`.
 
 **`user_enrichment_overrides`**: a person's own `api_key_encrypted` for a source, one row per user per source. The pipeline uses it in place of the source's key for that person's enrichments.
 
-**`enrichment_results`**: `entity_type`, `entity_id`, `source_type`, `raw_response`, `parsed_data`, `enriched_at`, `expires_at`, `status`. Only `success` and `error` rows are stored. The other outcomes (`cached`, `skipped_low_confidence`, `budget_exhausted`, `rate_limited`) appear only in the list `enrich_entity()` returns.
+**`enrichment_results`**: `entity_type`, `entity_id`, `source_type`, `raw_response`, `parsed_data`, `enriched_at`, `expires_at`, `status`. Only `success` and `error` rows are stored. The other outcomes (`cached`, `skipped_low_confidence`, and the gateway refusals `rate_limited`, `budget_exhausted`, `breaker_open`, `gateway_unavailable`) appear only in the list `enrich_entity()` returns.
 
 ### Adapter Registry
 
-`ADAPTER_REGISTRY` (`backend/app/enrichment/registry.py:20`) maps each `source_type` to its adapter class. `DEFAULT_SOURCES` (`registry.py:38`) gives each one its seed settings:
+`ADAPTER_REGISTRY` (`backend/app/enrichment/registry.py:22`) maps each `source_type` to its adapter class. `DEFAULT_SOURCES` (`registry.py:40`) gives each one its seed settings:
 
 | `source_type` | Display name | Entity types | Default trigger | Key? | Default rate limit | Min confidence |
 |---|---|---|---|---|---|---|
@@ -579,7 +579,7 @@ All three tables are in `backend/app/models/enrichment.py`.
 | `greynoise` | GreyNoise Community | observable (IPv4 only) | manual | No (optional key) | 10 / 3600 s | medium |
 | `shodan` | Shodan InternetDB | observable (IPv4 only) | auto | No | 30 / 60 s | medium |
 
-Every adapter extends `EnrichmentAdapter` (`backend/app/enrichment/base.py`). It sets `source_type`, `display_name`, `supported_entity_types`, `requires_api_key`, `default_trigger_mode`, and optionally `shared_key_group`. It implements `enrich(entity_type, value) -> EnrichmentData(raw_response, parsed_data, ttl_hours=24)`, and may override `bulk_sync()` and `check_health()`.
+Every adapter extends `EnrichmentAdapter` (`backend/app/enrichment/base.py`). It sets `source_type`, `display_name`, `supported_entity_types`, `requires_api_key`, `default_trigger_mode`, and optionally `shared_key_group`. It implements `enrich(entity_type, value) -> EnrichmentData(raw_response, parsed_data, ttl_hours=24)`, and may override `bulk_sync()` and `check_health()`. Adapters make every HTTP request through `self.http(timeout=...)`, a client on the source's [gateway](#source-gateway); none builds its own `httpx` client, and a test fails if one does. `check_health()` calls the same endpoint as `enrich()`.
 
 ### Trigger Modes
 
@@ -597,11 +597,8 @@ Every adapter extends `EnrichmentAdapter` (`backend/app/enrichment/base.py`). It
 2. Resolve the API key ([below](#api-key-resolution)).
 3. **Auto mode only**: skip it if the entity's confidence is below the source's minimum (`skipped_low_confidence`).
 4. If a fresh `success` result exists, return it (`cached`). No budget is used.
-5. If the source has a daily budget and it is used up, skip it (`budget_exhausted`).
-6. If the rate limit is reached, skip it (`rate_limited`).
-7. Call `adapter.enrich()` and store a `success` row that expires after `ttl_hours`. If the adapter raises, store an `error` row that expires after 1 hour.
-
-If Redis is down, the budget and rate-limit checks let the call through.
+5. Call `adapter.enrich()` and store a `success` row that expires after `ttl_hours`. If the adapter raises, store an `error` row that expires after 1 hour.
+6. If the source's gateway refuses a request, report why (`rate_limited`, `budget_exhausted`, `breaker_open` or `gateway_unavailable`) and store nothing, so the next trigger tries again.
 
 ### API Key Resolution
 
@@ -611,7 +608,7 @@ If Redis is down, the budget and rate-limit checks let the call through.
 2. The source's own key.
 3. A key on a sibling source in the same `shared_key_group` (the user's override first, then the sibling's own key).
 
-No current adapter sets `shared_key_group`, so `SHARED_KEY_GROUPS` (`backend/app/enrichment/registry.py:151`) is empty and step 3 never finds anything. Auto enrichment runs in a worker with no user, so it only uses the source's own key.
+No current adapter sets `shared_key_group`, so `SHARED_KEY_GROUPS` (`backend/app/enrichment/registry.py:154`) is empty and step 3 never finds anything. Auto enrichment runs in a worker with no user, so it only uses the source's own key.
 
 ### Confidence Thresholds
 
@@ -633,13 +630,25 @@ A `success` result is reused until `expires_at`. Each adapter picks its TTL per 
 - VirusTotal: 72 hours.
 - Short-lived misses (a GitHub rate limit, a missing VirusTotal or VulnCheck key, a failed Wikipedia fetch): 1 hour. These misses are stored as `success` rows with `found: false`, so they are cached too.
 
-### Rate Limiting
+### Source Gateway
 
-`RedisRateLimiter` (`backend/app/enrichment/rate_limiter.py`) is a sliding window: each call is added to a Redis sorted set at `enrichment:rate:{source_type}`, calls older than `period_seconds` are dropped, and the call is allowed while fewer than `requests_per_period` remain. Limits come from the source's `rate_limit_config` (seeded from the table above; edit them per source).
+`SourceGateway` (`backend/app/enrichment/gateway.py`) is the only way enrichment reaches the network. The pipeline, the source test button and the health check build one per source from its row (`adapter_for_source()` in `registry.py`), and its httpx transport checks every HTTP request, not every `enrich()` call:
+
+1. **Circuit breaker.** While it is open, requests are refused (`breaker_open`).
+2. **Rate limit and daily budget**, in one Redis script. The rate limit is a token bucket: `requests_per_period` tokens that refill over `period_seconds` (the source's `rate_limit_config`). The budget is `daily_budget` requests per UTC day (NULL = no limit). A request takes a token and is counted against the budget, or does neither, so refused requests cost nothing.
+3. **Short wait.** If the next token is at most 2 seconds away the request waits for it; otherwise it is refused (`rate_limited`).
+4. **User-Agent.** Every request says `IntelFeed/<version> (+<public URL>)`, using `PUBLIC_BASE_URL` (or the project page when it's blank).
+5. **The answer.** A 429 or 503 opens the breaker for the `Retry-After` time (seconds or a date), or for a backoff that starts at 60 seconds and doubles up to an hour when there is none, and the request ends as `rate_limited`. Three 5xx answers or connection errors in a row open it for the same backoff. Any other answer closes it.
+
+The bucket, budget and breaker belong to the credential, not the source type: they are keyed by the adapter's `shared_key_group` when it has one, else by `source_type`, plus a short hash of the API key when one is used. A user's own key has its own allowance; sources sharing one key share one. The keys live under `enrichment:gw:` in Redis.
+
+If Redis can't be reached, the gateway refuses the request (`gateway_unavailable`) and sends nothing.
+
+Wikipedia goes through the gateway too: `wikipediaapi` takes the gateway's transport for the httpx client it builds, with its own retries off.
 
 ### Daily Budgets
 
-When `daily_budget` is set, `RedisBudgetTracker` counts calls in `enrichment:budget:{source_type}:{YYYY-MM-DD}` (UTC; the key expires after 25 hours). A call over the budget is refused and not counted. Only real API calls count; cached results are free. Set a budget on keyed sources such as VirusTotal (free tier: 500 a day) or VulnCheck. `GET /api/enrichment/budget-summary` shows today's use.
+Set a budget on keyed sources such as VirusTotal (free tier: 500 a day) or VulnCheck. Every request the gateway sends counts; cached results are free. `GET /api/enrichment/budget-summary` and the source list's `daily_budget_used` show today's use under the source's own key, and `GET /api/enrichment/sources/{id}/health` shows the tokens left in its bucket.
 
 ### Scheduled Enrichment
 
@@ -709,5 +718,5 @@ The Malpedia sync passes `alt_names` through `filter_aliases()` (`backend/app/in
 - **Dry-run a rule**: `POST /api/automation/rules/{id}/test?entry_id=<uuid>`. Nothing is saved or sent.
 - **Run a rule now**: `POST /api/automation/rules/{id}/run?hours=24&limit=50`.
 - **See AI spend**: `AIResult.cost_estimate` per result, the Cost Dashboard (`GET /api/ai/cost-breakdown`), or the Prometheus counter `AI_COST_TOTAL{provider=...}`.
-- **See enrichment budgets**: `GET /api/enrichment/budget-summary`, or in code `await RedisBudgetTracker("virustotal").get_used()`.
+- **See enrichment budgets**: `GET /api/enrichment/budget-summary`, or in code `await source_gateway(source, api_key).used_today()` (`backend/app/enrichment/registry.py`).
 - **Tests**: `backend/tests/test_ai_providers.py`, `test_ai_tasks.py`, `test_ai_prompts.py`, `test_ai_allowance.py`, `test_user_ai_providers.py`, `test_openai_provider.py`, `test_ollama_provider.py`.

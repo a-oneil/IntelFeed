@@ -18,8 +18,8 @@ sys.path.insert(0, "/app")
 from sqlalchemy import delete, select
 
 from app.database import async_session
+from app.enrichment.gateway import USER_AGENT
 from app.enrichment.wikipedia_helper import (
-    USER_AGENT,
     extract_first_paragraph,
     get_search_queries,
     title_matches_entity,

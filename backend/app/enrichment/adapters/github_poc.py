@@ -24,7 +24,7 @@ class GitHubPoCAdapter(EnrichmentAdapter):
 
         query = f"{entity_value} poc exploit"
 
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with self.http(timeout=15) as client:
             resp = await client.get(
                 self._api_url,
                 headers=headers,
@@ -102,12 +102,12 @@ class GitHubPoCAdapter(EnrichmentAdapter):
             headers = {"Accept": "application/vnd.github+json"}
             if self.api_key:
                 headers["Authorization"] = f"Bearer {self.api_key}"
-            async with httpx.AsyncClient(timeout=5) as client:
+            async with self.http(timeout=5) as client:
                 resp = await client.get(
                     self._api_url,
                     headers=headers,
                     params={"q": "CVE-2021-44228 poc exploit", "per_page": 1},
                 )
                 return resp.status_code == 200
-        except Exception:
+        except httpx.HTTPError:
             return False

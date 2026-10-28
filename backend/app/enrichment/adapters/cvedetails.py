@@ -27,7 +27,7 @@ class CVEDetailsAdapter(EnrichmentAdapter):
             "Accept": "application/json",
         }
 
-        async with httpx.AsyncClient(timeout=15, headers=headers) as client:
+        async with self.http(timeout=15, headers=headers) as client:
             resp = await client.get(
                 f"{API_BASE}/vulnerability/search",
                 params={"cveId": entity_value},
@@ -38,13 +38,6 @@ class CVEDetailsAdapter(EnrichmentAdapter):
                     raw_response={"status": "not_found"},
                     parsed_data={"found": False},
                     ttl_hours=168,
-                )
-
-            if resp.status_code == 429:
-                return EnrichmentData(
-                    raw_response={"status": "rate_limited"},
-                    parsed_data={"found": False, "rate_limited": True},
-                    ttl_hours=0,
                 )
 
             resp.raise_for_status()
@@ -131,11 +124,11 @@ class CVEDetailsAdapter(EnrichmentAdapter):
                 "Authorization": f"Bearer {self.api_key}",
                 "Accept": "application/json",
             }
-            async with httpx.AsyncClient(timeout=5, headers=headers) as client:
+            async with self.http(timeout=5, headers=headers) as client:
                 resp = await client.get(
                     f"{API_BASE}/vulnerability/search",
                     params={"cveId": "CVE-2021-44228"},
                 )
                 return resp.status_code == 200
-        except Exception:
+        except httpx.HTTPError:
             return False
