@@ -24,10 +24,11 @@ router = APIRouter()
 
 async def _sync_enrichment_pause(db: AsyncSession, keys) -> None:
     """The gateways read the pause from Redis: copy a change there now rather
-    than at the dispatcher's next tick."""
+    than at the dispatcher's next tick, once the change is committed."""
     from app.enrichment.pause import SETTING, sync_pause
 
     if SETTING in keys:
+        await db.commit()
         await sync_pause(db)
 
 

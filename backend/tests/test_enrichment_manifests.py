@@ -247,7 +247,21 @@ def test_a_keyed_quota_applies_with_a_key_on_a_default_row():
     assert source_gateway(row, "ghp_token").capacity == 30
     tuned = _row("github_poc", rate_limit_config={"requests_per_period": 5, "period_seconds": 60})
     assert source_gateway(tuned, "ghp_token").capacity == 5  # an admin's choice stands
-    assert source_gateway(_row("nvd"), "key").capacity == 50  # no keyed quota
+    assert source_gateway(_row("malpedia"), "key").capacity == 30  # no keyed quota
+
+
+def test_nvd_runs_at_its_keyless_limit_unless_keyed():
+    row = _row("nvd")
+    keyless, keyed = source_gateway(row, None), source_gateway(row, "nvd-key")
+    assert (keyless.capacity, keyless.period) == (5, 30)
+    assert (keyed.capacity, keyed.period) == (50, 30)
+    # An admin's own rate stands with or without a key.
+    tuned = _row("nvd", rate_limit_config={"requests_per_period": 20, "period_seconds": 30})
+    assert source_gateway(tuned, None).capacity == source_gateway(tuned, "nvd-key").capacity == 20
+    # The sweep jobs' pacing fits inside either window.
+    from app.intelligence.cve import nvd_request_pace
+
+    assert 30 / nvd_request_pace(None) <= 5 and 30 / nvd_request_pace("nvd-key") <= 50
 
 
 async def test_catalog_job_gateway_uses_its_row(db_session):
@@ -344,11 +358,13 @@ async def test_catalog_rows_offer_no_entity_types_and_no_test(client, admin_head
 @pytest.mark.parametrize(
     ("source_type", "body", "status"),
     [
-        ("nvd", {"rate_limit_config": {"requests_per_period": 60, "period_seconds": 30}}, 400),
-        ("nvd", {"rate_limit_config": {"requests_per_period": 50, "period_seconds": 30}}, 200),
-        # 100 per minute is twice NVD's 50 per 30 s.
-        ("nvd", {"rate_limit_config": {"requests_per_period": 100, "period_seconds": 60}}, 200),
-        ("nvd", {"rate_limit_config": {"requests_per_period": 101, "period_seconds": 60}}, 400),
+        ("nvd", {"rate_limit_config": {"requests_per_period": 5, "period_seconds": 30}}, 200),
+        ("nvd", {"rate_limit_config": {"requests_per_period": 6, "period_seconds": 30}}, 400),
+        ("nvd", {"rate_limit_config": {"requests_per_period": 50, "period_seconds": 30}, "api_key": "k"}, 200),
+        ("nvd", {"rate_limit_config": {"requests_per_period": 60, "period_seconds": 30}, "api_key": "k"}, 400),
+        # 100 per minute is twice NVD's keyed 50 per 30 s.
+        ("nvd", {"rate_limit_config": {"requests_per_period": 100, "period_seconds": 60}, "api_key": "k"}, 200),
+        ("nvd", {"rate_limit_config": {"requests_per_period": 101, "period_seconds": 60}, "api_key": "k"}, 400),
         ("github_poc", {"rate_limit_config": {"requests_per_period": 30, "period_seconds": 60}}, 400),
         ("github_poc", {"rate_limit_config": {"requests_per_period": 30, "period_seconds": 60}, "api_key": "t"}, 200),
         ("wikipedia", {"rate_limit_config": {"requests_per_period": 500, "period_seconds": 60}}, 200),  # no ceiling

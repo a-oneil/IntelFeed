@@ -275,7 +275,7 @@ async def test_detail_limits_trend_queue_and_jobs(client, admin_headers, db_sess
     assert data["limits"] == {
         "requests_per_period": 40,
         "period_seconds": 30,
-        "ceiling_per_period": 50,
+        "ceiling_per_period": 5,  # keyless: NVD allows 5 per 30 s without a key
         "daily_budget": 100,
         "used_today": 3,
         "backfill_share": q.BACKFILL_SHARE,
@@ -484,6 +484,39 @@ async def test_dispatcher_defers_a_job_that_met_the_pause(db_session, monkeypatc
             <= job.due_at
             <= datetime.now(UTC) + timedelta(seconds=q.PAUSE_DEFER)
         )
+
+
+@pytest.mark.committed_db
+async def test_set_paused_writes_the_flag_after_the_commit(db_session, _engine, monkeypatch):
+    """A dispatcher syncing between the two must read the new value."""
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    import app.enrichment.pause as pause
+
+    seen = []
+    write_flag = pause._write_flag
+
+    async def committed_first(paused):
+        async with AsyncSession(bind=_engine) as other:
+            stored = await other.scalar(select(SystemSettings.settings).where(SystemSettings.id == 1))
+        seen.append(stored.get(SETTING))
+        await write_flag(paused)
+
+    monkeypatch.setattr(pause, "_write_flag", committed_first)
+    await set_paused(db_session, True)
+    await set_paused(db_session, False)
+    assert seen == [True, False]
+
+
+async def test_sync_pause_reads_the_row_not_the_settings_cache(db_session):
+    from app.services.system_settings import get_setting
+
+    await set_paused(db_session, False)
+    assert await get_setting(SETTING, db_session) is False  # cached
+    # Another worker pauses; this process's cache hasn't caught up.
+    await db_session.execute(update(SystemSettings).where(SystemSettings.id == 1).values(settings={SETTING: True}))
+    assert await sync_pause(db_session) is True
+    assert await (await get_redis_bytes()).exists(gw.paused_key())
 
 
 async def test_sync_pause_restores_a_lost_flag(db_session):

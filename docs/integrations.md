@@ -812,7 +812,7 @@ Enrichment adds outside data to CVEs, techniques, malware and indicators. Each s
 | Source | Key | Default trigger | Default rate limit | Scheduled jobs | Adds |
 |--------|---------|-----------------|--------------------|----------------|------|
 | FIRST EPSS | No | Manual | 100/min | Daily score sync | CVE exploit probability |
-| NVD API 2.0 | No | Auto | 50 per 30 s | Backfill, refresh, re-enrich | CVE details, CVSS |
+| NVD API 2.0 | No | Auto | 5 per 30 s; 50 with a key | Backfill, refresh, re-enrich | CVE details, CVSS |
 | CISA KEV | No | Manual | 100/min | Catalog sync every 6 h | Known exploited CVEs |
 | MITRE ATT&CK | No | Manual | 10/hour | Weekly bundle sync | Technique data |
 | VulnCheck KEV | Yes | Manual | 1,000/min | | KEV, EPSS, exploit data |

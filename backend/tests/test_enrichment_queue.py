@@ -437,6 +437,110 @@ async def test_out_of_time_hands_claimed_jobs_back(db_session, monkeypatch):
     assert len(left) == 2 and {(j.status, j.claimed_at) for j in left} == {("queued", None)}
 
 
+async def test_a_held_source_defers_its_backlog_in_one_update(db_session):
+    """A refusal moves the source's whole due backlog in one statement, spaced
+    at its rate, and the rest of the tick still runs other sources."""
+    from sqlalchemy import event
+
+    osv = await _source(db_session, "osv", rate_limit_config={"requests_per_period": 4, "period_seconds": 60})
+    await _source(db_session, "github_poc")
+    for _ in range(4):
+        await source_gateway(osv, None).acquire()
+    backlog = 300
+    await q.enqueue_many(db_session, "cve", "osv", [(uuid.uuid4(), f"CVE-2026-{i:05d}") for i in range(backlog)])
+    # Due after the whole backlog, so only a claim past the hold reaches it.
+    await q.enqueue_many(db_session, "cve", "github_poc", [(uuid.uuid4(), CVE_ID)])
+
+    job_updates = []
+
+    def count(conn, cursor, statement, *args):
+        if statement.lstrip().startswith("UPDATE enrichment_jobs"):
+            job_updates.append(statement)
+
+    engine = db_session.bind.sync_engine
+    event.listen(engine, "before_cursor_execute", count)
+    server = _Source(httpx.Response(200, json={"items": []}))
+    before = datetime.now(UTC)
+    try:
+        stats = await _dispatch(db_session, server)
+    finally:
+        event.remove(engine, "before_cursor_execute", count)
+
+    assert stats["rate_limited"] == q.CLAIM_BATCH
+    assert sum(stats.values()) == q.CLAIM_BATCH + 1  # the GitHub job ran too
+    assert {r.url.host for r in server.requests} == {"api.github.com"}
+    # Claim, the refused job, the held backlog, then GitHub's claim (+ settle):
+    # a handful, however long the backlog.
+    assert len(job_updates) <= 6
+
+    jobs = await _jobs(db_session, source_type="osv")
+    assert len(jobs) == backlog
+    assert {(j.status, j.last_status, j.claimed_at, j.attempts) for j in jobs} == {("queued", "rate_limited", None, 0)}
+    due = sorted(j.due_at for j in jobs)
+    assert due[0] > before + timedelta(seconds=10)
+    gaps = {round((b - a).total_seconds()) for a, b in zip(due, due[1:])}
+    assert gaps == {15}  # one request interval (60 s / 4) apart
+
+
+async def test_a_held_source_is_claimed_no_more_that_tick(db_session):
+    await _source(db_session)
+    await q.enqueue(db_session, "cve", uuid.uuid4(), CVE_ID)
+    held = frozenset({("osv", None)})
+    assert await q.claim(db_session, held=held) == []
+    assert [j.entity_value for j in await q.claim(db_session, held=frozenset({("osv", uuid.uuid4())}))] == [CVE_ID]
+
+
+async def test_a_lease_reclaim_counts_an_attempt_then_fails(db_session):
+    await _source(db_session)
+    await q.enqueue(db_session, "cve", uuid.uuid4(), CVE_ID)
+    expired = datetime.now(UTC) - q.LEASE - timedelta(minutes=1)
+    await db_session.execute(update(EnrichmentJob).values(status="running", claimed_at=expired))
+
+    (job,) = await q.claim(db_session)
+    assert job.attempts == 1
+    (row,) = await _jobs(db_session)
+    assert (row.status, row.attempts, row.last_status) == ("running", 1, "lease_expired")
+
+    await db_session.execute(
+        update(EnrichmentJob).values(status="running", claimed_at=expired, attempts=q.MAX_ATTEMPTS - 1)
+    )
+    assert await q.claim(db_session) == []
+    (row,) = await _jobs(db_session)
+    assert (row.status, row.attempts, row.last_status) == ("failed", q.MAX_ATTEMPTS, "lease_expired")
+    assert "lease" in row.last_error
+
+
+async def test_a_request_made_during_a_run_is_kept(db_session, test_user):
+    await _source(db_session)
+    eid = uuid.uuid4()
+    await q.enqueue(db_session, "cve", eid, CVE_ID, lane="backfill", source_types=["osv"])
+    (job,) = await q.claim(db_session)
+    # A person asks for it while it runs.
+    await q.enqueue(db_session, "cve", eid, CVE_ID, lane="manual", source_types=["osv"], requested_by=test_user.id)
+
+    await q._settle(db_session, job, "needs_key")
+    (row,) = await _jobs(db_session)
+    assert (row.status, row.lane, row.requested_by, row.claimed_at) == ("queued", "manual", test_user.id, None)
+
+    # Claimed again and nobody asks: the outcome applies.
+    (job,) = await q.claim(db_session)
+    await q._settle(db_session, job, "success")
+    assert await _jobs(db_session) == []
+
+
+async def test_a_request_made_during_a_run_is_not_deferred(db_session, test_user):
+    await _source(db_session)
+    eid = uuid.uuid4()
+    await q.enqueue(db_session, "cve", eid, CVE_ID, lane="backfill", source_types=["osv"])
+    (job,) = await q.claim(db_session)
+    await q.enqueue(db_session, "cve", eid, CVE_ID, lane="manual", source_types=["osv"], requested_by=test_user.id)
+
+    await q._settle(db_session, job, "rate_limited", retry_after=3600)
+    (row,) = await _jobs(db_session)
+    assert (row.status, row.lane, row.requested_by) == ("queued", "manual", test_user.id)
+    assert row.due_at <= datetime.now(UTC)
+
+
 # ── backfill share ───────────────────────────────────────────────────
 
 

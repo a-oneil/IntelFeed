@@ -22,8 +22,8 @@ CVE_PATTERN = re.compile(r"CVE-\d{4}-\d{4,}")
 
 NVD_API_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 # NVD's rolling window is 5 req/30s unkeyed, 50 req/30s with an API key. The
-# gateway's bucket (50 per 30s) refills while it drains, so a sweep that only
-# waited on it could send ~100 in one window: sweeps also sleep this long
+# gateway's bucket (the same rates) refills while it drains, so a sweep that only
+# waited on it could send twice the limit in one window: sweeps also sleep this long
 # between lookups.
 NVD_PACE_UNKEYED = 6.5
 NVD_PACE_KEYED = 0.7

@@ -14,9 +14,9 @@ class NVDAdapter(EnrichmentAdapter):
     display_name = "NVD API 2.0"
     applies_to = {"cve": None}
     # NVD allows 50 requests per rolling 30 s with an API key and 5 without
-    # (nvd.nist.gov/developers/start-here). The jobs pace themselves to the
-    # keyless window when there is no key (nvd_request_pace).
-    quota = Quota(50, 30, daily_budget=5000, ceiling_per_period=50)
+    # (nvd.nist.gov/developers/start-here). The jobs pace themselves inside
+    # either window (nvd_request_pace).
+    quota = Quota(5, 30, daily_budget=5000, ceiling_per_period=5, keyed=Quota(50, 30, 5000, ceiling_per_period=50))
     egress = Egress.LOW
     key_setting = "nvd_api_key"
     license = License(

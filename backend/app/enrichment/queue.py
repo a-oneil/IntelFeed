@@ -19,13 +19,28 @@ error                                           attempts + 1, exponential backof
                                                 ``failed`` after MAX_ATTEMPTS
 ==============================================  =================================
 
+A refusal (rate_limited, breaker_open, budget_exhausted) holds the source for
+that credential, its (source, requester), for the rest of the tick: one UPDATE
+moves all its other due rows past the refusal, spaced one request interval of
+the source's rate apart so they come due one at a time rather than together,
+and the tick claims none of its rows again while the hold lasts.
+
+A row enqueued again while it runs (a person asks for it mid-run) goes back to
+queued with the newer lane and requester instead of being deleted or
+rescheduled: the upsert stamps ``updated_at`` with the clock, the claim stamps
+``claimed_at`` and ``updated_at`` with its transaction time, and settling
+compares the two.
+
 A backfill-lane job runs only while its source has spent less than
 BACKFILL_SHARE of its ``daily_budget`` today, so bulk catch-up never starves
 new entities or a person's request; past that it waits for the next UTC day.
 
 While enrichment is paused (``app/enrichment/pause.py``) a tick claims
 nothing. A ``running`` row whose claim is older than LEASE is claimable again,
-so a worker that dies mid-tick strands nothing.
+so a worker that dies mid-tick strands nothing. Each reclaim counts an
+attempt, and a job whose lease expires on its MAX_ATTEMPTS-th try is marked
+``failed`` (``last_status`` ``lease_expired``), so a job that kills its worker
+stops coming back.
 """
 
 import logging
@@ -34,7 +49,7 @@ import uuid
 from collections import Counter
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import and_, case, delete, func, or_, select, update
+from sqlalchemy import DateTime, Interval, and_, case, delete, func, literal, not_, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -62,8 +77,11 @@ BACKFILL_SHARE = 0.6
 PAUSE_DEFER = 60
 #: Rows per INSERT when queueing a backfill.
 ENQUEUE_CHUNK = 1000
+LEASE_EXPIRED = f"The run did not finish within its {LEASE.total_seconds() / 60:.0f}-minute lease"
 
 _DONE = frozenset({"success", "cached", "skipped_low_confidence", "needs_key", "unsupported"})
+#: Refusals that hold the rest of a credential's jobs for the tick.
+_HOLDS = frozenset({"rate_limited", "breaker_open", "budget_exhausted"})
 
 
 def next_utc_midnight(now: datetime) -> datetime:
@@ -197,7 +215,9 @@ async def _upsert(db: AsyncSession, rows: list[dict]) -> None:
                 "entity_base_confidence": func.coalesce(new.entity_base_confidence, job.entity_base_confidence),
                 "status": case((revive, "queued"), else_=job.status),
                 "attempts": case((revive, 0), else_=job.attempts),
-                "updated_at": func.now(),
+                # The clock, not the transaction start, so a row claimed while
+                # this transaction ran still reads as asked for again.
+                "updated_at": func.clock_timestamp(),
             },
         )
     )
@@ -224,14 +244,28 @@ async def enqueue_many(
 # ── Dispatcher ───────────────────────────────────────────────────────
 
 
-async def claim(db: AsyncSession, limit: int = CLAIM_BATCH) -> list:
+def _credential(source_type: str, requested_by: uuid.UUID | None):
+    """Rows of one (source_type, requester)."""
+    return and_(
+        EnrichmentJob.source_type == source_type,
+        EnrichmentJob.requested_by.is_not_distinct_from(requested_by),
+    )
+
+
+async def claim(db: AsyncSession, limit: int = CLAIM_BATCH, held: frozenset = frozenset()) -> list:
     """Mark up to ``limit`` due jobs running and return them, highest lane
-    first. SKIP LOCKED lets two dispatchers claim side by side."""
+    first, skipping the (source_type, requester) pairs in ``held``. SKIP
+    LOCKED lets two dispatchers claim side by side.
+
+    A row reclaimed past its lease counts an attempt; one that reaches
+    MAX_ATTEMPTS that way is marked failed and not returned."""
     now = datetime.now(UTC)
     due = or_(
         and_(EnrichmentJob.status == "queued", EnrichmentJob.due_at <= now),
         and_(EnrichmentJob.status == "running", EnrichmentJob.claimed_at < now - LEASE),
     )
+    if held:
+        due = and_(due, not_(or_(*(_credential(st, by) for st, by in held))))
     ids = (
         (
             await db.execute(
@@ -248,13 +282,24 @@ async def claim(db: AsyncSession, limit: int = CLAIM_BATCH) -> list:
     if not ids:
         await db.commit()
         return []
+    expired = EnrichmentJob.status == "running"
     jobs = (
         await db.execute(
             update(EnrichmentJob)
             .where(EnrichmentJob.id.in_(ids))
-            .values(status="running", claimed_at=now)
+            .values(
+                status=case((and_(expired, EnrichmentJob.attempts + 1 >= MAX_ATTEMPTS), "failed"), else_="running"),
+                attempts=case((expired, EnrichmentJob.attempts + 1), else_=EnrichmentJob.attempts),
+                last_status=case((expired, "lease_expired"), else_=EnrichmentJob.last_status),
+                last_error=case((expired, LEASE_EXPIRED), else_=EnrichmentJob.last_error),
+                # Transaction time for both, so _settle can tell a row enqueued
+                # again since (see _upsert).
+                claimed_at=func.now(),
+                updated_at=func.now(),
+            )
             .returning(
                 EnrichmentJob.id,
+                EnrichmentJob.status,
                 EnrichmentJob.entity_type,
                 EnrichmentJob.entity_id,
                 EnrichmentJob.entity_value,
@@ -271,14 +316,24 @@ async def claim(db: AsyncSession, limit: int = CLAIM_BATCH) -> list:
         )
     ).all()
     await db.commit()
-    return sorted(jobs, key=lambda j: (j.priority, j.due_at))
+    return sorted((j for j in jobs if j.status == "running"), key=lambda j: (j.priority, j.due_at))
 
 
 async def _settle(db: AsyncSession, job, status: str, *, retry_after: float | None = None, error: str | None = None):
-    """Delete or reschedule a claimed job by its outcome, and commit."""
+    """Delete or reschedule a claimed job by its outcome, and commit. A row
+    enqueued again since its claim goes back to queued as that enqueue left it
+    (lane, requester, due_at) instead."""
     now = datetime.now(UTC)
+    unchanged = EnrichmentJob.updated_at <= EnrichmentJob.claimed_at
     if status in _DONE:
-        await db.execute(delete(EnrichmentJob).where(EnrichmentJob.id == job.id))
+        deleted = await db.execute(delete(EnrichmentJob).where(EnrichmentJob.id == job.id, unchanged))
+        if not deleted.rowcount:
+            await db.execute(
+                update(EnrichmentJob)
+                .where(EnrichmentJob.id == job.id)
+                .values(status="queued", claimed_at=None, last_status=status)
+                .execution_options(synchronize_session=False)
+            )
         await db.commit()
         return
     values: dict = {"status": "queued", "claimed_at": None, "last_status": status}
@@ -296,47 +351,87 @@ async def _settle(db: AsyncSession, job, status: str, *, retry_after: float | No
             status="failed" if attempts >= MAX_ATTEMPTS else "queued",
             due_at=now + timedelta(seconds=ERROR_BACKOFF * 2 ** (attempts - 1)),
         )
+    # A row asked for again mid-run keeps what that enqueue set.
+    rescheduled = {k: case((unchanged, v), else_=getattr(EnrichmentJob, k)) for k, v in values.items()}
+    rescheduled.update(status=case((unchanged, values["status"]), else_="queued"), claimed_at=None)
     await db.execute(
         update(EnrichmentJob)
         .where(EnrichmentJob.id == job.id)
-        .values(**values)
+        .values(**rescheduled)
         .execution_options(synchronize_session=False)
     )
     await db.commit()
 
 
-async def _backfill_allowed(db: AsyncSession, job) -> bool:
-    """Whether the job's source is under its backfill share of today's budget.
-    Raises GatewayUnavailable when the count can't be read."""
+async def _gateway(db: AsyncSession, job) -> tuple:
+    """The job's source row and the gateway it runs through; (None, None)
+    without a row."""
     from app.enrichment.pipeline import resolve_api_key
     from app.enrichment.registry import source_gateway
 
     source = (
         await db.execute(select(EnrichmentSource).where(EnrichmentSource.source_type == job.source_type))
     ).scalar_one_or_none()
+    if source is None:
+        return None, None
+    return source, source_gateway(source, await resolve_api_key(source, job.requested_by, db))
+
+
+async def _backfill_allowed(db: AsyncSession, job) -> bool:
+    """Whether the job's source is under its backfill share of today's budget.
+    Raises GatewayUnavailable when the count can't be read."""
+    source, gateway = await _gateway(db, job)
     if source is None or not source.daily_budget:
         return True
-    gateway = source_gateway(source, await resolve_api_key(source, job.requested_by, db))
     return await gateway.used_today() < BACKFILL_SHARE * source.daily_budget
+
+
+async def _hold(db: AsyncSession, job, until: datetime, status: str, claimed: list) -> None:
+    """Defer the other due rows of a refused job's credential, in one UPDATE:
+    the ``claimed`` rows of this batch and every queued one, the n-th due n
+    request intervals (at the source's rate) after ``until``."""
+    _, gateway = await _gateway(db, job)
+    interval = gateway.period / gateway.capacity if gateway else 1.0
+    ranked = (
+        select(
+            EnrichmentJob.id,
+            func.row_number().over(order_by=(EnrichmentJob.priority, EnrichmentJob.due_at)).label("position"),
+        )
+        .where(
+            _credential(job.source_type, job.requested_by),
+            or_(
+                and_(EnrichmentJob.status == "queued", EnrichmentJob.due_at <= datetime.now(UTC)),
+                EnrichmentJob.id.in_([j.id for j in claimed]),
+            ),
+        )
+        .subquery()
+    )
+    offset = func.make_interval(0, 0, 0, 0, 0, 0, ranked.c.position * interval, type_=Interval)
+    await db.execute(
+        update(EnrichmentJob)
+        .where(EnrichmentJob.id == ranked.c.id)
+        .values(
+            status="queued",
+            claimed_at=None,
+            last_status=status,
+            due_at=literal(until, DateTime(timezone=True)) + offset,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    await db.commit()
 
 
 async def _run(db: AsyncSession, job, held: dict) -> str:
     """Run one claimed job and settle it. Returns the outcome status.
 
-    ``held`` maps (source_type, requester) to the (until, status) of a refusal
-    earlier in this tick, so the rest of that credential's jobs are deferred
-    without asking the gateway again.
+    A refusal in _HOLDS records its (until, status) in ``held`` under the
+    job's (source_type, requester), for the dispatcher to hold.
     """
     from app.enrichment.entity_updater import apply_enrichment_results_to_entity
     from app.enrichment.pipeline import enrich_entity
 
     key = (job.source_type, job.requested_by)
     now = datetime.now(UTC)
-    if key in held and held[key][0] > now:
-        until, status = held[key]
-        await _settle(db, job, status, retry_after=(until - now).total_seconds())
-        return status
-
     try:
         if job.lane == "backfill" and not await _backfill_allowed(db, job):
             await _settle(db, job, "backfill_share")
@@ -387,24 +482,35 @@ async def dispatch_due(db: AsyncSession, budget_seconds: float = TICK_SECONDS) -
     stats: Counter[str] = Counter()
     held: dict = {}
     while time.monotonic() < deadline:
-        jobs = await claim(db)
+        now = datetime.now(UTC)
+        jobs = await claim(db, held=frozenset(k for k, (until, _) in held.items() if until > now))
         if not jobs:
             break
+        deferred: set = set()
         for i, job in enumerate(jobs):
+            if job.id in deferred:
+                continue
             if time.monotonic() >= deadline:
-                await _release(db, jobs[i:])
+                await _release(db, [j for j in jobs[i:] if j.id not in deferred])
                 return dict(stats)
             status = await _run(db, job, held)
             stats[status] += 1
-            if status == "gateway_unavailable":
+            if status in _HOLDS:
+                key = (job.source_type, job.requested_by)
+                rest = [j for j in jobs[i + 1 :] if (j.source_type, j.requested_by) == key]
+                await _hold(db, job, held[key][0], status, rest)
+                deferred.update(j.id for j in rest)
+                stats[status] += len(rest)
+            elif status == "gateway_unavailable":
                 # Redis is down: every other lookup would be refused too.
-                await _release(db, jobs[i + 1 :])
+                await _release(db, [j for j in jobs[i + 1 :] if j.id not in deferred])
                 return dict(stats)
-            if status == "paused":
+            elif status == "paused":
                 # Paused since the tick began: the rest wait as this one does.
                 for rest in jobs[i + 1 :]:
-                    await _settle(db, rest, "paused")
-                    stats["paused"] += 1
+                    if rest.id not in deferred:
+                        await _settle(db, rest, "paused")
+                        stats["paused"] += 1
                 return dict(stats)
     return dict(stats)
 

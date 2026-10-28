@@ -582,7 +582,7 @@ Each source is a class that carries its own manifest (`backend/app/enrichment/ma
 | `source_type` | Display name | Kind | Entity types | Default trigger | Key? | Default rate | Ceiling | Egress |
 |---|---|---|---|---|---|---|---|---|
 | `epss` | FIRST EPSS | lookup | cve | manual | No | 100 / 60 s | — | low |
-| `nvd` | NVD API 2.0 | lookup | cve | auto | No (optional) | 50 / 30 s | 50 / 30 s | low |
+| `nvd` | NVD API 2.0 | lookup | cve | auto | No (optional) | 5 / 30 s; 50 / 30 s with a key | the same | low |
 | `cisa_kev` | CISA KEV | lookup | cve | manual | No | 100 / 60 s | — | none |
 | `mitre_attack` | MITRE ATT&CK | lookup | ttp, threat_actor, malware, tool, mitigation | manual | No | 10 / 3600 s | — | none |
 | `vulncheck` | VulnCheck KEV | lookup | cve | manual | Yes | 1000 / 60 s | 1000 / 60 s | low |
@@ -711,18 +711,20 @@ Waiting enrichment work lives in `enrichment_jobs` (`backend/app/enrichment/queu
 
 | Outcome | Row |
 |---|---|
-| `success`, `cached`, `skipped_low_confidence`, or the source no longer applies | Deleted |
+| `success`, `cached`, `skipped_low_confidence`, `needs_key`, or the source no longer applies | Deleted |
 | `rate_limited`, `breaker_open` | Due again after `retry_after`; attempts unchanged |
 | `budget_exhausted` | Due at the next UTC midnight |
 | `paused` | Due again in 60 seconds; attempts unchanged, and the rest of the tick's batch waits the same way |
 | `gateway_unavailable` | Put back as it was, and the tick ends |
 | `error` | `attempts` + 1, due again after 5 minutes doubled per attempt; `failed` after 5 attempts (the row stays, and is not claimed again until it is queued anew) |
 
-When a source refuses one job, the tick defers that credential's other jobs the same way without asking again.
+When a source refuses one job (`rate_limited`, `breaker_open`, `budget_exhausted`), the tick holds that credential (the source and the job's requester) without asking the source again. One UPDATE moves all of the credential's other due rows, the rest of the batch included, past the refusal, one request interval of the source's rate apart (for VirusTotal at 4 a minute, 15 seconds), so a backlog comes due one row at a time rather than all at once. The tick claims none of the credential's rows while the hold lasts, and goes on with other sources.
+
+A row queued again while it runs (a person asks for it mid-run) is not deleted or rescheduled by the run's outcome: it goes back to `queued` with the newer lane and requester, and runs again. The upsert stamps `updated_at` with the clock and the claim stamps `claimed_at` and `updated_at` with its own transaction time, so settling tells the two apart.
 
 A `backfill` job runs only while its source has used less than 60% of its `daily_budget` today (when it has one); otherwise it waits for the next UTC day (`last_status = backfill_share`). The other lanes are not capped by this.
 
-While enrichment is [paused](#enrichment-console), a tick claims nothing. A `running` row claimed more than 10 minutes ago is claimable again, so a worker that dies mid-tick strands nothing. A tick still waiting when the next one is due is dropped (`expires` 30 seconds), so a restarted worker does not run a backlog of ticks.
+While enrichment is [paused](#enrichment-console), a tick claims nothing. A `running` row claimed more than 10 minutes ago is claimable again, so a worker that dies mid-tick strands nothing. Each reclaim counts an attempt (`last_status = lease_expired`), and a row whose lease expires on its fifth attempt is marked `failed`, so a job that kills or outlasts its worker stops coming back. A tick still waiting when the next one is due is dropped (`expires` 30 seconds), so a restarted worker does not run a backlog of ticks.
 
 ### API Key Resolution
 
@@ -804,7 +806,7 @@ Wikipedia goes through the gateway too: `wikipediaapi` takes the gateway's trans
 
 When the gateway refuses (`rate_limited`, `breaker_open`, `budget_exhausted`, `paused`), a job stops, commits what it has done, and records the reason as `stopped` in its stats, which land in the run's details in the Jobs view. The run still counts as a success. Loop jobs also stop with `stopped: "out_of_time"` before their time limit. `gateway_unavailable` fails the run.
 
-NVD allows 50 requests per 30 seconds with a key and 5 without. The bucket (50 per 30 s) refills while it drains, so on its own it could let about 100 through in one window; the NVD sweeps also sleep 0.7 s between lookups with a key and 6.5 s without (`nvd_request_pace()`).
+NVD allows 50 requests per 30 seconds with a key and 5 without. The NVD row's default rate is the keyless 5 per 30 s; with a key in use the gateway runs it at the keyed 50 per 30 s, unless an admin has changed the row's rate. The bucket refills while it drains, so on its own it could let up to twice its rate through in one window; the NVD sweeps also sleep 0.7 s between lookups with a key and 6.5 s without (`nvd_request_pace()`).
 
 ### Daily Budgets
 
@@ -829,7 +831,7 @@ Settings → Engine → Enrichment is one admin page for every source. Its API (
 
 **`POST /api/enrichment/sources/{source_type}/backfill`** (`{"entity_type", "limit"}`, both optional) queues `backfill`-lane jobs for the in-scope entities missing that column, newest first, 1,000 rows per insert; `limit` defaults to 1,000 and is capped at 50,000. It answers 400 for a catalog source, a type the source doesn't handle, a source with no column output, or a source that is off.
 
-**`POST /api/enrichment/pause`** (`{"paused": true}`) stops every request to outside sources. The switch is the system setting `enrichment_paused`, which the Settings block on the same page also shows. The gateways read a Redis flag in the same script that takes a token, so a pause applies on every worker's next request. The pause endpoint and the settings API write the flag at once (`backend/app/enrichment/pause.py`), and the dispatcher copies the setting onto it every tick, so a Redis restart restores it within 30 seconds. While paused, the dispatcher claims nothing, scheduled jobs stop with `stopped: "paused"`, and `POST /api/enrichment/enrich` queues the lookup for later.
+**`POST /api/enrichment/pause`** (`{"paused": true}`) stops every request to outside sources. The switch is the system setting `enrichment_paused`, which the Settings block on the same page also shows. The gateways read a Redis flag in the same script that takes a token, so a pause applies on every worker's next request. The pause endpoint and the settings API commit the setting, then write the flag (`backend/app/enrichment/pause.py`), and the dispatcher copies the setting onto it every tick, so a Redis restart restores it within 30 seconds. The copy reads the setting's row, not the settings cache, under a share lock held until the flag is written, so it can't put back a value a change is committing over. While paused, the dispatcher claims nothing, scheduled jobs stop with `stopped: "paused"`, and `POST /api/enrichment/enrich` queues the lookup for later.
 
 ### Source Jobs
 
