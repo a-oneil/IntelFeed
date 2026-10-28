@@ -37,9 +37,9 @@ class MalpediaAdapter(EnrichmentAdapter):
         *(Column("alt_names", f"{t}.aliases", Policy.UNION, rank=2, filter="aliases") for t in _TYPES),
         Column("country", "threat_actor.country"),
         Context("attribution", "Attributed to", Display.CHIPS, entity_types=("malware", "tool")),
-        Context("urls", "References", Display.LINK, entity_types=("malware", "tool")),
+        Context("urls", "References", Display.TABLE, item={"Link": None}, entity_types=("malware", "tool")),
         Context("families", "Families", Display.CHIPS, entity_types=("threat_actor",)),
-        Context("refs", "References", Display.LINK, entity_types=("threat_actor",)),
+        Context("refs", "References", Display.TABLE, item={"Link": None}, entity_types=("threat_actor",)),
     )
 
     _api_base = "https://malpedia.caad.fkie.fraunhofer.de/api/"

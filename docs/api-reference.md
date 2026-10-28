@@ -599,6 +599,7 @@ Reading entities uses the catalogs above. Creating and editing uses `/api/entiti
 | POST | `/api/entities/{entity_type}/{entity_id}/rescan` | User | Re-scan all articles for this entity |
 | POST | `/api/entities/convert` | Admin | Change an entity's type (for example malware to tool), moving its links, relationships, notes and campaigns |
 | GET | `/api/entities/{entity_type}/{entity_id}/provenance` | Visitor | Who stated each fact on the profile, and whether they still agree |
+| GET | `/api/entities/{entity_type}/{entity_id}/context` | Visitor | What the enabled enrichment sources say about the entity, with header badges; admins also get sources missing a key |
 | GET | `/api/entities/{entity_type}/{entity_id}/detection-gaps` | User | Detection coverage for the entity's techniques |
 | GET | `/api/entities/{entity_type}/{entity_id}/story-threads` | Visitor | Story threads that mention the entity |
 | GET | `/api/entities/{entity_type}/{entity_id}/attack-techniques` | Visitor | Techniques from its articles, by evidence |
@@ -1184,7 +1185,6 @@ Enrichment fills in entity details from outside sources (NVD, EPSS, CISA KEV, Ma
 | PUT | `/api/enrichment/user-overrides/{source_id}` | User | Set your own key for a source |
 | DELETE | `/api/enrichment/user-overrides/{source_id}` | User | Go back to the instance key |
 | POST | `/api/enrichment/enrich` | User | Enrich one entity now (`entity_type`, `entity_id`, optional `source_types`); sources that refused are queued to retry and listed in `queued` |
-| GET | `/api/enrichment/results` | Visitor | Saved results for one entity |
 
 ---
 

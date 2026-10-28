@@ -22,6 +22,8 @@ class CVEDetailsAdapter(EnrichmentAdapter):
     requires = ("api_key",)
     quota = Quota(60, 60, daily_budget=1000)
     egress = Egress.LOW
+    # The site's terms bar using it or its information "for any commercial
+    # purposes": https://www.cvedetails.com/terms-and-conditions.php
     license = License("CVEDetails API subscription", attribution="CVEdetails.com", commercial_ok=False)
     default_trigger_mode = "auto"
     outputs = (

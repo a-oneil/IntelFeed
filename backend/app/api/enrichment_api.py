@@ -8,15 +8,14 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
-from app.core.security import get_admin_user, get_current_user, get_viewer
+from app.core.security import get_admin_user, get_current_user
 from app.database import get_db
-from app.models.enrichment import EnrichmentResult, EnrichmentSource, UserEnrichmentOverride
+from app.models.enrichment import EnrichmentSource, UserEnrichmentOverride
 from app.models.user import User
 from app.schemas.enrichment import (
     EnrichEntityRequest,
     EnrichmentBackfillRequest,
     EnrichmentPauseRequest,
-    EnrichmentResultResponse,
     EnrichmentSourceResponse,
     EnrichmentSourceUpdate,
     UserEnrichmentOverrideCreate,
@@ -387,6 +386,10 @@ async def delete_user_override(
 # --- Entity Enrichment ---
 
 
+#: The column each entity type is looked up by; every other type uses ``name``.
+_LOOKUP_VALUE = {"cve": "cve_id", "ttp": "technique_id", "observable": "value"}
+
+
 @router.post("/enrich")
 async def enrich_entity(
     body: EnrichEntityRequest,
@@ -397,51 +400,19 @@ async def enrich_entity(
 
     Sources the gateway refused (rate limited, breaker open, budget used up)
     are queued to retry on the enrichment queue and listed in ``queued``."""
+    from app.enrichment.entity_updater import _get_model_map
     from app.enrichment.pipeline import enrich_entity as pipeline_enrich
 
-    # Resolve entity value and adapter entity type from the database
-    entity_value: str | None = None
-    adapter_entity_type = body.entity_type
-
-    if body.entity_type == "cve":
-        from app.models.cve import CVE
-
-        cve = await db.get(CVE, body.entity_id)
-        if not cve:
-            raise AppError(code="not_found", message="CVE not found", status_code=404)
-        entity_value = cve.cve_id
-    elif body.entity_type == "threat_actor":
-        from app.models.threat_actor import ThreatActor
-
-        actor = await db.get(ThreatActor, body.entity_id)
-        if not actor:
-            raise AppError(code="not_found", message="Threat actor not found", status_code=404)
-        entity_value = actor.name
-    elif body.entity_type == "malware":
-        from app.models.malware_family import MalwareFamily
-
-        malware = await db.get(MalwareFamily, body.entity_id)
-        if not malware:
-            raise AppError(code="not_found", message="Malware family not found", status_code=404)
-        entity_value = malware.name
-    elif body.entity_type == "ttp":
-        from app.models.ttp import TTP
-
-        ttp = await db.get(TTP, body.entity_id)
-        if not ttp:
-            raise AppError(code="not_found", message="TTP not found", status_code=404)
-        entity_value = ttp.technique_id
-    elif body.entity_type == "observable":
-        from app.models.observable import Observable
-
-        obs = await db.get(Observable, body.entity_id)
-        if not obs:
-            raise AppError(code="not_found", message="Observable not found", status_code=404)
-        # Values are stored refanged/canonical, so this is directly queryable;
-        # adapters infer the kind from the value's shape.
-        entity_value = obs.value
-    else:
+    # The value each source looks up: the entity's identifier for CVEs, TTPs
+    # and observables (stored refanged/canonical), its name for the rest.
+    model_cls = _get_model_map().get(body.entity_type)
+    if model_cls is None:
         raise AppError(code="invalid_entity_type", message="Unsupported entity type", status_code=400)
+    entity = await db.get(model_cls, body.entity_id)
+    if entity is None:
+        raise AppError(code="not_found", message=f"{body.entity_type} not found", status_code=404)
+    entity_value: str = getattr(entity, _LOOKUP_VALUE.get(body.entity_type, "name"))
+    adapter_entity_type = body.entity_type
 
     results = await pipeline_enrich(
         entity_type=adapter_entity_type,
@@ -452,6 +423,10 @@ async def enrich_entity(
         trigger="manual",
         source_types=body.source_types,
     )
+    # Write what came back onto the entity's columns, as the queue does.
+    from app.enrichment.entity_updater import apply_enrichment_results_to_entity
+
+    await apply_enrichment_results_to_entity(db, adapter_entity_type, body.entity_id, results)
 
     # A source the gateway refused gets a manual-lane job: the lookup runs when
     # the source allows it, under this user's key, rather than being lost.
@@ -483,31 +458,3 @@ async def enrich_entity(
         "results": results,
         "queued": queued,
     }
-
-
-@router.get("/results", response_model=list[EnrichmentResultResponse])
-async def get_enrichment_results(
-    entity_type: str = Query(..., description="Entity type the results belong to (cve, threat_actor, malware, ttp)"),
-    entity_id: uuid.UUID = Query(..., description="Entity UUID"),
-    user: User = Depends(get_viewer),
-    db: AsyncSession = Depends(get_db),
-):
-    """Stored enrichment results for one entity, newest first."""
-    if user.is_anonymous:
-        # Results are keyed by type and id, outside the visitor filter: answer
-        # only for an entity the visitor can see.
-        from app.services.public_view import entities_shown
-
-        if entity_type in ("campaign", "observable") or (entity_type, entity_id) not in await entities_shown(
-            db, {(entity_type, entity_id)}
-        ):
-            return []
-    result = await db.execute(
-        select(EnrichmentResult)
-        .where(
-            EnrichmentResult.entity_type == entity_type,
-            EnrichmentResult.entity_id == entity_id,
-        )
-        .order_by(EnrichmentResult.enriched_at.desc())
-    )
-    return [EnrichmentResultResponse.model_validate(r) for r in result.scalars().all()]

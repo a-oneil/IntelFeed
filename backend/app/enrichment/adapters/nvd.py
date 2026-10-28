@@ -6,7 +6,7 @@ Provides CVE details, CVSS scores, references, and affected products.
 import httpx
 
 from app.enrichment.base import EnrichmentAdapter, EnrichmentData
-from app.enrichment.manifest import Context, Display, Egress, Job, License, Quota
+from app.enrichment.manifest import Column, Context, Display, Egress, Job, License, Policy, Quota
 
 
 class NVDAdapter(EnrichmentAdapter):
@@ -47,11 +47,19 @@ class NVDAdapter(EnrichmentAdapter):
         ),
     )
     outputs = (
+        # Blank columns only, so a lookup never overwrites what article
+        # extraction (extract_and_store_cves) or the NVD jobs already wrote;
+        # it fills a CVE whose NVD call at extraction was throttled. NVD's
+        # score ranks first; the CNA's would be rank 2. The description
+        # ranks ahead of Wikipedia's.
+        Column("cvss_score", "cve.cvss_score", Policy.RANK, rank=1),
+        Column("cvss_severity", "cve.severity"),
+        Column("description", "cve.description", Policy.RANK, rank=1),
         Context("cvss_vector", "CVSS vector", Display.FACT),
         Context("published", "Published", Display.FACT),
         Context("last_modified", "Last modified", Display.FACT),
         Context("weaknesses", "Weaknesses", Display.CHIPS),
-        Context("references", "References", Display.LINK),
+        Context("references", "References", Display.TABLE, item={"Source": "source", "Link": "url"}),
     )
 
     async def enrich(self, entity_type: str, entity_value: str) -> EnrichmentData:

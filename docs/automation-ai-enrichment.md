@@ -553,17 +553,19 @@ Enrichment adds outside facts to entities: a CVE's CVSS score and EPSS probabili
 6. **Per-user API keys**: a person can store their own key for a source.
 7. **The [console](#enrichment-console)**: one admin page for every source's status, limits, queue, fill rates and jobs, plus a global pause.
 
-Sources are configured at Settings → Engine → Enrichment (`/api/enrichment/sources`). After a queued lookup, `apply_enrichment_results_to_entity` (`backend/app/enrichment/entity_updater.py`) writes the fields each source declares onto the entity itself ([Field Map](#field-map)).
+Sources are configured at Settings → Engine → Enrichment (`/api/enrichment/sources`). After a queued lookup, `apply_enrichment_results_to_entity` (`backend/app/enrichment/entity_updater.py`) writes the fields each source declares onto the entity itself ([Field Map](#field-map)), and each lookup stores what the source says for the profile in `entity_context` ([Source Context](#source-context)).
 
 ### Data Models
 
-All four tables are in `backend/app/models/enrichment.py`.
+All five tables are in `backend/app/models/enrichment.py`.
 
 **`enrichment_sources`**: one row per source. `source_type` (unique), `display_name`, `is_enabled` (a new row starts on when the source has jobs; while off, the source is looked up by nothing and its jobs skip), `trigger_mode` (`auto` / `manual`), `api_key_encrypted`, `rate_limit_config` (`requests_per_period`, `period_seconds`), `config`, `min_confidence_threshold` (`low` / `medium` / `high`), `daily_budget` (NULL = unlimited; new rows get the manifest quota's budget), `last_synced_at`, `health_status`. The gateway counts each day's requests in Redis.
 
 **`user_enrichment_overrides`**: a person's own `api_key_encrypted` for a source, one row per user per source. The pipeline uses it in place of the source's key for that person's enrichments.
 
-**`enrichment_results`**: `entity_type`, `entity_id`, `source_type`, `raw_response`, `parsed_data`, `enriched_at`, `expires_at`, `status`. Only `success` and `error` rows are stored. The other outcomes (`cached`, `skipped_low_confidence`, and the gateway refusals `rate_limited`, `budget_exhausted`, `breaker_open`, `paused`, `gateway_unavailable`) appear only in the list `enrich_entity()` returns.
+**`enrichment_results`**: `entity_type`, `entity_id`, `source_type`, `raw_response`, `parsed_data`, `enriched_at`, `expires_at`, `status`. Only `success` and `error` rows are stored; the other outcomes (`cached`, `skipped_low_confidence` and the gateway refusals `rate_limited`, `budget_exhausted`, `breaker_open`, `paused`, `gateway_unavailable`) appear only in the list `enrich_entity()` returns. A lookup adds a `success` row only when its `parsed_data` differs from the latest one; otherwise it moves that row's `enriched_at` and `expires_at` forward. The bulk syncs (EPSS, the GitHub PoC scan) keep one row per CVE and overwrite it; the EPSS sync's `parsed_data` uses the lookup's keys (`cve`, `epss`, `percentile`, `date`). The other outcomes (`cached`, `skipped_low_confidence`, and the gateway refusals `rate_limited`, `budget_exhausted`, `breaker_open`, `gateway_unavailable`) appear only in the list `enrich_entity()` returns.
+
+**`entity_context`**: what one source says about one entity, one row per declared `Context` output, keyed (`entity_type`, `entity_id`, `source_type`, `key`). `value` (JSONB, shaped for its display), `observed_at`, `expires_at`. See [Source Context](#source-context).
 
 **`enrichment_jobs`**: one pending lookup of one entity at one source, unique on (`entity_type`, `entity_id`, `source_type`). `lane` and its `priority`, `status` (`queued` / `running` / `failed`), `due_at`, `claimed_at`, `attempts`, `last_status` (why it last waited), `last_error`, `requested_by` (whose key a manual job uses), and the entity confidence the threshold check needs. `GROUP BY source_type, lane, status, last_status` shows what is waiting and why.
 
@@ -615,12 +617,38 @@ A source's `outputs` are `Column` and `Context` entries. A `Column` says which `
 
 A `filter` transforms the value first: `aliases` runs `filter_aliases()` (`backend/app/intelligence/autolinker.py`), so junk aliases never reach the autolinker vocabulary. `apply_enrichment_results_to_entity` (`backend/app/enrichment/entity_updater.py`) applies every output for the entity's type and records a claim (`entity_field_claims`, `source_kind = enrichment`, `source_ref` = the source) for each value it writes. What the sources write:
 
-- **Wikipedia**: `wikipedia_url` (newer wins), with `wikipedia_content` and `wikipedia_image_url` following it, so a new article never keeps the old one's image; `description` from `first_paragraph`, rank 1.
+- **Wikipedia**: `wikipedia_url` (newer wins), with `wikipedia_content` and `wikipedia_image_url` following it, so a new article never keeps the old one's image; `description` from `first_paragraph`, rank 1 (rank 2 for a CVE).
 - **MITRE ATT&CK**: `description` rank 2, `mitre_id`, `aliases` (union, first), `platforms` (ttp, tool).
 - **Malpedia**: `description` rank 3, `malpedia_url` (malware, tool), `github_url` (a tool's first github.com reference), `aliases` (union, after MITRE), actor `country`.
 - **VirusTotal, GreyNoise, Shodan**: keys of `Observable.reputation` (`vt_ratio`, `vt_malicious`, `vt_threat_label`, `vt_tags`, `asn`, `as_owner`, `country`; `gn_classification`, `gn_noise`, `gn_riot`, `gn_name`; `ports`, `hostnames`, `shodan_tags`, `vulns`), newest wins, empty values skipped; `reputation.enriched_at` is stamped whenever one of them answers. `infra_tag` fills when blank: a Shodan `vpn` / `proxy` / `tor` tag first, else `benign_service` for GreyNoise RIOT.
 
-A `Context` (key, label, display: `fact`, `chips`, `table`, `timeline`, `link` or `badge`) is a value for the entity's profile rather than a column; the adapters declare them (Shodan ports and tags, GreyNoise classification, OSV affected packages, Malpedia references, and so on).
+- **NVD**: `cvss_score` rank 1 (a CNA score would be rank 2), `severity`, and `description` rank 1 (Wikipedia's is rank 2 for a CVE), all into blank columns only. Article extraction (`extract_and_store_cves`) and the NVD jobs write these columns from their own NVD calls; a lookup fills a CVE whose extraction-time call was throttled and leaves a filled one alone.
+
+A `Context` (key, label, display: `fact`, `chips`, `table`, `timeline`, `link` or `badge`) is a value for the entity's profile rather than a column; the adapters declare them (Shodan ports and tags, GreyNoise classification, OSV affected packages, Malpedia references, and so on). `entity_types` limits one to some of the source's types.
+
+### Source Context
+
+Each lookup in `enrich_entity()`, fresh or cached, writes the source's `Context` outputs for the entity into `entity_context` (`store_context`, `backend/app/enrichment/context.py`): one row per output that has a value, `observed_at` the result's time and `expires_at` its expiry. A key the new result lacks is deleted, so a source that stops reporting something stops showing it. Values are stored shaped for their display:
+
+| Display | Stored value |
+|---|---|
+| `fact` | A string or number; `true`/`false` as `yes`/`no`, a list joined with commas |
+| `chips` | A list of strings; a comma-separated string is split, repeats dropped |
+| `table` | `{columns, rows}`: `item` maps each column to a key of every listed row (`None` takes the row itself, for a list of plain values); cells are a string, number or null |
+| `timeline` | `[{date, text}]`, from the `date` and `text` keys `item` names |
+| `link` | `{url}` or `{url, label}`; only `http(s)` URLs |
+| `badge` | The raw value. `tones` maps a value to its tone, and only those values become a badge |
+
+`GET /api/entities/{entity_type}/{entity_id}/context` (`backend/app/api/entity_context.py`) serves the profile's Context panel and header badges:
+
+- `sources`: each enabled source that applies to the entity (for an observable, to its kind) and declares context for it, sorted by name, with `label`, `license`, `observed_at`, `stale` (past `expires_at`) and its `items` (`key`, `label`, `display`, `value`). A source with nothing stored yet is listed with empty `items` and `observed_at: null`.
+- `badges`: the badge items whose value has a tone, labelled `"<label> · <value>"` (just the label for `true`). A badge whose key the source also writes to a column carries `field` (GreyNoise's classification: `reputation.gn_classification`), so the header shows that column's provenance.
+- `unavailable`: for admins only, enabled sources missing a requirement (`needs: "api_key"`). Such a source is in `sources` only while it has stored items.
+- `can_enrich`: false for visitors.
+
+In public read-only mode a visitor never sees a source whose `egress` is `shares_ioc` or whose license has `commercial_ok = False`, and gets a 404 for an entity the visitor filter hides.
+
+`prune-entity-context` (maintenance, daily 02:45 UTC, `prune_entity_context` in `backend/app/workers/maintenance.py`) deletes rows that expired more than 30 days ago. It belongs to no source, so it is a maintenance job rather than one in a manifest. `scripts/maintenance/backfill_entity_context.py` writes context from each entity's latest stored result per source, for results stored before the table existed.
 
 ### Trigger Modes
 
@@ -637,7 +665,7 @@ A `Context` (key, label, display: `fact`, `chips`, `table`, `timeline`, `link` o
 2. Resolve the API key ([below](#api-key-resolution)).
 3. **Auto mode only**: skip it if the entity's confidence is below the source's minimum (`skipped_low_confidence`).
 4. If a fresh `success` result exists, return it (`cached`). No budget is used.
-5. Call `adapter.enrich()` and store a `success` row that expires after `ttl_hours`. If the adapter raises, store an `error` row that expires after 1 hour.
+5. Call `adapter.enrich()` and store a `success` row that expires after `ttl_hours` (or re-date the latest row when `parsed_data` is unchanged), and write the source's [context](#source-context). If the adapter raises, store an `error` row that expires after 1 hour.
 6. If the source's gateway refuses a request, report why (`rate_limited`, `budget_exhausted`, `breaker_open`, `paused` or `gateway_unavailable`) and store nothing; the job queue tries again later.
 
 ### Enrichment Job Queue

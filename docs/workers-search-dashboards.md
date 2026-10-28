@@ -134,6 +134,7 @@ When `sync_cybergeist_feeds` creates new entities, it queues `refresh_autolinker
 | `cleanup_expired_entries` | Daily 02:05 | Delete entries past their feed's retention period, and remove them from search |
 | `decay_observable_confidence` | Daily 02:20 | Lower confidence on aging observables (IOCs) and move them through their lifecycle |
 | `prune_engine_tables` | Daily 02:40 | Delete engine bookkeeping rows (`job_runs`, …) older than 30 days |
+| `prune_entity_context` | Daily 02:45 | Delete enrichment context rows (`entity_context`) that expired more than 30 days ago |
 | `reconcile_observable_counters` | Daily 02:50 | Recount observable sighting and article counters, which deletes can throw off |
 | `cleanup_orphaned_references` | Daily 03:15 | Remove references to deleted entities |
 | `resolve_cve_affected` | Daily 03:35 | Re-match unmatched CVE affected-product (CPE) pairs to current vendors and products |
@@ -173,7 +174,7 @@ When `sync_cybergeist_feeds` creates new entities, it queues `refresh_autolinker
 
 ### Beat Schedule and Runtime Overrides
 
-`build_beat_schedule()` (`backend/app/workers/job_registry.py:614`) builds the schedule when beat starts:
+`build_beat_schedule()` (`backend/app/workers/job_registry.py:621`) builds the schedule when beat starts:
 
 1. Read overrides from the Redis key `intelfeed:job_schedule_overrides`.
 2. For each job, skip it if the override disables it, or if it has `enabled_by_default: False` and no override turns it on.
@@ -569,6 +570,7 @@ Built from the `JOB_REGISTRY` defaults. Admins can change any of these in Engine
 02:20 ├─ decay_observable_confidence
 02:30 ├─ sync_cybergeist_feeds
 02:40 ├─ prune_engine_tables
+02:45 ├─ prune_entity_context
 02:50 ├─ reconcile_observable_counters
 03:00 ├─ kickoff_actor_profile_refresh (Mon) · run_mitre_attack_sync (Sun)
 03:05 ├─ reenrich_cve_nvd

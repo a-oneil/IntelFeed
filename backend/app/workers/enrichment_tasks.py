@@ -153,7 +153,8 @@ async def _run_epss_bulk_sync():
         """
     )
     # Upsert enrichment_results set-based: overwrite the existing EPSS row per
-    # CVE, insert only for CVEs that don't have one yet. The old per-CVE append
+    # CVE, insert only for CVEs that don't have one yet. parsed_data has the
+    # lookup adapter's keys (EPSSAdapter), so both read as one source. The old per-CVE append
     # grew this table to ~40 rows per CVE (pruned in migration m2a2b3c4d5g9).
     ids_param = bindparam("ids", type_=ARRAY(UUID(as_uuid=True)))
     update_results = text(
@@ -162,8 +163,8 @@ async def _run_epss_bulk_sync():
         SET raw_response = jsonb_build_object(
                 'epss_score', c.epss_score, 'percentile', c.epss_percentile),
             parsed_data = jsonb_build_object(
-                'cve_id', c.cve_id, 'epss_score', c.epss_score,
-                'epss_percentile', c.epss_percentile, 'date', CAST(:date_str AS text)),
+                'cve', c.cve_id, 'epss', c.epss_score,
+                'percentile', c.epss_percentile, 'date', CAST(:date_str AS text)),
             enriched_at = :now, expires_at = :expires, status = 'success'
         FROM cves c
         WHERE c.id = er.entity_id
@@ -180,8 +181,8 @@ async def _run_epss_bulk_sync():
                jsonb_build_object(
                    'epss_score', c.epss_score, 'percentile', c.epss_percentile),
                jsonb_build_object(
-                   'cve_id', c.cve_id, 'epss_score', c.epss_score,
-                   'epss_percentile', c.epss_percentile, 'date', CAST(:date_str AS text)),
+                   'cve', c.cve_id, 'epss', c.epss_score,
+                   'percentile', c.epss_percentile, 'date', CAST(:date_str AS text)),
                :now, :expires, 'success'
         FROM cves c
         WHERE c.id = ANY(:ids)

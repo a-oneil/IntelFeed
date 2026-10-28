@@ -68,7 +68,9 @@ class RansomwareLiveSource(Source):
     # makes two (/groups, /recentvictims) every 30 minutes: 96 a day.
     quota = Quota(2, 60, daily_budget=200, ceiling_per_period=2)
     egress = Egress.NONE
-    # The free API is for non-commercial use; commercial use is ransomware.live PRO.
+    # Free for research, awareness and open-source use with attribution;
+    # commercial use needs the owner's written approval:
+    # https://www.ransomware.live/t&c
     license = License("ransomware.live API terms", attribution="ransomware.live", commercial_ok=False)
     jobs = (
         Job(
@@ -87,7 +89,9 @@ class CybergeistSource(Source):
     # Two files a day.
     quota = Quota(10, 3600, daily_budget=50)
     egress = Egress.NONE
-    # The public feed publishes no license.
+    # The public feed (pubbucket.cybergeist.io) publishes no license or terms,
+    # and cybergeist.io serves none (checked 2026-10-28), so nothing grants
+    # commercial reuse.
     license = License("Cybergeist public feed (no published license)", attribution="Cybergeist", commercial_ok=False)
     jobs = (
         Job(

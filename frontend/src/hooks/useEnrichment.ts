@@ -2,9 +2,9 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import api from "@/api/client";
 import { useIsVisitor } from "@/stores/authStore";
+import { entityContextKey } from "@/hooks/useEntityContext";
 import type {
   EnrichmentSource,
-  EnrichmentResult,
   UserEnrichmentOverride,
 } from "@/api/types";
 
@@ -150,31 +150,8 @@ export function useEnrichEntity() {
       if (data.queued?.length) {
         toast(`Queued to retry when the source allows: ${data.queued.join(", ")}`);
       }
-      return qc.invalidateQueries({
-        queryKey: [
-          "enrichment-results",
-          data.entity_type,
-          data.entity_id,
-        ],
-      });
+      return qc.invalidateQueries({ queryKey: entityContextKey(data.entity_type, data.entity_id) });
     },
-  });
-}
-
-export function useEnrichmentResults(
-  entityType: string | undefined,
-  entityId: string | undefined
-) {
-  return useQuery({
-    queryKey: ["enrichment-results", entityType, entityId],
-    queryFn: async () => {
-      const { data } = await api.get<EnrichmentResult[]>(
-        "/enrichment/results",
-        { params: { entity_type: entityType, entity_id: entityId } }
-      );
-      return data;
-    },
-    enabled: !!entityType && !!entityId,
   });
 }
 

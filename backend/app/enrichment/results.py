@@ -7,7 +7,8 @@ m2a2b3c4d5g9 prune migration.
 
 Deliberately NOT used for the wikipedia writer or the generic pipeline write
 path: wikipedia stores long-lived ``user_cleared`` marker rows whose semantics
-an upsert would clobber, and pipeline writes are already gated by cache TTL.
+an upsert would clobber, and the pipeline adds a row only when a lookup's
+parsed_data differs from the latest one (otherwise it re-dates that row).
 """
 
 import uuid

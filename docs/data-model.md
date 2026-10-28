@@ -579,7 +579,7 @@ Bookkeeping for the one-pass `entry_analysis` (one AI call that reads an article
 
 ### 6. Enrichment & External Data
 
-**Tables:** `enrichment_sources`, `user_enrichment_overrides`, `enrichment_results`, `entity_notes`, `entity_field_claims`, `entity_relationships`
+**Tables:** `enrichment_sources`, `user_enrichment_overrides`, `enrichment_results`, `entity_context`, `entity_notes`, `entity_field_claims`, `entity_relationships`
 
 #### EnrichmentSource
 Table `enrichment_sources`: one external data source.
@@ -602,6 +602,12 @@ Table `enrichment_results`: a cached answer from a source.
 - `raw_response`, `parsed_data` (JSONB)
 - `status` (default `success`) — for example `success`, `error`, `rate_limited`, `not_found`, `budget_exhausted`, `skipped_low_confidence`
 - `enriched_at`, `expires_at` (when the cache entry runs out)
+- A lookup adds a row only when `parsed_data` changed; otherwise it re-dates the latest one
+
+#### EntityContext
+Table `entity_context`: what one enrichment source says about one entity, for the profile's Context panel. One row per declared `Context` output. See [automation-ai-enrichment.md](automation-ai-enrichment.md#source-context).
+- Primary key (`entity_type`, `entity_id`, `source_type`, `key`)
+- `value` (JSONB, shaped for its display), `observed_at`, `expires_at` (indexed; rows expired over 30 days are pruned nightly)
 
 #### EntityNote
 Table `entity_notes`: an analyst's note on an entity.

@@ -120,6 +120,11 @@ listener filters every ORM query for visitors:
   their matches, intel profiles, notes, entity notes, comments, or the
   ransomware victim tracker. Campaign or observable ids passed to a pivot,
   timeline, list filter (`campaign_id`) or enrichment lookup find nothing.
+- **Source context.** The profile's Context panel
+  (`GET /api/entities/{entity_type}/{entity_id}/context`) leaves out every
+  source that sends an observable's value to a third party (`egress =
+  shares_ioc`) or whose license bars commercial use (`commercial_ok = False`),
+  and lists no unavailable sources.
 
 These filters apply only to ORM SQL, so a request's session must start empty:
 `session.get()` can answer from its cache without a query.

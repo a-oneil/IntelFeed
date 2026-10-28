@@ -92,6 +92,23 @@ class EnrichmentResult(Base):
     )
 
 
+class EntityContext(Base):
+    """What one source says about one entity, one row per declared ``Context``
+    output (``app/enrichment/manifest.py``): the value shaped for its display.
+    Written with each lookup's result; served to the profile by
+    GET /api/entities/{entity_type}/{entity_id}/context."""
+
+    __tablename__ = "entity_context"
+
+    entity_type: Mapped[str] = mapped_column(String(20), primary_key=True)
+    entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    source_type: Mapped[str] = mapped_column(String(30), primary_key=True)
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[dict | list | str | int | float | bool] = mapped_column(JSONB, nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
 class EnrichmentJob(Base):
     """One entity's pending lookup at one source. Waiting work lives here until
     the dispatcher runs it, so a lookup a source refuses is deferred, never

@@ -3,6 +3,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app import entity_types
+
 
 class EnrichmentSourceResponse(BaseModel):
     id: uuid.UUID
@@ -66,19 +68,6 @@ class UserEnrichmentOverrideCreate(BaseModel):
     model_config = ConfigDict(json_schema_extra={"example": {"api_key": "vt-user-api-key-0123456789abcdef"}})
 
 
-class EnrichmentResultResponse(BaseModel):
-    id: uuid.UUID
-    entity_type: str
-    entity_id: uuid.UUID
-    source_type: str
-    parsed_data: dict
-    enriched_at: datetime
-    expires_at: datetime
-    status: str
-
-    model_config = {"from_attributes": True}
-
-
 class EnrichmentPauseRequest(BaseModel):
     paused: bool
 
@@ -92,8 +81,32 @@ class EnrichmentBackfillRequest(BaseModel):
     model_config = ConfigDict(json_schema_extra={"example": {"entity_type": "cve", "limit": 5000}})
 
 
+_ENRICHABLE_PATTERN = (
+    "^("
+    + "|".join(
+        sorted(
+            (
+                entity_types.THREAT_ACTOR,
+                entity_types.MALWARE,
+                entity_types.CVE,
+                entity_types.CWE,
+                entity_types.TTP,
+                entity_types.COUNTRY,
+                entity_types.TOOL,
+                entity_types.VENDOR,
+                entity_types.PRODUCT,
+                entity_types.MITIGATION,
+                entity_types.OBSERVABLE,
+            )
+        )
+    )
+    + ")$"
+)
+
+
 class EnrichEntityRequest(BaseModel):
-    entity_type: str = Field(pattern=r"^(cve|threat_actor|malware|ttp|observable)$")
+    # Every type with an entity model the field map can write to.
+    entity_type: str = Field(pattern=_ENRICHABLE_PATTERN)
     entity_id: uuid.UUID
     source_types: list[str] | None = None
 

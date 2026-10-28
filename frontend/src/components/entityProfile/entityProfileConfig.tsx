@@ -9,6 +9,7 @@
  */
 import type { EntityType } from "@/stores/intelStore";
 import type { EntitySearchResult } from "@/api/types";
+import type { EntityContextBadge } from "@/hooks/useEntityContext";
 import { getPivotLinks, type PivotLink } from "@/utils/pivotLinks";
 import { observablePivotLinks } from "@/utils/entityPopoverMeta";
 
@@ -107,6 +108,26 @@ export function severityTone(severity: string | null | undefined): BadgeTone {
   }
 }
 
+/** Manifest badges (GET …/context `badges[]`) as header chips, after the
+ * hand-written ones. Quiet on purpose: only red/amber tones keep their color —
+ * "benign" or "info" is not something to look at, so it renders neutral. */
+export function contextBadgeSpecs(badges: EntityContextBadge[] | undefined): BadgeSpec[] {
+  return (badges ?? []).map((b) => {
+    const tone = b.tone?.toLowerCase();
+    return {
+      label: b.label,
+      tone:
+        tone === "critical" || tone === "high" || tone === "danger"
+          ? tone
+          : tone === "medium" || tone === "warning"
+            ? "medium"
+            : "neutral",
+      title: b.source_type,
+      ...(b.field ? { provenanceKey: b.field } : {}),
+    };
+  });
+}
+
 /** KEV = the CISA flag OR an exploit_status that already says known-exploited.
  * The retired KEVBadge honored both; keying on `is_kev` alone reads a CVE whose
  * enrichment wrote the status but never set the flag as "Not listed". */
@@ -155,7 +176,9 @@ export type OverviewPanelKey =
   | "cwe_vendors"
   | "observable_provenance"
   | "observable_backlinks"
-  | "infrastructure";
+  | "infrastructure"
+  /** Manifest-driven enrichment context (ContextPanel) — every type has it. */
+  | "context";
 
 // ── Actions ───────────────────────────────────────────────────────────────
 export type ActionKey =
@@ -238,7 +261,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     hasAliases: false,
     hasDescription: true,
     nameEditable: true,
-    overviewPanels: ["infrastructure"],
+    overviewPanels: ["context", "infrastructure"],
     // Campaigns are internal objects; there is nothing to look them up in.
     externalLinks: () => [],
     // No cascadeType: the preview counts extraction links that would be severed,
@@ -265,7 +288,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     nameEditable: true,
     // Techniques/attribution now live in the hero (associates strip, badges) —
     // no overview panels repeat them.
-    overviewPanels: ["infrastructure"],
+    overviewPanels: ["context", "infrastructure"],
     externalLinks: (e) => getPivotLinks("threat_actor", e.name || ""),
     cascadeType: "threat_actor",
     actions: ["add_to_campaign", "generate_report", "ai_summary", "convert", "merge", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
@@ -282,7 +305,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     hasDescription: true,
     nameEditable: true,
     // Malpedia moved into the Sources rail card.
-    overviewPanels: ["infrastructure"],
+    overviewPanels: ["context", "infrastructure"],
     externalLinks: (e) => getPivotLinks("malware", e.name || ""),
     cascadeType: "malware",
     actions: ["add_to_campaign", "generate_report", "ai_summary", "convert", "merge", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
@@ -331,7 +354,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     // Exploitation/EPSS/KEV numbers live in the Snapshot rail card; PoC links
     // in the Exploit & PoC card; references in Sources. Only the structured
     // CPE affected-products list keeps a panel of its own.
-    overviewPanels: ["cve_affected"],
+    overviewPanels: ["context", "cve_affected"],
     externalLinks: (e) => getPivotLinks("cve", e.cve_id || ""),
     cascadeType: "cve",
     actions: ["add_to_campaign", "generate_report", "ai_summary", "convert", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
@@ -396,7 +419,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     hasDescription: true,
     nameEditable: false,
     monoIdKey: "cwe_id",
-    overviewPanels: ["cwe_family", "cwe_catalog", "cwe_mitigations", "cwe_affected_vendors"],
+    overviewPanels: ["context", "cwe_family", "cwe_catalog", "cwe_mitigations", "cwe_affected_vendors"],
     // The catalog page keys on the bare number.
     externalLinks: (e) => getPivotLinks("cwe", (e.cwe_id || "").replace(/^CWE-/i, "")),
     cascadeType: "cwe",
@@ -440,7 +463,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     hasDescription: true,
     nameEditable: false,
     monoIdKey: "technique_id",
-    overviewPanels: ["ttp_mitre", "ttp_family", "ttp_mitigations"],
+    overviewPanels: ["context", "ttp_mitre", "ttp_family", "ttp_mitigations"],
     externalLinks: (e) => getPivotLinks("ttp", e.technique_id || ""),
     cascadeType: "ttp",
     actions: ["add_to_campaign", "generate_report", "ai_summary", "convert", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
@@ -457,7 +480,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     hasAliases: true,
     hasDescription: true,
     nameEditable: true,
-    overviewPanels: [],
+    overviewPanels: ["context"],
     externalLinks: (e) => getPivotLinks("country", e.name || ""),
     cascadeType: "country",
     actions: ["add_to_campaign", "generate_report", "ai_summary", "convert", "merge", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
@@ -474,7 +497,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     hasAliases: true,
     hasDescription: true,
     nameEditable: false,
-    overviewPanels: [],
+    overviewPanels: ["context"],
     externalLinks: (e) => getPivotLinks("sector", e.name || ""),
     actions: ["add_to_campaign", "generate_report", "ai_summary"],
   },
@@ -491,7 +514,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     hasDescription: true,
     nameEditable: true,
     // Malpedia/GitHub moved into the Sources rail card.
-    overviewPanels: ["infrastructure"],
+    overviewPanels: ["context", "infrastructure"],
     cascadeType: "tool",
     actions: ["add_to_campaign", "generate_report", "ai_summary", "convert", "merge", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
   },
@@ -522,7 +545,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     hasDescription: true,
     nameEditable: false,
     monoIdKey: "value",
-    overviewPanels: ["observable_provenance", "observable_backlinks"],
+    overviewPanels: ["context", "observable_provenance", "observable_backlinks"],
     externalLinks: (e) =>
       e.kind && e.value
         ? observablePivotLinks(e.kind, e.value).map((l) => ({ platform: l.label, url: l.url }))
@@ -542,7 +565,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     hasAliases: false,
     hasDescription: true,
     nameEditable: false,
-    overviewPanels: [],
+    overviewPanels: ["context"],
     actions: ["add_to_campaign", "generate_report", "ai_summary", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
   },
 
@@ -558,7 +581,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     hasDescription: true,
     nameEditable: true,
     // Website lives in the Snapshot/Sources cards, not a one-link panel.
-    overviewPanels: ["cwe_vendors"],
+    overviewPanels: ["context", "cwe_vendors"],
     cascadeType: "vendor",
     actions: ["add_to_campaign", "generate_report", "ai_summary", "convert", "merge", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
   },
@@ -575,7 +598,7 @@ export const ENTITY_PROFILE_CONFIG: Record<EntityType, EntityProfileConfig> = {
     hasAliases: true,
     hasDescription: true,
     nameEditable: true,
-    overviewPanels: ["cwe_vendors"],
+    overviewPanels: ["context", "cwe_vendors"],
     cascadeType: "product",
     actions: ["add_to_campaign", "generate_report", "ai_summary", "convert", "merge", "fetch_wikipedia", "rescan", "unlink_all", "clear_timeline", "delete"],
   },

@@ -47,7 +47,9 @@ class VirusTotalAdapter(EnrichmentAdapter):
         Context("tags", "Tags", Display.CHIPS),
         Context("meaningful_name", "File name", Display.FACT),
         Context("type_description", "File type", Display.FACT),
+        Context("asn", "ASN", Display.FACT),
         Context("as_owner", "AS owner", Display.FACT),
+        Context("country", "Country", Display.FACT),
         Context("network", "Network", Display.FACT),
         Context("registrar", "Registrar", Display.FACT),
     )

@@ -30,7 +30,7 @@ class OSVAdapter(EnrichmentAdapter):
             Display.TABLE,
             item={"Ecosystem": "ecosystem", "Package": "package_name", "Ranges": "ranges"},
         ),
-        Context("references", "References", Display.LINK),
+        Context("references", "References", Display.TABLE, item={"Type": "type", "Link": "url"}),
     )
 
     _vulns_url = "https://api.osv.dev/v1/vulns/"

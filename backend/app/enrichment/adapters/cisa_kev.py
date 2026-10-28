@@ -26,7 +26,9 @@ class CISAKEVAdapter(EnrichmentAdapter):
         ),
     )
     outputs = (
-        Context("in_kev", "In KEV", Display.BADGE),
+        # A fact, not a badge: the header already shows cve.is_kev, which the
+        # sync job sets from the same catalog.
+        Context("in_kev", "In KEV", Display.FACT),
         Context("date_added", "Added to KEV", Display.FACT),
         Context("due_date", "Remediation due", Display.FACT),
         Context("required_action", "Required action", Display.FACT),

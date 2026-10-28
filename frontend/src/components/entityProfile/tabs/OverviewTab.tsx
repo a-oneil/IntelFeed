@@ -46,6 +46,7 @@ import { ExploitPocCard, SnapshotCard } from "../SnapshotCard";
 import { VictimsStrip } from "../VictimsStrip";
 import { ActiveStoryCard } from "../ActiveStoryCard";
 import { SourcesCard } from "../SourcesCard";
+import { ContextPanel } from "../ContextPanel";
 import { AssessmentBlock } from "../AssessmentBlock";
 import { KnownAssociates } from "../KnownAssociates";
 import { EssentialReading } from "../EssentialReading";
@@ -56,7 +57,7 @@ import { SinceLastVisitRibbon } from "../SinceLastVisitRibbon";
 import type { PivotResponse } from "@/api/types";
 import { entityDisplayName, entityProfilePath, type EntityProfileConfig, type OverviewPanelKey } from "../entityProfileConfig";
 import { dedupeProducts, extractNvd, type RefLink } from "../cveRefs";
-import { capturedByLabel, defangObservable, observableSourcesLabel, reputationLabel, stixBundle, STIX_PATTERNS } from "@/utils/observables";
+import { capturedByLabel, defangObservable, observableSourcesLabel, stixBundle, STIX_PATTERNS } from "@/utils/observables";
 import { Chip } from "@/components/primitives";
 import {
   infrastructureCsvUrl,
@@ -236,6 +237,8 @@ export function OverviewTab({
 
   const renderPanel = (key: OverviewPanelKey): React.ReactNode => {
     switch (key) {
+      case "context":
+        return <ContextPanel key={key} entityType={entityType} entityId={entityId} />;
       case "cve_affected": {
         const products = dedupeProducts(entity.affected_products);
         // Authoritative cve_affected rows grouped by CPE vendor — resolved
@@ -564,12 +567,6 @@ export function OverviewTab({
         return (
           <Panel key={key} title="Provenance & confidence">
             {o.created_via && <Row k="Captured by" v={capturedByLabel(o.created_via)} />}
-            {o.reputation && (
-              <Row
-                k="Reputation"
-                v={`${reputationLabel(o.reputation)}${o.reputation.enriched_at ? ` (enriched ${String(o.reputation.enriched_at).slice(0, 10)})` : ""}`}
-              />
-            )}
             {o.infra_tag && (
               <Row
                 k="Infrastructure"
@@ -998,8 +995,6 @@ export function OverviewTab({
           {/* Sources ahead of the per-type panels — on panel-heavy types (CWE)
               it was landing below the fold. */}
           <SourcesCard
-            entityType={entityType}
-            entityId={entityId}
             entity={entity}
             config={config}
             cveReferences={entityType === "cve" ? cveRefLinks : undefined}

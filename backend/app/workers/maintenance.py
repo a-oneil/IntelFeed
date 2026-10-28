@@ -851,6 +851,36 @@ STALE_ENTITY_TYPES: list[tuple[str, str]] = [
 _STALE_FLAGS_PER_TYPE_CAP = 500  # bound one run's log growth
 
 
+@celery_app.task(name="app.workers.maintenance.prune_entity_context", soft_time_limit=300, time_limit=360)
+def prune_entity_context():
+    """Nightly: delete entity_context rows that expired more than 30 days ago.
+
+    An expired row still shows on the profile, marked stale, until its source
+    looks again; a month on, nothing is going to.
+    """
+    start = time.monotonic()
+    try:
+        deleted = run_async(_prune_entity_context())
+        logger.info("Pruned %d expired entity_context rows", deleted)
+        CELERY_TASKS_TOTAL.labels(task_name="prune_entity_context", status="success").inc()
+        return {"deleted": deleted}
+    except Exception:
+        CELERY_TASKS_TOTAL.labels(task_name="prune_entity_context", status="error").inc()
+        logger.exception("entity_context pruning failed")
+        raise
+    finally:
+        CELERY_TASK_DURATION_SECONDS.labels(task_name="prune_entity_context").observe(time.monotonic() - start)
+
+
+async def _prune_entity_context() -> int:
+    from app.enrichment.context import prune_expired_context
+
+    async with _get_worker_session() as db:
+        deleted = await prune_expired_context(db)
+        await db.commit()
+    return deleted
+
+
 @celery_app.task(name="app.workers.maintenance.prune_engine_tables", soft_time_limit=300, time_limit=360)
 def prune_engine_tables():
     """Daily: delete engine bookkeeping rows older than 30 days.

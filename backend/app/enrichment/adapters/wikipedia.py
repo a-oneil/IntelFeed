@@ -22,8 +22,9 @@ def _article_columns(entity_type: str) -> tuple[Column, ...]:
         Column("wikipedia_url", url, Policy.NEWER_WINS),
         Column("wikipedia_content", f"{entity_type}.wikipedia_content", Policy.NEWER_WINS, follows=url),
         Column("wikipedia_image_url", f"{entity_type}.wikipedia_image_url", Policy.NEWER_WINS, follows=url),
-        # Human-curated prose, so it ranks ahead of the security catalogs.
-        Column("first_paragraph", f"{entity_type}.description", Policy.RANK, rank=1),
+        # Human-curated prose, so it ranks ahead of the security catalogs;
+        # a CVE's own record (NVD) is the exception.
+        Column("first_paragraph", f"{entity_type}.description", Policy.RANK, rank=2 if entity_type == "cve" else 1),
     )
 
 

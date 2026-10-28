@@ -2818,17 +2818,6 @@ export interface EnrichmentSource {
   updated_at: string;
 }
 
-export interface EnrichmentResult {
-  id: string;
-  entity_type: string;
-  entity_id: string;
-  source_type: string;
-  parsed_data: Record<string, unknown>;
-  enriched_at: string;
-  expires_at: string;
-  status: string;
-}
-
 export interface UserEnrichmentOverride {
   id: string;
   source_id: string;

@@ -17,12 +17,15 @@ class VulnCheckAdapter(EnrichmentAdapter):
     # VulnCheck's free tier allows 1,000 requests a minute.
     quota = Quota(1000, 60, daily_budget=1000, ceiling_per_period=1000)
     egress = Egress.LOW
-    license = License("VulnCheck Community terms", attribution="VulnCheck KEV", commercial_ok=False)
+    # Free in open-source and commercial products with prominent attribution,
+    # labelled "VulnCheck KEV":
+    # https://docs.vulncheck.com/community/vulncheck-kev/attribution/
+    license = License("VulnCheck KEV community terms", attribution="VulnCheck KEV")
     outputs = (
-        Context("in_kev", "In VulnCheck KEV", Display.BADGE),
+        Context("in_kev", "VulnCheck KEV", Display.BADGE, tones={True: "critical"}),
         Context("date_added", "Added", Display.FACT),
         Context("known_ransomware_campaign_use", "Known ransomware use", Display.FACT),
-        Context("exploit_references", "Exploit references", Display.LINK),
+        Context("exploit_references", "Exploit references", Display.TABLE, item={"Link": "url", "Added": "date_added"}),
     )
 
     _api_base = "https://api.vulncheck.com/v3/"

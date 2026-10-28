@@ -33,7 +33,13 @@ class GreyNoiseAdapter(EnrichmentAdapter):
         *(Column(key, f"observable.reputation.{rep}", Policy.NEWER_WINS) for key, rep in _REPUTATION.items()),
         # RIOT: a known benign business service. Shodan's tags rank first.
         Column("riot", "observable.infra_tag", Policy.RANK, rank=2, filter="benign_service"),
-        Context("classification", "Classification", Display.BADGE),
+        Context(
+            "classification",
+            "noise",
+            Display.BADGE,
+            tones={"malicious": "danger", "benign": "success", "unknown": "neutral"},
+        ),
+        Context("riot", "Business service (RIOT)", Display.FACT),
         Context("name", "Actor", Display.FACT),
         Context("last_seen", "Last seen scanning", Display.FACT),
         Context("link", "GreyNoise", Display.LINK),

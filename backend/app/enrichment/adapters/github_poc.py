@@ -32,7 +32,7 @@ class GitHubPoCAdapter(EnrichmentAdapter):
         ),
     )
     outputs = (
-        Context("exploit_maturity", "Exploit maturity", Display.BADGE),
+        Context("exploit_maturity", "PoC", Display.BADGE, tones={"weaponized": "high", "poc": "medium"}),
         Context("poc_count", "Public PoCs", Display.FACT),
         Context(
             "poc_repos",

@@ -319,7 +319,7 @@ Celery signal handlers in `backend/app/workers/task_tracking.py` (`task_prerun`,
 
 ### Retention: `prune_engine_tables`
 
-`prune_engine_tables` (`backend/app/workers/maintenance.py:855`; job `prune-engine-tables`, daily 02:40 UTC) deletes rows older than `engine_run_retention_days` (default 30) from `entry_pipeline_runs`, `job_runs`, non-pending `ai_analysis_requests` and `ai_batch_jobs`, and deletes resolved `pending_autolink_matches`. Unresolved held matches expire after 14 days (no AI pass ever came). It also expires old link-validator proposals that nothing re-judges (`expire_legacy_link_proposals`, `backend/app/services/proposal_dismissals.py`). `entry_signals` is never pruned; signals live as long as their entry.
+`prune_engine_tables` (`backend/app/workers/maintenance.py:885`; job `prune-engine-tables`, daily 02:40 UTC) deletes rows older than `engine_run_retention_days` (default 30) from `entry_pipeline_runs`, `job_runs`, non-pending `ai_analysis_requests` and `ai_batch_jobs`, and deletes resolved `pending_autolink_matches`. Unresolved held matches expire after 14 days (no AI pass ever came). It also expires old link-validator proposals that nothing re-judges (`expire_legacy_link_proposals`, `backend/app/services/proposal_dismissals.py`). `entry_signals` is never pruned; signals live as long as their entry.
 
 ---
 

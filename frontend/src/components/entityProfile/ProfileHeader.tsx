@@ -19,7 +19,8 @@ import { EntityActionsMenu } from "./EntityActionsMenu";
 import { WatchToggleButton } from "./WatchToggleButton";
 import type { EntityProvenance } from "@/hooks/useEntityProvenance";
 import { IdentityMetaFields } from "./IdentityFields";
-import { entityDisplayName, type EntityProfileConfig } from "./entityProfileConfig";
+import { contextBadgeSpecs, entityDisplayName, type EntityProfileConfig } from "./entityProfileConfig";
+import { useEntityContext } from "@/hooks/useEntityContext";
 import styles from "./entityProfile.module.css";
 import { useIsVisitor } from "@/stores/authStore";
 
@@ -78,6 +79,8 @@ export function ProfileHeader({
   const [editingAliases, setEditingAliases] = useState(false);
   // Public read-only mode: the dossier reads, but nothing on it edits.
   const isVisitor = useIsVisitor();
+  // Manifest badges (noise class, SSVC, EOL) — same query as the Context panel.
+  const { data: context } = useEntityContext(entityType, entityId);
   const aliases = entity.aliases ?? [];
   // Catalog-keyed types (ttp, cwe) lead with the id in mono, then the name.
   // Which field holds the id is config, not a branch per type here.
@@ -159,7 +162,7 @@ export function ProfileHeader({
 
           <div className={styles.heroBadges}>
             <SignalBadges
-              badges={config.signalBadges(entity)}
+              badges={[...config.signalBadges(entity), ...contextBadgeSpecs(context?.badges)]}
               entity={entity}
               relatedCountries={relatedCountries}
               provenance={provenance}

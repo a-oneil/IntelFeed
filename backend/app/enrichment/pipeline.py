@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.encryption import decrypt_value
+from app.enrichment.context import store_context
 from app.enrichment.gateway import MAX_TOKEN_WAIT, BreakerOpen, GatewayError, RateLimited, SourceGateway
 from app.enrichment.registry import (
     ADAPTER_REGISTRY,
@@ -236,6 +237,15 @@ async def enrich_entity(
         # Check cache — skip if fresh result exists (no budget consumed)
         existing = await get_cached_result(db, entity_type, entity_id, source.source_type)
         if existing and existing.expires_at and existing.expires_at > datetime.now(UTC):
+            await store_context(
+                db,
+                entity_type,
+                entity_id,
+                source.source_type,
+                existing.parsed_data,
+                observed_at=existing.enriched_at,
+                expires_at=existing.expires_at,
+            )
             results.append(
                 {
                     "source_type": source.source_type,
@@ -251,17 +261,32 @@ async def enrich_entity(
             enrichment_data = await adapter.enrich(adapter_entity_type, entity_value)
 
             now = datetime.now(UTC)
-            er = EnrichmentResult(
-                entity_type=entity_type,
-                entity_id=entity_id,
-                source_type=source.source_type,
-                raw_response=enrichment_data.raw_response,
-                parsed_data=enrichment_data.parsed_data,
-                enriched_at=now,
-                expires_at=now + timedelta(hours=enrichment_data.ttl_hours),
-                status="success",
+            expires_at = now + timedelta(hours=enrichment_data.ttl_hours)
+            if existing and existing.parsed_data == enrichment_data.parsed_data:
+                # Nothing changed: the latest row stands, as of now.
+                existing.enriched_at, existing.expires_at = now, expires_at
+            else:
+                db.add(
+                    EnrichmentResult(
+                        entity_type=entity_type,
+                        entity_id=entity_id,
+                        source_type=source.source_type,
+                        raw_response=enrichment_data.raw_response,
+                        parsed_data=enrichment_data.parsed_data,
+                        enriched_at=now,
+                        expires_at=expires_at,
+                        status="success",
+                    )
+                )
+            await store_context(
+                db,
+                entity_type,
+                entity_id,
+                source.source_type,
+                enrichment_data.parsed_data,
+                observed_at=now,
+                expires_at=expires_at,
             )
-            db.add(er)
 
             results.append(
                 {

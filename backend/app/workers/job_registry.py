@@ -513,6 +513,13 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
         "uses_ai": True,
         "default_schedule": {"type": "crontab", "minute": "0", "hour": "6"},
     },
+    # Not a source's job: it prunes every source's rows.
+    "prune-entity-context": {
+        "task": "app.workers.maintenance.prune_entity_context",
+        "description": "Delete enrichment context rows that expired more than 30 days ago",
+        "category": "maintenance",
+        "default_schedule": {"type": "crontab", "minute": "45", "hour": "2"},
+    },
     "prune-engine-tables": {
         "settings_keys": ["engine_run_retention_days"],
         "task": "app.workers.maintenance.prune_engine_tables",

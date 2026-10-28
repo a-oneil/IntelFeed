@@ -317,32 +317,6 @@ class TestUserOverrides:
         assert list_resp.json() == []
 
 
-class TestGetResults:
-    async def test_get_results(
-        self, client: AsyncClient, auth_headers: dict, enrichment_result: EnrichmentResult, test_actor: ThreatActor
-    ):
-        resp = await client.get(
-            "/api/enrichment/results",
-            params={"entity_type": "threat_actor", "entity_id": str(test_actor.id)},
-            headers=auth_headers,
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert len(data) >= 1
-        assert data[0]["source_type"] == "nvd"
-        assert data[0]["status"] == "success"
-        assert "parsed_data" in data[0]
-
-    async def test_get_results_empty(self, client: AsyncClient, auth_headers: dict):
-        resp = await client.get(
-            "/api/enrichment/results",
-            params={"entity_type": "threat_actor", "entity_id": str(uuid.uuid4())},
-            headers=auth_headers,
-        )
-        assert resp.status_code == 200
-        assert resp.json() == []
-
-
 class TestEnrichEntity:
     async def test_enrich_entity(
         self,
@@ -391,6 +365,48 @@ class TestEnrichEntity:
             headers=auth_headers,
         )
         assert resp.status_code == 404
+
+    async def test_enrich_any_modelled_type_and_write_its_columns(
+        self, client: AsyncClient, auth_headers: dict, db_session: AsyncSession
+    ):
+        """The profile's Enrich now is on every entity type: a vendor is looked
+        up by name, and what comes back reaches the entity's columns, as a
+        queued lookup's does."""
+        from app.models.vendor import Vendor
+
+        vendor = Vendor(name="Palo Alto Networks")
+        db_session.add(vendor)
+        await db_session.flush()
+
+        answer = [
+            {
+                "source_type": "wikipedia",
+                "status": "success",
+                "parsed_data": {
+                    "wikipedia_url": "https://en.wikipedia.org/wiki/Palo_Alto_Networks",
+                    "first_paragraph": "Palo Alto Networks is a cybersecurity company.",
+                },
+            }
+        ]
+        with patch("app.enrichment.pipeline.enrich_entity", AsyncMock(return_value=answer)) as pipeline:
+            resp = await client.post(
+                "/api/enrichment/enrich",
+                json={"entity_type": "vendor", "entity_id": str(vendor.id)},
+                headers=auth_headers,
+            )
+        assert resp.status_code == 200
+        assert pipeline.await_args.kwargs["entity_value"] == "Palo Alto Networks"
+        await db_session.refresh(vendor)
+        assert vendor.wikipedia_url == "https://en.wikipedia.org/wiki/Palo_Alto_Networks"
+        assert vendor.description == "Palo Alto Networks is a cybersecurity company."
+
+    async def test_enrich_rejects_types_with_no_entity_model(self, client: AsyncClient, auth_headers: dict):
+        resp = await client.post(
+            "/api/enrichment/enrich",
+            json={"entity_type": "campaign", "entity_id": str(uuid.uuid4())},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 400  # request validation (the app's validation handler)
 
 
 # --- Pipeline Unit Tests ---

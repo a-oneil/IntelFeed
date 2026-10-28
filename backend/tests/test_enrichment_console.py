@@ -271,9 +271,11 @@ async def test_detail_limits_trend_queue_and_jobs(client, admin_headers, db_sess
         "backfill_share": q.BACKFILL_SHARE,
         "refresh_days": None,
         "key": "none",
-        "triggers": ["new", "manual", "schedule"],
-        "scope": None,
+        # NVD fills cvss_score through the field map, so it can backfill.
+        "triggers": ["new", "manual", "backfill", "schedule"],
+        "scope": "CVE with no CVSS score",
     }
+    assert data["gap"]["entity_type"] == "cve" and data["gap"]["field"] == "cvss_score"
     assert len(data["trend_24h"]) == 24 and data["trend_24h"][-1] == 3 and sum(data["trend_24h"]) == 3
     assert data["queue"] == {
         "waiting": 4,

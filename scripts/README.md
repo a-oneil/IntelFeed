@@ -93,6 +93,7 @@ are for fixing something by hand.
 | --- | --- |
 | `backfill_cve_weaknesses.py` | Parses the NVD `weaknesses` block on every stored CVE into `cve_weaknesses` rows. Run after `seed_cwe_catalog.py`. |
 | `backfill_entry_cwes.py` | Scans existing entries for `CWE-n` ids and links them, so weaknesses have article counts without waiting for re-ingest. |
+| `backfill_entity_context.py` | Writes `entity_context` (the profile's Context panel) from each entity's latest successful enrichment result per source, for results stored before the table existed. Rows are dated by their result, so an old one shows as stale. `--dry-run`. |
 | `backfill_field_claims.py` | Seeds `entity_field_claims` from provenance already on record — description history, enrichment results, and the article AI-extracted entities were minted from. Fields whose origin isn't recoverable stay unsourced on purpose. `--dry-run` / `--only`. |
 | `backfill_narrative_themes.py` | Parses every cached daily briefing into the `### Theme` groupings it already made, so the co-occurrence promotion gate can tell repeat coverage from one reporting wave. Reads stored markdown only — no AI call. The nightly job covers 14 days; this covers the whole history. `--dry-run` / `--force` / `--days`. |
 | `enrich_cves.py` | Backfills EPSS scores, CISA KEV flags, and NVD metadata on CVEs. Batched and resumable, with `--phase epss` / `--phase nvd`. |

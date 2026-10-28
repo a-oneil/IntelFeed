@@ -107,10 +107,18 @@ class Column:
 
 @dataclass(frozen=True)
 class Context:
-    """A parsed_data value shown on the entity's profile, not written to a column."""
+    """A parsed_data value shown on the entity's profile, not written to a column.
+
+    Values are stored in ``entity_context`` shaped for their display
+    (``app/enrichment/context.py``). ``item`` maps each TABLE column (or the
+    TIMELINE ``date`` and ``text``) to a key of every listed row; a key of
+    ``None`` takes the row itself, for a list of plain values. ``tones`` maps
+    a BADGE's value to its tone; a value it doesn't list shows no badge.
+    """
 
     key: str
     label: str
     display: Display
-    item: dict | None = None  # TABLE / TIMELINE: {field: parsed key}
+    item: dict | None = None
     entity_types: tuple[str, ...] = ()  # () = every applies_to type
+    tones: dict | None = None

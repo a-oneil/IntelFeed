@@ -83,7 +83,7 @@ async def test_epss_sync_twice_keeps_one_row_per_cve(db_session, cves):
             )
         )
     ).scalar_one()
-    assert row.parsed_data["epss_score"] == 0.15
+    assert row.parsed_data["epss"] == 0.15
     await db_session.refresh(cves[0])
     assert cves[0].epss_score == 0.15
 
@@ -228,4 +228,4 @@ async def test_epss_set_based_update_matches_row_logic(db_session, monkeypatch):
         )
     ).all()
     matched = {rows[c].id: new for c, (_, new) in cases.items() if new is not None}
-    assert {entity_id: data["epss_score"] for entity_id, data in results} == matched
+    assert {entity_id: data["epss"] for entity_id, data in results} == matched
