@@ -537,6 +537,6 @@ async def test_console_detail_names_the_family_side_of_the_connection(db_session
     body = await detail(db_session, "threatfox")
     relations = {o["field"]: o["target"] for o in body["outputs"] if o["kind"] == "relationship"}
     assert relations == {
-        "c2_families": "relationship: malware or tool communicates_with",
-        "families": "relationship: malware uses",
+        "c2_families": "relationship: communicates with malware family or tool",
+        "families": "relationship: uses malware family",
     }

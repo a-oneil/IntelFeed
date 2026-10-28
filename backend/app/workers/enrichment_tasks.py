@@ -938,6 +938,7 @@ async def _run_github_poc_scan():
 
     from sqlalchemy import case, or_
 
+    from app.enrichment.adapters.github_poc import GitHubPoCAdapter
     from app.enrichment.pipeline import gateway_for
     from app.enrichment.results import upsert_enrichment_result
     from app.models.cve import CVE
@@ -1015,14 +1016,9 @@ async def _run_github_poc_scan():
                     stats["stopped"] = "out_of_time"
                     break
                 try:
-                    # Bare "<cve> poc exploit" ANDs all three words across the
-                    # searched fields, so a repo literally named CVE-2024-3400
-                    # scored zero hits — the scan reported "no PoC" for 99% of
-                    # CVEs. Match the CVE id as a phrase in name/description
-                    # instead; PoC repos put the id in one or the other.
                     resp = await client.get(
-                        "https://api.github.com/search/repositories",
-                        params={"q": f'"{cve.cve_id}" in:name,description', "sort": "stars", "per_page": 5},
+                        GitHubPoCAdapter._api_url,
+                        params={"q": GitHubPoCAdapter.search_query(cve.cve_id), "sort": "stars", "per_page": 5},
                     )
                     resp.raise_for_status()
                     data = resp.json()

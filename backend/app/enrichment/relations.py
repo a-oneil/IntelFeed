@@ -59,11 +59,6 @@ def _allowed(entity_type: str, relation: str, target_type: str) -> bool:
     return orient_relationship(entity_type, relation, target_type) is not None
 
 
-def runs_from_target(entity_type: str, relation: Relation) -> bool:
-    """The matrix stores this output's connections from the target to the entity."""
-    return not any(is_allowed_relationship(entity_type, relation.relation, t) for t in relation.target_types)
-
-
 def relations_for(cls, entity_type: str) -> tuple[Relation, ...]:
     """The source's Relation outputs whose triple the matrix allows from ``entity_type``."""
     if cls is None or entity_type not in cls.applies_to:

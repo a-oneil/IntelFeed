@@ -400,6 +400,36 @@ class TestEnrichEntity:
         assert vendor.wikipedia_url == "https://en.wikipedia.org/wiki/Palo_Alto_Networks"
         assert vendor.description == "Palo Alto Networks is a cybersecurity company."
 
+    async def test_refresh_asks_the_source_again_past_a_fresh_result(
+        self, db_session: AsyncSession, enrichment_result: EnrichmentResult, test_actor: ThreatActor
+    ):
+        """A fresh stored result answers a lookup; Refresh asks the source again."""
+        from app.enrichment.pipeline import enrich_entity
+
+        with patch("app.enrichment.pipeline.adapter_for_source") as adapter_for:
+            adapter = MagicMock()
+            adapter.supports_entity.return_value = True
+            adapter.enrich = AsyncMock(
+                return_value=EnrichmentData(raw_response={}, parsed_data={"name": "fresher"}, ttl_hours=24)
+            )
+            adapter_for.return_value = adapter
+            args = dict(
+                entity_type="threat_actor",
+                entity_id=test_actor.id,
+                entity_value=test_actor.name,
+                db=db_session,
+                trigger="manual",
+                source_types=["nvd"],
+            )
+
+            cached = await enrich_entity(**args)
+            assert [r["status"] for r in cached] == ["cached"]
+            adapter.enrich.assert_not_awaited()
+
+            fresh = await enrich_entity(**args, refresh=True)
+            assert [r["status"] for r in fresh] == ["success"]
+            adapter.enrich.assert_awaited_once()
+
     async def test_enrich_rejects_types_with_no_entity_model(self, client: AsyncClient, auth_headers: dict):
         resp = await client.post(
             "/api/enrichment/enrich",

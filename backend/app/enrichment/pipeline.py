@@ -232,6 +232,7 @@ async def enrich_entity(
     source_types: list[str] | None = None,
     entity_confidence: str | None = None,
     entity_base_confidence: float | None = None,
+    refresh: bool = False,
 ) -> list[dict]:
     """Enrich an entity from all applicable enabled sources.
 
@@ -247,6 +248,8 @@ async def enrich_entity(
         source_types: Optional list of specific source types to use.
         entity_confidence: IOC confidence level (high/medium/low) for filtering.
         entity_base_confidence: IOC numeric confidence for filtering.
+        refresh: ask each source again even when its stored result is still
+            fresh (a person pressing Refresh); the gateway still limits it.
     """
     results = []
 
@@ -284,7 +287,7 @@ async def enrich_entity(
 
         # Check cache — skip if fresh result exists (no budget consumed)
         existing = await get_cached_result(db, entity_type, entity_id, source.source_type)
-        if existing and existing.expires_at and existing.expires_at > datetime.now(UTC):
+        if not refresh and existing and existing.expires_at and existing.expires_at > datetime.now(UTC):
             await store_context(
                 db,
                 entity_type,

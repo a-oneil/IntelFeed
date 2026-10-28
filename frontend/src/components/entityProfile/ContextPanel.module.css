@@ -159,6 +159,35 @@
   margin: 0;
 }
 
+.prose {
+  color: var(--text-primary);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.more {
+  margin-top: var(--sp-1);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.more:hover,
+.more:focus-visible {
+  color: var(--text-primary);
+}
+
 .chips {
   display: flex;
   flex-wrap: wrap;

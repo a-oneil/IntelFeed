@@ -641,7 +641,7 @@ async def test_console_detail_lists_relationship_outputs(client, admin_headers, 
     relations = {o["field"]: o for o in detail["outputs"] if o["kind"] == "relationship"}
     assert set(relations) == {"sectors", "countries", "tools"}
     tools = relations["tools"]
-    assert tools["target"] == "relationship: uses malware or tool"
+    assert tools["target"] == "relationship: uses malware family or tool"
     claims = await _claims(db_session, "etda")
     tool_claims = [c for c in claims if c.output == "tools"]
     assert tools["linked"] == sum(c.target_id is not None for c in tool_claims) == 4

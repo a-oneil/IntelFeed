@@ -109,6 +109,8 @@ class EnrichEntityRequest(BaseModel):
     entity_type: str = Field(pattern=_ENRICHABLE_PATTERN)
     entity_id: uuid.UUID
     source_types: list[str] | None = None
+    #: Look the entity up again even where a stored result is still fresh.
+    refresh: bool = False
 
     model_config = ConfigDict(
         json_schema_extra={

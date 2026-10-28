@@ -21,6 +21,8 @@ const auth = { visitor: false, admin: true };
 vi.mock("@/stores/authStore", () => ({
   useIsVisitor: () => auth.visitor,
   useIsAdmin: () => auth.admin,
+  // Date formatting reads the signed-in user's date-format preference.
+  useAuthStore: { getState: () => ({ user: null }) },
 }));
 
 const HOUR = 3_600_000;
@@ -148,6 +150,37 @@ describe("ContextPanel", () => {
     expect(screen.queryByRole("link", { name: "Open Enrichment" })).not.toBeInTheDocument();
   });
 
+  it("puts long text on its own line, clamps very long text, and formats timestamps", async () => {
+    const long = "Apply mitigations per vendor instructions. ".repeat(8).trim();
+    ctx.data = {
+      sources: [
+        {
+          source_type: "cisa_kev",
+          label: "CISA KEV",
+          license: null,
+          observed_at: null,
+          stale: false,
+          items: [
+            { key: "added", label: "Added", display: "fact", value: "2024-04-12" },
+            { key: "required_action", label: "Required action", display: "fact", value: long },
+            { key: "assessed", label: "SSVC assessed", display: "fact", value: "2024-04-17T04:00:13.543064Z" },
+          ],
+        },
+      ],
+      unavailable: [],
+      badges: [],
+      can_enrich: false,
+    };
+    const user = userEvent.setup();
+    renderPanel();
+    expect(screen.getByText("2024-04-12")).toBeInTheDocument();
+    expect(screen.queryByText("2024-04-17T04:00:13.543064Z")).not.toBeInTheDocument();
+    const more = screen.getByRole("button", { name: "more" });
+    expect(more).toHaveAttribute("aria-expanded", "false");
+    await user.click(more);
+    expect(screen.getByRole("button", { name: "less" })).toHaveAttribute("aria-expanded", "true");
+  });
+
   it("renders nothing when no source applies", () => {
     ctx.data = sample({ sources: [], unavailable: [] });
     const { container } = renderPanel();
@@ -168,23 +201,23 @@ describe("ContextPanel", () => {
     expect(screen.getByText("No context yet")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Enrich now" }));
     expect(mutate).toHaveBeenCalledWith(
-      { entityType: "observable", entityId: "o1", sourceTypes: undefined },
+      { entityType: "observable", entityId: "o1", sourceTypes: undefined, refresh: false },
       expect.anything(),
     );
     expect(screen.getByRole("status")).toHaveTextContent("queued: GreyNoise");
   });
 
-  it("refreshes every source from the header, or one source from its block", async () => {
+  it("refreshes every source from the header, or one source from its block, past the cache", async () => {
     const user = userEvent.setup();
     renderPanel();
     await user.click(screen.getByRole("button", { name: "Refresh" }));
     expect(mutate).toHaveBeenLastCalledWith(
-      { entityType: "observable", entityId: "o1", sourceTypes: undefined },
+      { entityType: "observable", entityId: "o1", sourceTypes: undefined, refresh: true },
       expect.anything(),
     );
     await user.click(screen.getByRole("button", { name: "Refresh Team Cymru" }));
     expect(mutate).toHaveBeenLastCalledWith(
-      { entityType: "observable", entityId: "o1", sourceTypes: ["cymru"] },
+      { entityType: "observable", entityId: "o1", sourceTypes: ["cymru"], refresh: true },
       expect.anything(),
     );
   });

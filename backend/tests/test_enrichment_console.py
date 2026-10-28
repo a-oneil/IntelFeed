@@ -690,3 +690,13 @@ async def test_sourced_job_schedules_edit_through_the_jobs_api(client, admin_hea
 
     detail = (await client.get("/api/enrichment/sources/epss/detail", headers=admin_headers)).json()
     assert [(j["key"], j["schedule"]) for j in detail["jobs"]] == [("epss-bulk-sync", "Daily at 7:00 AM")]
+
+
+def test_fills_keeps_mixed_case_labels_and_spells_out_relations():
+    from app.enrichment.adapters.github_poc import GitHubPoCAdapter
+    from app.enrichment.catalogs import RansomwareLiveSource
+    from app.enrichment.console import fills
+
+    assert fills(GitHubPoCAdapter).startswith("PoC, public PoCs")
+    assert "uses TTP" in fills(RansomwareLiveSource) or "uses technique" in fills(RansomwareLiveSource)
+    assert "_" not in fills(RansomwareLiveSource)

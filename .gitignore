@@ -21,7 +21,7 @@ backend/.venv/
 backend/.pytest_cache/
 backend/.ruff_cache/
 .ruff_cache/
-celerybeat-schedule
+celerybeat-schedule*
 
 # Node
 node_modules/

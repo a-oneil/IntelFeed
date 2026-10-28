@@ -297,9 +297,9 @@ async def test_github_poc():
     adapter, _ = _wire("github_poc")
     parsed = (await adapter.enrich("cve", "CVE-2021-44228")).parsed_data
     assert parsed["has_public_poc"] is True
-    assert parsed["poc_count"] == 15
+    assert parsed["poc_count"] == 100  # capped; GitHub reports 491
     assert parsed["exploit_maturity"] == "weaponized"
-    assert parsed["poc_repos"][0]["name"] == "CVE-2021-44228-PoC-log4j-bypass-words"
+    assert parsed["poc_repos"][0]["name"] == "log4j-scan"
 
     parsed = (await adapter.enrich("cve", "CVE-1999-99999")).parsed_data
     assert parsed["has_public_poc"] is False and parsed["poc_count"] == 0

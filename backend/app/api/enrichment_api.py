@@ -423,6 +423,7 @@ async def enrich_entity(
         user_id=user.id,
         trigger="manual",
         source_types=body.source_types,
+        refresh=body.refresh,
     )
     # Write what came back onto the entity's columns, as the queue does.
     from app.enrichment.entity_updater import apply_enrichment_results_to_entity

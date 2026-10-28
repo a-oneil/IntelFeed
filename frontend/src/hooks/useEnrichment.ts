@@ -123,10 +123,13 @@ export function useEnrichEntity() {
       entityType,
       entityId,
       sourceTypes,
+      refresh,
     }: {
       entityType: string;
       entityId: string;
       sourceTypes?: string[];
+      /** Ask the sources again even where a stored answer is still fresh. */
+      refresh?: boolean;
     }) => {
       const { data } = await api.post<{
         entity_type: string;
@@ -143,6 +146,7 @@ export function useEnrichEntity() {
         entity_type: entityType,
         entity_id: entityId,
         source_types: sourceTypes,
+        refresh,
       });
       return data;
     },

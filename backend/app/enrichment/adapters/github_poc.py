@@ -44,19 +44,24 @@ class GitHubPoCAdapter(EnrichmentAdapter):
 
     _api_url = "https://api.github.com/search/repositories"
 
+    @staticmethod
+    def search_query(cve_id: str) -> str:
+        """The repository search for one CVE's PoCs. The id is matched as a
+        phrase in name or description: a bare "<cve> poc exploit" ANDs all three
+        words, so a repo literally named CVE-2024-3400 scored zero hits."""
+        return f'"{cve_id}" in:name,description'
+
     async def enrich(self, entity_type: str, entity_value: str) -> EnrichmentData:
         headers = {"Accept": "application/vnd.github+json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-
-        query = f"{entity_value} poc exploit"
 
         async with self.http(timeout=15) as client:
             resp = await client.get(
                 self._api_url,
                 headers=headers,
                 params={
-                    "q": query,
+                    "q": self.search_query(entity_value),
                     "sort": "stars",
                     "order": "desc",
                     "per_page": 5,
@@ -125,7 +130,7 @@ class GitHubPoCAdapter(EnrichmentAdapter):
                 resp = await client.get(
                     self._api_url,
                     headers=headers,
-                    params={"q": "CVE-2021-44228 poc exploit", "per_page": 1},
+                    params={"q": self.search_query("CVE-2021-44228"), "per_page": 1},
                 )
                 return resp.status_code == 200
         except httpx.HTTPError:

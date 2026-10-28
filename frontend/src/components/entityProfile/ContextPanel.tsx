@@ -23,6 +23,7 @@ import {
   type EntityContextSource,
 } from "@/hooks/useEntityContext";
 import { useIsAdmin, useIsVisitor } from "@/stores/authStore";
+import { formatDateTime } from "@/utils/formatDate";
 import styles from "./ContextPanel.module.css";
 
 /** Where an admin fixes a missing key or a paused source. */
@@ -68,15 +69,45 @@ function linkParts(value: ContextLinkValue): { url: string; text: string } {
   return { url: value?.url ?? "", text: value?.label || value?.url || "" };
 }
 
+/** A value longer than this reads as prose, on its own line under its label. */
+const PROSE_AT = 48;
+/** Prose longer than this starts clamped, with a toggle. */
+const CLAMP_AT = 240;
+const ISO_DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
+
+function factText(value: string | number): string {
+  const text = String(value);
+  return ISO_DATETIME.test(text) ? formatDateTime(text, text) : text;
+}
+
+function ProseFact({ label, text }: { label: string; text: string }) {
+  const [open, setOpen] = useState(false);
+  const long = text.length > CLAMP_AT;
+  return (
+    <div className={styles.block}>
+      <dt className={styles.key}>{label}</dt>
+      <dd className={`${styles.prose} ${long && !open ? styles.clamped : ""}`}>{text}</dd>
+      {long && (
+        <button type="button" className={styles.more} onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+          {open ? "less" : "more"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function ItemView({ item }: { item: EntityContextItem }) {
   switch (item.display) {
-    case "fact":
+    case "fact": {
+      const text = factText(item.value);
+      if (text.length > PROSE_AT) return <ProseFact label={item.label} text={text} />;
       return (
         <div className={styles.fact}>
           <dt className={styles.key}>{item.label}</dt>
-          <dd className={styles.val}>{String(item.value)}</dd>
+          <dd className={styles.val}>{text}</dd>
         </div>
       );
+    }
     case "link": {
       const { url, text } = linkParts(item.value);
       return (
@@ -219,10 +250,10 @@ export function ContextPanel({ entityType, entityId }: { entityType: string; ent
   if (withData.length === 0 && unavailable.length === 0 && !canEnrich) return null;
 
   const labelOf = (sourceType: string) => sources.find((s) => s.source_type === sourceType)?.label ?? sourceType;
-  const run = (sourceTypes?: string[]) => {
+  const run = (sourceTypes?: string[], refresh = false) => {
     setQueued([]);
     enrich.mutate(
-      { entityType, entityId, sourceTypes },
+      { entityType, entityId, sourceTypes, refresh },
       {
         onSuccess: (res) => {
           setQueued(res.queued ?? []);
@@ -248,7 +279,7 @@ export function ContextPanel({ entityType, entityId }: { entityType: string; ent
             body="Looks this up again at every source that applies."
             aside="A rate-limited source queues the lookup and runs it when it can."
           >
-            <button type="button" className={styles.btn} onClick={() => run()} disabled={enrich.isPending}>
+            <button type="button" className={styles.btn} onClick={() => run(undefined, true)} disabled={enrich.isPending}>
               {enrich.isPending ? "Refreshing…" : "Refresh"}
             </button>
           </Hint>
@@ -266,7 +297,7 @@ export function ContextPanel({ entityType, entityId }: { entityType: string; ent
           key={s.source_type}
           source={s}
           busy={enrich.isPending}
-          onRefresh={canEnrich ? () => run([s.source_type]) : undefined}
+          onRefresh={canEnrich ? () => run([s.source_type], true) : undefined}
         />
       ))}
 
