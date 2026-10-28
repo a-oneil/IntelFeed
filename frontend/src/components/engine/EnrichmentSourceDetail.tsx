@@ -118,7 +118,7 @@ function LimitsPanel({
         <dt>Rate</dt>
         <dd>
           {rateText(l.effective_rate)}
-          {l.rate_note && <span className={s.muted}> ({l.rate_note}; {rateText(l.rate)} without)</span>}
+          {l.rate_note && <span className={s.muted}> ({l.rate_note}; {rateText(l.rate)} stored)</span>}
           {l.ceiling_per_period != null && <span className={s.muted}> (max {num(l.ceiling_per_period)})</span>}
         </dd>
         <dt>Today</dt>

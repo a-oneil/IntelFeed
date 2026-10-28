@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 import redis.asyncio as aioredis
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.enrichment import gateway as gw
@@ -305,6 +305,28 @@ async def test_success_deletes_the_job_and_stores_the_result(db_session):
     assert row.status == "success"
 
 
+async def test_a_manual_job_asks_again_past_a_stored_result(db_session, test_user):
+    await _source(db_session)
+    eid = uuid.uuid4()
+    now = datetime.now(UTC)
+    db_session.add(
+        EnrichmentResult(
+            entity_type="cve",
+            entity_id=eid,
+            source_type="osv",
+            raw_response={},
+            parsed_data={"id": CVE_ID},
+            enriched_at=now,
+            expires_at=now + timedelta(hours=1),
+            status="success",
+        )
+    )
+    await q.enqueue(db_session, "cve", eid, CVE_ID, lane="manual", source_types=["osv"], requested_by=test_user.id)
+    server = _Source()
+    assert await _dispatch(db_session, server) == {"success": 1}
+    assert len(server.requests) == 1
+
+
 async def test_cached_deletes_the_job_without_a_request(db_session):
     await _source(db_session)
     eid = uuid.uuid4()
@@ -469,9 +491,9 @@ async def test_a_held_source_defers_its_backlog_in_one_update(db_session):
     assert stats["rate_limited"] == q.CLAIM_BATCH
     assert sum(stats.values()) == q.CLAIM_BATCH + 1  # the GitHub job ran too
     assert {r.url.host for r in server.requests} == {"api.github.com"}
-    # Claim, the refused job, the held backlog, then GitHub's claim (+ settle):
-    # a handful, however long the backlog.
-    assert len(job_updates) <= 6
+    # Claim, the refused job's start and settle, the held backlog, then
+    # GitHub's claim, start and settle: a handful, however long the backlog.
+    assert len(job_updates) <= 8
 
     jobs = await _jobs(db_session, source_type="osv")
     assert len(jobs) == backlog
@@ -494,20 +516,104 @@ async def test_a_lease_reclaim_counts_an_attempt_then_fails(db_session):
     await _source(db_session)
     await q.enqueue(db_session, "cve", uuid.uuid4(), CVE_ID)
     expired = datetime.now(UTC) - q.LEASE - timedelta(minutes=1)
-    await db_session.execute(update(EnrichmentJob).values(status="running", claimed_at=expired))
+    started = {"status": "running", "claimed_at": expired, "last_status": q.STARTED}
+    await db_session.execute(update(EnrichmentJob).values(**started))
 
     (job,) = await q.claim(db_session)
     assert job.attempts == 1
     (row,) = await _jobs(db_session)
     assert (row.status, row.attempts, row.last_status) == ("running", 1, "lease_expired")
 
-    await db_session.execute(
-        update(EnrichmentJob).values(status="running", claimed_at=expired, attempts=q.MAX_ATTEMPTS - 1)
-    )
+    await db_session.execute(update(EnrichmentJob).values(**started, attempts=q.MAX_ATTEMPTS - 1))
     assert await q.claim(db_session) == []
     (row,) = await _jobs(db_session)
     assert (row.status, row.attempts, row.last_status) == ("failed", q.MAX_ATTEMPTS, "lease_expired")
     assert "lease" in row.last_error
+
+
+async def test_a_lease_reclaim_charges_only_the_job_that_had_started(db_session):
+    """A dead worker's batch: one job was running, the rest never began."""
+    await _source(db_session)
+    for i in range(3):
+        await q.enqueue(db_session, "cve", uuid.uuid4(), f"CVE-2021-4422{i}")
+    batch = await q.claim(db_session)
+    await q._start(db_session, batch[0])
+    expired = datetime.now(UTC) - q.LEASE - timedelta(minutes=1)
+    await db_session.execute(update(EnrichmentJob).values(claimed_at=expired, updated_at=expired))
+
+    reclaimed = {j.entity_value: j.attempts for j in await q.claim(db_session)}
+    assert reclaimed == {batch[0].entity_value: 1, batch[1].entity_value: 0, batch[2].entity_value: 0}
+    rows = {j.entity_value: (j.status, j.last_status) for j in await _jobs(db_session)}
+    assert rows == {
+        batch[0].entity_value: ("running", "lease_expired"),
+        batch[1].entity_value: ("running", None),
+        batch[2].entity_value: ("running", None),
+    }
+
+
+async def test_a_start_keeps_a_request_made_since_the_claim(db_session, test_user):
+    await _source(db_session)
+    eid = uuid.uuid4()
+    await q.enqueue(db_session, "cve", eid, CVE_ID, lane="backfill", source_types=["osv"])
+    (job,) = await q.claim(db_session)
+    await q.enqueue(db_session, "cve", eid, CVE_ID, lane="manual", source_types=["osv"], requested_by=test_user.id)
+    await q._start(db_session, job)
+
+    await q._settle(db_session, job, "success")
+    (row,) = await _jobs(db_session)
+    assert (row.status, row.lane) == ("queued", "manual")
+
+
+async def test_a_claim_goes_on_past_rows_the_lease_limit_failed(db_session):
+    await _source(db_session)
+    now = datetime.now(UTC)
+    await q.enqueue(db_session, "cve", uuid.uuid4(), "worn", due_at=now - timedelta(hours=1))
+    await q.enqueue(db_session, "cve", uuid.uuid4(), "fresh", due_at=now - timedelta(minutes=1))
+    await db_session.execute(
+        update(EnrichmentJob)
+        .where(EnrichmentJob.entity_value == "worn")
+        .values(
+            status="running",
+            claimed_at=now - q.LEASE - timedelta(minutes=1),
+            last_status=q.STARTED,
+            attempts=q.MAX_ATTEMPTS - 1,
+        )
+    )
+
+    assert [j.entity_value for j in await q.claim(db_session, limit=1)] == ["fresh"]
+    assert [j.status for j in await _jobs(db_session, entity_value="worn")] == ["failed"]
+
+
+@pytest.mark.committed_db
+async def test_a_hold_leaves_a_row_another_dispatcher_claimed_meanwhile(db_session, _engine):
+    """The hold's UPDATE waits on a row another dispatcher is claiming; once
+    that claim commits the row is running, and the hold must not take it back."""
+    import asyncio
+
+    await _source(db_session)
+    now = datetime.now(UTC)
+    await q.enqueue(db_session, "cve", uuid.uuid4(), "refused", due_at=now - timedelta(minutes=2))
+    await q.enqueue(db_session, "cve", uuid.uuid4(), "contested", due_at=now - timedelta(minutes=1))
+    await db_session.commit()
+    (refused,) = await q.claim(db_session, limit=1)
+
+    other = AsyncSession(bind=_engine, expire_on_commit=False)
+    try:
+        await other.execute(
+            update(EnrichmentJob)
+            .where(EnrichmentJob.entity_value == "contested")
+            .values(status="running", claimed_at=func.now())
+        )  # claimed, not yet committed
+        hold = asyncio.create_task(q._hold(db_session, refused, now + timedelta(hours=1), "rate_limited", []))
+        await asyncio.sleep(0.5)
+        assert not hold.done()  # waiting on the other claim's row lock
+        await other.commit()
+        await asyncio.wait_for(hold, 10)
+    finally:
+        await other.close()
+
+    (row,) = await _jobs(db_session, entity_value="contested")
+    assert (row.status, row.last_status) == ("running", None)
 
 
 async def test_a_request_made_during_a_run_is_kept(db_session, test_user):

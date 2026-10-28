@@ -26,8 +26,8 @@ the source's rate apart so they come due one at a time rather than together,
 and the tick claims none of its rows again while the hold lasts.
 
 A row enqueued again while it runs (a person asks for it mid-run) goes back to
-queued with the newer lane and requester instead of being deleted or
-rescheduled: the upsert stamps ``updated_at`` with the clock, the claim stamps
+queued as that enqueue left it (the higher-priority lane and its requester)
+instead of being deleted or rescheduled: the upsert stamps ``updated_at`` with the clock, the claim stamps
 ``claimed_at`` and ``updated_at`` with its transaction time, and settling
 compares the two.
 
@@ -35,12 +35,17 @@ A backfill-lane job runs only while its source has spent less than
 BACKFILL_SHARE of its ``daily_budget`` today, so bulk catch-up never starves
 new entities or a person's request; past that it waits for the next UTC day.
 
+A ``manual``-lane job runs with ``refresh``: it exists because a person asked
+for a lookup and the source refused it, so the stored result is not the answer.
+
 While enrichment is paused (``app/enrichment/pause.py``) a tick claims
 nothing. A ``running`` row whose claim is older than LEASE is claimable again,
-so a worker that dies mid-tick strands nothing. Each reclaim counts an
-attempt, and a job whose lease expires on its MAX_ATTEMPTS-th try is marked
-``failed`` (``last_status`` ``lease_expired``), so a job that kills its worker
-stops coming back.
+so a worker that dies mid-tick strands nothing. A claim takes a batch, but a
+job is marked ``started`` only when its run begins, so a reclaim counts an
+attempt only for a job that had started; the rest of a dead worker's batch is
+claimed again as it was. A job whose lease expires on its MAX_ATTEMPTS-th try
+is marked ``failed`` (``last_status`` ``lease_expired``), so a job that kills
+its worker stops coming back.
 """
 
 import logging
@@ -68,6 +73,8 @@ RETRYABLE = frozenset({"rate_limited", "breaker_open", "budget_exhausted", "gate
 
 TICK_SECONDS = 25
 CLAIM_BATCH = 10
+#: Claims a tick retries when every row it took was failed by the lease limit.
+CLAIM_ROUNDS = 5
 LEASE = timedelta(minutes=10)
 MAX_ATTEMPTS = 5
 #: Seconds before the first retry of an error; doubles per attempt.
@@ -77,6 +84,8 @@ BACKFILL_SHARE = 0.6
 PAUSE_DEFER = 60
 #: Rows per INSERT when queueing a backfill.
 ENQUEUE_CHUNK = 1000
+#: ``last_status`` of a claimed job whose run has begun.
+STARTED = "started"
 LEASE_EXPIRED = f"The run did not finish within its {LEASE.total_seconds() / 60:.0f}-minute lease"
 
 _DONE = frozenset({"success", "cached", "skipped_low_confidence", "needs_key", "unsupported"})
@@ -257,8 +266,19 @@ async def claim(db: AsyncSession, limit: int = CLAIM_BATCH, held: frozenset = fr
     first, skipping the (source_type, requester) pairs in ``held``. SKIP
     LOCKED lets two dispatchers claim side by side.
 
-    A row reclaimed past its lease counts an attempt; one that reaches
-    MAX_ATTEMPTS that way is marked failed and not returned."""
+    A row reclaimed past its lease counts an attempt only when its run had
+    started; one that reaches MAX_ATTEMPTS that way is marked failed and not
+    returned. When every row a claim took failed that way, it claims again,
+    up to CLAIM_ROUNDS times, so failed rows never end a tick with work due."""
+    for _ in range(CLAIM_ROUNDS):
+        found, jobs = await _claim_once(db, limit, held)
+        if jobs or not found:
+            return jobs
+    return []
+
+
+async def _claim_once(db: AsyncSession, limit: int, held: frozenset) -> tuple[bool, list]:
+    """One claim: whether it found due rows, and the ones it marked running."""
     now = datetime.now(UTC)
     due = or_(
         and_(EnrichmentJob.status == "queued", EnrichmentJob.due_at <= now),
@@ -281,8 +301,10 @@ async def claim(db: AsyncSession, limit: int = CLAIM_BATCH, held: frozenset = fr
     )
     if not ids:
         await db.commit()
-        return []
-    expired = EnrichmentJob.status == "running"
+        return False, []
+    # A reclaimed row whose run began; one still waiting in a dead worker's
+    # batch never ran, and costs nothing.
+    expired = and_(EnrichmentJob.status == "running", EnrichmentJob.last_status == STARTED)
     jobs = (
         await db.execute(
             update(EnrichmentJob)
@@ -316,7 +338,20 @@ async def claim(db: AsyncSession, limit: int = CLAIM_BATCH, held: frozenset = fr
         )
     ).all()
     await db.commit()
-    return sorted((j for j in jobs if j.status == "running"), key=lambda j: (j.priority, j.due_at))
+    return True, sorted((j for j in jobs if j.status == "running"), key=lambda j: (j.priority, j.due_at))
+
+
+async def _start(db: AsyncSession, job) -> None:
+    """Mark a claimed job's run begun, and commit, so a lease reclaim counts
+    its attempt. ``updated_at`` stays as it was: it tells _settle whether the
+    row was enqueued again since the claim."""
+    await db.execute(
+        update(EnrichmentJob)
+        .where(EnrichmentJob.id == job.id)
+        .values(last_status=STARTED, updated_at=EnrichmentJob.updated_at)
+        .execution_options(synchronize_session=False)
+    )
+    await db.commit()
 
 
 async def _settle(db: AsyncSession, job, status: str, *, retry_after: float | None = None, error: str | None = None):
@@ -392,24 +427,25 @@ async def _hold(db: AsyncSession, job, until: datetime, status: str, claimed: li
     request intervals (at the source's rate) after ``until``."""
     _, gateway = await _gateway(db, job)
     interval = gateway.period / gateway.capacity if gateway else 1.0
+    waiting = or_(
+        and_(EnrichmentJob.status == "queued", EnrichmentJob.due_at <= datetime.now(UTC)),
+        EnrichmentJob.id.in_([j.id for j in claimed]),
+    )
     ranked = (
         select(
             EnrichmentJob.id,
             func.row_number().over(order_by=(EnrichmentJob.priority, EnrichmentJob.due_at)).label("position"),
         )
-        .where(
-            _credential(job.source_type, job.requested_by),
-            or_(
-                and_(EnrichmentJob.status == "queued", EnrichmentJob.due_at <= datetime.now(UTC)),
-                EnrichmentJob.id.in_([j.id for j in claimed]),
-            ),
-        )
+        .where(_credential(job.source_type, job.requested_by), waiting)
         .subquery()
     )
     offset = func.make_interval(0, 0, 0, 0, 0, 0, ranked.c.position * interval, type_=Interval)
     await db.execute(
         update(EnrichmentJob)
-        .where(EnrichmentJob.id == ranked.c.id)
+        # ``waiting`` again on the row itself: after a lock wait Postgres
+        # re-checks only this WHERE, so a row another dispatcher claimed
+        # meanwhile is left to it.
+        .where(EnrichmentJob.id == ranked.c.id, waiting)
         .values(
             status="queued",
             claimed_at=None,
@@ -432,6 +468,7 @@ async def _run(db: AsyncSession, job, held: dict) -> str:
 
     key = (job.source_type, job.requested_by)
     now = datetime.now(UTC)
+    await _start(db, job)
     try:
         if job.lane == "backfill" and not await _backfill_allowed(db, job):
             await _settle(db, job, "backfill_share")
@@ -448,6 +485,8 @@ async def _run(db: AsyncSession, job, held: dict) -> str:
             source_types=[job.source_type],
             entity_confidence=job.entity_confidence,
             entity_base_confidence=job.entity_base_confidence,
+            # A person asked for this lookup and the source refused it.
+            refresh=job.lane == "manual",
         )
         await apply_enrichment_results_to_entity(db, job.entity_type, job.entity_id, results)
     except GatewayUnavailable:

@@ -37,6 +37,7 @@ from app.enrichment.d3fend import D3FENDSource
 from app.enrichment.endoflife import EndOfLifeSource
 from app.enrichment.etda import ETDASource
 from app.enrichment.gateway import SourceGateway
+from app.enrichment.manifest import Quota
 from app.enrichment.wikidata import WikidataSource
 from app.models.enrichment import EnrichmentSource
 
@@ -126,16 +127,37 @@ def get_adapter(
     return adapter_class(api_key=api_key, config=config, gateway=gateway)
 
 
+def _within_ceiling(rate_limit_config: dict, quota: Quota) -> dict:
+    """The row's rate, lowered to the quota's ceiling when it is above it: the
+    ceiling's rate over the row's own period, or the ceiling itself when that
+    period is too short to allow one request."""
+    requested = rate_limit_config.get("requests_per_period")
+    if quota.ceiling_per_period is None or requested is None:
+        return rate_limit_config
+    period = rate_limit_config.get("period_seconds") or quota.period_seconds
+    allowed = quota.ceiling_per_period * period // quota.period_seconds
+    if requested <= allowed:
+        return rate_limit_config
+    if allowed < 1:
+        return {"requests_per_period": quota.ceiling_per_period, "period_seconds": quota.period_seconds}
+    return {"requests_per_period": allowed, "period_seconds": period}
+
+
 def source_gateway(source: EnrichmentSource, api_key: str | None, **kwargs) -> SourceGateway:
     """The gateway for a source row and the key it will use. With a key, a
     source whose manifest has a ``keyed`` quota gets that rate, unless an admin
-    has changed the row's rate from the keyless default. Without one, a source
-    that requires a key gets a gateway that sends nothing."""
+    has changed the row's rate from the keyless default. Either way the rate
+    never exceeds the ceiling of the quota in use (keyed with a key, keyless
+    without), so a stored rate can't outrun the source. Without a key, a
+    source that requires one gets a gateway that sends nothing."""
     cls = SOURCE_REGISTRY.get(source.source_type, Source)
     rate_limit_config = source.rate_limit_config
     quota = getattr(cls, "quota", None)
-    if api_key and quota and quota.keyed and rate_limit_config == quota.rate_limit_config:
-        rate_limit_config = quota.keyed.rate_limit_config
+    if quota:
+        in_use = quota.keyed if api_key and quota.keyed else quota
+        if in_use is quota.keyed and rate_limit_config == quota.rate_limit_config:
+            rate_limit_config = in_use.rate_limit_config
+        rate_limit_config = _within_ceiling(rate_limit_config or {}, in_use)
     return SourceGateway(
         source.source_type,
         rate_limit_config=rate_limit_config,

@@ -29,6 +29,8 @@ from app.intelligence.sectors import sector_uuid
 from app.models.country import Country
 from app.models.enrichment import EnrichmentResult, EnrichmentSource, EntityContext, EntityRelationClaim
 from app.models.entity_relationship import EntityRelationship
+from app.models.entry import Entry
+from app.models.feed import Feed
 from app.models.malware_family import MalwareFamily
 from app.models.ransomware import RansomwareVictim, VictimDisclosure
 from app.models.sector import ThreatActorTargetSector
@@ -293,11 +295,8 @@ async def test_a_co_occurrence_edge_is_lifted_then_handed_back(db_session, ref_s
     await db_session.flush()
 
     assert await apply_relations(db_session, "threat_actor", actor.id, "ref_catalog", _tools("Cobalt Strike"))
-    assert (edge.source, edge.confidence, edge.description) == (
-        "enrichment",
-        "probable",
-        "Cobalt Strike in the toolkit",
-    )
+    # Lent, not rewritten: the row keeps its own (empty) description.
+    assert (edge.source, edge.confidence, edge.description) == ("enrichment", "probable", None)
 
     assert await apply_relations(db_session, "threat_actor", actor.id, "ref_catalog", {})
     assert (edge.source, edge.confidence) == ("co_occurrence", "possible")
@@ -347,6 +346,49 @@ async def test_an_earned_co_occurrence_edge_is_never_taken_or_lowered(db_session
         "confirmed",
         "corroborated",
     )
+
+
+async def test_a_withdrawal_never_lowers_an_edge_someone_else_raised(db_session, ref_sources, world):
+    from app.intelligence.enrichment import store_ai_relationships
+
+    actor, cobalt, duke = world["actor"], world["cobalt"], world["duke"]
+    await apply_relations(db_session, "threat_actor", actor.id, "ref_catalog", _tools("Cobalt Strike", "CozyDuke"))
+    edges = await _edges(db_session, actor.id)
+    asserted, reviewed = edges[("uses", "tool", str(cobalt.id))], edges[("uses", "malware", str(duke.id))]
+
+    # An article's AI extraction asserts one; reviews confirm the other.
+    feed = Feed(title="Relations feed", url=f"https://rel.example/{uuid.uuid4()}", feed_type="rss")
+    db_session.add(feed)
+    await db_session.flush()
+    entry = Entry(feed_id=feed.id, title="t", guid=f"guid-{uuid.uuid4()}", published_at=datetime.now(UTC))
+    db_session.add(entry)
+    await db_session.flush()
+    rel = {
+        "source_type": "threat_actor",
+        "source_name": "APT29",
+        "target_type": "tool",
+        "target_name": "Cobalt Strike",
+        "relationship_type": "uses",
+        "evidence": "APT29 deployed Cobalt Strike beacons.",
+        "confidence": "high",
+    }
+    assert await store_ai_relationships(db_session, [rel], entry.id) == 1
+    assert (asserted.source, asserted.confidence) == ("auto_extracted", "probable")
+    reviewed.confidence = "confirmed"
+    await db_session.flush()
+
+    assert not await apply_relations(db_session, "threat_actor", actor.id, "ref_catalog", {})
+    assert await _claims(db_session, "ref_catalog") == []
+    assert (asserted.source, asserted.confidence, asserted.evidence_entry_ids) == (
+        "auto_extracted",
+        "probable",
+        [entry.id],
+    )
+    assert (reviewed.source, reviewed.confidence) == ("enrichment", "confirmed")
+    assert set(await _edges(db_session, actor.id)) == {
+        ("uses", "tool", str(cobalt.id)),
+        ("uses", "malware", str(duke.id)),
+    }
 
 
 async def test_a_merge_moves_the_claims_with_their_connections(db_session, ref_sources, world):

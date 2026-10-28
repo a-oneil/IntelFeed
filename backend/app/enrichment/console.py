@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import entity_types
 from app.enrichment.base import Source
-from app.enrichment.gateway import GatewayUnavailable, hourly_requests
+from app.enrichment.gateway import DEFAULT_RATE, GatewayUnavailable, hourly_requests
 from app.enrichment.manifest import Column, Context, Egress, Relation
 from app.enrichment.pause import is_paused
 from app.enrichment.queue import BACKFILL_SHARE, LANES
@@ -70,6 +70,17 @@ def _words(name: str) -> str:
     return " ".join(
         _SPELLING.get(w, w.upper()) if w in _ACRONYMS else w for w in name.replace(".", " ").split("_") if w
     )
+
+
+def _rate_note(stored: dict, gateway, key: str | None) -> str | None:
+    """Why the enforced rate differs from the stored one, if it does."""
+    stored_per_s = stored["requests_per_period"] / stored["period_seconds"]
+    effective_per_s = gateway.capacity / gateway.period
+    if effective_per_s > stored_per_s and key:
+        return "with key"
+    if effective_per_s < stored_per_s:
+        return "held to the source's limit"
+    return None
 
 
 def type_label(entity_type: str) -> str:
@@ -370,9 +381,10 @@ async def detail(db: AsyncSession, source_type: str) -> dict | None:
         return None
     key = await _global_key(row, db)
     gateway = source_gateway(row, key)
-    # The row's own rate is what the gateway enforces without a key; with one,
-    # a keyed quota may stand in for it. The console edits the stored rate.
-    stored = source_gateway(row, None)
+    # The console edits the row's own rate. What the gateway enforces can
+    # differ: a keyed quota stands in for it when a key is in use, and a rate
+    # above the source's ceiling is held to the ceiling.
+    stored = {**DEFAULT_RATE, **(row.rate_limit_config or {})}
     quota = cls.quota.keyed if key and cls.quota.keyed else cls.quota
 
     try:
@@ -522,9 +534,9 @@ async def detail(db: AsyncSession, source_type: str) -> dict | None:
 
     return {
         "limits": {
-            "rate": {"requests_per_period": stored.capacity, "period_seconds": stored.period},
+            "rate": {"requests_per_period": stored["requests_per_period"], "period_seconds": stored["period_seconds"]},
             "effective_rate": {"requests_per_period": gateway.capacity, "period_seconds": gateway.period},
-            "rate_note": "with key" if (gateway.capacity, gateway.period) != (stored.capacity, stored.period) else None,
+            "rate_note": _rate_note(stored, gateway, key),
             "ceiling_per_period": quota.ceiling_per_period,
             "daily_budget": row.daily_budget,
             "used_today": used_today,

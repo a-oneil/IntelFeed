@@ -263,7 +263,7 @@ describe("EnrichmentConsole", () => {
 
     const limits = screen.getByRole("region", { name: "Limits" });
     expect(within(limits).getByText("50 per 30s")).toBeInTheDocument();
-    expect(within(limits).getByText("(with key; 5 per 30s without)")).toBeInTheDocument();
+    expect(within(limits).getByText("(with key; 5 per 30s stored)")).toBeInTheDocument();
     expect(within(limits).getByText(/3,100 of 5,000 · backfill may use 60%/)).toBeInTheDocument();
     expect(within(limits).getByText("global key set")).toBeInTheDocument();
     expect(within(limits).getByText("1,224 waiting: 240 refresh, 898 backfill, 86 retrying")).toBeInTheDocument();

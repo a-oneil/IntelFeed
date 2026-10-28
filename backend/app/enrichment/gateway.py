@@ -75,7 +75,7 @@ BACKOFF_CAP = 3600
 #: Longest Retry-After honored, so one bad header can't park a source for weeks.
 RETRY_AFTER_CAP = 86400
 
-_DEFAULT_RATE = {"requests_per_period": 100, "period_seconds": 86400}
+DEFAULT_RATE = {"requests_per_period": 100, "period_seconds": 86400}
 
 #: How long an hourly request counter is kept.
 STATS_TTL = 48 * 3600
@@ -259,7 +259,7 @@ class SourceGateway:
         inner: httpx.AsyncBaseTransport | None = None,
         requires_key: bool = False,
     ):
-        rate = {**_DEFAULT_RATE, **(rate_limit_config or {})}
+        rate = {**DEFAULT_RATE, **(rate_limit_config or {})}
         self.source_type = source_type
         self.capacity = max(1, int(rate["requests_per_period"]))
         self.period = max(1, int(rate["period_seconds"]))

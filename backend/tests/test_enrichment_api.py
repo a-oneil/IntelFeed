@@ -192,7 +192,7 @@ class TestGetHealth:
         data = resp.json()
         assert data["source_type"] == "nvd"
         assert "health_status" in data
-        assert data["rate_limit_remaining"] == 50  # a full bucket
+        assert data["rate_limit_remaining"] == 5  # a full bucket, held to the keyless 5 per 30 s
 
     async def test_remaining_reads_the_gateway_bucket(
         self, client: AsyncClient, auth_headers: dict, enrichment_source: EnrichmentSource
@@ -201,7 +201,7 @@ class TestGetHealth:
 
         await source_gateway(enrichment_source, None).acquire()
         resp = await client.get(f"/api/enrichment/sources/{enrichment_source.id}/health", headers=auth_headers)
-        assert resp.json()["rate_limit_remaining"] == 49
+        assert resp.json()["rate_limit_remaining"] == 4
 
 
 class TestBudgetUsage:

@@ -255,13 +255,33 @@ def test_nvd_runs_at_its_keyless_limit_unless_keyed():
     keyless, keyed = source_gateway(row, None), source_gateway(row, "nvd-key")
     assert (keyless.capacity, keyless.period) == (5, 30)
     assert (keyed.capacity, keyed.period) == (50, 30)
-    # An admin's own rate stands with or without a key.
+    # An admin's own rate stands, within the limit of the quota in use.
     tuned = _row("nvd", rate_limit_config={"requests_per_period": 20, "period_seconds": 30})
-    assert source_gateway(tuned, None).capacity == source_gateway(tuned, "nvd-key").capacity == 20
+    assert source_gateway(tuned, "nvd-key").capacity == 20
+    assert (source_gateway(tuned, None).capacity, source_gateway(tuned, None).period) == (5, 30)
     # The sweep jobs' pacing fits inside either window.
     from app.intelligence.cve import nvd_request_pace
 
     assert 30 / nvd_request_pace(None) <= 5 and 30 / nvd_request_pace("nvd-key") <= 50
+
+
+@pytest.mark.parametrize(
+    ("rate", "api_key", "runs_at"),
+    [
+        ((20, 30), None, (5, 30)),  # keyless, same period: the keyless ceiling
+        ((4, 30), None, (4, 30)),  # under it: as saved
+        ((20, 60), None, (10, 60)),  # another period: the ceiling's rate over it
+        ((10, 60), None, (10, 60)),  # the ceiling's rate exactly
+        ((1, 1), None, (5, 30)),  # too short a period for one request: the ceiling
+        ((80, 30), "nvd-key", (50, 30)),  # keyed: the keyed ceiling
+        ((200, 120), "nvd-key", (200, 120)),
+        ((300, 120), "nvd-key", (200, 120)),
+    ],
+)
+def test_a_stored_rate_never_exceeds_the_ceiling_in_use(rate, api_key, runs_at):
+    row = _row("nvd", rate_limit_config={"requests_per_period": rate[0], "period_seconds": rate[1]})
+    gateway = source_gateway(row, api_key)
+    assert (gateway.capacity, gateway.period) == runs_at
 
 
 async def test_catalog_job_gateway_uses_its_row(db_session):

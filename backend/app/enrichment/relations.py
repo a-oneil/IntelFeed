@@ -16,8 +16,8 @@ created. Then:
   answer once the entity exists (unless the output doesn't ``hold``: then it
   is dropped);
 - a target the source no longer names is withdrawn: its claim is deleted, and
-  the connection with it when no other source's claim holds it and it is one
-  this path made.
+  the connection with it when no other source's claim holds it, it is one
+  this path made, and it is still at the ``probable`` this path gave it.
 
 Each name is one ``entity_relation_claims`` row per source, so a re-run
 changes nothing and one source's withdrawal never touches another's claim.
@@ -202,9 +202,10 @@ async def _assert(db: AsyncSession, claim: EntityRelationClaim, label: str) -> b
     A new row is ``enrichment`` / ``probable``, described by the claim's
     evidence or the source's name. A co-occurrence row the claim matches is
     taken over and lifted to ``probable`` only while it is still ``possible``
-    with no verdict, so ``_retract`` can hand it back exactly as it was. Any
-    other row is left as it is: one corroboration or the adjudicator already
-    raised (or ruled coincidental), and AI, MITRE, analyst and rejected rows."""
+    with no verdict, and keeps its own description, so ``_retract`` can hand
+    it back exactly as it was. Any other row is left as it is: one
+    corroboration or the adjudicator already raised (or ruled coincidental),
+    and AI, MITRE, analyst and rejected rows."""
     from app.services.sector_links import add_target_sector
 
     if _in_sector_junction(claim.entity_type, claim.relation, claim.target_type):
@@ -233,15 +234,16 @@ async def _assert(db: AsyncSession, claim: EntityRelationClaim, label: str) -> b
     if edge.source != "co_occurrence" or edge.confidence != "possible" or edge.adjudication_verdict is not None:
         return False
     edge.source, edge.confidence = EDGE_SOURCE, "probable"
-    edge.description = edge.description or claim.evidence or label
     return True
 
 
 async def _retract(db: AsyncSession, claim: EntityRelationClaim) -> bool:
     """Undo the claim's connection once no other claim holds it. Only what this
     path made goes: a sector row it asserted (back to the rollup's when the
-    entity's own articles carry the sector), an ``enrichment`` row (back to
-    co-occurrence when articles back it). Returns whether anything changed."""
+    entity's own articles carry the sector), an ``enrichment`` row still at
+    ``probable`` (back to co-occurrence when articles back it). One a review
+    has since raised to ``confirmed`` stays as it is: a withdrawal never
+    lowers what someone else raised. Returns whether anything changed."""
     from app.services.sector_links import remove_target_sector
 
     def claims_from(end, other):
@@ -285,7 +287,7 @@ async def _retract(db: AsyncSession, claim: EntityRelationClaim) -> bool:
         return True
 
     edge = await _edge(db, claim)
-    if edge is None or edge.source != EDGE_SOURCE:
+    if edge is None or edge.source != EDGE_SOURCE or edge.confidence != "probable":
         return False
     if edge.evidence_entry_ids:
         edge.source, edge.confidence = "co_occurrence", "possible"

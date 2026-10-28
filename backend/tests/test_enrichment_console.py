@@ -273,9 +273,10 @@ async def test_detail_limits_trend_queue_and_jobs(client, admin_headers, db_sess
     data = resp.json()
 
     assert data["limits"] == {
+        # The stored 40 is above NVD's keyless ceiling: the gateway holds it to 5.
         "rate": {"requests_per_period": 40, "period_seconds": 30},
-        "effective_rate": {"requests_per_period": 40, "period_seconds": 30},
-        "rate_note": None,
+        "effective_rate": {"requests_per_period": 5, "period_seconds": 30},
+        "rate_note": "held to the source's limit",
         "ceiling_per_period": 5,  # keyless: NVD allows 5 per 30 s without a key
         "daily_budget": 100,
         "used_today": 3,
@@ -507,6 +508,42 @@ async def test_set_paused_writes_the_flag_after_the_commit(db_session, _engine, 
     await set_paused(db_session, True)
     await set_paused(db_session, False)
     assert seen == [True, False]
+
+
+async def test_set_paused_leaves_the_flag_at_the_last_change_committed(db_session, monkeypatch):
+    """Two quick toggles: the other one commits between this one's commit and
+    its flag write, so the flag must follow the stored row, not the argument."""
+    import app.enrichment.pause as pause
+
+    sync = pause.sync_pause
+
+    async def toggled_back_first(db):
+        await db.execute(update(SystemSettings).where(SystemSettings.id == 1).values(settings={SETTING: False}))
+        return await sync(db)
+
+    monkeypatch.setattr(pause, "sync_pause", toggled_back_first)
+    await set_paused(db_session, True)
+    assert not await (await get_redis_bytes()).exists(gw.paused_key())
+
+
+async def test_a_hung_redis_holds_the_pause_sync_only_briefly(db_session, monkeypatch):
+    import asyncio
+
+    import app.enrichment.pause as pause
+
+    class Hung:
+        async def set(self, *args):
+            await asyncio.Event().wait()
+
+        delete = set
+
+    async def hung():
+        return Hung()
+
+    await set_paused(db_session, True)
+    monkeypatch.setattr(pause, "FLAG_TIMEOUT", 0.05)
+    monkeypatch.setattr(pause, "get_redis_bytes", hung)
+    assert await asyncio.wait_for(sync_pause(db_session), 5) is True
 
 
 async def test_sync_pause_reads_the_row_not_the_settings_cache(db_session):
