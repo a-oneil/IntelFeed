@@ -709,14 +709,14 @@ private fun ReaderBody(
         }
     }
 
-    // Entity names (and tracked keywords) marked in the text, computed off the main thread once
+    // Entity names (and requirement keywords) marked in the text, computed off the main thread once
     // the linked intelligence has loaded; until then the plain text shows.
-    val terms = remember(state.glossary, state.intel, state.highlightEntities, state.trackedKeywords, state.pirMatches) {
+    val terms = remember(state.glossary, state.intel, state.highlightEntities, state.pirMatches) {
         // The web marks glossary terms first, then entity names outside them (the "Highlight
-        // entities" setting only turns entities off); the app's keywords go last.
+        // entities" setting only turns entities off); requirement keywords go last.
         glossaryTerms(state.glossary) +
             (if (state.highlightEntities) state.intel?.let(::entityTerms).orEmpty() else emptyList()) +
-            keywordTerms(state.trackedKeywords, state.pirMatches)
+            keywordTerms(state.pirMatches)
     }
     val cachedLinked = remember(blocks, terms) {
         val base = blocks

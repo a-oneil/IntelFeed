@@ -195,10 +195,6 @@ interface IntelFeedApi {
         @Query("offset") offset: Int = 0
     ): CursorPage<com.example.intelfeed.data.model.RequirementMatch>
 
-    /** Creates a requirement for everyone on the server (the web's New Requirement). */
-    @POST("api/requirements")
-    suspend fun createRequirement(@Body request: com.example.intelfeed.data.model.CreateRequirementRequest): com.example.intelfeed.data.model.Requirement
-
     @GET("api/entries/priority-unread-count")
     suspend fun getPriorityUnreadCount(): com.example.intelfeed.data.model.PriorityUnreadCount
 

@@ -9,13 +9,13 @@ import org.junit.Test
 
 /** Priority scores run 0–10 and the Radar threshold sits around 8 — every queue entry clears it. */
 class PriorityAlertScoreTest {
-    @Test fun alertCutOffIsTheRedBand() {
-        assertEquals(CyberRed, scoreColor(IntelNotificationWorker.PRIORITY_ALERT_SCORE))
-        assertTrue(scoreColor(IntelNotificationWorker.PRIORITY_ALERT_SCORE - 0.1) != CyberRed)
+    @Test fun defaultAlertCutOffIsTheRedBand() {
+        assertEquals(CyberRed, scoreColor(PriorityAlerts.DEFAULT_CUTOFF))
+        assertTrue(scoreColor(PriorityAlerts.DEFAULT_CUTOFF - 0.1) != CyberRed)
     }
 
     @Test fun anEntryJustOverTheRadarThresholdNeitherAlertsNorGoesRed() {
-        assertTrue(8.0 < IntelNotificationWorker.PRIORITY_ALERT_SCORE)
+        assertTrue(8.0 < PriorityAlerts.DEFAULT_CUTOFF)
         assertTrue(scoreColor(8.0) != CyberRed)
     }
 

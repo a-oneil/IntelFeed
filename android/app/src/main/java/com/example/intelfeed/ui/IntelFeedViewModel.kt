@@ -161,8 +161,6 @@ data class IntelFeedUiState(
     val searchLoadingMore: Boolean = false,
     val searchSuggestions: List<SearchSuggestion> = emptyList(),
     val recentSearches: List<String> = emptyList(),
-    // Tracked keywords (kept on this device): highlighted in articles and checked by the alerts.
-    val trackedKeywords: List<String> = emptyList(),
     val savedSearches: List<SavedSearch> = emptyList(),
 
     // Themes & Color Schema
@@ -258,9 +256,6 @@ class IntelFeedViewModel(
         }
         viewModelScope.launch {
             userPreferences.recentSearches.collect { recent -> _uiState.update { it.copy(recentSearches = recent) } }
-        }
-        viewModelScope.launch {
-            userPreferences.trackedKeywords.collect { list -> _uiState.update { it.copy(trackedKeywords = list) } }
         }
         viewModelScope.launch {
             userPreferences.feedDensity.collect { density -> _uiState.update { it.copy(feedDensity = density) } }
@@ -486,14 +481,13 @@ class IntelFeedViewModel(
         val sessionExpired = previous.isLoggedIn && !userInitiatedLogout
         userInitiatedLogout = false
         // Device preferences survive sign-out. Their flows are distinctUntilChanged and don't emit
-        // again, so dropping them here showed defaults (list layout, Hide Read off, no tracked
-        // keywords) until the app restarted.
+        // again, so dropping them here showed defaults (list layout, Hide Read off) until the app
+        // restarted.
         _uiState.value = IntelFeedUiState(
             sessionChecked = true,
             serverUrl = previous.serverUrl,
             username = previous.username,
             recentSearches = previous.recentSearches,
-            trackedKeywords = previous.trackedKeywords,
             feedDensity = previous.feedDensity,
             feedLayout = previous.feedLayout,
             feedHideRead = previous.feedHideRead,
@@ -1342,60 +1336,18 @@ class IntelFeedViewModel(
         }
     }
 
-    // KEYWORDS (tracked on this device)
-
-    /**
-     * Tracks [keyword] on this device. With [alsoOnServer] it's also added as an intelligence
-     * requirement (shared with everyone on the server, like the website's), unless one already
-     * lists that keyword.
-     */
-    fun addKeyword(keyword: String, alsoOnServer: Boolean = false) {
-        viewModelScope.launch {
-            val clean = keyword.trim()
-            if (clean.length < 2) {
-                messenger.show("A keyword needs at least 2 characters")
-                return@launch
-            }
-            val added = userPreferences.addTrackedKeyword(clean)
-            if (!alsoOnServer) {
-                if (added) messenger.show("Tracking \"$clean\". It's highlighted in articles, and new matches are notified if alerts are on.")
-                else messenger.show("\"$clean\" is already tracked (or you've reached ${UserPreferences.MAX_KEYWORDS} keywords)")
-                return@launch
-            }
-            val existing = repository.getRequirements().getOrNull()
-                ?.firstOrNull { req -> req.keywords.any { it.equals(clean, ignoreCase = true) } }
-            if (existing != null) {
-                messenger.show("${if (added) "Tracking \"$clean\". " else ""}The server requirement \"${existing.title}\" already covers it.")
-                return@launch
-            }
-            repository.createRequirement(title = clean, keywords = listOf(clean)).fold(
-                onSuccess = { messenger.show(if (added) "Tracking \"$clean\" here and as a server requirement" else "Added \"$clean\" as a server requirement") },
-                onFailure = { messenger.showError("add the server requirement", it) }
-            )
-        }
-    }
-
     fun openRequirements() = navigate(Route.Requirements)
 
-    fun removeKeyword(keyword: String) {
-        viewModelScope.launch {
-            userPreferences.removeTrackedKeyword(keyword)
-            messenger.show("Stopped tracking \"$keyword\"", "Undo") { addKeyword(keyword) }
-        }
-    }
-
     /**
-     * Articles containing [keyword] as a phrase, on the Search tab (from the drawer or a highlight
-     * in an article). [newestFirst] is for a keyword alert: search is relevance-ordered by default,
-     * which could put the new articles the alert was about below older ones.
+     * Articles containing [keyword] as a phrase, on the Search tab (from a highlight in an article).
      */
-    fun searchKeyword(keyword: String, newestFirst: Boolean = false) {
+    fun searchKeyword(keyword: String) {
         val clean = keyword.trim().replace("\"", "")
         if (clean.isEmpty()) return
         while (backStack.size > 1) backStack.removeAt(backStack.lastIndex)
         setAppTab(AppTab.SEARCH)
         _uiState.update { it.copy(searchScope = SearchScope.ARTICLES) }
-        searchUnified(if (newestFirst) "\"$clean\" sort:newest" else "\"$clean\"")
+        searchUnified("\"$clean\"")
     }
 
     /** Runs [query] as typed on the Search tab (articles), from the home screen. */

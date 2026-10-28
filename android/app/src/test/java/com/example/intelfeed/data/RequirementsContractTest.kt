@@ -1,20 +1,15 @@
 package com.example.intelfeed.data
 
-import com.example.intelfeed.data.model.CreateRequirementRequest
 import com.example.intelfeed.data.model.Requirement
 import com.example.intelfeed.data.network.ApiJson
 import com.example.intelfeed.data.network.IntelFeedApi
 import com.example.intelfeed.ui.screens.RequirementsViewModel
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 import retrofit2.Retrofit
@@ -73,22 +68,6 @@ class RequirementsContractTest {
         assertEquals("e9", m.entryId)
         assertEquals("BIG-IP", m.matchedOn)
         assertEquals("F5 BIG-IP exploited", m.entryTitle)
-    }
-
-    @Test
-    fun createSendsTheWebFormDefaultsAndOmitsAnEmptyDescription() = runTest {
-        ok("""{"id":"r2","title":"donkey","priority":"medium","status":"active","category":"operational","keywords":["donkey"],"match_count":0}""")
-        val created = api.createRequirement(CreateRequirementRequest(title = "donkey", keywords = listOf("donkey")))
-        val req = server.takeRequest()
-        assertEquals("POST", req.method)
-        assertEquals("/api/requirements", req.path)
-        val body = ApiJson.json.parseToJsonElement(req.body.readUtf8()).jsonObject
-        assertEquals(setOf("title", "priority", "category", "keywords"), body.keys)
-        assertEquals("medium", body["priority"]!!.jsonPrimitive.content)
-        assertEquals("operational", body["category"]!!.jsonPrimitive.content)
-        assertEquals("donkey", body["keywords"]!!.jsonArray.single().jsonPrimitive.content)
-        assertEquals("r2", created.id)
-        assertNull(created.lastMatchedAt)
     }
 
     @Test

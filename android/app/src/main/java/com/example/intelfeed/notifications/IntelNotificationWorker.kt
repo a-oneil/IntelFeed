@@ -6,9 +6,6 @@ import androidx.work.WorkerParameters
 import com.example.intelfeed.IntelFeedApplication
 import com.example.intelfeed.data.model.EntryItem
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -21,7 +18,7 @@ class IntelNotificationWorker(
     workerParams: WorkerParameters
 ) : CoroutineWorker(appContext, workerParams) {
 
-    // The periodic check and "Check for updates now" (or a new keyword's first check) can overlap.
+    // The periodic check and "Check for updates now" can overlap.
     // Both would post the same alerts and overwrite each other's saved state, so one runs at a time.
     override suspend fun doWork(): Result = runLock.withLock { check() }
 
@@ -40,8 +37,8 @@ class IntelNotificationWorker(
         // for the app): skip the network work instead of polling the server every 15 minutes.
         if (!IntelNotificationHelper.canPostNotifications(applicationContext)) return Result.success()
 
-        // The saved alert state belongs to one account on one server. After signing in as someone
-        // else, the old keyword baselines made every match of the new account look new.
+        // The saved alert state belongs to one account on one server, so signing in as someone
+        // else starts it fresh.
         val owner = app.authPreferences.getServerUrl() + "|" + app.authPreferences.username.first().orEmpty().lowercase(Locale.ROOT)
         app.userPreferences.claimAlertState(owner)
 
@@ -60,11 +57,7 @@ class IntelNotificationWorker(
         try {
             var syncComplete = true
 
-            // 1. Tracked keywords (kept on the device) first: the user chose them, and the sources
-            // below can take minutes on a slow server (WorkManager stops a run after 10).
-            checkKeywords(app, notified) { firstAlert(it) }
-
-            // 2. Poll Active Campaigns
+            // 1. Poll Active Campaigns
             app.repository.getCampaigns(limit = 10).onSuccess { campaignsPage ->
                 for (campaign in campaignsPage.items) {
                     app.repository.getCampaignEntries(
@@ -89,7 +82,7 @@ class IntelNotificationWorker(
                 }
             }.onFailure { syncComplete = false }
 
-            // 3. Poll Saved Searches
+            // 2. Poll Saved Searches
             app.repository.getSavedSearches().onSuccess { savedSearches ->
                 for (saved in savedSearches) {
                     if ((saved.unreadCount ?: 0) > 0) {
@@ -113,43 +106,58 @@ class IntelNotificationWorker(
                 }
             }.onFailure { syncComplete = false }
 
-            // 4. Poll Priority Queue for Critical Alerts. Scores run 0–10 and everything in the queue
-            // already clears the Radar threshold (around 8), so only the red band alerts.
-            app.repository.getEntries(
-                filter = com.example.intelfeed.data.repository.FeedFilter.PRIORITY_QUEUE,
-                limit = 5
-            ).onSuccess { page ->
-                for (entry in page.items) {
-                    if (entry.isRead) continue
-                    val score = entry.priorityScore ?: 0.0
-                    if (score < PRIORITY_ALERT_SCORE || !isNew(entry)) continue
-                    val scoreText = String.format(Locale.US, "%.1f", score)
-                    val thread = entry.thread
-                    if (thread != null) {
-                        // A story row: its id is "thread:<slug>", not an article id, so open the story.
-                        // Keyed with its last update, so a story that grows again can alert again.
-                        val slug = thread.slug ?: continue
-                        if (!firstAlert("t:$slug:${entry.publishedAt}")) continue
-                        IntelNotificationHelper.postNotification(
-                            context = applicationContext,
-                            id = slug.hashCode(),
-                            title = "Priority story (score $scoreText)",
-                            message = entry.title,
-                            threadSlug = slug,
-                            threadTitle = entry.title
-                        )
-                    } else {
-                        if (!firstAlert("e:${entry.id}")) continue
-                        IntelNotificationHelper.postNotification(
-                            context = applicationContext,
-                            id = entry.id.hashCode(),
-                            title = "Priority intelligence (score $scoreText)",
-                            message = entry.title,
-                            entryId = entry.id
-                        )
-                    }
+            // 3. Poll the Priority Queue: every unread row at or above the user's cut-off. The queue
+            // is ranked highest score first, so the scan stops at the first row below it.
+            val cutoff = app.userPreferences.priorityAlertScore.first()
+            val baselineAt = app.userPreferences.getPriorityAlertBaseline()
+            val rows = mutableListOf<EntryItem>()
+            var scanned = false
+            var cursor: String? = null
+            for (pageNo in 1..PriorityAlerts.MAX_PAGES) {
+                val page = app.repository.getEntries(
+                    filter = com.example.intelfeed.data.repository.FeedFilter.PRIORITY_QUEUE,
+                    cursor = cursor,
+                    limit = PriorityAlerts.PAGE_SIZE
+                ).getOrNull()
+                if (page == null) {
+                    syncComplete = false
+                    break
                 }
-            }.onFailure { syncComplete = false }
+                rows += page.items.filter { (it.priorityScore ?: 0.0) >= cutoff }
+                cursor = page.nextCursor
+                if (page.items.any { (it.priorityScore ?: 0.0) < cutoff } || !page.hasMore || cursor == null) {
+                    scanned = true
+                    break
+                }
+            }
+            // First check, or the cut-off was lowered: record what's already waiting without alerting.
+            val baseline = baselineAt == null || cutoff < baselineAt
+            val outcome = PriorityAlerts.plan(rows, cutoff, notified, baseline)
+            outcome.record.forEach { firstAlert(it) }
+            for (entry in outcome.alerts) {
+                val scoreText = String.format(Locale.US, "%.1f", entry.priorityScore ?: 0.0)
+                val slug = entry.thread?.slug
+                if (slug != null) {
+                    // A story row: its id is "thread:<slug>", not an article id, so open the story.
+                    IntelNotificationHelper.postNotification(
+                        context = applicationContext,
+                        id = slug.hashCode(),
+                        title = "Priority story (score $scoreText)",
+                        message = entry.title,
+                        threadSlug = slug,
+                        threadTitle = entry.title
+                    )
+                } else {
+                    IntelNotificationHelper.postNotification(
+                        context = applicationContext,
+                        id = entry.id.hashCode(),
+                        title = "Priority intelligence (score $scoreText)",
+                        message = entry.title,
+                        entryId = entry.id
+                    )
+                }
+            }
+            if (scanned) app.userPreferences.setPriorityAlertBaseline(cutoff)
 
             // A partial failure must not move the window past alerts the failed request missed.
             if (syncComplete) app.userPreferences.setLastNotificationSyncMs(currentSyncMs)
@@ -167,89 +175,7 @@ class IntelNotificationWorker(
         return Result.success()
     }
 
-    /**
-     * Searches each tracked keyword (as a phrase, from the last two days) and notifies about
-     * unread matches not seen on an earlier check. A keyword's first check only records what's
-     * there. Up to 4 keywords are checked at once: searches take several seconds each on the
-     * server and a worker run is limited to 10 minutes. [notified] holds the alerts already posted
-     * ("e:<entry id>"), so an article another alert covered doesn't alert again; [firstAlert]
-     * records a new one.
-     */
-    private suspend fun checkKeywords(app: IntelFeedApplication, notified: Set<String>, firstAlert: (String) -> Boolean) {
-        val keywords = app.userPreferences.trackedKeywords.first()
-        if (keywords.isEmpty()) return
-        val seen = app.userPreferences.getKeywordSeenIds()
-        val sinceDay = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US)
-            .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
-            .format(java.util.Date(System.currentTimeMillis() - 2 * 24 * 3600_000L))
-        val updated = seen.filterKeys { it in keywords }.toMutableMap()
-        try {
-            for (batch in keywords.chunked(4)) {
-                val results = coroutineScope {
-                    batch.map { keyword ->
-                        async {
-                            // The search index's is:unread filter can lag behind a read-state change.
-                            // Search the phrase once and check each new hit against its current detail.
-                            val matches = app.repository.searchEntries(
-                                KeywordAlerts.query(keyword, sinceDay),
-                                limit = KeywordAlerts.RESULTS_PER_CHECK
-                            ).getOrNull()?.items
-                            val readState = matches?.let { m ->
-                                KeywordAlerts.toLookUp(m.map { it.id }, seen[keyword])
-                                    .associateWith { id -> app.repository.getEntryDetail(id).getOrNull()?.isRead }
-                            }.orEmpty()
-                            Triple(keyword, matches, readState)
-                        }
-                    }.awaitAll()
-                }
-                for ((keyword, matches, readState) in results) {
-                    matches ?: continue // failed search: try again next time, without forgetting what was seen
-                    val ids = matches.map { it.id }
-                    val outcome = KeywordAlerts.evaluate(
-                        ids, seen[keyword], readState,
-                        alreadyAlerted = ids.filterTo(HashSet()) { "e:$it" in notified }
-                    )
-                    updated[keyword] = outcome.seen
-                    if (outcome.alert.isEmpty()) continue
-                    outcome.alert.forEach { firstAlert("e:$it") }
-                    postKeywordAlert(keyword, outcome.alert.map { id -> matches.first { it.id == id } })
-                }
-            }
-        } finally {
-            // Saved even when the run is stopped part-way (lost network, time limit, a newer run
-            // replacing it): alerts already posted must not be posted again next time.
-            withContext(NonCancellable) { runCatching { app.userPreferences.setKeywordSeenIds(updated) } }
-        }
-    }
-
-    /** One notification per keyword; [articles] are the new unread matches, newest first. */
-    private fun postKeywordAlert(keyword: String, articles: List<EntryItem>) {
-        val id = "keyword:$keyword".hashCode()
-        // An earlier alert for this keyword that hasn't been opened is added to rather than replaced
-        // with a smaller count, and the tap then opens all the keyword's newest matches.
-        val stillShowing = IntelNotificationHelper.isShowing(applicationContext, id)
-        val first = articles.first()
-        val single = articles.size == 1 && !stillShowing
-        val count = articles.size
-        val message = when {
-            single -> first.displayTitle
-            stillShowing -> "$count more new ${if (count == 1) "article mentions" else "articles mention"} \"$keyword\" · ${first.displayTitle}"
-            else -> "$count new articles mention \"$keyword\" · ${first.displayTitle}"
-        }
-        IntelNotificationHelper.postNotification(
-            context = applicationContext,
-            id = id,
-            title = "Keyword: $keyword",
-            message = message,
-            entryId = if (single) first.id else null,
-            keyword = if (single) null else keyword
-        )
-    }
-
     companion object {
-        /** The "critical" band, the same cut-off as the red score badge (EntryCards.scoreColor). */
-        const val PRIORITY_ALERT_SCORE = 9.5
-
         private val runLock = Mutex()
     }
 }

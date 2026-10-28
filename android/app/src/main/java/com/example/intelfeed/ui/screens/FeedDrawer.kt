@@ -4,7 +4,6 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -34,7 +33,6 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.MarkEmailUnread
-import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.filled.RssFeed
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.SavedSearch
@@ -46,7 +44,6 @@ import androidx.compose.material.icons.filled.TrackChanges
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -66,7 +63,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -121,10 +117,6 @@ fun FeedDrawerSheet(
     // Saved searches are listed (with their unread counts) when this is set.
     onOpenSavedSearch: ((SavedSearch) -> Unit)? = null,
     onDeleteSavedSearch: ((SavedSearch) -> Unit)? = null,
-    // Tracked keywords: the section shows when onKeywordSearch is set.
-    onKeywordSearch: ((String) -> Unit)? = null,
-    onAddKeyword: (keyword: String, alsoOnServer: Boolean) -> Unit = { _, _ -> },
-    onRemoveKeyword: (String) -> Unit = {},
     // The server's intelligence requirements (shared keyword matching). Row hidden when null.
     onOpenRequirements: (() -> Unit)? = null,
     // Add Feed. The button is hidden when onDiscoverFeeds is null.
@@ -135,8 +127,6 @@ fun FeedDrawerSheet(
     var expanded by rememberSaveable { mutableStateOf(setOf<String>()) }
     var feedQuery by rememberSaveable { mutableStateOf("") }
     var showAddFeedDialog by rememberSaveable { mutableStateOf(false) }
-    var showAddKeyword by rememberSaveable { mutableStateOf(false) }
-    var keywordToRemove by rememberSaveable { mutableStateOf<String?>(null) }
     var searchToDelete by remember { mutableStateOf<SavedSearch?>(null) }
     val scoped = uiState.selectedCategoryId != null || uiState.selectedFeedId != null
 
@@ -185,53 +175,6 @@ fun FeedDrawerSheet(
 
     val strings = LocalStrings.current
 
-    if (showAddKeyword) {
-        var text by rememberSaveable { mutableStateOf("") }
-        var alsoOnServer by rememberSaveable { mutableStateOf(false) }
-        AlertDialog(
-            onDismissRequest = { showAddKeyword = false },
-            title = { Text(strings.drawerTrackKeyword) },
-            text = {
-                Column {
-                    Text(
-                        "A word or phrase to watch for. It's highlighted wherever it appears in an article, and if background alerts are on you're notified when a new article mentions it. Your keyword list is kept on this device.",
-                        fontSize = 13.sp,
-                        color = TextMuted
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    OutlinedTextField(value = text, onValueChange = { text = it }, singleLine = true, placeholder = { Text("e.g. device code phishing") }, modifier = Modifier.fillMaxWidth())
-                    if (onOpenRequirements != null) {
-                        // Opt-in: a requirement is shared with everyone on the server, so it's never created silently.
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp).clip(RoundedCornerShape(8.dp))
-                                .toggleable(value = alsoOnServer, role = Role.Checkbox, onValueChange = { alsoOnServer = it })
-                        ) {
-                            Checkbox(checked = alsoOnServer, onCheckedChange = null)
-                            Spacer(Modifier.width(8.dp))
-                            Column {
-                                Text("Also add as a server requirement", fontSize = 14.sp, color = TextPrimary)
-                                Text("Shared with everyone on your server; the server then tags every matching article, as on the website.", fontSize = 12.sp, color = TextMuted)
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(enabled = text.trim().length >= 2, onClick = { onAddKeyword(text, alsoOnServer); showAddKeyword = false }) { Text(strings.drawerTrack) }
-            },
-            dismissButton = { TextButton(onClick = { showAddKeyword = false }) { Text(strings.drawerCancel) } }
-        )
-    }
-    keywordToRemove?.let { keyword ->
-        AlertDialog(
-            onDismissRequest = { keywordToRemove = null },
-            title = { Text("Stop tracking \"$keyword\"?") },
-            text = { Text("It won't be highlighted or notified any more.") },
-            confirmButton = { TextButton(onClick = { onRemoveKeyword(keyword); keywordToRemove = null }) { Text("Stop tracking") } },
-            dismissButton = { TextButton(onClick = { keywordToRemove = null }) { Text("Cancel") } }
-        )
-    }
     searchToDelete?.let { saved ->
         AlertDialog(
             onDismissRequest = { searchToDelete = null },
@@ -272,7 +215,7 @@ fun FeedDrawerSheet(
                 IconButton(onClick = onOpenSettings) { Icon(Icons.Default.Settings, contentDescription = strings.drawerAccountSettings, tint = TextSecondary) }
             }
 
-            // "Find a feed" sits below the views, keywords and saved searches, so its results used to
+            // "Find a feed" sits below the views, requirements and saved searches, so its results used to
             // appear under the keyboard. Typing scrolls the feed section to the top, and the list
             // stays above the keyboard.
             val listState = rememberLazyListState()
@@ -291,37 +234,9 @@ fun FeedDrawerSheet(
                             onClick = { onFilterSelect(filter) }
                         )
                     }
-                    if (onKeywordSearch != null) {
+                    if (onOpenRequirements != null) {
                         HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = SlateDark700)
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(end = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            SectionLabel(strings.drawerHeaderKeywords)
-                            TextButton(
-                                onClick = { showAddKeyword = true },
-                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp)
-                            ) {
-                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp), tint = CyberBlue)
-                                Spacer(Modifier.width(4.dp))
-                                Text(strings.drawerAdd, fontSize = 12.sp, color = CyberBlue)
-                            }
-                        }
-                        if (uiState.trackedKeywords.isEmpty()) {
-                            Text(
-                                "Track words or phrases: they're highlighted in articles, and new matches can notify you.",
-                                fontSize = 12.sp,
-                                color = TextMuted,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
-                            )
-                        }
-                        uiState.trackedKeywords.forEach { keyword ->
-                            KeywordItem(keyword = keyword, onClick = { onKeywordSearch(keyword) }, onRemove = { keywordToRemove = keyword })
-                        }
-                        if (onOpenRequirements != null) {
-                            DrawerItem(icon = Icons.Default.TrackChanges, title = strings.drawerServerRequirements, isSelected = false, onClick = onOpenRequirements)
-                        }
+                        DrawerItem(icon = Icons.Default.TrackChanges, title = strings.drawerServerRequirements, isSelected = false, onClick = onOpenRequirements)
                     }
                     if (uiState.savedSearches.isNotEmpty() && onOpenSavedSearch != null) {
                         HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = SlateDark700)
@@ -534,24 +449,6 @@ private fun UnreadCount(count: Int) {
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(horizontal = 7.dp, vertical = 1.dp)
         )
-    }
-}
-
-/** A tracked keyword: tap searches for it; the ✕ stops tracking it (after a confirmation). */
-@Composable
-private fun KeywordItem(keyword: String, onClick: () -> Unit, onRemove: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .clickable(onClickLabel = "Search for $keyword", onClick = onClick)
-            .padding(start = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(Icons.AutoMirrored.Filled.Label, contentDescription = null, tint = CyberAmber, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.width(12.dp))
-        Text(keyword, style = MaterialTheme.typography.bodyMedium, color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-        IconButton(onClick = onRemove) { Icon(Icons.Default.Close, contentDescription = "Stop tracking $keyword", tint = TextMuted, modifier = Modifier.size(18.dp)) }
     }
 }
 

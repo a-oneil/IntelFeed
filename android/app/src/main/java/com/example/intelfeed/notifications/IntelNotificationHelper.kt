@@ -34,15 +34,12 @@ object IntelNotificationHelper {
     const val EXTRA_ROUTE_CAMPAIGN_NAME = "route_campaign_name"
     const val EXTRA_ROUTE_THREAD_SLUG = "route_thread_slug"
     const val EXTRA_ROUTE_THREAD_TITLE = "route_thread_title"
-    const val EXTRA_ROUTE_KEYWORD = "route_keyword"
 
     /** Where a notification tap should go, after validation by the private notification target. */
     sealed interface Route {
         data class Entry(val id: String) : Route
         data class Campaign(val id: String, val name: String?) : Route
         data class Thread(val slug: String, val title: String?) : Route
-        /** Articles mentioning a tracked keyword (a search). */
-        data class Keyword(val keyword: String) : Route
     }
 
     private val ID_PATTERN = Regex("^[A-Za-z0-9-]{1,64}$")
@@ -60,8 +57,6 @@ object IntelNotificationHelper {
         text(EXTRA_ROUTE_ENTRY_ID)?.takeIf { ID_PATTERN.matches(it) }?.let { return Route.Entry(it) }
         text(EXTRA_ROUTE_THREAD_SLUG)?.takeIf { SLUG_PATTERN.matches(it) }?.let { return Route.Thread(it, text(EXTRA_ROUTE_THREAD_TITLE)) }
         text(EXTRA_ROUTE_CAMPAIGN_ID)?.takeIf { ID_PATTERN.matches(it) }?.let { return Route.Campaign(it, text(EXTRA_ROUTE_CAMPAIGN_NAME)) }
-        // A keyword only ever becomes a phrase search in the app; no control characters, 100 chars max.
-        text(EXTRA_ROUTE_KEYWORD)?.takeIf { k -> k.length <= 100 && k.none { it.isISOControl() } }?.let { return Route.Keyword(it) }
         return null
     }
 
@@ -71,13 +66,6 @@ object IntelNotificationHelper {
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return false
         return NotificationManagerCompat.from(context).areNotificationsEnabled()
-    }
-
-    /** True while notification [id] is still in the status bar (posted, and not opened or dismissed). */
-    fun isShowing(context: Context, id: Int): Boolean = try {
-        context.getSystemService(NotificationManager::class.java)?.activeNotifications?.any { it.id == id } == true
-    } catch (_: RuntimeException) {
-        false
     }
 
     fun createNotificationChannel(context: Context) {
@@ -138,8 +126,7 @@ object IntelNotificationHelper {
         campaignId: String? = null,
         campaignName: String? = null,
         threadSlug: String? = null,
-        threadTitle: String? = null,
-        keyword: String? = null
+        threadTitle: String? = null
     ) {
         if (!canPostNotifications(context)) return
 
@@ -150,7 +137,6 @@ object IntelNotificationHelper {
             campaignName?.let { putExtra(EXTRA_ROUTE_CAMPAIGN_NAME, it) }
             threadSlug?.let { putExtra(EXTRA_ROUTE_THREAD_SLUG, it) }
             threadTitle?.let { putExtra(EXTRA_ROUTE_THREAD_TITLE, it) }
-            keyword?.let { putExtra(EXTRA_ROUTE_KEYWORD, it) }
         }
 
         val pendingIntent = PendingIntent.getActivity(
@@ -183,7 +169,7 @@ object IntelNotificationHelper {
             context = context,
             id = 9999,
             title = "IntelFeed Alert System Active",
-            message = "Tracking active campaigns, saved keyword searches, and priority intelligence in the background."
+            message = "Tracking active campaigns, saved searches, and priority intelligence in the background."
         )
     }
 }

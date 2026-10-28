@@ -51,7 +51,6 @@ import com.example.intelfeed.data.model.RequirementMatch
 import com.example.intelfeed.data.repository.IntelFeedRepository
 import com.example.intelfeed.theme.CyberAmber
 import com.example.intelfeed.theme.CyberBlue
-import com.example.intelfeed.theme.CyberGreen
 import com.example.intelfeed.theme.CyberRed
 import com.example.intelfeed.theme.SlateDark900
 import com.example.intelfeed.theme.TextMuted
@@ -143,7 +142,6 @@ class RequirementsViewModel(private val repository: IntelFeedRepository) : ViewM
 @Composable
 fun RequirementsScreen(
     viewModel: RequirementsViewModel,
-    trackedKeywords: List<String>,
     onBack: () -> Unit,
     onOpenEntry: (String, List<String>) -> Unit,
     onSearchKeyword: (String) -> Unit
@@ -178,7 +176,6 @@ fun RequirementsScreen(
                             matches = state.matches[req.id],
                             matchesLoading = req.id in state.matchesLoading,
                             matchesError = state.matchesError[req.id],
-                            trackedKeywords = trackedKeywords,
                             onToggle = { viewModel.toggle(req.id) },
                             onOpenEntry = onOpenEntry,
                             onSearchKeyword = onSearchKeyword
@@ -198,7 +195,6 @@ private fun RequirementCard(
     matches: List<RequirementMatch>?,
     matchesLoading: Boolean,
     matchesError: String?,
-    trackedKeywords: List<String>,
     onToggle: () -> Unit,
     onOpenEntry: (String, List<String>) -> Unit,
     onSearchKeyword: (String) -> Unit
@@ -240,9 +236,7 @@ private fun RequirementCard(
                 val shown = if (expanded) requirement.keywords else requirement.keywords.take(8)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     shown.forEach { kw ->
-                        // Keywords you also track on this device are marked, so it's clear which alert you'll get.
-                        val mine = trackedKeywords.any { it.equals(kw, ignoreCase = true) }
-                        Pill(kw, if (mine) CyberGreen else CyberAmber, onClick = { onSearchKeyword(kw) })
+                        Pill(kw, CyberAmber, onClick = { onSearchKeyword(kw) })
                     }
                     if (!expanded && requirement.keywords.size > shown.size) Pill("+${requirement.keywords.size - shown.size} more", TextMuted, onClick = onToggle)
                 }

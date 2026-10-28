@@ -6,11 +6,11 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.example.intelfeed.notifications.PriorityAlerts
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
-import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
@@ -40,18 +40,20 @@ class UserPreferences(private val context: Context) {
         private val KEY_FEED_AUTO_READ = booleanPreferencesKey("feed_auto_read")
         private val KEY_FEED_SORT = stringPreferencesKey("feed_sort")
         private val KEY_HIGHLIGHT_ENTITIES = booleanPreferencesKey("highlight_entities")
-        private val KEY_TRACKED_KEYWORDS = stringPreferencesKey("tracked_keywords")
-        // JSON {keyword: [entry ids already notified or seen]}, for keyword alerts.
-        private val KEY_KEYWORD_SEEN = stringPreferencesKey("keyword_seen_ids")
-        const val MAX_KEYWORDS = 50
-        private const val MAX_SEEN_PER_KEYWORD = 200
+        // Left by versions that tracked keywords on the device; claimAlertState removes them.
+        private val LEGACY_KEYWORD_KEYS = listOf(stringPreferencesKey("tracked_keywords"), stringPreferencesKey("keyword_seen_ids"))
         private val KEY_NOTIFICATIONS_ENABLED = booleanPreferencesKey("notifications_enabled")
         private val KEY_LAST_NOTIFICATION_SYNC_MS = longPreferencesKey("last_notification_sync_ms")
-        // Campaign, saved-search and priority alerts already posted ("e:<entry id>", "t:<slug>:<time>").
+        // Campaign, saved-search and priority alerts already posted ("e:<entry id>", "t:<story slug>").
+        // A story records its articles too, so the cap leaves room for them.
         private val KEY_NOTIFIED_ALERTS = stringPreferencesKey("notified_alert_keys")
-        private const val MAX_NOTIFIED_ALERTS = 500
+        private const val MAX_NOTIFIED_ALERTS = 3000
         // "<server>|<username>" the alert state above belongs to (see claimAlertState).
         private val KEY_ALERT_STATE_OWNER = stringPreferencesKey("alert_state_owner")
+        // Lowest priority score that notifies (Settings), and the cut-off the queue was last
+        // recorded at without alerting (see IntelNotificationWorker).
+        private val KEY_PRIORITY_ALERT_SCORE = floatPreferencesKey("priority_alert_score")
+        private val KEY_PRIORITY_ALERT_BASELINE = floatPreferencesKey("priority_alert_baseline")
         private val KEY_THEME_ID = stringPreferencesKey("theme_id")
         private val KEY_THEME_NAME = stringPreferencesKey("theme_name")
         private val KEY_THEME_SOURCE = stringPreferencesKey("theme_source")
@@ -174,57 +176,6 @@ class UserPreferences(private val context: Context) {
         context.dataStore.edit { it[KEY_HIGHLIGHT_ENTITIES] = enabled }
     }
 
-    /**
-     * The user's tracked keywords (phrases), kept on this device: highlighted in articles, listed
-     * in the drawer, and checked by the background alerts. Oldest first.
-     */
-    val trackedKeywords: Flow<List<String>> = context.dataStore.data
-        .map { prefs -> prefs[KEY_TRACKED_KEYWORDS]?.split(RECENT_SEPARATOR)?.filter { it.isNotBlank() } ?: emptyList() }
-        .distinctUntilChanged()
-
-    /** Adds [keyword] (trimmed, spaces collapsed) unless it's already tracked in any case. Returns false if not added. */
-    suspend fun addTrackedKeyword(keyword: String): Boolean {
-        val clean = keyword.trim().replace(Regex("\\s+"), " ").replace(RECENT_SEPARATOR, "")
-        if (clean.length < 2 || clean.length > 100) return false
-        var added = false
-        context.dataStore.edit { prefs ->
-            val current = prefs[KEY_TRACKED_KEYWORDS]?.split(RECENT_SEPARATOR)?.filter { it.isNotBlank() } ?: emptyList()
-            if (current.size < MAX_KEYWORDS && current.none { it.equals(clean, ignoreCase = true) }) {
-                prefs[KEY_TRACKED_KEYWORDS] = (current + clean).joinToString(RECENT_SEPARATOR)
-                added = true
-            }
-        }
-        return added
-    }
-
-    /** Stops tracking [keyword] and forgets its alert history, so tracking it again starts fresh. */
-    suspend fun removeTrackedKeyword(keyword: String) {
-        val serializer = MapSerializer(String.serializer(), ListSerializer(String.serializer()))
-        context.dataStore.edit { prefs ->
-            val current = prefs[KEY_TRACKED_KEYWORDS]?.split(RECENT_SEPARATOR)?.filter { it.isNotBlank() } ?: emptyList()
-            prefs[KEY_TRACKED_KEYWORDS] = current.filterNot { it.equals(keyword, ignoreCase = true) }.joinToString(RECENT_SEPARATOR)
-            prefs[KEY_KEYWORD_SEEN]?.let { raw ->
-                val seen = runCatching { Json.decodeFromString(serializer, raw) }.getOrDefault(emptyMap())
-                prefs[KEY_KEYWORD_SEEN] = Json.encodeToString(serializer, seen.filterKeys { !it.equals(keyword, ignoreCase = true) })
-            }
-        }
-    }
-
-    /** Entry ids already seen for each keyword by the background alerts. */
-    suspend fun getKeywordSeenIds(): Map<String, List<String>> {
-        val raw = context.dataStore.data.first()[KEY_KEYWORD_SEEN] ?: return emptyMap()
-        return runCatching {
-            Json.decodeFromString(MapSerializer(String.serializer(), ListSerializer(String.serializer())), raw)
-        }.getOrDefault(emptyMap())
-    }
-
-    suspend fun setKeywordSeenIds(seen: Map<String, List<String>>) {
-        val trimmed = seen.mapValues { (_, ids) -> ids.takeLast(MAX_SEEN_PER_KEYWORD) }
-        context.dataStore.edit {
-            it[KEY_KEYWORD_SEEN] = Json.encodeToString(MapSerializer(String.serializer(), ListSerializer(String.serializer())), trimmed)
-        }
-    }
-
     /** Most recent first. */
     val recentSearches: Flow<List<String>> = context.dataStore.data
         .map { prefs -> prefs[KEY_RECENT_SEARCHES]?.split(RECENT_SEPARATOR)?.filter { it.isNotBlank() } ?: emptyList() }
@@ -244,13 +195,30 @@ class UserPreferences(private val context: Context) {
         context.dataStore.edit { it.remove(KEY_RECENT_SEARCHES) }
     }
 
-    /** Whether background notifications for campaigns, tracked keywords, and priority alerts are enabled. */
+    /** Whether background notifications for campaigns, saved searches, and priority alerts are enabled. */
     val notificationsEnabled: Flow<Boolean> = context.dataStore.data
         .map { it[KEY_NOTIFICATIONS_ENABLED] ?: true }
         .distinctUntilChanged()
 
     suspend fun setNotificationsEnabled(enabled: Boolean) {
         context.dataStore.edit { it[KEY_NOTIFICATIONS_ENABLED] = enabled }
+    }
+
+    /** Unread Priority Queue items scoring at least this notify. Default 9.5 (the red band). */
+    val priorityAlertScore: Flow<Double> = context.dataStore.data
+        .map { PriorityAlerts.clampCutoff(it[KEY_PRIORITY_ALERT_SCORE]?.toDouble() ?: PriorityAlerts.DEFAULT_CUTOFF) }
+        .distinctUntilChanged()
+
+    suspend fun setPriorityAlertScore(score: Double) {
+        context.dataStore.edit { it[KEY_PRIORITY_ALERT_SCORE] = PriorityAlerts.clampCutoff(score).toFloat() }
+    }
+
+    /** The cut-off the queue was last recorded at, or null before the first check. */
+    suspend fun getPriorityAlertBaseline(): Double? =
+        context.dataStore.data.first()[KEY_PRIORITY_ALERT_BASELINE]?.toDouble()
+
+    suspend fun setPriorityAlertBaseline(cutoff: Double) {
+        context.dataStore.edit { it[KEY_PRIORITY_ALERT_BASELINE] = cutoff.toFloat() }
     }
 
     suspend fun getLastNotificationSyncMs(): Long {
@@ -276,20 +244,20 @@ class UserPreferences(private val context: Context) {
     }
 
     /**
-     * Ties the background alert state (keyword baselines, posted alerts, last check time) to
+     * Ties the background alert state (posted alerts, priority baseline, last check time) to
      * [owner], the signed-in server and user. When the owner changes, that state is dropped, so a
-     * different account starts with fresh keyword baselines instead of alerting about every match.
-     * State saved before owners were recorded is kept and adopted.
+     * different account starts fresh. State saved before owners were recorded is kept and adopted.
      */
     suspend fun claimAlertState(owner: String) {
         context.dataStore.edit { prefs ->
             val previous = prefs[KEY_ALERT_STATE_OWNER]
             if (previous != null && previous != owner) {
-                prefs.remove(KEY_KEYWORD_SEEN)
                 prefs.remove(KEY_NOTIFIED_ALERTS)
+                prefs.remove(KEY_PRIORITY_ALERT_BASELINE)
                 prefs.remove(KEY_LAST_NOTIFICATION_SYNC_MS)
             }
             if (previous != owner) prefs[KEY_ALERT_STATE_OWNER] = owner
+            LEGACY_KEYWORD_KEYS.forEach { if (it in prefs) prefs.remove(it) }
         }
     }
 
