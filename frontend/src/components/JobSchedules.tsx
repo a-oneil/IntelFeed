@@ -11,7 +11,13 @@ import { Chip } from "./primitives";
 import styles from "./JobSchedules.module.css";
 import { AsyncStateLoading } from "@/components/AsyncState";
 
-export default function JobSchedules() {
+export default function JobSchedules({
+  onOpenEnrichment,
+}: {
+  /** Enrichment jobs belong to their source: their rows here are read-only
+   *  and open the Enrichment console with that source expanded. */
+  onOpenEnrichment: (source: string) => void;
+}) {
   const { data, isLoading } = useJobSchedules();
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
     new Set()
@@ -98,7 +104,15 @@ export default function JobSchedules() {
             </div>
             {expanded && (
               <div className={styles.groupBody}>
-                {catJobs.map((job) => (
+                {catJobs.map((job) =>
+                  job.source ? (
+                    <SourceJobRow
+                      key={job.name}
+                      job={job}
+                      source={job.source}
+                      onOpen={onOpenEnrichment}
+                    />
+                  ) : (
                   <JobRow
                     key={job.name}
                     job={job}
@@ -111,12 +125,40 @@ export default function JobSchedules() {
                     onCancelEdit={() => setEditingJob(null)}
                     onChanged={() => setHasChanges(true)}
                   />
-                ))}
+                  )
+                )}
               </div>
             )}
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/** A job owned by an enrichment source: shown for the full picture, edited
+ *  from the source's row in Engine → Enrichment. */
+function SourceJobRow({
+  job,
+  source,
+  onOpen,
+}: {
+  job: JobSchedule;
+  source: string;
+  onOpen: (source: string) => void;
+}) {
+  return (
+    <div className={`${styles.jobRow} ${!job.enabled ? styles.jobDisabled : ""}`}>
+      <div className={styles.jobInfo}>
+        <p className={styles.jobName}>{formatJobName(job.name)}</p>
+        <p className={styles.jobDesc}>{job.description}</p>
+        <div className={styles.jobSchedule}>{job.human_schedule}</div>
+      </div>
+      <div className={styles.jobControls}>
+        <button type="button" className={styles.settingsToggle} onClick={() => onOpen(source)}>
+          Open in Enrichment
+        </button>
+      </div>
     </div>
   );
 }
@@ -304,7 +346,7 @@ function JobRow({
   );
 }
 
-function ScheduleEditor({
+export function ScheduleEditor({
   job,
   onSave,
   onCancel,

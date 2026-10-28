@@ -949,7 +949,7 @@ For email, add a **Run Webhook** to an email relay (recipe 5):
 
 ### Enrichment sources not running
 
-- Is it on (**Settings → Engine → Pipeline**, enrich stage), with a working key and healthy status? A disabled source's jobs report `skipped: source disabled` in the Jobs view.
+- Is it on (**Settings → Engine → Enrichment**), with a working key? A status of **failing** or **needs key** says which; expand the row for the last job error. A disabled source's jobs report `skipped: source disabled`.
 - Errors are in **Settings → Logs** (Tasks).
 - Lower the rate limit if throttled.
 

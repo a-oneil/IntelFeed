@@ -247,7 +247,7 @@ How close two entity mentions are, by paragraph. Formula: `1 / (1 + decay_rate �
 
 ## Enrich stage
 
-Settings → Engine → *enrich* stage panel, and the **Enrichment** browse screen (groups `enrichment` and `api_keys`). Enrichment adds facts from outside sources (NVD, GitHub and others) to entities. See [automation-ai-enrichment.md](automation-ai-enrichment.md).
+Settings → Engine → **Enrichment**, under **Settings** at the bottom of the page (groups `enrichment` and `api_keys`); the *enrich* stage opens the same page. The page lists every source with its status and what it fills; expanding a row shows its limits, outputs (fill rates, backfill) and jobs. Enrichment adds facts from outside sources (NVD, GitHub and others) to entities. See [automation-ai-enrichment.md](automation-ai-enrichment.md).
 
 | Setting | Type / default | What it does |
 |---|---|---|
@@ -256,6 +256,7 @@ Settings → Engine → *enrich* stage panel, and the **Enrichment** browse scre
 | `cve_reenrich_batch_size` | int, `150` | CVEs re-fetched from NVD per `reenrich-cve-nvd` run. |
 | `github_poc_batch_limit` | int, `0` | CVEs searched per `github-poc-scan` run. `0` means 300 with a token, 40 without (GitHub blocks unauthenticated search quickly). |
 | `github_poc_rescan_days` | int, `30` | Days before a CVE is searched again. |
+| `enrichment_paused` | bool, `false` | Refuses every request to outside sources; queued lookups wait and scheduled jobs stop. The page's **Pause enrichment** button sets it. |
 
 ---
 

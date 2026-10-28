@@ -1176,13 +1176,15 @@ Enrichment fills in entity details from outside sources (NVD, EPSS, CISA KEV, Ma
 | PUT | `/api/enrichment/sources/{source_id}` | Admin | Turn a source on or off; change its trigger, key, rate limits, budget or schedule |
 | POST | `/api/enrichment/sources/{source_id}/test` | Admin | Test its key and connection |
 | GET | `/api/enrichment/sources/{source_id}/health` | User | Its current health |
-| GET | `/api/enrichment/budget-summary` | User | Today's budget use per source |
+| GET | `/api/enrichment/console` | Admin | Every source's status, what it fills and why it needs a look, with a summary (`?entity_type=` narrows the list) |
+| GET | `/api/enrichment/sources/{source_type}/detail` | Admin | One source's limits, 24-hour requests, queue, fill rates, backfill gap and jobs |
+| POST | `/api/enrichment/sources/{source_type}/backfill` | Admin | Queue backfill lookups for entities missing the source's first column (`entity_type`, `limit`) |
+| POST | `/api/enrichment/pause` | Admin | Pause or resume every request to outside sources (`{"paused": true}`) |
 | GET | `/api/enrichment/user-overrides` | User | Your own API keys for sources |
 | PUT | `/api/enrichment/user-overrides/{source_id}` | User | Set your own key for a source |
 | DELETE | `/api/enrichment/user-overrides/{source_id}` | User | Go back to the instance key |
 | POST | `/api/enrichment/enrich` | User | Enrich one entity now (`entity_type`, `entity_id`, optional `source_types`); sources that refused are queued to retry and listed in `queued` |
 | GET | `/api/enrichment/results` | Visitor | Saved results for one entity |
-| GET | `/api/enrichment/status` | User | Overall enrichment status |
 
 ---
 

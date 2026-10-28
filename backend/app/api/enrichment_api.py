@@ -14,7 +14,8 @@ from app.models.enrichment import EnrichmentResult, EnrichmentSource, UserEnrich
 from app.models.user import User
 from app.schemas.enrichment import (
     EnrichEntityRequest,
-    EnrichmentBudgetSummaryItem,
+    EnrichmentBackfillRequest,
+    EnrichmentPauseRequest,
     EnrichmentResultResponse,
     EnrichmentSourceResponse,
     EnrichmentSourceUpdate,
@@ -233,28 +234,74 @@ async def get_source_health(
     }
 
 
-@router.get("/budget-summary", response_model=list[EnrichmentBudgetSummaryItem])
-async def get_budget_summary(
-    user: User = Depends(get_current_user),
+# --- Admin: Console (Settings → Engine → Enrichment) ---
+
+
+@router.get("/console")
+async def get_enrichment_console(
+    entity_type: str | None = Query(None, description="Only sources that apply to this entity type, e.g. cve"),
+    user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get daily budget usage for all sources with budgets configured."""
-    result = await db.execute(select(EnrichmentSource).where(EnrichmentSource.daily_budget.isnot(None)))
-    sources = result.scalars().all()
+    """Admin: every source's status, what it fills and why it needs a look, plus
+    a summary (sources on, attention, pause, Redis, the last 24h of activity) and
+    the entity types with their source counts. Sources needing attention sort
+    first, then enabled ones, then by label. The summary and entity types always
+    cover every source; ``entity_type`` filters only ``sources``."""
+    from app.enrichment.console import console
 
-    summaries = []
-    for source in sources:
-        used = await (await _source_gateway(source, db)).used_today()
-        summaries.append(
-            EnrichmentBudgetSummaryItem(
-                source_type=source.source_type,
-                display_name=source.display_name,
-                daily_budget=source.daily_budget,
-                used_today=used,
-                remaining=max(0, source.daily_budget - used),
-            )
-        )
-    return summaries
+    return await console(db, entity_type)
+
+
+@router.get("/sources/{source_type}/detail")
+async def get_enrichment_source_detail(
+    source_type: str = Path(..., description="Source type, e.g. nvd"),
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: one source's limits and use today, 24 hourly request counts, its
+    queue, its outputs with fill rates, the gap a backfill would close, and its
+    jobs' last 30 days."""
+    from app.enrichment.console import detail
+
+    result = await detail(db, source_type)
+    if result is None:
+        raise AppError(code="not_found", message=f"Unknown enrichment source: {source_type}", status_code=404)
+    return result
+
+
+@router.post("/pause")
+async def pause_enrichment(
+    body: EnrichmentPauseRequest,
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: pause or resume every request to outside sources. While paused the
+    gateway refuses each request, queued lookups wait and scheduled jobs stop."""
+    from app.enrichment.pause import set_paused
+
+    await set_paused(db, body.paused)
+    return {"paused": body.paused}
+
+
+@router.post("/sources/{source_type}/backfill")
+async def backfill_enrichment_source(
+    source_type: str = Path(..., description="Lookup source type, e.g. nvd"),
+    body: EnrichmentBackfillRequest = Body(...),
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: queue backfill-lane lookups for the entities missing the source's
+    first column, newest first. Skips entities the source can't look up and ones
+    already waiting in its queue. 400 for a catalog source, a type it doesn't
+    apply to, or a source that is off."""
+    from app.enrichment.console import BackfillError, backfill
+
+    try:
+        queued = await backfill(db, source_type, body.entity_type, body.limit)
+    except BackfillError as e:
+        raise AppError(code=e.code, message=str(e), status_code=400) from e
+    return {"queued": queued}
 
 
 # --- User: API Key Overrides ---
@@ -464,34 +511,3 @@ async def get_enrichment_results(
         .order_by(EnrichmentResult.enriched_at.desc())
     )
     return [EnrichmentResultResponse.model_validate(r) for r in result.scalars().all()]
-
-
-@router.get("/status")
-async def get_enrichment_status(
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Overall enrichment system status."""
-    from sqlalchemy import func
-
-    sources_result = await db.execute(select(EnrichmentSource))
-    sources = sources_result.scalars().all()
-
-    enabled = sum(1 for s in sources if s.is_enabled)
-    healthy = sum(1 for s in sources if s.health_status == "healthy")
-
-    # Count recent enrichment results
-    now = datetime.now(UTC)
-    count_result = await db.execute(
-        select(func.count(EnrichmentResult.id)).where(
-            EnrichmentResult.enriched_at >= now.replace(hour=0, minute=0, second=0)
-        )
-    )
-    today_count = count_result.scalar() or 0
-
-    return {
-        "total_sources": len(sources),
-        "enabled_sources": enabled,
-        "healthy_sources": healthy,
-        "enrichments_today": today_count,
-    }

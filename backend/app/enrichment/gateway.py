@@ -20,7 +20,13 @@ Adapters open clients with ``self.http(...)``; the client's transport
    closes it.
 
 Redis errors before the send raise ``GatewayUnavailable`` and nothing is sent:
-the gateway fails closed.
+the gateway fails closed. While enrichment is paused (``app/enrichment/pause.py``
+sets a Redis flag) every request is refused with ``Paused``, checked in the same
+script, so a pause reaches every worker on its next request.
+
+Each sent request also counts toward ``stats:{source_type}:{YYYYMMDDHH}``, an
+hourly per-source counter (kept 48h) the Enrichment console charts; it is
+written in the same script as the token, so the two never disagree.
 
 The bucket, budget and breaker are keyed per credential, not per source: by
 the adapter's ``shared_key_group`` when it has one (siblings share one key's
@@ -34,7 +40,7 @@ import asyncio
 import hashlib
 import logging
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 
 import httpx
@@ -67,12 +73,18 @@ RETRY_AFTER_CAP = 86400
 
 _DEFAULT_RATE = {"requests_per_period": 100, "period_seconds": 86400}
 
-# Breaker, then bucket + budget, in one step. Returns {code, seconds}:
+#: How long an hourly request counter is kept.
+STATS_TTL = 48 * 3600
+
+# Pause, breaker, then bucket + budget, in one step. Returns {code, seconds}:
 # 0 = sent (token taken, request counted), 1 = no token yet (seconds until
-# one refills), 2 = daily budget used up, 3 = breaker open (seconds left).
-# Only code 0 writes anything.
+# one refills), 2 = daily budget used up, 3 = breaker open (seconds left),
+# 4 = enrichment paused. Only code 0 writes anything.
 _ACQUIRE_LUA = """
 local now = tonumber(ARGV[1])
+if redis.call('EXISTS', KEYS[4]) == 1 then
+    return {4, '0'}
+end
 local open_until = tonumber(redis.call('HGET', KEYS[3], 'open_until') or '0')
 if open_until > now then
     return {3, tostring(open_until - now)}
@@ -98,6 +110,8 @@ redis.call('HSET', KEYS[1], 'tokens', tostring(tokens - 1), 'ts', tostring(now))
 redis.call('EXPIRE', KEYS[1], tonumber(ARGV[5]))
 redis.call('INCR', KEYS[2])
 redis.call('EXPIRE', KEYS[2], 90000)
+redis.call('INCR', KEYS[5])
+redis.call('EXPIRE', KEYS[5], tonumber(ARGV[6]))
 return {0, '0'}
 """
 
@@ -165,9 +179,43 @@ class GatewayUnavailable(GatewayError):
     status = "gateway_unavailable"
 
 
+class Paused(GatewayError):
+    """An admin paused enrichment: no request leaves the box."""
+
+    status = "paused"
+
+
 #: Refusals a scheduled job stops on, keeping what it has done. GatewayUnavailable
 #: is not one: a job that can't check its limits fails.
-SOURCE_REFUSALS = (RateLimited, BudgetExhausted, BreakerOpen)
+SOURCE_REFUSALS = (RateLimited, BudgetExhausted, BreakerOpen, Paused)
+
+
+def paused_key() -> str:
+    """The Redis flag that pauses every gateway while it exists."""
+    return f"{KEY_PREFIX}paused"
+
+
+def stats_key(source_type: str, hour: datetime) -> str:
+    """The counter of requests ``source_type`` sent in the UTC hour ``hour``."""
+    return f"{KEY_PREFIX}stats:{source_type}:{hour.strftime('%Y%m%d%H')}"
+
+
+async def hourly_requests(source_types: list[str], hours: int = 24) -> dict[str, list[int]]:
+    """Requests each source sent per UTC hour, the last ``hours`` hours oldest
+    first (the current hour last). Raises GatewayUnavailable when Redis can't
+    answer."""
+    now = datetime.now(UTC)
+    stamps = [now - timedelta(hours=h) for h in range(hours - 1, -1, -1)]
+    keys = [stats_key(st, t) for st in source_types for t in stamps]
+    if not keys:
+        return {}
+    try:
+        r = await get_redis_bytes()
+        values = await r.mget(keys)
+    except (RedisError, OSError) as e:
+        raise GatewayUnavailable(str(e)) from e
+    counts = [int(v) if v else 0 for v in values]
+    return {st: counts[i * hours : (i + 1) * hours] for i, st in enumerate(source_types)}
 
 
 def parse_retry_after(value: str | None) -> float | None:
@@ -237,21 +285,26 @@ class SourceGateway:
                 r = await get_redis_bytes()
                 code, seconds = await r.eval(
                     _ACQUIRE_LUA,
-                    3,
+                    5,
                     self._key("bucket"),
                     self._budget_key(),
                     self._key("breaker"),
+                    paused_key(),
+                    stats_key(self.source_type, datetime.now(UTC)),
                     repr(time.time()),
                     str(self.capacity),
                     repr(self.capacity / self.period),
                     str(self.daily_budget if self.daily_budget is not None else -1),
                     str(self.period + 60),
+                    str(STATS_TTL),
                 )
             except (RedisError, OSError) as e:
                 raise GatewayUnavailable(f"{self.source_type}: rate limit store unavailable ({e})") from e
             code, seconds = int(code), float(seconds)
             if code == 0:
                 return
+            if code == 4:
+                raise Paused(f"{self.source_type}: enrichment is paused")
             if code == 2:
                 raise BudgetExhausted(f"{self.source_type} daily budget of {self.daily_budget} used up")
             if code == 3:
@@ -309,6 +362,15 @@ class SourceGateway:
             return self.capacity
         refilled = float(tokens) + max(0.0, time.time() - float(ts)) * self.capacity / self.period
         return int(min(self.capacity, refilled))
+
+    async def breaker_open_for(self) -> float:
+        """Seconds until this credential's breaker closes; 0 when it is closed."""
+        try:
+            r = await get_redis_bytes()
+            open_until = await r.hget(self._key("breaker"), "open_until")
+        except (RedisError, OSError) as e:
+            raise GatewayUnavailable(str(e)) from e
+        return max(0.0, float(open_until) - time.time()) if open_until else 0.0
 
     async def used_today(self) -> int:
         """Requests sent today (UTC) under this credential."""

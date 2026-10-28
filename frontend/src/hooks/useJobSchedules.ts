@@ -19,6 +19,8 @@ export interface JobSchedule {
   uses_ai: boolean;
   /** System settings that tune this job, rendered inline on its row. */
   settings_keys?: string[];
+  /** Enrichment jobs name the source that owns them. */
+  source?: string | null;
   enabled: boolean;
   default_schedule: JobScheduleDef;
   effective_schedule: JobScheduleDef;

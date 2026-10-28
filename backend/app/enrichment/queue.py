@@ -13,6 +13,7 @@ success, cached, skipped_low_confidence,        deleted
 source no longer applies
 rate_limited, breaker_open                      due again after ``retry_after``
 budget_exhausted                                due at the next UTC midnight
+paused                                          due again in PAUSE_DEFER; the tick ends
 gateway_unavailable                             put back as it was; the tick ends
 error                                           attempts + 1, exponential backoff;
                                                 ``failed`` after MAX_ATTEMPTS
@@ -22,8 +23,9 @@ A backfill-lane job runs only while its source has spent less than
 BACKFILL_SHARE of its ``daily_budget`` today, so bulk catch-up never starves
 new entities or a person's request; past that it waits for the next UTC day.
 
-A ``running`` row whose claim is older than LEASE is claimable again, so a
-worker that dies mid-tick strands nothing.
+While enrichment is paused (``app/enrichment/pause.py``) a tick claims
+nothing. A ``running`` row whose claim is older than LEASE is claimable again,
+so a worker that dies mid-tick strands nothing.
 """
 
 import logging
@@ -47,7 +49,7 @@ logger = logging.getLogger(__name__)
 LANES = {"manual": 0, "new": 1, "refresh": 2, "backfill": 3}
 
 #: Gateway refusals worth retrying; the manual enrich endpoint queues these.
-RETRYABLE = frozenset({"rate_limited", "breaker_open", "budget_exhausted", "gateway_unavailable"})
+RETRYABLE = frozenset({"rate_limited", "breaker_open", "budget_exhausted", "gateway_unavailable", "paused"})
 
 TICK_SECONDS = 25
 CLAIM_BATCH = 10
@@ -56,6 +58,10 @@ MAX_ATTEMPTS = 5
 #: Seconds before the first retry of an error; doubles per attempt.
 ERROR_BACKOFF = 300
 BACKFILL_SHARE = 0.6
+#: Seconds a job waits when it met the pause; no attempt is counted.
+PAUSE_DEFER = 60
+#: Rows per INSERT when queueing a backfill.
+ENQUEUE_CHUNK = 1000
 
 _DONE = frozenset({"success", "cached", "skipped_low_confidence", "unsupported"})
 
@@ -88,7 +94,6 @@ async def enqueue(
     and revives a ``failed`` row. Runs in a savepoint, so a failure here never
     costs the caller its transaction.
     """
-    priority = LANES[lane]
     query = select(EnrichmentSource.source_type).where(EnrichmentSource.is_enabled == True)  # noqa: E712
     if lane == "new":
         query = query.where(EnrichmentSource.trigger_mode == "auto")
@@ -105,50 +110,100 @@ async def enqueue(
             if not applicable:
                 return []
             due = due_at or datetime.now(UTC)
-            stmt = pg_insert(EnrichmentJob).values(
+            await _upsert(
+                db,
                 [
-                    {
-                        "id": uuid.uuid4(),
-                        "entity_type": entity_type,
-                        "entity_id": uuid.UUID(str(entity_id)),
-                        "entity_value": entity_value,
-                        "source_type": st,
-                        "lane": lane,
-                        "priority": priority,
-                        "status": "queued",
-                        "due_at": due,
-                        "attempts": 0,
-                        "requested_by": requested_by,
-                        "entity_confidence": entity_confidence,
-                        "entity_base_confidence": entity_base_confidence,
-                    }
+                    _row(
+                        entity_type,
+                        entity_id,
+                        entity_value,
+                        st,
+                        lane,
+                        due,
+                        requested_by=requested_by,
+                        entity_confidence=entity_confidence,
+                        entity_base_confidence=entity_base_confidence,
+                    )
                     for st in applicable
-                ]
-            )
-            new, job = stmt.excluded, EnrichmentJob
-            upgrade = new.priority < job.priority
-            revive = job.status == "failed"
-            await db.execute(
-                stmt.on_conflict_do_update(
-                    constraint="uq_enrichment_jobs_entity_source",
-                    set_={
-                        "priority": func.least(job.priority, new.priority),
-                        "lane": case((upgrade, new.lane), else_=job.lane),
-                        "requested_by": case((upgrade, new.requested_by), else_=job.requested_by),
-                        "due_at": func.least(job.due_at, new.due_at),
-                        "entity_value": new.entity_value,
-                        "entity_confidence": func.coalesce(new.entity_confidence, job.entity_confidence),
-                        "entity_base_confidence": func.coalesce(new.entity_base_confidence, job.entity_base_confidence),
-                        "status": case((revive, "queued"), else_=job.status),
-                        "attempts": case((revive, 0), else_=job.attempts),
-                        "updated_at": func.now(),
-                    },
-                )
+                ],
             )
     except SQLAlchemyError:
         logger.exception("Could not queue enrichment for %s/%s", entity_type, entity_value)
         return []
     return applicable
+
+
+def _row(
+    entity_type,
+    entity_id,
+    entity_value,
+    source_type,
+    lane,
+    due,
+    *,
+    requested_by=None,
+    entity_confidence=None,
+    entity_base_confidence=None,
+) -> dict:
+    return {
+        "id": uuid.uuid4(),
+        "entity_type": entity_type,
+        "entity_id": uuid.UUID(str(entity_id)),
+        "entity_value": entity_value,
+        "source_type": source_type,
+        "lane": lane,
+        "priority": LANES[lane],
+        "status": "queued",
+        "due_at": due,
+        "attempts": 0,
+        "requested_by": requested_by,
+        "entity_confidence": entity_confidence,
+        "entity_base_confidence": entity_base_confidence,
+    }
+
+
+async def _upsert(db: AsyncSession, rows: list[dict]) -> None:
+    """Insert job rows; a pair already queued keeps the higher-priority lane
+    (and its requester) and the earlier due_at, and a failed one is revived."""
+    stmt = pg_insert(EnrichmentJob).values(rows)
+    new, job = stmt.excluded, EnrichmentJob
+    upgrade = new.priority < job.priority
+    revive = job.status == "failed"
+    await db.execute(
+        stmt.on_conflict_do_update(
+            constraint="uq_enrichment_jobs_entity_source",
+            set_={
+                "priority": func.least(job.priority, new.priority),
+                "lane": case((upgrade, new.lane), else_=job.lane),
+                "requested_by": case((upgrade, new.requested_by), else_=job.requested_by),
+                "due_at": func.least(job.due_at, new.due_at),
+                "entity_value": new.entity_value,
+                "entity_confidence": func.coalesce(new.entity_confidence, job.entity_confidence),
+                "entity_base_confidence": func.coalesce(new.entity_base_confidence, job.entity_base_confidence),
+                "status": case((revive, "queued"), else_=job.status),
+                "attempts": case((revive, 0), else_=job.attempts),
+                "updated_at": func.now(),
+            },
+        )
+    )
+
+
+async def enqueue_many(
+    db: AsyncSession,
+    entity_type: str,
+    source_type: str,
+    entities: list[tuple[uuid.UUID, str]],
+    *,
+    lane: str = "backfill",
+) -> int:
+    """Queue lookups of many ``(entity_id, entity_value)`` pairs at one source,
+    ENQUEUE_CHUNK rows per INSERT, upserting as ``enqueue`` does. The caller
+    has checked that the source applies. Returns the pairs queued."""
+    now = datetime.now(UTC)
+    for i in range(0, len(entities), ENQUEUE_CHUNK):
+        chunk = entities[i : i + ENQUEUE_CHUNK]
+        await _upsert(db, [_row(entity_type, eid, value, source_type, lane, now) for eid, value in chunk])
+    return len(entities)
 
 
 # ── Dispatcher ───────────────────────────────────────────────────────
@@ -214,6 +269,8 @@ async def _settle(db: AsyncSession, job, status: str, *, retry_after: float | No
     values: dict = {"status": "queued", "claimed_at": None, "last_status": status}
     if status in ("rate_limited", "breaker_open"):
         values["due_at"] = now + timedelta(seconds=max(1.0, retry_after or 0))
+    elif status == "paused":
+        values["due_at"] = now + timedelta(seconds=PAUSE_DEFER)
     elif status in ("budget_exhausted", "backfill_share"):
         values["due_at"] = next_utc_midnight(now)
     elif status != "gateway_unavailable":
@@ -305,7 +362,12 @@ async def _run(db: AsyncSession, job, held: dict) -> str:
 
 async def dispatch_due(db: AsyncSession, budget_seconds: float = TICK_SECONDS) -> dict[str, int]:
     """One dispatcher tick: run due jobs until the queue is drained or
-    ``budget_seconds`` pass. Returns a count per outcome."""
+    ``budget_seconds`` pass. Returns a count per outcome, or ``{"paused": 1}``
+    when enrichment is paused."""
+    from app.enrichment.pause import sync_pause
+
+    if await sync_pause(db):
+        return {"paused": 1}
     deadline = time.monotonic() + budget_seconds
     stats: Counter[str] = Counter()
     held: dict = {}
@@ -322,6 +384,12 @@ async def dispatch_due(db: AsyncSession, budget_seconds: float = TICK_SECONDS) -
             if status == "gateway_unavailable":
                 # Redis is down: every other lookup would be refused too.
                 await _release(db, jobs[i + 1 :])
+                return dict(stats)
+            if status == "paused":
+                # Paused since the tick began: the rest wait as this one does.
+                for rest in jobs[i + 1 :]:
+                    await _settle(db, rest, "paused")
+                    stats["paused"] += 1
                 return dict(stats)
     return dict(stats)
 

@@ -1,8 +1,5 @@
-import EnrichmentSettings from "@/components/EnrichmentSettings";
 import SystemSettings from "@/components/SystemSettings";
 import { usePipelineOverview } from "@/hooks/useEngine";
-
-import { EnrichmentGaps } from "./EnrichmentGaps";
 
 import { AnalyzeStageConfig } from "./AnalyzeStageConfig";
 import { FpNamesPanel } from "./FpNamesPanel";
@@ -43,7 +40,7 @@ export function StagePanel({
         {info && <span className={styles.kind}>{KIND_LABELS[info.kind] ?? info.kind}</span>}
         <span className={styles.live}>LIVE — affects ingestion</span>
         {info && <span className={styles.desc}>{info.description}</span>}
-        {info && info.kind !== "inline" && stage !== "enrich" && (
+        {info && info.kind !== "inline" && (
           <button type="button" className={styles.errLink} onClick={() => onViewErrored(stage)}>
             View {stage.replace(/_/g, " ")} runs below ↓
           </button>
@@ -135,15 +132,6 @@ export function StagePanel({
           </>
         )}
         {(stage === "cooccurrence" || stage === "correlation") && <CorrelationTuningPanel />}
-        {stage === "enrich" && (
-          <>
-            <EnrichmentSettings />
-            {/* Entities missing key fields — one-click AI enrichment, folded onto
-                the stage whose job is to fill them in. */}
-            <EnrichmentGaps />
-            <SystemSettings filterGroups={["enrichment", "api_keys"]} flat />
-          </>
-        )}
         {stage === "automate" && (
           <p className={styles.note}>
             Automation rules run as the pipeline's side channel — manage them on the{" "}

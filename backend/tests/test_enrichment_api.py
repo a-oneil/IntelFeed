@@ -205,7 +205,7 @@ class TestGetHealth:
 
 
 class TestBudgetUsage:
-    async def test_summary_and_list_read_the_gateway(
+    async def test_list_reads_the_gateway(
         self, client: AsyncClient, auth_headers: dict, db_session: AsyncSession, enrichment_source: EnrichmentSource
     ):
         from app.enrichment.registry import source_gateway
@@ -215,17 +215,6 @@ class TestBudgetUsage:
         gateway = source_gateway(enrichment_source, None)
         for _ in range(3):
             await gateway.acquire()
-
-        resp = await client.get("/api/enrichment/budget-summary", headers=auth_headers)
-        assert resp.status_code == 200
-        (item,) = [i for i in resp.json() if i["source_type"] == "nvd"]
-        assert item == {
-            "source_type": "nvd",
-            "display_name": "NVD API 2.0",
-            "daily_budget": 10,
-            "used_today": 3,
-            "remaining": 7,
-        }
 
         resp = await client.get("/api/enrichment/sources", headers=auth_headers)
         (row,) = [s for s in resp.json() if s["source_type"] == "nvd"]
@@ -352,17 +341,6 @@ class TestGetResults:
         )
         assert resp.status_code == 200
         assert resp.json() == []
-
-
-class TestEnrichmentStatus:
-    async def test_get_status(self, client: AsyncClient, auth_headers: dict, enrichment_source: EnrichmentSource):
-        resp = await client.get("/api/enrichment/status", headers=auth_headers)
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "total_sources" in data
-        assert "enabled_sources" in data
-        assert "healthy_sources" in data
-        assert "enrichments_today" in data
 
 
 class TestEnrichEntity:

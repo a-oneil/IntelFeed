@@ -221,6 +221,21 @@ async def test_job_skips_cleanly_when_its_breaker_is_open(
     assert upstream.requests == []
 
 
+@pytest.mark.parametrize(("job", "fragment", "reply", "scope"), SINGLE_DOWNLOAD_JOBS)
+async def test_job_stops_while_enrichment_is_paused(
+    job, fragment, reply, scope, db_session, worker_session, upstream, private_kev_version
+):
+    from app.services.redis_client import get_redis_bytes
+
+    upstream.route(fragment, reply)
+    await (await get_redis_bytes()).set(gw.paused_key(), b"1")
+
+    stats = await job(db_session)
+
+    assert stats["stopped"] == "paused"
+    assert upstream.requests == []
+
+
 async def test_epss_uses_the_source_rows_budget(db_session, worker_session, upstream):
     await _source_row(db_session, "epss", daily_budget=0)
     upstream.route("epss_scores", _epss_csv)

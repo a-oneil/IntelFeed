@@ -2818,14 +2818,6 @@ export interface EnrichmentSource {
   updated_at: string;
 }
 
-export interface EnrichmentBudgetSummary {
-  source_type: string;
-  display_name: string;
-  daily_budget: number;
-  used_today: number;
-  remaining: number;
-}
-
 export interface EnrichmentResult {
   id: string;
   entity_type: string;
@@ -2842,13 +2834,6 @@ export interface UserEnrichmentOverride {
   source_id: string;
   has_api_key: boolean;
   created_at: string;
-}
-
-export interface EnrichmentStatus {
-  total_sources: number;
-  enabled_sources: number;
-  healthy_sources: number;
-  enrichments_today: number;
 }
 
 // --- Detection Summary Persistence ---

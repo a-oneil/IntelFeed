@@ -22,6 +22,15 @@ from app.services.system_settings import (
 router = APIRouter()
 
 
+async def _sync_enrichment_pause(db: AsyncSession, keys) -> None:
+    """The gateways read the pause from Redis: copy a change there now rather
+    than at the dispatcher's next tick."""
+    from app.enrichment.pause import SETTING, sync_pause
+
+    if SETTING in keys:
+        await sync_pause(db)
+
+
 class SystemSettingsUpdate(BaseModel):
     settings: dict[str, Any]
 
@@ -53,6 +62,7 @@ async def update_system_settings_endpoint(
         settings = await update_settings(db, body.settings)
     except ValueError as e:
         raise AppError(code="invalid_setting", message=str(e), status_code=400)
+    await _sync_enrichment_pause(db, body.settings)
     return {"settings": settings, "groups": GROUP_LABELS}
 
 
@@ -67,6 +77,7 @@ async def reset_setting_endpoint(
         settings = await reset_setting(db, key)
     except ValueError as e:
         raise AppError(code="invalid_setting", message=str(e), status_code=400)
+    await _sync_enrichment_pause(db, {key})
     return {"settings": settings, "groups": GROUP_LABELS}
 
 

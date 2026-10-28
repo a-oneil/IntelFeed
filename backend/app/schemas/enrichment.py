@@ -79,12 +79,17 @@ class EnrichmentResultResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class EnrichmentBudgetSummaryItem(BaseModel):
-    source_type: str
-    display_name: str
-    daily_budget: int
-    used_today: int
-    remaining: int
+class EnrichmentPauseRequest(BaseModel):
+    paused: bool
+
+    model_config = ConfigDict(json_schema_extra={"example": {"paused": True}})
+
+
+class EnrichmentBackfillRequest(BaseModel):
+    entity_type: str | None = Field(None, description="Entity type (default: its first column's)")
+    limit: int | None = Field(None, ge=1, description="Most lookups to queue (default 1,000, at most 50,000)")
+
+    model_config = ConfigDict(json_schema_extra={"example": {"entity_type": "cve", "limit": 5000}})
 
 
 class EnrichEntityRequest(BaseModel):

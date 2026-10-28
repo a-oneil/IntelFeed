@@ -787,10 +787,12 @@ export function EngineMatrix({
                 className={m.popLink}
                 onClick={() => {
                   setPeek(null);
-                  setOpenStage(peek.stage);
+                  // Enrich has no stage panel: its settings are the Enrichment page.
+                  if (peek.stage === "enrich") onBrowse("enrichment");
+                  else setOpenStage(peek.stage);
                 }}
               >
-                Full stage settings →
+                {peek.stage === "enrich" ? "Open Enrichment →" : "Full stage settings →"}
               </button>
               <button
                 type="button"

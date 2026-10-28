@@ -163,6 +163,10 @@ class Settings(BaseSettings):
     sentry_traces_sample_rate: float = 0.1
     sentry_profiles_sample_rate: float = 0.1
 
+    # Enrichment: the global pause (app/enrichment/pause.py). On, no request
+    # leaves for an outside source; queued lookups wait.
+    enrichment_paused: bool = False
+
     # NVD API
     nvd_api_key: str = ""  # Get from https://nvd.nist.gov/developers/request-an-api-key
     cve_reenrich_batch_size: int = 150  # CVEs re-fetched from NVD per maintenance run

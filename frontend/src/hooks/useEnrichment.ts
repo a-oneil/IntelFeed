@@ -4,10 +4,8 @@ import api from "@/api/client";
 import { useIsVisitor } from "@/stores/authStore";
 import type {
   EnrichmentSource,
-  EnrichmentBudgetSummary,
   EnrichmentResult,
   UserEnrichmentOverride,
-  EnrichmentStatus,
 } from "@/api/types";
 
 // --- Sources ---
@@ -180,18 +178,6 @@ export function useEnrichmentResults(
   });
 }
 
-export function useEnrichmentStatus() {
-  return useQuery({
-    queryKey: ["enrichment-status"],
-    queryFn: async () => {
-      const { data } = await api.get<EnrichmentStatus>(
-        "/enrichment/status"
-      );
-      return data;
-    },
-  });
-}
-
 export function useEnrichValue() {
   return useMutation({
     mutationFn: async ({
@@ -218,15 +204,161 @@ export function useEnrichValue() {
   });
 }
 
-export function useEnrichmentBudgetSummary() {
+// --- Console (Settings → Engine → Enrichment) ---
+
+export type EnrichmentSourceStatus = "ok" | "failing" | "off" | "needs_key";
+
+export interface EnrichmentConsoleSummary {
+  sources_on: number;
+  sources_total: number;
+  needs_attention: number;
+  paused: boolean;
+  redis_ok: boolean;
+  activity_24h: {
+    requests: number;
+    queued: number;
+    deferred: number;
+    iocs_sent_off_box: number;
+  };
+}
+
+export interface EnrichmentConsoleEntityType {
+  entity_type: string;
+  label: string;
+  source_count: number;
+}
+
+export interface EnrichmentConsoleSource {
+  /** The enrichment_sources row id, for PUT /enrichment/sources/{id}. */
+  id: string;
+  source_type: string;
+  label: string;
+  kind: "lookup" | "catalog";
+  status: EnrichmentSourceStatus;
+  enabled: boolean;
+  /** Plain-words summary of what the source writes. */
+  fills: string;
+  applies_to: string[];
+  /** Why the source needs a look; null when it's fine. */
+  attention: string | null;
+}
+
+export interface EnrichmentConsole {
+  summary: EnrichmentConsoleSummary;
+  entity_types: EnrichmentConsoleEntityType[];
+  sources: EnrichmentConsoleSource[];
+}
+
+export type EnrichmentLane = "manual" | "new" | "refresh" | "backfill";
+
+export interface EnrichmentSourceDetail {
+  limits: {
+    requests_per_period: number;
+    period_seconds: number;
+    ceiling_per_period: number | null;
+    daily_budget: number | null;
+    used_today: number;
+    backfill_share: number | null;
+    refresh_days: number | null;
+    /** "global" | "none" | "user_overrides:N" */
+    key: string;
+    triggers: string[];
+    scope: string | null;
+  };
+  /** 24 hourly request counts, oldest first. */
+  trend_24h: number[];
+  queue: {
+    waiting: number;
+    by_lane: Partial<Record<EnrichmentLane, number>>;
+    retrying: number;
+    failed: number;
+  };
+  outputs: Array<{
+    field: string;
+    target: string;
+    kind: "column" | "context";
+    policy?: string | null;
+    rank?: number | null;
+    filled_pct: number | null;
+  }>;
+  /** Null when the source has no column output. */
+  gap: {
+    entity_type: string;
+    field: string;
+    missing: number;
+    in_scope: number;
+    eta_days: number | null;
+  } | null;
+  jobs: Array<{
+    key: string;
+    schedule: string;
+    runs_30d: number;
+    ok_30d: number;
+    last_status: string | null;
+    last_error: string | null;
+    last_detail: Record<string, unknown> | null;
+  }>;
+}
+
+const CONSOLE_KEY = ["enrichment-console"] as const;
+
+export function useEnrichmentConsole(entityType?: string) {
   return useQuery({
-    queryKey: ["enrichment-budget-summary"],
+    queryKey: [...CONSOLE_KEY, entityType ?? "all"],
     queryFn: async () => {
-      const { data } = await api.get<EnrichmentBudgetSummary[]>(
-        "/enrichment/budget-summary"
+      const { data } = await api.get<EnrichmentConsole>("/enrichment/console", {
+        params: entityType ? { entity_type: entityType } : undefined,
+      });
+      return data;
+    },
+    // Switching tabs keeps the last table up instead of flashing a spinner.
+    placeholderData: (prev) => prev,
+    refetchInterval: 60_000,
+  });
+}
+
+export function useEnrichmentSourceDetail(sourceType: string | null) {
+  return useQuery({
+    queryKey: [...CONSOLE_KEY, "detail", sourceType],
+    queryFn: async () => {
+      const { data } = await api.get<EnrichmentSourceDetail>(
+        `/enrichment/sources/${sourceType}/detail`
       );
       return data;
     },
-    refetchInterval: 60000,
+    enabled: !!sourceType,
+  });
+}
+
+export function usePauseEnrichment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (paused: boolean) => {
+      const { data } = await api.post<{ paused: boolean }>("/enrichment/pause", { paused });
+      return data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: CONSOLE_KEY }),
+  });
+}
+
+export function useQueueBackfill() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      sourceType,
+      entityType,
+      limit,
+    }: {
+      sourceType: string;
+      entityType: string;
+      limit: number;
+    }) => {
+      const { data } = await api.post<{ queued: number }>(
+        `/enrichment/sources/${sourceType}/backfill`,
+        { entity_type: entityType, limit }
+      );
+      return data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: CONSOLE_KEY }),
   });
 }

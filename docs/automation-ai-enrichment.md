@@ -42,6 +42,7 @@ For contributors and operators. After reading this you will know how automation 
   - [Caching & TTL](#caching--ttl)
   - [Source Gateway](#source-gateway)
   - [Daily Budgets](#daily-budgets)
+  - [Enrichment Console](#enrichment-console)
   - [Source Jobs](#source-jobs)
 - [Configuration and Extensibility](#configuration-and-extensibility)
 - [Testing & Debugging](#testing--debugging)
@@ -550,6 +551,7 @@ Enrichment adds outside facts to entities: a CVE's CVSS score and EPSS probabili
 4. **The [job queue](#enrichment-job-queue)**: lookups wait in `enrichment_jobs` until their source allows them.
 5. **Caching**: results expire after a per-adapter TTL; a fresh result is reused.
 6. **Per-user API keys**: a person can store their own key for a source.
+7. **The [console](#enrichment-console)**: one admin page for every source's status, limits, queue, fill rates and jobs, plus a global pause.
 
 Sources are configured at Settings → Engine → Enrichment (`/api/enrichment/sources`). After a queued lookup, `apply_enrichment_results_to_entity` (`backend/app/enrichment/entity_updater.py`) writes the fields each source declares onto the entity itself ([Field Map](#field-map)).
 
@@ -561,7 +563,7 @@ All four tables are in `backend/app/models/enrichment.py`.
 
 **`user_enrichment_overrides`**: a person's own `api_key_encrypted` for a source, one row per user per source. The pipeline uses it in place of the source's key for that person's enrichments.
 
-**`enrichment_results`**: `entity_type`, `entity_id`, `source_type`, `raw_response`, `parsed_data`, `enriched_at`, `expires_at`, `status`. Only `success` and `error` rows are stored. The other outcomes (`cached`, `skipped_low_confidence`, and the gateway refusals `rate_limited`, `budget_exhausted`, `breaker_open`, `gateway_unavailable`) appear only in the list `enrich_entity()` returns.
+**`enrichment_results`**: `entity_type`, `entity_id`, `source_type`, `raw_response`, `parsed_data`, `enriched_at`, `expires_at`, `status`. Only `success` and `error` rows are stored. The other outcomes (`cached`, `skipped_low_confidence`, and the gateway refusals `rate_limited`, `budget_exhausted`, `breaker_open`, `paused`, `gateway_unavailable`) appear only in the list `enrich_entity()` returns.
 
 **`enrichment_jobs`**: one pending lookup of one entity at one source, unique on (`entity_type`, `entity_id`, `source_type`). `lane` and its `priority`, `status` (`queued` / `running` / `failed`), `due_at`, `claimed_at`, `attempts`, `last_status` (why it last waited), `last_error`, `requested_by` (whose key a manual job uses), and the entity confidence the threshold check needs. `GROUP BY source_type, lane, status, last_status` shows what is waiting and why.
 
@@ -636,7 +638,7 @@ A `Context` (key, label, display: `fact`, `chips`, `table`, `timeline`, `link` o
 3. **Auto mode only**: skip it if the entity's confidence is below the source's minimum (`skipped_low_confidence`).
 4. If a fresh `success` result exists, return it (`cached`). No budget is used.
 5. Call `adapter.enrich()` and store a `success` row that expires after `ttl_hours`. If the adapter raises, store an `error` row that expires after 1 hour.
-6. If the source's gateway refuses a request, report why (`rate_limited`, `budget_exhausted`, `breaker_open` or `gateway_unavailable`) and store nothing; the job queue tries again later.
+6. If the source's gateway refuses a request, report why (`rate_limited`, `budget_exhausted`, `breaker_open`, `paused` or `gateway_unavailable`) and store nothing; the job queue tries again later.
 
 ### Enrichment Job Queue
 
@@ -649,7 +651,7 @@ Waiting enrichment work lives in `enrichment_jobs` (`backend/app/enrichment/queu
 | `manual` | 0 (first) | `POST /api/enrichment/enrich`, for each source the gateway refused |
 | `new` | 1 | A new entity (the `auto` trigger) |
 | `refresh` | 2 | Reserved for re-checks of known entities; no caller queues it |
-| `backfill` | 3 | Reserved for bulk catch-up; no caller queues it |
+| `backfill` | 3 | `POST /api/enrichment/sources/{source_type}/backfill`, the console's Backfill button |
 
 `dispatch_enrichment_jobs` runs every 30 seconds on the `enrichment` queue, which only `celery-worker-enrichment` reads, one task at a time. Each tick works for at most 25 seconds. It claims due rows with `FOR UPDATE SKIP LOCKED`, ten at a time, by priority and then `due_at`, marks them `running`, and runs each through `enrich_entity(..., source_types=[source])`. A `new`-lane job is held to the source's confidence threshold; the other lanes are not. Results are written onto the entity with `apply_enrichment_results_to_entity`. Then the row is settled:
 
@@ -658,6 +660,7 @@ Waiting enrichment work lives in `enrichment_jobs` (`backend/app/enrichment/queu
 | `success`, `cached`, `skipped_low_confidence`, or the source no longer applies | Deleted |
 | `rate_limited`, `breaker_open` | Due again after `retry_after`; attempts unchanged |
 | `budget_exhausted` | Due at the next UTC midnight |
+| `paused` | Due again in 60 seconds; attempts unchanged, and the rest of the tick's batch waits the same way |
 | `gateway_unavailable` | Put back as it was, and the tick ends |
 | `error` | `attempts` + 1, due again after 5 minutes doubled per attempt; `failed` after 5 attempts (the row stays, and is not claimed again until it is queued anew) |
 
@@ -665,7 +668,7 @@ When a source refuses one job, the tick defers that credential's other jobs the 
 
 A `backfill` job runs only while its source has used less than 60% of its `daily_budget` today (when it has one); otherwise it waits for the next UTC day (`last_status = backfill_share`). The other lanes are not capped by this.
 
-A `running` row claimed more than 10 minutes ago is claimable again, so a worker that dies mid-tick strands nothing. A tick still waiting when the next one is due is dropped (`expires` 30 seconds), so a restarted worker does not run a backlog of ticks.
+While enrichment is [paused](#enrichment-console), a tick claims nothing. A `running` row claimed more than 10 minutes ago is claimable again, so a worker that dies mid-tick strands nothing. A tick still waiting when the next one is due is dropped (`expires` 30 seconds), so a restarted worker does not run a backlog of ticks.
 
 ### API Key Resolution
 
@@ -704,11 +707,12 @@ A `success` result is reused until `expires_at`. Each adapter picks its TTL per 
 
 `SourceGateway` (`backend/app/enrichment/gateway.py`) is the only way enrichment reaches the network. The pipeline, the source test button and the health check build one per source from its row (`adapter_for_source()` in `registry.py`); scheduled jobs and the profile page's Wikipedia fetch get the same one from `gateway_for()` (`backend/app/enrichment/pipeline.py`). Its httpx transport checks every HTTP request, not every `enrich()` call:
 
-1. **Circuit breaker.** While it is open, requests are refused (`breaker_open`).
-2. **Rate limit and daily budget**, in one Redis script. The rate limit is a token bucket: `requests_per_period` tokens that refill over `period_seconds` (the source's `rate_limit_config`). The budget is `daily_budget` requests per UTC day (NULL = no limit). A request takes a token and is counted against the budget, or does neither, so refused requests cost nothing.
-3. **Short wait.** If the next token is at most 2 seconds away the request waits for it; otherwise it is refused (`rate_limited`). Scheduled jobs wait up to 120 seconds (`JOB_TOKEN_WAIT`), so the bucket paces them through their backlog.
-4. **User-Agent.** Every request says `IntelFeed/<version> (+<public URL>)`, using `PUBLIC_BASE_URL` (or the project page when it's blank).
-5. **The answer.** A throttle status (429 or 503; NVD and GitHub PoC add 403, their `throttle_statuses`) opens the breaker for the `Retry-After` time (seconds or a date), or for a backoff that starts at 60 seconds and doubles up to an hour when there is none, and the request ends as `rate_limited`. Three 5xx answers or connection errors in a row open it for the same backoff. Any other answer closes it.
+1. **Pause.** While enrichment is paused, every request is refused (`paused`).
+2. **Circuit breaker.** While it is open, requests are refused (`breaker_open`).
+3. **Rate limit and daily budget**, in one Redis script. The rate limit is a token bucket: `requests_per_period` tokens that refill over `period_seconds` (the source's `rate_limit_config`). The budget is `daily_budget` requests per UTC day (NULL = no limit). A request takes a token and is counted against the budget, or does neither, so refused requests cost nothing. The same script counts each sent request in an hourly counter per source type, `enrichment:gw:stats:{source_type}:{YYYYMMDDHH}`, kept 48 hours; the console reads these.
+4. **Short wait.** If the next token is at most 2 seconds away the request waits for it; otherwise it is refused (`rate_limited`). Scheduled jobs wait up to 120 seconds (`JOB_TOKEN_WAIT`), so the bucket paces them through their backlog.
+5. **User-Agent.** Every request says `IntelFeed/<version> (+<public URL>)`, using `PUBLIC_BASE_URL` (or the project page when it's blank).
+6. **The answer.** A throttle status (429 or 503; NVD and GitHub PoC add 403, their `throttle_statuses`) opens the breaker for the `Retry-After` time (seconds or a date), or for a backoff that starts at 60 seconds and doubles up to an hour when there is none, and the request ends as `rate_limited`. Three 5xx answers or connection errors in a row open it for the same backoff. Any other answer closes it.
 
 The bucket, budget and breaker belong to the credential, not the source type: they are keyed by the adapter's `shared_key_group` when it has one, else by `source_type`, plus a short hash of the API key when one is used. A user's own key has its own allowance; sources sharing one key share one. The keys live under `enrichment:gw:` in Redis.
 
@@ -718,13 +722,34 @@ Wikipedia goes through the gateway too: `wikipediaapi` takes the gateway's trans
 
 **Jobs.** A job (NVD, EPSS, CISA KEV, MITRE ATT&CK, Malpedia, GitHub PoC, Wikipedia) uses its source row's rate limit, budget and key, so it shares one allowance with the per-entity lookups under the same key. The NVD sweeps fall back to the `nvd_api_key` setting and the GitHub PoC scan to `github_token` when the row has no key; a different key has its own allowance. The catalog sources' jobs (MISP Galaxy, Metasploit, MITRE CWE, Cybergeist, ransomware.live) use their rows the same way.
 
-When the gateway refuses (`rate_limited`, `breaker_open`, `budget_exhausted`), a job stops, commits what it has done, and records the reason as `stopped` in its stats, which land in the run's details in the Jobs view. The run still counts as a success. Loop jobs also stop with `stopped: "out_of_time"` before their time limit. `gateway_unavailable` fails the run.
+When the gateway refuses (`rate_limited`, `breaker_open`, `budget_exhausted`, `paused`), a job stops, commits what it has done, and records the reason as `stopped` in its stats, which land in the run's details in the Jobs view. The run still counts as a success. Loop jobs also stop with `stopped: "out_of_time"` before their time limit. `gateway_unavailable` fails the run.
 
 NVD allows 50 requests per 30 seconds with a key and 5 without. The bucket (50 per 30 s) refills while it drains, so on its own it could let about 100 through in one window; the NVD sweeps also sleep 0.7 s between lookups with a key and 6.5 s without (`nvd_request_pace()`).
 
 ### Daily Budgets
 
-Every source starts with a budget of about twice the requests a busy day sends (the `daily_budget` of its manifest's `quota`): NVD 5,000, Wikipedia 2,000, OSV 2,000, GitHub PoC 1,000, Malpedia 1,000, Shodan 1,000, CVEDetails 1,000, VulnCheck 1,000, EPSS 500, CISA KEV 500, VirusTotal 500 (its free tier), ransomware.live 200, MITRE ATT&CK 100, GreyNoise 100, and 50 each for MISP Galaxy, Metasploit, MITRE CWE and Cybergeist. An admin can change or clear one under Settings → Engine → Enrichment. A source that runs out stops until midnight UTC, jobs included. Every request the gateway sends counts; cached results are free. `GET /api/enrichment/budget-summary` and the source list's `daily_budget_used` show today's use under the source's own key, and `GET /api/enrichment/sources/{id}/health` shows the tokens left in its bucket.
+Every source starts with a budget of about twice the requests a busy day sends (the `daily_budget` of its manifest's `quota`): NVD 5,000, Wikipedia 2,000, OSV 2,000, GitHub PoC 1,000, Malpedia 1,000, Shodan 1,000, CVEDetails 1,000, VulnCheck 1,000, EPSS 500, CISA KEV 500, VirusTotal 500 (its free tier), ransomware.live 200, MITRE ATT&CK 100, GreyNoise 100, and 50 each for MISP Galaxy, Metasploit, MITRE CWE and Cybergeist. An admin can change or clear one under Settings → Engine → Enrichment. A source that runs out stops until midnight UTC, jobs included. Every request the gateway sends counts; cached results are free. The console's source detail (`used_today`) and the source list's `daily_budget_used` show today's use under the source's own key, and `GET /api/enrichment/sources/{id}/health` shows the tokens left in its bucket.
+
+### Enrichment Console
+
+Settings → Engine → Enrichment is one admin page for every source. Its API (all admin) is built in `backend/app/enrichment/console.py`.
+
+**`GET /api/enrichment/console`** lists the sources with a status word, what they fill (a few words from the manifest's outputs, or the first job's description for a catalog source) and an `attention` reason, plus a summary and the entity types with their source counts. `?entity_type=` narrows only the source list. The status is, in order:
+
+| Status | When |
+|---|---|
+| `failing` | One of its jobs last ended in an error, or its circuit breaker is open |
+| `needs_key` | It needs an API key and has none |
+| `off` | It is switched off |
+| `ok` | Otherwise |
+
+`attention` names the problem: the failing job and how many of its runs in 30 days failed, an open breaker, a missing key on a source that is on, or queued lookups that gave up. Sources with attention sort first, then the ones that are on, then by name. The summary's 24-hour activity counts the requests sent (from the hourly counters), lookups queued in that time that are still waiting, lookups deferred by a rate limit, budget or pause, and the requests sent by `shares_ioc` sources (indicators that left the box).
+
+**`GET /api/enrichment/sources/{source_type}/detail`** gives one source's limits (the rate in force, the manifest's ceiling, budget and today's use, backfill share, which key it uses), 24 hourly request counts, its queue by lane, each output with how full its column is, the gap a backfill would close, and its jobs with their schedule (overrides included) and last 30 days of runs from `job_runs`. A fill rate counts the entities the source can look up (for observables, its kinds). The gap is for the source's first column output: `missing` counts every entity without it, `in_scope` the ones the source can look up that aren't already waiting in its queue, and `eta_days` how long those take at the source's rate and backfill share of its budget.
+
+**`POST /api/enrichment/sources/{source_type}/backfill`** (`{"entity_type", "limit"}`, both optional) queues `backfill`-lane jobs for the in-scope entities missing that column, newest first, 1,000 rows per insert; `limit` defaults to 1,000 and is capped at 50,000. It answers 400 for a catalog source, a type the source doesn't handle, a source with no column output, or a source that is off.
+
+**`POST /api/enrichment/pause`** (`{"paused": true}`) stops every request to outside sources. The switch is the system setting `enrichment_paused`, which the Settings block on the same page also shows. The gateways read a Redis flag in the same script that takes a token, so a pause applies on every worker's next request. The pause endpoint and the settings API write the flag at once (`backend/app/enrichment/pause.py`), and the dispatcher copies the setting onto it every tick, so a Redis restart restores it within 30 seconds. While paused, the dispatcher claims nothing, scheduled jobs stop with `stopped: "paused"`, and `POST /api/enrichment/enrich` queues the lookup for later.
 
 ### Source Jobs
 
@@ -807,5 +832,5 @@ The Malpedia sync passes `alt_names` through `filter_aliases()` (`backend/app/in
 - **Dry-run a rule**: `POST /api/automation/rules/{id}/test?entry_id=<uuid>`. Nothing is saved or sent.
 - **Run a rule now**: `POST /api/automation/rules/{id}/run?hours=24&limit=50`.
 - **See AI spend**: `AIResult.cost_estimate` per result, the Cost Dashboard (`GET /api/ai/cost-breakdown`), or the Prometheus counter `AI_COST_TOTAL{provider=...}`.
-- **See enrichment budgets**: `GET /api/enrichment/budget-summary`, or in code `await source_gateway(source, api_key).used_today()` (`backend/app/enrichment/registry.py`).
+- **See enrichment budgets**: the source detail (`GET /api/enrichment/sources/{source_type}/detail`), or in code `await source_gateway(source, api_key).used_today()` (`backend/app/enrichment/registry.py`).
 - **Tests**: `backend/tests/test_ai_providers.py`, `test_ai_tasks.py`, `test_ai_prompts.py`, `test_ai_allowance.py`, `test_user_ai_providers.py`, `test_openai_provider.py`, `test_ollama_provider.py`.

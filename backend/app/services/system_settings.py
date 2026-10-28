@@ -83,6 +83,7 @@ CONFIGURABLE_KEYS: dict[str, type] = {
     "cve_reenrich_batch_size": int,
     "github_poc_batch_limit": int,
     "github_poc_rescan_days": int,
+    "enrichment_paused": bool,
     # Relationship strength formula (composite of corroboration/closeness/recency)
     "relationship_corroboration_saturation": int,
     "relationship_recency_half_life_days": int,
@@ -1054,6 +1055,11 @@ SETTING_METADATA: dict[str, dict] = {
     "github_poc_rescan_days": {
         "label": "GitHub PoC Rescan Interval",
         "description": "Days before an already-scanned CVE is eligible for another PoC search",
+        "group": "enrichment",
+    },
+    "enrichment_paused": {
+        "label": "Pause Enrichment",
+        "description": "Refuse every request to outside enrichment sources; queued lookups wait until it is off",
         "group": "enrichment",
     },
     "relationship_corroboration_saturation": {
