@@ -56,7 +56,7 @@ try a build from a PR that is not merged yet.
 | **Story threads** | Open a thread from a Priority Queue story row or a similar-article link. |
 | **Workbench** | ATT&CK matrix (`ui/workbench/AttackMatrixView.kt`) and the ransomware victim tracker (`ui/workbench/RansomwareView.kt`). Both are read-only. |
 | **Requirements** | The server's intelligence requirements and the articles that match them. |
-| **Alerts** | Keyword alerts, checked in the background about every 15 minutes (`notifications/IntelNotificationWorker.kt`). Tapping one opens the matching article. |
+| **Alerts** | Background notifications, checked about every 15 minutes (`notifications/IntelNotificationWorker.kt`): new unread articles in your campaigns and saved searches, and every unread Priority Queue item at or above the score set in Settings (default 9.5). Each article or story alerts once; a story doesn't alert again as it grows. Tapping one opens the article or story. |
 | **Share to IntelFeed** | Share an http(s) link from a browser and pick "Add to IntelFeed". After you confirm, the app adds the page as an article (`POST /api/entries/ingest/url`). |
 | **Languages** | English, Spanish, French, German, Ukrainian, Russian, Chinese, Japanese, Portuguese and Italian (`ui/i18n/AppStrings.kt`). |
 
@@ -113,8 +113,8 @@ cd android
 | Version | `versionCode` + `versionName` | `version.properties` |
 
 The tests are JVM unit tests in `app/src/test/`: API-contract and
-serialization tests against a mock server, URL and date helpers, keyword
-alerts, navigation routes, and the matrix and ransomware screens. There is one
+serialization tests against a mock server, URL and date helpers, alert
+timing, navigation routes, and the matrix and ransomware screens. There is one
 on-device test in `app/src/androidTest/`. CI does not run it, because it needs
 an emulator.
 

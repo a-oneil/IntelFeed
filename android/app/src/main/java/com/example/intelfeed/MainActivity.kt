@@ -69,7 +69,6 @@ class MainActivity : ComponentActivity() {
                         is IntelNotificationHelper.Route.Entry -> viewModel.openEntry(route.id)
                         is IntelNotificationHelper.Route.Thread -> viewModel.openThread(route.slug, route.title)
                         is IntelNotificationHelper.Route.Campaign -> viewModel.openEntity(EntityRef(EntityType.CAMPAIGN, route.id, route.name ?: "Campaign"))
-                        is IntelNotificationHelper.Route.Keyword -> viewModel.searchKeyword(route.keyword, newestFirst = true)
                     }
                 }
             }

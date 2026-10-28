@@ -445,10 +445,6 @@ class IntelFeedRepository(
     suspend fun getRequirementMatches(id: String, offset: Int = 0): Result<OffsetPage<com.example.intelfeed.data.model.RequirementMatch>> =
         apiCall { getApi().getRequirementMatches(id, offset = offset).toOffsetPage(offset) }
 
-    /** A requirement matching [keywords] for everyone on the server. */
-    suspend fun createRequirement(title: String, keywords: List<String>, description: String? = null): Result<com.example.intelfeed.data.model.Requirement> =
-        apiCall { getApi().createRequirement(com.example.intelfeed.data.model.CreateRequirementRequest(title = title, description = description, keywords = keywords)) }
-
     suspend fun getCategories(): Result<List<Category>> = apiCall { getApi().getCategories() }
 
     /** Every feed (the web client asks for 1000; the drawer used to stop at 100 of ~300). */

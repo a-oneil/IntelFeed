@@ -64,10 +64,10 @@ fun glossaryTerms(matches: List<GlossaryMatch>): List<Term> =
     }
 
 /**
- * Keyword phrases to highlight: the user's tracked keywords, plus the keywords that made the
- * article match an intelligence requirement (the web shows these as "keyword: <term>").
+ * Keyword phrases to highlight: the keywords that made the article match an intelligence
+ * requirement (the web shows these as "keyword: <term>").
  */
-fun keywordTerms(tracked: List<String>, pirMatches: List<PirMatch>): List<Term> =
-    (tracked + pirMatches.filter { it.matchType.equals("keyword", ignoreCase = true) }.mapNotNull { it.matchedOn })
+fun keywordTerms(pirMatches: List<PirMatch>): List<Term> =
+    pirMatches.filter { it.matchType.equals("keyword", ignoreCase = true) }.mapNotNull { it.matchedOn }
         .filter { it.isNotBlank() }
         .map { Term(it, SpanKind.KEYWORD) }

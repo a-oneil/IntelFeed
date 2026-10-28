@@ -52,19 +52,6 @@ class IntelFeedApplication : Application(), ImageLoaderFactory {
                     else IntelNotificationHelper.cancelPeriodicSync(this@IntelFeedApplication)
                 }
         }
-        // A new keyword's first check records what already matches without alerting. Run it now:
-        // waiting for the next periodic check (up to 15 minutes, longer in Doze) silently counted
-        // every article that arrived in between as already seen.
-        appScope.launch {
-            var previous: Set<String>? = null
-            userPreferences.trackedKeywords.collect { list ->
-                val current = list.mapTo(HashSet()) { it.lowercase() }
-                if (previous?.containsAll(current) == false) {
-                    IntelNotificationHelper.triggerImmediateSync(this@IntelFeedApplication)
-                }
-                previous = current
-            }
-        }
     }
     /** Coil's loader for article images; see IntelFeedRepository.imageHttpClient. */
     override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)

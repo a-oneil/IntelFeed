@@ -189,7 +189,6 @@ fun MainNavigation(
                             val requirementsVm = viewModel { RequirementsViewModel(app.repository) }
                             RequirementsScreen(
                                 viewModel = requirementsVm,
-                                trackedKeywords = uiState.trackedKeywords,
                                 onBack = { viewModel.goBack() },
                                 onOpenEntry = { id, context -> viewModel.openEntry(id, context) },
                                 onSearchKeyword = { keyword -> viewModel.searchKeyword(keyword) }
@@ -250,9 +249,6 @@ private fun HomeShell(viewModel: IntelFeedViewModel, uiState: IntelFeedUiState) 
                 onRetry = { viewModel.loadCategoriesAndFeeds() },
                 onOpenSavedSearch = { saved -> closeDrawer(); viewModel.openSavedSearch(saved) },
                 onDeleteSavedSearch = { saved -> viewModel.deleteSavedSearch(saved) },
-                onKeywordSearch = { keyword -> closeDrawer(); viewModel.searchKeyword(keyword) },
-                onAddKeyword = { keyword, alsoOnServer -> viewModel.addKeyword(keyword, alsoOnServer) },
-                onRemoveKeyword = { viewModel.removeKeyword(it) },
                 onOpenRequirements = { closeDrawer(); viewModel.openRequirements() },
                 onDiscoverFeeds = { url, onResult -> viewModel.discoverFeeds(url, onResult) },
                 onSubscribe = { feed, catId, interval -> viewModel.subscribeToFeed(feed, catId, interval); closeDrawer() },

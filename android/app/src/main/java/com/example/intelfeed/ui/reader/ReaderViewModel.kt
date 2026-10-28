@@ -49,8 +49,6 @@ data class ReaderUiState(
     val autoMarkedRead: Boolean = false,
     // Settings › Highlight entities in articles.
     val highlightEntities: Boolean = true,
-    // The user's tracked keywords (highlighted in the text).
-    val trackedKeywords: List<String> = emptyList(),
     // Intelligence requirements this article matched (POST /api/entries/intel-counts), as on the web reader.
     val pirMatches: List<PirMatch> = emptyList(),
     // On-device neural translation state
@@ -103,9 +101,6 @@ class ReaderViewModel(
         }
         viewModelScope.launch {
             userPreferences.highlightEntities.collect { on -> _state.update { it.copy(highlightEntities = on) } }
-        }
-        viewModelScope.launch {
-            userPreferences.trackedKeywords.collect { list -> _state.update { it.copy(trackedKeywords = list) } }
         }
         viewModelScope.launch {
             userPreferences.readerTextSize.collect { name ->

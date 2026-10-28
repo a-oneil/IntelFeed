@@ -62,6 +62,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -92,6 +94,7 @@ import com.example.intelfeed.data.local.UserPreferences
 import com.example.intelfeed.data.model.TagEntity
 import com.example.intelfeed.data.repository.IntelFeedRepository
 import com.example.intelfeed.notifications.IntelNotificationHelper
+import com.example.intelfeed.notifications.PriorityAlerts
 import com.example.intelfeed.theme.CyberAmber
 import com.example.intelfeed.theme.CyberBlue
 import com.example.intelfeed.theme.CyberPurple
@@ -132,6 +135,7 @@ fun SettingsScreen(
     val textSizeName by userPreferences.readerTextSize.collectAsStateWithLifecycle(initialValue = null)
     val textSize = ReaderFontSize.fromName(textSizeName)
     val notificationsEnabled by userPreferences.notificationsEnabled.collectAsStateWithLifecycle(initialValue = true)
+    val priorityAlertScore by userPreferences.priorityAlertScore.collectAsStateWithLifecycle(initialValue = PriorityAlerts.DEFAULT_CUTOFF)
     val snackbarHostState = LocalSnackbarHostState.current
     val speechRate by userPreferences.ttsSpeechRate.collectAsStateWithLifecycle(initialValue = 1.0f)
     var confirmLogout by remember { mutableStateOf(false) }
@@ -408,13 +412,36 @@ fun SettingsScreen(
                     Text(
                         when {
                             notificationsEnabled && !systemAllowsAlerts -> "Android isn't allowing IntelFeed notifications. Turn this on to allow them."
-                            else -> "Checks every 15 minutes for new articles in your campaigns, saved searches and tracked keywords, and for critical priority intel (score 8+)"
+                            else -> "Checks every 15 minutes for new articles in your campaigns and saved searches, and for priority intel scoring ${formatCutoff(priorityAlertScore)} or higher"
                         },
                         fontSize = 12.sp,
                         color = if (notificationsEnabled && !systemAllowsAlerts) CyberAmber else TextMuted
                     )
                 }
                 Switch(checked = alertsOn, onCheckedChange = setAlerts)
+            }
+
+            // Saved when the drag ends, not on every step it passes.
+            var cutoffDraft by remember(priorityAlertScore) { mutableStateOf(priorityAlertScore.toFloat()) }
+            Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Priority alert score", fontSize = 15.sp, color = if (alertsOn) TextPrimary else TextMuted, modifier = Modifier.weight(1f))
+                    Text(formatCutoff(cutoffDraft.toDouble()), fontSize = 15.sp, color = if (alertsOn) CyberPurple else TextMuted)
+                }
+                Text(
+                    "Unread Priority Queue items scoring at least this notify you, once each. A story alerts once, however much it grows. Lowering it doesn't alert on items already waiting.",
+                    fontSize = 12.sp,
+                    color = TextMuted
+                )
+                Slider(
+                    value = cutoffDraft,
+                    onValueChange = { cutoffDraft = it },
+                    onValueChangeFinished = { scope.launch { userPreferences.setPriorityAlertScore(cutoffDraft.toDouble()) } },
+                    valueRange = PriorityAlerts.MIN_CUTOFF.toFloat()..PriorityAlerts.MAX_CUTOFF.toFloat(),
+                    steps = ((PriorityAlerts.MAX_CUTOFF - PriorityAlerts.MIN_CUTOFF) / PriorityAlerts.CUTOFF_STEP).toInt() - 1,
+                    enabled = alertsOn,
+                    colors = SliderDefaults.colors(thumbColor = CyberPurple, activeTrackColor = CyberPurple)
+                )
             }
 
             SettingsRow(
@@ -1168,3 +1195,5 @@ private fun ThemeSwatches(variables: Map<String, String>) {
     }
 }
 
+/** A priority cut-off as the score badge shows it ("9.5"). */
+private fun formatCutoff(score: Double): String = String.format(java.util.Locale.US, "%.1f", score)

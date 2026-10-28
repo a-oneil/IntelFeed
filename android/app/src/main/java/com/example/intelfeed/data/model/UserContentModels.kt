@@ -167,18 +167,6 @@ data class RequirementMatch(
     @SerialName("entry_published_at") val entryPublishedAt: String? = null
 )
 
-/** POST /api/requirements, as the web's New Requirement form sends it (unset fields left out). */
-@OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
-@Serializable
-data class CreateRequirementRequest(
-    val title: String,
-    val priority: String = "medium",
-    val category: String = "operational",
-    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
-    val description: String? = null,
-    val keywords: List<String> = emptyList()
-)
-
 /**
  * A day chip's filter (the web's day "focus"): articles narrowed by [params] (e.g.
  * exploited_cves=true, entity_type/entity_id, sector). [chip] identifies the chip on day
