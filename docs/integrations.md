@@ -807,7 +807,7 @@ OpenRouter's health check doesn't validate the key, so a bad key passes **Test**
 
 ### 18. Configure Enrichment Sources
 
-Enrichment adds outside data to CVEs, techniques, malware and indicators. Each source declares itself in its class (`backend/app/enrichment/adapters/`, `backend/app/enrichment/catalogs.py`, `wikidata.py`, `endoflife.py`), listed in `backend/app/enrichment/registry.py`:
+Enrichment adds outside data to CVEs, techniques, malware and indicators. Each source declares itself in its class (`backend/app/enrichment/adapters/`, `backend/app/enrichment/catalogs.py`, `wikidata.py`, `endoflife.py`, `capec.py`, `ctid.py`, `d3fend.py`), listed in `backend/app/enrichment/registry.py`:
 
 | Source | Key | Default trigger | Default rate limit | Scheduled jobs | Adds |
 |--------|---------|-----------------|--------------------|----------------|------|
@@ -835,8 +835,11 @@ Enrichment adds outside data to CVEs, techniques, malware and indicators. Each s
 | Wikidata | No | — | 30/min | Weekly | Vendor websites and facts, product vendors, country regions |
 | endoflife.date | No | — | 1/s | Daily | Product support status and release lifecycles |
 | Tranco | No | — | 1/s | Daily | Domain popularity rank |
+| MITRE CAPEC | No | — | 10/hour | Weekly | The attack-pattern catalog: names for CWEs' CAPEC ids, patterns on techniques |
+| CTID control mappings | No | — | 10/hour | Weekly | NIST 800-53 and CIS controls on techniques |
+| MITRE D3FEND | No | — | 10/hour | Weekly | Countermeasures for techniques |
 
-Auto = looked up when a new entity appears; Manual = on request from an entity or indicator. The last eight are catalog sources: they only run their jobs. Team Cymru and RDAP look up active observables only. Turning a source off also stops its jobs. A rate above what a source documents it allows is refused.
+Auto = looked up when a new entity appears; Manual = on request from an entity or indicator. The last eleven are catalog sources: they only run their jobs. Team Cymru and RDAP look up active observables only. Turning a source off also stops its jobs. A rate above what a source documents it allows is refused.
 
 **To configure:** **Settings → Engine → Pipeline** → **enrich** stage: turn on sources, paste keys, optionally change rate limit and confidence threshold, save.
 

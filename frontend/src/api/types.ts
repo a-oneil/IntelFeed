@@ -1560,6 +1560,11 @@ export interface ObservableEntryPayload {
   candidates: ObservableCandidate[];
 }
 
+export interface CAPECRef {
+  capec_id: string;
+  name: string | null;
+}
+
 export interface CWEResponse {
   id: string;
   cwe_id: string;
@@ -1574,6 +1579,8 @@ export interface CWEResponse {
   likelihood_of_exploit: string | null;
   alternate_terms: string[];
   capec_ids: string[];
+  /** `capec_ids` with names from the CAPEC catalog (single-weakness endpoint only). */
+  capec_patterns?: CAPECRef[];
   consequences: Array<{ scope?: string | null; impacts?: string[]; note?: string | null }>;
   mitigations: Array<{ phase?: string | null; strategy?: string | null; description?: string | null }>;
   detection_methods: Array<{ method?: string | null; description?: string | null; effectiveness?: string | null }>;
@@ -1694,6 +1701,7 @@ export interface EntitySearchResult {
   likelihood_of_exploit?: string | null;
   alternate_terms?: string[];
   capec_ids?: string[];
+  capec_patterns?: CAPECRef[];
   consequences?: Array<{ scope?: string | null; impacts?: string[]; note?: string | null }>;
   mitigations?: Array<{ phase?: string | null; strategy?: string | null; description?: string | null }>;
   detection_methods?: Array<{ method?: string | null; description?: string | null; effectiveness?: string | null }>;

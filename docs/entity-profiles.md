@@ -42,6 +42,7 @@ Every profile — actors, malware, CVEs, CWEs, TTPs, countries, sectors, tools, 
 | NVD / EPSS / KEV / GitHub PoC | Scheduled syncs ([entries.md](entries.md#beat-scheduled-enrichment)) | CVE scores, exploit status, affected products |
 | MITRE ATT&CK / Malpedia / Wikipedia | Weekly syncs | TTP details and mitigations; actor and malware descriptions and aliases |
 | Wikidata / endoflife.date | Weekly and daily syncs ([rules](automation-ai-enrichment.md#wikidata)) | Vendor websites and facts, product vendors, country regions; product support status and releases |
+| CAPEC / CTID / D3FEND | Weekly syncs ([rules](automation-ai-enrichment.md#capec)) | CAPEC names for a CWE's attack patterns; a technique's CAPEC patterns, NIST 800-53 and CIS controls (`nist_controls`, `cis_controls`) and D3FEND countermeasures |
 | Co-occurrence and the Telegram forward graph | Post-ingest pipeline step; job every 4 hours | `entity_relationships` links |
 | Analyst | Badge edits, descriptions, merges, notes, relationship confirm/reject | Any of the above, marked analyst-sourced |
 

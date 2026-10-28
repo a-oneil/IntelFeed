@@ -14,6 +14,7 @@ from app.models.automation_rule import AutomationRule
 
 # Phase 9-12: Detection Engineering, Threat Intelligence, Enrichment
 from app.models.campaign import Campaign, CampaignEntity, CampaignEntry, CampaignSavedSearch
+from app.models.capec import CAPECPattern
 from app.models.category import Category
 from app.models.comment import Comment, CommentMention
 from app.models.correlation_event import CorrelationEventRecord
@@ -142,6 +143,7 @@ __all__ = [
     "CVE",
     "CVEAffected",
     "CWE",
+    "CAPECPattern",
     "EntryCWE",
     "CVEWeakness",
     "EntryCVE",

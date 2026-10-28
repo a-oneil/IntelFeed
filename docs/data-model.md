@@ -144,7 +144,7 @@ Files, pasted text and URLs an analyst uploads. Each item that parses becomes an
 
 ### 3. Intelligence Entities
 
-**Tables:** `ttps`, `cves`, `cve_affected`, `cve_weaknesses`, `cwes`, `observables`, `threat_actors`, `malware_families`, `countries`, `sectors`, `vendors`, `products`, `mitigations`, `tools`, `ransomware_victims`, `victim_disclosures`
+**Tables:** `ttps`, `cves`, `cve_affected`, `cve_weaknesses`, `cwes`, `capec_patterns`, `observables`, `threat_actors`, `malware_families`, `countries`, `sectors`, `vendors`, `products`, `mitigations`, `tools`, `ransomware_victims`, `victim_disclosures`
 
 **Maintenance and audit tables:** `entity_maintenance_log`, `actor_description_history`, `entity_link_validation_log`, `entity_merge_suggestion_dismissals`, `entity_reclassify_tombstones`, `proposal_dismissals`
 
@@ -172,6 +172,7 @@ Table `ttps`: one MITRE ATT&CK technique or sub-technique.
 - `is_subtechnique`, `parent_technique_id` (indexed)
 - `is_deprecated`, `superseded_by`
 - `matrix_domain` (indexed) — `enterprise`, `mobile` or `ics`
+- `nist_controls`, `cis_controls` (Text[]) — the NIST 800-53 and CIS controls that mitigate the technique (`AC-06`, `CIS-13.7`), from CTID's Mappings Explorer ([rules](automation-ai-enrichment.md#ctid-control-mappings))
 
 #### CVE
 Table `cves`: one published vulnerability.
@@ -388,8 +389,15 @@ Table `cwes`: the MITRE CWE catalog (Common Weakness Enumeration, the list of so
 - `status`, `mapping_usage` (indexed) — MITRE's advice on whether the id should be used for mapping
 - `description`, `extended_description`, `likelihood_of_exploit`
 - `parent_cwe_id` (indexed) — the parent chain is walked in SQL
-- `alternate_terms`, `capec_ids` (Text[]); `consequences`, `mitigations`, `detection_methods` (JSONB)
+- `alternate_terms`, `capec_ids` (Text[]); `consequences`, `mitigations`, `detection_methods` (JSONB). `capec_ids` resolve to names against `capec_patterns`
 - `cwe_url`, `is_deprecated`, `superseded_by`
+
+#### CAPECPattern
+Table `capec_patterns`: MITRE's CAPEC catalog of attack patterns, replaced weekly by `capec-sync` ([rules](automation-ai-enrichment.md#capec)). A lookup table: nothing references it by key.
+- `capec_id` (String 20, primary key) — for example `CAPEC-248`, the form `cwes.capec_ids` holds
+- `name`, `abstraction` (`Meta`, `Standard` or `Detailed`), `status`, `description`
+- `cwe_ids` (Text[]) — related weaknesses (`CWE-77`); `technique_ids` (Text[]) — ATT&CK taxonomy mappings (`T1574.010`)
+- `updated_at`
 
 #### EntryCWE
 Table `entry_cwes`: primary key `(entry_id, cwe_id)`, with `confidence`, `source`, `extracted_at`, `paragraph_indices`.
@@ -590,7 +598,7 @@ Bookkeeping for the one-pass `entry_analysis` (one AI call that reads an article
 
 #### EnrichmentSource
 Table `enrichment_sources`: one external data source.
-- `source_type` (unique) — `nvd`, `epss`, `cisa_kev`, `mitre_attack`, `vulncheck`, `osv`, `malpedia`, `github_poc`, `cvedetails`, `wikipedia`, `greynoise`, `shodan`, `virustotal`, `cymru`, `rdap`, and the catalog sources `misp_galaxy`, `metasploit`, `mitre_cwe`, `ransomware_live`, `cybergeist`, `wikidata`, `endoflife`, `tranco`
+- `source_type` (unique) — `nvd`, `epss`, `cisa_kev`, `mitre_attack`, `vulncheck`, `osv`, `malpedia`, `github_poc`, `cvedetails`, `wikipedia`, `greynoise`, `shodan`, `virustotal`, `cymru`, `rdap`, and the catalog sources `misp_galaxy`, `metasploit`, `mitre_cwe`, `ransomware_live`, `cybergeist`, `wikidata`, `endoflife`, `tranco`, `capec`, `ctid`, `d3fend`
 - `display_name`, `is_enabled` (seeded on for a source with scheduled jobs; a disabled source's jobs skip)
 - `trigger_mode` (default `manual`) — `auto` or `manual`
 - `api_key_encrypted`, `config` (JSONB)

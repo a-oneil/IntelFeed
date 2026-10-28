@@ -90,6 +90,18 @@ JOBS_BEFORE = {
         {"type": "crontab", "minute": "15", "hour": "5"},
     ),
     "tranco-sync": ("app.workers.enrichment_tasks.run_tranco_sync", {"type": "crontab", "minute": "20", "hour": "4"}),
+    "capec-sync": (
+        "app.workers.enrichment_tasks.run_capec_sync",
+        {"type": "crontab", "minute": "0", "hour": "4", "day_of_week": "1"},
+    ),
+    "ctid-mappings-sync": (
+        "app.workers.enrichment_tasks.run_ctid_sync",
+        {"type": "crontab", "minute": "15", "hour": "4", "day_of_week": "0"},
+    ),
+    "d3fend-sync": (
+        "app.workers.enrichment_tasks.run_d3fend_sync",
+        {"type": "crontab", "minute": "30", "hour": "4", "day_of_week": "0"},
+    ),
 }
 
 JOB_SOURCE = {
@@ -112,6 +124,9 @@ JOB_SOURCE = {
     "wikidata-sync": "wikidata",
     "endoflife-sync": "endoflife",
     "tranco-sync": "tranco",
+    "capec-sync": "capec",
+    "ctid-mappings-sync": "ctid",
+    "d3fend-sync": "d3fend",
 }
 
 
@@ -146,6 +161,9 @@ def test_every_source_has_a_seed_row_from_its_manifest():
         "wikidata",
         "endoflife",
         "tranco",
+        "capec",
+        "ctid",
+        "d3fend",
     }
     assert all(cls.kind == "catalog" and not issubclass(cls, EnrichmentAdapter) for cls in CATALOG_REGISTRY.values())
     assert all(cls.kind == "lookup" for cls in ADAPTER_REGISTRY.values())

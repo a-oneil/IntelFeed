@@ -123,6 +123,9 @@ All times are UTC. "AI" means the job calls an AI provider. "(`ai` queue)" means
 | `sync_ransomware_victims` | `ransomware_live` | Every 30 min | Collect ransomware leak-site victim posts as structured records |
 | `run_wikidata_sync` | `wikidata` | Thursday 04:30 | Fill vendor websites, product vendors and country regions, and vendor facts, from Wikidata |
 | `run_endoflife_sync` | `endoflife` | Daily 05:15 | Match products to endoflife.date and set their support status and next end of life |
+| `run_ctid_sync` | `ctid` | Sunday 04:15 | Write NIST 800-53 and CIS controls onto techniques from CTID's Mappings Explorer |
+| `run_d3fend_sync` | `d3fend` | Sunday 04:30 | Show the D3FEND countermeasures for each technique |
+| `run_capec_sync` | `capec` | Monday 04:00 | Refresh the CAPEC catalog and each technique's attack patterns |
 
 Each source declares its jobs in its manifest ([Source Jobs](automation-ai-enrichment.md#source-jobs)). A job skips while its source is switched off (`{"skipped": "source disabled"}`), and sends its requests through its source's gateway ([Source Gateway](automation-ai-enrichment.md#source-gateway)). A refusal (rate limited, breaker open, budget spent) stops the job; it keeps what it did and records `stopped` in its stats.
 
@@ -581,12 +584,12 @@ Built from the `JOB_REGISTRY` defaults. Admins can change any of these in Engine
 03:35 ├─ resolve_cve_affected
 03:45 ├─ decay_relationship_confidence (Sun) · refresh_cwe_catalog (Mon) · run_metasploit_sync (Sun)
 03:50 ├─ rebuild_rule_coverage
-04:00 ├─ run_wikipedia_bulk_sync (Wed)
+04:00 ├─ run_wikipedia_bulk_sync (Wed) · run_capec_sync (Mon)
 04:10 ├─ evict_image_cache
-04:15 ├─ evict_tts_cache
+04:15 ├─ evict_tts_cache · run_ctid_sync (Sun)
 04:20 ├─ recompute_signal_rates · rank_threat_board · rollup_targeted_sectors · cleanup_telegram_media (Sun)
 04:25 ├─ evict_old_telegram_media
-04:30 ├─ promote_watchlist_threats · run_wikidata_sync (Thu)
+04:30 ├─ promote_watchlist_threats · run_wikidata_sync (Thu) · run_d3fend_sync (Sun)
 04:35 ├─ fit_user_signal_weights · evict_old_ingest_files
 04:40 ├─ generate_threat_briefs
 04:45 ├─ archive_correlation_events

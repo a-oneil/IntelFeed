@@ -571,7 +571,7 @@ All five tables are in `backend/app/models/enrichment.py`.
 
 ### Source Registry
 
-Each source is a class that carries its own manifest (`backend/app/enrichment/manifest.py`): the entity types it `applies_to` (for observables, the kinds it handles), what it `requires` (`("api_key",)` when it can't run without one), its `quota`, its `egress` (`none`: downloads a whole catalog; `low`: sends public identifiers such as a CVE id or a group name; `shares_ioc`: sends an observable's value to a third party), its `license`, its scheduled `jobs`, and its `outputs`. A `scope` (column → values) narrows the entities a source looks up on its own: Team Cymru and RDAP set `{"status": ("active",)}`, so aged and expired observables are never queued by the `new` or `backfill` lanes, nor counted in its fill rate or backfill gap. `Source.scope_filter()` turns the kinds and the scope into one SQL condition that `enqueue()` and the console share; a person's request (`manual` lane, the Enrich button) looks up any entity the source applies to. Lookup sources extend `EnrichmentAdapter` (`backend/app/enrichment/base.py`) and look up one entity per `enrich()` call; catalog sources (`backend/app/enrichment/catalogs.py`, and `wikidata.py` and `endoflife.py` beside it) only have jobs.
+Each source is a class that carries its own manifest (`backend/app/enrichment/manifest.py`): the entity types it `applies_to` (for observables, the kinds it handles), what it `requires` (`("api_key",)` when it can't run without one), its `quota`, its `egress` (`none`: downloads a whole catalog; `low`: sends public identifiers such as a CVE id or a group name; `shares_ioc`: sends an observable's value to a third party), its `license`, its scheduled `jobs`, and its `outputs`. A `scope` (column → values) narrows the entities a source looks up on its own: Team Cymru and RDAP set `{"status": ("active",)}`, so aged and expired observables are never queued by the `new` or `backfill` lanes, nor counted in its fill rate or backfill gap. `Source.scope_filter()` turns the kinds and the scope into one SQL condition that `enqueue()` and the console share; a person's request (`manual` lane, the Enrich button) looks up any entity the source applies to. Lookup sources extend `EnrichmentAdapter` (`backend/app/enrichment/base.py`) and look up one entity per `enrich()` call; catalog sources (`backend/app/enrichment/catalogs.py`, and `wikidata.py`, `endoflife.py`, `capec.py`, `ctid.py` and `d3fend.py` beside it) only have jobs.
 
 `SOURCE_REGISTRY` (`backend/app/enrichment/registry.py`) lists them all; `ADAPTER_REGISTRY` holds the lookup sources. Generated from the manifests:
 
@@ -605,6 +605,9 @@ Each source is a class that carries its own manifest (`backend/app/enrichment/ma
 | `wikidata` | Wikidata | catalog | vendor, product, country | manual | No | 30 / 60 s | — | low |
 | `endoflife` | endoflife.date | catalog | product | manual | No | 1 / 1 s | — | none |
 | `tranco` | Tranco | catalog | observable (domain) | manual | No | 1 / 1 s | 1 / 1 s | none |
+| `capec` | MITRE CAPEC | catalog | ttp, cwe | manual | No | 10 / 3600 s | — | none |
+| `ctid` | CTID control mappings | catalog | ttp | manual | No | 10 / 3600 s | — | none |
+| `d3fend` | MITRE D3FEND | catalog | ttp | manual | No | 10 / 3600 s | — | none |
 
 The ceiling is the most the source documents it allows; `PUT /api/enrichment/sources/{id}` refuses a `rate_limit_config` above it with a 400 (`rate_above_ceiling`). Each manifest's comment cites the documented limit. A keyed rate (GitHub PoC) applies when the source has a key and its row's rate is still the keyless default, so an admin's own rate stands. A catalog source has no lookup: it lists no entity types for manual enrichment, and its test button answers 400.
 
@@ -637,12 +640,13 @@ A `filter` transforms the value first: `aliases` runs `filter_aliases()` (`backe
 - **CVE List (cvelistV5)**: `cvss_score` from the CNA's metric rank 2 and from CISA-ADP's rank 3, with `severity` following the score it wrote (so a score never sits beside extraction's `UNKNOWN`); `description` rank 1, since NVD republishes the CNA's text; `ssvc_exploitation`, `ssvc_automatable` and `ssvc_technical_impact`, newer wins. CVSS 3.1 is preferred, then 3.0, then 4.0.
 - **Wikidata**: vendor `website`, product `vendor_id` (resolved to an existing vendor), country `region` and `iso_code`, all into blank columns only.
 - **endoflife.date**: product `support_status` and `next_eol`, newer wins; `next_eol` `clears`, so it empties when no end date is left.
+- **CTID control mappings**: technique `nist_controls` and `cis_controls`, newer wins; both `clear`, so a technique the mappings drop loses its controls.
 
 A `Context` (key, label, display: `fact`, `chips`, `table`, `timeline`, `link` or `badge`) is a value for the entity's profile rather than a column; the adapters declare them (Shodan ports and tags, GreyNoise's class, Team Cymru's announced prefix, registry and allocation date, RDAP's registrar, expiry, status and nameservers, OSV affected packages, Malpedia references, and so on). `entity_types` limits one to some of the source's types.
 
 ### Source Context
 
-Each lookup in `enrich_entity()`, fresh or cached, writes the source's `Context` outputs for the entity into `entity_context` (`store_context`, `backend/app/enrichment/context.py`): one row per output that has a value, `observed_at` the result's time and `expires_at` its expiry. A key the new result lacks is deleted, so a source that stops reporting something stops showing it. The Wikidata and endoflife.date jobs store each entity's answer the same way (`apply_catalog_result`, `backend/app/enrichment/pipeline.py`): the result row, its context, then its columns. Values are stored shaped for their display:
+Each lookup in `enrich_entity()`, fresh or cached, writes the source's `Context` outputs for the entity into `entity_context` (`store_context`, `backend/app/enrichment/context.py`): one row per output that has a value, `observed_at` the result's time and `expires_at` its expiry. A key the new result lacks is deleted, so a source that stops reporting something stops showing it. The Wikidata, endoflife.date, CAPEC, CTID and D3FEND jobs store each entity's answer the same way (`apply_catalog_result`, `backend/app/enrichment/pipeline.py`): the result row, its context, then its columns. Values are stored shaped for their display:
 
 | Display | Stored value |
 |---|---|
@@ -743,7 +747,7 @@ A `success` result is reused until `expires_at`. Each adapter picks its TTL per 
 - NVD, Malpedia, MITRE ATT&CK, GreyNoise, Team Cymru, RDAP: 168 hours (7 days). An unannounced IP at Team Cymru: 24 hours.
 - EPSS, CISA KEV, VulnCheck, GitHub PoC: 24 hours.
 - VirusTotal: 72 hours.
-- Wikidata: 720 hours, not-found titles included. endoflife.date: 48 hours (its job runs daily).
+- Wikidata: 720 hours, not-found titles included. endoflife.date: 48 hours (its job runs daily). CAPEC, CTID and D3FEND: 14 days (their jobs run weekly).
 - Short-lived misses (a missing VirusTotal or VulnCheck key, a failed Wikipedia fetch): 1 hour. These misses are stored as `success` rows with `found: false`, so they are cached too.
 
 ### Source Gateway
@@ -765,7 +769,7 @@ Team Cymru answers over DNS, not HTTP, so its adapter takes each query's permit 
 
 Wikipedia goes through the gateway too: `wikipediaapi` takes the gateway's transport for the httpx client it builds, with its own retries off.
 
-**Jobs.** A job (NVD, EPSS, CISA KEV, MITRE ATT&CK, Malpedia, GitHub PoC, Wikipedia, CVE List, Wikidata, endoflife.date) uses its source row's rate limit, budget and key, so it shares one allowance with the per-entity lookups under the same key. The NVD sweeps fall back to the `nvd_api_key` setting and the GitHub PoC scan to `github_token` when the row has no key; a different key has its own allowance. The catalog sources' jobs (MISP Galaxy, Metasploit, MITRE CWE, Cybergeist, ransomware.live, Tranco) use their rows the same way.
+**Jobs.** A job (NVD, EPSS, CISA KEV, MITRE ATT&CK, Malpedia, GitHub PoC, Wikipedia, CVE List, Wikidata, endoflife.date) uses its source row's rate limit, budget and key, so it shares one allowance with the per-entity lookups under the same key. The NVD sweeps fall back to the `nvd_api_key` setting and the GitHub PoC scan to `github_token` when the row has no key; a different key has its own allowance. The catalog sources' jobs (MISP Galaxy, Metasploit, MITRE CWE, Cybergeist, ransomware.live, Tranco, CAPEC, CTID, D3FEND) use their rows the same way.
 
 When the gateway refuses (`rate_limited`, `breaker_open`, `budget_exhausted`, `paused`), a job stops, commits what it has done, and records the reason as `stopped` in its stats, which land in the run's details in the Jobs view. The run still counts as a success. Loop jobs also stop with `stopped: "out_of_time"` before their time limit. `gateway_unavailable` fails the run.
 
@@ -773,7 +777,7 @@ NVD allows 50 requests per 30 seconds with a key and 5 without. The bucket (50 p
 
 ### Daily Budgets
 
-Every source starts with a budget of about twice the requests a busy day sends (the `daily_budget` of its manifest's `quota`): CVE List 12,000, NVD 5,000, Wikipedia 2,000, OSV 2,000, GitHub PoC 1,000, Malpedia 1,000, Team Cymru 4,000 (two queries per IP), RDAP 2,000 (two requests per domain: rdap.org's redirect and the registry), Shodan 1,000, CVEDetails 1,000, VulnCheck 1,000, endoflife.date 1,000, EPSS 500, CISA KEV 500, VirusTotal 500 (its free tier), Wikidata 500, ransomware.live 200, MITRE ATT&CK 100, GreyNoise 100, and 50 each for MISP Galaxy, Metasploit, MITRE CWE and Cybergeist; Tranco 20. An admin can change or clear one under Settings → Engine → Enrichment. A source that runs out stops until midnight UTC, jobs included. Every request the gateway sends counts; cached results are free. The console's source detail (`used_today`) and the source list's `daily_budget_used` show today's use under the source's own key, and `GET /api/enrichment/sources/{id}/health` shows the tokens left in its bucket.
+Every source starts with a budget of about twice the requests a busy day sends (the `daily_budget` of its manifest's `quota`): CVE List 12,000, NVD 5,000, Wikipedia 2,000, OSV 2,000, GitHub PoC 1,000, Malpedia 1,000, Team Cymru 4,000 (two queries per IP), RDAP 2,000 (two requests per domain: rdap.org's redirect and the registry), Shodan 1,000, CVEDetails 1,000, VulnCheck 1,000, endoflife.date 1,000, EPSS 500, CISA KEV 500, VirusTotal 500 (its free tier), Wikidata 500, ransomware.live 200, MITRE ATT&CK 100, GreyNoise 100, and 50 each for MISP Galaxy, Metasploit, MITRE CWE, Cybergeist, CAPEC, CTID and D3FEND; Tranco 20. An admin can change or clear one under Settings → Engine → Enrichment. A source that runs out stops until midnight UTC, jobs included. Every request the gateway sends counts; cached results are free. The console's source detail (`used_today`) and the source list's `daily_budget_used` show today's use under the source's own key, and `GET /api/enrichment/sources/{id}/health` shows the tokens left in its bucket.
 
 ### Enrichment Console
 
@@ -821,6 +825,9 @@ Each source declares its scheduled jobs in its manifest. They are registered in 
 | `cvelist-delta-sync` | `cvelist` | Hourly at :40 | The CVE records changed since its last run, from cvelistV5's delta zips |
 | `wikidata-sync` | `wikidata` | Thursday 04:30 | Vendor websites and facts, product vendors, country regions ([below](#wikidata)) |
 | `endoflife-sync` | `endoflife` | Daily 05:15 | Product support lifecycles ([below](#endoflifedate)) |
+| `ctid-mappings-sync` | `ctid` | Sunday 04:15 | NIST 800-53 and CIS controls on techniques ([below](#ctid-control-mappings)) |
+| `d3fend-sync` | `d3fend` | Sunday 04:30 | D3FEND countermeasures for techniques ([below](#d3fend)) |
+| `capec-sync` | `capec` | Monday 04:00 | The CAPEC attack-pattern catalog, and each technique's patterns ([below](#capec)) |
 
 **CVE List.** The source reads the CVE Program's records from the cvelistV5 repository on GitHub: the CNA's container and CISA's ADP container (SSVC, and CVSS for CVEs the CNA left unscored). The repository's daily baseline zip of every record is about 650 MB, so it is never fetched. Instead:
 
@@ -869,6 +876,31 @@ Every looked-up entity also gets a link to its Wikidata item. A title Wikidata h
 ### Tranco
 
 The Tranco sync (`_run_tranco_sync` in `backend/app/workers/enrichment_tasks.py`) asks `tranco-list.eu/api/lists/date/latest` for the day's list, then streams its CSV (about 22 MB) line by line, matching 10,000 rows at a time against the ledger's `domain` observables, so only the matches are held in memory. A match is exact: `evil.workers.dev` never takes `workers.dev`'s rank. Matched domains get `popularity_rank` and a `rank` context row (expires in 48 hours); domains that left the list lose both. A domain entering the top 10,000 (`TRANCO_REVIEW_RANK`) gets `needs_review = true` once: a popular site named as an indicator is often a false positive, but nothing is deleted or denied, and a row an analyst has cleared isn't flagged again while it stays there. Denied rows are never flagged.
+
+### CAPEC
+
+`capec-sync` (`backend/app/enrichment/capec.py`) downloads CAPEC's research view, `capec.mitre.org/data/csv/1000.csv.zip` (about 380 KB, every attack pattern), and replaces `capec_patterns` with it: id, name, abstraction, status, description, related weaknesses and ATT&CK taxonomy mappings. Patterns that leave the view are deleted. An empty file fails the run rather than emptying the table.
+
+- **Weaknesses.** A CWE's `capec_ids` come from the CWE catalog. `GET /api/cwes/{cwe_id}` and the `get_cwe` tool return them with their names (`capec_patterns`, `capec_names()`), and the CWE profile's MITRE CWE panel shows the names. An id the catalog lacks keeps a null name. The names are read from the table, not copied onto each weakness, so they are current as soon as the sync has run.
+- **Techniques.** A technique's patterns are the ones whose ATT&CK mappings name it exactly (a sub-technique doesn't take its parent's). They show as an "Attack patterns" table (CAPEC, pattern, abstraction) in the technique's Context panel. A technique CAPEC stops mapping loses the table.
+
+CAPEC may be used for research, development and commercial purposes with MITRE's copyright designation ([terms](https://capec.mitre.org/about/termsofuse.html)); the profile credits it.
+
+### CTID Control Mappings
+
+`ctid-mappings-sync` (`backend/app/enrichment/ctid.py`) reads two files from the Center for Threat-Informed Defense's [Mappings Explorer](https://github.com/center-for-threat-informed-defense/mappings-explorer): NIST 800-53 rev5 mapped to ATT&CK 16.1 (about 2 MB) and CIS Controls 8.1.2 mapped to ATT&CK 19.1 (about 870 KB). Each mapping says a control (`capability_id`, such as `AC-06` or `CIS-13.7`) `mitigates` a technique (`attack_object_id`); non-mappable rows are skipped. `MAPPING_URLS` names the files, since a new framework or ATT&CK version is a new path.
+
+Every technique that either file maps, or that holds controls from an earlier run, gets `nist_controls` and `cis_controls` (control ids in control order, newer wins), a claim for each write, and two chip rows on its profile, "NIST 800-53 rev5" and "CIS Controls v8.1", each chip the control id and name. Sub-techniques carry their own mappings. Both files are read before anything is written: if one is refused the run stops without writing, so a missing framework never reads as controls removed.
+
+The mappings link controls to techniques only; they name no ATT&CK mitigation (M-id), so the job writes nothing onto `mitigations` or `ttp_mitigations`. Mappings Explorer is Apache 2.0.
+
+### D3FEND
+
+`d3fend-sync` (`backend/app/enrichment/d3fend.py`) asks `d3fend.mitre.org/api/version.json` for the current release, then streams that release's `d3fend-full-mappings.csv` (about 15 MB) to a temporary file. Each row is one path from a defensive technique, through the digital artifacts both act on, to an offensive technique; the job keeps each ATT&CK technique's defensive techniques with their D3FEND tactic.
+
+The file lists only a technique's own mappings. D3FEND's page for a technique adds the ones inherited through ATT&CK's hierarchy, and so does the job: a sub-technique takes its parent's, a parent its sub-techniques'. That matches what D3FEND's API answers for each technique.
+
+Each technique D3FEND counters gets a "Countermeasures" table (defensive technique, tactic; ordered Model, Harden, Detect, Isolate, Deceive, Evict, Restore) and a link to its D3FEND page. No column is written. A technique D3FEND stops countering loses both. D3FEND may be used for research, development and commercial purposes with MITRE's copyright designation ([terms](https://d3fend.mitre.org/tou/)).
 
 ---
 

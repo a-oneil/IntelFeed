@@ -1,6 +1,6 @@
 """Celery tasks for the enrichment sources' scheduled jobs — EPSS, MITRE ATT&CK,
 MISP Galaxy, Malpedia, Metasploit, NVD, GitHub PoC, Wikipedia, cvelistV5, Wikidata, endoflife.date,
-Tranco."""
+Tranco, CAPEC, CTID control mappings, D3FEND."""
 
 import csv
 import io
@@ -1768,6 +1768,84 @@ async def _run_endoflife_sync():
     gateway, _ = await _job_gateway("endoflife")
     async with _get_worker_session() as db:
         return await sync_endoflife(db, gateway)
+
+
+@celery_app.task(name="app.workers.enrichment_tasks.run_capec_sync", soft_time_limit=900, time_limit=960)
+def run_capec_sync():
+    """Weekly: the MITRE CAPEC catalog and each technique's attack patterns."""
+    start = time.monotonic()
+    try:
+        stats = run_async(_run_capec_sync())
+        logger.info("CAPEC sync stats: %s", stats)
+        CELERY_TASKS_TOTAL.labels(task_name="run_capec_sync", status="success").inc()
+        return stats
+    except Exception:
+        CELERY_TASKS_TOTAL.labels(task_name="run_capec_sync", status="error").inc()
+        logger.exception("CAPEC sync failed")
+        raise
+    finally:
+        CELERY_TASK_DURATION_SECONDS.labels(task_name="run_capec_sync").observe(time.monotonic() - start)
+
+
+@source_job("capec")
+async def _run_capec_sync():
+    from app.enrichment.capec import sync_capec
+
+    gateway, _ = await _job_gateway("capec")
+    async with _get_worker_session() as db:
+        return await sync_capec(db, gateway)
+
+
+@celery_app.task(name="app.workers.enrichment_tasks.run_ctid_sync", soft_time_limit=900, time_limit=960)
+def run_ctid_sync():
+    """Weekly: NIST 800-53 and CIS controls on techniques from CTID's mappings."""
+    start = time.monotonic()
+    try:
+        stats = run_async(_run_ctid_sync())
+        logger.info("CTID sync stats: %s", stats)
+        CELERY_TASKS_TOTAL.labels(task_name="run_ctid_sync", status="success").inc()
+        return stats
+    except Exception:
+        CELERY_TASKS_TOTAL.labels(task_name="run_ctid_sync", status="error").inc()
+        logger.exception("CTID sync failed")
+        raise
+    finally:
+        CELERY_TASK_DURATION_SECONDS.labels(task_name="run_ctid_sync").observe(time.monotonic() - start)
+
+
+@source_job("ctid")
+async def _run_ctid_sync():
+    from app.enrichment.ctid import sync_ctid
+
+    gateway, _ = await _job_gateway("ctid")
+    async with _get_worker_session() as db:
+        return await sync_ctid(db, gateway)
+
+
+@celery_app.task(name="app.workers.enrichment_tasks.run_d3fend_sync", soft_time_limit=900, time_limit=960)
+def run_d3fend_sync():
+    """Weekly: D3FEND countermeasures for techniques."""
+    start = time.monotonic()
+    try:
+        stats = run_async(_run_d3fend_sync())
+        logger.info("D3FEND sync stats: %s", stats)
+        CELERY_TASKS_TOTAL.labels(task_name="run_d3fend_sync", status="success").inc()
+        return stats
+    except Exception:
+        CELERY_TASKS_TOTAL.labels(task_name="run_d3fend_sync", status="error").inc()
+        logger.exception("D3FEND sync failed")
+        raise
+    finally:
+        CELERY_TASK_DURATION_SECONDS.labels(task_name="run_d3fend_sync").observe(time.monotonic() - start)
+
+
+@source_job("d3fend")
+async def _run_d3fend_sync():
+    from app.enrichment.d3fend import sync_d3fend
+
+    gateway, _ = await _job_gateway("d3fend")
+    async with _get_worker_session() as db:
+        return await sync_d3fend(db, gateway)
 
 
 TRANCO_LATEST_URL = "https://tranco-list.eu/api/lists/date/latest"

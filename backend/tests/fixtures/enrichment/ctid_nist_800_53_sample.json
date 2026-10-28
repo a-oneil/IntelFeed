@@ -1,0 +1,726 @@
+{
+ "metadata": {
+  "mapping_version": "",
+  "technology_domain": "enterprise",
+  "attack_version": "16.1",
+  "mapping_framework": "nist_800_53",
+  "mapping_framework_version": "rev5",
+  "author": null,
+  "contact": null,
+  "organization": null,
+  "creation_date": "01/13/2022",
+  "last_update": "04/16/2025",
+  "mapping_types": {
+   "mitigates": {
+    "name": "mitigates",
+    "description": ""
+   }
+  },
+  "capability_groups": {
+   "AC": "Access Control",
+   "CA": "Security Assessment and Authorization",
+   "CM": "Configuration Management",
+   "SC": "System and Communications Protection",
+   "SI": "System and Information Integrity",
+   "CP": "Contingency Planning",
+   "IA": "Identification and Authentication",
+   "SA": "System and Services Acquisition",
+   "RA": "Risk Assessment",
+   "MP": "Media Protection",
+   "SR": "Supply Chain Risk Management"
+  }
+ },
+ "mapping_objects": [
+  {
+   "capability_id": "CA-07",
+   "capability_description": "Continuous Monitoring",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059",
+   "attack_object_name": "Command and Scripting Interpreter",
+   "capability_group": "CA",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CA-07",
+   "capability_description": "Continuous Monitoring",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "CA",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CM-06",
+   "capability_description": "Configuration Settings",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059",
+   "attack_object_name": "Command and Scripting Interpreter",
+   "capability_group": "CM",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CM-06",
+   "capability_description": "Configuration Settings",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "CM",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CM-05",
+   "capability_description": "Access Restrictions for Change",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059",
+   "attack_object_name": "Command and Scripting Interpreter",
+   "capability_group": "CM",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CM-05",
+   "capability_description": "Access Restrictions for Change",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "CM",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "IA-05",
+   "capability_description": "Authenticator Management",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "IA",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "AC-17",
+   "capability_description": "Remote Access",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059",
+   "attack_object_name": "Command and Scripting Interpreter",
+   "capability_group": "AC",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "IA-09",
+   "capability_description": "Service Identification and Authentication",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059",
+   "attack_object_name": "Command and Scripting Interpreter",
+   "capability_group": "IA",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "IA-08",
+   "capability_description": "Identification and Authentication (Non-Organizational Users)",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059",
+   "attack_object_name": "Command and Scripting Interpreter",
+   "capability_group": "IA",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "SA-10",
+   "capability_description": "Developer Configuration Management",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "SA",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "IA-12",
+   "capability_description": "Identity Proofing",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "IA",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "SA-11",
+   "capability_description": "Developer Testing and Evaluation",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "SA",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "SA-15",
+   "capability_description": "Development Process, Standards, and Tools",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "SA",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "SA-17",
+   "capability_description": "Developer Security and Privacy Architecture and Design",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "SA",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "SA-03",
+   "capability_description": "System Development Life Cycle",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "SA",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "SA-04",
+   "capability_description": "Acquisition Process",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "SA",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "IA-13",
+   "capability_description": "Identity Providers and Authorization Servers",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "IA",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "SC-18",
+   "capability_description": "Mobile Code",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059",
+   "attack_object_name": "Command and Scripting Interpreter",
+   "capability_group": "SC",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CA-03",
+   "capability_description": "Information Exchange",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "CA",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CM-11",
+   "capability_description": "User-installed Software",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059",
+   "attack_object_name": "Command and Scripting Interpreter",
+   "capability_group": "CM",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "SC-28",
+   "capability_description": "Protection of Information at Rest",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "SC",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "SI-16",
+   "capability_description": "Memory Protection",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059",
+   "attack_object_name": "Command and Scripting Interpreter",
+   "capability_group": "SI",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "SI-02",
+   "capability_description": "Flaw Remediation",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059",
+   "attack_object_name": "Command and Scripting Interpreter",
+   "capability_group": "SI",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "RA-05",
+   "capability_description": "Vulnerability Monitoring and Scanning",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059",
+   "attack_object_name": "Command and Scripting Interpreter",
+   "capability_group": "RA",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "RA-05",
+   "capability_description": "Vulnerability Monitoring and Scanning",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "RA",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "SC-43",
+   "capability_description": "Usage Restrictions",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "SC",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CM-08",
+   "capability_description": "System Component Inventory",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059",
+   "attack_object_name": "Command and Scripting Interpreter",
+   "capability_group": "CM",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "SI-10",
+   "capability_description": "Information Input Validation",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059",
+   "attack_object_name": "Command and Scripting Interpreter",
+   "capability_group": "SI",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "SI-03",
+   "capability_description": "Malicious Code Protection",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059",
+   "attack_object_name": "Command and Scripting Interpreter",
+   "capability_group": "SI",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "SI-07",
+   "capability_description": "Software, Firmware, and Information Integrity",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059",
+   "attack_object_name": "Command and Scripting Interpreter",
+   "capability_group": "SI",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CM-02",
+   "capability_description": "Baseline Configuration",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059",
+   "attack_object_name": "Command and Scripting Interpreter",
+   "capability_group": "CM",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CM-02",
+   "capability_description": "Baseline Configuration",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059",
+   "attack_object_name": "Command and Scripting Interpreter",
+   "capability_group": "CM",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "SA-08",
+   "capability_description": "Security and Privacy Engineering Principles",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "SA",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "IA-02",
+   "capability_description": "Identification and Authentication (Organizational Users)",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059",
+   "attack_object_name": "Command and Scripting Interpreter",
+   "capability_group": "IA",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "IA-02",
+   "capability_description": "Identification and Authentication (Organizational Users)",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "IA",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CM-07",
+   "capability_description": "Least Functionality",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059",
+   "attack_object_name": "Command and Scripting Interpreter",
+   "capability_group": "CM",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CM-07",
+   "capability_description": "Least Functionality",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "CM",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "SI-04",
+   "capability_description": "System Monitoring",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059",
+   "attack_object_name": "Command and Scripting Interpreter",
+   "capability_group": "SI",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "SI-04",
+   "capability_description": "System Monitoring",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "SI",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "AC-02",
+   "capability_description": "Account Management",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059",
+   "attack_object_name": "Command and Scripting Interpreter",
+   "capability_group": "AC",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "AC-03",
+   "capability_description": "Access Enforcement",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059",
+   "attack_object_name": "Command and Scripting Interpreter",
+   "capability_group": "AC",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "AC-05",
+   "capability_description": "Separation of Duties",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059",
+   "attack_object_name": "Command and Scripting Interpreter",
+   "capability_group": "AC",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "AC-06",
+   "capability_description": "Least Privilege",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059",
+   "attack_object_name": "Command and Scripting Interpreter",
+   "capability_group": "AC",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "AC-02",
+   "capability_description": "Account Management",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "AC",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "AC-03",
+   "capability_description": "Access Enforcement",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "AC",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "AC-05",
+   "capability_description": "Separation of Duties",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "AC",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "AC-06",
+   "capability_description": "Least Privilege",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "AC",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "SC-07",
+   "capability_description": "Boundary Protection",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1078",
+   "attack_object_name": "Valid Accounts",
+   "capability_group": "SC",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CM-06",
+   "capability_description": "Configuration Settings",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059.001",
+   "attack_object_name": "PowerShell",
+   "capability_group": "CM",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CM-05",
+   "capability_description": "Access Restrictions for Change",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059.001",
+   "attack_object_name": "PowerShell",
+   "capability_group": "CM",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "AC-17",
+   "capability_description": "Remote Access",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059.001",
+   "attack_object_name": "PowerShell",
+   "capability_group": "AC",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "IA-09",
+   "capability_description": "Service Identification and Authentication",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059.001",
+   "attack_object_name": "PowerShell",
+   "capability_group": "IA",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "IA-08",
+   "capability_description": "Identification and Authentication (Non-Organizational Users)",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059.001",
+   "attack_object_name": "PowerShell",
+   "capability_group": "IA",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "SI-16",
+   "capability_description": "Memory Protection",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059.001",
+   "attack_object_name": "PowerShell",
+   "capability_group": "SI",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "SI-02",
+   "capability_description": "Flaw Remediation",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059.001",
+   "attack_object_name": "PowerShell",
+   "capability_group": "SI",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "RA-05",
+   "capability_description": "Vulnerability Monitoring and Scanning",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059.001",
+   "attack_object_name": "PowerShell",
+   "capability_group": "RA",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CM-08",
+   "capability_description": "System Component Inventory",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059.001",
+   "attack_object_name": "PowerShell",
+   "capability_group": "CM",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "SI-10",
+   "capability_description": "Information Input Validation",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059.001",
+   "attack_object_name": "PowerShell",
+   "capability_group": "SI",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "SI-03",
+   "capability_description": "Malicious Code Protection",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059.001",
+   "attack_object_name": "PowerShell",
+   "capability_group": "SI",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "SI-07",
+   "capability_description": "Software, Firmware, and Information Integrity",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059.001",
+   "attack_object_name": "PowerShell",
+   "capability_group": "SI",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "CM-02",
+   "capability_description": "Baseline Configuration",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059.001",
+   "attack_object_name": "PowerShell",
+   "capability_group": "CM",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "IA-02",
+   "capability_description": "Identification and Authentication (Organizational Users)",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059.001",
+   "attack_object_name": "PowerShell",
+   "capability_group": "IA",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "SI-04",
+   "capability_description": "System Monitoring",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059.001",
+   "attack_object_name": "PowerShell",
+   "capability_group": "SI",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "AC-02",
+   "capability_description": "Account Management",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059.001",
+   "attack_object_name": "PowerShell",
+   "capability_group": "AC",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "AC-03",
+   "capability_description": "Access Enforcement",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059.001",
+   "attack_object_name": "PowerShell",
+   "capability_group": "AC",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "AC-05",
+   "capability_description": "Separation of Duties",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059.001",
+   "attack_object_name": "PowerShell",
+   "capability_group": "AC",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": "AC-06",
+   "capability_description": "Least Privilege",
+   "mapping_type": "mitigates",
+   "attack_object_id": "T1059.001",
+   "attack_object_name": "PowerShell",
+   "capability_group": "AC",
+   "references": [],
+   "status": "complete"
+  },
+  {
+   "capability_id": null,
+   "capability_group": null,
+   "capability_description": null,
+   "mapping_type": null,
+   "attack_object_id": "T1496.002",
+   "attack_object_name": "Bandwidth Hijacking",
+   "comments": "no mitiigations in att&ck",
+   "references": [],
+   "status": "non_mappable"
+  }
+ ]
+}

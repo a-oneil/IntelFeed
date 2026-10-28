@@ -20,6 +20,7 @@ from app.enrichment.adapters import (
     WikipediaAdapter,
 )
 from app.enrichment.base import EnrichmentAdapter, Source
+from app.enrichment.capec import CAPECSource
 from app.enrichment.catalogs import (
     CybergeistSource,
     MetasploitSource,
@@ -28,6 +29,8 @@ from app.enrichment.catalogs import (
     RansomwareLiveSource,
     TrancoSource,
 )
+from app.enrichment.ctid import CTIDSource
+from app.enrichment.d3fend import D3FENDSource
 from app.enrichment.endoflife import EndOfLifeSource
 from app.enrichment.gateway import SourceGateway
 from app.enrichment.wikidata import WikidataSource
@@ -66,6 +69,9 @@ CATALOG_REGISTRY: dict[str, type[Source]] = {
         WikidataSource,
         EndOfLifeSource,
         TrancoSource,
+        CAPECSource,
+        CTIDSource,
+        D3FENDSource,
     )
 }
 

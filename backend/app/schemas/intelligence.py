@@ -84,6 +84,9 @@ class TTPResponse(BaseModel):
     is_deprecated: bool = False
     superseded_by: str | None = None
     matrix_domain: str | None = None
+    #: Controls that mitigate the technique, from CTID's mappings.
+    nist_controls: list[str] = []
+    cis_controls: list[str] = []
     first_seen_at: datetime
     last_seen_at: datetime
     article_count: int
@@ -758,6 +761,11 @@ class ObservableUpdateRequest(BaseModel):
     is_denied: bool | None = None
 
 
+class CAPECRef(BaseModel):
+    capec_id: str
+    name: str | None = None
+
+
 class CWEResponse(BaseModel):
     id: uuid.UUID
     cwe_id: str
@@ -772,6 +780,9 @@ class CWEResponse(BaseModel):
     likelihood_of_exploit: str | None = None
     alternate_terms: list[str] = []
     capec_ids: list[str] = []
+    #: ``capec_ids`` with their names from the CAPEC catalog (single-weakness
+    #: endpoint only); a name is null until the catalog has the pattern.
+    capec_patterns: list[CAPECRef] = []
     consequences: list[dict] = []
     mitigations: list[dict] = []
     detection_methods: list[dict] = []

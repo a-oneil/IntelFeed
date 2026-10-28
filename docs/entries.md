@@ -58,4 +58,7 @@ UTC defaults from `backend/app/workers/job_registry.py`; admins can override.
 | `wikipedia-bulk-sync` | weekly Wed 04:00 | Wikipedia summaries |
 | `wikidata-sync` | weekly Thu 04:30 | vendor websites, product vendors, country regions from Wikidata |
 | `endoflife-sync` | daily 05:15 | product support status from endoflife.date |
+| `ctid-mappings-sync` | weekly Sun 04:15 | NIST 800-53 and CIS controls on techniques (CTID) |
+| `d3fend-sync` | weekly Sun 04:30 | D3FEND countermeasures on techniques |
+| `capec-sync` | weekly Mon 04:00 | CAPEC attack patterns for weaknesses and techniques |
 | `build-telegram-forward-relationships` | every 4h | Telegram `forwarded_from` → `communicates_with` links |

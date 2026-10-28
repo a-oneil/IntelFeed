@@ -549,6 +549,7 @@ async def _search_observables(
 )
 async def _get_cwe(db: AsyncSession, user_id: uuid.UUID, cwe_id: str) -> dict:
     from app.api.intelligence import _cwe_rolled_counts
+    from app.enrichment.capec import capec_names
     from app.models.cwe import CWE, CVEWeakness
 
     try:
@@ -599,6 +600,7 @@ async def _get_cwe(db: AsyncSession, user_id: uuid.UUID, cwe_id: str) -> dict:
         "likelihood_of_exploit": cwe.likelihood_of_exploit,
         "alternate_terms": cwe.alternate_terms,
         "capec_ids": cwe.capec_ids,
+        "capec_patterns": await capec_names(db, cwe.capec_ids or []),
         "consequences": cwe.consequences,
         "mitigations": cwe.mitigations,
         "detection_methods": cwe.detection_methods,
@@ -647,6 +649,8 @@ async def _get_ttp(db: AsyncSession, user_id: uuid.UUID, ttp_id: str) -> dict:
         "mitre_url": ttp.mitre_url,
         "detection": ttp.detection,
         "is_subtechnique": ttp.is_subtechnique,
+        "nist_controls": ttp.nist_controls or [],
+        "cis_controls": ttp.cis_controls or [],
         "first_seen_at": str(ttp.first_seen_at),
         "last_seen_at": str(ttp.last_seen_at),
         "article_count": ttp.article_count,

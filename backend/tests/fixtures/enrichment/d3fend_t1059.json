@@ -1,0 +1,418 @@
+{
+ "off_to_def": {
+  "head": {
+   "vars": [
+    "def_tactic_label",
+    "def_tech_label",
+    "def_tech_id",
+    "def_tech",
+    "off_tech_id",
+    "off_tech_label"
+   ]
+  },
+  "results": {
+   "bindings": [
+    {
+     "def_tactic_label": {
+      "type": "literal",
+      "value": "Detect"
+     },
+     "def_tech_label": {
+      "type": "literal",
+      "value": "File Analysis"
+     },
+     "def_tech_id": {
+      "type": "literal",
+      "value": "D3-FA"
+     },
+     "def_tech": {
+      "type": "uri",
+      "value": "http://d3fend.mitre.org/ontologies/d3fend.owl#FileAnalysis"
+     },
+     "off_tech_id": {
+      "type": "literal",
+      "value": "T1059"
+     },
+     "off_tech_label": {
+      "type": "literal",
+      "value": "Command and Scripting Interpreter"
+     }
+    },
+    {
+     "def_tactic_label": {
+      "type": "literal",
+      "value": "Isolate"
+     },
+     "def_tech_label": {
+      "type": "literal",
+      "value": "Content Filtering"
+     },
+     "def_tech_id": {
+      "type": "literal",
+      "value": "D3-CF"
+     },
+     "def_tech": {
+      "type": "uri",
+      "value": "http://d3fend.mitre.org/ontologies/d3fend.owl#ContentFiltering"
+     },
+     "off_tech_id": {
+      "type": "literal",
+      "value": "T1059"
+     },
+     "off_tech_label": {
+      "type": "literal",
+      "value": "Command and Scripting Interpreter"
+     }
+    },
+    {
+     "def_tactic_label": {
+      "type": "literal",
+      "value": "Detect"
+     },
+     "def_tech_label": {
+      "type": "literal",
+      "value": "File Integrity Monitoring"
+     },
+     "def_tech_id": {
+      "type": "literal",
+      "value": "D3-FIM"
+     },
+     "def_tech": {
+      "type": "uri",
+      "value": "http://d3fend.mitre.org/ontologies/d3fend.owl#FileIntegrityMonitoring"
+     },
+     "off_tech_id": {
+      "type": "literal",
+      "value": "T1059"
+     },
+     "off_tech_label": {
+      "type": "literal",
+      "value": "Command and Scripting Interpreter"
+     }
+    },
+    {
+     "off_tech_id": {
+      "type": "literal",
+      "value": "T1059"
+     },
+     "off_tech_label": {
+      "type": "literal",
+      "value": "Command and Scripting Interpreter"
+     }
+    },
+    {
+     "def_tactic_label": {
+      "type": "literal",
+      "value": "Restore"
+     },
+     "def_tech_label": {
+      "type": "literal",
+      "value": "Restore File"
+     },
+     "def_tech_id": {
+      "type": "literal",
+      "value": "D3-RF"
+     },
+     "def_tech": {
+      "type": "uri",
+      "value": "http://d3fend.mitre.org/ontologies/d3fend.owl#RestoreFile"
+     },
+     "off_tech_id": {
+      "type": "literal",
+      "value": "T1059"
+     },
+     "off_tech_label": {
+      "type": "literal",
+      "value": "Command and Scripting Interpreter"
+     }
+    },
+    {
+     "def_tactic_label": {
+      "type": "literal",
+      "value": "Detect"
+     },
+     "def_tech_label": {
+      "type": "literal",
+      "value": "Dynamic Analysis"
+     },
+     "def_tech_id": {
+      "type": "literal",
+      "value": "D3-DA"
+     },
+     "def_tech": {
+      "type": "uri",
+      "value": "http://d3fend.mitre.org/ontologies/d3fend.owl#DynamicAnalysis"
+     },
+     "off_tech_id": {
+      "type": "literal",
+      "value": "T1059"
+     },
+     "off_tech_label": {
+      "type": "literal",
+      "value": "Command and Scripting Interpreter"
+     }
+    },
+    {
+     "def_tactic_label": {
+      "type": "literal",
+      "value": "Evict"
+     },
+     "def_tech_label": {
+      "type": "literal",
+      "value": "File Eviction"
+     },
+     "def_tech_id": {
+      "type": "literal",
+      "value": "D3-FEV"
+     },
+     "def_tech": {
+      "type": "uri",
+      "value": "http://d3fend.mitre.org/ontologies/d3fend.owl#FileEviction"
+     },
+     "off_tech_id": {
+      "type": "literal",
+      "value": "T1059"
+     },
+     "off_tech_label": {
+      "type": "literal",
+      "value": "Command and Scripting Interpreter"
+     }
+    },
+    {
+     "def_tactic_label": {
+      "type": "literal",
+      "value": "Deceive"
+     },
+     "def_tech_label": {
+      "type": "literal",
+      "value": "Decoy File"
+     },
+     "def_tech_id": {
+      "type": "literal",
+      "value": "D3-DF"
+     },
+     "def_tech": {
+      "type": "uri",
+      "value": "http://d3fend.mitre.org/ontologies/d3fend.owl#DecoyFile"
+     },
+     "off_tech_id": {
+      "type": "literal",
+      "value": "T1059"
+     },
+     "off_tech_label": {
+      "type": "literal",
+      "value": "Command and Scripting Interpreter"
+     }
+    },
+    {
+     "def_tactic_label": {
+      "type": "literal",
+      "value": "Isolate"
+     },
+     "def_tech_label": {
+      "type": "literal",
+      "value": "Content Quarantine"
+     },
+     "def_tech_id": {
+      "type": "literal",
+      "value": "D3-CQ"
+     },
+     "def_tech": {
+      "type": "uri",
+      "value": "http://d3fend.mitre.org/ontologies/d3fend.owl#ContentQuarantine"
+     },
+     "off_tech_id": {
+      "type": "literal",
+      "value": "T1059"
+     },
+     "off_tech_label": {
+      "type": "literal",
+      "value": "Command and Scripting Interpreter"
+     }
+    },
+    {
+     "def_tactic_label": {
+      "type": "literal",
+      "value": "Isolate"
+     },
+     "def_tech_label": {
+      "type": "literal",
+      "value": "Content Modification"
+     },
+     "def_tech_id": {
+      "type": "literal",
+      "value": "D3-CM"
+     },
+     "def_tech": {
+      "type": "uri",
+      "value": "http://d3fend.mitre.org/ontologies/d3fend.owl#ContentModification"
+     },
+     "off_tech_id": {
+      "type": "literal",
+      "value": "T1059"
+     },
+     "off_tech_label": {
+      "type": "literal",
+      "value": "Command and Scripting Interpreter"
+     }
+    },
+    {
+     "def_tactic_label": {
+      "type": "literal",
+      "value": "Isolate"
+     },
+     "def_tech_label": {
+      "type": "literal",
+      "value": "Executable Allowlisting"
+     },
+     "def_tech_id": {
+      "type": "literal",
+      "value": "D3-EAL"
+     },
+     "def_tech": {
+      "type": "uri",
+      "value": "http://d3fend.mitre.org/ontologies/d3fend.owl#ExecutableAllowlisting"
+     },
+     "off_tech_id": {
+      "type": "literal",
+      "value": "T1059"
+     },
+     "off_tech_label": {
+      "type": "literal",
+      "value": "Command and Scripting Interpreter"
+     }
+    },
+    {
+     "def_tactic_label": {
+      "type": "literal",
+      "value": "Detect"
+     },
+     "def_tech_label": {
+      "type": "literal",
+      "value": "Emulated File Analysis"
+     },
+     "def_tech_id": {
+      "type": "literal",
+      "value": "D3-EFA"
+     },
+     "def_tech": {
+      "type": "uri",
+      "value": "http://d3fend.mitre.org/ontologies/d3fend.owl#EmulatedFileAnalysis"
+     },
+     "off_tech_id": {
+      "type": "literal",
+      "value": "T1059"
+     },
+     "off_tech_label": {
+      "type": "literal",
+      "value": "Command and Scripting Interpreter"
+     }
+    },
+    {
+     "def_tactic_label": {
+      "type": "literal",
+      "value": "Harden"
+     },
+     "def_tech_label": {
+      "type": "literal",
+      "value": "File Encryption"
+     },
+     "def_tech_id": {
+      "type": "literal",
+      "value": "D3-FE"
+     },
+     "def_tech": {
+      "type": "uri",
+      "value": "http://d3fend.mitre.org/ontologies/d3fend.owl#FileEncryption"
+     },
+     "off_tech_id": {
+      "type": "literal",
+      "value": "T1059"
+     },
+     "off_tech_label": {
+      "type": "literal",
+      "value": "Command and Scripting Interpreter"
+     }
+    },
+    {
+     "def_tactic_label": {
+      "type": "literal",
+      "value": "Isolate"
+     },
+     "def_tech_label": {
+      "type": "literal",
+      "value": "Local File Permissions"
+     },
+     "def_tech_id": {
+      "type": "literal",
+      "value": "D3-LFP"
+     },
+     "def_tech": {
+      "type": "uri",
+      "value": "http://d3fend.mitre.org/ontologies/d3fend.owl#LocalFilePermissions"
+     },
+     "off_tech_id": {
+      "type": "literal",
+      "value": "T1059"
+     },
+     "off_tech_label": {
+      "type": "literal",
+      "value": "Command and Scripting Interpreter"
+     }
+    },
+    {
+     "def_tactic_label": {
+      "type": "literal",
+      "value": "Isolate"
+     },
+     "def_tech_label": {
+      "type": "literal",
+      "value": "Remote File Access Mediation"
+     },
+     "def_tech_id": {
+      "type": "literal",
+      "value": "D3-RFAM"
+     },
+     "def_tech": {
+      "type": "uri",
+      "value": "http://d3fend.mitre.org/ontologies/d3fend.owl#RemoteFileAccessMediation"
+     },
+     "off_tech_id": {
+      "type": "literal",
+      "value": "T1059"
+     },
+     "off_tech_label": {
+      "type": "literal",
+      "value": "Command and Scripting Interpreter"
+     }
+    },
+    {
+     "def_tactic_label": {
+      "type": "literal",
+      "value": "Isolate"
+     },
+     "def_tech_label": {
+      "type": "literal",
+      "value": "Executable Denylisting"
+     },
+     "def_tech_id": {
+      "type": "literal",
+      "value": "D3-EDL"
+     },
+     "def_tech": {
+      "type": "uri",
+      "value": "http://d3fend.mitre.org/ontologies/d3fend.owl#ExecutableDenylisting"
+     },
+     "off_tech_id": {
+      "type": "literal",
+      "value": "T1059"
+     },
+     "off_tech_label": {
+      "type": "literal",
+      "value": "Command and Scripting Interpreter"
+     }
+    }
+   ]
+  }
+ }
+}

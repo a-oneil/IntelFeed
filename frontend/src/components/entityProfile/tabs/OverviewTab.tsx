@@ -734,11 +734,16 @@ export function OverviewTab({
             {entity.capec_ids && entity.capec_ids.length > 0 && (
               <div className={styles.tagRow}>
                 <span className={styles.metaLabel}>CAPEC</span>
-                {entity.capec_ids.slice(0, 6).map((c) => (
-                  <span key={c} className={styles.platformTag}>
-                    {c}
-                  </span>
-                ))}
+                {(entity.capec_patterns?.length
+                  ? entity.capec_patterns
+                  : entity.capec_ids.map((c) => ({ capec_id: c, name: null }))
+                )
+                  .slice(0, 6)
+                  .map((c) => (
+                    <span key={c.capec_id} className={styles.platformTag}>
+                      {c.name ? `${c.capec_id} ${c.name}` : c.capec_id}
+                    </span>
+                  ))}
               </div>
             )}
           </Panel>

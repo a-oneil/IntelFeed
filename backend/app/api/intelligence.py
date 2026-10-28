@@ -27,6 +27,7 @@ from app.core.pagination import PaginatedResponse
 from app.core.public_access import viewer_is_anonymous
 from app.core.security import get_admin_user, get_current_user, get_entry_viewer, get_viewer
 from app.database import get_db
+from app.enrichment.capec import capec_names
 from app.intelligence.cve import extract_and_store_cves
 from app.intelligence.detection import (
     ENTITY_RULE_TYPES,
@@ -75,6 +76,7 @@ from app.schemas.intelligence import (
     BulkRuleDeleteRequest,
     BulkRuleUpdateRequest,
     BulkTranslateRequest,
+    CAPECRef,
     CountryResponse,
     CVEAffectedEntityRow,
     CVEResponse,
@@ -4790,6 +4792,8 @@ def _ttp_to_response(ttp: TTP) -> TTPResponse:
         is_deprecated=ttp.is_deprecated or False,
         superseded_by=ttp.superseded_by,
         matrix_domain=ttp.matrix_domain,
+        nist_controls=ttp.nist_controls or [],
+        cis_controls=ttp.cis_controls or [],
         first_seen_at=ttp.first_seen_at,
         last_seen_at=ttp.last_seen_at,
         article_count=ttp.article_count,
@@ -5894,13 +5898,15 @@ async def get_cwe(
         )
     ).one()
     rolled = await _cwe_rolled_counts(db)
-    return _cwe_to_response(
+    response = _cwe_to_response(
         cwe,
         cve_count=int(counts[0] or 0),
         kev_count=int(counts[1] or 0),
         cve_count_rolled=rolled.get(cwe.id, (0, 0))[0],
         kev_count_rolled=rolled.get(cwe.id, (0, 0))[1],
     )
+    response.capec_patterns = [CAPECRef(**p) for p in await capec_names(db, cwe.capec_ids or [])]
+    return response
 
 
 @router.get("/cwes/{cwe_id}/family", response_model=CWEFamilyResponse)
