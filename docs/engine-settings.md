@@ -514,7 +514,7 @@ Each job in `JOB_REGISTRY` (`backend/app/workers/job_registry.py`) lists the set
 
 `entity_maintenance_mode` is read by `actor-profile-refresh` but is not in its `settings_keys`, so the Jobs screen doesn't show it there. Edit it on the Maintenance screen.
 
-All 66 jobs, including those with no settings, are in [workers-search-dashboards.md](workers-search-dashboards.md).
+All 67 jobs, including those with no settings, are in [workers-search-dashboards.md](workers-search-dashboards.md).
 
 ---
 

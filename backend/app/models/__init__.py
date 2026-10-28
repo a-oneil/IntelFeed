@@ -26,7 +26,7 @@ from app.models.dashboard import Dashboard, DashboardWidget
 from app.models.detection_rule import DetectionRule
 from app.models.detection_rule_version import DetectionRuleVersion
 from app.models.detection_summary import DetectionSummary
-from app.models.enrichment import EnrichmentResult, EnrichmentSource, UserEnrichmentOverride
+from app.models.enrichment import EnrichmentJob, EnrichmentResult, EnrichmentSource, UserEnrichmentOverride
 from app.models.entity_field_claim import EntityFieldClaim
 
 # Entity link AI validation
@@ -203,6 +203,7 @@ __all__ = [
     "EnrichmentSource",
     "UserEnrichmentOverride",
     "EnrichmentResult",
+    "EnrichmentJob",
     "DetectionSummary",
     "FalsePositiveRecord",
     # Glossary

@@ -50,9 +50,10 @@ Ports are the dev stack (`docker-compose.dev.yml`). Production (`docker-compose.
 | db (PostgreSQL 16 + pgvector) | 5433 | Main database |
 | redis | 6380 | Task queue, caches, locks, autolinker word-list version |
 | api (FastAPI) | 8000 | REST API. Runs database migrations on start |
-| celery-worker | — | Background tasks on the default queue (fetching, linking, enrichment) |
+| celery-worker | — | Background tasks on the default queue (fetching, linking, scheduled enrichment syncs) |
 | celery-worker-ai | — | The `ai` queue, one task at a time. Every AI call runs here |
-| celery-beat | — | Scheduler for the 66 jobs in `JOB_REGISTRY` (`backend/app/workers/job_registry.py`) |
+| celery-worker-enrichment | — | The `enrichment` queue, one task at a time: the enrichment dispatcher |
+| celery-beat | — | Scheduler for the 67 jobs in `JOB_REGISTRY` (`backend/app/workers/job_registry.py`) |
 | telegram-listener | — | Long-running Telegram client |
 | meilisearch | 7700 | Full-text search |
 | libretranslate | 5050 | Article translation |
@@ -304,7 +305,7 @@ Enrichment adds facts from outside sources to an entity.
 
 ### Automatic Enrichment
 
-When a **new** entity is created, `auto_enrich_entity(entity_type, entity_id, entity_value)` runs. It finds the `EnrichmentSource` rows for that entity type set to `auto`, runs each adapter, and saves the results on the entity. For CVEs it also updates exploit status, KEV status and EPSS scores.
+When a **new** entity is created, `enqueue()` (`backend/app/enrichment/queue.py`) adds an `enrichment_jobs` row for each enabled `EnrichmentSource` set to `auto` that handles the entity type. Every 30 seconds `dispatch_enrichment_jobs`, on its own `enrichment` queue and worker, runs the due rows: each one through its source's adapter, with the results saved on the entity. A source that says "not now" (rate limit, open breaker, budget used up) gets the row back with a later `due_at`, so the lookup waits instead of being lost. See [automation-ai-enrichment.md](automation-ai-enrichment.md#enrichment-job-queue).
 
 Adapters (`backend/app/enrichment/adapters/`): NVD, EPSS, CISA KEV, MITRE ATT&CK, Malpedia, GitHub PoC, Wikipedia, CVEDetails, OSV, VulnCheck, and for observables VirusTotal, GreyNoise and Shodan InternetDB. Each one, and each scheduled enrichment job, makes its HTTP requests through a `SourceGateway` (`backend/app/enrichment/gateway.py`), which applies the source's rate limit, daily budget and circuit breaker to every request and refuses to send when Redis is down. See [automation-ai-enrichment.md](automation-ai-enrichment.md#source-gateway).
 

@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import api from "@/api/client";
 import { useIsVisitor } from "@/stores/authStore";
 import type {
@@ -139,6 +140,8 @@ export function useEnrichEntity() {
           parsed_data?: Record<string, unknown>;
           error?: string;
         }>;
+        /** Sources that refused for now; each lookup is queued to retry. */
+        queued: string[];
       }>("/enrichment/enrich", {
         entity_type: entityType,
         entity_id: entityId,
@@ -146,14 +149,18 @@ export function useEnrichEntity() {
       });
       return data;
     },
-    onSuccess: (data) =>
-      qc.invalidateQueries({
+    onSuccess: (data) => {
+      if (data.queued?.length) {
+        toast(`Queued to retry when the source allows: ${data.queued.join(", ")}`);
+      }
+      return qc.invalidateQueries({
         queryKey: [
           "enrichment-results",
           data.entity_type,
           data.entity_id,
         ],
-      }),
+      });
+    },
   });
 }
 

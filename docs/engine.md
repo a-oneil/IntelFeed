@@ -65,7 +65,7 @@ From `PIPELINE_STAGES` (`backend/app/pipeline/registry.py:38`):
 | `requirements` | post | `intel_feed_tasks.match_requirements_task` | on |
 | `score` | final | `signal_tasks.score_entry_task`. Scores the entry and queues the one-pass AI analysis | on |
 | `adjudicate` | post_analysis | `adjudication_tasks.adjudicate_entry_task`. An AI review of everything the analysis wrote to the entry (links, new entities, relationships, observables). Verdicts are filed or applied per `adjudication_mode`; see [engine-settings.md](engine-settings.md#adjudicate-stage-post-analysis-ai-review) | on |
-| `enrich` | side | `enrichment_tasks.auto_enrich_entity` | on |
+| `enrich` | side | `enrichment_dispatch_tasks.dispatch_enrichment_jobs`. New entities queue `enrichment_jobs` rows; this beat task runs the due ones every 30 seconds on the `enrichment` queue. See [automation-ai-enrichment.md](automation-ai-enrichment.md#enrichment-job-queue) | on |
 | `automate` | side | `automation_tasks.run_entry_automations` | on |
 
 `stages_of_kind(kind)` (`backend/app/pipeline/registry.py:163`) is how the chord builders and the API read the registry, so no task name is hard-coded elsewhere. `backend/tests/test_pipeline_registry.py` checks that the chord built from the registry has the expected shape.

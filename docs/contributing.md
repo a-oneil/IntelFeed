@@ -90,7 +90,7 @@ docker compose -f docker-compose.dev.yml up
 
 - **Frontend:** Vite at `localhost:3001`, with hot reload. It forwards `/api` to the api container.
 - **API:** uvicorn at `localhost:8000`. It restarts when you save a backend file.
-- **Workers:** `celery-worker` (the `celery` queue), `celery-worker-ai` (the `ai` queue, one task at a time), `celery-beat` and `telegram-listener`, each in its own container. They see your code through the same mount but **do not reload on their own**: after editing task code, run `docker compose -f docker-compose.dev.yml restart celery-worker celery-worker-ai`.
+- **Workers:** `celery-worker` (the `celery` queue), `celery-worker-ai` (the `ai` queue, one task at a time), `celery-worker-enrichment` (the `enrichment` queue: the enrichment dispatcher), `celery-beat` and `telegram-listener`, each in its own container. They see your code through the same mount but **do not reload on their own**: after editing task code, run `docker compose -f docker-compose.dev.yml restart celery-worker celery-worker-ai celery-worker-enrichment`.
 - **Data services:** PostgreSQL, Redis, Meilisearch, LibreTranslate and Piper.
 
 Diagram: [Dev stack services](diagrams/contributing-dev-stack.md).

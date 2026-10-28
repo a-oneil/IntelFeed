@@ -21,6 +21,7 @@ celery_app = Celery(
         "app.workers.intel_feed_tasks",
         "app.workers.saved_search_tasks",
         "app.workers.enrichment_tasks",
+        "app.workers.enrichment_dispatch_tasks",
         "app.workers.report_tasks",
         "app.workers.reddit_digest_tasks",
         "app.workers.telegram_link_tasks",
@@ -89,6 +90,11 @@ celery_app.conf.update(
         # volume, which only celery-worker-ai mounts.
         "app.workers.copilot_auth_tasks.run_claude_auth": {"queue": "ai"},
         "app.workers.copilot_auth_tasks.refresh_claude_auth_status": {"queue": "ai"},
+        # The enrichment dispatcher has its own small worker
+        # (celery-worker-enrichment, concurrency 1): a tick waiting on a slow
+        # or throttled source never holds a default-worker slot, and ticks
+        # never overlap.
+        "app.workers.enrichment_dispatch_tasks.dispatch_enrichment_jobs": {"queue": "enrichment"},
     },
 )
 

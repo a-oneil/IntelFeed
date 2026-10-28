@@ -277,19 +277,12 @@ async def store_ttps(
 
     await db.flush()
 
-    # Dispatch auto-enrichment for newly created TTPs
-    try:
-        from app.workers.enrichment_tasks import auto_enrich_entity
+    # Queue enrichment for newly created TTPs
+    from app.enrichment.queue import enqueue
 
-        for ttp_obj, is_new in stored:
-            if is_new:
-                auto_enrich_entity.delay(
-                    entity_type="ttp",
-                    entity_id=str(ttp_obj.id),
-                    entity_value=ttp_obj.technique_id,
-                )
-    except Exception:
-        pass  # Don't fail extraction if enrichment dispatch fails
+    for ttp_obj, is_new in stored:
+        if is_new:
+            await enqueue(db, "ttp", ttp_obj.id, ttp_obj.technique_id)
 
     return stored
 

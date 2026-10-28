@@ -109,7 +109,7 @@ flowchart TD
         GH_CHECK -- "No" --> AI_PASS
 
         AI_PASS["Regex-only pass (no AI call here):<br/>MITRE technique IDs · CVE IDs ·<br/>mitigation M-IDs, over original +<br/>translated text. The one-pass AI<br/>analysis is enqueued by the score<br/>stage and runs on the batch queue."]
-        AI_PASS --> TTP_STORE["Store TTPs (technique_id unique)<br/>new TTP → auto_enrich_entity.delay()"]
+        AI_PASS --> TTP_STORE["Store TTPs (technique_id unique)<br/>new TTP → enrichment_jobs row"]
         AI_PASS --> CVE_STORE["Store CVEs (cve_id unique)<br/>new CVE → NVD API 2.0 fetch:<br/>CVSS, severity, description,<br/>CPEs, references"]
 
         EXTRACT_TASK --> RULE_EXTRACT{"feed.extract_detection_rules?"}
@@ -121,7 +121,7 @@ flowchart TD
     end
 
     subgraph ENRICHMENT["⑨ Enrichment (auto + Celery Beat schedules)"]
-        ENRICH_PIPE["auto_enrich_entity()<br/>for new entities →<br/>EnrichmentSource adapters:<br/>NVD, OSV, CVEDetails, Wikipedia, …"]
+        ENRICH_PIPE["enrichment_jobs rows for new entities,<br/>run every 30s by dispatch_enrichment_jobs →<br/>EnrichmentSource adapters:<br/>NVD, OSV, CVEDetails, Wikipedia, …"]
         SCHEDULED["Beat-scheduled syncs:<br/>sync-kev-feed — every 6h<br/>cve-nvd-refresh — daily 12:00 UTC<br/>cve-nvd-backfill — daily 01:30 UTC<br/>epss-bulk-sync — daily 06:30 UTC<br/>github-poc-scan — daily 05:00 UTC<br/>cybergeist sync — daily 02:30 UTC<br/>mitre-attack-sync — weekly Sun 03:00<br/>malpedia-sync — weekly Sat 01:00<br/>wikipedia-bulk-sync — weekly Wed 04:00"]
     end
 

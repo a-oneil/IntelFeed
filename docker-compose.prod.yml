@@ -286,6 +286,36 @@ services:
         limits:
           memory: 2G
 
+  # Enrichment dispatcher: one tick at a time on the "enrichment" queue, so a
+  # tick waiting on a throttled source never holds a default-worker slot.
+  celery-worker-enrichment:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: production
+    restart: unless-stopped
+    logging: *default-logging
+    volumes:
+      - ./logs:/app/logs
+    env_file:
+      - .env
+    environment:
+      - ENV=production
+    networks:
+      - backend
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Same as celery-worker: first to be killed under memory pressure.
+    oom_score_adj: 600
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=1 --prefetch-multiplier=1 --max-tasks-per-child=200 --max-memory-per-child=250000 --queues=enrichment
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+
   # Serialized AI worker: one task at a time on the "ai" queue, whatever the
   # assigned provider (paces the Ollama GPU; also the only service mounting
   # the claude_code CLI credentials volume for CLI-provider tasks).

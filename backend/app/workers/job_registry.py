@@ -353,6 +353,15 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
         "default_schedule": {"type": "crontab", "minute": "*/30"},
     },
     # --- Enrichment ---
+    "enrichment-dispatch": {
+        "task": "app.workers.enrichment_dispatch_tasks.dispatch_enrichment_jobs",
+        "description": "Run due lookups from the enrichment job queue, by lane priority",
+        "category": "enrichment",
+        "default_schedule": {"type": "interval", "seconds": 30},
+        # A tick that sat out a worker restart is stale (the next is 30s
+        # behind it): drop it rather than run a backlog of ticks.
+        "options": {"expires": 30},
+    },
     "scheduled-enrichment-check": {
         "task": "app.workers.enrichment_tasks.run_scheduled_enrichment",
         "description": "Check and execute scheduled enrichment source syncs",
@@ -737,5 +746,7 @@ def build_beat_schedule(overrides: dict[str, Any] | None = None) -> dict:
             "task": job["task"],
             "schedule": schedule_dict_to_celery(sched),
         }
+        if job.get("options"):
+            schedule[name]["options"] = job["options"]
 
     return schedule

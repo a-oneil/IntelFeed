@@ -148,8 +148,11 @@ PIPELINE_STAGES: dict[str, StageDef] = {
     "enrich": StageDef(
         name="enrich",
         kind="side",
-        task_path="app.workers.enrichment_tasks.auto_enrich_entity",
-        description="Entity enrichment from external sources (EPSS, KEV, MITRE, Malpedia, Wikipedia, GitHub PoC)",
+        task_path="app.workers.enrichment_dispatch_tasks.dispatch_enrichment_jobs",
+        description=(
+            "Entity enrichment from external sources: new entities queue lookups in enrichment_jobs, "
+            "the dispatcher runs them as each source allows"
+        ),
     ),
     "automate": StageDef(
         name="automate",

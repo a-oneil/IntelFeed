@@ -15,6 +15,8 @@ flowchart TD
     worker --> redis
     cli["celery-worker-ai<br/>ai queue (all AI calls, one at a time)"] --> db
     cli --> redis
+    enr["celery-worker-enrichment<br/>enrichment queue (the dispatcher)"] --> db
+    enr --> redis
     beat["celery-beat<br/>scheduler"] --> db
     beat --> redis
     tg["telegram-listener"] --> api

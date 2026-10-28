@@ -1180,7 +1180,7 @@ Enrichment fills in entity details from outside sources (NVD, EPSS, CISA KEV, Ma
 | GET | `/api/enrichment/user-overrides` | User | Your own API keys for sources |
 | PUT | `/api/enrichment/user-overrides/{source_id}` | User | Set your own key for a source |
 | DELETE | `/api/enrichment/user-overrides/{source_id}` | User | Go back to the instance key |
-| POST | `/api/enrichment/enrich` | User | Enrich one entity now (`entity_type`, `entity_id`, optional `source_types`) |
+| POST | `/api/enrichment/enrich` | User | Enrich one entity now (`entity_type`, `entity_id`, optional `source_types`); sources that refused are queued to retry and listed in `queued` |
 | GET | `/api/enrichment/results` | Visitor | Saved results for one entity |
 | GET | `/api/enrichment/status` | User | Overall enrichment status |
 

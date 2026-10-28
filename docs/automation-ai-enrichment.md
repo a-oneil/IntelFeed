@@ -377,6 +377,8 @@ Every Celery task that calls an AI provider is routed to the `ai` queue (`task_r
 
 **A new task that calls a provider must be added to `task_routes`.** Left on the default queue, a slow AI call can fill the default worker and stop feed polling.
 
+The enrichment dispatcher has a queue of its own, `enrichment`, read only by `celery-worker-enrichment` at concurrency 1 (see [Enrichment Job Queue](#enrichment-job-queue)).
+
 ### Callers: Who Is Asking
 
 Every AI call runs for a `Caller` (`backend/app/ai/caller.py:41`): a *kind* plus the user it is charged to.
@@ -542,22 +544,25 @@ The store path (`backend/app/intelligence/enrichment.py`) guards entity quality:
 Enrichment adds outside facts to entities: a CVE's CVSS score and EPSS probability, an actor's Wikipedia article, an IP address's open ports. The pieces:
 
 1. **Adapters**: one class per source, 13 in all (see [Adapter Registry](#adapter-registry)).
-2. **Source gateway**: every request, from an adapter or a scheduled job, passes a per-credential rate limit, daily budget and circuit breaker (see [Source Gateway](#source-gateway)).
+2. **The [source gateway](#source-gateway)**: rate limit, daily budget and circuit breaker on every HTTP request, from an adapter or a scheduled job.
 3. **Daily budgets**: a per-source cap on requests per UTC day, with a default for each source.
-4. **Caching**: results expire after a per-adapter TTL; a fresh result is reused.
-5. **Per-user API keys**: a person can store their own key for a source.
+4. **The [job queue](#enrichment-job-queue)**: lookups wait in `enrichment_jobs` until their source allows them.
+5. **Caching**: results expire after a per-adapter TTL; a fresh result is reused.
+6. **Per-user API keys**: a person can store their own key for a source.
 
-Sources are configured at Settings → Engine → Enrichment (`/api/enrichment/sources`). After an auto enrichment, `apply_enrichment_results_to_entity` (`backend/app/enrichment/entity_updater.py`) copies the useful fields onto the entity itself.
+Sources are configured at Settings → Engine → Enrichment (`/api/enrichment/sources`). After a queued lookup, `apply_enrichment_results_to_entity` (`backend/app/enrichment/entity_updater.py`) copies the useful fields onto the entity itself.
 
 ### Data Models
 
-All three tables are in `backend/app/models/enrichment.py`.
+All four tables are in `backend/app/models/enrichment.py`.
 
 **`enrichment_sources`**: one row per source. `source_type` (unique), `display_name`, `is_enabled` (default `false`), `trigger_mode` (`auto` / `scheduled` / `manual`), `api_key_encrypted`, `rate_limit_config` (`requests_per_period`, `period_seconds`), `config`, `min_confidence_threshold` (`low` / `medium` / `high`), `daily_budget` (NULL = unlimited; new rows get the source's `default_daily_budget`), `daily_budget_used`, `schedule_interval_hours` (default 24), `next_scheduled_at`, `last_synced_at`, `health_status`.
 
 **`user_enrichment_overrides`**: a person's own `api_key_encrypted` for a source, one row per user per source. The pipeline uses it in place of the source's key for that person's enrichments.
 
 **`enrichment_results`**: `entity_type`, `entity_id`, `source_type`, `raw_response`, `parsed_data`, `enriched_at`, `expires_at`, `status`. Only `success` and `error` rows are stored. The other outcomes (`cached`, `skipped_low_confidence`, and the gateway refusals `rate_limited`, `budget_exhausted`, `breaker_open`, `gateway_unavailable`) appear only in the list `enrich_entity()` returns.
+
+**`enrichment_jobs`**: one pending lookup of one entity at one source, unique on (`entity_type`, `entity_id`, `source_type`). `lane` and its `priority`, `status` (`queued` / `running` / `failed`), `due_at`, `claimed_at`, `attempts`, `last_status` (why it last waited), `last_error`, `requested_by` (whose key a manual job uses), and the entity confidence the threshold check needs. `GROUP BY source_type, lane, status, last_status` shows what is waiting and why.
 
 ### Adapter Registry
 
@@ -585,9 +590,9 @@ Every adapter extends `EnrichmentAdapter` (`backend/app/enrichment/base.py`). It
 
 | Mode | When it runs |
 |---|---|
-| `auto` | When an entity is created or linked: the autolinker, TTP and CVE extraction, the observables ledger and GitHub rule import queue `auto_enrich_entity` |
+| `auto` | When an entity is created: the autolinker, TTP and CVE extraction, the observables ledger and GitHub rule import add a `new`-lane [job](#enrichment-job-queue) for each such source |
 | `scheduled` | The `scheduled-enrichment-check` job (every 15 minutes) calls `bulk_sync()` on each due source, then sets `next_scheduled_at` to now + `schedule_interval_hours`, even when the sync failed |
-| `manual` | A person asks: `POST /api/enrichment/enrich`, or an "Enrich" button. Naming `source_types` runs those sources whatever their mode; the hygiene "Enrich N" buttons use `bulk_enrich_for_gap` the same way |
+| `manual` | A person asks: `POST /api/enrichment/enrich`, or an "Enrich" button. It runs at once; naming `source_types` runs those sources whatever their mode. A source the gateway refuses gets a `manual`-lane job, listed in the response's `queued` |
 
 ### Pipeline Flow
 
@@ -598,7 +603,36 @@ Every adapter extends `EnrichmentAdapter` (`backend/app/enrichment/base.py`). It
 3. **Auto mode only**: skip it if the entity's confidence is below the source's minimum (`skipped_low_confidence`).
 4. If a fresh `success` result exists, return it (`cached`). No budget is used.
 5. Call `adapter.enrich()` and store a `success` row that expires after `ttl_hours`. If the adapter raises, store an `error` row that expires after 1 hour.
-6. If the source's gateway refuses a request, report why (`rate_limited`, `budget_exhausted`, `breaker_open` or `gateway_unavailable`) and store nothing, so the next trigger tries again.
+6. If the source's gateway refuses a request, report why (`rate_limited`, `budget_exhausted`, `breaker_open` or `gateway_unavailable`) and store nothing; the job queue tries again later.
+
+### Enrichment Job Queue
+
+Waiting enrichment work lives in `enrichment_jobs` (`backend/app/enrichment/queue.py`), so a lookup a source refuses is put off, never lost.
+
+`enqueue()` writes one row per applicable source: enabled and handling the entity type, and for the `new` lane also `trigger_mode='auto'`. Other lanes may name sources. Queueing the same entity and source again updates the row: it keeps the higher lane (and that lane's requester) and the earlier `due_at`, and a `failed` row goes back to `queued`. It runs in a savepoint, so a failure never costs the caller its transaction.
+
+| Lane | Priority | Queued by |
+|---|---|---|
+| `manual` | 0 (first) | `POST /api/enrichment/enrich`, for each source the gateway refused |
+| `new` | 1 | A new entity (the `auto` trigger) |
+| `refresh` | 2 | Reserved for re-checks of known entities; no caller queues it |
+| `backfill` | 3 | Reserved for bulk catch-up; no caller queues it |
+
+`dispatch_enrichment_jobs` runs every 30 seconds on the `enrichment` queue, which only `celery-worker-enrichment` reads, one task at a time. Each tick works for at most 25 seconds. It claims due rows with `FOR UPDATE SKIP LOCKED`, ten at a time, by priority and then `due_at`, marks them `running`, and runs each through `enrich_entity(..., source_types=[source])`. A `new`-lane job is held to the source's confidence threshold; the other lanes are not. Results are written onto the entity with `apply_enrichment_results_to_entity`. Then the row is settled:
+
+| Outcome | Row |
+|---|---|
+| `success`, `cached`, `skipped_low_confidence`, or the source no longer applies | Deleted |
+| `rate_limited`, `breaker_open` | Due again after `retry_after`; attempts unchanged |
+| `budget_exhausted` | Due at the next UTC midnight |
+| `gateway_unavailable` | Put back as it was, and the tick ends |
+| `error` | `attempts` + 1, due again after 5 minutes doubled per attempt; `failed` after 5 attempts (the row stays, and is not claimed again until it is queued anew) |
+
+When a source refuses one job, the tick defers that credential's other jobs the same way without asking again.
+
+A `backfill` job runs only while its source has used less than 60% of its `daily_budget` today (when it has one); otherwise it waits for the next UTC day (`last_status = backfill_share`). The other lanes are not capped by this.
+
+A `running` row claimed more than 10 minutes ago is claimable again, so a worker that dies mid-tick strands nothing. A tick still waiting when the next one is due is dropped (`expires` 30 seconds), so a restarted worker does not run a backlog of ticks.
 
 ### API Key Resolution
 
@@ -608,7 +642,7 @@ Every adapter extends `EnrichmentAdapter` (`backend/app/enrichment/base.py`). It
 2. The source's own key.
 3. A key on a sibling source in the same `shared_key_group` (the user's override first, then the sibling's own key).
 
-No current adapter sets `shared_key_group`, so `SHARED_KEY_GROUPS` (`backend/app/enrichment/registry.py:169`) is empty and step 3 never finds anything. Auto enrichment runs in a worker with no user, so it only uses the source's own key.
+No current adapter sets `shared_key_group`, so `SHARED_KEY_GROUPS` (`backend/app/enrichment/registry.py:169`) is empty and step 3 never finds anything. Queued jobs run in a worker with no user, so they use the source's own key, except a `manual`-lane job, which uses the key of the person who asked.
 
 ### Confidence Thresholds
 
@@ -618,7 +652,7 @@ A source's `min_confidence_threshold` stops cheap or low-value indicators from u
 - An entity with no confidence value at all (most non-observable entities) always passes.
 - Otherwise the entity passes if its text level (`high` 3 / `medium` 2 / `low` 1) meets the threshold, or its numeric confidence meets `high` 0.7 / `medium` 0.4.
 
-Only auto enrichment checks this. Manual enrichment skips it.
+Only auto enrichment (`new`-lane jobs) checks this. Manual enrichment skips it.
 
 ### Caching & TTL
 

@@ -1,7 +1,7 @@
 """Enrichment API — manage enrichment sources and trigger entity enrichment."""
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Body, Depends, Path, Query
 from sqlalchemy import delete, select
@@ -324,7 +324,10 @@ async def enrich_entity(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """On-demand enrichment for a specific entity. Uses the pipeline: cache, then each source's gateway."""
+    """On-demand enrichment for a specific entity. Uses the pipeline: cache, then each source's gateway.
+
+    Sources the gateway refused (rate limited, breaker open, budget used up)
+    are queued to retry on the enrichment queue and listed in ``queued``."""
     from app.enrichment.pipeline import enrich_entity as pipeline_enrich
 
     # Resolve entity value and adapter entity type from the database
@@ -381,7 +384,36 @@ async def enrich_entity(
         source_types=body.source_types,
     )
 
-    return {"entity_type": body.entity_type, "entity_id": str(body.entity_id), "results": results}
+    # A source the gateway refused gets a manual-lane job: the lookup runs when
+    # the source allows it, under this user's key, rather than being lost.
+    from app.enrichment.queue import RETRYABLE, enqueue, next_utc_midnight
+
+    queued: list[str] = []
+    now = datetime.now(UTC)
+    for r in results:
+        if r["status"] not in RETRYABLE:
+            continue
+        if r["status"] == "budget_exhausted":
+            due_at = next_utc_midnight(now)
+        else:
+            due_at = now + timedelta(seconds=r.get("retry_after") or 0)
+        queued += await enqueue(
+            db,
+            adapter_entity_type,
+            body.entity_id,
+            entity_value,
+            lane="manual",
+            source_types=[r["source_type"]],
+            requested_by=user.id,
+            due_at=due_at,
+        )
+
+    return {
+        "entity_type": body.entity_type,
+        "entity_id": str(body.entity_id),
+        "results": results,
+        "queued": queued,
+    }
 
 
 @router.get("/results", response_model=list[EnrichmentResultResponse])

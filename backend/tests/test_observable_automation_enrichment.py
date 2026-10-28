@@ -173,8 +173,12 @@ async def test_auto_enrich_fan_out_is_capped_per_entry(db_session, monkeypatch):
     from app.intelligence import observables as mod
 
     dispatched: list[str] = []
-    monkeypatch.setattr(mod, "_dispatch_auto_enrich", lambda obs: dispatched.append(obs.value))
-    monkeypatch.setattr(mod, "_auto_enrich_dispatched", {})
+
+    async def fake_enqueue(session, obs):
+        dispatched.append(obs.value)
+
+    monkeypatch.setattr(mod, "_enqueue_auto_enrich", fake_enqueue)
+    monkeypatch.setattr(mod, "_auto_enrich_queued", {})
     entry = await _entry(db_session)
     for i in range(mod.AUTO_ENRICH_PER_ENTRY_CAP + 10):
         await get_or_create_observable(

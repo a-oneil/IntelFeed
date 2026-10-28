@@ -28,12 +28,15 @@ IntelFeed runs background work with **Celery** (a Python task queue) and **Redis
 
 ### Queues and workers
 
-There are two queues:
+There are three queues:
 
 | Queue | Served by | Concurrency | What runs there |
 |-------|-----------|-------------|-----------------|
 | `celery` (default) | `celery-worker` | 4 in dev, 2 in prod | Everything not routed elsewhere |
 | `ai` | `celery-worker-ai` | 1 (`CLAUDE_CODE_CONCURRENCY`, default 1) | Tasks that call an AI provider |
+| `enrichment` | `celery-worker-enrichment` | 1 | `dispatch_enrichment_jobs`, the enrichment dispatcher |
+
+The `enrichment` worker runs one dispatcher tick at a time, so ticks never overlap, and a tick waiting on a throttled source never holds a default-worker slot.
 
 `celery-worker-ai` also drains the old `claude_code` queue name.
 
@@ -109,6 +112,7 @@ When `sync_cybergeist_feeds` creates new entities, it queues `refresh_autolinker
 
 | Task | Default schedule | What it does |
 |------|------------------|--------------|
+| `dispatch_enrichment_jobs` | Every 30 s | Run due lookups from the enrichment job queue (`enrichment` queue). See [Enrichment Pipeline](#enrichment-pipeline) |
 | `run_scheduled_enrichment` | Every 15 min | Run enrichment sources whose schedule is due |
 | `run_epss_bulk_sync` | Daily 06:30 | Update EPSS scores (exploit likelihood) for all CVEs |
 | `run_mitre_attack_sync` | Sunday 03:00 | Sync MITRE ATT&CK techniques, groups and mitigations |
@@ -170,7 +174,7 @@ Every enrichment job sends its requests through its source's gateway ([Source Ga
 
 ### Beat Schedule and Runtime Overrides
 
-`build_beat_schedule()` (`backend/app/workers/job_registry.py:719`) builds the schedule when beat starts:
+`build_beat_schedule()` (`backend/app/workers/job_registry.py:731`) builds the schedule when beat starts:
 
 1. Read overrides from the Redis key `intelfeed:job_schedule_overrides`.
 2. For each job, skip it if the override disables it, or if it has `enabled_by_default: False` and no override turns it on.
@@ -224,7 +228,9 @@ The stages come from the pipeline registry. See [Pipeline Engine](#pipeline-engi
 
 #### Enrichment Pipeline
 
-`auto_enrich_entity` (`backend/app/workers/enrichment_tasks.py`) runs after extraction and calls every enrichment source set to `trigger_mode='auto'` for the entity.
+A new entity does not call its sources directly. The code that creates it (the autolinker, TTP and CVE extraction, the observables ledger, GitHub rule import) calls `enqueue()` in `backend/app/enrichment/queue.py`, which adds one `enrichment_jobs` row per enabled `trigger_mode='auto'` source that handles the entity type.
+
+`dispatch_enrichment_jobs` (`backend/app/workers/enrichment_dispatch_tasks.py`) runs every 30 seconds on the `enrichment` queue. For up to 25 seconds it claims due rows (`FOR UPDATE SKIP LOCKED`, highest lane first, then oldest `due_at`), runs each through the pipeline for its one source, and writes the results onto the entity. A lookup the source refuses is rescheduled, not dropped. The lanes and outcomes are in [automation-ai-enrichment.md](automation-ai-enrichment.md#enrichment-job-queue).
 
 #### Report Generation
 
@@ -593,6 +599,7 @@ Built from the `JOB_REGISTRY` defaults. Admins can change any of these in Engine
 12:00 └─ run_cve_nvd_refresh
 
 Recurring:
+  Every 30 s      dispatch_enrichment_jobs
   Every 60 s      poll_due_feeds, run_scheduled_automations
   Every 5 min     refresh_saved_search_counts, sync_campaign_saved_searches, retry_failed_indexing
   Every 10 min    poll_analysis_batches
@@ -629,7 +636,8 @@ poll_due_feeds (every 60 s)
         detect_correlation_events
         match_requirements_task
       → score_entry_task
-  side tasks: run_entry_automations, auto_enrich_entity
+  side tasks: run_entry_automations; new entities queue enrichment_jobs rows,
+              run by dispatch_enrichment_jobs (enrichment queue)
   later, after AI analysis: adjudicate_entry_task (ai queue)
 ```
 

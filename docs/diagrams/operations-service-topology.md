@@ -22,6 +22,7 @@ graph TD
         P["Piper TTS<br/>:5000"]
         W["celery-worker<br/>queue: celery ×2"]
         WC["celery-worker-ai<br/>queue: ai ×1"]
+        WE["celery-worker-enrichment<br/>queue: enrichment ×1"]
         B["celery-beat"]
         TG["telegram-listener"]
     end
@@ -38,6 +39,8 @@ graph TD
     W --> P
     WC --> DB
     WC --> R
+    WE --> DB
+    WE --> R
     WC -- "IntelFeed MCP (HTTP, read-only token)" --> API
     B --> R
     TG --> DB

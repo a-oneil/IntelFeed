@@ -527,18 +527,11 @@ async def extract_and_store_cves(
         except Exception:
             logger.exception("cve_weaknesses sync failed")
 
-    # Dispatch auto-enrichment for newly created CVEs
-    try:
-        from app.workers.enrichment_tasks import auto_enrich_entity
+    # Queue enrichment for newly created CVEs
+    from app.enrichment.queue import enqueue
 
-        for cve_obj in stored:
-            if cve_obj.first_seen_at and (datetime.now(UTC) - cve_obj.first_seen_at).total_seconds() < 5:
-                auto_enrich_entity.delay(
-                    entity_type="cve",
-                    entity_id=str(cve_obj.id),
-                    entity_value=cve_obj.cve_id,
-                )
-    except Exception:
-        pass  # Don't fail extraction if enrichment dispatch fails
+    for cve_obj in stored:
+        if cve_obj.first_seen_at and (datetime.now(UTC) - cve_obj.first_seen_at).total_seconds() < 5:
+            await enqueue(db, "cve", cve_obj.id, cve_obj.cve_id)
 
     return stored

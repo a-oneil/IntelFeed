@@ -1,7 +1,19 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    SmallInteger,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -84,4 +96,46 @@ class EnrichmentResult(Base):
     __table_args__ = (
         Index("ix_enrichment_entity", "entity_type", "entity_id"),
         Index("ix_enrichment_source_entity", "source_type", "entity_type", "entity_id"),
+    )
+
+
+class EnrichmentJob(Base):
+    """One entity's pending lookup at one source. Waiting work lives here until
+    the dispatcher runs it, so a lookup a source refuses is deferred, never
+    dropped. See app/enrichment/queue.py."""
+
+    __tablename__ = "enrichment_jobs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    entity_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    entity_value: Mapped[str] = mapped_column(Text, nullable=False)
+    source_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    lane: Mapped[str] = mapped_column(String(10), nullable=False)
+    # manual, new, refresh, backfill
+    priority: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    # The lane's rank: lower runs first
+    status: Mapped[str] = mapped_column(String(10), nullable=False, default="queued", server_default="queued")
+    # queued, running, failed
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    last_status: Mapped[str | None] = mapped_column(String(30))
+    # The pipeline status of the last run (rate_limited, error, ...)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    requested_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    # Whose override key a manual job runs with
+    entity_confidence: Mapped[str | None] = mapped_column(String(10))
+    entity_base_confidence: Mapped[float | None] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("entity_type", "entity_id", "source_type", name="uq_enrichment_jobs_entity_source"),
+        # The dispatcher's claim: due work by lane, then age.
+        Index("ix_enrichment_jobs_claim", "status", "priority", "due_at"),
     )

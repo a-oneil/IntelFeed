@@ -154,7 +154,7 @@ The same word lists keep junk out of `aliases` arrays in the first place (`backe
 - `is_junk_alias(alias, canonical_name)` rejects aliases shorter than the minimum length, copies of the entity's own name, and anything on the false-positive or blocked lists.
 - `filter_aliases(aliases, canonical_name)` drops junk aliases and removes case-insensitive duplicates, keeping order.
 
-AI extraction and the Cybergeist sync pass new aliases through `gate_aliases()` (`backend/app/intelligence/entity_resolution.py:1435`), which applies `is_junk_alias()` plus further quality checks. The Malpedia sync (`_run_malpedia_sync`, `backend/app/workers/enrichment_tasks.py:1020`) runs Malpedia's `alt_names` through `filter_aliases()`.
+AI extraction and the Cybergeist sync pass new aliases through `gate_aliases()` (`backend/app/intelligence/entity_resolution.py:1435`), which applies `is_junk_alias()` plus further quality checks. The Malpedia sync (`_run_malpedia_sync`, `backend/app/workers/enrichment_tasks.py:873`) runs Malpedia's `alt_names` through `filter_aliases()`.
 
 ### Cross-Type Resurrection Guard
 
