@@ -219,3 +219,25 @@ async def test_malpedia_commits_in_batches(db_session, worker_session, monkeypat
     await db_session.refresh(actor)
     assert actor.description == "Actor from Malpedia"
     assert actor.aliases == ["BatchSpiderAlias"]
+
+
+# ── Idle dispatcher ticks ───────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("task_name", "retval", "recorded"),
+    [
+        ("app.workers.enrichment_dispatch_tasks.dispatch_enrichment_jobs", {}, False),
+        ("app.workers.enrichment_dispatch_tasks.dispatch_enrichment_jobs", {"success": 3}, True),
+        ("app.workers.enrichment_tasks.run_epss_bulk_sync", {}, True),
+    ],
+)
+def test_idle_dispatcher_ticks_are_not_recorded(task_name, retval, recorded, monkeypatch):
+    """The dispatcher runs every 30s; only ticks that did something reach job_runs."""
+    calls = []
+    monkeypatch.setattr(task_tracking, "_record_run", lambda *a, **k: calls.append(a))
+    task = MagicMock()
+    task.name = task_name
+    task.request = MagicMock(spec=[])
+    task_tracking._job_run_postrun(task_id="t1", task=task, state="SUCCESS", args=(), kwargs={}, retval=retval)
+    assert bool(calls) is recorded

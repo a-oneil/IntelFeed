@@ -111,6 +111,8 @@ def _job_run_postrun(task_id=None, task=None, state=None, args=None, kwargs=None
         if state == "FAILURE":
             return
         status = "success" if state == "SUCCESS" else (state or "success").lower()
+        if status == "success" and not retval and not JOB_REGISTRY[KNOWN_JOB_TASKS[task.name]].get("record_idle", True):
+            return
         _record_run(task.name, task_id, status, started, None, detail=_task_detail(args, kwargs, retval))
     except Exception:
         logger.debug("job_run postrun tracking failed", exc_info=True)

@@ -707,7 +707,7 @@ Waiting enrichment work lives in `enrichment_jobs` (`backend/app/enrichment/queu
 | `refresh` | 2 | Reserved for re-checks of known entities; no caller queues it |
 | `backfill` | 3 | `POST /api/enrichment/sources/{source_type}/backfill`, the console's Backfill button |
 
-`dispatch_enrichment_jobs` runs every 30 seconds on the `enrichment` queue, which only `celery-worker-enrichment` reads, one task at a time. Each tick works for at most 25 seconds. It claims due rows with `FOR UPDATE SKIP LOCKED`, ten at a time, by priority and then `due_at`, marks them `running`, and runs each through `enrich_entity(..., source_types=[source])`. A `new`-lane job is held to the source's confidence threshold; the other lanes are not. Results are written onto the entity with `apply_enrichment_results_to_entity`. Then the row is settled:
+`dispatch_enrichment_jobs` runs every 30 seconds on the `enrichment` queue, which only `celery-worker-enrichment` reads, one task at a time. Each tick works for at most 25 seconds. Engine → Jobs records a tick only when it ran or settled something, or failed (`record_idle: False` in its registry entry), so an empty queue doesn't fill `job_runs`. It claims due rows with `FOR UPDATE SKIP LOCKED`, ten at a time, by priority and then `due_at`, marks them `running`, and runs each through `enrich_entity(..., source_types=[source])`. A `new`-lane job is held to the source's confidence threshold; the other lanes are not. Results are written onto the entity with `apply_enrichment_results_to_entity`. Then the row is settled:
 
 | Outcome | Row |
 |---|---|

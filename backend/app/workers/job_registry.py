@@ -331,6 +331,9 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
         # A tick that sat out a worker restart is stale (the next is 30s
         # behind it): drop it rather than run a backlog of ticks.
         "options": {"expires": 30},
+        # It runs 2,880 times a day; a tick that found nothing due isn't a
+        # run worth keeping in job_runs.
+        "record_idle": False,
     },
     "backfill-rule-attack-mappings": {
         "settings_keys": ["rule_attack_backfill_limit"],
