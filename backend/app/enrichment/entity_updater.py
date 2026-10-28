@@ -103,6 +103,12 @@ def _country_code(value, entity) -> str | None:
     return code if len(code) == 2 and code.isalpha() else None
 
 
+def _asn(value, entity) -> int | None:
+    """An AS number ``observables.asn`` (int4) can hold. 32-bit ASNs reach
+    4,294,967,295; one past int4 stays in the source's answer only."""
+    return value if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 2**31 - 1 else None
+
+
 #: ``Column.filter`` names → transforms of (parsed value, entity) into the value written.
 FILTERS = {
     "aliases": _aliases,
@@ -112,6 +118,7 @@ FILTERS = {
     "date": _date,
     "timestamp": _timestamp,
     "country_code": _country_code,
+    "asn": _asn,
 }
 
 

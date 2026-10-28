@@ -17,8 +17,10 @@ Two ways in:
   temporary file and read a line at a time, and matched exactly against the
   ledger's ``(kind, value)``: ThreatFox IOCs by their own kind (an ``ip:port``
   by its IP), URLhaus URLs as URLs and by their host as a domain or IP. Only
-  active observables (the sources' ``scope``) are written; an observable that
-  had an answer and has left the export is withdrawn: its context and claims go.
+  active observables (the sources' ``scope``) are written; an observable the
+  export answered and has since left is withdrawn: its context and claims go.
+  A lookup's answer is never withdrawn by an export, and a later lookup of an
+  observable the export answered takes it over.
 - **Lookups** (``search_ioc``, URLhaus ``url``/``host``, Bazaar ``get_info``)
   send the observable to abuse.ch, so they are ``Egress.SHARES_IOC`` and run
   only when someone asks (``default_trigger_mode = "manual"``). MalwareBazaar
@@ -53,7 +55,7 @@ import zipfile
 from collections.abc import Iterator
 from urllib.parse import quote, urlsplit
 
-from sqlalchemy import select, union
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import entity_types
@@ -659,18 +661,27 @@ async def _match(db: AsyncSession, cls: ExportSource, batch: dict) -> dict:
 
 
 async def _previously_matched(db: AsyncSession, source_type: str) -> set[uuid.UUID]:
-    """Observables holding this source's context or relation claims."""
-    from app.models.enrichment import EntityContext, EntityRelationClaim
+    """Observables whose latest answer from this source is an export match.
+    One a lookup answered since is the lookup's: a lookup reaches what the
+    export doesn't hold (an old URL, an expired IOC), so the export never
+    withdraws it."""
+    from app.models.enrichment import EnrichmentResult
 
+    latest = (
+        select(EnrichmentResult.entity_id, EnrichmentResult.raw_response, EnrichmentResult.parsed_data)
+        .where(
+            EnrichmentResult.source_type == source_type,
+            EnrichmentResult.entity_type == entity_types.OBSERVABLE,
+            EnrichmentResult.status == "success",
+        )
+        .distinct(EnrichmentResult.entity_id)
+        .order_by(EnrichmentResult.entity_id, EnrichmentResult.enriched_at.desc())
+        .subquery()
+    )
     rows = await db.execute(
-        union(
-            select(EntityContext.entity_id).where(
-                EntityContext.source_type == source_type, EntityContext.entity_type == entity_types.OBSERVABLE
-            ),
-            select(EntityRelationClaim.entity_id).where(
-                EntityRelationClaim.source_type == source_type,
-                EntityRelationClaim.entity_type == entity_types.OBSERVABLE,
-            ),
+        select(latest.c.entity_id).where(
+            latest.c.raw_response["export"].as_boolean().is_(True),
+            latest.c.parsed_data["found"].as_boolean().is_(True),
         )
     )
     return set(rows.scalars())
@@ -678,8 +689,8 @@ async def _previously_matched(db: AsyncSession, source_type: str) -> set[uuid.UU
 
 async def sync_export(db: AsyncSession, gateway: SourceGateway, api_key: str | None, cls: ExportSource) -> dict:
     """Download the source's export, match it against the ledger and apply
-    each active match; withdraw what an observable no longer in the export was
-    given. Without a key nothing is sent; a refusal or an empty export stops
+    each active match; withdraw what an earlier run gave an observable no
+    longer in the export (``_previously_matched``). Without a key nothing is sent; a refusal or an empty export stops
     the run before anything changes; an error status raises."""
     from app.enrichment.pipeline import apply_catalog_result
 
@@ -718,14 +729,14 @@ async def sync_export(db: AsyncSession, gateway: SourceGateway, api_key: str | N
     stats["matched"] = len(applied)
     for n, (oid, kind, value, rows) in enumerate(sorted(applied, key=lambda a: str(a[0]))):
         facts = cls.export_facts(kind, value, rows)
-        data = EnrichmentData(raw_response={"rows": len(rows)}, parsed_data=facts, ttl_hours=ttl)
+        data = EnrichmentData(raw_response={"export": True, "rows": len(rows)}, parsed_data=facts, ttl_hours=ttl)
         if await apply_catalog_result(db, entity_types.OBSERVABLE, oid, cls.source_type, data):
             stats["updated"] += 1
         if n % BATCH == BATCH - 1:
             await db.commit()
 
     for oid in await _previously_matched(db, cls.source_type) - set(found):
-        data = EnrichmentData(raw_response={}, parsed_data={"found": False}, ttl_hours=ttl)
+        data = EnrichmentData(raw_response={"export": True}, parsed_data={"found": False}, ttl_hours=ttl)
         await apply_catalog_result(db, entity_types.OBSERVABLE, oid, cls.source_type, data)
         stats["withdrawn"] += 1
     await db.commit()

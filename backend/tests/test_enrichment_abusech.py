@@ -446,7 +446,9 @@ async def test_lookups_are_queued_only_when_asked(db_session, ledger):
     assert set(queued) == set(ABUSECH)
 
 
-async def _lookup(db_session, ledger, source_type: str, observable, body) -> tuple[list[dict], list[httpx.Request]]:
+async def _lookup(
+    db_session, ledger, source_type: str, observable, body, refresh: bool = False
+) -> tuple[list[dict], list[httpx.Request]]:
     key = _key()
     row = (
         await db_session.execute(select(EnrichmentSource).where(EnrichmentSource.source_type == source_type))
@@ -462,7 +464,13 @@ async def _lookup(db_session, ledger, source_type: str, observable, body) -> tup
 
     with patch.object(pipeline, "adapter_for_source", wired):
         results = await pipeline.enrich_entity(
-            "observable", observable.id, observable.value, db_session, trigger="manual", source_types=[source_type]
+            "observable",
+            observable.id,
+            observable.value,
+            db_session,
+            trigger="manual",
+            source_types=[source_type],
+            refresh=refresh,
         )
     from app.enrichment.entity_updater import apply_enrichment_results_to_entity
 
@@ -525,6 +533,34 @@ async def test_bazaar_lookup_claims_its_signature_and_shows_the_sample(db_sessio
     )
     assert context["first_seen"] == "2020-02-28" and context["tags"] == ["Adwind", "jar", "qua"]
     assert context["vendor_intel"]["rows"] == [["ReversingLabs", "ByteCode-JAVA.Trojan.Adwind"], ["Triage", "adwind"]]
+
+
+async def test_an_export_withdraws_only_what_it_wrote(db_session, ledger):
+    ip = ledger["obs"]["ip"]
+    key = _key()
+    fewer = _zipped("\n".join(line for line in THREATFOX_CSV.splitlines() if "139.180.203.104" not in line))
+
+    # A lookup reaches what the export doesn't hold: the export leaves it be.
+    await _lookup(db_session, ledger, "threatfox", ip, SEARCH_IOC)
+    looked_up = await _context(db_session, ip.id, "threatfox")
+    stats = await sync_export(db_session, _gateway("threatfox", _server(fewer), key), key, ThreatFoxAdapter)
+    assert stats["withdrawn"] == 0
+    assert await _context(db_session, ip.id, "threatfox") == looked_up
+    assert await _edges_to(db_session, ip.id)
+
+    # The export answers it, and so owns it: once it leaves, it is withdrawn.
+    full = _zipped(THREATFOX_CSV)
+    await sync_export(db_session, _gateway("threatfox", _server(full), key), key, ThreatFoxAdapter)
+    stats = await sync_export(db_session, _gateway("threatfox", _server(fewer), key), key, ThreatFoxAdapter)
+    assert stats["withdrawn"] == 1
+    assert await _context(db_session, ip.id, "threatfox") == {}
+
+    # A lookup after an export answer takes it over.
+    await sync_export(db_session, _gateway("threatfox", _server(full), key), key, ThreatFoxAdapter)
+    await _lookup(db_session, ledger, "threatfox", ip, SEARCH_IOC, refresh=True)
+    stats = await sync_export(db_session, _gateway("threatfox", _server(fewer), key), key, ThreatFoxAdapter)
+    assert stats["withdrawn"] == 0
+    assert await _context(db_session, ip.id, "threatfox") == looked_up
 
 
 async def test_a_lookup_answer_that_finds_nothing_is_not_found(db_session, ledger):

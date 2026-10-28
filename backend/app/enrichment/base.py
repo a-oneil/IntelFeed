@@ -2,7 +2,6 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import timedelta
 
 import httpx
 from sqlalchemy import and_
@@ -128,7 +127,3 @@ class EnrichmentAdapter(Source, ABC):
     def supports_entity(self, entity_type: str) -> bool:
         """Check if this adapter can enrich the given entity type."""
         return entity_type in self.applies_to
-
-    def get_cache_ttl(self) -> timedelta:
-        """Return cache TTL for this source's results."""
-        return timedelta(hours=self.config.get("ttl_hours", 24))

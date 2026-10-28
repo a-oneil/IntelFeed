@@ -179,6 +179,15 @@ async def test_a_cymru_lookup_writes_columns_and_context(db_session, monkeypatch
     }
 
 
+async def test_an_asn_past_int4_is_not_written(db_session):
+    obs = await _obs(db_session, "203.0.113.9")
+    parsed = {"found": True, "asn": 4_200_000_000, "asn_org": "Private use", "country": "US"}
+    results = [{"source_type": "cymru", "status": "success", "parsed_data": parsed}]
+    assert await apply_enrichment_results_to_entity(db_session, "observable", obs.id, results)
+    await db_session.flush()  # an int4 overflow would raise here
+    assert (obs.asn, obs.asn_org, obs.geo_country) == (None, "Private use", "US")
+
+
 async def test_a_disabled_source_is_neither_queued_nor_looked_up(db_session, monkeypatch):
     await _source(db_session, "cymru", is_enabled=False)
     resolver = _Resolver()

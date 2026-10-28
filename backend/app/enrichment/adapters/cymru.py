@@ -92,7 +92,7 @@ class CymruAdapter(EnrichmentAdapter):
     license = License("Team Cymru IP-to-ASN mapping, free service", attribution="Team Cymru")
     default_trigger_mode = "auto"
     outputs = (
-        Column("asn", "observable.asn", Policy.NEWER_WINS),
+        Column("asn", "observable.asn", Policy.NEWER_WINS, filter="asn"),
         Column("asn_org", "observable.asn_org", Policy.NEWER_WINS),
         Column("country", "observable.geo_country", Policy.NEWER_WINS, filter="country_code"),
         Context("prefix", "Announced prefix", Display.FACT),

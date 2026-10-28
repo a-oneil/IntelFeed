@@ -186,11 +186,13 @@ async def store_result(
 ) -> None:
     """Keep a source's fresh result for an entity and its context. A new
     enrichment_results row is written only when parsed_data changed from
-    ``existing`` (the latest one); otherwise that row stands, as of now."""
+    ``existing`` (the latest one); otherwise that row stands, as of now, with
+    this answer's raw_response (which says whether a lookup or a job gave it)."""
     now = datetime.now(UTC)
     expires_at = now + timedelta(hours=data.ttl_hours)
     if existing and existing.parsed_data == data.parsed_data:
         existing.enriched_at, existing.expires_at = now, expires_at
+        existing.raw_response = data.raw_response
     else:
         db.add(
             EnrichmentResult(
@@ -355,28 +357,3 @@ async def enrich_entity(
     await db.flush()
 
     return results
-
-
-async def enrich_entity_auto(
-    entity_type: str,
-    entity_id: uuid.UUID,
-    entity_value: str,
-    db: AsyncSession,
-    adapter_entity_type: str | None = None,
-    entity_confidence: str | None = None,
-    entity_base_confidence: float | None = None,
-) -> list[dict]:
-    """Auto-enrich an entity using sources with trigger_mode='auto'.
-
-    Called automatically after entity extraction. Uses the base entity type
-    for storage but the adapter_entity_type for adapter matching.
-    """
-    return await enrich_entity(
-        entity_type=adapter_entity_type or entity_type,
-        entity_id=entity_id,
-        entity_value=entity_value,
-        db=db,
-        trigger="auto",
-        entity_confidence=entity_confidence,
-        entity_base_confidence=entity_base_confidence,
-    )

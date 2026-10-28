@@ -189,8 +189,12 @@ async def _repoint_entity_relationships(
     so relationship evidence and confidence survive instead of dangling on a
     deleted entity. Rows whose repointed identity collides with an existing row
     merge their evidence into it (keeping the stronger confidence) and are
-    deleted; self-relationships are dropped.
+    deleted; self-relationships are dropped. Enrichment claims move first, so
+    their connections stay withdrawable (``relations.rehome_claims``).
     """
+    from app.enrichment.relations import rehome_claims
+
+    await rehome_claims(db, old_type, old_id, new_type, new_id)
     result = await db.execute(
         select(EntityRelationship).where(
             or_(

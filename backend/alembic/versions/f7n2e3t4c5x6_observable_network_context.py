@@ -4,7 +4,7 @@ asn, asn_org and geo_country (Team Cymru, VirusTotal), registered_at (RDAP),
 popularity_rank (Tranco, indexed for the daily match) and noise_class
 (GreyNoise). Each is the one home of its fact: the values VirusTotal and
 GreyNoise kept in ``reputation`` (asn, as_owner, country, gn_classification)
-move into the columns and leave the JSON. GreyNoise's stored context key
+move into the columns and leave the JSON; a value no column can hold stays. GreyNoise's stored context key
 ``classification`` becomes ``noise_class``, the key its column reads.
 
 Revision ID: f7n2e3t4c5x6
@@ -30,16 +30,24 @@ def upgrade() -> None:
     op.add_column("observables", sa.Column("noise_class", sa.String(16), nullable=True))
     op.create_index("ix_observables_popularity_rank", "observables", ["popularity_rank"])
 
+    # A value moves only when its column can hold it; a key whose value didn't
+    # move (a malformed country, GreyNoise's "suspicious", an ASN past int4)
+    # stays in the JSON.
+    moves = {
+        "asn": "reputation->>'asn' ~ '^[0-9]{1,9}$'",
+        "as_owner": "btrim(reputation->>'as_owner') <> ''",
+        "country": "reputation->>'country' ~ '^[A-Za-z]{2}$'",
+        "gn_classification": "reputation->>'gn_classification' IN ('malicious', 'benign', 'unknown')",
+    }
+    moved = ", ".join(f"CASE WHEN {cond} THEN '{key}' END" for key, cond in moves.items())
     op.execute(
-        """
+        f"""
         UPDATE observables SET
-            asn = CASE WHEN reputation->>'asn' ~ '^[0-9]{1,9}$' THEN (reputation->>'asn')::int END,
-            asn_org = NULLIF(btrim(reputation->>'as_owner'), ''),
-            geo_country = CASE WHEN reputation->>'country' ~ '^[A-Za-z]{2}$'
-                               THEN upper(reputation->>'country') END,
-            noise_class = CASE WHEN reputation->>'gn_classification' IN ('malicious', 'benign', 'unknown')
-                               THEN reputation->>'gn_classification' END,
-            reputation = reputation - 'asn' - 'as_owner' - 'country' - 'gn_classification'
+            asn = CASE WHEN {moves["asn"]} THEN (reputation->>'asn')::int END,
+            asn_org = CASE WHEN {moves["as_owner"]} THEN btrim(reputation->>'as_owner') END,
+            geo_country = CASE WHEN {moves["country"]} THEN upper(reputation->>'country') END,
+            noise_class = CASE WHEN {moves["gn_classification"]} THEN reputation->>'gn_classification' END,
+            reputation = reputation - array_remove(ARRAY[{moved}], NULL)
         WHERE reputation ?| array['asn', 'as_owner', 'country', 'gn_classification']
         """
     )

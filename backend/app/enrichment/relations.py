@@ -34,7 +34,7 @@ import re
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import entity_types
@@ -47,7 +47,6 @@ from app.models.entity_relationship import EntityRelationship
 #: The ``entity_relationships.source`` of a connection this path made.
 EDGE_SOURCE = "enrichment"
 
-_CONFIDENCE_RANK = {"possible": 0, "probable": 1, "confirmed": 2}
 _TECHNIQUE_ID = re.compile(r"^T\d{4}(?:\.\d{3})?$")
 
 #: Entity types a Relation can name as its target: those ``resolve_target`` can find.
@@ -193,7 +192,8 @@ async def _refresh_sector_chips(db: AsyncSession, claim: EntityRelationClaim) ->
     from app.services.sector_links import junction_for, refresh_targeted_sectors_cache
 
     entity = await db.get(junction_for(claim.entity_type)[0], claim.entity_id)
-    await refresh_targeted_sectors_cache(db, claim.entity_type, entity)
+    if entity is not None:  # a pruned claim's entity is gone
+        await refresh_targeted_sectors_cache(db, claim.entity_type, entity)
 
 
 async def _assert(db: AsyncSession, claim: EntityRelationClaim, label: str) -> bool:
@@ -201,9 +201,10 @@ async def _assert(db: AsyncSession, claim: EntityRelationClaim, label: str) -> b
 
     A new row is ``enrichment`` / ``probable``, described by the claim's
     evidence or the source's name. A co-occurrence row the claim matches is
-    taken over and lifted to ``probable``, unless the adjudicator ruled it
-    coincidental; any other row (AI, MITRE, an analyst's, a rejection) is left
-    as it is."""
+    taken over and lifted to ``probable`` only while it is still ``possible``
+    with no verdict, so ``_retract`` can hand it back exactly as it was. Any
+    other row is left as it is: one corroboration or the adjudicator already
+    raised (or ruled coincidental), and AI, MITRE, analyst and rejected rows."""
     from app.services.sector_links import add_target_sector
 
     if _in_sector_junction(claim.entity_type, claim.relation, claim.target_type):
@@ -229,11 +230,9 @@ async def _assert(db: AsyncSession, claim: EntityRelationClaim, label: str) -> b
             )
         )
         return True
-    if edge.source != "co_occurrence" or edge.adjudication_verdict == "coincidental":
+    if edge.source != "co_occurrence" or edge.confidence != "possible" or edge.adjudication_verdict is not None:
         return False
-    edge.source = EDGE_SOURCE
-    if _CONFIDENCE_RANK.get(edge.confidence, 0) < _CONFIDENCE_RANK["probable"]:
-        edge.confidence = "probable"
+    edge.source, edge.confidence = EDGE_SOURCE, "probable"
     edge.description = edge.description or claim.evidence or label
     return True
 
@@ -405,20 +404,57 @@ async def claim_counts(db: AsyncSession, source_type: str) -> dict[str, dict[str
     return {output: {"linked": linked, "held": held} for output, linked, held in rows.all()}
 
 
+async def rehome_claims(db: AsyncSession, old_type: str, old_id: uuid.UUID, new_type: str, new_id: uuid.UUID) -> None:
+    """Move the claims made by or naming an entity being merged away, before
+    its connections move with it (``entity_merge._repoint_entity_relationships``),
+    so a later answer can still withdraw them.
+
+    Into an entity of the same type, a claim follows its connection; one the
+    survivor already makes, or one that would name the survivor itself, is
+    dropped. Into another type, the claim no longer fits its source's output:
+    it is withdrawn by ``_retract``'s rules while the connection is still
+    where the claim put it, and the source's next answer for the survivor
+    claims afresh."""
+    made = and_(EntityRelationClaim.entity_type == old_type, EntityRelationClaim.entity_id == old_id)
+    named = and_(EntityRelationClaim.target_type == old_type, EntityRelationClaim.target_id == old_id)
+    claims = (await db.execute(select(EntityRelationClaim).where(or_(made, named)))).scalars().all()
+    survivor = (new_type, new_id)
+    for claim in claims:
+        if old_type != new_type:
+            await _withdraw(db, claim, set())
+        elif claim.entity_id == old_id:
+            key = (new_type, new_id, claim.source_type, claim.output, claim.target_key)
+            if (claim.target_type, claim.target_id) == survivor or await db.get(EntityRelationClaim, key):
+                await db.delete(claim)
+            else:
+                claim.entity_id = new_id
+        elif (claim.entity_type, claim.entity_id) == survivor:
+            await db.delete(claim)
+        else:
+            claim.target_id = new_id
+    await db.flush()
+
+
 async def prune_orphan_claims(db: AsyncSession) -> int:
-    """Delete claims whose entity is gone (merged away or deleted). Returns the count."""
+    """Withdraw claims whose entity is gone (deleted without a merge moving
+    them), by ``_retract``'s rules, so no connection outlives the claim that
+    made it. Returns the count."""
     from app.enrichment.entity_updater import _get_model_map
 
-    deleted = 0
+    pruned = 0
     for entity_type in (await db.execute(select(EntityRelationClaim.entity_type).distinct())).scalars().all():
         model = _get_model_map().get(entity_type)
         if model is None:
             continue
-        result = await db.execute(
-            delete(EntityRelationClaim).where(
-                EntityRelationClaim.entity_type == entity_type,
-                ~select(model.id).where(model.id == EntityRelationClaim.entity_id).exists(),
+        orphans = (
+            await db.execute(
+                select(EntityRelationClaim).where(
+                    EntityRelationClaim.entity_type == entity_type,
+                    ~select(model.id).where(model.id == EntityRelationClaim.entity_id).exists(),
+                )
             )
-        )
-        deleted += result.rowcount or 0
-    return deleted
+        ).scalars()
+        for claim in orphans.all():
+            await _withdraw(db, claim, set())
+            pruned += 1
+    return pruned

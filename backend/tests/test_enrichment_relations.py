@@ -309,6 +309,111 @@ async def test_a_co_occurrence_edge_is_lifted_then_handed_back(db_session, ref_s
     assert (edge.source, edge.confidence) == ("co_occurrence", "possible")
 
 
+async def test_an_earned_co_occurrence_edge_is_never_taken_or_lowered(db_session, ref_sources, world):
+    actor, cobalt, duke = world["actor"], world["cobalt"], world["duke"]
+    entry_id = uuid.uuid4()
+    corroborated = EntityRelationship(
+        source_type="threat_actor",
+        source_id=actor.id,
+        target_type="tool",
+        target_id=cobalt.id,
+        relationship_type="uses",
+        confidence="probable",
+        source="co_occurrence",
+        evidence_entry_ids=[entry_id],
+    )
+    adjudicated = EntityRelationship(
+        source_type="threat_actor",
+        source_id=actor.id,
+        target_type="malware",
+        target_id=duke.id,
+        relationship_type="uses",
+        confidence="confirmed",
+        source="co_occurrence",
+        adjudication_verdict="corroborated",
+        evidence_entry_ids=[entry_id],
+    )
+    db_session.add_all([corroborated, adjudicated])
+    await db_session.flush()
+
+    assert not await apply_relations(
+        db_session, "threat_actor", actor.id, "ref_catalog", _tools("Cobalt Strike", "CozyDuke")
+    )
+    assert len(await _claims(db_session, "ref_catalog")) == 2
+    assert not await apply_relations(db_session, "threat_actor", actor.id, "ref_catalog", {})
+    assert (corroborated.source, corroborated.confidence) == ("co_occurrence", "probable")
+    assert (adjudicated.source, adjudicated.confidence, adjudicated.adjudication_verdict) == (
+        "co_occurrence",
+        "confirmed",
+        "corroborated",
+    )
+
+
+async def test_a_merge_moves_the_claims_with_their_connections(db_session, ref_sources, world):
+    from app.api.entity_merge import _repoint_entity_relationships
+
+    survivor, cobalt, duke = world["actor"], world["cobalt"], world["duke"]
+    folded = ThreatActor(name="The Dukes")
+    db_session.add(folded)
+    await db_session.flush()
+    await apply_relations(db_session, "threat_actor", survivor.id, "ref_catalog", _tools("Cobalt Strike"))
+    await apply_relations(db_session, "threat_actor", folded.id, "ref_catalog", _tools("Cobalt Strike", "CozyDuke"))
+
+    await _repoint_entity_relationships(db_session, "threat_actor", folded.id, "threat_actor", survivor.id)
+    await db_session.delete(folded)
+    await db_session.flush()
+
+    # The survivor already claimed Cobalt Strike; CozyDuke's claim is its now.
+    assert {c.target_name for c in await _claims(db_session, "ref_catalog", survivor.id)} == {
+        "Cobalt Strike",
+        "CozyDuke",
+    }
+    assert await _claims(db_session, "ref_catalog", folded.id) == []
+    assert set(await _edges(db_session, survivor.id)) == {
+        ("uses", "tool", str(cobalt.id)),
+        ("uses", "malware", str(duke.id)),
+    }
+    # So the survivor's next answer can withdraw both.
+    assert await apply_relations(db_session, "threat_actor", survivor.id, "ref_catalog", {})
+    assert await _edges(db_session, survivor.id) == {}
+
+
+async def test_claims_into_another_type_are_withdrawn_before_the_move(db_session, ref_sources, world):
+    from app.api.entity_merge import _repoint_entity_relationships
+
+    actor, cobalt = world["actor"], world["cobalt"]
+    family = MalwareFamily(name="APT29 loader")
+    db_session.add(family)
+    await db_session.flush()
+    await apply_relations(db_session, "threat_actor", actor.id, "ref_catalog", _tools("Cobalt Strike"))
+
+    await _repoint_entity_relationships(db_session, "threat_actor", actor.id, "malware", family.id)
+    assert await _claims(db_session, "ref_catalog") == []
+    assert await _edges(db_session, family.id) == {}
+    assert ("uses", "tool", str(cobalt.id)) not in await _edges(db_session, actor.id)
+
+
+async def test_pruning_a_deleted_entitys_claims_withdraws_their_connections(db_session, ref_sources, world):
+    from app.enrichment.relations import prune_orphan_claims
+
+    cobalt, duke = world["cobalt"], world["duke"]
+    gone = ThreatActor(name="Deleted actor")
+    db_session.add(gone)
+    await db_session.flush()
+    await apply_relations(db_session, "threat_actor", gone.id, "ref_catalog", _tools("Cobalt Strike", "CozyDuke"))
+    # Articles back the CozyDuke connection: it goes back to co-occurrence.
+    duke_edge = (await _edges(db_session, gone.id))[("uses", "malware", str(duke.id))]
+    duke_edge.evidence_entry_ids = [uuid.uuid4()]
+    await db_session.delete(gone)
+    await db_session.flush()
+
+    assert await prune_orphan_claims(db_session) == 2
+    assert await _claims(db_session, "ref_catalog") == []
+    edges = await _edges(db_session, gone.id)
+    assert ("uses", "tool", str(cobalt.id)) not in edges
+    assert (edges[("uses", "malware", str(duke.id))].source, duke_edge.confidence) == ("co_occurrence", "possible")
+
+
 async def test_target_sectors_land_in_the_junction_and_leave_other_doors_alone(db_session):
     actor = ThreatActor(name="Turla")
     db_session.add(actor)

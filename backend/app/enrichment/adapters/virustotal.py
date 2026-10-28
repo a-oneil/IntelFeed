@@ -40,7 +40,7 @@ class VirusTotalAdapter(EnrichmentAdapter):
     outputs = (
         *(Column(key, f"observable.reputation.{rep}", Policy.NEWER_WINS) for key, rep in _REPUTATION.items()),
         # Network facts have one home each, shared with Team Cymru: the latest answer stands.
-        Column("asn", "observable.asn", Policy.NEWER_WINS),
+        Column("asn", "observable.asn", Policy.NEWER_WINS, filter="asn"),
         Column("as_owner", "observable.asn_org", Policy.NEWER_WINS),
         Column("country", "observable.geo_country", Policy.NEWER_WINS, filter="country_code"),
         Context("detection_ratio", "Detections", Display.FACT),

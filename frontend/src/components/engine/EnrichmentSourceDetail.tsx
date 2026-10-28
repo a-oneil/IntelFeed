@@ -119,6 +119,7 @@ function LimitsPanel({
         <dt>Today</dt>
         <dd>
           {l.daily_budget != null ? `${num(l.used_today)} of ${num(l.daily_budget)}` : `${num(l.used_today)}, no daily cap`}
+          {row?.shared_key_group && <span className={s.muted}> (all of the {row.shared_key_group} group)</span>}
           {l.backfill_share != null && ` · backfill may use ${Math.round(l.backfill_share * 100)}%`}
         </dd>
         {l.scope && (

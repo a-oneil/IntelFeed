@@ -141,7 +141,7 @@ When `sync_cybergeist_feeds` creates new entities, it queues `refresh_autolinker
 | `cleanup_expired_entries` | Daily 02:05 | Delete entries past their feed's retention period, and remove them from search |
 | `decay_observable_confidence` | Daily 02:20 | Lower confidence on aging observables (IOCs) and move them through their lifecycle |
 | `prune_engine_tables` | Daily 02:40 | Delete engine bookkeeping rows (`job_runs`, …) older than 30 days |
-| `prune_entity_context` | Daily 02:45 | Delete enrichment context rows (`entity_context`) that expired more than 30 days ago, and relation claims whose entity is gone |
+| `prune_entity_context` | Daily 02:45 | Delete enrichment context rows (`entity_context`) that expired more than 30 days ago, and withdraw relation claims whose entity is gone |
 | `reconcile_observable_counters` | Daily 02:50 | Recount observable sighting and article counters, which deletes can throw off |
 | `cleanup_orphaned_references` | Daily 03:15 | Remove references to deleted entities |
 | `resolve_cve_affected` | Daily 03:35 | Re-match unmatched CVE affected-product (CPE) pairs to current vendors and products |
