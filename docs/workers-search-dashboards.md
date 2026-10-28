@@ -126,6 +126,8 @@ All times are UTC. "AI" means the job calls an AI provider. "(`ai` queue)" means
 | `run_ctid_sync` | `ctid` | Sunday 04:15 | Write NIST 800-53 and CIS controls onto techniques from CTID's Mappings Explorer |
 | `run_d3fend_sync` | `d3fend` | Sunday 04:30 | Show the D3FEND countermeasures for each technique |
 | `run_capec_sync` | `capec` | Monday 04:00 | Refresh the CAPEC catalog and each technique's attack patterns |
+| `run_etda_sync` | `etda` | Tuesday 04:15 | Match ETDA Threat Group Cards to tracked actors: aliases, origin, targets, tools, operations |
+| `run_ransomware_group_profiles` | `ransomware_live` | Every 4 h at :50 | Techniques, tools and leak-site status for up to 10 tracked ransomware groups |
 
 Each source declares its jobs in its manifest ([Source Jobs](automation-ai-enrichment.md#source-jobs)). A job skips while its source is switched off (`{"skipped": "source disabled"}`), and sends its requests through its source's gateway ([Source Gateway](automation-ai-enrichment.md#source-gateway)). A refusal (rate limited, breaker open, budget spent) stops the job; it keeps what it did and records `stopped` in its stats.
 
@@ -139,7 +141,7 @@ When `sync_cybergeist_feeds` creates new entities, it queues `refresh_autolinker
 | `cleanup_expired_entries` | Daily 02:05 | Delete entries past their feed's retention period, and remove them from search |
 | `decay_observable_confidence` | Daily 02:20 | Lower confidence on aging observables (IOCs) and move them through their lifecycle |
 | `prune_engine_tables` | Daily 02:40 | Delete engine bookkeeping rows (`job_runs`, …) older than 30 days |
-| `prune_entity_context` | Daily 02:45 | Delete enrichment context rows (`entity_context`) that expired more than 30 days ago |
+| `prune_entity_context` | Daily 02:45 | Delete enrichment context rows (`entity_context`) that expired more than 30 days ago, and relation claims whose entity is gone |
 | `reconcile_observable_counters` | Daily 02:50 | Recount observable sighting and article counters, which deletes can throw off |
 | `cleanup_orphaned_references` | Daily 03:15 | Remove references to deleted entities |
 | `resolve_cve_affected` | Daily 03:35 | Re-match unmatched CVE affected-product (CPE) pairs to current vendors and products |
@@ -586,7 +588,7 @@ Built from the `JOB_REGISTRY` defaults. Admins can change any of these in Engine
 03:50 ├─ rebuild_rule_coverage
 04:00 ├─ run_wikipedia_bulk_sync (Wed) · run_capec_sync (Mon)
 04:10 ├─ evict_image_cache
-04:15 ├─ evict_tts_cache · run_ctid_sync (Sun)
+04:15 ├─ evict_tts_cache · run_ctid_sync (Sun) · run_etda_sync (Tue)
 04:20 ├─ recompute_signal_rates · rank_threat_board · rollup_targeted_sectors · cleanup_telegram_media (Sun)
 04:25 ├─ evict_old_telegram_media
 04:30 ├─ promote_watchlist_threats · run_wikidata_sync (Thu) · run_d3fend_sync (Sun)
@@ -615,7 +617,8 @@ Recurring:
                   retry_untranslated_entries, submit_analysis_batches
   Hourly (:10)    refresh_correlation_cache
   Every 2 h       rebuild_story_threads
-  Every 4 h       build_telegram_forward_relationships (:20), sync_entity_search_indexes (:45)
+  Every 4 h       build_telegram_forward_relationships (:20), sync_entity_search_indexes (:45),
+                  run_ransomware_group_profiles (:50)
   Every 6 h       sync_kev_feed (:15), check_feed_health (:30), rescore_recent_entries (:35),
                   retro_sight_observables (:40)
 

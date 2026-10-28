@@ -43,6 +43,7 @@ Every profile — actors, malware, CVEs, CWEs, TTPs, countries, sectors, tools, 
 | MITRE ATT&CK / Malpedia / Wikipedia | Weekly syncs | TTP details and mitigations; actor and malware descriptions and aliases |
 | Wikidata / endoflife.date | Weekly and daily syncs ([rules](automation-ai-enrichment.md#wikidata)) | Vendor websites and facts, product vendors, country regions; product support status and releases |
 | CAPEC / CTID / D3FEND | Weekly syncs ([rules](automation-ai-enrichment.md#capec)) | CAPEC names for a CWE's attack patterns; a technique's CAPEC patterns, NIST 800-53 and CIS controls (`nist_controls`, `cis_controls`) and D3FEND countermeasures |
+| ETDA Threat Group Cards / ransomware.live group profiles | Weekly sync; a few groups every 4 hours ([rules](automation-ai-enrichment.md#relations)) | Actor aliases, origin, MITRE id; targeted sectors and countries, tools and techniques as `enrichment` claims; operations and leak-site status on the Context panel |
 | Co-occurrence and the Telegram forward graph | Post-ingest pipeline step; job every 4 hours | `entity_relationships` links |
 | Analyst | Badge edits, descriptions, merges, notes, relationship confirm/reject | Any of the above, marked analyst-sourced |
 
@@ -51,8 +52,10 @@ Every profile — actors, malware, CVEs, CWEs, TTPs, countries, sectors, tools, 
 Rows in `entity_relationships` (`backend/app/models/entity_relationship.py`) have:
 - a **verb**: `uses`, `exploits`, `targets`, `attributed_to`, `variant_of`, `communicates_with`, `delivers`, `drops`, `controls`, `related_to`, `successor_of`, `subgroup_of`, `overlaps_with`
 - a **confidence**: `confirmed`, `probable` or `possible`
-- a **source**: `co_occurrence`, `auto_extracted`, `analyst_confirmed`, `analyst_created`, `analyst_rejected` or `external_feed` (the MITRE ATT&CK import writes `external_feed` with `confirmed`)
+- a **source**: `co_occurrence`, `auto_extracted`, `analyst_confirmed`, `analyst_created`, `analyst_rejected`, `external_feed` (the MITRE ATT&CK import writes `external_feed` with `confirmed`) or `enrichment` (an enrichment source's relation claim, `probable`, so it reads as reported)
 - **`evidence_entry_ids`**: the supporting articles
+
+An `enrichment` row exists while some source's claim in `entity_relation_claims` holds it; the claim keeps the source, the name it gave and its evidence, and the row goes when the last claim is withdrawn. See [Relations](automation-ai-enrichment.md#relations).
 
 Writes check (source type, verb, target type) against the allowlist in `backend/app/intelligence/relationship_matrix.py`; a disallowed combination is flipped to its allowed direction or dropped.
 
@@ -60,7 +63,7 @@ The adjudicate stage reviews machine links (`auto_extracted`, `co_occurrence`) a
 - **Demote** sets `adjudication_verdict = coincidental` and confidence `possible`; the link is never promoted again.
 - **Keep** adds the article to `reviewer_kept_entry_ids`. Once `relationship_evidence_promote_count` different articles keep it, it becomes `confirmed` / `corroborated`.
 
-A link with a verdict leaves the review list, so later co-mentions can't undo it. Analyst and `external_feed` links are never reviewed.
+A link with a verdict leaves the review list, so later co-mentions can't undo it. Analyst, `external_feed` and `enrichment` links are never reviewed.
 
 Two tombstones stop rejected data returning:
 - `source = analyst_rejected` rows stay, so co-occurrence never recreates a rejected pair.

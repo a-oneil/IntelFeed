@@ -87,6 +87,14 @@ const detail: EnrichmentSourceDetail = {
   outputs: [
     { field: "baseScore", target: "cve.cvss_score", kind: "column", policy: "rank", rank: 1, filled_pct: 72.1 },
     { field: "references", target: "context", kind: "context", filled_pct: null },
+    {
+      field: "tools",
+      target: "relationship: uses malware or tool",
+      kind: "relationship",
+      filled_pct: null,
+      linked: 1204,
+      held: 37,
+    },
   ],
   gap: { entity_type: "cve", field: "cvss_score", missing: 23665, in_scope: 14100, eta_days: 3.4 },
   jobs: [
@@ -261,6 +269,8 @@ describe("EnrichmentConsole", () => {
     const outputs = screen.getByRole("region", { name: "Outputs" });
     expect(within(outputs).getByText("cve.cvss_score (rank 1)")).toBeInTheDocument();
     expect(within(outputs).getByText("72%")).toBeInTheDocument();
+    expect(within(outputs).getByText("relationship: uses malware or tool")).toBeInTheDocument();
+    expect(within(outputs).getByText("1,204 linked · 37 held")).toBeInTheDocument();
     expect(within(outputs).getByText(/23,665 CVEs have no cvss score/)).toBeInTheDocument();
 
     const jobs = screen.getByRole("region", { name: "Jobs" });

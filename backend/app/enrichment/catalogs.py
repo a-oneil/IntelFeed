@@ -2,8 +2,9 @@
 whole file or feed. Each has an enrichment_sources row for its gateway (rate,
 budget, breaker) and its on/off switch."""
 
+from app import entity_types
 from app.enrichment.base import Source
-from app.enrichment.manifest import Column, Context, Display, Egress, Job, License, Policy, Quota
+from app.enrichment.manifest import Column, Context, Display, Egress, Job, License, Policy, Quota, Relation
 
 
 class MISPGalaxySource(Source):
@@ -64,8 +65,9 @@ class RansomwareLiveSource(Source):
     source_type = "ransomware_live"
     display_name = "ransomware.live"
     applies_to = {"threat_actor": None}
-    # ransomware.live allows about one call a minute per endpoint, and a sync
-    # makes two (/groups, /recentvictims) every 30 minutes: 96 a day.
+    # ransomware.live allows about one call a minute per endpoint. The victim
+    # sync makes two (/groups, /recentvictims) every 30 minutes, 96 a day; the
+    # group profiles at most 10 every four hours, 60 a day.
     quota = Quota(2, 60, daily_budget=200, ceiling_per_period=2)
     egress = Egress.NONE
     # Free for research, awareness and open-source use with attribution;
@@ -79,6 +81,25 @@ class RansomwareLiveSource(Source):
             {"type": "interval", "seconds": 1800},
             "Collect ransomware leak-site victim postings",
         ),
+        Job(
+            "ransomware-group-profiles",
+            "app.workers.enrichment_tasks.run_ransomware_group_profiles",
+            {"type": "crontab", "minute": "50", "hour": "*/4"},
+            "Refresh tracked ransomware groups' techniques, tools and leak-site status from ransomware.live",
+        ),
+    )
+    outputs = (
+        Relation(
+            "techniques",
+            "uses",
+            (entity_types.TTP,),
+            item={"name": "technique_id", "evidence": "technique_details"},
+        ),
+        Relation("tools", "uses", (entity_types.TOOL,), item={"name": "name"}),
+        Context("description", "Description", Display.FACT),
+        Context("tools_by_category", "Tools", Display.TABLE, item={"Category": "category", "Tools": "tools"}),
+        Context("leak_sites", "Leak sites", Display.TABLE, item={"Type": "type", "Status": "status"}),
+        Context("page", "Group page", Display.LINK),
     )
 
 

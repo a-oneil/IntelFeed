@@ -19,10 +19,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import entity_types
 from app.enrichment.base import Source
 from app.enrichment.gateway import GatewayUnavailable, hourly_requests
-from app.enrichment.manifest import Column, Context, Egress
+from app.enrichment.manifest import Column, Context, Egress, Relation
 from app.enrichment.pause import is_paused
 from app.enrichment.queue import BACKFILL_SHARE, LANES
 from app.enrichment.registry import ADAPTER_REGISTRY, SOURCE_REGISTRY, source_gateway
+from app.enrichment.relations import claim_counts
 from app.models.enrichment import EnrichmentJob, EnrichmentSource, UserEnrichmentOverride
 from app.models.job_run import JobRun
 
@@ -67,6 +68,8 @@ def fills(cls: type[Source]) -> str:
             if out.follows:
                 continue
             word = _words(out.path.split(".", 1)[0])
+        elif isinstance(out, Relation):
+            word = f"{out.relation} {' or '.join(entity_types.LABELS.get(t, t) for t in out.target_types)}"
         else:
             # "Open ports" → "open ports"; an acronym ("EPSS score") stays.
             word = out.label if out.label[:2].isupper() else out.label[0].lower() + out.label[1:]
@@ -403,6 +406,7 @@ async def detail(db: AsyncSession, source_type: str) -> dict | None:
             retrying += tried
 
     rates = await fill_rates(db, cls)
+    claims = await claim_counts(db, source_type) if cls.relations() else {}
     outputs = []
     for out in cls.outputs:
         if isinstance(out, Column):
@@ -425,6 +429,20 @@ async def detail(db: AsyncSession, source_type: str) -> dict | None:
                     "policy": None,
                     "rank": None,
                     "filled_pct": None,
+                }
+            )
+        elif isinstance(out, Relation):
+            counts = claims.get(out.key, {})
+            outputs.append(
+                {
+                    "field": out.key,
+                    "target": f"relationship: {out.relation} {' or '.join(out.target_types)}",
+                    "kind": "relationship",
+                    "policy": None,
+                    "rank": None,
+                    "filled_pct": None,
+                    "linked": counts.get("linked", 0),
+                    "held": counts.get("held", 0),
                 }
             )
 

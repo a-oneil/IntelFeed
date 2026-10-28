@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.enrichment.manifest import Column, Policy
+from app.enrichment.relations import apply_relations
 from app.services.claim_provenance import record_claim
 
 logger = logging.getLogger(__name__)
@@ -135,10 +136,39 @@ async def _existing_vendor(db: AsyncSession, value) -> uuid.UUID | None:
     return vendor.id if vendor else None
 
 
+async def existing_country(db: AsyncSession, value):
+    """The country a source names by ISO code, name or alias, if IntelFeed has
+    it; None for a placeholder ("[Unknown]", "Unknown"). Never creates one."""
+    from sqlalchemy import func
+
+    from app.intelligence.actor_attributes import normalize_country
+    from app.intelligence.entity_dedup import find_entity_by_name_or_alias
+    from app.models.country import Country
+
+    name = normalize_country(value) if isinstance(value, str) else None
+    if not name:
+        return None
+    if len(name) == 2 and name.isalpha():
+        return (await db.execute(select(Country).where(func.lower(Country.iso_code) == name.lower()))).scalar()
+    return await find_entity_by_name_or_alias(db, Country, name)
+
+
+async def _country_name(db: AsyncSession, value) -> str | None:
+    country = await existing_country(db, value)
+    return country.name if country else None
+
+
+async def _country_id(db: AsyncSession, value) -> uuid.UUID | None:
+    country = await existing_country(db, value)
+    return country.id if country else None
+
+
 #: ``Column.resolve`` names → database lookups of (session, value) into the
 #: value written, or None when there is no match.
 RESOLVERS = {
     "vendor": _existing_vendor,
+    "country": _country_name,
+    "country_id": _country_id,
 }
 
 _EMPTY = (None, "", [])
@@ -199,12 +229,13 @@ async def apply_enrichment_results_to_entity(
     resolves its value (a developer → an existing vendor's id) writes only what
     the lookup finds. Every write records a claim naming its source. A JSON
     column a source writes into (``Observable.reputation``) is stamped
-    ``enriched_at`` whenever one of its sources returned a result.
+    ``enriched_at`` whenever one of its sources returned a result. Each
+    source's ``Relation`` outputs are applied too (``app/enrichment/relations.py``).
 
     Each enrichment-result entry should look like:
       {"source_type": "...", "status": "success"|"cached", "parsed_data": {...}}
 
-    Returns True if the entity was changed.
+    Returns True if the entity or one of its connections was changed.
     """
     from app.enrichment.registry import SOURCE_REGISTRY
 
@@ -298,8 +329,12 @@ async def apply_enrichment_results_to_entity(
     for column in stamped:
         _set(entity, f"{column}.enriched_at", datetime.now(UTC).isoformat())
 
+    related = False
+    for src, data in by_source.items():
+        related |= await apply_relations(db, entity_type, entity_id, src, data)
+
     if not (claimed or stamped):
-        return False
+        return related
     db.add(entity)
     for path, value, src in claimed:
         await record_claim(

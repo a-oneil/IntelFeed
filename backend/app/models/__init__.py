@@ -32,6 +32,7 @@ from app.models.enrichment import (
     EnrichmentResult,
     EnrichmentSource,
     EntityContext,
+    EntityRelationClaim,
     UserEnrichmentOverride,
 )
 from app.models.entity_field_claim import EntityFieldClaim
@@ -213,6 +214,7 @@ __all__ = [
     "EnrichmentResult",
     "EnrichmentJob",
     "EntityContext",
+    "EntityRelationClaim",
     "DetectionSummary",
     "FalsePositiveRecord",
     # Glossary

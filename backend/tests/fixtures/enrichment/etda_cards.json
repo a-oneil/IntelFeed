@@ -1,0 +1,672 @@
+{
+ "authors": [
+  "ETDA"
+ ],
+ "category": "actor",
+ "name": "Threat Group Cards - Threat Actors",
+ "type": "threat-actor",
+ "source": "Threat Group Cards: A Threat Actor Encyclopedia",
+ "description": "All actor and tool details from ThaiCERT's 'Threat Group Cards: A Threat Actor Encyclopedia'",
+ "tlp": "white",
+ "license": "Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License",
+ "uuid": "78e854d3-173f-4113-beed-a7b7400131ff",
+ "last-db-change": "2025-08-16",
+ "values": [
+  {
+   "actor": "APT 29, Cozy Bear, The Dukes",
+   "names": [
+    {
+     "name": "APT 29",
+     "name-giver": "Mandiant"
+    },
+    {
+     "name": "Cozy Bear",
+     "name-giver": "CrowdStrike"
+    },
+    {
+     "name": "The Dukes",
+     "name-giver": "F-Secure"
+    },
+    {
+     "name": "Group 100",
+     "name-giver": "Talos"
+    },
+    {
+     "name": "Yttrium",
+     "name-giver": "Microsoft"
+    },
+    {
+     "name": "Iron Hemlock",
+     "name-giver": "SecureWorks"
+    },
+    {
+     "name": "Minidionis",
+     "name-giver": "Palo Alto"
+    },
+    {
+     "name": "CloudLook",
+     "name-giver": "Kaspersky"
+    },
+    {
+     "name": "ATK 7",
+     "name-giver": "Thales"
+    },
+    {
+     "name": "ITG11",
+     "name-giver": "IBM"
+    },
+    {
+     "name": "Grizzly Steppe",
+     "name-giver": "US Government"
+    },
+    {
+     "name": "UNC2452",
+     "name-giver": "FireEye"
+    },
+    {
+     "name": "Dark Halo",
+     "name-giver": "Volexity"
+    },
+    {
+     "name": "SolarStorm",
+     "name-giver": "Palo Alto"
+    },
+    {
+     "name": "StellarParticle",
+     "name-giver": "CrowdStrike"
+    },
+    {
+     "name": "SilverFish",
+     "name-giver": "Prodaft"
+    },
+    {
+     "name": "Nobelium",
+     "name-giver": "Microsoft"
+    },
+    {
+     "name": "Iron Ritual",
+     "name-giver": "SecureWorks"
+    },
+    {
+     "name": "Cloaked Ursa",
+     "name-giver": "Palo Alto"
+    },
+    {
+     "name": "BlueBravo",
+     "name-giver": "Recorded Future"
+    },
+    {
+     "name": "Midnight Blizzard",
+     "name-giver": "Microsoft"
+    },
+    {
+     "name": "UNC3524",
+     "name-giver": "Mandiant"
+    },
+    {
+     "name": "Cranefly",
+     "name-giver": "Symantec"
+    },
+    {
+     "name": "TEMP.Monkeys",
+     "name-giver": "FireEye"
+    },
+    {
+     "name": "Blue Dev 5",
+     "name-giver": "PWC"
+    },
+    {
+     "name": "NobleBaron",
+     "name-giver": "SentinelOne"
+    },
+    {
+     "name": "Solar Phoenix",
+     "name-giver": "Palo Alto"
+    },
+    {
+     "name": "Earth Koshchei",
+     "name-giver": "Trend Micro"
+    },
+    {
+     "name": "G0016",
+     "name-giver": "MITRE"
+    }
+   ],
+   "country": [
+    "Russia"
+   ],
+   "sponsor": "State-sponsored",
+   "motivation": [
+    "Information theft and espionage"
+   ],
+   "first-seen": "2008",
+   "description": "(F-Secure) The Dukes are a well-resourced, highly dedicated and organized cyberespionage group that we believe has been working for the Russian Federation since at least 2008 to collect intelligence in support of foreign and security policy decision-making.\n\nThe Dukes primarily target Western govern",
+   "observed-sectors": [
+    "Aerospace",
+    "Defense",
+    "Education",
+    "Embassies",
+    "Energy",
+    "Financial",
+    "Government",
+    "Healthcare",
+    "Law enforcement",
+    "Media",
+    "NGOs",
+    "Pharmaceutical",
+    "Telecommunications",
+    "Transportation",
+    "Think Tanks",
+    "Imagery"
+   ],
+   "observed-countries": [
+    "Australia",
+    "Azerbaijan",
+    "Belarus",
+    "Belgium",
+    "Brazil",
+    "Bulgaria",
+    "Canada",
+    "Chechnya"
+   ],
+   "tools": [
+    "7-Zip",
+    "AdFind",
+    "ATI-Agent",
+    "AtNow",
+    "BEATDROP",
+    "BloodHound",
+    "CEELOADER",
+    "CloudDuke",
+    "Cobalt Strike",
+    "CosmicDuke",
+    "CozyDuke",
+    "Danfuan"
+   ],
+   "operations": [
+    {
+     "date": "2013-02",
+     "activity": "Since the original announcement, we have observed several new attacks using the same exploit (CVE-2013-0640) which drop other malware. Between these, we’ve observed a couple of incidents which are so unusual in many ways that we-ve decided to analyse them in depth.\nhttps://securelist.com/the-miniduke-mystery-pdf-0-day-government-spy-assembler-0x29a-micro-backdoor/31112/"
+    },
+    {
+     "date": "2013",
+     "activity": "While the old style Miniduke implants were used to target mostly government victims, the new style CosmicDuke implants have a somehow different typology of victims. The most unusual is the targeting of individuals that appear to be involved in the traffic and reselling of controlled and illegal substances, such as steroids and hormones. These victims in the NITRO project have been observed only in Russia.\nhttps://securelist.com/miniduke-is-back-nemesis-gemina-and-the-botgen-studio/64107/"
+    },
+    {
+     "date": "2013",
+     "activity": "Operation “Ghost”\nWe call these newly uncovered Dukes campaigns, collectively, Operation Ghost, and describe how the group  has been busy compromising government targets, including three European Ministries of Foreign Affairs and the Washington DC embassy of a European Union country, all without drawing attention to their activities.\nhttps://www.welivesecurity.com/wp-content/uploads/2019/10/ESET_Operation_Ghost_Dukes.pdf"
+    }
+   ],
+   "counter-operations": [
+    {
+     "date": "2014-08",
+     "activity": "Dutch agencies provide crucial intel about Russia’s interference in US-elections\nhttps://www.volkskrant.nl/wetenschap/dutch-agencies-provide-crucial-intel-about-russia-s-interference-in-us-elections~b4f8111b/"
+    },
+    {
+     "date": "2018-07",
+     "activity": "Mueller indicts 12 Russians for DNC hacking as Trump-Putin summit looms\nhttps://www.politico.com/story/2018/07/13/mueller-indicts-12-russians-for-hacking-into-dnc-718805"
+    }
+   ],
+   "mitre-attack": [
+    "https://attack.mitre.org/groups/G0016/"
+   ],
+   "uuid": "93ba9804-335e-4782-855d-40af22b93201",
+   "last-card-change": "2025-08-16"
+  },
+  {
+   "actor": "Lazarus Group, Hidden Cobra, Labyrinth Chollima",
+   "names": [
+    {
+     "name": "Lazarus Group",
+     "name-giver": "Kaspersky"
+    },
+    {
+     "name": "Labyrinth Chollima",
+     "name-giver": "CrowdStrike"
+    },
+    {
+     "name": "Group 77",
+     "name-giver": "Talos"
+    },
+    {
+     "name": "Hastati Group",
+     "name-giver": "SecureWorks"
+    },
+    {
+     "name": "Whois Hacking Team",
+     "name-giver": "McAfee"
+    },
+    {
+     "name": "NewRomanic Cyber Army Team",
+     "name-giver": "McAfee"
+    },
+    {
+     "name": "Zinc",
+     "name-giver": "Microsoft"
+    },
+    {
+     "name": "Hidden Cobra",
+     "name-giver": "Trend Micro"
+    },
+    {
+     "name": "Appleworm",
+     "name-giver": "Symantec"
+    },
+    {
+     "name": "APT-C-26",
+     "name-giver": "Qihoo 360"
+    },
+    {
+     "name": "ATK 3",
+     "name-giver": "Thales"
+    },
+    {
+     "name": "SectorA01",
+     "name-giver": "ThreatRecon"
+    },
+    {
+     "name": "ITG03",
+     "name-giver": "IBM"
+    },
+    {
+     "name": "TA404",
+     "name-giver": "Proofpoint"
+    },
+    {
+     "name": "DEV-0139",
+     "name-giver": "Microsoft"
+    },
+    {
+     "name": "Guardians of Peace",
+     "name-giver": "self given"
+    },
+    {
+     "name": "Gods Apostles",
+     "name-giver": "self given"
+    },
+    {
+     "name": "Gods Disciples",
+     "name-giver": "self given"
+    },
+    {
+     "name": "UNC577",
+     "name-giver": "Mandiant"
+    },
+    {
+     "name": "UNC2970",
+     "name-giver": "Mandiant"
+    },
+    {
+     "name": "UNC4034",
+     "name-giver": "Mandiant"
+    },
+    {
+     "name": "UNC4736",
+     "name-giver": "Mandiant"
+    },
+    {
+     "name": "UNC4899",
+     "name-giver": "Mandiant"
+    },
+    {
+     "name": "Diamond Sleet",
+     "name-giver": "Microsoft"
+    },
+    {
+     "name": "Citrine Sleet",
+     "name-giver": "Microsoft"
+    },
+    {
+     "name": "Jade Sleet",
+     "name-giver": "Microsoft"
+    },
+    {
+     "name": "TraderTraitor",
+     "name-giver": "CISA"
+    },
+    {
+     "name": "Gleaming Pisces",
+     "name-giver": "Palo Alto"
+    },
+    {
+     "name": "Slow Pisces",
+     "name-giver": "Palo Alto"
+    },
+    {
+     "name": "G0032",
+     "name-giver": "MITRE"
+    }
+   ],
+   "country": [
+    "North Korea"
+   ],
+   "sponsor": "State-sponsored, Bureau/Unit 211",
+   "motivation": [
+    "Information theft and espionage",
+    "Sabotage and destruction",
+    "Financial crime"
+   ],
+   "first-seen": "2007",
+   "description": "(Malwarebytes) Lazarus Group is commonly believed to be run by the North Korean government, motivated primarily by financial gain as a method of circumventing long-standing sanctions against the regime. They first came to substantial media notice in 2013 with a series of coordinated attacks against ",
+   "observed-sectors": [
+    "Aerospace",
+    "Defense",
+    "Energy",
+    "Engineering",
+    "Financial",
+    "Government",
+    "Healthcare",
+    "Media",
+    "Shipping and Logistics",
+    "Technology",
+    "BitCoin exchanges"
+   ],
+   "observed-countries": [
+    "Australia",
+    "Bangladesh",
+    "Belgium",
+    "Brazil",
+    "Canada",
+    "Chile",
+    "China",
+    "Ecuador"
+   ],
+   "tools": [
+    "3proxy",
+    "3Rat Client",
+    "Andaratm",
+    "AppleJeus",
+    "ARTFULPIE",
+    "Aryan",
+    "ATMDtrack",
+    "AuditCred",
+    "BADCALL",
+    "Bankshot",
+    "BanSwift",
+    "BISTROMATH"
+   ],
+   "operations": [
+    {
+     "date": "2007",
+     "activity": "Operation “Flame”\nTarget: South Korean government.\nMethod: Disruption and sabotage."
+    },
+    {
+     "date": "2009-07",
+     "activity": "Operation “Troy”\nNorth Korean hackers are suspected of launching a cyber-attack on some of the most important government offices in the US and South Korea in recent days, including the White House, the Pentagon, the New York Stock Exchange and the presidential Blue House in Seoul.\nThe attack took out some of South Korea’s most important websites, including those of the Blue House, the defense ministry, the national assembly, Shinhan bank, Korea Exchange bank and the top internet portal Naver.\nTarget: Government, financial and media institutions in South Korea and USA.\nMethod: DdoS attacks.\nhttps://www.theguardian.com/world/2009/jul/08/south-korea-cyber-attack"
+    },
+    {
+     "date": "2011-03",
+     "activity": "Attack on South Korean banks and media\nRecent Distributed Denial of Service (DdoS) attacks on a number South Korean websites have been in news for the past week. The threat responsible for carrying out these attacks is Trojan.Koredos.\nTarget: South Korean organizations.\nMethod: DdoS attacks and destruction of infected machines.\nhttps://www.symantec.com/connect/blogs/trojankoredos-comes-unwelcomed-surprise"
+    }
+   ],
+   "counter-operations": [
+    {
+     "date": "2017-12",
+     "activity": "Microsoft and Facebook disrupt ZINC malware attack to protect customers and the internet from ongoing cyberthreats\nhttps://blogs.microsoft.com/on-the-issues/2017/12/19/microsoft-facebook-disrupt-zinc-malware-attack-protect-customers-internet-ongoing-cyberthreats/"
+    },
+    {
+     "date": "2018-09",
+     "activity": "North Korean Regime-Backed Programmer Charged With Conspiracy to Conduct Multiple Cyber Attacks and Intrusions\nhttps://www.justice.gov/opa/pr/north-korean-regime-backed-programmer-charged-conspiracy-conduct-multiple-cyber-attacks-and"
+    }
+   ],
+   "mitre-attack": [
+    "https://attack.mitre.org/groups/G0032/"
+   ],
+   "uuid": "41dcfaff-d5f0-484d-8649-ef8c61588eec",
+   "last-card-change": "2025-08-16"
+  },
+  {
+   "actor": "Agrius",
+   "names": [
+    {
+     "name": "Agrius",
+     "name-giver": "SentinelLabs"
+    },
+    {
+     "name": "DEV-0227",
+     "name-giver": "Microsoft"
+    },
+    {
+     "name": "BlackShadow",
+     "name-giver": "Kaspersky"
+    },
+    {
+     "name": "SharpBoys",
+     "name-giver": "?"
+    },
+    {
+     "name": "AMERICIUM",
+     "name-giver": "Microsoft"
+    },
+    {
+     "name": "Pink Sandstorm",
+     "name-giver": "Microsoft"
+    },
+    {
+     "name": "Agonizing Serpens",
+     "name-giver": "Palo Alto"
+    },
+    {
+     "name": "Spectral Kitten",
+     "name-giver": "CrowdStrike"
+    }
+   ],
+   "country": [
+    "Iran"
+   ],
+   "motivation": [
+    "Information theft and espionage",
+    "Sabotage and destruction"
+   ],
+   "first-seen": "2020",
+   "description": "(SentinelLabs) A new threat actor SentinelLabs track as Agrius was observed operating in Israel beginning in 2020. An analysis of what at first sight appeared to be a ransomware attack revealed new variants of wipers that were deployed in a set of destructive attacks against Israeli targets. The ope",
+   "observed-countries": [
+    "Hong Kong",
+    "Israel",
+    "South Africa"
+   ],
+   "tools": [
+    "Apostle",
+    "ASPXSpy",
+    "BFG Agonizer Wiper",
+    "DEADWOOD",
+    "Fantasy",
+    "IPsec Helper",
+    "Moneybird",
+    "MultiLayer Wiper",
+    "PartialWasher Wiper",
+    "Sqlextractor"
+   ],
+   "operations": [
+    {
+     "date": "2022-02",
+     "activity": "Fantasy – a new Agrius wiper deployed through a supply‑chain attack\nhttps://www.welivesecurity.com/2022/12/07/fantasy-new-agrius-wiper-supply-chain-attack/"
+    },
+    {
+     "date": "2023-05",
+     "activity": "Agrius Deploys Moneybird in Targeted Attacks Against Israeli Organizations\nhttps://research.checkpoint.com/2023/agrius-deploys-moneybird-in-targeted-attacks-against-israeli-organizations/"
+    }
+   ],
+   "uuid": "50c0c8a2-3842-4e7a-aad8-270c1793e3e1",
+   "last-card-change": "2025-06-28"
+  },
+  {
+   "actor": "Kimsuky, Velvet Chollima",
+   "names": [
+    {
+     "name": "Kimsuky",
+     "name-giver": "Kaspersky"
+    },
+    {
+     "name": "Velvet Chollima",
+     "name-giver": "CrowdStrike"
+    },
+    {
+     "name": "Thallium",
+     "name-giver": "Microsoft"
+    },
+    {
+     "name": "Black Banshee",
+     "name-giver": "PWC"
+    },
+    {
+     "name": "SharpTongue",
+     "name-giver": "Volexity"
+    },
+    {
+     "name": "ITG16",
+     "name-giver": "IBM"
+    },
+    {
+     "name": "TA406",
+     "name-giver": "Proofpoint"
+    },
+    {
+     "name": "TA427",
+     "name-giver": "Proofpoint"
+    },
+    {
+     "name": "APT 43",
+     "name-giver": "Mandiant"
+    },
+    {
+     "name": "ARCHIPELAGO",
+     "name-giver": "Google"
+    },
+    {
+     "name": "Emerald Sleet",
+     "name-giver": "Microsoft"
+    },
+    {
+     "name": "KTA082",
+     "name-giver": "Kroll"
+    },
+    {
+     "name": "UAT-5394",
+     "name-giver": "Talos"
+    },
+    {
+     "name": "Sparkling Pisces",
+     "name-giver": "Palo Alto"
+    },
+    {
+     "name": "Springtail",
+     "name-giver": "Symantec"
+    },
+    {
+     "name": "Larva-24005",
+     "name-giver": "AhnLab"
+    },
+    {
+     "name": "Larva-25004",
+     "name-giver": "AhnLab"
+    },
+    {
+     "name": "G0094",
+     "name-giver": "MITRE"
+    },
+    {
+     "name": "G0086",
+     "name-giver": "MITRE"
+    }
+   ],
+   "country": [
+    "North Korea"
+   ],
+   "sponsor": "State-sponsored",
+   "motivation": [
+    "Information theft and espionage"
+   ],
+   "first-seen": "2012",
+   "description": "(Kaspersky) For several months, we have been monitoring an ongoing cyber-espionage campaign against South Korean think-tanks. There are multiple reasons why this campaign is extraordinary in its execution and logistics. It all started one day when we encountered a somewhat unsophisticated spy progra",
+   "observed-sectors": [
+    "Defense",
+    "Education",
+    "Energy",
+    "Government",
+    "Healthcare",
+    "Manufacturing",
+    "Think Tanks",
+    "Ministry of Unification, Sejong Institute and Korea Institute for Defense Analyses"
+   ],
+   "observed-countries": [
+    "Japan",
+    "South Korea",
+    "Thailand",
+    "Ukraine",
+    "USA",
+    "Vietnam",
+    "Europe"
+   ],
+   "tools": [
+    "AppleSeed",
+    "BabyShark",
+    "BITTERSWEET",
+    "CSPY Downloader",
+    "FlowerPower",
+    "Gh0st RAT",
+    "Gold Dragon",
+    "Grease",
+    "KGH_SPY",
+    "KimJongRAT",
+    "Kimsuky",
+    "KPortScan"
+   ],
+   "operations": [
+    {
+     "date": "2013",
+     "activity": "For several months, we have been monitoring an ongoing cyber-espionage campaign against South Korean think-tanks.\nhttps://securelist.com/the-kimsuky-operation-a-north-korean-apt/57915/"
+    },
+    {
+     "date": "2014",
+     "activity": "The South Korean government issued a report today blaming North Korea for network intrusions that stole data from Korea Hydro and Nuclear Power (KHNP), the company that operates South Korea's 23 nuclear reactors. While the government report stated that only 'non-critical' networks were affected, the attackers had demanded the shutdown of three reactors just after the intrusion. They also threatened 'destruction' in a message posted to Twitter.\nhttps://arstechnica.com/information-technology/2015/03/south-korea-claims-north-hacked-nuclear-data/"
+    },
+    {
+     "date": "2018-03",
+     "activity": "Operation “Baby Coin”\nhttps://blog.alyac.co.kr/m/1963"
+    }
+   ],
+   "counter-operations": [
+    {
+     "date": "2019-12",
+     "activity": "Microsoft takes court action against fourth nation-state cybercrime group\nhttps://blogs.microsoft.com/on-the-issues/2019/12/30/microsoft-court-action-against-nation-state-cybercrime/"
+    },
+    {
+     "date": "2023-11",
+     "activity": "Treasury Targets DPRK’s International Agents and Illicit Cyber Intrusion Group\nhttps://home.treasury.gov/news/press-releases/jy1938"
+    }
+   ],
+   "mitre-attack": [
+    "https://attack.mitre.org/groups/G0094/",
+    "https://attack.mitre.org/groups/G0086/"
+   ],
+   "uuid": "5e3544bf-98ad-4e9f-b65e-85f05c36486f",
+   "last-card-change": "2025-08-16"
+  },
+  {
+   "actor": "AeroBlade",
+   "names": [
+    {
+     "name": "AeroBlade",
+     "name-giver": "BlackBerry"
+    }
+   ],
+   "country": [
+    "[Unknown]"
+   ],
+   "motivation": [
+    "Information theft and espionage"
+   ],
+   "first-seen": "2022",
+   "description": "(BlackBerry) BlackBerry has uncovered a previously unknown threat actor targeting an aerospace organization in the United States, with the apparent goal of conducting commercial and competitive cyber espionage. The BlackBerry Threat Research and Intelligence team is tracking this threat actor as Aer",
+   "observed-sectors": [
+    "Aerospace"
+   ],
+   "observed-countries": [
+    "USA"
+   ],
+   "uuid": "2c1a4c44-04ee-4b60-ba62-cfd0083550bc",
+   "last-card-change": "2024-01-16"
+  }
+ ]
+}

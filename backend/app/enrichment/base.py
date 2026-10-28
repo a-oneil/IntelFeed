@@ -8,7 +8,7 @@ import httpx
 from sqlalchemy import and_
 
 from app.enrichment.gateway import THROTTLE_STATUSES, SourceGateway
-from app.enrichment.manifest import Column, Context, Egress, Job, License, Quota
+from app.enrichment.manifest import Column, Context, Egress, Job, License, Quota, Relation
 
 
 @dataclass
@@ -51,7 +51,7 @@ class Source:
     egress: Egress
     license: License
     jobs: tuple[Job, ...] = ()
-    outputs: tuple[Column | Context, ...] = ()
+    outputs: tuple[Column | Context | Relation, ...] = ()
     default_trigger_mode: str = "manual"
     shared_key_group: str | None = None  # Sources sharing an API key set this (e.g. "abuse_ch")
     #: Instance setting holding a key to use when neither the person nor the
@@ -63,6 +63,10 @@ class Source:
     @classmethod
     def columns(cls) -> tuple[Column, ...]:
         return tuple(o for o in cls.outputs if isinstance(o, Column))
+
+    @classmethod
+    def relations(cls) -> tuple[Relation, ...]:
+        return tuple(o for o in cls.outputs if isinstance(o, Relation))
 
     @classmethod
     def scope_filter(cls, entity_type: str, model):

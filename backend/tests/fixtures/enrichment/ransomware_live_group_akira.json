@@ -1,0 +1,78 @@
+{
+ "added_date": "2023-04-26",
+ "altname": null,
+ "description": "The Akira ransomware group is said to have emerged in March 2023, and there's much speculation about its ties to the former CONTI ransomware group.<br> <br> It's worth noting that with the end of CONTI's operation, several affiliates migrated to independent campaigns such as Royal, BlackBasta, and others.<br> <br> According to some reports, Akira affiliates also work with other ransomware operatio",
+ "locations": [
+  {
+   "available": true,
+   "enabled": true,
+   "fqdn": "akiral2iz6a7qgd3ayp3l6yub7xx2uep76idk3u2kollpj5z3z636bad.onion",
+   "slug": "https://akiral2iz6a7qgd3ayp3l6yub7xx2uep76idk3u2kollpj5z3z636bad.onion",
+   "title": "",
+   "type": "DLS"
+  },
+  {
+   "available": true,
+   "enabled": true,
+   "fqdn": "akiralkzxzq2dsrzsrvbr2xgbbu2wgsmxryd4csgfameg52n7efvr2id.onion",
+   "slug": "https://akiralkzxzq2dsrzsrvbr2xgbbu2wgsmxryd4csgfameg52n7efvr2id.onion",
+   "title": "/",
+   "type": "Chat"
+  }
+ ],
+ "name": "akira",
+ "tools": [
+  {
+   "CredentialTheft": [
+    "DonPAPI",
+    "LaZagne",
+    "Mimikatz"
+   ],
+   "DefenseEvasion": [
+    "PowerTool",
+    "ThrottleStop driver",
+    "Zemana Anti-Rootkit driver"
+   ],
+   "DiscoveryEnum": [
+    "Advanced IP Scanner",
+    "Advanced Port Scanner",
+    "Bloodhound"
+   ]
+  }
+ ],
+ "ttps": [
+  {
+   "tactic_id": "TA0001",
+   "tactic_name": "Initial Access",
+   "techniques": [
+    {
+     "technique_details": "Utilizes compromised VPN credentials.",
+     "technique_id": "T1078",
+     "technique_name": "Valid Accounts"
+    },
+    {
+     "technique_details": "Operators use obtained domain accounts for access.",
+     "technique_id": "T1078.002",
+     "technique_name": "Valid Accounts: Domain Accounts"
+    }
+   ]
+  },
+  {
+   "tactic_id": "TA0002",
+   "tactic_name": "Execution",
+   "techniques": [
+    {
+     "technique_details": "Actors may use WMI to continue the attack.",
+     "technique_id": "T1047",
+     "technique_name": "Windows Management Instrumentation"
+    },
+    {
+     "technique_details": "Accepts parameters for its routines such as \"-n 10\" (for encryption percentage) or \"-s (filename)\" (for shared folder encryption).",
+     "technique_id": "T1059",
+     "technique_name": "Command and Scripting Interpreter"
+    }
+   ]
+  }
+ ],
+ "url": "https://www.ransomware.live/group/akira"
+}

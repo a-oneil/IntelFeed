@@ -102,6 +102,14 @@ JOBS_BEFORE = {
         "app.workers.enrichment_tasks.run_d3fend_sync",
         {"type": "crontab", "minute": "30", "hour": "4", "day_of_week": "0"},
     ),
+    "etda-sync": (
+        "app.workers.enrichment_tasks.run_etda_sync",
+        {"type": "crontab", "minute": "15", "hour": "4", "day_of_week": "2"},
+    ),
+    "ransomware-group-profiles": (
+        "app.workers.enrichment_tasks.run_ransomware_group_profiles",
+        {"type": "crontab", "minute": "50", "hour": "*/4"},
+    ),
 }
 
 JOB_SOURCE = {
@@ -127,6 +135,8 @@ JOB_SOURCE = {
     "capec-sync": "capec",
     "ctid-mappings-sync": "ctid",
     "d3fend-sync": "d3fend",
+    "etda-sync": "etda",
+    "ransomware-group-profiles": "ransomware_live",
 }
 
 
@@ -164,6 +174,7 @@ def test_every_source_has_a_seed_row_from_its_manifest():
         "capec",
         "ctid",
         "d3fend",
+        "etda",
     }
     assert all(cls.kind == "catalog" and not issubclass(cls, EnrichmentAdapter) for cls in CATALOG_REGISTRY.values())
     assert all(cls.kind == "lookup" for cls in ADAPTER_REGISTRY.values())

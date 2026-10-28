@@ -23,7 +23,8 @@ class EntityRelationship(Base):
     # confirmed, probable, possible
     source: Mapped[str] = mapped_column(String(20), default="analyst_created")
     # co_occurrence, auto_extracted, analyst_confirmed, analyst_created,
-    # analyst_rejected (hidden + never resurrected by co-occurrence), external_feed
+    # analyst_rejected (hidden + never resurrected by co-occurrence), external_feed,
+    # enrichment (an enrichment source's Relation output; see app/enrichment/relations.py)
     description: Mapped[str | None] = mapped_column(Text)
     # AI adjudicator verdict: corroborated (promoted to confirmed) or
     # coincidental (demoted to possible, never re-promoted by co-occurrence).

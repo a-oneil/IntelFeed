@@ -130,3 +130,21 @@ class Context:
     item: dict | None = None
     entity_types: tuple[str, ...] = ()  # () = every applies_to type
     tones: dict | None = None
+
+
+@dataclass(frozen=True)
+class Relation:
+    """A parsed_data list naming entities this one is connected to: each item
+    becomes a ``relation`` claim from the entity to an existing entity of one
+    of ``target_types`` (``app/enrichment/relations.py``). Targets are only
+    ever resolved, never created; one the source names but IntelFeed doesn't
+    have, or has more than one of, is held for review.
+
+    ``item`` maps ``name`` (and optionally ``evidence``) to a key of every
+    listed row; with no ``item`` the list holds plain names.
+    """
+
+    key: str
+    relation: str
+    target_types: tuple[str, ...]
+    item: dict | None = None

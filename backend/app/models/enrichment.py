@@ -109,6 +109,42 @@ class EntityContext(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
 
 
+class EntityRelationClaim(Base):
+    """One source's claim that an entity is connected to another, one row per
+    target the source names (a declared ``Relation`` output,
+    ``app/enrichment/relations.py``). ``target_id`` is the existing entity the
+    name resolved to; it is null while the claim is held — the name matches
+    nothing, or more than one entity — and ``held_reason`` says which.
+
+    The connection itself lives where IntelFeed keeps that kind of fact
+    (``entity_relationships``, or the target-sector junction); these rows are
+    what lets a source's claim be withdrawn without touching another's."""
+
+    __tablename__ = "entity_relation_claims"
+
+    entity_type: Mapped[str] = mapped_column(String(20), primary_key=True)
+    entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    source_type: Mapped[str] = mapped_column(String(30), primary_key=True)
+    # The Relation output's key (its parsed_data list).
+    output: Mapped[str] = mapped_column(String(64), primary_key=True)
+    # The target name folded (case and spacing): one claim per name.
+    target_key: Mapped[str] = mapped_column(String(255), primary_key=True)
+    relation: Mapped[str] = mapped_column(String(30), nullable=False)
+    target_name: Mapped[str] = mapped_column(Text, nullable=False)
+    target_type: Mapped[str | None] = mapped_column(String(20))
+    target_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    # unknown (no entity has the name) | ambiguous (more than one does)
+    held_reason: Mapped[str | None] = mapped_column(String(20))
+    evidence: Mapped[str | None] = mapped_column(Text)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        Index("ix_entity_relation_claims_target", "target_type", "target_id"),
+        Index("ix_entity_relation_claims_source", "source_type", "output"),
+    )
+
+
 class EnrichmentJob(Base):
     """One entity's pending lookup at one source. Waiting work lives here until
     the dispatcher runs it, so a lookup a source refuses is deferred, never

@@ -853,7 +853,8 @@ _STALE_FLAGS_PER_TYPE_CAP = 500  # bound one run's log growth
 
 @celery_app.task(name="app.workers.maintenance.prune_entity_context", soft_time_limit=300, time_limit=360)
 def prune_entity_context():
-    """Nightly: delete entity_context rows that expired more than 30 days ago.
+    """Nightly: delete entity_context rows that expired more than 30 days ago,
+    and relation claims whose entity is gone.
 
     An expired row still shows on the profile, marked stale, until its source
     looks again; a month on, nothing is going to.
@@ -861,7 +862,7 @@ def prune_entity_context():
     start = time.monotonic()
     try:
         deleted = run_async(_prune_entity_context())
-        logger.info("Pruned %d expired entity_context rows", deleted)
+        logger.info("Pruned %d expired entity_context rows and orphaned relation claims", deleted)
         CELERY_TASKS_TOTAL.labels(task_name="prune_entity_context", status="success").inc()
         return {"deleted": deleted}
     except Exception:
@@ -874,9 +875,10 @@ def prune_entity_context():
 
 async def _prune_entity_context() -> int:
     from app.enrichment.context import prune_expired_context
+    from app.enrichment.relations import prune_orphan_claims
 
     async with _get_worker_session() as db:
-        deleted = await prune_expired_context(db)
+        deleted = await prune_expired_context(db) + await prune_orphan_claims(db)
         await db.commit()
     return deleted
 

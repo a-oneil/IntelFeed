@@ -651,8 +651,10 @@ async def test_console_and_detail_match_the_frontend_types(client, admin_headers
 
     ts = _interface("EnrichmentSourceDetail")
     seen: set[str] = set()
-    # NVD has jobs, Shodan a gap and column outputs, MISP Galaxy neither.
-    for source_type in ("nvd", "shodan", "misp_galaxy"):
+    # NVD has jobs, Shodan a gap and column outputs, MISP Galaxy neither,
+    # ETDA relationship outputs.
+    await _source(db_session, "etda")
+    for source_type in ("nvd", "shodan", "misp_galaxy", "etda"):
         detail = (await client.get(f"/api/enrichment/sources/{source_type}/detail", headers=admin_headers)).json()
         assert set(detail) == {"limits", "trend_24h", "queue", "outputs", "gap", "jobs"}
         found = _keys(detail, skip=("by_lane", "last_detail"))

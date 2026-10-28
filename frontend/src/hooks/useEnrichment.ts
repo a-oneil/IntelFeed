@@ -253,10 +253,13 @@ export interface EnrichmentSourceDetail {
   outputs: Array<{
     field: string;
     target: string;
-    kind: "column" | "context";
+    kind: "column" | "context" | "relationship";
     policy?: string | null;
     rank?: number | null;
     filled_pct: number | null;
+    /** Relationship outputs: claims linked to an entity, and claims held for review. */
+    linked?: number;
+    held?: number;
   }>;
   /** Null when the source has no column output. */
   gap: {

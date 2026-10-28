@@ -516,7 +516,7 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
     # Not a source's job: it prunes every source's rows.
     "prune-entity-context": {
         "task": "app.workers.maintenance.prune_entity_context",
-        "description": "Delete enrichment context rows that expired more than 30 days ago",
+        "description": "Delete expired enrichment context rows and orphaned relation claims",
         "category": "maintenance",
         "default_schedule": {"type": "crontab", "minute": "45", "hour": "2"},
     },

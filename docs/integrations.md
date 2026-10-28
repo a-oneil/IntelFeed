@@ -807,7 +807,7 @@ OpenRouter's health check doesn't validate the key, so a bad key passes **Test**
 
 ### 18. Configure Enrichment Sources
 
-Enrichment adds outside data to CVEs, techniques, malware and indicators. Each source declares itself in its class (`backend/app/enrichment/adapters/`, `backend/app/enrichment/catalogs.py`, `wikidata.py`, `endoflife.py`, `capec.py`, `ctid.py`, `d3fend.py`), listed in `backend/app/enrichment/registry.py`:
+Enrichment adds outside data to CVEs, techniques, malware and indicators. Each source declares itself in its class (`backend/app/enrichment/adapters/`, `backend/app/enrichment/catalogs.py`, `wikidata.py`, `endoflife.py`, `capec.py`, `ctid.py`, `d3fend.py`, `etda.py`), listed in `backend/app/enrichment/registry.py`:
 
 | Source | Key | Default trigger | Default rate limit | Scheduled jobs | Adds |
 |--------|---------|-----------------|--------------------|----------------|------|
@@ -830,7 +830,7 @@ Enrichment adds outside data to CVEs, techniques, malware and indicators. Each s
 | MISP Galaxy | No | — | 10/hour | Weekly | Reference actor aliases |
 | Metasploit modules | No | — | 10/hour | Weekly | CVEs with Metasploit modules |
 | MITRE CWE | No | — | 10/hour | Weekly | The CWE catalog |
-| ransomware.live | No | — | 2/min | Every 30 min | Leak-site victims |
+| ransomware.live | No | — | 2/min | Every 30 min; group profiles every 4 h | Leak-site victims; group techniques, tools and leak-site status |
 | Cybergeist | No | — | 10/hour | Daily | Threat actors and malware |
 | Wikidata | No | — | 30/min | Weekly | Vendor websites and facts, product vendors, country regions |
 | endoflife.date | No | — | 1/s | Daily | Product support status and release lifecycles |
@@ -838,8 +838,9 @@ Enrichment adds outside data to CVEs, techniques, malware and indicators. Each s
 | MITRE CAPEC | No | — | 10/hour | Weekly | The attack-pattern catalog: names for CWEs' CAPEC ids, patterns on techniques |
 | CTID control mappings | No | — | 10/hour | Weekly | NIST 800-53 and CIS controls on techniques |
 | MITRE D3FEND | No | — | 10/hour | Weekly | Countermeasures for techniques |
+| ETDA Threat Group Cards | No | — | 10/hour | Weekly | Actor aliases, origin, MITRE id, targeted sectors and countries, tools, operations |
 
-Auto = looked up when a new entity appears; Manual = on request from an entity or indicator. The last eleven are catalog sources: they only run their jobs. Team Cymru and RDAP look up active observables only. Turning a source off also stops its jobs. A rate above what a source documents it allows is refused.
+Auto = looked up when a new entity appears; Manual = on request from an entity or indicator. The last twelve are catalog sources: they only run their jobs. Team Cymru and RDAP look up active observables only. Turning a source off also stops its jobs. A rate above what a source documents it allows is refused.
 
 **To configure:** **Settings → Engine → Pipeline** → **enrich** stage: turn on sources, paste keys, optionally change rate limit and confidence threshold, save.
 

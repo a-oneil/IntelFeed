@@ -32,6 +32,7 @@ from app.enrichment.catalogs import (
 from app.enrichment.ctid import CTIDSource
 from app.enrichment.d3fend import D3FENDSource
 from app.enrichment.endoflife import EndOfLifeSource
+from app.enrichment.etda import ETDASource
 from app.enrichment.gateway import SourceGateway
 from app.enrichment.wikidata import WikidataSource
 from app.models.enrichment import EnrichmentSource
@@ -72,6 +73,7 @@ CATALOG_REGISTRY: dict[str, type[Source]] = {
         CAPECSource,
         CTIDSource,
         D3FENDSource,
+        ETDASource,
     )
 }
 

@@ -340,7 +340,13 @@ function OutputsPanel({ source, detail }: { source: EnrichmentConsoleSource; det
                   {o.target}
                   {o.rank != null && ` (rank ${o.rank})`}
                 </td>
-                <td className={s.r}>{o.filled_pct != null ? `${Math.round(o.filled_pct)}%` : "—"}</td>
+                <td className={s.r}>
+                  {o.kind === "relationship"
+                    ? `${num(o.linked ?? 0)} linked · ${num(o.held ?? 0)} held`
+                    : o.filled_pct != null
+                      ? `${Math.round(o.filled_pct)}%`
+                      : "—"}
+                </td>
               </tr>
             ))}
           </tbody>

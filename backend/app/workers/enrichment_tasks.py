@@ -1848,6 +1848,58 @@ async def _run_d3fend_sync():
         return await sync_d3fend(db, gateway)
 
 
+@celery_app.task(name="app.workers.enrichment_tasks.run_etda_sync", soft_time_limit=1800, time_limit=1860)
+def run_etda_sync():
+    """Weekly: match ETDA Threat Group Cards to tracked threat actors."""
+    start = time.monotonic()
+    try:
+        stats = run_async(_run_etda_sync())
+        logger.info("ETDA sync stats: %s", stats)
+        CELERY_TASKS_TOTAL.labels(task_name="run_etda_sync", status="success").inc()
+        return stats
+    except Exception:
+        CELERY_TASKS_TOTAL.labels(task_name="run_etda_sync", status="error").inc()
+        logger.exception("ETDA sync failed")
+        raise
+    finally:
+        CELERY_TASK_DURATION_SECONDS.labels(task_name="run_etda_sync").observe(time.monotonic() - start)
+
+
+@source_job("etda")
+async def _run_etda_sync():
+    from app.enrichment.etda import sync_etda
+
+    gateway, _ = await _job_gateway("etda")
+    async with _get_worker_session() as db:
+        return await sync_etda(db, gateway)
+
+
+@celery_app.task(name="app.workers.enrichment_tasks.run_ransomware_group_profiles", soft_time_limit=900, time_limit=960)
+def run_ransomware_group_profiles():
+    """Every four hours: a few tracked ransomware groups' profiles from ransomware.live."""
+    start = time.monotonic()
+    try:
+        stats = run_async(_run_ransomware_group_profiles())
+        logger.info("ransomware.live group profile stats: %s", stats)
+        CELERY_TASKS_TOTAL.labels(task_name="run_ransomware_group_profiles", status="success").inc()
+        return stats
+    except Exception:
+        CELERY_TASKS_TOTAL.labels(task_name="run_ransomware_group_profiles", status="error").inc()
+        logger.exception("ransomware.live group profiles failed")
+        raise
+    finally:
+        CELERY_TASK_DURATION_SECONDS.labels(task_name="run_ransomware_group_profiles").observe(time.monotonic() - start)
+
+
+@source_job("ransomware_live")
+async def _run_ransomware_group_profiles():
+    from app.enrichment.ransomware_groups import sync_group_profiles
+
+    gateway, _ = await _job_gateway("ransomware_live")
+    async with _get_worker_session() as db:
+        return await sync_group_profiles(db, gateway)
+
+
 TRANCO_LATEST_URL = "https://tranco-list.eu/api/lists/date/latest"
 #: A domain ranked this high is a popular site: worth an analyst's look before
 #: it is treated as an indicator.

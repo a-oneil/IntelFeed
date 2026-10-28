@@ -594,11 +594,11 @@ Bookkeeping for the one-pass `entry_analysis` (one AI call that reads an article
 
 ### 6. Enrichment & External Data
 
-**Tables:** `enrichment_sources`, `user_enrichment_overrides`, `enrichment_results`, `entity_context`, `entity_notes`, `entity_field_claims`, `entity_relationships`
+**Tables:** `enrichment_sources`, `user_enrichment_overrides`, `enrichment_results`, `entity_context`, `entity_relation_claims`, `entity_notes`, `entity_field_claims`, `entity_relationships`
 
 #### EnrichmentSource
 Table `enrichment_sources`: one external data source.
-- `source_type` (unique) — `nvd`, `epss`, `cisa_kev`, `mitre_attack`, `vulncheck`, `osv`, `malpedia`, `github_poc`, `cvedetails`, `wikipedia`, `greynoise`, `shodan`, `virustotal`, `cymru`, `rdap`, and the catalog sources `misp_galaxy`, `metasploit`, `mitre_cwe`, `ransomware_live`, `cybergeist`, `wikidata`, `endoflife`, `tranco`, `capec`, `ctid`, `d3fend`
+- `source_type` (unique) — `nvd`, `epss`, `cisa_kev`, `mitre_attack`, `vulncheck`, `osv`, `malpedia`, `github_poc`, `cvedetails`, `wikipedia`, `greynoise`, `shodan`, `virustotal`, `cymru`, `rdap`, and the catalog sources `misp_galaxy`, `metasploit`, `mitre_cwe`, `ransomware_live`, `cybergeist`, `wikidata`, `endoflife`, `tranco`, `capec`, `ctid`, `d3fend`, `etda`
 - `display_name`, `is_enabled` (seeded on for a source with scheduled jobs; a disabled source's jobs skip)
 - `trigger_mode` (default `manual`) — `auto` or `manual`
 - `api_key_encrypted`, `config` (JSONB)
@@ -623,6 +623,13 @@ Table `enrichment_results`: a cached answer from a source.
 Table `entity_context`: what one enrichment source says about one entity, for the profile's Context panel. One row per declared `Context` output. See [automation-ai-enrichment.md](automation-ai-enrichment.md#source-context).
 - Primary key (`entity_type`, `entity_id`, `source_type`, `key`)
 - `value` (JSONB, shaped for its display), `observed_at`, `expires_at` (indexed; rows expired over 30 days are pruned nightly)
+
+#### EntityRelationClaim
+Table `entity_relation_claims`: one enrichment source's claim that an entity is connected to another, one row per target name a declared `Relation` output lists. See [automation-ai-enrichment.md](automation-ai-enrichment.md#relations).
+- Primary key (`entity_type`, `entity_id`, `source_type`, `output`, `target_key`); `target_key` is the name folded for case and spacing
+- `relation`, `target_name`, `evidence`, `first_seen_at`, `last_seen_at`
+- `target_type`, `target_id` — the existing entity the name resolved to; both null while the claim is held, with `held_reason` `unknown` or `ambiguous`
+- Indexed on (`target_type`, `target_id`) and (`source_type`, `output`); claims whose entity is gone are pruned nightly
 
 #### EntityNote
 Table `entity_notes`: an analyst's note on an entity.
@@ -649,7 +656,7 @@ Table `entity_relationships`: a typed link between two entities, for example "AP
 - `source_type`, `source_id`, `target_type`, `target_id` (all indexed)
 - `relationship_type` (indexed) — the verb: `uses`, `exploits`, `targets`, `attributed_to`, `variant_of`, `communicates_with`, `delivers`, `drops`, `controls`, `related_to`, `successor_of`, `subgroup_of`, `overlaps_with`. Which (source type, verb, target type) combinations are allowed is set by `ALLOWED_RELATIONSHIPS` in `app/intelligence/relationship_matrix.py`, checked on every write.
 - `confidence` (default `possible`) — `confirmed`, `probable` or `possible`
-- `source` (default `analyst_created`) — `co_occurrence`, `auto_extracted`, `analyst_confirmed`, `analyst_created`, `analyst_rejected` (hidden and never recreated by co-occurrence) or `external_feed`
+- `source` (default `analyst_created`) — `co_occurrence`, `auto_extracted`, `analyst_confirmed`, `analyst_created`, `analyst_rejected` (hidden and never recreated by co-occurrence), `external_feed` or `enrichment` (held by claims in `entity_relation_claims`)
 - `description`
 - `evidence_entry_ids` (UUID[]) — articles that support the link (GIN-indexed)
 - `adjudication_verdict`, `adjudicated_at` — the adjudicate stage's outcome:
