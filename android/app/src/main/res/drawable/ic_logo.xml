@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- IntelFeed logo at its native 24x24 size (the web favicon.svg), for in-app use such as the drawer
+     header. Same paths as ic_launcher_foreground.xml, without the adaptive-icon scaling. The colour is a
+     placeholder: callers tint it with the theme accent. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Hexagram network lines -->
+    <path
+        android:pathData="M12,2L21.2,16.5L2.8,16.5Z"
+        android:strokeColor="#F78166"
+        android:strokeWidth="0.7"
+        android:strokeLineJoin="round"
+        android:strokeAlpha="0.6" />
+    <path
+        android:pathData="M21.2,7.5L12,22L2.8,7.5Z"
+        android:strokeColor="#F78166"
+        android:strokeWidth="0.7"
+        android:strokeLineJoin="round"
+        android:strokeAlpha="0.6" />
+    <!-- Hexagon outline -->
+    <path
+        android:pathData="M12,2L21.2,7.5V16.5L12,22L2.8,16.5V7.5Z"
+        android:strokeColor="#F78166"
+        android:strokeWidth="1.4"
+        android:strokeLineJoin="round" />
+    <!-- Vertex and intersection nodes, RSS dot -->
+    <path
+        android:fillColor="#F78166"
+        android:pathData="M10.9,2a1.1,1.1 0,1 1,2.2,0a1.1,1.1 0,1 1,-2.2,0ZM20.1,7.5a1.1,1.1 0,1 1,2.2,0a1.1,1.1 0,1 1,-2.2,0ZM20.1,16.5a1.1,1.1 0,1 1,2.2,0a1.1,1.1 0,1 1,-2.2,0ZM10.9,22a1.1,1.1 0,1 1,2.2,0a1.1,1.1 0,1 1,-2.2,0ZM1.7,16.5a1.1,1.1 0,1 1,2.2,0a1.1,1.1 0,1 1,-2.2,0ZM1.7,7.5a1.1,1.1 0,1 1,2.2,0a1.1,1.1 0,1 1,-2.2,0ZM14.7,7.5a0.8,0.8 0,1 1,1.6,0a0.8,0.8 0,1 1,-1.6,0ZM17.5,12a0.8,0.8 0,1 1,1.6,0a0.8,0.8 0,1 1,-1.6,0ZM14.7,16.5a0.8,0.8 0,1 1,1.6,0a0.8,0.8 0,1 1,-1.6,0ZM7.7,16.5a0.8,0.8 0,1 1,1.6,0a0.8,0.8 0,1 1,-1.6,0ZM4.9,12a0.8,0.8 0,1 1,1.6,0a0.8,0.8 0,1 1,-1.6,0ZM7.7,7.5a0.8,0.8 0,1 1,1.6,0a0.8,0.8 0,1 1,-1.6,0ZM7.2,15.5a1.3,1.3 0,1 1,2.6,0a1.3,1.3 0,1 1,-2.6,0Z" />
+    <!-- RSS signal waves -->
+    <path
+        android:pathData="M8.5,12.5C10.16,12.5 11.5,13.84 11.5,15.5"
+        android:strokeColor="#F78166"
+        android:strokeWidth="1.4"
+        android:strokeLineJoin="round"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M8.5,9.8C11.65,9.8 14.2,12.35 14.2,15.5"
+        android:strokeColor="#F78166"
+        android:strokeWidth="1.4"
+        android:strokeLineJoin="round"
+        android:strokeLineCap="round" />
+    </vector>

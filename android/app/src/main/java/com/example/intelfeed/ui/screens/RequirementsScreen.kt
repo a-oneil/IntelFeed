@@ -87,7 +87,7 @@ data class RequirementsState(
 
 /**
  * The server's intelligence requirements (GET /api/requirements): the web's keyword matching.
- * Read-only here; a requirement can be created from the drawer's "Track a keyword".
+ * Read-only here; requirements are created on the website.
  */
 class RequirementsViewModel(private val repository: IntelFeedRepository) : ViewModel() {
     private val _state = MutableStateFlow(RequirementsState())
@@ -167,7 +167,7 @@ fun RequirementsScreen(
             when {
                 state.loading -> SlowLoadingState("Loading requirements…")
                 state.error != null && state.requirements.isEmpty() -> ErrorState(state.error!!, onRetry = { viewModel.load() }, modifier = Modifier.fillMaxSize())
-                state.requirements.isEmpty() -> EmptyState(Icons.Default.TrackChanges, "No requirements yet", "Requirements are created on the website, or from \"Track a keyword\" in the feeds drawer.")
+                state.requirements.isEmpty() -> EmptyState(Icons.Default.TrackChanges, "No requirements yet", "Requirements are created on the website.")
                 else -> LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxSize()) {
                     items(state.requirements, key = { it.id }, contentType = { "requirement_card" }) { req ->
                         RequirementCard(
