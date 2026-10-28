@@ -110,6 +110,14 @@ JOBS_BEFORE = {
         "app.workers.enrichment_tasks.run_ransomware_group_profiles",
         {"type": "crontab", "minute": "50", "hour": "*/4"},
     ),
+    "threatfox-sync": (
+        "app.workers.enrichment_tasks.run_threatfox_sync",
+        {"type": "crontab", "minute": "35", "hour": "4"},
+    ),
+    "urlhaus-sync": (
+        "app.workers.enrichment_tasks.run_urlhaus_sync",
+        {"type": "crontab", "minute": "50", "hour": "*/6"},
+    ),
 }
 
 JOB_SOURCE = {
@@ -137,6 +145,8 @@ JOB_SOURCE = {
     "d3fend-sync": "d3fend",
     "etda-sync": "etda",
     "ransomware-group-profiles": "ransomware_live",
+    "threatfox-sync": "threatfox",
+    "urlhaus-sync": "urlhaus",
 }
 
 

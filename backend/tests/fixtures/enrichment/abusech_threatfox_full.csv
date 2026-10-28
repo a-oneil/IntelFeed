@@ -1,0 +1,19 @@
+################################################################
+# ThreatFox IOCs: CSV export                                   #
+# Last updated: 2026-10-28 04:00:00 UTC                        #
+#                                                              #
+# Terms Of Use: https://threatfox.abuse.ch/faq/#tos            #
+# For questions please contact threatfox [at] abuse.ch         #
+################################################################
+#
+# IntelFeed test fixture, not a recording: no abuse.ch Auth-Key was available.
+# Built from the export's column layout and the IOCs of the API documentation's
+# examples (https://threatfox.abuse.ch/api/), trimmed.
+#
+# "first_seen_utc","ioc_id","ioc_value","ioc_type","threat_type","fk_malware","malware_alias","malware_printable","last_seen_utc","confidence_level","reference","tags","anonymous","reporter"
+"2020-12-06 09:10:23", "12", "139.180.203.104:443", "ip:port", "botnet_cc", "win.cobalt_strike", "Agentemis,BEACON,CobaltStrike", "Cobalt Strike", "", "75", "", "None", "0", "abuse_ch"
+"2021-01-10 11:00:00", "13", "139.180.203.104:8443", "ip:port", "botnet_cc", "win.sliver", "None", "Sliver", "2021-02-01 08:00:00", "50", "https://example.org/report/sliver", "c2,Sliver", "0", "abuse_ch"
+"2021-03-23 14:50:33", "4726", "http://harold.jetos.com:3606/is-ready", "url", "botnet_cc", "win.houdini", "Hworm,Jenxcus,Kognito,Njw0rm,WSHRAT,dinihou,dunihi", "Houdini", "", "100", "", "WSHRAT", "0", "abuse_ch"
+"2021-03-23 08:18:06", "4800", "b325c92fa540edeb89b95dbfd4400c1cb33599c66859a87aead820e568a2ebe7", "sha256_hash", "payload", "win.agent_tesla", "AgenTesla,AgentTesla", "Agent Tesla", "", "80", "", "AgentTesla,exe", "0", "abuse_ch"
+"2021-04-01 10:00:00", "4900", "payload-host.example.net", "domain", "payload_delivery", "win.emotet", "Geodo,Heodo", "Emotet", "", "90", "", "emotet", "0", "abuse_ch"
+"2021-04-02 10:00:00", "4901", "94.103.84.81:80", "ip:port", "botnet_cc", "unknown", "None", "Unknown malware", "", "25", "", "None", "1", "anonymous"

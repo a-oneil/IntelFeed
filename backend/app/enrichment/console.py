@@ -23,7 +23,7 @@ from app.enrichment.manifest import Column, Context, Egress, Relation
 from app.enrichment.pause import is_paused
 from app.enrichment.queue import BACKFILL_SHARE, LANES
 from app.enrichment.registry import ADAPTER_REGISTRY, SOURCE_REGISTRY, source_gateway
-from app.enrichment.relations import claim_counts
+from app.enrichment.relations import claim_counts, runs_from_target
 from app.models.enrichment import EnrichmentJob, EnrichmentSource, UserEnrichmentOverride
 from app.models.job_run import JobRun
 
@@ -59,6 +59,15 @@ def type_label(entity_type: str) -> str:
     return label[0].upper() + label[1:]
 
 
+def _relation_words(cls: type[Source], out: Relation, targets: list[str]) -> str:
+    """``uses tool``, or ``malware communicates_with`` for a connection the
+    matrix stores from the target."""
+    names = " or ".join(targets)
+    if all(runs_from_target(t, out) for t in cls.applies_to):
+        return f"{names} {out.relation}"
+    return f"{out.relation} {names}"
+
+
 def fills(cls: type[Source]) -> str:
     """What a source writes, in a few words: its columns, then its profile
     context, else its first job's description."""
@@ -69,7 +78,7 @@ def fills(cls: type[Source]) -> str:
                 continue
             word = _words(out.path.split(".", 1)[0])
         elif isinstance(out, Relation):
-            word = f"{out.relation} {' or '.join(entity_types.LABELS.get(t, t) for t in out.target_types)}"
+            word = _relation_words(cls, out, [entity_types.LABELS.get(t, t) for t in out.target_types])
         else:
             # "Open ports" → "open ports"; an acronym ("EPSS score") stays.
             word = out.label if out.label[:2].isupper() else out.label[0].lower() + out.label[1:]
@@ -436,7 +445,7 @@ async def detail(db: AsyncSession, source_type: str) -> dict | None:
             outputs.append(
                 {
                     "field": out.key,
-                    "target": f"relationship: {out.relation} {' or '.join(out.target_types)}",
+                    "target": f"relationship: {_relation_words(cls, out, list(out.target_types))}",
                     "kind": "relationship",
                     "policy": None,
                     "rank": None,

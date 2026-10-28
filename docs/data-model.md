@@ -598,7 +598,7 @@ Bookkeeping for the one-pass `entry_analysis` (one AI call that reads an article
 
 #### EnrichmentSource
 Table `enrichment_sources`: one external data source.
-- `source_type` (unique) — `nvd`, `epss`, `cisa_kev`, `mitre_attack`, `vulncheck`, `osv`, `malpedia`, `github_poc`, `cvedetails`, `wikipedia`, `greynoise`, `shodan`, `virustotal`, `cymru`, `rdap`, and the catalog sources `misp_galaxy`, `metasploit`, `mitre_cwe`, `ransomware_live`, `cybergeist`, `wikidata`, `endoflife`, `tranco`, `capec`, `ctid`, `d3fend`, `etda`
+- `source_type` (unique) — `nvd`, `epss`, `cisa_kev`, `mitre_attack`, `vulncheck`, `osv`, `malpedia`, `github_poc`, `cvedetails`, `wikipedia`, `greynoise`, `shodan`, `virustotal`, `cymru`, `rdap`, `threatfox`, `urlhaus`, `malwarebazaar`, and the catalog sources `misp_galaxy`, `metasploit`, `mitre_cwe`, `ransomware_live`, `cybergeist`, `wikidata`, `endoflife`, `tranco`, `capec`, `ctid`, `d3fend`, `etda`
 - `display_name`, `is_enabled` (seeded on for a source with scheduled jobs; a disabled source's jobs skip)
 - `trigger_mode` (default `manual`) — `auto` or `manual`
 - `api_key_encrypted`, `config` (JSONB)

@@ -827,6 +827,9 @@ Enrichment adds outside data to CVEs, techniques, malware and indicators. Each s
 | Shodan InternetDB | No | Auto | 30/min | | IP open ports and tags |
 | Team Cymru | No | Auto | 60/min (DNS) | | IP origin AS, AS name, country, prefix |
 | RDAP | No | Auto | 1/s | | Domain registration date, registrar, expiry, nameservers |
+| abuse.ch ThreatFox | Yes (abuse.ch, shared) | Manual | 10/min | Daily export match | Malware families behind IPs, domains, URLs and hashes; role, confidence, tags |
+| abuse.ch URLhaus | Yes (abuse.ch, shared) | Manual | 10/min | Export match every 6 h | Malware URL status, tags and families for URLs and their hosts |
+| abuse.ch MalwareBazaar | Yes (abuse.ch, shared) | Manual | 10/min | | Sample signature, file type, delivery method, vendor labels |
 | MISP Galaxy | No | — | 10/hour | Weekly | Reference actor aliases |
 | Metasploit modules | No | — | 10/hour | Weekly | CVEs with Metasploit modules |
 | MITRE CWE | No | — | 10/hour | Weekly | The CWE catalog |
@@ -840,7 +843,7 @@ Enrichment adds outside data to CVEs, techniques, malware and indicators. Each s
 | MITRE D3FEND | No | — | 10/hour | Weekly | Countermeasures for techniques |
 | ETDA Threat Group Cards | No | — | 10/hour | Weekly | Actor aliases, origin, MITRE id, targeted sectors and countries, tools, operations |
 
-Auto = looked up when a new entity appears; Manual = on request from an entity or indicator. The last twelve are catalog sources: they only run their jobs. Team Cymru and RDAP look up active observables only. Turning a source off also stops its jobs. A rate above what a source documents it allows is refused.
+Auto = looked up when a new entity appears; Manual = on request from an entity or indicator. The last twelve are catalog sources: they only run their jobs. Team Cymru, RDAP and the abuse.ch sources look up active observables only. The three abuse.ch sources share one free Auth-Key (https://auth.abuse.ch/): save it on any of them. Their export jobs send nothing about your indicators; a lookup sends the indicator to abuse.ch, so it runs only on request. abuse.ch's terms allow not-for-profit use (https://abuse.ch/terms-of-use/). Turning a source off also stops its jobs. A rate above what a source documents it allows is refused.
 
 **To configure:** **Settings → Engine → Pipeline** → **enrich** stage: turn on sources, paste keys, optionally change rate limit and confidence threshold, save.
 

@@ -1,6 +1,6 @@
 """Celery tasks for the enrichment sources' scheduled jobs — EPSS, MITRE ATT&CK,
 MISP Galaxy, Malpedia, Metasploit, NVD, GitHub PoC, Wikipedia, cvelistV5, Wikidata, endoflife.date,
-Tranco, CAPEC, CTID control mappings, D3FEND."""
+Tranco, CAPEC, CTID control mappings, D3FEND, abuse.ch ThreatFox and URLhaus."""
 
 import csv
 import io
@@ -2069,3 +2069,50 @@ async def _run_tranco_sync():
 
     stats.update(matched=len(matched), ranked=len(changed), dropped=len(dropped), flagged=len(flagged))
     return stats
+
+
+def _run_abusech(name: str, label: str, body):
+    """Run an abuse.ch export sync with the task metrics."""
+    start = time.monotonic()
+    try:
+        stats = run_async(body())
+        logger.info("%s sync stats: %s", label, stats)
+        CELERY_TASKS_TOTAL.labels(task_name=name, status="success").inc()
+        return stats
+    except Exception:
+        CELERY_TASKS_TOTAL.labels(task_name=name, status="error").inc()
+        logger.exception("%s sync failed", label)
+        raise
+    finally:
+        CELERY_TASK_DURATION_SECONDS.labels(task_name=name).observe(time.monotonic() - start)
+
+
+async def _abusech_sync(source_type: str):
+    from app.enrichment.adapters.abusech import sync_export
+    from app.enrichment.registry import ADAPTER_REGISTRY
+
+    gateway, api_key = await _job_gateway(source_type)
+    async with _get_worker_session() as db:
+        return await sync_export(db, gateway, api_key, ADAPTER_REGISTRY[source_type])
+
+
+@celery_app.task(name="app.workers.enrichment_tasks.run_threatfox_sync", soft_time_limit=1800, time_limit=1860)
+def run_threatfox_sync():
+    """Daily: match the ledger against ThreatFox's IOC export."""
+    return _run_abusech("run_threatfox_sync", "ThreatFox", _run_threatfox_sync)
+
+
+@source_job("threatfox")
+async def _run_threatfox_sync():
+    return await _abusech_sync("threatfox")
+
+
+@celery_app.task(name="app.workers.enrichment_tasks.run_urlhaus_sync", soft_time_limit=1800, time_limit=1860)
+def run_urlhaus_sync():
+    """Every six hours: match the ledger against the URLhaus dump."""
+    return _run_abusech("run_urlhaus_sync", "URLhaus", _run_urlhaus_sync)
+
+
+@source_job("urlhaus")
+async def _run_urlhaus_sync():
+    return await _abusech_sync("urlhaus")

@@ -571,7 +571,7 @@ All five tables are in `backend/app/models/enrichment.py`.
 
 ### Source Registry
 
-Each source is a class that carries its own manifest (`backend/app/enrichment/manifest.py`): the entity types it `applies_to` (for observables, the kinds it handles), what it `requires` (`("api_key",)` when it can't run without one), its `quota`, its `egress` (`none`: downloads a whole catalog; `low`: sends public identifiers such as a CVE id or a group name; `shares_ioc`: sends an observable's value to a third party), its `license`, its scheduled `jobs`, and its `outputs`. A `scope` (column → values) narrows the entities a source looks up on its own: Team Cymru and RDAP set `{"status": ("active",)}`, so aged and expired observables are never queued by the `new` or `backfill` lanes, nor counted in its fill rate or backfill gap. `Source.scope_filter()` turns the kinds and the scope into one SQL condition that `enqueue()` and the console share; a person's request (`manual` lane, the Enrich button) looks up any entity the source applies to. Lookup sources extend `EnrichmentAdapter` (`backend/app/enrichment/base.py`) and look up one entity per `enrich()` call; catalog sources (`backend/app/enrichment/catalogs.py`, and `wikidata.py`, `endoflife.py`, `capec.py`, `ctid.py` and `d3fend.py`, `etda.py` beside it) only have jobs.
+Each source is a class that carries its own manifest (`backend/app/enrichment/manifest.py`): the entity types it `applies_to` (for observables, the kinds it handles), what it `requires` (`("api_key",)` when it can't run without one), its `quota`, its `egress` (`none`: downloads a whole catalog; `low`: sends public identifiers such as a CVE id or a group name; `shares_ioc`: sends an observable's value to a third party), its `license`, its scheduled `jobs`, and its `outputs`. A `scope` (column → values) narrows the entities a source looks up on its own: Team Cymru, RDAP and the three abuse.ch sources set `{"status": ("active",)}`, so aged and expired observables are never queued by the `new` or `backfill` lanes, nor counted in its fill rate or backfill gap. `Source.scope_filter()` turns the kinds and the scope into one SQL condition that `enqueue()` and the console share; a person's request (`manual` lane, the Enrich button) looks up any entity the source applies to. Lookup sources extend `EnrichmentAdapter` (`backend/app/enrichment/base.py`) and look up one entity per `enrich()` call; catalog sources (`backend/app/enrichment/catalogs.py`, and `wikidata.py`, `endoflife.py`, `capec.py`, `ctid.py` and `d3fend.py`, `etda.py` beside it) only have jobs.
 
 `SOURCE_REGISTRY` (`backend/app/enrichment/registry.py`) lists them all; `ADAPTER_REGISTRY` holds the lookup sources. Generated from the manifests:
 
@@ -597,6 +597,9 @@ Each source is a class that carries its own manifest (`backend/app/enrichment/ma
 | `shodan` | Shodan InternetDB | lookup | observable (ipv4) | auto | No | 30 / 60 s | — | shares_ioc |
 | `cymru` | Team Cymru | lookup | observable (ipv4, ipv6; active) | auto | No | 60 / 60 s | — | low |
 | `rdap` | RDAP | lookup | observable (domain; active) | auto | No | 1 / 1 s | 1 / 1 s | low |
+| `threatfox` | abuse.ch ThreatFox | lookup + export job | observable (ipv4, ipv6, domain, url, md5, sha1, sha256; active) | manual | Yes (abuse.ch, shared) | 10 / 60 s | — | shares_ioc (lookups; the job sends nothing) |
+| `urlhaus` | abuse.ch URLhaus | lookup + export job | observable (url, domain, ipv4; active) | manual | Yes (abuse.ch, shared) | 10 / 60 s | — | shares_ioc (lookups; the job sends nothing) |
+| `malwarebazaar` | abuse.ch MalwareBazaar | lookup | observable (md5, sha1, sha256; active) | manual | Yes (abuse.ch, shared) | 10 / 60 s | — | shares_ioc |
 | `misp_galaxy` | MISP Galaxy | catalog | threat_actor | manual | No | 10 / 3600 s | — | none |
 | `metasploit` | Metasploit modules | catalog | cve | manual | No | 10 / 3600 s | — | none |
 | `mitre_cwe` | MITRE CWE | catalog | cwe | manual | No | 10 / 3600 s | — | none |
@@ -636,6 +639,7 @@ A `filter` transforms the value first: `aliases` runs `filter_aliases()` (`backe
 - **Team Cymru, VirusTotal**: the observable's network columns, newest wins: `asn`, `asn_org` (Cymru's AS name, VirusTotal's `as_owner`) and `geo_country` (`country_code`). Each fact has one home; none is kept in `reputation`.
 - **RDAP**: `registered_at` (newest wins, `timestamp`), the registration date of the registrable domain.
 - **Tranco**: its daily job writes `popularity_rank` directly ([below](#source-jobs)); the `Column` output names the column for the console's fill rate.
+- **ThreatFox, URLhaus, MalwareBazaar**: the observable's `role`, into a blank column only: ThreatFox's `threat_type` (`botnet_cc` → `c2`, `payload_delivery` → `delivery`, `payload` → `payload`), `delivery` for a URLhaus malware URL, `payload` for a MalwareBazaar sample ([below](#abusech)).
 
 - **NVD**: `cvss_score` rank 1, `severity`, and `description` rank 1 (Wikipedia's is rank 2 for a CVE), all into blank columns only. Article extraction (`extract_and_store_cves`) and the NVD jobs write these columns from their own NVD calls; a lookup fills a CVE whose extraction-time call was throttled and leaves a filled one alone.
 - **CVE List (cvelistV5)**: `cvss_score` from the CNA's metric rank 2 and from CISA-ADP's rank 3, with `severity` following the score it wrote (so a score never sits beside extraction's `UNKNOWN`); `description` rank 1, since NVD republishes the CNA's text; `ssvc_exploitation`, `ssvc_automatable` and `ssvc_technical_impact`, newer wins. CVSS 3.1 is preferred, then 3.0, then 4.0.
@@ -731,7 +735,7 @@ While enrichment is [paused](#enrichment-console), a tick claims nothing. A `run
 
 Scheduled jobs resolve their key through the same function (`gateway_for`), so a job and a per-entity lookup with the same key always share one gateway bucket.
 
-No current source sets `shared_key_group`, so `SHARED_KEY_GROUPS` (`backend/app/enrichment/registry.py:101`) is empty and step 3 never finds anything. Queued jobs run in a worker with no user, so they use the source's own key, except a `manual`-lane job, which uses the key of the person who asked.
+ThreatFox, URLhaus and MalwareBazaar set `shared_key_group = "abuse_ch"` (`SHARED_KEY_GROUPS`, `backend/app/enrichment/registry.py:108`): one abuse.ch key, saved on any of the three, serves all three, and they draw on one gateway bucket for it. The source test button resolves its key the same way. Queued jobs run in a worker with no user, so they use the source's own key, except a `manual`-lane job, which uses the key of the person who asked.
 
 ### Confidence Thresholds
 
@@ -756,6 +760,10 @@ For each name the source lists:
 5. **Hold.** A name that matches nothing (`held_reason = unknown`), or more than one entity (`ambiguous`, such as a tool and a malware family with the same name), is stored with no target. The source's next answer resolves it again, so it links once the entity exists. The console's source detail counts the held claims per output.
 6. **Withdraw.** A name the source no longer lists loses its claim. Its connection goes too, but only when no other claim (from any source) still holds it and it is one this path made: an `enrichment` row is deleted, or handed back to `co_occurrence` / `possible` when articles back it; an `enrichment` sector row is deleted, or handed back to the rollup when the entity's own articles carry the sector. One source's withdrawal never touches another source's claim.
 
+The claim always runs from the entity the source answered for; the connection runs the way the matrix stores it. The matrix keeps observables target-only, so when an observable's source names the malware family behind it (ThreatFox, URLhaus, MalwareBazaar), the connection is the family's: `malware communicates_with observable` for a C2, `malware uses observable` for delivery and payload material, `tool communicates_with observable` for a C2 framework. These show in the family's Infrastructure (claimed) and the observable's claimed-by list.
+
+An output with `hold=False` drops a name that resolves to nothing instead of holding it. URLhaus uses it for its tags, which mix family names with file types and architectures (`exe`, `32-bit`).
+
 Both ends' cached pivots and graphs are cleared when a connection changes.
 
 ### Caching & TTL
@@ -765,7 +773,7 @@ A `success` result is reused until `expires_at`. Each adapter picks its TTL per 
 - Wikipedia: 720 hours (30 days). Not-found: 168 hours.
 - NVD, Malpedia, MITRE ATT&CK, GreyNoise, Team Cymru, RDAP: 168 hours (7 days). An unannounced IP at Team Cymru: 24 hours.
 - EPSS, CISA KEV, VulnCheck, GitHub PoC: 24 hours.
-- VirusTotal: 72 hours.
+- VirusTotal, and the ThreatFox, URLhaus and MalwareBazaar lookups: 72 hours. ThreatFox's export answers: 48 hours (a daily job); URLhaus's: 24 hours (every six hours).
 - Wikidata: 720 hours, not-found titles included. endoflife.date: 48 hours (its job runs daily). CAPEC, CTID and D3FEND: 14 days (their jobs run weekly).
 - ETDA: 336 hours (two weekly runs). ransomware.live group profiles: 168 hours, unknown groups included.
 - Short-lived misses (a missing VirusTotal or VulnCheck key, a failed Wikipedia fetch): 1 hour. These misses are stored as `success` rows with `found: false`, so they are cached too.
@@ -785,6 +793,8 @@ The bucket, budget and breaker belong to the credential, not the source type: th
 
 If Redis can't be reached, the gateway refuses the request (`gateway_unavailable`) and sends nothing.
 
+A source whose manifest `requires` an API key gets a gateway that refuses every request while it has none (`needs_key`), before anything else, so no lookup, job or health check sends it a keyless request. A queued lookup that meets it is done, not retried.
+
 Team Cymru answers over DNS, not HTTP, so its adapter takes each query's permit itself: `gateway.acquire()` before the TXT query and `gateway.record()` after it, so the rate limit, budget, breaker and pause apply the same way. An NXDOMAIN (an unannounced IP) counts as an answer; a timeout or resolver failure counts toward the breaker.
 
 Wikipedia goes through the gateway too: `wikipediaapi` takes the gateway's transport for the httpx client it builds, with its own retries off.
@@ -797,7 +807,7 @@ NVD allows 50 requests per 30 seconds with a key and 5 without. The bucket (50 p
 
 ### Daily Budgets
 
-Every source starts with a budget of about twice the requests a busy day sends (the `daily_budget` of its manifest's `quota`): CVE List 12,000, NVD 5,000, Wikipedia 2,000, OSV 2,000, GitHub PoC 1,000, Malpedia 1,000, Team Cymru 4,000 (two queries per IP), RDAP 2,000 (two requests per domain: rdap.org's redirect and the registry), Shodan 1,000, CVEDetails 1,000, VulnCheck 1,000, endoflife.date 1,000, EPSS 500, CISA KEV 500, VirusTotal 500 (its free tier), Wikidata 500, ransomware.live 200, MITRE ATT&CK 100, GreyNoise 100, and 50 each for MISP Galaxy, Metasploit, MITRE CWE, Cybergeist, CAPEC, CTID and D3FEND, ETDA; Tranco 20. An admin can change or clear one under Settings → Engine → Enrichment. A source that runs out stops until midnight UTC, jobs included. Every request the gateway sends counts; cached results are free. The console's source detail (`used_today`) and the source list's `daily_budget_used` show today's use under the source's own key, and `GET /api/enrichment/sources/{id}/health` shows the tokens left in its bucket.
+Every source starts with a budget of about twice the requests a busy day sends (the `daily_budget` of its manifest's `quota`): CVE List 12,000, NVD 5,000, Wikipedia 2,000, OSV 2,000, GitHub PoC 1,000, Malpedia 1,000, Team Cymru 4,000 (two queries per IP), RDAP 2,000 (two requests per domain: rdap.org's redirect and the registry), Shodan 1,000, CVEDetails 1,000, VulnCheck 1,000, endoflife.date 1,000, EPSS 500, CISA KEV 500, VirusTotal 500 (its free tier), ThreatFox, URLhaus and MalwareBazaar 500 each, Wikidata 500, ransomware.live 200, MITRE ATT&CK 100, GreyNoise 100, and 50 each for MISP Galaxy, Metasploit, MITRE CWE, Cybergeist, CAPEC, CTID and D3FEND, ETDA; Tranco 20. An admin can change or clear one under Settings → Engine → Enrichment. A source that runs out stops until midnight UTC, jobs included. Every request the gateway sends counts; cached results are free. The console's source detail (`used_today`) and the source list's `daily_budget_used` show today's use under the source's own key, and `GET /api/enrichment/sources/{id}/health` shows the tokens left in its bucket.
 
 ### Enrichment Console
 
@@ -843,6 +853,8 @@ Each source declares its scheduled jobs in its manifest. They are registered in 
 | `sync-ransomware-victims` | `ransomware_live` | Every 30 minutes | Leak-site victim postings |
 | `ransomware-group-profiles` | `ransomware_live` | Every 4 hours at :50 | Techniques, tools and leak-site status for up to 10 tracked groups ([below](#ransomwarelive-group-profiles)) |
 | `etda-sync` | `etda` | Tuesday 04:15 | Matches ETDA Threat Group Cards to tracked actors ([below](#etda-threat-group-cards)) |
+| `threatfox-sync` | `threatfox` | Daily 04:35 | Matches the ledger's active observables against ThreatFox's IOC export ([below](#abusech)) |
+| `urlhaus-sync` | `urlhaus` | Every 6 hours at :50 | Matches the ledger's active URLs, domains and IPs against the URLhaus dump ([below](#abusech)) |
 | `cvelist-backfill` | `cvelist` | Hourly at :20 | The CVE record for CVEs with no current cvelist result, as many as fit in 13 minutes: those missing a score or description first, then KEV entries, then the newest |
 | `cvelist-delta-sync` | `cvelist` | Hourly at :40 | The CVE records changed since its last run, from cvelistV5's delta zips |
 | `wikidata-sync` | `wikidata` | Thursday 04:30 | Vendor websites and facts, product vendors, country regions ([below](#wikidata)) |
@@ -971,6 +983,17 @@ The sites' onion addresses are never stored: not in the context, not in the resu
 ---
 
 ## Configuration and Extensibility
+
+### abuse.ch
+
+ThreatFox, URLhaus and MalwareBazaar (`backend/app/enrichment/adapters/abusech.py`) need a free abuse.ch Auth-Key (https://auth.abuse.ch/); every API call and every export needs one. Until a key is saved they show as `needs_key` and send nothing.
+
+- **Export jobs** send nothing about the ledger. `threatfox-sync` downloads ThreatFox's full export (every IOC not yet expired; ThreatFox expires IOCs after six months and builds the file hourly). `urlhaus-sync` downloads the URLhaus dump (URLs online now or added in the past 90 days, built every 5 minutes). Each zipped CSV streams to a temporary file and is read a line at a time, matched 5,000 rows at a time against the ledger, so only the matches are held in memory. A match is exact on `(kind, value)`: a ThreatFox `ip:port` matches its IP, a URLhaus URL matches the URL and its host as a domain or IP. Only `active` observables are written. An observable that had an answer and is no longer in the export loses its context and claims; a column it filled stays. An empty export stops the run (`empty_export`) and withdraws nothing. The key is part of the export's URL, so an error names only the HTTP status.
+- **Lookups** (ThreatFox `search_ioc`, URLhaus `url` / `host`, MalwareBazaar `get_info`) send the observable to abuse.ch, so the sources are `shares_ioc` and manual: they run when someone presses Enrich, or for a backfill an admin starts. MalwareBazaar is lookup-only; its only small export holds the last 48 hours of samples, and the hashes write-ups name are mostly older.
+
+What they add: the `role` when it is blank; the malware families behind the indicator as [relations](#relations) to families IntelFeed already tracks (ThreatFox's `malware_printable`, URLhaus tags that name a tracked family, MalwareBazaar's `signature`), with the threat type, confidence, first-seen date and reference as evidence; and profile context. ThreatFox shows the threat type, families, confidence, first and last seen, tags, reference and a link; URLhaus a status badge (online is red, offline and unknown are neutral: an offline URL is history), the threat, the malware URL counts for a host, tags, first seen, last online, Spamhaus DBL and SURBL listings (lookups) and a link; MalwareBazaar the signature, file type and name, first and last seen, delivery method, tags, vendor labels and a link.
+
+abuse.ch's terms (https://abuse.ch/terms-of-use/) allow not-for-profit use within volumes "reasonably expected for non-commercial or non-profit purposes"; commercial use may need a Spamhaus subscription. No numeric query limit is published, so the sources keep to 10 requests a minute and 500 a day each, on one shared bucket. Their license is marked non-commercial, so visitors never see their context.
 
 ### Adding a New Enrichment Adapter
 

@@ -170,8 +170,8 @@ async def test_source_connection(
     if not source:
         raise AppError(code="not_found", message="Enrichment source not found", status_code=404)
 
-    from app.core.encryption import decrypt_value
     from app.enrichment.gateway import GatewayError, GatewayUnavailable
+    from app.enrichment.pipeline import resolve_api_key
     from app.enrichment.registry import ADAPTER_REGISTRY, adapter_for_source
 
     adapter_cls = ADAPTER_REGISTRY.get(source.source_type)
@@ -182,7 +182,8 @@ async def test_source_connection(
             status_code=400,
         )
     requires_key = adapter_cls.requires_api_key
-    api_key = decrypt_value(source.api_key_encrypted) if source.api_key_encrypted else None
+    # Resolved as lookups resolve it, so a key a sibling holds (abuse.ch) counts.
+    api_key = await resolve_api_key(source, None, db)
 
     if requires_key and not api_key:
         source.health_status = "down"

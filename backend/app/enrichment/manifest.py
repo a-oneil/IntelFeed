@@ -142,9 +142,16 @@ class Relation:
 
     ``item`` maps ``name`` (and optionally ``evidence``) to a key of every
     listed row; with no ``item`` the list holds plain names.
+
+    A triple the relationship matrix allows only the other way round (a
+    malware family ``communicates_with`` an observable) is stored that way:
+    an observable's source names the family, the connection runs from it.
+    ``hold=False`` drops a name that resolves to nothing instead of holding
+    it, for lists that only sometimes name an entity (free-form tags).
     """
 
     key: str
     relation: str
     target_types: tuple[str, ...]
     item: dict | None = None
+    hold: bool = True

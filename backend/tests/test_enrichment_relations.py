@@ -24,7 +24,7 @@ from app.enrichment.pipeline import apply_catalog_result
 from app.enrichment.ransomware_groups import group_facts, sync_group_profiles
 from app.enrichment.registry import SOURCE_REGISTRY
 from app.enrichment.relations import RESOLVABLE_TARGETS, apply_relations, relations_for
-from app.intelligence.relationship_matrix import is_allowed_relationship
+from app.intelligence.relationship_matrix import orient_relationship
 from app.intelligence.sectors import sector_uuid
 from app.models.country import Country
 from app.models.enrichment import EnrichmentResult, EnrichmentSource, EntityContext, EntityRelationClaim
@@ -109,11 +109,16 @@ def test_every_relation_output_is_one_the_matrix_allows_and_can_resolve():
         ("etda", "tools"),
         ("ransomware_live", "techniques"),
         ("ransomware_live", "tools"),
+        ("threatfox", "c2_families"),
+        ("threatfox", "families"),
+        ("urlhaus", "families"),
+        ("malwarebazaar", "families"),
     }
     for cls, relation in declared:
         for entity_type in cls.applies_to:
             for target_type in relation.target_types:
-                assert is_allowed_relationship(entity_type, relation.relation, target_type), (cls, relation)
+                # Either way round: an observable's source names the family behind it.
+                assert orient_relationship(entity_type, relation.relation, target_type), (cls, relation)
                 assert target_type in RESOLVABLE_TARGETS, (cls, relation)
 
 

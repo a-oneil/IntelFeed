@@ -10,7 +10,7 @@ the outcome:
 outcome                                         row
 ==============================================  =================================
 success, cached, skipped_low_confidence,        deleted
-source no longer applies
+needs_key, source no longer applies
 rate_limited, breaker_open                      due again after ``retry_after``
 budget_exhausted                                due at the next UTC midnight
 paused                                          due again in PAUSE_DEFER; the tick ends
@@ -63,7 +63,7 @@ PAUSE_DEFER = 60
 #: Rows per INSERT when queueing a backfill.
 ENQUEUE_CHUNK = 1000
 
-_DONE = frozenset({"success", "cached", "skipped_low_confidence", "unsupported"})
+_DONE = frozenset({"success", "cached", "skipped_low_confidence", "needs_key", "unsupported"})
 
 
 def next_utc_midnight(now: datetime) -> datetime:

@@ -1,3 +1,4 @@
+from app.enrichment.adapters.abusech import MalwareBazaarAdapter, ThreatFoxAdapter, URLhausAdapter
 from app.enrichment.adapters.cisa_kev import CISAKEVAdapter
 from app.enrichment.adapters.cvedetails import CVEDetailsAdapter
 from app.enrichment.adapters.cvelist import CVEListAdapter
@@ -32,4 +33,7 @@ __all__ = [
     "WikipediaAdapter",
     "CymruAdapter",
     "RDAPAdapter",
+    "ThreatFoxAdapter",
+    "URLhausAdapter",
+    "MalwareBazaarAdapter",
 ]

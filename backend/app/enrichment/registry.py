@@ -10,11 +10,14 @@ from app.enrichment.adapters import (
     GitHubPoCAdapter,
     GreyNoiseAdapter,
     MalpediaAdapter,
+    MalwareBazaarAdapter,
     MITREAttackAdapter,
     NVDAdapter,
     OSVAdapter,
     RDAPAdapter,
     ShodanAdapter,
+    ThreatFoxAdapter,
+    URLhausAdapter,
     VirusTotalAdapter,
     VulnCheckAdapter,
     WikipediaAdapter,
@@ -56,6 +59,10 @@ ADAPTER_REGISTRY: dict[str, type[EnrichmentAdapter]] = {
     # Observable network context: routing (Team Cymru) and registration (RDAP).
     "cymru": CymruAdapter,
     "rdap": RDAPAdapter,
+    # abuse.ch, on one shared Auth-Key: IOC export matching, manual lookups.
+    "threatfox": ThreatFoxAdapter,
+    "urlhaus": URLhausAdapter,
+    "malwarebazaar": MalwareBazaarAdapter,
 }
 
 # Catalog sources: scheduled jobs only, no per-entity lookup.
@@ -122,7 +129,8 @@ def get_adapter(
 def source_gateway(source: EnrichmentSource, api_key: str | None, **kwargs) -> SourceGateway:
     """The gateway for a source row and the key it will use. With a key, a
     source whose manifest has a ``keyed`` quota gets that rate, unless an admin
-    has changed the row's rate from the keyless default."""
+    has changed the row's rate from the keyless default. Without one, a source
+    that requires a key gets a gateway that sends nothing."""
     cls = SOURCE_REGISTRY.get(source.source_type, Source)
     rate_limit_config = source.rate_limit_config
     quota = getattr(cls, "quota", None)
@@ -135,6 +143,7 @@ def source_gateway(source: EnrichmentSource, api_key: str | None, **kwargs) -> S
         api_key=api_key,
         shared_key_group=cls.shared_key_group,
         throttle_statuses=cls.throttle_statuses,
+        requires_key="api_key" in cls.requires,
         **kwargs,
     )
 

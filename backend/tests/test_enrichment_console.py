@@ -184,12 +184,15 @@ async def test_console_filters_by_entity_type(client, admin_headers, db_session)
         "cymru",
         "rdap",
         "tranco",
+        "threatfox",
+        "urlhaus",
+        "malwarebazaar",
     }
     # The summary and the tabs always count every source.
     assert data["summary"] == everything["summary"]
     assert data["entity_types"] == everything["entity_types"]
     tabs = {t["entity_type"]: t for t in data["entity_types"]}
-    assert tabs["observable"] == {"entity_type": "observable", "label": "Observable", "source_count": 6}
+    assert tabs["observable"] == {"entity_type": "observable", "label": "Observable", "source_count": 9}
     assert tabs["cve"]["label"] == "CVE"
 
 

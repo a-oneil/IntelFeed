@@ -19,6 +19,10 @@ Adapters open clients with ``self.http(...)``; the client's transport
    transport errors in a row open it for a backoff; any other response
    closes it.
 
+A source whose manifest requires an API key gets a gateway that refuses every
+request with ``NeedsKey`` while it has none, before anything else: no path
+(lookup, job or health check) can send such a source a keyless request.
+
 Redis errors before the send raise ``GatewayUnavailable`` and nothing is sent:
 the gateway fails closed. While enrichment is paused (``app/enrichment/pause.py``
 sets a Redis flag) every request is refused with ``Paused``, checked in the same
@@ -185,6 +189,12 @@ class Paused(GatewayError):
     status = "paused"
 
 
+class NeedsKey(GatewayError):
+    """The source needs an API key and has none: nothing is sent."""
+
+    status = "needs_key"
+
+
 #: Refusals a scheduled job stops on, keeping what it has done. GatewayUnavailable
 #: is not one: a job that can't check its limits fails.
 SOURCE_REFUSALS = (RateLimited, BudgetExhausted, BreakerOpen, Paused)
@@ -247,6 +257,7 @@ class SourceGateway:
         throttle_statuses: tuple[int, ...] = THROTTLE_STATUSES,
         max_wait: float = MAX_TOKEN_WAIT,
         inner: httpx.AsyncBaseTransport | None = None,
+        requires_key: bool = False,
     ):
         rate = {**_DEFAULT_RATE, **(rate_limit_config or {})}
         self.source_type = source_type
@@ -255,6 +266,7 @@ class SourceGateway:
         self.daily_budget = daily_budget
         self.throttle_statuses = throttle_statuses
         self.max_wait = max_wait
+        self.missing_key = requires_key and not api_key
         scope = shared_key_group or source_type
         if api_key:
             scope += ":" + hashlib.sha256(api_key.encode()).hexdigest()[:12]
@@ -279,6 +291,8 @@ class SourceGateway:
     async def acquire(self) -> None:
         """Take a permit for one request, waiting up to ``max_wait`` for a
         token. Raises a GatewayError when the request must not be sent."""
+        if self.missing_key:
+            raise NeedsKey(f"{self.source_type} needs an API key")
         waited = 0.0
         while True:
             try:

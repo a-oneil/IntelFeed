@@ -41,6 +41,7 @@ _NOT_A_SLUG = {
     '"actor": handle': "Bluesky API request parameter",
     '{"actor": row.name': "threat_timeline chart row field, not a type discriminator",
     'card.get("actor")': "ETDA Threat Group Card payload key (the card's title)",
+    "_VENDOR_LABEL_KEYS = (": "MalwareBazaar vendor_intel payload keys (Triage's family label)",
     '"campaign", "vulnerability", "malware", "actor"': (
         "detection-summary `focus` angle, not an entity_type — note 'vulnerability', "
         "which is not one of our types either (see the focus pattern in schemas/intelligence.py)"

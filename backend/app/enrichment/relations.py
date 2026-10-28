@@ -13,13 +13,19 @@ created. Then:
   reported by one curated source, not corroborated);
 - a target that matches nothing, or more than one entity, is held: stored
   with no target, counted on the Enrichment console, and resolved by a later
-  answer once the entity exists;
+  answer once the entity exists (unless the output doesn't ``hold``: then it
+  is dropped);
 - a target the source no longer names is withdrawn: its claim is deleted, and
   the connection with it when no other source's claim holds it and it is one
   this path made.
 
 Each name is one ``entity_relation_claims`` row per source, so a re-run
 changes nothing and one source's withdrawal never touches another's claim.
+
+The claim always runs from the entity the source answered for; the connection
+runs the way the matrix stores it. An observable's source claims the malware
+family behind it, and the connection is the family's: ``malware
+communicates_with observable``.
 """
 
 from __future__ import annotations
@@ -28,12 +34,12 @@ import re
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import entity_types
 from app.enrichment.manifest import Relation
-from app.intelligence.relationship_matrix import is_allowed_relationship
+from app.intelligence.relationship_matrix import is_allowed_relationship, orient_relationship
 from app.models.enrichment import EntityRelationClaim
 from app.models.entity_index import ALIAS_INDEXED_TABLES
 from app.models.entity_relationship import EntityRelationship
@@ -48,13 +54,21 @@ _TECHNIQUE_ID = re.compile(r"^T\d{4}(?:\.\d{3})?$")
 RESOLVABLE_TARGETS = frozenset({entity_types.TTP, entity_types.SECTOR, entity_types.COUNTRY, *ALIAS_INDEXED_TABLES})
 
 
+def _allowed(entity_type: str, relation: str, target_type: str) -> bool:
+    """The matrix allows the triple, either way round."""
+    return orient_relationship(entity_type, relation, target_type) is not None
+
+
+def runs_from_target(entity_type: str, relation: Relation) -> bool:
+    """The matrix stores this output's connections from the target to the entity."""
+    return not any(is_allowed_relationship(entity_type, relation.relation, t) for t in relation.target_types)
+
+
 def relations_for(cls, entity_type: str) -> tuple[Relation, ...]:
     """The source's Relation outputs whose triple the matrix allows from ``entity_type``."""
     if cls is None or entity_type not in cls.applies_to:
         return ()
-    return tuple(
-        r for r in cls.relations() if any(is_allowed_relationship(entity_type, r.relation, t) for t in r.target_types)
-    )
+    return tuple(r for r in cls.relations() if any(_allowed(entity_type, r.relation, t) for t in r.target_types))
 
 
 def target_key(name: str) -> str:
@@ -146,14 +160,23 @@ def _in_sector_junction(entity_type: str, relation: str, target_type: str) -> bo
     return target_type == entity_types.SECTOR and relation == "targets" and entity_type in TARGET_SECTOR_ENTITY_TYPES
 
 
+def _ends(claim: EntityRelationClaim) -> tuple[tuple[str, uuid.UUID], tuple[str, uuid.UUID]]:
+    """The claim's connection as the matrix stores it: (source, target) ends."""
+    here, there = (claim.entity_type, claim.entity_id), (claim.target_type, claim.target_id)
+    if is_allowed_relationship(claim.entity_type, claim.relation, claim.target_type):
+        return here, there
+    return there, here
+
+
 async def _edge(db: AsyncSession, claim: EntityRelationClaim) -> EntityRelationship | None:
+    (source_type, source_id), (target_type, target_id) = _ends(claim)
     return (
         await db.execute(
             select(EntityRelationship).where(
-                EntityRelationship.source_type == claim.entity_type,
-                EntityRelationship.source_id == claim.entity_id,
-                EntityRelationship.target_type == claim.target_type,
-                EntityRelationship.target_id == claim.target_id,
+                EntityRelationship.source_type == source_type,
+                EntityRelationship.source_id == source_id,
+                EntityRelationship.target_type == target_type,
+                EntityRelationship.target_id == target_id,
                 EntityRelationship.relationship_type == claim.relation,
             )
         )
@@ -196,12 +219,13 @@ async def _assert(db: AsyncSession, claim: EntityRelationClaim, label: str) -> b
 
     edge = await _edge(db, claim)
     if edge is None:
+        (source_type, source_id), (target_type, target_id) = _ends(claim)
         db.add(
             EntityRelationship(
-                source_type=claim.entity_type,
-                source_id=claim.entity_id,
-                target_type=claim.target_type,
-                target_id=claim.target_id,
+                source_type=source_type,
+                source_id=source_id,
+                target_type=target_type,
+                target_id=target_id,
                 relationship_type=claim.relation,
                 confidence="probable",
                 source=EDGE_SOURCE,
@@ -226,16 +250,25 @@ async def _retract(db: AsyncSession, claim: EntityRelationClaim) -> bool:
     co-occurrence when articles back it). Returns whether anything changed."""
     from app.services.sector_links import remove_target_sector
 
+    def claims_from(end, other):
+        return and_(
+            EntityRelationClaim.entity_type == end[0],
+            EntityRelationClaim.entity_id == end[1],
+            EntityRelationClaim.target_type == other[0],
+            EntityRelationClaim.target_id == other[1],
+        )
+
+    # Another claim on the same connection, made from either end.
+    here, there = (claim.entity_type, claim.entity_id), (claim.target_type, claim.target_id)
     others = (
         await db.execute(
             select(func.count()).where(
-                EntityRelationClaim.entity_type == claim.entity_type,
-                EntityRelationClaim.entity_id == claim.entity_id,
                 EntityRelationClaim.relation == claim.relation,
-                EntityRelationClaim.target_type == claim.target_type,
-                EntityRelationClaim.target_id == claim.target_id,
+                or_(claims_from(here, there), claims_from(there, here)),
                 ~(
-                    (EntityRelationClaim.source_type == claim.source_type)
+                    (EntityRelationClaim.entity_type == claim.entity_type)
+                    & (EntityRelationClaim.entity_id == claim.entity_id)
+                    & (EntityRelationClaim.source_type == claim.source_type)
                     & (EntityRelationClaim.output == claim.output)
                     & (EntityRelationClaim.target_key == claim.target_key)
                 ),
@@ -307,9 +340,10 @@ async def apply_relations(
     for (output, key), (relation, name, evidence) in listed.items():
         target, held = await resolve_target(db, relation.target_types, name)
         claim = claims.pop((output, key), None)
-        allowed = target and is_allowed_relationship(entity_type, relation.relation, target[0])
-        if target and (not allowed or target == (entity_type, entity_id)):
-            # Resolved to an entity the matrix doesn't connect this way: no claim.
+        allowed = target and _allowed(entity_type, relation.relation, target[0])
+        if (target and (not allowed or target == (entity_type, entity_id))) or (not target and not relation.hold):
+            # Resolved to an entity the matrix doesn't connect this way, or to
+            # nothing in a list that doesn't hold names: no claim.
             if claim is not None:
                 changed |= await _withdraw(db, claim, touched)
             continue
