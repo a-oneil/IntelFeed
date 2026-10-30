@@ -11,6 +11,7 @@ import {
   type ProcessingOutputs,
   type ProcessingStageCell,
   useEngineProcessing,
+  useRetryPipelineErrors,
   usePipelineOverview,
   usePipelinePlans,
   useUpsertPlan,
@@ -366,6 +367,7 @@ export function EngineMatrix({
   const { data: feedHealth } = useFeedHealth();
   const { data: feeds } = useFeeds();
   const upsertPlan = useUpsertPlan();
+  const retryErrors = useRetryPipelineErrors();
   const qc = useQueryClient();
   const navigate = useNavigate();
   const setSelectedEntry = useUIStore((s) => s.setSelectedEntry);
@@ -533,6 +535,33 @@ export function EngineMatrix({
   const clearEntriesFilter = () => {
     setStatus(undefined);
     setStage(undefined);
+  };
+
+  // One click for the whole error column (or every column): the same
+  // re-dispatch the per-cell retry does, for every entry still stuck.
+  const retryAllErrors = async () => {
+    const where = stage ? `at ${labelByStage[stage] ?? stage}` : "at any stage";
+    if (
+      !(await confirmDialog({
+        title: "Retry every error",
+        message: `Re-run every stage still stuck on an error ${where}, for entries ingested in the last ${window_}? Each is re-dispatched the way the per-cell retry does it; entries already re-run green are left alone.`,
+        confirmLabel: "Retry all",
+      }))
+    )
+      return;
+    try {
+      const r = await retryErrors.mutateAsync({ stage, window: window_ });
+      const parts = [`${r.dispatched.toLocaleString()} re-dispatched`];
+      if (r.skipped) parts.push(`${r.skipped} not retryable`);
+      if (r.remaining) parts.push(`${r.remaining.toLocaleString()} more — run again`);
+      toast.success(parts.join(" · "), {
+        description: Object.entries(r.by_stage)
+          .map(([st, n]) => `${labelByStage[st] ?? st}: ${n}`)
+          .join(", "),
+      });
+    } catch (e) {
+      toast.error(`Retry failed: ${(e as Error).message}`);
+    }
   };
 
   const failingFeeds = feedHealth?.erroring_feeds?.length ?? 0;
@@ -888,6 +917,20 @@ export function EngineMatrix({
                       <button type="button" className={m.clearBtn} onClick={clearEntriesFilter}>
                         clear
                       </button>
+                      {status === "error" && (
+                        <>
+                          {" · "}
+                          <button
+                            type="button"
+                            className={m.retryAllBtn}
+                            disabled={retryErrors.isPending}
+                            title={`Re-run every stage still stuck on an error${stage ? ` at ${labelByStage[stage] ?? stage}` : ""} in this window`}
+                            onClick={retryAllErrors}
+                          >
+                            {retryErrors.isPending ? "retrying…" : "retry all"}
+                          </button>
+                        </>
+                      )}
                     </span>
                   )}
                   <span>

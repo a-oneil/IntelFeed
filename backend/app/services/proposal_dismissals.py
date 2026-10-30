@@ -123,3 +123,29 @@ WHERE l.action IN ('shadow_remove', 'needs_reclassification')
 async def expire_legacy_link_proposals(db: AsyncSession, days: int = LEGACY_LINK_PROPOSAL_MAX_AGE_DAYS) -> int:
     """Delete the retired validator's pending link proposals older than ``days``."""
     return (await db.execute(text(EXPIRE_LEGACY_LINK_PROPOSALS_SQL).bindparams(days=days))).rowcount or 0
+
+
+async def clear_entity_proposals(db: AsyncSession, entity_type: str, entity_id: uuid.UUID) -> int:
+    """Delete every pending proposal about an entity that no longer exists —
+    both logs, every action. Called when an analyst deletes the entity from a
+    review queue, so its rows do not linger as "gone" lines to dismiss by hand.
+    Applied rows stay: they are history and undo records."""
+    n = (
+        await db.execute(
+            delete(EntityLinkValidationLog).where(
+                EntityLinkValidationLog.action.in_(["shadow_remove", LINK_RECLASSIFY]),
+                EntityLinkValidationLog.entity_type == entity_type,
+                EntityLinkValidationLog.entity_id == entity_id,
+            )
+        )
+    ).rowcount or 0
+    n += (
+        await db.execute(
+            delete(EntityMaintenanceLog).where(
+                EntityMaintenanceLog.applied.is_(False),
+                EntityMaintenanceLog.entity_type == entity_type,
+                EntityMaintenanceLog.entity_id == entity_id,
+            )
+        )
+    ).rowcount or 0
+    return n

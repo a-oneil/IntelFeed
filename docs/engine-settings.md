@@ -34,7 +34,7 @@ A database value that equals the default does nothing useful, and it stops you g
 |---|---|---|
 | `CONFIGURABLE_KEYS` | `backend/app/services/system_settings.py:26` | Which keys the UI can edit, and each value's type |
 | `SETTING_METADATA` | `backend/app/services/system_settings.py:208` | Label, description and group shown in the UI |
-| `_ENGINE_SECTION_GROUPS` | `backend/app/services/system_settings.py:1319` | Moves engine keys into the group of the Engine panel that owns them |
+| `_ENGINE_SECTION_GROUPS` | `backend/app/services/system_settings.py:1330` | Moves engine keys into the group of the Engine panel that owns them |
 | `SECRET_KEYS` | `system_settings.py:14` | Encrypted in the database, hidden on read |
 | `GROUP_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:26` | Which Engine screen shows each group; drives the Engine settings search |
 | `KEY_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:67` | Single keys that live somewhere other than their group's screen |
@@ -334,6 +334,7 @@ Code: `backend/app/services/entry_adjudication.py` and `backend/app/workers/adju
 | `adjudication_max_per_hour` | int, `0` | Most reviews started per hour. `0` means no limit; the single AI worker is then the only pacing. Set a limit to cap spend on a paid provider, or to stop reviews delaying article analysis on the same worker. With a limit, the backfill gets at most half of each hour's budget. |
 | `adjudication_min_priority_score` | float, `0` | Skip articles below this priority score (0–10). Keep it at 0: low-scoring CVE articles are the main source of junk tool entities. |
 | `adjudication_apply_min_confidence` | `high` \| `medium` \| `low`, default `high` | In apply mode, verdicts below this are filed as proposals instead. |
+| `adjudication_reclassify_consensus` | int, `2` | A type change affects the whole catalogue, so in apply mode a `reclassify` verdict is applied only once this many distinct articles' reviews agree on the same target type. Each earlier review's pending proposal is a vote; the review that reaches the count converts the entity and clears the proposals. `1` applies the first verdict at the confidence floor. A name an analyst or an earlier apply folded out of a type (a reclassify tombstone) is never proposed back into it, so types cannot ping-pong. |
 | `adjudication_circuit_breaker_pct` | float, `0.5` | If more than this share of one article's items get a destructive verdict, the whole run becomes proposals. If the average over the last 50 apply runs goes above it (with at least 10 runs), reviews pause for an hour and a warning chip shows in the Engine console. |
 | `adjudication_content_max_chars` | int, `8000` | Article characters in the review prompt. |
 | `adjudication_scope` | csv, `links,entities,relationships,observables` | Which sections the reviewer sees. `entities` adds the lookup of existing names needed for `veto` and `merge`. `assessment` can be added but is only logged. |

@@ -1270,3 +1270,66 @@ async def test_radar_feedback_endpoint(client, auth_headers, db_session, reliabl
     assert resp.status_code == 200
     rows = (await db_session.execute(select(EntrySignalFeedback))).scalars().all()
     assert rows == []
+
+
+@pytest.mark.asyncio
+async def test_retry_errors_redispatches_every_stuck_stage(
+    client, admin_headers, auth_headers, db_session, reliable_feed, monkeypatch
+):
+    """One call re-dispatches every (entry, stage) whose latest run is an
+    error. A stage re-run green since is skipped; a stage the single-entry
+    retry refuses (translate) is counted, not dispatched; `stage` narrows."""
+    from app.models.entry_pipeline_run import EntryPipelineRun
+
+    stuck = await _make_entry(db_session, reliable_feed, title="stuck")
+    recovered = await _make_entry(db_session, reliable_feed, title="recovered")
+    untouchable = await _make_entry(db_session, reliable_feed, title="untouchable")
+    earlier = NOW - timedelta(minutes=5)
+    db_session.add(
+        EntryPipelineRun(entry_id=stuck.id, stage="extract", status="error", error="boom", created_at=earlier)
+    )
+    db_session.add(EntryPipelineRun(entry_id=stuck.id, stage="score", status="error", error="boom", created_at=earlier))
+    db_session.add(
+        EntryPipelineRun(entry_id=recovered.id, stage="extract", status="error", error="boom", created_at=earlier)
+    )
+    # Re-run green since: the newer success supersedes the error.
+    db_session.add(
+        EntryPipelineRun(entry_id=recovered.id, stage="extract", status="success", duration_ms=5, created_at=NOW)
+    )
+    db_session.add(
+        EntryPipelineRun(entry_id=untouchable.id, stage="translate", status="error", error="boom", created_at=earlier)
+    )
+    await db_session.commit()
+
+    sent: list[tuple[str, dict]] = []
+
+    class FakeResult:
+        id = "task-1"
+
+    def fake_send_task(name, kwargs=None, **_):
+        sent.append((name, kwargs))
+        return FakeResult()
+
+    monkeypatch.setattr("app.workers.celery_app.celery_app.send_task", fake_send_task)
+
+    resp = await client.post("/api/engine/pipeline/retry-errors", headers=auth_headers, json={})
+    assert resp.status_code == 403
+
+    resp = await client.post("/api/engine/pipeline/retry-errors", headers=admin_headers, json={"window": "24h"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["dispatched"] == 2 and body["skipped"] == 1 and body["remaining"] == 0
+    assert body["by_stage"] == {"extract": 1, "score": 1}
+    assert {(n.rsplit(".", 1)[-1], k["entry_id"]) for n, k in sent} == {
+        ("extract_entry_intel_task", str(stuck.id)),
+        ("score_entry_task", str(stuck.id)),
+    }
+
+    sent.clear()
+    resp = await client.post(
+        "/api/engine/pipeline/retry-errors", headers=admin_headers, json={"stage": "score", "window": "24h"}
+    )
+    assert resp.json()["by_stage"] == {"score": 1} and len(sent) == 1
+
+    resp = await client.post("/api/engine/pipeline/retry-errors", headers=admin_headers, json={"stage": "nope"})
+    assert resp.status_code == 422

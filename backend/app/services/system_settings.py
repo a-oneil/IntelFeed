@@ -64,6 +64,7 @@ CONFIGURABLE_KEYS: dict[str, type] = {
     "adjudication_max_per_hour": int,
     "adjudication_min_priority_score": float,
     "adjudication_apply_min_confidence": str,
+    "adjudication_reclassify_consensus": int,
     "adjudication_circuit_breaker_pct": float,
     "adjudication_content_max_chars": int,
     "adjudication_scope": str,
@@ -460,6 +461,16 @@ SETTING_METADATA: dict[str, dict] = {
         "description": "In apply mode, verdicts below this confidence are filed as proposals instead of applied",
         "group": "adjudication",
         "options": ["high", "medium", "low"],
+    },
+    "adjudication_reclassify_consensus": {
+        "label": "Reclassify Consensus",
+        "description": (
+            "A type change is catalogue-wide, so in apply mode it is applied only once this many distinct "
+            "articles' reviews agree on the same target type (each earlier review's proposal is a vote). "
+            "1 applies the first verdict at the confidence floor. A name an analyst folded out of a type "
+            "is never proposed back into it"
+        ),
+        "group": "adjudication",
     },
     "adjudication_circuit_breaker_pct": {
         "label": "Circuit Breaker",
@@ -1356,6 +1367,7 @@ _ENGINE_SECTION_GROUPS: dict[str, str] = {
     "adjudication_max_per_hour": "adjudication",
     "adjudication_min_priority_score": "adjudication",
     "adjudication_apply_min_confidence": "adjudication",
+    "adjudication_reclassify_consensus": "adjudication",
     "adjudication_circuit_breaker_pct": "adjudication",
     "adjudication_content_max_chars": "adjudication",
     "adjudication_scope": "adjudication",

@@ -157,6 +157,25 @@ export function usePipelineOverview() {
   });
 }
 
+export interface RetryErrorsResult {
+  dispatched: number;
+  skipped: number;
+  by_stage: Record<string, number>;
+  remaining: number;
+}
+
+/** Re-dispatch every stage still stuck on an error (optionally one stage) for
+ *  entries ingested in the window. Admin only. */
+export function useRetryPipelineErrors() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: { stage?: string; window?: string; limit?: number }) =>
+      (await api.post<RetryErrorsResult>("/engine/pipeline/retry-errors", body)).data,
+    // The runs land asynchronously; give the workers a moment before refetching.
+    onSuccess: () => setTimeout(() => qc.invalidateQueries({ queryKey: ["engine"] }), 3000),
+  });
+}
+
 export function usePipelinePlans() {
   return useQuery({
     queryKey: ["engine", "plans"],

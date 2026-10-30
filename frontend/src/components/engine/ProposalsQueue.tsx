@@ -34,6 +34,7 @@ import { formatDateTime } from "@/utils/formatDate";
 import { getEntityCssVar, getEntityLabel } from "@/utils/entityTheme";
 import { useQueryClient } from "@tanstack/react-query";
 
+import { EntityRowActions } from "./EntityRowActions";
 import styles from "./ProposalsQueue.module.css";
 import { confirmDialog } from "@/utils/dialog";
 
@@ -530,6 +531,14 @@ export function ProposalsQueue({
                           </button>
                         );
                       })}
+                      {!hist && row.entity_type && row.entity_id && (
+                        <EntityRowActions
+                          entityType={row.entity_type}
+                          entityId={row.entity_id}
+                          name={row.entity_name ?? row.subject ?? "entity"}
+                          disabled={busyRow === row.id}
+                        />
+                      )}
                     </div>
                   </td>
                 </tr>

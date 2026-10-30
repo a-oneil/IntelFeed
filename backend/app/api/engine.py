@@ -2,7 +2,7 @@
 
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.security import get_current_user, get_viewer
@@ -856,6 +856,83 @@ async def retry_pipeline_stage(
     return {"dispatched": True, "task_id": result.id}
 
 
+class RetryErrorsRequest(BaseModel):
+    stage: str | None = Field(default=None, description="Only this stage; default every retryable stage")
+    window: str = Field(default="7d", description="Entries ingested in this window: 1h, 24h, 7d or 30d")
+    limit: int = Field(default=500, ge=1, le=5000, description="Most stage runs to re-dispatch in one call")
+
+    model_config = ConfigDict(json_schema_extra={"example": {"stage": "extract", "window": "7d", "limit": 500}})
+
+
+@router.post("/pipeline/retry-errors")
+async def retry_pipeline_errors(
+    body: RetryErrorsRequest = Body(default=RetryErrorsRequest()),
+    user: User = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """Re-dispatch every stage that is still stuck on an error, in one call.
+    Admin only.
+
+    "Stuck" means the entry's latest run at that stage is an error — a later
+    success or retry run supersedes it, so an entry already re-run green is
+    left alone. Entries are scoped to the ingest window; ``stage`` narrows to
+    one column. Stages that cannot be re-dispatched from a bare entry id
+    (automate, translate) are counted in ``skipped``. The adjudicate stage is
+    re-queued the same way the single-entry retry does it."""
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import and_, exists, select
+    from sqlalchemy.orm import aliased
+
+    from app.models.entry import Entry
+    from app.models.entry_pipeline_run import EntryPipelineRun
+    from app.services.entry_adjudication import PENDING, _request_row
+    from app.workers.celery_app import celery_app
+
+    _require_admin(user)
+    if body.stage is not None and body.stage not in PROCESSING_STAGE_ORDER:
+        raise HTTPException(status_code=422, detail=f"Unknown stage: {body.stage}")
+    cutoff = datetime.now(UTC) - timedelta(hours=_WINDOW_HOURS.get(body.window, 24 * 7))
+
+    Run = EntryPipelineRun
+    Newer = aliased(Run)
+    superseded = exists().where(
+        and_(Newer.entry_id == Run.entry_id, Newer.stage == Run.stage, Newer.created_at > Run.created_at)
+    )
+    q = (
+        select(Run.entry_id, Run.stage)
+        .join(Entry, Entry.id == Run.entry_id)
+        .where(Entry.created_at >= cutoff, Run.status == "error", ~superseded)
+        .distinct()
+    )
+    if body.stage:
+        q = q.where(Run.stage == body.stage)
+    stuck = (await db.execute(q)).all()
+
+    dispatched = skipped = 0
+    by_stage: dict[str, int] = {}
+    for entry_id, stage in stuck[: body.limit]:
+        task = RETRYABLE_STAGE_TASKS.get(stage)
+        if task is None:
+            skipped += 1
+            continue
+        if stage == "adjudicate":
+            row = await _request_row(db, entry_id)
+            row.adjudication_status = PENDING
+            row.adjudication_queued_at = datetime.now(UTC)
+            db.add(row)
+        celery_app.send_task(task, kwargs={"entry_id": str(entry_id)})
+        dispatched += 1
+        by_stage[stage] = by_stage.get(stage, 0) + 1
+    await db.commit()
+    return {
+        "dispatched": dispatched,
+        "skipped": skipped,
+        "by_stage": by_stage,
+        "remaining": max(0, len(stuck) - body.limit),
+    }
+
+
 @router.get("/pipeline")
 async def pipeline_overview(
     user: User = Depends(get_current_user),
@@ -986,7 +1063,7 @@ PROCESSING_STAGE_ORDER: list[str] = [
     "automate",
 ]
 
-_WINDOW_HOURS: dict[str, int] = {"1h": 1, "24h": 24, "7d": 24 * 7}
+_WINDOW_HOURS: dict[str, int] = {"1h": 1, "24h": 24, "7d": 24 * 7, "30d": 24 * 30}
 
 
 @router.get("/processing")

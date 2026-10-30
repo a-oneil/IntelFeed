@@ -294,6 +294,9 @@ class Settings(BaseSettings):
     adjudication_max_per_hour: int = 0  # 0 = no ceiling; set one to cap spend or protect the ai queue
     adjudication_min_priority_score: float = 0.0  # 0 = no floor (keep it: junk comes from low-score CVE entries)
     adjudication_apply_min_confidence: str = "high"  # high | medium | low
+    # Distinct articles whose reviews must agree before a type change is applied
+    # in apply mode (1 = the first high-confidence verdict converts the entity).
+    adjudication_reclassify_consensus: int = 2
     adjudication_circuit_breaker_pct: float = 0.5
     adjudication_content_max_chars: int = 8000
     adjudication_scope: str = "links,entities,relationships,observables"

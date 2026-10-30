@@ -68,6 +68,13 @@ AI_TYPES: dict[str, dict] = {
     "observable": {"model": Observable, "name": "value", "aliases": False, "ac": True, "second": "label"},
 }
 
+# Named catalogue types the delete endpoint accepts: the AI-created set above
+# plus the three the review queues also surface. Observables are handled apart
+# (ledger tombstones); countries are a seeded catalogue, so they are deleted
+# but never denylisted.
+DELETABLE_TYPES = (set(AI_TYPES) | {"vendor", "product", "country"}) - {"observable"}
+_NO_DENY_TYPES = {"country"}
+
 _CONF_RANK = {"high": 3, "medium": 2, "low": 1}
 _WINDOW_DAYS = {"24h": 1, "7d": 7, "30d": 30, "all": None}
 
@@ -536,6 +543,37 @@ class ExtractionDeleteRequest(BaseModel):
     )
 
 
+async def delete_named_entity(db: AsyncSession, entity_type: str, entity, *, deny: bool, reason: str) -> int:
+    """Delete one catalogue entity the way the review surfaces do: its entry
+    links and relationships go with it, its pending proposals in both logs
+    are cleared, its search document and cache entry are dropped, and (unless
+    ``deny`` is off or the type is a seeded catalogue) its names join the
+    do-not-recreate list. Returns the number of denylist rows written. The
+    caller commits and refreshes the autolinker vocabulary."""
+    from app.services.proposal_dismissals import clear_entity_proposals
+
+    model, junction, fk_col = ENTITY_CONFIG[entity_type]
+    denied = 0
+    if deny and entity_type not in _NO_DENY_TYPES:
+        denied = await deny_entity_names(db, entity_type, deniable_names(entity_type, entity), reason=reason)
+    entity_id = entity.id
+    await db.execute(sql_delete(junction).where(fk_col == entity_id))
+    await db.execute(
+        sql_delete(EntityRelationship).where(
+            or_(
+                (EntityRelationship.source_type == entity_type) & (EntityRelationship.source_id == entity_id),
+                (EntityRelationship.target_type == entity_type) & (EntityRelationship.target_id == entity_id),
+            )
+        )
+    )
+    await clear_entity_proposals(db, entity_type, entity_id)
+    await db.delete(entity)
+    await db.flush()
+    delete_entity_document(entity_type, entity_id)
+    await invalidate_entity_cache(entity_type, str(entity_id))
+    return denied
+
+
 @router.post("/delete")
 async def extraction_delete(
     body: ExtractionDeleteRequest = Body(...),
@@ -555,40 +593,21 @@ async def extraction_delete(
     and the export then refuse the value. ``deny=false`` hard-deletes the row
     and its sightings instead, leaving it free to be captured again.
     """
-    spec = AI_TYPES.get(body.entity_type)
-    if not spec or not body.ids:
+    if not body.ids:
         return {"deleted": 0, "denied": 0}
-
     if body.entity_type == "observable":
         return await _delete_observables(db, body.ids, deny=body.deny)
+    if body.entity_type not in DELETABLE_TYPES:
+        return {"deleted": 0, "denied": 0}
 
-    model, junction, fk_col = ENTITY_CONFIG[body.entity_type]
+    model = ENTITY_CONFIG[body.entity_type][0]
     rows = (await db.execute(select(model).where(model.id.in_(body.ids)))).scalars().all()
 
     denied = 0
     for entity in rows:
-        if body.deny:
-            denied += await deny_entity_names(
-                db,
-                body.entity_type,
-                deniable_names(body.entity_type, entity),
-                reason="Deleted from the Engine AI entities table",
-            )
-
-        await db.execute(sql_delete(junction).where(fk_col == entity.id))
-        await db.execute(
-            sql_delete(EntityRelationship).where(
-                or_(
-                    (EntityRelationship.source_type == body.entity_type) & (EntityRelationship.source_id == entity.id),
-                    (EntityRelationship.target_type == body.entity_type) & (EntityRelationship.target_id == entity.id),
-                )
-            )
+        denied += await delete_named_entity(
+            db, body.entity_type, entity, deny=body.deny, reason="Deleted from the Engine review queues"
         )
-        entity_id = entity.id
-        await db.delete(entity)
-        await db.flush()
-        delete_entity_document(body.entity_type, entity_id)
-        await invalidate_entity_cache(body.entity_type, str(entity_id))
 
     await db.commit()
 

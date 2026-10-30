@@ -32,7 +32,7 @@ import unicodedata
 import uuid
 from dataclasses import dataclass, field
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -263,6 +263,33 @@ _ACTOR_HEAD_RE = re.compile(
 _ACTOR_DESCRIPTOR_RE = re.compile(
     r"^(?:apt[ -]actors?|security[ -]researchers?|john[ -]doe|hackers?[- ]for[- ]hire|script[ -]kiddies)$"
 )
+# "the threat actor", "an attacker": the article is not part of the name, so it
+# is dropped before the head-noun check — otherwise the determiner alone let
+# the phrase through the gate.
+_LEADING_ARTICLES = frozenset({"the", "a", "an", "this", "these", "those", "that"})
+
+# Continents, regions and blocs. An article that says "targets North America"
+# names a place, never an adversary, a family or a tool. Countries are gated
+# separately against the country catalogue (``_country_named``), which knows
+# every demonym and alias; this list covers what no country row holds.
+_REGION_NAMES = frozenset(
+    "north america|south america|central america|latin america|latam|the americas|americas|"
+    "europe|western europe|eastern europe|central europe|northern europe|southern europe|european union|eu|"
+    "asia|east asia|south asia|southeast asia|south east asia|central asia|west asia|asia pacific|apac|"
+    "africa|north africa|west africa|east africa|southern africa|sub saharan africa|"
+    "middle east|mena|gulf region|the gulf|persian gulf|levant|"
+    "oceania|australasia|pacific|pacific islands|caribbean|balkans|caucasus|nordics|scandinavia|benelux|"
+    "baltics|emea|global|worldwide|international|nato|five eyes|g7|g20|brics|asean|arctic|antarctica".split("|")
+)
+
+
+def is_region_name(name: str) -> bool:
+    """True when ``name`` is a continent, region or bloc rather than an entity."""
+    toks = _tokens(name)
+    while toks and toks[0] in _LEADING_ARTICLES:
+        toks = toks[1:]
+    return " ".join(toks) in _REGION_NAMES
+
 
 _LANG_TOKENS = frozenset(
     "rust go golang python js javascript typescript java powershell ruby php perl lua swift "
@@ -495,7 +522,10 @@ def _shared_junk_reason(name: str, norm: NormalizedName) -> str | None:
 
 
 def _actor_junk_reason(name: str) -> str | None:
-    lowered = " ".join(_tokens(name))
+    toks = _tokens(name)
+    while len(toks) > 1 and toks[0] in _LEADING_ARTICLES:
+        toks = toks[1:]
+    lowered = " ".join(toks)
     if _ACTOR_VAGUE_RE.search(lowered):
         return "vague_qualifier"
     if _ACTOR_HEAD_RE.match(lowered):
@@ -574,8 +604,44 @@ def generic_name_reason(entity_type: str, name: str, norm: NormalizedName | None
     reason = _shared_junk_reason(name, norm)
     if reason:
         return reason
+    if entity_type != "country" and is_region_name(name):
+        return "region_name"
     check = _TYPE_JUNK_CHECKS.get(entity_type)
     return check(name) if check else None
+
+
+async def _country_named(db: AsyncSession, name: str) -> str | None:
+    """The catalogue country whose name or alias ``name`` is, else None. Used
+    to keep "Iran" / "North Korea" / "Chinese" out of the actor, malware and
+    tool catalogues: an article attributes to a country, it does not name one
+    as the adversary."""
+    from app.models.country import Country
+
+    cleaned = (name or "").strip()
+    if not cleaned:
+        return None
+    toks = _tokens(cleaned)
+    while len(toks) > 1 and toks[0] in _LEADING_ARTICLES:
+        toks = toks[1:]
+    stripped = " ".join(toks)
+    forms = {cleaned.lower(), stripped}
+    # Aliases are stored as written ("Chinese", "PRC"); try the common casings.
+    variants = {
+        cleaned,
+        cleaned.lower(),
+        cleaned.upper(),
+        cleaned.title(),
+        stripped,
+        stripped.title(),
+        stripped.upper(),
+    }
+    return (
+        await db.execute(
+            select(Country.name)
+            .where(or_(func.lower(Country.name).in_(sorted(forms)), Country.aliases.overlap(sorted(variants))))
+            .limit(1)
+        )
+    ).scalar_one_or_none()
 
 
 # ---------------------------------------------------------------------------
@@ -1288,6 +1354,11 @@ async def resolve_entity_creation(
 
             if is_fp_entity_name(name):
                 gate_reason = "fp_name"
+        if gate_reason is None and entity_type in ("threat_actor", "malware", "tool"):
+            country = await _country_named(db, name)
+            if country:
+                gate_reason = "country_name"
+                gate_detail = {"country": country}
         if gate_reason is None:
             hits = await _cross_type_hits(
                 db,

@@ -836,7 +836,7 @@ Proposed fixes to entity data wait in review queues. Every route here is Admin. 
 | GET | `/api/engine/extraction/entities` | List them with a status (linked, review, orphan, dupe) |
 | POST | `/api/engine/extraction/confirm` | Sign off on them |
 | POST | `/api/engine/extraction/not-duplicate` | Mark two entities as different things |
-| POST | `/api/engine/extraction/delete` | Delete them and, unless `deny=false`, ban their names |
+| POST | `/api/engine/extraction/delete` | Delete entities (AI-created types plus vendor, product, country) with their links, relationships and pending proposals; unless `deny=false`, ban their names (countries are never banned) |
 | GET, POST | `/api/engine/extraction/denylist` | List or add banned names (`entity_type: "any"` bans for every type) |
 | DELETE | `/api/engine/extraction/denylist/{row_id}` | Lift a ban |
 
@@ -1349,6 +1349,7 @@ Instance settings, stored in the database and falling back to `.env`. All Admin.
 | GET | `/api/engine/entries/{entry_id}/runs` | User | Every stage run for one article |
 | GET | `/api/engine/entries/{entry_id}/adjudication` | User | What the adjudicate stage decided for one article |
 | POST | `/api/engine/entries/{entry_id}/stages/{stage}/retry` | Admin | Re-run one stage for one article |
+| POST | `/api/engine/pipeline/retry-errors` | Admin | Re-run every stage still stuck on an error (optionally one stage) for articles in a window |
 | GET | `/api/engine/extraction/status` | User | AI extraction health: queue, today's spend, last batch |
 | GET | `/api/engine/plans` | User | Pipeline plans (global, per category, per feed) |
 | PUT | `/api/engine/plans` | Admin | Create or change one plan |

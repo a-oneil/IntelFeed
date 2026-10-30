@@ -160,7 +160,7 @@ AI extraction and the Cybergeist sync pass new aliases through `gate_aliases()` 
 
 A same-type merge survives re-import because the loser's name becomes an alias of the survivor (`backend/app/intelligence/entity_dedup.py`). A cross-type fold (the "Akira" malware folded into the "Akira" actor) needs more, because each importer only searches its own table and would recreate the loser within hours.
 
-All automated creation goes through `resolve_entity_creation()` (`backend/app/intelligence/entity_resolution.py:1017`). Manual creation in the UI goes through it too, and may override a refusal with `force=true`. In order, it:
+All automated creation goes through `resolve_entity_creation()` (`backend/app/intelligence/entity_resolution.py:1083`). Manual creation in the UI goes through it too, and may override a refusal with `force=true`. In order, it:
 
 1. **Matches an existing entity** by exact name or alias, then a normalized match through `entity_alias_index`, then known actor synonyms.
 2. **Checks reclassify tombstones.** A cross-type reclassify (`perform_reclassify()` in `backend/app/api/entity_merge.py`) writes one `EntityReclassifyTombstone` row per folded name: `(source_type, normalized_name) → (target_type, target_id)`. On a hit, nothing is created and the entry links to the survivor through `link_entry_to_entity()`. Set `active = False` on a tombstone row in the database to allow a split again; there is no UI for this.
@@ -207,6 +207,7 @@ The API is `backend/app/api/hygiene.py`, under `/api/admin/hygiene/*` and admin-
 **The adjudicate stage** (`backend/app/services/entry_adjudication.py`). After an entry's one-pass analysis lands, `adjudicate_entry_task` (on the `ai` queue) sends the article plus a list of everything the analysis wrote: links, entities it created (with their nearest existing names), relationship claims and IOCs. The reviewer answers only for items it would change: remove, reclassify, veto, merge, demote or drop. Anything it leaves out is kept.
 
 - `adjudication_mode` (default `apply`): `shadow` files every verdict as a proposal; `apply` acts on high-confidence verdicts and files the rest. Every applied change writes an audit row that doubles as its undo.
+- `reclassify` is a catalogue-wide change, so in apply mode it needs agreement: each article's verdict is a vote (filed as a proposal), and the review that brings the count to `adjudication_reclassify_consensus` (default 2) converts the entity and clears the other proposals about it. A name that was folded out of a type (a reclassify tombstone) is never proposed back into it, so types do not ping-pong.
 - Circuit breakers turn a destructive run into proposals. The rolling breaker also pauses dispatch for an hour (`adjudication_breaker_until`).
 - Never touched: relationship edges an analyst confirmed, created or rejected, and external-feed edges (only `auto_extracted` and `co_occurrence` edges are reviewed). A link an analyst restored in the last 90 days is shown to the reviewer flagged, and never changed.
 - `merge` can only target a name the reviewer was shown. `veto` deletes an entity only when this entry created it and nothing else uses it.

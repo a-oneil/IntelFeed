@@ -33,6 +33,7 @@ import { confirmDialog } from "@/utils/dialog";
 import { getEntityCssVar, getEntityLabel } from "@/utils/entityTheme";
 import { formatDateTime } from "@/utils/formatDate";
 
+import { EntityRowActions } from "./EntityRowActions";
 import styles from "./ProposalsQueue.module.css";
 import cg from "./CleanupGroups.module.css";
 
@@ -300,6 +301,9 @@ export function ReclassifyQueue() {
                       >
                         Dismiss
                       </button>
+                      {g.exists && (
+                        <EntityRowActions entityType={g.entity_type} entityId={g.entity_id} name={g.name} disabled={busy === k || working} />
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -782,6 +786,9 @@ export function UnlinkQueue() {
                         >
                           Keep all
                         </button>
+                        {g.exists && (
+                          <EntityRowActions entityType={g.entity_type} entityId={g.entity_id} name={g.name} disabled={busy === k || working} />
+                        )}
                       </div>
                     </td>
                   </tr>
