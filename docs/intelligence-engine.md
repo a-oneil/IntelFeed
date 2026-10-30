@@ -199,7 +199,9 @@ The API is `backend/app/api/hygiene.py`, under `/api/admin/hygiene/*` and admin-
 | `POST /adjudication/{log_id}/apply`, `/restore`, `/adjudication/apply-all` | Act on, or undo, adjudicator proposals |
 | `POST /link-log/{log_id}/restore`, `/apply-removal` | Undo or apply one link-log row. A restore re-creates the link and counts as an analyst restore |
 | `POST /apply-reclassify-advisories` | Turn `needs_reclassification` advisories into reclassifies through `perform_reclassify()` |
-| `GET /reclassify-groups`, `/unlink-groups` (+ `/apply`, `/dismiss`, `/keep`) | Grouped cleanup queues per entity |
+| `GET /review-groups`, `POST /review-groups/dismiss` | The Review tab's one queue: every pending proposal folded per entity |
+| `GET /reclassify-groups`, `/unlink-groups` (+ `/apply`, `/dismiss`, `/keep`) | Per-entity apply paths the queue's row buttons use |
+| `POST /scan-duplicates` | Run the duplicate review (`review-duplicate-entities`) now |
 | `GET /orphans`, `POST /orphans/prune` | Entities with `article_count = 0` |
 | `/enrichment-gaps`, `/run-name-normalization`, `/scan-alias-hygiene`, `/scan-vendor-autolink`, `/scan-id-hygiene` | On-demand scanners with shadow/apply flows |
 | `GET /api/entities/{type}/{id}/cascade-preview` | What deleting an entity would remove. Any signed-in user |
@@ -210,7 +212,7 @@ The API is `backend/app/api/hygiene.py`, under `/api/admin/hygiene/*` and admin-
 - `reclassify` is a catalogue-wide change, so in apply mode it needs agreement: each article's verdict is a vote (filed as a proposal), and the review that brings the count to `adjudication_reclassify_consensus` (default 2) converts the entity and clears the other proposals about it. A name that was folded out of a type (a reclassify tombstone) is never proposed back into it, so types do not ping-pong.
 - Circuit breakers turn a destructive run into proposals. The rolling breaker also pauses dispatch for an hour (`adjudication_breaker_until`).
 - Never touched: relationship edges an analyst confirmed, created or rejected, and external-feed edges (only `auto_extracted` and `co_occurrence` edges are reviewed). A link an analyst restored in the last 90 days is shown to the reviewer flagged, and never changed.
-- `merge` can only target a name the reviewer was shown. `veto` deletes an entity only when this entry created it and nothing else uses it.
+- `merge` can only target a name the reviewer was shown. `veto` deletes an entity only when this entry created it and nothing else uses it. Two entities that both already exist are never compared here; that is the daily duplicate review (`backend/app/services/entity_merge_review.py`, job `review-duplicate-entities`), which scores same-type pairs by name similarity, a shared alias and shared articles, asks the `entity_merge_review` task, and files each `same` verdict as a Merge proposal on the Review tab.
 - `backfill_entry_adjudications` walks older entries through the same review, using at most half of each hour's budget. Run it by hand:
 
 ```bash

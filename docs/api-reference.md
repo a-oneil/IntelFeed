@@ -796,7 +796,10 @@ Proposed fixes to entity data wait in review queues. Every route here is Admin. 
 
 | Method | Path | What it does |
 | --- | --- | --- |
-| GET | `/api/admin/hygiene/feed` | Every proposal from both logs, newest first |
+| GET | `/api/admin/hygiene/feed` | Every proposal from both logs, newest first (`entity_type` + `entity_id` narrow it to one entity) |
+| GET | `/api/admin/hygiene/review-groups` | Every pending proposal, one row per entity, with what each kind wants done |
+| POST | `/api/admin/hygiene/review-groups/dismiss` | Settle each entity's row the leave-it-alone way and stop the proposals coming back |
+| POST | `/api/admin/hygiene/scan-duplicates` | Run the duplicate review now; its Merge proposals land in the queue |
 | GET | `/api/admin/hygiene/stats` | Queue counts and the adjudicate stage's mode |
 | DELETE | `/api/admin/hygiene/feed/{source}/{row_id}` | Delete one proposal row |
 | POST | `/api/admin/hygiene/dismiss-proposals` | Discard pending proposals without applying them |

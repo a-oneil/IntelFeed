@@ -167,6 +167,26 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
         # the ai worker so the daily batch paces itself.
         "default_schedule": {"type": "crontab", "minute": "45", "hour": "5"},
     },
+    "review-duplicate-entities": {
+        "settings_keys": [
+            "merge_review_batch_size",
+            "merge_review_pairs_per_call",
+            "merge_review_min_similarity",
+            "merge_review_min_confidence",
+            "merge_review_retry_days",
+        ],
+        "task": "app.workers.entity_maintenance_tasks.review_duplicate_entities",
+        "description": (
+            "Put the catalogue's most likely duplicate pairs of actors, malware and tools in front of "
+            "the model (similar names, a shared alias, or the same articles) and file a Merge proposal "
+            "on the Review tab for each pair it calls the same thing. Nothing is merged until a person "
+            "applies it; a pair judged different is not asked again for the retry window."
+        ),
+        "category": "intelligence",
+        "uses_ai": True,
+        # After the assessment backfill, on the same serialized ai worker.
+        "default_schedule": {"type": "crontab", "minute": "30", "hour": "6"},
+    },
     "actor-profile-refresh": {
         "settings_keys": [
             "actor_refresh_top_n_per_run",

@@ -1391,6 +1391,10 @@ async def hygiene_feed(
     # eligibility up-front so the queries are obviously scoped.
     if not isinstance(domain, str):
         domain = None  # called directly (the curation tool), not through FastAPI
+    if not isinstance(entity_type, str):
+        entity_type = None
+    if not isinstance(entity_id, uuid.UUID):
+        entity_id = None
     if domain is not None and domain not in DOMAINS:
         raise AppError(code="invalid", message=f"unknown domain: {domain}", status_code=400)
     actions = _parse_action_list(action)
@@ -4227,7 +4231,7 @@ async def review_groups(
             await clear_entity_proposals(db, g["entity_type"], eid)
             del groups[key]
             continue
-        g["exists"] = live is not None
+        g["exists"] = live is not None or _model_for(g["entity_type"]) is None
         g["name"] = (live[0] if live else None) or g["snap"] or "(unnamed)"
         g["linked"] = live[1] if live else None
 

@@ -33,8 +33,8 @@ A database value that equals the default does nothing useful, and it stops you g
 | Structure | File | Role |
 |---|---|---|
 | `CONFIGURABLE_KEYS` | `backend/app/services/system_settings.py:26` | Which keys the UI can edit, and each value's type |
-| `SETTING_METADATA` | `backend/app/services/system_settings.py:208` | Label, description and group shown in the UI |
-| `_ENGINE_SECTION_GROUPS` | `backend/app/services/system_settings.py:1330` | Moves engine keys into the group of the Engine panel that owns them |
+| `SETTING_METADATA` | `backend/app/services/system_settings.py:216` | Label, description and group shown in the UI |
+| `_ENGINE_SECTION_GROUPS` | `backend/app/services/system_settings.py:1375` | Moves engine keys into the group of the Engine panel that owns them |
 | `SECRET_KEYS` | `system_settings.py:14` | Encrypted in the database, hidden on read |
 | `GROUP_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:26` | Which Engine screen shows each group; drives the Engine settings search |
 | `KEY_DEST` | `frontend/src/components/engine/engineSettingsIndex.ts:67` | Single keys that live somewhere other than their group's screen |
@@ -367,6 +367,20 @@ celery -A app.workers.celery_app call app.workers.adjudication_tasks.backfill_en
 
 It takes `limit` and `since_days` kwargs, passes rows through the same checks, and the resweep drains them.
 
+### Duplicate review
+
+Puts the catalogue's most likely duplicate pairs of threat actors, malware families and tools in front of the model and files a Merge proposal on the Review tab for each pair it calls the same thing. Nothing is merged until a person applies it. Code: `backend/app/services/entity_merge_review.py` and `backend/app/workers/entity_maintenance_tasks.py`. Job `review-duplicate-entities`, daily 06:30 UTC, on the `ai` queue; the Review tab's **Review duplicates (AI)** button runs it now (`POST /api/admin/hygiene/scan-duplicates`). Its AI task is `entity_merge_review` (Settings → AI Configuration → Prompts).
+
+A pair is a candidate when the names are trigram-similar, when one side's name or alias equals the other's, or when the two are linked from at least three of the same articles. Pairs an analyst marked not-duplicate, pairs with a pending Merge proposal and pairs judged within the retry window are skipped. The model sees both profiles (name, aliases, description, article count, origin) and the signals, and answers `same` (with which side to keep), `different` or `unsure`. A `same` at or above the floor becomes an `adjudication_merge` row (`after.origin = merge_review`) that applies through the merge engine; `different` and `unsure` are logged as `merge_review_distinct` (visible in History as "Not duplicates") so the pair is not asked again for the retry window. Dismissing a filed merge records the pair as not-duplicate for good.
+
+| Setting | Type / default | What it does |
+|---|---|---|
+| `merge_review_batch_size` | int, `40` | Pairs per run, most likely first. `0` turns the review off. |
+| `merge_review_pairs_per_call` | int, `8` | Pairs per model call. |
+| `merge_review_min_similarity` | float, `0.55` | Trigram similarity two names need to be a candidate on name alone. |
+| `merge_review_min_confidence` | `high` / `medium` / `low`, `medium` | A `same` verdict below this is remembered as unsure instead of proposed. |
+| `merge_review_retry_days` | int, `30` | A pair judged different or unsure is not asked again for this long. |
+
 ### Entity assessments
 
 Writes and refreshes the AI summary paragraph on entity profiles. Code: `backend/app/workers/entity_maintenance_tasks.py`. Job `backfill-entity-assessments`, daily 05:45 UTC.
@@ -496,6 +510,7 @@ Each job in `JOB_REGISTRY` (`backend/app/workers/job_registry.py`) lists the set
 | `signal-rescore-recent` | every 6 h at :35 | `signal_engine_shadow`, `signal_engine_surface` |
 | `signal-rescore-all` | Sun 03:00 | `signal_engine_shadow`, `signal_engine_surface` |
 | `backfill-entity-assessments` | 05:45 | every `assessment_*` |
+| `review-duplicate-entities` | 06:30 | every `merge_review_*` |
 | `actor-profile-refresh` | Mon 03:00 | every `actor_refresh_*` |
 | `relationship-confidence-decay` | Sun 03:45 | `relationship_recency_half_life_days` |
 | `generate-daily-summaries` | 06:00 | `narrative_themes_enabled` |
