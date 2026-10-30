@@ -54,6 +54,9 @@ class UserPreferences(private val context: Context) {
         // recorded at without alerting (see IntelNotificationWorker).
         private val KEY_PRIORITY_ALERT_SCORE = floatPreferencesKey("priority_alert_score")
         private val KEY_PRIORITY_ALERT_BASELINE = floatPreferencesKey("priority_alert_baseline")
+        // App update notices (AppUpdateWorker): on/off, and the version already announced.
+        private val KEY_UPDATE_NOTICES = booleanPreferencesKey("update_notices_enabled")
+        private val KEY_NOTIFIED_UPDATE_VERSION = stringPreferencesKey("notified_update_version")
         private val KEY_THEME_ID = stringPreferencesKey("theme_id")
         private val KEY_THEME_NAME = stringPreferencesKey("theme_name")
         private val KEY_THEME_SOURCE = stringPreferencesKey("theme_source")
@@ -202,6 +205,22 @@ class UserPreferences(private val context: Context) {
 
     suspend fun setNotificationsEnabled(enabled: Boolean) {
         context.dataStore.edit { it[KEY_NOTIFICATIONS_ENABLED] = enabled }
+    }
+
+    /** Whether a notification announces a new app release. Default on. */
+    val updateNoticesEnabled: Flow<Boolean> = context.dataStore.data
+        .map { it[KEY_UPDATE_NOTICES] ?: true }
+        .distinctUntilChanged()
+
+    suspend fun setUpdateNoticesEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[KEY_UPDATE_NOTICES] = enabled }
+    }
+
+    /** The release version last announced, so each one notifies once. */
+    suspend fun getNotifiedUpdateVersion(): String? = context.dataStore.data.first()[KEY_NOTIFIED_UPDATE_VERSION]
+
+    suspend fun setNotifiedUpdateVersion(version: String) {
+        context.dataStore.edit { it[KEY_NOTIFIED_UPDATE_VERSION] = version }
     }
 
     /** Unread Priority Queue items scoring at least this notify. Default 9.5 (the red band). */
