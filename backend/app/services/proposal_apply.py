@@ -99,6 +99,7 @@ def maint_actions_for_domain(domain: str | None) -> frozenset[str] | None:
                 "update_aliases",
                 "ai_enrich_filled",
                 "ai_enrich_unknown",
+                "merge_review_distinct",
             }
         )
     return _MAINT_DOMAIN_ACTIONS.get(domain, frozenset())

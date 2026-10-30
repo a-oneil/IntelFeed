@@ -298,6 +298,14 @@ class Settings(BaseSettings):
     # in apply mode (1 = the first high-confidence verdict converts the entity).
     adjudication_reclassify_consensus: int = 2
     adjudication_circuit_breaker_pct: float = 0.5
+    # Daily duplicate review (services/entity_merge_review.py): likely-duplicate
+    # pairs of existing actors / malware / tools judged by the model; "same"
+    # becomes a Merge proposal on the Review tab. 0 pairs = off.
+    merge_review_batch_size: int = 40
+    merge_review_pairs_per_call: int = 8
+    merge_review_min_similarity: float = 0.55
+    merge_review_min_confidence: str = "medium"  # high | medium | low
+    merge_review_retry_days: int = 30
     adjudication_content_max_chars: int = 8000
     adjudication_scope: str = "links,entities,relationships,observables"
     # ICS/OT context keywords — ICS-matrix (T0xxx) ATT&CK techniques are only

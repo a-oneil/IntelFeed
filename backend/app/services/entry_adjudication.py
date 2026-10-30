@@ -2180,7 +2180,10 @@ async def apply_adjudication_row(db: AsyncSession, row) -> dict:
     before = row.before or {}
     after = row.after or {}
     entry = await db.get(Entry, uuid.UUID(before["entry_id"])) if before.get("entry_id") else None
-    if entry is None:
+    # A merge or a type change is about the entity, not the article: the
+    # duplicate review files merges with no entry at all, and an article being
+    # gone does not make either moot.
+    if entry is None and row.action not in (ACTION_MERGE, ACTION_RECLASSIFY):
         return {"applied": False, "reason": "entry gone"}
     reason = after.get("reason") or ""
     outcome: dict = {"applied": True}

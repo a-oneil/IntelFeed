@@ -74,6 +74,7 @@ celery_app.conf.update(
         "app.workers.entity_maintenance_tasks.refresh_actor_profile": {"queue": "ai"},
         "app.workers.entity_maintenance_tasks.process_name_normalization_batch": {"queue": "ai"},
         "app.workers.entity_maintenance_tasks.ai_enrich_gap_batch": {"queue": "ai"},
+        "app.workers.entity_maintenance_tasks.review_duplicate_entities": {"queue": "ai"},
         # Thread spines are generative; the sweeper that builds the threads
         # themselves is pure SQL and stays on the default queue.
         "app.workers.thread_tasks.narrate_story_threads": {"queue": "ai"},

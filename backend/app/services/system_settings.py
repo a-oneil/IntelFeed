@@ -66,6 +66,11 @@ CONFIGURABLE_KEYS: dict[str, type] = {
     "adjudication_apply_min_confidence": str,
     "adjudication_reclassify_consensus": int,
     "adjudication_circuit_breaker_pct": float,
+    "merge_review_batch_size": int,
+    "merge_review_pairs_per_call": int,
+    "merge_review_min_similarity": float,
+    "merge_review_min_confidence": str,
+    "merge_review_retry_days": int,
     "adjudication_content_max_chars": int,
     "adjudication_scope": str,
     "entity_maintenance_mode": str,
@@ -480,6 +485,40 @@ SETTING_METADATA: dict[str, dict] = {
             "runs above the same threshold pauses dispatch for the hour; shadow runs are not sampled, "
             "because they change nothing"
         ),
+        "group": "adjudication",
+    },
+    "merge_review_batch_size": {
+        "label": "Duplicate Review: Pairs Per Run",
+        "description": (
+            "How many likely-duplicate pairs of existing actors, malware and tools the daily duplicate "
+            "review puts in front of the model (most likely first: similar names, a shared alias, the "
+            "same articles). Each pair it calls the same thing becomes a Merge proposal on the Review "
+            "tab; nothing is merged without a person. 0 turns the review off"
+        ),
+        "group": "adjudication",
+    },
+    "merge_review_pairs_per_call": {
+        "label": "Duplicate Review: Pairs Per Call",
+        "description": "Pairs sent to the model in one call. Smaller is slower but harder to truncate",
+        "group": "adjudication",
+    },
+    "merge_review_min_similarity": {
+        "label": "Duplicate Review: Name Similarity Floor",
+        "description": (
+            "Trigram similarity (0–1) two names need before they are a candidate pair on name alone. "
+            "A shared alias or three shared articles qualifies a pair whatever its names"
+        ),
+        "group": "adjudication",
+    },
+    "merge_review_min_confidence": {
+        "label": "Duplicate Review: Propose At Confidence",
+        "description": "A 'same' verdict below this confidence is remembered as unsure instead of proposed",
+        "group": "adjudication",
+        "options": ["high", "medium", "low"],
+    },
+    "merge_review_retry_days": {
+        "label": "Duplicate Review: Retry After (days)",
+        "description": "A pair the model called different or unsure is not asked again for this long",
         "group": "adjudication",
     },
     "adjudication_content_max_chars": {
@@ -1369,6 +1408,11 @@ _ENGINE_SECTION_GROUPS: dict[str, str] = {
     "adjudication_apply_min_confidence": "adjudication",
     "adjudication_reclassify_consensus": "adjudication",
     "adjudication_circuit_breaker_pct": "adjudication",
+    "merge_review_batch_size": "adjudication",
+    "merge_review_pairs_per_call": "adjudication",
+    "merge_review_min_similarity": "adjudication",
+    "merge_review_min_confidence": "adjudication",
+    "merge_review_retry_days": "adjudication",
     "adjudication_content_max_chars": "adjudication",
     "adjudication_scope": "adjudication",
     # Score stage
