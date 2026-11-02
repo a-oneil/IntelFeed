@@ -1091,6 +1091,40 @@
   "mutating": true
  },
  {
+  "name": "decide_proposals",
+  "description": "Apply a reviewed batch of Review-queue decisions in one call (POST /admin/hygiene/decisions). Each decision is {id: '<source>:<log_id>', decision: 'apply' | 'dismiss' | 'reclassify:<entity_type>'}. apply runs the row's own applier; dismiss deletes it (a reclassify dismissal covers the entity and stops new filings); reclassify converts the entity and closes every proposal about it. Duplicates settle server-side: a row an earlier decision closed comes back 'settled'; an apply whose outcome is already reached comes back 'resolved'. Returns one result per decision plus counts. Admin only.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "decisions": {
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "id": {
+        "type": "string",
+        "description": "Feed row id '<source>:<log_id>'"
+       },
+       "decision": {
+        "type": "string",
+        "description": "apply | dismiss | reclassify:<entity_type>"
+       }
+      },
+      "required": [
+       "id",
+       "decision"
+      ]
+     },
+     "description": "Up to 1000 decisions"
+    }
+   },
+   "required": [
+    "decisions"
+   ]
+  },
+  "mutating": true
+ },
+ {
   "name": "delete_automation_rule",
   "description": "Delete an automation rule permanently. REQUIRES user confirmation. First call returns a confirmation prompt with a token — present it to the user. Only call again with the confirmation_token after the user explicitly approves. To just stop a rule from running, use toggle_automation_rule instead.",
   "input_schema": {
@@ -1155,7 +1189,7 @@
  },
  {
   "name": "delete_entity",
-  "description": "Delete a record: feed, entry, note, detection rule, campaign, automation rule, intelligence requirement, intel report, tag, or any intelligence entity (threat actor, malware, CVE, TTP, country, tool, vendor, product, mitigation, observable). Intelligence entities get the same cleanup as the API delete endpoints: entry links and entity relationships are removed and the search-index document is dropped. No tombstone is written — the autolinker/extraction pipeline may re-create the entity from future articles; use the false-positive workflow if the name must stay gone (an observable's equivalent is the never-capture tombstone). REQUIRES user confirmation. First call returns a confirmation prompt — present it to the user. Only call again with the confirmation_token after the user explicitly approves.",
+  "description": "Delete a record: feed, entry, note, detection rule, campaign, automation rule, intelligence requirement, intel report, tag, or any intelligence entity (threat actor, malware, CVE, TTP, country, tool, vendor, product, mitigation, observable), by id or, for an intelligence entity, by name. Intelligence entities get the same cleanup as the API delete endpoints: entry links, entity relationships and pending Review proposals are removed and the search-index document is dropped. No tombstone is written — the autolinker/extraction pipeline may re-create the entity from future articles; use the false-positive workflow if the name must stay gone (an observable's equivalent is the never-capture tombstone). REQUIRES user confirmation. First call returns a confirmation prompt — present it to the user. Only call again with the confirmation_token after the user explicitly approves.",
   "input_schema": {
    "type": "object",
    "properties": {
@@ -1188,14 +1222,17 @@
      "type": "string",
      "description": "UUID of the entity to delete"
     },
+    "name": {
+     "type": "string",
+     "description": "Instead of entity_id, for an intelligence entity: its name (or unique alias; a CVE id, ATT&CK technique id or observable value)"
+    },
     "confirmation_token": {
      "type": "string",
      "description": "Confirmation token from a previous call. Only provide after user confirms."
     }
    },
    "required": [
-    "entity_type",
-    "entity_id"
+    "entity_type"
    ]
   },
   "mutating": true
@@ -2808,6 +2845,54 @@
   "mutating": false
  },
  {
+  "name": "get_review_rows",
+  "description": "The pending proposals behind one Review group (or every pending row matching the filters), newest first. Each row has its id ('<source>:<log_id>', what decide_proposals takes), action, subject, reason, payload, and `context`: the article text around the match, so the article needn't be fetched. Admin only.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entity_type": {
+     "type": "string",
+     "description": "The group's entity_type"
+    },
+    "entity_id": {
+     "type": "string",
+     "description": "The group's entity_id"
+    },
+    "action": {
+     "type": "string",
+     "description": "Only these action codes, comma-separated"
+    },
+    "origin": {
+     "type": "string",
+     "enum": [
+      "adjudicator",
+      "merge_review",
+      "scan"
+     ]
+    },
+    "domain": {
+     "type": "string",
+     "enum": [
+      "links",
+      "entities",
+      "relationships"
+     ]
+    },
+    "limit": {
+     "type": "integer",
+     "default": 200,
+     "description": "Rows per page (1-200)"
+    },
+    "offset": {
+     "type": "integer",
+     "default": 0,
+     "description": "Rows to skip"
+    }
+   }
+  },
+  "mutating": false
+ },
+ {
   "name": "get_search_facets",
   "description": "Get available search facets: feed types (feed count per type), categories (feed count per category), and top tags (by entry usage). Useful for understanding what's in the system before searching.",
   "input_schema": {
@@ -3688,6 +3773,56 @@
   "mutating": false
  },
  {
+  "name": "list_review_groups",
+  "description": "The Engine › Review queue: every pending hygiene proposal (both logs) folded one row per entity, most proposals first. Each group gives the entity, its proposal count, per-kind counts (e.g. shadow_remove, adjudication_reclassify), proposed target types, merge targets, origin, the newest row's subject and reason, matched forms and a sample entry. Read a group's rows with get_review_rows; decide them with decide_proposals. `total`/`proposals` are the queue size. Admin only.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "q": {
+     "type": "string",
+     "description": "Entity name substring (case-insensitive)"
+    },
+    "entity_type": {
+     "type": "string",
+     "description": "Only groups about this entity type"
+    },
+    "action": {
+     "type": "string",
+     "description": "Only these action codes, comma-separated"
+    },
+    "domain": {
+     "type": "string",
+     "enum": [
+      "links",
+      "entities",
+      "relationships"
+     ],
+     "description": "What applying would change"
+    },
+    "origin": {
+     "type": "string",
+     "enum": [
+      "adjudicator",
+      "merge_review",
+      "scan"
+     ],
+     "description": "Who filed the proposals"
+    },
+    "limit": {
+     "type": "integer",
+     "default": 50,
+     "description": "Groups per page (1-200)"
+    },
+    "offset": {
+     "type": "integer",
+     "default": 0,
+     "description": "Groups to skip"
+    }
+   }
+  },
+  "mutating": false
+ },
+ {
   "name": "list_saved_searches",
   "description": "List this user's saved searches with unread/total entry counts. Counts come from a 10-minute cache and are computed inline (via search-index queries) on a cache miss.",
   "input_schema": {
@@ -3826,6 +3961,43 @@
    },
    "required": [
     "entry_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "merge_entities",
+  "description": "Merge duplicate entities of one type into a keeper, by name or id (POST /entities/{type}/merge): entry links move to the keeper, the merged names and aliases become keeper aliases, and the merged entities are deleted along with their pending Review proposals (a merge proposal into one of them moves to the keeper). Names match the entity name first, then a unique alias. Admin only.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entity_type": {
+     "type": "string",
+     "enum": [
+      "threat_actor",
+      "malware",
+      "country",
+      "tool",
+      "vendor",
+      "product"
+     ]
+    },
+    "keeper": {
+     "type": "string",
+     "description": "The entity to keep: UUID or name"
+    },
+    "merge": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Entities to merge into the keeper: UUIDs or names"
+    }
+   },
+   "required": [
+    "entity_type",
+    "keeper",
+    "merge"
    ]
   },
   "mutating": true
@@ -4166,7 +4338,7 @@
  },
  {
   "name": "reclassify_entity",
-  "description": "Move an entity from one type to another (cross-type) when it was filed under the wrong type — e.g. a malware that's actually a tool, or a product mistakenly stored as a vendor. Supports malware / product / threat_actor / tool / vendor. If target_id is given, the source is merged into that existing entity in the target type; if omitted, a new entity is created in target_type by copying name/aliases/description. Type-specific fields (motivation, malware_type, vendor_id, tool_type, etc.) are NOT carried across — fix them after with update_entity_profile. Use mode='shadow' to log without acting; always include reasoning.",
+  "description": "Move an entity from one type to another (cross-type) when it was filed under the wrong type — e.g. a malware that's actually a tool, or a product mistakenly stored as a vendor. Supports malware / product / threat_actor / tool / vendor. If target_id is given, the source is merged into that existing entity in the target type; if omitted, a new entity is created in target_type by copying name/aliases/description, unless target_type already has an entity of the same name, which it is merged into. Name the source by source_id or source_name (and the target by target_id or target_name). Type-specific fields (motivation, malware_type, vendor_id, tool_type, etc.) are NOT carried across — fix them after with update_entity_profile. The source's pending Review proposals are closed. Use mode='shadow' to log without acting; always include reasoning.",
   "input_schema": {
    "type": "object",
    "properties": {
@@ -4181,7 +4353,12 @@
      ]
     },
     "source_id": {
-     "type": "string"
+     "type": "string",
+     "description": "Source entity UUID (or give source_name)."
+    },
+    "source_name": {
+     "type": "string",
+     "description": "Source entity name or alias, instead of source_id."
     },
     "target_type": {
      "type": "string",
@@ -4195,7 +4372,11 @@
     },
     "target_id": {
      "type": "string",
-     "description": "Optional: existing target entity to merge into. Omit to create a new one."
+     "description": "Optional: existing target entity to merge into. Omit to use the same-named target entity, or create a new one."
+    },
+    "target_name": {
+     "type": "string",
+     "description": "Optional: existing target entity by name or alias."
     },
     "mode": {
      "type": "string",
@@ -4221,7 +4402,6 @@
    },
    "required": [
     "source_type",
-    "source_id",
     "target_type"
    ]
   },
@@ -4257,6 +4437,43 @@
    },
    "required": [
     "relationship_id"
+   ]
+  },
+  "mutating": true
+ },
+ {
+  "name": "remove_entity_aliases",
+  "description": "Remove aliases from an entity, by entity name or id. Entries linked only through a removed alias are unlinked and the stored article count is recounted (the same path as editing aliases on the profile). Alias matching is case-insensitive. Admin only.",
+  "input_schema": {
+   "type": "object",
+   "properties": {
+    "entity_type": {
+     "type": "string",
+     "enum": [
+      "threat_actor",
+      "malware",
+      "country",
+      "tool",
+      "vendor",
+      "product"
+     ]
+    },
+    "entity": {
+     "type": "string",
+     "description": "UUID or name of the entity"
+    },
+    "aliases": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Aliases to remove"
+    }
+   },
+   "required": [
+    "entity_type",
+    "entity",
+    "aliases"
    ]
   },
   "mutating": true

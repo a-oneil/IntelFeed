@@ -35,6 +35,15 @@ _BLOCK_CLOSE_RE = re.compile(
     r"</(?:p|div|li|ul|ol|tr|table|thead|tbody|blockquote|figure|figcaption|dl|dd|dt|details|summary|section|article|h[1-6])\s*>",
     re.IGNORECASE,
 )
+#: Opening block tags also break the line: an unclosed <p> or a <div> that
+#: follows inline text must not glue onto it.
+_BLOCK_OPEN_RE = re.compile(
+    r"<(?:p|div|ul|ol|table|blockquote|figure|figcaption|caption|dl|dd|dt|details|summary|section|article)(?:\s[^>]*)?>",
+    re.IGNORECASE,
+)
+#: A cell left over after row rendering (nested tables, a stray <td> outside
+#: any <tr>) still ends at its boundary.
+_CELL_CLOSE_RE = re.compile(r"</t[dh]\s*>", re.IGNORECASE)
 _BR_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
 _HR_RE = re.compile(r"<hr\s*/?>", re.IGNORECASE)
 _H_OPEN_RE = re.compile(r"<h([1-6])(?:\s[^>]*)?>", re.IGNORECASE)
@@ -97,6 +106,8 @@ def html_to_analysis_text(html: str | None) -> str:
     text = _BR_RE.sub("\n", text)
     text = _HR_RE.sub("\n\n", text)
     text = _BLOCK_CLOSE_RE.sub("\n\n", text)
+    text = _BLOCK_OPEN_RE.sub("\n", text)
+    text = _CELL_CLOSE_RE.sub(" | ", text)
     text = _TAG_RE.sub("", text)
     text = html_mod.unescape(text).replace("\xa0", " ")
 
@@ -105,6 +116,9 @@ def html_to_analysis_text(html: str | None) -> str:
     # A table row rendered as " | cell | cell | " → "cell | cell".
     lines = [re.sub(r"^\|\s*|\s*\|$", "", line) for line in lines]
     out = "\n".join(lines)
+    # A block opened inside a list item or heading (<li><p>…) left the
+    # marker on a line of its own: pull the text back up.
+    out = re.sub(r"(?m)^(-|##)\n+(?=\S)", r"\1 ", out)
     out = re.sub(r"\n{3,}", "\n\n", out).strip()
 
     def _restore_pre(m: re.Match) -> str:

@@ -29,6 +29,7 @@ promotion and the stale sweep.
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -91,6 +92,9 @@ _OVERRIDE_PAYLOAD_KEYS: dict[str, tuple[str, ...]] = {
 # changes share the action code; `applied` tells them apart, like the merge
 # engine's rows). api/hygiene.py registers them as proposal kinds.
 ACTION_UNLINK = "adjudication_unlink"
+# A remove that blames one alias files the alias proposal the Review queue
+# already applies (the scan's row shape, kind="adjudicator").
+ACTION_ALIAS = "alias_collision"
 # Advisory: a link whose entity is filed under the wrong type. Applying it
 # converts the entity (the merge engine's reclassify), never unlinks it.
 ACTION_RECLASSIFY = "adjudication_reclassify"
@@ -150,6 +154,8 @@ REVIEWABLE_EDGE_SOURCES = ("auto_extracted", "co_occurrence")
 _MAX_CANDIDATES = 3
 _SNIPPET_WINDOW = 160
 _SNIPPET_MAX = 320
+# This many link changes sharing one reason are voided (see _validate_verdicts).
+_COPIED_REASON_MIN = 3
 
 # Skip statuses written to ai_analysis_requests.adjudication_status.
 SKIPPED_OFF = "skipped_off"
@@ -552,6 +558,11 @@ class ReviewItem:
     matched_names: list[str] = field(default_factory=list)
     paragraph_indices: list[int] = field(default_factory=list)
     extracted_at: datetime | None = None
+    # Other names a reason may use for this item: a TTP's technique id and
+    # name, an edge's two endpoints (see _reason_names_item).
+    forms: list[str] = field(default_factory=list)
+    # the analysis's own quote for an AI link: what the context line searches for
+    quote: str | None = None
     # ioc
     ioc_kind: str | None = None
     ioc_value: str | None = None
@@ -641,6 +652,150 @@ def _snippet(paragraph_map: dict[int, str], needles: list[str], indices: list[in
             piece += "…"
         return piece[:_SNIPPET_MAX]
     return ""
+
+
+# Defanged spellings of one character, for finding a value as the article
+# prints it (evil[.]com, hxxps[://], user[@]mail).
+_FANG_CLASSES = {
+    ".": r"(?:\.|\\?\[\s?(?:\.|dot)\s?\\?\]|\((?:\.|dot)\)|\{(?:\.|dot)\})",
+    ":": r"(?::|\[:\])",
+    "@": r"(?:@|\[@\]|\(@\)|\[at\]|\(at\))",
+}
+_HEADING_RE = re.compile(r"(?m)^## (.+)$")
+_ROW_MAX = 240
+
+
+def _value_pattern(value: str) -> re.Pattern | None:
+    """A case-insensitive pattern that finds ``value`` plain or defanged."""
+    value = (value or "").strip()
+    if len(value) < 3:
+        return None
+    parts: list[str] = []
+    rest = value
+    if rest[:4].lower() == "http":
+        parts.append(r"h(?:tt|xx)p")
+        rest = rest[4:]
+    i = 0
+    while i < len(rest):
+        if rest.startswith("://", i):
+            # 'hxxps[://]evil' brackets the whole separator, not just the colon
+            parts.append(r"(?:\[://\]|\[:\]//|:(?:\[//\]|//))")
+            i += 3
+            continue
+        ch = rest[i]
+        parts.append(_FANG_CLASSES.get(ch) or (r"\s+" if ch.isspace() else re.escape(ch)))
+        i += 1
+    # A value is a whole token: 'abc' must not be found inside 'xabcx' when
+    # it starts or ends on a word character.
+    lead = r"(?<![\w.])" if value[0].isalnum() else ""
+    tail = r"(?![\w])" if value[-1].isalnum() else ""
+    return re.compile(lead + "".join(parts) + tail, re.IGNORECASE)
+
+
+def _technique_pattern(technique_id: str) -> re.Pattern | None:
+    """T1059 finds T1059 and its sub-techniques; T1059.001 only itself."""
+    if not re.fullmatch(r"T\d{4}(?:\.\d{3})?", technique_id or "", re.IGNORECASE):
+        return None
+    return re.compile(rf"(?<![\w.]){re.escape(technique_id)}(?!\d)", re.IGNORECASE)
+
+
+def _line_bounds(text: str, start: int, end: int) -> tuple[int, int]:
+    ls = text.rfind("\n", 0, start) + 1
+    le = text.find("\n", end)
+    return ls, len(text) if le == -1 else le
+
+
+def _heading_before(text: str, pos: int) -> str:
+    """The nearest section heading above ``pos``: a rendered ``## `` line, or
+    an indicator heading in plain text (``Indicators of Compromise:``)."""
+    from app.services.analysis_window import IOC_HEADING_RE
+
+    head = text[:pos]
+    best_pos, best = -1, ""
+    for m in _HEADING_RE.finditer(head):
+        best_pos, best = m.start(), m.group(1)
+    for m in IOC_HEADING_RE.finditer(head):
+        if m.start() > best_pos:
+            best_pos, best = m.start(), m.group(0)
+    return best.strip().lstrip("#").strip()[:80]
+
+
+def _table_header(text: str, line_start: int) -> str:
+    """The first row of the table the line at ``line_start`` belongs to."""
+    header = ""
+    pos = line_start
+    while pos > 0:
+        prev_start = text.rfind("\n", 0, pos - 1) + 1
+        prev = text[prev_start : pos - 1].strip()
+        if " | " not in prev:
+            break
+        header, pos = prev, prev_start
+    return header[:120]
+
+
+def _clip(line: str, start: int, end: int) -> str:
+    """``line`` cut to _ROW_MAX characters around [start, end)."""
+    if len(line) <= _ROW_MAX:
+        return line
+    lo = max(0, min(start - _ROW_MAX // 3, len(line) - _ROW_MAX))
+    piece = line[lo : lo + _ROW_MAX]
+    return ("…" if lo else "") + piece + ("…" if lo + _ROW_MAX < len(line) else "")
+
+
+def _locate(text: str, patterns: list[re.Pattern | None], *, structured_only: bool = False) -> str:
+    """Where an item sits in the article, for the item line: the table row,
+    list line or sentence holding it, its section heading and table header.
+
+    The first literal occurrence is often the wrong one to judge by: an IoC
+    table's hash also turns up in a "re-fang only in VirusTotal" note, a TTP
+    in a file name before the report's ATT&CK table. So an occurrence in a
+    table or list (and inside the indicator section) beats one in prose.
+    ``structured_only`` returns nothing unless such a row was found."""
+    from app.services.analysis_window import find_indicator_section
+
+    if not text:
+        return ""
+    section = find_indicator_section(text)
+    best: tuple[int, int, int, int, bool, str, str] | None = None
+    for pattern in patterns:
+        if pattern is None:
+            continue
+        for m in pattern.finditer(text):
+            ls, le = _line_bounds(text, m.start(), m.end())
+            raw = text[ls:le]
+            line = raw.strip()
+            lead = len(raw) - len(raw.lstrip())
+            if " | " in line:  # html_to_analysis_text's cell separator
+                shape = "table row"
+            elif line.startswith("- "):
+                shape = "list item"
+            elif len(line) <= len(m.group(0)) + 40:
+                shape = "line of its own"
+            else:
+                shape = ""
+            in_section = bool(section and section[0] <= m.start() < section[1])
+            rank = (0 if shape else 2) + (0 if in_section else 1)
+            if best is None or rank < best[0]:
+                best = (rank, ls, m.start() - ls - lead, m.end() - ls - lead, in_section, shape, line)
+            if rank == 0:
+                break
+        if best is not None and best[0] == 0:
+            break
+    if best is None or (structured_only and not best[5]):
+        return ""
+    _, ls, s, e, in_section, shape, best_line = best
+    where = shape or "sentence"
+    heading = _heading_before(text, ls)
+    if heading:
+        where += f' under "{heading}"'
+    if in_section:
+        where += " (the article's indicator section)"
+    where += f': "{_clip(best_line, s, e)}"'
+    if shape == "table row":
+        header = _table_header(text, ls)
+        if header and header != best_line:
+            where += f" · table header: {header}"
+    return where
 
 
 async def _nearest_candidates(db: AsyncSession, entity_type: str, entity, limit: int = _MAX_CANDIDATES) -> list[dict]:
@@ -857,9 +1012,12 @@ async def _link_items(
                 name=f"{ttp.technique_id} {ttp.technique_name}",
                 source="ai",
                 confidence=junction.confidence,
-                matched_names=[junction.source_text or ""],
+                # the technique id, not the AI's quote: this list reaches the queue as the matched form
+                matched_names=[ttp.technique_id],
+                quote=junction.source_text or None,
                 paragraph_indices=list(junction.paragraph_indices or []),
                 extracted_at=junction.extracted_at,
+                forms=[f for f in (ttp.technique_id, ttp.technique_name) if f],
             )
         )
 
@@ -906,6 +1064,12 @@ async def _link_items(
             bits.append("promoted from the pending tier (name is also a dictionary word)")
         if item.previously_restored:
             bits.append("an analyst restored this link recently — it will not be changed, flag it only")
+        # The analysis links sectors (and sometimes other types) on meaning:
+        # no surface form, so the first literal occurrence of the name is
+        # often a "Related:" headline that says nothing about the link.
+        inferred = item.source != "auto_link" and not item.matched_names
+        if inferred:
+            bits.append("inferred by the analysis (linked on meaning, not a name match)")
         line = f"{item.item_id}  " + " · ".join(bits)
         if item.minted_here:
             if item.candidates:
@@ -925,9 +1089,31 @@ async def _link_items(
         aliases = list(getattr(entity, "aliases", None) or [])[:3]
         if aliases:
             line += f"\n    aliases: {', '.join(aliases)}"
-        snippet = _snippet(paragraph_map, item.matched_names or [item.name], item.paragraph_indices, text)
+        via = [f for f in dict.fromkeys(item.matched_names) if f and f.lower() != (item.name or "").lower()]
+        if via and item.source == "auto_link":
+            line += f"\n    matched as: {', '.join(via[:3])}"
+        snippet = (
+            ""
+            if inferred and item.entity_type == SECTOR
+            else _snippet(
+                paragraph_map,
+                [f for f in (item.quote, *item.matched_names) if f] or [item.name],
+                item.paragraph_indices,
+                text,
+            )
+        )
         if snippet:
             line += f'\n    context: "{snippet}"'
+        if item.entity_type == TTP and item.forms:
+            # A report's own ATT&CK table lists the technique by id; the
+            # analysis's quote can sit anywhere (a file name, a heading).
+            row = _locate(
+                text,
+                [_technique_pattern(item.forms[0]), *(_value_pattern(f) for f in item.forms[1:])],
+                structured_only=True,
+            )
+            if row:
+                line += f"\n    listed in: {row}"
         for note in earlier.get(item.item_id, []):
             line += f"\n    earlier suggestion (retired nightly job): {note}"
         item.line = line
@@ -1076,11 +1262,38 @@ async def _edge_items(db: AsyncSession, entry, dropped_out: list | None = None) 
         line = f"edge:{edge.id}  {claim} · {edge.confidence} · asserted by {edge.source.replace('_', ' ')}"
         if edge.description:
             line += f'\n    evidence: "{edge.description[:240]}"'
-        items.append(ReviewItem(item_id=f"edge:{edge.id}", kind="edge", line=line, name=claim, edge_id=edge.id))
+        items.append(
+            ReviewItem(item_id=f"edge:{edge.id}", kind="edge", line=line, name=claim, edge_id=edge.id, forms=[src, tgt])
+        )
     return items
 
 
-async def _ioc_items(db: AsyncSession, entry) -> list[ReviewItem]:
+def _ioc_where(text: str, value: str, surface: str | None) -> str:
+    """The item line's "found in:" for an indicator, or "" when not found."""
+    forms = [f for f in dict.fromkeys([surface or "", value]) if f]
+    where = _locate(text, [_value_pattern(f) for f in forms])
+    return f"\n    found in: {where}" if where else ""
+
+
+def _script_lines(text: str, code: str, label: str | None, language: str | None) -> str:
+    """A script item's code (collapsed, clipped) and where its first line sits."""
+    out = ""
+    flat = " ".join(code.split())
+    if flat:
+        head = f"script{f' ({language})' if language else ''}{f' "{label}"' if label else ''}"
+        out += f'\n    {head}: "{flat[:_ROW_MAX]}{"…" if len(flat) > _ROW_MAX else ""}"'
+        first = next((ln.strip() for ln in code.splitlines() if len(ln.strip()) >= 12), "")
+        if len(first) > 120:
+            first = first[:120].rsplit(" ", 1)[0]
+        where = _locate(text, [_value_pattern(first)]) if first else ""
+        if where:
+            out += f"\n    found in: {where}"
+    elif label:
+        out += f'\n    script "{label}" (code not stored)'
+    return out
+
+
+async def _ioc_items(db: AsyncSession, entry, text: str = "", parsed: dict | None = None) -> list[ReviewItem]:
     """Observables this entry's analysis produced, captured ledger rows first.
 
     The cap trims the tail, so the order decides what gets judged. A captured
@@ -1089,8 +1302,21 @@ async def _ioc_items(db: AsyncSession, entry) -> list[ReviewItem]:
     the candidates queue. Collecting the captured rows first also means that a
     value which is both renders as the captured one, and dropping that handles
     the staged half too (see ``_drop_ioc``).
+
+    Each item carries where the value sits in ``text`` (its IoC-table row or
+    hash-list line, found defanged too), and a script carries its code: the
+    value of a script row is our own hash of the snippet, which the article
+    never prints.
     """
+    from app.intelligence.observables import SCRIPT_KIND, script_identity
     from app.models.observable import EntryObservable, Observable
+
+    # A staged script keeps only its hash; the analysis payload has the code.
+    parsed_scripts: dict[str, dict] = {}
+    for sc in (parsed or {}).get("scripts") or []:
+        code = (sc.get("code") or "").strip() if isinstance(sc, dict) else ""
+        if len(code) >= 40:
+            parsed_scripts[script_identity(code)[0]] = sc
 
     captured: list[ReviewItem] = []
     staged: list[ReviewItem] = []
@@ -1111,6 +1337,10 @@ async def _ioc_items(db: AsyncSession, entry) -> list[ReviewItem]:
             line += f" · printed as {sighting.surface_form}"
         if getattr(sighting, "was_defanged", False):
             line += " · printed defanged"
+        if obs.kind == SCRIPT_KIND:
+            line += _script_lines(text, obs.content or "", obs.label, obs.language)
+        else:
+            line += _ioc_where(text, obs.value, sighting.surface_form)
         captured.append(
             ReviewItem(
                 item_id=f"ioc:{obs.kind}:{obs.value}",
@@ -1134,6 +1364,13 @@ async def _ioc_items(db: AsyncSession, entry) -> list[ReviewItem]:
             line += " · printed defanged"
         if cand.get("evidence"):
             line += f'\n    evidence: "{str(cand["evidence"])[:200]}"'
+        if kind == SCRIPT_KIND:
+            sc = parsed_scripts.get(value) or {}
+            line += _script_lines(
+                text, sc.get("code") or "", sc.get("label") or cand.get("surface_form"), sc.get("language")
+            )
+        else:
+            line += _ioc_where(text, value, cand.get("surface_form"))
         staged.append(
             ReviewItem(
                 item_id=f"ioc:{kind}:{value}",
@@ -1190,7 +1427,7 @@ async def build_manifest(
     if "relationships" in scope:
         items += await _edge_items(db, entry, dropped_out)
     if "observables" in scope:
-        items += await _ioc_items(db, entry)
+        items += await _ioc_items(db, entry, text, parsed)
     if "assessment" in scope:
         item = _assessment_item(parsed)
         if item:
@@ -1259,11 +1496,66 @@ class Verdict:
     reason: str
     suggested_type: str | None = None
     merge_target: dict | None = None
+    # A remove that blames one alias: that surface form is not a name for this
+    # entity at all ('crypto' on crypto24). Filed as an alias proposal.
+    bad_alias: str | None = None
     # True when the model named this item. The prompt asks for changes only, so
     # most keeps are the fill-in below — an item nobody spoke about. The two
     # read the same on every path except edge corroboration, where silence must
     # not count as agreement (see apply_verdicts).
     explicit: bool = False
+
+
+def _norm_words(text: str) -> str:
+    return " " + " ".join(re.sub(r"[^\w$]+", " ", text.lower()).split()) + " "
+
+
+def _reason_names_item(reason: str, item: ReviewItem) -> bool:
+    """A reclassify, remove or demote has to be about its own item, so its
+    reason must name it: the entity, a form it matched as, a TTP's technique
+    id or name, or either end of an edge. One that argues over another name
+    was paired with the wrong item_id ("The term 'SHA-256' …" filed against
+    Red Hat Enterprise Linux; a MANTLEMAZE → Cairn demote explaining Warlock).
+    Compared on words, so "NetSupport-RAT" names NetSupport RAT."""
+    said = _norm_words(reason)
+    for form in [item.name, *item.matched_names, *item.forms]:
+        words = _norm_words(form or "")
+        if words.strip() and words in said:
+            return True
+    return False
+
+
+# A reason that argues FOR the record it is filed against ("… explicitly
+# states MANTLEMAZE uses Cairn, validating the edge") paired the wrong
+# verdict with it. A negation shortly before the phrase ("never states",
+# "does not support the claim") is the ordinary case and stands.
+_AFFIRMING_RE = re.compile(
+    r"\bvalidat(?:e|es|ed|ing)\b"
+    r"|\b(?:supports?|supporting|confirms?|confirming|corroborates?|corroborating|justif(?:y|ies|ying))\s+"
+    r"(?:the|this|that)\s+(?:edge|relationship|claim|link|record|indicator|ioc|verb)\b"
+    r"|\b(?:edge|relationship|claim|link|record)\s+is\s+(?:correct|valid|accurate|supported|justified|warranted)\b"
+    # about this record, not others ("only the C2 domains should remain" argues for a drop)
+    r"|\b(?:it|this|edge|relationship|claim|link|record|indicator|ioc|value)\s+(?:should|must)\s+"
+    r"(?:be\s+)?(?:kept|stay|remain)\b"
+    r"|\b(?:is|as)\s+an?\s+(?:valid|genuine|real|confirmed)\s+(?:indicator|ioc)\b",
+    re.IGNORECASE,
+)
+_NEGATION_RE = re.compile(
+    r"\b(?:not|never|no|nor|without|neither|fails?\s+to|nothing|rather\s+than|instead\s+of)\b|n't\b",
+    re.IGNORECASE,
+)
+
+
+def _reason_affirms(reason: str) -> bool:
+    """True when the reason argues that the record is right."""
+    for m in _AFFIRMING_RE.finditer(reason):
+        before = reason[max(0, m.start() - 40) : m.start()]
+        # Only the clause the phrase sits in: "X is a word. It never states"
+        # must not reach back past the sentence break.
+        before = re.split(r"[.;:!?]\s", before)[-1]
+        if not _NEGATION_RE.search(before):
+            return True
+    return False
 
 
 def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verdict], dict]:
@@ -1274,7 +1566,9 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
     raw = result.get("verdicts")
     # unknown: item ids not in the manifest; coerced: verdicts the item's kind
     # or state does not accept (treated as keep).
-    stats = {"unknown": 0, "coerced": 0, "duplicate": False}
+    # unnamed_reason / affirming_reason: removes and demotes whose reason does
+    # not name the item, destructive verdicts whose reason argues for it.
+    stats = {"unknown": 0, "coerced": 0, "duplicate": False, "unnamed_reason": 0, "affirming_reason": 0}
     verdicts: dict[str, Verdict] = {}
     if isinstance(raw, list):
         for entry in raw:
@@ -1307,6 +1601,7 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
                 suggested not in RECLASSIFY_TYPES
                 or item.entity_type not in RECLASSIFY_TYPES
                 or suggested == item.entity_type
+                or not _reason_names_item(reason, item)
             ):
                 verdict = "keep"
             if verdict == "merge":
@@ -1320,9 +1615,43 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
                     verdict = "keep"  # never merge into a name it was not shown
             if verdict != asked and asked in VERDICTS:
                 stats["coerced"] += 1
-            verdicts[item_id] = Verdict(item, verdict, confidence, reason, suggested, merge_target, explicit=True)
+            # Voided, not coerced: like a copied reason, these are not about
+            # their own item (or not against it), so they are not explicit.
+            explicit = True
+            if verdict in ("remove", "demote") and not _reason_names_item(reason, item):
+                verdict, explicit = "keep", False
+                stats["unnamed_reason"] += 1
+            elif verdict in DESTRUCTIVE and _reason_affirms(reason):
+                verdict, explicit = "keep", False
+                stats["affirming_reason"] += 1
+            bad_alias = None
+            if verdict == "remove":
+                wanted = str(entry.get("bad_alias") or "").strip().lower()
+                # Only a form this link actually matched on, and never the name itself.
+                if wanted and wanted != (item.name or "").lower():
+                    bad_alias = next((f for f in item.matched_names if f.lower() == wanted), None)
+            verdicts[item_id] = Verdict(
+                item, verdict, confidence, reason, suggested, merge_target, bad_alias=bad_alias, explicit=explicit
+            )
     if stats["duplicate"]:
         verdicts = {}
+    # One reason pasted onto several changes of one kind means the model lost
+    # track of which item it was judging (a "Related: Tailscale" reason filed
+    # against six sectors; one "indicator of compromise … use drop" reason on a
+    # C2 domain, a payload host and a hash). None of those verdicts is about its
+    # own item. Voided verdicts are not explicit: a voided edge demote must not
+    # count as a keep, which is corroboration.
+    by_reason: dict[tuple[str, str], list[str]] = {}
+    for item_id, v in verdicts.items():
+        if v.item.kind in ("link", "ioc", "edge") and v.verdict != "keep" and v.reason.strip():
+            by_reason.setdefault((v.item.kind, " ".join(v.reason.lower().split())), []).append(item_id)
+    stats["copied_reason"] = 0
+    for ids in by_reason.values():
+        if len(ids) >= _COPIED_REASON_MIN:
+            for item_id in ids:
+                verdicts[item_id].verdict = "keep"
+                verdicts[item_id].explicit = False
+            stats["copied_reason"] += len(ids)
     out = [verdicts.get(it.item_id) or Verdict(it, "keep", "low", "") for it in items]
     assessment = result.get("assessment")
     if isinstance(assessment, dict) and any(it.kind == "assessment" for it in items):
@@ -1535,6 +1864,23 @@ async def _entity_has_a_life(db: AsyncSession, entity_type: str, entity_id: uuid
     except Exception:
         logger.debug("claim check skipped", exc_info=True)
     return False
+
+
+async def _settle_gone(db: AsyncSession, entity_type: str, entity_id: uuid.UUID | None, **kw) -> int:
+    """Close the pending proposals of an entity this run deleted or merged away."""
+    from app.services.proposal_dismissals import settle_gone_entity  # imports this module
+
+    successor = kw.get("successor")
+    if successor is not None:
+        kw["successor"] = (successor[0], uuid.UUID(str(successor[1])))
+    # Its own savepoint: the delete or merge already landed, and a failure here
+    # must neither undo it nor poison the session for the rest of the run.
+    try:
+        async with db.begin_nested():
+            return await settle_gone_entity(db, entity_type, entity_id, **kw)
+    except Exception as exc:
+        logger.warning("could not close proposals of %s %s: %s", entity_type, entity_id, exc)
+        return 0
 
 
 async def _delete_entity(db: AsyncSession, entity_type: str, entity_id: uuid.UUID) -> bool:
@@ -1797,6 +2143,60 @@ async def _reclassify_flips_back(db: AsyncSession, entity_type: str, entity_id: 
     return await find_reclassify_tombstone(db, target_type, obj.name, aliases) is not None
 
 
+async def _proposal_pending(
+    db: AsyncSession, action: str, entity_type: str, entity_id: uuid.UUID | None, entry_id: uuid.UUID
+) -> bool:
+    """True when this entry already has an unapplied proposal of this kind about
+    this subject. Re-reviewing an entry (a resweep, a re-analysis) filed every
+    edge demote twice; the second copy only doubles the queue."""
+    from app.models.entity_maintenance import EntityMaintenanceLog
+
+    if entity_id is None:
+        return False
+    found = await db.scalar(
+        select(EntityMaintenanceLog.id)
+        .where(
+            EntityMaintenanceLog.action == action,
+            EntityMaintenanceLog.applied.is_(False),
+            EntityMaintenanceLog.entity_type == entity_type,
+            EntityMaintenanceLog.entity_id == entity_id,
+            EntityMaintenanceLog.before["entry_id"].astext == str(entry_id),
+        )
+        .limit(1)
+    )
+    return found is not None
+
+
+async def _bad_alias_proposal(db: AsyncSession, item: ReviewItem, form: str, reason: str) -> tuple[dict, dict] | None:
+    """The (before, after) of an alias proposal for a remove that blamed one
+    alias, or None when the alias is not on the entity (any more) or already
+    proposed. Always a proposal: one alias drives every article the entity
+    matches, so a person applies it from the Review queue."""
+    from app.models.entity_maintenance import EntityMaintenanceLog
+
+    model = _model_for(item.entity_type or "")
+    entity = await db.get(model, item.entity_id) if model else None
+    aliases = list(getattr(entity, "aliases", None) or [])
+    alias = next((a for a in aliases if a.lower() == form.lower()), None)
+    if alias is None:
+        return None
+    pending = (
+        await db.execute(
+            select(EntityMaintenanceLog.id).where(
+                EntityMaintenanceLog.action == ACTION_ALIAS,
+                EntityMaintenanceLog.applied.is_(False),
+                EntityMaintenanceLog.entity_type == item.entity_type,
+                EntityMaintenanceLog.entity_id == item.entity_id,
+                EntityMaintenanceLog.after["bad_alias"].astext == alias,
+            )
+        )
+    ).first()
+    if pending is not None:
+        return None
+    before = {"entity": {"id": str(entity.id), "name": entity.name, "aliases": aliases}}
+    return before, {"kind": "adjudicator", "bad_alias": alias, "reason": reason}
+
+
 async def apply_verdicts(
     db: AsyncSession,
     entry,
@@ -1943,7 +2343,14 @@ async def apply_verdicts(
                         if real is not None:
                             applied_n += 1
                             snap = real
-                    _log(ACTION_UNLINK, item, {"junction": snap}, after_base, applied=do_apply)
+                    if do_apply or not await _proposal_pending(
+                        db, ACTION_UNLINK, item.entity_type or "", item.entity_id, entry.id
+                    ):
+                        _log(ACTION_UNLINK, item, {"junction": snap}, after_base, applied=do_apply)
+                if v.bad_alias:
+                    alias_row = await _bad_alias_proposal(db, item, v.bad_alias, reason)
+                    if alias_row is not None:
+                        _log(ACTION_ALIAS, item, alias_row[0], alias_row[1], applied=False)
             elif v.verdict == "reclassify" and v.suggested_type:
                 etype, eid, target = item.entity_type or "", item.entity_id, v.suggested_type
                 if await _reclassify_flips_back(db, etype, eid, target):  # type: ignore[arg-type]
@@ -2012,6 +2419,8 @@ async def apply_verdicts(
                         {**after_base, "deleted": deleted},
                         applied=True,
                     )
+                    if deleted:
+                        await _settle_gone(db, item.entity_type or "", item.entity_id, gone=True)  # type: ignore[arg-type]
                 else:
                     _log(ACTION_VETO, item, {"entity": snapshot, "junction": junction_snap}, after_base, applied=False)
             elif v.verdict == "merge" and v.merge_target:
@@ -2037,6 +2446,13 @@ async def apply_verdicts(
                         _log(
                             ACTION_MERGE, item, {"entity": snapshot}, {**after, "error": str(exc)[:300]}, applied=False
                         )
+                    else:
+                        await _settle_gone(
+                            db,
+                            item.entity_type or "",
+                            item.entity_id,  # type: ignore[arg-type]
+                            successor=(v.merge_target["entity_type"], v.merge_target["entity_id"]),
+                        )
                 else:
                     _log(ACTION_MERGE, item, {"entity": snapshot}, after, applied=False)
         elif item.kind == "edge" and v.verdict == "demote":
@@ -2053,7 +2469,7 @@ async def apply_verdicts(
                         entity_type=LOG_TYPE_RELATIONSHIP,
                         entity_id=item.edge_id,
                     )
-            else:
+            elif not await _proposal_pending(db, ACTION_EDGE_DEMOTE, LOG_TYPE_RELATIONSHIP, item.edge_id, entry.id):
                 _log(
                     ACTION_EDGE_DEMOTE,
                     item,
@@ -2078,7 +2494,7 @@ async def apply_verdicts(
                         entity_type=OBSERVABLE,
                         entity_id=item.observable_id,
                     )
-            else:
+            elif not await _proposal_pending(db, ACTION_IOC_DROP, OBSERVABLE, item.observable_id, entry.id):
                 _log(
                     ACTION_IOC_DROP,
                     item,

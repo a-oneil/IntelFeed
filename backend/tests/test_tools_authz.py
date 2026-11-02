@@ -28,7 +28,14 @@ def test_admin_tools_are_registered():
     missing = ADMIN_TOOLS - names
     assert not missing, f"ADMIN_TOOLS entries not in the registry: {missing}"
     admin_reads = ADMIN_TOOLS - MUTATING_TOOLS
-    assert admin_reads == {"get_hygiene_feed", "get_hygiene_stats", "get_extraction_stats", "list_extraction_entities"}
+    assert admin_reads == {
+        "get_hygiene_feed",
+        "get_hygiene_stats",
+        "get_extraction_stats",
+        "list_extraction_entities",
+        "list_review_groups",
+        "get_review_rows",
+    }
 
 
 @pytest.mark.asyncio

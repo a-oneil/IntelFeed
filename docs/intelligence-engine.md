@@ -78,21 +78,33 @@ When an entry has a translation, the autolinker and the extract stage scan the o
 
 The autolinker matches text against a dictionary of every known entity name and alias, using an Aho-Corasick automaton (one pass over the text finds every dictionary word in it).
 
-**The vocabulary.** `EntityVocabulary` (`backend/app/intelligence/autolinker.py:337`) loads the name and aliases of every threat actor, malware family, country, vendor, product and tool, plus mitigation names (mitigations have no aliases). Names shorter than `autolinker_min_name_length` (default 3) are skipped, as are names the false-positive lists rule out.
+**The vocabulary.** `EntityVocabulary` (`backend/app/intelligence/autolinker.py:350`) loads the name and aliases of every threat actor, malware family, country, vendor, product and tool, plus mitigation names (mitigations have no aliases). Names shorter than `autolinker_min_name_length` (default 3) are skipped, as are names the false-positive lists rule out.
 
 **Keeping workers in sync.** Each worker process holds its own copy. The vocabulary's version is a hash of its contents, published to Redis under `intelfeed:autolinker:vocab_version`. Before a scan, `_ensure_vocabulary()` compares its local version with Redis and rebuilds on a mismatch. The `refresh-autolinker-vocabulary` job rebuilds every 30 minutes, and denying a name or curating extractions rebuilds at once. A brand-new entity therefore starts matching new articles within 30 minutes.
 
-**The scan** (`scan_text()`, `backend/app/intelligence/autolinker.py:483`), per paragraph:
+**The scan** (`scan_text()`, `backend/app/intelligence/autolinker.py:929`), per paragraph:
 
 1. Match the lowercased text against every name and alias.
-2. Drop matches that sit inside a longer word ("APT" inside "RAPT").
-3. Short single words (alphabetic, up to `autolinker_ambiguous_name_max_length`, default 10) must start with a capital letter in the original text. For actor, malware, country and mitigation names, such a word is also dropped if it appears more than `autolinker_ambiguous_max_occurrences` (default 3) times in the entry. Lots of repeats means ordinary word use, not a name.
-4. A canonical-name match is `high` confidence; an alias match is `medium`.
-5. Regex picks up structured IDs in the same pass: `CVE-YYYY-NNNN…`, `CWE-N`, and ATT&CK technique IDs (`T1234` or `T1234.001`; the invalid `.000` falls back to the parent).
+2. Drop matches that sit inside a longer word ("APT" inside "RAPT", "RTM" inside "RTMP" or `RTM_NEWLINK`) or inside a longer matched name ("Korea" inside "North Korea").
+3. Short single words (alphabetic, up to `autolinker_ambiguous_name_max_length`, default 10) must be written the way the name is: an acronym in capitals, a mixed-case name exactly ("SynAck", not "Synack"), any other word with a capital first letter. A name written in lower case on purpose, such as the npm package "axios", matches lower-case text; capitalised mid-sentence ("reported by Axios") it is something else. For actor, malware, country and mitigation names, a short word is also dropped if it appears more than `autolinker_ambiguous_max_occurrences` (default 3) times in the entry.
+4. A name of several words must have its first real word cased as in the name: "push security" is not Push Security, and "the COM object" is not The Com.
+5. Each match is then judged in its sentence (`_occurrence_verdict()`, `backend/app/intelligence/autolinker.py:868`). It is dropped when it is:
+   - inside a "Related:" / "Read more:" headline, at the start of a line or run into the body (Dark Reading), since that headline is another article's. IDs in it are skipped too;
+   - part of a code or file token: a dotted package id (`com.apple.…`), a hyphenated compound with a capital or digit after the hyphen ("X-Agent-Secret", "Proton-J"; "-linked" and "-based" only describe the name), or a capitalised name written in lower case inside a file name or path (`push security-audit.yml`, `id-ed25519`);
+   - a number used as a number, for a name made only of digits ("PID: 764", "port 764", "1,764", "764 seconds");
+   - a release stage after a version ("Windows 10 RTM", "the RTM build");
+   - a country alias in demonym form used as a language ("staff who speak Persian", "Spanish-speaking", "Portuguese text").
+6. Some matches are held for the AI instead (see [Pending Tier](#pending-tier-dictionary-word-matches)):
+   - a one-word name inside a longer capitalised name: "NVIDIA Inception", "Quasar Framework", "WWHF DEADWOOD", "Adi Moldovan". A word that says what the name is ("Quasar RAT", "Lazarus Group") or a demonym before it ("Russian Sandworm") doesn't count. In a Title Case headline only an acronym next to the name counts. For vendors and products, which have no AI check, only a dictionary-word alias is affected, and it is dropped ("SOC Teams" is not Microsoft Teams);
+   - a name made only of digits (the group "764");
+   - an actor name with initials ("J.P. Morgan"), and an actor or malware name that a vendor or product also uses.
+   With the pending tier off these matches are dropped, not linked.
+7. A canonical-name match is `high` confidence; an alias match is `medium`.
+8. Regex picks up structured IDs in the same pass: `CVE-YYYY-NNNN…` (through `extract_cve_ids()`, which strips a CVSS score glued onto an id, so "CVE-2026-10384910.0" is CVE-2026-103849, and skips ids that can't be real), `CWE-N`, and ATT&CK technique IDs (`T1234` or `T1234.001`; the invalid `.000` falls back to the parent).
 
 ### Phase 3: Junction Record Storage
 
-`store_autolink_matches()` (`backend/app/intelligence/autolinker.py:701`) writes one junction row per entity, with:
+`store_autolink_matches()` (`backend/app/intelligence/autolinker.py:1183`) writes one junction row per entity, with:
 
 - `confidence` — the match's confidence scaled by the feed's reliability rating (see [Confidence weighting](#confidence-weighting-and-reliability-rating))
 - `source = "auto_link"` (TTP links store `source_text = "auto_link:T1234"` instead)
@@ -105,7 +117,7 @@ How each ID type is handled:
 
 | Type | Behaviour |
 |---|---|
-| CVE | The one type the autolinker creates. An unknown ID becomes a stub row (`created_via = "auto_link"`) and is queued for NVD enrichment, unless the ID is on the do-not-recreate list. |
+| CVE | The one type the autolinker creates. An unknown ID becomes a stub row (`created_via = "auto_link"`) and is queued for NVD enrichment, unless the ID is on the do-not-recreate list or can't be a real id (`is_plausible_cve_id()`). |
 | TTP | Checked against the ATT&CK catalog first (`resolve_technique_ids()`, `backend/app/intelligence/attack_catalog.py:615`): unknown IDs are dropped, revoked IDs map to their replacement, and ICS techniques (`T0xxx`) need ICS/OT words in the entry. |
 | CWE | Linked only if the ID is in the seeded CWE catalog. Never created. |
 | Dictionary words | Held for AI confirmation instead of linked; see [Pending Tier](#pending-tier-dictionary-word-matches). |
@@ -125,12 +137,13 @@ Other stages add more intelligence after (or beside) the autolinker:
 
 ### False Positive Filtering
 
-Four rules stop common words from becoming links:
+Five rules stop common words from becoming links:
 
 1. **False-positive name list** (`autolinker_false_positive_names`). A curated list of common words, brand names, Windows built-in tools and junk aliases ("storm", "windows", "certutil", "page", …). It applies to actor, malware and country names. Vendor, product, tool and mitigation names skip it, because many of them really are those words (Microsoft, Norton).
 2. **Analyst blocks** (`autolinker_blocked_surface_forms`). Words an analyst marked "never match this" from the reader. These apply to every entity type.
-3. **Capital-letter rule** for short single words (step 3 of the scan above). "fox" in "Firefox" or lowercase prose does not match the "Fox" entity.
+3. **Case rules** for short single words and multi-word names (steps 3 and 4 of the scan above). "fox" in "Firefox" or lowercase prose does not match the "Fox" entity.
 4. **Repeat limit** for those short words (also step 3).
+5. **Context rules** (steps 5 and 6): Related headlines, file names and paths, hyphenated compounds, numbers, languages, and one-word names inside longer names.
 
 Both lists are checked when the vocabulary is built, so a blocked word never enters the automaton.
 
@@ -139,7 +152,8 @@ Both lists are checked when the vocabulary is built, so a blocked word never ent
 The capital-letter rule cannot tell "Royal" the ransomware from "Royal Navy", or "INC" the group from "N2K Networks, Inc." So matches on ordinary English words wait for the AI to confirm them.
 
 - **Which words.** `is_provisional_form()` (`backend/app/intelligence/autolinker.py:194`) marks a single alphabetic word that appears in the bundled list of about 31,000 common English words (`backend/app/intelligence/data/common_english_words.txt`). Examples: "royal", "inc", "hive", "medusa". Coined names such as "Emotet" or "LockBit" link at once. This applies to actors, malware, tools and countries. Countries use a short list of their own instead (`AMBIGUOUS_COUNTRY_WORDS`: Chad, China, Georgia, Guinea, Jersey, Jordan, Niger, Panama, Turkey, Chile, Cuba). Vendors and products always link at once.
-- **Holding.** If every matched name for an entity is such a word, the match goes to `pending_autolink_matches` instead of a junction table. Held matches are invisible to correlation, scoring, counts and the UI. One non-dictionary name (the alias "Royal Ransomware", say) turns the whole match into a normal link.
+- **Other held matches.** The context rules hold a few more kinds of match the same way (step 6 of the scan): one-word names inside a longer capitalised name, names made only of digits, actor names with initials, and actor or malware names a vendor or product also uses.
+- **Holding.** If every occurrence of an entity in the article is held, the match goes to `pending_autolink_matches` instead of a junction table. Held matches are invisible to correlation, scoring, counts and the UI. One non-dictionary name (the alias "Royal Ransomware", say) turns the whole match into a normal link.
 - **Confirming.** When the one-pass AI analysis lands, `reconcile_pending_autolinks()` (`backend/app/intelligence/autolink_reconcile.py:59`) promotes held entities whose name or alias the AI also extracted. Promotion goes through the normal store path. The rest are rejected with a `FalsePositiveRecord` (`extraction_source = "ai_reconcile"`).
 - **Feeds without AI.** `entry_will_get_ai_analysis()` (`backend/app/services/ai_eligibility.py:41`) checks the instance switch `ai_one_pass_enabled`, the feed's `ai_analysis_enabled`, and that the feed's mode is not `none`. If the entry will never be analysed, nothing could confirm a held match, so these matches are dropped. They are counted in daily Redis keys (`autolink:pending_dropped_ai_off:<YYYYMMDD>`), and the Engine's Autolinking view shows the 30-day total.
 - **Expiry.** Some entries never get an AI pass (junk-gated, out of budget). `prune_engine_tables` deletes unresolved held rows after 14 days and resolved ones after `engine_run_retention_days` (default 30).
@@ -154,18 +168,18 @@ The same word lists keep junk out of `aliases` arrays in the first place (`backe
 - `is_junk_alias(alias, canonical_name)` rejects aliases shorter than the minimum length, copies of the entity's own name, and anything on the false-positive or blocked lists.
 - `filter_aliases(aliases, canonical_name)` drops junk aliases and removes case-insensitive duplicates, keeping order.
 
-AI extraction and the Cybergeist sync pass new aliases through `gate_aliases()` (`backend/app/intelligence/entity_resolution.py:1506`), which applies `is_junk_alias()` plus further quality checks. The Malpedia sync (`_run_malpedia_sync`, `backend/app/workers/enrichment_tasks.py:873`) runs Malpedia's `alt_names` through `filter_aliases()`.
+AI extraction and the Cybergeist sync pass new aliases through `gate_aliases()` (`backend/app/intelligence/entity_resolution.py:1966`), which applies `is_junk_alias()` plus further quality checks. The Malpedia sync (`_run_malpedia_sync`, `backend/app/workers/enrichment_tasks.py:873`) runs Malpedia's `alt_names` through `filter_aliases()`.
 
 ### Cross-Type Resurrection Guard
 
 A same-type merge survives re-import because the loser's name becomes an alias of the survivor (`backend/app/intelligence/entity_dedup.py`). A cross-type fold (the "Akira" malware folded into the "Akira" actor) needs more, because each importer only searches its own table and would recreate the loser within hours.
 
-All automated creation goes through `resolve_entity_creation()` (`backend/app/intelligence/entity_resolution.py:1083`). Manual creation in the UI goes through it too, and may override a refusal with `force=true`. In order, it:
+All automated creation goes through `resolve_entity_creation()` (`backend/app/intelligence/entity_resolution.py:1543`). Manual creation in the UI goes through it too, and may override a refusal with `force=true`. In order, it:
 
 1. **Matches an existing entity** by exact name or alias, then a normalized match through `entity_alias_index`, then known actor synonyms.
 2. **Checks reclassify tombstones.** A cross-type reclassify (`perform_reclassify()` in `backend/app/api/entity_merge.py`) writes one `EntityReclassifyTombstone` row per folded name: `(source_type, normalized_name) → (target_type, target_id)`. On a hit, nothing is created and the entry links to the survivor through `link_entry_to_entity()`. Set `active = False` on a tombstone row in the database to allow a split again; there is no UI for this.
 3. **Applies always-on blocks.** For automated sources creating an actor or malware family, `is_fp_entity_name()` (`backend/app/intelligence/autolinker.py:101`) rejects the false-positive list and bare file names such as `svchost.exe`, `*.dll` or `*.sys`. The do-not-recreate list (`entity_name_denylist`) also applies here.
-4. **Applies the switchable gates** (`entity_creation_gates`: `off`, `shadow` or `on`, default `on`). `shadow` logs what it would block and still creates.
+4. **Applies the switchable gates** (`entity_creation_gates`: `off`, `shadow` or `on`, default `on`). `shadow` logs what it would block and still creates. Besides generic phrases, regions and countries, the gates refuse names that are not things at all (`non_entity_reason()`): protocols (WebRTC, MQTT), cipher names (RSA, Ed25519), install commands (`npm install`, `git clone`), code tokens (`trust_remote_code=True`, `CAP_NET_ADMIN`, AutoConfig), OS APIs and kernel features (BitBlt, ptrace, inotify), product categories (SIEM, ZTNA, "OpenAI models"), technique names (BYOVD, HVNC, DNS tunneling) and hex literals. These apply to actors, malware, tools and products; protocols may still be products, and vendors are not checked. For actors, descriptions ("China-nexus", "North Korea-linked group", "Russian submarine operation") and number-only names ("888") are refused too. The same checks drop matching aliases.
 5. **Holds weak candidates.** A name that only loosely matches an existing entity is held for review and never auto-merged.
 
 Every decision is written to `EntityMaintenanceLog` (`resolution_*` actions), so it shows in the hygiene feed.
@@ -208,6 +222,8 @@ The API is `backend/app/api/hygiene.py`, under `/api/admin/hygiene/*` and admin-
 
 **The adjudicate stage** (`backend/app/services/entry_adjudication.py`). After an entry's one-pass analysis lands, `adjudicate_entry_task` (on the `ai` queue) sends the article plus a list of everything the analysis wrote: links, entities it created (with their nearest existing names), relationship claims and IOCs. The reviewer answers only for items it would change: remove, reclassify, veto, merge, demote or drop. Anything it leaves out is kept.
 
+- Each item line says where the item sits in the article. An IOC gets its table row or list line and the heading above it, found in its defanged form too, so a value from the article's own IoC table is judged there and not by an earlier passing mention. A `script` IOC carries its code, since its value is a hash of that code. An AI-linked TTP gets its row in the report's ATT&CK table when it has one.
+- Verdicts are checked before they count. A remove, demote or reclassify whose reason does not name its item (the entity, a form it matched as, a TTP's id, either end of an edge) is dropped, as is any destructive verdict whose reason argues the record is right ("validating the edge"), and one reason pasted onto three or more items. A dropped edge verdict is not counted as a keep.
 - `adjudication_mode` (default `apply`): `shadow` files every verdict as a proposal; `apply` acts on high-confidence verdicts and files the rest. Every applied change writes an audit row that doubles as its undo.
 - `reclassify` is a catalogue-wide change, so in apply mode it needs agreement: each article's verdict is a vote (filed as a proposal), and the review that brings the count to `adjudication_reclassify_consensus` (default 2) converts the entity and clears the other proposals about it. A name that was folded out of a type (a reclassify tombstone) is never proposed back into it, so types do not ping-pong.
 - Circuit breakers turn a destructive run into proposals. The rolling breaker also pauses dispatch for an hour (`adjudication_breaker_until`).
@@ -316,7 +332,7 @@ Adjustments:
 
 ### Typed relationships
 
-Co-occurrence also writes `entity_relationships` rows (actor *uses* malware, and so on) with a trust level. The weekly `relationship-confidence-decay` job moves stale co-occurrence rows from `probable` back to `possible`; rows an analyst touched are never demoted. Entry-to-entity link confidence does not decay. See [entity-profiles.md](entity-profiles.md) for how relationships appear on profiles.
+Co-occurrence also writes `entity_relationships` rows (actor *uses* malware, and so on) with a trust level, but only for a pair named in the same paragraph, where that paragraph is not boilerplate and names fewer than five entities (see [architecture.md](architecture.md#7-correlation-engine)). The weekly `relationship-confidence-decay` job moves stale co-occurrence rows from `probable` back to `possible`; rows an analyst touched are never demoted. Entry-to-entity link confidence does not decay. See [entity-profiles.md](entity-profiles.md) for how relationships appear on profiles.
 
 ---
 
@@ -378,12 +394,13 @@ Re-processing the same article stores nothing new. See [detection-engineering.md
 
 ### CVE Extraction & NVD Enrichment
 
-CVE IDs come from the autolinker (stubs), the extract stage (`extract_and_store_cves()` in `backend/app/intelligence/cve.py`) and the KEV sync. None of them calls NVD: each new CVE is queued in the [enrichment job queue](automation-ai-enrichment.md#enrichment-job-queue), and NVD looks it up from there while the source is switched on. `enrich_from_nvd()` (`backend/app/intelligence/cve.py:80`) calls the NVD API 2.0 and fills in the CVSS score and severity (v3.1, then v3.0, then v2), the English description, affected products (CPE) and references.
+CVE IDs come from the autolinker (stubs), the extract stage (`extract_and_store_cves()` in `backend/app/intelligence/cve.py`) and the KEV sync. None of them calls NVD: each new CVE is queued in the [enrichment job queue](automation-ai-enrichment.md#enrichment-job-queue), and NVD looks it up from there while the source is switched on. `enrich_from_nvd()` (`backend/app/intelligence/cve.py:144`) calls the NVD API 2.0 and fills in the CVSS score and severity (v3.1, then v3.0, then v2), the English description, affected products (CPE) and references.
 
 - Every lookup goes through the `nvd` source's [gateway](automation-ai-enrichment.md#source-gateway). An NVD API key (`nvd_api_key`, set under Settings → Engine → Enrichment → Keys) raises the rate limit from 5 to 50 requests per rolling 30 seconds. The gateway paces every caller inside that window, one request at a time.
 - A 429, or a 403 that isn't a rejected key, opens the gateway's breaker for the whole source. A sweep then stops and picks up on its next run. A rejected key stops NVD until the key changes and shows as "key rejected" in the Enrichment console.
 - Every answer goes through the NVD source's field map, so NVD's score replaces a CNA's or CISA's but never an analyst's, and every source's score stays visible as a claim.
 - An ID NVD has no record of is retried at most 3 times, 7 days apart, so junk IDs stop costing quota.
+- `extract_cve_ids()` skips IDs that can't be real. A sequence longer than seven digits, or of five or more digits with a leading zero, is dropped. An ID followed by `.<digit>` has a CVSS score glued on (`CVE-2026-10384910.0`); the score's integer part is cut off and the real ID kept. A seven-digit ID (outside the real `1000xxx` block) is dropped when its six-digit prefix is named in the same text, and `extract_and_store_cves()` won't create one whose prefix is already a stored CVE.
 
 ### EPSS & Exploit Tracking
 
@@ -399,7 +416,7 @@ CVE IDs come from the autolinker (stubs), the extract stage (`extract_and_store_
 
 ### CVE Scoring & Priority
 
-The UI shows a **risk tier** from `compute_risk_tier()` (`backend/app/intelligence/cve.py:492`), weighted toward evidence of exploitation:
+The UI shows a **risk tier** from `compute_risk_tier()` (`backend/app/intelligence/cve.py:557`), weighted toward evidence of exploitation:
 
 | Tier | Rule |
 |---|---|
@@ -408,7 +425,7 @@ The UI shows a **risk tier** from `compute_risk_tier()` (`backend/app/intelligen
 | medium | A public GitHub PoC, or CVSS critical/high |
 | low | Everything else |
 
-CVSS alone never goes above medium. API responses also carry a simpler `priority` field (`calculate_cve_priority()`, `backend/app/intelligence/cve.py:453`): CRITICAL if in KEV; HIGH if EPSS > 0.5 or CVSS ≥ 9.0; MEDIUM if EPSS > 0.1 or CVSS ≥ 7.0; else LOW.
+CVSS alone never goes above medium. API responses also carry a simpler `priority` field (`calculate_cve_priority()`, `backend/app/intelligence/cve.py:518`): CRITICAL if in KEV; HIGH if EPSS > 0.5 or CVSS ≥ 9.0; MEDIUM if EPSS > 0.1 or CVSS ≥ 7.0; else LOW.
 
 ---
 
@@ -480,7 +497,7 @@ Every setting below is read through `settings.get()`, which checks the `system_s
 | `autolinker_min_name_length` | 3 | Shorter names and aliases are never matched |
 | `autolinker_false_positive_names` | curated list | Words never matched as actor, malware or country names |
 | `autolinker_blocked_surface_forms` | empty | Analyst blocks, for every entity type |
-| `autolinker_ambiguous_name_max_length` | 10 | Single words up to this length need a capital letter |
+| `autolinker_ambiguous_name_max_length` | 10 | Single words up to this length must be written the way the name is (see the scan, step 3) |
 | `autolinker_ambiguous_max_occurrences` | 3 | More repeats than this and a short word is ignored |
 | `autolink_pending_tier_enabled` | true | Hold dictionary-word matches for AI confirmation |
 | `entity_creation_gates` | `on` | `off` / `shadow` / `on` for the creation gates |
@@ -602,7 +619,7 @@ Use for personal or non-security feeds, test feeds, or to quiet a feed while you
 
 ### Confidence weighting and reliability rating
 
-`_weighted_confidence()` (`backend/app/intelligence/autolinker.py:629`) scales each autolink's confidence by the feed's reliability rating. A canonical-name match starts at 0.9 and an alias at 0.5. The result is multiplied by the feed weight (`reliability_to_weight()`, `backend/app/intelligence/autolinker.py:235`):
+`_weighted_confidence()` (`backend/app/intelligence/autolinker.py:1111`) scales each autolink's confidence by the feed's reliability rating. A canonical-name match starts at 0.9 and an alias at 0.5. The result is multiplied by the feed weight (`reliability_to_weight()`, `backend/app/intelligence/autolinker.py:235`):
 
 | Rating | A | B | C | D | E | F | unrated |
 |---|---|---|---|---|---|---|---|
@@ -625,8 +642,8 @@ Then it is bucketed: ≥ 0.7 high, ≥ 0.4 medium, else low. So "APT29" on an A-
 
 ### Operational notes
 
-- Changing a feed's mode only affects new entries. To re-process old ones, use the rescan endpoints or `autolink_batch()` (`backend/app/intelligence/autolinker.py:1110`), which commits every 100 entries.
-- Creating an entity by hand runs `link_entity_to_existing_entries()` (`backend/app/intelligence/autolinker.py:1373`), which links it to existing entries using the same rules as ingest: `manual` and `none` feeds skipped, both word lists applied, the capital-letter rule applied, and confidence scaled by feed reliability. The pending tier does not apply.
+- Changing a feed's mode only affects new entries. To re-process old ones, use the rescan endpoints or `autolink_batch()` (`backend/app/intelligence/autolinker.py:1584`), which commits every 100 entries.
+- Creating an entity by hand runs `link_entity_to_existing_entries()` (`backend/app/intelligence/autolinker.py:1857`), which links it to existing entries using the same rules as ingest: `manual` and `none` feeds skipped, both word lists applied, the case and context rules applied, and confidence scaled by feed reliability. The pending tier does not apply, so a match ingest would hold is not linked.
 
 ### None of this uses AI
 

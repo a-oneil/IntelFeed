@@ -25,11 +25,11 @@ Related: summary in [intelligence-engine.md](intelligence-engine.md#observables-
 
 Defanged values (`evil[.]com`, `hxxps://`) get +0.1. No `created_via` value means "regex".
 
-Door input must pass `validate_kind_value()` (`backend/app/intelligence/observables.py:1240`). New entries are then **sighted**: `sight_known_values()` (`backend/app/intelligence/observables.py:1001`) records exact matches of ledger values.
+Door input must pass `validate_kind_value()` (`backend/app/intelligence/observables.py:1350`). New entries are then **sighted**: `sight_known_values()` (`backend/app/intelligence/observables.py:1069`) records exact matches of ledger values.
 
 ## What becomes a candidate
 
-Rules in `scan_candidates()` (`backend/app/intelligence/observables.py:434`):
+Rules in `scan_candidates()` (`backend/app/intelligence/observables.py:501`):
 
 | Family | Becomes a candidate when |
 |---|---|
@@ -45,7 +45,8 @@ The scanner also refuses:
 
 - **Advisory sources.** Entries with a GitHub `content_type` (Sigma, Nuclei, LOLDrivers repositories), feeds in a category in `observables_codeblock_skip_categories` (default "Security Advisories, Government / CERT"), and NVD feeds nominate **only defanged values** (bare hex there is a checksum, a dotted quad a version); their code blocks nominate nothing.
 - **Version numbers.** "9.4.0.0 through 9.4.0.25", "20.15.6.1 and earlier", "from X to Y", or a dotted quad after version/release/affected wording with no address wording nearby.
-- **Commit hashes.** Hex in commit / fixed-in / version context with no sample, hash or file word nearby.
+- **Commit hashes.** Hex in commit / fixed-in / version context with no sample, hash or file word nearby. A 40-hex value with git wording on its line or the line above (`commit`, `merge`, `revert`, `git`, `GitHub`, a `| Commit |` cell, a git log `Author:` line below) and no sample or SHA1 wording is not staged.
+- **Certificate and header hashes.** A hash labelled, or nested under a YAML/JSON key, `TBS`, `RichPEHeaderHash`, `Thumbprint`, `SerialNumber`, `Certificates`, `Signer` or `Signatures` (the LOLDrivers driver layout) describes a certificate or PE header, not the file. The sample's own hashes and its `Authentihash` still nominate.
 - **Glued table cells.** The scan reads renderer text (`cell | cell`); a TLD shaped like `com` + letters (`pobelstudio.comdomain`) is rejected.
 - **Placeholders and reference sites.** `attacker.com`, `contoso.com`; sandbox, catalog, vendor and social sites (VirusTotal, urlscan, GitHub, MITRE, Microsoft Learn, Telegram API, IP-echo services); the bare apex of shared hosting (`amazonaws.com`, `github.io`). Their subdomains can still be candidates.
 - **Hashes inside longer tokens.** 32/40/64 hex inside a hostname, path segment or identifier (`pub-9ee1bf…a.r2.dev`). Cloud dev platforms (`r2.dev`, `pages.dev`, `trycloudflare.com`, `ngrok`, `vercel.app`, …) are in `SHARED_INFRA_SUFFIXES`: their apex never nominates, and rows under them are never published.
@@ -67,22 +68,22 @@ python scripts/maintenance/rescan_observable_candidates.py --purge-all-scan --pu
 | | `url` | 60 days | A full `http(s)://` URL |
 | | `uri_path` | 120 days | Starts with `/`; benign paths (`/favicon.ico`, `/login`) rejected |
 | | `ja3`, `ja4`, `cert_fingerprint` | never decays | Correct fingerprint shape |
-| hash | `md5`, `sha1`, `sha256` | never decays | Length sets the kind; the AI door rejects 64-hex its evidence calls a key, token or secret |
+| hash | `md5`, `sha1`, `sha256` | never decays | Length sets the kind; the AI door rejects hex its evidence calls a key, token or secret, a certificate TBS digest, a RichPE header hash, a thumbprint or a git commit |
 | host | `cmdline`, `path`, `registry`, `scheduled_task`, `service_name`, `mutex`, `named_pipe`, `user_agent`, `http_header` | never decays | See below |
 | script | `script` | never decays | SHA-256 of the normalised snippet (kept in `content`) |
 
 Host rules (`_plausible_cmdline`, `_plausible_path_atom`, and the branches of `validate_kind_value`):
 
-- **`cmdline`**: two+ tokens; not a generic admin command (`whoami /priv`, `systeminfo`, `net group "Domain Admins" /domain`, `nltest`, `tasklist`, …); not detection logic (`process.`, `index=`, `OR`/`AND` chains); and has something attacker-chosen: path, host, URL, IP, quoted string, encoded blob, dropped file name, or state-changing flag (`/add`, `/create`, `-enc`, `-ExecutionPolicy`).
-- **`path`**: absolute (env-var prefixes allowed); not a known OS binary under `System32` / `SysWOW64` (a planted `phoneinfo.dll` there *is* kept); not a bare well-known directory or lab path (`C:\Users\Lab\…`); no `REDACTED`, `<…>` or `{…}`.
-- **`registry`**: a hive-rooted key **with** the value name (`HKCU\…\Run\AppResolver`); a bare well-known key is not an artifact.
+- **`cmdline`**: two+ tokens; not a generic admin command (`whoami /priv`, `systeminfo`, `net group "Domain Admins" /domain`, `nltest`, `tasklist`, …); not detection logic (`process.`, `index=`, `OR`/`AND` chains); not a template (`<TARGET>`, `{c2_url}`, `{{host}}`, `[ATTACKER_IP]`, `REDACTED`); and has something attacker-chosen: path, host, URL, IP, quoted string, encoded blob, dropped file name, or state-changing flag (`/add`, `/create`, `-enc`, `-ExecutionPolicy`).
+- **`path`**: absolute (env-var prefixes allowed); not a known OS binary under `System32` / `SysWOW64` (`cmd.exe`, `wsl.exe`, `fodhelper.exe`, …; a planted `phoneinfo.dll` there *is* kept); not a bare well-known directory or lab path (`C:\Users\Lab\…`); not a well-known system file (`/var/log/*` unless a hidden name sits under it, `/proc/*`, `/etc/os-release`, `…\drivers\etc\hosts`, `…\config\SAM`, `ntds.dit`); not a loopback share (`\\127.0.0.1\C$`, `\\localhost\…`); no `REDACTED`, `<…>` or `{…}`.
+- **`registry`**: a hive-rooted key **with** the value name (`HKCU\…\Run\AppResolver`); a bare well-known key is not an artifact. A Run/RunOnce key followed by a file name, a path or a deeper segment (`…\Run\update.exe`, `…\Run\C:\Users\…`) is a key glued onto its value data and is rejected.
 - **`scheduled_task`, `service_name`, `mutex`, `named_pipe`**: 3–128 characters, at most 5 words, not an OS default (`Schedule`, `Spooler`, `wuauserv`, …).
 - **`http_header`**: a custom header name, optionally `Name: value`; standard headers rejected (`User-Agent` has its own kind).
 - **`user_agent`**: product/version syntax (`Mozilla/5.0 …`, `curl/8.1.2`).
 
 **Roles.** Network: `c2`, `delivery`, `payload`, `phishing`, `exfil`, `exploit`, `scanning`. Host (a tactic): `persistence`, `execution`, `defense_evasion`, `credential_access`, `discovery`, `lateral_movement`, `collection`. Feed rows take it from the file path (`domainC2s` → `c2`, scanners → `scanning`, phishing-simulation → `phishing`); VPN, RMM and KVM lists get an infrastructure tag.
 
-**Shared infrastructure.** `is_shared_infra()` (`backend/app/intelligence/observables.py:652`) tags shared hosting, CDNs and URL shorteners in `infra_tag`; publishing skips them, profiles show them.
+**Shared infrastructure.** `is_shared_infra()` (`backend/app/intelligence/observables.py:722`) tags shared hosting, CDNs and URL shorteners in `infra_tag`; publishing skips them, profiles show them.
 
 ## What the AI sees: the analysis window
 
@@ -168,7 +169,7 @@ Shodan, GreyNoise, VirusTotal and the abuse.ch lookups send the indicator to a t
 
 ## Lifecycle and jobs
 
-Confidence = `base × 0.5^(days since last sighting / half-life)`. `status_for()` (`backend/app/intelligence/observables.py:753`) derives status: `active`, `aging` below 0.5, `expired` below 0.15. `retro_sight_observable()` (`backend/app/intelligence/observables.py:1945`) searches recent entries when a row is created, so promoted candidates keep their history.
+Confidence = `base × 0.5^(days since last sighting / half-life)`. `status_for()` (`backend/app/intelligence/observables.py:823`) derives status: `active`, `aging` below 0.5, `expired` below 0.15. `retro_sight_observable()` (`backend/app/intelligence/observables.py:2067`) searches recent entries when a row is created, so promoted candidates keep their history.
 
 | Job | When (UTC) | Does |
 |---|---|---|

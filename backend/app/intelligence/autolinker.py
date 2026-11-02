@@ -331,6 +331,19 @@ class VocabEntry:
     is_alias: bool
     is_ambiguous: bool = False  # Requires uppercase-first match in original text
     is_provisional: bool = False  # Common English word — match held for AI confirmation
+    # Written in lower case on purpose (an npm package such as "axios"): no other
+    # form of the entity spells it with capitals.
+    lowercase_only: bool = False
+
+
+# Types that name organisations and their products. A threat actor or malware
+# form that one of them also uses ("Quasar" the framework) is held for the AI.
+_ORG_TYPES = frozenset({"vendor", "product"})
+_THREAT_TYPES = frozenset({"threat_actor", "malware"})
+
+# A person's name with initials ("J.P. Morgan"): as an actor handle it is far
+# more often the person or the bank, so it waits for the AI.
+_INITIALS_NAME_RE = re.compile(r"^(?:[A-Z]\.\s?){1,3}[A-Z][a-z]+$")
 
 
 @dataclass
@@ -438,6 +451,9 @@ class EntityVocabulary:
             if key in seen_forms:
                 continue
             seen_forms.add(key)
+            provisional = is_provisional_form(entity_type, surface_form)
+            if entity_type == "threat_actor" and _INITIALS_NAME_RE.match(surface_form):
+                provisional = True
             entry = VocabEntry(
                 entity_type=entity_type,
                 entity_id=entity_id,
@@ -445,13 +461,21 @@ class EntityVocabulary:
                 surface_form=surface_form,
                 is_alias=is_alias,
                 is_ambiguous=_is_ambiguous_surface_form(surface_form),
-                is_provisional=is_provisional_form(entity_type, surface_form),
+                is_provisional=provisional,
+                lowercase_only=surface_form == key
+                and not any(f and f.lower() == key and f != key for f, _ in all_forms),
             )
 
             # Multiple entities can share a surface form
             existing = self.automaton.get(key, None)
             if existing is not None:
                 existing.append(entry)
+                # The same word names a company or product too: the threat
+                # entity's match waits for the AI to say which one is meant.
+                if any(e.entity_type in _ORG_TYPES for e in existing):
+                    for e in existing:
+                        if e.entity_type in _THREAT_TYPES:
+                            e.is_provisional = True
             else:
                 self.automaton.add_word(key, [entry])
             count += 1
@@ -472,12 +496,434 @@ _vocab_version: str = ""
 
 
 def _is_word_boundary(text: str, start: int, end: int) -> bool:
-    """Check that match has word boundaries on both sides."""
-    if start > 0 and text[start - 1].isalnum():
+    """Check that match has word boundaries on both sides. An underscore is part
+    of the word: "RTM" in RTM_NEWLINK is a code identifier, not a mention."""
+    if start > 0 and (text[start - 1].isalnum() or text[start - 1] == "_"):
         return False
-    if end < len(text) and text[end].isalnum():
+    if end < len(text) and (text[end].isalnum() or text[end] == "_"):
         return False
     return True
+
+
+def _case_fits(form: str, seen: str) -> bool:
+    """Case test for a short one-word form (see _is_ambiguous_surface_form).
+    An acronym must appear in capitals ("TRAP", not a kernel "trap"; "MMC",
+    not "mmc:"), a mixed-case brand exactly as written ("iOS", not Cisco
+    "IOS"). Other forms need a capital first letter, as a proper noun does."""
+    if form.isupper():
+        return seen.isupper()
+    if any(c.isupper() for c in form[1:]):
+        return seen == form
+    return seen[:1].isupper()
+
+
+def _starts_dotted_identifier(text: str, start: int, end: int) -> bool:
+    """True for an all-lowercase match that opens a dotted package or bundle id:
+    "the com" in "the com.apple.screensharing", "com" in "com.ahsay.c". A name
+    written as a name has capitals; a lowercase run followed by two more dotted
+    segments is code. One segment ("google.com", "certutil.exe") still matches."""
+    if text[start:end] != text[start:end].lower():
+        return False
+    rest = text[end:]
+    return rest.startswith(".") and _DOTTED_TAIL_RE.match(rest) is not None
+
+
+_DOTTED_TAIL_RE = re.compile(r"\.[a-z0-9_]+\.[a-z0-9_]")
+
+
+# ── Context rules ────────────────────────────────────────────────────────────
+# Each occurrence of a name is judged in its sentence: accept it, hold it for
+# the AI (pending tier), or drop it.
+_ACCEPT, _HOLD, _DROP = "accept", "hold", "drop"
+
+_ALNUM_RUN_RE = re.compile(r"[A-Za-z0-9]+")
+_ALPHA_FORM_RE = re.compile(r"^[A-Za-z]+\.?$")
+_ACRONYM_RE = re.compile(r"^[A-Z]{2,6}$")
+_VERSION_RE = re.compile(r"^v?\d+(?:\.\d+)*$", re.IGNORECASE)
+_PUNCT = ".,;:!?)]}\"'”’"
+
+# Words after a hyphen that describe the name rather than extend it
+# ("APT28-linked", "Russia-backed", title-cased in headlines).
+_DESCRIPTIVE_SUFFIXES = frozenset(
+    {
+        "affiliated", "aligned", "associated", "backed", "based", "branded", "built",
+        "centric", "compatible", "connected", "controlled", "derived", "driven",
+        "enabled", "focused", "inspired", "led", "like", "linked", "made", "nexus",
+        "operated", "owned", "powered", "related", "speaking", "sponsored", "style",
+        "targeted", "themed", "tied", "type",
+    }
+)  # fmt: skip
+
+# Words after a name that say what it is ("Quasar RAT", "Lazarus Group"):
+# the name is used as a name, not as part of a longer one.
+_NAME_DESCRIPTORS = frozenset(
+    {
+        "actor", "actors", "affiliate", "affiliates", "apt", "attack", "attacks",
+        "backdoor", "banker", "botnet", "builder", "c2", "campaign", "campaigns",
+        "crew", "downloader", "dropper", "family", "gang", "group", "hackers",
+        "implant", "infostealer", "loader", "malware", "operation", "operator",
+        "operators", "panel", "payload", "payloads", "rat", "ransomware", "rootkit",
+        "sample", "samples", "spyware", "stealer", "team", "threat", "trojan",
+        "variant", "variants", "wiper", "worm",
+    }
+)  # fmt: skip
+
+# Capitalised only because they start a sentence or a phrase.
+_LEAD_WORDS = frozenset(
+    {
+        "a", "an", "and", "as", "at", "both", "by", "called", "dubbed", "for", "from",
+        "his", "her", "in", "its", "like", "named", "new", "of", "on", "or", "our",
+        "than", "that", "the", "their", "these", "this", "those", "to", "via", "with",
+    }
+)  # fmt: skip
+
+# A number right after one of these is a value, not a group ("PID: 764").
+_NUMBER_LABELS = frozenset(
+    {
+        "about", "around", "build", "code", "count", "cve", "error", "event", "exit",
+        "gid", "id", "kb", "line", "nearly", "no", "number", "offset", "over", "page",
+        "pid", "port", "ppid", "rule", "sid", "size", "status", "step", "tid", "top",
+        "total", "uid", "v", "ver", "version",
+    }
+)  # fmt: skip
+_NUMBER_UNITS = frozenset(
+    {
+        "bytes", "customers", "days", "devices", "files", "gb", "hours", "kb", "mb",
+        "minutes", "ms", "people", "percent", "seconds", "times", "users", "victims",
+        "years",
+    }
+)  # fmt: skip
+
+# A country alias in demonym form ("Persian", "Portuguese") next to one of these
+# is a language, not the country.
+_LANGUAGE_BEFORE = frozenset(
+    {"fluent", "native", "speak", "speaks", "spoke", "spoken", "speaking", "translate", "translated", "written"}
+)
+_LANGUAGE_AFTER = frozenset(
+    {
+        "alphabet", "dialect", "keyboard", "language", "languages", "locale", "name",
+        "names", "script", "speaker", "speakers", "speaking", "subtitles", "text",
+        "translation", "translations", "version", "word", "words",
+    }
+)  # fmt: skip
+_DEMONYM_RE = re.compile(r"(?:ish|ese|ian|an|ic|i|ch)$")
+
+# Release qualifiers: an acronym after a version number or before one of these
+# is a build stage ("Windows 10 RTM", "the RTM build").
+_RELEASE_AFTER = frozenset({"build", "builds", "edition", "release", "version"})
+
+# "Related: <headline>" links to another article. Whatever it names is not
+# what this article is about.
+_RELATED_LABEL_RE = re.compile(r"\b(?:Related|RELATED|Read [Mm]ore|READ MORE|See [Aa]lso|Also [Rr]ead)\s*:")
+_HEADLINE_SMALL_WORDS = frozenset(
+    {
+        "a", "after", "an", "and", "are", "as", "at", "by", "for", "from", "in", "into",
+        "is", "of", "on", "or", "over", "the", "to", "vs", "via", "with",
+    }
+)  # fmt: skip
+_HEADLINE_MAX_TOKENS = 25
+
+
+def _related_spans(text: str) -> list[tuple[int, int]]:
+    """Character spans of "Related:" headlines in ``text``.
+
+    At the start of a line the rest of the line is the headline. Inline (Dark
+    Reading runs them into the body with no line break) the headline is the
+    run of title-case words after the label; the capitalised word just before
+    the first lowercase one already starts the next sentence."""
+    spans: list[tuple[int, int]] = []
+    for m in _RELATED_LABEL_RE.finditer(text):
+        line_start = text.rfind("\n", 0, m.start()) + 1
+        if not text[line_start : m.start()].strip():
+            line_end = text.find("\n", m.end())
+            spans.append((m.start(), len(text) if line_end < 0 else line_end))
+            continue
+        end = before_last = m.end()
+        tokens = 0
+        for tok in re.compile(r"\S+").finditer(text, m.end()):
+            if "\n" in text[end : tok.start()] or tokens >= _HEADLINE_MAX_TOKENS:
+                break
+            word = tok.group().strip(_PUNCT + "(")
+            if word and not (word[0].isupper() or word[0].isdigit() or word.lower() in _HEADLINE_SMALL_WORDS):
+                if tokens > 1:
+                    end = before_last  # that capital started the next sentence
+                break
+            before_last, end = end, tok.end()
+            tokens += 1
+            if tok.group()[-1:] in ".!?":
+                break
+        spans.append((m.start(), end))
+    return spans
+
+
+def _in_spans(pos: int, spans: list[tuple[int, int]] | None) -> bool:
+    return bool(spans) and any(s <= pos < e for s, e in spans)
+
+
+def is_headline_text(text: str) -> bool:
+    """A short paragraph in Title Case (a headline): every word is capitalised,
+    so a capital next to a name says nothing about it."""
+    if len(text.split()) > 30:
+        return False
+    words = [w for w in re.findall(r"[A-Za-z0-9][\w'’-]*", text) if w.lower() not in _HEADLINE_SMALL_WORDS]
+    if len(words) < 3:
+        return False
+    return sum(w[0].isupper() or w[0].isdigit() for w in words) / len(words) >= 0.75
+
+
+def _token_before(text: str, start: int) -> tuple[str, int] | None:
+    """The word just before ``start`` on the same line, when only spaces separate
+    them and it doesn't end a clause (no comma, full stop, bracket)."""
+    i = start
+    while i > 0 and text[i - 1] in " \t":
+        i -= 1
+    if i == start or i == 0 or text[i - 1] in _PUNCT:
+        return None
+    j = i
+    while j > 0 and not text[j - 1].isspace():
+        j -= 1
+    return text[j:i], j
+
+
+def _token_after(text: str, end: int) -> str | None:
+    """The word just after ``end`` when only spaces separate them."""
+    i = end
+    while i < len(text) and text[i] in " \t":
+        i += 1
+    if i == end or i >= len(text):
+        return None
+    j = i
+    while j < len(text) and not text[j].isspace():
+        j += 1
+    return text[i:j]
+
+
+def _bare_word(token: str) -> str:
+    word = token.strip(_PUNCT + '("“')
+    for tail in ("'s", "’s"):
+        if word.endswith(tail):
+            word = word[: -len(tail)]
+    return word
+
+
+def _sentence_initial(text: str, pos: int) -> bool:
+    k = pos
+    while k > 0 and text[k - 1] in " \t":
+        k -= 1
+    return k == 0 or text[k - 1] in '.!?:;\n•*–—|>"“('
+
+
+def _ends_with_country_form(text: str, pos: int) -> bool:
+    """True when the one to three words ending at ``pos`` name a country or its
+    demonym ("Russian", "North Korean", "Russia's")."""
+    if not _vocabulary or not _vocabulary.built:
+        return False
+    words = text[:pos].split()[-3:]
+    for n in range(1, len(words) + 1):
+        form = _bare_word(" ".join(words[-n:])).lower()
+        if any(e.entity_type == "country" for e in _vocabulary.automaton.get(form, None) or []):
+            return True
+    return False
+
+
+def _glued_compound(text: str, start: int, end: int, form: str) -> bool:
+    """True when the match is one piece of a longer hyphenated, file or path token.
+
+    "X-Agent" in "X-Agent-Secret", "Proton" in "Proton-J": a capitalised or
+    numeric piece after the hyphen makes a different name ("-linked", "-based"
+    only describe it). A name with capitals written all in lower case and glued
+    to a hyphen, slash or dot is a file or path ("push security-audit.yml",
+    "id-ed25519", "/ed25519.pub")."""
+    seen = text[start:end]
+    lowered = seen == seen.lower() and form != form.lower()
+    n = len(text)
+    if end + 1 < n and text[end] == "-" and text[end + 1].isalnum():
+        suffix = _ALNUM_RUN_RE.match(text, end + 1).group()
+        if suffix.lower() not in _DESCRIPTIVE_SUFFIXES and (suffix[0].isupper() or suffix[0].isdigit()):
+            return True
+        if lowered:
+            return True
+    if start >= 2 and text[start - 1] == "-" and text[start - 2].isalnum():
+        j = start - 1
+        while j > 0 and text[j - 1].isalnum():
+            j -= 1
+        prefix = text[j : start - 1]
+        if len(prefix) == 1 or prefix.isupper() or prefix.isdigit() or lowered:
+            return True
+    if lowered and start >= 1 and (text[start - 1] in "/\\" or (text[start - 1] == "." and start >= 2)):
+        return True
+    return lowered and end + 1 < n and text[end] in "/\\" and text[end + 1].isalnum()
+
+
+_PHRASE_LEAD_WORDS = frozenset({"a", "an", "the", "of", "and", "for", "in", "on", "de", "la"})
+
+
+def _phrase_case_fits(form: str, seen: str) -> bool:
+    """Case test for a multi-word name that has capitals. Its first real word
+    must be written as in the name ("push security" is not Push Security), and a
+    capitalised word must not turn up as a different acronym ("the COM object"
+    is not The Com). A phrase in all capitals (a shouted headline) fits."""
+    if form == form.lower() or seen.isupper():
+        return True
+    form_words, seen_words = form.split(), seen.split()
+    if len(form_words) != len(seen_words):
+        return True
+    head_done = False
+    for fw, sw in zip(form_words, seen_words, strict=True):
+        if fw.lower() in _PHRASE_LEAD_WORDS and not head_done:
+            continue
+        has_caps = any(c.isupper() for c in fw)
+        if has_caps and not fw.isupper() and sw.isupper() and len(sw) > 1:
+            return False
+        if not head_done:
+            head_done = True
+            if has_caps and not _case_fits(fw, sw):
+                return False
+    return True
+
+
+def _numeric_context(text: str, start: int, end: int) -> bool:
+    """True when a purely numeric name is just a number here: part of a larger
+    number, a value after a label ("PID: 764", "port 764") or before a unit."""
+    if start > 0 and text[start - 1] in ".,:/#$-+%x":
+        return True
+    if end < len(text) and text[end] in "%-/":
+        return True
+    if end + 1 < len(text) and text[end] in ".,:" and text[end + 1].isdigit():
+        return True
+    # The word before, even across a colon ("PID: 764").
+    i = start
+    while i > 0 and text[i - 1] in " \t":
+        i -= 1
+    j = i
+    while j > 0 and not text[j - 1].isspace():
+        j -= 1
+    word = _bare_word(text[j:i]).rstrip("#=").lower()
+    if word in _NUMBER_LABELS or _VERSION_RE.match(word or "-"):
+        return True
+    after = _token_after(text, end)
+    return bool(after and _bare_word(after).lower() in _NUMBER_UNITS)
+
+
+def _language_context(text: str, start: int, end: int, entry: VocabEntry) -> bool:
+    """True for a demonym-form country alias used as a language ("staff who
+    speak Persian", "Spanish-speaking", "Portuguese text")."""
+    form = entry.surface_form
+    if not entry.is_alias or form.lower() == entry.canonical_name.lower() or not _DEMONYM_RE.search(form.lower()):
+        return False
+    before = _token_before(text, start)
+    if before and _bare_word(before[0]).lower() in _LANGUAGE_BEFORE:
+        return True
+    m = re.match(r"[\s-]+([A-Za-z]+)", text[end:])
+    if m and m.group(1).lower() in _LANGUAGE_AFTER:
+        return True
+    if before and before[0].lower() == "in":
+        after = _token_after(text, end)
+        return after is None or text[end : end + 1] in _PUNCT or _bare_word(after).lower() in ("and", "or")
+    return False
+
+
+def _in_name_run(text: str, start: int, end: int, entry: VocabEntry, headline: bool) -> bool:
+    """True when a one-word name sits inside a longer capitalised name:
+    "NVIDIA Inception", "Quasar Framework", "WWHF Deadwood", "SOC Teams",
+    "Adi Moldovan". Words that say what the name is ("Quasar RAT") and
+    demonyms before it ("Iranian MuddyWater") don't count. In a headline every
+    word is capitalised, so only an acronym neighbour counts there."""
+    form = entry.surface_form
+    if not _ALPHA_FORM_RE.match(form):
+        return False
+    letters = form.rstrip(".")
+    if not (letters.isupper() or (letters[0].isupper() and letters[1:] == letters[1:].lower())):
+        return False  # CamelCase and lower-case forms are told apart by case alone
+
+    before = _token_before(text, start)
+    if before:
+        word = _bare_word(before[0])
+        if word[:1].isupper():
+            acronym = bool(_ACRONYM_RE.match(word))
+            if headline:
+                counts = acronym
+            elif word.lower() in _LEAD_WORDS:
+                counts = False
+            elif entry.entity_type != "country" and _ends_with_country_form(text, before[1] + len(before[0])):
+                counts = False
+            elif _sentence_initial(text, before[1]) and not acronym and is_common_english_word(word):
+                counts = False
+            else:
+                counts = True
+            if counts:
+                return True
+    if entry.entity_type not in PENDING_TIER_TYPES - {"country"}:
+        # A demonym before a capitalised noun is ordinary ("Russian GRU"), and
+        # so is a company name before its product ("Microsoft Defender").
+        return False
+    after = _token_after(text, end)
+    if after:
+        word = _bare_word(after)
+        if word[:1].isupper() and word.lower() not in _NAME_DESCRIPTORS:
+            return bool(_ACRONYM_RE.match(word)) if headline else True
+    return False
+
+
+def _occurrence_verdict(
+    entry: VocabEntry,
+    text: str,
+    start: int,
+    end: int,
+    *,
+    related: list[tuple[int, int]] | None = None,
+    headline: bool = False,
+) -> str:
+    """Accept, hold for the AI, or drop one occurrence of ``entry`` at text[start:end]."""
+    form = entry.surface_form
+    seen = text[start:end]
+    if _in_spans(start, related):
+        return _DROP
+    if _starts_dotted_identifier(text, start, end) or _glued_compound(text, start, end, form):
+        return _DROP
+
+    hold = False
+    if entry.is_ambiguous:
+        if entry.lowercase_only and entry.entity_type in ("tool", "product", "vendor"):
+            # A package name written in lower case ("axios") is that package;
+            # capitalised mid-sentence it is something else (Axios the outlet).
+            if seen != form and not (headline or _sentence_initial(text, start)):
+                if entry.entity_type != "tool":
+                    return _DROP
+                hold = True
+            elif seen == form and is_common_english_word(form):
+                return _DROP  # "chalk", "request" in prose
+        elif not _case_fits(form, seen):
+            return _DROP
+    elif " " in form and not _phrase_case_fits(form, seen):
+        return _DROP
+
+    if not any(c.isalpha() for c in form):
+        if _numeric_context(text, start, end):
+            return _DROP
+        hold = True
+    elif form.isupper() and _ALPHA_FORM_RE.match(form):
+        before = _token_before(text, start)
+        after = _token_after(text, end)
+        if (before and _VERSION_RE.match(_bare_word(before[0]))) or (
+            after and _bare_word(after).lower() in _RELEASE_AFTER
+        ):
+            return _DROP
+
+    if entry.entity_type == "country" and _language_context(text, start, end, entry):
+        return _DROP
+
+    if _in_name_run(text, start, end, entry, headline):
+        if entry.entity_type in PENDING_TIER_TYPES:
+            hold = True
+        elif entry.is_alias and is_common_english_word(form):
+            # Vendors and products have no AI check: only a dictionary-word
+            # alias ("Teams" for Microsoft Teams) is dropped, never a real name.
+            return _DROP
+
+    if hold and entry.entity_type not in PENDING_TIER_TYPES:
+        return _ACCEPT if not any(c.isalpha() for c in form) else _DROP
+    return _HOLD if hold else _ACCEPT
 
 
 def scan_text(text_or_paragraphs: str | list[tuple[int, str]]) -> list[dict]:
@@ -511,6 +957,9 @@ def scan_text(text_or_paragraphs: str | list[tuple[int, str]]) -> list[dict]:
         settings.get("autolinker_ambiguous_max_occurrences") or settings.autolinker_ambiguous_max_occurrences
     )
     pending_tier = pending_tier_enabled()
+    from app.intelligence.cve import extract_cve_ids
+
+    entry_cves = set(extract_cve_ids("\n\n".join(t for _, t in paragraphs if t)))
 
     # Accumulate matches: (entity_type, entity_id_str) → match_dict with paragraph_indices
     seen: dict[tuple[str, str], dict] = {}
@@ -519,21 +968,27 @@ def scan_text(text_or_paragraphs: str | list[tuple[int, str]]) -> list[dict]:
         if not para_text:
             continue
         para_lower = para_text.lower()
+        related = _related_spans(para_text)
+        headline = is_headline_text(para_text)
 
-        # Phase 1: Aho-Corasick scan for threat actors, malware, countries
+        # Phase 1: Aho-Corasick scan for threat actors, malware, countries.
+        # Collect the paragraph's accepted matches first, then drop any that
+        # sit inside a longer one ("Korea" in "North Korea").
+        candidates: list[tuple[int, int, VocabEntry, bool]] = []
         for end_idx, entries in _vocabulary.automaton.iter(para_lower) if _vocabulary.entry_count > 0 else []:
             for vocab_entry in entries:
-                key = (vocab_entry.entity_type, str(vocab_entry.entity_id))
-
                 match_len = len(vocab_entry.surface_form)
                 start_idx = end_idx - match_len + 1
 
                 if not _is_word_boundary(para_lower, start_idx, end_idx + 1):
                     continue
+                verdict = _occurrence_verdict(
+                    vocab_entry, para_text, start_idx, end_idx + 1, related=related, headline=headline
+                )
+                if verdict == _DROP or (verdict == _HOLD and not pending_tier):
+                    continue
 
                 if vocab_entry.is_ambiguous:
-                    if not para_text[start_idx].isupper():
-                        continue
                     # Frequency gate only applies to actor/malware-style codenames
                     # (e.g. "Storm", "Agent") — for vendor/product/tool proper
                     # nouns, high frequency means the article is about that entity.
@@ -543,34 +998,57 @@ def scan_text(text_or_paragraphs: str | list[tuple[int, str]]) -> list[dict]:
                         term_lower = vocab_entry.surface_form.lower()
                         if combined_lower.count(term_lower) > max_occurrences:
                             continue
+                held = verdict == _HOLD or vocab_entry.is_provisional
+                candidates.append((start_idx, end_idx + 1, vocab_entry, held))
 
-                if key in seen:
-                    # Entity already matched — record this paragraph + surface form
-                    if para_idx not in seen[key]["paragraph_indices"]:
-                        seen[key]["paragraph_indices"].append(para_idx)
-                    if vocab_entry.surface_form not in seen[key]["surface_forms"]:
-                        seen[key]["surface_forms"].append(vocab_entry.surface_form)
-                    # A single non-provisional form (multi-word, coined name)
-                    # rescues the whole match from the pending tier.
-                    if not vocab_entry.is_provisional:
-                        seen[key]["provisional"] = False
-                    continue
+        for start_idx, end, vocab_entry, held in candidates:
+            # A name inside a longer name of the same type is part of it ("Exchange" in
+            # "Exchange Online"). Across types it stands: "Microsoft" in "Microsoft
+            # Exchange" is still the vendor. A held long match can't hide an accepted one,
+            # since the AI may reject it.
+            if any(
+                s <= start_idx
+                and end <= e
+                and (e - s) > (end - start_idx)
+                and other.entity_type == vocab_entry.entity_type
+                and not other_held
+                for s, e, other, other_held in candidates
+            ):
+                continue
+            key = (vocab_entry.entity_type, str(vocab_entry.entity_id))
+            if key in seen:
+                # Entity already matched — record this paragraph + surface form
+                if para_idx not in seen[key]["paragraph_indices"]:
+                    seen[key]["paragraph_indices"].append(para_idx)
+                if vocab_entry.surface_form not in seen[key]["surface_forms"]:
+                    seen[key]["surface_forms"].append(vocab_entry.surface_form)
+                # A single clean occurrence (multi-word form, coined name, a
+                # sentence that leaves no doubt) rescues the whole match from
+                # the pending tier.
+                if not held:
+                    seen[key]["provisional"] = False
+                continue
 
-                seen[key] = {
-                    "entity_type": vocab_entry.entity_type,
-                    "entity_id": str(vocab_entry.entity_id),
-                    "canonical_name": vocab_entry.canonical_name,
-                    "surface_form": vocab_entry.surface_form,
-                    "surface_forms": [vocab_entry.surface_form],
-                    "confidence": "medium" if vocab_entry.is_alias else "high",
-                    "source": "auto_link",
-                    "paragraph_indices": [para_idx],
-                    "provisional": pending_tier and vocab_entry.is_provisional,
-                }
+            seen[key] = {
+                "entity_type": vocab_entry.entity_type,
+                "entity_id": str(vocab_entry.entity_id),
+                "canonical_name": vocab_entry.canonical_name,
+                "surface_form": vocab_entry.surface_form,
+                "surface_forms": [vocab_entry.surface_form],
+                "confidence": "medium" if vocab_entry.is_alias else "high",
+                "source": "auto_link",
+                "paragraph_indices": [para_idx],
+                "provisional": pending_tier and held,
+            }
 
-        # Phase 2: Regex scan for structured identifiers
-        for m in CVE_PATTERN.finditer(para_text):
-            cve_id = m.group()
+        # Phase 2: Regex scan for structured identifiers. CVE ids go through
+        # extract_cve_ids, which strips a CVSS score glued onto an id
+        # ("CVE-2026-10384910.0") and drops implausible ones; the whole-entry
+        # pass decides which ids are real, this paragraph's pass where they are.
+        cve_text = para_text
+        for s, e in related:
+            cve_text = cve_text[:s] + " " * (e - s) + cve_text[e:]
+        for cve_id in sorted(set(extract_cve_ids(cve_text)) & entry_cves):
             key = ("cve", cve_id)
             if key in seen:
                 if para_idx not in seen[key]["paragraph_indices"]:
@@ -588,6 +1066,8 @@ def scan_text(text_or_paragraphs: str | list[tuple[int, str]]) -> list[dict]:
             }
 
         for m in CWE_PATTERN.finditer(para_text):
+            if _in_spans(m.start(), related):
+                continue
             cwe_id = m.group()
             key = ("cwe", cwe_id)
             if key in seen:
@@ -606,6 +1086,8 @@ def scan_text(text_or_paragraphs: str | list[tuple[int, str]]) -> list[dict]:
             }
 
         for m in TTP_PATTERN.finditer(para_text):
+            if _in_spans(m.start(), related):
+                continue
             technique_id = m.group()
             key = ("ttp", technique_id)
             if key in seen:
@@ -943,9 +1425,10 @@ async def store_autolink_matches(
                     # CVE id is specific enough to stand on its own. It honours
                     # the same do-not-recreate list as the extract path, and
                     # created_via marks the stub so curation can find it.
+                    from app.intelligence.cve import is_plausible_cve_id
                     from app.intelligence.entity_resolution import is_name_denied
 
-                    if await is_name_denied(db, "cve", lookup_key):
+                    if not is_plausible_cve_id(lookup_key) or await is_name_denied(db, "cve", lookup_key):
                         continue
                     # Upsert — concurrent workers may race on the same id, and a
                     # raw INSERT would IntegrityError and poison the txn.
@@ -1271,11 +1754,15 @@ async def _rebuild_vocabulary(db: AsyncSession) -> tuple[int, list]:
     return count, loaded
 
 
-async def backfill_paragraph_indices(db: AsyncSession) -> dict:
+async def backfill_paragraph_indices(
+    db: AsyncSession, entry_ids: list[uuid.UUID] | None = None, *, refresh: bool = False
+) -> dict:
     """Backfill paragraph_indices for existing junction records that have NULL.
 
     Lighter than a full rescan — preserves existing confidence/source metadata
     and just adds paragraph position data by re-scanning entry text.
+    ``refresh`` recomputes every row of ``entry_ids`` (after their text was
+    re-derived): a link the scan no longer places loses its stale positions.
     """
     from app.models.entry import Entry
 
@@ -1295,10 +1782,13 @@ async def backfill_paragraph_indices(db: AsyncSession) -> dict:
     ]
 
     # Collect entry IDs that have NULL paragraph_indices in any junction
-    entry_ids_set: set[uuid.UUID] = set()
-    for junc_model, _, _ in junction_configs:
-        result = await db.execute(select(junc_model.entry_id).where(junc_model.paragraph_indices.is_(None)).distinct())
-        entry_ids_set.update(row[0] for row in result.all())
+    entry_ids_set: set[uuid.UUID] = set(entry_ids or [])
+    if entry_ids is None:
+        for junc_model, _, _ in junction_configs:
+            result = await db.execute(
+                select(junc_model.entry_id).where(junc_model.paragraph_indices.is_(None)).distinct()
+            )
+            entry_ids_set.update(row[0] for row in result.all())
 
     if not entry_ids_set:
         return {"entries": 0, "updated": 0}
@@ -1327,13 +1817,13 @@ async def backfill_paragraph_indices(db: AsyncSession) -> dict:
 
         # Update each junction table
         for junc_model, fk_col_name, entity_type in junction_configs:
-            junc_result = await db.execute(
-                select(junc_model).where(junc_model.entry_id == eid).where(junc_model.paragraph_indices.is_(None))
-            )
-            for junc_row in junc_result.scalars().all():
+            q = select(junc_model).where(junc_model.entry_id == eid)
+            if not refresh:
+                q = q.where(junc_model.paragraph_indices.is_(None))
+            for junc_row in (await db.execute(q)).scalars().all():
                 entity_id_str = str(getattr(junc_row, fk_col_name))
-                para = match_map.get((entity_type, entity_id_str))
-                if para:
+                para = match_map.get((entity_type, entity_id_str)) or None
+                if (para or refresh) and junc_row.paragraph_indices != para:
                     junc_row.paragraph_indices = para
                     stats["updated"] += 1
 
@@ -1350,15 +1840,18 @@ async def backfill_paragraph_indices(db: AsyncSession) -> dict:
 _NO_AUTOLINK_MODES = ("manual", "none")
 
 
-def _accepted_mention(term: str, pattern: re.Pattern, text: str) -> bool:
-    """Word-boundary match of ``term`` in ``text``, with ingest's capital-letter rule.
-
-    An ambiguous form (a short single word like "Play" or "Hive") only counts
-    where the text spells it with a capital first letter, as scan_text requires.
-    """
-    if not _is_ambiguous_surface_form(term):
-        return pattern.search(text) is not None
-    return any(text[m.start()].isupper() for m in pattern.finditer(text))
+def _accepted_mention(entry: VocabEntry, pattern: re.Pattern, text: str) -> bool:
+    """Word-boundary match of ``entry``'s form in ``text`` that ingest's context
+    rules accept (see _occurrence_verdict). This path has no pending tier, so a
+    match ingest would hold for the AI does not count."""
+    if not pattern.search(text):
+        return False
+    related = _related_spans(text)
+    headline = is_headline_text(text)
+    return any(
+        _occurrence_verdict(entry, text, m.start(), m.end(), related=related, headline=headline) == _ACCEPT
+        for m in pattern.finditer(text)
+    )
 
 
 async def link_entity_to_existing_entries(
@@ -1488,6 +1981,18 @@ async def _link_entity_to_existing_entries_inner(
     if not search_terms:
         return stats
     term_patterns = [(t, re.compile(r"(?<!\w)" + re.escape(t) + r"(?!\w)", re.IGNORECASE)) for t in search_terms]
+    term_entries = {
+        t: VocabEntry(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            canonical_name=canonical_term or t,
+            surface_form=t,
+            is_alias=t != canonical_term,
+            is_ambiguous=_is_ambiguous_surface_form(t),
+            lowercase_only=t == t.lower() and not any(o != t and o.lower() == t for o in search_terms),
+        )
+        for t in search_terms
+    }
 
     # ── Find entries mentioning any search term ─────────────────────
     text_conditions = []
@@ -1524,7 +2029,7 @@ async def _link_entity_to_existing_entries_inner(
                 continue
 
             # Collect every term that has an accepted match in the combined text
-            matched_terms = [t for t, pat in term_patterns if _accepted_mention(t, pat, combined)]
+            matched_terms = [t for t, pat in term_patterns if _accepted_mention(term_entries[t], pat, combined)]
             if not matched_terms:
                 continue
             matched_term = matched_terms[0]
@@ -1540,7 +2045,7 @@ async def _link_entity_to_existing_entries_inner(
             para_indices = [
                 para_idx
                 for para_idx, para_text in paragraphs
-                if any(_accepted_mention(t, pat, para_text) for t, pat in term_patterns)
+                if any(_accepted_mention(term_entries[t], pat, para_text) for t, pat in term_patterns)
             ]
 
             # ── Insert junction record ──────────────────────────────

@@ -1152,6 +1152,161 @@ async def _create_intel_report(
     return {"id": str(report.id), "created": True, "title": title}
 
 
+async def _settle_merged(db: AsyncSession, entity_type: str, source_id: uuid.UUID, result) -> None:
+    """An applied merge removes the source: close its pending Review proposals."""
+    if getattr(result, "applied", False) and getattr(result, "mode", None) == "apply":
+        from app.services.proposal_dismissals import settle_gone_entity
+
+        await settle_gone_entity(db, entity_type, source_id, successor=(entity_type, result.target_id))
+
+
+# Display/identity column per type, for name lookups.
+_REF_NAME_COLUMN = {"cve": "cve_id", "ttp": "technique_id", "observable": "value"}
+
+
+def _ref_model(entity_type: str):
+    from app.services.entity_summary import ENTITY_MODEL_MAP
+
+    spec = ENTITY_MODEL_MAP.get(entity_type)
+    return spec[0] if spec else None
+
+
+async def resolve_entity_ref(db: AsyncSession, entity_type: str, ref: str | None):
+    """An entity by UUID or by name: exact name (case-insensitive) first, then a
+    unique alias. Returns ``(entity, None)`` or ``(None, {"error": ...})``."""
+    from sqlalchemy import func
+
+    model = _ref_model(entity_type)
+    if model is None:
+        return None, {"error": f"unsupported entity_type: {entity_type}"}
+    if not ref or not str(ref).strip():
+        return None, {"error": "give an entity id or name"}
+    ref = str(ref).strip()
+    try:
+        eid = uuid.UUID(ref)
+    except ValueError:
+        eid = None
+    if eid is not None:
+        entity = (await db.execute(select(model).where(model.id == eid))).scalar_one_or_none()
+        return (entity, None) if entity else (None, {"error": f"{entity_type} {ref} not found"})
+    col = getattr(model, _REF_NAME_COLUMN.get(entity_type, "name"))
+    hits = (await db.execute(select(model).where(func.lower(col) == ref.lower()).limit(5))).scalars().all()
+    if not hits and hasattr(model, "aliases"):
+        lowered = func.lower(func.array_to_string(model.aliases, "\x1f"))
+        rows = (await db.execute(select(model).where(lowered.contains(ref.lower())).limit(25))).scalars().all()
+        hits = [r for r in rows if ref.lower() in {(a or "").lower() for a in (r.aliases or [])}]
+    if len(hits) == 1:
+        return hits[0], None
+    if not hits:
+        return None, {"error": f"no {entity_type} named {ref!r}"}
+    return None, {
+        "error": f"{ref!r} matches {len(hits)} {entity_type} entities; pass an id",
+        "candidates": [{"id": str(h.id), "name": str(getattr(h, col.key))} for h in hits],
+    }
+
+
+_ALIAS_TYPES = ("threat_actor", "malware", "country", "tool", "vendor", "product")
+
+
+@_tool(
+    name="merge_entities",
+    description=(
+        "Merge duplicate entities of one type into a keeper, by name or id (POST /entities/{type}/merge): entry "
+        "links move to the keeper, the merged names and aliases become keeper aliases, and the merged entities "
+        "are deleted along with their pending Review proposals (a merge proposal into one of them moves to the "
+        "keeper). Names match the entity name first, then a unique alias. Admin only."
+    ),
+    input_schema={
+        "properties": {
+            "entity_type": {"type": "string", "enum": _ALIAS_TYPES},
+            "keeper": {"type": "string", "description": "The entity to keep: UUID or name"},
+            "merge": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Entities to merge into the keeper: UUIDs or names",
+            },
+        },
+        "required": ["entity_type", "keeper", "merge"],
+    },
+)
+async def _merge_entities_by_ref(
+    db: AsyncSession, user_id: uuid.UUID, entity_type: str, keeper: str, merge: list[str]
+) -> dict:
+    from app.api.entity_profiles import EntityMergeRequest
+    from app.api.entity_profiles import merge_entities as _route
+
+    if entity_type not in _ALIAS_TYPES:
+        return {"error": f"entity_type must be one of {list(_ALIAS_TYPES)}"}
+    keep, err = await resolve_entity_ref(db, entity_type, keeper)
+    if err:
+        return err
+    ids: list[uuid.UUID] = []
+    for ref in merge or []:
+        ent, err = await resolve_entity_ref(db, entity_type, ref)
+        if err:
+            return err
+        if ent.id != keep.id and ent.id not in ids:
+            ids.append(ent.id)
+    if not ids:
+        return {"error": "nothing to merge (every name resolved to the keeper)"}
+    return await _route(
+        entity_type=entity_type, body=EntityMergeRequest(keeper_id=keep.id, merge_ids=ids), user=None, db=db
+    )
+
+
+@_tool(
+    name="remove_entity_aliases",
+    description=(
+        "Remove aliases from an entity, by entity name or id. Entries linked only through a removed alias are "
+        "unlinked and the stored article count is recounted (the same path as editing aliases on the profile). "
+        "Alias matching is case-insensitive. Admin only."
+    ),
+    input_schema={
+        "properties": {
+            "entity_type": {"type": "string", "enum": _ALIAS_TYPES},
+            "entity": {"type": "string", "description": "UUID or name of the entity"},
+            "aliases": {"type": "array", "items": {"type": "string"}, "description": "Aliases to remove"},
+        },
+        "required": ["entity_type", "entity", "aliases"],
+    },
+)
+async def _remove_entity_aliases(
+    db: AsyncSession, user_id: uuid.UUID, entity_type: str, entity: str, aliases: list[str]
+) -> dict:
+    from app.api.entity_profiles import _unlink_entries_for_removed_aliases
+    from app.intelligence.correlation_cache import invalidate_entity_cache
+    from app.services.entity_indexer import index_single_entity
+    from app.services.entity_summary import ENTITY_MODEL_MAP
+
+    if entity_type not in _ALIAS_TYPES:
+        return {"error": f"entity_type must be one of {list(_ALIAS_TYPES)}"}
+    ent, err = await resolve_entity_ref(db, entity_type, entity)
+    if err:
+        return err
+    drop = {(a or "").strip().lower() for a in aliases or [] if (a or "").strip()}
+    current = list(ent.aliases or [])
+    kept = [a for a in current if (a or "").lower() not in drop]
+    removed = [a for a in current if (a or "").lower() in drop]
+    if not removed:
+        return {"id": str(ent.id), "name": ent.name, "removed": [], "unlinked": 0, "aliases": current}
+    _, junction, fk_attr = ENTITY_MODEL_MAP[entity_type]
+    unlinked = await _unlink_entries_for_removed_aliases(
+        db, current, kept, junction, getattr(junction, fk_attr), ent.id, entity=ent
+    )
+    ent.aliases = kept
+    await db.flush()
+    await invalidate_entity_cache(entity_type, str(ent.id))
+    await index_single_entity(entity_type, ent)
+    return {
+        "id": str(ent.id),
+        "name": ent.name,
+        "removed": removed,
+        "unlinked": unlinked,
+        "aliases": kept,
+        "article_count": getattr(ent, "article_count", None),
+    }
+
+
 @_tool(
     name="merge_threat_actors",
     description=(
@@ -1205,6 +1360,7 @@ async def _merge_threat_actors(
         reasoning=reasoning,
     )
     result = await perform_actor_merge(db, uuid.UUID(target_id), body)
+    await _settle_merged(db, "threat_actor", body.source_id, result)
     return result.model_dump(mode="json")
 
 
@@ -1215,8 +1371,11 @@ async def _merge_threat_actors(
         "malware that's actually a tool, or a product mistakenly stored as a vendor. "
         "Supports " + " / ".join(sorted(entity_types.RECLASSIFIABLE)) + ". If target_id is given, the "
         "source is merged into that existing entity in the target type; if omitted, a new entity is created in "
-        "target_type by copying name/aliases/description. Type-specific fields (motivation, malware_type, "
+        "target_type by copying name/aliases/description, unless target_type already has an entity of the same "
+        "name, which it is merged into. Name the source by source_id or source_name (and the target by "
+        "target_id or target_name). Type-specific fields (motivation, malware_type, "
         "vendor_id, tool_type, etc.) are NOT carried across — fix them after with update_entity_profile. "
+        "The source's pending Review proposals are closed. "
         "Use mode='shadow' to log without acting; always include reasoning."
     ),
     input_schema={
@@ -1225,15 +1384,18 @@ async def _merge_threat_actors(
                 "type": "string",
                 "enum": sorted(entity_types.RECLASSIFIABLE),
             },
-            "source_id": {"type": "string"},
+            "source_id": {"type": "string", "description": "Source entity UUID (or give source_name)."},
+            "source_name": {"type": "string", "description": "Source entity name or alias, instead of source_id."},
             "target_type": {
                 "type": "string",
                 "enum": sorted(entity_types.RECLASSIFIABLE),
             },
             "target_id": {
                 "type": "string",
-                "description": "Optional: existing target entity to merge into. Omit to create a new one.",
+                "description": "Optional: existing target entity to merge into. Omit to use the same-named "
+                "target entity, or create a new one.",
             },
+            "target_name": {"type": "string", "description": "Optional: existing target entity by name or alias."},
             "mode": {"type": "string", "enum": ["shadow", "apply"], "default": "apply"},
             "new_description": {"type": "string"},
             "extra_aliases": {
@@ -1243,34 +1405,60 @@ async def _merge_threat_actors(
             },
             "reasoning": {"type": "string"},
         },
-        "required": ["source_type", "source_id", "target_type"],
+        "required": ["source_type", "target_type"],
     },
 )
 async def _reclassify_entity(
     db: AsyncSession,
     user_id: uuid.UUID,
     source_type: str,
-    source_id: str,
     target_type: str,
+    source_id: str | None = None,
+    source_name: str | None = None,
     target_id: str | None = None,
+    target_name: str | None = None,
     mode: str = "apply",
     new_description: str | None = None,
     extra_aliases: list[str] | None = None,
     reasoning: str | None = None,
 ) -> dict:
+    from sqlalchemy import func
+
     from app.api.entity_merge import ReclassifyRequest, perform_reclassify
+    from app.services.proposal_dismissals import settle_gone_entity
+
+    source, err = await resolve_entity_ref(db, source_type, source_id or source_name)
+    if err:
+        return err
+    target_uuid = None
+    if target_id or target_name:
+        target, err = await resolve_entity_ref(db, target_type, target_id or target_name)
+        if err:
+            return err
+        target_uuid = target.id
+    else:
+        # The Review queue's rule: the same-named entity of the target type absorbs it.
+        tmodel = _ref_model(target_type)
+        if tmodel is not None:
+            target_uuid = (
+                await db.execute(select(tmodel.id).where(func.lower(tmodel.name) == source.name.lower()).limit(1))
+            ).scalar_one_or_none()
 
     body = ReclassifyRequest(
         source_type=source_type,
-        source_id=uuid.UUID(source_id),
+        source_id=source.id,
         target_type=target_type,
-        target_id=uuid.UUID(target_id) if target_id else None,
+        target_id=target_uuid,
         mode=mode,  # type: ignore[arg-type]
         new_description=new_description,
         extra_aliases=extra_aliases or [],
         reasoning=reasoning,
     )
     result = await perform_reclassify(db, body)
+    if result.applied and result.mode == "apply":
+        await settle_gone_entity(
+            db, result.source_type, result.source_id, successor=(result.target_type, result.target_id)
+        )
     return result.model_dump(mode="json")
 
 
@@ -1311,18 +1499,18 @@ async def _merge_vendors(
     # we use a small helper that mirrors the actor/malware merge primitives.
     from app.api.entity_merge import perform_same_type_merge
 
-    return (
-        await perform_same_type_merge(
-            db,
-            entity_type="vendor",
-            target_id=uuid.UUID(target_id),
-            source_id=uuid.UUID(source_id),
-            mode=mode,
-            new_description=new_description,
-            extra_aliases=extra_aliases or [],
-            reasoning=reasoning,
-        )
-    ).model_dump(mode="json")
+    result = await perform_same_type_merge(
+        db,
+        entity_type="vendor",
+        target_id=uuid.UUID(target_id),
+        source_id=uuid.UUID(source_id),
+        mode=mode,
+        new_description=new_description,
+        extra_aliases=extra_aliases or [],
+        reasoning=reasoning,
+    )
+    await _settle_merged(db, "vendor", uuid.UUID(source_id), result)
+    return result.model_dump(mode="json")
 
 
 @_tool(
@@ -1356,18 +1544,18 @@ async def _merge_products(
 ) -> dict:
     from app.api.entity_merge import perform_same_type_merge
 
-    return (
-        await perform_same_type_merge(
-            db,
-            entity_type="product",
-            target_id=uuid.UUID(target_id),
-            source_id=uuid.UUID(source_id),
-            mode=mode,
-            new_description=new_description,
-            extra_aliases=extra_aliases or [],
-            reasoning=reasoning,
-        )
-    ).model_dump(mode="json")
+    result = await perform_same_type_merge(
+        db,
+        entity_type="product",
+        target_id=uuid.UUID(target_id),
+        source_id=uuid.UUID(source_id),
+        mode=mode,
+        new_description=new_description,
+        extra_aliases=extra_aliases or [],
+        reasoning=reasoning,
+    )
+    await _settle_merged(db, "product", uuid.UUID(source_id), result)
+    return result.model_dump(mode="json")
 
 
 @_tool(
@@ -1401,18 +1589,18 @@ async def _merge_tools(
 ) -> dict:
     from app.api.entity_merge import perform_same_type_merge
 
-    return (
-        await perform_same_type_merge(
-            db,
-            entity_type="tool",
-            target_id=uuid.UUID(target_id),
-            source_id=uuid.UUID(source_id),
-            mode=mode,
-            new_description=new_description,
-            extra_aliases=extra_aliases or [],
-            reasoning=reasoning,
-        )
-    ).model_dump(mode="json")
+    result = await perform_same_type_merge(
+        db,
+        entity_type="tool",
+        target_id=uuid.UUID(target_id),
+        source_id=uuid.UUID(source_id),
+        mode=mode,
+        new_description=new_description,
+        extra_aliases=extra_aliases or [],
+        reasoning=reasoning,
+    )
+    await _settle_merged(db, "tool", uuid.UUID(source_id), result)
+    return result.model_dump(mode="json")
 
 
 @_tool(
@@ -1457,6 +1645,7 @@ async def _merge_malware(
         reasoning=reasoning,
     )
     result = await perform_malware_merge(db, uuid.UUID(target_id), body)
+    await _settle_merged(db, "malware", body.source_id, result)
     return result.model_dump(mode="json")
 
 

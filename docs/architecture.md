@@ -396,8 +396,9 @@ A *correlation event* is a notable finding, such as a new technique for a known 
 
 `create_cooccurrence_relationships(entry_id)` builds links from articles:
 
-- For each pair of different-type entities in an article, it scores proximity and picks a verb and direction (for example actor → malware is `uses`). A pair with no known verb gets `related_to` only when the mentions are very close.
-- An existing link gains the article as evidence. A `co_occurrence` link moves from `possible` to `probable` after one very close mention or `relationship_evidence_promote_count` separate articles.
+- A pair of different-type entities is linked only when both are named in the same paragraph, and that paragraph reads as one statement. It picks a verb and direction from the pair's types (for example actor → malware is `uses`); a pair with no known verb gets `related_to`.
+- Some co-mentions never count: entities in different paragraphs, links with no recorded paragraph (most AI-sourced links), boilerplate paragraphs ("Related:", "Read more", sources, references, a detection rule's analytic stories) and paragraphs naming five or more entities (a roundup or list line).
+- An existing link gains the article as evidence. A `co_occurrence` link moves from `possible` to `probable` after `relationship_evidence_promote_count` separate articles from at least two feeds.
 - A link an analyst rejected is never recreated.
 
 Analysts confirm, reject and create links in the relationship browser (`backend/app/api/entity_relationships.py`). See the [relationship lifecycle diagram](diagrams/entity-relationship-lifecycle.md).

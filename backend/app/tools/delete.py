@@ -105,9 +105,10 @@ def _load_model(model_path: str):
     description=(
         "Delete a record: feed, entry, note, detection rule, campaign, automation rule, "
         "intelligence requirement, intel report, tag, or any intelligence entity (threat actor, "
-        "malware, CVE, TTP, country, tool, vendor, product, mitigation, observable). Intelligence entities get "
-        "the same cleanup as the API delete endpoints: entry links and entity relationships are "
-        "removed and the search-index document is dropped. No tombstone is written — the autolinker/"
+        "malware, CVE, TTP, country, tool, vendor, product, mitigation, observable), by id or, for an "
+        "intelligence entity, by name. Intelligence entities get "
+        "the same cleanup as the API delete endpoints: entry links, entity relationships and pending Review "
+        "proposals are removed and the search-index document is dropped. No tombstone is written — the autolinker/"
         "extraction pipeline may re-create the entity from future articles; use the false-positive "
         "workflow if the name must stay gone (an observable's equivalent is the never-capture tombstone). "
         "REQUIRES user confirmation. First call returns a "
@@ -125,23 +126,38 @@ def _load_model(model_path: str):
                 "type": "string",
                 "description": "UUID of the entity to delete",
             },
+            "name": {
+                "type": "string",
+                "description": "Instead of entity_id, for an intelligence entity: its name (or unique alias; "
+                "a CVE id, ATT&CK technique id or observable value)",
+            },
             "confirmation_token": {
                 "type": "string",
                 "description": "Confirmation token from a previous call. Only provide after user confirms.",
             },
         },
-        "required": ["entity_type", "entity_id"],
+        "required": ["entity_type"],
     },
 )
 async def _delete_entity(
     db: AsyncSession,
     user_id: uuid.UUID,
     entity_type: str,
-    entity_id: str,
+    entity_id: str | None = None,
     confirmation_token: str | None = None,
+    name: str | None = None,
 ) -> dict:
     if entity_type not in _DELETABLE_ENTITIES:
         return {"error": f"Cannot delete entity type: {entity_type}"}
+    if not entity_id:
+        if not name or entity_type not in _INTEL_ENTITY_TYPES or entity_type == "mitigation":
+            return {"error": "give entity_id (name lookup covers intelligence entities except mitigations)"}
+        from app.tools.write import resolve_entity_ref
+
+        found, err = await resolve_entity_ref(db, entity_type, name)
+        if err:
+            return err
+        entity_id = str(found.id)
 
     model_path, display_name, has_user_scope = _DELETABLE_ENTITIES[entity_type]
     Model = _load_model(model_path)
@@ -207,7 +223,9 @@ async def _delete_entity(
     if entity_type in _INTEL_ENTITY_TYPES:
         from app.intelligence.correlation_cache import invalidate_entity_cache
         from app.services.entity_indexer import delete_entity_document
+        from app.services.proposal_dismissals import settle_gone_entity
 
+        await settle_gone_entity(db, entity_type, eid, gone=True)
         delete_entity_document(entity_type, eid)
         await invalidate_entity_cache(entity_type, entity_id)
 
