@@ -170,6 +170,13 @@ def test_name_inside_a_file_name_or_path_is_dropped():
     assert _state("It signs with Ed25519 keys.", "Ed25519") == "linked"
 
 
+def test_hyphen_before_a_non_ascii_letter_does_not_crash():
+    # isalnum() takes "é"; the ASCII-only run regex does not
+    _activate(products=[_entity("Ed25519")])
+    assert _state("It signs with Ed25519-é keys.", "Ed25519") == "linked"
+    assert _state("It signs with Ed25519-² keys.", "Ed25519") == "linked"
+
+
 # ── 4. Languages and surnames are not countries ────────────────────────────
 
 

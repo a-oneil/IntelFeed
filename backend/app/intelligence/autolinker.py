@@ -737,8 +737,9 @@ def _glued_compound(text: str, start: int, end: int, form: str) -> bool:
     seen = text[start:end]
     lowered = seen == seen.lower() and form != form.lower()
     n = len(text)
-    if end + 1 < n and text[end] == "-" and text[end + 1].isalnum():
-        suffix = _ALNUM_RUN_RE.match(text, end + 1).group()
+    # _ALNUM_RUN_RE is ASCII-only; isalnum() also takes "é" or "²", which the regex won't match
+    if end + 1 < n and text[end] == "-" and (m := _ALNUM_RUN_RE.match(text, end + 1)):
+        suffix = m.group()
         if suffix.lower() not in _DESCRIPTIVE_SUFFIXES and (suffix[0].isupper() or suffix[0].isdigit()):
             return True
         if lowered:
