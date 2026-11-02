@@ -1,7 +1,8 @@
+import ipaddress
 import time
 
 import httpx
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from sqlalchemy import text
 
 from app.config import settings
@@ -63,12 +64,27 @@ async def version():
     return build_stamp()
 
 
+def _is_local(request: Request) -> bool:
+    """A caller on this host (the container healthcheck, an operator's exec curl):
+    loopback peer and nothing forwarded it. Every proxied request carries
+    X-Forwarded-For, so traffic from outside never counts."""
+    if request.headers.get("x-forwarded-for"):
+        return False
+    host = request.client.host if request.client else ""
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 @router.get("/api/health")
-async def health():
-    """Aggregate health check pinging PostgreSQL, Redis, and Meilisearch, with per-component latency.
+async def health(request: Request):
+    """Aggregate health check pinging PostgreSQL, Redis, and Meilisearch.
 
     Overall status is "healthy" when every component is ok, "degraded" when only the
     database is ok, and "unhealthy" when the database check fails. Unauthenticated.
+    Latency and error text per component are shown only to a caller on this host;
+    anyone else gets each component's status alone.
     """
     components = {
         "database": await _check_database(),
@@ -87,6 +103,8 @@ async def health():
     else:
         status = "unhealthy"
 
+    if not _is_local(request):
+        components = {name: {"status": c["status"]} for name, c in components.items()}
     return {
         "status": status,
         **build_stamp(),

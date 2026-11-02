@@ -5,11 +5,12 @@ import logging
 import re
 import uuid
 from datetime import UTC, datetime
+from typing import Literal
 
 from fastapi import APIRouter, Body, Depends, Path, Request
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, ConfigDict
-from sqlalchemy import func, select
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy import false, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -473,9 +474,15 @@ async def get_shared_entry(
         for t, link in tool_result.all()
     ]
 
-    # Notes
+    # Notes: only the sharer's own. Other analysts' notes on the article are
+    # team-internal, and a link made before they wrote them shouldn't publish them.
     note_result = await db.execute(
-        select(Note).where(Note.entry_id == entry_id).order_by(Note.is_pinned.desc(), Note.created_at.desc())
+        select(Note)
+        .where(
+            Note.entry_id == entry_id,
+            Note.created_by == share.created_by if share.created_by is not None else false(),
+        )
+        .order_by(Note.is_pinned.desc(), Note.created_at.desc())
     )
     notes = [NoteResponse.model_validate(n) for n in note_result.scalars().all()]
 
@@ -751,10 +758,18 @@ async def get_shared_tts_file(
 ):
     """Public read-aloud file — authorized by the share token, not a JWT."""
     from app.api.tts import _serve_audio_file
+    from app.models.tts_audio import TTSAudio
     from app.services import tts as _tts
 
-    # Token must be a valid, active share for the file to be served.
-    await _resolve_active_share_entry(token, db)
+    # Token must be a valid, active share, and the audio must be that article's.
+    entry = await _resolve_active_share_entry(token, db)
+    owned = await db.scalar(
+        select(TTSAudio.cache_key).where(
+            TTSAudio.cache_key == cache_key, TTSAudio.source == "entry", TTSAudio.ref_id == str(entry.id)
+        )
+    )
+    if owned is None:
+        raise AppError(code="tts_not_found", message="Audio not found.", status_code=404)
     response = _serve_audio_file(cache_key)
     await _tts.touch(db, cache_key)
     return response
@@ -783,6 +798,16 @@ async def _share_requests_today(db: AsyncSession, share: SharedEntry) -> int:
             )
         )
     ).scalar_one()
+
+
+async def _lock_share(db: AsyncSession, share: SharedEntry) -> None:
+    """Serialize one link's AI calls until this transaction ends.
+
+    The budget and run-once checks count rows that only exist once a call
+    finishes, so parallel requests would all pass them. The lock makes the
+    next request wait for this one's row.
+    """
+    await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": f"share-ai:{share.id}"})
 
 
 async def _enforce_share_limit(db: AsyncSession, share: SharedEntry) -> int | None:
@@ -843,6 +868,8 @@ async def run_shared_ai_task(
         raise AppError(code="not_found", message=f"Task '{body.task_name}' not found", status_code=404)
     if task.category not in ("analysis", "generation") or task.name in EXCLUDED_SHARED_TASKS:
         raise AppError(code="forbidden", message="This task cannot be run on shared articles", status_code=403)
+
+    await _lock_share(db, share)
 
     # One-time enforcement: check if already run. limit(1) keeps this an
     # existence check — a target carrying duplicate current rows should still
@@ -927,14 +954,29 @@ async def run_shared_ai_task(
     }
 
 
+# Share links take no login, so the prompt they can build is bounded here.
+# The page resends the whole chat every turn: history is trimmed, not refused.
+_SHARE_QUESTION_MAX = 4000
+_SHARE_HISTORY_MESSAGES = 20
+_SHARE_HISTORY_CHARS = 8000
+
+
 class SharedAskAgentMessage(BaseModel):
-    role: str
+    role: Literal["user", "assistant"]
     content: str
 
 
 class SharedAskAgentRequest(BaseModel):
-    question: str
+    question: str = Field(max_length=_SHARE_QUESTION_MAX)
     history: list[SharedAskAgentMessage] = []
+
+    @field_validator("history")
+    @classmethod
+    def _trim_history(cls, history: list[SharedAskAgentMessage]) -> list[SharedAskAgentMessage]:
+        return [
+            SharedAskAgentMessage(role=m.role, content=m.content[:_SHARE_HISTORY_CHARS])
+            for m in history[-_SHARE_HISTORY_MESSAGES:]
+        ]
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -988,6 +1030,7 @@ async def shared_ask_agent(
         raise AppError(code="not_configured", message="Ask Agent is not configured", status_code=422)
 
     task, provider_model = resolved.task, resolved.provider
+    await _lock_share(db, share)
     remaining = await _enforce_share_limit(db, share)
     system_template, user_template = await get_active_prompt(db, task.id)
 
@@ -1036,7 +1079,9 @@ async def shared_ask_agent(
         # exception, and a failed call still has to count as a request.
         await record_direct_result(db, response=None, error=str(e), **ledger)
         await db.commit()
-        raise AppError(code="ai_error", message=f"AI provider error: {e}", status_code=502)
+        # The provider's own error can name internal hosts; strangers get a generic one.
+        logger.warning("shared ask-agent provider error for share %s: %s", share.id, e)
+        raise AppError(code="ai_error", message="The AI provider could not answer. Try again later.", status_code=502)
 
     await record_direct_result(db, response=response, **ledger)
     return {"answer": response.content, "model": response.model, "remaining_today": remaining}

@@ -7,17 +7,15 @@ degrades to empty rather than erroring.
 """
 
 import mimetypes
-import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi import Path as PathParam
 from fastapi.responses import FileResponse
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
 from app.core.public_access import bearer_credential
-from app.core.security import decode_token, get_viewer, public_read_only_enabled
+from app.core.security import get_viewer, public_read_only_enabled, user_from_access_token
 from app.database import get_db
 from app.models.user import User
 from app.schemas.documentation import (
@@ -73,17 +71,7 @@ async def _resolve_user(request: Request, token: str | None, db: AsyncSession) -
         if public_read_only_enabled():
             return None
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token")
-    payload = decode_token(raw_token)
-    if payload.get("type") != "access":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
-    user_id = payload.get("sub")
-    if not user_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-    result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
-    user = result.scalar_one_or_none()
-    if not user or not user.is_active:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
-    return user
+    return await user_from_access_token(raw_token, db)
 
 
 @router.get(

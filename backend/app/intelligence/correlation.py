@@ -869,14 +869,36 @@ async def _get_manual_relationships(db: AsyncSession, entity_type: str, entity_i
     if hidden:
         query = query.where(EntityRelationship.confidence.notin_(hidden))
     result = await db.execute(query)
+    rels = result.scalars().all()
+
+    # A visitor gets what /api/entity-relationships gives them: an edge drawn
+    # only from hidden articles goes with them, and the description (analyst
+    # or AI text) and the AI verdict stay internal.
+    from app.core.public_access import viewer_is_anonymous
+
+    visitor = viewer_is_anonymous()
+    shown_evidence: set[uuid.UUID] = set()
+    if visitor:
+        evidence = {eid for rel in rels for eid in (rel.evidence_entry_ids or [])}
+        if evidence:
+            shown_evidence = set((await db.execute(select(Entry.id).where(Entry.id.in_(evidence)))).scalars())
+
     relationships = []
-    for rel in result.scalars().all():
+    for rel in rels:
         # Determine the "other" side of the relationship
         is_outbound = rel.source_type == entity_type and rel.source_id == entity_id
         if is_outbound:
             other_type, other_id = rel.target_type, rel.target_id
         else:
             other_type, other_id = rel.source_type, rel.source_id
+        evidence_ids = rel.evidence_entry_ids or []
+        if visitor:
+            if other_type == "campaign":
+                continue
+            kept = [eid for eid in evidence_ids if eid in shown_evidence]
+            if evidence_ids and not kept:
+                continue
+            evidence_ids = kept
         relationships.append(
             {
                 "relationship_id": str(rel.id),
@@ -885,9 +907,9 @@ async def _get_manual_relationships(db: AsyncSession, entity_type: str, entity_i
                 "relationship_type": rel.relationship_type,
                 "confidence": rel.confidence,
                 "source": rel.source,
-                "description": rel.description,
-                "adjudication_verdict": rel.adjudication_verdict,
-                "evidence_count": len(rel.evidence_entry_ids or []),
+                "description": None if visitor else rel.description,
+                "adjudication_verdict": None if visitor else rel.adjudication_verdict,
+                "evidence_count": len(evidence_ids),
                 # outbound: this entity <verb> other; inbound: other <verb> this entity
                 "direction": "outbound" if is_outbound else "inbound",
             }
@@ -2489,6 +2511,7 @@ async def entity_timeline(db: AsyncSession, entity_type: str, entity_id: uuid.UU
             EntityRelationship.confidence,
             EntityRelationship.source,
             EntityRelationship.created_at,
+            EntityRelationship.evidence_entry_ids,
         )
         .where(
             or_(
@@ -2501,13 +2524,26 @@ async def entity_timeline(db: AsyncSession, entity_type: str, entity_id: uuid.UU
     hidden_conf = hidden_relationship_confidences()
     if hidden_conf:
         rel_query = rel_query.where(EntityRelationship.confidence.notin_(hidden_conf))
-    rel_result = await db.execute(rel_query)
+    from app.core.public_access import viewer_is_anonymous
+
+    visitor = viewer_is_anonymous()
+    if visitor:
+        rel_query = rel_query.where(EntityRelationship.source != "analyst_rejected")
+    rel_rows_raw = (await db.execute(rel_query)).all()
+    # A visitor doesn't see an edge drawn only from hidden articles.
+    shown_evidence: set[uuid.UUID] = set()
+    if visitor:
+        evidence = {eid for row in rel_rows_raw for eid in (row[-1] or [])}
+        if evidence:
+            shown_evidence = set((await db.execute(select(Entry.id).where(Entry.id.in_(evidence)))).scalars())
     # Collect rows and resolve other-entity display names. Track whether the
     # viewed entity is the SOURCE (outbound: viewed <verb> other) so titles can
     # render the passive form when it's the object (inbound: other <verb> viewed).
     rel_rows = []
     other_ids_by_type: dict[str, set[uuid.UUID]] = {}
-    for rid, src_type, src_id, tgt_type, tgt_id, rel_type, confidence, source, created_at in rel_result.all():
+    for rid, src_type, src_id, tgt_type, tgt_id, rel_type, confidence, source, created_at, evidence_ids in rel_rows_raw:
+        if visitor and evidence_ids and not any(eid in shown_evidence for eid in evidence_ids):
+            continue
         is_outbound = str(src_id) == str(entity_id) and src_type == entity_type
         if is_outbound:
             other_type, other_id = tgt_type, tgt_id

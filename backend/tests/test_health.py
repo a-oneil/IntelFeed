@@ -1,9 +1,15 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 
 from app.core.build_info import build_stamp
+from app.main import app
+
+
+def _local_client() -> AsyncClient:
+    """A caller on the api host itself (the container healthcheck)."""
+    return AsyncClient(transport=ASGITransport(app=app, client=("127.0.0.1", 50000)), base_url="http://test")
 
 
 @pytest.mark.asyncio
@@ -24,8 +30,8 @@ async def test_health_returns_200(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_health_response_has_expected_fields(client: AsyncClient):
-    """Response includes status, version, and components with database/redis/meilisearch."""
+async def test_health_response_has_expected_fields():
+    """A local caller gets status, version, and each component's status and latency."""
     with (
         patch("app.api.health._check_database", new_callable=AsyncMock) as mock_db,
         patch("app.api.health._check_redis", new_callable=AsyncMock) as mock_redis,
@@ -35,7 +41,8 @@ async def test_health_response_has_expected_fields(client: AsyncClient):
         mock_redis.return_value = {"status": "ok", "latency_ms": 2.0}
         mock_meili.return_value = {"status": "ok", "latency_ms": 3.0}
 
-        resp = await client.get("/api/health")
+        async with _local_client() as local:
+            resp = await local.get("/api/health")
         data = resp.json()
 
     assert "status" in data
@@ -90,7 +97,7 @@ async def test_health_all_ok_returns_healthy(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_health_degraded_when_non_critical_down(client: AsyncClient):
+async def test_health_degraded_when_non_critical_down():
     """When database is ok but a non-critical service fails, status is 'degraded'."""
     with (
         patch("app.api.health._check_database", new_callable=AsyncMock) as mock_db,
@@ -101,7 +108,8 @@ async def test_health_degraded_when_non_critical_down(client: AsyncClient):
         mock_redis.return_value = {"status": "error", "error": "Connection refused"}
         mock_meili.return_value = {"status": "ok", "latency_ms": 1.0}
 
-        resp = await client.get("/api/health")
+        async with _local_client() as local:
+            resp = await local.get("/api/health")
         data = resp.json()
 
     assert data["status"] == "degraded"
@@ -206,3 +214,30 @@ async def test_health_degraded_when_meilisearch_down(client: AsyncClient):
 
     assert data["status"] == "degraded"
     assert data["components"]["meilisearch"]["status"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_health_hides_component_detail_from_remote_callers(client: AsyncClient):
+    """Over the network a caller gets each component's status, never latency or error text."""
+    with (
+        patch("app.api.health._check_database", new_callable=AsyncMock) as mock_db,
+        patch("app.api.health._check_redis", new_callable=AsyncMock) as mock_redis,
+        patch("app.api.health._check_meilisearch", new_callable=AsyncMock) as mock_meili,
+    ):
+        mock_db.return_value = {"status": "ok", "latency_ms": 1.0}
+        mock_redis.return_value = {"status": "error", "error": "Error connecting to redis-internal:6379"}
+        mock_meili.return_value = {"status": "ok", "latency_ms": 1.0}
+
+        remote = await client.get("/api/health")
+        # Through the proxy the peer is local but the request was forwarded.
+        async with _local_client() as local:
+            forwarded = await local.get("/api/health", headers={"X-Forwarded-For": "203.0.113.9"})
+
+    for resp in (remote, forwarded):
+        data = resp.json()
+        assert data["status"] == "degraded"
+        assert data["components"] == {
+            "database": {"status": "ok"},
+            "redis": {"status": "error"},
+            "meilisearch": {"status": "ok"},
+        }

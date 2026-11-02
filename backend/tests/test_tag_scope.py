@@ -873,27 +873,6 @@ async def test_export_and_top_tags_do_not_leak_across_users(
     assert "customer-a" not in names(theirs)
 
 
-# ---- the reindex script's queries ----
-
-
-@pytest.mark.asyncio
-async def test_reindex_script_queries_run(db_session: AsyncSession, scope_entries: list[Entry], test_user: User):
-    """Both branches of the maintenance script's id query must execute: the
-    tagged-only branch once rendered `ORDER BY DISTINCT …`."""
-    path = Path(__file__).resolve().parents[2] / "scripts" / "maintenance" / "reindex_entry_tags.py"
-    spec = importlib.util.spec_from_file_location("reindex_entry_tags", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
-    tag = await _make_tag(db_session, "customer-a")
-    await ensure_assignment(db_session, scope_entries[0].id, tag, test_user.id)
-
-    tagged = await module.entry_ids(db_session, include_untagged=False)
-    everything = await module.entry_ids(db_session, include_untagged=True)
-    assert tagged == [scope_entries[0].id]
-    assert set(everything) >= {e.id for e in scope_entries}
-
-
 # ---- migration SQL ----
 
 

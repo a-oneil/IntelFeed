@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
@@ -112,6 +112,10 @@ async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db))
         expected = required_code.encode("utf-8")
         if not hmac.compare_digest(submitted, expected):
             raise AppError(code="forbidden", message="Invalid invite code", status_code=403)
+
+    # Serialize sign-ups until this transaction ends: two at once on a fresh
+    # install would otherwise both see no user and both become admin.
+    await db.execute(text("SELECT pg_advisory_xact_lock(hashtext('intelfeed:register'))"))
 
     # Check if username already exists
     result = await db.execute(select(User).where(User.username == request.username))

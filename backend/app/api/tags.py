@@ -56,12 +56,14 @@ def _tag_response(tag: Tag, entry_count: int) -> TagResponse:
     )
 
 
-async def _visible_entry_count(db: AsyncSession, tag_id: uuid.UUID, user_id: uuid.UUID) -> int:
+async def _visible_entry_count(db: AsyncSession, tag_id: uuid.UUID, user_id: uuid.UUID | None) -> int:
     """Entries carrying the tag as this user sees them: their own assignments,
-    or everyone's if the tag is global."""
-    result = await db.execute(
-        select(func.count(func.distinct(EntryTag.entry_id))).where(EntryTag.tag_id == tag_id, visible_to(user_id))
-    )
+    or everyone's if the tag is global. A visitor (no id) counts visible
+    articles only, as GET /api/tags does: joining Entry applies their filter."""
+    query = select(func.count(func.distinct(EntryTag.entry_id))).where(EntryTag.tag_id == tag_id, visible_to(user_id))
+    if user_id is None:
+        query = query.select_from(EntryTag).join(Entry, Entry.id == EntryTag.entry_id)
+    result = await db.execute(query)
     return result.scalar() or 0
 
 

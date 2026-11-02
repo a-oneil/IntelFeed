@@ -2,7 +2,6 @@
 
 import hashlib
 import hmac
-import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Header, Query
@@ -34,17 +33,13 @@ async def _get_feed_user(
     """
     # Try JWT first if Authorization header present
     if credentials:
-        try:
-            from app.core.security import decode_token
+        from fastapi import HTTPException
 
-            payload = decode_token(credentials.credentials)
-            if payload.get("type") == "access":
-                user_id = payload.get("sub")
-                if user_id:
-                    user = await db.get(User, uuid.UUID(user_id))
-                    if user and user.is_active:
-                        return user
-        except Exception:
+        from app.core.security import user_from_access_token
+
+        try:
+            return await user_from_access_token(credentials.credentials, db)
+        except HTTPException:
             pass  # Fall through to API key auth
 
     # Fall back to API key — query by hash directly instead of iterating all users

@@ -31,8 +31,10 @@ def _is_allowed(ip_str: str) -> bool:
 @router.get("/metrics")
 async def metrics(request: Request):
     """Expose Prometheus metrics for scraping."""
-    # Check X-Real-IP (set by nginx proxy), then fall back to direct client IP
-    client_ip = request.headers.get("x-real-ip") or (request.client.host if request.client else None)
+    # The direct peer only: X-Real-IP is whatever the caller sent unless a proxy
+    # overwrote it, so it can't vouch for anyone. Scrapers reach api:8000 from
+    # inside the compose network; nginx never proxies /metrics.
+    client_ip = request.client.host if request.client else None
     if not client_ip or not _is_allowed(client_ip):
         logger.warning("Metrics access denied from %s", client_ip)
         return Response(status_code=403, content="Forbidden")

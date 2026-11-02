@@ -142,7 +142,8 @@ async def list_entity_relationships(
     base = select(EntityRelationship)
     count_base = select(func.count()).select_from(EntityRelationship)
 
-    if not include_rejected:
+    # A rejection is an analyst's call on this instance: visitors don't see them.
+    if not include_rejected or user.is_anonymous:
         base = base.where(EntityRelationship.source != "analyst_rejected")
         count_base = count_base.where(EntityRelationship.source != "analyst_rejected")
 
@@ -277,7 +278,7 @@ async def get_entity_relationships(
         (EntityRelationship.target_type == entity_type) & (EntityRelationship.target_id == entity_id),
     )
     query = select(EntityRelationship).where(condition)
-    if not include_rejected:
+    if not include_rejected or user.is_anonymous:
         query = query.where(EntityRelationship.source != "analyst_rejected")
     hidden = hidden_relationship_confidences()
     if hidden:
