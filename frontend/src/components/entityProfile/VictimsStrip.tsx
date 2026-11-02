@@ -1,8 +1,9 @@
 /**
  * VictimsStrip — recent leak-site victims for a ransomware actor, from the
- * ransomware tracker. The Snapshot may count them; this is the victimology:
- * who, in what sector, where, when. Renders nothing when the tracker has no
- * disclosures for this actor (or is disabled).
+ * ransomware tracker, inside the Overview's Recent victims section (whose row
+ * carries the title and count). The facts strip counts them; this is the
+ * victimology: who, in what sector, where, when. Renders nothing when the
+ * tracker has no disclosures for this actor (or is disabled).
  */
 import { useNavigate } from "react-router-dom";
 import { useActorVictims } from "@/hooks/useEntityProfile";
@@ -17,9 +18,6 @@ export function VictimsStrip({ entityId }: { entityId: string }) {
 
   return (
     <div className={styles.victimsStrip}>
-      <div className={styles.sectionLabel}>
-        Recent victims <span className={styles.sectionLabelSub}>· leak site · {data.total} on record</span>
-      </div>
       <div className={styles.victimsTable}>
         {data.items.map((v) => (
           <div key={v.id} className={styles.victimRow}>

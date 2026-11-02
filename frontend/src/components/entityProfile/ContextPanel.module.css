@@ -1,27 +1,30 @@
-/* Context panel — quiet by default: neutral text, one accent for links,
-   amber only on a stale marker. Matches the rail's .panel card. */
+/* Context — the body of the Overview's Context section, flat like its
+   neighbours: quiet text, one accent for links, amber only on "stale". */
 
 .panel {
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  padding: var(--sp-4) 14px;
-  background: var(--bg-secondary);
   min-width: 0;
 }
 
 .head {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: var(--sp-3);
-  margin-bottom: var(--sp-3);
+  gap: 6px 10px;
+  margin-bottom: 6px;
 }
 
+/* The Overview's section row already says "Context": the heading stays for
+   assistive tech and is not painted again. */
 .title {
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-muted);
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .summary {
@@ -77,17 +80,64 @@
 
 .sourceHead {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--sp-3);
   margin-bottom: var(--sp-2);
 }
 
-.sourceName {
+/* The row itself is the toggle: caret, name, then the closed digest. */
+.sourceToggle {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sourceToggle:hover .sourceName,
+.sourceToggle:focus-visible .sourceName {
+  color: var(--accent);
+}
+
+.sourceToggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--r-sm);
+}
+
+.caret {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  align-self: center;
+  color: var(--text-muted);
+  transition: transform 120ms ease;
+}
+.caretOpen { transform: rotate(90deg); }
+
+.sourceName {
+  flex: none;
   min-width: 0;
   font-size: var(--fs-base);
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.sourceDigest {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .age {
@@ -124,10 +174,12 @@
   margin: 0;
 }
 
+/* Label column then value, read left to right: in a wide column a value
+   pushed to the far edge loses its label. */
 .fact {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(7rem, 11rem) minmax(0, 1fr);
   align-items: baseline;
-  justify-content: space-between;
   gap: var(--sp-3);
   font-size: var(--fs-base);
   padding: 2px 0;
@@ -150,9 +202,29 @@
 .val {
   margin: 0;
   color: var(--text-primary);
-  text-align: right;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* CVSS by source: the vector is detail, the tag says which score is on the profile. */
+.vector {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
+.shownTag,
+.claimTag {
+  margin-left: var(--sp-2);
+  font-size: var(--fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.shownTag {
+  color: var(--text-secondary);
+  font-weight: 600;
 }
 
 .block > dd {
@@ -278,4 +350,12 @@
 
 .ghostLink:hover {
   color: var(--text-primary);
+}
+
+/* Phone width: the label sits over its value. */
+@media (max-width: 480px) {
+  .fact {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
 }

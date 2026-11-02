@@ -27,6 +27,7 @@ import {
   useCreateRelationship,
   useConfirmRelationship,
   useRejectRelationship,
+  useRelationClaims,
 } from "@/hooks/useRelationships";
 import type { EntityType } from "@/stores/intelStore";
 import type { GraphResponse, PivotResponse } from "@/api/types";
@@ -131,6 +132,9 @@ export function RelationshipsTab({
   const [serverExpanded, setServerExpanded] = useState(false);
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
   const [reportingOpen, setReportingOpen] = useState(false);
+  // "via <source>": narrow the claims to one enrichment source's.
+  const [viaSource, setViaSource] = useState<string | null>(null);
+  const [heldOpen, setHeldOpen] = useState(false);
   const [pendingEdge, setPendingEdge] = useState<{
     sourceId: string;
     sourceType: string;
@@ -145,7 +149,23 @@ export function RelationshipsTab({
     setGraphExpansions(new Map());
     setExpansionInfo(new Map());
     setStoryFilter(null);
+    setViaSource(null);
+    setHeldOpen(false);
   }, [entityId]);
+
+  // Which enrichment sources claim each connection, and the names they gave
+  // that resolved to nothing (held). Signed-in only.
+  const { data: claims } = useRelationClaims(entityType, entityId, !isVisitor);
+  const sourceLabel = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const x of claims?.sources ?? []) m.set(x.source_type, x.label);
+    for (const h of claims?.held ?? []) m.set(h.source_type, h.source_label);
+    return m;
+  }, [claims]);
+  const claimSourcesOf = useCallback(
+    (row: RelRow) => (claims?.by_target[rowKey(row)] ?? []).map((st) => sourceLabel.get(st) ?? st),
+    [claims, sourceLabel],
+  );
 
   const unlinkRelated = useUnlinkRelatedEntity();
   const confirmRel = useConfirmRelationship();
@@ -175,12 +195,16 @@ export function RelationshipsTab({
 
   const searched = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return allRows;
+    const via = viaSource ? (r: RelRow) => (claims?.by_target[rowKey(r)] ?? []).includes(viaSource) : null;
+    if (!q && !via) return allRows;
     return allRows.filter(
-      ({ item, label }) =>
-        label.toLowerCase().includes(q) || (item.aliases ?? []).some((a) => (a || "").toLowerCase().includes(q)),
+      (r) =>
+        (!via || via(r)) &&
+        (!q ||
+          r.label.toLowerCase().includes(q) ||
+          (r.item.aliases ?? []).some((a) => (a || "").toLowerCase().includes(q))),
     );
-  }, [allRows, search]);
+  }, [allRows, search, viaSource, claims]);
 
   // Country profiles keep their semantic verb groups (targets / operates from /
   // infrastructure) — junction-derived, rendered ahead of the typed groups.
@@ -289,6 +313,7 @@ export function RelationshipsTab({
 
   const rowActions = {
     viewedLabel: entityLabel,
+    claimSources: claimSourcesOf,
     onOpen: onOpenEntity,
     onOpenArticle,
     onConfirm: (id: string) => confirmRel.mutate(id),
@@ -780,6 +805,52 @@ export function RelationshipsTab({
         </div>
       </div>
 
+      {showAsserted && claims && (claims.sources.length > 0 || claims.held_count > 0) && (
+        <div className={styles.viaRow} role="group" aria-label="Filter by enrichment source">
+          {claims.sources.map((x) => {
+            const on = viaSource === x.source_type;
+            return (
+              <button
+                key={x.source_type}
+                type="button"
+                className={`${styles.viaChip} ${on ? styles.viaChipOn : ""}`}
+                aria-pressed={on}
+                onClick={() => setViaSource(on ? null : x.source_type)}
+                title={`Only the connections ${x.label} claims`}
+              >
+                via {x.label} <span className={styles.viaCount}>{x.linked}</span>
+              </button>
+            );
+          })}
+          {claims.held_count > 0 && (
+            <button
+              type="button"
+              className={styles.heldToggle}
+              aria-expanded={heldOpen}
+              aria-controls="relationships-held"
+              onClick={() => setHeldOpen((o) => !o)}
+              title="Names a source gave that match no entity, or more than one"
+            >
+              unresolved · {claims.held_count}
+            </button>
+          )}
+        </div>
+      )}
+      {showAsserted && heldOpen && claims && claims.held.length > 0 && (
+        <ul id="relationships-held" className={styles.heldList}>
+          {claims.held.map((h) => (
+            <li key={`${h.source_type}-${h.relation}-${h.target_name}`} className={styles.heldItem}>
+              <span className={styles.heldName}>{h.target_name}</span>
+              <span className={styles.groupNote}>
+                {h.relation.replace(/_/g, " ")}
+                {h.target_type ? ` · ${h.target_type.replace(/_/g, " ")}` : ""} · via {h.source_label} ·{" "}
+                {h.held_reason === "ambiguous" ? "matches more than one entity" : "no entity has this name yet"}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
       {!graphCollapsed && nodes.length > 0 && (
         <div className={styles.section}>
           <div style={{ height: 620, border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
@@ -888,7 +959,9 @@ export function RelationshipsTab({
           <div className={styles.sectionHeader}>
             Asserted relationships <span className={styles.sectionCount}>{asserted.length}</span>
             <span className={styles.sectionNote}>
-              {storyFilter
+              {viaSource
+                ? `via ${sourceLabel.get(viaSource) ?? viaSource} · ${assertedView.length} claims`
+                : storyFilter
                 ? `filtered to one story · ${assertedView.length} claims`
                 : foldedAll.length > 0
                   ? `${earnedAll.length} shown · rest folded below each group`

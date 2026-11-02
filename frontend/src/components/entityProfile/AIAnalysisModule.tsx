@@ -1,5 +1,5 @@
 /**
- * AIAnalysisModule — the AI tab folded into the Overview's briefing column.
+ * AIAnalysisModule — the AI tab folded into the Overview's Workspace section.
  * Run and read are split: persisted results render as cards (AIResultsDisplay
  * hides itself when there are none), and the task-runner list stays behind a
  * "Run a task" toggle so an unused module costs one slim header row. The old

@@ -22,15 +22,23 @@ vi.mock("@/hooks/useFalsePositives", () => ({
 
 const convertMutate = vi.fn();
 const unlinkAllMutate = vi.fn();
+const deleteEntityMock = vi.fn(() => Promise.resolve());
 vi.mock("@/hooks/useEntityProfile", () => ({
   useConvertEntity: () => ({ mutate: convertMutate, isPending: false }),
+  useDeleteEntity: () => deleteEntityMock,
   useUnlinkAllEntries: () => ({ mutate: unlinkAllMutate, isPending: false }),
   MERGEABLE_ENTITY_TYPES: ["threat_actor", "malware", "country", "tool", "vendor", "product"],
 }));
 
+const enrichMutate = vi.fn();
 vi.mock("@/hooks/useEnrichment", () => ({
-  useEnrichEntity: () => ({ mutate: vi.fn(), isPending: false }),
-  useEnrichmentSources: () => ({ data: [] }),
+  useEnrichEntity: () => ({ mutate: enrichMutate, isPending: false }),
+}));
+
+// The glance a test hands the popover; undefined is "not loaded / failed".
+let glanceData: unknown = undefined;
+vi.mock("@/hooks/useEntityGlance", () => ({
+  useEntityGlance: () => ({ data: glanceData }),
 }));
 
 // Observable rungs: unlink-this-sighting and the deny tombstone.
@@ -58,6 +66,14 @@ vi.mock("@/utils/dialog", () => ({
   confirmDialog: (opts: unknown) => confirmDialogMock(opts),
   promptDialog: () => Promise.resolve(null),
   alertDialog: () => Promise.resolve(),
+}));
+
+// The undo window runs its delete straight away here.
+vi.mock("@/hooks/useUndoableDelete", () => ({
+  useUndoableDelete: () => (opts: { onDelete: () => void; onInitiate?: () => void }) => {
+    opts.onInitiate?.();
+    opts.onDelete();
+  },
 }));
 
 vi.mock("../EntityMergeIntoModal", () => ({
@@ -96,6 +112,7 @@ describe("EntityPopover — wrong-match menu", () => {
     vi.clearAllMocks();
     confirmDialogMock.mockResolvedValue(true);
     authState.user = { id: "u1", role: "admin" };
+    glanceData = undefined;
   });
 
   it("reports the article-scoped fix and closes", () => {
@@ -260,5 +277,124 @@ describe("EntityPopover — wrong-match menu", () => {
       />,
     );
     expect(screen.queryByText("Wrong?")).toBeNull();
+  });
+});
+
+
+const observable: HighlightEntity = {
+  id: "obs-1",
+  type: "observable",
+  value: "71.6.135.131",
+  meta: { facts: [{ label: "Kind", value: "ipv4" }] },
+};
+
+function renderPopover(entity: HighlightEntity = observable) {
+  render(<EntityPopover entity={entity} x={100} y={100} onClose={vi.fn()} onNavigate={vi.fn()} entryId="entry-1" />);
+}
+
+describe("EntityPopover — enrichment glance", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    authState.user = { id: "u1", role: "admin" };
+    glanceData = {
+      chips: [{ text: "Benign scanner", tone: "warn", source: "GreyNoise Community", observed_at: "2026-10-28T00:00:00Z" }],
+      facts: [
+        { text: "AS10439 CariNet · US", tone: null, source: "Team Cymru", observed_at: null },
+        { text: "VPN", tone: null, source: "Shodan InternetDB", observed_at: null },
+      ],
+      lookup_sources: [
+        { source_type: "greynoise", label: "GreyNoise Community" },
+        { source_type: "shodan", label: "Shodan InternetDB" },
+      ],
+      needs_key: [{ source_type: "virustotal", label: "VirusTotal v3", key: "virustotal" }],
+      looked_up: true,
+    };
+  });
+
+  it("shows verdict chips and a Context row, each naming its source", () => {
+    renderPopover();
+    expect(screen.getByText("Benign scanner")).toHaveAttribute("title", expect.stringMatching(/^GreyNoise Community · /));
+    expect(screen.getByText("Context")).toBeInTheDocument();
+    expect(screen.getByText("AS10439 CariNet · US")).toHaveAttribute("title", "Team Cymru");
+    expect(screen.getByText("VPN")).toBeInTheDocument();
+  });
+
+  it("looks exactly as before when there is no glance", () => {
+    glanceData = undefined;
+    renderPopover();
+    expect(screen.queryByText("Context")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Look up" })).toBeDisabled();
+  });
+
+  it("refreshes every applicable source and says what waited or failed", () => {
+    enrichMutate.mockImplementation((_vars, opts) =>
+      opts?.onSuccess?.({
+        results: [
+          { source_type: "greynoise", status: "budget_exhausted" },
+          { source_type: "shodan", status: "error" },
+        ],
+      }),
+    );
+    renderPopover();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(enrichMutate).toHaveBeenCalledWith(
+      { entityType: "observable", entityId: "obs-1", sourceTypes: ["greynoise", "shodan"], refresh: true },
+      expect.anything(),
+    );
+    expect(screen.getByText(/GreyNoise Community is at its daily cap/)).toBeInTheDocument();
+    expect(screen.getByText(/Shodan InternetDB didn't answer/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(enrichMutate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sourceTypes: ["shodan"] }),
+      expect.anything(),
+    );
+  });
+
+  it("tells an admin which source needs a key, and nobody else", () => {
+    renderPopover();
+    expect(screen.getByText(/VirusTotal v3 needs a key/)).toBeInTheDocument();
+  });
+
+  it("hides the key note from a regular analyst", () => {
+    authState.user = { id: "u2", role: "analyst" };
+    renderPopover();
+    expect(screen.queryByText(/needs a key/)).not.toBeInTheDocument();
+  });
+});
+
+
+describe("EntityPopover — delete from the Wrong? menu", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    confirmDialogMock.mockResolvedValue(true);
+    authState.user = { id: "u1", role: "admin" };
+    glanceData = undefined;
+  });
+
+  it("deletes the entity after a confirm and closes", async () => {
+    const { onClose } = openWrongMenu();
+    fireEvent.click(screen.getByText("Delete Sprocket Security…"));
+    await waitFor(() => expect(deleteEntityMock).toHaveBeenCalledWith("vendor", "vendor-1"));
+    expect(confirmDialogMock).toHaveBeenCalledWith(expect.objectContaining({ destructive: true }));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("deletes nothing when the confirm is declined", async () => {
+    confirmDialogMock.mockResolvedValue(false);
+    openWrongMenu();
+    fireEvent.click(screen.getByText("Delete Sprocket Security…"));
+    await waitFor(() => expect(confirmDialogMock).toHaveBeenCalled());
+    expect(deleteEntityMock).not.toHaveBeenCalled();
+  });
+
+  it("offers delete on an observable too", async () => {
+    openWrongMenu({ id: "obs-9", type: "observable", value: "203.0.113.5", meta: {} });
+    fireEvent.click(screen.getByText("Delete this observable…"));
+    await waitFor(() => expect(deleteEntityMock).toHaveBeenCalledWith("observable", "obs-9"));
+  });
+
+  it("has no delete for a type the shared delete doesn't handle", () => {
+    openWrongMenu({ id: "cwe-1", type: "cwe", value: "CWE-79", meta: {} });
+    expect(screen.queryByText(/^Delete /)).not.toBeInTheDocument();
   });
 });

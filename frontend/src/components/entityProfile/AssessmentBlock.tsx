@@ -1,9 +1,10 @@
 /**
  * AssessmentBlock — the profile's voice: the entity description promoted to a
  * prominent, analyst-editable narrative with an AI refresh, followed by dated
- * "latest developments" from the What's-New engine — the briefing column's
- * opening module.
+ * "latest developments" from the What's-New engine — the Overview's opening
+ * module, with the next-action chips under it.
  */
+import { useState } from "react";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
 import { InlineEditField } from "@/components/InlineEditField";
@@ -20,6 +21,9 @@ import styles from "./entityProfile.module.css";
 import { useIsVisitor } from "@/stores/authStore";
 
 const DEVELOPMENTS_LIMIT = 4;
+/** Past this, the prose starts folded to its opening lines with a toggle —
+ * a pasted-in encyclopedia article should not be the whole first screen. */
+const FOLD_AT_CHARS = 900;
 
 const SIGNAL_LABELS: Record<string, string> = {
   novel_entity: "new",
@@ -82,6 +86,9 @@ export function AssessmentBlock({
   };
 
   const developments = whatsNew.slice(0, DEVELOPMENTS_LIMIT);
+  const foldable = (entity.description?.length ?? 0) > FOLD_AT_CHARS;
+  const [unfolded, setUnfolded] = useState(false);
+  const folded = foldable && !unfolded;
 
   return (
     <div className={styles.assessment}>
@@ -118,7 +125,15 @@ export function AssessmentBlock({
         )}
       </div>
 
-      <div className={styles.assessmentBody}>
+      {/* The fold clips the body, so it opens when focus lands inside: the
+          textarea InlineEditField focuses when editing begins, or a link an
+          analyst tabs to — nothing stays hidden under the mask. */}
+      <div
+        className={`${styles.assessmentBody} ${folded ? styles.assessmentFolded : ""}`}
+        onFocusCapture={() => {
+          if (folded) setUnfolded(true);
+        }}
+      >
         <InlineEditField
           value={entity.description || ""}
           placeholder={editable ? "No assessment yet — write one, or let AI draft it from recent reporting…" : "No assessment yet"}
@@ -129,6 +144,17 @@ export function AssessmentBlock({
           onSave={(v) => onUpdateField("description", v)}
         />
       </div>
+      {foldable && (
+        <button
+          type="button"
+          className={styles.assessmentFoldToggle}
+          onClick={() => setUnfolded((u) => !u)}
+          aria-expanded={unfolded}
+        >
+          {unfolded ? "Show less" : "Read the full assessment"}{" "}
+          <span className="caret-glyph">{unfolded ? "▴" : "▾"}</span>
+        </button>
+      )}
 
       {(() => {
         // Plain-language provenance under the prose: when the assessment was

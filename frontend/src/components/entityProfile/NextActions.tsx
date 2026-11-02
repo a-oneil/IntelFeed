@@ -1,12 +1,14 @@
 /**
- * NextActionsRail — computed, not curated: each card is a signal the backend
+ * NextActions — computed, not curated: each chip is a signal the backend
  * already emits (detection gaps, unconfirmed relationship suggestions, bundle
- * export, missing assessment). Cards disappear as the work gets done; a clean
- * profile shows only the coverage ring.
+ * export, missing assessment, a campaign's suggestions and standing searches).
+ * One row under the assessment; each chip's explanation lives in its hover
+ * card. Chips disappear as the work gets done.
  */
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import api from "@/api/client";
+import { Hint } from "@/components/primitives";
 import { useEntityDetectionGaps } from "@/hooks/useEntityProfile";
 import {
   useAddCampaignEntries,
@@ -41,7 +43,17 @@ const GAPPED_TYPES: EntityType[] = ["threat_actor", "malware"];
 
 const BUNDLE_ENTRY_CAP = 100;
 
-export function NextActionsRail({
+type Tone = "hot" | "warm" | "cool" | "calm";
+
+interface Action {
+  key: string;
+  tone: Tone;
+  label: string;
+  why: ReactNode;
+  button?: { label: string; onClick: () => void; disabled?: boolean };
+}
+
+export function NextActions({
   entityType,
   entityId,
   entity,
@@ -73,7 +85,7 @@ export function NextActionsRail({
 
   // A campaign's next actions are the two tabs it used to carry — Suggestions
   // and Searches — plus the one thing nothing ever told you: that it has gone
-  // quiet. All three are work, which is what this rail is for.
+  // quiet. All three are work, which is what this row is for.
   const isCampaign = entityType === "campaign";
   const campaignId = isCampaign ? entityId : undefined;
   const { data: campaignSuggestions } = useCampaignSuggestions(campaignId);
@@ -130,151 +142,151 @@ export function NextActionsRail({
   const needsAssessment = !entity.description;
   const canBundle = entries.length > 0;
 
-  const hasCampaignWork = !!topStory || syncingSearches.length > 0 || campaignQuiet !== null;
-  if (!coverage && unconfirmed.length === 0 && !needsAssessment && !canBundle && !hasCampaignWork) return null;
+  const actions: Action[] = [];
+
+  // No coverage percentage: source_ttps tag equality reads 88-90% for every
+  // actor, so a ring measured nothing. The honest numbers are the Threats
+  // board's: techniques on record, and the gap chip beside it.
+  if (coverage) {
+    actions.push({
+      key: "coverage",
+      tone: "cool",
+      label: `${coverage.total_ttps} techniques on record`,
+      why: "Build coverage from the Detection tab.",
+    });
+  }
+
+  if (topStory && topStory.kind === "story") {
+    actions.push({
+      key: "story",
+      tone: "hot",
+      label: `${topStory.items.length} more article${topStory.items.length === 1 ? "" : "s"} in a story you track`,
+      why: `${topStory.title}${topStory.held > 0 ? ` — you have ${topStory.held} of ${topStory.total}` : ""}`,
+      button: {
+        label: addEntries.isPending ? "Adding…" : `Add all ${topStory.items.length}`,
+        disabled: addEntries.isPending,
+        onClick: () =>
+          addEntries.mutate(
+            { campaignId: entityId, entryIds: topStory.items.map((i) => i.entry_id) },
+            {
+              onSuccess: (r) => toast.success(`Added ${r.added} articles`),
+              onError: () => toast.error("Failed to add story"),
+            },
+          ),
+      },
+    });
+  }
+
+  if (syncingSearches.length > 0) {
+    const added = syncingSearches.reduce((n, x) => n + x.entries_added, 0);
+    actions.push({
+      key: "searches",
+      tone: "cool",
+      label: `${syncingSearches.length} standing search${syncingSearches.length === 1 ? "" : "es"}`,
+      why:
+        (syncingSearches.map((x) => x.saved_search_name).filter(Boolean).slice(0, 2).join(" · ") ||
+          "Pulling matching articles in automatically") + (added > 0 ? ` — ${added} added so far` : ""),
+    });
+  }
+
+  if (campaignQuiet !== null) {
+    actions.push({
+      key: "quiet",
+      tone: "warm",
+      label: `No new coverage in ${campaignQuiet} days`,
+      why: `Status still says ${entity.status} — closing it stamps the end date from the last article.`,
+      button: {
+        label: updateCampaign.isPending ? "Closing…" : "Close it",
+        disabled: updateCampaign.isPending,
+        onClick: () =>
+          updateCampaign.mutate(
+            { id: entityId, status: "closed", end_date: entity.last_activity_at?.slice(0, 10) },
+            {
+              onSuccess: () => toast.success("Campaign closed"),
+              onError: () => toast.error("Failed to close campaign"),
+            },
+          ),
+      },
+    });
+  }
+
+  if (gapCount > 0) {
+    actions.push({
+      key: "gaps",
+      tone: "hot",
+      label: `Close ${gapCount} detection gap${gapCount === 1 ? "" : "s"}`,
+      why: (
+        <>
+          No rule for{" "}
+          {gapTechniques.map((t) => (
+            <code key={t} className={styles.actionCode}>
+              {t}
+            </code>
+          ))}
+          {gapCount > 3 ? ` +${gapCount - 3} more` : ""}
+        </>
+      ),
+      button: { label: "Review gaps", onClick: onShowDetectionGaps },
+    });
+  }
+
+  if (unconfirmed.length > 0) {
+    actions.push({
+      key: "claims",
+      tone: "warm",
+      label: `${unconfirmed.length} claim${unconfirmed.length === 1 ? "" : "s"} to corroborate`,
+      why: "The AI adjudicator reviews these nightly — pin or reject to settle one now.",
+      button: { label: "Review", onClick: onShowRelationships },
+    });
+  }
+
+  if (needsAssessment) {
+    actions.push({
+      key: "assessment",
+      tone: "cool",
+      label: "No assessment yet",
+      why: "Draft one from linked reporting with AI.",
+      button: {
+        label: draftPending ? "Drafting…" : "Draft with AI",
+        disabled: draftPending,
+        onClick: onDraftAssessment,
+      },
+    });
+  }
+
+  if (canBundle) {
+    actions.push({
+      key: "bundle",
+      tone: "calm",
+      label: "Hunt package",
+      why: "Articles, entities, IOC CSV and ATT&CK Navigator layer as one bundle.",
+      button: { label: exporting ? "Building…" : "Build", disabled: exporting, onClick: exportBundle },
+    });
+  }
+
+  if (actions.length === 0) return null;
 
   return (
-    <div className={styles.rail}>
-      <div className={styles.railTitle}>Next actions</div>
-
-      {/* No coverage percentage: source_ttps tag equality reads 88-90% for
-          every actor, so the ring measured nothing. The honest numbers are the
-          Threats board's: techniques on record, and the gap list below. */}
-      {coverage && (
-        <div className={styles.posture}>
-          <div>
-            <div className={styles.postureValue}>{coverage.total_ttps} techniques on record</div>
-            <div className={styles.postureLabel}>build coverage from the Detection tab</div>
-          </div>
-        </div>
-      )}
-
-      {topStory && topStory.kind === "story" && (
-        <div className={`${styles.actionCard} ${styles.actionHot}`}>
-          <div className={styles.actionTitle}>
-            {topStory.items.length} more article{topStory.items.length === 1 ? "" : "s"} in a story you track
-          </div>
-          <div className={styles.actionWhy}>
-            {topStory.title}
-            {topStory.held > 0 ? ` — you have ${topStory.held} of ${topStory.total}` : ""}
-          </div>
-          <button
-            className={styles.actionBtn}
-            disabled={addEntries.isPending}
-            onClick={() =>
-              addEntries.mutate(
-                { campaignId: entityId, entryIds: topStory.items.map((i) => i.entry_id) },
-                {
-                  onSuccess: (r) => toast.success(`Added ${r.added} articles`),
-                  onError: () => toast.error("Failed to add story"),
-                },
-              )
-            }
-          >
-            {addEntries.isPending ? "Adding…" : `Add all ${topStory.items.length}`}
-          </button>
-        </div>
-      )}
-
-      {syncingSearches.length > 0 && (
-        <div className={`${styles.actionCard} ${styles.actionCool}`}>
-          <div className={styles.actionTitle}>
-            {syncingSearches.length} standing search{syncingSearches.length === 1 ? "" : "es"}
-          </div>
-          <div className={styles.actionWhy}>
-            {syncingSearches.map((x) => x.saved_search_name).filter(Boolean).slice(0, 2).join(" · ") ||
-              "Pulling matching articles in automatically"}
-            {syncingSearches.some((x) => x.entries_added > 0)
-              ? ` — ${syncingSearches.reduce((n, x) => n + x.entries_added, 0)} added so far`
-              : ""}
-          </div>
-        </div>
-      )}
-
-      {campaignQuiet !== null && (
-        <div className={`${styles.actionCard} ${styles.actionWarm}`}>
-          <div className={styles.actionTitle}>No new coverage in {campaignQuiet} days</div>
-          <div className={styles.actionWhy}>
-            Status still says {entity.status} — closing it stamps the end date from the last article
-          </div>
-          <button
-            className={styles.actionBtn}
-            disabled={updateCampaign.isPending}
-            onClick={() =>
-              updateCampaign.mutate(
-                {
-                  id: entityId,
-                  status: "closed",
-                  end_date: entity.last_activity_at?.slice(0, 10),
-                },
-                {
-                  onSuccess: () => toast.success("Campaign closed"),
-                  onError: () => toast.error("Failed to close campaign"),
-                },
-              )
-            }
-          >
-            {updateCampaign.isPending ? "Closing…" : "Close it"}
-          </button>
-        </div>
-      )}
-
-      {gapCount > 0 && (
-        <div className={`${styles.actionCard} ${styles.actionHot}`}>
-          <div className={styles.actionTitle}>
-            Close {gapCount} detection gap{gapCount === 1 ? "" : "s"}
-          </div>
-          <div className={styles.actionWhy}>
-            No rule for{" "}
-            {gapTechniques.map((t) => (
-              <code key={t} className={styles.actionCode}>
-                {t}
-              </code>
-            ))}
-            {gapCount > 3 ? ` +${gapCount - 3} more` : ""}
-          </div>
-          <button className={styles.actionBtn} onClick={onShowDetectionGaps}>
-            Review gaps
-          </button>
-        </div>
-      )}
-
-      {unconfirmed.length > 0 && (
-        <div className={`${styles.actionCard} ${styles.actionWarm}`}>
-          <div className={styles.actionTitle}>
-            {unconfirmed.length} claim{unconfirmed.length === 1 ? "" : "s"} awaiting corroboration
-          </div>
-          <div className={styles.actionWhy}>
-            The AI adjudicator reviews these nightly — pin or reject to settle one now
-          </div>
-          <button className={styles.actionBtn} onClick={onShowRelationships}>
-            Review
-          </button>
-        </div>
-      )}
-
-      {needsAssessment && (
-        <div className={`${styles.actionCard} ${styles.actionCool}`}>
-          <div className={styles.actionTitle}>No assessment yet</div>
-          <div className={styles.actionWhy}>Draft one from linked reporting with AI</div>
-          <button className={styles.actionBtn} onClick={onDraftAssessment} disabled={draftPending}>
-            {draftPending ? "Drafting…" : "Draft with AI"}
-          </button>
-        </div>
-      )}
-
-      {canBundle && (
-        <div className={`${styles.actionCard} ${styles.actionCalm}`}>
-          <div className={styles.actionTitle}>Export hunt package</div>
-          <div className={styles.actionWhy}>
-            Articles, entities, IOC CSV and ATT&CK Navigator layer as one bundle
-          </div>
-          <button className={styles.actionBtn} onClick={exportBundle} disabled={exporting}>
-            {exporting ? "Building…" : "Build package"}
-          </button>
-        </div>
-      )}
+    <div className={styles.nextActions} role="group" aria-label="Next actions">
+      <span className={styles.sectionLabel}>Next</span>
+      {actions.map((a) => (
+        <Hint key={a.key} title={a.label} body={a.why}>
+          <span className={`${styles.actionChip} ${styles[`actionTone_${a.tone}`]}`}>
+            <span className={styles.actionDot} aria-hidden="true" />
+            {a.label}
+            {a.button && (
+              <button
+                type="button"
+                className={styles.actionChipBtn}
+                onClick={a.button.onClick}
+                disabled={a.button.disabled}
+              >
+                {a.button.label}
+              </button>
+            )}
+          </span>
+        </Hint>
+      ))}
     </div>
   );
 }
-

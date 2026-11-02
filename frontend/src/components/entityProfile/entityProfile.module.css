@@ -362,11 +362,6 @@
   border-top: 1px solid var(--border);
 }
 
-/* The block flowing beside a floated entity image shouldn't get a divider. */
-
-/* Overview uses a two-column dashboard: main content + a right rail that fills
-   the horizontal space (related/external/reference live in the rail). */
-
 /* ── Dashboard / signal panels ── */
 
 .panel {
@@ -667,7 +662,7 @@
 
 .articleTitle {
   flex: 1;
-  color: var(--accent);
+  color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1542,7 +1537,7 @@
   font-weight: 500;
 }
 
-/* ── Dossier grid: assessment + next-actions rail ─────────────────────── */
+/* ── The brief: assessment + next-action chips ────────────────────────── */
 
 .assessment {
   min-width: 0;
@@ -1645,22 +1640,11 @@
   white-space: nowrap;
 }
 
-/* ── Next-actions rail ────────────────────────────────────────────────── */
-.rail {
-  display: grid;
-  gap: 10px;
-  align-content: start;
-}
-.railTitle {
-  font-size: var(--fs-xs);
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--text-muted);
-}
+
 /* Campaign intake — what feeds a campaign, and what it could take next.
-   Lives in the wide briefing column: the rail could say that something would be
-   added without room to say what, which is the whole decision. */
+   Opens inside the Activity section at full width: a narrow column could say
+   that something would be added without room to say what, which is the whole
+   decision. */
 .intakePanel {
   padding: var(--sp-5);
   /* The activity feed's filter bar follows immediately and its controls sat
@@ -1975,49 +1959,6 @@
    the 52px gutter the offer previews use to clear their kind column. */
 .intakeComposer .intakePreview { margin-left: 0; }
 
-.posture {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  padding: 11px 13px;
-  display: flex;
-  gap: 13px;
-  align-items: center;
-}
-.postureValue {
-  font-family: var(--font-display);
-  font-size: var(--fs-lg);
-  font-weight: 700;
-  color: var(--text-primary);
-  line-height: 1.2;
-  font-variant-numeric: tabular-nums;
-}
-.postureLabel {
-  font-size: var(--fs-sm);
-  color: var(--text-secondary);
-}
-.actionCard {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--bg-hover);
-  border-radius: var(--r-md);
-  padding: 11px 13px;
-}
-.actionHot { border-left-color: var(--danger); }
-.actionWarm { border-left-color: var(--severity-high); }
-.actionCool { border-left-color: var(--accent-intel); }
-.actionCalm { border-left-color: var(--success); }
-.actionTitle {
-  font-size: var(--fs-md);
-  font-weight: 600;
-  color: var(--text-primary);
-  margin-bottom: 3px;
-}
-.actionWhy {
-  font-size: var(--fs-base);
-  color: var(--text-secondary);
-  margin-bottom: var(--sp-3);
-}
 .actionCode {
   font-family: var(--font-display);
   font-size: var(--fs-sm);
@@ -2025,24 +1966,6 @@
   padding: 0 var(--sp-2);
   border-radius: var(--r-sm);
   margin-right: var(--sp-2);
-}
-.actionBtn {
-  font-size: var(--fs-base);
-  font-weight: 600;
-  color: var(--text-primary);
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  padding: 3px 10px;
-  cursor: pointer;
-  font-family: inherit;
-}
-.actionBtn:hover:not(:disabled) {
-  border-color: var(--bg-hover);
-}
-.actionBtn:disabled {
-  opacity: 0.6;
-  cursor: default;
 }
 
 /* ── Essential reading ────────────────────────────────────────────────── */
@@ -2505,6 +2428,18 @@
   padding-top: var(--sp-1);
 }
 
+/* Affected vendor groups flow into columns when the section is wide enough. */
+.affGrid {
+  columns: 280px;
+  column-gap: var(--sp-5);
+}
+
+.affGrid .affGroup {
+  break-inside: avoid;
+  border-top: 0;
+  padding-top: var(--sp-1);
+}
+
 .affGroupHead {
   display: flex;
   align-items: baseline;
@@ -2536,6 +2471,18 @@
   font-weight: 600;
   color: var(--entity-product);
   text-decoration: none;
+}
+
+/* Links that leave IntelFeed take the theme accent; links to a profile keep
+   the entity colour. */
+a.affVendorLink[href^="http"],
+a.affProdLink[href^="http"] {
+  color: var(--accent);
+}
+
+/* A CWE link takes the CWE entity colour. */
+.cweLink {
+  color: var(--entity-cwe);
 }
 
 .affProdLink:hover {
@@ -3145,49 +3092,13 @@
   color: var(--text-primary);
 }
 
-/* ── Overview briefing grid: narrative column + fact rail ─────────────── */
-.briefingGrid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
-  gap: var(--sp-6);
-  align-items: start;
-}
-@media (max-width: 1100px) {
-  .briefingGrid {
-    grid-template-columns: 1fr;
-  }
-}
-.briefingCol {
-  /* Fills the grid track — no measure cap; the rail fixes the right edge. */
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-6);
-  min-width: 0;
-}
-.railCol {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-4);
-  min-width: 0;
-}
 
-/* Snapshot / rail card details */
-.snapSub {
-  font-size: var(--fs-2xs);
-  color: var(--text-muted);
-  text-align: right;
-  margin-top: -4px;
-  overflow-wrap: anywhere;
-}
+/* Facts strip details */
 .snapUp {
   color: var(--severity-high);
 }
 .snapDown {
   color: var(--success);
-}
-.snapKev b {
-  color: var(--severity-high);
-  font-weight: 600;
 }
 .snapCritical {
   color: var(--danger);
@@ -3699,8 +3610,8 @@
   cursor: default;
 }
 
-/* ── AI analysis module (briefing column) ── */
-.aiModule { margin-bottom: var(--sp-5); }
+/* ── AI analysis module (workspace section) ── */
+.aiModule { min-width: 0; }
 .aiModuleHead {
   display: flex;
   align-items: baseline;
@@ -3725,10 +3636,7 @@
   background: var(--bg-secondary);
 }
 
-/* ── Notes module (briefing column) ── */
-.notesModule { margin-bottom: var(--sp-5); }
-
-/* ── Observable provenance panel actions ── */
+/* ── Panel action buttons (provenance, infrastructure) ── */
 .railBtn {
   font-size: var(--fs-sm);
   font-weight: 600;
@@ -3744,3 +3652,354 @@
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 .railBtn:disabled { opacity: 0.5; cursor: default; }
+
+/* ── Relationships: enrichment-source claims ──
+   A quiet source tag on each claimed row, "via <source>" filter chips and an
+   "unresolved · N" toggle for names a source gave that matched no entity. */
+.relSourceTag {
+  flex: none;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+  border-radius: var(--r-sm);
+  padding: 0 var(--sp-2);
+  white-space: nowrap;
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.viaRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+
+.viaChip,
+.heldToggle {
+  appearance: none;
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: var(--r-full);
+  padding: 2px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.viaChip:hover,
+.heldToggle:hover {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+.viaChipOn {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.viaChip:focus-visible,
+.heldToggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.viaCount {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.heldToggle {
+  border-style: dashed;
+}
+
+.heldList {
+  list-style: none;
+  margin: 0 0 var(--sp-4);
+  padding: 0;
+  border-left: 2px solid var(--border-color);
+}
+
+.heldItem {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px var(--sp-3);
+  padding: 2px 0 2px var(--sp-3);
+}
+
+.heldName {
+  font-size: var(--fs-base);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+/* ── Overview: one column of sections ────────────────────────────────── */
+
+.tabList {
+  display: flex;
+  gap: var(--sp-1);
+  flex: 1;
+  min-width: 0;
+}
+/* Sticks to the strip's right edge while the tabs scroll beneath it, so the
+   Brief / Everything switch is in reach at phone width too. */
+.tabBarTrailing {
+  position: sticky;
+  right: 0;
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 4px 0 4px var(--sp-3);
+  background: var(--bg-secondary);
+  box-shadow: -10px 0 8px -6px var(--bg-secondary);
+}
+
+/* The brief: assessment with the next-action chips right under it. */
+.brief {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+/* A long pasted-in description shows its opening lines until unfolded. */
+.assessmentFolded {
+  max-height: 9.6em;
+  overflow: hidden;
+  mask-image: linear-gradient(#000 70%, transparent);
+}
+.assessmentFoldToggle {
+  align-self: flex-start;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+}
+.assessmentFoldToggle:hover { text-decoration: underline; }
+
+.nextActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+}
+.actionChip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 26px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-secondary);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.actionDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+.actionTone_hot .actionDot { background: var(--danger); }
+.actionTone_warm .actionDot { background: var(--severity-high); }
+.actionTone_cool .actionDot { background: var(--accent-intel); }
+.actionTone_calm .actionDot { background: var(--success); }
+.actionChipBtn {
+  border: 0;
+  background: none;
+  padding: 0 0 0 var(--sp-1);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+}
+.actionChipBtn:hover:not(:disabled) { text-decoration: underline; }
+.actionChipBtn:disabled { opacity: 0.6; cursor: default; }
+
+/* Facts strip: one tile per fact, across the width. */
+.facts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.factsStrip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+.factTile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--sp-2) 14px;
+  border-left: 1px solid var(--border);
+}
+.factTile:first-child {
+  border-left: 0;
+  padding-left: 0;
+}
+.factKey {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+.factVal {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.factVal.mono { font-family: var(--font-mono); font-size: var(--fs-base); }
+/* Two weaknesses in one tile, one per line, at reading size. */
+.factStack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--fs-base);
+}
+.factSub {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Section rows. The tab's own divider already separates the stack from the
+   facts strip, so the first row brings no border of its own. */
+.overviewRows {
+  display: flex;
+  flex-direction: column;
+}
+.overviewRow {
+  border-top: 1px solid var(--border);
+  min-width: 0;
+}
+.overviewRow:first-child { border-top: 0; }
+.overviewRowToggle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  min-height: 46px;
+  padding: 0 var(--sp-1);
+  border: 0;
+  background: none;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.overviewRowToggle:hover { background: var(--bg-hover); }
+.overviewRowToggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: var(--r-sm);
+}
+/* A 20px chevron, drawn not typed, so it reads as a control and turns to
+   point down when the row is open. */
+.overviewRowCaret {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  color: var(--text-muted);
+  transition: transform 120ms ease;
+}
+.overviewRowCaretOpen { transform: rotate(90deg); }
+.overviewRowToggle:hover .overviewRowCaret { color: var(--text-primary); }
+.overviewRowName {
+  flex: none;
+  min-width: 150px;
+  font-size: var(--fs-base);
+  font-weight: 600;
+}
+.overviewRowCount {
+  margin-left: var(--sp-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--text-muted);
+}
+.overviewRowDigest {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.overviewRowBody {
+  padding: var(--sp-1) 0 var(--sp-5) 32px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+/* Panels inside a section sit flat: the row is the frame. */
+.overviewRowBody .panel {
+  border: 0;
+  border-radius: 0;
+  background: none;
+  padding: 0;
+}
+.overviewRowBody .reading { margin-top: 0; }
+
+.readingGrid,
+.workspaceGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: var(--sp-5) var(--sp-6);
+}
+.readingStories {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.mitiGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--sp-3);
+}
+
+@media (max-width: 720px) {
+  /* A phone has no room for name and digest side by side, so the closed row
+     wraps: caret and name on the first line, the digest on its own line
+     under the name, still one truncated line. */
+  .overviewRowToggle {
+    flex-wrap: wrap;
+    row-gap: 0;
+    padding-top: var(--sp-2);
+    padding-bottom: var(--sp-2);
+  }
+  .overviewRowName { min-width: 0; }
+  .overviewRowDigest {
+    flex-basis: 100%;
+    padding-left: calc(20px + var(--sp-3));
+  }
+  .overviewRowBody { padding-left: 0; }
+  /* The pulse readout wraps instead of running off a phone screen: sparkline
+     and counts on the first line, trend, quality and the window picker below. */
+  .pulseLine {
+    flex-wrap: wrap;
+    row-gap: var(--sp-2);
+    align-items: center;
+  }
+}

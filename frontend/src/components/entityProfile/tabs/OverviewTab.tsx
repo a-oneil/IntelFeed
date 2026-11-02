@@ -1,12 +1,23 @@
 /**
- * OverviewTab — the entity's intrinsic dashboard: per-type "signal panels"
- * (CVE: threat / exploitation / affected; TTP: MITRE + mitigations; …), the
- * description, external pivot links, and Wikipedia. Relational data lives in the
+ * OverviewTab — the entity's dossier as one column.
+ *
+ * Always open at the top: the since-last-visit ribbon, the best-evidenced
+ * claims, the assessment with its next-action chips, and the facts strip
+ * (SnapshotCard). Below them, every other part of the profile is a section
+ * row (OverviewSection) in the order the type's config gives: closed, each row
+ * is one line whose digest answers the usual question; open, the same
+ * components render beneath it. Which rows are open is remembered per entity
+ * type (uiStore), and the tab bar's Brief / Everything switch opens them all.
+ *
+ * Per-type signal panels (CVE affected products, TTP catalog, CWE family,
+ * observable provenance, infrastructure…) render inside the section that
+ * hosts them (OVERVIEW_SECTION_PANELS). Relational data lives in the
  * Relationships tab; scalar identity fields live in the header.
  */
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo, type ReactNode } from "react";
 import api from "@/api/client";
 import { useAuthStore, useIsVisitor } from "@/stores/authStore";
+import { useUIStore } from "@/stores/uiStore";
 import { Link } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -31,14 +42,20 @@ import {
   useEntityDetectionGaps,
   useClearWikipedia,
   useEntityCampaigns,
+  useEntityStoryThreads,
+  useEntityTopEntries,
   useFetchWikipedia,
   useGenerateEntitySummary,
   useWikipediaSearch,
 } from "@/hooks/useEntityProfile";
+import { useEntityContext } from "@/hooks/useEntityContext";
+import { useAIResults } from "@/hooks/useAI";
+import { useEntityNotes } from "@/hooks/useEntityNotes";
 import { useEntityWhatsNew } from "@/hooks/useEngine";
 import type { EntityType } from "@/stores/intelStore";
 import type { CWEFamilyRef, EntitySearchResult, TimelineEvent, TTPFamilyRef } from "@/api/types";
 import { toast } from "sonner";
+import { formatDate } from "@/utils/formatDate";
 import { EntityNotesSection } from "@/components/EntityNotesSection";
 import { ActivityFeed } from "../ActivityFeed";
 import { AIAnalysisModule } from "../AIAnalysisModule";
@@ -46,16 +63,27 @@ import { ExploitPocCard, SnapshotCard } from "../SnapshotCard";
 import { VictimsStrip } from "../VictimsStrip";
 import { ActiveStoryCard } from "../ActiveStoryCard";
 import { SourcesCard } from "../SourcesCard";
-import { ContextPanel } from "../ContextPanel";
+import { ContextPanel, contextDigest, contextSourcesWithData } from "../ContextPanel";
 import { AssessmentBlock } from "../AssessmentBlock";
 import { KnownAssociates } from "../KnownAssociates";
 import { EssentialReading } from "../EssentialReading";
-import { NextActionsRail } from "../NextActionsRail";
+import { NextActions } from "../NextActions";
 import { CampaignIntake } from "../CampaignIntake";
+import { OverviewSection } from "../OverviewSection";
 import { useCampaignStats } from "@/hooks/useCampaigns";
 import { SinceLastVisitRibbon } from "../SinceLastVisitRibbon";
 import type { PivotResponse } from "@/api/types";
-import { entityDisplayName, entityProfilePath, type EntityProfileConfig, type OverviewPanelKey } from "../entityProfileConfig";
+import {
+  entityDisplayName,
+  entityProfilePath,
+  OVERVIEW_SECTION_LABELS,
+  OVERVIEW_SECTION_PANELS,
+  orderedOverviewSections,
+  resolveOpenSections,
+  type EntityProfileConfig,
+  type OverviewPanelKey,
+  type OverviewSectionKey,
+} from "../entityProfileConfig";
 import { dedupeProducts, extractNvd, type RefLink } from "../cveRefs";
 import {
   capturedByLabel,
@@ -107,6 +135,21 @@ function wikiLede(content: string): string {
   return plain.length > 420 ? `${plain.slice(0, 420).trimEnd()}…` : plain;
 }
 
+/** "3 articles", "1 event" — digests count things constantly. A noun whose
+ * plural is not noun + "s" passes it: plural(n, "entity", "entities"). */
+const plural = (n: number, noun: string, irregular?: string) =>
+  `${n.toLocaleString()} ${n === 1 ? noun : (irregular ?? `${noun}s`)}`;
+
+/** Joins the non-empty parts of a digest with the house separator. */
+const digestOf = (...parts: Array<string | null | undefined | false>) => parts.filter(Boolean).join(" · ");
+
+/** Scroll a section's child into view once that section has rendered it. */
+function scrollOnceRendered(ref: React.RefObject<HTMLElement | null>) {
+  // The ref is attached by a render that follows the state change, so the
+  // scroll waits one frame rather than reading a not-yet-mounted node.
+  requestAnimationFrame(() => ref.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+}
+
 export function OverviewTab({
   entityType,
   entityId,
@@ -133,7 +176,7 @@ export function OverviewTab({
   config: EntityProfileConfig;
   entries: Array<{ id: string; title: string; published_at: string | null }>;
   events: TimelineEvent[];
-  /** Full pivot related set — powers the next-actions rail. */
+  /** Full pivot related set — powers the next-action chips. */
   related?: PivotResponse["related"];
   /** Lower bound from the hero timeline's window picker — scopes the activity feed. */
   activitySince?: Date | null;
@@ -145,18 +188,49 @@ export function OverviewTab({
   onOpenStory?: (slug: string) => void;
   /** Field-level claims, shared with the header (same query key). */
   provenance?: import("@/hooks/useEntityProvenance").EntityProvenance;
-  /** Deep-link target (?tab=notes): scroll the notes module into view on mount. */
+  /** Deep-link target (?tab=notes): open the workspace and scroll notes into view. */
   anchor?: "notes" | null;
 }) {
-  // Public read-only mode: saved assessments show; AI, notes, the action rail and edits do not.
+  // Public read-only mode: saved assessments show; AI, notes, next actions and edits do not.
   const isVisitor = useIsVisitor();
   const activityRef = useRef<HTMLDivElement>(null);
   const notesRef = useRef<HTMLDivElement>(null);
+  const readingRef = useRef<HTMLDivElement>(null);
+
+  // ── Which sections are open ────────────────────────────────────────────
+  const mode = useUIStore((s) => s.profileOverviewMode);
+  const stored = useUIStore((s) => s.profileOpenSections[entityType]);
+  const setSectionOpen = useUIStore((s) => s.setProfileSectionOpen);
+  const sections = useMemo(
+    () => orderedOverviewSections(isVisitor ? config.overviewSections.filter((k) => k !== "workspace") : config.overviewSections),
+    [config, isVisitor],
+  );
+  const openKeys = useMemo(
+    () => new Set<OverviewSectionKey>(resolveOpenSections(stored, sections, config.overviewOpen, mode)),
+    [mode, sections, stored, config],
+  );
+  const isOpen = (key: OverviewSectionKey) => openKeys.has(key);
+  const toggle = (key: OverviewSectionKey) => setSectionOpen(entityType, key, !isOpen(key), [...openKeys], sections);
+  const openAnd = (key: OverviewSectionKey, ref: React.RefObject<HTMLElement | null>) => {
+    if (!isOpen(key)) setSectionOpen(entityType, key, true, [...openKeys], sections);
+    scrollOnceRendered(ref);
+  };
+
   useEffect(() => {
-    if (anchor === "notes") notesRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (anchor === "notes") openAnd("workspace", notesRef);
+    // Runs on arrival only — re-running on open-state changes would re-scroll.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anchor]);
+
   const [wikiOpen, setWikiOpen] = useState(false);
-  const [wikiSearchOpen, setWikiSearchOpen] = useState(false);
+  // Where the Wikipedia search was opened from, so it renders beside that
+  // button: the Sources card (no article yet) or the article's "Wrong article?".
+  const [wikiSearchAt, setWikiSearchAt] = useState<"sources" | "article" | null>(null);
+  const wikiSearchOpen = wikiSearchAt !== null;
+  const toggleWikiSearch = (at: "sources" | "article") => {
+    setWikiSearchAt((cur) => (cur === at ? null : at));
+    if (wikiSearchAt !== at) setWikiQuery(entity.name || entity.cve_id || "");
+  };
   const [wikiQuery, setWikiQuery] = useState("");
   const [debouncedWikiQuery, setDebouncedWikiQuery] = useState("");
   useEffect(() => {
@@ -185,7 +259,7 @@ export function OverviewTab({
   const { data: ttpFamily } = useTTPRelatedTechniques(entityType === "ttp" ? entityId : undefined);
   const { data: cweFamily } = useCWEFamily(entityType === "cwe" ? entityId : undefined);
   // The pivot payload has no corpus counts — they need a join, so like useCVE
-  // for the CVE hero this fetches the detail record for the stat row.
+  // for the CVE hero this fetches the detail record for the facts strip.
   const { data: cweDetail } = useCWE(entityType === "cwe" ? entityId : undefined);
   const { data: observableDetail } = useObservable(entityType === "observable" ? entityId : undefined);
   const { data: infrastructure } = useEntityInfrastructure(entityType, entityId);
@@ -203,7 +277,7 @@ export function OverviewTab({
     entityType === "vendor" || entityType === "product" ? entityType : undefined,
     entityId,
   );
-  // Same query as NextActionsRail — the Snapshot's techniques/rules rows.
+  // Same query as NextActions — the facts strip's techniques/rules tiles.
   const hasGaps = entityType === "threat_actor" || entityType === "malware";
   const { data: gapsForSnapshot } = useEntityDetectionGaps(
     hasGaps ? entityType : undefined,
@@ -214,6 +288,14 @@ export function OverviewTab({
     entityType === "vendor" || entityType === "product" ? entityType : undefined,
     entityId,
   );
+  // Section digests read the same queries their bodies run (same keys, one
+  // request each): context sources, open stories, essential reading, AI
+  // results and notes.
+  const { data: contextData } = useEntityContext(entityType, entityId);
+  const { data: openThreads } = useEntityStoryThreads(entityType, entityId, { limit: 2, status: "open" });
+  const { data: topEntries } = useEntityTopEntries(entityType, entityId, 30);
+  const { data: aiResults } = useAIResults(isVisitor ? undefined : entityType, entityId);
+  const { data: notes } = useEntityNotes(entityType, isVisitor ? undefined : entityId);
   const nvd =
     entityType === "cve" ? extractNvd(cveDetail?.nvd_data) : { vector: null, cwe: null, references: [], published: null };
   // CVE reference set for the Sources card — structured references_ column
@@ -231,7 +313,7 @@ export function OverviewTab({
         : nvd.references
       : [];
 
-  // Rail's "draft with AI" shares the same endpoint the assessment refresh runs.
+  // The chips' "draft with AI" shares the same endpoint the assessment refresh runs.
   const draftAI = useGenerateEntitySummary();
   const draftAssessment = () => {
     draftAI.mutate(
@@ -245,8 +327,6 @@ export function OverviewTab({
 
   const renderPanel = (key: OverviewPanelKey): React.ReactNode => {
     switch (key) {
-      case "context":
-        return <ContextPanel key={key} entityType={entityType} entityId={entityId} />;
       case "cve_affected": {
         const products = dedupeProducts(entity.affected_products);
         // Authoritative cve_affected rows grouped by CPE vendor — resolved
@@ -263,7 +343,8 @@ export function OverviewTab({
         return (
           <Panel key={key} title={vendorGroups.size > 0 ? "Affected — from NVD CPE" : "Affected"}>
             {vendorGroups.size > 0 ? (
-              [...vendorGroups.entries()].map(([cpeVendor, group]) => {
+              <div className={styles.affGrid}>
+              {[...vendorGroups.entries()].map(([cpeVendor, group]) => {
                 const resolvedCount = group.rows.filter((r) => r.product_id).length;
                 return (
                   <div key={cpeVendor} className={styles.affGroup}>
@@ -297,7 +378,8 @@ export function OverviewTab({
                     })}
                   </div>
                 );
-              })
+              })}
+              </div>
             ) : products.length > 0 ? (
               <div className={styles.aliases}>
                 {products.map((p) => <span key={p} className={styles.alias}>{p}</span>)}
@@ -350,16 +432,18 @@ export function OverviewTab({
         if (!ttpMitigations?.length) return null;
         return (
           <Panel key={key} title={`Mitigations (${ttpMitigations.length})`}>
-            {ttpMitigations.map((m) => (
-              <div key={m.id} className={styles.mitiItem}>
-                <div className={styles.mitiHeader}>
-                  {m.mitre_id && <span className={styles.mitiId}>{m.mitre_id}</span>}
-                  <span className={styles.mitiName}>{m.name}</span>
-                  {m.mitre_url && <a className={styles.mitreLink} href={m.mitre_url} target="_blank" rel="noopener noreferrer">ATT&CK</a>}
+            <div className={styles.mitiGrid}>
+              {ttpMitigations.map((m) => (
+                <div key={m.id} className={styles.mitiItem}>
+                  <div className={styles.mitiHeader}>
+                    {m.mitre_id && <span className={styles.mitiId}>{m.mitre_id}</span>}
+                    <span className={styles.mitiName}>{m.name}</span>
+                    {m.mitre_url && <a className={styles.mitreLink} href={m.mitre_url} target="_blank" rel="noopener noreferrer">ATT&CK</a>}
+                  </div>
+                  {m.description && <div className={styles.mitiDesc}>{m.description.length > 200 ? `${m.description.slice(0, 200)}…` : m.description}</div>}
                 </div>
-                {m.description && <div className={styles.mitiDesc}>{m.description.length > 200 ? `${m.description.slice(0, 200)}…` : m.description}</div>}
-              </div>
-            ))}
+              ))}
+            </div>
           </Panel>
         );
       case "cwe_family": {
@@ -560,9 +644,11 @@ export function OverviewTab({
                   <span>Reported with</span>
                   <span className={styles.metaLabel}>named in the same articles</span>
                 </div>
-                {b.reported_with.map((r) =>
-                  row(r, `${r.entity_type.replace(/_/g, " ")} · ${r.article_count} article${r.article_count === 1 ? "" : "s"}`),
-                )}
+                <div className={styles.affGrid}>
+                  {b.reported_with.map((r) =>
+                    row(r, `${r.entity_type.replace(/_/g, " ")} · ${r.article_count} article${r.article_count === 1 ? "" : "s"}`),
+                  )}
+                </div>
               </div>
             )}
           </Panel>
@@ -756,19 +842,21 @@ export function OverviewTab({
         if (!mitigations.length) return null;
         return (
           <Panel key={key} title={`Mitigations (${mitigations.length})`}>
-            {mitigations.slice(0, 5).map((m, i) => (
-              <div key={`${m.phase}-${i}`} className={styles.mitiItem}>
-                <div className={styles.mitiHeader}>
-                  {m.phase && <span className={styles.mitiId}>{m.phase}</span>}
-                  {m.strategy && <span className={styles.mitiName}>{m.strategy}</span>}
-                </div>
-                {m.description && (
-                  <div className={styles.mitiDesc}>
-                    {m.description.length > 200 ? `${m.description.slice(0, 200)}…` : m.description}
+            <div className={styles.mitiGrid}>
+              {mitigations.slice(0, 5).map((m, i) => (
+                <div key={`${m.phase}-${i}`} className={styles.mitiItem}>
+                  <div className={styles.mitiHeader}>
+                    {m.phase && <span className={styles.mitiId}>{m.phase}</span>}
+                    {m.strategy && <span className={styles.mitiName}>{m.strategy}</span>}
                   </div>
-                )}
-              </div>
-            ))}
+                  {m.description && (
+                    <div className={styles.mitiDesc}>
+                      {m.description.length > 200 ? `${m.description.slice(0, 200)}…` : m.description}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           </Panel>
         );
       }
@@ -811,11 +899,348 @@ export function OverviewTab({
     }
   };
 
-  const panels = config.overviewPanels.map(renderPanel).filter(Boolean);
+  /** The type's signal panels that belong to one section, rendered. */
+  const panelsFor = (section: OverviewSectionKey): ReactNode[] =>
+    (OVERVIEW_SECTION_PANELS[section] ?? [])
+      .filter((p) => config.overviewPanels.includes(p))
+      .map(renderPanel)
+      .filter(Boolean);
+
   // scoped=true: the profile's Latest Developments list only carries events
   // about THIS entity, not first-mentions of co-occurring ones.
   const { data: whatsNew } = useEntityWhatsNew(entityType, entityId, true, true);
   const { data: campaigns } = useEntityCampaigns(entityType, entityId);
+
+  // ── Section digests ────────────────────────────────────────────────────
+  // Each answers the row's usual question in one line, from data the section's
+  // own components already fetch.
+  const latestVictim = victims?.items[0];
+  const victimsDigest = victimStats && victims && victims.items.length > 0
+    ? digestOf(
+        `leak site · ${victimStats.last_30d} in the last 30 days`,
+        latestVictim &&
+          `last ${latestVictim.name} (${[latestVictim.country_code, latestVictim.sector_label ?? latestVictim.sector].filter(Boolean).join(", ")})${latestVictim.last_seen_at ? ` on ${formatDate(latestVictim.last_seen_at)}` : ""}`,
+      )
+    : null;
+
+  const catalogDigest =
+    entityType === "ttp"
+      ? digestOf(
+          entity.platforms?.length ? plural(entity.platforms.length, "platform") : null,
+          entity.data_sources?.length ? plural(entity.data_sources.length, "data source") : null,
+          ttpMitigations?.length ? plural(ttpMitigations.length, "mitigation") : null,
+          ttpFamily?.parent ? `under ${ttpFamily.parent.technique_id}` : null,
+          ttpFamily?.subtechniques.length ? plural(ttpFamily.subtechniques.length, "sub-technique") : null,
+        )
+      : entityType === "cwe"
+        ? digestOf(
+            cweFamily?.lineage.length ? `under ${cweFamily.lineage[cweFamily.lineage.length - 1]?.cwe_id}` : null,
+            cweFamily?.children.length ? plural(cweFamily.children.length, "child", "children") : null,
+            entity.mitigations?.length ? plural(entity.mitigations.length, "mitigation") : null,
+            cweVendors?.length ? `${cweVendors.length} most-affected vendors` : null,
+            entity.mapping_usage ? `mapping ${entity.mapping_usage}` : null,
+          )
+        : null;
+
+  const pocCount = cveDetail?.github_poc_count ?? entity.github_poc_count ?? 0;
+  const metasploit = cveDetail?.metasploit_module ?? entity.metasploit_module;
+  const exploitDigest = digestOf(
+    pocCount > 0 ? `${pocCount} public PoC${pocCount === 1 ? "" : "s"}` : null,
+    metasploit ? `Metasploit ${metasploit}` : "no Metasploit module yet",
+  );
+
+  const affectedVendors = [...new Set((affectedRows ?? []).map((r) => r.vendor_name ?? r.cpe_vendor))];
+  const affectedDigest = affectedRows?.length
+    ? digestOf(
+        affectedVendors.slice(0, 2).join(", ") + (affectedVendors.length > 2 ? ` +${affectedVendors.length - 2}` : ""),
+        plural(affectedRows.length, "product"),
+        `${affectedRows.filter((r) => r.product_id).length} resolved`,
+      )
+    : dedupeProducts(entity.affected_products).slice(0, 3).join(" · ") || null;
+
+  const weaknessDigest = weaknessProfile?.length
+    ? weaknessProfile
+        .slice(0, 3)
+        .map((w) => `${w.cwe_id} ${Math.round(w.share * 100)}%`)
+        .join(" · ") + (weaknessProfile.length > 3 ? ` · +${weaknessProfile.length - 3}` : "")
+    : null;
+
+  const infraByKind = infrastructure?.counts?.by_kind ?? {};
+  const infraTotal = (infrastructure?.claimed.length ?? 0) + (infrastructure?.reported_alongside.length ?? 0);
+  const infraStaged = infrastructure?.counts?.staged_candidate_articles ?? 0;
+  const infraDigest = infraTotal > 0
+    ? Object.entries(infraByKind)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 4)
+        .map(([k, n]) => `${k.replace(/_/g, " ")} ${n}`)
+        .join(" · ")
+    : digestOf("None captured yet", infraStaged > 0 ? `${plural(infraStaged, "article")} with indicators waiting for review` : null);
+
+  const attributionTypes = new Map<string, number>();
+  for (const r of backlinks?.reported_with ?? []) attributionTypes.set(r.entity_type, (attributionTypes.get(r.entity_type) ?? 0) + 1);
+  const attributionDigest = backlinks && (backlinks.claimed_by.length > 0 || backlinks.reported_with.length > 0)
+    ? digestOf(
+        backlinks.claimed_by.length > 0 ? `claimed by ${plural(backlinks.claimed_by.length, "entity", "entities")}` : null,
+        backlinks.reported_with.length > 0
+          ? `reported with ${[...attributionTypes.entries()]
+              .sort((a, b) => b[1] - a[1])
+              .map(([t, n]) => `${n} ${t.replace(/_/g, " ")}`)
+              .join(", ")}`
+          : null,
+      )
+    : null;
+
+  const provenanceDigest = observableDetail
+    ? digestOf(
+        `${Math.round(observableDetail.current_confidence * 100)}% confidence`,
+        observableDetail.decay_half_life_days ? `${observableDetail.decay_half_life_days}d half-life` : "never decays",
+        observableDetail.created_via ? `via ${capturedByLabel(observableDetail.created_via)}` : null,
+        observableSourcesLabel(observableDetail),
+      )
+    : null;
+
+  const readingDigest = digestOf(
+    openThreads?.length
+      ? `${openThreads.length} active · ${openThreads[0].title} (${plural(openThreads[0].entry_count, "article")})`
+      : null,
+    topEntries?.length ? `${topEntries.length} essential read${topEntries.length === 1 ? "" : "s"}` : null,
+    entity.wikipedia_content ? "Wikipedia attached" : null,
+  ) || "no stories or ranked reading yet";
+
+  // Enrichment runs are bookkeeping, not news: the digest leads with the
+  // latest article or story, not "Enriched via nvd (success)".
+  const latestActivity = [
+    ...events.filter((e) => e.event_type !== "enrichment").map((e) => ({ title: e.title, date: e.date })),
+    ...entries.map((e) => ({ title: e.title, date: e.published_at })),
+  ]
+    .filter((x) => x.date)
+    .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""))[0];
+  const activityDigest = digestOf(
+    latestActivity ? `Latest: ${formatDate(latestActivity.date!)} ${latestActivity.title}` : null,
+    plural(entries.length, "article"),
+    plural(events.length, "event"),
+  );
+
+  const workspaceDigest = digestOf(
+    `AI analysis: ${aiResults?.length ? `${aiResults.length} on record` : "none on record"}`,
+    `Notes: ${notes?.length ? notes.length : "none yet"}`,
+  );
+
+  // The Wikipedia search, rendered beside whichever button opened it.
+  const wikiSearchPop = (
+    <div className={styles.wikiSearchPop}>
+      <input
+        className={styles.wikiSearchInput}
+        value={wikiQuery}
+        onChange={(e) => setWikiQuery(e.target.value)}
+        placeholder="Search Wikipedia…"
+        autoFocus
+      />
+      {wikiSearching && <div className={styles.wikiSearchStatus}>Searching…</div>}
+      {!wikiSearching && wikiResults && wikiResults.length === 0 && (
+        <div className={styles.wikiSearchStatus}>No articles found</div>
+      )}
+      {wikiResults && wikiResults.length > 0 && (
+        <div className={styles.wikiSearchResults}>
+          {wikiResults.map((r) => (
+            <button
+              key={r.title}
+              className={styles.wikiSearchResult}
+              disabled={fetchWikipedia.isPending}
+              onClick={() => {
+                fetchWikipedia.mutate(
+                  { entityType, entityId, title: r.title },
+                  {
+                    onSuccess: () => {
+                      setWikiSearchAt(null);
+                      setWikiOpen(true);
+                      // The lede lives in Stories & reading: open it so the attach is seen.
+                      openAnd("reading", readingRef);
+                    },
+                  },
+                );
+              }}
+            >
+              <span className={styles.wikiSearchResultTitle}>{r.title}</span>
+              {r.snippet && <span className={styles.wikiSearchResultSnippet}>{r.snippet}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+      {fetchWikipedia.isPending && <div className={styles.wikiSearchStatus}>Applying…</div>}
+      <button
+        className={styles.wikiSearchNone}
+        disabled={clearWikipedia.isPending || fetchWikipedia.isPending}
+        onClick={() => {
+          clearWikipedia.mutate(
+            { entityType, entityId },
+            { onSuccess: () => { setWikiSearchAt(null); setWikiOpen(false); } },
+          );
+        }}
+      >
+        {clearWikipedia.isPending ? "Clearing…" : "None — no Wikipedia article"}
+      </button>
+    </div>
+  );
+
+  // ── Section bodies ─────────────────────────────────────────────────────
+  type SectionSpec = { digest: string | null; count?: ReactNode; body: ReactNode; hidden?: boolean };
+  const sectionSpec = (key: OverviewSectionKey): SectionSpec => {
+    switch (key) {
+      case "victims":
+        return { digest: victimsDigest, count: victims?.total, body: <VictimsStrip entityId={entityId} />, hidden: !victimsDigest };
+      case "catalog": {
+        const panels = panelsFor(key);
+        return { digest: catalogDigest, body: panels, hidden: panels.length === 0 };
+      }
+      case "context": {
+        const digest = contextDigest(contextData);
+        return {
+          digest,
+          // Counts the sources that answered, not every source that applies.
+          count: contextSourcesWithData(contextData).length ? plural(contextSourcesWithData(contextData).length, "source") : undefined,
+          hidden: digest === null,
+          body: (
+            <>
+              <ContextPanel entityType={entityType} entityId={entityId} />
+              <SourcesCard
+                entity={entity}
+                config={config}
+                cveReferences={entityType === "cve" ? cveRefLinks : undefined}
+                // Gated on the config's own declaration rather than "has no wiki
+                // content yet": a campaign is an internal object with nothing to
+                // look up, and offering the search returned an error on click.
+                onFindWikipedia={
+                  entity.wikipedia_content || !config.actions.includes("fetch_wikipedia")
+                    ? undefined
+                    : () => toggleWikiSearch("sources")
+                }
+              />
+              {wikiSearchAt === "sources" && wikiSearchPop}
+            </>
+          ),
+        };
+      }
+      case "exploit":
+        return {
+          digest: exploitDigest,
+          count: pocCount > 0 ? pocCount : undefined,
+          body: <ExploitPocCard entity={entity} cveDetail={cveDetail} />,
+          hidden: pocCount === 0 && !metasploit && !(cveDetail?.github_poc_urls ?? entity.github_poc_urls ?? []).length,
+        };
+      case "affected": {
+        const panels = panelsFor(key);
+        return { digest: affectedDigest, body: panels, hidden: panels.length === 0 };
+      }
+      case "weakness_profile": {
+        const panels = panelsFor(key);
+        return { digest: weaknessDigest, body: panels, hidden: panels.length === 0 };
+      }
+      case "infrastructure": {
+        const panels = panelsFor(key);
+        return { digest: infraDigest, count: infraTotal || undefined, body: panels, hidden: panels.length === 0 };
+      }
+      case "attribution": {
+        const panels = panelsFor(key);
+        return {
+          digest: attributionDigest,
+          count: backlinks ? backlinks.claimed_by.length + backlinks.reported_with.length || undefined : undefined,
+          body: panels,
+          hidden: panels.length === 0,
+        };
+      }
+      case "provenance": {
+        const panels = panelsFor(key);
+        return { digest: provenanceDigest, body: panels, hidden: panels.length === 0 };
+      }
+      case "reading":
+        return {
+          digest: readingDigest,
+          body: (
+            <div className={styles.readingGrid} ref={readingRef}>
+              <div className={styles.readingStories}>
+                <ActiveStoryCard entityType={entityType} entityId={entityId} />
+              </div>
+              <div>
+                <EssentialReading entityType={entityType} entityId={entityId} onOpenArticle={onOpenArticle} />
+                {/* Wikipedia renders only when an article is attached — collapsed to
+                    its lede; the attach flow starts from the Sources card. */}
+                {entity.wikipedia_content && (
+                  <div className={styles.wikiSection}>
+                    <div className={styles.wikiHeader}>
+                      <span className={styles.wikiTitleLabel}>Wikipedia</span>
+                      {entity.wikipedia_url && (
+                        <a className={styles.wikiLink} href={entity.wikipedia_url} target="_blank" rel="noopener noreferrer">
+                          View article ↗
+                        </a>
+                      )}
+                      {!isVisitor && (
+                        <button
+                          className={styles.wikiSearchBtn}
+                          onClick={() => toggleWikiSearch("article")}
+                        >
+                          Wrong article?
+                        </button>
+                      )}
+                    </div>
+                    {wikiSearchAt === "article" && wikiSearchPop}
+                    {wikiOpen ? (
+                      <div className={styles.wikiContent}>
+                        <Markdown remarkPlugins={[remarkGfm]}>{entity.wikipedia_content}</Markdown>
+                        <button className={styles.wikiLedeMore} onClick={() => setWikiOpen(false)}>
+                          show less <span className="caret-glyph">▴</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <div className={styles.wikiLede}>
+                        {wikiLede(entity.wikipedia_content)}{" "}
+                        <button className={styles.wikiLedeMore} onClick={() => setWikiOpen(true)}>
+                          read more <span className="caret-glyph">▾</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          ),
+        };
+      case "activity":
+        return {
+          digest: activityDigest,
+          count: entries.length + events.length || undefined,
+          body: (
+            <div ref={activityRef}>
+              {entityType === "campaign" && (
+                <CampaignIntake campaignId={entityId} onOpenArticle={onOpenArticle} />
+              )}
+              <ActivityFeed
+                entityType={entityType}
+                entityId={entityId}
+                entries={entries}
+                events={events}
+                since={activitySince}
+                onOpenArticle={onOpenArticle}
+                onOpenStory={onOpenStory}
+              />
+            </div>
+          ),
+        };
+      case "workspace":
+        return {
+          digest: workspaceDigest,
+          body: (
+            <div className={styles.workspaceGrid}>
+              <AIAnalysisModule entityType={entityType} entityId={entityId} />
+              {/* Analyst notes; a ?tab=notes link opens this row and scrolls here. */}
+              <div ref={notesRef}>
+                <EntityNotesSection entityType={entityType} entityId={entityId} />
+              </div>
+            </div>
+          ),
+        };
+    }
+  };
 
   return (
     <div className={styles.tabPanel}>
@@ -826,7 +1251,7 @@ export function OverviewTab({
         events={events}
         kevAddedAt={entityType === "cve" ? (cveDetail?.kev_date_added ?? entity.kev_date_added) : undefined}
         victimDates={entityType === "threat_actor" ? (victims?.items ?? []).map((v) => v.last_seen_at) : undefined}
-        onCatchUp={() => activityRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+        onCatchUp={() => openAnd("activity", activityRef)}
       />
       {/* Associates open the Overview (moved out of the fixed header so other
           tabs don't pay for the strip). */}
@@ -886,215 +1311,98 @@ export function OverviewTab({
           )}
         </div>
       )}
-      <div className={styles.briefingGrid}>
-        <div className={styles.briefingCol}>
-          {config.hasDescription && (
-            <AssessmentBlock
-              entityType={entityType}
-              entityId={entityId}
-              entity={entity}
-              editable={entityType !== "mitigation" && !isVisitor}
-              whatsNew={whatsNew ?? []}
-              onUpdateField={onUpdateField}
-              onOpenArticle={onOpenArticle}
-            />
-          )}
-          {!isVisitor && <AIAnalysisModule entityType={entityType} entityId={entityId} />}
-          {entityType === "threat_actor" && !isVisitor && <VictimsStrip entityId={entityId} />}
-          <EssentialReading entityType={entityType} entityId={entityId} onOpenArticle={onOpenArticle} />
 
-          {/* Wikipedia renders only when an article is attached — collapsed to
-              its lede; the attach flow starts from the Sources card. */}
-          {entity.wikipedia_content && (
-            <div className={styles.wikiSection}>
-              <div className={styles.wikiHeader}>
-                <span className={styles.wikiTitleLabel}>Wikipedia</span>
-                {entity.wikipedia_url && (
-                  <a className={styles.wikiLink} href={entity.wikipedia_url} target="_blank" rel="noopener noreferrer">
-                    View article ↗
-                  </a>
-                )}
-                {!isVisitor && (
-                <button
-                  className={styles.wikiSearchBtn}
-                  onClick={() => {
-                    setWikiSearchOpen((o) => !o);
-                    if (!wikiSearchOpen) setWikiQuery(entity.name || entity.cve_id || "");
-                  }}
-                >
-                  Wrong article?
-                </button>
-                )}
-              </div>
-              {wikiOpen ? (
-                <div className={styles.wikiContent}>
-                  <Markdown remarkPlugins={[remarkGfm]}>{entity.wikipedia_content}</Markdown>
-                  <button className={styles.wikiLedeMore} onClick={() => setWikiOpen(false)}>
-                    show less <span className="caret-glyph">▴</span>
-                  </button>
-                </div>
-              ) : (
-                <div className={styles.wikiLede}>
-                  {wikiLede(entity.wikipedia_content)}{" "}
-                  <button className={styles.wikiLedeMore} onClick={() => setWikiOpen(true)}>
-                    read more <span className="caret-glyph">▾</span>
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Analyst notes — folded in from the old Notes tab; ?tab=notes lands here. */}
-          {!isVisitor && (
-          <div ref={notesRef} className={styles.notesModule}>
-            <EntityNotesSection entityType={entityType} entityId={entityId} />
-          </div>
-          )}
-
-          <div ref={activityRef}>
-            <ActiveStoryCard entityType={entityType} entityId={entityId} />
-            {/* Wide column, not the rail: the rail could say that something
-                would be added without ever saying what. */}
-            {entityType === "campaign" && (
-              <CampaignIntake campaignId={entityId} onOpenArticle={onOpenArticle} />
-            )}
-            <ActivityFeed
-              entityType={entityType}
-              entityId={entityId}
-              entries={entries}
-              events={events}
-              since={activitySince}
-              onOpenArticle={onOpenArticle}
-              onOpenStory={onOpenStory}
-            />
-          </div>
-        </div>
-
-        <div className={styles.railCol}>
-          <SnapshotCard
+      {/* The brief: the profile's voice, with what to do about it right under. */}
+      <div className={styles.brief}>
+        {config.hasDescription && (
+          <AssessmentBlock
             entityType={entityType}
+            entityId={entityId}
             entity={entity}
-            cveDetail={cveDetail}
-            cweDetail={cweDetail}
-            cveWeaknesses={cveWeaknesses}
-            cvssVector={nvd.vector}
-            campaigns={campaigns}
-            provenance={provenance}
-            victimStats={victimStats}
-            affected={affectedForCounts}
-            techniques={
-              gapsForSnapshot && gapsForSnapshot.total_ttps > 0
-                ? { total: gapsForSnapshot.total_ttps, gaps: gapsForSnapshot.gap_count }
-                : null
-            }
-            ruleCount={related?.detection_rules?.length ?? 0}
-            campaignStats={
-              campaignStatsData
-                ? {
-                    entries: campaignStatsData.entry_count,
-                    stories: campaignStoryCount,
-                    actors: campaignStatsData.entity_counts?.threat_actor ?? 0,
-                    malware: campaignStatsData.entity_counts?.malware ?? 0,
-                    cves: campaignStatsData.entity_counts?.cve ?? 0,
-                    techniques: campaignStatsData.entity_counts?.ttp ?? 0,
-                    coveragePct: campaignStatsData.detection_coverage_pct ?? null,
-                  }
-                : null
-            }
-            countryStats={
-              countryProfile
-                ? {
-                    origins: countryProfile.origin_actors.length,
-                    targeting: countryProfile.targeting_actors.length,
-                    roles: countryProfile.role_breakdown ?? {},
-                  }
-                : null
-            }
+            editable={entityType !== "mitigation" && !isVisitor}
+            whatsNew={whatsNew ?? []}
+            onUpdateField={onUpdateField}
             onOpenArticle={onOpenArticle}
           />
-          {entityType === "cve" && <ExploitPocCard entity={entity} cveDetail={cveDetail} />}
-          {/* Sources ahead of the per-type panels — on panel-heavy types (CWE)
-              it was landing below the fold. */}
-          <SourcesCard
-            entity={entity}
-            config={config}
-            cveReferences={entityType === "cve" ? cveRefLinks : undefined}
-            // Gated on the config's own declaration rather than "has no wiki
-            // content yet": a campaign is an internal object with nothing to
-            // look up, and offering the search returned an error on click.
-            onFindWikipedia={
-              entity.wikipedia_content || !config.actions.includes("fetch_wikipedia")
-                ? undefined
-                : () => {
-                    setWikiSearchOpen((o) => !o);
-                    if (!wikiSearchOpen) setWikiQuery(entity.name || entity.cve_id || "");
-                  }
-            }
-          />
-          {panels}
-        {wikiSearchOpen && (
-          <div className={styles.wikiSearchPop}>
-            <input
-              className={styles.wikiSearchInput}
-              value={wikiQuery}
-              onChange={(e) => setWikiQuery(e.target.value)}
-              placeholder="Search Wikipedia…"
-              autoFocus
-            />
-            {wikiSearching && <div className={styles.wikiSearchStatus}>Searching…</div>}
-            {!wikiSearching && wikiResults && wikiResults.length === 0 && (
-              <div className={styles.wikiSearchStatus}>No articles found</div>
-            )}
-            {wikiResults && wikiResults.length > 0 && (
-              <div className={styles.wikiSearchResults}>
-                {wikiResults.map((r) => (
-                  <button
-                    key={r.title}
-                    className={styles.wikiSearchResult}
-                    disabled={fetchWikipedia.isPending}
-                    onClick={() => {
-                      fetchWikipedia.mutate(
-                        { entityType, entityId, title: r.title },
-                        { onSuccess: () => { setWikiSearchOpen(false); setWikiOpen(true); } },
-                      );
-                    }}
-                  >
-                    <span className={styles.wikiSearchResultTitle}>{r.title}</span>
-                    {r.snippet && <span className={styles.wikiSearchResultSnippet}>{r.snippet}</span>}
-                  </button>
-                ))}
-              </div>
-            )}
-            {fetchWikipedia.isPending && <div className={styles.wikiSearchStatus}>Applying…</div>}
-            <button
-              className={styles.wikiSearchNone}
-              disabled={clearWikipedia.isPending || fetchWikipedia.isPending}
-              onClick={() => {
-                clearWikipedia.mutate(
-                  { entityType, entityId },
-                  { onSuccess: () => { setWikiSearchOpen(false); setWikiOpen(false); } },
-                );
-              }}
-            >
-              {clearWikipedia.isPending ? "Clearing…" : "None — no Wikipedia article"}
-            </button>
-          </div>
         )}
-          {related && onShowRelationships && !isVisitor && (
-            <NextActionsRail
-              entityType={entityType}
-              entityId={entityId}
-              entity={entity}
-              displayName={entityDisplayName(entity, entityId)}
-              related={related}
-              entries={entries}
-              onShowRelationships={onShowRelationships}
-              onShowDetectionGaps={onShowDetectionGaps ?? onShowRelationships}
-              onDraftAssessment={draftAssessment}
-              draftPending={draftAI.isPending}
-            />
-          )}
-        </div>
+        {related && onShowRelationships && !isVisitor && (
+          <NextActions
+            entityType={entityType}
+            entityId={entityId}
+            entity={entity}
+            displayName={entityDisplayName(entity, entityId)}
+            related={related}
+            entries={entries}
+            onShowRelationships={onShowRelationships}
+            onShowDetectionGaps={onShowDetectionGaps ?? onShowRelationships}
+            onDraftAssessment={draftAssessment}
+            draftPending={draftAI.isPending}
+          />
+        )}
+      </div>
+
+      {/* The facts strip: every number the type carries, across the width. */}
+      <SnapshotCard
+        entityType={entityType}
+        entity={entity}
+        cveDetail={cveDetail}
+        cweDetail={cweDetail}
+        cveWeaknesses={cveWeaknesses}
+        cvssVector={nvd.vector}
+        campaigns={campaigns}
+        provenance={provenance}
+        victimStats={victimStats}
+        affected={affectedForCounts}
+        techniques={
+          gapsForSnapshot && gapsForSnapshot.total_ttps > 0
+            ? { total: gapsForSnapshot.total_ttps, gaps: gapsForSnapshot.gap_count }
+            : null
+        }
+        ruleCount={related?.detection_rules?.length ?? 0}
+        campaignStats={
+          campaignStatsData
+            ? {
+                entries: campaignStatsData.entry_count,
+                stories: campaignStoryCount,
+                actors: campaignStatsData.entity_counts?.threat_actor ?? 0,
+                malware: campaignStatsData.entity_counts?.malware ?? 0,
+                cves: campaignStatsData.entity_counts?.cve ?? 0,
+                techniques: campaignStatsData.entity_counts?.ttp ?? 0,
+                coveragePct: campaignStatsData.detection_coverage_pct ?? null,
+              }
+            : null
+        }
+        countryStats={
+          countryProfile
+            ? {
+                origins: countryProfile.origin_actors.length,
+                targeting: countryProfile.targeting_actors.length,
+                roles: countryProfile.role_breakdown ?? {},
+              }
+            : null
+        }
+        onOpenArticle={onOpenArticle}
+      />
+
+      {/* Everything else: one row per section, in the type's order. */}
+      <div className={styles.overviewRows}>
+        {sections.map((key) => {
+          const spec = sectionSpec(key);
+          if (spec.hidden) return null;
+          return (
+            <OverviewSection
+              key={key}
+              id={key}
+              title={OVERVIEW_SECTION_LABELS[key]}
+              count={spec.count}
+              digest={spec.digest}
+              open={isOpen(key)}
+              onToggle={() => toggle(key)}
+            >
+              {spec.body}
+            </OverviewSection>
+          );
+        })}
       </div>
     </div>
   );

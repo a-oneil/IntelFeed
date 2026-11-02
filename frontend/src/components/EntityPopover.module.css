@@ -220,13 +220,6 @@
   bottom: calc(100% + 4px);
 }
 
-.enrichMenuEmpty {
-  padding: 6px 10px;
-  font-size: var(--fs-sm);
-  color: var(--text-muted);
-  text-align: center;
-}
-
 .enrichMenuItem {
   display: block;
   width: 100%;
@@ -244,15 +237,49 @@
   color: var(--accent-text);
 }
 
-.enrichFlash {
+/* Enrichment's verdict chips beside the type chip (exploited, no patch,
+   benign scanner, EOL): the only colored part of the glance. */
+.verdict {
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  font-weight: 700;
+}
+
+/* The Context row: a few short facts on one line, joined by middots. */
+.glanceFacts > span + span::before {
+  content: " · ";
+  color: var(--text-tertiary);
+  font-weight: 400;
+}
+
+.factBad {
+  color: var(--danger);
+}
+
+.factWarn {
+  color: var(--warning);
+}
+
+/* What a Look up left to say: a source that waited, failed or needs a key. */
+.lookupNotes {
   margin-top: var(--sp-2);
-  padding: 3px var(--sp-3);
+  display: grid;
+  gap: 2px;
   font-size: var(--fs-sm);
-  font-weight: 600;
-  color: var(--success);
+  color: var(--text-secondary);
   text-align: center;
-  border-radius: var(--r-sm);
-  background: color-mix(in srgb, var(--success) 10%, transparent);
+}
+
+.noteLink {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
 }
 
 /* KEV: a filled red flag. Chip's `solid` tone derives the foreground from the
@@ -282,4 +309,9 @@
   height: 1px;
   margin: var(--sp-2) 0;
   background: var(--border);
+}
+
+/* Delete: the one destructive row in the Wrong? menu. */
+.danger {
+  color: var(--danger);
 }

@@ -77,6 +77,7 @@ export function SignalBadges({
         if (b.editKind === "country" && b.label && entity && onOpenEntity) {
           const countryId =
             entity.origin_country_id ??
+            entity.country_id ??
             relatedCountries.find((c) => c.name?.toLowerCase() === entity.country?.toLowerCase())?.id ??
             null;
           if (countryId) {

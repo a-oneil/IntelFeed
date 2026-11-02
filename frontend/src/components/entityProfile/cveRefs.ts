@@ -1,6 +1,6 @@
 /**
  * cveRefs — shared helpers for reading a CVE's NVD blob and reference set.
- * Used by the Overview's Snapshot/Sources rail cards and the affected panel.
+ * Used by the Overview's facts strip, Sources card and the affected panel.
  */
 
 export interface RefLink {

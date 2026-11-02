@@ -172,6 +172,18 @@ export type ReaderMaxWidth = 600 | 720 | 860 | 1000 | 0; // 0 = unlimited
  * declares both halves up top and swaps its body between them.
  */
 export type SidebarMode = "reading" | "workbench";
+export type ProfileOverviewMode = "brief" | "everything";
+/**
+ * One entity type's remembered Overview choice. `open` is the rows left open;
+ * `seen` is every row the type had when that choice was made, so a row the
+ * config adds later can be told apart from one the analyst closed. An entry
+ * saved as a bare list (before `seen` existed) counts every current row as
+ * seen. `resolveOpenSections` in entityProfileConfig reads both shapes.
+ */
+export interface ProfileOpenSections {
+  open: string[];
+  seen: string[];
+}
 
 interface UIState {
   sidebarCollapsed: boolean;
@@ -233,6 +245,20 @@ interface UIState {
   // day that loads in later collapsed too, until expand-all / a manual toggle.
   collapsedDays: string[];
   collapseAllMode: boolean;
+  /**
+   * Entity profile Overview: which sections are left open, per entity type
+   * ("cve", "threat_actor", …). A type with no entry shows its configured
+   * defaults. Persisted: if you always open Mitigations on techniques, it
+   * stays open on techniques.
+   */
+  profileOpenSections: Record<string, ProfileOpenSections | string[]>;
+  /** `currentlyOpen` is what the tab shows right now (defaults, the stored
+   *  set, or everything), so a toggle from "Everything" lands on a real set;
+   *  `sections` is every row the tab has, recorded as seen. */
+  setProfileSectionOpen: (entityType: string, key: string, open: boolean, currentlyOpen: string[], sections: string[]) => void;
+  /** "brief" shows the per-type open set; "everything" opens every section. */
+  profileOverviewMode: ProfileOverviewMode;
+  setProfileOverviewMode: (mode: ProfileOverviewMode) => void;
   activePanel: ActivePanel;
   entryListWidth: number;
   entryListCollapsed: boolean;
@@ -315,6 +341,7 @@ interface UIState {
   setActiveReaderPanel: (panel: ReaderPanel) => void;
   setSidePanelWidth: (width: number) => void;
   toggleSettingsNav: () => void;
+  setSettingsNavCollapsed: (collapsed: boolean) => void;
   toggleDocsNav: () => void;
   toggleAutomationShowDisabled: () => void;
   toggleDashboardLocked: () => void;
@@ -442,6 +469,21 @@ export const useUIStore = create<UIState>()(
       markReadOnScroll: true,
       collapsedDays: [],
       collapseAllMode: false,
+      profileOpenSections: {},
+      setProfileSectionOpen: (entityType, key, open, currentlyOpen, sections) =>
+        set((s) => ({
+          profileOpenSections: {
+            ...s.profileOpenSections,
+            [entityType]: {
+              open: open ? [...new Set([...currentlyOpen, key])] : currentlyOpen.filter((k) => k !== key),
+              seen: [...sections],
+            },
+          },
+          // Closing one row while everything is open means "not everything".
+          profileOverviewMode: "brief",
+        })),
+      profileOverviewMode: "brief",
+      setProfileOverviewMode: (mode) => set({ profileOverviewMode: mode }),
       activePanel: "entries",
       entryListWidth: 300,
       entryListCollapsed: false,
@@ -712,6 +754,7 @@ export const useUIStore = create<UIState>()(
       setEntryListCollapsed: (collapsed) => set({ entryListCollapsed: collapsed, entryListAutoCollapsed: false }),
       setSidePanelWidth: (width) => set({ sidePanelWidth: Math.max(280, Math.min(2400, width)) }),
       toggleSettingsNav: () => set((s) => ({ settingsNavCollapsed: !s.settingsNavCollapsed })),
+      setSettingsNavCollapsed: (collapsed) => set({ settingsNavCollapsed: collapsed }),
       toggleDocsNav: () => set((s) => ({ docsNavCollapsed: !s.docsNavCollapsed })),
       toggleAutomationShowDisabled: () =>
         set((s) => ({ automationShowDisabled: !s.automationShowDisabled })),
@@ -949,6 +992,8 @@ export const useUIStore = create<UIState>()(
         markReadOnScroll: state.markReadOnScroll,
         collapsedDays: state.collapsedDays,
         collapseAllMode: state.collapseAllMode,
+        profileOpenSections: state.profileOpenSections,
+        profileOverviewMode: state.profileOverviewMode,
         sidebarWidth: state.sidebarWidth,
         entryListWidth: state.entryListWidth,
         sidePanelWidth: state.sidePanelWidth,

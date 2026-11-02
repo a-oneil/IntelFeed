@@ -7,6 +7,43 @@ import type {
   PaginatedResponse,
 } from "@/api/types";
 
+/** Which enrichment sources claim an entity's connections
+ *  (GET /entity-relationships/claims/{type}/{id}). */
+export interface RelationClaims {
+  entity_type: string;
+  entity_id: string;
+  /** Linked claims per source, most first. */
+  sources: Array<{ source_type: string; label: string; linked: number }>;
+  /** `<type>-<id>` of a connected entity → the sources whose claim names it. */
+  by_target: Record<string, string[]>;
+  /** Names a source gave that matched no entity, or several, held for review. */
+  held: Array<{
+    source_type: string;
+    source_label: string;
+    relation: string;
+    target_name: string;
+    target_type: string | null;
+    held_reason: "unknown" | "ambiguous" | string | null;
+    evidence: string | null;
+  }>;
+  held_count: number;
+}
+
+/** Signed-in only: held names can come from sources a visitor doesn't see. */
+export function useRelationClaims(entityType: string | undefined, entityId: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: ["relation-claims", entityType, entityId],
+    queryFn: async () => {
+      const { data } = await api.get<RelationClaims>(`/entity-relationships/claims/${entityType}/${entityId}`);
+      return data;
+    },
+    enabled: enabled && !!entityType && !!entityId,
+    // Supplementary: without it the rows simply carry no source tag.
+    meta: { silenceToast: true },
+    staleTime: 60_000,
+  });
+}
+
 export function useEntityRelationships(
   entityType: string | undefined,
   entityId: string | undefined,
