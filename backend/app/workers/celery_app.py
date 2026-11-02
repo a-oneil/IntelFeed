@@ -12,6 +12,8 @@ setup_logging()
 
 celery_app = Celery(
     "intelfeed",
+    # Every task honours the engine switch (app/workers/engine_gate.py).
+    task_cls="app.workers.engine_gate:GatedTask",
     broker=settings.redis_url,
     backend=settings.redis_url,
     include=[
@@ -53,6 +55,7 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
     beat_schedule=build_beat_schedule(),
+    beat_scheduler="app.workers.engine_gate:EngineScheduler",
     # Prevent Celery from replacing the root logger we just configured.
     worker_hijack_root_logger=False,
     task_default_queue="celery",
@@ -98,6 +101,11 @@ celery_app.conf.update(
         "app.workers.enrichment_dispatch_tasks.dispatch_enrichment_jobs": {"queue": "enrichment"},
     },
 )
+
+
+from app.workers.engine_gate import EngineSwitchStep  # noqa: E402
+
+celery_app.steps["consumer"].add(EngineSwitchStep)
 
 
 @after_setup_task_logger.connect

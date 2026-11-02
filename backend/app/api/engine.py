@@ -5,7 +5,7 @@ import json
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.core.security import get_current_user, get_viewer
+from app.core.security import get_admin_user, get_current_user, get_viewer
 from app.database import get_db
 from app.models.user import User
 
@@ -1671,6 +1671,55 @@ async def job_runs(
             for r in rows
         ]
     }
+
+
+class EngineStateUpdate(BaseModel):
+    stopped: bool
+
+    model_config = ConfigDict(json_schema_extra={"example": {"stopped": True}})
+
+
+class EngineStateResponse(BaseModel):
+    stopped: bool
+    queued: dict[str, int] = Field(description="Tasks waiting on each worker queue")
+
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"stopped": False, "queued": {"celery": 3, "ai": 12, "enrichment": 0}}}
+    )
+
+
+async def _engine_state(db) -> dict:
+    from app.services import engine_switch
+    from app.services.system_settings import get_setting
+
+    return {
+        "stopped": bool(await get_setting(engine_switch.SETTING, db)),
+        "queued": await engine_switch.queue_depths(),
+    }
+
+
+@router.get("/state", response_model=EngineStateResponse)
+async def engine_state(
+    user: User = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """Whether the engine is stopped, and how many tasks wait on each queue."""
+    return await _engine_state(db)
+
+
+@router.put("/state", response_model=EngineStateResponse)
+async def set_engine_state(
+    body: EngineStateUpdate,
+    user: User = Depends(get_admin_user),
+    db=Depends(get_db),
+):
+    """Admin: stop or start all background work: feed polling, AI analysis,
+    enrichment, automations and scheduled jobs. Queued work waits until the
+    engine starts again. A task already running finishes."""
+    from app.services.engine_switch import set_stopped
+
+    await set_stopped(db, body.stopped)
+    return await _engine_state(db)
 
 
 class RadarFeedback(BaseModel):

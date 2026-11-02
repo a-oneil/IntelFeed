@@ -44,3 +44,21 @@ async def _dispatch_enrichment_jobs() -> dict[str, int]:
 
     async with _get_worker_session() as db:
         return await dispatch_due(db)
+
+
+@celery_app.task(name="app.workers.enrichment_dispatch_tasks.sync_enrichment_pause", soft_time_limit=30, time_limit=60)
+def sync_enrichment_pause():
+    """Every minute, on the default worker: copy the stored enrichment pause
+    onto the gateways' Redis flag, so a Redis that lost it is corrected even
+    while the enrichment worker (whose dispatcher also syncs it) is down.
+    Returns {"restored": True} only when the flag had been lost."""
+    restored = run_async(_sync_enrichment_pause())
+    return {"restored": True} if restored else None
+
+
+async def _sync_enrichment_pause() -> bool:
+    from app.enrichment.pause import reassert_pause
+
+    async with _get_worker_session() as db:
+        _, restored = await reassert_pause(db)
+        return restored

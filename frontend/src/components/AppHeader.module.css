@@ -166,3 +166,19 @@
 .signInBtn:hover {
   filter: brightness(1.08);
 }
+
+/* Check-engine light — colour is the status, so hover keeps it. Healthy
+   stays the plain icon colour: the light only lights up when something's off. */
+.engine_warn,
+.engine_warn:hover {
+  color: var(--warning);
+}
+.engine_err,
+.engine_err:hover {
+  color: var(--danger);
+}
+.engine_stopped,
+.engine_stopped:hover {
+  color: var(--danger-fg);
+  background: var(--danger);
+}

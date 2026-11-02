@@ -166,6 +166,9 @@ class Settings(BaseSettings):
     # Enrichment: the global pause (app/enrichment/pause.py). On, no request
     # leaves for an outside source; queued lookups wait.
     enrichment_paused: bool = False
+    # The engine switch (app/services/engine_switch.py). On, every worker,
+    # beat and the Telegram listener stand still; queued work waits.
+    engine_stopped: bool = False
 
     # NVD API
     nvd_api_key: str = ""  # Get from https://nvd.nist.gov/developers/request-an-api-key
@@ -178,6 +181,9 @@ class Settings(BaseSettings):
     # because unauthenticated search 403s after ~10 requests/minute.
     github_poc_batch_limit: int = 0  # 0 = auto (300 with a token, 40 without)
     github_poc_rescan_days: int = 30
+    # Contact email in the User-Agent of Wikipedia and Wikidata requests
+    # (Wikimedia's User-Agent policy asks for a way to reach the operator).
+    wikimedia_contact_email: str = ""
     github_repo_max_file_size_kb: int = 5120  # 5MB
     github_repo_default_interval_minutes: int = 1440
 

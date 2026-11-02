@@ -355,6 +355,17 @@ JOB_REGISTRY: dict[str, dict[str, Any]] = {
         # run worth keeping in job_runs.
         "record_idle": False,
     },
+    "enrichment-pause-sync": {
+        "task": "app.workers.enrichment_dispatch_tasks.sync_enrichment_pause",
+        "description": "Re-assert the enrichment pause flag in Redis from the database",
+        "category": "enrichment",
+        "default_schedule": {"type": "interval", "seconds": 60},
+        "options": {"expires": 60},
+        # Runs on the default worker, so a Redis that lost the pause flag is
+        # corrected while the enrichment worker is down. Only a run that had
+        # to restore the flag is kept in job_runs.
+        "record_idle": False,
+    },
     "backfill-rule-attack-mappings": {
         "settings_keys": ["rule_attack_backfill_limit"],
         "task": "app.workers.maintenance.backfill_rule_attack_mappings",

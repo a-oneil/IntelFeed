@@ -1,6 +1,7 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import api from "@/api/client";
+import { CONSOLE_KEY as ENRICHMENT_CONSOLE_KEY } from "@/hooks/useEnrichment";
 
 export interface SignalStat {
   signal_type: string;
@@ -149,11 +150,13 @@ export interface ExtractionStatus {
   } | null;
 }
 
-export function usePipelineOverview() {
+export function usePipelineOverview({ enabled = true, poll }: { enabled?: boolean; poll?: number } = {}) {
   return useQuery({
     queryKey: ["engine", "pipeline"],
     queryFn: async () => (await api.get<PipelineOverview>("/engine/pipeline")).data,
     staleTime: 30_000,
+    enabled,
+    refetchInterval: poll,
   });
 }
 
@@ -493,4 +496,66 @@ export function useResetMyRadarWeights() {
       qc.invalidateQueries({ queryKey: ["entries"] });
     },
   });
+}
+
+export interface EngineState {
+  stopped: boolean;
+  /** Tasks waiting on each queue; null when Redis couldn't be asked. */
+  queued: Record<string, number | null>;
+}
+
+const ENGINE_STATE_KEY = ["engine", "state"];
+
+export function useEngineState(enabled = true, poll = 15_000) {
+  return useQuery({
+    queryKey: ENGINE_STATE_KEY,
+    queryFn: async () => (await api.get<EngineState>("/engine/state")).data,
+    refetchInterval: poll,
+    enabled,
+  });
+}
+
+export function useSetEngineStopped() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (stopped: boolean) => (await api.put<EngineState>("/engine/state", { stopped })).data,
+    onSuccess: (data) => {
+      qc.setQueryData(ENGINE_STATE_KEY, data);
+      // Stopping the engine pauses enrichment too.
+      qc.invalidateQueries({ queryKey: ENRICHMENT_CONSOLE_KEY });
+    },
+  });
+}
+
+type EngineHealthLevel = "stopped" | "err" | "warn" | "ok";
+
+export interface EngineHealth {
+  level: EngineHealthLevel;
+  /** Entries stuck on an errored stage, per stage. */
+  failing: { stage: string; count: number }[];
+  retrying: number;
+}
+
+/** One status for the whole engine, for the header light. Stopped beats
+ *  errors; errors are entries still stuck at a stage (a retry to green drops
+ *  them), so a red light always has something to fix behind it.
+ *  The light sits on every page for every admin, so it polls once a minute;
+ *  the Engine console's own observers poll faster while it is open and
+ *  TanStack uses the shortest interval. */
+export function useEngineHealth(enabled: boolean): EngineHealth | undefined {
+  const { data: state } = useEngineState(enabled, 60_000);
+  const { data: overview } = usePipelineOverview({ enabled, poll: 60_000 });
+  if (!state || !overview) return undefined;
+  const failing = overview.stages
+    .filter((s) => s.runs_24h.error > 0)
+    .map((s) => ({ stage: s.name, count: s.runs_24h.error }));
+  const retrying = overview.stages.reduce((n, s) => n + s.runs_24h.retry, 0);
+  const level: EngineHealthLevel = state.stopped
+    ? "stopped"
+    : failing.length
+      ? "err"
+      : retrying
+        ? "warn"
+        : "ok";
+  return { level, failing, retrying };
 }

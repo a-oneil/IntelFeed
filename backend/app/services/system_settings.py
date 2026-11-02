@@ -89,7 +89,9 @@ CONFIGURABLE_KEYS: dict[str, type] = {
     "cve_reenrich_batch_size": int,
     "github_poc_batch_limit": int,
     "github_poc_rescan_days": int,
+    "wikimedia_contact_email": str,
     "enrichment_paused": bool,
+    "engine_stopped": bool,
     # Relationship strength formula (composite of corroboration/closeness/recency)
     "relationship_corroboration_saturation": int,
     "relationship_recency_half_life_days": int,
@@ -491,8 +493,8 @@ SETTING_METADATA: dict[str, dict] = {
         "label": "Duplicate Review: Pairs Per Run",
         "description": (
             "How many likely-duplicate pairs of existing actors, malware and tools the daily duplicate "
-            "review puts in front of the model (most likely first: similar names, a shared alias, the "
-            "same articles). Each pair it calls the same thing becomes a Merge proposal on the Review "
+            "review puts in front of the model (most likely first: similar names, a shared alias). "
+            "Each pair it calls the same thing becomes a Merge proposal on the Review "
             "tab; nothing is merged without a person. 0 turns the review off"
         ),
         "group": "adjudication",
@@ -506,7 +508,7 @@ SETTING_METADATA: dict[str, dict] = {
         "label": "Duplicate Review: Name Similarity Floor",
         "description": (
             "Trigram similarity (0–1) two names need before they are a candidate pair on name alone. "
-            "A shared alias or three shared articles qualifies a pair whatever its names"
+            "A shared alias qualifies a pair whatever its names; shared articles only order the pairs"
         ),
         "group": "adjudication",
     },
@@ -1107,10 +1109,26 @@ SETTING_METADATA: dict[str, dict] = {
         "description": "Days before an already-scanned CVE is eligible for another PoC search",
         "group": "enrichment",
     },
+    "wikimedia_contact_email": {
+        "label": "Wikimedia contact email",
+        "description": (
+            "Sent in the User-Agent of every Wikipedia and Wikidata request, as Wikimedia's User-Agent policy "
+            "asks, so they can reach you instead of blocking the instance"
+        ),
+        "group": "enrichment",
+    },
     "enrichment_paused": {
         "label": "Pause Enrichment",
         "description": "Refuse every request to outside enrichment sources; queued lookups wait until it is off",
         "group": "enrichment",
+    },
+    "engine_stopped": {
+        "label": "Stop Engine",
+        "description": (
+            "Stop every background process: feed polling, analysis, enrichment and scheduled jobs. "
+            "Queued work waits until the engine starts again"
+        ),
+        "group": "maintenance",
     },
     "relationship_corroboration_saturation": {
         "label": "Corroboration Saturation",
