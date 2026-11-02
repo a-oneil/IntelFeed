@@ -798,7 +798,7 @@ Proposed fixes to entity data wait in review queues. Every route here is Admin. 
 
 | Method | Path | What it does |
 | --- | --- | --- |
-| GET | `/api/admin/hygiene/feed` | Every proposal from both logs, newest first (`entity_type` + `entity_id` narrow it to one entity). Each row's `context` is the article text around the match (at most 320 characters) |
+| GET | `/api/admin/hygiene/feed` | Every proposal from both logs, newest first (`entity_type` + `entity_id` narrow it to one entity). `context=true` adds each row's article text around the match (at most 320 characters); the Review tab asks for it on one entity's rows |
 | GET | `/api/admin/hygiene/review-groups` | Every pending proposal, one row per entity, with what each kind wants done |
 | POST | `/api/admin/hygiene/decisions` | Decide many proposals in one call: `[{id: "<source>:<log_id>", decision: "apply" \| "dismiss" \| "reclassify:<type>"}]`, one result per row. A row an earlier decision already closed comes back `settled`; an apply with nothing left to do comes back `resolved` |
 | POST | `/api/admin/hygiene/review-groups/dismiss` | Settle each entity's row the leave-it-alone way and stop the proposals coming back |

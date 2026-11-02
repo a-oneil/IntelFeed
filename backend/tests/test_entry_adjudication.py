@@ -747,6 +747,8 @@ def test_reason_names_item_compares_words_not_punctuation():
         ("The article does not support the claim that MANTLEMAZE uses Cairn.", False),
         ("Cairn is a place name. Validating requires a stated use.", True),
         ("Cairn here is a Scottish landmark, not the malware.", False),
+        ("The publisher's own domain, not an indicator; only the C2 domains should remain.", False),
+        ("It should remain: the article names it.", True),
     ],
 )
 def test_reason_affirms(reason, affirms):
@@ -3270,3 +3272,11 @@ async def test_a_second_review_does_not_file_the_same_edge_demote_again(db_sessi
     # Another article's review of the same edge is its own proposal.
     other = await _make_entry(db_session, feed)
     assert not await adj._proposal_pending(db_session, ACTION_EDGE_DEMOTE, "relationship", edge_id, other.id)
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["https://evil.example/a", "hxxps[://]evil[.]example/a", "hxxps[:]//evil[.]example/a", "hxxps://evil[.]example/a"],
+)
+def test_value_pattern_finds_bracketed_url_separators(text):
+    assert adj._value_pattern("https://evil.example/a").search(text)

@@ -30,7 +30,9 @@ and would not stop the next fetch of an old article being stored again.
 ``word_count`` is updated to match the new text.
 
 On --apply the changed entries' search documents get the new text (partial
-update: content_text and word_count only). ``--rerun`` also queues the
+update: content_text and word_count only), and their existing links'
+paragraph_indices are recomputed against the new paragraphs (the extra breaks
+renumber them; co-occurrence matches on them). ``--rerun`` also queues the
 autolink, observables and extract stages for each changed entry, followed by
 its co-occurrence stage (Celery tasks; no AI call, no automation rules), at
 most ``--rerun-max`` entries.
@@ -64,6 +66,7 @@ from sqlalchemy import select, update
 
 import app.models  # noqa: F401  (register every mapper)
 from app.database import async_session
+from app.intelligence.autolinker import backfill_paragraph_indices
 from app.models.entry import Entry
 from app.services.sanitizer import html_to_text
 
@@ -182,6 +185,10 @@ async def main(args) -> None:
                 for eid, text, wc in writes:
                     await db.execute(update(Entry).where(Entry.id == eid).values(content_text=text, word_count=wc))
                 await db.commit()
+                # New breaks renumber the paragraphs: re-place this batch's links so stored
+                # paragraph_indices match the new text (co-occurrence reads them).
+                placed = await backfill_paragraph_indices(db, [eid for eid, _t, _w in writes], refresh=True)
+                stats["links_replaced"] += placed["updated"]
                 changed_ids.extend(eid for eid, _t, _w in writes)
                 if not search_failed:
                     try:
@@ -203,6 +210,7 @@ async def main(args) -> None:
         print(f"\n{stats['would_write']} entries would be rewritten. DRY RUN — re-run with --apply.")
         return
     print(f"\n{stats['written']} entries rewritten; content_hash left as it was.")
+    print(f"{stats['links_replaced']} link positions recomputed for the new paragraphs.")
     if args.rerun and changed_ids:
         todo = changed_ids[: args.rerun_max]
         _rerun(todo)

@@ -1370,7 +1370,9 @@ async def hygiene_feed(
     entity_type: str | None = Query(None, description="Only rows about entities of this type (with entity_id)"),
     entity_id: uuid.UUID | None = Query(None, description="Only rows about this entity (the Review tab's expand)"),
     context: bool = Query(
-        True, description="Add each row's article snippet around the match (`context`); false skips the article read"
+        False,
+        description="Add each row's article snippet around the match (`context`). Reads every row's article, "
+        "so ask for it only on small pages (one entity's rows)",
     ),
     limit: int = Query(50, ge=1, le=200, description="Rows per page"),
     offset: int = Query(0, ge=0, description="Rows to skip for pagination"),
@@ -2300,6 +2302,17 @@ async def apply_alias_collision(
             entity_id=entity.id,
             removed_alias=bad_alias,
         )
+    # Unlink what only that alias matched and recount, like an alias edit on the profile;
+    # otherwise the wrong links (and the inflated count) outlive the alias.
+    unlinked = 0
+    cascade = CASCADE_SPECS.get(row.entity_type)
+    if cascade is not None:
+        from app.api.entity_profiles import _unlink_entries_for_removed_aliases
+
+        junction = cascade["junction"]
+        unlinked = await _unlink_entries_for_removed_aliases(
+            db, current, new_aliases, junction, getattr(junction, cascade["junction_fk"]), entity.id, entity=entity
+        )
     entity.aliases = new_aliases
     row.applied = True
     db.add(row)
@@ -2314,6 +2327,7 @@ async def apply_alias_collision(
                 "bad_alias": bad_alias,
                 "kind": (row.after or {}).get("kind"),
                 "aliases_after": new_aliases,
+                "unlinked_entries": unlinked,
                 "promoted_from": str(row.id),
             },
             reasoning=f"Promoted from alias_collision proposal {row.id}.",
@@ -2722,15 +2736,14 @@ async def scan_id_hygiene(
             )
         )
     ).all()
-    canonical_cves: set[str] = set(
-        (await db.execute(select(CVE.cve_id).where(CVE.cve_id.op("~")(r"^CVE-\d{4}-\d{4,}$")))).scalars().all()
-    )
+    canonical_rows = await _all_canonical_cves(db)  # one read serves both checks
+    canonical_cves: set[str] = {raw for _cid, raw in canonical_rows}
     # Right shape, impossible id: an over-long sequence (a CVSS score glued on,
     # "CVE-2024-123459.8"), or a zero-padded one past four digits. No safe
     # canonical form, so the row is the analyst's to dismiss or delete.
     from app.intelligence.cve import is_plausible_cve_id
 
-    implausible_cve_rows = [(cid, raw) for cid, raw in await _all_canonical_cves(db) if not is_plausible_cve_id(raw)]
+    implausible_cve_rows = [(cid, raw) for cid, raw in canonical_rows if not is_plausible_cve_id(raw)]
     cve_malformed = 0
     for cid, raw_cve in [*malformed_cve_rows, *implausible_cve_rows]:
         proposed = _canonicalize_cve_id(raw_cve)

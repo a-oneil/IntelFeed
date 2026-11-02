@@ -557,7 +557,7 @@ export function ProposalsQueue({
         let targets: FeedRow[];
         if (g.entity_id) {
           const { data } = await api.get<FeedResponse>("/admin/hygiene/feed", {
-            params: { pending: "true", entity_type: g.entity_type, entity_id: g.entity_id, limit: 200 },
+            params: { pending: "true", entity_type: g.entity_type, entity_id: g.entity_id, limit: 200, context: "true" },
           });
           targets = data.rows.filter((r) => !UNLINK_KINDS.has(r.action) && !RECLASSIFY_KINDS.has(r.action));
           // One entity merges once: the most-proposed target's row, applied

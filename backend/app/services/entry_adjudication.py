@@ -561,6 +561,8 @@ class ReviewItem:
     # Other names a reason may use for this item: a TTP's technique id and
     # name, an edge's two endpoints (see _reason_names_item).
     forms: list[str] = field(default_factory=list)
+    # the analysis's own quote for an AI link: what the context line searches for
+    quote: str | None = None
     # ioc
     ioc_kind: str | None = None
     ioc_value: str | None = None
@@ -673,8 +675,16 @@ def _value_pattern(value: str) -> re.Pattern | None:
     if rest[:4].lower() == "http":
         parts.append(r"h(?:tt|xx)p")
         rest = rest[4:]
-    for ch in rest:
+    i = 0
+    while i < len(rest):
+        if rest.startswith("://", i):
+            # 'hxxps[://]evil' brackets the whole separator, not just the colon
+            parts.append(r"(?:\[://\]|\[:\]//|:(?:\[//\]|//))")
+            i += 3
+            continue
+        ch = rest[i]
         parts.append(_FANG_CLASSES.get(ch) or (r"\s+" if ch.isspace() else re.escape(ch)))
+        i += 1
     # A value is a whole token: 'abc' must not be found inside 'xabcx' when
     # it starts or ends on a word character.
     lead = r"(?<![\w.])" if value[0].isalnum() else ""
@@ -1004,6 +1014,7 @@ async def _link_items(
                 confidence=junction.confidence,
                 # the technique id, not the AI's quote: this list reaches the queue as the matched form
                 matched_names=[ttp.technique_id],
+                quote=junction.source_text or None,
                 paragraph_indices=list(junction.paragraph_indices or []),
                 extracted_at=junction.extracted_at,
                 forms=[f for f in (ttp.technique_id, ttp.technique_name) if f],
@@ -1084,7 +1095,12 @@ async def _link_items(
         snippet = (
             ""
             if inferred and item.entity_type == SECTOR
-            else _snippet(paragraph_map, item.matched_names or [item.name], item.paragraph_indices, text)
+            else _snippet(
+                paragraph_map,
+                [f for f in (item.quote, *item.matched_names) if f] or [item.name],
+                item.paragraph_indices,
+                text,
+            )
         )
         if snippet:
             line += f'\n    context: "{snippet}"'
@@ -1518,7 +1534,9 @@ _AFFIRMING_RE = re.compile(
     r"|\b(?:supports?|supporting|confirms?|confirming|corroborates?|corroborating|justif(?:y|ies|ying))\s+"
     r"(?:the|this|that)\s+(?:edge|relationship|claim|link|record|indicator|ioc|verb)\b"
     r"|\b(?:edge|relationship|claim|link|record)\s+is\s+(?:correct|valid|accurate|supported|justified|warranted)\b"
-    r"|\b(?:should|must)\s+(?:be\s+)?(?:kept|keep|stay|remain)\b"
+    # about this record, not others ("only the C2 domains should remain" argues for a drop)
+    r"|\b(?:it|this|edge|relationship|claim|link|record|indicator|ioc|value)\s+(?:should|must)\s+"
+    r"(?:be\s+)?(?:kept|stay|remain)\b"
     r"|\b(?:is|as)\s+an?\s+(?:valid|genuine|real|confirmed)\s+(?:indicator|ioc)\b",
     re.IGNORECASE,
 )
@@ -1852,7 +1870,17 @@ async def _settle_gone(db: AsyncSession, entity_type: str, entity_id: uuid.UUID 
     """Close the pending proposals of an entity this run deleted or merged away."""
     from app.services.proposal_dismissals import settle_gone_entity  # imports this module
 
-    return await settle_gone_entity(db, entity_type, entity_id, **kw)
+    successor = kw.get("successor")
+    if successor is not None:
+        kw["successor"] = (successor[0], uuid.UUID(str(successor[1])))
+    # Its own savepoint: the delete or merge already landed, and a failure here
+    # must neither undo it nor poison the session for the rest of the run.
+    try:
+        async with db.begin_nested():
+            return await settle_gone_entity(db, entity_type, entity_id, **kw)
+    except Exception as exc:
+        logger.warning("could not close proposals of %s %s: %s", entity_type, entity_id, exc)
+        return 0
 
 
 async def _delete_entity(db: AsyncSession, entity_type: str, entity_id: uuid.UUID) -> bool:
@@ -2392,7 +2420,7 @@ async def apply_verdicts(
                         applied=True,
                     )
                     if deleted:
-                        await _settle_gone(db, item.entity_type or "", item.entity_id, gone=True)
+                        await _settle_gone(db, item.entity_type or "", item.entity_id, gone=True)  # type: ignore[arg-type]
                 else:
                     _log(ACTION_VETO, item, {"entity": snapshot, "junction": junction_snap}, after_base, applied=False)
             elif v.verdict == "merge" and v.merge_target:
@@ -2413,16 +2441,17 @@ async def apply_verdicts(
                             )  # type: ignore[arg-type]
                         applied_n += 1
                         _log(ACTION_MERGE, item, {"entity": snapshot}, {**after, "outcome": outcome}, applied=True)
-                        await _settle_gone(
-                            db,
-                            item.entity_type or "",
-                            item.entity_id,
-                            successor=(v.merge_target["entity_type"], uuid.UUID(str(v.merge_target["entity_id"]))),
-                        )
                     except Exception as exc:
                         logger.warning("adjudication merge failed for %s: %s", item.item_id, exc)
                         _log(
                             ACTION_MERGE, item, {"entity": snapshot}, {**after, "error": str(exc)[:300]}, applied=False
+                        )
+                    else:
+                        await _settle_gone(
+                            db,
+                            item.entity_type or "",
+                            item.entity_id,  # type: ignore[arg-type]
+                            successor=(v.merge_target["entity_type"], v.merge_target["entity_id"]),
                         )
                 else:
                     _log(ACTION_MERGE, item, {"entity": snapshot}, after, applied=False)

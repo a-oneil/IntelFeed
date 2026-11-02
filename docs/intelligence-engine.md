@@ -104,7 +104,7 @@ The autolinker matches text against a dictionary of every known entity name and 
 
 ### Phase 3: Junction Record Storage
 
-`store_autolink_matches()` (`backend/app/intelligence/autolinker.py:1172`) writes one junction row per entity, with:
+`store_autolink_matches()` (`backend/app/intelligence/autolinker.py:1183`) writes one junction row per entity, with:
 
 - `confidence` — the match's confidence scaled by the feed's reliability rating (see [Confidence weighting](#confidence-weighting-and-reliability-rating))
 - `source = "auto_link"` (TTP links store `source_text = "auto_link:T1234"` instead)
@@ -619,7 +619,7 @@ Use for personal or non-security feeds, test feeds, or to quiet a feed while you
 
 ### Confidence weighting and reliability rating
 
-`_weighted_confidence()` (`backend/app/intelligence/autolinker.py:1100`) scales each autolink's confidence by the feed's reliability rating. A canonical-name match starts at 0.9 and an alias at 0.5. The result is multiplied by the feed weight (`reliability_to_weight()`, `backend/app/intelligence/autolinker.py:235`):
+`_weighted_confidence()` (`backend/app/intelligence/autolinker.py:1111`) scales each autolink's confidence by the feed's reliability rating. A canonical-name match starts at 0.9 and an alias at 0.5. The result is multiplied by the feed weight (`reliability_to_weight()`, `backend/app/intelligence/autolinker.py:235`):
 
 | Rating | A | B | C | D | E | F | unrated |
 |---|---|---|---|---|---|---|---|
@@ -642,8 +642,8 @@ Then it is bucketed: ≥ 0.7 high, ≥ 0.4 medium, else low. So "APT29" on an A-
 
 ### Operational notes
 
-- Changing a feed's mode only affects new entries. To re-process old ones, use the rescan endpoints or `autolink_batch()` (`backend/app/intelligence/autolinker.py:1573`), which commits every 100 entries.
-- Creating an entity by hand runs `link_entity_to_existing_entries()` (`backend/app/intelligence/autolinker.py:1839`), which links it to existing entries using the same rules as ingest: `manual` and `none` feeds skipped, both word lists applied, the case and context rules applied, and confidence scaled by feed reliability. The pending tier does not apply, so a match ingest would hold is not linked.
+- Changing a feed's mode only affects new entries. To re-process old ones, use the rescan endpoints or `autolink_batch()` (`backend/app/intelligence/autolinker.py:1584`), which commits every 100 entries.
+- Creating an entity by hand runs `link_entity_to_existing_entries()` (`backend/app/intelligence/autolinker.py:1857`), which links it to existing entries using the same rules as ingest: `manual` and `none` feeds skipped, both word lists applied, the case and context rules applied, and confidence scaled by feed reliability. The pending tier does not apply, so a match ingest would hold is not linked.
 
 ### None of this uses AI
 

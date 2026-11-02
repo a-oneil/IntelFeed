@@ -192,6 +192,16 @@ def test_a_name_inside_a_longer_name_is_not_matched():
     assert found == {"Korea", "North Korea"}  # a separate mention still counts
 
 
+def test_a_name_inside_a_longer_name_of_another_type_still_counts():
+    # the vendor-in-product case ("Microsoft" in "Microsoft Exchange"), with types the helper builds
+    actor = _make_actor("Sandworm")
+    malware = _make_malware("Sandworm Loader")
+    _build_and_activate(actors=[actor], malware=[malware])
+
+    found = {(m["entity_type"], m["canonical_name"]) for m in scan_text("Sandworm Loader was seen again.")}
+    assert found == {("threat_actor", "Sandworm"), ("malware", "Sandworm Loader")}
+
+
 def test_single_dotted_segment_still_matches():
     malware = _make_malware("Lumma7")
     _build_and_activate(malware=[malware])

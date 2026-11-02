@@ -1002,7 +1002,18 @@ def scan_text(text_or_paragraphs: str | list[tuple[int, str]]) -> list[dict]:
                 candidates.append((start_idx, end_idx + 1, vocab_entry, held))
 
         for start_idx, end, vocab_entry, held in candidates:
-            if any(s <= start_idx and end <= e and (e - s) > (end - start_idx) for s, e, _, _ in candidates):
+            # A name inside a longer name of the same type is part of it ("Exchange" in
+            # "Exchange Online"). Across types it stands: "Microsoft" in "Microsoft
+            # Exchange" is still the vendor. A held long match can't hide an accepted one,
+            # since the AI may reject it.
+            if any(
+                s <= start_idx
+                and end <= e
+                and (e - s) > (end - start_idx)
+                and other.entity_type == vocab_entry.entity_type
+                and not other_held
+                for s, e, other, other_held in candidates
+            ):
                 continue
             key = (vocab_entry.entity_type, str(vocab_entry.entity_id))
             if key in seen:
@@ -1743,11 +1754,15 @@ async def _rebuild_vocabulary(db: AsyncSession) -> tuple[int, list]:
     return count, loaded
 
 
-async def backfill_paragraph_indices(db: AsyncSession) -> dict:
+async def backfill_paragraph_indices(
+    db: AsyncSession, entry_ids: list[uuid.UUID] | None = None, *, refresh: bool = False
+) -> dict:
     """Backfill paragraph_indices for existing junction records that have NULL.
 
     Lighter than a full rescan — preserves existing confidence/source metadata
     and just adds paragraph position data by re-scanning entry text.
+    ``refresh`` recomputes every row of ``entry_ids`` (after their text was
+    re-derived): a link the scan no longer places loses its stale positions.
     """
     from app.models.entry import Entry
 
@@ -1767,10 +1782,13 @@ async def backfill_paragraph_indices(db: AsyncSession) -> dict:
     ]
 
     # Collect entry IDs that have NULL paragraph_indices in any junction
-    entry_ids_set: set[uuid.UUID] = set()
-    for junc_model, _, _ in junction_configs:
-        result = await db.execute(select(junc_model.entry_id).where(junc_model.paragraph_indices.is_(None)).distinct())
-        entry_ids_set.update(row[0] for row in result.all())
+    entry_ids_set: set[uuid.UUID] = set(entry_ids or [])
+    if entry_ids is None:
+        for junc_model, _, _ in junction_configs:
+            result = await db.execute(
+                select(junc_model.entry_id).where(junc_model.paragraph_indices.is_(None)).distinct()
+            )
+            entry_ids_set.update(row[0] for row in result.all())
 
     if not entry_ids_set:
         return {"entries": 0, "updated": 0}
@@ -1799,13 +1817,13 @@ async def backfill_paragraph_indices(db: AsyncSession) -> dict:
 
         # Update each junction table
         for junc_model, fk_col_name, entity_type in junction_configs:
-            junc_result = await db.execute(
-                select(junc_model).where(junc_model.entry_id == eid).where(junc_model.paragraph_indices.is_(None))
-            )
-            for junc_row in junc_result.scalars().all():
+            q = select(junc_model).where(junc_model.entry_id == eid)
+            if not refresh:
+                q = q.where(junc_model.paragraph_indices.is_(None))
+            for junc_row in (await db.execute(q)).scalars().all():
                 entity_id_str = str(getattr(junc_row, fk_col_name))
-                para = match_map.get((entity_type, entity_id_str))
-                if para:
+                para = match_map.get((entity_type, entity_id_str)) or None
+                if (para or refresh) and junc_row.paragraph_indices != para:
                     junc_row.paragraph_indices = para
                     stats["updated"] += 1
 
