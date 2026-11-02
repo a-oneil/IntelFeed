@@ -360,6 +360,22 @@ async def test_manifest_marks_inferred_sector_without_a_context_line(db_session:
 
 
 @pytest.mark.asyncio
+async def test_restore_relinks_a_sector_from_a_snapshot_without_its_slug(db_session: AsyncSession, feed):
+    # entry_sectors keys on (entry_id, sector); older unlink snapshots only
+    # carry confidence/source, so the slug comes from the Sector row.
+    from app.services.entry_adjudication import _relink
+
+    entry = await _make_entry(db_session, feed)
+    health = Sector(slug="health-test", name="Health Test", aliases=[], article_count=3)
+    db_session.add(health)
+    await db_session.flush()
+    assert await _relink(db_session, "sector", entry.id, health.id, {"confidence": "high", "source": "ai"})
+    await db_session.flush()
+    row = (await db_session.execute(select(EntrySector).where(EntrySector.entry_id == entry.id))).scalar_one()
+    assert (row.sector, row.sector_id) == ("health-test", health.id)
+
+
+@pytest.mark.asyncio
 async def test_manifest_edges_and_ai_iocs(db_session: AsyncSession, feed):
     entry = await _make_entry(db_session, feed)
     warlock = await _link_actor(db_session, entry, "Warlock", source="ai")

@@ -1806,6 +1806,11 @@ async def _relink(db: AsyncSession, entity_type: str, entry_id: uuid.UUID, entit
             kwargs[attr] = snap[attr]
     if snap.get("extracted_at"):
         kwargs["extracted_at"] = datetime.fromisoformat(snap["extracted_at"])
+    # entry_sectors keys on the slug too; older snapshots don't carry it
+    if hasattr(jmodel, "sector") and not kwargs.get("sector") and emodel is not None:
+        kwargs["sector"] = (await db.execute(select(emodel.slug).where(emodel.id == entity_id))).scalar_one_or_none()
+        if kwargs["sector"] is None:
+            return False
     db.add(jmodel(**kwargs))
     if emodel is not None and hasattr(emodel, "article_count"):
         await db.execute(sa_update(emodel).where(emodel.id == entity_id).values(article_count=emodel.article_count + 1))
