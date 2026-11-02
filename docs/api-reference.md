@@ -600,6 +600,7 @@ Reading entities uses the catalogs above. Creating and editing uses `/api/entiti
 | POST | `/api/entities/convert` | Admin | Change an entity's type (for example malware to tool), moving its links, relationships, notes and campaigns |
 | GET | `/api/entities/{entity_type}/{entity_id}/provenance` | Visitor | Who stated each fact on the profile, and whether they still agree |
 | GET | `/api/entities/{entity_type}/{entity_id}/context` | Visitor | What the enabled enrichment sources say about the entity, with header badges; admins also get sources missing a key |
+| GET | `/api/entities/{entity_type}/{entity_id}/glance` | Visitor | The highlight popover's few words from enrichment: up to two verdict chips and three facts, each with its source and date, the sources its Look up button runs, and (admins) sources that need a key |
 | GET | `/api/entities/{entity_type}/{entity_id}/detection-gaps` | User | Detection coverage for the entity's techniques |
 | GET | `/api/entities/{entity_type}/{entity_id}/story-threads` | Visitor | Story threads that mention the entity |
 | GET | `/api/entities/{entity_type}/{entity_id}/attack-techniques` | Visitor | Techniques from its articles, by evidence |
@@ -729,6 +730,7 @@ Entity types: `ttp`, `cve`, `threat_actor`, `malware`, `campaign`, `country`, `t
 | --- | --- | --- | --- |
 | GET | `/api/entity-relationships` | Visitor | Paginated list. `entity_type` + `entity_id`, `relationship_type`, `include_rejected` |
 | GET | `/api/entity-relationships/by-entity/{entity_type}/{entity_id}` | Visitor | Every relationship for one entity |
+| GET | `/api/entity-relationships/claims/{entity_type}/{entity_id}` | User | Which enrichment sources claim each of the entity's connections (`by_target`, keyed `<type>-<id>`), linked claims per source (`sources`), and the names its sources gave that matched no entity or several (`held`, `held_count`) |
 | POST | `/api/entity-relationships/signals/{entity_type}` | Visitor | Body `{"ids": [...]}`: per id, the count and top 3 relationships. A POST because the id list is too long for a URL |
 | POST | `/api/entity-relationships` | User | Create one. Creating an existing one merges the evidence (200 instead of 201); re-creating a rejected one restores it |
 | PUT | `/api/entity-relationships/{relationship_id}` | User | Change verb, confidence, description or evidence |
@@ -820,7 +822,6 @@ Proposed fixes to entity data wait in review queues. Every route here is Admin. 
 | POST | `/api/admin/hygiene/link-log/{log_id}/apply-removal` | Carry out a proposed link removal |
 | GET | `/api/admin/hygiene/orphans` | Entities with no articles |
 | POST | `/api/admin/hygiene/orphans/prune` | Delete them |
-| GET | `/api/admin/hygiene/enrichment-gaps` | Empty fields by entity type |
 | POST | `/api/admin/hygiene/enrichment-gaps/enrich` | Have the AI research and fill one field |
 | POST | `/api/admin/hygiene/run-name-normalization` | Start the AI name check |
 | POST | `/api/admin/hygiene/normalize-name/{log_id}/apply` | Apply one rename or merge |
@@ -887,8 +888,8 @@ A rule runs actions (tag, alert, run AI, call a webhook) when its trigger fires.
 | GET | `/api/automation/rules/export` | User | All rules as portable JSON |
 | GET | `/api/automation/rules/export/{rule_id}` | User | One rule as portable JSON |
 | POST | `/api/automation/rules/import` | User | Import exported rules. A rule with the same name is overwritten only if it is yours (an admin overwrites any) |
-| GET | `/api/automation/templates` | Public | Ready-made rule templates |
-| GET | `/api/automation/variable-contexts` | Public | Template variables each action provides |
+| GET | `/api/automation/templates` | User | Ready-made rule templates |
+| GET | `/api/automation/variable-contexts` | User | Template variables each action provides |
 
 Create request:
 
@@ -927,7 +928,7 @@ Background jobs (feed fetching, enrichment, cleanup) and their schedules. All Ad
 
 | Method | Path | What it does |
 | --- | --- | --- |
-| GET | `/api/job-schedules` | Every job and its schedule |
+| GET | `/api/job-schedules` | Every job and its schedule, with its last 30 days of runs (`runs_30d`, `ok_30d`) and how its last run ended (`last_status`, `last_error`, `last_run_at`). A job an enrichment source owns carries `source` and `source_label` |
 | PATCH | `/api/job-schedules/{job_name}` | Change a job's schedule or turn it off |
 | DELETE | `/api/job-schedules/{job_name}` | Go back to the default schedule |
 | POST | `/api/job-schedules/{job_name}/run` | Run it now |
@@ -1177,17 +1178,20 @@ Enrichment fills in entity details from outside sources (NVD, EPSS, CISA KEV, Ma
 | Method | Path | Access | What it does |
 | --- | --- | --- | --- |
 | GET | `/api/enrichment/sources` | User | Every source with what it needs and what it covers |
-| PUT | `/api/enrichment/sources/{source_id}` | Admin | Turn a source on or off; change its trigger, key, rate limits, budget or schedule |
-| POST | `/api/enrichment/sources/{source_id}/test` | Admin | Test its key and connection |
+| PUT | `/api/enrichment/sources/{source_id}` | Admin | Turn a source on or off; change its trigger, rate limits or budget |
 | GET | `/api/enrichment/sources/{source_id}/health` | User | Its current health |
-| GET | `/api/enrichment/console` | Admin | Every source's status, what it fills and why it needs a look, with a summary (`?entity_type=` narrows the list) |
-| GET | `/api/enrichment/sources/{source_type}/detail` | Admin | One source's limits, 24-hour requests, queue, fill rates, backfill gap and jobs |
+| GET | `/api/enrichment/console` | Admin | Every source's status, what it fills and sends out, its key, the problems with one action each, and a 24-hour summary (`?entity_type=` narrows the list) |
+| GET | `/api/enrichment/sources/{source_type}/detail` | Admin | One source's limits (rate, refresh interval, requests at once), 24-hour requests, queue (with why rows are waiting), fill rates, backfill gap, jobs and the settings its form edits |
 | POST | `/api/enrichment/sources/{source_type}/backfill` | Admin | Queue backfill lookups for entities missing the source's first column (`entity_type`, `limit`) |
+| GET | `/api/enrichment/coverage` | Admin | How full each field a source fills is, who fills it, and a backfill or AI research to fill the rest |
+| GET | `/api/enrichment/activity` | Admin | The queue by lane, the lookups that gave up, and requests by source over 24 hours |
+| POST | `/api/enrichment/retry` | Admin | Queue the lookups that gave up again (`?source_type=` optional) |
 | POST | `/api/enrichment/pause` | Admin | Pause or resume every request to outside sources (`{"paused": true}`) |
-| GET | `/api/enrichment/user-overrides` | User | Your own API keys for sources |
-| PUT | `/api/enrichment/user-overrides/{source_id}` | User | Set your own key for a source |
-| DELETE | `/api/enrichment/user-overrides/{source_id}` | User | Go back to the instance key |
-| POST | `/api/enrichment/enrich` | User | Enrich one entity now (`entity_type`, `entity_id`, optional `source_types`); sources that refused are queued to retry and listed in `queued` |
+| GET | `/api/enrichment/keys` | Admin | One row per API key: the sources it serves, whether it's set, missing, optional or rejected, and whether you have your own |
+| PUT | `/api/enrichment/keys/{id}` | Admin | Set or remove a shared key (`{"api_key": "…"}`) |
+| PUT | `/api/enrichment/keys/{id}/mine` | Admin | Set or remove your own key, used for the lookups you start |
+| POST | `/api/enrichment/keys/{id}/test` | Admin | Test the shared key |
+| POST | `/api/enrichment/enrich` | User | Enrich one entity now (`entity_type`, `entity_id`, optional `source_types`, `refresh`, and `lane`, which can only be `manual`); sources that refused are queued in the `manual` lane to retry and listed in `queued`. A ransomware victim is looked up by its domain |
 
 ---
 
@@ -1358,6 +1362,8 @@ Instance settings, stored in the database and falling back to `.env`. All Admin.
 | PUT | `/api/engine/plans` | Admin | Create or change one plan |
 | DELETE | `/api/engine/plans/{plan_id}` | Admin | Delete a category or feed plan (not the global one) |
 | GET | `/api/engine/job-runs` | User | Recent scheduled job runs |
+| GET | `/api/engine/state` | User | Whether the engine is stopped, and tasks waiting on each queue |
+| PUT | `/api/engine/state` | Admin | Stop or start all background work |
 | GET | `/api/engine/signals/stats` | User | Signal firing rates, weights and the radar threshold |
 | PUT | `/api/engine/signals/settings` | Admin | Change signal weights or the radar threshold, then rescore |
 | GET | `/api/engine/entities/{entity_type}/{entity_id}/whats-new` | Visitor | Recent signals on an entity's articles |
@@ -1406,13 +1412,13 @@ Log files on the server. All Admin.
 | GET | `/api/logs/{filename}` | The last `lines` lines (default 500, max 10000) as text |
 | DELETE | `/api/logs/{filename}` | Empty a log file |
 
-Files: `app.log`, `error.log`, `http.log`, `tasks.log`, `audit.log`, `update.log`. There is no audit-log query API; audit events are in `audit.log`.
+Files: `app.log`, `error.log`, `http.log`, `jobs.log`, `audit.log`, `update.log`. There is no audit-log query API; audit events are in `audit.log`.
 
 #### Health & Metrics
 
 | Method | Path | Access | What it does |
 | --- | --- | --- | --- |
-| GET | `/api/health` | Public | Checks PostgreSQL, Redis and Meilisearch |
+| GET | `/api/health` | Public | Checks PostgreSQL, Redis and Meilisearch. Latency and error text only for callers on the api host |
 | GET | `/api/version` | Public | Build `version`, `git_sha` and `built_at`. An unstamped build reports `dev` |
 | GET | `/metrics` | Private networks only | Prometheus metrics. Returns 403 to any address outside loopback and private ranges |
 

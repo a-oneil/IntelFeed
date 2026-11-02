@@ -307,7 +307,7 @@ Enrichment adds facts from outside sources to an entity.
 
 When a **new** entity is created, `enqueue()` (`backend/app/enrichment/queue.py`) adds an `enrichment_jobs` row for each enabled `EnrichmentSource` set to `auto` that handles the entity type. Every 30 seconds `dispatch_enrichment_jobs`, on its own `enrichment` queue and worker, runs the due rows: each one through its source's adapter, with the results saved on the entity. A source that says "not now" (rate limit, open breaker, budget used up) gets the row back with a later `due_at`, so the lookup waits instead of being lost. See [automation-ai-enrichment.md](automation-ai-enrichment.md#enrichment-job-queue).
 
-Adapters (`backend/app/enrichment/adapters/`): NVD, EPSS, CISA KEV, MITRE ATT&CK, Malpedia, GitHub PoC, Wikipedia, CVEDetails, OSV, VulnCheck, and for observables VirusTotal, GreyNoise and Shodan InternetDB. Each one, and each scheduled enrichment job, makes its HTTP requests through a `SourceGateway` (`backend/app/enrichment/gateway.py`), which applies the source's rate limit, daily budget and circuit breaker to every request and refuses to send when Redis is down. See [automation-ai-enrichment.md](automation-ai-enrichment.md#source-gateway).
+The 19 lookup adapters (`backend/app/enrichment/adapters/`) and 13 catalog sources are listed in the [Source Registry](automation-ai-enrichment.md#source-registry). Each adapter, and each scheduled enrichment job, makes its HTTP requests through a `SourceGateway` (`backend/app/enrichment/gateway.py`), which applies the source's rate limit, cap on requests at once, daily budget and circuit breaker to every request, stops sending with a key the source rejected, and refuses to send when Redis is down. See [automation-ai-enrichment.md](automation-ai-enrichment.md#source-gateway).
 
 ### Scheduled Enrichment
 
@@ -514,7 +514,7 @@ Tool pages (Workbench, Settings, Search, Automation) use `SidebarLayout` instead
 
 ### Inline Entity Highlighting
 
-`InlineEntityHighlighter` marks known entities in the article. Hovering shows a quick profile (`EntityPopover`); clicking opens the profile. You can also select text to create or link an entity.
+`InlineEntityHighlighter` marks known entities in the article. Hovering shows a quick profile (`EntityPopover`), with a few words from enrichment when there are any ([Highlight Popover](automation-ai-enrichment.md#highlight-popover)); clicking opens the profile. You can also select text to create or link an entity.
 
 ### AI Copilot Dock
 

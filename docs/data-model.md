@@ -177,6 +177,7 @@ Table `ttps`: one MITRE ATT&CK technique or sub-technique.
 #### CVE
 Table `cves`: one published vulnerability.
 - `cve_id` (String 20, unique) — for example `CVE-2021-44228`
+- `aliases` (Text[]) — other ids for the same vulnerability (`GHSA-…`, a distro's advisory id), added by the OSV source
 - `description`, `cvss_score` (Numeric 3,1), `severity` (indexed)
 - `affected_products`, `references_`, `nvd_data`, `timeline` (all JSONB)
 - EPSS (the Exploit Prediction Scoring System, a daily probability that a CVE will be exploited): `epss_score` (indexed), `epss_percentile`, `epss_updated_at`, `epss_previous_score`, `epss_changed_at`. The `epss_jump` signal reads the last two.
@@ -189,11 +190,12 @@ Table `cves`: one published vulnerability.
 - Public exploits: `github_poc_count`, `github_poc_urls` (Text[]), `metasploit_module`
 
 #### CVEAffected
-Table `cve_affected`: which vendors and products a CVE affects, read from NVD CPE data (CPE is NVD's naming scheme for software). These links live here, not in `entity_relationships`. The raw CPE strings are always kept. `vendor_id` and `product_id` are filled in when the strings match a known entity, so an unmatched pair can still match later.
+Table `cve_affected`: which vendors and products a CVE affects, read from NVD CPE data, the CNA's `affected` list in the CVE record and CISA-ADP's CPEs (CPE is NVD's naming scheme for software). These links live here, not in `entity_relationships`. The raw CPE strings are always kept. `vendor_id` and `product_id` are filled in when the strings match a known entity, so an unmatched pair can still match later.
 - `cve_id` (FK, CASCADE)
 - `cpe_vendor`, `cpe_product` — raw lowercase CPE 2.3 parts
 - `vendor_id`, `product_id` (FK, SET NULL)
-- `version_start`, `version_end`, `source` (default `nvd`), `resolved_at`
+- `version_start`, `version_end`, `resolved_at`
+- `source` (default `nvd`) — `nvd`, `cna` (the CVE record's `affected` list) or `cisa_adp` (CISA's CPEs, which carry no version range)
 
 Unique on `(cve_id, cpe_vendor, cpe_product)`.
 
@@ -233,6 +235,7 @@ Entries link to sectors through `entry_sectors`, which only the one-pass AI anal
 Tables `vendors` and `products`.
 - Both: `name` (String 255, unique), `aliases`, `normalized_name`, `description`, `website`, `metadata_`
 - `vendors.vendor_type` (indexed) — see [Enums & Constants](#enums--constants)
+- `vendors.country_id` (FK → `countries`, SET NULL, indexed) — the company's country, from Wikidata (P17), when IntelFeed tracks that country
 - `products.vendor_id` (FK → `vendors`, SET NULL), `products.product_type` (indexed)
 - `products.support_status` (String 20) — `maintained`, `security_only`, `eol` or `unknown`; `products.next_eol` (Date) — the soonest end of security support among maintained releases. Both come from endoflife.date and stay empty for products it doesn't list ([rules](automation-ai-enrichment.md#endoflifedate))
 
@@ -276,7 +279,7 @@ These tables stop duplicate and junk entities from being created.
 - **`known_alias_map`** — alias lists from MISP Galaxy and MITRE ATT&CK intrusion sets, refreshed weekly by `misp-galaxy-sync` and `mitre-attack-sync` (each sync replaces its own source's rows). It lets the resolver map "Secret Blizzard" to Turla without asking the AI. Unique on `(source, normalized_canonical, normalized_alias)`.
 - **`entity_name_denylist`** — names that may not be created as a given entity type. Columns: `display_name`, `reason`, `source`, `active`. Unique on `(entity_type, normalized_name)`.
 - **`proposal_dismissals`** — analyst decisions that stop a cleanup proposal from coming back. `kind='reclassify'` stops reclassify proposals for `(entity_type, entity_id)`. `kind='not_duplicate'` drops the pair `(entity_id, other_key)` from the likely-duplicate check. Unique on `(kind, entity_type, entity_id, other_key)`.
-- **`pending_autolink_matches`** — autolinker matches on dictionary words ("Royal", "Hive", "Turkey") that wait for the one-pass AI to confirm them, instead of becoming links straight away. `resolution` records the outcome: `promoted`, `rejected`, or `dropped_ai_off` (written by `scripts/maintenance/resolve_pending_ai_off.py`). `prune_engine_tables` deletes old rows. Unique on `(entry_id, entity_type, entity_id)`.
+- **`pending_autolink_matches`** — autolinker matches on dictionary words ("Royal", "Hive", "Turkey") that wait for the one-pass AI to confirm them, instead of becoming links straight away. `resolution` records the outcome: `promoted`, `rejected`, or `dropped_ai_off`. `prune_engine_tables` deletes old rows. Unique on `(entry_id, entity_type, entity_id)`.
 
 #### EntityMaintenanceLog & ActorDescriptionHistory
 
@@ -325,7 +328,7 @@ Table `observables`: the indicator ledger. An IOC (indicator of compromise) is a
 
 **The rule the schema is built around: regex never creates a row.** Pattern scanning only stages candidates on `entries.observable_candidates`. Rows come from judgment steps ("capture doors"), and once a value is known, later articles containing it are recorded as sightings by exact match.
 
-- `kind` (indexed) — one of `ALL_KINDS` (`backend/app/models/observable.py:55`), in four families:
+- `kind` (indexed) — one of `ALL_KINDS` (`backend/app/models/observable.py:67`), in four families:
   - **network** — `ipv4`, `ipv6`, `domain`, `url`, `uri_path`, `ja3`, `ja4`, `cert_fingerprint`, `email`
   - **hash** — `md5`, `sha1`, `sha256`
   - **host** — `cmdline`, `registry`, `path`, `mutex`, `named_pipe`, `service_name`, `scheduled_task`, `user_agent`, `http_header`
@@ -342,10 +345,10 @@ Table `observables`: the indicator ledger. An IOC (indicator of compromise) is a
 - `is_denied` — analyst denial, separate from status
 - `infra_tag` (indexed) — marks shared infrastructure (shared hosting, CDN, URL shortener) so publishing can leave it out without deleting it
 - `reputation` (JSONB) — the reputation summary enrichment writes (Shodan ports, hostnames, tags and vulns; VirusTotal `vt_*`; GreyNoise `gn_noise`, `gn_riot`, `gn_name`; `enriched_at`)
-- `asn` (Integer), `asn_org`, `geo_country` (2 letters) — the IP's origin AS, its name and the allocation's country (Team Cymru, VirusTotal)
+- `asn` (BigInteger, since 32-bit AS numbers run to 4,294,967,295), `asn_org`, `geo_country` (2 letters) — the IP's origin AS, its name and the allocation's country (Team Cymru)
 - `registered_at` — when the registrable domain was registered (RDAP)
 - `popularity_rank` (indexed) — the domain's rank in the daily Tranco top-1M list; null when it isn't in it
-- `noise_class` — GreyNoise: `malicious`, `benign` or `unknown` when seen mass-scanning, `not_seen` otherwise
+- `noise_class` — GreyNoise: `malicious`, `benign` or `unknown` when seen mass-scanning; empty when GreyNoise hasn't seen the IP scanning or hasn't been asked
 - `created_via` (indexed) — which judgment step created the row, with its base confidence:
 
   | `created_via` | Source | Base confidence |
@@ -363,7 +366,7 @@ Table `observables`: the indicator ledger. An IOC (indicator of compromise) is a
 
 Unique on `(kind, value)` (`uq_observable_kind_value`), because the same string is a different observable as a domain than as a URL path.
 
-**Confidence decay.** `decay-observable-confidence` runs daily at 02:20 UTC when `observables_decay_enabled` is on. Half-lives are per kind (`DECAY_HALF_LIFE_DAYS`, `observable.py:59`):
+**Confidence decay.** `decay-observable-confidence` runs daily at 02:20 UTC when `observables_decay_enabled` is on. Half-lives are per kind (`DECAY_HALF_LIFE_DAYS`, `backend/app/models/observable.py:71`):
 
 | Kind | Half-life |
 |---|---|
@@ -598,9 +601,9 @@ Bookkeeping for the one-pass `entry_analysis` (one AI call that reads an article
 
 #### EnrichmentSource
 Table `enrichment_sources`: one external data source.
-- `source_type` (unique) — `nvd`, `epss`, `cisa_kev`, `mitre_attack`, `vulncheck`, `osv`, `malpedia`, `github_poc`, `cvedetails`, `wikipedia`, `greynoise`, `shodan`, `virustotal`, `cymru`, `rdap`, `threatfox`, `urlhaus`, `malwarebazaar`, and the catalog sources `misp_galaxy`, `metasploit`, `mitre_cwe`, `ransomware_live`, `cybergeist`, `wikidata`, `endoflife`, `tranco`, `capec`, `ctid`, `d3fend`, `etda`
-- `display_name`, `is_enabled` (seeded on for a source with scheduled jobs; a disabled source's jobs skip)
-- `trigger_mode` (default `manual`) — `auto` or `manual`
+- `source_type` (unique) — `nvd`, `epss`, `cisa_kev`, `mitre_attack`, `vulncheck`, `osv`, `malpedia`, `github_poc`, `cvedetails`, `cvelist`, `wikipedia`, `virustotal`, `greynoise`, `shodan`, `cymru`, `rdap`, `threatfox`, `urlhaus`, `malwarebazaar` (the 19 lookup sources in `ADAPTER_REGISTRY`), and the 13 catalog sources `misp_galaxy`, `metasploit`, `mitre_cwe`, `ransomware_live`, `cybergeist`, `wikidata`, `endoflife`, `tranco`, `capec`, `ctid`, `d3fend`, `etda`, `github_repo`
+- `display_name`, `is_enabled` (seeded on for a source with scheduled jobs; a disabled source's jobs skip and its queued lookups wait)
+- `trigger_mode` (default `manual`) — `auto` or `manual`. A source that sends an observable to a third party (`shares_ioc`) is seeded `manual`
 - `api_key_encrypted`, `config` (JSONB)
 - `rate_limit_config` (JSONB) — for example `{"requests_per_period": 50, "period_seconds": 604800}`
 - `health_status` (default `unknown`) — `healthy`, `degraded`, `down` or `unknown`
@@ -643,7 +646,7 @@ Table `entity_field_claims`: where each profile field value came from. It does f
 - `field` — the column, for example `motivation` or `targeted_sectors`
 - `value_text` — the value as the profile shows it
 - `source_kind` — `analyst`, `ai_extraction`, `ai_assessment`, `enrichment`, `external_feed` or `seed`
-- `source_ref` — the adapter or feed within that kind (for example `wikipedia`, `cybergeist`)
+- `source_ref` — the adapter or feed within that kind (for example `wikipedia`, `cybergeist`), or one part of a source's answer (`cvelist:cna`, `cvelist:adp` for the CVE record's CNA and CISA-ADP scores)
 - `entry_id` (FK, SET NULL), `quote` — the article and sentence behind the claim
 - `confidence`, `created_by` (SET NULL), `ai_result_id` (SET NULL)
 - `claim_key` (String 64, unique) — a digest of entity + field + value + source + article
@@ -654,7 +657,7 @@ Indexes on `(entity_type, entity_id, field)`, `(entity_type, last_asserted_at)` 
 #### EntityRelationship
 Table `entity_relationships`: a typed link between two entities, for example "APT29 uses Cobalt Strike".
 - `source_type`, `source_id`, `target_type`, `target_id` (all indexed)
-- `relationship_type` (indexed) — the verb: `uses`, `exploits`, `targets`, `attributed_to`, `variant_of`, `communicates_with`, `delivers`, `drops`, `controls`, `related_to`, `successor_of`, `subgroup_of`, `overlaps_with`. Which (source type, verb, target type) combinations are allowed is set by `ALLOWED_RELATIONSHIPS` in `app/intelligence/relationship_matrix.py`, checked on every write.
+- `relationship_type` (indexed) — the verb: `uses`, `exploits`, `targets`, `attributed_to`, `variant_of`, `communicates_with`, `delivers`, `drops`, `controls`, `related_to`, `successor_of`, `subgroup_of`, `overlaps_with`, `exposes` (observable → CVE), `operates_in` (vendor → sector). Which (source type, verb, target type) combinations are allowed is set by `ALLOWED_RELATIONSHIPS` in `app/intelligence/relationship_matrix.py`, checked on every write.
 - `confidence` (default `possible`) — `confirmed`, `probable` or `possible`
 - `source` (default `analyst_created`) — `co_occurrence`, `auto_extracted`, `analyst_confirmed`, `analyst_created`, `analyst_rejected` (hidden and never recreated by co-occurrence), `external_feed` or `enrichment` (held by claims in `entity_relation_claims`)
 - `description`
@@ -795,7 +798,7 @@ Table `entry_tags`: one tag on one entry.
 
 Unique on `(entry_id, tag_id, user_id)` with NULLs not distinct.
 
-Read tags through `app.services.entry_tags.visible_to` and write them through `ensure_assignment`, which picks the owner from the tag's scope. In Meilisearch, global tag names are in `tags`. Personal tags are in the filter-only field `user_tags` as `"<user_id>:<name>"`; the server strips that field from results and folds it into the viewer's own `tags` facet. `scripts/maintenance/reindex_entry_tags.py` re-pushes the search index's tag fields.
+Read tags through `app.services.entry_tags.visible_to` and write them through `ensure_assignment`, which picks the owner from the tag's scope. In Meilisearch, global tag names are in `tags`. Personal tags are in the filter-only field `user_tags` as `"<user_id>:<name>"`; the server strips that field from results and folds it into the viewer's own `tags` facet.
 
 #### Comment
 Table `comments`: a comment on any object, with replies.

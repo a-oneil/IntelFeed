@@ -72,7 +72,7 @@ The non-AI layer ("Layer 0") runs on every entry the feed allows. The AI layer r
 
 Paragraph numbers matter because they are stored on every link. Correlation uses them to tell "named in the same paragraph" (strong) from "both somewhere in a long roundup" (weak).
 
-When an entry has a translation, the autolinker and the extract stage scan the original and translated text together (`entry_text_with_translation`, called from `_autolink_entry` in `backend/app/workers/intel_feed_tasks.py:207`).
+When an entry has a translation, the autolinker and the extract stage scan the original and translated text together (`entry_text_with_translation`, called from `_autolink_entry` in `backend/app/workers/intel_feed_tasks.py:218`).
 
 ### Phase 2: Autolinker Scan (Layer 0)
 
@@ -115,7 +115,7 @@ How each ID type is handled:
 Other stages add more intelligence after (or beside) the autolinker:
 
 - **Observables stage** — stages IOC candidates and records sightings of known ledger values. See [observables.md](observables.md).
-- **Extract stage** (`_extract_entry_intel`, `backend/app/workers/intel_feed_tasks.py:472`) — a standalone regex pass for CVEs (with NVD lookups), TTPs and mitigation IDs, plus detection-rule extraction and GitHub rule import.
+- **Extract stage** (`_extract_entry_intel`, `backend/app/workers/intel_feed_tasks.py:483`) — a standalone regex pass for CVEs (new ones are queued for NVD lookups), TTPs and mitigation IDs, plus detection-rule extraction and GitHub rule import.
 - **One-pass AI analysis** (`entry_analysis` task) — reads the article once and returns entities, relationships, IOCs and a summary. It confirms or rejects held autolinks.
 - **Adjudicate stage** — a second AI call that reviews what the analysis wrote. See [Entity Hygiene Console](#entity-hygiene-console).
 
@@ -141,7 +141,7 @@ The capital-letter rule cannot tell "Royal" the ransomware from "Royal Navy", or
 - **Which words.** `is_provisional_form()` (`backend/app/intelligence/autolinker.py:194`) marks a single alphabetic word that appears in the bundled list of about 31,000 common English words (`backend/app/intelligence/data/common_english_words.txt`). Examples: "royal", "inc", "hive", "medusa". Coined names such as "Emotet" or "LockBit" link at once. This applies to actors, malware, tools and countries. Countries use a short list of their own instead (`AMBIGUOUS_COUNTRY_WORDS`: Chad, China, Georgia, Guinea, Jersey, Jordan, Niger, Panama, Turkey, Chile, Cuba). Vendors and products always link at once.
 - **Holding.** If every matched name for an entity is such a word, the match goes to `pending_autolink_matches` instead of a junction table. Held matches are invisible to correlation, scoring, counts and the UI. One non-dictionary name (the alias "Royal Ransomware", say) turns the whole match into a normal link.
 - **Confirming.** When the one-pass AI analysis lands, `reconcile_pending_autolinks()` (`backend/app/intelligence/autolink_reconcile.py:59`) promotes held entities whose name or alias the AI also extracted. Promotion goes through the normal store path. The rest are rejected with a `FalsePositiveRecord` (`extraction_source = "ai_reconcile"`).
-- **Feeds without AI.** `entry_will_get_ai_analysis()` (`backend/app/services/ai_eligibility.py:41`) checks the instance switch `ai_one_pass_enabled`, the feed's `ai_analysis_enabled`, and that the feed's mode is not `none`. If the entry will never be analysed, nothing could confirm a held match, so these matches are dropped. They are counted in daily Redis keys (`autolink:pending_dropped_ai_off:<YYYYMMDD>`), and the Engine's Autolinking view shows the 30-day total. `scripts/maintenance/resolve_pending_ai_off.py` resolves old held rows on such feeds.
+- **Feeds without AI.** `entry_will_get_ai_analysis()` (`backend/app/services/ai_eligibility.py:41`) checks the instance switch `ai_one_pass_enabled`, the feed's `ai_analysis_enabled`, and that the feed's mode is not `none`. If the entry will never be analysed, nothing could confirm a held match, so these matches are dropped. They are counted in daily Redis keys (`autolink:pending_dropped_ai_off:<YYYYMMDD>`), and the Engine's Autolinking view shows the 30-day total.
 - **Expiry.** Some entries never get an AI pass (junk-gated, out of budget). `prune_engine_tables` deletes unresolved held rows after 14 days and resolved ones after `engine_run_retention_days` (default 30).
 - **Review by hand.** Engine → Review → Held links (`GET /api/entity-links/pending`, `POST /api/entity-links/pending/resolve`).
 
@@ -154,7 +154,7 @@ The same word lists keep junk out of `aliases` arrays in the first place (`backe
 - `is_junk_alias(alias, canonical_name)` rejects aliases shorter than the minimum length, copies of the entity's own name, and anything on the false-positive or blocked lists.
 - `filter_aliases(aliases, canonical_name)` drops junk aliases and removes case-insensitive duplicates, keeping order.
 
-AI extraction and the Cybergeist sync pass new aliases through `gate_aliases()` (`backend/app/intelligence/entity_resolution.py:1435`), which applies `is_junk_alias()` plus further quality checks. The Malpedia sync (`_run_malpedia_sync`, `backend/app/workers/enrichment_tasks.py:873`) runs Malpedia's `alt_names` through `filter_aliases()`.
+AI extraction and the Cybergeist sync pass new aliases through `gate_aliases()` (`backend/app/intelligence/entity_resolution.py:1506`), which applies `is_junk_alias()` plus further quality checks. The Malpedia sync (`_run_malpedia_sync`, `backend/app/workers/enrichment_tasks.py:873`) runs Malpedia's `alt_names` through `filter_aliases()`.
 
 ### Cross-Type Resurrection Guard
 
@@ -175,13 +175,13 @@ Tools have two extra guards that apply whatever `entity_creation_gates` says:
 - Concept words in `TOOL_CONCEPT_NAMES` (hash algorithms, bug classes such as SQL injection, protocols such as WebSocket, generic words such as payload) are blocked as `generic_name:concept_term`.
 - A name already on file as a product or vendor is held as `product_or_vendor_name`, and the entry links to that product or vendor instead. Dual-use tools in `DUAL_USE_TOOL_NAMES` (AnyDesk, rclone, ngrok, …) are exempt.
 
-A feed with `extract_tools` off calls the resolver with `link_only=True`: known tools still link, and a name that would create a row is blocked as `creation_disabled`. `scripts/maintenance/clean_tool_catalog.py` moves platform and product rows out of the tool catalog and puts concept rows on the do-not-recreate list.
+A feed with `extract_tools` off calls the resolver with `link_only=True`: known tools still link, and a name that would create a row is blocked as `creation_disabled`.
 
 See diagram: [Entity creation guards](diagrams/intelligence-engine-entity-creation-guards.md)
 
 ### False Positive Feedback Loop
 
-`FalsePositiveRecord` (`backend/app/models/false_positive_record.py`) stores each "this link is wrong" verdict: the entity, the wrong value, the entry, the reason, who marked it and which layer produced it (`extraction_source`, such as `auto_link` or `ai_reconcile`). The reader's "Wrong?" menu writes these and can also add the word to the analyst block list.
+`FalsePositiveRecord` (`backend/app/models/false_positive_record.py`) stores each "this link is wrong" verdict: the entity, the wrong value, the entry, the reason, who marked it and which layer produced it (`extraction_source`, such as `auto_link` or `ai_reconcile`). The reader's "Wrong?" menu writes these and can also add the word to the analyst block list. The same menu, narrowest fix first, also converts the entity to another type, merges it into a duplicate, unlinks it from every article (admins), and deletes it outright, after a confirm and a 5-second undo (`frontend/src/components/EntityPopover.tsx`). For an observable it removes this article's sighting, tombstones the value (admins) or deletes the row.
 
 ---
 
@@ -203,7 +203,7 @@ The API is `backend/app/api/hygiene.py`, under `/api/admin/hygiene/*` and admin-
 | `GET /reclassify-groups`, `/unlink-groups` (+ `/apply`, `/dismiss`, `/keep`) | Per-entity apply paths the queue's row buttons use |
 | `POST /scan-duplicates` | Run the duplicate review (`review-duplicate-entities`) now |
 | `GET /orphans`, `POST /orphans/prune` | Entities with `article_count = 0` |
-| `/enrichment-gaps`, `/run-name-normalization`, `/scan-alias-hygiene`, `/scan-vendor-autolink`, `/scan-id-hygiene` | On-demand scanners with shadow/apply flows |
+| `/enrichment-gaps/enrich`, `/run-name-normalization, `/scan-alias-hygiene`, `/scan-vendor-autolink`, `/scan-id-hygiene` | On-demand scanners with shadow/apply flows |
 | `GET /api/entities/{type}/{id}/cascade-preview` | What deleting an entity would remove. Any signed-in user |
 
 **The adjudicate stage** (`backend/app/services/entry_adjudication.py`). After an entry's one-pass analysis lands, `adjudicate_entry_task` (on the `ai` queue) sends the article plus a list of everything the analysis wrote: links, entities it created (with their nearest existing names), relationship claims and IOCs. The reviewer answers only for items it would change: remove, reclassify, veto, merge, demote or drop. Anything it leaves out is kept.
@@ -212,7 +212,7 @@ The API is `backend/app/api/hygiene.py`, under `/api/admin/hygiene/*` and admin-
 - `reclassify` is a catalogue-wide change, so in apply mode it needs agreement: each article's verdict is a vote (filed as a proposal), and the review that brings the count to `adjudication_reclassify_consensus` (default 2) converts the entity and clears the other proposals about it. A name that was folded out of a type (a reclassify tombstone) is never proposed back into it, so types do not ping-pong.
 - Circuit breakers turn a destructive run into proposals. The rolling breaker also pauses dispatch for an hour (`adjudication_breaker_until`).
 - Never touched: relationship edges an analyst confirmed, created or rejected, and external-feed edges (only `auto_extracted` and `co_occurrence` edges are reviewed). A link an analyst restored in the last 90 days is shown to the reviewer flagged, and never changed.
-- `merge` can only target a name the reviewer was shown. `veto` deletes an entity only when this entry created it and nothing else uses it. Two entities that both already exist are never compared here; that is the daily duplicate review (`backend/app/services/entity_merge_review.py`, job `review-duplicate-entities`), which scores same-type pairs by name similarity, a shared alias and shared articles, asks the `entity_merge_review` task, and files each `same` verdict as a Merge proposal on the Review tab.
+- `merge` can only target a name the reviewer was shown. `veto` deletes an entity only when this entry created it and nothing else uses it. Two entities that both already exist are never compared here; that is the daily duplicate review (`backend/app/services/entity_merge_review.py`, job `review-duplicate-entities`), which scores same-type pairs by name similarity and a shared alias (shared articles only break ties), asks the `entity_merge_review` task, and files each `same` verdict as a Merge proposal on the Review tab.
 - `backfill_entry_adjudications` walks older entries through the same review, using at most half of each hour's budget. Run it by hand:
 
 ```bash
@@ -312,7 +312,7 @@ Adjustments:
 
 ### Timeline Construction
 
-`GET /api/intelligence/timeline/{entity_type}/{entity_id}` (`entity_timeline()`, `backend/app/intelligence/correlation.py:2291`) merges, by date: linked articles (one per duplicate story), correlation events, enrichment runs, detection rules created, typed relationships and campaign membership.
+`GET /api/intelligence/timeline/{entity_type}/{entity_id}` (`entity_timeline()`, `backend/app/intelligence/correlation.py:2336`) merges, by date: linked articles (one per duplicate story), correlation events, enrichment runs, detection rules created, typed relationships and campaign membership.
 
 ### Typed relationships
 
@@ -378,10 +378,11 @@ Re-processing the same article stores nothing new. See [detection-engineering.md
 
 ### CVE Extraction & NVD Enrichment
 
-CVE IDs come from the autolinker (stubs) and the extract stage (`extract_and_store_cves()` in `backend/app/intelligence/cve.py`). `enrich_from_nvd()` (`backend/app/intelligence/cve.py:80`) calls the NVD API 2.0 and fills in the CVSS score and severity (v3.1, then v3.0, then v2), the English description, affected products (CPE) and references.
+CVE IDs come from the autolinker (stubs), the extract stage (`extract_and_store_cves()` in `backend/app/intelligence/cve.py`) and the KEV sync. None of them calls NVD: each new CVE is queued in the [enrichment job queue](automation-ai-enrichment.md#enrichment-job-queue), and NVD looks it up from there while the source is switched on. `enrich_from_nvd()` (`backend/app/intelligence/cve.py:80`) calls the NVD API 2.0 and fills in the CVSS score and severity (v3.1, then v3.0, then v2), the English description, affected products (CPE) and references.
 
-- Every lookup goes through the `nvd` source's [gateway](automation-ai-enrichment.md#source-gateway). An NVD API key (on the source, else `nvd_api_key` under Settings → Engine) raises the rate limit. The sweeps pace lookups at one per 6.5 s without a key and one per 0.7 s with one.
-- A 403 or 429 opens the gateway's breaker for the whole source. A sweep then stops and picks up on its next run; extraction stores the CVE without NVD data and the sweeps fill it in.
+- Every lookup goes through the `nvd` source's [gateway](automation-ai-enrichment.md#source-gateway). An NVD API key (`nvd_api_key`, set under Settings → Engine → Enrichment → Keys) raises the rate limit from 5 to 50 requests per rolling 30 seconds. The gateway paces every caller inside that window, one request at a time.
+- A 429, or a 403 that isn't a rejected key, opens the gateway's breaker for the whole source. A sweep then stops and picks up on its next run. A rejected key stops NVD until the key changes and shows as "key rejected" in the Enrichment console.
+- Every answer goes through the NVD source's field map, so NVD's score replaces a CNA's or CISA's but never an analyst's, and every source's score stays visible as a claim.
 - An ID NVD has no record of is retried at most 3 times, 7 days apart, so junk IDs stop costing quota.
 
 ### EPSS & Exploit Tracking
@@ -398,7 +399,7 @@ CVE IDs come from the autolinker (stubs) and the extract stage (`extract_and_sto
 
 ### CVE Scoring & Priority
 
-The UI shows a **risk tier** from `compute_risk_tier()` (`backend/app/intelligence/cve.py:358`), weighted toward evidence of exploitation:
+The UI shows a **risk tier** from `compute_risk_tier()` (`backend/app/intelligence/cve.py:492`), weighted toward evidence of exploitation:
 
 | Tier | Rule |
 |---|---|
@@ -407,7 +408,7 @@ The UI shows a **risk tier** from `compute_risk_tier()` (`backend/app/intelligen
 | medium | A public GitHub PoC, or CVSS critical/high |
 | low | Everything else |
 
-CVSS alone never goes above medium. API responses also carry a simpler `priority` field (`calculate_cve_priority()`, `backend/app/intelligence/cve.py:319`): CRITICAL if in KEV; HIGH if EPSS > 0.5 or CVSS ≥ 9.0; MEDIUM if EPSS > 0.1 or CVSS ≥ 7.0; else LOW.
+CVSS alone never goes above medium. API responses also carry a simpler `priority` field (`calculate_cve_priority()`, `backend/app/intelligence/cve.py:453`): CRITICAL if in KEV; HIGH if EPSS > 0.5 or CVSS ≥ 9.0; MEDIUM if EPSS > 0.1 or CVSS ≥ 7.0; else LOW.
 
 ---
 
@@ -541,9 +542,9 @@ The observables stage has no switch of its own, but `_scan_entry_observables` sk
 
 ### The two pipelines
 
-**Pipeline A — the autolinker.** Entry point `_autolink_entry` (`backend/app/workers/intel_feed_tasks.py:207`). Runs for `full` and `selective` (if the entry passes the relevance filter). It links actors, malware, countries, vendors, products, tools and mitigations, plus CVE, CWE and technique IDs. See [Phase 2](#phase-2-autolinker-scan-layer-0).
+**Pipeline A — the autolinker.** Entry point `_autolink_entry` (`backend/app/workers/intel_feed_tasks.py:218`). Runs for `full` and `selective` (if the entry passes the relevance filter). It links actors, malware, countries, vendors, products, tools and mitigations, plus CVE, CWE and technique IDs. See [Phase 2](#phase-2-autolinker-scan-layer-0).
 
-**Pipeline B — the extract stage.** Entry point `_extract_entry_intel` (`backend/app/workers/intel_feed_tasks.py:472`):
+**Pipeline B — the extract stage.** Entry point `_extract_entry_intel` (`backend/app/workers/intel_feed_tasks.py:483`):
 
 - CVE extraction with NVD enrichment
 - Technique-ID regex pass
@@ -573,7 +574,7 @@ The filter is a cheap keyword scorer (no AI, no database). Keywords match at the
 | Threat actor | 0.35 | APT, nation-state, espionage, hacktivist, financially motivated |
 | Detection | 0.20 | Sigma, YARA, IOC, MITRE ATT&CK, Splunk, SIEM, threat hunting |
 
-One hit in a category earns 80% of its weight; two or more earn all of it. Bonuses: a CVE ID +0.4, a technique ID +0.3, an IOC-like value (IPv4, hash, defanged URL) +0.2, a security keyword in the title +0.15. The score is capped at 1.0. At the default threshold one keyword is enough, so only articles with no security words at all are dropped. `scripts/maintenance/measure_relevance_filter.py` shows, per feed, how many recent entries fall below a threshold.
+One hit in a category earns 80% of its weight; two or more earn all of it. Bonuses: a CVE ID +0.4, a technique ID +0.3, an IOC-like value (IPv4, hash, defanged URL) +0.2, a security keyword in the title +0.15. The score is capped at 1.0. At the default threshold one keyword is enough, so only articles with no security words at all are dropped.
 
 Use for general security news, mixed social sources and vendor blogs: the safe default. The keywords are English, so for foreign-language feeds turn on `auto_translate` or use `full`.
 

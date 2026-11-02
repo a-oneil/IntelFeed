@@ -313,7 +313,8 @@ Full query syntax: [query-language.md](query-language.md).
 - **EntityMergeSelectionModal:** merges the checked rows into one (default: the one with the most articles) with `POST /entities/{type}/merge`.
 - **EntityPopover**, **EntityActionMenu**, **EntityMergeModal**, **EntityMergeIntoModal:** hover cards, actions and merge flows.
 - **CreateEntityPanel**, **AddAliasPanel**, **LinkEntityPanel:** create an entity, add an alias, or link selected text to an entity.
-- **EnrichmentPanel:** enrichment status and results.
+- **entityProfile/ContextPanel:** the profile's Context section, the first row of the Overview: each enrichment source's facts, its last answer and freshness, Refresh and per-source ↻ buttons, and CVSS by source on a CVE.
+- **engine/EnrichmentConsole:** Settings → Engine → Enrichment: every source's status, limits, queue, fill rates and jobs, plus the global pause.
 - **AttackMatrixSection:** the ATT&CK matrix with rule coverage per technique.
 
 ### Reader Experience Components

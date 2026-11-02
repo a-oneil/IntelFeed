@@ -68,7 +68,7 @@ intelfeed-skill/      Claude skill + CLI with every registry tool (191)
 intelfeed-lite-skill/ Read-only skill + CLI (95 tools)
 intelfeed-mcp/        MCP server for local models, over the same tool registry
 docs/                 Documentation (also shown in the app; mounted into the api container)
-scripts/              seed/ maintenance/ telegram/ ops/ dev/ archive/ (see scripts/README.md)
+scripts/              seed/ maintenance/ telegram/ ops/ dev/ (see scripts/README.md)
 docker-compose.dev.yml, docker-compose.prod.yml
 Caddyfile             Production reverse proxy and TLS
 update.sh             Production update script

@@ -10,25 +10,29 @@ Every profile — actors, malware, CVEs, CWEs, TTPs, countries, sectors, tools, 
 
 ## Page anatomy
 
-- **Header.** Breadcrumb, type badge and name (click to rename where `nameEditable`). **SignalBadges** are click-to-edit chips (motivation, malware type, tactic, severity, CVSS, EPSS, KEV, region); the country badge links to its profile. Also:
+- **Header.** Breadcrumb, type badge and name (click to rename where `nameEditable`). **SignalBadges** are click-to-edit chips (motivation, malware type, tactic, severity, CVSS, EPSS, KEV, region); the country badge links to its profile (a vendor's country comes from Wikidata). Badges the enrichment sources raise sit beside them: a product's support status (`EOL` in red; amber for "security fixes only" or an end of life under 90 days away), and **no patch coming** on a CVE that affects a product past end of life, or a release past end of life of a product that is still maintained (the affected rows' `eol_releases`). Also:
   - **Ask Copilot**, a **Watch** toggle, enrichment status
   - an actions menu: markdown export, merge into, add to campaign, convert to another type. Merge and convert are admin-only; convert writes a tombstone so the old name isn't recreated.
 - **Strip under the header.** Mentions timeline and pulse line. CVEs add a lifecycle strip; observables add `ObservableLifecycleStrip`.
-- **Overview tab:**
-  - description via `EntityLinkedMarkdown` (names become links)
-  - assessment block with recent developments (`GET /api/engine/entities/{type}/{id}/whats-new`)
-  - known associates and identity fields
-  - entity-scoped AI analysis (`AIAnalysisModule`, for prompts with `show_in_entity_actions`)
-  - essential reading, Wikipedia summary, analyst notes (`EntityNotesSection`), activity feed
-  - sources card and next-actions rail
-  - per-type config panels (CVE affected products, TTP MITRE details and mitigations, CWE family and catalog, infrastructure on actors, malware, tools and campaigns)
+- **Overview tab.** One column, from the brief down to the workspace. The **brief** is the assessment (`AssessmentBlock`: description via `EntityLinkedMarkdown`, so names become links, with recent developments from `GET /api/engine/entities/{type}/{id}/whats-new`; long text folds past 900 characters) with the **next-action chips** under it. The **facts strip** (`SnapshotCard`) is a row of tiles: identity fields and the type's numbers (a CVE's CVSS, EPSS, KEV, affected products, weaknesses). Everything else is a **section row** (`OverviewSection`): one line with a caret, the section name, a count and a one-line digest (how many, the top items, how fresh), which opens in place. Each type lists which rows it has under `overviewSections` in the config and which are open by default under `overviewOpen`; a row with nothing to show is left out. The order is the same on every type (`OVERVIEW_SECTION_ORDER`): Context first, then the rows that are the entity's own record, then Stories & reading, Activity and Workspace. The rows, in that order, are:
+  - **Context** (`ContextPanel`): what each enrichment source says about the entity, one collapsible row per source (the first open) with when it last answered and whether that answer is still fresh or stale. Refresh re-runs every source; ↻ re-runs one. A source without its key shows "needs key" and, for admins, links to that source in the Enrichment console. A CVE also gets **CVSS by source**: each source's score (NVD, the CVE record's CNA and CISA-ADP scores) with its vector, and which one the profile shows. Visitors see the section without its buttons. The `SourcesCard` of outbound links (external pivots, Malpedia, GitHub, Wikipedia, a CVE's NVD references) sits in the same row; attaching a Wikipedia article starts from it. See [Source Context](automation-ai-enrichment.md#source-context).
+  - **Recent victims** (ransomware actors): leak-site victims from the tracker.
+  - **Catalog**: a TTP's MITRE details, related techniques and mitigations; a CWE's family, catalog data, mitigations and affected vendors.
+  - **Provenance & confidence** (observable): how the indicator was captured and how its confidence decays.
+  - **Exploit & PoC** (CVE): proof-of-concept repositories and Metasploit modules, when any exist.
+  - **Affected** (CVE), **Weakness profile** (vendor, product), **Infrastructure** (actor, malware, tool, campaign), **Attribution** (observable): the per-type panels.
+  - **Stories & reading**: active story threads, essential reading, and the Wikipedia summary when an article is attached.
+  - **Activity**: the activity feed; a campaign's intake panel (searches and suggestions) sits above it.
+  - **Workspace**: entity-scoped AI analysis (`AIAnalysisModule`, for prompts with `show_in_entity_actions`) and analyst notes (`EntityNotesSection`); `?tab=notes` opens this row. Visitors do not get it.
+
+  Which rows are open is remembered per entity type (`profileOpenSections` in `uiStore`). The **Brief / Everything** switch at the right of the tab bar opens every row at once; closing one row drops back to Brief.
 - **Relationships tab** (all types). A typed graph that draws claims only, plus a list in two parts:
   - **Claims** — typed verbs graded by trust (confidence from analyst action or AI adjudication).
   - **Co-mentions** — entities in the same articles, marked not claims.
 
-  Rows show verb, evidence count, sparkline, confirm / reject; filterable and sortable.
-- **Detection tab** (actor, malware, campaign, CVE, CWE, TTP). Linked rules and coverage; **Detection Gaps** (uncovered techniques) opens from the rail's "Review gaps". Public read-only visitors see neither.
-- **Vulnerabilities tab** (CWE, vendor, product). CVEs with this weakness, or affecting this vendor/product via `cve_affected` (NVD CPE links, separate from `entity_relationships`).
+  Rows show verb, evidence count, sparkline, confirm / reject; filterable and sortable. A connection an enrichment source claims carries that source's name. Signed-in users also get a **via** chip per source ("via Malpedia"), which narrows the claims to that source's, and an **unresolved · N** toggle listing the names a source gave that match no entity, or more than one (`GET /api/entity-relationships/claims/{type}/{id}`).
+- **Detection tab** (actor, malware, campaign, CVE, CWE, TTP). Linked rules and coverage; **Detection Gaps** (uncovered techniques) opens from the "Review gaps" next-action chip. Public read-only visitors see neither.
+- **Vulnerabilities tab** (CWE, vendor, product). CVEs with this weakness, or affecting this vendor/product via `cve_affected` (NVD CPE data and the CVE record's affected list, separate from `entity_relationships`).
 - **Weaknesses tab** (CVE). The CVE's CWEs.
 - **Geography tab** (country). Role breakdown; actors from or targeting the country.
 - **Victimology tab** (sector). Who targets the industry (reporting vs claims), plus leak-site victims.
@@ -41,7 +45,7 @@ Every profile — actors, malware, CVEs, CWEs, TTPs, countries, sectors, tools, 
 | Regex and AI extraction | `CVE-YYYY-NNNN` and `TNNNN(.NNN)` regex; one-pass AI analysis | CVE and TTP links, new entities, sectors, indicators |
 | NVD / EPSS / KEV / GitHub PoC | Scheduled syncs ([entries.md](entries.md#beat-scheduled-enrichment)) | CVE scores, exploit status, affected products |
 | MITRE ATT&CK / Malpedia / Wikipedia | Weekly syncs | TTP details and mitigations; actor and malware descriptions and aliases |
-| Wikidata / endoflife.date | Weekly and daily syncs ([rules](automation-ai-enrichment.md#wikidata)) | Vendor websites and facts, product vendors, country regions; product support status and releases |
+| Wikidata / endoflife.date | Weekly and daily syncs ([rules](automation-ai-enrichment.md#wikidata)) | Vendor websites, countries, industries and facts, product vendors, country regions, victim countries; product support status and releases |
 | CAPEC / CTID / D3FEND | Weekly syncs ([rules](automation-ai-enrichment.md#capec)) | CAPEC names for a CWE's attack patterns; a technique's CAPEC patterns, NIST 800-53 and CIS controls (`nist_controls`, `cis_controls`) and D3FEND countermeasures |
 | ETDA Threat Group Cards / ransomware.live group profiles | Weekly sync; a few groups every 4 hours ([rules](automation-ai-enrichment.md#relations)) | Actor aliases, origin, MITRE id; targeted sectors and countries, tools and techniques as `enrichment` claims; operations and leak-site status on the Context panel |
 | Co-occurrence and the Telegram forward graph | Post-ingest pipeline step; job every 4 hours | `entity_relationships` links |
@@ -50,7 +54,7 @@ Every profile — actors, malware, CVEs, CWEs, TTPs, countries, sectors, tools, 
 ### Relationships and trust
 
 Rows in `entity_relationships` (`backend/app/models/entity_relationship.py`) have:
-- a **verb**: `uses`, `exploits`, `targets`, `attributed_to`, `variant_of`, `communicates_with`, `delivers`, `drops`, `controls`, `related_to`, `successor_of`, `subgroup_of`, `overlaps_with`
+- a **verb**: `uses`, `exploits`, `targets`, `attributed_to`, `variant_of`, `communicates_with`, `delivers`, `drops`, `controls`, `related_to`, `successor_of`, `subgroup_of`, `overlaps_with`, `exposes`, `operates_in`
 - a **confidence**: `confirmed`, `probable` or `possible`
 - a **source**: `co_occurrence`, `auto_extracted`, `analyst_confirmed`, `analyst_created`, `analyst_rejected`, `external_feed` (the MITRE ATT&CK import writes `external_feed` with `confirmed`) or `enrichment` (an enrichment source's relation claim, `probable`, so it reads as reported)
 - **`evidence_entry_ids`**: the supporting articles
@@ -103,7 +107,7 @@ Rules:
 
 Fields with a value but no claim return in `unsourced_fields`, marked unsourced.
 
-Claims merge on `claim_key` (entity + field + value + source + article): a nightly sync repeating a value only updates its timestamp, while different sources or articles stay separate rows — that is the agreement count shown. `scripts/maintenance/backfill_field_claims.py` fills the table from existing provenance (`actor_description_history`, `enrichment_results`, `created_via` / `created_from_entry_id`); anything untraceable stays unsourced on purpose.
+Claims merge on `claim_key` (entity + field + value + source + article): a nightly sync repeating a value only updates its timestamp, while different sources or articles stay separate rows — that is the agreement count shown.
 
 ## Backend endpoints
 
@@ -113,6 +117,8 @@ All paths are under `/api`.
 |---|---|
 | `GET /entities/{type}/{id}/provenance` | each tracked field's claims with article, feed and feed reliability grade, plus `unsourced_fields` |
 | `GET /entities/{type}/{id}/infrastructure` | claimed and reported-alongside observables |
+| `GET /entities/{type}/{id}/context` | the Context section's source blocks and the header's context badges |
+| `GET /entity-relationships/claims/{type}/{id}` | which enrichment sources claim each connection, and the names they gave that resolved to nothing |
 | `GET /engine/entities/{type}/{id}/whats-new` | recent developments for the assessment block |
 | `GET /intelligence/pivot/{type}/{id}` | the entity, related entities and entries |
 | `GET /intelligence/graph/{type}/{id}` | graph nodes and typed edges |

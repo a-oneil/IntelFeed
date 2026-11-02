@@ -21,7 +21,7 @@ The switches live in the `system_settings` database table (editable at Settings 
 | `pipeline_engine_enabled` | `false` | Use pipeline plans instead of each feed's own extraction switches (`backend/app/config.py:112`) |
 | `adjudication_mode` | `apply` | The `adjudicate` stage: `off`, `shadow` (file verdicts as proposals) or `apply` (apply confident verdicts, file the rest) |
 
-Setting metadata is in `backend/app/services/system_settings.py`: `CONFIGURABLE_KEYS` (`backend/app/services/system_settings.py:26`) says which keys may be overridden and their type, `SETTING_METADATA` (`backend/app/services/system_settings.py:216`) holds labels and help text, and `_ENGINE_SECTION_GROUPS` (`backend/app/services/system_settings.py:1375`) places engine keys on console sections.
+Setting metadata is in `backend/app/services/system_settings.py`: `CONFIGURABLE_KEYS` (`backend/app/services/system_settings.py:26`) says which keys may be overridden and their type, `SETTING_METADATA` (`backend/app/services/system_settings.py:216`) holds labels and help text, and `_ENGINE_SECTION_GROUPS` (`backend/app/services/system_settings.py:1393`) places engine keys on console sections.
 
 Related docs: [entries.md](entries.md) (the full entry lifecycle), [intelligence-engine.md](intelligence-engine.md) (the autolinker and correlation code the stages call), [data-model.md](data-model.md) (table schemas), [workers-search-dashboards.md](workers-search-dashboards.md) (Celery and beat schedules).
 
@@ -300,9 +300,25 @@ The console is at `/settings?section=engine` (admin only; `/workbench/engine` re
 - **Review**: everything the AI wants a person to approve (`ProposalsQueue.tsx`, `CleanupGroups.tsx`, `ExtractionTab.tsx`). Four lenses: **Proposals** (every pending proposal from both logs, one row per entity), **Held links** (autolinker matches waiting for confirmation), **New entities** (AI-created entities to merge, convert, delete or confirm), and **History** (applied changes, with Restore). A Proposals row (`GET /api/admin/hygiene/review-groups`) folds every proposal about one entity: the backend files one per article, so "Linux" collects hundreds of remove-link proposals and a mis-filed malware a reclassify per mention. The row shows what each kind wants (remove links, a type to convert to, a merge target, a veto), its buttons settle every article's copy at once (Remove links, the type chips, Merge, Delete, Dismiss), and it expands to the articles behind it with per-row Apply and Dismiss. Rows about something other than a catalogue entity (a relationship edge, an article's assessment) stand alone. Dismiss keeps the links and the type, stops the type change being proposed again and, for a duplicate review's merge, marks the pair not-duplicate (`proposal_dismissals`). Every row carries the same "⋯" entity menu as New entities (`EntityRowActions.tsx`: merge into, rename, add alias, convert type, delete + never recreate), so the entity a proposal is about can be fixed without opening its profile; deleting one clears every pending proposal about it. Beside the Proposed / Applied switch, **⚙ Tuning** unfolds the knobs that decide what is applied at ingest and what lands in the queue instead (the confidence floor, reclassify consensus, the circuit breaker, the review scope and the duplicate review's batch and floor). A background Apply all and Dismiss all act on whatever the facets show. The tab badge is `pending_total` from `GET /api/admin/hygiene/stats`.
 - **Feeds**: feed health and feed, rate-limit and image-proxy settings.
 
-Above the table: a pulse dot (red while any entry is stuck), an ingest sparkline, the window's counts, and a **Needs you** strip of shortcuts (stage errors, duplicate candidates, entities to reclassify, adjudication verdicts, pending links, observable candidates).
+Above the table: a pulse dot (red while any entry is stuck), an ingest sparkline, the window's counts, and a **Needs you** strip of shortcuts (stage errors, duplicate candidates, entities to reclassify, adjudication verdicts, pending links, observable candidates). The **Stop engine** button sits at the right end ([Stopping the engine](#stopping-the-engine)).
 
 Five more views open as full pages with a back button (`BrowseView`, `frontend/src/components/engine/EngineMatrix.tsx:42`): **Jobs** (schedules from `JOB_REGISTRY` plus Redis overrides in `JobSchedules.tsx`, and run history from `GET /api/engine/job-runs`), **Plans** (`PipelinePlans.tsx`), **Enrichment** (sources), **Maintenance** (`MaintenancePanel.tsx`: sweeps, resets and on-demand scanners), and **Publishing** (`PublishingPanel.tsx`: outbound observable feeds). Old `?tab=` and `?section=` links are mapped onto these views (`legacyState`, `frontend/src/components/engine/EngineSection.tsx:33`). Every setting the console shows is listed in [engine-settings.md](engine-settings.md).
+
+### Stopping the engine
+
+The **Stop engine** button at the right of the Engine top bar stops all background work. Use it to freeze the app while you fix something, run a big cleanup, or take load off the server. **Start engine** picks everything up where it stopped, easing back to full speed over a few minutes.
+
+While the engine is stopped:
+
+- No feeds are polled, and the Telegram listener doesn't fetch new messages.
+- No AI analysis, adjudication, summaries or other background AI runs.
+- No enrichment requests leave the server. It works like the Enrichment console's **Pause all sources**, and starting the engine doesn't clear a pause you set yourself.
+- No automations and no scheduled jobs run.
+- Work that was already queued waits. A task that was already running finishes.
+
+Reading, search and editing keep working, and so does AI you run yourself from a page (an entity's AI tab, AI on an entry, the copilot on Ollama). A red banner shows on the Engine pages with the number of queued tasks.
+
+How it works: the button saves the `engine_stopped` setting in the database (`backend/app/services/engine_switch.py`). Each Celery worker reads it every 10 seconds and stops taking tasks off its queues, so queued work stays in Redis. On a start, each worker runs one task at a time at first and adds a process back every minute until it's at full size, so a backlog drains gradually instead of all hitting the database at once. Beat skips scheduled jobs while it's on, so they don't all run at once on the start. A job that was due runs at its next normal time. Both live in `backend/app/workers/engine_gate.py`. The switch is never kept in Redis, so a Redis restart or wipe can't start a stopped engine. Every task and queue is covered without extra code, including ones added later. A background process that isn't a Celery task (like the Telegram listener) has to check `is_stopped()` / `is_stopped_async()` itself.
 
 ### `entry_pipeline_runs` — per-entry stage observability
 
@@ -343,6 +359,8 @@ The engine router is mounted at `/api/engine`. Every route needs a signed-in use
 | `PUT /plans` | Admin: create or update a plan by scope (checks stage names, bumps the plan version) |
 | `DELETE /plans/{plan_id}` | Admin: delete a plan. Global plans cannot be deleted |
 | `GET /job-runs` | Recent job runs, optional `job_key` filter (limit ≤500) |
+| `GET /state` | Whether the engine is stopped, and how many tasks wait on each queue |
+| `PUT /state` | Admin: stop or start the engine (`{"stopped": true}`). See [Stopping the engine](#stopping-the-engine) |
 | `PUT /radar-feedback` | Vote on a Radar item (1 / −1 / 0 clears) |
 | `GET`/`PUT`/`DELETE /my-radar` | Your learned Radar weights: read, opt in or out, reset |
 | `GET`/`POST`/`DELETE /autolink/fp-names` | Admin writes: the false-positive name list (`autolinker_false_positive_names`). Vendors, products, tools and mitigations ignore it |

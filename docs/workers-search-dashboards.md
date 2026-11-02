@@ -46,6 +46,8 @@ The `ai` worker runs one AI call at a time, whatever the provider. That paces a 
 
 **Any new task that calls an AI provider must be routed to `ai`.** On the default queue, a long AI call fills the worker's slots and blocks `poll_due_feeds`, which stops ingest.
 
+Every worker and beat obey the **Stop engine** button: while it's on, workers take nothing off their queues and beat sends nothing. New tasks and queues are covered automatically. See [Stopping the engine](engine.md#stopping-the-engine).
+
 ### Per-Worker Async Pattern and Connection Management
 
 `backend/app/workers/db.py` gives tasks two helpers:
@@ -65,7 +67,7 @@ engine = create_async_engine(
 
 ### Task Catalog and Schedules
 
-`JOB_REGISTRY` (`backend/app/workers/job_registry.py:44`) lists all **66** scheduled jobs. Each has a task, a description, a category, a default schedule and, where it has them, the `settings_keys` that tune it. The Engine → Jobs screen reads it and shows those settings next to the job. Every setting named there is listed in [engine-settings.md](engine-settings.md#setting--scheduled-job).
+`JOB_REGISTRY` (`backend/app/workers/job_registry.py:45`) lists all **84** scheduled jobs. Each has a task, a description, a category, a default schedule and, where it has them, the `settings_keys` that tune it. The Engine → Jobs screen reads it and shows those settings next to the job. Every setting named there is listed in [engine-settings.md](engine-settings.md#setting--scheduled-job).
 
 All times are UTC. "AI" means the job calls an AI provider. "(`ai` queue)" means that work runs on the `ai` worker.
 
@@ -107,6 +109,7 @@ All times are UTC. "AI" means the job calls an AI provider. "(`ai` queue)" means
 | Task | Source | Default schedule | What it does |
 |------|--------|------------------|--------------|
 | `dispatch_enrichment_jobs` | | Every 30 s | Run due lookups from the enrichment job queue (`enrichment` queue). See [Enrichment Pipeline](#enrichment-pipeline) |
+| `sync_enrichment_pause` | | Every 60 s | Copy the `enrichment_paused` setting onto the Redis flag the gateways read, on the default worker, so a Redis that lost the flag is corrected even while the enrichment worker is down. A run is kept in `job_runs` only when it had to restore the flag |
 | `run_epss_bulk_sync` | `epss` | Daily 06:30 | Update EPSS scores (exploit likelihood) for all CVEs |
 | `sync_kev_feed` | `cisa_kev` | Every 6 h at :15 | Sync the CISA Known Exploited Vulnerabilities catalog |
 | `run_mitre_attack_sync` | `mitre_attack` | Sunday 03:00 | Sync MITRE ATT&CK techniques, groups and mitigations |
@@ -115,13 +118,14 @@ All times are UTC. "AI" means the job calls an AI provider. "(`ai` queue)" means
 | `run_metasploit_sync` | `metasploit` | Sunday 03:45 | Map tracked CVEs to Metasploit modules and mark them weaponized |
 | `refresh_cwe_catalog` | `mitre_cwe` | Monday 03:45 | Re-pull the MITRE CWE catalog and re-match unmatched NVD weakness references |
 | `run_cve_nvd_refresh` | `nvd` | Daily 12:00 | Re-check NVD for CVSS changes |
-| `run_cve_nvd_backfill` | `nvd` | Daily 01:30 | Fill in NVD data (CVSS, description, affected products, references) for CVEs that lack it; stops starting lookups 2 minutes before its time limit |
+| `run_cve_nvd_backfill` | `nvd` | Daily 01:30 | Look up NVD data (CVSS, description, affected products, references) for CVEs with no NVD record yet; stops starting lookups 2 minutes before its time limit. Backfill lane |
 | `reenrich_cve_nvd` | `nvd` | Daily 03:05 | Re-fetch NVD data for CVEs still missing it |
 | `run_github_poc_scan` | `github_poc` | Daily 05:00 | Search GitHub for proof-of-concept exploits; stops starting searches 2 minutes before its time limit |
-| `run_wikipedia_bulk_sync` | `wikipedia` | Wednesday 04:00 | Add Wikipedia content to entities that lack it; stops 5 minutes before its time limit |
+| `run_wikipedia_bulk_sync` | `wikipedia` | Wednesday 04:00 | Add Wikipedia content to entities that lack it; stops 5 minutes before its time limit. Backfill lane |
 | `sync_cybergeist_feeds` | `cybergeist` | Daily 02:30 | Sync threat actor and malware lists from Cybergeist |
 | `sync_ransomware_victims` | `ransomware_live` | Every 30 min | Collect ransomware leak-site victim posts as structured records |
-| `run_wikidata_sync` | `wikidata` | Thursday 04:30 | Fill vendor websites, product vendors and country regions, and vendor facts, from Wikidata |
+| `run_wikidata_sync` | `wikidata` | Thursday 04:30 | Fill vendor websites, countries and industries, product vendors, country regions, victim countries and vendor facts from Wikidata |
+| `run_github_repo_sync` | `github_repo` | Tuesday 05:15 | Read stars, last push, archived state, license and topics of tools' GitHub repositories |
 | `run_endoflife_sync` | `endoflife` | Daily 05:15 | Match products to endoflife.date and set their support status and next end of life |
 | `run_ctid_sync` | `ctid` | Sunday 04:15 | Write NIST 800-53 and CIS controls onto techniques from CTID's Mappings Explorer |
 | `run_d3fend_sync` | `d3fend` | Sunday 04:30 | Show the D3FEND countermeasures for each technique |
@@ -129,7 +133,7 @@ All times are UTC. "AI" means the job calls an AI provider. "(`ai` queue)" means
 | `run_etda_sync` | `etda` | Tuesday 04:15 | Match ETDA Threat Group Cards to tracked actors: aliases, origin, targets, tools, operations |
 | `run_ransomware_group_profiles` | `ransomware_live` | Every 4 h at :50 | Techniques, tools and leak-site status for up to 10 tracked ransomware groups |
 
-Each source declares its jobs in its manifest ([Source Jobs](automation-ai-enrichment.md#source-jobs)). A job skips while its source is switched off (`{"skipped": "source disabled"}`), and sends its requests through its source's gateway ([Source Gateway](automation-ai-enrichment.md#source-gateway)). A refusal (rate limited, breaker open, budget spent) stops the job; it keeps what it did and records `stopped` in its stats.
+Each source declares its jobs in its manifest ([Source Jobs](automation-ai-enrichment.md#source-jobs)). A job skips while its source is switched off (`{"skipped": "source disabled"}`), and sends its requests through its source's gateway ([Source Gateway](automation-ai-enrichment.md#source-gateway)). A refusal (rate limited, breaker open, budget spent, backfill share used, paused) stops the job; it keeps what it did and records `stopped` in its stats. A key the source rejects fails the run, so Engine → Jobs shows why. Jobs marked "Backfill lane" (and `cvelist-backfill`) stop once their source has used 60% of its daily budget. Each source job's run details start with `fetched`, `changed` and `written`.
 
 When `sync_cybergeist_feeds` creates new entities, it queues `refresh_autolinker_vocabulary` and, 30 seconds later, `rescan_recent_entries` for the last 7 days. The delay lets the new dictionary load before old entries are re-scanned.
 
@@ -181,7 +185,7 @@ When `sync_cybergeist_feeds` creates new entities, it queues `refresh_autolinker
 
 ### Beat Schedule and Runtime Overrides
 
-`build_beat_schedule()` (`backend/app/workers/job_registry.py:621`) builds the schedule when beat starts:
+`build_beat_schedule()` (`backend/app/workers/job_registry.py:655`) builds the schedule when beat starts:
 
 1. Read overrides from the Redis key `intelfeed:job_schedule_overrides`.
 2. For each job, skip it if the override disables it, or if it has `enabled_by_default: False` and no override turns it on.
@@ -257,7 +261,7 @@ Reusing `fetch_feed` means de-duplication, sanitizing, media, autolinking and li
 
 ### Observability
 
-Tasks record Prometheus metrics `CELERY_TASKS_TOTAL` and `CELERY_TASK_DURATION_SECONDS` (`backend/app/core/metrics.py`) and log through structlog. Each scheduled run is also written to the `job_runs` table, which the Engine → Jobs screen shows as run history.
+Tasks record Prometheus metrics `CELERY_TASKS_TOTAL` and `CELERY_TASK_DURATION_SECONDS` (`backend/app/core/metrics.py`) and log through structlog. Each scheduled run is also written to the `job_runs` table, which the Engine → Jobs screen shows as run history. Each job there shows how many of its runs in the last 30 days succeeded ("12/14 ok in 30 days") and, when its last run failed, that run's error. A job an enrichment source owns carries a "source · NVD" chip, since the source's page in the Enrichment console is where it is managed.
 
 ---
 
@@ -597,7 +601,7 @@ Built from the `JOB_REGISTRY` defaults. Admins can change any of these in Engine
 04:45 ├─ archive_correlation_events
 04:50 ├─ backfill_rule_data_sources (Sun)
 05:00 ├─ run_github_poc_scan
-05:15 ├─ run_endoflife_sync
+05:15 ├─ run_endoflife_sync · run_github_repo_sync (Tue)
 05:30 ├─ backfill_rule_attack_mappings (Sun)
 05:45 ├─ kickoff_assessment_backfill
 06:00 ├─ generate_daily_summaries
@@ -609,7 +613,7 @@ Built from the `JOB_REGISTRY` defaults. Admins can change any of these in Engine
 
 Recurring:
   Every 30 s      dispatch_enrichment_jobs
-  Every 60 s      poll_due_feeds, run_scheduled_automations
+  Every 60 s      poll_due_feeds, run_scheduled_automations, sync_enrichment_pause
   Every 5 min     refresh_saved_search_counts, sync_campaign_saved_searches, retry_failed_indexing
   Every 10 min    poll_analysis_batches
   Every 15 min    embed_pending_entries, sync_campaign_sources

@@ -110,7 +110,7 @@ flowchart TD
 
         AI_PASS["Regex-only pass (no AI call here):<br/>MITRE technique IDs · CVE IDs ·<br/>mitigation M-IDs, over original +<br/>translated text. The one-pass AI<br/>analysis is enqueued by the score<br/>stage and runs on the batch queue."]
         AI_PASS --> TTP_STORE["Store TTPs (technique_id unique)<br/>new TTP → enrichment_jobs row"]
-        AI_PASS --> CVE_STORE["Store CVEs (cve_id unique)<br/>new CVE → NVD API 2.0 fetch:<br/>CVSS, severity, description,<br/>CPEs, references"]
+        AI_PASS --> CVE_STORE["Store CVEs (cve_id unique)<br/>new CVE → enrichment_jobs row<br/>(NVD fills CVSS, severity, description,<br/>CPEs, references from the queue)"]
 
         EXTRACT_TASK --> RULE_EXTRACT{"feed.extract_detection_rules?"}
         RULE_EXTRACT -- "Yes" --> RULE_PARSE["extract_rules_from_content()<br/>Detects: Sigma (YAML) ·<br/>Elastic TOML (→ elastic_ql / kql) ·<br/>YARA · Snort/Suricata · Splunk SPL"]

@@ -42,8 +42,8 @@ More than the article:
 
 - the article text, its media, its linked entities and any detection rules
   taken from it;
-- **every note on that article**, by anyone on your instance. Notes have no
-  private setting;
+- **your own notes on that article**, including ones you add after sharing.
+  Other people's notes on it stay inside your instance;
 - the article's current AI results.
 
 **People with the link can also use AI on it.** Without logging in, they can run
@@ -53,7 +53,8 @@ is logged under the account of the person who made the link.
 
 - Each AI task can run only once per article. Its result is saved on the article,
   so everyone who can see the article's AI results sees it.
-- Questions to the agent are answered but not saved.
+- Questions to the agent are answered but not saved. A question can be up to
+  4,000 characters, and the agent reads only the last 20 messages of the chat.
 - Each link has a daily AI limit, 20 requests by default. An admin can change
   it under **Settings → AI Configuration → User keys → Share link daily limit**
   (0 means no limit). The count resets at midnight UTC.

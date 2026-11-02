@@ -299,7 +299,7 @@ Back up `ENCRYPTION_KEY`: without it these are unreadable, even from a good back
 | `app.log` | App INFO and above, excluding workers |
 | `error.log` | ERROR and above |
 | `http.log` | One line per request: method, path, status, `duration_ms`, client |
-| `tasks.log` | Celery worker and beat |
+| `jobs.log` | Celery worker and beat |
 | `audit.log` | Create, update and delete actions via the API |
 | `update.log` | `update.sh` output |
 
@@ -309,7 +309,7 @@ Admins read them in **Settings → Logs** or via the API:
 
 ### Prometheus Metrics
 
-`/metrics` answers only loopback and private (RFC 1918) addresses (`backend/app/api/metrics.py`). In prod the frontend nginx always returns **404** for it, since behind the proxy every request looks private. Scrape `http://api:8000/metrics` from Prometheus on the compose `backend` network; in dev, use `http://localhost:8000/metrics`.
+`/metrics` answers only a direct peer on loopback or a private (RFC 1918) address (`backend/app/api/metrics.py`); it ignores `X-Real-IP` and other forwarding headers. In prod the frontend nginx always returns **404** for it, since behind the proxy every request looks private. Scrape `http://api:8000/metrics` from Prometheus on the compose `backend` network; in dev, use `http://localhost:8000/metrics`.
 
 ```yaml
 scrape_configs:
@@ -349,7 +349,7 @@ Metrics (`backend/app/core/metrics.py`):
 
 ### Health Endpoints
 
-`GET /api/health` (no login) pings PostgreSQL, Redis and Meilisearch with latencies:
+`GET /api/health` (no login) pings PostgreSQL, Redis and Meilisearch. A caller on the api host itself (the container health check, `docker compose exec api curl …`) also gets each component's latency and error text:
 
 ```json
 {
@@ -364,6 +364,8 @@ Metrics (`backend/app/core/metrics.py`):
   }
 }
 ```
+
+Anyone else, including every request through the proxy, gets each component's `status` only (`{"database": {"status": "ok"}, …}`).
 
 `healthy` = all up; `degraded` = database up, Redis or Meilisearch down; `unhealthy` = database down.
 
@@ -482,6 +484,8 @@ Host folders (relative to the repo):
 | `./tts_media` | api, celery-worker | Read-aloud MP3s; must be owned by uid 1000 (`update.sh` fixes this) |
 | `./ingest_files` | api, celery-worker | Uploaded originals, deleted after `ingest_files_ttl_days` (default 180); must be owned by uid 1000 (`update.sh` fixes this) |
 
+The `cvelist-backfill` job downloads the cvelistV5 baseline zip (about 650 MB; a zip over 2 GB is refused) into `/tmp` inside the celery-worker container and keeps it there between runs, so that container's writable layer needs about 2 GB free.
+
 ---
 
 ## Performance & Scaling
@@ -591,12 +595,6 @@ docker compose -f docker-compose.prod.yml exec redis redis-cli -a "$REDIS_PASSWO
 `$REDIS_PASSWORD` isn't in your shell by default; paste it from `.env` or run `set -a; . ./.env; set +a`.
 
 ### Useful Commands
-
-**After the per-user tags migration** (`y6q8s0u2w4y6`), run once so tag search hides other users' tags (re-runnable; `--dry-run` only counts):
-
-```bash
-docker compose -f docker-compose.prod.yml exec api python scripts/maintenance/reindex_entry_tags.py --all
-```
 
 **Containers:**
 
