@@ -2764,15 +2764,19 @@ _BOILERPLATE_PARAGRAPH = re.compile(
 _CROWDED_PARAGRAPH_ENTITIES = 5
 
 
-async def _boilerplate_paragraphs(db: AsyncSession, entry_id: uuid.UUID) -> set[int]:
-    """Indices (the autolinker's split) of the entry's boilerplate paragraphs."""
+def boilerplate_indices(title: str | None, summary: str | None, content: str | None) -> set[int]:
+    """Indices (the autolinker's split) of an article's boilerplate paragraphs."""
     from app.intelligence.autolinker import split_into_paragraphs
 
+    paragraphs = split_into_paragraphs(title or "", summary or "", content or "")
+    return {idx for idx, text in paragraphs if _BOILERPLATE_PARAGRAPH.match(text or "")}
+
+
+async def _boilerplate_paragraphs(db: AsyncSession, entry_id: uuid.UUID) -> set[int]:
     entry = await db.get(Entry, entry_id)
     if entry is None:
         return set()
-    paragraphs = split_into_paragraphs(entry.title or "", entry.summary or "", entry.content_text or "")
-    return {idx for idx, text in paragraphs if _BOILERPLATE_PARAGRAPH.match(text or "")}
+    return boilerplate_indices(entry.title, entry.summary, entry.content_text)
 
 
 def _canonical_pair(

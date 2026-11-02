@@ -47,6 +47,8 @@ ADMIN_TOOLS: frozenset[str] = frozenset(
         "merge_products",
         "merge_tools",
         "reclassify_entity",
+        "merge_entities",
+        "remove_entity_aliases",
         "update_automation_rule",
         "delete_automation_rule",
         "toggle_automation_rule",
@@ -64,6 +66,10 @@ ADMIN_TOOLS: frozenset[str] = frozenset(
         # /api/engine/extraction/*): curation and adjudication internals.
         "get_hygiene_feed",
         "get_hygiene_stats",
+        # The Review queue (/api/admin/hygiene/review-groups, feed, decisions).
+        "list_review_groups",
+        "get_review_rows",
+        "decide_proposals",
         "get_extraction_stats",
         "list_extraction_entities",
     }

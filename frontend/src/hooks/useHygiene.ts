@@ -129,6 +129,8 @@ export interface FeedRow {
   origin: ProposalOrigin | null;
   /** What applying it changes (the Review tab's Domain facet). */
   domain: ProposalDomain;
+  /** The article text around the match (bounded), when the row has an article. */
+  context?: string | null;
 }
 
 export type ProposalOrigin = "adjudicator" | "merge_review" | "scan";

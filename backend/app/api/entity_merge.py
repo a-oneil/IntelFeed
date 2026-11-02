@@ -441,6 +441,16 @@ async def perform_actor_merge(
     )
 
 
+async def _settled(db: AsyncSession, entity_type: str, source_id: uuid.UUID, resp: MergeResponse) -> MergeResponse:
+    """After an applied merge: close the merged-away entity's pending Review
+    proposals (a merge proposal into it moves to the keeper)."""
+    if resp.applied and resp.mode == "apply":
+        from app.services.proposal_dismissals import settle_gone_entity
+
+        await settle_gone_entity(db, entity_type, source_id, successor=(entity_type, resp.target_id))
+    return resp
+
+
 @router.post("/threat-actors/{target_id}/merge", response_model=MergeResponse)
 async def merge_threat_actors(
     target_id: uuid.UUID = Path(..., description="UUID of the surviving (target) threat actor."),
@@ -451,7 +461,7 @@ async def merge_threat_actors(
     """Merge one threat actor into another: move entry and target-country links to the target,
     union aliases (including the source name), log the merge, then delete the source.
     Shadow mode records what would happen without changing data."""
-    return await perform_actor_merge(db, target_id, body)
+    return await _settled(db, "threat_actor", body.source_id, await perform_actor_merge(db, target_id, body))
 
 
 # -------------------------------------------------------- malware merge
@@ -563,7 +573,7 @@ async def merge_malware(
     """Merge one malware family into another: move entry links to the target, union aliases
     (including the source name), log the merge, then delete the source. Shadow mode records
     what would happen without changing data."""
-    return await perform_malware_merge(db, target_id, body)
+    return await _settled(db, "malware", body.source_id, await perform_malware_merge(db, target_id, body))
 
 
 # ----------------------------------------- generic same-type merge
@@ -690,7 +700,7 @@ async def merge_vendors(
     """Merge one vendor into another: move entry links to the target, union aliases (including
     the source name), log the merge, then delete the source. Shadow mode records what would
     happen without changing data."""
-    return await perform_same_type_merge(
+    resp = await perform_same_type_merge(
         db,
         entity_type="vendor",
         target_id=target_id,
@@ -700,6 +710,7 @@ async def merge_vendors(
         extra_aliases=body.extra_aliases,
         reasoning=body.reasoning,
     )
+    return await _settled(db, "vendor", body.source_id, resp)
 
 
 @router.post("/products/{target_id}/merge", response_model=MergeResponse)
@@ -712,7 +723,7 @@ async def merge_products(
     """Merge one product into another: move entry links to the target, union aliases (including
     the source name), log the merge, then delete the source. Shadow mode records what would
     happen without changing data."""
-    return await perform_same_type_merge(
+    resp = await perform_same_type_merge(
         db,
         entity_type="product",
         target_id=target_id,
@@ -722,6 +733,7 @@ async def merge_products(
         extra_aliases=body.extra_aliases,
         reasoning=body.reasoning,
     )
+    return await _settled(db, "product", body.source_id, resp)
 
 
 @router.post("/tools/{target_id}/merge", response_model=MergeResponse)
@@ -736,7 +748,7 @@ async def merge_tools(
     """Merge one tool into another: move entry links to the target, union aliases (including
     the source name), log the merge, then delete the source. Shadow mode records what would
     happen without changing data."""
-    return await perform_same_type_merge(
+    resp = await perform_same_type_merge(
         db,
         entity_type="tool",
         target_id=target_id,
@@ -746,6 +758,7 @@ async def merge_tools(
         extra_aliases=body.extra_aliases,
         reasoning=body.reasoning,
     )
+    return await _settled(db, "tool", body.source_id, resp)
 
 
 # -------------------------------------------------- cross-type reclassify
@@ -1074,4 +1087,9 @@ async def reclassify_entity(
     target entity or creating a new one. Moves entry links, writes reclassify tombstones so
     automated pipelines don't recreate the source, logs the action, then deletes the source.
     Shadow mode records the plan without changing data."""
-    return await perform_reclassify(db, body)
+    resp = await perform_reclassify(db, body)
+    if resp.applied and resp.mode == "apply":
+        from app.services.proposal_dismissals import settle_gone_entity
+
+        await settle_gone_entity(db, resp.source_type, resp.source_id, successor=(resp.target_type, resp.target_id))
+    return resp

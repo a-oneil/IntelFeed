@@ -255,6 +255,7 @@ function ProposalRow({
       <td className={styles.detail}>
         <span className={styles.subject}>{row.subject ?? "—"}</span>
         {row.reason && <span className={styles.reason}>{row.reason}</span>}
+        {row.context && <span className={styles.reason}>“{row.context}”</span>}
         <LinkChips links={row.links ?? []} />
       </td>
       <td className={styles.when}>{formatDateTime(row.when)}</td>

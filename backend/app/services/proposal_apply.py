@@ -43,6 +43,9 @@ from app.models.entity_link_validation_log import EntityLinkValidationLog
 from app.models.entity_maintenance import EntityMaintenanceLog
 from app.services.entry_adjudication import (
     ACTION_ASSESSMENT,
+    ACTION_MERGE,
+    ACTION_RECLASSIFY,
+    ACTION_VETO,
     ADJUDICATION_PROPOSAL_ACTIONS,
     apply_adjudication_row,
 )
@@ -197,6 +200,44 @@ async def apply_link_removal_row(db: AsyncSession, row: EntityLinkValidationLog)
     return False
 
 
+# What an apply that changes nothing reports when its outcome is already
+# reached: the link, edge or entity it acts on is gone, or an analyst rejected
+# the edge. Such a proposal is resolved, not left pending.
+MOOT_REASONS = frozenset({"entry gone", "edge gone or analyst-rejected", "entity gone"})
+
+
+def outcome_is_moot(row: EntityMaintenanceLog, outcome: dict) -> bool:
+    """True when an adjudication apply found nothing left to do."""
+    if outcome.get("applied") or outcome.get("reason") not in MOOT_REASONS:
+        return False
+    # A veto wants the entity gone; its article going does not get it there.
+    return not (row.action == ACTION_VETO and outcome.get("reason") == "entry gone")
+
+
+async def settle_adjudication_outcome(db: AsyncSession, row: EntityMaintenanceLog, outcome: dict) -> str:
+    """After ``apply_adjudication_row``: delete a moot proposal, and close the
+    other proposals of an entity the apply removed (veto, merge, reclassify).
+    Returns 'applied', 'resolved' (moot, row deleted) or 'skipped'."""
+    from app.services.proposal_dismissals import settle_gone_entity
+
+    if not outcome.get("applied"):
+        if outcome_is_moot(row, outcome):
+            await db.delete(row)
+            await db.flush()
+            return "resolved"
+        return "skipped"
+    if row.action in (ACTION_VETO, ACTION_MERGE, ACTION_RECLASSIFY) and row.entity_id:
+        after = row.after or {}
+        successor = None
+        if row.action == ACTION_MERGE and after.get("target_id"):
+            try:
+                successor = (after.get("target_type") or row.entity_type, uuid.UUID(str(after["target_id"])))
+            except ValueError:
+                successor = None
+        await settle_gone_entity(db, row.entity_type, row.entity_id, successor=successor)
+    return "applied"
+
+
 # ---------------------------------------------------------------------------
 # Scope helpers
 # ---------------------------------------------------------------------------
@@ -324,17 +365,23 @@ async def apply_adjudication_batch(
             q = q.where(EntityMaintenanceLog.id.notin_(exclude_ids))
         rows = (await db.execute(q)).scalars().all()
         for row in rows:
+            row_id, row_action = row.id, row.action
             try:
                 async with db.begin_nested():
                     outcome = await apply_adjudication_row(db, row)
+                    status = await settle_adjudication_outcome(db, row, outcome)
             except Exception as exc:  # one bad row must not sink the batch
-                errors.append({"log_id": str(row.id), "action": row.action, "error": str(exc)[:300]})
-                failed_ids.add(row.id)
+                errors.append({"log_id": str(row_id), "action": row_action, "error": str(exc)[:300]})
+                failed_ids.add(row_id)
                 continue
-            if outcome.get("applied"):
+            if status == "applied":
                 applied += 1
             else:
                 skipped += 1
+                if status == "skipped":
+                    # Still pending: keep later batches of this job off it, or
+                    # a drain-everything job would select it forever.
+                    failed_ids.add(row_id)
         processed += len(rows)
         budget -= len(rows)
 

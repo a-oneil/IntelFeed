@@ -431,6 +431,73 @@ _COMMIT_CONTEXT_RE = re.compile(
 )
 
 
+#: Hashes that describe a signing certificate or a PE header, not the file:
+#: LOLDrivers-style driver YAML lists ``TBS: {MD5, SHA1, SHA256}`` under each
+#: certificate and ``RichPEHeaderHash: {…}`` next to the sample's own hashes.
+#: Matched against the label on the hash's line or its parent YAML/JSON key.
+_NON_FILE_HASH_LABEL_RE = re.compile(
+    r"(?i)\b(?:tbs|rich[\s_-]?(?:pe[\s_-]?)?header[\s_-]?hash|richpeheaderhash|thumbprint|serial[\s_-]?number"
+    r"|certificates?|signer|signatures?)\b"
+)
+#: The same label as the key right before the value ("TBS SHA256: ",
+#: "Certificate thumbprint = "), with no clause break in between.
+_NON_FILE_HASH_LABEL_TAIL_RE = re.compile(_NON_FILE_HASH_LABEL_RE.pattern + r"[\w \t\"'-]{0,20}[:=|]?\s*$")
+#: A bare mapping key opening a nested block: ``TBS:``, ``- Certificates:``,
+#: ``"RichPEHeaderHash": {``.
+_PARENT_KEY_RE = re.compile(r"""^\s*-?\s*["']?([A-Za-z][\w -]{1,40})["']?\s*:\s*[{\[]?\s*$""")
+#: Git context for a 40-hex string: a commit id, not a SHA1 sample.
+_GIT_LINE_RE = re.compile(
+    r"(?i)\b(?:commits?|merge[ds]?|git|github|gitlab|revision|rev|tree|parent|head|cherry-pick\w*|revert\w*"
+    r"|pull request|changeset|author|signed-off-by)\b"
+)
+_COMMIT_WORD_RE = re.compile(r"(?i)\b(?:commits?|merge[ds]?|revert\w*|cherry-pick\w*)\b")
+_SHA1_SAMPLE_RE = re.compile(r"(?i)\b(?:sha-?1|hash\w*|sample\w*|malware|payload|dropper|loader|ioc\w*|indicator\w*)\b")
+
+
+def _hash_is_not_a_file(text: str, start: int, end: int, value: str) -> bool:
+    """True when the hex string at ``text[start:end]`` names a certificate,
+    a PE header or a git commit rather than a file."""
+    line_start = text.rfind("\n", 0, start) + 1
+    line_end = text.find("\n", end)
+    line = text[line_start : len(text) if line_end == -1 else line_end]
+    # The label right before the value ("TBS SHA256:", "Thumbprint:"), not
+    # the whole sentence: "signed with a certificate; SHA256: …" is the file.
+    label = text[max(line_start, start - 40) : start]
+    if _NON_FILE_HASH_LABEL_TAIL_RE.search(label):
+        return True
+    # The nearest parent key above, within the same block (no blank line).
+    indent = len(line) - len(line.lstrip())
+    cursor = line_start - 1
+    for _ in range(8):
+        if cursor <= 0:
+            break
+        prev_start = text.rfind("\n", 0, cursor) + 1
+        prev = text[prev_start:cursor]
+        cursor = prev_start - 1
+        if not prev.strip():
+            break
+        key = _PARENT_KEY_RE.match(prev)
+        if key and len(prev) - len(prev.lstrip()) <= indent:
+            if _NON_FILE_HASH_LABEL_RE.search(key.group(1)):
+                return True
+            break
+    if len(value) == 40:
+        # A commit: git words on its line ("git checkout 5d2f…", "| Commit |
+        # 5d2f… |"), commit words on the line above, or a git log entry
+        # ("Author:" next), with nothing calling it a sample.
+        above_start = text.rfind("\n", 0, max(0, line_start - 1)) + 1
+        above = text[above_start:line_start]
+        below = text[(len(text) if line_end == -1 else line_end + 1) :][:80]
+        git = (
+            _GIT_LINE_RE.search(line)
+            or _COMMIT_WORD_RE.search(above)
+            or re.match(r"(?i)\s*(?:author|merge|date):", below)
+        )
+        if git and not _SHA1_SAMPLE_RE.search(above + line):
+            return True
+    return False
+
+
 def scan_candidates(
     text: str, *, max_candidates: int = 200, plain_hashes: bool = True, plain_ips: bool = True
 ) -> list[Candidate]:
@@ -493,6 +560,9 @@ def scan_candidates(
         # calling it a sample or a hash, is not an indicator.
         near = prefix[-60:] + suffix[:40]
         if _COMMIT_CONTEXT_RE.search(prefix[-60:]) and not _IOC_CONTEXT_RE.search(near):
+            continue
+        # Certificate TBS / RichPE header hashes and git commit ids.
+        if _hash_is_not_a_file(text, m.start(), m.end(), m.group(0)):
             continue
         add(_classify_hash(m.group(0)), m.group(0).lower(), m.group(0), False, m.start())
 
@@ -1073,7 +1143,11 @@ _OS_BINARY_NAMES = (
     "vssadmin|bcdedit|wevtutil|ntdsutil|comsvcs|ntdll|kernel32|kernelbase|user32|advapi32|msvcrt|amsi|sdiagnhost|"
     "sdiageng|werfault|smss|wininit|runtimebroker|sihost|dwm|ctfmon|searchindexer|searchhost|msedge|iexplore|"
     "appcmd|w3wp|inetinfo|mmc|tasklist|whoami|systeminfo|ipconfig|nslookup|netsh|ping|find|findstr|xcopy|robocopy|"
-    "attrib|icacls|takeown|cacls|at|schtasks|wscript|cmdkey|curl|tar|expand|extrac32|makecab|esentutl|print"
+    "attrib|icacls|takeown|cacls|at|schtasks|wscript|cmdkey|curl|tar|expand|extrac32|makecab|esentutl|print|"
+    "wsl|wslhost|wslconfig|bash|ssh|sshd|scp|sftp|ftp|tracert|hh|fodhelper|computerdefaults|eventvwr|sdclt|wsreset|"
+    "mavinject|diskshadow|dnscmd|wuauclt|presentationhost|msconfig|sethc|utilman|osk|magnify|narrator|atbroker|"
+    "cleanmgr|msdt|mstsc|klist|certreq|csc|vbc|jsc|ieexec|regedit|regini|msinfo32|gpupdate|gpresult|logonui|"
+    "userinit|fontdrvhost|audiodg|wermgr|lsaiso|mpcmdrun|bthudtask|devicecredentialdeployment|dfsvc"
 )
 _SYSTEM_BINARY_PATH_RE = re.compile(
     r"(?i)^(?:[a-z]:)?\\(?:windows|winnt)\\(?:system32|syswow64|winsxs|microsoft\.net|systemapps)\\"
@@ -1096,6 +1170,21 @@ _BARE_UNIX_LOCATION_RE = re.compile(
     r"|opt|srv|mnt|media|run|lib|lib64|tmp|bin|sbin|usr/s?bin|usr/local/s?bin|private/tmp|private/var/tmp"
     r"|library/launchagents|library/launchdaemons|applications|users(?:/[a-z0-9_-]+)?)$"
 )
+#: Well-known files every write-up names as the technique's target or the
+#: place to look — log files, OS identity files, credential stores — and
+#: loopback admin shares (``\\\\127.0.0.1\\C$``): none is attacker-chosen.
+_WELLKNOWN_FILE_RE = re.compile(
+    r"(?i)^/var/log/(?!(?:[^/]*/)*\.)[\w./-]*$"  # /var/log/*, unless a hidden name sits under it
+    r"|^/(?:proc|sys)/"
+    r"|^/etc/(?:os-release|issue(?:\.net)?|machine-id|lsb-release|redhat-release|debian_version|sudoers\.d"
+    r"|ssh/ssh_host_\w+(?:\.pub)?|ssh/ssh_config|ld\.so\.conf|ld\.so\.cache|login\.defs|timezone|localtime)$"
+    r"|^/dev/(?:u?random|zero|null|stdin|stdout|stderr|kmsg|mem|ptmx)$"
+    r"|^/(?:var/)?run/(?:docker\.sock|utmp|containerd/containerd\.sock)$"
+    r"|^(?:[a-z]:)?\\windows\\(?:system32\\(?:drivers\\etc\\(?:hosts|networks|services|protocol)"
+    r"|config\\(?:sam|system|security|software|default)|winevt\\logs(?:\\[\w%. -]+\.evtx)?)"
+    r"|ntds\\ntds\.dit|win\.ini|system\.ini)$"
+    r"|^\\\\(?:127(?:\.\d{1,3}){3}|localhost|\[?::1\]?)(?:\\|$)"
+)
 _BARE_WELLKNOWN_KEY_RE = re.compile(
     r"(?i)^hk(?:lm|cu|u|cr|cc|ey_[a-z_]+)\\(?:(?:software|system)\\)?(?:wow6432node\\)?(?:"
     r"microsoft\\windows(?: nt)?\\currentversion(?:\\(?:run|runonce|runservices|explorer|policies|policies\\explorer"
@@ -1104,6 +1193,13 @@ _BARE_WELLKNOWN_KEY_RE = re.compile(
     r"|microsoft\\windows defender(?:\\exclusions(?:\\paths)?)?|"
     r"classes|microsoft|software|system|environment"
     r")\\?$"
+)
+#: A Run/RunOnce key with a file name or path glued on where the value name
+#: should be ("…\\Run\\update.exe", "…\\Run\\C:\\Users\\…"): the key and the
+#: value's *data* run together by a flattened table or sentence. Run keys have
+#: no subkeys, so anything past one more segment is a misread too.
+_GLUED_RUN_VALUE_RE = re.compile(
+    r"(?i)\\run(?:once|services(?:once)?)?(?:ex)?\\(?:[^\\]*[:%]|[^\\]+\.(?:exe|dll|ps1|bat|cmd|vbs|js|lnk|scr|hta)$|[^\\]+\\)"
 )
 _BENIGN_URI_PATHS = frozenset(
     {
@@ -1162,6 +1258,16 @@ _DETECTION_QUERY_START_RE = re.compile(
 _UA_PREFIXES = ("mozilla/", "curl/", "wget/", "python-requests/", "python-urllib", "okhttp", "go-http-client", "java/")
 
 
+#: Template slots in a command that _PLACEHOLDER_RE leaves alone because a
+#: real command can carry the shape elsewhere: ``[ATTACKER_IP]``, ``{{host}}``,
+#: ``$TARGET_HOST`` written as an all-caps slot name with an underscore.
+_CMD_TEMPLATE_RE = re.compile(
+    r"\[(?:attacker|victim|target|c2|ip|domain|url|host|user(?:name)?|password|path|file(?:name)?|payload|port)"
+    r"(?:[ _-]?\w+)?\]|\{\{[^}]{1,40}\}\}",
+    re.IGNORECASE,
+)
+
+
 def _plausible_cmdline(value: str) -> bool:
     """A command line, not a sentence about one and not detection logic.
 
@@ -1187,6 +1293,10 @@ def _plausible_cmdline(value: str) -> bool:
     normalized = re.sub(r"\s+", " ", value.strip()).lower().strip("\"'`")
     if GENERIC_COMMANDS_RE.match(normalized):
         return False
+    # A template ("psexec \\\\<TARGET> -u <USER>", "curl {c2_url}") is a
+    # pattern for a rule, not an atom anyone will see in telemetry.
+    if _PLACEHOLDER_RE.search(value) or _CMD_TEMPLATE_RE.search(value):
+        return False
     return bool(_ATTACKER_LITERAL_RE.search(value))
 
 
@@ -1210,6 +1320,8 @@ def _plausible_path_atom(value: str) -> bool:
     if re.fullmatch(r"/[^/\\]+/?", value):
         return False
     if _BARE_UNIX_LOCATION_RE.match(value.rstrip("/") or value):
+        return False
+    if _WELLKNOWN_FILE_RE.match(value):
         return False
     if _PLACEHOLDER_RE.search(value):
         return False
@@ -1263,7 +1375,9 @@ def validate_kind_value(kind: str, raw: str) -> str | None:
         bare = canonical.rstrip("\\")
         if not re.match(r"hk(?:lm|cu|u|cr|cc|ey_)", bare) or _PLACEHOLDER_RE.search(bare) or "\\\\" in bare:
             return None
-        return None if _BARE_WELLKNOWN_KEY_RE.match(bare) or "*" in bare else bare
+        if _BARE_WELLKNOWN_KEY_RE.match(bare) or "*" in bare or _GLUED_RUN_VALUE_RE.search(bare):
+            return None
+        return bare
     if kind == "http_header":
         name = canonical.split(":", 1)[0].strip()
         if not re.fullmatch(r"[a-z0-9][a-z0-9-]{2,63}", name) or name in _STANDARD_HEADERS:
@@ -1299,6 +1413,19 @@ def validate_kind_value(kind: str, raw: str) -> str | None:
 #: A 64-hex string the author calls a key, token or secret is not a file hash
 #: (AES keys and API tokens share SHA256's shape).
 _NOT_A_HASH_EVIDENCE_RE = re.compile(r"(?i)\b(?:aes|xor|rc4|chacha)?\s*(?:key|token|secret|nonce|iv|seed|salt)s?\b")
+#: Evidence that says the hash is a certificate's TBS digest, a PE header
+#: hash or a git commit: not the file, even when it says "hash".
+_NON_FILE_HASH_EVIDENCE_RE = re.compile(
+    r"(?i)\b(?:tbs|rich[\s_-]?(?:pe[\s_-]?)?header|richpeheaderhash|thumbprint|git\s+commit|commit\s+(?:id|hash|sha))\b"
+)
+
+
+def _hash_evidence_vetoed(kind: str, evidence: str | None) -> bool:
+    if kind not in HASH_KINDS or not evidence:
+        return False
+    if _NON_FILE_HASH_EVIDENCE_RE.search(evidence):
+        return True
+    return bool(_NOT_A_HASH_EVIDENCE_RE.search(evidence)) and "hash" not in evidence.lower()
 
 
 async def _ttp_id_for(session: AsyncSession, technique_id: str | None):
@@ -1325,12 +1452,7 @@ async def store_observables(session: AsyncSession, entry_id, iocs: list[dict]) -
         if canonical is None:
             continue
         evidence = (item.get("evidence") or "").strip() or None
-        if (
-            kind in HASH_KINDS
-            and evidence
-            and _NOT_A_HASH_EVIDENCE_RE.search(evidence)
-            and "hash" not in evidence.lower()
-        ):
+        if _hash_evidence_vetoed(kind, evidence):
             continue
         defanged = bool(item.get("defanged")) or is_defanged(raw)
         obs = await get_or_create_observable(
@@ -1384,6 +1506,8 @@ async def shadow_observables(
             continue
         canonical = validate_kind_value(kind, raw)
         if canonical is None or (kind, canonical) in seen:
+            continue
+        if _hash_evidence_vetoed(kind, (item.get("evidence") or "").strip() or None):
             continue
         seen.add((kind, canonical))
         role = (item.get("role") or "").strip()

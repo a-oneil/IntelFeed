@@ -29,6 +29,7 @@ promotion and the stale sweep.
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -557,6 +558,9 @@ class ReviewItem:
     matched_names: list[str] = field(default_factory=list)
     paragraph_indices: list[int] = field(default_factory=list)
     extracted_at: datetime | None = None
+    # Other names a reason may use for this item: a TTP's technique id and
+    # name, an edge's two endpoints (see _reason_names_item).
+    forms: list[str] = field(default_factory=list)
     # ioc
     ioc_kind: str | None = None
     ioc_value: str | None = None
@@ -646,6 +650,142 @@ def _snippet(paragraph_map: dict[int, str], needles: list[str], indices: list[in
             piece += "…"
         return piece[:_SNIPPET_MAX]
     return ""
+
+
+# Defanged spellings of one character, for finding a value as the article
+# prints it (evil[.]com, hxxps[://], user[@]mail).
+_FANG_CLASSES = {
+    ".": r"(?:\.|\\?\[\s?(?:\.|dot)\s?\\?\]|\((?:\.|dot)\)|\{(?:\.|dot)\})",
+    ":": r"(?::|\[:\])",
+    "@": r"(?:@|\[@\]|\(@\)|\[at\]|\(at\))",
+}
+_HEADING_RE = re.compile(r"(?m)^## (.+)$")
+_ROW_MAX = 240
+
+
+def _value_pattern(value: str) -> re.Pattern | None:
+    """A case-insensitive pattern that finds ``value`` plain or defanged."""
+    value = (value or "").strip()
+    if len(value) < 3:
+        return None
+    parts: list[str] = []
+    rest = value
+    if rest[:4].lower() == "http":
+        parts.append(r"h(?:tt|xx)p")
+        rest = rest[4:]
+    for ch in rest:
+        parts.append(_FANG_CLASSES.get(ch) or (r"\s+" if ch.isspace() else re.escape(ch)))
+    # A value is a whole token: 'abc' must not be found inside 'xabcx' when
+    # it starts or ends on a word character.
+    lead = r"(?<![\w.])" if value[0].isalnum() else ""
+    tail = r"(?![\w])" if value[-1].isalnum() else ""
+    return re.compile(lead + "".join(parts) + tail, re.IGNORECASE)
+
+
+def _technique_pattern(technique_id: str) -> re.Pattern | None:
+    """T1059 finds T1059 and its sub-techniques; T1059.001 only itself."""
+    if not re.fullmatch(r"T\d{4}(?:\.\d{3})?", technique_id or "", re.IGNORECASE):
+        return None
+    return re.compile(rf"(?<![\w.]){re.escape(technique_id)}(?!\d)", re.IGNORECASE)
+
+
+def _line_bounds(text: str, start: int, end: int) -> tuple[int, int]:
+    ls = text.rfind("\n", 0, start) + 1
+    le = text.find("\n", end)
+    return ls, len(text) if le == -1 else le
+
+
+def _heading_before(text: str, pos: int) -> str:
+    """The nearest section heading above ``pos``: a rendered ``## `` line, or
+    an indicator heading in plain text (``Indicators of Compromise:``)."""
+    from app.services.analysis_window import IOC_HEADING_RE
+
+    head = text[:pos]
+    best_pos, best = -1, ""
+    for m in _HEADING_RE.finditer(head):
+        best_pos, best = m.start(), m.group(1)
+    for m in IOC_HEADING_RE.finditer(head):
+        if m.start() > best_pos:
+            best_pos, best = m.start(), m.group(0)
+    return best.strip().lstrip("#").strip()[:80]
+
+
+def _table_header(text: str, line_start: int) -> str:
+    """The first row of the table the line at ``line_start`` belongs to."""
+    header = ""
+    pos = line_start
+    while pos > 0:
+        prev_start = text.rfind("\n", 0, pos - 1) + 1
+        prev = text[prev_start : pos - 1].strip()
+        if " | " not in prev:
+            break
+        header, pos = prev, prev_start
+    return header[:120]
+
+
+def _clip(line: str, start: int, end: int) -> str:
+    """``line`` cut to _ROW_MAX characters around [start, end)."""
+    if len(line) <= _ROW_MAX:
+        return line
+    lo = max(0, min(start - _ROW_MAX // 3, len(line) - _ROW_MAX))
+    piece = line[lo : lo + _ROW_MAX]
+    return ("…" if lo else "") + piece + ("…" if lo + _ROW_MAX < len(line) else "")
+
+
+def _locate(text: str, patterns: list[re.Pattern | None], *, structured_only: bool = False) -> str:
+    """Where an item sits in the article, for the item line: the table row,
+    list line or sentence holding it, its section heading and table header.
+
+    The first literal occurrence is often the wrong one to judge by: an IoC
+    table's hash also turns up in a "re-fang only in VirusTotal" note, a TTP
+    in a file name before the report's ATT&CK table. So an occurrence in a
+    table or list (and inside the indicator section) beats one in prose.
+    ``structured_only`` returns nothing unless such a row was found."""
+    from app.services.analysis_window import find_indicator_section
+
+    if not text:
+        return ""
+    section = find_indicator_section(text)
+    best: tuple[int, int, int, int, bool, str, str] | None = None
+    for pattern in patterns:
+        if pattern is None:
+            continue
+        for m in pattern.finditer(text):
+            ls, le = _line_bounds(text, m.start(), m.end())
+            raw = text[ls:le]
+            line = raw.strip()
+            lead = len(raw) - len(raw.lstrip())
+            if " | " in line:  # html_to_analysis_text's cell separator
+                shape = "table row"
+            elif line.startswith("- "):
+                shape = "list item"
+            elif len(line) <= len(m.group(0)) + 40:
+                shape = "line of its own"
+            else:
+                shape = ""
+            in_section = bool(section and section[0] <= m.start() < section[1])
+            rank = (0 if shape else 2) + (0 if in_section else 1)
+            if best is None or rank < best[0]:
+                best = (rank, ls, m.start() - ls - lead, m.end() - ls - lead, in_section, shape, line)
+            if rank == 0:
+                break
+        if best is not None and best[0] == 0:
+            break
+    if best is None or (structured_only and not best[5]):
+        return ""
+    _, ls, s, e, in_section, shape, best_line = best
+    where = shape or "sentence"
+    heading = _heading_before(text, ls)
+    if heading:
+        where += f' under "{heading}"'
+    if in_section:
+        where += " (the article's indicator section)"
+    where += f': "{_clip(best_line, s, e)}"'
+    if shape == "table row":
+        header = _table_header(text, ls)
+        if header and header != best_line:
+            where += f" · table header: {header}"
+    return where
 
 
 async def _nearest_candidates(db: AsyncSession, entity_type: str, entity, limit: int = _MAX_CANDIDATES) -> list[dict]:
@@ -862,9 +1002,11 @@ async def _link_items(
                 name=f"{ttp.technique_id} {ttp.technique_name}",
                 source="ai",
                 confidence=junction.confidence,
-                matched_names=[junction.source_text or ""],
+                # the technique id, not the AI's quote: this list reaches the queue as the matched form
+                matched_names=[ttp.technique_id],
                 paragraph_indices=list(junction.paragraph_indices or []),
                 extracted_at=junction.extracted_at,
+                forms=[f for f in (ttp.technique_id, ttp.technique_name) if f],
             )
         )
 
@@ -946,6 +1088,16 @@ async def _link_items(
         )
         if snippet:
             line += f'\n    context: "{snippet}"'
+        if item.entity_type == TTP and item.forms:
+            # A report's own ATT&CK table lists the technique by id; the
+            # analysis's quote can sit anywhere (a file name, a heading).
+            row = _locate(
+                text,
+                [_technique_pattern(item.forms[0]), *(_value_pattern(f) for f in item.forms[1:])],
+                structured_only=True,
+            )
+            if row:
+                line += f"\n    listed in: {row}"
         for note in earlier.get(item.item_id, []):
             line += f"\n    earlier suggestion (retired nightly job): {note}"
         item.line = line
@@ -1094,11 +1246,38 @@ async def _edge_items(db: AsyncSession, entry, dropped_out: list | None = None) 
         line = f"edge:{edge.id}  {claim} · {edge.confidence} · asserted by {edge.source.replace('_', ' ')}"
         if edge.description:
             line += f'\n    evidence: "{edge.description[:240]}"'
-        items.append(ReviewItem(item_id=f"edge:{edge.id}", kind="edge", line=line, name=claim, edge_id=edge.id))
+        items.append(
+            ReviewItem(item_id=f"edge:{edge.id}", kind="edge", line=line, name=claim, edge_id=edge.id, forms=[src, tgt])
+        )
     return items
 
 
-async def _ioc_items(db: AsyncSession, entry) -> list[ReviewItem]:
+def _ioc_where(text: str, value: str, surface: str | None) -> str:
+    """The item line's "found in:" for an indicator, or "" when not found."""
+    forms = [f for f in dict.fromkeys([surface or "", value]) if f]
+    where = _locate(text, [_value_pattern(f) for f in forms])
+    return f"\n    found in: {where}" if where else ""
+
+
+def _script_lines(text: str, code: str, label: str | None, language: str | None) -> str:
+    """A script item's code (collapsed, clipped) and where its first line sits."""
+    out = ""
+    flat = " ".join(code.split())
+    if flat:
+        head = f"script{f' ({language})' if language else ''}{f' "{label}"' if label else ''}"
+        out += f'\n    {head}: "{flat[:_ROW_MAX]}{"…" if len(flat) > _ROW_MAX else ""}"'
+        first = next((ln.strip() for ln in code.splitlines() if len(ln.strip()) >= 12), "")
+        if len(first) > 120:
+            first = first[:120].rsplit(" ", 1)[0]
+        where = _locate(text, [_value_pattern(first)]) if first else ""
+        if where:
+            out += f"\n    found in: {where}"
+    elif label:
+        out += f'\n    script "{label}" (code not stored)'
+    return out
+
+
+async def _ioc_items(db: AsyncSession, entry, text: str = "", parsed: dict | None = None) -> list[ReviewItem]:
     """Observables this entry's analysis produced, captured ledger rows first.
 
     The cap trims the tail, so the order decides what gets judged. A captured
@@ -1107,8 +1286,21 @@ async def _ioc_items(db: AsyncSession, entry) -> list[ReviewItem]:
     the candidates queue. Collecting the captured rows first also means that a
     value which is both renders as the captured one, and dropping that handles
     the staged half too (see ``_drop_ioc``).
+
+    Each item carries where the value sits in ``text`` (its IoC-table row or
+    hash-list line, found defanged too), and a script carries its code: the
+    value of a script row is our own hash of the snippet, which the article
+    never prints.
     """
+    from app.intelligence.observables import SCRIPT_KIND, script_identity
     from app.models.observable import EntryObservable, Observable
+
+    # A staged script keeps only its hash; the analysis payload has the code.
+    parsed_scripts: dict[str, dict] = {}
+    for sc in (parsed or {}).get("scripts") or []:
+        code = (sc.get("code") or "").strip() if isinstance(sc, dict) else ""
+        if len(code) >= 40:
+            parsed_scripts[script_identity(code)[0]] = sc
 
     captured: list[ReviewItem] = []
     staged: list[ReviewItem] = []
@@ -1129,6 +1321,10 @@ async def _ioc_items(db: AsyncSession, entry) -> list[ReviewItem]:
             line += f" · printed as {sighting.surface_form}"
         if getattr(sighting, "was_defanged", False):
             line += " · printed defanged"
+        if obs.kind == SCRIPT_KIND:
+            line += _script_lines(text, obs.content or "", obs.label, obs.language)
+        else:
+            line += _ioc_where(text, obs.value, sighting.surface_form)
         captured.append(
             ReviewItem(
                 item_id=f"ioc:{obs.kind}:{obs.value}",
@@ -1152,6 +1348,13 @@ async def _ioc_items(db: AsyncSession, entry) -> list[ReviewItem]:
             line += " · printed defanged"
         if cand.get("evidence"):
             line += f'\n    evidence: "{str(cand["evidence"])[:200]}"'
+        if kind == SCRIPT_KIND:
+            sc = parsed_scripts.get(value) or {}
+            line += _script_lines(
+                text, sc.get("code") or "", sc.get("label") or cand.get("surface_form"), sc.get("language")
+            )
+        else:
+            line += _ioc_where(text, value, cand.get("surface_form"))
         staged.append(
             ReviewItem(
                 item_id=f"ioc:{kind}:{value}",
@@ -1208,7 +1411,7 @@ async def build_manifest(
     if "relationships" in scope:
         items += await _edge_items(db, entry, dropped_out)
     if "observables" in scope:
-        items += await _ioc_items(db, entry)
+        items += await _ioc_items(db, entry, text, parsed)
     if "assessment" in scope:
         item = _assessment_item(parsed)
         if item:
@@ -1287,13 +1490,54 @@ class Verdict:
     explicit: bool = False
 
 
+def _norm_words(text: str) -> str:
+    return " " + " ".join(re.sub(r"[^\w$]+", " ", text.lower()).split()) + " "
+
+
 def _reason_names_item(reason: str, item: ReviewItem) -> bool:
-    """A reclassify changes the entity's type everywhere, so its reason has to
-    be about this entity. One that argues over another name ("The term
-    'SHA-256' …" filed against Red Hat Enterprise Linux) was paired with the
-    wrong item_id."""
-    lowered = reason.lower()
-    return any(form and form.lower() in lowered for form in [item.name, *item.matched_names])
+    """A reclassify, remove or demote has to be about its own item, so its
+    reason must name it: the entity, a form it matched as, a TTP's technique
+    id or name, or either end of an edge. One that argues over another name
+    was paired with the wrong item_id ("The term 'SHA-256' …" filed against
+    Red Hat Enterprise Linux; a MANTLEMAZE → Cairn demote explaining Warlock).
+    Compared on words, so "NetSupport-RAT" names NetSupport RAT."""
+    said = _norm_words(reason)
+    for form in [item.name, *item.matched_names, *item.forms]:
+        words = _norm_words(form or "")
+        if words.strip() and words in said:
+            return True
+    return False
+
+
+# A reason that argues FOR the record it is filed against ("… explicitly
+# states MANTLEMAZE uses Cairn, validating the edge") paired the wrong
+# verdict with it. A negation shortly before the phrase ("never states",
+# "does not support the claim") is the ordinary case and stands.
+_AFFIRMING_RE = re.compile(
+    r"\bvalidat(?:e|es|ed|ing)\b"
+    r"|\b(?:supports?|supporting|confirms?|confirming|corroborates?|corroborating|justif(?:y|ies|ying))\s+"
+    r"(?:the|this|that)\s+(?:edge|relationship|claim|link|record|indicator|ioc|verb)\b"
+    r"|\b(?:edge|relationship|claim|link|record)\s+is\s+(?:correct|valid|accurate|supported|justified|warranted)\b"
+    r"|\b(?:should|must)\s+(?:be\s+)?(?:kept|keep|stay|remain)\b"
+    r"|\b(?:is|as)\s+an?\s+(?:valid|genuine|real|confirmed)\s+(?:indicator|ioc)\b",
+    re.IGNORECASE,
+)
+_NEGATION_RE = re.compile(
+    r"\b(?:not|never|no|nor|without|neither|fails?\s+to|nothing|rather\s+than|instead\s+of)\b|n't\b",
+    re.IGNORECASE,
+)
+
+
+def _reason_affirms(reason: str) -> bool:
+    """True when the reason argues that the record is right."""
+    for m in _AFFIRMING_RE.finditer(reason):
+        before = reason[max(0, m.start() - 40) : m.start()]
+        # Only the clause the phrase sits in: "X is a word. It never states"
+        # must not reach back past the sentence break.
+        before = re.split(r"[.;:!?]\s", before)[-1]
+        if not _NEGATION_RE.search(before):
+            return True
+    return False
 
 
 def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verdict], dict]:
@@ -1304,7 +1548,9 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
     raw = result.get("verdicts")
     # unknown: item ids not in the manifest; coerced: verdicts the item's kind
     # or state does not accept (treated as keep).
-    stats = {"unknown": 0, "coerced": 0, "duplicate": False}
+    # unnamed_reason / affirming_reason: removes and demotes whose reason does
+    # not name the item, destructive verdicts whose reason argues for it.
+    stats = {"unknown": 0, "coerced": 0, "duplicate": False, "unnamed_reason": 0, "affirming_reason": 0}
     verdicts: dict[str, Verdict] = {}
     if isinstance(raw, list):
         for entry in raw:
@@ -1351,6 +1597,15 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
                     verdict = "keep"  # never merge into a name it was not shown
             if verdict != asked and asked in VERDICTS:
                 stats["coerced"] += 1
+            # Voided, not coerced: like a copied reason, these are not about
+            # their own item (or not against it), so they are not explicit.
+            explicit = True
+            if verdict in ("remove", "demote") and not _reason_names_item(reason, item):
+                verdict, explicit = "keep", False
+                stats["unnamed_reason"] += 1
+            elif verdict in DESTRUCTIVE and _reason_affirms(reason):
+                verdict, explicit = "keep", False
+                stats["affirming_reason"] += 1
             bad_alias = None
             if verdict == "remove":
                 wanted = str(entry.get("bad_alias") or "").strip().lower()
@@ -1358,7 +1613,7 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
                 if wanted and wanted != (item.name or "").lower():
                     bad_alias = next((f for f in item.matched_names if f.lower() == wanted), None)
             verdicts[item_id] = Verdict(
-                item, verdict, confidence, reason, suggested, merge_target, bad_alias=bad_alias, explicit=True
+                item, verdict, confidence, reason, suggested, merge_target, bad_alias=bad_alias, explicit=explicit
             )
     if stats["duplicate"]:
         verdicts = {}
@@ -1591,6 +1846,13 @@ async def _entity_has_a_life(db: AsyncSession, entity_type: str, entity_id: uuid
     except Exception:
         logger.debug("claim check skipped", exc_info=True)
     return False
+
+
+async def _settle_gone(db: AsyncSession, entity_type: str, entity_id: uuid.UUID | None, **kw) -> int:
+    """Close the pending proposals of an entity this run deleted or merged away."""
+    from app.services.proposal_dismissals import settle_gone_entity  # imports this module
+
+    return await settle_gone_entity(db, entity_type, entity_id, **kw)
 
 
 async def _delete_entity(db: AsyncSession, entity_type: str, entity_id: uuid.UUID) -> bool:
@@ -2129,6 +2391,8 @@ async def apply_verdicts(
                         {**after_base, "deleted": deleted},
                         applied=True,
                     )
+                    if deleted:
+                        await _settle_gone(db, item.entity_type or "", item.entity_id, gone=True)
                 else:
                     _log(ACTION_VETO, item, {"entity": snapshot, "junction": junction_snap}, after_base, applied=False)
             elif v.verdict == "merge" and v.merge_target:
@@ -2149,6 +2413,12 @@ async def apply_verdicts(
                             )  # type: ignore[arg-type]
                         applied_n += 1
                         _log(ACTION_MERGE, item, {"entity": snapshot}, {**after, "outcome": outcome}, applied=True)
+                        await _settle_gone(
+                            db,
+                            item.entity_type or "",
+                            item.entity_id,
+                            successor=(v.merge_target["entity_type"], uuid.UUID(str(v.merge_target["entity_id"]))),
+                        )
                     except Exception as exc:
                         logger.warning("adjudication merge failed for %s: %s", item.item_id, exc)
                         _log(

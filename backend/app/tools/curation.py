@@ -5,8 +5,10 @@ extraction.py and hygiene.py. Read tools call the router functions directly
 (their user/admin params are unused in the handler bodies); mutating tools
 reuse the routers' helpers and flush — the executor owns the transaction.
 
-Deliberately NOT exposed (admin plane, excluded by design): hygiene apply /
-prune / scan / AI-review actions, and the enrichment-gap dispatch endpoints.
+Review-queue decisions are exposed as one admin tool (decide_proposals, the
+bulk decisions endpoint). Deliberately NOT exposed (admin plane, excluded by
+design): hygiene prune / scan / AI-review actions, the per-row and bulk
+apply-all endpoints, and the enrichment-gap dispatch endpoints.
 """
 
 import uuid
@@ -629,7 +631,7 @@ async def _confirm_extraction_entities(db: AsyncSession, user_id: uuid.UUID, ent
 
 
 # ---------------------------------------------------------------------------
-# Hygiene (read-only — apply/prune/scan actions are admin plane, not exposed)
+# Hygiene (read-only — prune/scan actions are admin plane, not exposed)
 # ---------------------------------------------------------------------------
 
 
@@ -736,3 +738,172 @@ async def _get_hygiene_feed(
         db=db,
     )
     return resp.model_dump()
+
+
+# ---------------------------------------------------------------------------
+# Review queue (admin): the Engine › Review list, its rows, bulk decisions
+# ---------------------------------------------------------------------------
+
+_REVIEW_DOMAINS = ["links", "entities", "relationships"]
+_REVIEW_ORIGINS = ["adjudicator", "merge_review", "scan"]
+
+
+@_tool(
+    name="list_review_groups",
+    description=(
+        "The Engine › Review queue: every pending hygiene proposal (both logs) folded one row per entity, most "
+        "proposals first. Each group gives the entity, its proposal count, per-kind counts (e.g. shadow_remove, "
+        "adjudication_reclassify), proposed target types, merge targets, origin, the newest row's subject and "
+        "reason, matched forms and a sample entry. Read a group's rows with get_review_rows; decide them with "
+        "decide_proposals. `total`/`proposals` are the queue size. Admin only."
+    ),
+    input_schema={
+        "properties": {
+            "q": {"type": "string", "description": "Entity name substring (case-insensitive)"},
+            "entity_type": {"type": "string", "description": "Only groups about this entity type"},
+            "action": {"type": "string", "description": "Only these action codes, comma-separated"},
+            "domain": {"type": "string", "enum": _REVIEW_DOMAINS, "description": "What applying would change"},
+            "origin": {"type": "string", "enum": _REVIEW_ORIGINS, "description": "Who filed the proposals"},
+            "limit": {"type": "integer", "default": 50, "description": "Groups per page (1-200)"},
+            "offset": {"type": "integer", "default": 0, "description": "Groups to skip"},
+        },
+    },
+    mutating=False,
+)
+async def _list_review_groups(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    q: str | None = None,
+    entity_type: str | None = None,
+    action: str | None = None,
+    domain: str | None = None,
+    origin: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
+    from app.api.hygiene import review_groups as _route
+
+    try:
+        resp = await _route(
+            q=q,
+            entity_type=entity_type,
+            action=action,
+            domain=domain,
+            origin=origin,
+            limit=max(1, min(limit, 200)),
+            offset=max(0, offset),
+            user=None,
+            db=db,
+        )
+    except AppError as e:
+        return {"error": e.message}
+    return resp.model_dump(mode="json")
+
+
+@_tool(
+    name="get_review_rows",
+    description=(
+        "The pending proposals behind one Review group (or every pending row matching the filters), newest "
+        "first. Each row has its id ('<source>:<log_id>', what decide_proposals takes), action, subject, reason, "
+        "payload, and `context`: the article text around the match, so the article needn't be fetched. "
+        "Admin only."
+    ),
+    input_schema={
+        "properties": {
+            "entity_type": {"type": "string", "description": "The group's entity_type"},
+            "entity_id": {"type": "string", "description": "The group's entity_id"},
+            "action": {"type": "string", "description": "Only these action codes, comma-separated"},
+            "origin": {"type": "string", "enum": _REVIEW_ORIGINS},
+            "domain": {"type": "string", "enum": _REVIEW_DOMAINS},
+            "limit": {"type": "integer", "default": 200, "description": "Rows per page (1-200)"},
+            "offset": {"type": "integer", "default": 0, "description": "Rows to skip"},
+        },
+    },
+    mutating=False,
+)
+async def _get_review_rows(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    entity_type: str | None = None,
+    entity_id: str | None = None,
+    action: str | None = None,
+    origin: str | None = None,
+    domain: str | None = None,
+    limit: int = 200,
+    offset: int = 0,
+) -> dict:
+    from app.api.hygiene import hygiene_feed as _route
+
+    eid = None
+    if entity_id:
+        eid = _parse_uuid(entity_id, "entity_id")
+        if isinstance(eid, dict):
+            return eid
+    try:
+        resp = await _route(
+            action=action,
+            source=None,
+            domain=domain,
+            mode=None,
+            pending=True,
+            origin=origin,
+            orphaned=False,
+            since=None,
+            entity_type=entity_type,
+            entity_id=eid,
+            context=True,
+            limit=max(1, min(limit, 200)),
+            offset=max(0, offset),
+            user=None,
+            db=db,
+        )
+    except AppError as e:
+        return {"error": e.message}
+    return resp.model_dump(mode="json")
+
+
+@_tool(
+    name="decide_proposals",
+    description=(
+        "Apply a reviewed batch of Review-queue decisions in one call (POST /admin/hygiene/decisions). Each "
+        "decision is {id: '<source>:<log_id>', decision: 'apply' | 'dismiss' | 'reclassify:<entity_type>'}. "
+        "apply runs the row's own applier; dismiss deletes it (a reclassify dismissal covers the entity and "
+        "stops new filings); reclassify converts the entity and closes every proposal about it. Duplicates "
+        "settle server-side: a row an earlier decision closed comes back 'settled'; an apply whose outcome is "
+        "already reached comes back 'resolved'. Returns one result per decision plus counts. Admin only."
+    ),
+    input_schema={
+        "properties": {
+            "decisions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string", "description": "Feed row id '<source>:<log_id>'"},
+                        "decision": {"type": "string", "description": "apply | dismiss | reclassify:<entity_type>"},
+                    },
+                    "required": ["id", "decision"],
+                },
+                "description": "Up to 1000 decisions",
+            },
+        },
+        "required": ["decisions"],
+    },
+    mutating=True,
+)
+async def _decide_proposals(db: AsyncSession, user_id: uuid.UUID, decisions: list) -> dict:
+    from app.api.hygiene import ProposalDecision
+    from app.api.hygiene import decide_proposals as _route
+    from app.models.user import User
+
+    user = await db.get(User, user_id)
+    if user is None:
+        return {"error": "user not found"}
+    try:
+        body = [ProposalDecision(**d) for d in decisions or []]
+        resp = await _route(body=body, user=user, db=db)
+    except AppError as e:
+        return {"error": e.message}
+    except (TypeError, ValueError) as e:
+        return {"error": f"bad decisions: {e}"}
+    return resp.model_dump(mode="json")

@@ -973,6 +973,46 @@ TOOLS: dict[str, dict] = {
             },
         },
     },
+    "get_review_rows": {
+        "description": (
+            "The pending proposals behind one Review group (or every pending row matching the "
+            "filters), newest first. Each row has its id ('<source>:<log_id>', what decide_proposals "
+            "takes), action, subject, reason, payload, and `context`: the article text around the "
+            "match, so the article needn't be fetched. Admin only."
+        ),
+        "params": {
+            "entity_type": {
+                "type": 'str',
+                "default": None,
+            },
+            "entity_id": {
+                "type": 'str',
+                "default": None,
+            },
+            "action": {
+                "type": 'str',
+                "default": None,
+            },
+            "origin": {
+                "type": 'str',
+                "default": None,
+                "enum": ['adjudicator', 'merge_review', 'scan'],
+            },
+            "domain": {
+                "type": 'str',
+                "default": None,
+                "enum": ['links', 'entities', 'relationships'],
+            },
+            "limit": {
+                "type": 'int',
+                "default": 200,
+            },
+            "offset": {
+                "type": 'int',
+                "default": 0,
+            },
+        },
+    },
     "get_search_facets": {
         "description": (
             "Get available search facets: feed types (feed count per type), categories (feed count "
@@ -1507,6 +1547,48 @@ TOOLS: dict[str, dict] = {
             "limit": {
                 "type": 'int',
                 "default": 50,
+            },
+        },
+    },
+    "list_review_groups": {
+        "description": (
+            "The Engine \u203a Review queue: every pending hygiene proposal (both logs) folded one row per "
+            "entity, most proposals first. Each group gives the entity, its proposal count, per-kind "
+            "counts (e.g. shadow_remove, adjudication_reclassify), proposed target types, merge "
+            "targets, origin, the newest row's subject and reason, matched forms and a sample entry. "
+            "Read a group's rows with get_review_rows; decide them with decide_proposals. "
+            "`total`/`proposals` are the queue size. Admin only."
+        ),
+        "params": {
+            "q": {
+                "type": 'str',
+                "default": None,
+            },
+            "entity_type": {
+                "type": 'str',
+                "default": None,
+            },
+            "action": {
+                "type": 'str',
+                "default": None,
+            },
+            "domain": {
+                "type": 'str',
+                "default": None,
+                "enum": ['links', 'entities', 'relationships'],
+            },
+            "origin": {
+                "type": 'str',
+                "default": None,
+                "enum": ['adjudicator', 'merge_review', 'scan'],
+            },
+            "limit": {
+                "type": 'int',
+                "default": 50,
+            },
+            "offset": {
+                "type": 'int',
+                "default": 0,
             },
         },
     },

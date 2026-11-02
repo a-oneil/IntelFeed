@@ -98,9 +98,55 @@ def sanitize_html(raw_html: str, proxy_base_url: str = "/api/proxy/image") -> st
     return clean
 
 
+# Block-level tags break the line and table cells are kept apart by a tab.
+# Without this nh3's strip glues neighbours together: list items of defanged
+# IPs ran into one another (46.233.40.20 + 4… read as 46.233.40.204), a CVE
+# column into its CVSS column (CVE-2026-103849 + 10), a caption into the next
+# "Source:" line ("powerSource" matched POWERSOURCE).
+_ATTRS = r"""(?:[^>"']|"[^"]*"|'[^']*')*"""
+_PARA_BREAK_RE = re.compile(
+    r"</?(?:p|div|ul|ol|table|thead|tbody|tfoot|blockquote|pre|figure|h[1-6]|dl|details|summary|"
+    rf"section|article|header|footer|aside|nav|main|address)\b{_ATTRS}>|<hr\b{_ATTRS}>",
+    re.IGNORECASE,
+)
+_LINE_BREAK_RE = re.compile(rf"</?(?:li|tr|dt|dd|figcaption|caption)\b{_ATTRS}>|<br\b{_ATTRS}>", re.IGNORECASE)
+_CELL_BREAK_RE = re.compile(rf"</?t[dh]\b{_ATTRS}>", re.IGNORECASE)
+# The tags are replaced by control-character marks before the strip (they
+# would be dropped anyway, and an HTML parser moves text put between table
+# rows out of the table). Each run of marks, with the source whitespace before
+# and between them, then becomes one separator; where the source already had a
+# newline (or, between cells, any whitespace) that whitespace is kept.
+_PARA_MARK, _LINE_MARK, _CELL_MARK = "\x1e", "\x1d", "\x1f"
+_MARKS = _PARA_MARK + _LINE_MARK + _CELL_MARK
+_MARK_RUN_RE = re.compile(rf"[\s{_MARKS}]*[{_MARKS}]")
+
+
+def _join_marks(m: re.Match) -> str:
+    run = m.group(0)
+    source_ws = "".join(ch for ch in run if ch not in _MARKS)
+    at_edge = m.start() == 0 or m.end() == len(m.string)
+    if _PARA_MARK in run or _LINE_MARK in run:
+        if "\n" in source_ws or at_edge:
+            return source_ws
+        return "\n\n" if _PARA_MARK in run else "\n"
+    return source_ws if source_ws or at_edge else "\t"
+
+
 def html_to_text(html: str) -> str:
-    """Strip HTML tags to get plain text."""
-    return nh3.clean(html, tags=set())
+    """Strip HTML tags to get plain text.
+
+    Text from neighbouring elements never runs together: paragraph-level
+    elements are separated by a blank line, list items, table rows, captions
+    and ``<br>`` by a newline, table cells by a tab — unless the source
+    already had whitespace there, which is kept."""
+    if not html:
+        return ""
+    for mark in _MARKS:
+        html = html.replace(mark, "")
+    spaced = _CELL_BREAK_RE.sub(_CELL_MARK, html)
+    spaced = _LINE_BREAK_RE.sub(_LINE_MARK, spaced)
+    spaced = _PARA_BREAK_RE.sub(_PARA_MARK, spaced)
+    return _MARK_RUN_RE.sub(_join_marks, nh3.clean(spaced, tags=set()))
 
 
 def entry_text_with_translation(entry) -> tuple[str, str]:

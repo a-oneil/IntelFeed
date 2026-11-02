@@ -91,13 +91,16 @@ from app.services.proposal_apply import (
     new_progress,
     proposal_domain,
     read_progress,
+    settle_adjudication_outcome,
     write_progress,
 )
 from app.services.proposal_dismissals import (
     clear_entity_proposals,
     clear_reclassify_proposals,
     dismiss_reclassify,
+    entity_alive_clause,
     mark_not_duplicate,
+    settle_gone_entity,
 )
 
 router = APIRouter()
@@ -506,6 +509,7 @@ async def prune_orphans(
         if body.mode == "apply":
             await db.delete(entity)
             await db.flush()
+            await settle_gone_entity(db, etype, eid, gone=True)
             pruned += 1
             by_type[etype] += 1
 
@@ -626,11 +630,12 @@ async def _apply_advisory_rows(
             )[:2000],
         )
         try:
-            await perform_reclassify(db, req)
+            resp = await perform_reclassify(db, req)
             if mode == "apply":
                 # Every proposal about the entity, not just these rows: the
                 # other suggested types and the other log are moot now.
                 cleared += await clear_reclassify_proposals(db, src_type, src_id)
+                cleared += await settle_gone_entity(db, src_type, src_id, successor=(tgt_type, resp.target_id))
                 applied += 1
             else:
                 # shadow — leave advisories in place
@@ -822,6 +827,10 @@ class FeedRow(BaseModel):
     # What applying it changes: links | entities | relationships (the Review
     # tab's Domain facet; both logs feed that one queue; observables are entities).
     domain: str = "entities"
+    # The article text around the match (the paragraph the link came from, or
+    # the first mention), so a reviewer needn't open the article. At most
+    # FEED_CONTEXT_MAX characters; None when the row has no article or no match.
+    context: str | None = None
 
 
 class FeedResponse(BaseModel):
@@ -833,6 +842,8 @@ class FeedResponse(BaseModel):
 ORIGIN_ADJUDICATOR = "adjudicator"
 ORIGIN_MERGE_REVIEW = "merge_review"
 ORIGIN_SCAN = "scan"
+# after.kind on the adjudicator's alias_collision rows (its alias trims).
+ADJUDICATOR_ALIAS_KIND = "adjudicator"
 PROPOSAL_ORIGINS = (ORIGIN_ADJUDICATOR, ORIGIN_MERGE_REVIEW, ORIGIN_SCAN)
 _ORIGIN_HELP = (
     "'adjudicator' = rows the post-analysis adjudicate stage filed with the article in hand; "
@@ -852,7 +863,10 @@ def _maint_origin(action: str, after: dict | None) -> str:
     adjudicator's merge action, so its rows are told apart by ``after.origin``."""
     if (after or {}).get("origin") == MERGE_REVIEW_ORIGIN:
         return ORIGIN_MERGE_REVIEW
-    return ORIGIN_ADJUDICATOR if action in ADJUDICATION_ACTIONS else ORIGIN_SCAN
+    # The adjudicator files its alias trims as alias_collision rows, told apart by after.kind.
+    if action in ADJUDICATION_ACTIONS or (after or {}).get("kind") == ADJUDICATOR_ALIAS_KIND:
+        return ORIGIN_ADJUDICATOR
+    return ORIGIN_SCAN
 
 
 def _maint_origin_clause(origin: str):
@@ -861,7 +875,10 @@ def _maint_origin_clause(origin: str):
     if origin == ORIGIN_MERGE_REVIEW:
         return review
     not_review = EntityMaintenanceLog.after["origin"].astext.is_distinct_from(MERGE_REVIEW_ORIGIN)
-    adjudicator = EntityMaintenanceLog.action.in_(sorted(ADJUDICATION_ACTIONS))
+    adjudicator = or_(
+        EntityMaintenanceLog.action.in_(sorted(ADJUDICATION_ACTIONS)),
+        func.coalesce(EntityMaintenanceLog.after["kind"].astext == ADJUDICATOR_ALIAS_KIND, False),
+    )
     return and_(adjudicator, not_review) if origin == ORIGIN_ADJUDICATOR else and_(~adjudicator, not_review)
 
 
@@ -1220,6 +1237,108 @@ def _maint_links(row: EntityMaintenanceLog) -> list[FeedLink]:
     return out
 
 
+FEED_CONTEXT_MAX = 320  # characters of article text per feed row
+_CONTEXT_WINDOW = 160
+
+
+def _claim_needles(claim: str) -> list[str]:
+    """The entity names in an edge claim: "FIN7 uses AsyncRAT" → FIN7, AsyncRAT
+    (runs of words that aren't a lowercase verb)."""
+    out: list[str] = []
+    cur: list[str] = []
+    for tok in claim.split():
+        if tok.isalpha() and tok.islower():
+            if cur:
+                out.append(" ".join(cur))
+                cur = []
+        else:
+            cur.append(tok)
+    if cur:
+        out.append(" ".join(cur))
+    return out
+
+
+def _context_target(row: FeedRow) -> tuple[uuid.UUID, list[str], list[int]] | None:
+    """(entry id, names to find, paragraph indices) for a feed row's snippet."""
+    p = row.payload or {}
+    needles: list[str] = []
+    indices: list[int] = []
+    if row.source == "link_validator":
+        raw_entry = p.get("entry_id")
+        needles += [n for n in p.get("original_matched_names") or [] if isinstance(n, str)]
+        indices += [i for i in p.get("original_paragraph_indices") or [] if isinstance(i, int)]
+        if row.entity_name:
+            needles.append(row.entity_name)
+    else:
+        before = p.get("before") if isinstance(p.get("before"), dict) else {}
+        after = p.get("after") if isinstance(p.get("after"), dict) else {}
+        raw_entry = before.get("entry_id")
+        junction = before.get("junction") if isinstance(before.get("junction"), dict) else {}
+        needles += [n for n in junction.get("matched_names") or [] if isinstance(n, str)]
+        indices += [i for i in junction.get("paragraph_indices") or [] if isinstance(i, int)]
+        ent = before.get("entity") if isinstance(before.get("entity"), dict) else {}
+        for v in (ent.get("name"), after.get("value")):
+            if isinstance(v, str):
+                needles.append(v)
+        if isinstance(before.get("claim"), str):
+            needles += _claim_needles(before["claim"])
+    needles = [n.strip() for n in needles if n and n.strip()]
+    if not raw_entry or not needles:
+        return None
+    try:
+        return uuid.UUID(str(raw_entry)), list(dict.fromkeys(needles)), indices
+    except ValueError:
+        return None
+
+
+def _snippet_around(texts: list[str], needles: list[str]) -> str | None:
+    """The text around the first needle found, searching ``texts`` in order."""
+    for chunk in texts:
+        lowered = chunk.lower()
+        pos = next((p for p in (lowered.find(n.lower()) for n in needles) if p != -1), -1)
+        if pos == -1:
+            continue
+        start = max(0, pos - _CONTEXT_WINDOW // 2)
+        piece = " ".join(chunk[start : pos + _CONTEXT_WINDOW].split())
+        if start > 0:
+            piece = "…" + piece
+        if pos + _CONTEXT_WINDOW < len(chunk):
+            piece += "…"
+        return piece[:FEED_CONTEXT_MAX]
+    return None
+
+
+async def _attach_context(db: AsyncSession, rows: list[FeedRow]) -> None:
+    """Fill each row's ``context`` from its article: the linked paragraph when
+    the row records one, else the first mention anywhere in the article."""
+    from app.intelligence.autolinker import split_into_paragraphs
+
+    targets = {r.id: t for r in rows if (t := _context_target(r)) is not None}
+    if not targets:
+        return
+    entry_ids = {t[0] for t in targets.values()}
+    entries = {
+        eid: (title, summary, text)
+        for eid, title, summary, text in (
+            await db.execute(
+                select(Entry.id, Entry.title, Entry.summary, Entry.content_text).where(Entry.id.in_(entry_ids))
+            )
+        ).all()
+    }
+    paragraphs: dict[uuid.UUID, dict[int, str]] = {}
+    for r in rows:
+        t = targets.get(r.id)
+        if t is None or t[0] not in entries:
+            continue
+        entry_id, needles, indices = t
+        if entry_id not in paragraphs:
+            title, summary, text = entries[entry_id]
+            paragraphs[entry_id] = dict(split_into_paragraphs(title or "", summary or "", text or ""))
+        pmap = paragraphs[entry_id]
+        texts = [pmap[i] for i in indices if i in pmap] + list(pmap.values())
+        r.context = _snippet_around(texts, needles)
+
+
 @router.get("/admin/hygiene/feed", response_model=FeedResponse)
 async def hygiene_feed(
     action: str | None = Query(
@@ -1250,6 +1369,9 @@ async def hygiene_feed(
     since: datetime | None = Query(None, description="Only rows created at or after this timestamp"),
     entity_type: str | None = Query(None, description="Only rows about entities of this type (with entity_id)"),
     entity_id: uuid.UUID | None = Query(None, description="Only rows about this entity (the Review tab's expand)"),
+    context: bool = Query(
+        True, description="Add each row's article snippet around the match (`context`); false skips the article read"
+    ),
     limit: int = Query(50, ge=1, le=200, description="Rows per page"),
     offset: int = Query(0, ge=0, description="Rows to skip for pagination"),
     user: User = Depends(get_admin_user),
@@ -1278,6 +1400,10 @@ async def hygiene_feed(
         origin = None
     if not isinstance(orphaned, bool):
         orphaned = False
+    if not isinstance(context, bool):
+        context = True
+    if not isinstance(pending, bool):
+        pending = False
     if domain is not None and domain not in DOMAINS:
         raise AppError(code="invalid", message=f"unknown domain: {domain}", status_code=400)
     _check_origin(origin)
@@ -1323,6 +1449,9 @@ async def hygiene_feed(
             q = q.where(_link_origin_clause(origin, adjudicator_results))
         if pending:
             q = q.where(EntityLinkValidationLog.action.in_(["shadow_remove", "needs_reclassification"]))
+            if not orphaned:
+                # The Review list drops proposals about a gone entity; so does its count.
+                q = q.where(entity_alive_clause(EntityLinkValidationLog))
         if link_actions:
             q = q.where(EntityLinkValidationLog.action.in_(sorted(link_actions)))
         # link_validator has no `mode` column — map mode filter to action subsets:
@@ -1359,6 +1488,8 @@ async def hygiene_feed(
                 EntityMaintenanceLog.applied.is_(False),
                 EntityMaintenanceLog.action.in_(sorted(_MAINTENANCE_PROPOSAL_ACTIONS | {"orphan_prune"})),
             )
+            if not orphaned:
+                q = q.where(entity_alive_clause(EntityMaintenanceLog))
         if maint_actions:
             q = q.where(EntityMaintenanceLog.action.in_(sorted(maint_actions)))
             # Proposal-only actions reuse the same code post-apply (only the
@@ -1493,6 +1624,8 @@ async def hygiene_feed(
     feed.sort(key=lambda f: f.when, reverse=True)
     sliced = feed[offset : offset + limit]
     has_more = len(feed) > offset + limit
+    if context:
+        await _attach_context(db, sliced)
     return FeedResponse(
         rows=sliced,
         has_more=has_more,
@@ -1532,7 +1665,10 @@ async def _pending_by_domain(db: AsyncSession) -> dict[str, int]:
     link_counts = (
         await db.execute(
             select(EntityLinkValidationLog.action, func.count())
-            .where(EntityLinkValidationLog.action.in_(["shadow_remove", "needs_reclassification"]))
+            .where(
+                EntityLinkValidationLog.action.in_(["shadow_remove", "needs_reclassification"]),
+                entity_alive_clause(EntityLinkValidationLog),
+            )
             .group_by(EntityLinkValidationLog.action)
         )
     ).all()
@@ -1542,6 +1678,7 @@ async def _pending_by_domain(db: AsyncSession) -> dict[str, int]:
             .where(
                 EntityMaintenanceLog.applied.is_(False),
                 EntityMaintenanceLog.action.in_(sorted(_MAINTENANCE_PROPOSAL_ACTIONS | {"orphan_prune"})),
+                entity_alive_clause(EntityMaintenanceLog),
             )
             .group_by(EntityMaintenanceLog.action)
         )
@@ -1577,6 +1714,7 @@ async def hygiene_stats(
             .where(
                 EntityLinkValidationLog.action.in_(["shadow_remove", "needs_reclassification"]),
                 EntityLinkValidationLog.ai_result_id.in_(adjudicator_results),
+                entity_alive_clause(EntityLinkValidationLog),
             )
         )
     ).scalar_one() + (
@@ -1586,6 +1724,7 @@ async def hygiene_stats(
             .where(
                 EntityMaintenanceLog.action.in_(sorted(ADJUDICATION_PROPOSAL_ACTIONS)),
                 EntityMaintenanceLog.applied.is_(False),
+                entity_alive_clause(EntityMaintenanceLog),
             )
         )
     ).scalar_one()
@@ -1687,6 +1826,7 @@ async def hygiene_stats(
             .where(
                 EntityMaintenanceLog.action == "vendor_autolink",
                 EntityMaintenanceLog.applied.is_(False),
+                entity_alive_clause(EntityMaintenanceLog),
             )
         )
     ).scalar_one()
@@ -1898,14 +2038,17 @@ async def apply_normalize_name(
                 merge_target_id=merge_target_id,
                 new_name=proposed_name,
             )
+        source_id = entity.id
         await perform_same_type_merge(
             db,
             entity_type=row.entity_type,
             target_id=merge_target_id,
-            source_id=entity.id,
+            source_id=source_id,
             mode="apply",
             reasoning=(f"Promoted from name-normalization proposal {row.id}: {(row.reasoning or '')[:1500]}"),
         )
+        row.applied = True
+        await settle_gone_entity(db, row.entity_type, source_id, successor=(row.entity_type, merge_target_id))
     elif kind == "rename":
         if not proposed_name or not proposed_name.strip():
             raise AppError(code="invalid", message="rename proposal has empty proposed_name", status_code=400)
@@ -2223,8 +2366,13 @@ async def scan_vendor_autolink(
     # for every vendor name + alias. Sort longest-first so longest match wins
     # when multiple prefixes match the same product.
     vendor_rows = (await db.execute(select(Vendor.id, Vendor.name, Vendor.aliases))).all()
+    # A vendor named exactly like a product is a product filed twice ("Windows",
+    # "Docker Engine"); it is no product's parent.
+    product_names = {(n or "").lower() for n in (await db.execute(select(Product.name))).scalars().all() if n}
     tokens: list[tuple[str, uuid.UUID, str, str]] = []
     for vid, vname, valiases in vendor_rows:
+        if vname and vname.lower() in product_names:
+            continue
         if vname:
             tokens.append((vname.lower(), vid, vname, "name"))
         for alias in valiases or []:
@@ -2477,6 +2625,11 @@ def _canonicalize_cve_id(raw: str | None) -> str | None:
     return f"CVE-{year:04d}-{seq}"
 
 
+async def _all_canonical_cves(db: AsyncSession) -> list[tuple[uuid.UUID, str]]:
+    """Every CVE whose id has the canonical shape."""
+    return list((await db.execute(select(CVE.id, CVE.cve_id).where(CVE.cve_id.op("~")(r"^CVE-\d{4}-\d{4,}$")))).all())
+
+
 class IdHygieneScanResponse(BaseModel):
     ttps_scanned: int
     cves_scanned: int
@@ -2572,10 +2725,16 @@ async def scan_id_hygiene(
     canonical_cves: set[str] = set(
         (await db.execute(select(CVE.cve_id).where(CVE.cve_id.op("~")(r"^CVE-\d{4}-\d{4,}$")))).scalars().all()
     )
+    # Right shape, impossible id: an over-long sequence (a CVSS score glued on,
+    # "CVE-2024-123459.8"), or a zero-padded one past four digits. No safe
+    # canonical form, so the row is the analyst's to dismiss or delete.
+    from app.intelligence.cve import is_plausible_cve_id
+
+    implausible_cve_rows = [(cid, raw) for cid, raw in await _all_canonical_cves(db) if not is_plausible_cve_id(raw)]
     cve_malformed = 0
-    for cid, raw_cve in malformed_cve_rows:
+    for cid, raw_cve in [*malformed_cve_rows, *implausible_cve_rows]:
         proposed = _canonicalize_cve_id(raw_cve)
-        if proposed and proposed in canonical_cves:
+        if proposed and (proposed in canonical_cves or not is_plausible_cve_id(proposed)):
             proposed = None
         db.add(
             EntityMaintenanceLog(
@@ -2589,7 +2748,11 @@ async def scan_id_hygiene(
                     "proposed_id": proposed,
                 },
                 reasoning=(
-                    f"CVE id '{raw_cve}' doesn't match CVE-YYYY-NNNN+ form."
+                    (
+                        f"CVE id '{raw_cve}' can't be a real id (sequence too long or zero-padded)."
+                        if raw_cve and _CVE_ID_RE.match(raw_cve)
+                        else f"CVE id '{raw_cve}' doesn't match CVE-YYYY-NNNN+ form."
+                    )
                     + (f" Canonical: {proposed}." if proposed else " No safe canonical form.")
                 )[:2000],
                 applied=False,
@@ -2855,6 +3018,7 @@ async def apply_id_hygiene(
         )
     )
     await db.flush()
+    await settle_gone_entity(db, "cve", cve.id, gone=True)
     return ApplyIdHygieneResponse(
         log_id=row.id,
         applied=True,
@@ -2874,6 +3038,9 @@ class AdjudicationRowResult(BaseModel):
     log_id: uuid.UUID
     applied: bool = False
     restored: bool = False
+    # Apply found its outcome already reached (the entry, edge or entity is
+    # gone, or an analyst rejected the edge): the proposal is closed.
+    resolved: bool = False
     reason: str | None = None
     detail: dict = Field(default_factory=dict)
 
@@ -2893,15 +3060,20 @@ async def apply_adjudication_proposal(
 ) -> AdjudicationRowResult:
     """Apply one proposal the adjudicate stage filed in shadow mode: unlink,
     veto (delete when nothing else holds the entity), merge, demote, drop.
-    Same code path apply mode uses at ingest; the row becomes the undo record."""
+    Same code path apply mode uses at ingest; the row becomes the undo record.
+    When the outcome is already reached (entry, edge or entity gone; edge
+    rejected by an analyst) the proposal is closed and `resolved` is true.
+    An entity the apply removes has its other pending proposals closed."""
     from app.services.entry_adjudication import apply_adjudication_row
 
     row = await _adjudication_row(db, log_id)
     outcome = await apply_adjudication_row(db, row)
+    status = await settle_adjudication_outcome(db, row, outcome)
     await db.flush()
     return AdjudicationRowResult(
-        log_id=row.id,
-        applied=bool(outcome.get("applied")),
+        log_id=log_id,
+        applied=status == "applied",
+        resolved=status == "resolved",
         reason=outcome.get("reason"),
         detail={k: v for k, v in outcome.items() if k not in ("applied", "reason")},
     )
@@ -3460,6 +3632,15 @@ class ReclassifyGroupsActionResponse(BaseModel):
     errors: list[dict]
 
 
+def _reclassify_successor(target_type: str, outcome: dict | None) -> tuple[str, uuid.UUID] | None:
+    """The entity a reclassify moved into, from ``_reclassify_entity``'s outcome."""
+    raw = ((outcome or {}).get("response") or {}).get("target_id")
+    try:
+        return (target_type, uuid.UUID(str(raw))) if raw else None
+    except ValueError:
+        return None
+
+
 @router.post("/admin/hygiene/reclassify-groups/apply", response_model=ReclassifyGroupsActionResponse)
 async def apply_reclassify_groups(
     body: ReclassifyGroupsActionRequest = Body(...),
@@ -3484,6 +3665,9 @@ async def apply_reclassify_groups(
                 if not outcome.get("applied") and outcome.get("reason") != "entity gone":
                     raise AppError(code="invalid", message=str(outcome.get("reason")), status_code=400)
                 cleared += await clear_reclassify_proposals(db, it.entity_type, it.entity_id)
+                cleared += await settle_gone_entity(
+                    db, it.entity_type, it.entity_id, successor=_reclassify_successor(it.target_type, outcome)
+                )
             entities += 1
         except AppError as e:
             failed += 1
@@ -3946,6 +4130,7 @@ async def review_groups(
     maint_origin = case(
         (EntityMaintenanceLog.after["origin"].astext == MERGE_REVIEW_ORIGIN, ORIGIN_MERGE_REVIEW),
         (EntityMaintenanceLog.action.in_(sorted(ADJUDICATION_ACTIONS)), ORIGIN_ADJUDICATOR),
+        (EntityMaintenanceLog.after["kind"].astext == ADJUDICATOR_ALIAS_KIND, ORIGIN_ADJUDICATOR),
         else_=ORIGIN_SCAN,
     )
     # A maintenance row with no entity is its own group.
@@ -3993,6 +4178,7 @@ async def review_groups(
                 func.array_agg(case((link_adjudicated, ORIGIN_ADJUDICATOR), else_=ORIGIN_SCAN).distinct()),
             )
             .where(EntityLinkValidationLog.action.in_(sorted(link_actions)))
+            .where(entity_alive_clause(EntityLinkValidationLog))
             .group_by(EntityLinkValidationLog.entity_type, EntityLinkValidationLog.entity_id)
         )
         if entity_type:
@@ -4024,6 +4210,7 @@ async def review_groups(
                 func.array_agg(maint_origin.distinct()),
             )
             .where(EntityMaintenanceLog.applied.is_(False), EntityMaintenanceLog.action.in_(sorted(maint_actions)))
+            .where(entity_alive_clause(EntityMaintenanceLog))
             .group_by(EntityMaintenanceLog.entity_type, EntityMaintenanceLog.entity_id, maint_row_key)
         )
         if entity_type:
@@ -4035,9 +4222,11 @@ async def review_groups(
             _fold(g, n, latest, snap, acts, origins, "entity_maintenance", rid)
 
     # Pass 2 — live names, order, page. A deleted entity has nothing left to
-    # fix: its groups are hidden here, and the nightly prune deletes the rows
-    # (purge_gone_entity_proposals). Pseudo types (relationship, entry) have no
-    # model and are never assumed gone.
+    # fix: pass 1 already left its rows out (entity_alive_clause, which the
+    # pending feed and the counts share), deletes, merges and reclassifies
+    # close them, and the nightly prune drops any left
+    # (purge_gone_entity_proposals). Pseudo types (relationship, entry) have
+    # no model and are never assumed gone.
     by_type: dict[str, list[uuid.UUID]] = defaultdict(list)
     for g in groups.values():
         if g["entity_id"] is not None:
@@ -4324,6 +4513,266 @@ async def _has_pending_reclassify(db: AsyncSession, entity_type: str, entity_id:
             .limit(1)
         )
     ).first() is not None
+
+
+# ---------------------------------------------------------------------------
+# Bulk decisions: one call for a reviewed batch
+# ---------------------------------------------------------------------------
+#
+# A triage pass decides hundreds of rows at once: apply this, dismiss that,
+# "this entity is really a product". The per-row endpoints made the client
+# pick the right one per action, order reclassifies before their copies, and
+# treat a 404 on a copy as success. This endpoint takes the decisions as they
+# are and settles duplicates itself.
+
+DECISIONS_MAX = 1000
+_DECISION_STATUSES = ("applied", "dismissed", "reclassified", "resolved", "settled", "skipped", "gone", "error")
+
+
+class ProposalDecision(BaseModel):
+    id: str = Field(..., description="Feed row id: '{source}:{log_id}' (source = link_validator | entity_maintenance)")
+    decision: str = Field(..., description="'apply', 'dismiss' or 'reclassify:<entity_type>' (the entity, every copy)")
+
+
+class ProposalDecisionResult(BaseModel):
+    id: str
+    decision: str
+    status: Literal["applied", "dismissed", "reclassified", "resolved", "settled", "skipped", "gone", "error"] = Field(
+        description="applied / dismissed / reclassified: done. resolved: the outcome was already reached, the "
+        "proposal is closed. settled: an earlier decision in this call already closed it (one reclassify or "
+        "dismiss settles every copy). skipped: nothing to do (already applied, informational). gone: no such "
+        "proposal. error: see reason."
+    )
+    reason: str | None = None
+    detail: dict = Field(default_factory=dict)
+
+
+class ProposalDecisionsResponse(BaseModel):
+    results: list[ProposalDecisionResult]
+    counts: dict[str, int]
+
+
+class _Parsed(BaseModel):
+    index: int
+    id: str
+    decision: str
+    source: str
+    log_id: uuid.UUID
+    verb: str  # apply | dismiss | reclassify
+    target_type: str | None = None
+
+
+def _parse_decision(i: int, d: ProposalDecision) -> _Parsed | ProposalDecisionResult:
+    from app.services.entry_adjudication import RECLASSIFY_TYPES
+
+    src, _, raw = d.id.partition(":")
+    dec = d.decision.strip()
+
+    def bad(reason: str) -> ProposalDecisionResult:
+        return ProposalDecisionResult(id=d.id, decision=dec, status="error", reason=reason)
+
+    if src not in ("link_validator", "entity_maintenance"):
+        return bad("id must be 'link_validator:<uuid>' or 'entity_maintenance:<uuid>'")
+    try:
+        log_id = uuid.UUID(raw)
+    except ValueError:
+        return bad("id has no valid uuid")
+    verb, _, target = dec.partition(":")
+    if verb in ("apply", "dismiss") and not target:
+        return _Parsed(index=i, id=d.id, decision=dec, source=src, log_id=log_id, verb=verb)
+    if verb == "reclassify" and target in RECLASSIFY_TYPES:
+        return _Parsed(index=i, id=d.id, decision=dec, source=src, log_id=log_id, verb=verb, target_type=target)
+    if verb == "reclassify":
+        return bad(f"reclassify target must be one of {sorted(RECLASSIFY_TYPES)}")
+    return bad("decision must be 'apply', 'dismiss' or 'reclassify:<entity_type>'")
+
+
+async def _load_log_row(db: AsyncSession, source: str, log_id: uuid.UUID):
+    model = EntityLinkValidationLog if source == "link_validator" else EntityMaintenanceLog
+    return (await db.execute(select(model).where(model.id == log_id))).scalar_one_or_none()
+
+
+async def _decide_reclassify(
+    db: AsyncSession, entity_type: str, entity_id: uuid.UUID, target_type: str, reason: str
+) -> tuple[str, str | None, dict]:
+    """Reclassify the entity and close every proposal about it."""
+    from app.services.entry_adjudication import _reclassify_entity
+
+    outcome = await _reclassify_entity(db, entity_type, entity_id, target_type, reason)
+    if not outcome.get("applied"):
+        if outcome.get("reason") == "entity gone":
+            cleared = await settle_gone_entity(db, entity_type, entity_id)
+            return "resolved", "entity gone", {"cleared": cleared}
+        raise AppError(code="invalid", message=str(outcome.get("reason")), status_code=400)
+    cleared = await clear_reclassify_proposals(db, entity_type, entity_id)
+    cleared += await settle_gone_entity(
+        db, entity_type, entity_id, successor=_reclassify_successor(target_type, outcome)
+    )
+    detail = {
+        "target_type": target_type,
+        "merged_into_existing": bool(outcome.get("merged_into_existing")),
+        "cleared": cleared,
+    }
+    return "reclassified", None, detail
+
+
+async def _decide_apply_maint(db: AsyncSession, row: EntityMaintenanceLog, user: User) -> tuple[str, str | None, dict]:
+    """Apply one maintenance-log proposal through the appliers the per-row buttons use."""
+    from app.services.entry_adjudication import apply_adjudication_row
+
+    if row.action in ADJUDICATION_PROPOSAL_ACTIONS:
+        outcome = await apply_adjudication_row(db, row)
+        status = await settle_adjudication_outcome(db, row, outcome)
+        detail = {k: v for k, v in outcome.items() if k not in ("applied", "reason")}
+        return status, outcome.get("reason"), detail
+    route = {
+        "alias_collision": apply_alias_collision,
+        "vendor_autolink": apply_vendor_autolink,
+        "normalize_name": apply_normalize_name,
+        "ttp_malformed_id": apply_id_hygiene,
+        "cve_malformed_id": apply_id_hygiene,
+        "cve_withdrawn": apply_id_hygiene,
+    }.get(row.action)
+    if route is not None:
+        resp = await route(log_id=row.id, user=user, db=db)
+        detail = resp.model_dump(mode="json")
+        return ("resolved" if detail.get("skipped") else "applied"), None, detail
+    if row.action == "orphan_prune" and row.entity_id:
+        resp = await prune_orphans(
+            body=PruneOrphansRequest(
+                targets=[{"entity_type": row.entity_type, "entity_id": str(row.entity_id)}], mode="apply"
+            ),
+            user=user,
+            db=db,
+        )
+        if resp.pruned:
+            return "applied", None, {"pruned": resp.pruned}
+        return "skipped", "no longer an orphan (or already gone)", {}
+    raise AppError(code="invalid", message=f"no apply path for {row.action}", status_code=400)
+
+
+async def _decide_one(
+    db: AsyncSession, p: _Parsed, user: User, reclassified: dict[tuple[str, uuid.UUID], str]
+) -> tuple[str, str | None, dict]:
+    row = await _load_log_row(db, p.source, p.log_id)
+    if row is None:
+        return "gone", "no such proposal", {}
+    is_link = p.source == "link_validator"
+    pending = row.action in _LINK_PENDING_ACTIONS if is_link else not row.applied
+    if not pending:
+        return "skipped", "not pending (already applied)", {}
+    key = (row.entity_type, row.entity_id)
+    link_reclassify = is_link and row.action == "needs_reclassification"
+    maint_reclassify = not is_link and row.action == ACTION_RECLASSIFY
+
+    if p.verb == "reclassify" or (p.verb == "apply" and link_reclassify):
+        target = p.target_type or row.suggested_entity_type
+        if row.entity_id is None or not target:
+            raise AppError(code="invalid", message="row has no entity or no proposed type", status_code=400)
+        if key in reclassified:
+            if reclassified[key] == target:
+                return "settled", "already reclassified in this call", {}
+            raise AppError(code="conflict", message=f"already reclassified to {reclassified[key]}", status_code=409)
+        out = await _decide_reclassify(db, row.entity_type, row.entity_id, target, row.reason if is_link else "")
+        reclassified[key] = target
+        return out
+
+    if p.verb == "dismiss":
+        if (link_reclassify or maint_reclassify) and row.entity_id:
+            # The decision is about the entity: every article's copy goes, and it isn't re-proposed.
+            n = await dismiss_reclassify(db, row.entity_type, row.entity_id, user.id)
+            return "dismissed", None, {"cleared": n}
+        if not is_link:
+            await _remember_merge_dismissal(db, row, user.id)
+        await db.delete(row)
+        return "dismissed", None, {"cleared": 1}
+
+    # apply
+    if is_link:
+        already = await apply_link_removal_row(db, row)
+        return "applied", None, {"already_removed": already}
+    status, reason, detail = await _decide_apply_maint(db, row, user)
+    if maint_reclassify and status == "applied":
+        reclassified[key] = (row.after or {}).get("suggested_type") or ""
+    return status, reason, detail
+
+
+@router.post("/admin/hygiene/decisions", response_model=ProposalDecisionsResponse)
+async def decide_proposals(
+    body: list[ProposalDecision] = Body(
+        ...,
+        description=f"Decisions, at most {DECISIONS_MAX}: [{{id: '<source>:<log_id>', decision}}]",
+        examples=[
+            [
+                {"id": "link_validator:3f9d2a1b-8c7e-4f6a-b5d4-0e1c2a3b4d5f", "decision": "apply"},
+                {"id": "entity_maintenance:d5b2c8f0-3e4a-4b6c-9d1e-7f8a9b0c1d2e", "decision": "reclassify:tool"},
+            ]
+        ],
+    ),
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> ProposalDecisionsResponse:
+    """Apply a reviewed batch of decisions on pending proposals, one result per row.
+
+    `apply` runs the row's own applier (link removal, adjudication apply,
+    alias trim, vendor link, rename, id fix, orphan prune). `dismiss` deletes
+    the proposal; a reclassify dismissal covers the entity and stops new
+    filings. `reclassify:<type>` converts the entity (into the same-named
+    entity of that type when one exists) and closes every proposal about it.
+
+    Duplicates settle server-side: reclassifies run first, and a row an
+    earlier decision already closed comes back `settled`, not as an error.
+    An apply whose outcome is already reached closes the proposal
+    (`resolved`). Each row is its own savepoint, so one failure doesn't stop
+    the rest."""
+    if not body:
+        raise AppError(code="invalid", message="no decisions", status_code=400)
+    if len(body) > DECISIONS_MAX:
+        raise AppError(code="invalid", message=f"at most {DECISIONS_MAX} decisions per call", status_code=400)
+
+    results: list[ProposalDecisionResult | None] = [None] * len(body)
+    parsed: list[_Parsed] = []
+    for i, d in enumerate(body):
+        p = _parse_decision(i, d)
+        if isinstance(p, ProposalDecisionResult):
+            results[i] = p
+        else:
+            parsed.append(p)
+
+    # Which rows exist now, so a row closed by an earlier decision reads as settled.
+    present: set[str] = set()
+    for source, model in (("link_validator", EntityLinkValidationLog), ("entity_maintenance", EntityMaintenanceLog)):
+        ids = [p.log_id for p in parsed if p.source == source]
+        if ids:
+            found = (await db.execute(select(model.id).where(model.id.in_(ids)))).scalars()
+            present |= {f"{source}:{rid}" for rid in found}
+
+    reclassified: dict[tuple[str, uuid.UUID], str] = {}
+    done: set[str] = set()
+    for p in sorted(parsed, key=lambda p: (p.verb != "reclassify", p.index)):
+        canon = f"{p.source}:{p.log_id}"
+        try:
+            async with db.begin_nested():
+                status, reason, detail = await _decide_one(db, p, user, reclassified)
+            if status == "gone" and canon in present:
+                status, reason = "settled", "closed by an earlier decision in this call"
+            if status == "gone" and canon in done:
+                status, reason = "settled", "duplicate of an earlier decision in this call"
+        except AppError as e:
+            status, reason, detail = "error", e.message, {}
+        except Exception as e:  # one bad row must not sink the batch
+            status, reason, detail = "error", str(e)[:300], {}
+        done.add(canon)
+        results[p.index] = ProposalDecisionResult(
+            id=p.id, decision=p.decision, status=status, reason=reason, detail=detail
+        )
+    await db.flush()
+
+    final = [r for r in results if r is not None]
+    counts = {s: 0 for s in _DECISION_STATUSES}
+    for r in final:
+        counts[r.status] += 1
+    return ProposalDecisionsResponse(results=final, counts={k: v for k, v in counts.items() if v})
 
 
 # ---------------------------------------------------------------------------

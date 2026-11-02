@@ -39,11 +39,18 @@ export function useHygieneRowAction() {
     // stage's own code path.
     if (row.source === "entity_maintenance" && row.action.startsWith("adjudication_") && (action === "apply" || action === "restore")) {
       try {
-        const res = await api.post<{ applied: boolean; restored: boolean; reason: string | null; detail: Record<string, unknown> }>(
+        const res = await api.post<{
+          applied: boolean;
+          restored: boolean;
+          resolved?: boolean;
+          reason: string | null;
+          detail: Record<string, unknown>;
+        }>(
           `/admin/hygiene/adjudication/${extractLogId(row)}/${action}`,
         );
         if (action === "apply") {
           if (res.data.applied) toast.success(res.data.detail?.deleted ? "Applied — entity deleted" : "Applied");
+          else if (res.data.resolved) toast.message(`Already done (${res.data.reason ?? "nothing left to change"}) — proposal closed`);
           else toast.message(res.data.reason ?? "Nothing to apply");
         } else if (res.data.restored) toast.success("Restored");
         else toast.message(res.data.reason ?? "Nothing to restore");

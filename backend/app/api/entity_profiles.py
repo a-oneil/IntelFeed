@@ -45,6 +45,7 @@ from app.models.vendor import EntryVendor, Vendor
 from app.services.entity_backlink import dispatch_backlink_for_added_aliases, dispatch_entity_backlink
 from app.services.entity_indexer import delete_entity_document
 from app.services.entity_summary import ENTITY_MODEL_MAP, generate_entity_assessment
+from app.services.proposal_dismissals import settle_gone_entity
 
 logger = logging.getLogger(__name__)
 
@@ -1440,6 +1441,7 @@ async def delete_threat_actor(
     await _delete_entity_relationships(db, "threat_actor", actor_id)
     await db.delete(actor)
     await db.flush()
+    await settle_gone_entity(db, "threat_actor", actor_id, gone=True)
     delete_entity_document("threat_actor", actor_id)
 
 
@@ -1460,6 +1462,7 @@ async def delete_malware_family(
     await _delete_entity_relationships(db, "malware", malware_id)
     await db.delete(malware)
     await db.flush()
+    await settle_gone_entity(db, "malware", malware_id, gone=True)
     delete_entity_document("malware", malware_id)
 
 
@@ -1480,6 +1483,7 @@ async def delete_cve(
     await _delete_entity_relationships(db, "cve", cve_uuid)
     await db.delete(cve)
     await db.flush()
+    await settle_gone_entity(db, "cve", cve_uuid, gone=True)
     delete_entity_document("cve", cve_uuid)
 
 
@@ -1500,6 +1504,7 @@ async def delete_ttp(
     await _delete_entity_relationships(db, "ttp", ttp_id)
     await db.delete(ttp)
     await db.flush()
+    await settle_gone_entity(db, "ttp", ttp_id, gone=True)
     delete_entity_document("ttp", ttp_id)
 
 
@@ -1520,6 +1525,7 @@ async def delete_country(
     await _delete_entity_relationships(db, "country", country_id)
     await db.delete(country)
     await db.flush()
+    await settle_gone_entity(db, "country", country_id, gone=True)
     delete_entity_document("country", country_id)
 
 
@@ -1598,6 +1604,7 @@ async def delete_tool(
     await _delete_entity_relationships(db, "tool", tool_id)
     await db.delete(tool)
     await db.flush()
+    await settle_gone_entity(db, "tool", tool_id, gone=True)
     delete_entity_document("tool", tool_id)
     await invalidate_entity_cache("tool", str(tool_id))
 
@@ -1837,6 +1844,7 @@ async def delete_vendor(
     await _delete_entity_relationships(db, "vendor", vendor_id)
     await db.delete(vendor)
     await db.flush()
+    await settle_gone_entity(db, "vendor", vendor_id, gone=True)
     await invalidate_entity_cache("vendor", str(vendor_id))
 
 
@@ -1857,6 +1865,7 @@ async def delete_product(
     await _delete_entity_relationships(db, "product", product_id)
     await db.delete(product)
     await db.flush()
+    await settle_gone_entity(db, "product", product_id, gone=True)
     await invalidate_entity_cache("product", str(product_id))
 
 
@@ -1993,6 +2002,10 @@ async def merge_entities(
     keeper.aliases = new_aliases
     db.add(keeper)
     await db.flush()
+    # The merged-away entities' pending Review proposals are moot; a merge
+    # proposal into one of them moves to the keeper.
+    for target in targets:
+        await settle_gone_entity(db, entity_type, target.id, successor=(entity_type, body.keeper_id), gone=True)
 
     # Recount actual article links
     actual_count = await db.scalar(select(func.count()).select_from(junction_cls).where(fk_col == body.keeper_id))
@@ -2275,6 +2288,7 @@ async def delete_mitigation(
     await _delete_entity_relationships(db, "mitigation", mitigation_id)
     await db.delete(mitigation)
     await db.flush()
+    await settle_gone_entity(db, "mitigation", mitigation_id, gone=True)
     delete_entity_document("mitigation", mitigation_id)
     await invalidate_entity_cache("mitigation", str(mitigation_id))
 

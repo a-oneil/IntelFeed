@@ -343,6 +343,13 @@ quotes, tables, emphasis and so on) and removes everything else, including
 scripts, event handlers and iframes. Links get
 `rel="noopener noreferrer nofollow"`.
 
+`html_to_text()` builds the entry's `content_text` from the HTML. Text from
+neighbouring elements never runs together: paragraphs, headings and other
+blocks are separated by a blank line; list items, table rows, captions and
+`<br>` by a newline; table cells by a tab. Where the source already has a
+newline there, it is kept as is. This keeps the regex scans honest: two list
+items of IPs stay two IPs, and a CVE cell stays apart from its CVSS cell.
+
 ### Image Proxying
 
 `sanitize_html()` rewrites every `<img src>` to IntelFeed's image proxy

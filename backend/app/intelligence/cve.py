@@ -19,6 +19,12 @@ from app.models.cwe import CWE, CVEWeakness
 logger = logging.getLogger(__name__)
 
 CVE_PATTERN = re.compile(r"CVE-\d{4}-\d{4,}")
+# A CVE id with a decimal glued on: a table's CVSS column run into the id
+# column by HTML stripping ("CVE-2026-103849" + "10.0" → "CVE-2026-10384910.0").
+_CVE_GLUED_SCORE_RE = re.compile(r"CVE-(\d{4})-(\d{4,})(?=\.\d)")
+# Real sequence numbers run to six digits, seven in the 1000000+ block the
+# DWF and a few CNAs issue. Eight or more is two numbers glued together.
+CVE_MAX_SEQUENCE_DIGITS = 7
 
 NVD_API_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 # Seconds per request inside NVD's rolling window: 5 req/30s unkeyed, 50 req/30s
@@ -69,11 +75,70 @@ async def nvd_gateway(db: AsyncSession, max_wait: float = MAX_TOKEN_WAIT) -> tup
     return await gateway_for(db, "nvd", max_wait=max_wait)
 
 
+def is_plausible_cve_id(cve_id: str) -> bool:
+    """Whether a ``CVE-YYYY-N`` string can be a real id.
+
+    Rejects sequences longer than seven digits and five-plus-digit sequences
+    with a leading zero (the CVE syntax only zero-pads to four)."""
+    m = re.fullmatch(r"CVE-(\d{4})-(\d{4,})", cve_id or "")
+    if not m:
+        return False
+    seq = m.group(2)
+    if len(seq) > CVE_MAX_SEQUENCE_DIGITS:
+        return False
+    return not (len(seq) > 4 and seq.startswith("0"))
+
+
+def _strip_glued_score(seq: str, after_dot: str) -> str | None:
+    """The real sequence when a CVSS score's integer part was glued onto it.
+
+    ``after_dot`` is the digit after the decimal point. "10" + ".0" is the
+    10.0 score; otherwise the last digit is the score's integer part. None
+    when what's left can't be a sequence."""
+    tail = 2 if seq.endswith("10") and after_dot == "0" else 1
+    head = seq[:-tail]
+    if len(head) < 4 or (len(head) > 4 and head.startswith("0")):
+        return None
+    return head
+
+
 def extract_cve_ids(text: str) -> list[str]:
-    """Extract CVE IDs from text using regex."""
+    """Extract CVE IDs from text using regex.
+
+    An id followed by ``.<digit>`` is a CVSS score glued onto it (a table
+    whose cells lost their separator): the score's integer part is dropped
+    and the real id kept. Implausible ids are skipped, as is a seven-digit id
+    whose six-digit prefix the same text names on its own (the prefix plus a
+    glued score digit)."""
     if not text:
         return []
-    return list(set(CVE_PATTERN.findall(text)))
+    ids: set[str] = set()
+    glued_at: set[int] = set()
+    for m in _CVE_GLUED_SCORE_RE.finditer(text):
+        glued_at.add(m.start())
+        head = _strip_glued_score(m.group(2), text[m.end() + 1])
+        if head:
+            ids.add(f"CVE-{m.group(1)}-{head}")
+    for m in CVE_PATTERN.finditer(text):
+        if m.start() not in glued_at:
+            ids.add(m.group())
+    out = {i for i in ids if is_plausible_cve_id(i)}
+    return [i for i in out if not (set(glued_score_prefixes(i)) & out)]
+
+
+def glued_score_prefixes(cve_id: str) -> list[str]:
+    """The ids a seven-digit CVE id could be with a CVSS integer glued on.
+
+    Empty for ids of six digits or fewer and for the real 1000000+ block.
+    Used to drop the long form when its prefix is named in the same text or
+    already stored."""
+    year, seq = cve_id.split("-")[1:3]
+    if len(seq) != CVE_MAX_SEQUENCE_DIGITS or seq.startswith("1000"):
+        return []
+    out = [f"CVE-{year}-{seq[:-1]}"]
+    if seq.endswith("10"):
+        out.append(f"CVE-{year}-{seq[:-2]}")
+    return out
 
 
 async def enrich_from_nvd(cve_id: str, gateway: SourceGateway, api_key: str | None = None) -> dict | None:
@@ -619,6 +684,12 @@ async def extract_and_store_cves(
 
             if await is_name_denied(db, "cve", cve_id):
                 logger.info("Skipping CVE %s: on the analyst do-not-recreate list", cve_id)
+                continue
+            # A new seven-digit id whose six-digit prefix is a stored CVE is
+            # that CVE with a glued CVSS digit, not a new one.
+            prefixes = glued_score_prefixes(cve_id)
+            if prefixes and await db.scalar(select(CVE.id).where(CVE.cve_id.in_(prefixes)).limit(1)):
+                logger.info("Skipping CVE %s: a stored CVE plus a glued score digit", cve_id)
                 continue
 
             cve_obj = CVE(cve_id=cve_id, created_via="ai_extraction", created_from_entry_id=entry_id)

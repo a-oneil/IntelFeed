@@ -306,3 +306,23 @@ def test_reliability_weight_is_shared_with_ingest():
 
     assert _reliability_to_weight("A") == autolinker_mod.reliability_to_weight("A") == 1.0
     assert _reliability_to_weight(None) == autolinker_mod.reliability_to_weight(None) == 0.5
+
+
+@pytest.mark.asyncio
+async def test_store_never_creates_an_implausible_cve_stub(db_session):
+    """Old content_text still carries ids with a CVSS score glued on; the store
+    path refuses to mint a stub for one even if a caller passes it."""
+    entry_id = uuid.uuid4()
+    match = {
+        "entity_type": "cve",
+        "entity_id": None,
+        "canonical_name": "CVE-2026-123456789",
+        "surface_form": "CVE-2026-123456789",
+        "confidence": "high",
+        "source": "auto_link",
+        "lookup_key": "CVE-2026-123456789",
+        "paragraph_indices": [0],
+    }
+    stored = await store_autolink_matches(db_session, entry_id, [match], context_text="")
+    assert stored == []
+    assert (await db_session.execute(select(CVE).where(CVE.cve_id == "CVE-2026-123456789"))).first() is None
