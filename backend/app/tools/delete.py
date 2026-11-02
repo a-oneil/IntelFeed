@@ -144,8 +144,8 @@ async def _delete_entity(
     user_id: uuid.UUID,
     entity_type: str,
     entity_id: str | None = None,
-    name: str | None = None,
     confirmation_token: str | None = None,
+    name: str | None = None,
 ) -> dict:
     if entity_type not in _DELETABLE_ENTITIES:
         return {"error": f"Cannot delete entity type: {entity_type}"}

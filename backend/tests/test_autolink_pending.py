@@ -310,7 +310,7 @@ async def test_instance_ai_off_links_instantly(db_session, entry, royal_malware,
     vocab_malware = MagicMock(id=royal_malware.id, aliases=[])
     vocab_malware.name = "Royal"
     _build_and_activate(malware=[vocab_malware])
-    matches = scan_text("Cyber vulnerability sweep picks up Royal Navy drones.")
+    matches = scan_text("The sweep picks up Royal samples on two hosts.")
     assert matches and matches[0]["provisional"] is False
 
     stored = await store_autolink_matches(db_session, entry.id, matches)

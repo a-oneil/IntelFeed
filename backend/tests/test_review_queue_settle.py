@@ -232,13 +232,15 @@ async def test_feed_count_agrees_with_review_groups(client, admin_headers, db_se
     db_session.add_all([_unlink("malware", gone_id, e, "Ghost"), _unlink("malware", live.id, e)])
     await db_session.commit()
 
-    feed = (await client.get("/api/admin/hygiene/feed?pending=true", headers=admin_headers)).json()["rows"]
+    feed = (await client.get("/api/admin/hygiene/feed?pending=true&context=true", headers=admin_headers)).json()["rows"]
     groups = (await client.get("/api/admin/hygiene/review-groups", headers=admin_headers)).json()
     stats = (await client.get("/api/admin/hygiene/stats", headers=admin_headers)).json()
     assert [r["entity_id"] for r in feed] == [str(live.id)]
     assert groups["proposals"] == 1 == stats["pending_total"]
-    # The snippet comes with the row.
+    # The snippet comes with the row when asked for, and only then.
     assert "Everest ransomware" in feed[0]["context"]
+    plain = (await client.get("/api/admin/hygiene/feed?pending=true", headers=admin_headers)).json()["rows"]
+    assert plain[0]["context"] is None
 
 
 @pytest.mark.asyncio

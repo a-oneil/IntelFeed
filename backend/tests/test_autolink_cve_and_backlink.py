@@ -313,14 +313,15 @@ async def test_store_never_creates_an_implausible_cve_stub(db_session):
     """Old content_text still carries ids with a CVSS score glued on; the store
     path refuses to mint a stub for one even if a caller passes it."""
     entry_id = uuid.uuid4()
+    glued = "CVE-2026-123456789"
     match = {
         "entity_type": "cve",
         "entity_id": None,
-        "canonical_name": "CVE-2026-123456789",
-        "surface_form": "CVE-2026-123456789",
+        "canonical_name": glued,
+        "surface_form": glued,
         "confidence": "high",
         "source": "auto_link",
-        "lookup_key": "CVE-2026-123456789",
+        "lookup_key": glued,
         "paragraph_indices": [0],
     }
     stored = await store_autolink_matches(db_session, entry_id, [match], context_text="")
