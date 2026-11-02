@@ -450,6 +450,7 @@ async def test_review_groups_fold_every_kind_per_entity(client, admin_headers, d
 
     edge = next(g for g in body["groups"] if g["entity_type"] == "relationship")
     assert edge["entity_id"] == str(edge_id) and edge["subject"] == "Demote: Everest uses Linuxish"
+    assert edge["name"] == "Everest uses Linuxish"  # an edge group is named by its claim
     assert edge["exists"] is True and edge["row_ids"] == []  # a pseudo type is never assumed gone
 
     # Facets narrow the same way the flat feed does.
@@ -463,7 +464,8 @@ async def test_review_groups_fold_every_kind_per_entity(client, admin_headers, d
     ).json()
     assert [g["name"] for g in recl["groups"]] == ["Everest"]
     found = (await client.get("/api/admin/hygiene/review-groups?q=linux", headers=admin_headers)).json()
-    assert [g["name"] for g in found["groups"]] == ["Linuxish"]
+    # the edge's claim names Linuxish too, so a name search finds its proposals
+    assert [g["name"] for g in found["groups"]] == ["Linuxish", "Everest uses Linuxish"]
     adj = (await client.get("/api/admin/hygiene/review-groups?origin=adjudicator", headers=admin_headers)).json()
     assert {g["name"] for g in adj["groups"]} == {"Everest", py["name"], edge["name"]}
     assert next(g for g in adj["groups"] if g["name"] == "Everest")["proposals"] == 1
