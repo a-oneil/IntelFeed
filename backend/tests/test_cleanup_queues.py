@@ -20,6 +20,7 @@ from app.models.entity_maintenance import EntityMaintenanceLog
 from app.models.entry import Entry
 from app.models.malware_family import EntryMalware, MalwareFamily
 from app.models.pending_autolink import PendingAutolinkMatch
+from app.models.threat_actor import ThreatActor
 from app.models.tool import EntryTool, Tool
 
 pytestmark = pytest.mark.asyncio
@@ -185,9 +186,24 @@ async def test_apply_group_converts_and_clears_every_suggestion(client, admin_he
     assert await db_session.get(MalwareFamily, mid) is None
 
 
+async def test_names_that_differ_only_in_digits_are_not_duplicates(client, admin_headers, db_session):
+    # Storm-3068 / Storm-3069 are two tracked clusters; a version bump is a variant
+    db_session.add_all(
+        [
+            ThreatActor(name="Storm-3068", created_via="ai_extraction"),
+            ThreatActor(name="Storm-3069", created_via="ai_extraction"),
+            Tool(name="KillSecurity 2.0", created_via="ai_extraction"),
+            Tool(name="KillSecurity 3.0", created_via="ai_extraction"),
+        ]
+    )
+    await db_session.commit()
+    stats = (await client.get("/api/engine/extraction/stats?window=all", headers=admin_headers)).json()
+    assert stats["likely_duplicates"] == 0
+
+
 async def test_not_duplicate_drops_the_pair(client, admin_headers, db_session):
-    a = Tool(name="KillSecurity 2.0", created_via="ai_extraction")
-    b = Tool(name="KillSecurity 3.0", created_via="ai_extraction")
+    a = Tool(name="Cobalt Strike", created_via="ai_extraction")
+    b = Tool(name="CobaltStrike", created_via="ai_extraction")
     db_session.add_all([a, b])
     await db_session.flush()
     await db_session.commit()
