@@ -800,6 +800,37 @@ def test_validate_drops_destructive_verdicts_whose_reason_argues_for_the_record(
     assert stats["affirming_reason"] == 2
 
 
+@pytest.mark.parametrize(
+    "reason, kept",
+    [
+        (
+            "The article is a promotional piece about Microsoft Defender for Endpoint; linking it implies the"
+            " software is an adversary, which contradicts it being a defensive product.",
+            True,
+        ),
+        ("Microsoft Defender for Endpoint is a legitimate security product, not an attacker tool.", True),
+        ("Microsoft Defender for Endpoint is the victim environment the malware runs in.", True),
+        ("Microsoft Defender for Endpoint appears only in a 'Related:' headline at the foot of the page.", False),
+        ("Microsoft Defender for Endpoint is named only in the author bio, not as a threat actor.", False),
+    ],
+)
+def test_a_link_remove_argued_from_the_entity_being_a_defender_is_voided(reason, kept):
+    item = ReviewItem(
+        item_id="link:product:mde",
+        kind="link",
+        line="",
+        entity_type="product",
+        entity_id=uuid.uuid4(),
+        name="Microsoft Defender for Endpoint",
+    )
+    verdicts, stats = _validate_verdicts(
+        {"verdicts": [{"item_id": item.item_id, "verdict": "remove", "confidence": "high", "reason": reason}]},
+        [item],
+    )
+    assert verdicts[0].verdict == ("keep" if kept else "remove")
+    assert stats["bystander_reason"] == (1 if kept else 0)
+
+
 # ------------------------------------------------------------------ where an item sits
 
 IOC_ARTICLE = """The campaign used a loader. Note: re-fang 45.77.12[.]9 only in VirusTotal or MISP.

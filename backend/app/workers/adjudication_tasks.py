@@ -202,7 +202,7 @@ async def _adjudicate_entry(entry_id: uuid.UUID) -> dict:
             detail["unknown_ids"] = stats["unknown"]
             detail["coerced_verdicts"] = stats["coerced"]
             # verdicts the guards threw out, so a run shows why its removes didn't land
-            for key in ("copied_reason", "unnamed_reason", "affirming_reason"):
+            for key in ("copied_reason", "unnamed_reason", "affirming_reason", "bystander_reason"):
                 if stats.get(key):
                     detail[key] = stats[key]
             for kind, key in (("link", "uncapped_links"), ("edge", "uncapped_edges")):

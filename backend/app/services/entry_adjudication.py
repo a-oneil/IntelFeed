@@ -1558,6 +1558,19 @@ def _reason_affirms(reason: str) -> bool:
     return False
 
 
+# A link remove argued from the entity being on the defenders' side ("linking
+# it implies the software is an adversary", "a defensive product", "not an
+# attacker tool"). A link is not an adversary claim — WHAT A LINK MEANS in the
+# prompt — but small models still reach for it, so the guard holds the line.
+_BYSTANDER_RE = re.compile(
+    r"\bimpl(?:y|ies|ying)\b[^.]{0,60}\b(?:adversar\w*|attacker|malicious|threat\s+actor)\b"
+    r"|\b(?:defensive|legitimate|benign)\s+(?:security\s+)?(?:product|tool|software|vendor|service|platform)\b"
+    r"|\bnot\s+(?:an?\s+)?(?:adversary|attacker(?:\s+tool)?|threat\s+actor|malicious\s+(?:tool|software))\b"
+    r"|\bvictim\s+(?:component|environment|organi[sz]ation)\b",
+    re.IGNORECASE,
+)
+
+
 def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verdict], dict]:
     """Per-item verdicts with the validity matrix applied. Anything missing,
     malformed or out of place is a keep. A duplicate item_id voids the whole
@@ -1568,7 +1581,15 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
     # or state does not accept (treated as keep).
     # unnamed_reason / affirming_reason: removes and demotes whose reason does
     # not name the item, destructive verdicts whose reason argues for it.
-    stats = {"unknown": 0, "coerced": 0, "duplicate": False, "unnamed_reason": 0, "affirming_reason": 0}
+    # bystander_reason: link removes argued from the entity being a defender.
+    stats = {
+        "unknown": 0,
+        "coerced": 0,
+        "duplicate": False,
+        "unnamed_reason": 0,
+        "affirming_reason": 0,
+        "bystander_reason": 0,
+    }
     verdicts: dict[str, Verdict] = {}
     if isinstance(raw, list):
         for entry in raw:
@@ -1624,6 +1645,9 @@ def _validate_verdicts(result: dict, items: list[ReviewItem]) -> tuple[list[Verd
             elif verdict in DESTRUCTIVE and _reason_affirms(reason):
                 verdict, explicit = "keep", False
                 stats["affirming_reason"] += 1
+            elif verdict == "remove" and item.kind == "link" and _BYSTANDER_RE.search(reason):
+                verdict, explicit = "keep", False
+                stats["bystander_reason"] += 1
             bad_alias = None
             if verdict == "remove":
                 wanted = str(entry.get("bad_alias") or "").strip().lower()
