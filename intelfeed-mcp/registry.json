@@ -2458,7 +2458,7 @@
  },
  {
   "name": "get_hygiene_feed",
-  "description": "Chronological hygiene feed: a merge of the entity-link log and the entity-maintenance log, normalized (action, mode, applied, subject, reason, affected-entity links, origin). Filter by action code (comma-separate for several), log source, mode, origin (adjudicator = filed by the adjudicate stage, legacy = scans and analysts), pending-only, or a since timestamp. Read-only — applying or dismissing proposals happens in the Proposals queue.",
+  "description": "Chronological hygiene feed: a merge of the entity-link log and the entity-maintenance log, normalized (action, mode, applied, subject, reason, affected-entity links, origin). Filter by action code (comma-separate for several), log source, mode, origin (adjudicator = filed by the adjudicate stage, merge_review = the duplicate review, scan = the on-demand scans and analysts), pending-only, or a since timestamp. Read-only — applying or dismissing proposals happens in the Proposals queue.",
   "input_schema": {
    "type": "object",
    "properties": {
@@ -2486,9 +2486,10 @@
      "type": "string",
      "enum": [
       "adjudicator",
-      "legacy"
+      "merge_review",
+      "scan"
      ],
-     "description": "adjudicator = rows the adjudicate stage filed; legacy = scans and analysts"
+     "description": "adjudicator = rows the adjudicate stage filed; merge_review = the duplicate review; scan = the on-demand scans and analysts"
     },
     "pending": {
      "type": "boolean",
@@ -3238,7 +3239,7 @@
  },
  {
   "name": "link_entities",
-  "description": "Assert an analyst-grade relationship between two intelligence entities. The (source, verb, target) triple is validated against the semantic relationship matrix and auto-flipped into its canonical orientation (e.g. 'cve exploited-by actor' is stored as 'actor exploits cve'). Valid verbs (per-pair restrictions apply): attributed_to, communicates_with, controls, delivers, drops, exploits, overlaps_with, related_to, subgroup_of, successor_of, targets, uses, variant_of. Written with source=analyst_created; re-asserting an existing triple promotes it to analyst_created and merges confidence/description/evidence instead of erroring.",
+  "description": "Assert an analyst-grade relationship between two intelligence entities. The (source, verb, target) triple is validated against the semantic relationship matrix and auto-flipped into its canonical orientation (e.g. 'cve exploited-by actor' is stored as 'actor exploits cve'). Valid verbs (per-pair restrictions apply): attributed_to, communicates_with, controls, delivers, drops, exploits, exposes, operates_in, overlaps_with, related_to, subgroup_of, successor_of, targets, uses, variant_of. Written with source=analyst_created; re-asserting an existing triple promotes it to analyst_created and merges confidence/description/evidence instead of erroring.",
   "input_schema": {
    "type": "object",
    "properties": {
@@ -3289,6 +3290,8 @@
       "delivers",
       "drops",
       "exploits",
+      "exposes",
+      "operates_in",
       "overlaps_with",
       "related_to",
       "subgroup_of",
@@ -3483,6 +3486,8 @@
       "delivers",
       "drops",
       "exploits",
+      "exposes",
+      "operates_in",
       "overlaps_with",
       "related_to",
       "subgroup_of",

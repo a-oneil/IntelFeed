@@ -887,6 +887,8 @@ export interface Vendor {
   description: string | null;
   website: string | null;
   vendor_type: string | null;
+  /** The country the company is from (Wikidata), a country row id. */
+  country_id?: string | null;
   article_count: number;
   first_seen_at: string;
   last_seen_at: string;
@@ -1732,6 +1734,10 @@ export interface EntitySearchResult {
   product_type?: string;
   vendor_id?: string;
   vendor_name?: string;
+  /** endoflife.date: maintained | security_only | eol | unknown. */
+  support_status?: string | null;
+  /** Soonest end of security support (YYYY-MM-DD). */
+  next_eol?: string | null;
   // Rule fields
   rule_type?: string;
   title?: string;
@@ -1782,6 +1788,8 @@ export interface EntitySearchResult {
   context_role?: 'reporting_source';
   country_relationship?: 'targets' | 'operates_from' | 'infrastructure';
   origin_country_id?: string | null;
+  /** Vendor: the country the company is from (Wikidata), a country row id. */
+  country_id?: string | null;
   first_seen_at?: string;
   last_seen_at?: string;
   // Wikipedia
@@ -2831,13 +2839,6 @@ export interface EnrichmentSource {
   config: Record<string, unknown>;
   created_at: string;
   updated_at: string;
-}
-
-export interface UserEnrichmentOverride {
-  id: string;
-  source_id: string;
-  has_api_key: boolean;
-  created_at: string;
 }
 
 // --- Detection Summary Persistence ---

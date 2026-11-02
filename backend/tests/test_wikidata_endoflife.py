@@ -22,10 +22,13 @@ import app.enrichment.endoflife as endoflife
 from app.enrichment.endoflife import lifecycle, match_product, parse_product, product_index, sync_endoflife
 from app.enrichment.gateway import USER_AGENT, SourceGateway
 from app.enrichment.wikidata import best_values, enwiki_title, fetch_labels, item_facts, sync_wikidata
+from app.intelligence.sectors import sector_uuid
 from app.models.country import Country
 from app.models.enrichment import EnrichmentResult, EnrichmentSource, EntityContext
 from app.models.entity_field_claim import EntityFieldClaim
+from app.models.entity_relationship import EntityRelationship
 from app.models.product import Product
+from app.models.ransomware import RansomwareVictim
 from app.models.vendor import Vendor
 
 FIXTURES = Path(__file__).parent / "fixtures" / "enrichment"
@@ -200,6 +203,10 @@ async def wiki_entities(db_session):
 
 async def test_sync_fills_blank_columns_and_stores_vendor_context(db_session, wiki_entities):
     microsoft, windows_server, germany, unknown = wiki_entities
+    # Microsoft's P17 is Q30, labelled "United States": a tracked country.
+    united_states = Country(name="United States", iso_code="US", aliases=["United States of America"])
+    db_session.add(united_states)
+    await db_session.flush()
     server = _Wikidata()
     vendors_before = await _vendor_count(db_session)
 
@@ -210,6 +217,7 @@ async def test_sync_fills_blank_columns_and_stores_vendor_context(db_session, wi
     assert len(server.requests) == 2
     assert all(r.headers["User-Agent"] == USER_AGENT for r in server.requests)
     assert microsoft.website == "https://www.microsoft.com/"
+    assert microsoft.country_id == united_states.id
     assert windows_server.vendor_id == microsoft.id
     assert (germany.region, germany.iso_code) == ("Europe", "DE")
     assert await _vendor_count(db_session) == vendors_before
@@ -246,6 +254,7 @@ async def test_sync_fills_blank_columns_and_stores_vendor_context(db_session, wi
     )
     assert claims == {
         "website": "https://www.microsoft.com/",
+        "country_id": str(united_states.id),
         "vendor_id": str(microsoft.id),
         "region": "Europe",
         "iso_code": "DE",
@@ -283,6 +292,65 @@ async def test_filled_columns_are_left_alone(db_session, wiki_entities):
     assert (
         await db_session.execute(select(EnrichmentResult).where(EnrichmentResult.entity_id == product.id))
     ).first() is None
+
+
+async def test_sync_links_a_vendor_to_the_sectors_its_industries_name(db_session, wiki_entities):
+    microsoft, *_ = wiki_entities
+    await sync_wikidata(db_session, _wikidata_gateway())
+
+    edges = (
+        (await db_session.execute(select(EntityRelationship).where(EntityRelationship.source_id == microsoft.id)))
+        .scalars()
+        .all()
+    )
+    # "technology industry" and "software industry" both name the technology sector.
+    assert {(e.relationship_type, e.target_type, e.target_id) for e in edges} == {
+        ("operates_in", "sector", sector_uuid("technology"))
+    }
+
+
+def _wikidata_gateway(server=None):
+    return _gateway("wikidata", server or _Wikidata())
+
+
+class _Websites(_Wikidata):
+    """The query service too: a website query answers from the recording."""
+
+    def __init__(self):
+        super().__init__()
+        self.queries: list[str] = []
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        if request.url.host == "query.wikidata.org":
+            self.requests.append(request)
+            self.queries.append(parse_qs(urlparse(str(request.url)).query)["query"][0])
+            return httpx.Response(200, json=_fixture("wikidata_sparql_websites.json"))
+        return super().__call__(request)
+
+
+async def test_sync_finds_a_victim_country_by_its_website(db_session):
+    germany = Country(name="Germany", iso_code="DE")
+    siemens = RansomwareVictim(name="Siemens AG", domain="www.siemens.com")
+    nobody = RansomwareVictim(name="Small Shop", domain="smallshop-wikidatatest.example")
+    nameonly = RansomwareVictim(name="No Domain Ltd", domain="No Domain Ltd")
+    db_session.add_all([germany, siemens, nobody, nameonly])
+    await db_session.flush()
+    server = _Websites()
+
+    stats = await sync_wikidata(db_session, _gateway("wikidata", server))
+
+    assert len(server.queries) == 1
+    assert "<https://www.siemens.com/>" in server.queries[0] and "No Domain" not in server.queries[0]
+    assert stats["victims"]["found"] == 1
+    assert siemens.country_id == germany.id
+    assert nobody.country_id is None
+    assert await _context(db_session, "ransomware_victim", siemens.id, "wikidata") == {
+        "item": {"url": "https://www.wikidata.org/wiki/Q81230", "label": "Q81230"}
+    }
+    # Asked once: the answer (found or not) holds for the TTL.
+    server.queries.clear()
+    await sync_wikidata(db_session, _gateway("wikidata", server))
+    assert server.queries == []
 
 
 async def test_a_developer_only_links_to_an_existing_vendor(db_session):
@@ -545,7 +613,7 @@ async def test_endoflife_sync_writes_lifecycle_columns_and_context(db_session, e
 
     stats = await sync_endoflife(db_session, _gateway("endoflife", upstream))
 
-    assert stats == {"catalog": 10, "matched": 3, "updated": 2, "failed": 1, "stopped": None}
+    assert stats == {"catalog": 10, "matched": 3, "updated": 2, "failed": 1, "withdrawn": 0, "stopped": None}
     # The list, then each matched endoflife.date product once.
     assert [r.url.path for r in upstream.requests] == [
         "/api/v1/products",
@@ -590,6 +658,24 @@ async def test_endoflife_clears_next_eol_when_no_end_is_left(db_session, eol_pro
     await sync_endoflife(db_session, _gateway("endoflife", _EndOfLife(gone)))
 
     assert (server_product.support_status, server_product.next_eol) == ("eol", None)
+
+
+async def test_a_product_that_stops_matching_loses_its_lifecycle(db_session, eol_products):
+    server_product, twin, *_ = eol_products
+    await sync_endoflife(db_session, _gateway("endoflife", _EndOfLife()))
+    assert server_product.support_status == "maintained"
+
+    server_product.name = "Endoflifetest Renamed Server"
+    await db_session.flush()
+    stats = await sync_endoflife(db_session, _gateway("endoflife", _EndOfLife()))
+
+    assert stats["withdrawn"] == 1
+    await db_session.refresh(server_product)
+    assert (server_product.support_status, server_product.next_eol) == (None, None)
+    assert await _context(db_session, "product", server_product.id, "endoflife") == {}
+    # The twin still matches and keeps its answer; a second run withdraws nothing more.
+    assert twin.support_status == "maintained"
+    assert (await sync_endoflife(db_session, _gateway("endoflife", _EndOfLife())))["withdrawn"] == 0
 
 
 async def test_endoflife_sync_stops_cleanly_on_a_refusal(db_session, eol_products):

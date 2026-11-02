@@ -33,6 +33,11 @@ class Vendor(Base):
     description: Mapped[str | None] = mapped_column(Text)
     website: Mapped[str | None] = mapped_column(Text)
     vendor_type: Mapped[str | None] = mapped_column(String(50), index=True)
+    #: The country the company is from (Wikidata P17), when IntelFeed tracks it.
+    #: A link to a country row, as a victim's country and an actor's origin are.
+    country_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("countries.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     article_count: Mapped[int] = mapped_column(Integer, default=1)
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -44,6 +49,7 @@ class Vendor(Base):
     # Relationships
     entry_vendors = relationship("EntryVendor", back_populates="vendor", cascade="all, delete-orphan")
     products = relationship("Product", back_populates="vendor")
+    country = relationship("Country", foreign_keys=[country_id])
 
 
 class EntryVendor(Base):

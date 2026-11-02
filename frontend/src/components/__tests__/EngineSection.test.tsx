@@ -35,6 +35,9 @@ vi.mock("../engine/EngineMatrix", () => ({
     </div>
   ),
 }));
+vi.mock("../engine/EngineSwitch", () => ({
+  EngineStoppedBanner: () => null,
+}));
 vi.mock("../engine/PipelinePlans", () => ({
   PipelinePlans: () => <div data-testid="pipeline-plans" />,
 }));

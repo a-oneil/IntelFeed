@@ -11,7 +11,7 @@ import re
 import httpx
 
 from app.enrichment.base import EnrichmentAdapter, EnrichmentData
-from app.enrichment.manifest import Column, Context, Display, Egress, License, Policy, Quota
+from app.enrichment.manifest import Column, Context, Display, Egress, Key, License, Policy, Quota
 
 _HASH_RE = re.compile(r"^[a-f0-9]{32}$|^[a-f0-9]{40}$|^[a-f0-9]{64}$", re.IGNORECASE)
 _IPV4_RE = re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}$")
@@ -28,8 +28,9 @@ _REPUTATION = {
 class VirusTotalAdapter(EnrichmentAdapter):
     source_type = "virustotal"
     display_name = "VirusTotal v3"
+    about = "Antivirus verdicts for a file, URL, domain or IP."
     applies_to = {"observable": ("ipv4", "domain", "md5", "sha1", "sha256")}
-    requires = ("api_key",)
+    requires = (Key(),)
     # The public API allows 4 lookups a minute and 500 a day
     # (docs.virustotal.com, "Public vs Premium API"). Premium keys are sized
     # per contract, so there is no ceiling.
@@ -37,12 +38,11 @@ class VirusTotalAdapter(EnrichmentAdapter):
     egress = Egress.SHARES_IOC
     # The public API may not be used in commercial products or services.
     license = License("VirusTotal public API terms", attribution="VirusTotal", commercial_ok=False)
+    # Context only: the network columns (asn, asn_org, geo_country) are Team
+    # Cymru's, so a manual VirusTotal lookup never overwrites them. The
+    # reputation summary keeps VT's verdict for the ledger's list rows.
     outputs = (
         *(Column(key, f"observable.reputation.{rep}", Policy.NEWER_WINS) for key, rep in _REPUTATION.items()),
-        # Network facts have one home each, shared with Team Cymru: the latest answer stands.
-        Column("asn", "observable.asn", Policy.NEWER_WINS, filter="asn"),
-        Column("as_owner", "observable.asn_org", Policy.NEWER_WINS),
-        Column("country", "observable.geo_country", Policy.NEWER_WINS, filter="country_code"),
         Context("detection_ratio", "Detections", Display.FACT),
         Context("threat_label", "Threat label", Display.FACT),
         Context("tags", "Tags", Display.CHIPS),

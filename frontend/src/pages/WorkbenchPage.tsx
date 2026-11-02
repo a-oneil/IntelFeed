@@ -1957,7 +1957,7 @@ function ObservablesSection() {
         emptyDesc={
           linkedEntity
             ? "Nothing is attributed to it or reported alongside it. IPs, domains and hashes found in articles about it will show here."
-            : "Ledger rows come from judgment: the one-pass analysis, curated ioc_list feeds, TTP observables, or promoting a candidate from an article's intel panel. Run scripts/maintenance/backfill_observables.py to fill from existing extractions."
+            : "Ledger rows come from judgment: the one-pass analysis, curated ioc_list feeds, TTP observables, or promoting a candidate from an article's intel panel."
         }
         getId={(o) => o.id}
         getLabel={(o) => o.label || o.value}

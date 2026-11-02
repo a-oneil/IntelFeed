@@ -15,6 +15,7 @@ import httpx
 import pytest
 from sqlalchemy import func, select
 
+from app import entity_types
 from app.config import settings
 from app.enrichment.base import EnrichmentData, Source
 from app.enrichment.etda import ETDASource, card_facts, match_cards, sync_etda
@@ -23,11 +24,12 @@ from app.enrichment.manifest import Egress, License, Quota, Relation
 from app.enrichment.pipeline import apply_catalog_result
 from app.enrichment.ransomware_groups import group_facts, sync_group_profiles
 from app.enrichment.registry import SOURCE_REGISTRY
-from app.enrichment.relations import RESOLVABLE_TARGETS, apply_relations, relations_for
+from app.enrichment.relations import apply_relations, relations_for
 from app.intelligence.relationship_matrix import orient_relationship
 from app.intelligence.sectors import sector_uuid
 from app.models.country import Country
 from app.models.enrichment import EnrichmentResult, EnrichmentSource, EntityContext, EntityRelationClaim
+from app.models.entity_index import ALIAS_INDEXED_TABLES
 from app.models.entity_relationship import EntityRelationship
 from app.models.entry import Entry
 from app.models.feed import Feed
@@ -39,6 +41,11 @@ from app.models.tool import Tool
 from app.models.ttp import TTP
 
 FIXTURES = Path(__file__).parent / "fixtures" / "enrichment"
+
+#: Entity types ``resolve_target`` can find (the branches of ``relations._ids``).
+RESOLVABLE_TARGETS = frozenset(
+    {entity_types.TTP, entity_types.CVE, entity_types.SECTOR, entity_types.COUNTRY, *ALIAS_INDEXED_TABLES}
+)
 CARDS = json.loads((FIXTURES / "etda_cards.json").read_text())
 AKIRA = json.loads((FIXTURES / "ransomware_live_group_akira.json").read_text())
 
@@ -115,13 +122,27 @@ def test_every_relation_output_is_one_the_matrix_allows_and_can_resolve():
         ("threatfox", "families"),
         ("urlhaus", "families"),
         ("malwarebazaar", "families"),
+        ("malpedia", "attribution"),
+        ("shodan", "cve_ids"),
+        ("wikidata", "industry"),
     }
     for cls, relation in declared:
-        for entity_type in cls.applies_to:
-            for target_type in relation.target_types:
-                # Either way round: an observable's source names the family behind it.
-                assert orient_relationship(entity_type, relation.relation, target_type), (cls, relation)
-                assert target_type in RESOLVABLE_TARGETS, (cls, relation)
+        for target_type in relation.target_types:
+            assert target_type in RESOLVABLE_TARGETS, (cls, relation)
+        # Either way round: an observable's source names the family behind it.
+        # A source that applies to several types may declare a relation only
+        # some of them make (Malpedia's attribution: malware, not tools):
+        # ``relations_for`` keeps it for exactly the types the matrix allows.
+        assert any(
+            orient_relationship(t, relation.relation, target_type)
+            for t in cls.applies_to
+            for target_type in relation.target_types
+        ), (cls, relation)
+        for t in cls.applies_to:
+            allowed = any(
+                orient_relationship(t, relation.relation, target_type) for target_type in relation.target_types
+            )
+            assert (relation in relations_for(cls, t)) is allowed, (cls, relation, t)
 
 
 def test_licenses_bar_commercial_use():
@@ -143,7 +164,7 @@ class _Ref(Source):
     egress = Egress.NONE
     license = License("test")
     outputs = (
-        Relation("tools", "uses", ("malware", "tool"), item={"name": "name", "evidence": "how"}),
+        Relation("tools", "uses", ("malware", "tool"), item={"name": "name", "evidence": "how", "aliases": "aka"}),
         Relation("places", "uses", ("ttp", "country")),
         Relation("victims", "targets", ("tool",)),
     )
@@ -222,6 +243,21 @@ async def test_a_rerun_changes_nothing_and_a_held_name_links_once_the_entity_exi
     assert await apply_relations(db_session, "threat_actor", actor.id, "ref_catalog", data)
     assert ("uses", "tool", str(rat.id)) in await _edges(db_session, actor.id)
     assert all(c.held_reason is None for c in await _claims(db_session, "ref_catalog"))
+
+
+async def test_a_name_that_matches_nothing_resolves_by_the_sources_other_names(db_session, ref_sources, world):
+    actor = world["actor"]
+    data = {
+        "tools": [
+            # ThreatFox's printable name and its malware_alias list.
+            {"name": "Beacon Framework", "aka": ["Agentemis", "CobaltStrike"]},
+            {"name": "Nonexistent RAT", "aka": ["Also Unknown"]},
+        ]
+    }
+    assert await apply_relations(db_session, "threat_actor", actor.id, "ref_catalog", data)
+    claims = {c.target_name: c for c in await _claims(db_session, "ref_catalog")}
+    assert (claims["Beacon Framework"].target_id, claims["Beacon Framework"].held_reason) == (world["cobalt"].id, None)
+    assert claims["Nonexistent RAT"].held_reason == "unknown"
 
 
 async def test_withdrawal_keeps_what_another_source_still_claims(db_session, ref_sources, world):

@@ -10,6 +10,8 @@ import uuid
 from sqlalchemy import select
 
 from app.enrichment.entity_updater import apply_enrichment_results_to_entity
+from app.models.country import Country
+from app.models.cve import CVE
 from app.models.entity_field_claim import EntityFieldClaim
 from app.models.malware_family import MalwareFamily
 from app.models.mitigation import Mitigation
@@ -17,6 +19,7 @@ from app.models.observable import Observable
 from app.models.threat_actor import ThreatActor
 from app.models.tool import Tool
 from app.models.ttp import TTP
+from app.services.claim_provenance import record_claim
 
 
 def _ok(source: str, data: dict, status: str = "success") -> dict:
@@ -59,8 +62,15 @@ async def _apply(db, entity_type, entity, results):
 # ── Reference entities: fills, ranks, unions ─────────────────────────
 
 
+async def _russia(db) -> Country:
+    """The country Malpedia's "RU" resolves to: a country is only ever linked, never created."""
+    country = (await db.execute(select(Country).where(Country.iso_code == "RU"))).scalar()
+    return country or await _add(db, Country(name="Russia", iso_code="RU"))
+
+
 async def test_blank_actor_takes_every_fill(db_session):
     actor = await _add(db_session, ThreatActor(name="APT28"))
+    russia = await _russia(db_session)
 
     changed = await _apply(
         db_session,
@@ -78,7 +88,7 @@ async def test_blank_actor_takes_every_fill(db_session):
     # MITRE's list first, then Malpedia's; junk ("AB", non-strings, the name
     # itself) and case-insensitive repeats are dropped, whitespace trimmed.
     assert actor.aliases == ["Sofacy", "STRONTIUM", "Pawn Storm", "Sednit"]
-    assert actor.country == "RU"
+    assert actor.country == russia.name
 
 
 async def test_curated_actor_keeps_its_fields_and_gains_new_aliases(db_session):
@@ -123,7 +133,8 @@ async def test_tool_fills_references_and_platforms(db_session):
     malpedia = {
         "found": True,
         "malpedia_url": " https://malpedia.caad.fkie.fraunhofer.de/details/win.mimikatz ",
-        "urls": [{"url": "https://blog.example/mimikatz"}, "https://github.com/gentilkiwi/mimikatz", "x"],
+        # The adapter's parse keeps the github.com links of Malpedia's urls.
+        "github_urls": [{"url": "https://blog.example/mimikatz"}, "https://github.com/gentilkiwi/mimikatz", "x"],
         "alt_names": ["Mimikatz", "MimiKatz2"],
     }
     mitre = {"found": True, "platforms": ["Windows", None, 3], "aliases": ["mimikatz"]}
@@ -138,7 +149,7 @@ async def test_tool_fills_references_and_platforms(db_session):
 
 async def test_tool_github_url_from_a_dict_reference_and_blank_platforms_stay(db_session):
     tool = await _add(db_session, Tool(name="Rubeus", platforms=["Linux"]))
-    malpedia = {"urls": [{"url": "https://github.com/GhostPack/Rubeus"}]}
+    malpedia = {"github_urls": [{"url": "https://github.com/GhostPack/Rubeus"}]}
     await _apply(db_session, "tool", tool, [_ok("malpedia", malpedia), _ok("mitre_attack", {"platforms": ["Windows"]})])
     assert tool.github_url == "https://github.com/GhostPack/Rubeus"
     assert tool.platforms == ["Linux"]
@@ -210,6 +221,7 @@ async def test_nothing_to_write_reports_no_change(db_session):
 
 async def test_fills_record_who_asserted_them(db_session):
     actor = await _add(db_session, ThreatActor(name="APT28"))
+    await _russia(db_session)
     await _apply(
         db_session,
         "threat_actor",
@@ -258,8 +270,9 @@ async def test_reputation_folds_every_source(db_session):
         "vt_ratio": "3/92",
         "vt_malicious": 0,
     }
-    # Network facts and the GreyNoise class live in their own columns.
-    assert (obs.asn, obs.geo_country, obs.noise_class) == (63949, "US", "benign")
+    # The GreyNoise class lives in its own column; VirusTotal's network facts
+    # are context only (Team Cymru writes asn and geo_country).
+    assert (obs.asn, obs.geo_country, obs.noise_class) == (None, None, "benign")
     assert obs.infra_tag == "vpn"
 
 
@@ -311,3 +324,109 @@ async def test_a_bare_result_still_stamps_the_reputation(db_session):
     untouched = await _add(db_session, _obs("1.2.3.4", infra_tag="rmm"))
     assert not await _apply(db_session, "observable", untouched, [])
     assert untouched.reputation is None and untouched.infra_tag == "rmm"
+
+
+# ── Ranked columns: the holder's rank decides ───────────────────────
+
+
+async def _claims(db, entity_id) -> set[tuple[str, str, str]]:
+    rows = await db.execute(
+        select(EntityFieldClaim.field, EntityFieldClaim.value_text, EntityFieldClaim.source_ref).where(
+            EntityFieldClaim.entity_id == entity_id
+        )
+    )
+    return set(rows.all())
+
+
+def _cna(score: float) -> dict:
+    return {"found": True, "cna_cvss": {"score": score}, "cvss_severity": "CRITICAL"}
+
+
+async def test_a_higher_ranked_source_replaces_and_the_loser_is_still_claimed(db_session):
+    cve = await _add(db_session, CVE(cve_id="CVE-2026-90001"))
+    assert await _apply(db_session, "cve", cve, [_ok("cvelist", _cna(9.0))])
+    assert float(cve.cvss_score) == 9.0
+
+    # NVD (rank 1) outranks the CNA (rank 2) and its severity goes with it.
+    assert await _apply(db_session, "cve", cve, [_ok("nvd", {"cvss_score": 10.0, "cvss_severity": "CRITICAL"})])
+    assert float(cve.cvss_score) == 10.0
+
+    # The CNA answering again doesn't take it back, but its value is claimed.
+    assert not await _apply(db_session, "cve", cve, [_ok("cvelist", _cna(9.1))])
+    assert float(cve.cvss_score) == 10.0
+    claims = await _claims(db_session, cve.id)
+    expected = {("cvss_score", "10", "nvd"), ("cvss_score", "9", "cvelist:cna"), ("cvss_score", "9.1", "cvelist:cna")}
+    assert expected <= claims
+
+
+async def test_an_answer_without_a_score_never_wipes_one(db_session):
+    cve = await _add(db_session, CVE(cve_id="CVE-2026-90002"))
+    await _apply(db_session, "cve", cve, [_ok("cvelist", _cna(7.5))])
+    assert not await _apply(db_session, "cve", cve, [_ok("nvd", {"cvss_score": None, "description": None})])
+    assert float(cve.cvss_score) == 7.5
+
+
+async def test_the_holder_updates_and_withdraws_its_own_value(db_session):
+    obs = await _add(db_session, _obs("10.0.0.9"))
+    await _apply(db_session, "observable", obs, [_ok("shodan", {"tags": "vpn"})])
+    assert obs.infra_tag == "vpn"
+    await _apply(db_session, "observable", obs, [_ok("shodan", {"tags": "proxy"})])
+    assert obs.infra_tag == "proxy"
+    # A lower-ranked source can't replace it…
+    await _apply(db_session, "observable", obs, [_ok("greynoise", {"riot": True})])
+    assert obs.infra_tag == "proxy"
+    # …but Shodan no longer seeing a proxy clears its tag.
+    await _apply(db_session, "observable", obs, [_ok("shodan", {"found": True, "tags": "cloud"})])
+    assert obs.infra_tag is None
+    # A "not found" answer withdraws it too, as it does noise_class: the two
+    # columns from one lookup never disagree.
+    await _apply(db_session, "observable", obs, [_ok("greynoise", {"riot": True})])
+    assert obs.infra_tag == "benign_service"
+    await _apply(db_session, "observable", obs, [_ok("greynoise", {"found": False})])
+    assert obs.infra_tag is None
+    await _apply(db_session, "observable", obs, [_ok("shodan", {"tags": "tor"})])
+    await _apply(db_session, "observable", obs, [_ok("shodan", {"found": False})])
+    assert obs.infra_tag is None
+
+
+async def test_a_not_found_answer_keeps_a_value_whose_output_does_not_clear(db_session):
+    cve = await _add(db_session, CVE(cve_id="CVE-2026-90007"))
+    await _apply(db_session, "cve", cve, [_ok("nvd", {"cvss_score": 7.5})])
+    assert not await _apply(db_session, "cve", cve, [_ok("nvd", {"found": False})])
+    assert float(cve.cvss_score) == 7.5
+
+
+async def test_an_analysts_value_outranks_every_source(db_session):
+    actor = await _add(db_session, ThreatActor(name="Group R", description="Analyst text."))
+    await record_claim(
+        db_session,
+        entity_type="threat_actor",
+        entity_id=actor.id,
+        field="description",
+        value="Analyst text.",
+        source_kind="analyst",
+    )
+    assert not await _apply(db_session, "threat_actor", actor, [_ok("wikipedia", WIKI | {"wikipedia_url": None})])
+    assert actor.description == "Analyst text."
+    assert ("description", WIKI["first_paragraph"].strip(), "wikipedia") in await _claims(db_session, actor.id)
+
+
+async def test_an_ai_value_is_replaced_by_a_ranked_source(db_session):
+    actor = await _add(db_session, ThreatActor(name="Group S", description="AI draft."))
+    await record_claim(
+        db_session,
+        entity_type="threat_actor",
+        entity_id=actor.id,
+        field="description",
+        value="AI draft.",
+        source_kind="ai_assessment",
+    )
+    await _apply(db_session, "threat_actor", actor, [_ok("mitre_attack", {"description": "From ATT&CK."})])
+    assert actor.description == "From ATT&CK."
+
+
+async def test_osv_aliases_union_onto_the_cve(db_session):
+    cve = await _add(db_session, CVE(cve_id="CVE-2026-90003", aliases=["GHSA-aaaa-bbbb-cccc"]))
+    data = {"found": True, "aliases": ["CVE-2026-90003", " GHSA-aaaa-bbbb-cccc ", "PYSEC-2026-1", 7]}
+    assert await _apply(db_session, "cve", cve, [_ok("osv", data)])
+    assert cve.aliases == ["GHSA-aaaa-bbbb-cccc", "PYSEC-2026-1"]

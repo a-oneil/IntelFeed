@@ -947,9 +947,12 @@ async def _prune_engine_tables() -> int:
         )
         total += result.rowcount or 0
         # The retired link validator's proposals: past 30 days nothing re-judges them.
-        from app.services.proposal_dismissals import expire_legacy_link_proposals
+        from app.services.proposal_dismissals import expire_legacy_link_proposals, purge_gone_entity_proposals
 
         total += await expire_legacy_link_proposals(db)
+        # Proposals about entities that no longer exist: the Review queue hides
+        # them the moment the entity goes; this drops the rows.
+        total += await purge_gone_entity_proposals(db)
         await db.commit()
     return total
 
@@ -1121,22 +1124,19 @@ def reenrich_cve_nvd():
 _REENRICH_PENDING_STATUSES = ("Awaiting Analysis", "Undergoing Analysis", "Received")
 
 
-@source_job("nvd")
-async def _reenrich_cve_nvd(batch_size: int | None = None) -> dict:
-    import asyncio
+# Wall-clock seconds a run may spend on lookups, under the task's soft limit.
+_REENRICH_BUDGET_S = 780
 
+
+@source_job("nvd", lane="backfill")
+async def _reenrich_cve_nvd(batch_size: int | None = None) -> dict:
+    """Look the selected CVEs up again. The NVD source's gateway paces the
+    requests (no sleeps here); each answer goes through the NVD source's
+    field map (``apply_nvd``), so it never overwrites an analyst's value."""
     from sqlalchemy import and_, or_
 
     from app.enrichment.gateway import JOB_TOKEN_WAIT, SOURCE_REFUSALS
-    from app.intelligence.cpe_resolver import build_cpe_index
-    from app.intelligence.cve import (
-        enrich_from_nvd,
-        nvd_gateway,
-        nvd_request_pace,
-        nvd_retry_allowed,
-        stamp_nvd_miss,
-        sync_cve_affected,
-    )
+    from app.intelligence.cve import apply_nvd, enrich_from_nvd, nvd_gateway, nvd_retry_allowed, stamp_nvd_miss
     from app.models.cve import CVE
 
     if batch_size is None:
@@ -1164,10 +1164,19 @@ async def _reenrich_cve_nvd(batch_size: int | None = None) -> dict:
         or_(~CVE.nvd_data.has_key("_enrich_last_attempt"), last_attempt < stale_cutoff),
     )
 
-    stats = {"attempted": 0, "enriched": 0, "with_config": 0, "pairs": 0, "stopped": None}
+    stats = {
+        "fetched": 0,
+        "changed": 0,
+        "written": 0,
+        "attempted": 0,
+        "enriched": 0,
+        "with_config": 0,
+        "affected_products": 0,
+    }
+    stats["stopped"] = None
+    deadline = time.monotonic() + _REENRICH_BUDGET_S
     async with _get_worker_session() as db:
         gateway, api_key = await nvd_gateway(db, max_wait=JOB_TOKEN_WAIT)
-        index = await build_cpe_index(db)
         rows = (
             (
                 await db.execute(
@@ -1180,10 +1189,14 @@ async def _reenrich_cve_nvd(batch_size: int | None = None) -> dict:
             .scalars()
             .all()
         )
-        pace = nvd_request_pace(api_key)
+        cache: dict = {}
         for i, cve in enumerate(rows):
-            if i:
-                await asyncio.sleep(pace)  # stay under NVD's rolling window
+            left = deadline - time.monotonic()
+            if left <= 0:
+                stats["stopped"] = "out_of_time"
+                break
+            # A token wait never carries the run past its budget.
+            gateway.max_wait = min(JOB_TOKEN_WAIT, left)
             try:
                 nvd = await enrich_from_nvd(cve.cve_id, gateway, api_key)
             except SOURCE_REFUSALS as e:
@@ -1196,25 +1209,18 @@ async def _reenrich_cve_nvd(batch_size: int | None = None) -> dict:
             if not nvd:
                 stamp_nvd_miss(cve, now)
                 continue
+            stats["fetched"] += 1
             stats["enriched"] += 1
-            if nvd.get("cvss_score") is not None:
-                cve.cvss_score = nvd["cvss_score"]
-            if nvd.get("severity"):
-                cve.severity = nvd["severity"]
-            if nvd.get("description") and not cve.description:
-                cve.description = nvd["description"]
-            if nvd.get("references"):
-                cve.references_ = nvd["references"]
-            blob = dict(nvd.get("nvd_data") or {})
-            if not blob.get("configurations"):
+            if not (nvd.get("nvd_data") or {}).get("configurations"):
                 # Still unanalyzed at NVD — stamp so the pending arm waits 14d
-                blob["_enrich_last_attempt"] = now.isoformat()
-            cve.nvd_data = blob
+                nvd = {**nvd, "nvd_data": {**(nvd.get("nvd_data") or {}), "_enrich_last_attempt": now.isoformat()}}
+            applied = await apply_nvd(db, cve, nvd, cache, via="reenrich-cve-nvd")
+            stats["changed"] += applied.changed
+            stats["written"] += applied.written
             products = nvd.get("affected_products") or []
             if products:
                 stats["with_config"] += 1
-                cve.affected_products = products
-                stats["pairs"] += await sync_cve_affected(db, cve.id, products, index)
+                stats["affected_products"] += len(products)
         await db.commit()
     return stats
 

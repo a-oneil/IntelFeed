@@ -3,197 +3,270 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-import type { EnrichmentConsole as ConsoleData, EnrichmentSourceDetail } from "@/hooks/useEnrichment";
-import type { EnrichmentSource } from "@/api/types";
+import type {
+  EnrichmentConsole as ConsoleData,
+  EnrichmentConsoleSource,
+  EnrichmentKey,
+  EnrichmentSourceDetail,
+} from "@/hooks/useEnrichment";
 import { EnrichmentConsole } from "../engine/EnrichmentConsole";
 
-// Payloads in the shapes of the build spec's console API (§C).
+function source(over: Partial<EnrichmentConsoleSource>): EnrichmentConsoleSource {
+  return {
+    id: `row-${over.source_type}`,
+    source_type: "x",
+    label: "X",
+    about: "",
+    kind: "lookup",
+    status: "ok",
+    enabled: true,
+    fills: "",
+    applies_to: ["cve"],
+    attention: null,
+    egress: "low",
+    license: "CC0",
+    commercial_ok: true,
+    key: null,
+    key_status: null,
+    trigger_mode: "auto",
+    used_today: 0,
+    daily_budget: 1000,
+    jobs: 0,
+    settings_keys: [],
+    source_settings: [],
+    ...over,
+  };
+}
+
+const sources = [
+  source({
+    source_type: "nvd",
+    label: "NVD 2.0",
+    about: "The US National Vulnerability Database.",
+    status: "failing",
+    attention: "cve-nvd-backfill failed 30 of 33 runs in 30 days",
+    fills: "CVSS score, weaknesses",
+    key: "nvd_api_key",
+    key_status: "set",
+    used_today: 950,
+    jobs: 2,
+    settings_keys: ["cve_reenrich_batch_size"],
+  }),
+  source({
+    source_type: "threatfox",
+    label: "abuse.ch ThreatFox",
+    status: "key_rejected",
+    applies_to: ["observable"],
+    egress: "shares_ioc",
+    commercial_ok: false,
+    key: "abuse_ch",
+    key_status: "rejected",
+    trigger_mode: "manual",
+  }),
+  source({ source_type: "epss", label: "FIRST EPSS", new: true, fills: "EPSS score", egress: "none" }),
+  source({
+    source_type: "virustotal",
+    label: "VirusTotal v3",
+    status: "needs_key",
+    needs: "key",
+    enabled: false,
+    applies_to: ["observable"],
+    key: "virustotal",
+    key_status: "missing",
+  }),
+];
+
 const consoleData: ConsoleData = {
   summary: {
-    sources_on: 11,
-    sources_total: 17,
-    needs_attention: 1,
+    sources_on: 3,
+    sources_total: 4,
     paused: false,
     redis_ok: true,
-    activity_24h: { requests: 4212, queued: 1730, deferred: 94, iocs_sent_off_box: 0 },
+    activity_24h: {
+      requests: 4212,
+      trend: Array(24).fill(1),
+      waiting: 1730,
+      waiting_backfill: 898,
+      deferred: 94,
+      iocs_sent: 212,
+      ioc_sources: ["abuse.ch ThreatFox"],
+    },
   },
-  entity_types: [
-    { entity_type: "cve", label: "CVE", source_count: 3 },
-    { entity_type: "observable", label: "Observable", source_count: 1 },
-  ],
-  sources: [
+  attention: [
     {
-      id: "id-nvd",
+      source_type: "threatfox",
+      label: "abuse.ch Auth-Key",
+      sources: ["abuse.ch ThreatFox", "abuse.ch URLhaus"],
+      text: "the source rejected the API key",
+      severity: "bad",
+      action: { kind: "key", key: "abuse_ch", label: "Replace key" },
+    },
+    {
       source_type: "nvd",
       label: "NVD 2.0",
-      kind: "lookup",
-      status: "failing",
-      enabled: true,
-      fills: "CVSS, CWE, affected products",
-      applies_to: ["cve"],
-      attention: "cve-nvd-backfill failed 30 of 33 runs",
+      text: "cve-nvd-backfill failed 30 of 33 runs in 30 days",
+      severity: "bad",
+      action: { kind: "source", source: "nvd", tab: "jobs", label: "Open jobs" },
     },
     {
-      id: "id-epss",
-      source_type: "epss",
-      label: "EPSS",
-      kind: "lookup",
-      status: "ok",
-      enabled: true,
-      fills: "EPSS score, percentile",
-      applies_to: ["cve"],
-      attention: null,
-    },
-    {
-      id: "id-osv",
-      source_type: "osv",
-      label: "OSV",
-      kind: "lookup",
-      status: "off",
-      enabled: false,
-      fills: "aliases, fixed versions",
-      applies_to: ["cve"],
-      attention: null,
-    },
-    {
-      id: "id-virustotal",
-      source_type: "virustotal",
-      label: "VirusTotal",
-      kind: "lookup",
-      status: "needs_key",
-      enabled: false,
-      fills: "reputation",
-      applies_to: ["observable"],
-      attention: null,
+      source_type: "greynoise",
+      label: "GreyNoise Community",
+      text: "86 lookups gave up after repeated errors",
+      severity: "warn",
+      action: { kind: "retry", source: "greynoise", label: "Retry all" },
     },
   ],
+  entity_types: [
+    { entity_type: "cve", label: "CVE", source_count: 2 },
+    { entity_type: "observable", label: "Observable", source_count: 2 },
+  ],
+  sources,
 };
 
 const detail: EnrichmentSourceDetail = {
   limits: {
-    // Keyed: the row stores the keyless 5 per 30 s, the key runs it at 50.
     rate: { requests_per_period: 5, period_seconds: 30 },
     effective_rate: { requests_per_period: 50, period_seconds: 30 },
     rate_note: "with key",
-    ceiling_per_period: 100,
-    daily_budget: 5000,
-    used_today: 3100,
+    ceiling_per_period: 50,
+    daily_budget: 1000,
+    used_today: 950,
     backfill_share: 0.6,
-    refresh_days: 30,
-    key: "global",
-    triggers: ["new", "refresh", "manual", "backfill"],
-    scope: "cve with no CVSS, or changed in 7 days",
+    refresh_days: 7,
+    triggers: ["new", "manual", "backfill", "schedule"],
+    scope: "CVE with no CVSS score",
   },
-  trend_24h: Array.from({ length: 24 }, (_, i) => (i % 5) * 10),
-  queue: { waiting: 1224, by_lane: { backfill: 898, refresh: 240, manual: 0, new: 0 }, retrying: 86, failed: 0 },
+  trend_24h: Array(24).fill(0),
+  queue: { waiting: 12, by_lane: { new: 4, backfill: 8 }, retrying: 3, by_reason: { rate_limited: 3 }, failed: 0 },
+  settings: { trigger_mode: "auto", rate_limit_config: { requests_per_period: 5, period_seconds: 30 } },
   outputs: [
-    { field: "baseScore", target: "cve.cvss_score", kind: "column", policy: "rank", rank: 1, filled_pct: 72.1 },
-    { field: "references", target: "context", kind: "context", filled_pct: null },
-    {
-      field: "tools",
-      target: "relationship: uses malware or tool",
-      kind: "relationship",
-      filled_pct: null,
-      linked: 1204,
-      held: 37,
-    },
+    { field: "cvss_score", target: "cve.cvss_score", kind: "column", policy: "rank", rank: 1, filled_pct: 72 },
+    { field: "references", target: "profile: References", kind: "context", filled_pct: null },
   ],
-  gap: { entity_type: "cve", field: "cvss_score", missing: 23665, in_scope: 14100, eta_days: 3.4 },
+  gap: { entity_type: "cve", field: "cvss_score", missing: 23665, in_scope: 14100, eta_days: 0.4 },
   jobs: [
     {
       key: "cve-nvd-backfill",
-      schedule: "daily 01:30",
+      description: "Backfill NVD data for CVEs missing it",
+      settings_keys: [],
+      schedule: "Daily at 1:30 AM",
       runs_30d: 33,
       ok_30d: 3,
       last_status: "error",
       last_error: "TimeLimitExceeded(960)",
-      last_detail: { enriched: 0 },
+      last_detail: null,
     },
     {
-      key: "cve-nvd-refresh",
-      schedule: "hourly",
-      runs_30d: 30,
-      ok_30d: 30,
+      key: "reenrich-cve-nvd",
+      description: "Ask again about CVEs NVD hadn't analysed",
+      settings_keys: ["cve_reenrich_batch_size"],
+      schedule: "Daily at 3:05 AM",
+      runs_30d: 29,
+      ok_30d: 28,
       last_status: "success",
       last_error: null,
-      last_detail: null,
+      last_detail: { fetched: 200, changed: 41, written: 39 },
     },
   ],
 };
 
-const row = (source_type: string, extra: Partial<EnrichmentSource> = {}) =>
-  ({
-    id: `id-${source_type}`,
-    source_type,
-    display_name: source_type,
-    is_enabled: true,
-    trigger_mode: "auto",
-    has_api_key: false,
-    requires_api_key: false,
-    shared_key_group: null,
-    rate_limit_config: { requests_per_period: 50, period_seconds: 30 },
-    min_confidence_threshold: "low",
-    daily_budget: 5000,
-    supported_entity_types: ["cve"],
-    last_synced_at: null,
-    health_status: "healthy",
-    config: {},
-    created_at: "",
-    updated_at: "",
-    ...extra,
-  }) as EnrichmentSource;
+const keys: EnrichmentKey[] = [
+  {
+    id: "abuse_ch",
+    label: "abuse.ch Auth-Key",
+    note: "Needed. One key for all 3 sources.",
+    required: true,
+    sources: [
+      { source_type: "threatfox", label: "abuse.ch ThreatFox" },
+      { source_type: "urlhaus", label: "abuse.ch URLhaus" },
+    ],
+    also_used_by: null,
+    status: "rejected",
+    message: "HTTP 401",
+    mine: false,
+    personal_allowed: true,
+    signup_url: "https://auth.abuse.ch/",
+  },
+  {
+    id: "nvd_api_key",
+    label: "NVD API Key",
+    note: "Optional. Raises the limit from 5 to 50 per 30 seconds.",
+    required: false,
+    sources: [{ source_type: "nvd", label: "NVD 2.0" }],
+    also_used_by: null,
+    status: "set",
+    message: null,
+    mine: true,
+    personal_allowed: true,
+    signup_url: null,
+  },
+];
 
-const consoleSpy = vi.fn();
 const pauseMutate = vi.fn();
 const backfillMutate = vi.fn();
 const updateMutate = vi.fn();
-const enrichGapMutate = vi.fn();
+const retryMutate = vi.fn();
+const setKey = vi.fn().mockResolvedValue(undefined);
+const testKey = vi.fn().mockResolvedValue({ status: "ok", message: null });
 
 vi.mock("@/hooks/useEnrichment", () => ({
-  useEnrichmentConsole: (entityType?: string) => {
-    consoleSpy(entityType);
-    const sources = entityType
-      ? consoleData.sources.filter((x) => x.applies_to.includes(entityType))
-      : consoleData.sources;
-    return { data: { ...consoleData, sources }, isError: false };
-  },
-  useEnrichmentSources: () => ({
-    data: [row("nvd"), row("epss"), row("osv", { is_enabled: false }), row("virustotal", { requires_api_key: true })],
+  useEnrichmentConsole: () => ({ data: consoleData, isError: false }),
+  useEnrichmentSourceDetail: (sourceType: string | null) => ({ data: sourceType ? detail : undefined, isError: false }),
+  useEnrichmentKeys: () => ({ data: keys, isError: false }),
+  useEnrichmentCoverage: () => ({
+    data: [
+      {
+        entity_type: "threat_actor",
+        entity_label: "Threat actor",
+        field: "country",
+        label: "country",
+        filled: 43,
+        total: 100,
+        filled_pct: 43,
+        sources: [{ source_type: "etda", label: "ETDA", enabled: true }],
+        action: { kind: "ai", field: "country" },
+        cadence: null,
+      },
+    ],
+    isError: false,
   }),
-  useEnrichmentSourceDetail: (sourceType: string | null) => ({
-    data: sourceType ? detail : undefined,
-    isLoading: false,
+  useEnrichmentActivity: () => ({
+    data: {
+      lanes: [
+        { lane: "manual", waiting: 4, deferred: 0 },
+        { lane: "backfill", waiting: 898, deferred: 51 },
+      ],
+      backfill_share: 0.6,
+      failed: [{ source_type: "greynoise", label: "GreyNoise Community", count: 86, last_error: "429" }],
+      requests: [{ source_type: "nvd", label: "NVD 2.0", requests: 3100 }],
+    },
     isError: false,
   }),
   usePauseEnrichment: () => ({ mutate: pauseMutate, isPending: false }),
   useQueueBackfill: () => ({ mutate: backfillMutate, isPending: false }),
   useUpdateEnrichmentSource: () => ({ mutate: updateMutate, isPending: false }),
-  useTestEnrichmentSource: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useUserEnrichmentOverrides: () => ({ data: [] }),
-  useUpsertUserOverride: () => ({ mutate: vi.fn(), isPending: false }),
-  useDeleteUserOverride: () => ({ mutate: vi.fn(), isPending: false }),
+  useRetryFailedLookups: () => ({ mutate: retryMutate, isPending: false }),
+  useSetEnrichmentKey: () => ({ mutateAsync: setKey, isPending: false }),
+  useTestEnrichmentKey: () => ({ mutateAsync: testKey, isPending: false }),
 }));
 
+const enrichGapMutate = vi.fn();
 vi.mock("@/hooks/useHygiene", () => ({
-  useEnrichmentGaps: () => ({
-    data: { buckets: [{ entity_type: "cve", field: "cvss", missing: 42, sample: [] }] },
-    isLoading: false,
-  }),
-  useEnrichGap: () => ({ mutateAsync: enrichGapMutate }),
+  useEnrichGap: () => ({ mutate: enrichGapMutate, isPending: false }),
 }));
 
 vi.mock("@/hooks/useJobSchedules", () => ({
   useJobSchedules: () => ({ data: undefined }),
   useUpdateJobSchedule: () => ({ mutate: vi.fn(), isPending: false }),
   useResetJobSchedule: () => ({ mutate: vi.fn(), isPending: false }),
-  useRunJobNow: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useRunJobNow: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 vi.mock("@/components/SystemSettings", async () => {
   const { createContext } = await import("react");
   return {
-    default: ({ filterGroups }: { filterGroups?: string[] }) => (
-      <div data-testid="system-settings">{filterGroups?.join(",")}</div>
+    default: ({ filterKeys }: { filterKeys?: string[] }) => (
+      <div data-testid="system-settings">{filterKeys?.join(",")}</div>
     ),
     SettingsHighlightContext: createContext<{ key: string; nonce: number } | null>(null),
   };
@@ -211,162 +284,158 @@ function renderConsole(initialSource?: string) {
   return render(<EnrichmentConsole initialSource={initialSource} />, { wrapper: wrap });
 }
 
-const bodyRows = () => within(screen.getByRole("table")).getAllByRole("row").slice(1);
+const view = (name: RegExp) => fireEvent.click(screen.getByRole("tab", { name }));
+const panel = () => screen.getByRole("complementary");
 
 describe("EnrichmentConsole", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
+  beforeEach(() => vi.clearAllMocks());
 
-  it("shows the one-line summary and filters to sources needing attention", () => {
+  it("shows the 24h strip and the distinct indicators sent out", () => {
     renderConsole();
-    expect(screen.getByText(/11 of 17 sources on/)).toBeInTheDocument();
-    expect(bodyRows()).toHaveLength(4);
-    const attn = screen.getByRole("button", { name: "1 needs attention" });
-    fireEvent.click(attn);
-    expect(attn).toHaveAttribute("aria-pressed", "true");
-    expect(bodyRows()).toHaveLength(1);
-    expect(screen.getByRole("button", { name: /NVD 2.0/ })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "show all" }));
-    expect(bodyRows()).toHaveLength(4);
+    const strip = screen.getByLabelText("Last 24 hours");
+    expect(within(strip).getByText("4,212")).toBeInTheDocument();
+    expect(within(strip).getByText("898 are backfill")).toBeInTheDocument();
+    expect(within(strip).getByText("212")).toBeInTheDocument();
+    expect(within(strip).getByText("to abuse.ch ThreatFox")).toBeInTheDocument();
+    expect(within(strip).getByText("Healthy")).toBeInTheDocument();
   });
 
-  it("filters by entity-type tab", () => {
+  it("names each problem with the one button that fixes it", () => {
     renderConsole();
-    const tabs = screen.getByRole("tablist");
-    expect(within(tabs).getByRole("tab", { name: "All 17" })).toHaveAttribute("aria-selected", "true");
-    fireEvent.click(within(tabs).getByRole("tab", { name: "Observable 1" }));
-    expect(consoleSpy).toHaveBeenLastCalledWith("observable");
-    expect(within(tabs).getByRole("tab", { name: "Observable 1" })).toHaveAttribute("aria-selected", "true");
-    expect(bodyRows()).toHaveLength(1);
-    expect(screen.getByRole("button", { name: /VirusTotal/ })).toBeInTheDocument();
+    const attn = screen.getByRole("region", { name: "Needs attention" });
+    expect(within(attn).getByText(/rejected the API key/)).toBeInTheDocument();
+
+    fireEvent.click(within(attn).getByRole("button", { name: "Retry all" }));
+    expect(retryMutate).toHaveBeenCalledWith("greynoise", expect.anything());
+
+    fireEvent.click(within(attn).getByRole("button", { name: "Open jobs" }));
+    expect(screen.getByRole("tab", { name: "Jobs · 2" })).toHaveAttribute("aria-selected", "true");
+    expect(within(panel()).getByText("cve-nvd-backfill")).toBeInTheDocument();
+
+    fireEvent.click(within(attn).getByRole("button", { name: "Replace key" }));
+    expect(screen.getByRole("tab", { name: /Keys/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("Shared key")).toBeInTheDocument();
   });
 
-  it("shows one status word per source", () => {
+  it("lists sources that are on first and the rest under Available", () => {
     renderConsole();
-    const statuses = bodyRows().map((r) => within(r).getAllByRole("cell")[1].textContent);
-    expect(statuses).toEqual(["failing", "ok", "off", "needs key"]);
+    expect(screen.getByText("On · 3")).toBeInTheDocument();
+    expect(screen.getByText("Available · 1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /NVD 2.0.*Failing/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /ThreatFox.*Key rejected/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /VirusTotal.*Needs a key/ })).toBeInTheDocument();
   });
 
-  it("toggles a source on through the settings row id", () => {
+  it("filters the list by entity type", () => {
     renderConsole();
-    fireEvent.click(screen.getByRole("switch", { name: "OSV on" }));
-    expect(updateMutate).toHaveBeenCalledWith({ sourceId: "id-osv", is_enabled: true }, expect.anything());
+    fireEvent.click(screen.getByRole("button", { name: /^Observable/ }));
+    expect(screen.queryByRole("button", { name: /NVD 2.0/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /ThreatFox/ })).toBeInTheDocument();
   });
 
-  it("expands a row into Limits, Outputs and Jobs", () => {
+  it("opens a source in the side panel with what it sends out and its key", () => {
     renderConsole();
-    const expander = screen.getByRole("button", { name: /NVD 2.0/ });
-    expect(expander).toHaveAttribute("aria-expanded", "false");
-    fireEvent.click(expander);
-    expect(expander).toHaveAttribute("aria-expanded", "true");
-
-    const limits = screen.getByRole("region", { name: "Limits" });
-    expect(within(limits).getByText("50 per 30s")).toBeInTheDocument();
-    expect(within(limits).getByText("(with key; 5 per 30s stored)")).toBeInTheDocument();
-    expect(within(limits).getByText(/3,100 of 5,000 · backfill may use 60%/)).toBeInTheDocument();
-    expect(within(limits).getByText("global key set")).toBeInTheDocument();
-    expect(within(limits).getByText("1,224 waiting: 240 refresh, 898 backfill, 86 retrying")).toBeInTheDocument();
-    expect(within(limits).getByRole("img", { name: /requests in the last 24 hours/ })).toBeInTheDocument();
-
-    const outputs = screen.getByRole("region", { name: "Outputs" });
-    expect(within(outputs).getByText("cve.cvss_score (rank 1)")).toBeInTheDocument();
-    expect(within(outputs).getByText("72%")).toBeInTheDocument();
-    expect(within(outputs).getByText("relationship: uses malware or tool")).toBeInTheDocument();
-    expect(within(outputs).getByText("1,204 linked · 37 held")).toBeInTheDocument();
-    expect(within(outputs).getByText(/23,665 CVEs have no cvss score/)).toBeInTheDocument();
-
-    const jobs = screen.getByRole("region", { name: "Jobs" });
-    expect(within(jobs).getByText("3 of 33 ok")).toBeInTheDocument();
-    expect(within(jobs).getByText("30 of 30 ok")).toBeInTheDocument();
-    expect(within(jobs).getByText("cve-nvd-backfill: TimeLimitExceeded(960)")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /ThreatFox/ }));
+    expect(within(panel()).getByText("your indicators")).toBeInTheDocument();
+    expect(within(panel()).getByText(/hidden from public visitors/)).toBeInTheDocument();
+    fireEvent.click(within(panel()).getByRole("button", { name: "rejected" }));
+    expect(screen.getByRole("tab", { name: /Keys/ })).toHaveAttribute("aria-selected", "true");
   });
 
-  it("opens the deep-linked source expanded", () => {
-    renderConsole("epss");
-    expect(screen.getByRole("button", { name: /EPSS/ })).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("region", { name: "Limits" })).toBeInTheDocument();
+  it("asks for a key before a source that needs one can run", () => {
+    renderConsole();
+    fireEvent.click(screen.getByRole("button", { name: /VirusTotal/ }));
+    fireEvent.click(within(panel()).getByRole("button", { name: "Add key" }));
+    expect(screen.getByRole("tab", { name: /Keys/ })).toHaveAttribute("aria-selected", "true");
   });
 
-  it("queues a backfill for the in-scope gap", () => {
+  it("toggles a source through its settings row id", () => {
+    renderConsole();
+    fireEvent.click(screen.getByRole("button", { name: /FIRST EPSS/ }));
+    fireEvent.click(within(panel()).getByRole("switch", { name: "FIRST EPSS on" }));
+    expect(updateMutate).toHaveBeenCalledWith({ sourceId: "row-epss", is_enabled: false }, expect.anything());
+  });
+
+  it("saves limits with the stored rate and no key fields", () => {
     renderConsole("nvd");
-    fireEvent.click(screen.getByRole("button", { name: "Backfill 14,100 (about 3.4 days at the cap)" }));
-    expect(backfillMutate).toHaveBeenCalledWith(
-      { sourceType: "nvd", entityType: "cve", limit: 14100 },
-      expect.anything(),
-    );
-  });
-
-  it("pauses enrichment", () => {
-    renderConsole();
-    fireEvent.click(screen.getByRole("button", { name: "Pause enrichment" }));
-    expect(pauseMutate).toHaveBeenCalledWith(true, expect.anything());
-  });
-
-  it("lists sources that are off or need a key under Add source", () => {
-    renderConsole();
-    const add = screen.getByRole("button", { name: "Add source" });
-    fireEvent.click(add);
-    expect(add).toHaveAttribute("aria-expanded", "true");
-    fireEvent.click(screen.getByRole("button", { name: "Turn on" }));
-    expect(updateMutate).toHaveBeenCalledWith({ sourceId: "id-osv", is_enabled: true }, expect.anything());
-    fireEvent.click(screen.getByRole("button", { name: "Add key" }));
-    // Opens VirusTotal's row with the limits editor showing the key field.
-    expect(screen.getByRole("button", { name: /VirusTotal/ })).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByLabelText("Global key")).toBeInTheDocument();
-  });
-
-  it("saves edited limits with the rate config", () => {
-    renderConsole("nvd");
-    fireEvent.click(screen.getByRole("button", { name: "Edit limits" }));
-    fireEvent.change(screen.getByLabelText("Requests"), { target: { value: "80" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(within(panel()).getByRole("tab", { name: "Limits" }));
+    expect(within(panel()).queryByLabelText(/key/i)).not.toBeInTheDocument();
+    fireEvent.change(within(panel()).getByLabelText("Rate"), { target: { value: "10" } });
+    fireEvent.click(within(panel()).getByRole("button", { name: "Save" }));
     expect(updateMutate).toHaveBeenCalledWith(
       expect.objectContaining({
-        sourceId: "id-nvd",
-        rate_limit_config: { requests_per_period: 80, period_seconds: 30 },
-        daily_budget: 5000,
+        sourceId: "row-nvd",
+        rate_limit_config: { requests_per_period: 10, period_seconds: 30 },
+        daily_budget: 1000,
         trigger_mode: "auto",
       }),
       expect.anything(),
     );
   });
 
-  it("edits the stored rate and leaves it out of a save that doesn't change it", () => {
-    renderConsole("nvd");
-    fireEvent.click(screen.getByRole("button", { name: "Edit limits" }));
-    expect(screen.getByLabelText("Requests")).toHaveValue(5);
-    fireEvent.change(screen.getByLabelText("Daily cap"), { target: { value: "4000" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    const [payload] = updateMutate.mock.calls.at(-1)!;
-    expect(payload).toMatchObject({ sourceId: "id-nvd", daily_budget: 4000 });
-    expect(payload).not.toHaveProperty("rate_limit_config");
-  });
-
   it("refuses a rate above the source's ceiling", () => {
     renderConsole("nvd");
-    fireEvent.click(screen.getByRole("button", { name: "Edit limits" }));
-    fireEvent.change(screen.getByLabelText("Requests"), { target: { value: "500" } });
-    expect(screen.getByText(/at most 100 per period/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    fireEvent.click(within(panel()).getByRole("tab", { name: "Limits" }));
+    fireEvent.change(within(panel()).getByLabelText("Rate"), { target: { value: "500" } });
+    expect(within(panel()).getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
-  it("keeps AI research for missing fields one click away", async () => {
-    enrichGapMutate.mockResolvedValue({ supported: true, enqueued: 10, batch_size: 10, total_missing: 42 });
-    renderConsole();
-    const summary = screen.getByText("AI research for missing fields");
-    const details = summary.closest("details")!;
-    details.open = true;
-    fireEvent(details, new Event("toggle"));
-    fireEvent.click(await screen.findByRole("button", { name: "Research 10" }));
-    expect(enrichGapMutate).toHaveBeenCalledWith({ entity_type: "cve", field: "cvss", limit: 10 });
+  it("shows fill rates and queues the in-scope backfill", () => {
+    renderConsole("nvd");
+    fireEvent.click(within(panel()).getByRole("tab", { name: "Fields" }));
+    expect(within(panel()).getByText("72%")).toBeInTheDocument();
+    expect(within(panel()).getByText(/14,100 can be looked up now/)).toBeInTheDocument();
+    expect(within(panel()).getByText("under a day at the daily cap")).toBeInTheDocument();
+    fireEvent.click(within(panel()).getByRole("button", { name: "Backfill 14,100" }));
+    expect(backfillMutate).toHaveBeenCalledWith(
+      { sourceType: "nvd", entityType: "cve", limit: 14100 },
+      expect.anything(),
+    );
   });
 
-  it("keeps the enrichment system settings on the page", () => {
+  it("puts each job's settings beside the job", () => {
+    renderConsole("nvd");
+    expect(within(panel()).getByText("TimeLimitExceeded(960)")).toBeInTheDocument();
+    expect(within(panel()).getByText("200 fetched · 41 changed · 39 written")).toBeInTheDocument();
+    expect(within(panel()).getByTestId("system-settings")).toHaveTextContent("cve_reenrich_batch_size");
+  });
+
+  it("sets keys only in Keys, shared and own, and tests a new shared key", async () => {
     renderConsole();
-    const details = screen.getByText("Settings").closest("details")!;
-    details.open = true;
-    fireEvent(details, new Event("toggle"));
-    expect(screen.getByTestId("system-settings")).toHaveTextContent("enrichment,api_keys");
+    view(/Keys/);
+    const rows = within(screen.getByRole("table")).getAllByRole("row").slice(1);
+    expect(rows).toHaveLength(2);
+    expect(within(rows[0]).getByText("Rejected")).toBeInTheDocument();
+    expect(within(rows[1]).getByText("Yours is used")).toBeInTheDocument();
+
+    fireEvent.click(within(rows[0]).getByRole("button", { name: "Replace key" }));
+    fireEvent.change(screen.getByLabelText("Shared key"), { target: { value: "new-key" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save and test" }));
+    await vi.waitFor(() => expect(testKey).toHaveBeenCalledWith("abuse_ch"));
+    expect(setKey).toHaveBeenCalledWith({ keyId: "abuse_ch", apiKey: "new-key" });
+  });
+
+  it("offers AI research where no lookup source fills a field", () => {
+    renderConsole();
+    view(/Coverage/);
+    fireEvent.click(screen.getByRole("button", { name: "Ask the AI for 10" }));
+    expect(enrichGapMutate).toHaveBeenCalledWith(
+      { entity_type: "threat_actor", field: "country", limit: 10 },
+      expect.anything(),
+    );
+  });
+
+  it("retries the lookups that gave up from Activity", () => {
+    renderConsole();
+    view(/Activity/);
+    expect(screen.getByText("Gave up · 86")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(retryMutate).toHaveBeenCalledWith("greynoise", expect.anything());
+  });
+
+  it("pauses every source from the header", () => {
+    renderConsole();
+    fireEvent.click(screen.getByRole("button", { name: "Pause all sources" }));
+    expect(pauseMutate).toHaveBeenCalledWith(true, expect.anything());
   });
 });

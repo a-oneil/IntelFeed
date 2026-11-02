@@ -20,6 +20,7 @@ _TYPES = ("ttp", "threat_actor", "malware", "tool", "mitigation")
 class MITREAttackAdapter(EnrichmentAdapter):
     source_type = "mitre_attack"
     display_name = "MITRE ATT&CK"
+    about = "The ATT&CK catalog: techniques, mitigations, and the groups and software that use them."
     applies_to = dict.fromkeys(_TYPES)
     # A lookup downloads the whole Enterprise bundle; the weekly job pulls three.
     quota = Quota(10, 3600, daily_budget=100)
@@ -34,6 +35,7 @@ class MITREAttackAdapter(EnrichmentAdapter):
             "app.workers.enrichment_tasks.run_mitre_attack_sync",
             {"type": "crontab", "minute": "0", "hour": "3", "day_of_week": "0"},
             "Download and sync MITRE ATT&CK techniques, groups, and mitigations",
+            counts=False,
         ),
     )
     outputs = (

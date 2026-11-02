@@ -223,12 +223,10 @@ async def test_job_skips_cleanly_when_its_breaker_is_open(
 
 @pytest.mark.parametrize(("job", "fragment", "reply", "scope"), SINGLE_DOWNLOAD_JOBS)
 async def test_job_stops_while_enrichment_is_paused(
-    job, fragment, reply, scope, db_session, worker_session, upstream, private_kev_version
+    job, fragment, reply, scope, db_session, worker_session, upstream, private_kev_version, pause_enrichment
 ):
-    from app.services.redis_client import get_redis_bytes
-
     upstream.route(fragment, reply)
-    await (await get_redis_bytes()).set(gw.paused_key(), b"1")
+    await pause_enrichment()
 
     stats = await job(db_session)
 
@@ -282,7 +280,7 @@ async def test_github_poc_scan_sends_the_fallback_token_through_its_bucket(
 
     stats = await tasks._run_github_poc_scan()
 
-    assert stats == {"scanned": 3, "pocs_found": 3, "stopped": None}
+    assert stats == {"fetched": 3, "changed": 3, "written": 3, "scanned": 3, "pocs_found": 3, "stopped": None}
     assert _all_through_gateway(upstream)
     assert upstream.requests[0].headers["Authorization"] == "Bearer fallback-token"
     # The token has its own allowance, apart from the keyless one.
@@ -331,7 +329,7 @@ async def test_github_poc_scan_stops_when_the_breaker_is_open(
 
     stats = await tasks._run_github_poc_scan()
 
-    assert stats == {"scanned": 0, "pocs_found": 0, "stopped": "breaker_open"}
+    assert stats == {"fetched": 0, "changed": 0, "written": 0, "scanned": 0, "pocs_found": 0, "stopped": "breaker_open"}
     assert upstream.requests == []
 
 
@@ -425,19 +423,28 @@ async def test_reenrich_cve_nvd_stops_cleanly_when_refused(
     assert "_enrich_attempts" not in (row.nvd_data or {})
 
 
-async def test_kev_sync_paces_new_cves_through_the_nvd_gateway(
-    db_session, worker_session, upstream, no_settings, fast_nvd_pace, private_kev_version
+async def test_kev_sync_queues_new_cves_instead_of_calling_nvd(
+    db_session, worker_session, upstream, no_settings, private_kev_version
 ):
-    vulns = [{"cveID": f"CVE-2026-7230{i}", "dateAdded": "2026-10-01"} for i in range(2)]
+    """A CVE the catalog adds goes on the enrichment queue; the sync itself
+    never calls NVD, so a disabled NVD source stays silent."""
+    from app.models.enrichment import EnrichmentJob, EntityContext
+
+    await _source_row(db_session, "nvd", trigger_mode="auto")
+    vulns = [{"cveID": f"CVE-2026-7230{i}", "dateAdded": "2026-10-01", "dueDate": "2026-10-22"} for i in range(2)]
     upstream.route("known_exploited", _json({"catalogVersion": "t2", "vulnerabilities": vulns}))
-    upstream.route("services.nvd.nist.gov", _nvd_record("CVE-2026-72300"), _status(429))
 
     stats = await _run_kev(db_session)
 
-    assert stats["new"] == 2
-    assert stats["stopped"] == "rate_limited"
+    assert stats["new"] == 2 and stats["fetched"] == 2
     assert _all_through_gateway(upstream)
-    assert await SourceGateway("nvd").used_today() == 2
+    assert not any("nvd.nist.gov" in str(r.url) for r in upstream.requests)
+    queued = (await db_session.execute(select(EnrichmentJob.entity_value, EnrichmentJob.source_type))).all()
+    assert {("CVE-2026-72300", "nvd"), ("CVE-2026-72301", "nvd")} <= set(queued)
+    context = (
+        await db_session.execute(select(EntityContext.key).where(EntityContext.source_type == "cisa_kev"))
+    ).scalars()
+    assert "date_added" in set(context)
 
 
 # ── Wikipedia ───────────────────────────────────────────────────────
@@ -468,6 +475,61 @@ async def test_wikipedia_bulk_sync_fetches_through_the_wikipedia_gateway(
     assert all(t._gateway.source_type == "wikipedia" for t in transports)
     assert _all_through_gateway(upstream)
     assert await SourceGateway("wikipedia").used_today() == 2
+
+
+async def test_wikipedia_bulk_sync_stores_no_article_and_moves_on(db_session, worker_session, upstream, monkeypatch):
+    """A name Wikipedia has no article for gets a "not found" answer, so the
+    next run asks about other names instead of the same ones again."""
+    import app.enrichment.wikipedia_helper as helper
+    from app.models.enrichment import EnrichmentResult
+
+    vendor = Vendor(name="Wikitest Nothing")
+    db_session.add(vendor)
+    await db_session.flush()
+    asked: list[str] = []
+
+    async def fake_fetch(name, entity_type, aliases=None, *, transport):
+        asked.append(name)
+        return None
+
+    monkeypatch.setattr(helper, "fetch_wikipedia", fake_fetch)
+
+    await tasks._run_wikipedia_bulk_sync()
+    assert "Wikitest Nothing" in asked
+    stored = (
+        await db_session.execute(
+            select(EnrichmentResult.parsed_data).where(
+                EnrichmentResult.entity_id == vendor.id, EnrichmentResult.source_type == "wikipedia"
+            )
+        )
+    ).scalar_one()
+    assert stored == {"found": False}
+
+    asked.clear()
+    await tasks._run_wikipedia_bulk_sync()
+    assert "Wikitest Nothing" not in asked
+
+
+async def test_wikipedia_bulk_sync_stops_a_fetch_that_outlasts_the_run(
+    db_session, worker_session, upstream, monkeypatch
+):
+    """The run's time left bounds a whole entity's fetch, so a slow one can't
+    carry the job past Celery's limit."""
+    import asyncio
+
+    import app.enrichment.wikipedia_helper as helper
+
+    db_session.add(Vendor(name="Wikitest Slow"))
+    await db_session.flush()
+
+    async def slow_fetch(name, entity_type, aliases=None, *, transport):
+        await asyncio.sleep(5)
+
+    monkeypatch.setattr(helper, "fetch_wikipedia", slow_fetch)
+    monkeypatch.setattr(tasks, "_WIKIPEDIA_BULK_BUDGET_S", 0.05)
+
+    stats = await tasks._run_wikipedia_bulk_sync()
+    assert stats["stopped"] == "out_of_time"
 
 
 async def test_wikipedia_profile_fetch_answers_429_when_refused(client, auth_headers, db_session):
@@ -573,3 +635,354 @@ async def test_jobs_and_lookups_resolve_one_key_so_they_share_one_bucket(db_sess
     lookup_key = await resolve_api_key(row, None, db_session)
     assert job_key == lookup_key == "setting-key"
     assert job_gateway.scope == source_gateway(row, lookup_key).scope
+
+
+# ── Jobs write through the shared writer ─────────────────────────────
+
+
+async def _claims(db_session, entity_id, source_ref: str) -> dict[str, str]:
+    from app.models.entity_field_claim import EntityFieldClaim
+
+    rows = (
+        await db_session.execute(
+            select(EntityFieldClaim).where(
+                EntityFieldClaim.entity_id == entity_id, EntityFieldClaim.source_ref == source_ref
+            )
+        )
+    ).scalars()
+    return {r.field: r.value_text for r in rows}
+
+
+async def _context(db_session, entity_id, source_type: str) -> dict:
+    from app.models.enrichment import EntityContext
+
+    rows = (
+        await db_session.execute(
+            select(EntityContext).where(EntityContext.entity_id == entity_id, EntityContext.source_type == source_type)
+        )
+    ).scalars()
+    return {r.key: r.value for r in rows}
+
+
+def _misp_cluster() -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "values": [
+                {
+                    "value": "APT28",
+                    "description": "A Russian state-sponsored group.",
+                    "meta": {
+                        "country": "RU",
+                        "synonyms": ["Fancy Bear", "Sofacy"],
+                        "cfr-type-of-incident": "Espionage",
+                        "cfr-target-category": ["Government", "Military"],
+                    },
+                },
+                {
+                    "value": "Kept Group",
+                    "description": "Its profile already says where it's from.",
+                    "meta": {"country": "CN", "motive": "nonsense words"},
+                },
+                {"value": "Untracked", "meta": {"country": "RU"}},
+            ]
+        },
+    )
+
+
+async def test_misp_galaxy_applies_matched_actors_through_the_field_map(db_session, worker_session, upstream):
+    from app.intelligence.sectors import normalize_sectors, sector_uuid
+    from app.models.country import Country
+    from app.models.sector import ThreatActorTargetSector
+    from app.models.threat_actor import ThreatActor
+
+    db_session.add_all([Country(name="Russia", iso_code="RU"), Country(name="China", iso_code="CN")])
+    fancy = ThreatActor(name="Fancy Bear")  # matched by a synonym
+    kept = ThreatActor(name="Kept Group", country="Iran")
+    db_session.add_all([fancy, kept])
+    await db_session.flush()
+    upstream.route("misp-galaxy", _misp_cluster)
+
+    stats = await tasks._run_misp_galaxy_sync()
+
+    assert stats["matched"] == 2
+    await db_session.refresh(fancy)
+    await db_session.refresh(kept)
+    # The ISO code resolves to the country's name; the CFR incident type is a motive.
+    assert fancy.country == "Russia"
+    assert fancy.motivation == "espionage"
+    assert fancy.description == "A Russian state-sponsored group."
+    sectors = (
+        (
+            await db_session.execute(
+                select(ThreatActorTargetSector.sector_id).where(ThreatActorTargetSector.threat_actor_id == fancy.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    # The CFR categories land on the sector vocabulary ("Military" is defense).
+    assert normalize_sectors(["Government", "Military"]) == ["government", "defense"]
+    assert set(sectors) == {sector_uuid("government"), sector_uuid("defense")}
+    # Claims name MISP Galaxy, not another catalog.
+    claims = await _claims(db_session, fancy.id, "misp_galaxy")
+    assert claims["country"] == "Russia" and claims["motivation"] == "espionage"
+    assert "description" in claims
+    assert await _claims(db_session, fancy.id, "cybergeist") == {}
+
+    # Fill-blank: a country the profile has stands; a motive that matches
+    # nothing in the vocabulary is dropped.
+    assert kept.country == "Iran"
+    assert kept.motivation is None
+    assert kept.description == "Its profile already says where it's from."
+
+
+async def test_misp_galaxy_description_yields_to_a_higher_ranked_source(db_session, worker_session, upstream):
+    from app.enrichment.entity_updater import apply_enrichment_results_to_entity
+    from app.models.threat_actor import ThreatActor
+
+    actor = ThreatActor(name="APT28")
+    db_session.add(actor)
+    await db_session.flush()
+    await apply_enrichment_results_to_entity(
+        db_session,
+        "threat_actor",
+        actor.id,
+        [{"source_type": "mitre_attack", "status": "success", "parsed_data": {"description": "ATT&CK's words."}}],
+    )
+    assert actor.description == "ATT&CK's words."
+    upstream.route("misp-galaxy", _misp_cluster)
+
+    await tasks._run_misp_galaxy_sync()
+
+    await db_session.refresh(actor)
+    assert actor.description == "ATT&CK's words."
+    # Its value is still recorded, as a claim that lost.
+    assert "description" in await _claims(db_session, actor.id, "misp_galaxy")
+
+
+def _msf_metadata() -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "exploit_windows_x": {"fullname": "exploit/windows/http/x_rce", "references": ["CVE-2026-70100", "URL-x"]},
+            "aux_scanner_x": {"fullname": "auxiliary/scanner/http/x_check", "references": ["CVE-2026-70100"]},
+            "exploit_kev": {"fullname": "exploit/linux/kev_rce", "references": ["CVE-2026-70101"]},
+            "exploit_manual": {"fullname": "exploit/linux/manual", "references": ["CVE-2026-70102"]},
+            "exploit_untracked": {"fullname": "exploit/linux/other", "references": ["CVE-2026-79999"]},
+        },
+    )
+
+
+async def test_metasploit_applies_modules_and_escalates_with_a_claim(db_session, worker_session, upstream, monkeypatch):
+    import app.workers.signal_tasks as signal_tasks
+
+    rescored: list = []
+    monkeypatch.setattr(signal_tasks, "dispatch_cve_rescore", rescored.append)
+    poc = CVE(cve_id="CVE-2026-70100", exploit_availability="poc")
+    kev = CVE(cve_id="CVE-2026-70101", is_kev=True, exploit_availability="active_exploitation")
+    manual = CVE(cve_id="CVE-2026-70102", exploit_availability="poc", exploit_status_source="manual")
+    db_session.add_all([poc, kev, manual])
+    await db_session.flush()
+    upstream.route("metasploit-framework", _msf_metadata)
+
+    stats = await tasks._run_metasploit_sync()
+
+    assert stats["cves_matched"] == 4 and stats["escalated"] == 1
+    for cve in (poc, kev, manual):
+        await db_session.refresh(cve)
+    # The first module (sorted) goes on the column; the full list is context.
+    assert poc.metasploit_module == "auxiliary/scanner/http/x_check"
+    assert await _context(db_session, poc.id, "metasploit") == {
+        "modules": ["auxiliary/scanner/http/x_check", "exploit/windows/http/x_rce"]
+    }
+    assert [s for s in poc.exploit_sources if s.get("source") == "metasploit"] == [
+        {"source": "metasploit", "module": "auxiliary/scanner/http/x_check"}
+    ]
+    assert poc.exploit_availability == "weaponized"
+    assert (await _claims(db_session, poc.id, "metasploit")).get("exploit_availability") == "weaponized"
+    assert rescored == [poc.id]
+
+    # KEV stays active exploitation and an analyst's verdict stands, with no claim.
+    assert kev.exploit_availability == "active_exploitation" and kev.metasploit_module == "exploit/linux/kev_rce"
+    assert manual.exploit_availability == "poc"
+    assert "exploit_availability" not in await _claims(db_session, manual.id, "metasploit")
+
+    # A second run adds nothing: metasploit is listed once, nothing escalates again.
+    upstream.route("metasploit-framework", _msf_metadata)
+    again = await tasks._run_metasploit_sync()
+    await db_session.refresh(poc)
+    assert again["escalated"] == 0
+    assert sum(1 for s in poc.exploit_sources if s.get("source") == "metasploit") == 1
+
+
+async def test_an_epss_lookup_writes_both_columns(client, auth_headers, db_session, upstream):
+    await _source_row(db_session, "epss")
+    cve = CVE(cve_id="CVE-2026-70200")
+    db_session.add(cve)
+    await db_session.flush()
+    upstream.route(
+        "api.first.org",
+        _json({"data": [{"cve": "CVE-2026-70200", "epss": "0.42", "percentile": "0.97", "date": "2026-10-31"}]}),
+    )
+
+    resp = await client.post(
+        "/api/enrichment/enrich",
+        json={"entity_type": "cve", "entity_id": str(cve.id), "source_types": ["epss"]},
+        headers=auth_headers,
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert [r["status"] for r in resp.json()["results"]] == ["success"]
+    assert _all_through_gateway(upstream)
+    await db_session.refresh(cve)
+    assert (cve.epss_score, cve.epss_percentile) == (0.42, 0.97)
+
+
+# ── OSV: records changed since the last run ─────────────────────────
+
+
+def _osv_stamp(when) -> str:
+    """OSV's format: nanoseconds and a Z."""
+    return f"{when:%Y-%m-%dT%H:%M:%S}.{when.microsecond:06d}789Z"
+
+
+def _osv_record(cve_id: str, ghsa: str):
+    return _json({"id": cve_id, "aliases": [ghsa], "summary": f"{cve_id} in a package", "affected": []})
+
+
+@pytest.fixture
+def osv_changes(db_session):
+    """A change list newest first, around a cursor an hour back."""
+    from datetime import UTC, datetime, timedelta
+
+    cursor = (datetime.now(UTC) - timedelta(hours=1)).replace(microsecond=123456)
+    at = {m: cursor + timedelta(minutes=m) for m in (50, 40, 30, 20, 10, -10)}
+    lines = [
+        f"{_osv_stamp(at[50])},GIT/CVE-2026-70301",
+        f"{_osv_stamp(at[40])},PyPI/GHSA-aaaa-bbbb-cccc",  # not a CVE record
+        f"{_osv_stamp(at[30])},Linux/CVE-2026-70302",
+        f"{_osv_stamp(at[20])},GIT/CVE-2026-79999",  # a CVE IntelFeed doesn't track
+        f"{_osv_stamp(at[10])},GIT/CVE-2026-70301",  # an older change of one listed above
+        f"{_osv_stamp(at[-10])},GIT/CVE-2026-70303",  # before the cursor: never read
+    ]
+    return cursor, at, "\n".join(lines) + "\n"
+
+
+async def _osv_cves(db_session):
+    rows = [CVE(cve_id=f"CVE-2026-7030{i}") for i in (1, 2, 3)]
+    db_session.add_all(rows)
+    await db_session.flush()
+    return rows
+
+
+def test_parse_osv_modified_line():
+    from datetime import UTC, datetime
+
+    assert tasks.parse_osv_modified_line("2026-11-01T02:50:35.123456789Z,GIT/CVE-2026-1\n") == (
+        datetime(2026, 11, 1, 2, 50, 35, 123456, tzinfo=UTC),
+        "GIT/CVE-2026-1",
+    )
+    assert tasks.parse_osv_modified_line("2026-11-01T02:50:35Z,Linux/CVE-2026-2") == (
+        datetime(2026, 11, 1, 2, 50, 35, tzinfo=UTC),
+        "Linux/CVE-2026-2",
+    )
+    assert tasks.parse_osv_modified_line("2026-11-01T02:50:35Z") is None
+    assert tasks.parse_osv_modified_line("not a time,GIT/CVE-2026-3") is None
+    assert tasks.parse_osv_modified_line("") is None
+
+
+async def test_osv_delta_fetches_only_tracked_cves_back_to_the_cursor(
+    db_session, worker_session, upstream, osv_changes
+):
+    from datetime import UTC, datetime
+
+    cursor, at, csv = osv_changes
+    row = await _source_row(db_session, "osv", last_synced_at=cursor)
+    first, second, before_cursor = await _osv_cves(db_session)
+    upstream.route("modified_id.csv", lambda: httpx.Response(200, text=csv))
+    upstream.route("GIT/CVE-2026-70301.json", _osv_record("CVE-2026-70301", "GHSA-1111-1111-1111"))
+    upstream.route("Linux/CVE-2026-70302.json", _osv_record("CVE-2026-70302", "GHSA-2222-2222-2222"))
+    started = datetime.now(UTC)
+
+    stats = await tasks._run_osv_delta_sync()
+
+    assert (stats["listed"], stats["tracked"], stats["fetched"], stats["stopped"]) == (5, 2, 2, None)
+    assert _all_through_gateway(upstream)
+    # Oldest change first; the untracked CVE and the one before the cursor aren't asked for.
+    fetched = [r.url.path.rsplit("/", 2)[-2:] for r in upstream.requests[1:]]
+    assert fetched == [["Linux", "CVE-2026-70302.json"], ["GIT", "CVE-2026-70301.json"]]
+    for cve in (first, second, before_cursor):
+        await db_session.refresh(cve)
+    assert "GHSA-1111-1111-1111" in (first.aliases or [])
+    assert "GHSA-2222-2222-2222" in (second.aliases or [])
+    assert not before_cursor.aliases
+    # A run that went through reads up to now next time.
+    await db_session.refresh(row)
+    assert row.last_synced_at >= started
+
+
+async def test_osv_delta_refusal_keeps_the_cursor_at_the_last_applied_record(
+    db_session, worker_session, upstream, osv_changes
+):
+    cursor, at, csv = osv_changes
+    row = await _source_row(db_session, "osv", last_synced_at=cursor)
+    first, second, _ = await _osv_cves(db_session)
+    upstream.route("modified_id.csv", lambda: httpx.Response(200, text=csv))
+    upstream.route("Linux/CVE-2026-70302.json", _osv_record("CVE-2026-70302", "GHSA-2222-2222-2222"))
+    upstream.route("GIT/CVE-2026-70301.json", _status(429))
+
+    stats = await tasks._run_osv_delta_sync()
+
+    assert stats["stopped"] == "rate_limited"
+    assert stats["fetched"] == 1
+    await db_session.refresh(row)
+    await db_session.refresh(second)
+    assert "GHSA-2222-2222-2222" in (second.aliases or [])
+    # The next run starts after CVE-2026-70302's change, so 70301's is read again.
+    assert row.last_synced_at == at[30]
+
+
+async def test_osv_delta_holds_the_cursor_before_a_record_that_failed(
+    db_session, worker_session, upstream, osv_changes
+):
+    cursor, at, csv = osv_changes
+    row = await _source_row(db_session, "osv", last_synced_at=cursor)
+    first, second, _ = await _osv_cves(db_session)
+    upstream.route("modified_id.csv", lambda: httpx.Response(200, text=csv))
+    upstream.route("Linux/CVE-2026-70302.json", _status(500))  # the older change
+    upstream.route("GIT/CVE-2026-70301.json", _osv_record("CVE-2026-70301", "GHSA-1111-1111-1111"))
+
+    stats = await tasks._run_osv_delta_sync()
+
+    assert (stats["fetched"], stats["failed"], stats["stopped"]) == (1, 1, None)
+    await db_session.refresh(first)
+    assert "GHSA-1111-1111-1111" in (first.aliases or [])
+    # Nothing before the failed record was applied, so the next run starts where this one did.
+    await db_session.refresh(row)
+    assert row.last_synced_at == cursor
+
+
+async def test_osv_delta_first_run_reads_a_window_back(db_session, worker_session, upstream, osv_changes):
+    _, _, csv = osv_changes
+    await _source_row(db_session, "osv", last_synced_at=None)
+    await _osv_cves(db_session)
+    upstream.route("modified_id.csv", lambda: httpx.Response(200, text=csv))
+    upstream.route("CVE-2026-7030", _osv_record("CVE-2026-70300", "GHSA-0000-0000-0000"))
+
+    stats = await tasks._run_osv_delta_sync()
+
+    # Two days back takes in the change an hour before the cursor too.
+    assert (stats["listed"], stats["tracked"], stats["fetched"]) == (6, 3, 3)
+
+
+async def test_osv_delta_runs_before_the_source_row_is_seeded(db_session, worker_session, upstream, osv_changes):
+    """``source_job`` runs a job whose source has no row yet; the delta sync
+    reads its cursor from that row."""
+    _, _, csv = osv_changes
+    upstream.route("modified_id.csv", lambda: httpx.Response(200, text=csv))
+    stats = await tasks._run_osv_delta_sync()
+    # No row, so the cursor is the first window (two days back): every change
+    # is listed, none is a CVE IntelFeed tracks, and only the list was fetched.
+    assert (stats["listed"], stats["tracked"], stats["fetched"], stats["stopped"]) == (6, 0, 0, None)
+    assert [str(r.url) for r in upstream.requests] == [tasks.OSV_MODIFIED_URL]

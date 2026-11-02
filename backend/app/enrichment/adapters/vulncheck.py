@@ -6,14 +6,15 @@ Checks if a CVE is in VulnCheck's KEV database with exploit references.
 import httpx
 
 from app.enrichment.base import EnrichmentAdapter, EnrichmentData
-from app.enrichment.manifest import Context, Display, Egress, License, Quota
+from app.enrichment.manifest import Context, Display, Egress, Key, License, Quota
 
 
 class VulnCheckAdapter(EnrichmentAdapter):
     source_type = "vulncheck"
     display_name = "VulnCheck KEV"
+    about = "VulnCheck's wider list of exploited vulnerabilities, with exploitation dates."
     applies_to = {"cve": None}
-    requires = ("api_key",)
+    requires = (Key(),)
     # VulnCheck's free tier allows 1,000 requests a minute.
     quota = Quota(1000, 60, daily_budget=1000, ceiling_per_period=1000)
     egress = Egress.LOW

@@ -1,14 +1,18 @@
 """Scheduled enrichment jobs finish inside their limits and report what they did."""
 
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy import select
 
 import app.workers.enrichment_tasks as tasks
 from app.models.cve import CVE
+from app.models.enrichment import EnrichmentResult
 from app.models.malware_family import MalwareFamily
 from app.models.threat_actor import ThreatActor
+from app.models.vendor import Vendor
 from app.workers import task_tracking
 
 
@@ -55,7 +59,7 @@ def nvd_backfill(db_session, worker_session, monkeypatch):
     from app.intelligence import cve as cve_mod
 
     async def fake_setting(key, db=None):
-        return "test-key"  # keyed pacing: 0.7s between calls
+        return "test-key"
 
     clock = _Clock()
     looked_up: list[str] = []
@@ -94,7 +98,7 @@ async def test_nvd_backfill_stops_at_the_time_budget(db_session, nvd_backfill):
 async def test_nvd_backfill_loads_only_what_fits_the_budget(db_session, nvd_backfill, monkeypatch):
     rows, looked_up = nvd_backfill
     await db_session.flush()
-    monkeypatch.setattr(tasks, "_NVD_BACKFILL_BUDGET_S", 2)  # room for 2 lookups at 0.7s
+    monkeypatch.setattr(tasks, "_per_run", lambda gateway, seconds: 2)  # room for 2 lookups at the source's rate
     monkeypatch.setattr(tasks.time, "monotonic", lambda: 0.0)
 
     stats = await tasks._run_cve_nvd_backfill()
@@ -105,56 +109,137 @@ async def test_nvd_backfill_loads_only_what_fits_the_budget(db_session, nvd_back
     assert stats["stopped"] is None
 
 
-# ── NVD refresh selection ───────────────────────────────────────────
+async def test_nvd_backfill_puts_cves_nothing_has_filled_first(db_session, worker_session, monkeypatch):
+    """Within what one run can look up, a CVE with no score or description
+    goes before one another source already filled, KEV first among them."""
+    import app.services.system_settings as ss
+    from app.intelligence import cve as cve_mod
+
+    looked_up: list[str] = []
+
+    async def fake_setting(key, db=None):
+        return None
+
+    async def fake_enrich(cve_id, gateway, api_key=None):
+        looked_up.append(cve_id)
+        return None
+
+    monkeypatch.setattr(ss, "get_setting", fake_setting)
+    monkeypatch.setattr(cve_mod, "enrich_from_nvd", fake_enrich)
+    monkeypatch.setattr(tasks, "_per_run", lambda gateway, seconds: 3)  # room for 3 of the 4
+    db_session.add_all(
+        [
+            CVE(cve_id="CVE-2026-61000", cvss_score=9.1, description="from the CNA record"),
+            CVE(cve_id="CVE-2026-61001"),
+            CVE(cve_id="CVE-2026-61002", is_kev=True),
+            CVE(cve_id="CVE-2026-61003", cvss_score=5.0),  # scored but not described: still unfilled
+        ]
+    )
+    await db_session.flush()
+
+    stats = await tasks._run_cve_nvd_backfill()
+
+    assert looked_up == ["CVE-2026-61002", "CVE-2026-61001", "CVE-2026-61003"]
+    assert (stats["total"], stats["pending"]) == (3, 4)  # the filled one waits for tomorrow's run
 
 
-async def test_nvd_refresh_selects_by_its_own_stamp_not_updated_at(db_session, worker_session, monkeypatch):
-    """EPSS bumps updated_at on nearly every CVE daily, so staleness must come
-    from the refresh stamp inside nvd_data."""
+def test_per_run_is_the_requests_a_budget_affords_at_the_sources_rate():
+    from app.enrichment.gateway import SourceGateway
+
+    gateway = SourceGateway("nvd", {"requests_per_period": 5, "period_seconds": 30})
+    # The tokens that refill over the budget, plus the full bucket the run starts with.
+    assert tasks._per_run(gateway, 780) == 130 + 5
+    assert tasks._per_run(gateway, 0) == 5
+
+
+# ── NVD refresh: change windows ─────────────────────────────────────
+
+
+async def test_nvd_refresh_applies_the_records_nvd_changed_since_the_last_window(
+    db_session, worker_session, monkeypatch
+):
+    """One query per page of changed records, not one per CVE: only the CVEs
+    IntelFeed holds are applied, and the window ends where this one did."""
     from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import select
 
     import app.services.system_settings as ss
     from app.intelligence import cve as cve_mod
+    from app.models.enrichment import EnrichmentSource
 
     async def fake_setting(key, db=None):
         return "test-key"
 
-    looked_up: list[str] = []
+    windows: list[tuple] = []
+    pages = {
+        0: [{"cvss_score": 9.1, "severity": "CRITICAL", "nvd_data": {"id": "CVE-2026-61001"}}],
+        1: [{"cvss_score": 5.0, "severity": "MEDIUM", "nvd_data": {"id": "CVE-2026-69999"}}],  # not ours
+    }
 
-    async def fake_enrich(cve_id, gateway, api_key=None):
-        looked_up.append(cve_id)
-        if cve_id == "CVE-2026-61002":
-            return None  # NVD has nothing this time
-        return {"cvss_score": 9.1, "severity": "CRITICAL", "nvd_data": {"id": cve_id}}
+    async def fake_changes(start, end, gateway, api_key=None, start_index=0):
+        windows.append((start, end, start_index))
+        return pages[start_index], 2
 
     monkeypatch.setattr(ss, "get_setting", fake_setting)
-    monkeypatch.setattr(cve_mod, "enrich_from_nvd", fake_enrich)
-    monkeypatch.setattr("asyncio.sleep", AsyncMock())
+    monkeypatch.setattr(cve_mod, "fetch_nvd_changes", fake_changes)
 
-    now = datetime.now(UTC)
-    never = CVE(cve_id="CVE-2026-61001", nvd_data={"id": "CVE-2026-61001"}, updated_at=now)
-    stale = CVE(
-        cve_id="CVE-2026-61002",
-        nvd_data={"id": "CVE-2026-61002", "_refreshed_at": (now - timedelta(days=10)).isoformat()},
-        updated_at=now,
-    )
-    fresh = CVE(
-        cve_id="CVE-2026-61003",
-        nvd_data={"id": "CVE-2026-61003", "_refreshed_at": (now - timedelta(days=1)).isoformat()},
-        updated_at=now - timedelta(days=30),
-    )
-    no_record = CVE(cve_id="CVE-2026-61004", nvd_data={}, updated_at=now - timedelta(days=30))
-    db_session.add_all([never, stale, fresh, no_record])
+    source = (
+        await db_session.execute(select(EnrichmentSource).where(EnrichmentSource.source_type == "nvd"))
+    ).scalar_one_or_none() or EnrichmentSource(source_type="nvd", display_name="NVD")
+    source.is_enabled = True
+    last = datetime.now(UTC) - timedelta(hours=3)
+    source.last_synced_at = last
+    db_session.add(source)
+    ours = CVE(cve_id="CVE-2026-61001", nvd_data={"id": "CVE-2026-61001"})
+    db_session.add(ours)
     await db_session.flush()
 
     stats = await tasks._run_cve_nvd_refresh()
 
-    assert looked_up == ["CVE-2026-61001", "CVE-2026-61002"]  # never-checked first
-    assert stats == {"checked": 1, "score_changes": 0, "failed": 1, "total": 2, "stopped": None}
-    for row in (never, stale):
-        await db_session.refresh(row)
-        assert row.nvd_data["_refreshed_at"] > (now - timedelta(minutes=1)).isoformat()
-    assert float(never.cvss_score) == 9.1
+    assert [(w[0], w[2]) for w in windows] == [(last, 0), (last, 1)]
+    assert stats["pages"] == 2 and stats["total"] == 2
+    assert (stats["fetched"], stats["checked"], stats["stopped"]) == (1, 1, None)
+    await db_session.refresh(ours)
+    await db_session.refresh(source)
+    assert float(ours.cvss_score) == 9.1
+    assert source.last_synced_at == windows[0][1]
+
+
+async def test_nvd_refresh_keeps_the_window_start_when_it_stops(db_session, worker_session, monkeypatch):
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import select
+
+    import app.services.system_settings as ss
+    from app.enrichment.gateway import RateLimited
+    from app.intelligence import cve as cve_mod
+    from app.models.enrichment import EnrichmentSource
+
+    async def fake_setting(key, db=None):
+        return None
+
+    async def refused(start, end, gateway, api_key=None, start_index=0):
+        raise RateLimited("nvd", 30)
+
+    monkeypatch.setattr(ss, "get_setting", fake_setting)
+    monkeypatch.setattr(cve_mod, "fetch_nvd_changes", refused)
+    source = (
+        await db_session.execute(select(EnrichmentSource).where(EnrichmentSource.source_type == "nvd"))
+    ).scalar_one_or_none() or EnrichmentSource(source_type="nvd", display_name="NVD")
+    source.is_enabled = True
+    # Further back than NVD allows: the window is clipped to 120 days.
+    source.last_synced_at = datetime.now(UTC) - timedelta(days=400)
+    db_session.add(source)
+    await db_session.flush()
+    before = source.last_synced_at
+
+    stats = await tasks._run_cve_nvd_refresh()
+
+    assert stats["stopped"] == "rate_limited"
+    assert datetime.fromisoformat(stats["since"]) > datetime.now(UTC) - timedelta(days=121)
+    await db_session.refresh(source)
+    assert source.last_synced_at == before
 
 
 # ── Malpedia batched commits ────────────────────────────────────────
@@ -205,10 +290,11 @@ async def test_malpedia_commits_in_batches(db_session, worker_session, monkeypat
     with patch("httpx.AsyncClient", return_value=_malpedia_client(families, actors)):
         stats = await tasks._run_malpedia_sync()
 
-    # 6 updated entities, 2 per batch: two mid-run commits plus the final one
+    # 6 updated entities, 2 per batch: two mid-run commits plus the final one,
+    # after the commit source_job's pause sync makes before the body runs.
     assert stats["families_updated"] == 5
     assert stats["actors_updated"] == 1
-    assert commits == 3
+    assert commits == 1 + 3
 
     for row in malware:
         await db_session.refresh(row)
@@ -241,3 +327,29 @@ def test_idle_dispatcher_ticks_are_not_recorded(task_name, retval, recorded, mon
     task.request = MagicMock(spec=[])
     task_tracking._job_run_postrun(task_id="t1", task=task, state="SUCCESS", args=(), kwargs={}, retval=retval)
     assert bool(calls) is recorded
+
+
+# ── Wikipedia: a miss is an answer too ──────────────────────────────
+
+
+async def test_a_wikipedia_miss_is_stored_for_a_month(db_session):
+    vendor = Vendor(name="Nowhere Systems")
+    db_session.add(vendor)
+    await db_session.flush()
+
+    await tasks._wikipedia_not_found(db_session, "vendor", vendor.id, {}, "not_found")
+
+    row = (
+        await db_session.execute(
+            select(EnrichmentResult).where(
+                EnrichmentResult.entity_type == "vendor",
+                EnrichmentResult.entity_id == vendor.id,
+                EnrichmentResult.source_type == "wikipedia",
+            )
+        )
+    ).scalar_one()
+    assert row.parsed_data == {"found": False}
+    assert row.raw_response == {"via": "wikipedia-bulk-sync", "status": "not_found"}
+    assert timedelta(days=29) < row.expires_at - datetime.now(UTC) < timedelta(days=31)
+    await db_session.refresh(vendor)
+    assert vendor.wikipedia_content is None

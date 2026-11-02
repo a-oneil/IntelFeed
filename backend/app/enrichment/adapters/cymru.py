@@ -5,15 +5,22 @@ Two TXT lookups per IP: ``{reversed ip}.origin.asn.cymru.com`` (IPv6:
 ``"10439 | 71.6.128.0/17 | US | arin | 2006-02-01"`` (origin AS, announced
 prefix, country, registry, allocation date), then ``AS10439.asn.cymru.com``
 answers ``"10439 | US | arin | 1997-08-05 | CARINET - CariNet, Inc., US"``
-for the AS name. Team Cymru asks that individual lookups use DNS rather than
-WHOIS (https://www.team-cymru.com/ip-asn-mapping). The bulk WHOIS interface
-suits batches of thousands; this source looks up one new IP at a time.
+for the AS name. Team Cymru asks that individual lookups use DNS and batches
+use bulk WHOIS (https://www.team-cymru.com/ip-asn-mapping), so a person's
+lookup and a new IP go over DNS, and the ``cymru-bulk-sync`` job maps every
+active IP that is due over one WHOIS connection (``bulk_lookup``):
+``begin`` / ``verbose`` / one IP a line / ``end`` to whois.cymru.com:43, which
+answers ``10439 | 71.6.135.131 | 71.6.128.0/17 | US | arin | 2006-02-01 |
+CARINET - CariNet, Inc., US`` per IP.
 
-DNS isn't HTTP, so each query takes a permit from the source's gateway by
-hand: the rate limit, daily budget, breaker and pause switch all apply.
+Neither is HTTP, so each DNS query and each bulk connection takes a permit
+from the source's gateway by hand: the rate limit, daily budget, breaker,
+pause switch and concurrency cap all apply.
 """
 
+import asyncio
 import ipaddress
+from contextlib import suppress
 
 import dns.asyncresolver
 import dns.exception
@@ -21,10 +28,14 @@ import dns.resolver
 import httpx
 
 from app.enrichment.base import EnrichmentAdapter, EnrichmentData
-from app.enrichment.manifest import Column, Context, Display, Egress, License, Policy, Quota
+from app.enrichment.manifest import Column, Context, Display, Egress, Job, License, Policy, Quota
 
 #: Seconds one query may take, retries included.
 DNS_TIMEOUT = 5.0
+BULK_HOST = "whois.cymru.com"
+BULK_PORT = 43
+#: Seconds one bulk connection may take, the whole answer read.
+BULK_TIMEOUT = 300.0
 
 #: What the gateway is told when the resolver answered: the source is up.
 _ANSWERED = httpx.Response(200)
@@ -79,18 +90,68 @@ def parse_as_name(records: list[str]) -> str | None:
     return None
 
 
+async def _connect(host: str, port: int):
+    """A TCP connection: (reader, writer)."""
+    return await asyncio.open_connection(host, port)
+
+
+def bulk_query(ips: list[str]) -> bytes:
+    return ("begin\nverbose\n" + "".join(f"{ip}\n" for ip in ips) + "end\n").encode()
+
+
+def parse_bulk(text: str) -> dict[str, dict]:
+    """IP → parsed_data, as ``enrich()`` gives it, from a verbose bulk answer.
+    The banner and error lines are skipped; an unannounced IP (``NA``) is
+    ``found: False``."""
+    answers = {}
+    for line in text.splitlines():
+        fields = _fields(line)
+        if len(fields) < 7:
+            continue
+        asn, ip, prefix, country, registry, allocated, name = fields[:7]
+        try:
+            ip = str(ipaddress.ip_address(ip))
+        except ValueError:
+            continue
+        if not asn.isdigit():
+            answers[ip] = {"found": False, "note": "not announced in BGP"}
+            continue
+        parsed = {
+            "found": True,
+            "asn": int(asn),
+            "prefix": prefix if prefix not in ("", "NA") else None,
+            "country": country if country not in ("", "NA") else None,
+            "registry": registry.upper() if registry not in ("", "NA") else None,
+            "allocated": allocated or None,
+            "asn_org": name if name not in ("", "NA") else None,
+        }
+        answers[ip] = {k: v for k, v in parsed.items() if v is not None}
+    return answers
+
+
 class CymruAdapter(EnrichmentAdapter):
     source_type = "cymru"
     display_name = "Team Cymru"
+    about = "Maps an IP to the network (AS) that announces it and the country it's allocated to."
     applies_to = {"observable": ("ipv4", "ipv6")}
     scope = {"status": ("active",)}
-    # Two queries per IP. Team Cymru publishes no figure for DNS, only the ask
-    # to use DNS (or bulk) at volume; 60 a minute is ~30 IPs.
+    # Two queries per IP, or one per bulk connection. Team Cymru publishes no
+    # figure for DNS, only the ask to use DNS (or bulk) at volume; 60 a minute
+    # is ~30 IPs.
     quota = Quota(60, 60, daily_budget=4000)
     egress = Egress.LOW
     # "Does this service cost anything? Free, forever." (team-cymru.com/ip-asn-mapping)
     license = License("Team Cymru IP-to-ASN mapping, free service", attribution="Team Cymru")
+    default_enabled = True
     default_trigger_mode = "auto"
+    jobs = (
+        Job(
+            "cymru-bulk-sync",
+            "app.workers.enrichment_tasks.run_cymru_bulk_sync",
+            {"type": "crontab", "minute": "25", "hour": "*/6"},
+            "Map the ledger's active IPs to their AS over one Team Cymru bulk WHOIS connection",
+        ),
+    )
     outputs = (
         Column("asn", "observable.asn", Policy.NEWER_WINS, filter="asn"),
         Column("asn_org", "observable.asn_org", Policy.NEWER_WINS),
@@ -108,19 +169,46 @@ class CymruAdapter(EnrichmentAdapter):
         doesn't exist (an unannounced IP)."""
         if self.gateway is None:
             raise RuntimeError(f"{self.source_type} adapter has no SourceGateway")
-        await self.gateway.acquire()
-        try:
-            if self.resolver is None:
-                self.resolver = dns.asyncresolver.Resolver()
-            answer = await self.resolver.resolve(name, "TXT", lifetime=DNS_TIMEOUT)
-        except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
-            await self.gateway.record(_ANSWERED)
-            return []
-        except dns.exception.DNSException:
-            await self.gateway.record(None)
-            raise
-        await self.gateway.record(_ANSWERED)
+        # permit() holds an in-flight slot for the query, so DNS lookups count
+        # toward the source's concurrency cap like its HTTP ones would.
+        async with self.gateway.permit(DNS_TIMEOUT + 5) as permit:
+            try:
+                if self.resolver is None:
+                    self.resolver = dns.asyncresolver.Resolver()
+                answer = await self.resolver.resolve(name, "TXT", lifetime=DNS_TIMEOUT)
+            except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
+                await self.gateway.record(_ANSWERED, permit=permit, release=False)
+                return []
+            except dns.exception.DNSException:
+                await self.gateway.record(None, permit=permit, release=False)
+                raise
+            await self.gateway.record(_ANSWERED, permit=permit, release=False)
         return [b"".join(record.strings).decode("utf-8", "replace") for record in answer]
+
+    async def bulk_lookup(self, ips: list[str]) -> dict[str, dict]:
+        """IP → parsed_data for ``ips`` over one bulk WHOIS connection, under
+        one gateway permit. An IP the answer leaves out is left out."""
+        if self.gateway is None:
+            raise RuntimeError(f"{self.source_type} adapter has no SourceGateway")
+        if not ips:
+            return {}
+        async with self.gateway.permit(BULK_TIMEOUT + 5) as permit:
+            try:
+                async with asyncio.timeout(BULK_TIMEOUT):
+                    reader, writer = await _connect(BULK_HOST, BULK_PORT)
+                    try:
+                        writer.write(bulk_query(ips))
+                        await writer.drain()
+                        answer = await reader.read()
+                    finally:
+                        writer.close()
+                        with suppress(OSError):
+                            await writer.wait_closed()
+            except (OSError, TimeoutError):
+                await self.gateway.record(None, permit=permit, release=False)
+                raise
+            await self.gateway.record(_ANSWERED, permit=permit, release=False)
+        return parse_bulk(answer.decode("utf-8", "replace"))
 
     async def enrich(self, entity_type: str, entity_value: str) -> EnrichmentData:
         name = origin_name(entity_value)

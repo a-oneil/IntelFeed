@@ -31,12 +31,16 @@ def _article_columns(entity_type: str) -> tuple[Column, ...]:
 class WikipediaAdapter(EnrichmentAdapter):
     source_type = "wikipedia"
     display_name = "Wikipedia"
+    about = "The opening paragraph of an entity's Wikipedia article."
+    # Wikimedia asks for a contact in every User-Agent (gateway.user_agent).
+    settings_keys = ("wikimedia_contact_email",)
     applies_to = dict.fromkeys(_TYPES)
     # MediaWiki sets no fixed limit on reads but asks clients to send them one
-    # at a time and back off when told (mediawiki.org/wiki/API:Etiquette). An
-    # entity costs three to five requests. 20 a minute keeps the weekly sync
-    # (about 1,100 requests in its hour) and a day's lookups inside the budget.
-    quota = Quota(20, 60, daily_budget=2000)
+    # at a time and back off when told (mediawiki.org/wiki/API:Etiquette), so
+    # concurrency is 1. An entity costs three to five requests. 20 a minute
+    # keeps the weekly sync (about 1,100 requests in its hour) and a day's
+    # lookups inside the budget.
+    quota = Quota(20, 60, daily_budget=2000, concurrency=1)
     egress = Egress.LOW
     license = License("CC BY-SA 4.0", attribution="Wikipedia")
     default_trigger_mode = "auto"

@@ -12,6 +12,7 @@ from app.enrichment.manifest import Context, Display, Egress, Job, License, Quot
 class GitHubPoCAdapter(EnrichmentAdapter):
     source_type = "github_poc"
     display_name = "GitHub PoC"
+    about = "Searches GitHub for public proof-of-concept exploit code for a CVE."
     applies_to = {"cve": None}
     # GitHub's search API allows 10 requests a minute unauthenticated and 30
     # with a token (docs.github.com, "Rate limits for the REST API").
@@ -71,55 +72,7 @@ class GitHubPoCAdapter(EnrichmentAdapter):
             resp.raise_for_status()
             data = resp.json()
 
-        items = data.get("items", [])
-        total_count = data.get("total_count", 0)
-
-        if not items:
-            return EnrichmentData(
-                raw_response=data,
-                parsed_data={
-                    "found": True,
-                    "cve_id": entity_value,
-                    "has_public_poc": False,
-                    "poc_count": 0,
-                    "poc_repos": [],
-                    "exploit_maturity": "none",
-                },
-                ttl_hours=24,
-            )
-
-        # Determine exploit maturity based on star count and repo quality
-        max_stars = max(item.get("stargazers_count", 0) for item in items)
-        if max_stars >= 100:
-            maturity = "weaponized"
-        elif max_stars >= 10:
-            maturity = "poc"
-        else:
-            maturity = "poc"
-
-        return EnrichmentData(
-            raw_response=data,
-            parsed_data={
-                "found": True,
-                "cve_id": entity_value,
-                "has_public_poc": True,
-                "poc_count": min(total_count, 100),
-                "poc_repos": [
-                    {
-                        "name": item.get("name"),
-                        "url": item.get("html_url"),
-                        "stars": item.get("stargazers_count", 0),
-                        "language": item.get("language"),
-                        "created_at": item.get("created_at"),
-                        "updated_at": item.get("updated_at"),
-                        "description": (item.get("description") or "")[:200],
-                    }
-                    for item in items
-                ],
-                "exploit_maturity": maturity,
-            },
-            ttl_hours=24,
-        )
+        return EnrichmentData(raw_response=data, parsed_data=parse_search(entity_value, data), ttl_hours=24)
 
     async def check_health(self) -> bool:
         try:
@@ -135,3 +88,31 @@ class GitHubPoCAdapter(EnrichmentAdapter):
                 return resp.status_code == 200
         except httpx.HTTPError:
             return False
+
+
+def parse_search(cve_id: str, data: dict) -> dict:
+    """A repository search answer for one CVE as the source's parsed_data:
+    the top repositories, how many matched, and the exploit maturity the PoC
+    badge shows (weaponized from 100 stars, else poc; none without a hit)."""
+    items = [i for i in data.get("items") or [] if isinstance(i, dict)][:5]
+    repos = [
+        {
+            "name": item.get("name"),
+            "url": item.get("html_url"),
+            "stars": item.get("stargazers_count") or 0,
+            "language": item.get("language"),
+            "created_at": item.get("created_at"),
+            "updated_at": item.get("updated_at"),
+            "description": (item.get("description") or "")[:200],
+        }
+        for item in items
+    ]
+    max_stars = max((r["stars"] for r in repos), default=0)
+    return {
+        "found": True,
+        "cve_id": cve_id,
+        "has_public_poc": bool(repos),
+        "poc_count": min(data.get("total_count") or len(repos), 100),
+        "poc_repos": repos,
+        "exploit_maturity": ("weaponized" if max_stars >= 100 else "poc") if repos else "none",
+    }

@@ -12,6 +12,11 @@ from a second, batched call.
 Each claim is read at its best rank: the ``preferred`` statements when there
 are any, else the ``normal`` ones; ``deprecated`` statements never count. That
 is what makes Microsoft's logo the current one rather than its 1980 one.
+
+Ransomware victims have no article, only a domain, so the same job asks the
+query service which items give that domain as their official website (P856)
+and takes the country (P17) of the one item that does. Only well-known
+companies list a website, so most victims get nothing.
 """
 
 from __future__ import annotations
@@ -25,13 +30,15 @@ import httpx
 from sqlalchemy import exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import entity_types
 from app.enrichment.base import EnrichmentData, Source
 from app.enrichment.gateway import SOURCE_REFUSALS, SourceGateway
-from app.enrichment.manifest import Column, Context, Display, Egress, Job, License, Quota
+from app.enrichment.manifest import Column, Context, Display, Egress, Job, License, Match, Quota, Relation
 
 logger = logging.getLogger(__name__)
 
 API_URL = "https://www.wikidata.org/w/api.php"
+SPARQL_URL = "https://query.wikidata.org/sparql"
 
 #: Titles per wbgetentities call. The API takes 50, but a country's item runs
 #: to megabytes of claims (Germany: 2.7 MB), so smaller calls keep a batch's
@@ -42,6 +49,8 @@ IDS_PER_CALL = 50
 #: Entities of each type looked up per run.
 RUN_LIMIT = 200
 TTL_HOURS = 720
+#: Victims per query-service call: each sends eight spellings of its website.
+DOMAINS_PER_QUERY = 25
 
 _ENWIKI = re.compile(r"^https?://en\.(?:m\.)?wikipedia\.org/wiki/([^?#]+)")
 
@@ -62,13 +71,24 @@ CONTINENT_REGION = {
 class WikidataSource(Source):
     source_type = "wikidata"
     display_name = "Wikidata"
-    applies_to = {"vendor": None, "product": None, "country": None}
+    about = "Company and product facts from Wikidata: website, country, developer."
+    # Wikimedia asks for a contact in every User-Agent (gateway.user_agent).
+    settings_keys = ("wikimedia_contact_email",)
+    # Vendors, products and countries are matched by their English Wikipedia
+    # article (the item's enwiki sitelink); victims by their website (P856).
+    applies_to = {
+        "vendor": Match(column="wikipedia_url"),
+        "product": Match(column="wikipedia_url"),
+        "country": Match(column="wikipedia_url"),
+        "ransomware_victim": Match(column="domain"),
+    }
     # Wikimedia publishes no hard read limit; its API etiquette asks for
     # requests one at a time, not in parallel, from a client that names itself
-    # (https://www.mediawiki.org/wiki/API:Etiquette). A run makes about 40
-    # calls, so 30 a minute is unhurried.
-    quota = Quota(30, 60, daily_budget=500)
-    # Sends the article titles of the entities it looks up.
+    # (https://www.mediawiki.org/wiki/API:Etiquette), so concurrency is 1. A
+    # run makes about 40 calls, so 30 a minute is unhurried.
+    quota = Quota(30, 60, daily_budget=500, concurrency=1)
+    # Sends the article titles of the entities it looks up, and victims'
+    # public website domains.
     egress = Egress.LOW
     # https://www.wikidata.org/wiki/Wikidata:Licensing — structured data is CC0.
     license = License("CC0 1.0", attribution="Wikidata")
@@ -77,11 +97,15 @@ class WikidataSource(Source):
             "wikidata-sync",
             "app.workers.enrichment_tasks.run_wikidata_sync",
             {"type": "crontab", "minute": "30", "hour": "4", "day_of_week": "4"},
-            "Fill vendor websites, product vendors and country regions from Wikidata",
+            "Fill vendor websites and countries, product vendors, country regions and victim countries from Wikidata",
         ),
     )
     outputs = (
         Column("website", "vendor.website"),
+        # The same column as the profile's Country fact, resolved to a tracked
+        # country (threat actors' origin and victims' country work the same way).
+        Column("country", "vendor.country_id", resolve="country_id"),
+        Column("country", "ransomware_victim.country_id", resolve="country_id"),
         Column("developer", "product.vendor_id", resolve="vendor"),
         Column("region", "country.region"),
         Column("iso_code", "country.iso_code"),
@@ -91,6 +115,10 @@ class WikidataSource(Source):
         Context("industry", "Industry", Display.CHIPS, entity_types=("vendor",)),
         Context("logo", "Logo", Display.LINK, entity_types=("vendor",)),
         Context("item", "Wikidata item", Display.LINK),
+        # A vendor's industries, mapped onto the sector vocabulary. Most
+        # industries name no sector ("software development"), so an
+        # unmapped one is dropped, not held.
+        Relation("industry", "operates_in", (entity_types.SECTOR,), hold=False),
     )
 
 
@@ -246,6 +274,7 @@ async def fetch_labels(client, ids: list[str]) -> dict[str, dict]:
 
 
 def _models() -> dict:
+    """The types looked up by article title."""
     from app.models.country import Country
     from app.models.product import Product
     from app.models.vendor import Vendor
@@ -278,6 +307,124 @@ async def _candidates(db: AsyncSession, entity_type: str, model) -> list:
     if gap is not None:
         query = query.where(gap)
     return list((await db.execute(query.order_by(model.name).limit(RUN_LIMIT))).scalars())
+
+
+# ── Victims, by website ──────────────────────────────────────────────
+
+
+def website_spellings(domain: str) -> list[str]:
+    """The ways an item may write a domain's website in P856: http or https,
+    with or without ``www.``, with or without the trailing slash."""
+    host = domain.strip().lower().rstrip(".").removeprefix("www.")
+    return [
+        f"{scheme}://{prefix}{host}{slash}"
+        for scheme in ("https", "http")
+        for prefix in ("", "www.")
+        for slash in ("/", "")
+    ]
+
+
+_DOMAIN = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
+
+
+def victim_domain(value: str | None) -> str | None:
+    """A victim's domain as a host name, or None when it isn't one (leak
+    sites post names, URLs and placeholders in the field)."""
+    host = (value or "").strip().lower()
+    host = re.sub(r"^[a-z]+://", "", host).split("/", 1)[0].rstrip(".").removeprefix("www.")
+    return host if _DOMAIN.match(host) else None
+
+
+def website_query(domains: list[str]) -> str:
+    """SPARQL: each item whose official website is one of ``domains``, with
+    the ISO code of its country. ``wdt:`` reads best-rank statements only."""
+    values = " ".join(f"<{url}>" for d in domains for url in website_spellings(d))
+    return (
+        "SELECT ?site ?item ?iso WHERE { "
+        f"VALUES ?site {{ {values} }} "
+        "?item wdt:P856 ?site . ?item wdt:P17 ?country . ?country wdt:P297 ?iso . }"
+    )
+
+
+def countries_by_domain(bindings: list[dict]) -> dict[str, dict]:
+    """Domain → ``{"qid", "iso"}`` from the query's rows, for each domain whose
+    website one item, in one country, claims. A domain two companies (or a
+    company in two countries) claim is left out: there's no telling which."""
+    seen: dict[str, set[tuple[str, str]]] = {}
+    for row in bindings:
+        site = (row.get("site") or {}).get("value") or ""
+        item = ((row.get("item") or {}).get("value") or "").rsplit("/", 1)[-1]
+        iso = (row.get("iso") or {}).get("value")
+        domain = victim_domain(site)
+        if domain and item and iso:
+            seen.setdefault(domain, set()).add((item, iso.upper()))
+    found = {}
+    for domain, hits in seen.items():
+        if len(hits) == 1:
+            qid, iso = hits.pop()
+            found[domain] = {"qid": qid, "iso": iso}
+    return found
+
+
+async def _victim_candidates(db: AsyncSession) -> list:
+    """Victims with a domain, no country and no unexpired Wikidata answer."""
+    from app.models.enrichment import EnrichmentResult
+    from app.models.ransomware import RansomwareVictim
+
+    fresh = exists().where(
+        EnrichmentResult.entity_type == entity_types.RANSOMWARE_VICTIM,
+        EnrichmentResult.entity_id == RansomwareVictim.id,
+        EnrichmentResult.source_type == WikidataSource.source_type,
+        EnrichmentResult.expires_at > datetime.now(UTC),
+    )
+    query = (
+        select(RansomwareVictim)
+        .where(RansomwareVictim.domain.isnot(None), RansomwareVictim.country_id.is_(None), ~fresh)
+        .order_by(RansomwareVictim.disclosure_count.desc(), RansomwareVictim.id)
+        .limit(RUN_LIMIT)
+    )
+    return list((await db.execute(query)).scalars())
+
+
+async def sync_victim_countries(db: AsyncSession, client, stats: dict) -> None:
+    """Look up victims' websites in batches and apply the countries found.
+    Raises the gateway's refusals for the caller to stop on."""
+    from app.enrichment.pipeline import apply_catalog_result
+
+    pending = [(v, d) for v in await _victim_candidates(db) if (d := victim_domain(v.domain))]
+    for start in range(0, len(pending), DOMAINS_PER_QUERY):
+        batch = pending[start : start + DOMAINS_PER_QUERY]
+        try:
+            resp = await client.get(
+                SPARQL_URL,
+                params={"query": website_query(sorted({d for _, d in batch})), "format": "json"},
+                headers={"Accept": "application/sparql-results+json"},
+            )
+            resp.raise_for_status()
+            found = countries_by_domain(((resp.json().get("results") or {}).get("bindings")) or [])
+        except (httpx.HTTPError, ValueError) as e:
+            logger.warning("Wikidata website batch failed: %s", e)
+            stats["failed"] += len(batch)
+            continue
+        for victim, domain in batch:
+            stats["looked_up"] += 1
+            hit = found.get(domain)
+            if hit is None:
+                parsed = {"found": False}
+            else:
+                stats["found"] += 1
+                qid = hit["qid"]
+                parsed = {
+                    "found": True,
+                    "qid": qid,
+                    "country": hit["iso"],
+                    "item": {"url": f"https://www.wikidata.org/wiki/{qid}", "label": qid},
+                }
+            data = EnrichmentData(raw_response={"domain": domain}, parsed_data=parsed, ttl_hours=TTL_HOURS)
+            victim_type = entity_types.RANSOMWARE_VICTIM
+            if await apply_catalog_result(db, victim_type, victim.id, WikidataSource.source_type, data):
+                stats["updated"] += 1
+        await db.commit()
 
 
 async def sync_wikidata(db: AsyncSession, gateway: SourceGateway) -> dict:
@@ -335,4 +482,14 @@ async def sync_wikidata(db: AsyncSession, gateway: SourceGateway) -> dict:
                 if await apply_catalog_result(db, entity_type, entity.id, WikidataSource.source_type, data):
                     stats["updated"] += 1
             await db.commit()
+
+        if stats["stopped"] is None:
+            victims = {"looked_up": 0, "found": 0, "updated": 0, "failed": 0}
+            try:
+                await sync_victim_countries(db, client, victims)
+            except SOURCE_REFUSALS as e:
+                logger.warning("Wikidata victim lookups stopping: %s", e)
+                stats["stopped"] = e.status
+            if any(victims.values()):
+                stats["victims"] = victims
     return stats

@@ -366,7 +366,9 @@ describe("observable endpoints (issue #1)", () => {
     expect(allowedVerbsForPair("threat_actor", "observable")).toEqual(["uses", "communicates_with", "controls"]);
     expect(allowedVerbsForPair("malware", "observable")).toEqual(["uses", "communicates_with"]);
     expect(allowedVerbsForPair("campaign", "observable")).toEqual(["uses"]);
-    expect(allowedVerbsForPair("cve", "observable")).toEqual([]);
+    // The one observable-first triple: a host exposes a CVE (Shodan InternetDB).
+    expect(allowedVerbsForPair("observable", "cve")).toEqual(["exposes"]);
+    expect(allowedVerbsForPair("vendor", "sector")).toEqual(["operates_in"]);
     expect(verbChipLabel(item({ relationship_type: "controls", relationship_direction: "outbound" }))).toBe("controls");
     expect(verbChipLabel(item({ relationship_type: "controls", relationship_direction: "inbound" }))).toBe("controlled by");
   });

@@ -1,0 +1,34 @@
+{
+  "head" : {
+    "vars" : [ "site", "item", "iso" ]
+  },
+  "results" : {
+    "bindings" : [ {
+      "site" : {
+        "type" : "uri",
+        "value" : "https://www.microsoft.com/"
+      },
+      "item" : {
+        "type" : "uri",
+        "value" : "http://www.wikidata.org/entity/Q2283"
+      },
+      "iso" : {
+        "type" : "literal",
+        "value" : "US"
+      }
+    }, {
+      "site" : {
+        "type" : "uri",
+        "value" : "https://www.siemens.com/"
+      },
+      "item" : {
+        "type" : "uri",
+        "value" : "http://www.wikidata.org/entity/Q81230"
+      },
+      "iso" : {
+        "type" : "literal",
+        "value" : "DE"
+      }
+    } ]
+  }
+}

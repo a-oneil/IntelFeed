@@ -69,7 +69,7 @@ ENDPOINTS = {
     "nvd": r"^https://services\.nvd\.nist\.gov/rest/json/cves/2\.0\?cveId=CVE-[\d-]+$",
     "cisa_kev": r"^https://www\.cisa\.gov/sites/default/files/feeds/known_exploited_vulnerabilities\.json$",
     "mitre_attack": r"^https://raw\.githubusercontent\.com/mitre-attack/attack-stix-data/.+/enterprise-attack\.json$",
-    "malpedia": r"^https://malpedia\.caad\.fkie\.fraunhofer\.de/api/(get/family/[^/]+|list/families)$",
+    "malpedia": r"^https://malpedia\.caad\.fkie\.fraunhofer\.de/api/(find|get)/family/[^/]+$",
     "github_poc": r"^https://api\.github\.com/search/repositories\?q=",
     "wikipedia": r"^https://en\.wikipedia\.org/w/api\.php\?.*action=query",
     "cvelist": r"^https://raw\.githubusercontent\.com/CVEProject/cvelistV5/main/cves/\d{4}/\d+xxx/CVE-[\d-]+\.json$",
@@ -188,7 +188,8 @@ async def test_greynoise_not_observed():
     adapter, _ = _wire("greynoise")
     data = await adapter.enrich("observable", "1.1.1.1")
     assert data.parsed_data["found"] is False
-    assert data.parsed_data["noise_class"] == "not_seen"
+    # GreyNoise gives no class for an IP it hasn't seen: none is made up.
+    assert "noise_class" not in data.parsed_data
     assert data.parsed_data["noise"] is False
     assert data.parsed_data["riot"] is False
 
@@ -199,7 +200,7 @@ async def test_greynoise_default_source_needs_no_key():
 
     assert GreyNoiseAdapter.requires == ()
     row = next(s for s in DEFAULT_SOURCES if s["source_type"] == "greynoise")
-    assert row["default_trigger_mode"] == "manual"
+    assert (row["default_enabled"], row["default_trigger_mode"]) == (True, "auto")
 
 
 # ── The other keyless adapters ───────────────────────────────────────
@@ -223,6 +224,7 @@ async def test_shodan():
         "tags": None,
         "vulns": None,
         "cpes": None,
+        "cve_ids": [],  # 8.8.8.8 exposes no CVE: the "exposes" relation names none
     }
     data = await adapter.enrich("observable", "10.1.2.3")
     assert data.parsed_data == {"found": False}
@@ -276,14 +278,18 @@ async def test_mitre_attack():
 
 
 async def test_malpedia():
-    adapter, _ = _wire("malpedia")
-    # "WannaCry" has no family of that id: the adapter falls back to the
-    # family list and finds win.wannacryptor.
+    adapter, seen = _wire("malpedia")
+    # "WannaCry" is an alternative name of win.wannacryptor: find/family turns
+    # it into the family id, then get/family answers.
     family = (await adapter.enrich("malware", "WannaCry")).parsed_data
+    assert [r.url.path for r in seen] == ["/api/find/family/WannaCry", "/api/get/family/win.wannacryptor"]
     assert family["found"] is True
+    assert family["family_id"] == "win.wannacryptor"
     assert family["family_name"] == "WannaCryptor"
     assert family["attribution"] == ["Lazarus Group"]
     assert family["urls"] and all(u.startswith("http") for u in family["urls"])
+    # Malpedia's answer has no page URL: the adapter builds it from the id.
+    assert family["malpedia_url"] == "https://malpedia.caad.fkie.fraunhofer.de/details/win.wannacryptor"
 
     actor = (await adapter.enrich("threat_actor", "Lazarus Group")).parsed_data
     assert actor["actor_name"] == "Lazarus Group"

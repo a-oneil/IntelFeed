@@ -107,6 +107,26 @@ async def test_new_lane_queues_enabled_auto_sources_for_the_type(db_session):
     }
 
 
+async def test_sources_that_share_iocs_queue_on_their_own_only_when_set_to_auto(db_session):
+    from app.intelligence import observables as obs_mod
+
+    await _source(db_session, "shodan", trigger_mode="manual")
+    await _source(db_session, "virustotal", trigger_mode="manual")
+    obs = await obs_mod.get_or_create_observable(db_session, "ipv4", "203.0.113.90", via="ai_extraction")
+    assert await _jobs(db_session) == []  # the new lane skipped shodan
+
+    # Nor does a refresh send the value out; a person or a backfill may.
+    async def queue(lane):
+        return await q.enqueue(db_session, "observable", obs.id, obs.value, lane=lane, source_types=["virustotal"])
+
+    assert await queue("refresh") == []
+    assert await queue("backfill") == ["virustotal"]
+
+    # An admin who sets the row to auto opts in.
+    await _source(db_session, "virustotal", trigger_mode="auto")
+    assert await queue("refresh") == ["virustotal"]
+
+
 async def test_other_lanes_may_name_any_enabled_source(db_session):
     await _source(db_session, "github_poc", trigger_mode="manual")
     await _source(db_session, "osv")
@@ -195,9 +215,53 @@ async def test_new_cve_is_queued(db_session):
     db_session.add(entry)
     await db_session.flush()
 
-    await extract_and_store_cves(db_session, entry.id, "Patch CVE-2026-50505 now.", enrich=False)
+    # enrich=False stores and links the CVE but queues no lookup.
+    await extract_and_store_cves(db_session, entry.id, "Patch CVE-2026-50506 now.", enrich=False)
+    assert await _jobs(db_session) == []
+
+    await extract_and_store_cves(db_session, entry.id, "Patch CVE-2026-50505 now.")
     (job,) = await _jobs(db_session)
     assert (job.entity_type, job.entity_value, job.source_type) == ("cve", "CVE-2026-50505", "osv")
+
+
+async def test_unfilled_cve_is_not_queued_again_while_its_lookup_waits(db_session, monkeypatch):
+    """Every article naming a CVE with no score and no description asks for it
+    again; while a lookup is queued or running that is one row already, so no
+    upsert runs. Once the row is done (or failed) the next mention asks again."""
+    from app.intelligence import cve as cve_module
+    from app.models.entry import Entry
+    from app.models.feed import Feed
+
+    await _source(db_session, "osv")
+    feed = Feed(title="f", url=f"https://f.example/{uuid.uuid4()}", feed_type="rss")
+    db_session.add(feed)
+    await db_session.flush()
+    entry = Entry(feed_id=feed.id, guid=str(uuid.uuid4()), title="e", content_text="x")
+    db_session.add(entry)
+    await db_session.flush()
+
+    await cve_module.extract_and_store_cves(db_session, entry.id, "CVE-2026-50507 is out.")
+    (job,) = await _jobs(db_session)
+
+    enqueued: list[str] = []
+    real_enqueue = q.enqueue
+
+    async def counting_enqueue(db, entity_type, entity_id, entity_value, **kw):
+        enqueued.append(entity_value)
+        return await real_enqueue(db, entity_type, entity_id, entity_value, **kw)
+
+    # extract_and_store_cves imports enqueue from the queue module on each call.
+    monkeypatch.setattr(q, "enqueue", counting_enqueue)
+
+    await cve_module.extract_and_store_cves(db_session, entry.id, "More on CVE-2026-50507.")
+    assert enqueued == []
+
+    for status in ("running", "failed"):
+        job.status = status
+        await db_session.flush()
+        enqueued.clear()
+        await cve_module.extract_and_store_cves(db_session, entry.id, "More on CVE-2026-50507.")
+        assert enqueued == (["CVE-2026-50507"] if status == "failed" else [])
 
 
 async def test_github_rule_import_queues_new_ttps_and_cves(db_session):
@@ -357,13 +421,46 @@ async def test_low_confidence_new_job_is_skipped_and_deleted(db_session):
     assert await _jobs(db_session) == [] and server.requests == []
 
 
-async def test_a_source_disabled_since_is_dropped(db_session):
+async def test_a_disabled_source_s_jobs_wait_for_it(db_session):
     source = await _source(db_session)
     await q.enqueue(db_session, "cve", uuid.uuid4(), CVE_ID)
     source.is_enabled = False
     await db_session.flush()
-    assert await _dispatch(db_session, _Source()) == {"unsupported": 1}
+    server = _Source()
+    assert await _dispatch(db_session, server) == {}
+    (job,) = await _jobs(db_session)
+    assert (job.status, job.attempts) == ("queued", 0) and server.requests == []
+
+    source.is_enabled = True
+    await db_session.flush()
+    assert await _dispatch(db_session, server) == {"success": 1}
     assert await _jobs(db_session) == []
+
+
+async def test_a_source_disabled_mid_run_puts_its_job_back(db_session):
+    source = await _source(db_session)
+    await q.enqueue(db_session, "cve", uuid.uuid4(), CVE_ID)
+    (claimed,) = await q.claim(db_session)
+    source.is_enabled = False
+    await db_session.flush()
+    with _wired(_Source()):
+        assert await q._run(db_session, claimed, {}) == "source_disabled"
+    (job,) = await _jobs(db_session)
+    assert (job.status, job.attempts, job.last_status, job.claimed_at) == ("queued", 0, "source_disabled", None)
+
+
+async def test_an_auth_failure_defers_the_credential_without_retrying(db_session):
+    await _source(db_session)
+    for value in (CVE_ID, "CVE-2021-45046"):
+        await q.enqueue(db_session, "cve", uuid.uuid4(), value)
+    server = _Source(httpx.Response(401, json={"message": "Invalid API key"}))
+    before = datetime.now(UTC)
+
+    assert await _dispatch(db_session, server) == {"auth_failed": 2}
+    assert len(server.requests) == 1  # the second was held, not sent
+    for job in await _jobs(db_session):
+        assert (job.status, job.attempts, job.last_status) == ("queued", 0, "auth_failed")
+        assert job.due_at >= before + timedelta(seconds=q.AUTH_DEFER)
 
 
 async def test_rate_limited_waits_for_retry_after(db_session):
@@ -401,6 +498,19 @@ async def test_budget_exhausted_waits_for_the_next_utc_day(db_session):
     (job,) = await _jobs(db_session)
     assert job.due_at == q.next_utc_midnight(datetime.now(UTC))
     assert job.attempts == 0
+
+
+async def test_queueing_a_deferred_job_again_keeps_it_waiting(db_session):
+    await _source(db_session, daily_budget=0)
+    eid = uuid.uuid4()
+    await q.enqueue(db_session, "cve", eid, CVE_ID)
+    assert await _dispatch(db_session, _Source()) == {"budget_exhausted": 1}
+    midnight = q.next_utc_midnight(datetime.now(UTC))
+
+    # A new mention of the CVE doesn't bring the refused lookup forward.
+    await q.enqueue(db_session, "cve", eid, CVE_ID)
+    (job,) = await _jobs(db_session)
+    assert (job.due_at, job.last_status) == (midnight, "budget_exhausted")
 
 
 async def test_gateway_unavailable_requeues_and_ends_the_tick(db_session):
@@ -666,6 +776,22 @@ async def test_backfill_defers_past_its_share_of_the_budget(db_session):
     assert len(server.requests) == 1  # only the new-lane job went out
 
 
+async def test_a_backfill_job_s_requests_run_in_the_backfill_lane(db_session):
+    """The share holds per request too: the gateway sees the backfill lane."""
+    await _source(db_session, daily_budget=10)
+    await q.enqueue(db_session, "cve", uuid.uuid4(), CVE_ID, lane="backfill", source_types=["osv"])
+    lanes = []
+
+    def server(request):
+        lanes.append(gw._lane.get())
+        return httpx.Response(200, json={"id": CVE_ID, "aliases": []})
+
+    with _wired(server):
+        assert await q.dispatch_due(db_session) == {"success": 1}
+    assert lanes == ["backfill"]
+    assert gw._lane.get() is None
+
+
 async def test_backfill_runs_under_its_share(db_session):
     source = await _source(db_session, daily_budget=10)
     g = source_gateway(source, None)
@@ -754,3 +880,39 @@ def test_dispatcher_runs_on_its_own_queue_every_30s():
     assert beat["task"] == task and beat["schedule"] == 30
     assert beat["options"] == {"expires": 30}
     assert PIPELINE_STAGES["enrich"].task_path == task
+
+
+def test_the_pause_sync_runs_on_the_default_worker_every_minute():
+    from app.workers.celery_app import celery_app
+    from app.workers.job_registry import JOB_REGISTRY, build_beat_schedule
+
+    task = "app.workers.enrichment_dispatch_tasks.sync_enrichment_pause"
+    celery_app.loader.import_default_modules()
+    assert task in celery_app.tasks
+    assert task not in (celery_app.conf.task_routes or {})  # the default queue, not the enrichment worker's
+    assert build_beat_schedule({})["enrichment-pause-sync"]["schedule"] == 60
+    assert JOB_REGISTRY["enrichment-pause-sync"]["record_idle"] is False
+
+
+async def test_a_pause_flag_redis_lost_is_put_back_by_any_worker(db_session, monkeypatch, pause_enrichment):
+    from contextlib import asynccontextmanager
+
+    from app.enrichment import pause
+    from app.workers import enrichment_dispatch_tasks as tasks
+
+    @asynccontextmanager
+    async def session():
+        yield db_session
+
+    monkeypatch.setattr(tasks, "_get_worker_session", session)
+    await pause_enrichment(True)
+    r = await gw.get_redis_bytes()
+    await r.delete(gw.paused_key(), gw.pause_synced_key())  # Redis restarted empty
+
+    assert await tasks._sync_enrichment_pause() is True
+    assert await r.exists(gw.paused_key()) and await r.exists(gw.pause_synced_key())
+    assert await tasks._sync_enrichment_pause() is False  # nothing to restore now
+
+    await pause.set_paused(db_session, False)
+    assert not await r.exists(gw.paused_key())
+    assert await r.exists(gw.pause_synced_key())

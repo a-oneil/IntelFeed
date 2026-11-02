@@ -137,7 +137,17 @@ async def test_console_status_attention_and_sort(client, admin_headers, db_sessi
     assert by_type["nvd"]["id"] == str(nvd.id)
     assert by_type["epss"]["status"] == "failing"
     assert "back off" in by_type["epss"]["attention"]
-    assert (by_type["virustotal"]["status"], by_type["virustotal"]["attention"]) == ("needs_key", "needs an API key")
+    assert (by_type["virustotal"]["status"], by_type["virustotal"]["attention"]) == (
+        "needs_key",
+        "needs an API key before it can run",
+    )
+    assert (by_type["virustotal"]["key"], by_type["virustotal"]["key_status"]) == ("virustotal", "missing")
+    assert (by_type["nvd"]["key"], by_type["nvd"]["key_status"]) == ("nvd_api_key", "optional")
+    assert by_type["osv"]["key"] is None and by_type["osv"]["key_status"] is None
+    assert by_type["shodan"]["egress"] == "shares_ioc" and by_type["shodan"]["commercial_ok"] is False
+    assert by_type["shodan"]["about"] and by_type["shodan"]["used_today"] == 2
+    assert by_type["nvd"]["trigger_mode"] == "auto" and by_type["misp_galaxy"]["trigger_mode"] is None
+    assert by_type["nvd"]["jobs"] == 3
     assert (by_type["vulncheck"]["status"], by_type["vulncheck"]["attention"]) == ("needs_key", None)
     assert (by_type["osv"]["status"], by_type["osv"]["attention"]) == ("off", None)
     assert (by_type["shodan"]["status"], by_type["shodan"]["attention"]) == ("ok", None)
@@ -151,13 +161,93 @@ async def test_console_status_attention_and_sort(client, admin_headers, db_sessi
         ["nvd", "epss", "virustotal"], key=lambda t: by_type[t]["label"].lower()
     )
 
+    # One row per problem, with the action that fixes it; failing ones first.
+    attention = {a["source_type"]: a for a in data["attention"]}
+    assert set(attention) == {"nvd", "epss", "virustotal"}
+    assert attention["nvd"]["severity"] == "bad" and attention["epss"]["severity"] == "bad"
+    assert attention["virustotal"]["severity"] == "warn"
+    assert [a["severity"] for a in data["attention"]] == ["bad", "bad", "warn"]
+
     summary = data["summary"]
-    assert summary["needs_attention"] == 3
+    assert "needs_attention" not in summary
     assert summary["sources_on"] == 4
     assert summary["sources_total"] == len(data["sources"])
     assert summary["paused"] is False and summary["redis_ok"] is True
-    assert summary["activity_24h"]["requests"] == 2
-    assert summary["activity_24h"]["iocs_sent_off_box"] == 2  # Shodan shares the IP
+    activity = summary["activity_24h"]
+    assert activity["requests"] == 2
+    assert len(activity["trend"]) == 24 and activity["trend"][-1] == 2
+    assert (activity["waiting"], activity["waiting_backfill"], activity["deferred"]) == (0, 0, 0)
+    # Shodan's two requests carried no lookup's indicator; only enrich_entity counts one.
+    assert activity["iocs_sent"] == 0
+    assert sorted(activity["ioc_sources"]) == sorted([by_type["shodan"]["label"], by_type["virustotal"]["label"]])
+
+
+async def test_console_off_wins_over_old_failures(client, admin_headers, db_session):
+    """A source switched off whose last job errored, or whose breaker is open,
+    reads off and needs no attention: there's nothing to act on."""
+    nvd = await _source(db_session, "nvd", is_enabled=False)
+    db_session.add(_run("cve-nvd-backfill", "error", 5, error="TimeLimitExceeded(960)"))
+    await source_gateway(nvd, None)._trip("throttle", 600)
+    await db_session.flush()
+
+    data = (await client.get("/api/enrichment/console", headers=admin_headers)).json()
+    row = next(s for s in data["sources"] if s["source_type"] == "nvd")
+    assert (row["status"], row["attention"]) == ("off", None)
+    assert data["attention"] == []
+
+
+async def test_console_says_a_rejected_key_not_failing(client, admin_headers, db_session, monkeypatch):
+    """An auth failure the gateway recorded reads "key_rejected" with its
+    message, so a bad key isn't mistaken for a rate limit."""
+    import app.enrichment.console as console
+
+    async def key(row, db):
+        return "bad-key" if row.source_type == "greynoise" else None
+
+    monkeypatch.setattr(console, "_global_key", key)
+    row = await _source(db_session, "greynoise")
+    gateway = source_gateway(row, "bad-key")
+    await gateway._mark_auth_failed(401, "GreyNoise rejected the API key (401)")
+
+    data = (await client.get("/api/enrichment/console", headers=admin_headers)).json()
+    greynoise = next(s for s in data["sources"] if s["source_type"] == "greynoise")
+    assert greynoise["status"] == "key_rejected"
+    assert greynoise["attention"] == "GreyNoise rejected the API key (401)"
+
+
+async def test_console_marks_recently_added_sources_new(client, admin_headers, db_session):
+    """New = added in the last two weeks and at least a day after the first
+    rows, so a fresh install's seeded sources don't all read as new."""
+    old = datetime.now(UTC) - timedelta(days=90)
+    await db_session.execute(update(EnrichmentSource).values(created_at=old))
+    await _source(db_session, "etda", created_at=datetime.now(UTC) - timedelta(days=2))
+    await _source(db_session, "osv", created_at=datetime.now(UTC) - timedelta(days=30))
+    await db_session.flush()
+
+    data = (await client.get("/api/enrichment/console", headers=admin_headers)).json()
+    new = {s["source_type"] for s in data["sources"] if s["new"]}
+    assert new == {"etda"}
+
+
+def test_is_new_ignores_a_fresh_installs_seeded_rows():
+    from app.enrichment.console import is_new
+
+    now = datetime.now(UTC)
+    seeded = EnrichmentSource(source_type="nvd", created_at=now - timedelta(days=1, hours=1))
+    assert is_new(seeded, now - timedelta(days=1, hours=2), now) is False
+    later = EnrichmentSource(source_type="etda", created_at=now - timedelta(hours=1))
+    assert is_new(later, now - timedelta(days=1, hours=2), now) is True
+
+
+def test_refresh_days_from_the_row_the_manifest_or_the_adapter():
+    from app.enrichment.console import refresh_days
+    from app.enrichment.registry import SOURCE_REGISTRY
+
+    etda = SOURCE_REGISTRY["etda"]
+    # The row's own setting wins.
+    assert refresh_days(etda, EnrichmentSource(source_type="etda", config={"refresh_days": 3})) == 3
+    # Else the adapter module's TTL_HOURS (ETDA: 336 h).
+    assert refresh_days(etda, EnrichmentSource(source_type="etda", config={})) == 14
 
 
 async def test_console_fills_reads_the_manifest(client, admin_headers, db_session):
@@ -168,7 +258,8 @@ async def test_console_fills_reads_the_manifest(client, admin_headers, db_sessio
     assert by_type["cisa_kev"]["fills"].startswith("in KEV, added to KEV")
     assert by_type["epss"]["fills"] == "EPSS score, EPSS percentile, scored on"
     # A catalog source with no outputs says what its job does.
-    assert by_type["misp_galaxy"]["fills"].startswith("Refresh the reference alias")
+    assert by_type["misp_galaxy"]["fills"].startswith("country, motivation, description")
+    assert by_type["mitre_cwe"]["fills"].startswith("Re-pull the MITRE CWE catalog")
 
 
 async def test_console_filters_by_entity_type(client, admin_headers, db_session):
@@ -272,7 +363,11 @@ async def test_detail_limits_trend_queue_and_jobs(client, admin_headers, db_sess
     assert resp.status_code == 200
     data = resp.json()
 
-    assert data["limits"] == {
+    limits = dict(data["limits"])
+    # Derived from the manifest / gateway; checked in their own tests.
+    limits.pop("refresh_days")
+    assert limits.pop("concurrency") == source_gateway(nvd, None).concurrency
+    assert limits == {
         # The stored 40 is above NVD's keyless ceiling: the gateway holds it to 5.
         "rate": {"requests_per_period": 40, "period_seconds": 30},
         "effective_rate": {"requests_per_period": 5, "period_seconds": 30},
@@ -280,9 +375,7 @@ async def test_detail_limits_trend_queue_and_jobs(client, admin_headers, db_sess
         "ceiling_per_period": 5,  # keyless: NVD allows 5 per 30 s without a key
         "daily_budget": 100,
         "used_today": 3,
-        "backfill_share": q.BACKFILL_SHARE,
-        "refresh_days": None,
-        "key": "none",
+        "backfill_share": gw.BACKFILL_SHARE,
         # NVD fills cvss_score through the field map, so it can backfill.
         "triggers": ["new", "manual", "backfill", "schedule"],
         "scope": "CVE with no CVSS score",
@@ -293,12 +386,21 @@ async def test_detail_limits_trend_queue_and_jobs(client, admin_headers, db_sess
         "waiting": 4,
         "by_lane": {"manual": 1, "new": 0, "refresh": 1, "backfill": 2},
         "retrying": 2,
+        # Why queued lookups wait again: the refresh one met a 429.
+        "by_reason": {"rate_limited": 1},
         "failed": 1,
+    }
+    # What the limits form edits, so the console needs no second request.
+    assert data["settings"] == {
+        "trigger_mode": "auto",
+        "rate_limit_config": {"requests_per_period": 40, "period_seconds": 30},
     }
     jobs = {j["key"]: j for j in data["jobs"]}
     assert set(jobs) == {"cve-nvd-refresh", "cve-nvd-backfill", "reenrich-cve-nvd"}
     assert jobs["cve-nvd-backfill"] == {
         "key": "cve-nvd-backfill",
+        "description": "Backfill NVD data (CVSS, description, affected products, references) for CVEs missing it",
+        "settings_keys": [],
         "schedule": "Daily at 1:30 AM",
         "runs_30d": 2,
         "ok_30d": 1,
@@ -306,6 +408,7 @@ async def test_detail_limits_trend_queue_and_jobs(client, admin_headers, db_sess
         "last_error": "TimeLimitExceeded(960)",
         "last_detail": {"enriched": 0},
     }
+    assert jobs["reenrich-cve-nvd"]["settings_keys"] == ["cve_reenrich_batch_size"]
     # A schedule override, as the Jobs API applies it.
     assert jobs["cve-nvd-refresh"]["schedule"] == "Every 2 hours"
     assert jobs["reenrich-cve-nvd"]["runs_30d"] == 0 and jobs["reenrich-cve-nvd"]["last_status"] is None
@@ -360,7 +463,7 @@ async def test_detail_outputs_and_gap(client, admin_headers, db_session):
         "in_scope": 2,
         "eta_days": 0.1,  # 2 lookups against 600 a day of backfill: under a day
     }
-    assert data["limits"]["scope"] == "observable (ipv4) with no reputation ports"
+    assert data["limits"]["scope"] == "observable (ipv4), status active with no reputation ports"
     assert data["limits"]["triggers"] == ["new", "manual", "backfill"]
 
 
@@ -531,11 +634,24 @@ async def test_a_hung_redis_holds_the_pause_sync_only_briefly(db_session, monkey
 
     import app.enrichment.pause as pause
 
-    class Hung:
-        async def set(self, *args):
+    class HungPipeline:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        def exists(self, *args):
+            pass
+
+        set = delete = exists
+
+        async def execute(self):
             await asyncio.Event().wait()
 
-        delete = set
+    class Hung:
+        def pipeline(self, transaction=True):
+            return HungPipeline()
 
     async def hung():
         return Hung()
@@ -582,6 +698,28 @@ async def test_manual_enrich_queues_a_paused_source(client, auth_headers, db_ses
     body = resp.json()
     assert [r["status"] for r in body["results"]] == ["paused"]
     assert body["queued"] == ["osv"]
+    # A person's request: the manual lane, said explicitly.
+    assert body["lane"] == "manual"
+    job = (await db_session.execute(select(EnrichmentJob).where(EnrichmentJob.entity_id == cve.id))).scalar_one()
+    assert job.lane == "manual"
+
+
+async def test_enrich_refuses_any_lane_but_manual(client, auth_headers, db_session):
+    from app.models.cve import CVE
+
+    cve = CVE(cve_id="CVE-2021-44229")
+    db_session.add(cve)
+    await db_session.flush()
+    resp = await client.post(
+        "/api/enrichment/enrich",
+        json={"entity_type": "cve", "entity_id": str(cve.id), "source_types": ["osv"], "lane": "backfill"},
+        headers=auth_headers,
+    )
+    # The app answers a request validation error with 400 (validation_error_handler).
+    assert resp.status_code == 400
+    error = resp.json()["error"]
+    assert error["code"] == "validation_error"
+    assert [d["field"] for d in error["details"]] == ["lane"]
 
 
 # ── Backfill ─────────────────────────────────────────────────────────
@@ -663,7 +801,7 @@ async def test_detail_shows_the_stored_rate_beside_the_keyed_one(client, admin_h
     assert limits["rate"] == {"requests_per_period": 5, "period_seconds": 30}
     assert limits["effective_rate"] == {"requests_per_period": 50, "period_seconds": 30}
     assert limits["rate_note"] == "with key"
-    assert limits["key"] == "global"
+    assert "key" not in limits
 
 
 # ── Contract with the frontend types ─────────────────────────────────
@@ -721,6 +859,10 @@ def _keys(value, skip=()) -> dict[str, object]:
     return found
 
 
+@pytest.mark.skipif(
+    not FRONTEND_HOOKS.exists(),
+    reason="needs the repo checkout (frontend/ or .env.example not mounted in the api container)",
+)
 async def test_console_and_detail_match_the_frontend_types(client, admin_headers, db_session):
     await _scenario(db_session)
     await _observables(db_session)
@@ -749,8 +891,8 @@ async def test_console_and_detail_match_the_frontend_types(client, admin_headers
     await _source(db_session, "etda")
     for source_type in ("nvd", "shodan", "misp_galaxy", "etda"):
         detail = (await client.get(f"/api/enrichment/sources/{source_type}/detail", headers=admin_headers)).json()
-        assert set(detail) == {"limits", "trend_24h", "queue", "outputs", "gap", "jobs"}
-        found = _keys(detail, skip=("by_lane", "last_detail"))
+        assert set(detail) == {"limits", "trend_24h", "queue", "outputs", "gap", "jobs", "settings"}
+        found = _keys(detail, skip=("by_lane", "by_reason", "last_detail", "rate_limit_config"))
         assert set(found) <= set(ts), set(found) - set(ts)
         seen |= set(found)
         for k, v in found.items():
@@ -782,6 +924,64 @@ async def test_sourced_job_schedules_edit_through_the_jobs_api(client, admin_hea
     assert [(j["key"], j["schedule"]) for j in detail["jobs"]] == [("epss-bulk-sync", "Daily at 7:00 AM")]
 
 
+async def test_job_schedules_list_runs_and_owner(client, admin_headers, db_session, monkeypatch):
+    """Engine → Jobs: every job carries its last 30 days from job_runs, and a
+    source's job names its owner."""
+    import app.api.job_schedules as job_schedules
+
+    monkeypatch.setattr(job_schedules, "read_overrides_from_redis", lambda: {})
+    db_session.add_all(
+        [
+            _run("cve-nvd-backfill", "success", 300),
+            _run("cve-nvd-backfill", "error", 5, error="TimeLimitExceeded(960)"),
+            _run("cve-nvd-backfill", "success", 60 * 24 * 40),  # older than 30 days
+        ]
+    )
+    await db_session.flush()
+
+    jobs = {j["name"]: j for j in (await client.get("/api/job-schedules", headers=admin_headers)).json()["jobs"]}
+    backfill = jobs["cve-nvd-backfill"]
+    assert (backfill["source"], backfill["source_label"]) == ("nvd", "NVD API 2.0")
+    assert (backfill["runs_30d"], backfill["ok_30d"]) == (2, 1)
+    assert (backfill["last_status"], backfill["last_error"]) == ("error", "TimeLimitExceeded(960)")
+    assert backfill["last_run_at"]
+    never = next(j for j in jobs.values() if j["runs_30d"] == 0)
+    assert (never["ok_30d"], never["last_status"], never["last_error"]) == (0, None, None)
+    unowned = next(j for j in jobs.values() if not j["source"])
+    assert unowned["source_label"] is None
+
+
+def test_backfill_looks_a_victim_up_by_its_domain():
+    from app.enrichment.registry import SOURCE_REGISTRY
+
+    cls = next(c for c in SOURCE_REGISTRY.values() if "ransomware_victim" in c.applies_to)
+    assert cls.lookup_column("ransomware_victim") == "domain"
+    assert SOURCE_REGISTRY["nvd"].lookup_column("cve") == "cve_id"
+
+
+async def test_pivot_entity_carries_vendor_country_and_product_lifecycle(db_session):
+    from datetime import date
+
+    from app.intelligence.correlation import _serialize_entity, get_entity
+    from app.models.country import Country
+    from app.models.product import Product
+    from app.models.vendor import Vendor
+
+    country = Country(name=f"Testland {uuid.uuid4().hex[:6]}")
+    db_session.add(country)
+    await db_session.flush()
+    vendor = Vendor(name=f"Acme {uuid.uuid4().hex[:6]}", country_id=country.id)
+    product = Product(name=f"Widget {uuid.uuid4().hex[:6]}", support_status="eol", next_eol=date(2025, 10, 14))
+    db_session.add_all([vendor, product])
+    await db_session.flush()
+    db_session.expunge_all()
+
+    v = _serialize_entity("vendor", await get_entity(db_session, "vendor", vendor.id))
+    assert (v["country_id"], v["country"]) == (str(country.id), country.name)
+    p = _serialize_entity("product", await get_entity(db_session, "product", product.id))
+    assert (p["support_status"], p["next_eol"]) == ("eol", "2025-10-14")
+
+
 def test_fills_keeps_mixed_case_labels_and_spells_out_relations():
     from app.enrichment.adapters.github_poc import GitHubPoCAdapter
     from app.enrichment.catalogs import RansomwareLiveSource
@@ -790,3 +990,255 @@ def test_fills_keeps_mixed_case_labels_and_spells_out_relations():
     assert fills(GitHubPoCAdapter).startswith("PoC, public PoCs")
     assert "uses TTP" in fills(RansomwareLiveSource) or "uses technique" in fills(RansomwareLiveSource)
     assert "_" not in fills(RansomwareLiveSource)
+
+
+# ── Attention: one row per problem, with the action that fixes it ────
+
+
+def _job(source_type, status="failed", lane="new", last_status="error", last_error="HTTP 500", **fields):
+    return EnrichmentJob(
+        entity_type="observable",
+        entity_id=uuid.uuid4(),
+        entity_value="198.51.100.9",
+        source_type=source_type,
+        lane=lane,
+        priority=q.LANES[lane],
+        status=status,
+        due_at=datetime.now(UTC),
+        attempts=fields.pop("attempts", 5),
+        last_status=last_status,
+        last_error=last_error,
+        **fields,
+    )
+
+
+async def test_attention_names_the_action_for_each_problem(client, admin_headers, db_session, monkeypatch):
+    import app.enrichment.console as console
+
+    async def key(row, db):
+        return "bad-key" if row.source_type == "greynoise" else None
+
+    monkeypatch.setattr(console, "_global_key", key)
+    greynoise = await _source(db_session, "greynoise")
+    await source_gateway(greynoise, "bad-key")._mark_auth_failed(401, "GreyNoise rejected the API key (401)")
+    await _source(db_session, "virustotal")  # needs a key it doesn't have
+    await _source(db_session, "nvd")
+    db_session.add(_run("cve-nvd-backfill", "error", 5, error="boom"))
+    epss = await _source(db_session, "epss")
+    await source_gateway(epss, None)._trip("throttle", 600)
+    await _source(db_session, "shodan")
+    db_session.add_all([_job("shodan"), _job("shodan", last_error="HTTP 502")])
+    await db_session.flush()
+
+    data = (await client.get("/api/enrichment/console", headers=admin_headers)).json()
+    rows = {a["source_type"]: a for a in data["attention"]}
+    assert rows["greynoise"] == {
+        "source_type": "greynoise",
+        "label": "GreyNoise Community",
+        "text": "GreyNoise rejected the API key (401)",
+        "severity": "bad",
+        "action": {"kind": "key", "key": "greynoise", "label": "Replace key"},
+    }
+    assert rows["virustotal"]["action"] == {"kind": "key", "key": "virustotal", "label": "Add key"}
+    assert rows["virustotal"]["severity"] == "warn"
+    assert rows["nvd"]["action"] == {"kind": "source", "source": "nvd", "tab": "jobs", "label": "Open jobs"}
+    assert rows["epss"]["action"] == {"kind": "source", "source": "epss", "tab": "overview", "label": "Open"}
+    assert rows["shodan"]["text"] == "2 lookups gave up after repeated errors"
+    assert rows["shodan"]["action"] == {"kind": "retry", "source": "shodan", "label": "Retry all"}
+    assert rows["shodan"]["severity"] == "warn"
+    # Failing first, then by label.
+    order = [(a["severity"] != "bad", a["label"].lower()) for a in data["attention"]]
+    assert order == sorted(order)
+    by_type = {s["source_type"]: s for s in data["sources"]}
+    assert by_type["greynoise"]["key_status"] == "rejected"
+
+
+async def test_a_key_problem_shared_by_several_sources_is_one_row(client, admin_headers, db_session):
+    """Three abuse.ch sources missing their one Auth-Key are one problem,
+    labelled with the credential; other problems stay one row per source."""
+    for source_type in ("threatfox", "urlhaus", "malwarebazaar"):
+        await _source(db_session, source_type)
+    for source_type in ("shodan", "rdap"):
+        await _source(db_session, source_type)
+        db_session.add(_job(source_type))
+    await db_session.flush()
+
+    attention = (await client.get("/api/enrichment/console", headers=admin_headers)).json()["attention"]
+    keyed = [a for a in attention if a["action"]["kind"] == "key"]
+    assert len(keyed) == 1
+    (row,) = keyed
+    assert row["label"] == "abuse.ch Auth-Key"
+    assert row["text"] == "needs an API key before it can run"
+    assert row["action"] == {"kind": "key", "key": "abuse_ch", "label": "Add key"}
+    assert len(row["sources"]) == 3
+    retries = [a for a in attention if a["action"]["kind"] == "retry"]
+    assert sorted(a["source_type"] for a in retries) == ["rdap", "shodan"]
+    assert all("sources" not in a for a in retries)
+
+
+async def test_a_lone_missing_key_row_keeps_its_sources_label(client, admin_headers, db_session):
+    vt = await _source(db_session, "virustotal", display_name="VirusTotal (ours)")
+    (row,) = (await client.get("/api/enrichment/console", headers=admin_headers)).json()["attention"]
+    assert row["label"] == vt.display_name
+    assert "sources" not in row
+
+
+# ── Coverage ─────────────────────────────────────────────────────────
+
+
+async def _coverage(client, admin_headers) -> dict:
+    resp = await client.get("/api/enrichment/coverage", headers=admin_headers)
+    assert resp.status_code == 200
+    return {(f["entity_type"], f["field"]): f for f in resp.json()["fields"]}
+
+
+async def test_coverage_offers_a_backfill_only_on_a_lookup_sources_primary_column(client, admin_headers, db_session):
+    from app.enrichment.registry import SOURCE_REGISTRY
+    from app.models.cve import CVE
+    from app.workers.job_registry import schedule_to_human
+
+    await _source(db_session, "nvd")
+    db_session.add_all(
+        [
+            CVE(cve_id="CVE-2026-90001", cvss_score=9.8, description="filled"),
+            CVE(cve_id="CVE-2026-90002"),
+            CVE(cve_id="CVE-2026-90003"),
+        ]
+    )
+    await db_session.flush()
+
+    fields = await _coverage(client, admin_headers)
+    cvss = fields[("cve", "cvss_score")]
+    assert (cvss["filled"], cvss["total"], cvss["filled_pct"]) == (1, 3, 33.3)
+    # NVD is on and cvss_score is the column its backfill fills.
+    assert cvss["action"] == {"kind": "backfill", "source": "nvd", "count": 2}
+    assert cvss["cadence"] is None
+    assert {"source_type": "nvd", "enabled": True} == {
+        k: v for s in cvss["sources"] if s["source_type"] == "nvd" for k, v in s.items() if k != "label"
+    }
+    # NVD fills descriptions too, but its backfill doesn't target them, and
+    # no AI research covers a CVE description: its jobs fill it on schedule.
+    description = fields[("cve", "description")]
+    assert description["action"] is None
+    assert description["cadence"] == schedule_to_human(SOURCE_REGISTRY["nvd"].jobs[0].schedule)
+    # A column written along with another isn't its own row.
+    assert ("cve", "severity") not in fields
+
+
+async def test_coverage_falls_back_to_ai_research_where_it_covers_the_field(client, admin_headers, db_session):
+    from app.models.cve import CVE
+    from app.models.threat_actor import ThreatActor
+
+    await _source(db_session, "misp_galaxy")  # a catalog: nothing to backfill through
+    db_session.add_all([ThreatActor(name="CoverageActor"), CVE(cve_id="CVE-2026-90004")])
+    await db_session.flush()
+
+    fields = await _coverage(client, admin_headers)
+    assert fields[("threat_actor", "country")]["action"] == {"kind": "ai", "field": "country"}
+    assert fields[("threat_actor", "motivation")]["action"] == {"kind": "ai", "field": "motivation"}
+    # NVD is off: the CVSS gap goes to AI research ("cvss" covers cvss_score).
+    assert fields[("cve", "cvss_score")]["action"] == {"kind": "ai", "field": "cvss"}
+    # Nothing is on to fill an EPSS score, and no AI covers it.
+    epss = fields[("cve", "epss_score")]
+    assert (epss["action"], epss["cadence"]) == (None, None)
+
+
+async def test_coverage_of_a_full_column_offers_nothing(client, admin_headers, db_session):
+    from app.models.cve import CVE
+    from app.workers.job_registry import schedule_to_human
+
+    await _source(db_session, "epss")
+    db_session.add(CVE(cve_id="CVE-2026-90005", epss_score=0.4, epss_percentile=0.9))
+    await db_session.flush()
+
+    fields = await _coverage(client, admin_headers)
+    score = fields[("cve", "epss_score")]
+    assert (score["filled"], score["total"], score["action"]) == (1, 1, None)
+    assert score["cadence"] == "Daily at 6:30 AM" == schedule_to_human({"type": "crontab", "minute": "30", "hour": "6"})
+
+
+# ── Activity and retry ───────────────────────────────────────────────
+
+
+async def test_activity_lanes_failed_lookups_and_requests(client, admin_headers, db_session):
+    shodan = await _source(db_session, "shodan")
+    await _send(source_gateway(shodan, None), 3)
+    rdap = await _source(db_session, "rdap")
+    await _send(source_gateway(rdap, None), 1)
+    db_session.add_all(
+        [
+            _job("shodan", status="queued", lane="backfill", last_status=None, last_error=None, attempts=0),
+            _job("shodan", status="queued", lane="backfill", last_status="rate_limited", last_error=None),
+            # A rejected key put this one off too: deferred, not failed.
+            _job("shodan", status="queued", lane="backfill", last_status="auth_failed", last_error=None),
+            _job("shodan", status="running", lane="manual", last_status=None, last_error=None, attempts=0),
+            _job("shodan", last_error="HTTP 500"),
+            _job("shodan", last_error="HTTP 502"),
+            _job("rdap", last_error="timeout"),
+        ]
+    )
+    await db_session.flush()
+
+    resp = await client.get("/api/enrichment/activity", headers=admin_headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    lanes = {lane["lane"]: lane for lane in data["lanes"]}
+    assert set(lanes) == set(q.LANES)
+    assert lanes["backfill"] == {"lane": "backfill", "waiting": 3, "deferred": 2}
+    assert lanes["manual"] == {"lane": "manual", "waiting": 1, "deferred": 0}
+    assert lanes["new"] == {"lane": "new", "waiting": 0, "deferred": 0}
+    assert data["backfill_share"] == gw.BACKFILL_SHARE
+    assert [(f["source_type"], f["count"]) for f in data["failed"]] == [("shodan", 2), ("rdap", 1)]
+    assert data["failed"][0]["last_error"] in ("HTTP 500", "HTTP 502")
+    assert [(r["source_type"], r["requests"]) for r in data["requests"]] == [("shodan", 3), ("rdap", 1)]
+
+
+async def test_activity_requests_are_null_when_redis_is_down(client, admin_headers, db_session, monkeypatch):
+    import redis.asyncio as aioredis
+
+    await _source(db_session, "shodan")
+    dead = aioredis.from_url("redis://127.0.0.1:1/0", socket_connect_timeout=0.5)
+
+    async def broken():
+        return dead
+
+    monkeypatch.setattr(gw, "get_redis_bytes", broken)
+    data = (await client.get("/api/enrichment/activity", headers=admin_headers)).json()
+    assert data["requests"] is None
+
+
+async def test_retry_queues_failed_lookups_again_with_attempts_reset(client, admin_headers, db_session):
+    await _source(db_session, "shodan")
+    await _source(db_session, "rdap")
+    shodan_jobs = [_job("shodan"), _job("shodan")]
+    rdap_job = _job("rdap")
+    waiting = _job("shodan", status="queued", last_status="rate_limited", last_error=None, attempts=2)
+    db_session.add_all([*shodan_jobs, rdap_job, waiting])
+    await db_session.flush()
+
+    resp = await client.post("/api/enrichment/retry", params={"source_type": "shodan"}, headers=admin_headers)
+    assert resp.status_code == 200
+    assert resp.json() == {"queued": 2}
+    for job in shodan_jobs:
+        await db_session.refresh(job)
+        assert (job.status, job.attempts, job.last_status, job.last_error) == ("queued", 0, None, None)
+    await db_session.refresh(rdap_job)
+    await db_session.refresh(waiting)
+    assert rdap_job.status == "failed"
+    # A lookup that is only waiting keeps its attempts.
+    assert (waiting.attempts, waiting.last_status) == (2, "rate_limited")
+
+    # No source: every failed lookup.
+    assert (await client.post("/api/enrichment/retry", headers=admin_headers)).json() == {"queued": 1}
+    await db_session.refresh(rdap_job)
+    assert (rdap_job.status, rdap_job.attempts) == ("queued", 0)
+
+
+async def test_coverage_activity_and_retry_are_admin_only(client, auth_headers, db_session):
+    for method, path in (
+        ("get", "/api/enrichment/coverage"),
+        ("get", "/api/enrichment/activity"),
+        ("post", "/api/enrichment/retry"),
+    ):
+        resp = await client.request(method, path, headers=auth_headers)
+        assert resp.status_code == 403, path

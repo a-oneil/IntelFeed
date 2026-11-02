@@ -6260,6 +6260,7 @@ def _vendor_to_response(v: Vendor, entry_link: EntryVendor | None = None) -> Ven
         description=v.description,
         website=v.website,
         vendor_type=v.vendor_type,
+        country_id=getattr(v, "country_id", None),
         article_count=v.article_count,
         first_seen_at=v.first_seen_at,
         last_seen_at=v.last_seen_at,
@@ -6802,13 +6803,33 @@ async def get_cve_affected(
 
     rows = (
         await db.execute(
-            select(CVEAffected, Vendor.name, Product.name)
+            select(CVEAffected, Vendor.name, Product.name, Product.support_status, Product.next_eol)
             .outerjoin(Vendor, Vendor.id == CVEAffected.vendor_id)
             .outerjoin(Product, Product.id == CVEAffected.product_id)
             .where(CVEAffected.cve_id == cve.id)
             .order_by(CVEAffected.cpe_vendor, CVEAffected.cpe_product)
         )
     ).all()
+    from app.enrichment.endoflife import EndOfLifeSource, eol_releases
+    from app.models.enrichment import EntityContext
+
+    product_ids = {link.product_id for link, *_ in rows if link.product_id}
+    releases = (
+        dict(
+            (
+                await db.execute(
+                    select(EntityContext.entity_id, EntityContext.value).where(
+                        EntityContext.entity_type == "product",
+                        EntityContext.entity_id.in_(product_ids),
+                        EntityContext.source_type == EndOfLifeSource.source_type,
+                        EntityContext.key == "releases",
+                    )
+                )
+            ).all()
+        )
+        if product_ids
+        else {}
+    )
     return [
         CVEAffectedEntityRow(
             cpe_vendor=link.cpe_vendor,
@@ -6819,8 +6840,11 @@ async def get_cve_affected(
             product_name=product_name,
             version_start=link.version_start,
             version_end=link.version_end,
+            product_support_status=support_status,
+            product_next_eol=next_eol,
+            eol_releases=eol_releases(releases.get(link.product_id), link.version_start, link.version_end),
         )
-        for link, vendor_name, product_name in rows
+        for link, vendor_name, product_name, support_status, next_eol in rows
     ]
 
 

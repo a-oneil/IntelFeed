@@ -4,6 +4,7 @@ enrichment sources say about one entity (app/enrichment/context.py)."""
 import uuid
 
 from fastapi import APIRouter, Depends, Path
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -79,3 +80,74 @@ async def get_entity_context(
     return await entity_context(
         db, entity_type, entity_id, user, kind=entity.kind if entity_type == "observable" else None
     )
+
+
+class GlanceItem(BaseModel):
+    text: str
+    tone: str | None = Field(description="bad or warn; null is neutral")
+    source: str | None = Field(description="The source that said it; null for a count the enrichment links made")
+    observed_at: str | None
+
+
+class GlanceSource(BaseModel):
+    source_type: str
+    label: str
+
+
+class GlanceKeySource(GlanceSource):
+    key: str | None = Field(description="The credential id the source needs")
+
+
+class EntityGlanceResponse(BaseModel):
+    chips: list[GlanceItem] = Field(description="At most two verdict chips")
+    facts: list[GlanceItem] = Field(description="At most three short facts")
+    lookup_sources: list[GlanceSource] = Field(description="What the Look up button runs; empty for visitors")
+    needs_key: list[GlanceKeySource] = Field(description="Admins only: sources that need a key first")
+    looked_up: bool = Field(description="Some source has answered for this entity")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "chips": [
+                    {
+                        "text": "Exploited in the wild",
+                        "tone": "bad",
+                        "source": "CISA KEV",
+                        "observed_at": "2026-10-28T10:00:00+00:00",
+                    }
+                ],
+                "facts": [
+                    {"text": "EPSS 0.94", "tone": None, "source": "EPSS", "observed_at": "2026-10-28T10:00:00+00:00"}
+                ],
+                "lookup_sources": [{"source_type": "nvd", "label": "NVD"}],
+                "needs_key": [{"source_type": "vulncheck", "label": "VulnCheck", "key": "vulncheck_api_key"}],
+                "looked_up": True,
+            }
+        }
+    )
+
+
+@router.get("/{entity_type}/{entity_id}/glance", response_model=EntityGlanceResponse)
+async def get_entity_glance(
+    entity_type: str = Path(..., description="Entity type slug, e.g. cve or observable."),
+    entity_id: uuid.UUID = Path(..., description="Entity UUID."),
+    user: User = Depends(get_viewer),
+    db: AsyncSession = Depends(get_db),
+):
+    """The highlight popover's glance: up to two verdict ``chips`` (``tone``
+    bad or warn) and three neutral ``facts`` from enrichment, each with the
+    source that said it and when (``app/enrichment/glance.py``). Empty lists
+    when nothing has been looked up. ``lookup_sources`` are the sources the
+    popover's Look up button runs for this entity (none for visitors);
+    ``needs_key`` lists, for admins, sources that need a key first; and
+    ``looked_up`` says whether any source has answered yet. Visitors never see
+    sources that send observables to a third party or bar commercial use, and
+    get a 404 for an entity they can't see."""
+    from app.enrichment.glance import entity_for, glance
+
+    if entity_type not in _MODELS:
+        raise AppError(code="bad_request", message=f"Unsupported entity type: {entity_type}", status_code=400)
+    entity = await entity_for(db, entity_type, entity_id)
+    if entity is None:
+        raise AppError(code="not_found", message="Entity not found", status_code=404)
+    return await glance(db, entity_type, entity, user)

@@ -44,6 +44,7 @@ _VERSION = re.compile(r"^\d+\.\d+\.\d+$")
 class D3FENDSource(Source):
     source_type = "d3fend"
     display_name = "MITRE D3FEND"
+    about = "MITRE's catalog of defensive techniques, mapped to the attacks they counter."
     applies_to = {"ttp": None}
     # D3FEND publishes no rate limit; a run makes two requests.
     quota = Quota(10, 3600, daily_budget=50)
@@ -57,6 +58,7 @@ class D3FENDSource(Source):
             "app.workers.enrichment_tasks.run_d3fend_sync",
             {"type": "crontab", "minute": "30", "hour": "4", "day_of_week": "0"},
             "Map D3FEND defensive techniques onto the ATT&CK techniques they counter",
+            counts=False,
         ),
     )
     outputs = (

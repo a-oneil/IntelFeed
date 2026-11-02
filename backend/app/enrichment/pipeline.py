@@ -2,6 +2,7 @@
 
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
@@ -11,7 +12,15 @@ from app.core.encryption import decrypt_value
 from app.enrichment.base import EnrichmentData
 from app.enrichment.context import store_context
 from app.enrichment.entity_updater import apply_enrichment_results_to_entity
-from app.enrichment.gateway import MAX_TOKEN_WAIT, BreakerOpen, GatewayError, RateLimited, SourceGateway
+from app.enrichment.gateway import (
+    MAX_TOKEN_WAIT,
+    BreakerOpen,
+    GatewayError,
+    RateLimited,
+    SourceGateway,
+    record_ioc_sent,
+)
+from app.enrichment.manifest import Egress
 from app.enrichment.registry import (
     ADAPTER_REGISTRY,
     SHARED_KEY_GROUPS,
@@ -183,14 +192,16 @@ async def store_result(
     source_type: str,
     data: EnrichmentData,
     existing: EnrichmentResult | None,
-) -> None:
+) -> bool:
     """Keep a source's fresh result for an entity and its context. A new
     enrichment_results row is written only when parsed_data changed from
     ``existing`` (the latest one); otherwise that row stands, as of now, with
-    this answer's raw_response (which says whether a lookup or a job gave it)."""
+    this answer's raw_response (which says whether a lookup or a job gave it).
+    Returns True when the answer differs from ``existing``."""
     now = datetime.now(UTC)
     expires_at = now + timedelta(hours=data.ttl_hours)
-    if existing and existing.parsed_data == data.parsed_data:
+    changed = not (existing and existing.parsed_data == data.parsed_data)
+    if not changed:
         existing.enriched_at, existing.expires_at = now, expires_at
         existing.raw_response = data.raw_response
     else:
@@ -209,19 +220,63 @@ async def store_result(
     await store_context(
         db, entity_type, entity_id, source_type, data.parsed_data, observed_at=now, expires_at=expires_at
     )
+    return changed
+
+
+async def apply_record(
+    db: AsyncSession, entity_type: str, entity_id: uuid.UUID, source_type: str, data: EnrichmentData, cache: dict
+) -> None:
+    """The writes a source makes beyond its manifest outputs (NVD's affected
+    products and weaknesses, a CVE record's affected versions): its class's
+    ``apply_record`` hook, when it has one. ``cache`` carries lookup indexes
+    across the entities of one job run."""
+    hook = getattr(SOURCE_REGISTRY.get(source_type), "apply_record", None)
+    if hook is None:
+        return
+    try:
+        async with db.begin_nested():
+            await hook(db, entity_type, entity_id, data, cache)
+    except Exception:
+        # The answer and its columns still land without the extras.
+        logger.exception("%s extra writes failed for %s %s", source_type, entity_type, entity_id)
+
+
+@dataclass(frozen=True)
+class Applied:
+    """What applying one answer did: ``changed`` when it differed from the
+    stored one, ``written`` when it changed the entity's columns or links."""
+
+    changed: bool
+    written: bool
+
+
+async def apply_source_result(
+    db: AsyncSession,
+    entity_type: str,
+    entity_id: uuid.UUID,
+    source_type: str,
+    data: EnrichmentData,
+    cache: dict | None = None,
+) -> Applied:
+    """A scheduled job's answer for one entity, handled as a lookup's is:
+    stored (a new row only when it changed), its Context written, its Column
+    outputs applied through the field map (ranks, claims, losing claims), its
+    Relation outputs and the source's own extra writes made."""
+    existing = await get_cached_result(db, entity_type, entity_id, source_type)
+    changed = await store_result(db, entity_type, entity_id, source_type, data, existing)
+    await apply_record(db, entity_type, entity_id, source_type, data, {} if cache is None else cache)
+    written = await apply_enrichment_results_to_entity(
+        db, entity_type, entity_id, [{"source_type": source_type, "status": "success", "parsed_data": data.parsed_data}]
+    )
+    return Applied(changed, written)
 
 
 async def apply_catalog_result(
     db: AsyncSession, entity_type: str, entity_id: uuid.UUID, source_type: str, data: EnrichmentData
 ) -> bool:
-    """A catalog job's answer for one entity, handled as a lookup's would be:
-    stored, its Context written, its Column outputs applied. Returns True if
-    the entity's columns changed."""
-    existing = await get_cached_result(db, entity_type, entity_id, source_type)
-    await store_result(db, entity_type, entity_id, source_type, data, existing)
-    return await apply_enrichment_results_to_entity(
-        db, entity_type, entity_id, [{"source_type": source_type, "status": "success", "parsed_data": data.parsed_data}]
-    )
+    """``apply_source_result`` for callers that only ask whether the entity's
+    columns changed."""
+    return (await apply_source_result(db, entity_type, entity_id, source_type, data)).written
 
 
 async def enrich_entity(
@@ -312,7 +367,11 @@ async def enrich_entity(
         # circuit breaker on each HTTP request it makes.
         try:
             enrichment_data = await adapter.enrich(adapter_entity_type, entity_value)
+            if ADAPTER_REGISTRY[source.source_type].egress == Egress.SHARES_IOC:
+                # The gateway let the request out: the indicator left the box.
+                await record_ioc_sent(entity_value)
             await store_result(db, entity_type, entity_id, source.source_type, enrichment_data, existing)
+            await apply_record(db, entity_type, entity_id, source.source_type, enrichment_data, {})
 
             results.append(
                 {

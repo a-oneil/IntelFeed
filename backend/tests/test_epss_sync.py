@@ -229,3 +229,21 @@ async def test_epss_set_based_update_matches_row_logic(db_session, monkeypatch):
     ).all()
     matched = {rows[c].id: new for c, (_, new) in cases.items() if new is not None}
     assert {entity_id: data["epss"] for entity_id, data in results} == matched
+
+
+@pytest.mark.asyncio
+async def test_a_percentile_move_under_the_step_rewrites_nothing(db_session, cves):
+    first, _ = cves
+    await _run_sync_with(db_session, {"CVE-2024-0001": (0.4, 0.90)})
+    await db_session.refresh(first)
+    stamped = first.epss_updated_at
+
+    stats = await _run_sync_with(db_session, {"CVE-2024-0001": (0.4, 0.905)})
+    assert stats["updated"] == 0
+    await db_session.refresh(first)
+    assert (first.epss_percentile, first.epss_updated_at) == (0.90, stamped)
+
+    stats = await _run_sync_with(db_session, {"CVE-2024-0001": (0.4, 0.92)})
+    assert stats["updated"] == 1
+    await db_session.refresh(first)
+    assert first.epss_percentile == 0.92

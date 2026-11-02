@@ -7,7 +7,7 @@ import re
 
 import httpx
 
-from app.enrichment.gateway import USER_AGENT, GatewayError, SourceGateway
+from app.enrichment.gateway import GatewayError, SourceGateway, client_for, user_agent
 
 logger = logging.getLogger(__name__)
 
@@ -315,7 +315,7 @@ async def _fetch_page_image_async(
 ) -> str | None:
     """The lead/infobox image URL for a Wikipedia page, from the MediaWiki API."""
     try:
-        async with httpx.AsyncClient(timeout=10, transport=transport) as client:
+        async with client_for(transport, timeout=10) as client:
             resp = await client.get(
                 WIKI_API_URL,
                 params={
@@ -360,7 +360,9 @@ async def fetch_wikipedia(
         logger.warning("wikipedia-api package not installed")
         return None
 
-    wiki = wikipediaapi.AsyncWikipedia(user_agent=USER_AGENT, language="en", transport=transport, max_retries=0)
+    wiki = wikipediaapi.AsyncWikipedia(
+        user_agent=user_agent("wikipedia"), language="en", transport=transport, max_retries=0
+    )
     queries = get_search_queries(entity_name, entity_type)
 
     for q in queries:
@@ -401,7 +403,9 @@ async def fetch_wikipedia_by_title(title: str, *, transport: httpx.AsyncBaseTran
         logger.warning("wikipedia-api package not installed")
         return None
 
-    wiki = wikipediaapi.AsyncWikipedia(user_agent=USER_AGENT, language="en", transport=transport, max_retries=0)
+    wiki = wikipediaapi.AsyncWikipedia(
+        user_agent=user_agent("wikipedia"), language="en", transport=transport, max_retries=0
+    )
     try:
         page = wiki.page(title)
         if not await page.exists():

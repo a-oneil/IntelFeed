@@ -192,9 +192,12 @@ async def _repoint_entity_relationships(
     deleted; self-relationships are dropped. Enrichment claims move first, so
     their connections stay withdrawable (``relations.rehome_claims``).
     """
+    from app.enrichment.context import rehome_context
     from app.enrichment.relations import rehome_claims
 
     await rehome_claims(db, old_type, old_id, new_type, new_id)
+    # The sources' profile context follows the entity too.
+    await rehome_context(db, old_type, old_id, new_type, new_id)
     result = await db.execute(
         select(EntityRelationship).where(
             or_(

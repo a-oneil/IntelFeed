@@ -37,6 +37,7 @@ from app.enrichment.d3fend import D3FENDSource
 from app.enrichment.endoflife import EndOfLifeSource
 from app.enrichment.etda import ETDASource
 from app.enrichment.gateway import SourceGateway
+from app.enrichment.github_repo import GitHubRepoSource
 from app.enrichment.manifest import Quota
 from app.enrichment.wikidata import WikidataSource
 from app.models.enrichment import EnrichmentSource
@@ -82,6 +83,7 @@ CATALOG_REGISTRY: dict[str, type[Source]] = {
         CTIDSource,
         D3FENDSource,
         ETDASource,
+        GitHubRepoSource,
     )
 }
 
@@ -89,15 +91,31 @@ CATALOG_REGISTRY: dict[str, type[Source]] = {
 SOURCE_REGISTRY: dict[str, type[Source]] = {**ADAPTER_REGISTRY, **CATALOG_REGISTRY}
 
 
+def seed_enabled(cls: type[Source]) -> bool:
+    """Whether a new row starts on: what the manifest says, else on when the
+    source has jobs (its jobs skip while it is off)."""
+    return bool(cls.jobs) if cls.default_enabled is None else cls.default_enabled
+
+
+def seed_trigger_mode(cls: type[Source]) -> str:
+    """The trigger mode a new row starts in: the manifest's. A source that is
+    on only so its jobs run starts ``manual``, so a fresh install makes no
+    per-entity lookups for it until an admin chooses auto. A source that sends
+    an observable to a third party (``Egress.SHARES_IOC``) inherits the base
+    class's ``manual`` unless its manifest names ``auto`` itself."""
+    if cls.jobs and cls.default_enabled is None:
+        return "manual"
+    return cls.default_trigger_mode
+
+
 def _seed_row(cls: type[Source]) -> dict:
     return {
         "source_type": cls.source_type,
         "display_name": cls.display_name,
-        "default_trigger_mode": cls.default_trigger_mode,
+        "default_trigger_mode": seed_trigger_mode(cls),
         "default_rate_limit": cls.quota.rate_limit_config,
         "default_daily_budget": cls.quota.daily_budget,
-        # A source with jobs starts on: its jobs skip while it is off.
-        "default_enabled": bool(cls.jobs),
+        "default_enabled": seed_enabled(cls),
     }
 
 
@@ -143,21 +161,31 @@ def _within_ceiling(rate_limit_config: dict, quota: Quota) -> dict:
     return {"requests_per_period": allowed, "period_seconds": period}
 
 
+def quota_in_use(cls: type[Source], api_key: str | None) -> Quota | None:
+    """The manifest quota that applies: ``keyed`` with a key, when it has one."""
+    quota = getattr(cls, "quota", None)
+    if quota is None:
+        return None
+    return quota.keyed if api_key and quota.keyed else quota
+
+
 def source_gateway(source: EnrichmentSource, api_key: str | None, **kwargs) -> SourceGateway:
     """The gateway for a source row and the key it will use. With a key, a
     source whose manifest has a ``keyed`` quota gets that rate, unless an admin
     has changed the row's rate from the keyless default. Either way the rate
     never exceeds the ceiling of the quota in use (keyed with a key, keyless
-    without), so a stored rate can't outrun the source. Without a key, a
-    source that requires one gets a gateway that sends nothing."""
+    without), so a stored rate can't outrun the source, and the quota in use
+    sets the concurrency cap. Without a key, a source that requires one gets a
+    gateway that sends nothing."""
     cls = SOURCE_REGISTRY.get(source.source_type, Source)
     rate_limit_config = source.rate_limit_config
     quota = getattr(cls, "quota", None)
-    if quota:
-        in_use = quota.keyed if api_key and quota.keyed else quota
+    in_use = quota_in_use(cls, api_key)
+    if in_use:
         if in_use is quota.keyed and rate_limit_config == quota.rate_limit_config:
             rate_limit_config = in_use.rate_limit_config
         rate_limit_config = _within_ceiling(rate_limit_config or {}, in_use)
+        kwargs.setdefault("concurrency", in_use.concurrency)
     return SourceGateway(
         source.source_type,
         rate_limit_config=rate_limit_config,
@@ -165,7 +193,7 @@ def source_gateway(source: EnrichmentSource, api_key: str | None, **kwargs) -> S
         api_key=api_key,
         shared_key_group=cls.shared_key_group,
         throttle_statuses=cls.throttle_statuses,
-        requires_key="api_key" in cls.requires,
+        requires_key=cls.requires_api_key,
         **kwargs,
     )
 
@@ -184,6 +212,8 @@ def enrichment_jobs() -> dict[str, dict]:
             }
             if job.settings_keys:
                 entry["settings_keys"] = list(job.settings_keys)
+            if not job.counts:
+                entry["counts"] = False
             jobs[job.key] = entry
     return jobs
 

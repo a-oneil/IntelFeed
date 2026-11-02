@@ -52,9 +52,10 @@ async def backfill_kev() -> None:
 
 
 async def backfill_nvd(limit: int | None) -> None:
-    """Enrich CVEs missing CVSS/description from NVD (rate-limit aware, resumable)."""
+    """Enrich CVEs missing CVSS/description from NVD (resumable). The NVD
+    gateway paces the requests; ``delay`` only sizes the time estimate."""
     from app.enrichment.gateway import JOB_TOKEN_WAIT, SOURCE_REFUSALS
-    from app.intelligence.cve import enrich_from_nvd, nvd_gateway, nvd_request_pace
+    from app.intelligence.cve import apply_nvd, enrich_from_nvd, nvd_gateway, nvd_request_pace
 
     async with async_session() as db:
         gateway, api_key = await nvd_gateway(db, max_wait=JOB_TOKEN_WAIT)
@@ -84,16 +85,8 @@ async def backfill_nvd(limit: int | None) -> None:
                 print(f"[nvd] stopping at {i}/{total}: {e} (re-run to resume)")
                 break
             if nvd:
-                if nvd.get("cvss_score") is not None:
-                    cve.cvss_score = nvd["cvss_score"]
-                if nvd.get("severity"):
-                    cve.severity = nvd["severity"]
-                if nvd.get("description") and not cve.description:
-                    cve.description = nvd["description"]
-                cve.affected_products = nvd.get("affected_products", cve.affected_products)
-                cve.references_ = nvd.get("references", cve.references_)
-                cve.nvd_data = nvd.get("nvd_data", cve.nvd_data)
-                db.add(cve)
+                # Same path as the NVD jobs: field map ranks, claims, context.
+                await apply_nvd(db, cve, nvd, via="script")
                 enriched += 1
             else:
                 failed += 1
@@ -101,8 +94,6 @@ async def backfill_nvd(limit: int | None) -> None:
             if (i + 1) % 50 == 0:
                 await db.commit()
                 print(f"[nvd] progress: {enriched} enriched, {failed} failed ({i + 1}/{total})")
-
-            await asyncio.sleep(delay)
 
         await db.commit()
     print(f"[nvd] done: {enriched} enriched, {failed} failed")

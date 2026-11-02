@@ -12,14 +12,16 @@ outcome                                         row
 success, cached, skipped_low_confidence,        deleted
 needs_key, source no longer applies
 rate_limited, breaker_open                      due again after ``retry_after``
-budget_exhausted                                due at the next UTC midnight
+budget_exhausted, backfill_share                due at the next UTC midnight
+auth_failed                                     due again in AUTH_DEFER; no attempt
+source_disabled                                 put back as it was
 paused                                          due again in PAUSE_DEFER; the tick ends
 gateway_unavailable                             put back as it was; the tick ends
 error                                           attempts + 1, exponential backoff;
                                                 ``failed`` after MAX_ATTEMPTS
 ==============================================  =================================
 
-A refusal (rate_limited, breaker_open, budget_exhausted) holds the source for
+A refusal (rate_limited, breaker_open, budget_exhausted, auth_failed) holds the source for
 that credential, its (source, requester), for the rest of the tick: one UPDATE
 moves all its other due rows past the refusal, spaced one request interval of
 the source's rate apart so they come due one at a time rather than together,
@@ -34,6 +36,16 @@ compares the two.
 A backfill-lane job runs only while its source has spent less than
 BACKFILL_SHARE of its ``daily_budget`` today, so bulk catch-up never starves
 new entities or a person's request; past that it waits for the next UTC day.
+Its requests run in the gateway's backfill lane (``gateway.in_lane``), so the
+share holds per request too, the same cap scheduled backfill jobs get.
+
+A disabled source's rows wait: the dispatcher claims only rows of enabled
+sources, and a row whose source is switched off mid-run goes back to the
+queue as it was. Switching the source back on picks them up again.
+
+Sources that send an observable to a third party (``Egress.SHARES_IOC``) are
+queued on the automatic lanes (``new``, ``refresh``) only when an admin set
+their row to ``trigger_mode='auto'``; their rows are seeded ``manual``.
 
 A ``manual``-lane job runs with ``refresh``: it exists because a person asked
 for a lookup and the source refused it, so the stored result is not the answer.
@@ -59,7 +71,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.enrichment.gateway import GatewayUnavailable
+from app.enrichment.gateway import GatewayUnavailable, in_lane
+from app.enrichment.manifest import Egress
 from app.enrichment.registry import ADAPTER_REGISTRY
 from app.models.enrichment import EnrichmentJob, EnrichmentSource
 
@@ -79,7 +92,11 @@ LEASE = timedelta(minutes=10)
 MAX_ATTEMPTS = 5
 #: Seconds before the first retry of an error; doubles per attempt.
 ERROR_BACKOFF = 300
-BACKFILL_SHARE = 0.6
+#: Seconds a job waits when its credential's key was rejected. The refusal
+#: costs no request, so it is checked again soon: a fixed key is picked up.
+AUTH_DEFER = 3600
+#: Lanes nobody asked for by name: a SHARES_IOC source needs trigger_mode='auto'.
+AUTOMATIC_LANES = frozenset({"new", "refresh"})
 #: Seconds a job waits when it met the pause; no attempt is counted.
 PAUSE_DEFER = 60
 #: Rows per INSERT when queueing a backfill.
@@ -89,8 +106,11 @@ STARTED = "started"
 LEASE_EXPIRED = f"The run did not finish within its {LEASE.total_seconds() / 60:.0f}-minute lease"
 
 _DONE = frozenset({"success", "cached", "skipped_low_confidence", "needs_key", "unsupported"})
+#: Outcomes that put a row off until the source can take it: asking again
+#: doesn't bring it forward, the source would only refuse it again.
+DEFERRALS = ("rate_limited", "breaker_open", "budget_exhausted", "backfill_share", "auth_failed", "paused")
 #: Refusals that hold the rest of a credential's jobs for the tick.
-_HOLDS = frozenset({"rate_limited", "breaker_open", "budget_exhausted"})
+_HOLDS = frozenset({"rate_limited", "breaker_open", "budget_exhausted", "auth_failed"})
 
 
 def next_utc_midnight(now: datetime) -> datetime:
@@ -114,27 +134,33 @@ async def enqueue(
     source types queued.
 
     Applicable: enabled and supporting the entity type; for the ``new`` lane,
-    also ``trigger_mode='auto'``. Other lanes may name ``source_types``. Outside
-    the ``manual`` lane the entity must also be in the source's scope (its
-    kinds and ``scope`` values, ``Source.scope_filter``).
+    also ``trigger_mode='auto'``. Any lane may narrow to ``source_types``. A
+    source that shares IOCs (``Egress.SHARES_IOC``) is queued on an automatic
+    lane only with ``trigger_mode='auto'``. Outside the ``manual`` lane the
+    entity must also be in the source's scope (its kinds and ``scope``
+    values, ``Source.scope_filter``).
 
     Enqueueing an entity/source pair again upserts its row: it keeps the
     higher-priority lane (and that lane's requester) and the earlier due_at,
     and revives a ``failed`` row. Runs in a savepoint, so a failure here never
     costs the caller its transaction.
     """
-    query = select(EnrichmentSource.source_type).where(EnrichmentSource.is_enabled == True)  # noqa: E712
+    query = select(EnrichmentSource.source_type, EnrichmentSource.trigger_mode).where(
+        EnrichmentSource.is_enabled == True  # noqa: E712
+    )
     if lane == "new":
         query = query.where(EnrichmentSource.trigger_mode == "auto")
-    elif source_types:
+    if source_types:
         query = query.where(EnrichmentSource.source_type.in_(source_types))
 
     try:
         async with db.begin_nested():
             applicable = [
                 st
-                for st in (await db.execute(query)).scalars()
-                if st in ADAPTER_REGISTRY and entity_type in ADAPTER_REGISTRY[st].applies_to
+                for st, mode in (await db.execute(query)).all()
+                if st in ADAPTER_REGISTRY
+                and entity_type in ADAPTER_REGISTRY[st].applies_to
+                and not (lane in AUTOMATIC_LANES and mode != "auto" and shares_ioc(st))
             ]
             if lane != "manual":
                 applicable = [st for st in applicable if await _in_scope(db, st, entity_type, entity_id)]
@@ -162,6 +188,12 @@ async def enqueue(
         logger.exception("Could not queue enrichment for %s/%s", entity_type, entity_value)
         return []
     return applicable
+
+
+def shares_ioc(source_type: str) -> bool:
+    """Whether the source sends an observable's value to a third party."""
+    cls = ADAPTER_REGISTRY.get(source_type)
+    return cls is not None and cls.egress == Egress.SHARES_IOC
 
 
 async def _in_scope(db: AsyncSession, source_type: str, entity_type: str, entity_id) -> bool:
@@ -206,11 +238,14 @@ def _row(
 
 async def _upsert(db: AsyncSession, rows: list[dict]) -> None:
     """Insert job rows; a pair already queued keeps the higher-priority lane
-    (and its requester) and the earlier due_at, and a failed one is revived."""
+    (and its requester) and the earlier due_at, and a failed one is revived.
+    A row the source put off (``DEFERRALS``) keeps its due_at: a budget
+    refusal waits for midnight however often the entity is queued again."""
     stmt = pg_insert(EnrichmentJob).values(rows)
     new, job = stmt.excluded, EnrichmentJob
     upgrade = new.priority < job.priority
     revive = job.status == "failed"
+    deferred = and_(job.status == "queued", job.last_status.in_(DEFERRALS))
     await db.execute(
         stmt.on_conflict_do_update(
             constraint="uq_enrichment_jobs_entity_source",
@@ -218,7 +253,7 @@ async def _upsert(db: AsyncSession, rows: list[dict]) -> None:
                 "priority": func.least(job.priority, new.priority),
                 "lane": case((upgrade, new.lane), else_=job.lane),
                 "requested_by": case((upgrade, new.requested_by), else_=job.requested_by),
-                "due_at": func.least(job.due_at, new.due_at),
+                "due_at": case((deferred, job.due_at), else_=func.least(job.due_at, new.due_at)),
                 "entity_value": new.entity_value,
                 "entity_confidence": func.coalesce(new.entity_confidence, job.entity_confidence),
                 "entity_base_confidence": func.coalesce(new.entity_base_confidence, job.entity_base_confidence),
@@ -283,6 +318,13 @@ async def _claim_once(db: AsyncSession, limit: int, held: frozenset) -> tuple[bo
     due = or_(
         and_(EnrichmentJob.status == "queued", EnrichmentJob.due_at <= now),
         and_(EnrichmentJob.status == "running", EnrichmentJob.claimed_at < now - LEASE),
+    )
+    # A disabled source's rows wait for it to be switched back on.
+    due = and_(
+        due,
+        EnrichmentJob.source_type.in_(
+            select(EnrichmentSource.source_type).where(EnrichmentSource.is_enabled == True)  # noqa: E712
+        ),
     )
     if held:
         due = and_(due, not_(or_(*(_credential(st, by) for st, by in held))))
@@ -378,7 +420,9 @@ async def _settle(db: AsyncSession, job, status: str, *, retry_after: float | No
         values["due_at"] = now + timedelta(seconds=PAUSE_DEFER)
     elif status in ("budget_exhausted", "backfill_share"):
         values["due_at"] = next_utc_midnight(now)
-    elif status != "gateway_unavailable":
+    elif status == "auth_failed":
+        values["due_at"] = now + timedelta(seconds=AUTH_DEFER)
+    elif status not in ("gateway_unavailable", "source_disabled"):
         attempts = job.attempts + 1
         values.update(
             attempts=attempts,
@@ -418,7 +462,12 @@ async def _backfill_allowed(db: AsyncSession, job) -> bool:
     source, gateway = await _gateway(db, job)
     if source is None or not source.daily_budget:
         return True
-    return await gateway.used_today() < BACKFILL_SHARE * source.daily_budget
+    return await gateway.used_today() < gateway.backfill_cap()
+
+
+async def _source_enabled(db: AsyncSession, source_type: str) -> bool:
+    enabled = await db.scalar(select(EnrichmentSource.is_enabled).where(EnrichmentSource.source_type == source_type))
+    return bool(enabled)
 
 
 async def _hold(db: AsyncSession, job, until: datetime, status: str, claimed: list) -> None:
@@ -473,21 +522,26 @@ async def _run(db: AsyncSession, job, held: dict) -> str:
         if job.lane == "backfill" and not await _backfill_allowed(db, job):
             await _settle(db, job, "backfill_share")
             return "backfill_share"
-        results = await enrich_entity(
-            entity_type=job.entity_type,
-            entity_id=job.entity_id,
-            entity_value=job.entity_value,
-            db=db,
-            user_id=job.requested_by,
-            # Only the new lane is subject to the source's confidence threshold;
-            # a person or a backfill asked for this one by name.
-            trigger="auto" if job.lane == "new" else "manual",
-            source_types=[job.source_type],
-            entity_confidence=job.entity_confidence,
-            entity_base_confidence=job.entity_base_confidence,
-            # A person asked for this lookup and the source refused it.
-            refresh=job.lane == "manual",
-        )
+        with in_lane(job.lane):
+            results = await enrich_entity(
+                entity_type=job.entity_type,
+                entity_id=job.entity_id,
+                entity_value=job.entity_value,
+                db=db,
+                user_id=job.requested_by,
+                # Only the new lane is subject to the source's confidence threshold;
+                # a person or a backfill asked for this one by name.
+                trigger="auto" if job.lane == "new" else "manual",
+                source_types=[job.source_type],
+                entity_confidence=job.entity_confidence,
+                entity_base_confidence=job.entity_base_confidence,
+                # A person asked for this lookup and the source refused it.
+                refresh=job.lane == "manual",
+            )
+        if not results and not await _source_enabled(db, job.source_type):
+            # Switched off since the claim: the row waits for it.
+            await _settle(db, job, "source_disabled")
+            return "source_disabled"
         await apply_enrichment_results_to_entity(db, job.entity_type, job.entity_id, results)
     except GatewayUnavailable:
         await db.rollback()
@@ -505,6 +559,8 @@ async def _run(db: AsyncSession, job, held: dict) -> str:
         held[key] = (now + timedelta(seconds=max(1.0, outcome.get("retry_after") or 0)), status)
     elif status == "budget_exhausted":
         held[key] = (next_utc_midnight(now), status)
+    elif status == "auth_failed":
+        held[key] = (now + timedelta(seconds=AUTH_DEFER), status)
     await _settle(db, job, status, retry_after=outcome.get("retry_after"), error=outcome.get("error"))
     return status
 
@@ -565,3 +621,16 @@ async def _release(db: AsyncSession, jobs: list) -> None:
         .execution_options(synchronize_session=False)
     )
     await db.commit()
+
+
+async def retry_failed(db: AsyncSession, source_type: str | None = None) -> int:
+    """Queue again the lookups that gave up after MAX_ATTEMPTS errors (at one
+    source, or at every source), with their attempts reset. Returns how many."""
+    stmt = (
+        update(EnrichmentJob)
+        .where(EnrichmentJob.status == "failed")
+        .values(status="queued", attempts=0, last_status=None, last_error=None, due_at=func.now(), claimed_at=None)
+    )
+    if source_type:
+        stmt = stmt.where(EnrichmentJob.source_type == source_type)
+    return (await db.execute(stmt)).rowcount or 0

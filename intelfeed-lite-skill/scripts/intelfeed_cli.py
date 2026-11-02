@@ -701,9 +701,9 @@ TOOLS: dict[str, dict] = {
             "Chronological hygiene feed: a merge of the entity-link log and the entity-maintenance "
             "log, normalized (action, mode, applied, subject, reason, affected-entity links, origin). "
             "Filter by action code (comma-separate for several), log source, mode, origin "
-            "(adjudicator = filed by the adjudicate stage, legacy = scans and analysts), "
-            "pending-only, or a since timestamp. Read-only \u2014 applying or dismissing proposals happens "
-            "in the Proposals queue."
+            "(adjudicator = filed by the adjudicate stage, merge_review = the duplicate review, scan "
+            "= the on-demand scans and analysts), pending-only, or a since timestamp. Read-only \u2014 "
+            "applying or dismissing proposals happens in the Proposals queue."
         ),
         "params": {
             "action": {
@@ -723,7 +723,7 @@ TOOLS: dict[str, dict] = {
             "origin": {
                 "type": 'str',
                 "default": None,
-                "enum": ['adjudicator', 'legacy'],
+                "enum": ['adjudicator', 'merge_review', 'scan'],
             },
             "pending": {
                 "type": 'bool',
@@ -1351,6 +1351,8 @@ TOOLS: dict[str, dict] = {
                     'delivers',
                     'drops',
                     'exploits',
+                    'exposes',
+                    'operates_in',
                     'overlaps_with',
                     'related_to',
                     'subgroup_of',

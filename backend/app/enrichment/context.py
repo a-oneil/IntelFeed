@@ -4,6 +4,9 @@
 A source declares what it shows (``app/enrichment/manifest.py``). Each lookup
 result writes one row per declared output that has a value, shaped for its
 display, and removes that source's rows the new result no longer carries.
+
+Rows follow their entity: a merge moves them to the survivor
+(``rehome_context``), and the nightly prune drops rows whose entity is gone.
 """
 
 from __future__ import annotations
@@ -11,7 +14,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -229,7 +232,7 @@ async def entity_context(
         if visitor and (cls.egress == Egress.SHARES_IOC or not cls.license.commercial_ok):
             continue
         stored = rows.get(cls.source_type, {})
-        if "api_key" in cls.requires and not await resolve_api_key(source, user.id, db):
+        if cls.requires_api_key and not await resolve_api_key(source, user.id, db):
             if is_admin:
                 unavailable.append({"source_type": cls.source_type, "label": cls.display_name, "needs": "api_key"})
             if not stored:
@@ -257,7 +260,78 @@ async def entity_context(
     return {"sources": sources, "unavailable": unavailable, "badges": badges, "can_enrich": not visitor}
 
 
+async def rehome_context(db: AsyncSession, old_type: str, old_id: uuid.UUID, new_type: str, new_id: uuid.UUID) -> int:
+    """Move the context rows of an entity being merged away to the survivor,
+    alongside ``relations.rehome_claims``. Returns the rows moved.
+
+    A source's rows are one answer, so they move together or not at all: a
+    source that already has rows on the survivor keeps its own, and the merged
+    entity's are dropped. Into another type (a reclassify) nothing fits the
+    new type's outputs, so the rows are dropped and the next lookup of the
+    survivor fills them."""
+    rows = list(
+        (
+            await db.execute(
+                select(EntityContext).where(EntityContext.entity_type == old_type, EntityContext.entity_id == old_id)
+            )
+        ).scalars()
+    )
+    if not rows:
+        return 0
+    held = set()
+    if old_type == new_type and old_id != new_id:
+        held = set(
+            (
+                await db.execute(
+                    select(EntityContext.source_type)
+                    .where(EntityContext.entity_type == new_type, EntityContext.entity_id == new_id)
+                    .distinct()
+                )
+            ).scalars()
+        )
+    moving = {r.source_type for r in rows} - held if old_type == new_type else set()
+    for row in rows:
+        db.expunge(row)
+    if moving:
+        await db.execute(
+            update(EntityContext)
+            .where(
+                EntityContext.entity_type == old_type,
+                EntityContext.entity_id == old_id,
+                EntityContext.source_type.in_(moving),
+            )
+            .values(entity_id=new_id)
+            .execution_options(synchronize_session=False)
+        )
+    await db.execute(
+        delete(EntityContext).where(EntityContext.entity_type == old_type, EntityContext.entity_id == old_id)
+    )
+    return sum(1 for r in rows if r.source_type in moving)
+
+
+async def prune_orphan_context(db: AsyncSession) -> int:
+    """Delete rows whose entity is gone (deleted without a merge moving them).
+    Returns the count."""
+    from app.enrichment.entity_updater import _get_model_map
+
+    pruned = 0
+    models = _get_model_map()
+    for entity_type in (await db.execute(select(EntityContext.entity_type).distinct())).scalars().all():
+        model = models.get(entity_type)
+        if model is None:
+            continue
+        result = await db.execute(
+            delete(EntityContext).where(
+                EntityContext.entity_type == entity_type,
+                ~select(model.id).where(model.id == EntityContext.entity_id).exists(),
+            )
+        )
+        pruned += result.rowcount or 0
+    return pruned
+
+
 async def prune_expired_context(db: AsyncSession) -> int:
-    """Delete rows that expired more than ``PRUNE_AFTER`` ago. Returns the count."""
+    """Delete rows that expired more than ``PRUNE_AFTER`` ago, and rows whose
+    entity is gone. Returns the count."""
     result = await db.execute(delete(EntityContext).where(EntityContext.expires_at < datetime.now(UTC) - PRUNE_AFTER))
-    return result.rowcount or 0
+    return (result.rowcount or 0) + await prune_orphan_context(db)

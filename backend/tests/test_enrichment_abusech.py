@@ -32,8 +32,8 @@ from app.enrichment.adapters.abusech import (
     sync_export,
 )
 from app.enrichment.console import console, detail
-from app.enrichment.gateway import NeedsKey, SourceGateway
-from app.enrichment.manifest import Egress
+from app.enrichment.gateway import AuthFailed, NeedsKey, SourceGateway
+from app.enrichment.manifest import Egress, Key
 from app.enrichment.registry import (
     DEFAULT_SOURCES,
     SHARED_KEY_GROUPS,
@@ -163,7 +163,7 @@ def test_three_sources_one_key_manual_lookups_not_for_profit():
     seeds = {s["source_type"]: s for s in DEFAULT_SOURCES}
     for source_type in ABUSECH:
         cls = SOURCE_REGISTRY[source_type]
-        assert cls.requires == ("api_key",) and cls.shared_key_group == "abuse_ch"
+        assert cls.requires == (Key(),) and cls.shared_key_group == "abuse_ch"
         # A lookup sends the observable to abuse.ch: never on its own.
         assert cls.egress == Egress.SHARES_IOC and cls.default_trigger_mode == "manual"
         assert cls.license.commercial_ok is False
@@ -282,9 +282,14 @@ async def test_an_empty_export_withdraws_nothing_and_a_refusal_stops(db_session,
 
 async def test_an_export_error_never_shows_the_key(db_session, ledger):
     key = _key()
-    with pytest.raises(RuntimeError) as raised:
+    # A rejected key is the gateway's AuthFailed; any other error status is the export's own.
+    with pytest.raises(AuthFailed) as raised:
         await sync_export(db_session, _gateway("urlhaus", _server(status=401), key), key, URLhausAdapter)
     assert "401" in str(raised.value) and key not in str(raised.value)
+    key = _key()  # the rejected key is refused before it is sent again
+    with pytest.raises(RuntimeError) as raised:
+        await sync_export(db_session, _gateway("urlhaus", _server(status=500), key), key, URLhausAdapter)
+    assert "500" in str(raised.value) and key not in str(raised.value)
 
 
 # ── URLhaus export ───────────────────────────────────────────────────
@@ -384,10 +389,18 @@ async def test_without_a_key_nothing_is_sent_and_the_console_says_so(db_session,
         await adapter.enrich("observable", SHA256)
     assert not await adapter.check_health()
 
-    sources = {s["source_type"]: s for s in (await console(db_session))["sources"]}
+    data = await console(db_session)
+    sources = {s["source_type"]: s for s in data["sources"]}
     for source_type in ABUSECH:
         assert sources[source_type]["status"] == "needs_key"
-        assert sources[source_type]["attention"] == "needs an API key"
+        assert sources[source_type]["attention"] == "needs an API key before it can run"
+        assert sources[source_type]["key"] == "abuse_ch"
+        assert sources[source_type]["key_status"] == "missing"
+    # One missing key is one problem, however many sources share it.
+    (missing,) = [a for a in data["attention"] if a["action"] and a["action"].get("key") == "abuse_ch"]
+    assert missing["label"] == "abuse.ch Auth-Key"
+    assert missing["action"] == {"kind": "key", "key": "abuse_ch", "label": "Add key"}
+    assert sorted(missing["sources"]) == sorted(sources[t]["label"] for t in ABUSECH)
 
 
 # ── One key for three ────────────────────────────────────────────────

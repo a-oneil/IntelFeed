@@ -493,31 +493,7 @@ async def test_the_body_satisfies_the_frontend_type(
     assert {i["display"] for s in body["sources"] for i in s["items"]} >= {"fact", "chips", "table", "link", "badge"}
 
 
-# ── NVD lookups fill the CVE without fighting extraction ─────────────
-
-_EXTRACTED = {
-    "cvss_score": 9.8,
-    "severity": "CRITICAL",
-    "description": "From the extraction-time NVD call.",
-    "affected_products": [],
-    "references": [],
-    "nvd_data": {},
-}
-
-
-async def _extract(db, monkeypatch, nvd_answer):
-    from app.intelligence import cve as cve_module
-
-    async def fake_gateway(db):
-        return None, None
-
-    async def fake_nvd(cve_id, gateway, api_key=None):
-        return nvd_answer
-
-    monkeypatch.setattr(cve_module, "nvd_gateway", fake_gateway)
-    monkeypatch.setattr(cve_module, "enrich_from_nvd", fake_nvd)
-    (stored,) = await cve_module.extract_and_store_cves(db, uuid.uuid4(), "Patch CVE-2024-3400 now.")
-    return stored
+# ── NVD lookups fill the CVE extraction stored ───────────────────────
 
 
 async def _claims(db, entity_id) -> set[tuple[str, str]]:
@@ -527,27 +503,59 @@ async def _claims(db, entity_id) -> set[tuple[str, str]]:
     return set(rows.all())
 
 
-async def test_extraction_writes_nvd_columns_and_a_lookup_leaves_them(db_session, test_entry, monkeypatch):
-    from app.enrichment.entity_updater import apply_enrichment_results_to_entity
+async def test_extraction_calls_no_source_and_queues_the_cve(db_session, test_entry, monkeypatch):
+    """Ingest never calls NVD itself: the new CVE goes on the queue, where the
+    source's switch, rate and budget apply."""
     from app.intelligence import cve as cve_module
+    from app.models.enrichment import EnrichmentJob, EnrichmentSource
 
-    async def fake_gateway(db):
-        return None, None
+    async def no_nvd(*args, **kwargs):
+        raise AssertionError("extraction called NVD")
 
-    async def fake_nvd(cve_id, gateway, api_key=None):
-        return _EXTRACTED
-
-    monkeypatch.setattr(cve_module, "nvd_gateway", fake_gateway)
-    monkeypatch.setattr(cve_module, "enrich_from_nvd", fake_nvd)
-    (cve,) = await cve_module.extract_and_store_cves(db_session, test_entry.id, "Patch CVE-2024-3400 now.")
-    # Today's extraction path: score, severity and description from its own call.
-    assert (float(cve.cvss_score), cve.severity, cve.description) == (9.8, "CRITICAL", _EXTRACTED["description"])
-
-    nvd = {"status": "success", "source_type": "nvd", "parsed_data": NVD}
-    assert await apply_enrichment_results_to_entity(db_session, "cve", cve.id, [nvd]) is False
+    monkeypatch.setattr(cve_module, "enrich_from_nvd", no_nvd)
+    db_session.add(
+        EnrichmentSource(
+            source_type="nvd",
+            display_name="NVD",
+            is_enabled=True,
+            trigger_mode="auto",
+            config={},
+            rate_limit_config={"requests_per_period": 5, "period_seconds": 30},
+        )
+    )
     await db_session.flush()
-    assert (float(cve.cvss_score), cve.severity, cve.description) == (9.8, "CRITICAL", _EXTRACTED["description"])
-    assert await _claims(db_session, cve.id) == set()
+
+    (cve,) = await cve_module.extract_and_store_cves(db_session, test_entry.id, "Patch CVE-2024-3400 now.")
+
+    assert (cve.cvss_score, cve.description) == (None, None)
+    queued = (
+        await db_session.execute(select(EnrichmentJob.source_type).where(EnrichmentJob.entity_id == cve.id))
+    ).scalars()
+    assert "nvd" in set(queued)
+
+
+async def test_extraction_queues_nothing_for_a_disabled_nvd(db_session, test_entry):
+    from app.intelligence import cve as cve_module
+    from app.models.enrichment import EnrichmentJob, EnrichmentSource
+
+    db_session.add(
+        EnrichmentSource(
+            source_type="nvd",
+            display_name="NVD",
+            is_enabled=False,
+            trigger_mode="auto",
+            config={},
+            rate_limit_config={"requests_per_period": 5, "period_seconds": 30},
+        )
+    )
+    await db_session.flush()
+
+    (cve,) = await cve_module.extract_and_store_cves(db_session, test_entry.id, "Patch CVE-2024-3401 now.")
+
+    queued = (
+        await db_session.execute(select(EnrichmentJob.source_type).where(EnrichmentJob.entity_id == cve.id))
+    ).scalars()
+    assert "nvd" not in set(queued)
 
 
 async def test_a_lookup_fills_a_cve_extraction_left_bare(db_session, test_entry, monkeypatch):
@@ -578,13 +586,18 @@ async def test_a_lookup_fills_a_cve_extraction_left_bare(db_session, test_entry,
 async def test_the_nightly_prune_drops_rows_expired_over_30_days(db_session):
     from app.workers.job_registry import JOB_REGISTRY
 
-    old, recent = uuid.uuid4(), uuid.uuid4()
-    await _store(db_session, "observable", old, "shodan", SHODAN, observed=NOW - timedelta(days=32))
-    await _store(db_session, "observable", recent, "shodan", SHODAN, observed=NOW - timedelta(days=29))
+    old, recent = _ip("71.6.135.131"), _ip("71.6.135.132")
+    db_session.add_all([old, recent])
+    await db_session.flush()
+    await _store(db_session, "observable", old.id, "shodan", SHODAN, observed=NOW - timedelta(days=32))
+    await _store(db_session, "observable", recent.id, "shodan", SHODAN, observed=NOW - timedelta(days=29))
+    # Unexpired, but its observable is gone: pruned as an orphan.
+    await _store(db_session, "observable", uuid.uuid4(), "shodan", SHODAN, observed=NOW - timedelta(days=29))
 
-    assert await prune_expired_context(db_session) == 2
+    # Two rows (ports, tags) each for the expired observable and the orphan.
+    assert await prune_expired_context(db_session) == 4
     left = {r for (r,) in await db_session.execute(select(EntityContext.entity_id))}
-    assert left == {recent}
+    assert left == {recent.id}
 
     job = JOB_REGISTRY["prune-entity-context"]
     assert job["task"] == "app.workers.maintenance.prune_entity_context"

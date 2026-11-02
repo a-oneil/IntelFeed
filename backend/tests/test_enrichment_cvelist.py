@@ -225,9 +225,9 @@ async def test_nvd_outranks_the_cna_and_the_severity_goes_with_the_score(db_sess
     )
 
     assert float(cve.cvss_score) == 9.8
-    # Extraction's UNKNOWN isn't blank, so NVD's severity can't fill it; the
-    # CNA's severity follows only a score the CNA wrote.
-    assert cve.severity == "UNKNOWN"
+    # The severity goes with the score that was written, so NVD's 9.8 makes
+    # the CVE CRITICAL; extraction's UNKNOWN is a placeholder, not an answer.
+    assert cve.severity == "CRITICAL"
 
 
 async def test_the_cna_score_fills_a_blank_cve_with_its_severity(db_session):
@@ -284,10 +284,11 @@ async def test_an_applied_record_stores_context_badges_and_cwe_links(client, aut
     await db_session.flush()
     await _source_row(db_session)
 
-    changed = await tasks._apply_cvelist_record(db_session, cve.id, record_result(PAN_OS), {"CWE-77": cwe.id})
+    stats = {"changed": 0, "written": 0, "updated": 0}
+    await tasks._apply_cvelist_record(db_session, cve.id, record_result(PAN_OS), {"CWE-77": cwe.id}, stats)
     await db_session.flush()
 
-    assert changed
+    assert stats["changed"] and stats["written"] == 1
     stored = await _context(db_session, cve.id)
     assert stored["assigner"] == "palo_alto"
     assert stored["capec"] == ["CAPEC-248"]
@@ -337,14 +338,17 @@ async def test_an_unchanged_record_keeps_one_result_row(db_session):
     db_session.add(cve)
     await db_session.flush()
 
+    stats = {"changed": 0, "written": 0, "updated": 0}
     for _ in range(2):
-        await tasks._apply_cvelist_record(db_session, cve.id, record_result(PAN_OS), {})
+        await tasks._apply_cvelist_record(db_session, cve.id, record_result(PAN_OS), {}, stats)
         await db_session.flush()
 
     rows = (
         (await db_session.execute(select(EnrichmentResult).where(EnrichmentResult.entity_id == cve.id))).scalars().all()
     )
     assert len(rows) == 1
+    # The second, identical record changed nothing.
+    assert stats["changed"] == 1
 
 
 # ── Backfill: one record per unchecked CVE ───────────────────────────
@@ -371,7 +375,15 @@ async def test_backfill_fetches_unchecked_cves_only(db_session, worker_session, 
 
     stats = await tasks._run_cvelist_backfill()
 
-    assert stats == {"fetched": 1, "updated": 1, "not_found": 0, "failed": 0, "pending": 1, "stopped": None}
+    assert stats == {
+        "fetched": 1,
+        "changed": 1,
+        "written": 1,
+        "updated": 1,
+        "not_found": 0,
+        "pending": 1,
+        "stopped": None,
+    }
     assert [str(r.url) for r in upstream.requests] == [FIXTURE["cna_and_cisa_adp"]["url"]]
     await db_session.refresh(unchecked)
     assert unchecked.ssvc_exploitation == "active" and unchecked.cvss_score == Decimal("10.0")
@@ -379,17 +391,20 @@ async def test_backfill_fetches_unchecked_cves_only(db_session, worker_session, 
     assert (await tasks._run_cvelist_backfill())["pending"] == 0
 
 
-async def test_backfill_puts_cves_missing_a_score_first(db_session, worker_session, upstream):
+async def test_backfill_reads_the_baseline_when_more_are_due_than_a_run_can_fetch(db_session, worker_session, upstream):
+    # One request a day: two due CVEs are more than half a run's worth, so the
+    # run goes to the baseline zip instead of fetching records one at a time.
     await _source_row(db_session, rate_limit_config={"requests_per_period": 1, "period_seconds": 86400})
-    db_session.add_all(
-        [CVE(cve_id="CVE-2024-41713", cvss_score=Decimal("9.1"), description="x"), CVE(cve_id="CVE-2024-3400")]
-    )
+    db_session.add_all([CVE(cve_id="CVE-2024-41713"), CVE(cve_id="CVE-2024-3400")])
     await db_session.flush()
     upstream.route("cvelistV5", _status(404))
 
-    await tasks._run_cvelist_backfill()
+    stats = await tasks._run_cvelist_backfill()
 
-    assert "CVE-2024-3400" in str(upstream.requests[0].url)
+    assert stats["stopped"] == "download_failed" and stats["pending"] == 2
+    assert [str(r.url) for r in upstream.requests] == [
+        "https://api.github.com/repos/CVEProject/cvelistV5/releases?per_page=5"
+    ]
 
 
 async def test_backfill_stops_on_a_throttle_and_keeps_what_it_did(db_session, worker_session, upstream):
@@ -407,16 +422,16 @@ async def test_backfill_stops_on_a_throttle_and_keeps_what_it_did(db_session, wo
     assert len(results) == 1
 
 
-async def test_backfill_stops_cleanly_when_paused_or_out_of_budget(db_session, worker_session, upstream):
-    from app.services.redis_client import get_redis_bytes
-
+async def test_backfill_stops_cleanly_when_paused_or_out_of_budget(
+    db_session, worker_session, upstream, pause_enrichment
+):
     await _source_row(db_session, daily_budget=0)
     db_session.add(CVE(cve_id="CVE-2024-3400"))
     await db_session.flush()
     upstream.route("cvelistV5", _record(PAN_OS))
 
     assert (await tasks._run_cvelist_backfill())["stopped"] == "budget_exhausted"
-    await (await get_redis_bytes()).set(gw.paused_key(), b"1")
+    await pause_enrichment()
     assert (await tasks._run_cvelist_backfill())["stopped"] == "paused"
     assert upstream.requests == []
 
@@ -472,7 +487,17 @@ async def test_delta_sync_applies_only_our_records_and_moves_its_cursor(
 
     stats = await tasks._run_cvelist_delta_sync()
 
-    assert stats == {"deltas": 2, "records": 5, "ours": 2, "updated": 2, "gap": False, "stopped": None}
+    assert stats == {
+        "fetched": 2,
+        "changed": 2,
+        "written": 2,
+        "deltas": 2,
+        "records": 5,
+        "ours": 2,
+        "updated": 2,
+        "gap": False,
+        "stopped": None,
+    }
     assert read == ["deltaCves/CVE-2024-41713.json", "deltaCves/CVE-2024-3400.json"]
     assert all(r.headers["User-Agent"] == USER_AGENT for r in upstream.requests)
     assert await SourceGateway("cvelist").used_today() == len(upstream.requests) == 5
@@ -565,3 +590,115 @@ async def test_migration_adds_and_drops_the_ssvc_columns(db_session):
     assert await columns() == set()
     await connection.run_sync(run(migration.upgrade))
     assert await columns() == {"ssvc_exploitation", "ssvc_automatable", "ssvc_technical_impact"}
+
+
+# ── The baseline zip: downloaded once, read for the CVEs due ─────────
+
+
+def _baseline_zip(*records) -> bytes:
+    """The baseline's layout: an outer zip whose one member is ``cves.zip``."""
+    inner = io.BytesIO()
+    with zipfile.ZipFile(inner, "w", zipfile.ZIP_DEFLATED) as zf:
+        for record in records:
+            cve_id = record["cveMetadata"]["cveId"]
+            year, number = cve_id.split("-")[1:]
+            zf.writestr(f"cves/{year}/{number[:-3]}xxx/{cve_id}.json", json.dumps(record))
+    outer = io.BytesIO()
+    with zipfile.ZipFile(outer, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("cves.zip", inner.getvalue())
+    return outer.getvalue()
+
+
+BASELINE_ASSET = "2026-10-28_all_CVEs_at_midnight.zip.zip"
+
+
+@pytest.fixture
+def baseline_dir(tmp_path, monkeypatch):
+    """Where the job keeps the baseline between runs, under this test's tmp_path."""
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+    return tmp_path / tasks._CVELIST_BASELINE_DIR
+
+
+def _gateway() -> SourceGateway:
+    return SourceGateway("cvelist", rate_limit_config={"requests_per_period": 100, "period_seconds": 60})
+
+
+def test_baseline_records_yields_only_the_wanted_cves(tmp_path):
+    path = tmp_path / BASELINE_ASSET
+    path.write_bytes(_baseline_zip(PAN_OS, MITEL, _not_ours("CVE-2026-99001")))
+
+    got = dict(tasks._baseline_records(str(path), lambda c: c in {"CVE-2024-3400", "CVE-2026-99001"}))
+
+    assert set(got) == {"CVE-2024-3400", "CVE-2026-99001"}
+    assert got["CVE-2024-3400"]["cveMetadata"]["cveId"] == "CVE-2024-3400"
+    # A zip with no records zip inside isn't a baseline.
+    (tmp_path / "plain.zip").write_bytes(_zip(PAN_OS))
+    with pytest.raises(ValueError, match="no records zip"):
+        list(tasks._baseline_records(str(tmp_path / "plain.zip"), lambda c: True))
+
+
+async def test_the_baseline_is_downloaded_once_and_older_ones_are_removed(upstream, baseline_dir):
+    baseline_dir.mkdir()
+    (baseline_dir / "2026-10-27_all_CVEs_at_midnight.zip.zip").write_bytes(b"last release's")
+    body = _baseline_zip(PAN_OS)
+    upstream.route("api.github.com/repos/CVEProject/cvelistV5/releases", _record(RELEASES))
+    for fragment, reply in _release_download(BASELINE_ASSET, body):
+        upstream.route(fragment, reply)
+
+    async with _gateway().client(timeout=60, follow_redirects=True) as client:
+        path = await tasks._cvelist_baseline(client)
+        again = await tasks._cvelist_baseline(client)
+
+    assert path == again == str(baseline_dir / BASELINE_ASSET)
+    assert [p.name for p in baseline_dir.iterdir()] == [BASELINE_ASSET]
+    assert Path(path).read_bytes() == body
+    assert len([r for r in upstream.requests if "release-assets" in str(r.url)]) == 1
+    assert list(dict(tasks._baseline_records(path, lambda c: True))) == ["CVE-2024-3400"]
+
+
+async def test_no_baseline_when_the_listing_has_none(upstream, baseline_dir):
+    upstream.route("api.github.com/repos/CVEProject/cvelistV5/releases", _record([{"assets": []}]))
+    async with _gateway().client(timeout=60, follow_redirects=True) as client:
+        assert await tasks._cvelist_baseline(client) is None
+
+
+async def test_an_oversized_baseline_is_refused_and_leaves_no_partial_file(upstream, baseline_dir, monkeypatch):
+    monkeypatch.setattr(tasks, "_CVELIST_BASELINE_MAX_BYTES", 16)
+    upstream.route("api.github.com/repos/CVEProject/cvelistV5/releases", _record(RELEASES))
+    for fragment, reply in _release_download(BASELINE_ASSET, _baseline_zip(PAN_OS)):
+        upstream.route(fragment, reply)
+
+    async with _gateway().client(timeout=60, follow_redirects=True) as client:
+        with pytest.raises(ValueError, match="larger than"):
+            await tasks._cvelist_baseline(client)
+    assert list(baseline_dir.iterdir()) == []
+
+
+async def test_backfill_applies_the_baseline_and_stores_what_it_lacks_as_not_found(
+    db_session, worker_session, upstream, baseline_dir
+):
+    # Three requests a day: two due CVEs are more than half a run's worth, so
+    # they go to the baseline, which holds only one of them.
+    await _source_row(db_session, rate_limit_config={"requests_per_period": 3, "period_seconds": 86400})
+    pan_os, mitel = CVE(cve_id="CVE-2024-3400"), CVE(cve_id="CVE-2024-41713")
+    db_session.add_all([pan_os, mitel])
+    await db_session.flush()
+    upstream.route("api.github.com/repos/CVEProject/cvelistV5/releases", _record(RELEASES))
+    for fragment, reply in _release_download(BASELINE_ASSET, _baseline_zip(PAN_OS)):
+        upstream.route(fragment, reply)
+
+    stats = await tasks._run_cvelist_backfill()
+
+    assert (stats["fetched"], stats["not_found"], stats["pending"], stats["stopped"]) == (1, 1, 2, None)
+    await db_session.refresh(pan_os)
+    assert pan_os.ssvc_exploitation == "active"
+    results = {
+        entity_id: parsed
+        for entity_id, parsed in (
+            await db_session.execute(select(EnrichmentResult.entity_id, EnrichmentResult.parsed_data))
+        ).all()
+    }
+    assert results[pan_os.id]["found"] is True
+    assert results[mitel.id] == {"found": False}
+    # Both checked: the next run has nothing to do and downloads nothing.
+    assert (await tasks._run_cvelist_backfill())["pending"] == 0

@@ -226,6 +226,13 @@ class CVEAffectedEntityRow(BaseModel):
     product_name: str | None = None
     version_start: str | None = None
     version_end: str | None = None
+    # The resolved product's support lifecycle (endoflife.date): maintained,
+    # security_only, eol or unknown, and its soonest end of security support.
+    product_support_status: str | None = None
+    product_next_eol: date | None = None
+    # End-of-life releases of the product this row's version range covers:
+    # no fix will ship for them, even while the product itself is maintained.
+    eol_releases: list[str] = []
 
 
 # --- Threat Actor Schemas ---
@@ -917,6 +924,8 @@ class VendorResponse(BaseModel):
     description: str | None = None
     website: str | None = None
     vendor_type: str | None = None
+    # The country the company is from (Wikidata P17), a link to a country row.
+    country_id: uuid.UUID | None = None
     article_count: int = 0
     first_seen_at: datetime | None = None
     last_seen_at: datetime | None = None

@@ -1,6 +1,5 @@
 """External intelligence feed ingestion: CISA KEV and Cybergeist."""
 
-import asyncio
 import logging
 from datetime import UTC, date, datetime
 
@@ -21,10 +20,6 @@ KEV_REDIS_KEY = "intelfeed:kev:version"
 
 CYBERGEIST_ACTOR_URL = "https://pubbucket.cybergeist.io/cybergeist.io-threatActor-public-feed.json"
 CYBERGEIST_MALWARE_URL = "https://pubbucket.cybergeist.io/cybergeist.io-malware-public-feed.json"
-
-# New KEV CVEs enriched from NVD per sync, and the seconds that may take.
-MAX_NVD_ENRICHMENT = 50
-NVD_ENRICH_SECONDS = 180
 
 
 def _parse_kev_date(value: str | None) -> date | None:
@@ -82,13 +77,29 @@ def apply_kev_record(cve_obj: CVE, kev_data: dict) -> bool:
 
 
 async def sync_kev_feed(db: AsyncSession) -> dict:
-    """Sync CISA Known Exploited Vulnerabilities catalog.
+    """Sync the CISA Known Exploited Vulnerabilities catalog.
 
-    Returns stats dict with counts of new/updated CVEs.
+    Sets each listed CVE's KEV columns (``apply_kev_record``) and stores the
+    entry as the cisa_kev source's answer for the CVE (its context, through
+    ``apply_source_result``); a CVE the catalog adds is created and queued for
+    lookup, so NVD fills it through the enrichment queue (its switch, rate and
+    budget) rather than here. Returns stats with the job counts.
     """
-    from app.enrichment.pipeline import gateway_for
+    from app.enrichment.adapters.cisa_kev import kev_result
+    from app.enrichment.pipeline import apply_source_result, gateway_for
+    from app.enrichment.queue import enqueue
+    from app.services.claim_provenance import record_claim
 
-    stats = {"new": 0, "updated": 0, "skipped": 0, "errors": 0, "kev_additions": 0}
+    stats = {
+        "fetched": 0,
+        "changed": 0,
+        "written": 0,
+        "new": 0,
+        "updated": 0,
+        "skipped": 0,
+        "errors": 0,
+        "kev_additions": 0,
+    }
 
     gateway, _ = await gateway_for(db, "cisa_kev", max_wait=JOB_TOKEN_WAIT)
     try:
@@ -109,6 +120,7 @@ async def sync_kev_feed(db: AsyncSession) -> dict:
         return stats
 
     vulnerabilities = catalog.get("vulnerabilities", [])
+    stats["fetched"] = len(vulnerabilities)
     logger.info("Processing %d KEV vulnerabilities (version %s)", len(vulnerabilities), catalog_version)
 
     # Batch-load existing CVEs for efficiency
@@ -116,9 +128,10 @@ async def sync_kev_feed(db: AsyncSession) -> dict:
     existing_result = await db.execute(select(CVE).where(CVE.cve_id.in_(kev_cve_ids)))
     existing_map = {cve.cve_id: cve for cve in existing_result.scalars().all()}
 
-    new_cve_ids = []
+    new_cves: list[CVE] = []
     # Track CVEs newly added to KEV for correlation events
     kev_addition_cves: list[tuple[str, CVE]] = []  # (cve_id, cve_obj)
+    claims: list[tuple[CVE, str, object]] = []
 
     for vuln in vulnerabilities:
         cve_id = vuln.get("cveID")
@@ -139,10 +152,13 @@ async def sync_kev_feed(db: AsyncSession) -> dict:
         cve_obj = existing_map.get(cve_id)
         if cve_obj:
             # Update existing CVE with KEV data (never overwrites manual exploit status)
+            before = (cve_obj.exploit_availability, cve_obj.description)
             newly_added = apply_kev_record(cve_obj, kev_data)
             # Store description from KEV if CVE has none
             if not cve_obj.description and kev_data.get("shortDescription"):
                 cve_obj.description = kev_data["shortDescription"]
+            if (cve_obj.exploit_availability, cve_obj.description) != before:
+                stats["written"] += 1
             cve_obj.updated_at = datetime.now(UTC)
             if newly_added:
                 kev_addition_cves.append((cve_id, cve_obj))
@@ -157,11 +173,35 @@ async def sync_kev_feed(db: AsyncSession) -> dict:
             apply_kev_record(cve_obj, kev_data)
             db.add(cve_obj)
             existing_map[cve_id] = cve_obj
-            new_cve_ids.append(cve_id)
+            new_cves.append(cve_obj)
             kev_addition_cves.append((cve_id, cve_obj))
             stats["new"] += 1
+            stats["written"] += 1
+        claims.append((cve_obj, "exploit_availability", cve_obj.exploit_availability))
+        if cve_obj.description and cve_obj.description == kev_data.get("shortDescription"):
+            claims.append((cve_obj, "description", cve_obj.description))
 
     await db.flush()
+
+    # Each listed CVE: what KEV wrote is claimed for it, and the entry is
+    # stored as the source's answer (the profile's KEV context).
+    for vuln in vulnerabilities:
+        cve_obj = existing_map.get(vuln.get("cveID"))
+        if cve_obj is None:
+            continue
+        applied = await apply_source_result(db, "cve", cve_obj.id, "cisa_kev", kev_result(vuln, via="sync-kev-feed"))
+        stats["changed"] += applied.changed
+    for cve_obj, field, value in claims:
+        if cve_obj.exploit_status_source != "manual" or field == "description":
+            await record_claim(
+                db,
+                entity_type="cve",
+                entity_id=cve_obj.id,
+                field=field,
+                value=value,
+                source_kind="enrichment",
+                source_ref="cisa_kev",
+            )
 
     # Generate correlation events for new KEV additions
     if kev_addition_cves:
@@ -174,6 +214,11 @@ async def sync_kev_feed(db: AsyncSession) -> dict:
             except Exception:
                 logger.debug("Failed to create KEV addition event for %s", cve_id, exc_info=True)
 
+    # New CVEs go on the enrichment queue: NVD (and every other automatic
+    # source) looks them up there, only while it is switched on.
+    for cve_obj in new_cves:
+        await enqueue(db, "cve", cve_obj.id, cve_obj.cve_id)
+
     await db.commit()
 
     # KEV addition changes severity signals on entries already covering the CVE
@@ -183,40 +228,6 @@ async def sync_kev_feed(db: AsyncSession) -> dict:
         for _, cve_obj in kev_addition_cves:
             dispatch_cve_rescore(cve_obj.id)
 
-    # Enrich new CVEs from NVD at its pace (5 req/30s without an API key), at
-    # most what fits in NVD_ENRICH_SECONDS of the task's 300s limit; the nightly
-    # reenrich-cve-nvd job picks up the rest.
-    if new_cve_ids:
-        from app.intelligence.cve import enrich_from_nvd, nvd_gateway, nvd_request_pace
-
-        nvd_gw, api_key = await nvd_gateway(db)
-        pace = nvd_request_pace(api_key)
-        enrich_batch = new_cve_ids[: min(MAX_NVD_ENRICHMENT, int(NVD_ENRICH_SECONDS / pace))]
-        logger.info(
-            "Enriching %d/%d new KEV CVEs from NVD",
-            len(enrich_batch),
-            len(new_cve_ids),
-        )
-        for i, cve_id in enumerate(enrich_batch):
-            if i:
-                await asyncio.sleep(pace)
-            try:
-                nvd = await enrich_from_nvd(cve_id, nvd_gw, api_key)
-            except SOURCE_REFUSALS as e:
-                logger.warning("KEV sync: NVD enrichment stopping at %d/%d: %s", i, len(enrich_batch), e)
-                stats["stopped"] = e.status
-                break
-            if nvd:
-                cve_obj = existing_map[cve_id]
-                cve_obj.cvss_score = nvd.get("cvss_score")
-                cve_obj.severity = nvd.get("severity")
-                if nvd.get("description"):
-                    cve_obj.description = nvd["description"]
-                cve_obj.affected_products = nvd.get("affected_products", [])
-                cve_obj.references_ = nvd.get("references", [])
-                cve_obj.nvd_data = nvd.get("nvd_data", {})
-
-        await db.commit()
     await r.set(KEV_REDIS_KEY, catalog_version)
     logger.info("KEV sync complete: %d new, %d updated", stats["new"], stats["updated"])
     return stats

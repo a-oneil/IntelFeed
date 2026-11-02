@@ -146,6 +146,9 @@ async def get_entity(db: AsyncSession, entity_type: str, entity_id: uuid.UUID):
     # Eagerly load vendor relationship for products
     if entity_type == "product":
         q = q.options(selectinload(Product.vendor))
+    # And a vendor's country (Wikidata P17), for the profile's country badge.
+    if entity_type == "vendor":
+        q = q.options(selectinload(Vendor.country))
     result = await db.execute(q)
     return result.scalar_one_or_none()
 
@@ -774,6 +777,10 @@ def _serialize_entity(entity_type: str, entity) -> dict:
                 "aliases": getattr(entity, "aliases", None) or [],
                 "vendor_type": getattr(entity, "vendor_type", None),
                 "website": getattr(entity, "website", None),
+                # The country the company is from, when it is linked (and loaded:
+                # get_entity eager-loads it; a list row may not have it).
+                "country_id": str(entity.country_id) if getattr(entity, "country_id", None) else None,
+                "country": _loaded_name(entity, "country"),
                 "description": getattr(entity, "description", None),
                 "wikipedia_url": getattr(entity, "wikipedia_url", None),
                 "wikipedia_content": getattr(entity, "wikipedia_content", None),
@@ -803,6 +810,9 @@ def _serialize_entity(entity_type: str, entity) -> dict:
                 "vendor_name": vendor_name,
                 "product_type": getattr(entity, "product_type", None),
                 "website": getattr(entity, "website", None),
+                # endoflife.date lifecycle: the profile's EOL badge.
+                "support_status": getattr(entity, "support_status", None),
+                "next_eol": str(entity.next_eol) if getattr(entity, "next_eol", None) else None,
                 "description": getattr(entity, "description", None),
                 "wikipedia_url": getattr(entity, "wikipedia_url", None),
                 "wikipedia_content": getattr(entity, "wikipedia_content", None),
@@ -813,6 +823,19 @@ def _serialize_entity(entity_type: str, entity) -> dict:
             }
         )
     return base
+
+
+def _loaded_name(entity, relation: str) -> str | None:
+    """A related row's name when the relationship is already loaded, else None
+    (never a lazy load, which an async session can't do)."""
+    from sqlalchemy import inspect as sa_inspect
+    from sqlalchemy.orm.base import NO_VALUE
+
+    try:
+        value = sa_inspect(entity).attrs[relation].loaded_value
+    except Exception:
+        return None
+    return None if value is NO_VALUE or value is None else getattr(value, "name", None)
 
 
 def _dt(dt: datetime | None) -> str | None:

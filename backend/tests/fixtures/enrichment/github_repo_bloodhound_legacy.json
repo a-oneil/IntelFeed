@@ -1,0 +1,21 @@
+{
+ "id": 56452110,
+ "name": "BloodHound-Legacy",
+ "full_name": "SpecterOps/BloodHound-Legacy",
+ "html_url": "https://github.com/SpecterOps/BloodHound-Legacy",
+ "description": "Six Degrees of Domain Admin",
+ "fork": false,
+ "stargazers_count": 10623,
+ "pushed_at": "2026-03-02T18:29:31Z",
+ "archived": false,
+ "disabled": false,
+ "license": {
+  "key": "gpl-3.0",
+  "name": "GNU General Public License v3.0",
+  "spdx_id": "GPL-3.0",
+  "url": "https://api.github.com/licenses/gpl-3.0",
+  "node_id": "MDc6TGljZW5zZTk="
+ },
+ "topics": [],
+ "default_branch": "master"
+}

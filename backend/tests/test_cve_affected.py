@@ -204,6 +204,19 @@ class TestAffectedCVEEndpoints:
         assert resp2.status_code == 200
         assert resp2.json() == rows
 
+    async def test_cve_affected_rows_carry_the_products_lifecycle(
+        self, client: AsyncClient, auth_headers, db_session, entities, affected_data
+    ):
+        """The profile's "no patch coming" badge reads the affected product's
+        endoflife.date status off these rows."""
+        from datetime import date
+
+        entities["outlook"].support_status = "eol"
+        entities["outlook"].next_eol = date(2025, 10, 14)
+        await db_session.flush()
+        rows = (await client.get(f"/api/cves/{affected_data['kev'].id}/affected", headers=auth_headers)).json()
+        assert (rows[0]["product_support_status"], rows[0]["product_next_eol"]) == ("eol", "2025-10-14")
+
     async def test_unknown_ids_404(self, client: AsyncClient, auth_headers, affected_data):
         missing = uuid.uuid4()
         assert (await client.get(f"/api/products/{missing}/affected-cves", headers=auth_headers)).status_code == 404
@@ -282,7 +295,7 @@ class TestReenrichSweep:
         assert stats["attempted"] == 2  # healthy CVE not selected
         assert stats["enriched"] == 1
         assert stats["with_config"] == 1
-        assert stats["pairs"] == 1
+        assert stats["affected_products"] == 1
         await db_session.refresh(stuck)
         await db_session.refresh(junk)
         assert stuck.nvd_data.get("configurations") is not None
@@ -291,3 +304,79 @@ class TestReenrichSweep:
         assert junk.nvd_data.get("_enrich_attempts") == 1
         row = (await db_session.execute(select(CVEAffected).where(CVEAffected.cve_id == stuck.id))).scalar_one()
         assert row.cpe_product == "netscaler_gateway"
+
+
+# ── End-of-life releases a range covers ──────────────────────────────
+
+
+def _releases(*rows) -> dict:
+    """The profile's stored endoflife.date table."""
+    return {
+        "columns": ["Release", "Released", "Active until", "Security until", "Status"],
+        "rows": [[release, "2020-01-01", None, None, status] for release, status in rows],
+    }
+
+
+class TestEolReleases:
+    def test_a_release_inside_a_patch_range(self):
+        from app.enrichment.endoflife import eol_releases
+
+        table = _releases(("10.2", "eol"), ("10.1", "eol"), ("11.0", "eol"))
+        assert eol_releases(table, "10.2.0", "10.2.9-h1") == ["10.2"]
+
+    def test_a_release_under_an_upper_bound(self):
+        from app.enrichment.endoflife import eol_releases
+
+        table = _releases(("3.11", "eol"), ("3.10", "eol"), ("3.8", "eol"), ("3.12", "maintained"))
+        # Compared at the release's own length: 3.10 is inside "< 3.10.2", 3.11 isn't.
+        assert eol_releases(table, None, "3.10.2") == ["3.10", "3.8"]
+        assert eol_releases(table, "3.9", None) == ["3.11", "3.10"]
+
+    def test_only_numbered_end_of_life_releases_count(self):
+        from app.enrichment.endoflife import eol_releases
+
+        table = _releases(("23H2", "eol"), ("22.04", "security only"), ("20.04", "eol"))
+        assert eol_releases(table, "1", "99") == ["20.04"]
+
+    def test_no_bound_names_no_release(self):
+        from app.enrichment.endoflife import eol_releases
+
+        table = _releases(("10.2", "eol"))
+        assert eol_releases(table, None, None) == []
+        assert eol_releases(table, "", "*") == []
+        assert eol_releases(None, "1", "2") == []
+        assert eol_releases({"rows": [["10.2"], "junk", [None, 1, 2, 3, "eol"]]}, "1", "99") == []
+
+    async def test_affected_rows_carry_the_eol_releases_they_cover(
+        self, client: AsyncClient, auth_headers, db_session, entities, affected_data
+    ):
+        from datetime import UTC, datetime, timedelta
+
+        from app.enrichment.context import store_context
+
+        # The kev CVE affects Outlook up to and including 9.9.
+        parsed = {
+            "found": True,
+            "releases": [
+                {"release": r, "released": "2020-01-01", "active_until": None, "security_until": None, "status": s}
+                for r, s in (("10.0", "eol"), ("9.9", "maintained"), ("9.5", "eol"), ("8", "eol"))
+            ],
+        }
+        now = datetime.now(UTC)
+        await store_context(
+            db_session,
+            "product",
+            entities["outlook"].id,
+            "endoflife",
+            parsed,
+            observed_at=now,
+            expires_at=now + timedelta(days=7),
+        )
+        await db_session.flush()
+
+        rows = (await client.get(f"/api/cves/{affected_data['kev'].id}/affected", headers=auth_headers)).json()
+        assert rows[0]["version_end"] == "9.9"
+        assert rows[0]["eol_releases"] == ["9.5", "8"]
+        # A product endoflife.date never answered for has none.
+        rows = (await client.get(f"/api/cves/{affected_data['vcenter'].id}/affected", headers=auth_headers)).json()
+        assert rows[0]["eol_releases"] == []

@@ -28,6 +28,21 @@
    ]
   }
  },
+ "find_family": {
+  "url": "https://malpedia.caad.fkie.fraunhofer.de/api/find/family/WannaCry",
+  "status": 200,
+  "body": [
+   {
+    "name": "win.wannacryptor",
+    "alt_names": [
+     "Wana Decrypt0r",
+     "WannaCry",
+     "WannaCrypt",
+     "Wcry"
+    ]
+   }
+  ]
+ },
  "family_list": {
   "url": "https://malpedia.caad.fkie.fraunhofer.de/api/list/families",
   "status": 200,

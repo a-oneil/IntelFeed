@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import uuid
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -49,7 +50,14 @@ PROVENANCE_FIELDS: dict[str, tuple[str, ...]] = {
     # Both exploit columns are real and both are analyst-editable: exploit_status
     # is the extraction's wording, exploit_availability is what the header badge
     # edits. Tracking only one leaves the other's claims with no UI to surface them.
-    entity_types.CVE: ("description", "cvss_score", "severity", "exploit_status", "exploit_availability"),
+    entity_types.CVE: (
+        "description",
+        "cvss_score",
+        "severity",
+        "exploit_status",
+        "exploit_availability",
+        "aliases",
+    ),
     entity_types.TTP: ("description", "tactic", "detection"),
     entity_types.CWE: ("description",),
     entity_types.VENDOR: ("description",),
@@ -78,9 +86,9 @@ def render_value(value) -> str:
         return ", ".join(str(v) for v in value if v not in (None, ""))
     if isinstance(value, bool):
         return "true" if value else "false"
-    if isinstance(value, float):
-        # 9.8 and 9.80 are the same claim about a CVSS score.
-        return f"{value:g}"
+    if isinstance(value, (float, Decimal)):
+        # 9.8, 9.80 and Decimal("10.0") vs 10.0 are the same claim about a CVSS score.
+        return f"{float(value):g}"
     return str(value).strip()
 
 

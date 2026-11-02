@@ -2,15 +2,24 @@
 whole file or feed. Each has an enrichment_sources row for its gateway (rate,
 budget, breaker) and its on/off switch."""
 
+import uuid
+from datetime import datetime, timedelta
+
+from sqlalchemy import all_, bindparam, delete, func, select
+from sqlalchemy.dialects.postgresql import ARRAY, UUID
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app import entity_types
 from app.enrichment.base import Source
-from app.enrichment.manifest import Column, Context, Display, Egress, Job, License, Policy, Quota, Relation
+from app.enrichment.manifest import Column, Context, Display, Egress, Job, License, Match, Policy, Quota, Relation
 
 
 class MISPGalaxySource(Source):
     source_type = "misp_galaxy"
     display_name = "MISP Galaxy"
-    applies_to = {"threat_actor": None}
+    about = "The MISP community's threat-actor catalog: countries, motives and targeted sectors."
+    applies_to = {entity_types.THREAT_ACTOR: None}
     # One file a week from raw.githubusercontent.com.
     quota = Quota(10, 3600, daily_budget=50)
     egress = Egress.NONE
@@ -23,12 +32,22 @@ class MISPGalaxySource(Source):
             "Refresh the reference alias knowledge from the MISP Galaxy threat-actor cluster",
         ),
     )
+    # A cluster fills only what an actor's profile leaves blank; its synonyms
+    # stay resolution knowledge (known_alias_map), never profile aliases.
+    outputs = (
+        Column("country", "threat_actor.country", resolve="country"),
+        Column("motivation", "threat_actor.motivation", filter="motivation"),
+        # Below Wikipedia, ATT&CK and Malpedia: it fills a blank and yields to them.
+        Column("description", "threat_actor.description", Policy.RANK, rank=4),
+        Relation("sectors", "targets", (entity_types.SECTOR,)),
+    )
 
 
 class MetasploitSource(Source):
     source_type = "metasploit"
     display_name = "Metasploit modules"
-    applies_to = {"cve": None}
+    about = "Which CVEs have a Metasploit module: shipped, weaponized exploit code."
+    applies_to = {entity_types.CVE: None}
     # One file a week from raw.githubusercontent.com.
     quota = Quota(10, 3600, daily_budget=50)
     egress = Egress.NONE
@@ -41,12 +60,34 @@ class MetasploitSource(Source):
             "Map tracked CVEs to Metasploit modules and escalate weaponized exploit status",
         ),
     )
+    outputs = (
+        Column("module", "cve.metasploit_module", Policy.NEWER_WINS),
+        Context("modules", "Metasploit modules", Display.CHIPS),
+    )
+
+    @staticmethod
+    async def apply_record(db, entity_type: str, entity_id, data, cache: dict) -> None:
+        """Adds Metasploit to the CVE's ``exploit_sources`` list, once."""
+        from app.intelligence.external_feeds import coerce_exploit_sources
+        from app.models.cve import CVE
+
+        module = (data.parsed_data or {}).get("module")
+        cve = await db.get(CVE, entity_id) if entity_type == entity_types.CVE and module else None
+        if cve is None:
+            return
+        sources = coerce_exploit_sources(cve.exploit_sources)
+        if not any(s.get("source") == "metasploit" for s in sources):
+            sources.append({"source": "metasploit", "module": module})
+        if sources != list(cve.exploit_sources or []):
+            # Rows stored as bare strings are rewritten as dicts.
+            cve.exploit_sources = sources
 
 
 class MITRECWESource(Source):
     source_type = "mitre_cwe"
     display_name = "MITRE CWE"
-    applies_to = {"cwe": None}
+    about = "MITRE's catalog of software weakness types."
+    applies_to = {entity_types.CWE: None}
     # One 2 MB zip a week.
     quota = Quota(10, 3600, daily_budget=50)
     egress = Egress.NONE
@@ -64,7 +105,8 @@ class MITRECWESource(Source):
 class RansomwareLiveSource(Source):
     source_type = "ransomware_live"
     display_name = "ransomware.live"
-    applies_to = {"threat_actor": None}
+    about = "ransomware.live's profiles of ransomware groups: tools, leak sites and notes."
+    applies_to = {entity_types.THREAT_ACTOR: None}
     # ransomware.live allows about one call a minute per endpoint. The victim
     # sync makes two (/groups, /recentvictims) every 30 minutes, 96 a day; the
     # group profiles at most 10 every four hours, 60 a day.
@@ -80,6 +122,7 @@ class RansomwareLiveSource(Source):
             "app.workers.intel_feed_tasks.sync_ransomware_victims",
             {"type": "interval", "seconds": 1800},
             "Collect ransomware leak-site victim postings",
+            counts=False,
         ),
         Job(
             "ransomware-group-profiles",
@@ -106,7 +149,8 @@ class RansomwareLiveSource(Source):
 class CybergeistSource(Source):
     source_type = "cybergeist"
     display_name = "Cybergeist"
-    applies_to = {"threat_actor": None, "malware": None}
+    about = "Cybergeist's public threat-actor and malware feeds."
+    applies_to = {entity_types.THREAT_ACTOR: None, entity_types.MALWARE: None}
     # Two files a day.
     quota = Quota(10, 3600, daily_budget=50)
     egress = Egress.NONE
@@ -127,7 +171,9 @@ class CybergeistSource(Source):
 class TrancoSource(Source):
     source_type = "tranco"
     display_name = "Tranco"
-    applies_to = {"observable": ("domain",)}
+    about = "A daily ranking of the top million domains. A top-10k domain is likely benign."
+    # A victim's site rank is a rough size signal: context only.
+    applies_to = {entity_types.OBSERVABLE: ("domain",), entity_types.RANSOMWARE_VICTIM: Match(column="domain")}
     # A daily sync makes two requests: the latest list's id, then its CSV. The
     # API allows one query a second (https://tranco-list.eu/api_documentation).
     quota = Quota(1, 1, daily_budget=20, ceiling_per_period=1)
@@ -148,6 +194,66 @@ class TrancoSource(Source):
         ),
     )
     outputs = (
-        Column("rank", "observable.popularity_rank", Policy.NEWER_WINS),
+        # A domain that drops out of the list is answered "not found": the rank clears.
+        Column("rank", "observable.popularity_rank", Policy.NEWER_WINS, clears=True),
         Context("rank", "Tranco rank", Display.FACT),
     )
+
+
+# ── Tranco: victims ──────────────────────────────────────────────────
+# The daily Tranco job ranks the ledger's domains; these rank ransomware
+# victims' domains from the same streamed list, as profile context only (no
+# column, no review flag: a popular victim is no reason to doubt it).
+
+
+async def tranco_victim_matches(db: AsyncSession, batch: dict[str, int]) -> dict[uuid.UUID, int]:
+    """The victims whose domain (``www.`` aside, any case) is among ``batch``
+    (domain → rank), as id → rank."""
+    from app.models.ransomware import RansomwareVictim
+
+    host = func.regexp_replace(func.lower(RansomwareVictim.domain), r"^www\.", "")
+    rows = await db.execute(select(RansomwareVictim.id, host).where(host.in_(list(batch))))
+    return {vid: batch[domain] for vid, domain in rows}
+
+
+async def write_tranco_victim_ranks(
+    db: AsyncSession, matched: dict[uuid.UUID, int], now: datetime, ttl: timedelta
+) -> int:
+    """Store today's rank for each matched victim and drop the rank of victims
+    no longer listed. Returns the victims ranked."""
+    from app.models.enrichment import EntityContext
+
+    stale = delete(EntityContext).where(
+        EntityContext.entity_type == entity_types.RANSOMWARE_VICTIM,
+        EntityContext.source_type == TrancoSource.source_type,
+    )
+    if matched:
+        # One array bind however many victims rank (an IN list binds each).
+        ids = bindparam(None, list(matched), type_=ARRAY(UUID(as_uuid=True)))
+        stale = stale.where(EntityContext.entity_id != all_(ids))
+    await db.execute(stale)
+    rows = [
+        {
+            "entity_type": entity_types.RANSOMWARE_VICTIM,
+            "entity_id": vid,
+            "source_type": TrancoSource.source_type,
+            "key": "rank",
+            "value": rank,
+            "observed_at": now,
+            "expires_at": now + ttl,
+        }
+        for vid, rank in matched.items()
+    ]
+    for start in range(0, len(rows), 5000):
+        insert = pg_insert(EntityContext).values(rows[start : start + 5000])
+        await db.execute(
+            insert.on_conflict_do_update(
+                index_elements=["entity_type", "entity_id", "source_type", "key"],
+                set_={
+                    "value": insert.excluded.value,
+                    "observed_at": insert.excluded.observed_at,
+                    "expires_at": insert.excluded.expires_at,
+                },
+            )
+        )
+    return len(rows)

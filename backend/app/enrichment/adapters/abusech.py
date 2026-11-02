@@ -61,7 +61,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import entity_types
 from app.enrichment.base import EnrichmentAdapter, EnrichmentData
 from app.enrichment.gateway import SOURCE_REFUSALS, NeedsKey, SourceGateway
-from app.enrichment.manifest import Column, Context, Display, Egress, Job, License, Quota, Relation
+from app.enrichment.manifest import Column, Context, Display, Egress, Job, Key, License, Quota, Relation
 
 logger = logging.getLogger(__name__)
 
@@ -214,7 +214,7 @@ def _export_rows(fileobj) -> Iterator[dict]:
 class _AbuseCh(EnrichmentAdapter):
     """What the three abuse.ch sources share: the key, the terms, the bucket."""
 
-    requires = ("api_key",)
+    requires = (Key(),)
     shared_key_group = "abuse_ch"
     # abuse.ch publishes no numeric query limit, only "volumes reasonably
     # expected for non-commercial or non-profit purposes"
@@ -246,8 +246,10 @@ class _AbuseCh(EnrichmentAdapter):
             return resp.json()
 
 
-def _family(name: str | None, evidence: str) -> dict | None:
-    return {"name": name, "evidence": evidence} if name else None
+def _family(name: str | None, evidence: str, aliases: list[str] | None = None) -> dict | None:
+    if not name:
+        return None
+    return {"name": name, "evidence": evidence, **({"aliases": aliases} if aliases else {})}
 
 
 # ThreatFox ───────────────────────────────────────────────────────────
@@ -274,6 +276,9 @@ def threatfox_row(raw: dict) -> dict | None:
         "id": _text(raw.get("id") or raw.get("ioc_id")),
         "threat_type": _text(raw.get("threat_type")),
         "malware": None if not printable or printable.lower().startswith("unknown") else printable,
+        # Other names for the family ("BokBot,IcedID"): tried when the
+        # printable name matches nothing IntelFeed has.
+        "malware_aliases": _tags(raw.get("malware_alias")),
         "confidence": confidence,
         "first_seen": _day(raw.get("first_seen") or raw.get("first_seen_utc")),
         "last_seen": _day(raw.get("last_seen") or raw.get("last_seen_utc")),
@@ -293,7 +298,7 @@ def threatfox_facts(rows: list[dict]) -> dict:
         evidence = f"ThreatFox: {threat}, {row['confidence']}% confidence, first seen {row['first_seen']}"
         if row["reference"]:
             evidence += f" ({row['reference']})"
-        if family := _family(row["malware"], evidence):
+        if family := _family(row["malware"], evidence, row.get("malware_aliases")):
             (c2 if row["threat_type"] == "botnet_cc" else used).append(family)
     seen_last = [r["last_seen"] for r in rows if r["last_seen"]]
     return _compact(
@@ -318,12 +323,13 @@ def threatfox_facts(rows: list[dict]) -> dict:
     )
 
 
-_FAMILY_ITEM = {"name": "name", "evidence": "evidence"}
+_FAMILY_ITEM = {"name": "name", "evidence": "evidence", "aliases": "aliases"}
 
 
 class ThreatFoxAdapter(_AbuseCh):
     source_type = "threatfox"
     display_name = "abuse.ch ThreatFox"
+    about = "abuse.ch's feed of indicators tied to malware and C2."
     applies_to = {"observable": ("ipv4", "ipv6", "domain", "url", "md5", "sha1", "sha256")}
     #: The export (``{key}`` in its path) the job matches, and how long its answer stays fresh.
     export_url = THREATFOX_EXPORT
@@ -463,6 +469,7 @@ def urlhaus_facts(kind: str, value: str, rows: list[dict], blacklists=None, url_
 class URLhausAdapter(_AbuseCh):
     source_type = "urlhaus"
     display_name = "abuse.ch URLhaus"
+    about = "abuse.ch's list of URLs that serve malware."
     applies_to = {"observable": ("url", "domain", "ipv4")}
     export_url = URLHAUS_EXPORT
     export_ttl_hours = 24  # four runs a day; a URL's status moves fast
@@ -592,10 +599,13 @@ def bazaar_facts(sample: dict) -> dict:
 class MalwareBazaarAdapter(_AbuseCh):
     source_type = "malwarebazaar"
     display_name = "abuse.ch MalwareBazaar"
+    about = "abuse.ch's malware sample database, by file hash."
     applies_to = {"observable": ("md5", "sha1", "sha256")}
     outputs = (
         Column("role", "observable.role"),
-        Relation("families", "uses", (entity_types.MALWARE,), item=_FAMILY_ITEM),
+        # A sample's signature is a family name, as ThreatFox's are: one
+        # IntelFeed doesn't track yet is held, and links once it does.
+        Relation("families", "uses", (entity_types.MALWARE,), item=_FAMILY_ITEM, hold=True),
         Context("signature", "Signature", Display.FACT),
         Context("file_type", "File type", Display.FACT),
         Context("file_name", "File name", Display.FACT),

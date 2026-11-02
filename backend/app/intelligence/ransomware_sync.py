@@ -28,7 +28,7 @@ from app import entity_types
 from app.adapters.base import ParsedEntry
 from app.adapters.ransomware_live import RansomwareLiveAdapter, _parse_dt
 from app.api.events import publish_event
-from app.enrichment.gateway import JOB_TOKEN_WAIT, SOURCE_REFUSALS, GatewayUnavailable, SourceGateway
+from app.enrichment.gateway import JOB_TOKEN_WAIT, SOURCE_REFUSALS, AuthFailed, GatewayUnavailable, SourceGateway
 from app.intelligence.entity_dedup import find_entity_by_name_or_alias
 from app.intelligence.entity_resolution import gate_aliases, resolve_entity_creation
 from app.intelligence.sectors import normalize_sector, sector_label, sector_uuid
@@ -423,7 +423,7 @@ async def sync_ransomware_victims(
             logger.warning("ransomware sync: %s refused, skipping it this run: %s", source, e)
             stats["stopped"] = e.status
             continue
-        except GatewayUnavailable:
+        except (GatewayUnavailable, AuthFailed):
             raise
         except Exception:
             logger.exception("ransomware sync: fetch failed for source=%s", source)

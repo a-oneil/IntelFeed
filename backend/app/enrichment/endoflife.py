@@ -34,6 +34,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app import entity_types
 from app.enrichment.base import EnrichmentData, Source
 from app.enrichment.gateway import SOURCE_REFUSALS, SourceGateway
 from app.enrichment.manifest import Column, Context, Display, Egress, Job, License, Policy, Quota
@@ -57,7 +58,8 @@ TTL_HOURS = 48
 class EndOfLifeSource(Source):
     source_type = "endoflife"
     display_name = "endoflife.date"
-    applies_to = {"product": None}
+    about = "Release and support dates for software products."
+    applies_to = {entity_types.PRODUCT: None}
     # endoflife.date publishes no rate limit (https://endoflife.date/docs/api/v1/);
     # one request a second is polite, and a run makes one per matched product.
     quota = Quota(1, 1, daily_budget=1000)
@@ -74,7 +76,8 @@ class EndOfLifeSource(Source):
         ),
     )
     outputs = (
-        Column("support_status", "product.support_status", Policy.NEWER_WINS),
+        # A product that stops matching is answered "not found": both columns clear.
+        Column("support_status", "product.support_status", Policy.NEWER_WINS, clears=True),
         Column("next_eol", "product.next_eol", Policy.NEWER_WINS, filter="date", clears=True),
         Context(
             "releases",
@@ -177,17 +180,55 @@ def parse_product(result: dict, today: date) -> dict:
     }
 
 
+# ── Releases a CVE's range covers ────────────────────────────────────
+
+_NUMERIC = re.compile(r"^\d+(\.\d+)*$")
+
+
+def _version(text: str | None) -> tuple[int, ...] | None:
+    """``"10.2.9-h1"`` → ``(10, 2, 9)``: its leading dotted numbers."""
+    match = re.match(r"^\d+(\.\d+)*", (text or "").strip())
+    return tuple(int(p) for p in match.group(0).split(".")) if match else None
+
+
+def eol_releases(releases: dict | None, version_start: str | None, version_end: str | None) -> list[str]:
+    """The end-of-life releases (the profile's endoflife.date table) a CVE's
+    affected range covers. A release counts when its number, compared at its
+    own length, lies within the range: release ``10.2`` is inside
+    ``10.2.0 – 10.2.9``, release ``3.8`` inside ``< 3.10.2``. Only numbered
+    releases are compared ("23H2" is not), and a range with no bound at all
+    names no release."""
+    start, end = _version(version_start), _version(version_end)
+    if start is None and end is None:
+        return []
+    rows = (releases or {}).get("rows") or []
+    hits = []
+    for row in rows:
+        if not isinstance(row, list) or len(row) < 5 or row[4] != "eol" or not isinstance(row[0], str):
+            continue
+        if not _NUMERIC.match(row[0]):
+            continue
+        release = _version(row[0])
+        n = len(release)
+        if (start is None or start[:n] <= release) and (end is None or release <= end[:n]):
+            hits.append(row[0])
+    return hits
+
+
 # ── The job ──────────────────────────────────────────────────────────
 
 
 async def sync_endoflife(db: AsyncSession, gateway: SourceGateway) -> dict:
     """Match products, fetch each matched endoflife.date product once, apply.
     A refusal stops the run and keeps what it did; a product that fails to
-    load is skipped."""
+    load is skipped. After a run that went through, a product endoflife.date
+    answered before but no longer matches is answered "not found", which
+    clears its support columns and context."""
     from app.enrichment.pipeline import apply_catalog_result
+    from app.models.enrichment import EnrichmentResult
     from app.models.product import Product
 
-    stats = {"catalog": 0, "matched": 0, "updated": 0, "failed": 0, "stopped": None}
+    stats = {"catalog": 0, "matched": 0, "updated": 0, "failed": 0, "withdrawn": 0, "stopped": None}
     today = datetime.now(UTC).date()
     async with gateway.client(timeout=30.0) as client:
         try:
@@ -223,7 +264,29 @@ async def sync_endoflife(db: AsyncSession, gateway: SourceGateway) -> dict:
                 continue
             data = EnrichmentData(raw_response=result, parsed_data=parse_product(result, today), ttl_hours=TTL_HOURS)
             for product in products:
-                if await apply_catalog_result(db, "product", product.id, EndOfLifeSource.source_type, data):
+                if await apply_catalog_result(db, entity_types.PRODUCT, product.id, EndOfLifeSource.source_type, data):
                     stats["updated"] += 1
             await db.commit()
+
+    if stats["stopped"] is not None or not catalog:
+        return stats
+    matched = {p.id for products in matches.values() for p in products}
+    latest = (
+        select(EnrichmentResult.entity_id, EnrichmentResult.parsed_data)
+        .where(
+            EnrichmentResult.entity_type == entity_types.PRODUCT,
+            EnrichmentResult.source_type == EndOfLifeSource.source_type,
+            EnrichmentResult.status == "success",
+        )
+        .order_by(EnrichmentResult.entity_id, EnrichmentResult.enriched_at.desc())
+        .distinct(EnrichmentResult.entity_id)
+    )
+    gone = [pid for pid, parsed in (await db.execute(latest)).all() if pid not in matched and parsed.get("found", True)]
+    not_found = EnrichmentData(
+        raw_response={"status": "not_matched"}, parsed_data={"found": False}, ttl_hours=TTL_HOURS
+    )
+    for pid in gone:
+        await apply_catalog_result(db, entity_types.PRODUCT, pid, EndOfLifeSource.source_type, not_found)
+        stats["withdrawn"] += 1
+    await db.commit()
     return stats

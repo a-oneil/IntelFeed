@@ -17,6 +17,9 @@ class CVE(Base):
     cvss_score: Mapped[Decimal | None] = mapped_column(Numeric(3, 1))
     severity: Mapped[str | None] = mapped_column(String(20), index=True)
     description: Mapped[str | None] = mapped_column(Text)
+    # Other ids for the same vulnerability (GHSA-…, a distro's advisory id),
+    # unioned from sources that know them (OSV).
+    aliases: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list, server_default="{}", nullable=False)
     affected_products: Mapped[list] = mapped_column(JSONB, default=list)
     exploit_status: Mapped[str | None] = mapped_column(String(30))
     exploit_sources: Mapped[list] = mapped_column(JSONB, default=list)

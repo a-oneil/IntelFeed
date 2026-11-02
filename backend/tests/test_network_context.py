@@ -4,7 +4,8 @@
 Recorded answers live in ``tests/fixtures/enrichment/``: ``cymru.json`` maps a
 query name to its TXT answers (dig, 2026-10-28; a name it lacks is NXDOMAIN),
 ``rdap.json`` holds rdap.org's redirect and the registry's record, and
-``tranco_sample.csv`` is rows of the 2026-10-27 list as served (CRLF). DNS goes
+``tranco_sample.csv`` is rows of the 2026-10-27 list as served (CRLF),
+``cymru_bulk.txt`` a verbose bulk WHOIS answer (2026-10-30). DNS goes
 to a fake resolver, HTTP to ``httpx.MockTransport``, both behind real gateways
 (Redis; conftest gives each test its own key prefix).
 """
@@ -27,11 +28,11 @@ from app.enrichment import console, pipeline
 from app.enrichment import gateway as gw
 from app.enrichment import queue as q
 from app.enrichment.adapters import rdap
-from app.enrichment.adapters.cymru import CymruAdapter, origin_name
+from app.enrichment.adapters.cymru import CymruAdapter, bulk_query, origin_name, parse_bulk
 from app.enrichment.entity_updater import apply_enrichment_results_to_entity
 from app.enrichment.gateway import Paused, SourceGateway
 from app.enrichment.registry import get_adapter, source_gateway
-from app.models.enrichment import EnrichmentJob, EnrichmentSource, EntityContext
+from app.models.enrichment import EnrichmentJob, EnrichmentResult, EnrichmentSource, EntityContext
 from app.models.observable import Observable
 from app.services.redis_client import get_redis_bytes
 from app.workers.db import SOURCE_DISABLED
@@ -40,6 +41,7 @@ FIXTURES = Path(__file__).parent / "fixtures" / "enrichment"
 CYMRU = json.loads((FIXTURES / "cymru.json").read_text())
 RDAP = json.loads((FIXTURES / "rdap.json").read_text())
 TRANCO_CSV = (FIXTURES / "tranco_sample.csv").read_bytes()
+CYMRU_BULK = (FIXTURES / "cymru_bulk.txt").read_bytes()
 
 
 class _Resolver:
@@ -179,13 +181,138 @@ async def test_a_cymru_lookup_writes_columns_and_context(db_session, monkeypatch
     }
 
 
-async def test_an_asn_past_int4_is_not_written(db_session):
+def test_cymru_bulk_answers_read_like_dns_ones():
+    answers = parse_bulk(CYMRU_BULK.decode())
+    assert set(answers) == {"71.6.135.131", "8.8.8.8", "240.0.0.1", "2001:4860:4860::8888"}
+    # The same values a DNS lookup of the IP gives.
+    assert answers["71.6.135.131"] == {
+        "found": True,
+        "asn": 10439,
+        "prefix": "71.6.128.0/17",
+        "country": "US",
+        "registry": "ARIN",
+        "allocated": "2006-02-01",
+        "asn_org": "CARINET - CariNet, Inc., US",
+    }
+    assert answers["240.0.0.1"] == {"found": False, "note": "not announced in BGP"}
+    assert answers["2001:4860:4860::8888"]["prefix"] == "2001:4860::/32"
+    assert bulk_query(["8.8.8.8", "1.1.1.1"]) == b"begin\nverbose\n8.8.8.8\n1.1.1.1\nend\n"
+
+
+class _Whois:
+    """whois.cymru.com:43: records what was sent, answers the recording."""
+
+    def __init__(self):
+        self.sent = b""
+        self.connections = 0
+
+    async def open_connection(self, host, port):
+        assert (host, port) == ("whois.cymru.com", 43)
+        self.connections += 1
+        server = self
+
+        class Writer:
+            def write(self, data):
+                server.sent += data
+
+            async def drain(self):
+                pass
+
+            def close(self):
+                pass
+
+            async def wait_closed(self):
+                pass
+
+        reader = SimpleNamespace(read=_answer)
+        return reader, Writer()
+
+
+async def _answer():
+    return CYMRU_BULK
+
+
+@pytest.fixture
+def whois(monkeypatch, db_session):
+    server = _Whois()
+
+    @asynccontextmanager
+    async def session():
+        yield db_session
+
+    monkeypatch.setattr("app.enrichment.adapters.cymru._connect", server.open_connection)
+    monkeypatch.setattr(tasks, "_get_worker_session", session)
+    return server
+
+
+async def test_cymru_bulk_sync_maps_due_active_ips_over_one_connection(db_session, whois):
+    await _source(db_session, "cymru")
+    carinet = await _obs(db_session, "71.6.135.131")
+    v6 = await _obs(db_session, "2001:4860:4860:0::8888", kind="ipv6")  # written longhand
+    dark = await _obs(db_session, "240.0.0.1")
+    aged = await _obs(db_session, "8.8.4.4", status="aging")
+    fresh = await _obs(db_session, "8.8.8.8")
+    domain = await _obs(db_session, "cymru-bulk.example", kind="domain")
+    db_session.add(
+        EnrichmentResult(
+            entity_type="observable",
+            entity_id=fresh.id,
+            source_type="cymru",
+            raw_response={},
+            parsed_data={"found": True, "asn": 15169},
+            status="success",
+            enriched_at=datetime.now(UTC),
+            expires_at=datetime(2099, 1, 1, tzinfo=UTC),
+        )
+    )
+    await db_session.flush()
+
+    stats = await tasks._run_cymru_bulk_sync()
+
+    assert whois.connections == 1
+    sent = set(whois.sent.decode().splitlines())
+    assert {"begin", "verbose", "end", "71.6.135.131", "240.0.0.1", "2001:4860:4860::8888"} == sent
+    assert stats == {"due": 3, "fetched": 4, "changed": 3, "written": 2, "unannounced": 1}
+    for row in (carinet, v6, dark, aged, domain):
+        await db_session.refresh(row)
+    assert (carinet.asn, carinet.asn_org, carinet.geo_country) == (10439, "CARINET - CariNet, Inc., US", "US")
+    assert v6.asn == 15169
+    assert dark.asn is None and aged.asn is None
+    assert await _context(db_session, carinet.id) == {
+        ("cymru", "prefix"): "71.6.128.0/17",
+        ("cymru", "registry"): "ARIN",
+        ("cymru", "allocated"): "2006-02-01",
+    }
+    # One permit for the whole connection.
+    assert await SourceGateway("cymru").used_today() == 1
+
+    # Answered: nothing is due on the next run.
+    whois.sent = b""
+    assert (await tasks._run_cymru_bulk_sync())["due"] == 0
+    assert whois.connections == 1
+
+
+async def test_cymru_bulk_sync_skips_while_disabled_or_paused(db_session, whois, pause_enrichment):
+    await _source(db_session, "cymru", is_enabled=False)
+    await _obs(db_session, "71.6.135.131")
+    assert await tasks._run_cymru_bulk_sync() == SOURCE_DISABLED
+
+    await _source(db_session, "cymru")
+    await pause_enrichment()
+    stats = await tasks._run_cymru_bulk_sync()
+    assert stats["stopped"] == "paused"
+    assert whois.connections == 0
+
+
+async def test_a_32_bit_asn_is_written(db_session):
+    # observables.asn is bigint: AS numbers past int4 (4,200,000,000 is a
+    # private-use 32-bit ASN) are stored like any other.
     obs = await _obs(db_session, "203.0.113.9")
     parsed = {"found": True, "asn": 4_200_000_000, "asn_org": "Private use", "country": "US"}
     results = [{"source_type": "cymru", "status": "success", "parsed_data": parsed}]
     assert await apply_enrichment_results_to_entity(db_session, "observable", obs.id, results)
-    await db_session.flush()  # an int4 overflow would raise here
-    assert (obs.asn, obs.asn_org, obs.geo_country) == (None, "Private use", "US")
+    await db_session.flush()
+    assert (obs.asn, obs.asn_org, obs.geo_country) == (4_200_000_000, "Private use", "US")
 
 
 async def test_a_disabled_source_is_neither_queued_nor_looked_up(db_session, monkeypatch):
@@ -294,7 +421,44 @@ async def test_an_rdap_result_writes_the_registration_date(db_session, rdap_serv
     assert context[("rdap", "domain")] == "carinet.com"
 
 
+async def test_rdap_looks_up_a_victim_by_its_domain(rdap_server):
+    transport, seen = rdap_server
+    adapter = get_adapter("rdap", gateway=_gateway("rdap", transport))
+    assert adapter.supports_entity("ransomware_victim")
+
+    data = await adapter.enrich("ransomware_victim", "www.carinet.com")
+    assert data.parsed_data["registrar"] == "Network Solutions, LLC"
+
+    # A victim known only by name (or a URL) has nothing to look up.
+    seen.clear()
+    for value in ("Carinet Holdings Ltd.", "https://carinet.com/about", ""):
+        data = await adapter.enrich("ransomware_victim", value)
+        assert data.parsed_data == {"found": False, "note": "the victim has no domain to look up"}
+    assert seen == []
+
+
 # ── Scope: only active observables are looked up on their own ────────
+
+
+def test_ip_sources_look_up_active_ips_only_and_run_on_their_own():
+    from app.enrichment.registry import SOURCE_REGISTRY
+
+    for source_type in ("shodan", "greynoise", "cymru"):
+        cls = SOURCE_REGISTRY[source_type]
+        assert cls.scope == {"status": ("active",)}, source_type
+        assert (cls.default_enabled, cls.default_trigger_mode) == (True, "auto"), source_type
+
+
+async def test_aged_ips_are_not_sent_to_shodan_on_its_own(db_session):
+    await _source(db_session, "shodan")  # an admin set it to auto
+    aged = await _obs(db_session, "198.51.100.21", status="aging")
+    active = await _obs(db_session, "198.51.100.22")
+
+    assert await q.enqueue(db_session, "observable", aged.id, aged.value) == []
+    assert await q.enqueue(db_session, "observable", active.id, active.value) == ["shodan"]
+    assert await q.enqueue(db_session, "observable", aged.id, aged.value, lane="manual", source_types=["shodan"]) == [
+        "shodan"
+    ]
 
 
 async def test_new_observables_queue_the_sources_that_take_their_kind(db_session):
@@ -410,10 +574,14 @@ async def test_tranco_ranks_only_our_domains_and_flags_the_top_10k(db_session, t
     assert batches == [4, 4, 4]
     assert stats == {
         "listed": 12,
+        "fetched": 12,
         "matched": 4,
         "ranked": 3,  # the reviewed row's rank didn't move
         "dropped": 1,
         "flagged": 1,
+        "victims": 0,
+        "changed": 5,  # every answer is new to enrichment_results
+        "written": 4,  # the reviewed row's column already held 9999
         "list_id": "GQ3LK",
     }
     for row in (google, reviewed, popular_enough, denied, gone, ip):
@@ -432,12 +600,12 @@ async def test_tranco_ranks_only_our_domains_and_flags_the_top_10k(db_session, t
     assert await SourceGateway("tranco").used_today() == 2
 
 
-async def test_tranco_skips_while_disabled_or_paused(db_session, tranco_upstream):
+async def test_tranco_skips_while_disabled_or_paused(db_session, tranco_upstream, pause_enrichment):
     await _source(db_session, "tranco", is_enabled=False)
     assert await tasks._run_tranco_sync() == SOURCE_DISABLED
 
     await _source(db_session, "tranco")
-    await (await get_redis_bytes()).set(gw.paused_key(), b"1")
+    await pause_enrichment()
     stats = await tasks._run_tranco_sync()
     assert stats["stopped"] == "paused"
     assert tranco_upstream == []
@@ -461,10 +629,11 @@ async def test_greynoise_writes_its_class_to_a_column(db_session):
     assert obs.noise_class == "malicious"
     assert "gn_classification" not in (obs.reputation or {})
 
+    # Not seen scanning: GreyNoise gives no class, and the earlier one no longer stands.
     await apply_enrichment_results_to_entity(
-        db_session, "observable", obs.id, [{**seen, "parsed_data": {"found": False, "noise_class": "not_seen"}}]
+        db_session, "observable", obs.id, [{**seen, "parsed_data": {"found": False, "noise": False, "riot": False}}]
     )
-    assert obs.noise_class == "not_seen"
+    assert obs.noise_class is None
 
 
 # ── Migration ────────────────────────────────────────────────────────
@@ -519,3 +688,30 @@ async def test_migration_moves_reputation_keys_into_columns(db_session):
     ).scalar_one()
     assert rep == {**reputation, "country": "US"}
     await conn.run_sync(run(migration.upgrade))
+
+
+# ── Team Cymru bulk WHOIS: one connection, one permit ───────────────
+
+
+async def test_cymru_bulk_lookup_answers_every_ip_over_one_connection(whois):
+    adapter = get_adapter("cymru", gateway=_gateway("cymru"))
+
+    answers = await adapter.bulk_lookup(["71.6.135.131", "240.0.0.1"])
+
+    assert answers["71.6.135.131"]["asn"] == 10439 and answers["71.6.135.131"]["prefix"] == "71.6.128.0/17"
+    assert answers["240.0.0.1"] == {"found": False, "note": "not announced in BGP"}
+    assert whois.connections == 1 and whois.sent == bulk_query(["71.6.135.131", "240.0.0.1"])
+    assert await SourceGateway("cymru").used_today() == 1
+    # Nothing to ask: no connection.
+    assert await adapter.bulk_lookup([]) == {} and whois.connections == 1
+
+
+async def test_cymru_bulk_lookup_records_a_failed_connection(whois, monkeypatch):
+    async def refused(host, port):
+        raise ConnectionRefusedError
+
+    monkeypatch.setattr("app.enrichment.adapters.cymru._connect", refused)
+    adapter = get_adapter("cymru", gateway=_gateway("cymru"))
+    with pytest.raises(OSError):
+        await adapter.bulk_lookup(["71.6.135.131"])
+    assert await SourceGateway("cymru").used_today() == 1, "the permit was taken and the failure recorded"

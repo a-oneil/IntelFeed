@@ -65,7 +65,7 @@ class TestAdapterRegistry:
         assert adapter.config["ttl_hours"] == 48
 
     def test_default_sources_defined(self):
-        assert len(DEFAULT_SOURCES) == 31
+        assert len(DEFAULT_SOURCES) == 32
         source_types = {s["source_type"] for s in DEFAULT_SOURCES}
         assert source_types == set(ADAPTER_REGISTRY) | {
             "misp_galaxy",
@@ -80,6 +80,7 @@ class TestAdapterRegistry:
             "ctid",
             "d3fend",
             "etda",
+            "github_repo",
         }
 
     def test_all_adapters_have_required_attributes(self):

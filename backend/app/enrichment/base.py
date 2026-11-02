@@ -6,17 +6,41 @@ from dataclasses import dataclass
 import httpx
 from sqlalchemy import and_
 
+from app import entity_types
 from app.enrichment.gateway import THROTTLE_STATUSES, SourceGateway
-from app.enrichment.manifest import Column, Context, Egress, Job, License, Quota, Relation
+from app.enrichment.manifest import (
+    Column,
+    Context,
+    Egress,
+    Job,
+    Key,
+    License,
+    Match,
+    Quota,
+    Relation,
+)
+
+#: The column each entity type is looked up by when a manifest doesn't say.
+LOOKUP_COLUMNS = {
+    entity_types.CVE: "cve_id",
+    entity_types.CWE: "cwe_id",
+    entity_types.TTP: "technique_id",
+    entity_types.OBSERVABLE: "value",
+    entity_types.RANSOMWARE_VICTIM: "domain",
+}
+
+#: Hours a result is kept when the adapter doesn't say.
+DEFAULT_TTL_HOURS = 24
 
 
 @dataclass
 class EnrichmentData:
-    """Normalized enrichment result from any adapter."""
+    """Normalized enrichment result from any adapter. Without ``ttl_hours``
+    an adapter's result is kept for 24 hours."""
 
     raw_response: dict
     parsed_data: dict
-    ttl_hours: int = 24
+    ttl_hours: int = DEFAULT_TTL_HOURS
 
 
 class _derived:
@@ -44,20 +68,58 @@ class Source:
     #: its own (every queue lane but manual), e.g. {"status": ("active",)}. A
     #: person's request looks up anything the source applies to.
     scope: dict[str, tuple[str, ...]] = {}
-    #: Secrets or settings the source can't work without, e.g. ("api_key",).
-    requires: tuple[str, ...] = ()
+    #: The ``Match`` entries of ``applies_to``, by entity type.
+    match: dict[str, Match] = {}
+    #: Keys the source can't work without: ``Key()`` (its own API key),
+    #: ``Key("abuse_ch")`` (a shared one).
+    requires: tuple[Key, ...] = ()
+    #: One sentence on what the source is, for the console.
+    about: str = ""
+    #: Takes an API key it doesn't need (GreyNoise: a key raises its limit).
+    optional_key: bool = False
+    #: System settings that configure the source itself (not one of its
+    #: jobs), edited on the source's Limits tab.
+    settings_keys: tuple[str, ...] = ()
     quota: Quota
     egress: Egress
     license: License
     jobs: tuple[Job, ...] = ()
     outputs: tuple[Column | Context | Relation, ...] = ()
     default_trigger_mode: str = "manual"
+    #: Whether a new install starts with the source on. None: on when it has
+    #: jobs (and then its per-entity lookups start manual: it is on only so
+    #: its jobs run).
+    default_enabled: bool | None = None
     shared_key_group: str | None = None  # Sources sharing an API key set this (e.g. "abuse_ch")
     #: Instance setting holding a key to use when neither the person nor the
     #: source row has one, e.g. "nvd_api_key". Every path resolves keys the same
     #: way, so a job and a per-entity lookup always share one bucket.
     key_setting: str | None = None
     throttle_statuses: tuple[int, ...] = THROTTLE_STATUSES  # Statuses the gateway treats as "slow down"
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        applies_to = cls.__dict__.get("applies_to")
+        if applies_to is not None:
+            # Match entries become plain kinds; the Match itself moves to
+            # ``match``, so every reader of applies_to sees one shape.
+            cls.applies_to = {t: (m.kinds if isinstance(m, Match) else m) for t, m in applies_to.items()}
+            declared = {t: m for t, m in applies_to.items() if isinstance(m, Match)}
+            cls.match = {**{t: m for t, m in cls.match.items() if t in cls.applies_to}, **declared}
+
+    @classmethod
+    def lookup_column(cls, entity_type: str) -> str:
+        """The entity column whose value the source looks up: the
+        ``Match.column`` its manifest declares, else the type's identifier
+        (``LOOKUP_COLUMNS``), else ``name``."""
+        m = cls.match.get(entity_type)
+        if m and m.column:
+            return m.column
+        return LOOKUP_COLUMNS.get(entity_type, "name")
+
+    @classmethod
+    def required_keys(cls) -> tuple[Key, ...]:
+        return tuple(r for r in cls.requires if isinstance(r, Key))
 
     @classmethod
     def columns(cls) -> tuple[Column, ...]:
@@ -84,7 +146,7 @@ class Source:
 
     @_derived
     def requires_api_key(cls) -> bool:
-        return "api_key" in cls.requires
+        return bool(cls.required_keys())
 
 
 class EnrichmentAdapter(Source, ABC):

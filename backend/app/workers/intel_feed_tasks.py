@@ -112,7 +112,14 @@ async def _sync_cybergeist_feeds():
         refresh_autolinker_vocabulary.delay()
         rescan_recent_entries.apply_async(kwargs={"days": 7}, countdown=30)
 
-    return {"actors": actor_stats, "malware": malware_stats}
+    both = (actor_stats, malware_stats)
+    return {
+        "fetched": sum(s.get(k, 0) for s in both for k in ("new", "updated", "skipped", "errors")),
+        "changed": sum(s.get("new", 0) + s.get("updated", 0) for s in both),
+        "written": sum(s.get("new", 0) + s.get("updated", 0) for s in both),
+        "actors": actor_stats,
+        "malware": malware_stats,
+    }
 
 
 @celery_app.task(name="app.workers.intel_feed_tasks.sync_ransomware_victims", soft_time_limit=300, time_limit=360)

@@ -23,17 +23,28 @@ _REPUTATION = {"noise": "gn_noise", "riot": "gn_riot", "name": "gn_name"}
 class GreyNoiseAdapter(EnrichmentAdapter):
     source_type = "greynoise"
     display_name = "GreyNoise Community"
+    about = "Whether an IP is mass-scanning the internet, and whether it's a known business service."
     applies_to = {"observable": ("ipv4",)}
+    # Sends the IP off the box: on its own it only looks up IPs the ledger
+    # still holds active. A person can ask about any of them.
+    scope = {"status": ("active",)}
     # GreyNoise publishes no per-minute figure for the Community API; it
     # answers 429 when a caller goes over, and the breaker backs off.
     quota = Quota(10, 3600, daily_budget=100)
+    # Sends the IP to GreyNoise; it runs on its own anyway, as Shodan does.
     egress = Egress.SHARES_IOC
+    default_enabled = True
+    default_trigger_mode = "auto"
+    optional_key = True
     license = License("GreyNoise Community terms", attribution="GreyNoise", commercial_ok=False)
     outputs = (
         *(Column(key, f"observable.reputation.{rep}", Policy.NEWER_WINS) for key, rep in _REPUTATION.items()),
-        Column("noise_class", "observable.noise_class", Policy.NEWER_WINS),
+        # Only GreyNoise's own classes are stored. An IP it hasn't seen
+        # scanning empties the column: an earlier class no longer stands.
+        Column("noise_class", "observable.noise_class", Policy.NEWER_WINS, clears=True),
         # RIOT: a known benign business service. Shodan's tags rank first.
-        Column("riot", "observable.infra_tag", Policy.RANK, rank=2, filter="benign_service"),
+        # An IP that leaves RIOT, or that GreyNoise no longer knows, loses it.
+        Column("riot", "observable.infra_tag", Policy.RANK, rank=2, filter="benign_service", clears=True),
         Context(
             "noise_class",
             "noise",
@@ -43,10 +54,22 @@ class GreyNoiseAdapter(EnrichmentAdapter):
         Context("riot", "Business service (RIOT)", Display.FACT),
         Context("name", "Actor", Display.FACT),
         Context("last_seen", "Last seen scanning", Display.FACT),
+        Context("note", "Scanning", Display.FACT),
         Context("link", "GreyNoise", Display.LINK),
     )
 
     _api_base = "https://api.greynoise.io/v3/community/"
+
+    @staticmethod
+    async def apply_record(db, entity_type: str, entity_id, data: EnrichmentData, cache: dict) -> None:
+        """An IP newly classed benign noise is flagged for review
+        (``app/enrichment/review.py``). Runs before the field map, so
+        ``noise_class`` still holds the earlier answer."""
+        from app.enrichment.review import flag_for_review, greynoise_says_benign_noise
+
+        if entity_type == "observable":
+            now = greynoise_says_benign_noise(data.parsed_data or {})
+            await flag_for_review(db, entity_id, now, lambda obs: obs.noise_class == "benign")
 
     def _headers(self) -> dict:
         return {"key": self.api_key} if self.api_key else {}
@@ -63,13 +86,13 @@ class GreyNoiseAdapter(EnrichmentAdapter):
             if resp.status_code == 404:
                 # Not seen scanning the internet (the body still says
                 # noise:false / riot:false) — for a suspected C2 that is itself
-                # signal: targeted infrastructure, not mass noise.
+                # signal: targeted infrastructure, not mass noise. GreyNoise
+                # gives no class for it, so none is stored.
                 data = resp.json()
                 return EnrichmentData(
                     raw_response=data,
                     parsed_data={
                         "found": False,
-                        "noise_class": "not_seen",
                         "noise": data.get("noise", False),
                         "riot": data.get("riot", False),
                         "note": "not seen mass-scanning — targeted, not noise",

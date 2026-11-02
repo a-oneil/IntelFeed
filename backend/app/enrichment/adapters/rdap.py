@@ -10,6 +10,7 @@ source keeps to one request a second, and a lookup takes two (the redirect).
 """
 
 import json
+import re
 from datetime import timedelta
 
 import httpx
@@ -17,10 +18,14 @@ from publicsuffixlist import PublicSuffixList
 from redis.exceptions import RedisError
 
 from app.enrichment.base import EnrichmentAdapter, EnrichmentData
-from app.enrichment.manifest import Column, Context, Display, Egress, License, Policy, Quota
+from app.enrichment.manifest import Column, Context, Display, Egress, License, Match, Policy, Quota
 from app.services.redis_client import get_redis
 
 RDAP_URL = "https://rdap.org/domain/"
+
+#: A host name: dotted labels, no spaces, paths, ports or addresses. Labels
+#: may be Unicode (an IDN the ledger kept as written).
+_HOST = re.compile(r"^[^\s/@:&,;!?()'\"]+\.[^\s/@:&,;!?()'\".]+$")
 
 #: Redis key prefix of the per-registrable-domain cache.
 CACHE_PREFIX = "enrichment:rdap:"
@@ -35,9 +40,12 @@ def registrable_domain(domain: str) -> str | None:
     """The domain a registry holds a record for; None for a bare suffix.
     ICANN suffixes only: ``evil.github.io`` is registered as ``github.io``."""
     global _psl
+    host = domain.strip().lower().rstrip(".")
+    if not _HOST.match(host):
+        return None  # a name, a URL or an address, not a host
     if _psl is None:
         _psl = PublicSuffixList(only_icann=True)
-    return _psl.privatesuffix(domain.strip().lower().rstrip("."))
+    return _psl.privatesuffix(host)
 
 
 def _vcard_name(entity: dict) -> str | None:
@@ -73,7 +81,12 @@ def parse_rdap(domain: str, data: dict) -> dict:
 class RDAPAdapter(EnrichmentAdapter):
     source_type = "rdap"
     display_name = "RDAP"
-    applies_to = {"observable": ("domain",)}
+    about = "Domain registration records from the registries: when a domain was registered, and by whom."
+    # A victim is looked up by its domain: leak sites usually post one, and
+    # its registrar and registration date are a rough size and age signal.
+    # The registrant's country is redacted at almost every registry, so RDAP
+    # fills no victim column.
+    applies_to = {"observable": ("domain",), "ransomware_victim": Match(column="domain")}
     scope = {"status": ("active",)}
     quota = Quota(1, 1, daily_budget=2000, ceiling_per_period=1)
     egress = Egress.LOW
@@ -84,6 +97,7 @@ class RDAPAdapter(EnrichmentAdapter):
     outputs = (
         Column("registered", "observable.registered_at", Policy.NEWER_WINS, filter="timestamp"),
         Context("domain", "Registered domain", Display.FACT),
+        Context("registered", "Registered", Display.FACT, entity_types=("ransomware_victim",)),
         Context("registrar", "Registrar", Display.FACT),
         Context("expires", "Expires", Display.FACT),
         Context("updated", "Last changed", Display.FACT),
@@ -105,11 +119,14 @@ class RDAPAdapter(EnrichmentAdapter):
             pass
 
     async def enrich(self, entity_type: str, entity_value: str) -> EnrichmentData:
-        domain = registrable_domain(entity_value) if "/" not in entity_value and "@" not in entity_value else None
+        domain = registrable_domain(entity_value or "")
         if domain is None:
+            note = "RDAP looks up registrable domains only"
+            if entity_type == "ransomware_victim":
+                note = "the victim has no domain to look up"
             return EnrichmentData(
                 raw_response={"status": "unsupported_kind"},
-                parsed_data={"found": False, "note": "RDAP looks up registrable domains only"},
+                parsed_data={"found": False, "note": note},
                 ttl_hours=168,
             )
         if (parsed := await self._cached(domain)) is not None:

@@ -28,11 +28,12 @@ import SystemSettings from "@/components/SystemSettings";
 
 import { AutolinkingSection } from "./AutolinkingSection";
 import { EngineSettingsSearch } from "./EngineSettingsSearch";
+import { EngineSwitch } from "./EngineSwitch";
 import { EntryOutputs } from "./EntryOutputs";
 import { HeldLinksQueue } from "./CleanupGroups";
 import { ExtractionTab } from "./ExtractionTab";
 import { ProposalsQueue } from "./ProposalsQueue";
-import type { ProposalDomain } from "@/hooks/useHygiene";
+import type { ProposalDomain, ProposalOrigin } from "@/hooks/useHygiene";
 import { StagePanel } from "./StagePanel";
 import { skipReason, waitingOn } from "./adjudicationCopy";
 import type { EngineDest } from "./engineSettingsIndex";
@@ -104,10 +105,11 @@ function relTime(iso: string | null): string {
   return `${Math.round(s / 86_400)}d ago`;
 }
 
+// Radar score is 0–10 by rank (signals.py): 9+ is the top ~5%, 7+ the top ~18%.
 function scoreCls(v: number | null): string {
   if (v == null) return styles.scoreLo;
-  if (v >= 80) return styles.scoreHi;
-  if (v >= 50) return styles.scoreMid;
+  if (v >= 9) return styles.scoreHi;
+  if (v >= 7) return styles.scoreMid;
   return styles.scoreLo;
 }
 
@@ -302,7 +304,7 @@ export function EngineMatrix({
   );
   // Pre-applied filters when a chip deep-links into the proposals queue.
   const [proposalsAction, setProposalsAction] = useState<string | undefined>(undefined);
-  const [proposalsOrigin, setProposalsOrigin] = useState<"adjudicator" | "legacy" | undefined>(undefined);
+  const [proposalsOrigin, setProposalsOrigin] = useState<ProposalOrigin | undefined>(undefined);
   const [proposalsDomain, setProposalsDomain] = useState<ProposalDomain | undefined>(undefined);
   const [status, setStatus] = useState<string | undefined>(initialStatus);
   const [stage, setStage] = useState<string | undefined>(initialStage);
@@ -323,7 +325,7 @@ export function EngineMatrix({
     setProposalsDomain(undefined);
     if (v !== "review") setReviewLens("proposals");
   };
-  const openProposals = (opts: { action?: string; origin?: "adjudicator" | "legacy"; domain?: ProposalDomain }) => {
+  const openProposals = (opts: { action?: string; origin?: ProposalOrigin; domain?: ProposalDomain }) => {
     setView("review");
     setReviewLens("proposals");
     setProposalsAction(opts.action);
@@ -717,6 +719,7 @@ export function EngineMatrix({
           ))}
         </div>
         <EngineSettingsSearch onPick={gotoSetting} className={m.attnSearch} />
+        <EngineSwitch />
       </div>
 
       {/* matrix */}
@@ -1374,7 +1377,7 @@ function Row({
         ))}
         <td className={styles.gdiv}>
           <span className={`${styles.score} ${scoreCls(entry.radar_score)}`}>
-            {entry.radar_score != null ? Math.round(entry.radar_score) : "—"}
+            {entry.radar_score != null ? entry.radar_score.toFixed(1) : "—"}
             <span className={styles.scoreUnit}>rdr</span>
           </span>
         </td>

@@ -37,6 +37,7 @@ _CWE_ID = re.compile(r"\d+")
 class CAPECSource(Source):
     source_type = "capec"
     display_name = "MITRE CAPEC"
+    about = "MITRE's catalog of attack patterns, linked to the weaknesses they exploit."
     applies_to = {"ttp": None, "cwe": None}
     # CAPEC publishes no rate limit; a run makes one request.
     quota = Quota(10, 3600, daily_budget=50)
@@ -50,6 +51,7 @@ class CAPECSource(Source):
             "app.workers.enrichment_tasks.run_capec_sync",
             {"type": "crontab", "minute": "0", "hour": "4", "day_of_week": "1"},
             "Refresh the MITRE CAPEC attack-pattern catalog and the patterns mapped to each technique",
+            counts=False,
         ),
     )
     outputs = (

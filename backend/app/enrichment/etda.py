@@ -66,6 +66,7 @@ SECTORS = {
 class ETDASource(Source):
     source_type = "etda"
     display_name = "ETDA Threat Group Cards"
+    about = "ThaiCERT's cards on about 500 threat groups: names, sponsors, targets and tools."
     applies_to = {"threat_actor": None}
     # One 2 MB download a week.
     quota = Quota(10, 3600, daily_budget=20)

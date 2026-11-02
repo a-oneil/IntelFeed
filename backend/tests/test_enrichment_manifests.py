@@ -48,9 +48,13 @@ JOBS_BEFORE = {
         "app.workers.enrichment_tasks.run_metasploit_sync",
         {"type": "crontab", "minute": "45", "hour": "3", "day_of_week": "0"},
     ),
+    "osv-delta-sync": (
+        "app.workers.enrichment_tasks.run_osv_delta_sync",
+        {"type": "crontab", "minute": "40", "hour": "*"},
+    ),
     "cve-nvd-refresh": (
         "app.workers.enrichment_tasks.run_cve_nvd_refresh",
-        {"type": "crontab", "minute": "0", "hour": "12"},
+        {"type": "crontab", "minute": "0", "hour": "*"},
     ),
     "cve-nvd-backfill": (
         "app.workers.enrichment_tasks.run_cve_nvd_backfill",
@@ -90,6 +94,10 @@ JOBS_BEFORE = {
         {"type": "crontab", "minute": "15", "hour": "5"},
     ),
     "tranco-sync": ("app.workers.enrichment_tasks.run_tranco_sync", {"type": "crontab", "minute": "20", "hour": "4"}),
+    "cymru-bulk-sync": (
+        "app.workers.enrichment_tasks.run_cymru_bulk_sync",
+        {"type": "crontab", "minute": "25", "hour": "*/6"},
+    ),
     "capec-sync": (
         "app.workers.enrichment_tasks.run_capec_sync",
         {"type": "crontab", "minute": "0", "hour": "4", "day_of_week": "1"},
@@ -118,14 +126,20 @@ JOBS_BEFORE = {
         "app.workers.enrichment_tasks.run_urlhaus_sync",
         {"type": "crontab", "minute": "50", "hour": "*/6"},
     ),
+    "github-repo-sync": (
+        "app.workers.enrichment_tasks.run_github_repo_sync",
+        {"type": "crontab", "minute": "15", "hour": "5", "day_of_week": "2"},
+    ),
 }
 
 JOB_SOURCE = {
+    "github-repo-sync": "github_repo",
     "epss-bulk-sync": "epss",
     "mitre-attack-sync": "mitre_attack",
     "misp-galaxy-sync": "misp_galaxy",
     "malpedia-sync": "malpedia",
     "metasploit-sync": "metasploit",
+    "osv-delta-sync": "osv",
     "cve-nvd-refresh": "nvd",
     "cve-nvd-backfill": "nvd",
     "reenrich-cve-nvd": "nvd",
@@ -140,6 +154,7 @@ JOB_SOURCE = {
     "wikidata-sync": "wikidata",
     "endoflife-sync": "endoflife",
     "tranco-sync": "tranco",
+    "cymru-bulk-sync": "cymru",
     "capec-sync": "capec",
     "ctid-mappings-sync": "ctid",
     "d3fend-sync": "d3fend",
@@ -171,7 +186,8 @@ def test_every_source_has_a_seed_row_from_its_manifest():
         assert row["default_rate_limit"] == cls.quota.rate_limit_config
         assert row["default_daily_budget"] == cls.quota.daily_budget
         assert row["default_trigger_mode"] in ("auto", "manual")
-        assert row["default_enabled"] is bool(cls.jobs)
+        expected = bool(cls.jobs) if cls.default_enabled is None else cls.default_enabled
+        assert row["default_enabled"] is expected, source_type
     assert set(CATALOG_REGISTRY) == {
         "misp_galaxy",
         "metasploit",
@@ -185,6 +201,7 @@ def test_every_source_has_a_seed_row_from_its_manifest():
         "ctid",
         "d3fend",
         "etda",
+        "github_repo",
     }
     assert all(cls.kind == "catalog" and not issubclass(cls, EnrichmentAdapter) for cls in CATALOG_REGISTRY.values())
     assert all(cls.kind == "lookup" for cls in ADAPTER_REGISTRY.values())
@@ -202,7 +219,11 @@ def test_every_column_output_names_a_real_column():
             if column.resolve:
                 assert column.resolve in RESOLVERS
             if column.clears:
-                assert column.policy == Policy.NEWER_WINS
+                # A column a source may empty is rewritten whole, newer wins.
+                # The shared infra tag is the one ranked exception: Shodan's
+                # tags outrank GreyNoise's RIOT, and emptying it follows rank.
+                expected = Policy.RANK if column.target == "observable.infra_tag" else Policy.NEWER_WINS
+                assert column.policy == expected, (source_type, column.target)
             if column.follows:
                 leader = next(c for c in cls.columns() if c.target == column.follows)
                 assert leader.policy != Policy.UNION and not leader.follows
@@ -367,30 +388,58 @@ async def test_catalog_rows_offer_no_entity_types_and_no_test(client, admin_head
     (item,) = [s for s in listed if s["source_type"] == "metasploit"]
     assert item["supported_entity_types"] == []
 
-    resp = await client.post(f"/api/enrichment/sources/{row.id}/test", headers=admin_headers)
-    assert resp.status_code == 400
-    assert resp.json()["error"]["code"] == "not_testable"
+    # A catalog source takes no key, so there is no key to test.
+    from app.enrichment.keys import credential_for
+
+    assert credential_for("metasploit") is None
+    resp = await client.post("/api/enrichment/keys/metasploit/test", headers=admin_headers)
+    assert resp.status_code == 404
+
+
+async def test_a_key_whose_sources_only_run_jobs_is_untestable(db_session):
+    """github_token's sources include a catalog one; with only that one's row
+    there is no lookup to probe it through."""
+    from app.enrichment.keys import test_key
+
+    db_session.add(_row("github_repo", display_name="GitHub repos", is_enabled=True, config={}))
+    await db_session.flush()
+    assert (await test_key(db_session, "github_token"))["status"] == "untestable"
+
+
+def test_every_source_says_what_it_is():
+    for source_type, cls in SOURCE_REGISTRY.items():
+        assert isinstance(cls.about, str) and cls.about.strip(), source_type
 
 
 # ── The rate ceiling ─────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
-    ("source_type", "body", "status"),
+    ("source_type", "body", "key", "status"),
     [
-        ("nvd", {"rate_limit_config": {"requests_per_period": 5, "period_seconds": 30}}, 200),
-        ("nvd", {"rate_limit_config": {"requests_per_period": 6, "period_seconds": 30}}, 400),
-        ("nvd", {"rate_limit_config": {"requests_per_period": 50, "period_seconds": 30}, "api_key": "k"}, 200),
-        ("nvd", {"rate_limit_config": {"requests_per_period": 60, "period_seconds": 30}, "api_key": "k"}, 400),
+        ("nvd", {"rate_limit_config": {"requests_per_period": 5, "period_seconds": 30}}, None, 200),
+        ("nvd", {"rate_limit_config": {"requests_per_period": 6, "period_seconds": 30}}, None, 400),
+        ("nvd", {"rate_limit_config": {"requests_per_period": 50, "period_seconds": 30}}, "k", 200),
+        ("nvd", {"rate_limit_config": {"requests_per_period": 60, "period_seconds": 30}}, "k", 400),
         # 100 per minute is twice NVD's keyed 50 per 30 s.
-        ("nvd", {"rate_limit_config": {"requests_per_period": 100, "period_seconds": 60}, "api_key": "k"}, 200),
-        ("nvd", {"rate_limit_config": {"requests_per_period": 101, "period_seconds": 60}, "api_key": "k"}, 400),
-        ("github_poc", {"rate_limit_config": {"requests_per_period": 30, "period_seconds": 60}}, 400),
-        ("github_poc", {"rate_limit_config": {"requests_per_period": 30, "period_seconds": 60}, "api_key": "t"}, 200),
-        ("wikipedia", {"rate_limit_config": {"requests_per_period": 500, "period_seconds": 60}}, 200),  # no ceiling
+        ("nvd", {"rate_limit_config": {"requests_per_period": 100, "period_seconds": 60}}, "k", 200),
+        ("nvd", {"rate_limit_config": {"requests_per_period": 101, "period_seconds": 60}}, "k", 400),
+        ("github_poc", {"rate_limit_config": {"requests_per_period": 30, "period_seconds": 60}}, None, 400),
+        ("github_poc", {"rate_limit_config": {"requests_per_period": 30, "period_seconds": 60}}, "t", 200),
+        ("wikipedia", {"rate_limit_config": {"requests_per_period": 500, "period_seconds": 60}}, None, 200),
     ],
 )
-async def test_put_refuses_a_rate_above_the_ceiling(source_type, body, status, client, admin_headers, db_session):
+async def test_put_refuses_a_rate_above_the_ceiling(
+    source_type, body, key, status, client, admin_headers, db_session, monkeypatch
+):
+    """The ceiling is the keyed one when the source resolves a key (here its
+    instance setting, set under Keys), else the keyless one."""
+    import app.services.system_settings as ss
+
+    async def setting(name, db=None):
+        return key if name in ("nvd_api_key", "github_token") and key else ""
+
+    monkeypatch.setattr(ss, "get_setting", setting)
     row = _row(source_type, display_name=source_type, is_enabled=True, health_status="unknown", config={})
     db_session.add(row)
     await db_session.flush()
@@ -426,7 +475,7 @@ def _migration():
     return module
 
 
-async def test_migration_turns_scheduled_rows_manual_and_keeps_jobs_running(db_session):
+async def test_migration_turns_scheduled_rows_manual_and_leaves_disabled_rows_off(db_session):
     from alembic.migration import MigrationContext
     from alembic.operations import Operations
 
@@ -470,9 +519,10 @@ async def test_migration_turns_scheduled_rows_manual_and_keeps_jobs_running(db_s
         r.source_type: (r.is_enabled, r.trigger_mode)
         for r in (await db_session.execute(select(EnrichmentSource))).scalars()
     }
+    # An admin's off switch stands, jobs or not.
     assert after == {
-        "epss": (True, "manual"),
-        "nvd": (True, "manual"),
+        "epss": (False, "manual"),
+        "nvd": (False, "auto"),
         "vulncheck": (False, "manual"),
         "shodan": (True, "auto"),
         "wikipedia": (True, "auto"),
@@ -580,6 +630,138 @@ async def test_seeding_starts_job_sources_on_but_manual(db_session, monkeypatch)
     for src in DEFAULT_SOURCES:
         row = rows[src["source_type"]]
         assert row.is_enabled is src["default_enabled"]
-        expected = "manual" if src["default_enabled"] else src["default_trigger_mode"]
-        assert row.trigger_mode == expected, src["source_type"]
+        assert row.trigger_mode == src["default_trigger_mode"], src["source_type"]
+    # On only so its jobs run: per-entity lookups wait for an admin.
     assert rows["nvd"].is_enabled and rows["nvd"].trigger_mode == "manual"
+    # The IP sources run on their own from the start.
+    for source_type in ("shodan", "greynoise", "cymru"):
+        assert (rows[source_type].is_enabled, rows[source_type].trigger_mode) == (True, "auto"), source_type
+
+
+# ── Manifest parts: match, requires, ttl, concurrency, egress ────────
+
+
+def _manifest_class(**attrs):
+    """A throwaway adapter class with the given manifest attributes."""
+    from app.enrichment.base import EnrichmentData
+    from app.enrichment.manifest import Egress, License, Quota
+
+    async def enrich(self, entity_type, entity_value):
+        return attrs.pop("_answer", None) or EnrichmentData(raw_response={}, parsed_data={})
+
+    body = {
+        "source_type": "test_source",
+        "display_name": "Test",
+        "applies_to": {"cve": None},
+        "quota": Quota(10, 60, daily_budget=100),
+        "egress": Egress.LOW,
+        "license": License("test"),
+        "enrich": enrich,
+        **attrs,
+    }
+    return type("TestSource", (EnrichmentAdapter,), body)
+
+
+def test_applies_to_takes_a_match_and_keeps_its_shape():
+    from app.enrichment.manifest import Match
+
+    cls = _manifest_class(
+        applies_to={
+            "threat_actor": Match(column="mitre_id"),
+            "observable": Match(("ipv4",)),
+            "cve": None,
+        }
+    )
+    # Readers of applies_to still see entity_type -> kinds.
+    assert cls.applies_to == {"threat_actor": None, "observable": ("ipv4",), "cve": None}
+    assert cls.match == {"threat_actor": Match(column="mitre_id"), "observable": Match(("ipv4",))}
+    assert cls.supported_entity_types == ["threat_actor", "observable", "cve"]
+
+
+def test_a_match_names_the_column_an_entity_is_looked_up_by():
+    from app.enrichment.manifest import Match
+
+    cls = _manifest_class(applies_to={"ransomware_victim": Match(column="domain"), "cve": None, "tool": None})
+    assert cls.lookup_column("ransomware_victim") == "domain"
+    assert cls.lookup_column("cve") == "cve_id"  # the type's identifier
+    assert cls.lookup_column("tool") == "name"
+
+
+def test_requires_takes_keys():
+    from app.enrichment.manifest import Key
+
+    own = _manifest_class(requires=(Key(),))
+    assert own.requires_api_key and own.required_keys() == (Key(),)
+
+    shared = _manifest_class(requires=(Key("abuse_ch"),))
+    assert shared.requires_api_key and shared.required_keys() == (Key("abuse_ch"),)
+    assert Key("abuse_ch") != Key()
+
+    assert not _manifest_class(requires=()).requires_api_key
+
+
+def test_the_quota_in_use_sets_the_concurrency_cap(monkeypatch):
+    from app.enrichment import registry
+    from app.enrichment.manifest import Quota
+
+    cls = _manifest_class(quota=Quota(5, 30, 100, concurrency=1, keyed=Quota(50, 30, 100, concurrency=3)))
+    monkeypatch.setitem(registry.SOURCE_REGISTRY, "test_source", cls)
+    row = EnrichmentSource(
+        source_type="test_source", rate_limit_config={"requests_per_period": 5, "period_seconds": 30}
+    )
+    assert source_gateway(row, None).concurrency == 1
+    assert source_gateway(row, "key").concurrency == 3
+    assert Quota(1, 1, None).concurrency == 2  # the default
+
+
+def test_sources_that_share_iocs_are_seeded_manual_unless_their_manifest_says_auto():
+    from app.enrichment.manifest import Egress
+    from app.enrichment.registry import seed_trigger_mode
+
+    assert seed_trigger_mode(_manifest_class(egress=Egress.SHARES_IOC)) == "manual"
+    assert seed_trigger_mode(_manifest_class(egress=Egress.SHARES_IOC, default_trigger_mode="auto")) == "auto"
+    sharing = {
+        row["source_type"]: row["default_trigger_mode"]
+        for row in DEFAULT_SOURCES
+        if SOURCE_REGISTRY[row["source_type"]].egress == Egress.SHARES_IOC
+    }
+    # Shodan and GreyNoise only answer from their own scans of the internet;
+    # VirusTotal and abuse.ch wait to be asked.
+    assert {st for st, mode in sharing.items() if mode == "auto"} == {"shodan", "greynoise"}
+
+
+async def test_a_backfill_source_job_runs_in_the_backfill_lane(db_session, monkeypatch):
+    import sys
+
+    from app.enrichment.gateway import _lane
+    from app.workers.db import source_job
+
+    module = sys.modules[__name__]
+
+    @asynccontextmanager
+    async def session():
+        yield db_session
+
+    monkeypatch.setattr(module, "_get_worker_session", session, raising=False)
+
+    @source_job("nvd", lane="backfill")
+    async def _backfill():
+        return _lane.get()
+
+    @source_job("nvd")
+    async def _refresh():
+        return _lane.get()
+
+    assert await _backfill() == "backfill"
+    assert await _refresh() is None
+    assert _lane.get() is None
+
+
+def test_bulk_catch_up_jobs_run_in_the_backfill_lane():
+    import app.workers.enrichment_tasks as tasks
+    import app.workers.maintenance as maintenance
+
+    # Re-fetches of whole sets stop at BACKFILL_SHARE of the daily budget,
+    # leaving the rest to new CVEs and people's lookups.
+    for job in (tasks._run_cve_nvd_backfill, tasks._run_cvelist_backfill, maintenance._reenrich_cve_nvd):
+        assert job.lane == "backfill", job.__name__

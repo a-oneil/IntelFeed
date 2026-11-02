@@ -12,11 +12,14 @@ from app.enrichment.manifest import Column, Context, Display, Egress, Job, Licen
 class NVDAdapter(EnrichmentAdapter):
     source_type = "nvd"
     display_name = "NVD API 2.0"
+    about = "The US National Vulnerability Database: NIST's CVSS score, weaknesses and affected products for a CVE."
     applies_to = {"cve": None}
     # NVD allows 50 requests per rolling 30 s with an API key and 5 without
-    # (nvd.nist.gov/developers/start-here). The jobs pace themselves inside
-    # either window (nvd_request_pace).
-    quota = Quota(5, 30, daily_budget=5000, ceiling_per_period=5, keyed=Quota(50, 30, 5000, ceiling_per_period=50))
+    # (nvd.nist.gov/developers/start-here). The gateway keeps every caller,
+    # jobs included, inside the window.
+    quota = Quota(
+        5, 30, daily_budget=5000, ceiling_per_period=5, concurrency=1, keyed=Quota(50, 30, 5000, ceiling_per_period=50)
+    )
     egress = Egress.LOW
     key_setting = "nvd_api_key"
     license = License(
@@ -29,8 +32,8 @@ class NVDAdapter(EnrichmentAdapter):
         Job(
             "cve-nvd-refresh",
             "app.workers.enrichment_tasks.run_cve_nvd_refresh",
-            {"type": "crontab", "minute": "0", "hour": "12"},
-            "Re-check NVD for CVSS score changes on existing CVEs",
+            {"type": "crontab", "minute": "0", "hour": "*"},
+            "Apply every NVD record changed since the last run (CVSS score changes) to existing CVEs",
         ),
         Job(
             "cve-nvd-backfill",
@@ -47,13 +50,11 @@ class NVDAdapter(EnrichmentAdapter):
         ),
     )
     outputs = (
-        # Blank columns only, so a lookup never overwrites what article
-        # extraction (extract_and_store_cves) or the NVD jobs already wrote;
-        # it fills a CVE whose NVD call at extraction was throttled. NVD's
-        # score ranks first; the CNA's would be rank 2. The description
-        # ranks ahead of Wikipedia's.
+        # NVD's score ranks first (NVD > CNA > CISA-ADP): it replaces a
+        # CNA's or CISA's, and the severity goes with it. The description
+        # ranks with the CNA's (NVD republishes it), ahead of Wikipedia's.
         Column("cvss_score", "cve.cvss_score", Policy.RANK, rank=1),
-        Column("cvss_severity", "cve.severity"),
+        Column("cvss_severity", "cve.severity", follows="cve.cvss_score"),
         Column("description", "cve.description", Policy.RANK, rank=1),
         Context("cvss_vector", "CVSS vector", Display.FACT),
         Context("published", "Published", Display.FACT),
@@ -83,50 +84,75 @@ class NVDAdapter(EnrichmentAdapter):
                 parsed_data={"found": False},
                 ttl_hours=168,  # 1 week for NVD data
             )
+        from app.intelligence.cve import parse_nvd_record
 
-        cve_item = vulnerabilities[0].get("cve", {})
-        metrics = cve_item.get("metrics", {})
+        record = parse_nvd_record(vulnerabilities[0].get("cve", {}))
+        return EnrichmentData(raw_response=data, parsed_data=parsed(record), ttl_hours=168)
 
-        # Extract CVSS v3.1 or v3.0 score
-        cvss_v31 = metrics.get("cvssMetricV31", [{}])
-        cvss_v30 = metrics.get("cvssMetricV30", [{}])
-        cvss_data = (cvss_v31[0] if cvss_v31 else cvss_v30[0] if cvss_v30 else {}).get("cvssData", {})
+    @staticmethod
+    async def apply_record(db, entity_type: str, entity_id, data: EnrichmentData, cache: dict) -> None:
+        """A lookup's extra writes: the record, affected products, references
+        and their cve_affected / cve_weaknesses links (``apply_nvd_record``).
+        A sweep's answer (``nvd_result``) carries no record here; the sweep
+        writes it itself."""
+        from app.intelligence.cve import adopt_nvd_values, apply_nvd_record, parse_nvd_record
+        from app.models.cve import CVE
 
-        descriptions = cve_item.get("descriptions", [])
-        en_desc = next((d["value"] for d in descriptions if d.get("lang") == "en"), None)
-
-        references = [
-            {"url": ref.get("url"), "source": ref.get("source"), "tags": ref.get("tags", [])}
-            for ref in cve_item.get("references", [])
-        ]
-
-        return EnrichmentData(
-            raw_response=data,
-            parsed_data={
-                "cve_id": cve_item.get("id"),
-                "description": en_desc,
-                "cvss_score": cvss_data.get("baseScore"),
-                "cvss_severity": cvss_data.get("baseSeverity"),
-                "cvss_vector": cvss_data.get("vectorString"),
-                "published": cve_item.get("published"),
-                "last_modified": cve_item.get("lastModified"),
-                "references": references[:20],
-                "weaknesses": [
-                    w.get("description", [{}])[0].get("value")
-                    for w in cve_item.get("weaknesses", [])
-                    if w.get("description")
-                ],
-            },
-            ttl_hours=168,
-        )
+        vulnerabilities = (data.raw_response or {}).get("vulnerabilities") or []
+        record = vulnerabilities[0].get("cve") if vulnerabilities else None
+        if entity_type != "cve" or not record:
+            return
+        cve = await db.get(CVE, entity_id)
+        if cve is not None:
+            # Claim the values NVD wrote before claims existed, read from the
+            # stored nvd_data, so the field map may update them.
+            await adopt_nvd_values(db, cve)
+            await apply_nvd_record(db, cve, parse_nvd_record(record), cache)
 
     async def check_health(self) -> bool:
+        """One lookup with the key in use, so a key test tests the key: NVD
+        answers 404 to a key it doesn't know, which is a rejection."""
+        from app.enrichment.gateway import AuthFailed
+
         try:
             async with self.http(timeout=5) as client:
                 resp = await client.get(
                     "https://services.nvd.nist.gov/rest/json/cves/2.0",
                     params={"cveId": "CVE-2021-44228"},
+                    headers={"apiKey": self.api_key} if self.api_key else {},
                 )
-                return resp.status_code == 200
         except httpx.HTTPError:
             return False
+        if resp.status_code == 404 and self.api_key:
+            raise AuthFailed("NVD doesn't know this key")
+        return resp.status_code == 200
+
+
+def parsed(nvd: dict) -> dict:
+    """An NVD answer (``parse_nvd_record``'s values) as the source's parsed_data."""
+    record = nvd.get("nvd_data") or {}
+    score = nvd.get("cvss_score")
+    return {
+        "cve_id": record.get("id"),
+        "description": nvd.get("description"),
+        "cvss_score": score,
+        "cvss_severity": nvd.get("severity") if score is not None else None,
+        "cvss_vector": nvd.get("cvss_vector"),
+        "published": record.get("published"),
+        "last_modified": record.get("lastModified"),
+        "references": [
+            {"url": r.get("url"), "source": r.get("source"), "tags": r.get("tags") or []}
+            for r in (nvd.get("references") or [])[:20]
+        ],
+        "weaknesses": [
+            w.get("description", [{}])[0].get("value") for w in record.get("weaknesses", []) if w.get("description")
+        ],
+    }
+
+
+def nvd_result(nvd: dict, via: str = "job") -> EnrichmentData:
+    """A sweep's NVD answer (``enrich_from_nvd``) as the source's result. The
+    raw response names the sweep instead of repeating the record, which
+    ``cves.nvd_data`` holds."""
+    record = nvd.get("nvd_data") or {}
+    return EnrichmentData(raw_response={"via": via, "id": record.get("id")}, parsed_data=parsed(nvd), ttl_hours=168)

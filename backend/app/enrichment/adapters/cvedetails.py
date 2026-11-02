@@ -10,7 +10,7 @@ API docs: https://www.cvedetails.com/documentation/apis
 import httpx
 
 from app.enrichment.base import EnrichmentAdapter, EnrichmentData
-from app.enrichment.manifest import Context, Display, Egress, License, Quota
+from app.enrichment.manifest import Context, Display, Egress, Key, License, Quota
 
 API_BASE = "https://www.cvedetails.com/api/v1"
 
@@ -18,8 +18,9 @@ API_BASE = "https://www.cvedetails.com/api/v1"
 class CVEDetailsAdapter(EnrichmentAdapter):
     source_type = "cvedetails"
     display_name = "CVEDetails"
+    about = "A second view of a CVE's exploit and scoring data."
     applies_to = {"cve": None}
-    requires = ("api_key",)
+    requires = (Key(),)
     quota = Quota(60, 60, daily_budget=1000)
     egress = Egress.LOW
     # The site's terms bar using it or its information "for any commercial

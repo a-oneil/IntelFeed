@@ -3,10 +3,11 @@ import { toast } from "sonner";
 import api from "@/api/client";
 import { useIsVisitor } from "@/stores/authStore";
 import { entityContextKey } from "@/hooks/useEntityContext";
-import type {
-  EnrichmentSource,
-  UserEnrichmentOverride,
-} from "@/api/types";
+import { entityGlanceKey } from "@/hooks/useEntityGlance";
+import type { EnrichmentSource } from "@/api/types";
+
+/** Every console query (the table and each source's detail) sits under this. */
+export const CONSOLE_KEY = ["enrichment-console"] as const;
 
 // --- Sources ---
 
@@ -35,7 +36,6 @@ export function useUpdateEnrichmentSource() {
       sourceId: string;
       is_enabled?: boolean;
       trigger_mode?: string;
-      api_key?: string;
       rate_limit_config?: Record<string, number>;
       config?: Record<string, unknown>;
       min_confidence_threshold?: string;
@@ -48,69 +48,10 @@ export function useUpdateEnrichmentSource() {
       );
       return data;
     },
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: ["enrichment-sources"] }),
-  });
-}
-
-export function useTestEnrichmentSource() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (sourceId: string) => {
-      const { data } = await api.post<{
-        source_type: string;
-        health_status: string;
-      }>(`/enrichment/sources/${sourceId}/test`);
-      return data;
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["enrichment-sources"] });
+      qc.invalidateQueries({ queryKey: CONSOLE_KEY });
     },
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: ["enrichment-sources"] }),
-  });
-}
-
-// --- User Overrides ---
-
-export function useUserEnrichmentOverrides() {
-  return useQuery({
-    queryKey: ["enrichment-user-overrides"],
-    queryFn: async () => {
-      const { data } = await api.get<UserEnrichmentOverride[]>(
-        "/enrichment/user-overrides"
-      );
-      return data;
-    },
-  });
-}
-
-export function useUpsertUserOverride() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({
-      sourceId,
-      ...body
-    }: {
-      sourceId: string;
-      api_key?: string;
-    }) => {
-      const { data } = await api.put(
-        `/enrichment/user-overrides/${sourceId}`,
-        body
-      );
-      return data;
-    },
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: ["enrichment-user-overrides"] }),
-  });
-}
-
-export function useDeleteUserOverride() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (sourceId: string) => {
-      await api.delete(`/enrichment/user-overrides/${sourceId}`);
-    },
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: ["enrichment-user-overrides"] }),
   });
 }
 
@@ -140,6 +81,8 @@ export function useEnrichEntity() {
           parsed_data?: Record<string, unknown>;
           error?: string;
         }>;
+        /** The queue lane a refused lookup waits in: always "manual" here. */
+        lane?: "manual";
         /** Sources that refused for now; each lookup is queued to retry. */
         queued: string[];
       }>("/enrichment/enrich", {
@@ -147,14 +90,21 @@ export function useEnrichEntity() {
         entity_id: entityId,
         source_types: sourceTypes,
         refresh,
+        // A person asked: the manual lane, ahead of new/refresh/backfill work.
+        lane: "manual",
       });
       return data;
     },
     onSuccess: (data) => {
       if (data.queued?.length) {
-        toast(`Queued to retry when the source allows: ${data.queued.join(", ")}`);
+        toast(`Queued to retry when the source allows: ${data.queued.map(sourceLabel).join(", ")}`);
       }
-      return qc.invalidateQueries({ queryKey: entityContextKey(data.entity_type, data.entity_id) });
+      return Promise.all([
+        qc.invalidateQueries({ queryKey: entityContextKey(data.entity_type, data.entity_id) }),
+        qc.invalidateQueries({ queryKey: entityGlanceKey(data.entity_type, data.entity_id) }),
+        // The console counts today's requests and what's queued.
+        qc.invalidateQueries({ queryKey: CONSOLE_KEY }),
+      ]);
     },
   });
 }
@@ -187,19 +137,47 @@ export function useEnrichValue() {
 
 // --- Console (Settings → Engine → Enrichment) ---
 
-export type EnrichmentSourceStatus = "ok" | "failing" | "off" | "needs_key";
+/** key_rejected: the source turned the key down (401/403) — fix the key,
+ *  waiting won't help. */
+type EnrichmentSourceStatus = "ok" | "failing" | "off" | "needs_key" | "key_rejected";
+
+/** What a lookup sends out: nothing (the source is downloaded), public ids,
+ *  or the analyst's indicators. */
+export type EnrichmentEgress = "none" | "low" | "shares_ioc";
+
+export type EnrichmentKeyStatus = "set" | "missing" | "optional" | "rejected";
+
+/** The one action that fixes an attention item. */
+export type EnrichmentAction =
+  | { kind: "key"; key: string; label: string }
+  | { kind: "source"; source: string; tab: "overview" | "limits" | "fields" | "jobs"; label: string }
+  | { kind: "retry"; source: string; label: string };
+
+interface EnrichmentAttention {
+  source_type: string | null;
+  label: string;
+  /** Other sources the same problem covers (one key, several sources). */
+  sources?: string[];
+  text: string;
+  severity: "bad" | "warn";
+  action: EnrichmentAction | null;
+}
 
 export interface EnrichmentConsoleSummary {
   sources_on: number;
   sources_total: number;
-  needs_attention: number;
   paused: boolean;
   redis_ok: boolean;
   activity_24h: {
     requests: number;
-    queued: number;
+    /** 24 hourly totals, oldest first. */
+    trend: number[];
+    waiting: number;
+    waiting_backfill: number;
     deferred: number;
-    iocs_sent_off_box: number;
+    /** Distinct indicators sent to outside sources; null when Redis can't say. */
+    iocs_sent: number | null;
+    ioc_sources: string[];
   };
 }
 
@@ -214,23 +192,60 @@ export interface EnrichmentConsoleSource {
   id: string;
   source_type: string;
   label: string;
+  about: string;
   kind: "lookup" | "catalog";
   status: EnrichmentSourceStatus;
   enabled: boolean;
+  /** Added recently (in the last two weeks, after the instance's first sources). */
+  new?: boolean;
+  /** What a needs_key source lacks: "key", or "setting <name>". */
+  needs?: string | null;
   /** Plain-words summary of what the source writes. */
   fills: string;
   applies_to: string[];
   /** Why the source needs a look; null when it's fine. */
   attention: string | null;
+  egress: EnrichmentEgress;
+  license: string;
+  commercial_ok: boolean;
+  /** The credential (Keys view row) it uses; null when it takes no key. */
+  key: string | null;
+  key_status: EnrichmentKeyStatus | null;
+  /** Lookup sources only: "auto" looks up new entities on its own. */
+  trigger_mode: "auto" | "manual" | null;
+  used_today: number;
+  daily_budget: number | null;
+  jobs: number;
+  /** Settings that tune its jobs. */
+  settings_keys: string[];
+  /** Settings that configure the source itself (Limits tab). */
+  source_settings: string[];
 }
 
 export interface EnrichmentConsole {
   summary: EnrichmentConsoleSummary;
+  attention: EnrichmentAttention[];
   entity_types: EnrichmentConsoleEntityType[];
   sources: EnrichmentConsoleSource[];
 }
 
+/** source_type → label, from the last console read: toasts name sources the
+ *  way the console does. */
+const LABELS = new Map<string, string>();
+export function sourceLabel(sourceType: string): string {
+  return LABELS.get(sourceType) ?? sourceType;
+}
+
 export type EnrichmentLane = "manual" | "new" | "refresh" | "backfill";
+
+export type EnrichmentQueueReason =
+  | "rate_limited"
+  | "breaker_open"
+  | "budget_exhausted"
+  | "backfill_share"
+  | "paused"
+  | "auth_failed"
+  | "source_disabled";
 
 export interface EnrichmentSourceDetail {
   limits: {
@@ -250,9 +265,10 @@ export interface EnrichmentSourceDetail {
     daily_budget: number | null;
     used_today: number;
     backfill_share: number | null;
+    /** How often a stored answer is looked up again, in days. */
     refresh_days: number | null;
-    /** "global" | "none" | "user_overrides:N" */
-    key: string;
+    /** Requests in flight at once under one credential, when capped. */
+    concurrency?: number | null;
     triggers: string[];
     scope: string | null;
   };
@@ -262,7 +278,14 @@ export interface EnrichmentSourceDetail {
     waiting: number;
     by_lane: Partial<Record<EnrichmentLane, number>>;
     retrying: number;
+    /** Queued lookups by why they wait again (rate_limited = after a 429). */
+    by_reason?: Partial<Record<EnrichmentQueueReason, number>>;
     failed: number;
+  };
+  /** What the limits form edits. */
+  settings?: {
+    trigger_mode: string;
+    rate_limit_config: Record<string, number>;
   };
   outputs: Array<{
     field: string;
@@ -285,6 +308,8 @@ export interface EnrichmentSourceDetail {
   } | null;
   jobs: Array<{
     key: string;
+    description: string;
+    settings_keys: string[];
     schedule: string;
     runs_30d: number;
     ok_30d: number;
@@ -294,8 +319,6 @@ export interface EnrichmentSourceDetail {
   }>;
 }
 
-const CONSOLE_KEY = ["enrichment-console"] as const;
-
 export function useEnrichmentConsole(entityType?: string) {
   return useQuery({
     queryKey: [...CONSOLE_KEY, entityType ?? "all"],
@@ -303,9 +326,10 @@ export function useEnrichmentConsole(entityType?: string) {
       const { data } = await api.get<EnrichmentConsole>("/enrichment/console", {
         params: entityType ? { entity_type: entityType } : undefined,
       });
+      for (const src of data.sources) LABELS.set(src.source_type, src.label);
       return data;
     },
-    // Switching tabs keeps the last table up instead of flashing a spinner.
+    // Switching filters keeps the last list up instead of flashing a spinner.
     placeholderData: (prev) => prev,
     refetchInterval: 60_000,
   });
@@ -354,5 +378,122 @@ export function useQueueBackfill() {
       return data;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: CONSOLE_KEY }),
+  });
+}
+
+/** Queue again the lookups that gave up (at one source, or all). */
+export function useRetryFailedLookups() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (sourceType?: string) => {
+      const { data } = await api.post<{ queued: number }>("/enrichment/retry", null, {
+        params: sourceType ? { source_type: sourceType } : undefined,
+      });
+      return data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: CONSOLE_KEY }),
+  });
+}
+
+// --- Keys ---
+
+export interface EnrichmentKey {
+  id: string;
+  label: string;
+  /** What the key does, in one sentence. */
+  note: string;
+  required: boolean;
+  sources: Array<{ source_type: string; label: string }>;
+  /** A user of the key outside enrichment (GitHub feeds). */
+  also_used_by: string | null;
+  status: EnrichmentKeyStatus;
+  /** Why the source rejected it, when it did. */
+  message: string | null;
+  /** The caller has an own key, used for the lookups they start. */
+  mine: boolean;
+  personal_allowed: boolean;
+  signup_url: string | null;
+}
+
+export function useEnrichmentKeys() {
+  return useQuery({
+    queryKey: [...CONSOLE_KEY, "keys"],
+    queryFn: async () => {
+      const { data } = await api.get<EnrichmentKey[]>("/enrichment/keys");
+      return data;
+    },
+  });
+}
+
+export function useSetEnrichmentKey() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ keyId, apiKey, mine }: { keyId: string; apiKey: string | null; mine?: boolean }) => {
+      await api.put(`/enrichment/keys/${keyId}${mine ? "/mine" : ""}`, { api_key: apiKey });
+    },
+    // A key changes the sources' status, so the whole console reloads.
+    onSuccess: () => qc.invalidateQueries({ queryKey: CONSOLE_KEY }),
+  });
+}
+
+export function useTestEnrichmentKey() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (keyId: string) => {
+      const { data } = await api.post<{
+        status: "ok" | "rejected" | "unreachable" | "missing" | "untestable";
+        message: string | null;
+      }>(`/enrichment/keys/${keyId}/test`);
+      return data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: CONSOLE_KEY }),
+  });
+}
+
+// --- Coverage and activity ---
+
+export interface EnrichmentCoverageField {
+  entity_type: string;
+  entity_label: string;
+  field: string;
+  label: string;
+  filled: number;
+  total: number;
+  filled_pct: number | null;
+  sources: Array<{ source_type: string; label: string; enabled: boolean }>;
+  /** The one thing to do about the rest; null when jobs fill it on a schedule. */
+  action: { kind: "backfill"; source: string; count: number } | { kind: "ai"; field: string } | null;
+  cadence: string | null;
+}
+
+export function useEnrichmentCoverage(enabled = true) {
+  return useQuery({
+    queryKey: [...CONSOLE_KEY, "coverage"],
+    queryFn: async () => {
+      const { data } = await api.get<{ fields: EnrichmentCoverageField[] }>("/enrichment/coverage");
+      return data.fields;
+    },
+    enabled,
+    staleTime: 5 * 60_000,
+  });
+}
+
+interface EnrichmentActivity {
+  lanes: Array<{ lane: EnrichmentLane; waiting: number; deferred: number }>;
+  backfill_share: number;
+  failed: Array<{ source_type: string; label: string; count: number; last_error: string | null }>;
+  /** Null when Redis can't say. */
+  requests: Array<{ source_type: string; label: string; requests: number }> | null;
+}
+
+export function useEnrichmentActivity(enabled = true) {
+  return useQuery({
+    queryKey: [...CONSOLE_KEY, "activity"],
+    queryFn: async () => {
+      const { data } = await api.get<EnrichmentActivity>("/enrichment/activity");
+      return data;
+    },
+    enabled,
+    refetchInterval: 60_000,
   });
 }

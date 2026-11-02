@@ -12,6 +12,7 @@ from app.enrichment.manifest import Context, Display, Egress, Job, License, Quot
 class CISAKEVAdapter(EnrichmentAdapter):
     source_type = "cisa_kev"
     display_name = "CISA KEV"
+    about = "CISA's catalog of vulnerabilities known to be exploited, with the date each was added."
     applies_to = {"cve": None}
     # One JSON file; a lookup downloads the whole catalog.
     quota = Quota(100, 60, daily_budget=500)
@@ -53,21 +54,7 @@ class CISAKEVAdapter(EnrichmentAdapter):
                 ttl_hours=24,
             )
 
-        return EnrichmentData(
-            raw_response=match,
-            parsed_data={
-                "in_kev": True,
-                "vendor": match.get("vendorProject"),
-                "product": match.get("product"),
-                "vulnerability_name": match.get("vulnerabilityName"),
-                "date_added": match.get("dateAdded"),
-                "short_description": match.get("shortDescription"),
-                "required_action": match.get("requiredAction"),
-                "due_date": match.get("dueDate"),
-                "known_ransomware_use": match.get("knownRansomwareCampaignUse"),
-            },
-            ttl_hours=24,
-        )
+        return kev_result(match)
 
     async def check_health(self) -> bool:
         try:
@@ -76,3 +63,24 @@ class CISAKEVAdapter(EnrichmentAdapter):
                 return resp.status_code == 200
         except httpx.HTTPError:
             return False
+
+
+def kev_result(entry: dict, via: str | None = None) -> EnrichmentData:
+    """A catalog entry as the source's answer for its CVE. The KEV sync names
+    itself in the raw response instead of repeating the entry."""
+    return EnrichmentData(
+        raw_response={"via": via, "cveID": entry.get("cveID")} if via else entry,
+        parsed_data={
+            "in_kev": True,
+            "vendor": entry.get("vendorProject"),
+            "product": entry.get("product"),
+            "vulnerability_name": entry.get("vulnerabilityName"),
+            "date_added": entry.get("dateAdded"),
+            "short_description": entry.get("shortDescription"),
+            "required_action": entry.get("requiredAction"),
+            "due_date": entry.get("dueDate"),
+            "known_ransomware_use": entry.get("knownRansomwareCampaignUse"),
+        },
+        # The sync re-checks the catalog every six hours.
+        ttl_hours=24,
+    )

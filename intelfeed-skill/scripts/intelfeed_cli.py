@@ -2047,9 +2047,9 @@ TOOLS: dict[str, dict] = {
             "Chronological hygiene feed: a merge of the entity-link log and the entity-maintenance "
             "log, normalized (action, mode, applied, subject, reason, affected-entity links, origin). "
             "Filter by action code (comma-separate for several), log source, mode, origin "
-            "(adjudicator = filed by the adjudicate stage, legacy = scans and analysts), "
-            "pending-only, or a since timestamp. Read-only \u2014 applying or dismissing proposals happens "
-            "in the Proposals queue."
+            "(adjudicator = filed by the adjudicate stage, merge_review = the duplicate review, scan "
+            "= the on-demand scans and analysts), pending-only, or a since timestamp. Read-only \u2014 "
+            "applying or dismissing proposals happens in the Proposals queue."
         ),
         "params": {
             "action": {
@@ -2069,7 +2069,7 @@ TOOLS: dict[str, dict] = {
             "origin": {
                 "type": 'str',
                 "default": None,
-                "enum": ['adjudicator', 'legacy'],
+                "enum": ['adjudicator', 'merge_review', 'scan'],
             },
             "pending": {
                 "type": 'bool',
@@ -2662,10 +2662,10 @@ TOOLS: dict[str, dict] = {
             "verb, target) triple is validated against the semantic relationship matrix and "
             "auto-flipped into its canonical orientation (e.g. 'cve exploited-by actor' is stored as "
             "'actor exploits cve'). Valid verbs (per-pair restrictions apply): attributed_to, "
-            "communicates_with, controls, delivers, drops, exploits, overlaps_with, related_to, "
-            "subgroup_of, successor_of, targets, uses, variant_of. Written with "
-            "source=analyst_created; re-asserting an existing triple promotes it to analyst_created "
-            "and merges confidence/description/evidence instead of erroring."
+            "communicates_with, controls, delivers, drops, exploits, exposes, operates_in, "
+            "overlaps_with, related_to, subgroup_of, successor_of, targets, uses, variant_of. Written "
+            "with source=analyst_created; re-asserting an existing triple promotes it to "
+            "analyst_created and merges confidence/description/evidence instead of erroring."
         ),
         "params": {
             "source_type": {
@@ -2720,6 +2720,8 @@ TOOLS: dict[str, dict] = {
                     'delivers',
                     'drops',
                     'exploits',
+                    'exposes',
+                    'operates_in',
                     'overlaps_with',
                     'related_to',
                     'subgroup_of',
@@ -2884,6 +2886,8 @@ TOOLS: dict[str, dict] = {
                     'delivers',
                     'drops',
                     'exploits',
+                    'exposes',
+                    'operates_in',
                     'overlaps_with',
                     'related_to',
                     'subgroup_of',

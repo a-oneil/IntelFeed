@@ -3,7 +3,7 @@
 A source declares a ``Relation`` (``app/enrichment/manifest.py``): a list in
 its parsed_data whose items name other entities. Each time the source answers
 for an entity, every named target is resolved to an entity IntelFeed already
-has — exact name or alias, a technique id, a sector's vocabulary — and never
+has — exact name or alias, a technique or CVE id, a sector's vocabulary — and never
 created. Then:
 
 - a resolved target whose triple the relationship matrix allows becomes a
@@ -48,9 +48,7 @@ from app.models.entity_relationship import EntityRelationship
 EDGE_SOURCE = "enrichment"
 
 _TECHNIQUE_ID = re.compile(r"^T\d{4}(?:\.\d{3})?$")
-
-#: Entity types a Relation can name as its target: those ``resolve_target`` can find.
-RESOLVABLE_TARGETS = frozenset({entity_types.TTP, entity_types.SECTOR, entity_types.COUNTRY, *ALIAS_INDEXED_TABLES})
+_CVE_ID = re.compile(r"^CVE-\d{4}-\d{4,}$")
 
 
 def _allowed(entity_type: str, relation: str, target_type: str) -> bool:
@@ -70,19 +68,25 @@ def target_key(name: str) -> str:
     return re.sub(r"\s+", " ", name.strip().casefold())[:255]
 
 
-def _listed(relation: Relation, value) -> list[tuple[str, str | None]]:
-    """(name, evidence) for each item of a Relation's parsed_data list."""
+def _listed(relation: Relation, value) -> list[tuple[str, str | None, tuple[str, ...]]]:
+    """(name, evidence, other names) for each item of a Relation's parsed_data
+    list. The item's ``aliases`` key, when the Relation maps one, lists other
+    names the source gives the same target."""
     name_key = (relation.item or {}).get("name")
     evidence_key = (relation.item or {}).get("evidence")
+    aliases_key = (relation.item or {}).get("aliases")
     items = []
     for row in value if isinstance(value, list) else []:
+        aliases: tuple[str, ...] = ()
         if isinstance(row, dict):
             name, evidence = row.get(name_key), row.get(evidence_key) if evidence_key else None
+            if aliases_key and isinstance(row.get(aliases_key), list):
+                aliases = tuple(a.strip() for a in row[aliases_key] if isinstance(a, str) and a.strip())
         else:
             name, evidence = row, None
         if isinstance(name, str) and name.strip():
             text = evidence.strip() if isinstance(evidence, str) else ""
-            items.append((name.strip(), text or None))
+            items.append((name.strip(), text or None, aliases))
     return items
 
 
@@ -107,6 +111,13 @@ async def _ids(db: AsyncSession, target_type: str, name: str) -> list[uuid.UUID]
         if not _TECHNIQUE_ID.match(code):
             return []
         return list((await db.execute(select(TTP.id).where(TTP.technique_id == code))).scalars())
+    if target_type == entity_types.CVE:
+        from app.models.cve import CVE
+
+        code = name.strip().upper()
+        if not _CVE_ID.match(code):
+            return []
+        return list((await db.execute(select(CVE.id).where(CVE.cve_id == code))).scalars())
     if target_type == entity_types.SECTOR:
         from app.intelligence.sectors import normalize_sector
         from app.models.sector import Sector
@@ -312,10 +323,10 @@ async def apply_relations(
     if not relations:
         return False
 
-    listed: dict[tuple[str, str], tuple[Relation, str, str | None]] = {}
+    listed: dict[tuple[str, str], tuple[Relation, str, str | None, tuple[str, ...]]] = {}
     for relation in relations:
-        for name, evidence in _listed(relation, _lookup(parsed_data or {}, relation.key)):
-            listed.setdefault((relation.key, target_key(name)), (relation, name, evidence))
+        for name, evidence, aliases in _listed(relation, _lookup(parsed_data or {}, relation.key)):
+            listed.setdefault((relation.key, target_key(name)), (relation, name, evidence, aliases))
 
     claims = {
         (c.output, c.target_key): c
@@ -333,8 +344,15 @@ async def apply_relations(
     now = datetime.now(UTC)
     changed = False
     touched: set[tuple[str, uuid.UUID]] = set()
-    for (output, key), (relation, name, evidence) in listed.items():
+    for (output, key), (relation, name, evidence, aliases) in listed.items():
         target, held = await resolve_target(db, relation.target_types, name)
+        # A name nothing matches may match by another name the source gives
+        # it. The claim stays under the first name either way.
+        for alias in aliases if held == "unknown" else ():
+            found, why = await resolve_target(db, relation.target_types, alias)
+            if why != "unknown":
+                target, held = found, why
+                break
         claim = claims.pop((output, key), None)
         allowed = target and _allowed(entity_type, relation.relation, target[0])
         if (target and (not allowed or target == (entity_type, entity_id))) or (not target and not relation.hold):

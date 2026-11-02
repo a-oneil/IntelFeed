@@ -2,8 +2,10 @@
 MISP Galaxy, Malpedia, Metasploit, NVD, GitHub PoC, Wikipedia, cvelistV5, Wikidata, endoflife.date,
 Tranco, CAPEC, CTID control mappings, D3FEND, abuse.ch ThreatFox and URLhaus."""
 
+import asyncio
 import csv
 import io
+import ipaddress
 import itertools
 import logging
 import re
@@ -16,8 +18,14 @@ from sqlalchemy.dialects.postgresql import ARRAY, UUID
 
 from app.config import settings
 from app.core.metrics import CELERY_TASK_DURATION_SECONDS, CELERY_TASKS_TOTAL
-from app.enrichment.gateway import JOB_TOKEN_WAIT, SOURCE_REFUSALS, GatewayError, GatewayUnavailable, SourceGateway
-from app.intelligence.autolinker import filter_aliases
+from app.enrichment.gateway import (
+    JOB_TOKEN_WAIT,
+    SOURCE_REFUSALS,
+    AuthFailed,
+    GatewayError,
+    GatewayUnavailable,
+    SourceGateway,
+)
 from app.intelligence.entity_dedup import find_entity_by_name_or_alias
 from app.workers.celery_app import celery_app
 from app.workers.db import run_async, source_job, worker_session
@@ -102,16 +110,33 @@ EPSS_CSV_URL = "https://epss.empiricalsecurity.com/epss_scores-current.csv.gz"
 _EPSS_CHUNK_SIZE = 5000
 
 
+#: How long a stored EPSS answer stands. A score that hasn't changed isn't
+#: rewritten; its rows are renewed in bulk once they come within EPSS_RENEW
+#: of expiring, so a day's sync touches only what changed plus a sliver.
+EPSS_TTL = timedelta(days=30)
+#: The percentile move that rewrites a CVE whose score didn't change: one point.
+EPSS_PERCENTILE_STEP = 0.01
+EPSS_RENEW = timedelta(days=2)
+
+
 @source_job("epss")
 async def _run_epss_bulk_sync():
+    """Download FIRST's daily CSV and apply it set-based, a chunk per
+    transaction. A CVE is written (the cves row, its EPSS result row and
+    context) only when its score changed or its percentile moved by
+    EPSS_PERCENTILE_STEP or more; a percentile ranks a CVE against all the
+    others, so smaller moves happen to nearly every CVE every day and rewrite
+    nothing. The columns are EPSSAdapter's Column outputs, which a single
+    lookup writes through the field map; this job writes them set-based and
+    records no claims: a claim per CVE per changed score would grow without
+    bound."""
     import gzip
-    from datetime import timedelta
 
     from app.intelligence.correlation_events import create_cve_score_change_event
     from app.models.enrichment import EnrichmentSource
     from app.workers.signal_tasks import dispatch_cve_rescore
 
-    stats = {"updated": 0, "total_scores": 0, "score_changes": 0}
+    stats = {"fetched": 0, "changed": 0, "written": 0, "updated": 0, "total_scores": 0, "score_changes": 0}
 
     gateway, _ = await _job_gateway("epss")
     try:
@@ -126,15 +151,15 @@ async def _run_epss_bulk_sync():
     now = datetime.now(UTC)
     sql_params = {
         "now": now,
-        "expires": now + timedelta(hours=24),
+        "expires": now + EPSS_TTL,
         "date_str": now.strftime("%Y-%m-%d"),
     }
 
     # Significant change: the score jumped by >= 0.1 (absolute) or crossed the
     # 0.5 threshold (high exploitation probability). Columns read in SET are the
     # pre-update row, so c.epss_score is the score being replaced. The epss_jump
-    # signal reads epss_previous_score/epss_changed_at; epss_updated_at can't
-    # serve since every sync touches it, change or not.
+    # signal reads epss_previous_score/epss_changed_at; epss_updated_at is when
+    # the score last changed.
     significant = (
         "c.epss_score IS NOT NULL AND (abs(i.score - c.epss_score) >= 0.1 OR (c.epss_score < 0.5 AND i.score >= 0.5))"
     )
@@ -150,13 +175,17 @@ async def _run_epss_bulk_sync():
         FROM unnest(CAST(:cve_ids AS text[]), CAST(:scores AS float8[]), CAST(:pcts AS float8[]))
             AS i(cve_id, score, pct)
         WHERE c.cve_id = i.cve_id
+          AND (
+            c.epss_score IS DISTINCT FROM i.score
+            OR c.epss_percentile IS NULL
+            OR abs(c.epss_percentile - i.pct) >= :pct_step
+          )
         RETURNING c.id, c.cve_id, c.epss_previous_score, c.epss_score, c.epss_changed_at = :now AS changed
         """
     )
     # Upsert enrichment_results set-based: overwrite the existing EPSS row per
     # CVE, insert only for CVEs that don't have one yet. parsed_data has the
-    # lookup adapter's keys (EPSSAdapter), so both read as one source. The old per-CVE append
-    # grew this table to ~40 rows per CVE (pruned in migration m2a2b3c4d5g9).
+    # lookup adapter's keys (EPSSAdapter), so both read as one source.
     ids_param = bindparam("ids", type_=ARRAY(UUID(as_uuid=True)))
     update_results = text(
         """
@@ -193,13 +222,46 @@ async def _run_epss_bulk_sync():
                 AND er.entity_type = 'cve' AND er.source_type = 'epss')
         """
     ).bindparams(ids_param)
+    # The source's Context outputs (EPSSAdapter: epss, percentile, date), as
+    # store_context would write them, for the same CVEs.
+    upsert_context = text(
+        """
+        INSERT INTO entity_context (entity_type, entity_id, source_type, key, value, observed_at, expires_at)
+        SELECT 'cve', c.id, 'epss', k.key, k.value, :now, :expires
+        FROM cves c
+        CROSS JOIN LATERAL (VALUES
+            ('epss', to_jsonb(c.epss_score)),
+            ('percentile', to_jsonb(c.epss_percentile)),
+            ('date', to_jsonb(CAST(:date_str AS text)))
+        ) AS k(key, value)
+        WHERE c.id = ANY(:ids) AND k.value IS NOT NULL
+        ON CONFLICT (entity_type, entity_id, source_type, key)
+        DO UPDATE SET value = EXCLUDED.value, observed_at = EXCLUDED.observed_at, expires_at = EXCLUDED.expires_at
+        """
+    ).bindparams(ids_param)
+    renew = {"expires": now + EPSS_TTL, "renew_before": now + EPSS_RENEW}
+    renew_results = text(
+        """
+        UPDATE enrichment_results SET expires_at = :expires
+        WHERE entity_type = 'cve' AND source_type = 'epss' AND status = 'success' AND expires_at < :renew_before
+        """
+    )
+    renew_context = text(
+        """
+        UPDATE entity_context SET expires_at = :expires
+        WHERE entity_type = 'cve' AND source_type = 'epss' AND expires_at < :renew_before
+        """
+    )
 
     async with _get_worker_session() as db:
         for chunk in itertools.batched(iter_epss_csv(csv_text), _EPSS_CHUNK_SIZE):
             stats["total_scores"] += len(chunk)
             cve_ids, scores, pcts = (list(col) for col in zip(*chunk, strict=True))
             rows = (
-                await db.execute(update_cves, {"now": now, "cve_ids": cve_ids, "scores": scores, "pcts": pcts})
+                await db.execute(
+                    update_cves,
+                    {"now": now, "cve_ids": cve_ids, "scores": scores, "pcts": pcts, "pct_step": EPSS_PERCENTILE_STEP},
+                )
             ).all()
             if not rows:
                 continue
@@ -208,6 +270,7 @@ async def _run_epss_bulk_sync():
             matched_ids = [row.id for row in rows]
             await db.execute(update_results, {**sql_params, "ids": matched_ids})
             await db.execute(insert_results, {**sql_params, "ids": matched_ids})
+            await db.execute(upsert_context, {**sql_params, "ids": matched_ids})
 
             # Correlation events for significant changes; rescores go out after
             # the commit so the worker reads the new score.
@@ -227,6 +290,10 @@ async def _run_epss_bulk_sync():
             for cve_uuid in increased:
                 dispatch_cve_rescore(cve_uuid)
 
+        # Answers that didn't change stand: renew the rows about to expire.
+        await db.execute(renew_results, renew)
+        await db.execute(renew_context, renew)
+
         # Update source last_synced_at
         source_result = await db.execute(select(EnrichmentSource).where(EnrichmentSource.source_type == "epss"))
         source = source_result.scalar_one_or_none()
@@ -237,6 +304,8 @@ async def _run_epss_bulk_sync():
 
         await db.commit()
 
+    stats["fetched"] = stats["total_scores"]
+    stats["changed"] = stats["written"] = stats["updated"]
     return stats
 
 
@@ -419,13 +488,13 @@ async def _run_misp_galaxy_sync():
             data = resp.json()
     except SOURCE_REFUSALS as e:
         logger.warning("MISP Galaxy sync skipped: %s", e)
-        return {"stopped": e.status}
+        return {"fetched": 0, "changed": 0, "written": 0, "stopped": e.status}
 
     items = parse_misp_galaxy_clusters(data)
     if not items:
         # An empty/garbled feed must not wipe the existing knowledge.
         logger.warning("MISP Galaxy threat-actor cluster returned no values; keeping existing alias map")
-        return {"clusters": 0, "alias_rows": 0, "skipped": True}
+        return {"fetched": 0, "changed": 0, "written": 0, "clusters": 0, "alias_rows": 0, "skipped": True}
 
     attributes = parse_misp_galaxy_attributes(data)
 
@@ -433,76 +502,33 @@ async def _run_misp_galaxy_sync():
         rows = await upsert_known_aliases(db, "misp_galaxy", items)
 
         # The synonym clusters stay resolution-only knowledge (guardrails Phase
-        # 4). The rest of the cluster metadata is ordinary profile data, so fill
-        # the blanks on actors we already track — never overwrite a value an
-        # analyst or an earlier source already set.
+        # 4). The rest of the cluster metadata is ordinary profile data, applied
+        # through the field map to actors we already track: it fills blanks
+        # only (MISPGalaxySource's outputs), with a claim naming MISP Galaxy.
         from app import entity_types
-        from app.intelligence.actor_attributes import coerce_motivation, resolve_country_name
-        from app.intelligence.sectors import normalize_sectors, sector_uuid
+        from app.enrichment.base import EnrichmentData
+        from app.enrichment.pipeline import apply_source_result
+        from app.intelligence.sectors import normalize_sectors
         from app.models.threat_actor import ThreatActor
-        from app.services.claim_provenance import record_claims
-        from app.services.sector_links import add_target_sector, list_target_sectors, refresh_targeted_sectors_cache
 
         synonyms_by_name = dict(items)
-        filled = {"country": 0, "sectors": 0, "motivation": 0, "description": 0, "matched": 0}
+        stats = {"fetched": len(items), "changed": 0, "written": 0, "matched": 0}
+        cache: dict = {}
         for name, attrs in attributes.items():
             actor = await find_entity_by_name_or_alias(db, ThreatActor, name, synonyms_by_name.get(name) or [])
             if not actor:
                 continue
-            filled["matched"] += 1
-            changed = False
-
-            # Each fill is also recorded as a claim so the profile can name the
-            # reference feed that asserted it rather than showing a bare value.
-            asserted: dict = {}
-
-            if not actor.country and attrs.get("country"):
-                country = await resolve_country_name(db, attrs["country"])
-                if country:
-                    actor.country = country
-                    asserted["country"] = country
-                    filled["country"] += 1
-                    changed = True
-
-            if attrs.get("sectors") and not await list_target_sectors(db, "threat_actor", actor.id):
-                # Fill-if-empty against the junction, not the cache column; the
-                # rows land as `enrichment` claims the nightly rollup never prunes.
-                slugs = normalize_sectors(attrs["sectors"])
-                if slugs:
-                    for slug in slugs:
-                        await add_target_sector(db, "threat_actor", actor.id, sector_uuid(slug), "enrichment")
-                    labels = await refresh_targeted_sectors_cache(db, "threat_actor", actor)
-                    asserted["targeted_sectors"] = labels
-                    filled["sectors"] += 1
-                    changed = True
-
-            if not actor.motivation and attrs.get("motivation"):
-                motivation = coerce_motivation(attrs["motivation"])
-                if motivation:
-                    actor.motivation = motivation
-                    asserted["motivation"] = motivation
-                    filled["motivation"] += 1
-                    changed = True
-
-            if not actor.description and attrs.get("description"):
-                actor.description = attrs["description"]
-                asserted["description"] = attrs["description"]
-                filled["description"] += 1
-                changed = True
-
-            if changed:
-                db.add(actor)
-                await record_claims(
-                    db,
-                    entity_type=entity_types.THREAT_ACTOR,
-                    entity_id=actor.id,
-                    values=asserted,
-                    source_kind="external_feed",
-                    source_ref="cybergeist",
-                )
+            stats["matched"] += 1
+            parsed = {"found": True, "name": name, **attrs}
+            if attrs.get("sectors"):
+                parsed["sectors"] = normalize_sectors(attrs["sectors"])
+            data = EnrichmentData(raw_response={"cluster": name}, parsed_data=parsed, ttl_hours=24 * 8)
+            applied = await apply_source_result(db, entity_types.THREAT_ACTOR, actor.id, "misp_galaxy", data, cache)
+            stats["changed"] += applied.changed
+            stats["written"] += applied.written
 
         await db.commit()
-    return {"clusters": len(items), "alias_rows": rows, "attributes": filled}
+    return {**stats, "clusters": len(items), "alias_rows": rows}
 
 
 @celery_app.task(name="app.workers.enrichment_tasks.run_cve_nvd_backfill", soft_time_limit=900, time_limit=960)
@@ -527,21 +553,35 @@ def run_cve_nvd_backfill():
 _NVD_BACKFILL_BUDGET_S = 780
 
 
-@source_job("nvd")
-async def _run_cve_nvd_backfill():
-    import asyncio as _asyncio
-    from datetime import UTC, datetime
+def _bounded(gateway: SourceGateway, deadline: float) -> bool:
+    """Let ``gateway`` wait for a token only as long as the run has left, so a
+    token wait can't carry a job past its time budget. False once it's spent."""
+    left = deadline - time.monotonic()
+    gateway.max_wait = max(0.0, min(JOB_TOKEN_WAIT, left))
+    return left > 0
 
-    from app.intelligence.cve import (
-        enrich_from_nvd,
-        nvd_gateway,
-        nvd_request_pace,
-        nvd_retry_allowed,
-        stamp_nvd_miss,
-    )
+
+def _per_run(gateway: SourceGateway, seconds: float) -> int:
+    """How many requests fit in ``seconds`` at the gateway's rate."""
+    return int(seconds * gateway.capacity / gateway.period) + gateway.capacity
+
+
+@source_job("nvd", lane="backfill")
+async def _run_cve_nvd_backfill():
+    """Look up each CVE that has no NVD record yet, whatever else filled it
+    (a CNA's record from cvelist fills the description first), within the
+    retry budget for ids NVD keeps missing. The gateway paces the requests;
+    each answer goes through the NVD source's field map (``apply_nvd``)."""
+    from sqlalchemy import func as sa_func
+    from sqlalchemy import or_
+
+    from app.intelligence.cve import apply_nvd, enrich_from_nvd, nvd_gateway, nvd_retry_allowed, stamp_nvd_miss
     from app.models.cve import CVE
 
     stats = {
+        "fetched": 0,
+        "changed": 0,
+        "written": 0,
         "enriched": 0,
         "failed": 0,
         "skipped_invalid": 0,
@@ -554,50 +594,43 @@ async def _run_cve_nvd_backfill():
 
     async with _get_worker_session() as db:
         gateway, api_key = await nvd_gateway(db, max_wait=JOB_TOKEN_WAIT)
-        delay = nvd_request_pace(api_key)
 
-        # Process valid-format CVEs first (4-5 digit suffix), skip obviously bogus ones
-        from sqlalchemy import func as sa_func
-
-        # Ids NVD has already missed on are retried on the shared budget (3
-        # lookups, a week apart) — autolink and extraction mint a stub for any
-        # CVE-shaped string, and without the budget every junk id was looked up
-        # again every night.
-        due = (
-            CVE.description.is_(None),
-            sa_func.length(sa_func.split_part(CVE.cve_id, "-", 3)) <= 5,
-            nvd_retry_allowed(now),
-        )
+        # No NVD record: never looked up, or only miss stamps so far. Ids NVD
+        # has already missed on are retried on the shared budget (3 lookups, a
+        # week apart), since autolink and extraction mint a stub for any
+        # CVE-shaped string. Valid-format ids only (a 4-5 digit suffix).
+        no_record = or_(CVE.nvd_data.is_(None), ~CVE.nvd_data.has_key("id"))
+        valid = sa_func.length(sa_func.split_part(CVE.cve_id, "-", 3)) <= 5
+        due = (no_record, valid, nvd_retry_allowed(now))
         stats["pending"] = (await db.execute(select(sa_func.count()).select_from(CVE).where(*due))).scalar() or 0
-        # Load only what one run can look up at this pace; the rest waits for
-        # tomorrow's run.
+        # Load only what one run can look up at the source's rate; the rest
+        # waits for tomorrow's run. CVEs nothing has filled go first.
         result = await db.execute(
-            select(CVE).where(*due).order_by(CVE.cve_id).limit(int(_NVD_BACKFILL_BUDGET_S / delay))
+            select(CVE)
+            .where(*due)
+            .order_by(
+                or_(CVE.cvss_score.is_(None), CVE.description.is_(None)).desc(),
+                CVE.is_kev.desc(),
+                CVE.cve_id,
+            )
+            .limit(_per_run(gateway, _NVD_BACKFILL_BUDGET_S))
         )
         cves = result.scalars().all()
         stats["total"] = len(cves)
-
-        # Count skipped invalid CVEs
-        invalid_result = await db.execute(
-            select(sa_func.count())
-            .select_from(CVE)
-            .where(
-                CVE.description.is_(None),
-                sa_func.length(sa_func.split_part(CVE.cve_id, "-", 3)) > 5,
-            )
-        )
-        stats["skipped_invalid"] = invalid_result.scalar() or 0
+        stats["skipped_invalid"] = (
+            await db.execute(select(sa_func.count()).select_from(CVE).where(no_record, ~valid))
+        ).scalar() or 0
 
         logger.info(
-            "CVE NVD backfill: %d of %d valid CVEs this run, %d invalid skipped (delay=%.1fs)",
+            "CVE NVD backfill: %d of %d valid CVEs this run, %d invalid skipped",
             stats["total"],
             stats["pending"],
             stats["skipped_invalid"],
-            delay,
         )
 
+        cache: dict = {}
         for i, cve_obj in enumerate(cves):
-            if time.monotonic() >= deadline:
+            if not _bounded(gateway, deadline):
                 # Out of budget: stop cleanly so the run commits and records its
                 # stats instead of being killed at the soft limit.
                 logger.info("CVE NVD backfill stopping at %d/%d: time budget spent", i, len(cves))
@@ -612,16 +645,14 @@ async def _run_cve_nvd_backfill():
                 stats["stopped"] = e.status
                 break
             if nvd:
-                cve_obj.cvss_score = nvd.get("cvss_score")
-                cve_obj.severity = nvd.get("severity")
-                cve_obj.description = nvd.get("description")
-                cve_obj.affected_products = nvd.get("affected_products", [])
-                cve_obj.references_ = nvd.get("references", [])
-                cve_obj.nvd_data = nvd.get("nvd_data", {})
-                db.add(cve_obj)
+                stats["fetched"] += 1
+                applied = await apply_nvd(db, cve_obj, nvd, cache, via="cve-nvd-backfill")
+                stats["changed"] += applied.changed
+                stats["written"] += applied.written
                 stats["enriched"] += 1
             else:
                 stamp_nvd_miss(cve_obj, now)
+                db.add(cve_obj)
                 stats["failed"] += 1
 
             # Commit in batches of 50 to avoid losing progress
@@ -633,8 +664,6 @@ async def _run_cve_nvd_backfill():
                     stats["total"],
                     stats["failed"],
                 )
-
-            await _asyncio.sleep(delay)
 
         await db.commit()
 
@@ -658,74 +687,79 @@ def run_cve_nvd_refresh():
         CELERY_TASK_DURATION_SECONDS.labels(task_name="run_cve_nvd_refresh").observe(time.monotonic() - start)
 
 
+_NVD_REFRESH_BUDGET_S = 780
+#: How far back a first run (no window read yet) looks for changes.
+_NVD_REFRESH_FIRST_WINDOW = timedelta(days=8)
+
+
 @source_job("nvd")
 async def _run_cve_nvd_refresh():
-    """Re-enrich CVEs that already have NVD data, detecting CVSS score changes."""
-    import asyncio as _asyncio
-    from datetime import timedelta
+    """Apply every NVD record changed since the last run to the CVEs IntelFeed
+    holds, detecting CVSS score changes. One request returns up to 2,000
+    changed records, so a day of NVD's changes costs a few requests rather
+    than one per CVE.
 
-    from app.intelligence.cve import enrich_from_nvd, nvd_gateway, nvd_request_pace
+    The window starts where the last fully read one ended (the nvd row's
+    ``last_synced_at``; a first run looks back 8 days) and covers at most
+    NVD's 120 days. A run that stops part way keeps the window's start, and
+    the next reads it again: records already applied change nothing.
+
+    Each answer goes through the NVD source's field map, so a newer NVD score
+    replaces NVD's own (or a lower-ranked source's) but never an analyst's."""
+    from app.intelligence.correlation_events import create_cve_score_change_event
+    from app.intelligence.cve import NVD_MAX_WINDOW, apply_nvd, fetch_nvd_changes, nvd_gateway
     from app.models.cve import CVE
+    from app.models.enrichment import EnrichmentSource
 
-    stats = {"checked": 0, "score_changes": 0, "failed": 0, "total": 0, "stopped": None}
+    stats = {"fetched": 0, "changed": 0, "written": 0, "checked": 0, "score_changes": 0, "pages": 0, "total": 0}
+    stats["stopped"] = None
+    deadline = time.monotonic() + _NVD_REFRESH_BUDGET_S
 
     async with _get_worker_session() as db:
         gateway, api_key = await nvd_gateway(db, max_wait=JOB_TOKEN_WAIT)
-        delay = nvd_request_pace(api_key)
-
-        # Select CVEs that hold an NVD record not re-checked in 7 days, oldest
-        # first. Limit to 100 per run to stay within rate limits. Staleness uses
-        # the blob-internal stamp, NOT CVE.updated_at: the daily EPSS sync and
-        # article mentions touch updated_at on nearly every CVE, which left this
-        # job with nothing to select.
+        source = (
+            await db.execute(select(EnrichmentSource).where(EnrichmentSource.source_type == "nvd"))
+        ).scalar_one_or_none()
         now = datetime.now(UTC)
-        cutoff = (now - timedelta(days=7)).isoformat()
-        refreshed_at = CVE.nvd_data["_refreshed_at"].astext
-        from sqlalchemy import func as sa_func
-        from sqlalchemy import or_
+        since = source.last_synced_at if source and source.last_synced_at else now - _NVD_REFRESH_FIRST_WINDOW
+        since = max(since, now - NVD_MAX_WINDOW)
+        stats["since"] = since.isoformat()
 
-        result = await db.execute(
-            select(CVE)
-            .where(
-                CVE.nvd_data.has_key("id"),
-                or_(~CVE.nvd_data.has_key("_refreshed_at"), refreshed_at < cutoff),
-                sa_func.length(sa_func.split_part(CVE.cve_id, "-", 3)) <= 5,
-            )
-            .order_by(refreshed_at.asc().nulls_first())
-            .limit(100)
-        )
-        cves = result.scalars().all()
-        stats["total"] = len(cves)
-
-        if not cves:
-            return stats
-
-        logger.info("CVE NVD refresh: re-checking %d CVEs for score changes (delay=%.1fs)", len(cves), delay)
-
-        from app.intelligence.correlation_events import create_cve_score_change_event
-
-        for i, cve_obj in enumerate(cves):
-            old_cvss = float(cve_obj.cvss_score) if cve_obj.cvss_score is not None else None
+        cache: dict = {}
+        index = 0
+        while True:
+            if not _bounded(gateway, deadline):
+                stats["stopped"] = "out_of_time"
+                break
             try:
-                nvd = await enrich_from_nvd(cve_obj.cve_id, gateway, api_key)
+                records, stats["total"] = await fetch_nvd_changes(since, now, gateway, api_key, index)
             except SOURCE_REFUSALS as e:
-                # Left unstamped, so the next run starts with it.
-                logger.warning("CVE NVD refresh stopping at %d/%d: %s", i, len(cves), e)
+                logger.warning("CVE NVD refresh stopping at %d/%d: %s", index, stats["total"], e)
                 stats["stopped"] = e.status
                 break
-            if nvd:
-                new_cvss = nvd.get("cvss_score")
-                new_cvss_float = float(new_cvss) if new_cvss is not None else None
+            stats["pages"] += 1
+            ids = [r["nvd_data"]["id"] for r in records]
+            held = {c.cve_id: c for c in (await db.execute(select(CVE).where(CVE.cve_id.in_(ids)))).scalars()}
+            for nvd in records:
+                cve_obj = held.get(nvd["nvd_data"]["id"])
+                if cve_obj is None:
+                    continue
+                stats["fetched"] += 1
+                old_cvss = float(cve_obj.cvss_score) if cve_obj.cvss_score is not None else None
+                applied = await apply_nvd(db, cve_obj, nvd, cache, via="cve-nvd-refresh")
+                stats["changed"] += applied.changed
+                stats["written"] += applied.written
+                new_cvss = float(cve_obj.cvss_score) if cve_obj.cvss_score is not None else None
 
                 # Detect CVSS severity tier escalation into high (>=7.0) or critical (>=9.0).
                 # Numeric changes within the same tier, or any downgrade, do not notify.
-                if old_cvss is not None and new_cvss_float is not None:
+                if old_cvss is not None and new_cvss is not None:
                     old_rank = _cvss_tier_rank(old_cvss)
-                    new_rank = _cvss_tier_rank(new_cvss_float)
+                    new_rank = _cvss_tier_rank(new_cvss)
                     if new_rank > old_rank and new_rank >= 3:
                         try:
                             await create_cve_score_change_event(
-                                db, cve_obj.cve_id, cve_obj.id, "cvss_score", old_cvss, new_cvss_float
+                                db, cve_obj.cve_id, cve_obj.id, "cvss_score", old_cvss, new_cvss
                             )
                             stats["score_changes"] += 1
                         except Exception:
@@ -733,35 +767,17 @@ async def _run_cve_nvd_refresh():
                         from app.workers.signal_tasks import dispatch_cve_rescore
 
                         dispatch_cve_rescore(cve_obj.id)
-
-                # Update the CVE with fresh NVD data
-                cve_obj.cvss_score = new_cvss
-                cve_obj.severity = nvd.get("severity") or cve_obj.severity
-                if nvd.get("description"):
-                    cve_obj.description = nvd["description"]
-                cve_obj.affected_products = nvd.get("affected_products", cve_obj.affected_products)
-                cve_obj.references_ = nvd.get("references", cve_obj.references_)
-                cve_obj.nvd_data = nvd.get("nvd_data", cve_obj.nvd_data)
                 stats["checked"] += 1
-            else:
-                stats["failed"] += 1
-            # Stamp hits and misses alike so a CVE NVD can't answer for rotates
-            # to the back instead of heading every run.
-            cve_obj.nvd_data = {**(cve_obj.nvd_data or {}), "_refreshed_at": now.isoformat()}
-            db.add(cve_obj)
+                cve_obj.nvd_data = {**(cve_obj.nvd_data or {}), "_refreshed_at": now.isoformat()}
+                db.add(cve_obj)
+            await db.commit()
+            index += len(records)
+            if not records or index >= stats["total"]:
+                break
 
-            if (i + 1) % 50 == 0:
-                await db.commit()
-                logger.info(
-                    "CVE NVD refresh progress: %d/%d checked, %d score changes",
-                    stats["checked"],
-                    stats["total"],
-                    stats["score_changes"],
-                )
-
-            await _asyncio.sleep(delay)
-
-        await db.commit()
+        if stats["stopped"] is None and source is not None:
+            source.last_synced_at = now
+            await db.commit()
 
     return stats
 
@@ -807,13 +823,16 @@ async def _malpedia_get(client, kind: str) -> dict:
 
 @source_job("malpedia")
 async def _run_malpedia_sync():
+    from app.enrichment.base import EnrichmentData
+    from app.enrichment.pipeline import apply_source_result
     from app.intelligence.actor_attributes import resolve_country_name
     from app.models.enrichment import EnrichmentSource
     from app.models.malware_family import MalwareFamily
     from app.models.threat_actor import ThreatActor
     from app.models.tool import Tool
 
-    stats = {"families_updated": 0, "tools_updated": 0, "actors_updated": 0, "families_seen": 0, "stopped": None}
+    stats = {"fetched": 0, "changed": 0, "written": 0, "families_updated": 0, "tools_updated": 0}
+    stats.update({"actors_updated": 0, "families_seen": 0, "stopped": None})
 
     # `get/families` returns the full {family_key: {...}} payload. The
     # `list/families` endpoint this used to call returns a bare list of keys,
@@ -833,11 +852,15 @@ async def _run_malpedia_sync():
 
     stats["families_seen"] = len(families)
     stats["actors_seen"] = len(actors)
+    stats["fetched"] = len(families) + len(actors)
 
     async with _get_worker_session() as db:
         # Commit in batches: one transaction over thousands of malware, tool and
         # actor rows held locks long enough to deadlock with other catalog syncs.
+        # Each match is applied as a lookup's answer would be (the Malpedia
+        # source's columns, claims and context, apply_source_result).
         dirty = 0
+        cache: dict = {}
         for family_key, family_data in families.items():
             if dirty >= _MALPEDIA_COMMIT_EVERY:
                 await db.commit()
@@ -846,26 +869,21 @@ async def _run_malpedia_sync():
                 continue
             common_name = family_data.get("common_name") or family_key
             alt_names = [a for a in family_data.get("alt_names") or [] if isinstance(a, str)]
-            malpedia_url = f"https://malpedia.caad.fkie.fraunhofer.de/details/{family_key}"
-            github_url = next((u for u in family_data.get("urls") or [] if "github.com/" in str(u)), None)
+            data = _malpedia_family_result(family_key, family_data)
 
             # Malpedia files offensive tooling under the same family namespace as
             # malware, so a key can match either table. Try malware first — it's
             # the larger and more specific catalog — then tools.
-            for model, stat_key in ((MalwareFamily, "families_updated"), (Tool, "tools_updated")):
+            for model, entity_type, stat_key in (
+                (MalwareFamily, "malware", "families_updated"),
+                (Tool, "tool", "tools_updated"),
+            ):
                 entity = await find_entity_by_name_or_alias(db, model, common_name, alt_names)
                 if not entity:
                     continue
-                entity.malpedia_url = malpedia_url
-                if family_data.get("description") and not entity.description:
-                    entity.description = family_data["description"]
-                if github_url and hasattr(entity, "github_url") and not entity.github_url:
-                    entity.github_url = github_url
-                if alt_names and not entity.aliases:
-                    cleaned = filter_aliases(alt_names, common_name)
-                    if cleaned:
-                        entity.aliases = cleaned
-                db.add(entity)
+                applied = await apply_source_result(db, entity_type, entity.id, "malpedia", data, cache)
+                stats["changed"] += applied.changed
+                stats["written"] += applied.written
                 stats[stat_key] += 1
                 dirty += 1
                 break
@@ -881,18 +899,24 @@ async def _run_malpedia_sync():
             actor = await find_entity_by_name_or_alias(db, ThreatActor, actor_key, synonyms)
             if not actor:
                 continue
-            if actor_data.get("description") and not actor.description:
-                actor.description = actor_data["description"]
-            if meta.get("country") and not actor.country:
-                # Malpedia reports ISO alpha-2; the column stores full names.
-                country = await resolve_country_name(db, meta["country"])
-                if country:
-                    actor.country = country
-            if synonyms and not actor.aliases:
-                cleaned = filter_aliases(synonyms, actor_key)
-                if cleaned:
-                    actor.aliases = cleaned
-            db.add(actor)
+            # Malpedia reports ISO alpha-2; the column stores full names.
+            country = await resolve_country_name(db, meta["country"]) if meta.get("country") else None
+            data = EnrichmentData(
+                raw_response={"via": "malpedia-sync", "id": actor_key},
+                parsed_data={
+                    "found": True,
+                    "actor_name": actor_data.get("value") or actor_key,
+                    "description": (actor_data.get("description") or "")[:2000],
+                    "alt_names": synonyms,
+                    "country": country,
+                    "refs": [r for r in meta.get("refs") or [] if isinstance(r, str)][:10],
+                    "families": list(actor_data.get("families") or {})[:20],
+                },
+                ttl_hours=168,
+            )
+            applied = await apply_source_result(db, "threat_actor", actor.id, "malpedia", data, cache)
+            stats["changed"] += applied.changed
+            stats["written"] += applied.written
             stats["actors_updated"] += 1
             dirty += 1
 
@@ -907,6 +931,29 @@ async def _run_malpedia_sync():
         await db.commit()
 
     return stats
+
+
+def _malpedia_family_result(family_key: str, family_data: dict):
+    """A ``get/families`` entry as the Malpedia source's answer for a family
+    (the lookup's keys). The family page is built from its key, and GitHub
+    links go first, so the repository survives the reference list's cap."""
+    from app.enrichment.base import EnrichmentData
+
+    urls = [u for u in family_data.get("urls") or [] if isinstance(u, str)]
+    urls = sorted(urls, key=lambda u: "github.com/" not in u)[:25]
+    return EnrichmentData(
+        raw_response={"via": "malpedia-sync", "id": family_key},
+        parsed_data={
+            "found": True,
+            "family_name": family_data.get("common_name") or family_key,
+            "description": (family_data.get("description") or "")[:2000],
+            "alt_names": [a for a in family_data.get("alt_names") or [] if isinstance(a, str)],
+            "attribution": [a for a in family_data.get("attribution") or [] if isinstance(a, str)],
+            "urls": urls,
+            "malpedia_url": f"https://malpedia.caad.fkie.fraunhofer.de/details/{family_key}",
+        },
+        ttl_hours=168,
+    )
 
 
 @celery_app.task(name="app.workers.enrichment_tasks.run_github_poc_scan", soft_time_limit=600, time_limit=660)
@@ -938,13 +985,14 @@ async def _run_github_poc_scan():
 
     from sqlalchemy import case, or_
 
-    from app.enrichment.adapters.github_poc import GitHubPoCAdapter
-    from app.enrichment.pipeline import gateway_for
-    from app.enrichment.results import upsert_enrichment_result
+    from app.enrichment.adapters.github_poc import GitHubPoCAdapter, parse_search
+    from app.enrichment.base import EnrichmentData
+    from app.enrichment.pipeline import apply_source_result, gateway_for
     from app.models.cve import CVE
     from app.models.enrichment import EnrichmentResult, EnrichmentSource
+    from app.services.claim_provenance import record_claim
 
-    stats = {"scanned": 0, "pocs_found": 0, "stopped": None}
+    stats = {"fetched": 0, "changed": 0, "written": 0, "scanned": 0, "pocs_found": 0, "stopped": None}
     deadline = time.monotonic() + _GITHUB_POC_BUDGET_S
 
     async with _get_worker_session() as db:
@@ -1010,9 +1058,10 @@ async def _run_github_poc_scan():
         )
         cves = result.scalars().all()
 
+        cache: dict = {}
         async with gateway.client(timeout=30.0, headers=headers) as client:
             for cve in cves:
-                if time.monotonic() >= deadline:
+                if not _bounded(gateway, deadline):
                     stats["stopped"] = "out_of_time"
                     break
                 try:
@@ -1021,48 +1070,36 @@ async def _run_github_poc_scan():
                         params={"q": GitHubPoCAdapter.search_query(cve.cve_id), "sort": "stars", "per_page": 5},
                     )
                     resp.raise_for_status()
-                    data = resp.json()
-
-                    poc_repos = []
-                    for item in data.get("items", [])[:5]:
-                        poc_repos.append(
-                            {
-                                "name": item["name"],
-                                "url": item["html_url"],
-                                "stars": item["stargazers_count"],
-                                "language": item.get("language"),
-                                "description": item.get("description", ""),
-                            }
-                        )
-
-                    now = datetime.now(UTC)
-                    parsed = {
-                        "cve_id": cve.cve_id,
-                        "has_public_poc": len(poc_repos) > 0,
-                        "poc_count": len(poc_repos),
-                        "poc_repos": poc_repos,
-                    }
-
-                    await upsert_enrichment_result(
+                    parsed = parse_search(cve.cve_id, resp.json())
+                    stats["fetched"] += 1
+                    # Stored, its context (the PoC badge, repos) written, as a
+                    # lookup's answer is. The raw response is the search, kept
+                    # small: parsed_data holds what is used.
+                    applied = await apply_source_result(
                         db,
-                        entity_type="cve",
-                        entity_id=cve.id,
-                        source_type="github_poc",
-                        raw_response=data,
-                        parsed_data=parsed,
-                        enriched_at=now,
-                        expires_at=now + timedelta(hours=24),
-                        status="success",
+                        "cve",
+                        cve.id,
+                        "github_poc",
+                        EnrichmentData(
+                            raw_response={"via": "github-poc-scan", "total_count": parsed["poc_count"]},
+                            parsed_data=parsed,
+                            ttl_hours=24,
+                        ),
+                        cache,
                     )
+                    stats["changed"] += applied.changed
+                    poc_repos = parsed["poc_repos"]
 
                     # Update CVE model directly. Write the count even when the
                     # scan finds nothing, so "scanned, no PoC" reads as 0 rather
                     # than looking unscanned, and a rescan clears stale hits.
                     old_poc_count = cve.github_poc_count or 0
                     new_poc_urls = [r["url"] for r in poc_repos]
-                    cve.github_poc_count = len(poc_repos)
-                    cve.github_poc_urls = new_poc_urls
-                    db.add(cve)
+                    if (cve.github_poc_count, list(cve.github_poc_urls or [])) != (len(poc_repos), new_poc_urls):
+                        cve.github_poc_count = len(poc_repos)
+                        cve.github_poc_urls = new_poc_urls
+                        db.add(cve)
+                        stats["written"] += 1
                     if poc_repos:
                         old_availability = cve.exploit_availability
                         # Determine exploit availability level using full escalation hierarchy:
@@ -1082,6 +1119,15 @@ async def _run_github_poc_scan():
                         # Create correlation event if status changed
                         new_availability = cve.exploit_availability
                         if new_availability != old_availability:
+                            await record_claim(
+                                db,
+                                entity_type="cve",
+                                entity_id=cve.id,
+                                field="exploit_availability",
+                                value=new_availability,
+                                source_kind="enrichment",
+                                source_ref="github_poc",
+                            )
                             from app.intelligence.correlation_events import create_exploit_status_change_event
 
                             await create_exploit_status_change_event(
@@ -1108,7 +1154,8 @@ async def _run_github_poc_scan():
                     logger.warning("GitHub PoC scan stopping after %d CVEs: %s", stats["scanned"], e)
                     stats["stopped"] = e.status
                     break
-                except GatewayUnavailable:
+                except (GatewayUnavailable, AuthFailed):
+                    # A rejected key fails the job so Engine → Jobs shows why.
                     raise
                 except Exception as e:
                     logger.warning("GitHub PoC scan failed for %s: %s", cve.cve_id, e)
@@ -1143,13 +1190,28 @@ def run_wikipedia_bulk_sync():
 # Wall-clock seconds the sync may spend fetching: the wikipedia bucket paces it,
 # so it stops here and commits rather than run into the 3600s soft limit.
 _WIKIPEDIA_BULK_BUDGET_S = 3300
+#: How long "no article" stands before the weekly sync asks again.
+_WIKIPEDIA_NOT_FOUND_TTL_H = 30 * 24
 
 
-@source_job("wikipedia")
+async def _wikipedia_not_found(db, entity_type: str, entity_id, cache: dict, reason: str) -> None:
+    """Store a "no article" answer, so the next runs move on to other names."""
+    from app.enrichment.base import EnrichmentData
+    from app.enrichment.pipeline import apply_source_result
+
+    data = EnrichmentData(
+        raw_response={"via": "wikipedia-bulk-sync", "status": reason},
+        parsed_data={"found": False},
+        ttl_hours=_WIKIPEDIA_NOT_FOUND_TTL_H,
+    )
+    await apply_source_result(db, entity_type, entity_id, "wikipedia", data, cache)
+
+
+@source_job("wikipedia", lane="backfill")
 async def _run_wikipedia_bulk_sync():
-    from datetime import timedelta
 
-    from app.enrichment.pipeline import gateway_for
+    from app.enrichment.base import EnrichmentData
+    from app.enrichment.pipeline import apply_source_result, gateway_for
     from app.enrichment.wikipedia_helper import extract_first_paragraph, fetch_wikipedia
     from app.models.country import Country
     from app.models.enrichment import EnrichmentResult, EnrichmentSource
@@ -1172,6 +1234,9 @@ async def _run_wikipedia_bulk_sync():
     ]
 
     stats = {
+        "fetched": 0,
+        "changed": 0,
+        "written": 0,
         "country": 0,
         "vendor": 0,
         "product": 0,
@@ -1188,6 +1253,7 @@ async def _run_wikipedia_bulk_sync():
     async with _get_worker_session() as db:
         now = datetime.now(UTC)
         batch_count = 0
+        cache: dict = {}
         gateway, _ = await gateway_for(db, "wikipedia", max_wait=JOB_TOKEN_WAIT)
 
         for entity_type, model_cls, name_attr in entity_configs:
@@ -1205,16 +1271,28 @@ async def _run_wikipedia_bulk_sync():
                 )
                 .exists()
             )
+            # An answer that still stands (a "no article" one included) isn't
+            # asked again.
+            fresh_answer = (
+                select(EnrichmentResult.id)
+                .where(
+                    EnrichmentResult.entity_type == entity_type,
+                    EnrichmentResult.entity_id == model_cls.id,
+                    EnrichmentResult.source_type == "wikipedia",
+                    EnrichmentResult.expires_at > now,
+                )
+                .exists()
+            )
             result = await db.execute(
                 select(model_cls)
-                .where(model_cls.wikipedia_content.is_(None), ~cleared_marker)
+                .where(model_cls.wikipedia_content.is_(None), ~cleared_marker, ~fresh_answer)
                 .order_by(model_cls.name)
                 .limit(BATCH_LIMIT)
             )
             entities = result.scalars().all()
 
             for entity in entities:
-                if time.monotonic() >= deadline:
+                if not _bounded(gateway, deadline):
                     stats["stopped"] = "out_of_time"
                     break
                 entity_name = getattr(entity, name_attr)
@@ -1223,13 +1301,23 @@ async def _run_wikipedia_bulk_sync():
                     continue
 
                 # The source's bucket paces the requests (several per entity).
+                # One entity can make a dozen of them, each waiting for a slot,
+                # so the run's time left bounds the whole fetch, not just the
+                # first wait.
                 try:
-                    wiki_result = await fetch_wikipedia(entity_name, entity_type, transport=gateway.transport())
+                    wiki_result = await asyncio.wait_for(
+                        fetch_wikipedia(entity_name, entity_type, transport=gateway.transport()),
+                        timeout=max(1.0, deadline - time.monotonic()),
+                    )
+                except TimeoutError:
+                    stats["stopped"] = "out_of_time"
+                    break
                 except SOURCE_REFUSALS as e:
                     logger.warning("Wikipedia bulk sync stopping: %s", e)
                     stats["stopped"] = e.status
                     break
-                except GatewayUnavailable:
+                except (GatewayUnavailable, AuthFailed):
+                    # A rejected key fails the job so Engine → Jobs shows why.
                     raise
                 except Exception as e:
                     logger.warning("Wikipedia fetch failed for %s/%s: %s", entity_type, entity_name, e)
@@ -1237,8 +1325,10 @@ async def _run_wikipedia_bulk_sync():
                     continue
 
                 if not wiki_result:
+                    await _wikipedia_not_found(db, entity_type, entity.id, cache, "no_article")
                     stats["skipped"] += 1
                     continue
+                stats["fetched"] += 1
 
                 # Topical guard (F11): a wrong-subject article (calendar year,
                 # disambiguation page, geography, unrelated bio) anchors every
@@ -1251,31 +1341,20 @@ async def _run_wikipedia_bulk_sync():
                     log_enrichment_reject(
                         db, entity_type, entity.id, entity_name, reject_reason, detail=wiki_result.get("url")
                     )
+                    await _wikipedia_not_found(db, entity_type, entity.id, cache, "off_topic")
                     stats["skipped"] += 1
                     continue
 
-                # Update entity model directly
-                entity.wikipedia_url = wiki_result["url"]
-                entity.wikipedia_content = wiki_result["content"]
-                entity.wikipedia_image_url = wiki_result.get("image_url")
-                if hasattr(entity, "description") and not entity.description:
-                    first_para = extract_first_paragraph(wiki_result["content"])
-                    if first_para:
-                        entity.description = first_para
-                db.add(entity)
-
-                # Store enrichment result
-                db.add(
-                    EnrichmentResult(
-                        entity_type=entity_type,
-                        entity_id=entity.id,
-                        source_type="wikipedia",
-                        raw_response={
-                            "title": wiki_result["title"],
-                            "url": wiki_result["url"],
-                            "content": wiki_result["content"],
-                            "image_url": wiki_result.get("image_url"),
-                        },
+                # Applied as a lookup's answer is: the article's columns move
+                # together, the first paragraph takes the description by rank,
+                # and each write is claimed for Wikipedia.
+                applied = await apply_source_result(
+                    db,
+                    entity_type,
+                    entity.id,
+                    "wikipedia",
+                    EnrichmentData(
+                        raw_response={"via": "wikipedia-bulk-sync", "title": wiki_result["title"]},
                         parsed_data={
                             "found": True,
                             "wikipedia_url": wiki_result["url"],
@@ -1284,11 +1363,12 @@ async def _run_wikipedia_bulk_sync():
                             "title": wiki_result["title"],
                             "first_paragraph": extract_first_paragraph(wiki_result["content"]),
                         },
-                        enriched_at=now,
-                        expires_at=now + timedelta(hours=720),
-                        status="success",
-                    )
+                        ttl_hours=720,
+                    ),
+                    cache,
                 )
+                stats["changed"] += applied.changed
+                stats["written"] += applied.written
 
                 stats[entity_type] += 1
                 stats["total"] += 1
@@ -1368,10 +1448,10 @@ async def _run_metasploit_sync():
     escalation permanently inert. Rapid7 publishes the module index as a single
     JSON file, so this needs no API key and no per-CVE requests.
     """
-    from app.intelligence.external_feeds import coerce_exploit_sources
     from app.models.cve import CVE
 
-    stats = {"modules_seen": 0, "cves_matched": 0, "cves_updated": 0, "escalated": 0}
+    stats = {"fetched": 0, "changed": 0, "written": 0, "modules_seen": 0, "cves_matched": 0, "cves_updated": 0}
+    stats["escalated"] = 0
 
     gateway, _ = await _job_gateway("metasploit")
     try:
@@ -1387,36 +1467,37 @@ async def _run_metasploit_sync():
         logger.warning("Metasploit metadata was %s, not a dict; skipping", type(metadata).__name__)
         return stats
 
-    stats["modules_seen"] = len(metadata)
+    stats["modules_seen"] = stats["fetched"] = len(metadata)
     by_cve = parse_metasploit_modules(metadata)
     stats["cves_matched"] = len(by_cve)
     if not by_cve:
         return stats
 
+    from app.enrichment.base import EnrichmentData
+    from app.enrichment.pipeline import apply_source_result
+    from app.intelligence.correlation_events import create_exploit_status_change_event
+    from app.services.claim_provenance import record_claim
+
     async with _get_worker_session() as db:
         # Only touch CVEs we actually track; the module index covers far more.
         rows = (await db.execute(select(CVE).where(CVE.cve_id.in_(list(by_cve))))).scalars().all()
         rescored: list = []
+        cache: dict = {}
         for cve in rows:
             modules = by_cve.get(cve.cve_id.upper()) or []
             if not modules:
                 continue
-            # Store the primary module name; the full list lives in exploit_sources.
-            primary = modules[0]
-            changed = False
-            if cve.metasploit_module != primary:
-                cve.metasploit_module = primary
-                changed = True
-
-            sources = coerce_exploit_sources(cve.exploit_sources)
-            if not any(s.get("source") == "metasploit" for s in sources):
-                sources.append({"source": "metasploit", "module": primary})
-                cve.exploit_sources = sources
-                changed = True
-            elif sources != list(cve.exploit_sources or []):
-                # Rows this sync wrote as bare strings before it used dicts.
-                cve.exploit_sources = sources
-                changed = True
+            # The primary module goes on the column (and exploit_sources, via
+            # MetasploitSource.apply_record); the full list is profile context.
+            data = EnrichmentData(
+                raw_response={"via": "metasploit-sync"},
+                parsed_data={"found": True, "module": modules[0], "modules": modules},
+                ttl_hours=24 * 8,
+            )
+            sources_before = list(cve.exploit_sources or [])
+            applied = await apply_source_result(db, "cve", cve.id, "metasploit", data, cache)
+            stats["changed"] += applied.changed
+            written = applied.written or list(cve.exploit_sources or []) != sources_before
 
             # A shipped module is weaponized exploitation code. Never downgrade
             # active_exploitation (KEV), and never overwrite an analyst verdict.
@@ -1428,16 +1509,24 @@ async def _run_metasploit_sync():
                 and cve.exploit_availability != "weaponized"
             ):
                 cve.exploit_availability = "weaponized"
-                changed = True
-
-            if changed:
                 db.add(cve)
+                written = True
+                await record_claim(
+                    db,
+                    entity_type="cve",
+                    entity_id=cve.id,
+                    field="exploit_availability",
+                    value="weaponized",
+                    source_kind="enrichment",
+                    source_ref="metasploit",
+                )
+
+            if written:
                 stats["cves_updated"] += 1
+                stats["written"] += 1
             if cve.exploit_availability != old:
                 stats["escalated"] += 1
                 rescored.append(cve.id)
-                from app.intelligence.correlation_events import create_exploit_status_change_event
-
                 await create_exploit_status_change_event(db, cve.cve_id, cve.id, old, cve.exploit_availability)
 
         await db.commit()
@@ -1454,27 +1543,21 @@ async def _run_metasploit_sync():
 # --- cvelistV5: the CVE Program's records, CNA and CISA-ADP containers ---
 
 
-async def _apply_cvelist_record(db, cve_pk, data, cwe_index: dict) -> bool:
+async def _apply_cvelist_record(db, cve_pk, data, cache: dict, stats: dict) -> None:
     """Store one CVE record as the cvelist source's result for the CVE: its
-    context, its declared columns, and its CWE ids as cve_weaknesses links.
-    Returns True when a column changed."""
-    from app.enrichment.pipeline import apply_catalog_result
-    from app.intelligence.cve import sync_cve_weaknesses
+    context, its declared columns, and (the source's ``apply_record``) its CWE
+    ids as cve_weaknesses links and affected products as cve_affected rows."""
+    from app.enrichment.pipeline import apply_source_result
 
-    changed = await apply_catalog_result(db, "cve", cve_pk, "cvelist", data)
-    parsed = data.parsed_data
-    weaknesses = [
-        {"cwe_ref": ref, "is_primary": False, "assigner": parsed.get("assigner")}
-        for ref in dict.fromkeys(parsed.get("weaknesses") or [])
-    ]
-    if weaknesses:
-        await sync_cve_weaknesses(db, cve_pk, weaknesses, cwe_index, source="cvelist")
-    return changed
+    applied = await apply_source_result(db, "cve", cve_pk, "cvelist", data, cache)
+    stats["changed"] += applied.changed
+    stats["written"] += applied.written
+    stats["updated"] += applied.written
 
 
 @celery_app.task(name="app.workers.enrichment_tasks.run_cvelist_backfill", soft_time_limit=900, time_limit=960)
 def run_cvelist_backfill():
-    """Hourly: fetch the CVE record for CVEs the cvelist source hasn't checked lately."""
+    """Hourly: apply the cvelistV5 baseline to CVEs the cvelist source hasn't checked lately."""
     start = time.monotonic()
     try:
         stats = run_async(_run_cvelist_backfill())
@@ -1489,81 +1572,190 @@ def run_cvelist_backfill():
         CELERY_TASK_DURATION_SECONDS.labels(task_name="run_cvelist_backfill").observe(time.monotonic() - start)
 
 
-# Wall-clock seconds a backfill run may spend fetching: 120s under the 900s
-# soft limit, left for the last commit.
+# Wall-clock seconds a backfill run may spend: 120s under the 900s soft limit,
+# left for the last commit.
 _CVELIST_BACKFILL_BUDGET_S = 780
+# The largest baseline zip downloaded (every record: about 650 MB).
+_CVELIST_BASELINE_MAX_BYTES = 2 * 1024**3
+# Where the baseline is kept between runs: a run that runs out of time leaves
+# it for the next, which goes on without downloading it again.
+_CVELIST_BASELINE_DIR = "intelfeed-cvelist"
 
 
-@source_job("cvelist")
-async def _run_cvelist_backfill():
-    """Fetch the record of each CVE with no unexpired cvelist result: the CVEs
-    missing a score or description first, then KEV entries, then the newest.
+async def _cvelist_baseline(client) -> str | None:
+    """The newest baseline zip on local disk, downloaded through the source's
+    gateway when it isn't there yet (older ones are deleted). None when the
+    releases list no baseline."""
+    import os
+    import tempfile
 
-    Each record is one raw.githubusercontent.com request, paced by the source's
-    bucket; a run fetches what its time budget allows and the next run goes on.
-    The delta sync keeps a fetched record current, and it is checked again here
-    once its result expires (RECORD_TTL_HOURS).
-    """
+    from app.enrichment.adapters.cvelist import RELEASES_URL, pick_baseline
+
+    resp = await client.get(RELEASES_URL, params={"per_page": 5}, headers={"Accept": "application/vnd.github+json"})
+    resp.raise_for_status()
+    picked = pick_baseline(resp.json())
+    if picked is None:
+        return None
+    name, url = picked
+    folder = os.path.join(tempfile.gettempdir(), _CVELIST_BASELINE_DIR)
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, os.path.basename(name))
+    for old in os.listdir(folder):
+        if os.path.join(folder, old) != path:
+            os.remove(os.path.join(folder, old))
+    if not os.path.exists(path):
+        partial = path + ".part"
+        try:
+            with open(partial, "w+b") as fh:
+                await _download_to(client, url, fh, _CVELIST_BASELINE_MAX_BYTES)
+            os.replace(partial, path)
+        finally:
+            if os.path.exists(partial):
+                os.remove(partial)
+    return path
+
+
+def _baseline_records(path: str, wanted) -> Iterator[tuple[str, dict]]:
+    """(CVE id, record) for each record in the baseline at ``path`` whose id
+    ``wanted`` accepts, streamed: the outer zip's ``cves.zip`` member is read
+    front to back, one record in memory at a time."""
+    import json
+    import zipfile
+
+    from app.enrichment.adapters.cvelist import iter_zip, member_cve_id
+
+    with zipfile.ZipFile(path) as outer:
+        inner = next((n for n in outer.namelist() if n.endswith(".zip")), None)
+        if inner is None:
+            raise ValueError(f"{path} holds no records zip")
+        with outer.open(inner) as stream:
+            for name, data in iter_zip(stream, lambda n: wanted(member_cve_id(n))):
+                yield member_cve_id(name), json.loads(data)
+
+
+async def _cvelist_records(db, gateway, due: dict, deadline: float, cache: dict, stats: dict) -> None:
+    """Fetch and apply the due CVEs' records one request each, as a lookup does."""
     import httpx
-    from sqlalchemy import exists, func, or_
 
     from app.enrichment.adapters.cvelist import CVEListAdapter
+
+    adapter = CVEListAdapter(gateway=gateway)
+    for i, (cve_id, cve_pk) in enumerate(due.items()):
+        if not _bounded(gateway, deadline):
+            stats["stopped"] = "out_of_time"
+            break
+        try:
+            data = await adapter.enrich("cve", cve_id)
+        except SOURCE_REFUSALS as e:
+            logger.warning("cvelist backfill stopping at %d/%d: %s", i, len(due), e)
+            stats["stopped"] = e.status
+            break
+        except (httpx.HTTPError, ValueError) as e:
+            # A server error or an unreadable record: left unchecked, so the
+            # next run tries it again.
+            logger.warning("cvelist record for %s failed: %s", cve_id, e)
+            continue
+        stats["fetched"] += 1
+        if not data.parsed_data.get("found"):
+            stats["not_found"] += 1
+        await _apply_cvelist_record(db, cve_pk, data, cache, stats)
+        if (i + 1) % 50 == 0:
+            await db.commit()
+
+
+@source_job("cvelist", lane="backfill")
+async def _run_cvelist_backfill():
+    """Apply the record of each CVE with no unexpired cvelist result, read from
+    the cvelistV5 baseline zip (every record as of midnight UTC, published with
+    each release) instead of fetched one at a time.
+
+    With only a few CVEs due (fewer than half a run's worth of requests at the
+    source's rate), their records are fetched one at a time instead. The zip
+    is downloaded once through the source's gateway and kept on local disk; a
+    run reads it front to back for the CVEs due and stops at its time budget,
+    and the next run goes on with what is still due. Once a run has read the
+    whole zip, the due CVEs it doesn't hold are stored as not found (asked
+    again in NOT_FOUND_TTL_HOURS). The delta sync keeps a record current after
+    that, and it is checked here again once its result expires
+    (RECORD_TTL_HOURS).
+    """
+    import asyncio
+
+    import httpx
+    from sqlalchemy import exists
+
+    from app.enrichment.adapters.cvelist import NOT_FOUND_TTL_HOURS, record_result
+    from app.enrichment.base import EnrichmentData
     from app.enrichment.pipeline import gateway_for
-    from app.intelligence.cve import build_cwe_index
     from app.models.cve import CVE
     from app.models.enrichment import EnrichmentResult
 
-    stats = {"fetched": 0, "updated": 0, "not_found": 0, "failed": 0, "pending": 0, "stopped": None}
+    stats = {"fetched": 0, "changed": 0, "written": 0, "updated": 0, "not_found": 0, "pending": 0, "stopped": None}
     deadline = time.monotonic() + _CVELIST_BACKFILL_BUDGET_S
     async with _get_worker_session() as db:
-        gateway, _ = await gateway_for(db, "cvelist", max_wait=JOB_TOKEN_WAIT)
-        adapter = CVEListAdapter(gateway=gateway)
         checked = exists().where(
             EnrichmentResult.source_type == "cvelist",
             EnrichmentResult.entity_type == "cve",
             EnrichmentResult.entity_id == CVE.id,
             EnrichmentResult.expires_at > datetime.now(UTC),
         )
-        stats["pending"] = (await db.execute(select(func.count()).select_from(CVE).where(~checked))).scalar_one()
-        # Only as many as one run can fetch at the bucket's rate.
-        per_run = int(_CVELIST_BACKFILL_BUDGET_S * gateway.capacity / gateway.period) + gateway.capacity
-        rows = (
-            await db.execute(
-                select(CVE.id, CVE.cve_id)
-                .where(~checked)
-                .order_by(
-                    or_(CVE.cvss_score.is_(None), CVE.description.is_(None)).desc(),
-                    CVE.is_kev.desc(),
-                    CVE.first_seen_at.desc(),
-                )
-                .limit(per_run)
-            )
-        ).all()
-        cwe_index = await build_cwe_index(db)
+        due = {
+            cve_id.upper(): cve_pk
+            for cve_pk, cve_id in (await db.execute(select(CVE.id, CVE.cve_id).where(~checked))).all()
+        }
+        stats["pending"] = len(due)
+        if not due:
+            return stats
 
-        for i, (cve_pk, cve_id) in enumerate(rows):
+        gateway, _ = await gateway_for(db, "cvelist", max_wait=JOB_TOKEN_WAIT)
+        cache: dict = {}
+        if len(due) <= _per_run(gateway, _CVELIST_BACKFILL_BUDGET_S) // 2:
+            # A few new CVEs: their records one at a time beat a baseline download.
+            await _cvelist_records(db, gateway, due, deadline, cache, stats)
+            await db.commit()
+            return stats
+        _bounded(gateway, deadline)
+        try:
+            async with gateway.client(timeout=60, follow_redirects=True) as client:
+                path = await _cvelist_baseline(client)
+        except SOURCE_REFUSALS as e:
+            logger.warning("cvelist backfill skipped: %s", e)
+            return {**stats, "stopped": e.status}
+        except (httpx.HTTPError, ValueError, OSError) as e:
+            logger.warning("cvelist baseline download failed: %s", e)
+            return {**stats, "stopped": "download_failed"}
+        if path is None:
+            return {**stats, "stopped": "no_baseline"}
+
+        finished = True
+        # Each record is found in a thread: skipping the zip's other records
+        # inflates them, which would otherwise block the loop.
+        records = _baseline_records(path, lambda c: c in due)
+        i = 0
+        while (found := await asyncio.to_thread(next, records, None)) is not None:
             if time.monotonic() >= deadline:
                 stats["stopped"] = "out_of_time"
+                finished = False
                 break
-            try:
-                data = await adapter.enrich("cve", cve_id)
-            except SOURCE_REFUSALS as e:
-                logger.warning("cvelist backfill stopping at %d/%d: %s", i, len(rows), e)
-                stats["stopped"] = e.status
-                break
-            except (httpx.HTTPError, ValueError) as e:
-                # A server error or an unreadable record: left unchecked, so
-                # the next run tries it again.
-                logger.warning("cvelist record for %s failed: %s", cve_id, e)
-                stats["failed"] += 1
-                continue
+            cve_id, record = found
             stats["fetched"] += 1
-            if not data.parsed_data.get("found"):
-                stats["not_found"] += 1
-            if await _apply_cvelist_record(db, cve_pk, data, cwe_index):
-                stats["updated"] += 1
-            if (i + 1) % 50 == 0:
+            await _apply_cvelist_record(db, due.pop(cve_id), record_result(record), cache, stats)
+            i += 1
+            if i % 50 == 0:
                 await db.commit()
+        if finished:
+            # Read to the end: what's still due has no record (reserved, or junk).
+            for cve_pk in due.values():
+                if time.monotonic() >= deadline:
+                    stats["stopped"] = "out_of_time"
+                    break
+                missing = EnrichmentData(
+                    raw_response={"status": "not_in_baseline"},
+                    parsed_data={"found": False},
+                    ttl_hours=NOT_FOUND_TTL_HOURS,
+                )
+                await _apply_cvelist_record(db, cve_pk, missing, cache, stats)
+                stats["not_found"] += 1
         await db.commit()
     return stats
 
@@ -1588,7 +1780,7 @@ def run_cvelist_delta_sync():
 # Wall-clock seconds a delta sync may spend before starting another zip.
 _CVELIST_DELTA_BUDGET_S = 480
 # The largest delta zip the sync downloads. A whole day's is about 4 MB; the
-# daily baseline of every record (about 650 MB) is never fetched.
+# baseline of every record is the backfill's.
 _CVELIST_DELTA_MAX_BYTES = 64 * 1024 * 1024
 # Releases listed per run: about four days of hourly releases.
 _CVELIST_RELEASES_PAGE = 100
@@ -1638,7 +1830,7 @@ async def _download_to(client, url: str, fh, limit: int) -> None:
     fh.seek(0)
 
 
-async def _apply_cvelist_delta(db, fh, cwe_index: dict, stats: dict) -> None:
+async def _apply_cvelist_delta(db, fh, cache: dict, stats: dict) -> None:
     """Apply the records in a delta zip whose CVE ids are in the cves table,
     reading only those members."""
     import json
@@ -1660,8 +1852,8 @@ async def _apply_cvelist_delta(db, fh, cwe_index: dict, stats: dict) -> None:
             for cve_pk, cve_id in ours:
                 record = json.loads(archive.read(members[cve_id.upper()]))
                 stats["ours"] += 1
-                if await _apply_cvelist_record(db, cve_pk, record_result(record), cwe_index):
-                    stats["updated"] += 1
+                stats["fetched"] += 1
+                await _apply_cvelist_record(db, cve_pk, record_result(record), cache, stats)
 
 
 @source_job("cvelist")
@@ -1674,17 +1866,17 @@ async def _run_cvelist_delta_sync():
 
     from app.enrichment.adapters.cvelist import RELEASES_URL
     from app.enrichment.pipeline import gateway_for
-    from app.intelligence.cve import build_cwe_index
     from app.models.enrichment import EnrichmentSource
 
-    stats = {"deltas": 0, "records": 0, "ours": 0, "updated": 0, "gap": False, "stopped": None}
+    stats = {"fetched": 0, "changed": 0, "written": 0, "deltas": 0, "records": 0, "ours": 0, "updated": 0}
+    stats.update({"gap": False, "stopped": None})
     deadline = time.monotonic() + _CVELIST_DELTA_BUDGET_S
     async with _get_worker_session() as db:
         gateway, _ = await gateway_for(db, "cvelist", max_wait=JOB_TOKEN_WAIT)
         source = (
             await db.execute(select(EnrichmentSource).where(EnrichmentSource.source_type == "cvelist"))
         ).scalar_one_or_none()
-        cwe_index = await build_cwe_index(db)
+        cache: dict = {}
         try:
             async with gateway.client(timeout=60, follow_redirects=True) as client:
                 resp = await client.get(
@@ -1697,12 +1889,12 @@ async def _run_cvelist_delta_sync():
                 if stats["gap"]:
                     logger.warning("cvelist delta sync: releases since %s are no longer listed", source.last_synced_at)
                 for published, url in deltas:
-                    if time.monotonic() >= deadline:
+                    if not _bounded(gateway, deadline):
                         stats["stopped"] = "out_of_time"
                         break
                     with tempfile.TemporaryFile() as fh:
                         await _download_to(client, url, fh, _CVELIST_DELTA_MAX_BYTES)
-                        await _apply_cvelist_delta(db, fh, cwe_index, stats)
+                        await _apply_cvelist_delta(db, fh, cache, stats)
                     if source:
                         source.last_synced_at = published
                     await db.commit()
@@ -1738,6 +1930,32 @@ async def _run_wikidata_sync():
     gateway, _ = await _job_gateway("wikidata")
     async with _get_worker_session() as db:
         return await sync_wikidata(db, gateway)
+
+
+@celery_app.task(name="app.workers.enrichment_tasks.run_github_repo_sync", soft_time_limit=900, time_limit=960)
+def run_github_repo_sync():
+    """Weekly: stars, last push, archived state, license and topics of tools' GitHub repositories."""
+    start = time.monotonic()
+    try:
+        stats = run_async(_run_github_repo_sync())
+        logger.info("GitHub repo sync stats: %s", stats)
+        CELERY_TASKS_TOTAL.labels(task_name="run_github_repo_sync", status="success").inc()
+        return stats
+    except Exception:
+        CELERY_TASKS_TOTAL.labels(task_name="run_github_repo_sync", status="error").inc()
+        logger.exception("GitHub repo sync failed")
+        raise
+    finally:
+        CELERY_TASK_DURATION_SECONDS.labels(task_name="run_github_repo_sync").observe(time.monotonic() - start)
+
+
+@source_job("github_repo")
+async def _run_github_repo_sync():
+    from app.enrichment.github_repo import sync_github_repos
+
+    gateway, api_key = await _job_gateway("github_repo")
+    async with _get_worker_session() as db:
+        return await sync_github_repos(db, gateway, api_key)
 
 
 @celery_app.task(name="app.workers.enrichment_tasks.run_endoflife_sync", soft_time_limit=900, time_limit=960)
@@ -1904,6 +2122,7 @@ TRANCO_REVIEW_RANK = 10_000
 _TRANCO_CHUNK = 10_000
 #: How long a rank stays fresh on the profile: one daily list plus slack.
 _TRANCO_CONTEXT_TTL = timedelta(hours=48)
+_TRANCO_COMMIT_EVERY = 500
 
 
 def parse_tranco_line(line: str) -> tuple[int, str] | None:
@@ -1950,22 +2169,26 @@ async def _tranco_match(db, batch: dict[str, int]) -> dict:
 
 @source_job("tranco")
 async def _run_tranco_sync():
-    """Write ``popularity_rank`` (and the profile's rank context) for the
-    ledger's domains in today's list, clear it for those that dropped out, and
+    """Apply today's rank to the ledger's domains in the list and a "not
+    found" answer to those that dropped out, through the field map (the
+    ``popularity_rank`` column, its claim and the profile's rank context), and
     set ``needs_review`` on a domain the first time it ranks in the top
     TRANCO_REVIEW_RANK. Nothing is deleted or denied.
 
     The ~22 MB CSV is streamed line by line and matched against the ledger a
     chunk at a time, so only the ledger's matches are held in memory.
     """
-    from sqlalchemy import all_, any_, delete, update
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from sqlalchemy import all_, any_, update
 
-    from app.models.enrichment import EnrichmentSource, EntityContext
+    from app.enrichment.base import EnrichmentData
+    from app.enrichment.catalogs import tranco_victim_matches, write_tranco_victim_ranks
+    from app.enrichment.pipeline import apply_source_result
+    from app.models.enrichment import EnrichmentSource
     from app.models.observable import Observable
 
-    stats = {"listed": 0, "matched": 0, "ranked": 0, "dropped": 0, "flagged": 0}
+    stats = dict.fromkeys(("listed", "matched", "ranked", "dropped", "flagged", "victims", "changed", "written"), 0)
     matched: dict = {}
+    victims: dict = {}
 
     gateway, _ = await _job_gateway("tranco")
     try:
@@ -1984,9 +2207,11 @@ async def _run_tranco_sync():
                     batch.setdefault(row[1], row[0])
                     if len(batch) >= _TRANCO_CHUNK:
                         matched.update(await _tranco_match(db, batch))
+                        victims.update(await tranco_victim_matches(db, batch))
                         batch = {}
                 if batch:
                     matched.update(await _tranco_match(db, batch))
+                    victims.update(await tranco_victim_matches(db, batch))
     except SOURCE_REFUSALS as e:
         logger.warning("Tranco sync skipped: %s", e)
         return {**stats, "stopped": e.status}
@@ -1995,66 +2220,45 @@ async def _run_tranco_sync():
         raise RuntimeError(f"Tranco list {stats['list_id']} had no rows")
 
     now = datetime.now(UTC)
-    changed = [{"id": oid, "popularity_rank": rank} for oid, (rank, old, _) in matched.items() if rank != old]
+    ranked = sum(1 for rank, old, _ in matched.values() if rank != old)
     flagged = [
         oid
         for oid, (rank, old, denied) in matched.items()
         if rank <= TRANCO_REVIEW_RANK and (old is None or old > TRANCO_REVIEW_RANK) and not denied
     ]
+    ttl = int(_TRANCO_CONTEXT_TTL.total_seconds() // 3600)
+    raw = {"list_id": stats["list_id"]}
+    cache: dict = {}
     async with _get_worker_session() as db:
-        if changed:
-            await db.execute(update(Observable), changed)
-        if flagged:
-            await db.execute(update(Observable).where(Observable.id == any_(_uuids(flagged))).values(needs_review=True))
+        # A listed domain's answer, and a "not found" one for a domain that
+        # dropped out, go through the field map as a lookup's would: the rank
+        # column (and its claim) and the profile's rank context.
         dropped = (
             (
                 await db.execute(
-                    update(Observable)
-                    .where(
+                    select(Observable.id).where(
                         Observable.kind == "domain",
                         Observable.popularity_rank.isnot(None),
                         Observable.id != all_(_uuids(matched)),
                     )
-                    .values(popularity_rank=None)
-                    .returning(Observable.id)
-                    .execution_options(synchronize_session=False)
                 )
             )
             .scalars()
             .all()
         )
-        if dropped:
-            await db.execute(
-                delete(EntityContext).where(
-                    EntityContext.entity_type == "observable",
-                    EntityContext.entity_id == any_(_uuids(dropped)),
-                    EntityContext.source_type == "tranco",
-                )
-            )
-        context = [
-            {
-                "entity_type": "observable",
-                "entity_id": oid,
-                "source_type": "tranco",
-                "key": "rank",
-                "value": rank,
-                "observed_at": now,
-                "expires_at": now + _TRANCO_CONTEXT_TTL,
-            }
-            for oid, (rank, _, _) in matched.items()
-        ]
-        for chunk in itertools.batched(context, 5000):
-            insert = pg_insert(EntityContext).values(list(chunk))
-            await db.execute(
-                insert.on_conflict_do_update(
-                    index_elements=["entity_type", "entity_id", "source_type", "key"],
-                    set_={
-                        "value": insert.excluded.value,
-                        "observed_at": insert.excluded.observed_at,
-                        "expires_at": insert.excluded.expires_at,
-                    },
-                )
-            )
+        answers = [(oid, {"found": True, "rank": rank}) for oid, (rank, _, _) in matched.items()]
+        answers += [(oid, {"found": False}) for oid in dropped]
+        for n, (oid, parsed) in enumerate(answers, 1):
+            data = EnrichmentData(raw_response=raw, parsed_data=parsed, ttl_hours=ttl)
+            applied = await apply_source_result(db, "observable", oid, "tranco", data, cache)
+            stats["changed"] += applied.changed
+            stats["written"] += applied.written
+            if n % _TRANCO_COMMIT_EVERY == 0:
+                await db.commit()
+        if flagged:
+            await db.execute(update(Observable).where(Observable.id == any_(_uuids(flagged))).values(needs_review=True))
+        # Ransomware victims are ranked by their domain too (context only).
+        stats["victims"] = await write_tranco_victim_ranks(db, victims, now, _TRANCO_CONTEXT_TTL)
         source = (
             await db.execute(select(EnrichmentSource).where(EnrichmentSource.source_type == "tranco"))
         ).scalar_one_or_none()
@@ -2063,7 +2267,98 @@ async def _run_tranco_sync():
             source.health_status = "healthy"
         await db.commit()
 
-    stats.update(matched=len(matched), ranked=len(changed), dropped=len(dropped), flagged=len(flagged))
+    stats.update(matched=len(matched), ranked=ranked, dropped=len(dropped), flagged=len(flagged))
+    stats["fetched"] = stats["listed"]
+    return stats
+
+
+#: Most IPs one bulk connection carries; the rest are due on the next run.
+CYMRU_BULK_MAX = 10_000
+_CYMRU_COMMIT_EVERY = 500
+
+
+@celery_app.task(name="app.workers.enrichment_tasks.run_cymru_bulk_sync", soft_time_limit=900, time_limit=960)
+def run_cymru_bulk_sync():
+    """Every 6 hours: map the ledger's active IPs that are due to their AS."""
+    start = time.monotonic()
+    try:
+        stats = run_async(_run_cymru_bulk_sync())
+        logger.info("Team Cymru bulk sync stats: %s", stats)
+        CELERY_TASKS_TOTAL.labels(task_name="run_cymru_bulk_sync", status="success").inc()
+        return stats
+    except Exception:
+        CELERY_TASKS_TOTAL.labels(task_name="run_cymru_bulk_sync", status="error").inc()
+        logger.exception("Team Cymru bulk sync failed")
+        raise
+    finally:
+        CELERY_TASK_DURATION_SECONDS.labels(task_name="run_cymru_bulk_sync").observe(time.monotonic() - start)
+
+
+def _ip_key(value: str) -> str | None:
+    try:
+        return str(ipaddress.ip_address(value.strip()))
+    except ValueError:
+        return None
+
+
+@source_job("cymru")
+async def _run_cymru_bulk_sync():
+    """Look up, over one bulk WHOIS connection, the active IPs with no fresh
+    Team Cymru answer (none yet, or one past its TTL), newest sighting first,
+    and apply each answer as a lookup's is: columns, claims, context."""
+    from app.enrichment.base import EnrichmentData
+    from app.enrichment.pipeline import apply_source_result
+    from app.enrichment.registry import get_adapter
+    from app.models.enrichment import EnrichmentResult
+    from app.models.observable import Observable
+
+    stats = {"due": 0, "fetched": 0, "changed": 0, "written": 0, "unannounced": 0}
+    adapter = get_adapter("cymru", gateway=(await _job_gateway("cymru"))[0])
+    fresh = (
+        select(EnrichmentResult.id)
+        .where(
+            EnrichmentResult.entity_type == "observable",
+            EnrichmentResult.entity_id == Observable.id,
+            EnrichmentResult.source_type == "cymru",
+            EnrichmentResult.status == "success",
+            EnrichmentResult.expires_at > datetime.now(UTC),
+        )
+        .exists()
+    )
+    async with _get_worker_session() as db:
+        due = (
+            await db.execute(
+                select(Observable.id, Observable.value)
+                .where(adapter.scope_filter("observable", Observable), ~fresh)
+                .order_by(Observable.last_seen_at.desc())
+                .limit(CYMRU_BULK_MAX)
+            )
+        ).all()
+    ips = {oid: key for oid, value in due if (key := _ip_key(value))}
+    stats["due"] = len(ips)
+    if not ips:
+        return stats
+    try:
+        answers = await adapter.bulk_lookup(list(dict.fromkeys(ips.values())))
+    except SOURCE_REFUSALS as e:
+        logger.warning("Team Cymru bulk sync skipped: %s", e)
+        return {**stats, "stopped": e.status}
+    stats["fetched"] = len(answers)
+
+    cache: dict = {}
+    async with _get_worker_session() as db:
+        for n, (oid, ip) in enumerate(ips.items(), 1):
+            if (parsed := answers.get(ip)) is None:
+                continue
+            found = parsed.get("found", False)
+            stats["unannounced"] += not found
+            data = EnrichmentData(raw_response={"bulk": True}, parsed_data=parsed, ttl_hours=168 if found else 24)
+            applied = await apply_source_result(db, "observable", oid, "cymru", data, cache)
+            stats["changed"] += applied.changed
+            stats["written"] += applied.written
+            if n % _CYMRU_COMMIT_EVERY == 0:
+                await db.commit()
+        await db.commit()
     return stats
 
 
@@ -2112,3 +2407,141 @@ def run_urlhaus_sync():
 @source_job("urlhaus")
 async def _run_urlhaus_sync():
     return await _abusech_sync("urlhaus")
+
+
+# ── OSV: records changed since the last run ─────────────────────────
+
+OSV_MODIFIED_URL = "https://osv-vulnerabilities.storage.googleapis.com/modified_id.csv"
+OSV_RECORD_URL = "https://osv-vulnerabilities.storage.googleapis.com/{path}.json"
+#: How far back the first run reads.
+OSV_FIRST_WINDOW = timedelta(days=2)
+_OSV_COMMIT_EVERY = 200
+
+
+@celery_app.task(name="app.workers.enrichment_tasks.run_osv_delta_sync", soft_time_limit=900, time_limit=960)
+def run_osv_delta_sync():
+    """Hourly: apply the OSV records of tracked CVEs that changed since the last run."""
+    start = time.monotonic()
+    try:
+        stats = run_async(_run_osv_delta_sync())
+        logger.info("OSV delta sync stats: %s", stats)
+        CELERY_TASKS_TOTAL.labels(task_name="run_osv_delta_sync", status="success").inc()
+        return stats
+    except Exception:
+        CELERY_TASKS_TOTAL.labels(task_name="run_osv_delta_sync", status="error").inc()
+        logger.exception("OSV delta sync failed")
+        raise
+    finally:
+        CELERY_TASK_DURATION_SECONDS.labels(task_name="run_osv_delta_sync").observe(time.monotonic() - start)
+
+
+def parse_osv_modified_line(line: str) -> tuple[datetime, str] | None:
+    """``2026-11-01T02:50:35.48Z,GIT/CVE-2026-1`` → (when, ``GIT/CVE-2026-1``)."""
+    stamp, _, path = line.strip().partition(",")
+    if not path:
+        return None
+    # OSV writes nanoseconds; datetime holds microseconds.
+    stamp = re.sub(r"(\.\d{6})\d+", r"\1", stamp).replace("Z", "+00:00")
+    try:
+        when = datetime.fromisoformat(stamp)
+    except ValueError:
+        return None
+    return (when if when.tzinfo else when.replace(tzinfo=UTC)), path
+
+
+@source_job("osv")
+async def _run_osv_delta_sync():
+    """Read OSV's change list (newest first) back to the osv row's
+    ``last_synced_at``, keep the CVE records ("CVE-…" ids, under GIT/ or
+    Linux/) of CVEs IntelFeed tracks, then fetch and apply each, oldest first,
+    through the field map as a lookup's answer. The cursor moves only past
+    what was applied: a refusal stops the run there, and a record that failed
+    holds it, so the next run fetches that record again."""
+    import httpx
+
+    from app.enrichment.adapters.osv import TTL_HOURS, parse_vuln
+    from app.enrichment.base import EnrichmentData
+    from app.enrichment.pipeline import apply_source_result
+    from app.models.cve import CVE
+    from app.models.enrichment import EnrichmentSource
+
+    stats = {"fetched": 0, "changed": 0, "written": 0, "listed": 0, "tracked": 0, "failed": 0, "stopped": None}
+    now = datetime.now(UTC)
+    async with _get_worker_session() as db:
+        row = (
+            await db.execute(select(EnrichmentSource).where(EnrichmentSource.source_type == "osv"))
+        ).scalar_one_or_none()
+        # Before the startup seed writes the row the job still runs, from the first window.
+        since = (row.last_synced_at if row else None) or now - OSV_FIRST_WINDOW
+
+    # CVE id → (newest change, record path); the list repeats an id per change.
+    changed: dict[str, tuple[datetime, str]] = {}
+    gateway, _ = await _job_gateway("osv")
+    async with gateway.client(timeout=120.0, follow_redirects=True) as client:
+        try:
+            async with client.stream("GET", OSV_MODIFIED_URL) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    parsed = parse_osv_modified_line(line)
+                    if parsed is None:
+                        continue
+                    when, path = parsed
+                    if when <= since:
+                        break
+                    stats["listed"] += 1
+                    record_id = path.rsplit("/", 1)[-1]
+                    if record_id.startswith("CVE-") and record_id not in changed:
+                        changed[record_id] = (when, path)
+        except SOURCE_REFUSALS as e:
+            logger.warning("OSV delta sync skipped: %s", e)
+            return {**stats, "stopped": e.status}
+
+        async with _get_worker_session() as db:
+            tracked = {}
+            ids = list(changed)
+            for i in range(0, len(ids), 5000):
+                chunk = ids[i : i + 5000]
+                for pk, cve_id in await db.execute(select(CVE.id, CVE.cve_id).where(CVE.cve_id.in_(chunk))):
+                    tracked[cve_id] = pk
+            stats["tracked"] = len(tracked)
+
+            cursor = since
+            cache: dict = {}
+            due = sorted((changed[c][0], changed[c][1], c) for c in tracked)
+            for n, (when, path, cve_id) in enumerate(due, 1):
+                try:
+                    resp = await client.get(OSV_RECORD_URL.format(path=path))
+                    resp.raise_for_status()
+                    vuln = resp.json()
+                except SOURCE_REFUSALS as e:
+                    logger.warning("OSV delta sync stopping: %s", e)
+                    stats["stopped"] = e.status
+                    break
+                except (httpx.HTTPError, ValueError) as e:
+                    logger.warning("OSV record %s failed: %s", path, e)
+                    stats["failed"] += 1
+                    continue
+                stats["fetched"] += 1
+                data = EnrichmentData(
+                    raw_response={"via": "osv-delta-sync", "path": path},
+                    parsed_data=parse_vuln(vuln),
+                    ttl_hours=TTL_HOURS,
+                )
+                applied = await apply_source_result(db, "cve", tracked[cve_id], "osv", data, cache)
+                stats["changed"] += applied.changed
+                stats["written"] += applied.written
+                if not stats["failed"]:
+                    cursor = when
+                if n % _OSV_COMMIT_EVERY == 0:
+                    await db.commit()
+
+            row = (
+                await db.execute(select(EnrichmentSource).where(EnrichmentSource.source_type == "osv"))
+            ).scalar_one_or_none()
+            # A run that applied everything reads up to now next time; one that
+            # stopped, or had a record fail, resumes after the last record it
+            # applied before that.
+            if row is not None:
+                row.last_synced_at = now if not (stats["stopped"] or stats["failed"]) else cursor
+            await db.commit()
+    return stats

@@ -6,12 +6,13 @@ Provides exploitation probability scores for CVEs.
 import httpx
 
 from app.enrichment.base import EnrichmentAdapter, EnrichmentData
-from app.enrichment.manifest import Context, Display, Egress, Job, License, Quota
+from app.enrichment.manifest import Column, Context, Display, Egress, Job, License, Policy, Quota
 
 
 class EPSSAdapter(EnrichmentAdapter):
     source_type = "epss"
     display_name = "FIRST EPSS"
+    about = "FIRST's daily estimate of how likely each CVE is to be exploited in the next 30 days."
     applies_to = {"cve": None}
     # The job downloads one CSV a day; api.first.org publishes no request limit.
     quota = Quota(100, 60, daily_budget=500)
@@ -25,7 +26,11 @@ class EPSSAdapter(EnrichmentAdapter):
             "Update all CVEs with EPSS scores from epss.empiricalsecurity.com",
         ),
     )
+    # A lookup's answer writes both columns through the field map; the daily
+    # job writes the same two set-based (``_run_epss_bulk_sync``).
     outputs = (
+        Column("epss", "cve.epss_score", Policy.NEWER_WINS),
+        Column("percentile", "cve.epss_percentile", Policy.NEWER_WINS),
         Context("epss", "EPSS score", Display.FACT),
         Context("percentile", "EPSS percentile", Display.FACT),
         Context("date", "Scored on", Display.FACT),

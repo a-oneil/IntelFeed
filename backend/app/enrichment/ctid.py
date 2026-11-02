@@ -43,6 +43,7 @@ TTL_HOURS = 24 * 14
 class CTIDSource(Source):
     source_type = "ctid"
     display_name = "CTID control mappings"
+    about = "Which security controls (NIST 800-53, CIS) address each ATT&CK technique."
     applies_to = {"ttp": None}
     # raw.githubusercontent.com publishes no rate limit; a run makes two requests.
     quota = Quota(10, 3600, daily_budget=50)
@@ -55,6 +56,7 @@ class CTIDSource(Source):
             "app.workers.enrichment_tasks.run_ctid_sync",
             {"type": "crontab", "minute": "15", "hour": "4", "day_of_week": "0"},
             "Map NIST 800-53 and CIS controls onto techniques from CTID's Mappings Explorer",
+            counts=False,
         ),
     )
     outputs = (

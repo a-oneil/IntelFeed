@@ -4,22 +4,25 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Body, Depends, Path, Query
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
 from app.core.security import get_admin_user, get_current_user
 from app.database import get_db
-from app.models.enrichment import EnrichmentSource, UserEnrichmentOverride
+from app.models.enrichment import EnrichmentSource
 from app.models.user import User
 from app.schemas.enrichment import (
     EnrichEntityRequest,
+    EnrichmentActivityResponse,
     EnrichmentBackfillRequest,
+    EnrichmentCoverageResponse,
+    EnrichmentKeyResponse,
+    EnrichmentKeyUpdate,
     EnrichmentPauseRequest,
+    EnrichmentRetryResponse,
     EnrichmentSourceResponse,
     EnrichmentSourceUpdate,
-    UserEnrichmentOverrideCreate,
-    UserEnrichmentOverrideResponse,
 )
 
 router = APIRouter()
@@ -122,26 +125,25 @@ async def update_enrichment_source(
     user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Admin: update a source's enablement, trigger mode, API key, rate limit or budget.
+    """Admin: update a source's enablement, trigger mode, rate limit or budget.
     Only fields present in the body are applied. A rate above the source's documented
-    ceiling (with a key, its keyed ceiling) is refused with 400.
+    ceiling (with a key, its keyed ceiling) is refused with 400. Keys are set
+    under ``/enrichment/keys``.
     """
     source = await db.get(EnrichmentSource, source_id)
     if not source:
         raise AppError(code="not_found", message="Enrichment source not found", status_code=404)
 
     if body.rate_limit_config is not None:
-        has_key = bool(body.api_key) if body.api_key is not None else bool(source.api_key_encrypted)
+        from app.enrichment.pipeline import resolve_api_key
+
+        has_key = bool(await resolve_api_key(source, None, db))
         _check_rate_ceiling(source.source_type, body.rate_limit_config, has_key)
 
     if body.is_enabled is not None:
         source.is_enabled = body.is_enabled
     if body.trigger_mode is not None:
         source.trigger_mode = body.trigger_mode
-    if body.api_key is not None:
-        from app.core.encryption import encrypt_value
-
-        source.api_key_encrypted = encrypt_value(body.api_key) if body.api_key else None
     if body.rate_limit_config is not None:
         source.rate_limit_config = body.rate_limit_config
     if body.config is not None:
@@ -157,54 +159,6 @@ async def update_enrichment_source(
     await db.flush()
     await db.refresh(source)
     return _source_to_response(source, await _used_today(source, db))
-
-
-@router.post("/sources/{source_id}/test")
-async def test_source_connection(
-    source_id: uuid.UUID = Path(..., description="Enrichment source UUID"),
-    user: User = Depends(get_admin_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Test API key and connectivity for an enrichment source."""
-    source = await db.get(EnrichmentSource, source_id)
-    if not source:
-        raise AppError(code="not_found", message="Enrichment source not found", status_code=404)
-
-    from app.enrichment.gateway import GatewayError, GatewayUnavailable
-    from app.enrichment.pipeline import resolve_api_key
-    from app.enrichment.registry import ADAPTER_REGISTRY, adapter_for_source
-
-    adapter_cls = ADAPTER_REGISTRY.get(source.source_type)
-    if adapter_cls is None:
-        raise AppError(
-            code="not_testable",
-            message=f"{source.display_name} has no lookup to test; its jobs report in the Jobs view",
-            status_code=400,
-        )
-    requires_key = adapter_cls.requires_api_key
-    # Resolved as lookups resolve it, so a key a sibling holds (abuse.ch) counts.
-    api_key = await resolve_api_key(source, None, db)
-
-    if requires_key and not api_key:
-        source.health_status = "down"
-    else:
-        # The probe goes through the gateway like any request, so it can be
-        # refused; that says nothing about the source, so the status stays.
-        try:
-            healthy = await adapter_for_source(source, api_key).check_health()
-        except GatewayError as e:
-            raise AppError(
-                code=e.status,
-                message=str(e),
-                status_code=503 if isinstance(e, GatewayUnavailable) else 429,
-            ) from e
-        except Exception:
-            healthy = False
-        source.health_status = "healthy" if healthy else "down"
-
-    db.add(source)
-    await db.flush()
-    return {"source_type": source.source_type, "health_status": source.health_status}
 
 
 @router.get("/sources/{source_id}/health")
@@ -270,6 +224,45 @@ async def get_enrichment_source_detail(
     return result
 
 
+@router.get("/coverage", response_model=EnrichmentCoverageResponse)
+async def get_enrichment_coverage(
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: how full each column a source fills is, the sources that fill it,
+    and what to do about the rest (``action``: a backfill through a lookup
+    source, AI research, or none when jobs fill it on their ``cadence``)."""
+    from app.enrichment.console import coverage
+
+    return {"fields": await coverage(db)}
+
+
+@router.get("/activity", response_model=EnrichmentActivityResponse)
+async def get_enrichment_activity(
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: the queue by lane (waiting, put off), the lookups that gave up per
+    source, and each source's requests over the last 24 hours (null when Redis
+    can't say)."""
+    from app.enrichment.console import activity
+
+    return await activity(db)
+
+
+@router.post("/retry", response_model=EnrichmentRetryResponse)
+async def retry_failed_lookups(
+    source_type: str | None = Query(None, description="Only this source's lookups, e.g. greynoise"),
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: queue again the lookups that gave up after repeated errors, with
+    their attempts reset."""
+    from app.enrichment.queue import retry_failed
+
+    return {"queued": await retry_failed(db, source_type)}
+
+
 @router.post("/pause")
 async def pause_enrichment(
     body: EnrichmentPauseRequest,
@@ -304,91 +297,102 @@ async def backfill_enrichment_source(
     return {"queued": queued}
 
 
-# --- User: API Key Overrides ---
+# --- Keys (Settings → Engine → Enrichment → Keys) ---
 
 
-@router.get("/user-overrides", response_model=list[UserEnrichmentOverrideResponse])
-async def list_user_overrides(
-    user: User = Depends(get_current_user),
+@router.get("/keys", response_model=list[EnrichmentKeyResponse])
+async def list_enrichment_keys(
+    user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List the current user's enrichment source overrides."""
-    result = await db.execute(select(UserEnrichmentOverride).where(UserEnrichmentOverride.created_by == user.id))
-    overrides = result.scalars().all()
-    return [
-        UserEnrichmentOverrideResponse(
-            id=o.id,
-            source_id=o.source_id,
-            has_api_key=bool(o.api_key_encrypted),
-            created_at=o.created_at,
-        )
-        for o in overrides
-    ]
+    """Admin: one row per API key enrichment uses: the sources it serves, whether
+    the shared key is set, rejected, missing or optional, and whether the caller
+    has an own key. Keys are never returned."""
+    from app.enrichment.keys import list_keys
+
+    return await list_keys(db, user.id)
 
 
-@router.put("/user-overrides/{source_id}", status_code=200)
-async def upsert_user_override(
-    source_id: uuid.UUID = Path(..., description="Enrichment source UUID the override applies to"),
-    body: UserEnrichmentOverrideCreate = Body(...),
-    user: User = Depends(get_current_user),
+@router.put("/keys/{key_id}")
+async def set_enrichment_key(
+    key_id: str = Path(..., description="Credential id, e.g. nvd_api_key or abuse_ch"),
+    body: EnrichmentKeyUpdate = Body(...),
+    user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create or update a user API key override for an enrichment source."""
-    # Verify source exists
-    source = await db.get(EnrichmentSource, source_id)
-    if not source:
-        raise AppError(code="not_found", message="Enrichment source not found", status_code=404)
+    """Admin: set or (with an empty key) remove the shared key every lookup and
+    job of the credential's sources uses."""
+    from app.enrichment.keys import UnknownKey, set_shared_key
 
-    # Check for the caller's existing override
-    result = await db.execute(
-        select(UserEnrichmentOverride).where(
-            UserEnrichmentOverride.source_id == source_id,
-            UserEnrichmentOverride.created_by == user.id,
-        )
-    )
-    override = result.scalar_one_or_none()
-
-    if override:
-        if body.api_key is not None:
-            from app.core.encryption import encrypt_value
-
-            override.api_key_encrypted = encrypt_value(body.api_key) if body.api_key else None
-    else:
-        override = UserEnrichmentOverride(
-            created_by=user.id,
-            source_id=source_id,
-        )
-        if body.api_key:
-            from app.core.encryption import encrypt_value
-
-            override.api_key_encrypted = encrypt_value(body.api_key)
-
-    db.add(override)
-    await db.flush()
-    return {"status": "ok", "id": str(override.id)}
+    try:
+        await set_shared_key(db, key_id, body.api_key)
+    except UnknownKey as e:
+        raise AppError(code="not_found", message=f"Unknown key: {key_id}", status_code=404) from e
+    return {"id": key_id, "set": bool(body.api_key)}
 
 
-@router.delete("/user-overrides/{source_id}", status_code=204)
-async def delete_user_override(
-    source_id: uuid.UUID = Path(..., description="Enrichment source UUID whose override to remove"),
-    user: User = Depends(get_current_user),
+@router.put("/keys/{key_id}/mine")
+async def set_my_enrichment_key(
+    key_id: str = Path(..., description="Credential id, e.g. virustotal"),
+    body: EnrichmentKeyUpdate = Body(...),
+    user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Remove the current user's override for an enrichment source (revert to global)."""
-    await db.execute(
-        delete(UserEnrichmentOverride).where(
-            UserEnrichmentOverride.source_id == source_id,
-            UserEnrichmentOverride.created_by == user.id,
-        )
-    )
-    await db.flush()
+    """Set or (with an empty key) remove the caller's own key: it replaces the
+    shared key for the lookups the caller starts."""
+    from app.enrichment.keys import UnknownKey, set_my_key
+
+    try:
+        await set_my_key(db, key_id, user.id, body.api_key)
+    except UnknownKey as e:
+        raise AppError(code="not_found", message=f"Unknown key: {key_id}", status_code=404) from e
+    return {"id": key_id, "mine": bool(body.api_key)}
+
+
+@router.post("/keys/{key_id}/test")
+async def test_enrichment_key(
+    key_id: str = Path(..., description="Credential id"),
+    user: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: probe the shared key through one of its sources. ``status`` is ok,
+    rejected (the source turned the key down), unreachable (it did not answer),
+    missing or untestable. A probe the gateway refuses (rate limit, pause)
+    answers 429/503 and says nothing about the key."""
+    from app.enrichment.gateway import GatewayError, GatewayUnavailable
+    from app.enrichment.keys import UnknownKey, test_key
+
+    try:
+        return await test_key(db, key_id)
+    except UnknownKey as e:
+        raise AppError(code="not_found", message=f"Unknown key: {key_id}", status_code=404) from e
+    except GatewayError as e:
+        raise AppError(
+            code=e.status, message=str(e), status_code=503 if isinstance(e, GatewayUnavailable) else 429
+        ) from e
 
 
 # --- Entity Enrichment ---
 
 
 #: The column each entity type is looked up by; every other type uses ``name``.
-_LOOKUP_VALUE = {"cve": "cve_id", "ttp": "technique_id", "observable": "value"}
+_LOOKUP_VALUE = {"cve": "cve_id", "ttp": "technique_id", "observable": "value", "ransomware_victim": "domain"}
+
+
+def _lookup_column(entity_type: str, source_types: list[str] | None) -> str:
+    """The column a lookup reads: the manifest's ``lookup_column`` when the
+    request names one source that declares it, else ``_LOOKUP_VALUE``, else
+    ``name``."""
+    from app.enrichment.registry import SOURCE_REGISTRY
+
+    if source_types and len(source_types) == 1:
+        cls = SOURCE_REGISTRY.get(source_types[0])
+        lookup = getattr(cls, "lookup_column", None) if cls else None
+        if callable(lookup) and entity_type in getattr(cls, "applies_to", {}):
+            column = lookup(entity_type)
+            if column != "name":
+                return column
+    return _LOOKUP_VALUE.get(entity_type, "name")
 
 
 @router.post("/enrich")
@@ -412,7 +416,12 @@ async def enrich_entity(
     entity = await db.get(model_cls, body.entity_id)
     if entity is None:
         raise AppError(code="not_found", message=f"{body.entity_type} not found", status_code=404)
-    entity_value: str = getattr(entity, _LOOKUP_VALUE.get(body.entity_type, "name"))
+    # A victim is looked up by its domain; one with no domain falls back to its name.
+    entity_value: str | None = getattr(entity, _lookup_column(body.entity_type, body.source_types), None) or getattr(
+        entity, "name", None
+    )
+    if not entity_value:
+        raise AppError(code="no_lookup_value", message="Entity has nothing to look up by", status_code=400)
     adapter_entity_type = body.entity_type
 
     results = await pipeline_enrich(
@@ -448,7 +457,7 @@ async def enrich_entity(
             adapter_entity_type,
             body.entity_id,
             entity_value,
-            lane="manual",
+            lane=body.lane,
             source_types=[r["source_type"]],
             requested_by=user.id,
             due_at=due_at,
@@ -457,6 +466,7 @@ async def enrich_entity(
     return {
         "entity_type": body.entity_type,
         "entity_id": str(body.entity_id),
+        "lane": body.lane,
         "results": results,
         "queued": queued,
     }
