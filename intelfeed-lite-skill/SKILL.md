@@ -285,7 +285,7 @@ Answer platform questions from the docs, not from memory.
 
 ## Available Tools
 
-94 tools, all read-only. The lite CLI does not carry a single tool that creates, changes or deletes anything — no writes, no AI extraction, no report or document generation (`export_observables` only reads a ledger slice back as EDL/CSV/JSON; it saves nothing). If the user asks for one of those, say the lite skill cannot do it rather than improvising a workaround. `⚠` marks a tool that needs an **admin** account; for anyone else the API answers 403.
+97 tools, all read-only. The lite CLI does not carry a single tool that creates, changes or deletes anything — no writes, no AI extraction, no report or document generation (`export_observables` only reads a ledger slice back as EDL/CSV/JSON; it saves nothing). If the user asks for one of those, say the lite skill cannot do it rather than improvising a workaround. `⚠` marks a tool that needs an **admin** account; for anyone else the API answers 403.
 
 ### Search & Discovery (4 tools)
 
@@ -418,7 +418,7 @@ Rule formats in the library: `sigma`, `splunk_spl`, `crowdstrike_ql`, `elastic_q
 - **get_automation_logs** — Recent execution logs (rule_id, limit)
 - **list_webhook_presets** — Saved webhook presets; URLs and header values come back redacted (preset_type, limit)
 
-### Curation & Hygiene (7 tools)
+### Curation & Hygiene (9 tools)
 
 Read-only visibility into the link and claim layers — inspect and report, but the fixes themselves live in the full skill.
 
@@ -429,6 +429,8 @@ Read-only visibility into the link and claim layers — inspect and report, but 
 - **list_entity_relationships** — Every relationship where an entity is source or target, with verb, confidence and provenance (entity_type, entity_id, relationship_type, include_rejected)
 - **get_hygiene_feed** ⚠ — Chronological merge of link-validator and entity-maintenance logs (action, source, mode, review, pending, since, limit, offset)
 - **get_hygiene_stats** ⚠ — Hygiene counters: operating modes (shadow/apply) and pending advisories
+- **list_review_groups** ⚠ — The Engine › Review queue, one row per entity with its proposal counts by kind (q, entity_type, action, domain, origin, limit, offset)
+- **get_review_rows** ⚠ — The pending proposals behind a Review group, with reasons and a context snippet (entity_type, entity_id, action, origin, domain, limit, offset)
 
 ### Documentation (3 tools)
 
