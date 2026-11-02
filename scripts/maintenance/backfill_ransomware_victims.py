@@ -1,15 +1,16 @@
-"""One-shot backfill of ransomware.live victim history (plan §10).
+"""Backfill `victim_disclosures` from ransomware.live's per-year history.
 
-Populates ~years of `victim_disclosures` so the Landscape dashboard has real trend
-data on day one. Reuses the exact same resolver/dedup path as the live sync — it just
-feeds it the per-year history endpoint instead of /recentvictims.
+The live sync only reads /recentvictims, so a fresh install holds just the latest
+victims. This script feeds the same resolver and dedup path the per-year history
+endpoint instead, so the Landscape dashboard has trend data from `--start-year` on.
 
-Run inside the API container (only ./backend is mounted at /app):
+Run inside the API container (`./scripts` is bind-mounted at /app/scripts):
 
     docker compose -f docker-compose.dev.yml exec api \
-        python scripts/archive/backfill_ransomware_victims.py --start-year 2022
+        python scripts/maintenance/backfill_ransomware_victims.py --start-year 2022
 
-Idempotent: the (source, guid) unique constraint means re-runs skip existing rows.
+Repeatable: the (source, guid) unique constraint means a re-run skips rows it
+already holds and only adds what is new.
 """
 
 import argparse

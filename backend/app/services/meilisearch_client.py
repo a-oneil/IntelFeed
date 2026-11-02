@@ -85,8 +85,7 @@ def fold_viewer_tags(result: dict, viewer_id: str | None) -> dict:
     leaves the server: the viewer's `"<user_id>:<name>"` entries are added to
     `tags` under their bare name and the rest are dropped. Counts add cleanly
     because a tag's name is in `tags` (global) or in `user_tags` (personal) on
-    any one document, never both — once scripts/maintenance/reindex_entry_tags.py
-    has run after the migration.
+    any one document, never both.
     """
     dist = result.get("facetDistribution")
     if not dist or "user_tags" not in dist:

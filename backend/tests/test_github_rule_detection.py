@@ -1,23 +1,16 @@
 """GitHub repo files typed by extension and content, not only by per-repo pattern.
 
 Covers .kql files, generic YAML/TOML recognised as a supported rule format,
-the LOLDrivers org move, and the reprocess script that retypes stored entries.
+and the LOLDrivers org move.
 """
 
-import importlib.util
 import uuid
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.github_content_types import derive_title, detect_content_type, extract_metadata
 from app.models.detection_rule import DetectionRule
-from app.models.entry import Entry
-from app.models.feed import Feed
-from app.models.user import User
 from app.services.github_rule_import import import_detection_rule, process_github_entry, rule_type_for
 
 # ---------------------------------------------------------------------------
@@ -319,98 +312,6 @@ class TestImport:
         ):
             await process_github_entry(db, entry, uuid.uuid4())
         imp.assert_awaited_once()
-
-
-# ---------------------------------------------------------------------------
-# Reprocess script
-# ---------------------------------------------------------------------------
-
-
-def _script():
-    path = Path(__file__).resolve().parents[2] / "scripts" / "maintenance" / "reprocess_github_repo_types.py"
-    spec = importlib.util.spec_from_file_location("reprocess_github_repo_types", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-async def _repo_feed(db: AsyncSession, owner: str, repo: str, **flags) -> Feed:
-    feed = Feed(
-        title=f"{owner}/{repo}",
-        url=f"https://github.com/{owner}/{repo}",
-        feed_type="github_repo",
-        adapter_config={"owner": owner, "repo": repo},
-        **flags,
-    )
-    db.add(feed)
-    await db.flush()
-    return feed
-
-
-async def _repo_entry(db: AsyncSession, feed: Feed, fp: str, raw: str | None, content_type: str) -> Entry:
-    cfg = feed.adapter_config
-    entry = Entry(
-        feed_id=feed.id,
-        title=Path(fp).name,
-        guid=f"{cfg['owner']}/{cfg['repo']}/{fp}",
-        url=f"https://github.com/{cfg['owner']}/{cfg['repo']}/blob/x/{fp}",
-        metadata_={
-            "source": "github_repo",
-            "owner": cfg["owner"],
-            "repo": cfg["repo"],
-            "file_path": fp,
-            "commit_sha": "abc1234567890",
-            "commit_message": "add",
-            "change_type": "added",
-            "raw_content": raw,
-            "content_type": content_type,
-            "extracted": {},
-        },
-    )
-    db.add(entry)
-    await db.flush()
-    return entry
-
-
-@pytest.mark.asyncio
-async def test_reprocess_script_dry_run_then_apply(db_session: AsyncSession, admin_user: User):
-    module = _script()
-    lol = await _repo_feed(db_session, "magicsword-io", "LOLDrivers", auto_extract_on_ingest=True)
-    sentinel = await _repo_feed(db_session, "Cloud-Architekt", "AzureSentinel", extract_detection_rules=True)
-    slim = await _repo_feed(db_session, "SlimKQL", "Hunting-Queries-Detection-Rules")  # both flags off
-
-    driver = await _repo_entry(db_session, lol, "yaml/a2a53148.yaml", LOLDRIVER_YAML, "yaml_file")
-    rule_entry = await _repo_entry(db_session, sentinel, "Detections/x.yaml", SENTINEL_SCHEDULED, "yaml_file")
-    kql_entry = await _repo_entry(db_session, slim, "Azure/VM Reset.kql", KQL_FILE, "unknown")
-    plain = await _repo_entry(db_session, sentinel, "Detections/config.yaml", PLAIN_YAML, "yaml_file")
-
-    totals = await module.reprocess(db_session, apply=False)
-    assert totals["entries"] == 3
-    await db_session.refresh(driver)
-    assert driver.metadata_["content_type"] == "yaml_file"
-
-    with patch("app.services.github_rule_import.index_rule", new=AsyncMock()):
-        totals = await module.reprocess(db_session, apply=True)
-    assert totals["entries"] == 3
-
-    for e in (driver, rule_entry, kql_entry, plain):
-        await db_session.refresh(e)
-    assert driver.metadata_["content_type"] == "loldriver_entry"
-    assert driver.metadata_["extracted"]["cve_ids"] == ["CVE-2023-52271"]
-    assert driver.title == "heysafe_drv.sys"
-    assert rule_entry.metadata_["content_type"] == "sentinel_rule"
-    assert rule_entry.title == "Entra Connect account outside watchlist"
-    assert kql_entry.metadata_["content_type"] == "kql_query"
-    assert plain.metadata_["content_type"] == "yaml_file"
-
-    rules = (await db_session.execute(select(DetectionRule))).scalars().all()
-    # The Sentinel feed imports; the SlimKQL feed has both flags off, so it is retyped only.
-    assert [(r.entry_id, r.rule_type) for r in rules] == [(rule_entry.id, "kql")]
-
-    # A second run finds nothing left to change.
-    with patch("app.services.github_rule_import.index_rule", new=AsyncMock()):
-        totals = await module.reprocess(db_session, apply=True)
-    assert totals["entries"] == 0
 
 
 def test_anvilogic_formats_map_to_accepted_rule_types():

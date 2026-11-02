@@ -195,17 +195,12 @@ def test_tables_resolve_to_real_model_tables():
 
 def test_standalone_scripts_use_the_canonical_vocabulary():
     """scripts/ writes the same columns as app/ and must not drift from it."""
-    # import_profiles maps external profile formats (apt_group, attack_technique)
-    # onto our slugs, so retired names legitimately appear on its input side.
-    external_input_mappers = {"import_profiles.py"}
     hits = []
     scanned = 0
     for root in SCRIPT_ROOTS:
         if not root.exists():
             continue
         for path in root.rglob("*.py"):
-            if path.name in external_input_mappers:
-                continue
             text = path.read_text()
             scanned += 1
             skip = _docstring_lines(ast.parse(text))
