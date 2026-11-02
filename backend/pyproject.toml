@@ -46,7 +46,7 @@ dependencies = [
     "jsonschema>=4.26.0",
     # Imported directly by rule_extraction, rule_validation, github_content_types
     # and api/intelligence, so it is declared rather than left to a transitive pull.
-    "PyYAML>=6.0",
+    "PyYAML>=6.0.3",
     # Team Cymru's IP-to-ASN TXT lookups (app/enrichment/adapters/cymru.py).
     # Already pulled in by email-validator; declared because it is imported directly.
     "dnspython>=2.8.0",
