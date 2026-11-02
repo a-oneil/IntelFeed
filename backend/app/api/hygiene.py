@@ -4218,7 +4218,13 @@ async def review_groups(
                 maint_row_key,
                 func.count(),
                 func.max(EntityMaintenanceLog.created_at),
-                func.max(EntityMaintenanceLog.before["entity"]["name"].astext),
+                # an edge row has no entity; its claim ("PapRAT uses Cisco") names it
+                func.max(
+                    func.coalesce(
+                        EntityMaintenanceLog.before["entity"]["name"].astext,
+                        EntityMaintenanceLog.before["claim"].astext,
+                    )
+                ),
                 func.array_agg(EntityMaintenanceLog.action.distinct()),
                 func.array_agg(maint_origin.distinct()),
             )
